@@ -37,25 +37,26 @@ export async function POST(request) {
 
     const [rows] = await conn.execute(`
       SELECT
-        t.id                AS txn_id,
-        t.bill_no           AS application_id,
-        t.date              AS purchase_date,
-        t.cust_name         AS customer_name,
-        t.cust_mobile       AS phone_number,
+        t.id                          AS txn_id,
+        t.bill_no                     AS application_id,
+        t.date                        AS purchase_date,
+        t.cust_name                   AS customer_name,
+        t.cust_mobile                 AS phone_number,
         t.branch_id,
-        t.type_gold         AS transaction_type,
-        t.serv_chr          AS service_charge_pct,
-        t.finl_amnt         AS final_amount_crm,
-        o.grms_wet          AS gross_weight_str,
-        o.stnt_wet          AS stone_weight_str,
-        o.wastag_wet        AS wastage_str,
-        o.net_wet           AS net_weight_str,
-        o.purity            AS purity_str,
-        o.grs_amnt          AS total_amount_str
+        t.type_gold                   AS transaction_type,
+        t.serv_chr                    AS service_charge_pct,
+        t.finl_amnt                   AS final_amount_crm,
+        GROUP_CONCAT(o.grms_wet)      AS gross_weight_str,
+        GROUP_CONCAT(o.stnt_wet)      AS stone_weight_str,
+        GROUP_CONCAT(o.wastag_wet)    AS wastage_str,
+        GROUP_CONCAT(o.net_wet)       AS net_weight_str,
+        GROUP_CONCAT(o.purity)        AS purity_str,
+        GROUP_CONCAT(o.grs_amnt)      AS total_amount_str
       FROM transac_tbl t
       LEFT JOIN ornments_tbl o ON o.trnxnn_id = t.id
       WHERE t.trxn_status = 'approved'
-      AND t.date >= '2026-03-16'
+      AND t.date >= '2026-03-15'
+      GROUP BY t.id
     `)
 
     if (!rows.length) {
