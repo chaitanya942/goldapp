@@ -27,6 +27,7 @@ function weightedAvgPurity(netWetStr, purityStr) {
 export async function POST(request) {
   let conn
   try {
+    // ── Connect to CRM MySQL ──────────────────────────────
     conn = await mysql.createConnection({
       host:     process.env.CRM_DB_HOST,
       port:     parseInt(process.env.CRM_DB_PORT || '3306'),
@@ -35,6 +36,7 @@ export async function POST(request) {
       password: process.env.CRM_DB_PASSWORD,
     })
 
+    // ── Pull approved records from CRM (from 15 Mar 2026) ─
     const [rows] = await conn.execute(`
       SELECT
         t.id                          AS txn_id,
@@ -60,14 +62,24 @@ export async function POST(request) {
     `)
 
     if (!rows.length) {
-      return Response.json({ success: true, message: 'No records found', synced: 0 })
+      return Response.json({ success: true, message: 'No records in CRM', synced: 0, newCount: 0 })
     }
 
+    // ── Branch lookup ─────────────────────────────────────
     const [branches] = await conn.execute(`SELECT brnch_id, brnch_name FROM branch_tbl`)
     const branchMap = {}
     branches.forEach(b => { branchMap[b.brnch_id] = b.brnch_name })
 
-    const records = rows.map(r => {
+    // ── Get existing application_ids from Supabase ────────
+    const { data: existing } = await supabaseAdmin
+      .from('purchases')
+      .select('application_id')
+      .gte('purchase_date', '2026-03-15')
+
+    const existingIds = new Set((existing || []).map(r => r.application_id))
+
+    // ── Map CRM rows → Supabase records ───────────────────
+    const allRecords = rows.map(r => {
       const grossWeight = sumCSV(r.gross_weight_str)
       const stoneWeight = sumCSV(r.stone_weight_str)
       const wastage     = sumCSV(r.wastage_str)
@@ -108,17 +120,31 @@ export async function POST(request) {
       }
     })
 
+    // ── Filter to only NEW records ─────────────────────────
+    const newRecords = allRecords.filter(r => !existingIds.has(r.application_id))
+
+    if (!newRecords.length) {
+      return Response.json({
+        success:  true,
+        total:    rows.length,
+        synced:   0,
+        newCount: 0,
+        message:  'All records already synced — nothing new to add',
+      })
+    }
+
+    // ── Insert new records in batches of 100 ──────────────
     const BATCH = 100
     let synced = 0, errors = 0, lastError = null
 
-    for (let i = 0; i < records.length; i += BATCH) {
-      const batch = records.slice(i, i + BATCH)
+    for (let i = 0; i < newRecords.length; i += BATCH) {
+      const batch = newRecords.slice(i, i + BATCH)
       const { error } = await supabaseAdmin
-  .from('purchases')
-  .upsert(batch, { onConflict: 'application_id', ignoreDuplicates: false })
+        .from('purchases')
+        .insert(batch)
       if (error) {
         console.error('Insert error:', JSON.stringify(error, null, 2))
-        console.error('First record sample:', JSON.stringify(batch[0], null, 2))
+        console.error('Sample record:', JSON.stringify(batch[0], null, 2))
         lastError = error
         errors += batch.length
       } else {
@@ -127,12 +153,13 @@ export async function POST(request) {
     }
 
     return Response.json({
-      success: errors === 0,
-      total:   records.length,
+      success:  errors === 0,
+      total:    rows.length,
+      newCount: newRecords.length,
       synced,
       errors,
       lastError: lastError ? JSON.stringify(lastError) : null,
-      message: `Synced ${synced} records from CRM (${errors} errors)`,
+      message:  `${newRecords.length} new records found — synced ${synced} (${errors} errors)`,
     })
 
   } catch (err) {
