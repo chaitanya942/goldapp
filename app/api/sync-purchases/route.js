@@ -114,8 +114,8 @@ export async function POST(request) {
     for (let i = 0; i < records.length; i += BATCH) {
       const batch = records.slice(i, i + BATCH)
       const { error } = await supabaseAdmin
-        .from('purchases')
-        .insert(batch)
+  .from('purchases')
+  .upsert(batch, { onConflict: 'application_id', ignoreDuplicates: false })
       if (error) {
         console.error('Insert error:', JSON.stringify(error, null, 2))
         console.error('First record sample:', JSON.stringify(batch[0], null, 2))
