@@ -46,6 +46,62 @@ function genConsignmentNo() {
   return `CSN-${y}${m}${d}-${Math.floor(1000 + Math.random() * 9000)}`
 }
 
+function ConBillsList({ billIds, t, s }) {
+  const [bills, setBills]     = useState([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    if (!billIds?.length) { setLoading(false); return }
+    supabase.from('purchases')
+      .select('id, application_id, purchase_date, customer_name, branch_name, net_weight, total_amount, transaction_type')
+      .in('id', billIds)
+      .order('branch_name')
+      .then(({ data }) => { if (data) setBills(data); setLoading(false) })
+  }, [])
+
+  if (loading) return <div style={{ textAlign: 'center', color: t.text3, padding: '24px' }}>Loading bills...</div>
+  if (!bills.length) return <div style={{ textAlign: 'center', color: t.text4, padding: '24px' }}>No bills found</div>
+
+  const totalNet   = bills.reduce((s, b) => s + (parseFloat(b.net_weight) || 0), 0)
+  const totalValue = bills.reduce((s, b) => s + (parseFloat(b.total_amount) || 0), 0)
+
+  return (
+    <div>
+      <div style={{ display: 'flex', gap: '24px', marginBottom: '12px', padding: '10px 14px', background: t.card2, borderRadius: '8px', border: `1px solid ${t.border}` }}>
+        <span style={{ fontSize: '12px', color: t.text3 }}>Total: <span style={{ color: t.text1, fontWeight: 600 }}>{bills.length} bills</span></span>
+        <span style={{ fontSize: '12px', color: t.text3 }}>Net Wt: <span style={{ color: t.gold, fontWeight: 600 }}>{fmt(totalNet)}g</span></span>
+        <span style={{ fontSize: '12px', color: t.text3 }}>Value: <span style={{ color: t.green, fontWeight: 600 }}>{fmtCr(totalValue)}</span></span>
+      </div>
+      <div style={{ overflowX: 'auto', borderRadius: '8px', border: `1px solid ${t.border}` }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead>
+            <tr>
+              {['App ID', 'Date', 'Customer', 'Branch', 'Net Wt', 'Gross Value', 'Type'].map(h => (
+                <th key={h} style={s.th}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {bills.map(bill => (
+              <tr key={bill.id}>
+                <td style={{ ...s.td, color: t.gold, fontWeight: 500 }}>{bill.application_id}</td>
+                <td style={s.td}>{fmtDate(bill.purchase_date)}</td>
+                <td style={s.td}>{bill.customer_name}</td>
+                <td style={{ ...s.td, color: t.text2 }}>{bill.branch_name}</td>
+                <td style={{ ...s.td, color: t.gold }}>{fmt(bill.net_weight)}g</td>
+                <td style={s.td}>₹{fmt(bill.total_amount)}</td>
+                <td style={{ ...s.td, fontSize: '11px' }}>
+                  <span style={{ color: bill.transaction_type === 'PHYSICAL' ? t.gold : t.orange, background: `${bill.transaction_type === 'PHYSICAL' ? t.gold : t.orange}18`, border: `1px solid ${bill.transaction_type === 'PHYSICAL' ? t.gold : t.orange}40`, borderRadius: '4px', padding: '2px 7px' }}>{bill.transaction_type}</span>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
 export default function ConsignmentData() {
   const { theme, userProfile } = useApp()
   const t = THEMES[theme]
@@ -57,6 +113,7 @@ export default function ConsignmentData() {
   const [selectedState, setSelectedState]   = useState(null)
   const [selectedBranch, setSelectedBranch] = useState(null)
   const [sortBy, setSortBy]                 = useState('bill_count')
+  const [expandedCon, setExpandedCon]       = useState(null)
 
   const [stateSummary, setStateSummary]       = useState([])
   const [statesLoading, setStatesLoading]     = useState(false)
@@ -77,11 +134,10 @@ export default function ConsignmentData() {
 
   const [showCreate, setShowCreate] = useState(false)
   const [creating, setCreating]     = useState(false)
-  const [form, setForm] = useState({ consignment_no: genConsignmentNo(), expected_arrival: '', vehicle_details: '', notes: '' })
+  const [form, setForm] = useState({ expected_arrival: '', vehicle_details: '', notes: '' })
   const [transitCon, setTransitCon] = useState(null)
   const [marking, setMarking]       = useState(false)
 
-  // OCR state
   const [ocrMode, setOcrMode]         = useState(false)
   const [ocrLoading, setOcrLoading]   = useState(false)
   const [ocrResult, setOcrResult]     = useState(null)
@@ -163,7 +219,6 @@ export default function ConsignmentData() {
   const toggleBill     = (id) => setSelectedIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })
   const toggleAllBills = ()   => { if (bills.length > 0 && bills.every(b => selectedIds.has(b.id))) setSelectedIds(new Set()); else setSelectedIds(new Set(bills.map(b => b.id))) }
 
-  // OCR upload
   const handleOcrUpload = async (file) => {
     if (!file) return
     setOcrFileName(file.name)
@@ -187,7 +242,6 @@ export default function ConsignmentData() {
 
   const toggleOcrRow = (id) => setOcrSelectedIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })
 
-  // Create consignment from OCR — directly in_transit, no modal
   const handleCreateFromOcr = async () => {
     if (ocrSelectedIds.size === 0) return
     setCreating(true)
@@ -216,10 +270,9 @@ export default function ConsignmentData() {
 
     setOcrMode(false); setOcrResult(null); setOcrSelectedIds(new Set()); setCreating(false)
     loadStateSummary(); loadConsignments()
-    alert(`✓ Consignment ${consNo} created and marked In Transit — ${billIds.length} bills`)
+    alert(`✓ Consignment created — ${billIds.length} bills marked In Transit`)
   }
 
-  // Create consignment from manual selection
   const handleCreateConsignment = async () => {
     if (selectedIds.size === 0) return
     setCreating(true)
@@ -227,18 +280,23 @@ export default function ConsignmentData() {
     const totalNetWt  = selectedBills.reduce((s, b) => s + (parseFloat(b.net_weight) || 0), 0)
     const branchNames = [...new Set(selectedBills.map(b => b.branch_name).filter(Boolean))]
     const { error }   = await supabase.from('consignments').insert({
-      consignment_no:   form.consignment_no, created_by: userProfile?.id,
-      expected_arrival: form.expected_arrival || null, vehicle_details: form.vehicle_details || null,
-      notes:            form.notes || null, status: 'created',
-      total_bills:      billIds.length, total_net_weight: totalNetWt,
-      branch_names:     branchNames, bill_ids: billIds,
+      consignment_no:   genConsignmentNo(),
+      created_by:       userProfile?.id,
+      expected_arrival: form.expected_arrival || null,
+      vehicle_details:  form.vehicle_details || null,
+      notes:            form.notes || null,
+      status:           'created',
+      total_bills:      billIds.length,
+      total_net_weight: totalNetWt,
+      branch_names:     branchNames,
+      bill_ids:         billIds,
     })
     if (error) { alert('Error: ' + error.message); setCreating(false); return }
     const BATCH = 100
     for (let i = 0; i < billIds.length; i += BATCH)
       await supabase.from('purchases').update({ stock_status: 'in_consignment' }).in('id', billIds.slice(i, i + BATCH))
     setShowCreate(false); setCreating(false)
-    setForm({ consignment_no: genConsignmentNo(), expected_arrival: '', vehicle_details: '', notes: '' })
+    setForm({ expected_arrival: '', vehicle_details: '', notes: '' })
     setSelectedIds(new Set())
     loadStateSummary(); loadBranchSummary(selectedState); loadBills(selectedBranch, billsPage); loadConsignments()
   }
@@ -310,7 +368,6 @@ export default function ConsignmentData() {
 
         {ocrResult && !ocrLoading && (
           <>
-            {/* Summary cards */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '14px', marginBottom: '20px' }}>
               {[
                 { label: 'Total Rows Extracted', value: ocrResult.total,       color: t.gold  },
@@ -325,10 +382,9 @@ export default function ConsignmentData() {
               ))}
             </div>
 
-            {/* Warnings */}
             {ocrResult.notFoundIds?.length > 0 && (
               <div style={{ background: `${t.red}10`, border: `1px solid ${t.red}40`, borderRadius: '10px', padding: '14px 20px', marginBottom: '14px' }}>
-                <div style={{ fontSize: '13px', color: t.red, fontWeight: 600, marginBottom: '6px' }}>⚠ {ocrResult.notFoundIds.length} Application IDs not found in Supabase</div>
+                <div style={{ fontSize: '13px', color: t.red, fontWeight: 600, marginBottom: '6px' }}>⚠ {ocrResult.notFoundIds.length} Application IDs not found</div>
                 <div style={{ fontSize: '12px', color: t.text3, lineHeight: 1.8 }}>{ocrResult.notFoundIds.join(' · ')}</div>
               </div>
             )}
@@ -339,7 +395,6 @@ export default function ConsignmentData() {
               </div>
             )}
 
-            {/* Selection bar */}
             {ocrSelectedIds.size > 0 && (
               <div style={{ background: `${t.gold}12`, border: `1px solid ${t.gold}30`, borderRadius: '8px', padding: '10px 16px', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '20px', flexWrap: 'wrap' }}>
                 <span style={{ fontSize: '13px', color: t.gold, fontWeight: 600 }}>{ocrSelectedIds.size} bills selected</span>
@@ -349,7 +404,6 @@ export default function ConsignmentData() {
               </div>
             )}
 
-            {/* Table */}
             {ocrResult.rows?.length > 0 && (
               <div style={s.tblWrap}>
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -628,18 +682,19 @@ export default function ConsignmentData() {
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
               {consignments.map(con => {
-                const meta = STATUS_META[con.status] || { label: con.status, color: t.text3 }
+                const meta   = STATUS_META[con.status] || { label: con.status, color: t.text3 }
+                const isOpen = expandedCon === con.id
                 return (
-                  <div key={con.id} style={{ ...s.card, marginBottom: 0 }}>
+                  <div key={con.id} style={{ ...s.card, marginBottom: 0, cursor: 'pointer' }}
+                    onClick={() => setExpandedCon(isOpen ? null : con.id)}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '12px' }}>
-                      <div>
+                      <div style={{ flex: 1 }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '10px' }}>
-                          <div style={{ fontSize: '1rem', fontWeight: 600, color: t.gold }}>{con.consignment_no}</div>
                           <span style={{ fontSize: '11px', color: meta.color, background: `${meta.color}18`, border: `1px solid ${meta.color}40`, borderRadius: '4px', padding: '2px 8px', fontWeight: 600 }}>{meta.label}</span>
+                          <span style={{ fontSize: '12px', color: t.text4 }}>{fmtDate(con.created_at)}</span>
                         </div>
                         <div style={{ display: 'flex', gap: '28px', flexWrap: 'wrap' }}>
                           {[
-                            { label: 'Created', value: fmtDate(con.created_at) },
                             { label: 'Bills',   value: con.total_bills, bold: true },
                             { label: 'Net Wt',  value: `${fmt(con.total_net_weight)}g`, color: t.gold },
                             con.expected_arrival && { label: 'Expected', value: fmtDate(con.expected_arrival) },
@@ -658,10 +713,21 @@ export default function ConsignmentData() {
                         )}
                         {con.notes && <div style={{ marginTop: '10px', fontSize: '12px', color: t.text3, fontStyle: 'italic' }}>Note: {con.notes}</div>}
                       </div>
-                      {canManage && con.status === 'created' && (
-                        <button style={s.btnBlue} onClick={() => setTransitCon(con)}>🚚 Mark In Transit</button>
-                      )}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                        {canManage && con.status === 'created' && (
+                          <button style={s.btnBlue} onClick={e => { e.stopPropagation(); setTransitCon(con) }}>🚚 Mark In Transit</button>
+                        )}
+                        <span style={{ fontSize: '20px', color: t.text3, transition: 'transform .2s', transform: isOpen ? 'rotate(180deg)' : 'rotate(0deg)', display: 'inline-block' }}>⌄</span>
+                      </div>
                     </div>
+
+                    {/* Expanded bills */}
+                    {isOpen && (
+                      <div style={{ marginTop: '16px', borderTop: `1px solid ${t.border}`, paddingTop: '16px' }}
+                        onClick={e => e.stopPropagation()}>
+                        <ConBillsList billIds={con.bill_ids} t={t} s={s} />
+                      </div>
+                    )}
                   </div>
                 )
               })}
@@ -670,14 +736,13 @@ export default function ConsignmentData() {
         </>
       )}
 
-      {/* CREATE MODAL (manual only) */}
+      {/* CREATE MODAL (manual) */}
       {showCreate && (
         <div style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
-          <div style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: '16px', padding: '36px', maxWidth: '520px', width: '100%', boxShadow: '0 24px 80px rgba(0,0,0,.6)' }}>
+          <div style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: '16px', padding: '36px', maxWidth: '480px', width: '100%', boxShadow: '0 24px 80px rgba(0,0,0,.6)' }}>
             <div style={{ fontSize: '1.1rem', color: t.text1, marginBottom: '6px' }}>Create Consignment</div>
             <div style={{ fontSize: '12px', color: t.text3, marginBottom: '28px' }}>{selectedIds.size} bills · {fmt(selectedNetWt)}g · {selectedBranches.length} {selectedBranches.length === 1 ? 'branch' : 'branches'}</div>
             {[
-              { label: 'Consignment Number',        key: 'consignment_no',   type: 'text' },
               { label: 'Expected Arrival Date',     key: 'expected_arrival', type: 'date' },
               { label: 'Vehicle / Courier Details', key: 'vehicle_details',  type: 'text', placeholder: 'e.g. KA-01-AB-1234 or BlueDart AWB' },
             ].map(f => (
@@ -710,7 +775,6 @@ export default function ConsignmentData() {
           <div style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: '16px', padding: '36px', maxWidth: '420px', width: '100%', textAlign: 'center' }}>
             <div style={{ fontSize: '2rem', marginBottom: '16px' }}>🚚</div>
             <div style={{ fontSize: '1rem', color: t.text1, marginBottom: '8px' }}>Mark as In Transit?</div>
-            <div style={{ fontSize: '13px', color: t.gold, marginBottom: '6px' }}>{transitCon.consignment_no}</div>
             <div style={{ fontSize: '12px', color: t.text3, marginBottom: '28px', lineHeight: 1.6 }}>{transitCon.total_bills} bills · {fmt(transitCon.total_net_weight)}g<br />This cannot be undone.</div>
             <div style={{ display: 'flex', gap: '10px', justifyContent: 'center' }}>
               <button style={s.btnOutline} onClick={() => setTransitCon(null)} disabled={marking}>Cancel</button>
