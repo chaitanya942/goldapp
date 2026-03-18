@@ -108,7 +108,7 @@ export async function POST(request) {
       }
 
       return {
-        application_id:             String(r.application_id)?.trim(),
+        application_id:             `WGKA${String(r.application_id).trim()}`,
         purchase_date:              r.purchase_date ? new Date(r.purchase_date).toISOString().split('T')[0] : null,
         transaction_time:           txnTime,
         customer_name:              r.customer_name?.trim() || null,
