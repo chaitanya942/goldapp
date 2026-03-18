@@ -27,6 +27,18 @@ function weightedAvgPurity(netWetStr, purityStr) {
 export async function POST(request) {
   let conn
   try {
+    // ── Parse date range from request body ────────────────
+    const body = await request.json().catch(() => ({}))
+    const from = body.from || null
+    const to   = body.to   || null
+
+    if (!from || !to) {
+      return Response.json({
+        success: false,
+        error: 'Please provide from and to dates. Example: {"from":"2023-04-01","to":"2024-03-31"}',
+      }, { status: 400 })
+    }
+
     // ── Connect to CRM MySQL ──────────────────────────────
     conn = await mysql.createConnection({
       host:     process.env.CRM_DB_HOST,
@@ -36,7 +48,7 @@ export async function POST(request) {
       password: process.env.CRM_DB_PASSWORD,
     })
 
-    // ── Pull ONLY pre-April 2025 records from CRM ─────────
+    // ── Pull records for the given date range ─────────────
     const [rows] = await conn.execute(`
       SELECT
         t.id                          AS txn_id,
@@ -58,12 +70,12 @@ export async function POST(request) {
       FROM transac_tbl t
       LEFT JOIN ornments_tbl o ON o.trnxnn_id = t.id
       WHERE t.trxn_status = 'approved'
-      AND t.date < '2025-04-01'
+      AND t.date >= ? AND t.date <= ?
       GROUP BY t.id
-    `)
+    `, [from, to])
 
     if (!rows.length) {
-      return Response.json({ success: true, message: 'No pre-April 2025 records found in CRM', total: 0 })
+      return Response.json({ success: true, message: `No records found between ${from} and ${to}`, total: 0, synced: 0 })
     }
 
     // ── Branch lookup ─────────────────────────────────────
@@ -72,10 +84,9 @@ export async function POST(request) {
     branches.forEach(b => { branchMap[b.brnch_id] = b.brnch_name?.trim() })
 
     // ── Get existing application_ids from Supabase ────────
-    // Fetch in chunks to handle large datasets
     const crmAppIds = rows.map(r => String(r.application_id)?.trim())
     const existingIds = new Set()
-    const FETCH_CHUNK = 1000
+    const FETCH_CHUNK = 500
     for (let i = 0; i < crmAppIds.length; i += FETCH_CHUNK) {
       const chunk = crmAppIds.slice(i, i + FETCH_CHUNK)
       const { data } = await supabaseAdmin
@@ -99,7 +110,6 @@ export async function POST(request) {
       const branchName  = (branchMap[r.branch_id] || String(r.branch_id))?.trim()
       const txnType     = r.transaction_type?.trim()?.toLowerCase()
 
-      // Format time
       let txnTime = null
       if (r.transaction_time !== null && r.transaction_time !== undefined) {
         if (typeof r.transaction_time === 'string') {
@@ -142,7 +152,7 @@ export async function POST(request) {
       }
     })
 
-    // ── Filter to only NEW records not in Supabase ────────
+    // ── Filter to only NEW records ─────────────────────────
     const newRecords = allRecords.filter(r => !existingIds.has(r.application_id))
 
     if (!newRecords.length) {
@@ -150,7 +160,7 @@ export async function POST(request) {
         success:  true,
         total:    rows.length,
         synced:   0,
-        message:  'All pre-April 2025 records already exist in Supabase',
+        message:  `All ${rows.length} records for ${from} → ${to} already exist in Supabase`,
       })
     }
 
@@ -164,8 +174,7 @@ export async function POST(request) {
         .from('purchases')
         .insert(batch)
       if (error) {
-        console.error('Backfill insert error:', JSON.stringify(error, null, 2))
-        console.error('Sample record:', JSON.stringify(batch[0], null, 2))
+        console.error('Backfill error:', JSON.stringify(error, null, 2))
         lastError = error
         errors += batch.length
       } else {
@@ -180,7 +189,7 @@ export async function POST(request) {
       synced,
       errors,
       lastError: lastError ? JSON.stringify(lastError) : null,
-      message:  `Backfill complete — ${synced} pre-April 2025 records inserted (${errors} errors)`,
+      message:  `${from} → ${to}: ${synced} records inserted (${errors} errors)`,
     })
 
   } catch (err) {
