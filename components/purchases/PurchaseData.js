@@ -18,6 +18,18 @@ const STATUS_COLORS = {
   sold:             { color: '#888888', label: 'Sold' },
 }
 
+function fmtTime(t) {
+  if (!t) return '—'
+  // t is HH:MM:SS string
+  const parts = String(t).split(':')
+  if (parts.length < 2) return t
+  const h = parseInt(parts[0])
+  const m = parts[1]
+  const ampm = h >= 12 ? 'PM' : 'AM'
+  const h12 = h % 12 || 12
+  return `${h12}:${m} ${ampm}`
+}
+
 function parseCSV(text) {
   const lines = text.trim().split('\n')
   if (lines.length < 2) return []
@@ -60,6 +72,7 @@ function parseCSV(text) {
 const EXPORT_COLS = [
   { key: 'application_id',          label: 'App ID' },
   { key: 'purchase_date',           label: 'Date' },
+  { key: 'transaction_time',        label: 'Time' },
   { key: 'customer_name',           label: 'Customer' },
   { key: 'phone_number',            label: 'Phone' },
   { key: 'branch_name',             label: 'Branch' },
@@ -118,16 +131,16 @@ export default function PurchaseData() {
   const fileInputRef = useRef(null)
   const isSuperAdmin = userProfile?.role === 'super_admin'
 
-  const [purchases, setPurchases]   = useState([])
+  const [purchases, setPurchases]     = useState([])
   const [allBranches, setAllBranches] = useState([])
-  const [loading, setLoading]       = useState(false)
-  const [exporting, setExporting]   = useState(false)
-  const [search, setSearch]         = useState('')
+  const [loading, setLoading]         = useState(false)
+  const [exporting, setExporting]     = useState(false)
+  const [search, setSearch]           = useState('')
   const [filterStatus, setFilterStatus]       = useState('')
   const [filterBranch, setFilterBranch]       = useState('')
   const [filterDuplicate, setFilterDuplicate] = useState(false)
 
-  const [page, setPage]             = useState(0)
+  const [page, setPage]         = useState(0)
   const [totalCount, setTotalCount] = useState(0)
   const PAGE_SIZE = 100
 
@@ -186,7 +199,6 @@ export default function PurchaseData() {
 
   const load = () => { setPage(0); loadKpis(); loadPage(0) }
 
-  // ── EXPORT ALL FILTERED ──
   const handleExport = async (format) => {
     setExporting(true)
     try {
@@ -223,7 +235,6 @@ export default function PurchaseData() {
   const handleDeleteSelected = async () => {
     setDeleting(true)
     if (deleteAllMode) {
-      // Delete ALL records matching current filters, in chunks of 500
       while (true) {
         const { data } = await buildQuery(true).select('id').limit(500)
         if (!data || data.length === 0) break
@@ -327,22 +338,17 @@ export default function PurchaseData() {
       <div style={{ background: t.card, border: `1px solid ${t.red}40`, borderRadius: '14px', padding: '36px', maxWidth: '420px', width: '90%', boxShadow: `0 0 60px ${t.red}18` }}>
         <div style={{ fontSize: '1.4rem', marginBottom: '12px', textAlign: 'center' }}>⚠</div>
         <div style={{ fontSize: '1rem', color: t.text1, fontWeight: 400, textAlign: 'center', marginBottom: '8px' }}>
-          {deleteAllMode
-            ? `Delete ALL ${totalCount.toLocaleString('en-IN')} records?`
-            : `Delete ${selectedIds.size} ${selectedIds.size === 1 ? 'record' : 'records'}?`}
+          {deleteAllMode ? `Delete ALL ${totalCount.toLocaleString('en-IN')} records?` : `Delete ${selectedIds.size} ${selectedIds.size === 1 ? 'record' : 'records'}?`}
         </div>
         <div style={{ fontSize: '.72rem', color: t.red, textAlign: 'center', marginBottom: '28px', lineHeight: 1.7 }}>
           {deleteAllMode
             ? <>Permanently deletes <strong>ALL {totalCount.toLocaleString('en-IN')}</strong> purchase records{(filterBranch || filterStatus || search) ? ' matching current filters' : ''}.<br />This cannot be undone.</>
-            : <>Permanently deletes <strong>{selectedIds.size}</strong> purchase {selectedIds.size === 1 ? 'record' : 'records'}.<br />This cannot be undone.</>
-          }
+            : <>Permanently deletes <strong>{selectedIds.size}</strong> purchase {selectedIds.size === 1 ? 'record' : 'records'}.<br />This cannot be undone.</>}
         </div>
         <div style={{ display: 'flex', gap: '10px', justifyContent: 'center' }}>
           <button style={s.btnOutline} onClick={() => { setShowDeleteConfirm(false); setDeleteAllMode(false) }} disabled={deleting}>Cancel</button>
           <button style={s.btnDangerSolid} onClick={handleDeleteSelected} disabled={deleting}>
-            {deleting ? 'Deleting...' : deleteAllMode
-              ? `Delete All ${totalCount.toLocaleString('en-IN')} Records`
-              : `Delete ${selectedIds.size} ${selectedIds.size === 1 ? 'Record' : 'Records'}`}
+            {deleting ? 'Deleting...' : deleteAllMode ? `Delete All ${totalCount.toLocaleString('en-IN')} Records` : `Delete ${selectedIds.size} ${selectedIds.size === 1 ? 'Record' : 'Records'}`}
           </button>
         </div>
       </div>
@@ -388,24 +394,15 @@ export default function PurchaseData() {
         </div>
 
         {unknownBranches.length > 0 && (
-          <div style={{
-            background: `${t.red}10`, border: `1px solid ${t.red}40`,
-            borderRadius: '10px', padding: '14px 20px', marginBottom: '20px',
-            display: 'flex', gap: '12px', alignItems: 'flex-start',
-          }}>
+          <div style={{ background: `${t.red}10`, border: `1px solid ${t.red}40`, borderRadius: '10px', padding: '14px 20px', marginBottom: '20px', display: 'flex', gap: '12px', alignItems: 'flex-start' }}>
             <span style={{ fontSize: '1.1rem', lineHeight: 1, marginTop: '1px' }}>⚠️</span>
             <div>
-              <div style={{ fontSize: '.78rem', color: t.red, fontWeight: 600, marginBottom: '5px' }}>
-                {unknownBranches.length} unknown {unknownBranches.length === 1 ? 'branch' : 'branches'} found in this CSV
-              </div>
+              <div style={{ fontSize: '.78rem', color: t.red, fontWeight: 600, marginBottom: '5px' }}>{unknownBranches.length} unknown {unknownBranches.length === 1 ? 'branch' : 'branches'} found in this CSV</div>
               <div style={{ fontSize: '.72rem', color: t.text2, lineHeight: 1.7 }}>
-                The following {unknownBranches.length === 1 ? 'branch is' : 'branches are'} not registered in Branch Management.
-                Records will still import but won't be linked to a branch profile:{' '}
+                The following {unknownBranches.length === 1 ? 'branch is' : 'branches are'} not registered in Branch Management. Records will still import but won't be linked to a branch profile:{' '}
                 <span style={{ color: t.red, fontWeight: 500 }}>{unknownBranches.join(' · ')}</span>
               </div>
-              <div style={{ fontSize: '.65rem', color: t.text3, marginTop: '6px' }}>
-                To fix this, add the {unknownBranches.length === 1 ? 'branch' : 'branches'} in Admin → Branch Management before importing.
-              </div>
+              <div style={{ fontSize: '.65rem', color: t.text3, marginTop: '6px' }}>To fix this, add the {unknownBranches.length === 1 ? 'branch' : 'branches'} in Admin → Branch Management before importing.</div>
             </div>
           </div>
         )}
@@ -430,11 +427,9 @@ export default function PurchaseData() {
                     <td style={{ ...s.td, color: t.gold }}>{r.application_id || '—'}</td>
                     <td style={s.td}>{fmtDate(r.purchase_date)}</td>
                     <td style={s.td}>{r.customer_name}</td>
-                    <td style={{ ...s.td }}>
+                    <td style={s.td}>
                       <span style={{ color: isUnknownBranch ? t.red : t.text2 }}>{r.branch_name}</span>
-                      {isUnknownBranch && (
-                        <span style={{ marginLeft: '6px', fontSize: '.58rem', color: t.red, background: `${t.red}18`, border: `1px solid ${t.red}40`, borderRadius: '3px', padding: '1px 5px' }}>NEW</span>
-                      )}
+                      {isUnknownBranch && <span style={{ marginLeft: '6px', fontSize: '.58rem', color: t.red, background: `${t.red}18`, border: `1px solid ${t.red}40`, borderRadius: '3px', padding: '1px 5px' }}>NEW</span>}
                     </td>
                     <td style={s.td}>{r.gross_weight}g</td><td style={s.td}>{r.stone_weight}g</td>
                     <td style={s.td}>{r.wastage}g</td><td style={s.td}>{r.net_weight}g</td>
@@ -443,9 +438,7 @@ export default function PurchaseData() {
                     <td style={s.td}>₹{fmt(r.final_amount_crm)}</td>
                     <td style={{ ...s.td, fontSize: '.65rem', color: t.text3 }}>{r.transaction_type}</td>
                     <td style={s.td}>
-                      {duplicates.has(r.application_id) && (
-                        <span style={{ fontSize: '.6rem', color: t.red, background: `${t.red}18`, border: `1px solid ${t.red}40`, borderRadius: '4px', padding: '2px 6px' }}>DUPLICATE</span>
-                      )}
+                      {duplicates.has(r.application_id) && <span style={{ fontSize: '.6rem', color: t.red, background: `${t.red}18`, border: `1px solid ${t.red}40`, borderRadius: '4px', padding: '2px 6px' }}>DUPLICATE</span>}
                     </td>
                   </tr>
                 )
@@ -558,27 +551,19 @@ export default function PurchaseData() {
         <>
           <div style={{ display: 'flex', gap: '10px', marginBottom: '16px', flexWrap: 'wrap', alignItems: 'center' }}>
             <input style={s.input} placeholder="Search customer, app ID, branch..." value={search} onChange={e => { setSearch(e.target.value); setPage(0) }} />
-
             <select style={s.select} value={filterBranch} onChange={e => { setFilterBranch(e.target.value); setPage(0) }}>
               <option value="">All Branches</option>
               {allBranches.map(b => <option key={b} value={b}>{b}</option>)}
             </select>
-
             <select style={s.select} value={filterStatus} onChange={e => { setFilterStatus(e.target.value); setPage(0) }}>
               <option value="">All Status</option>
               {Object.entries(STATUS_COLORS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
             </select>
-
             {filterDuplicate && (
-              <div onClick={() => { setFilterDuplicate(false); setPage(0) }} style={{
-                display: 'flex', alignItems: 'center', gap: '6px',
-                padding: '6px 12px', borderRadius: '20px',
-                background: `${t.red}18`, border: `1px solid ${t.red}50`,
-                color: t.red, fontSize: '.68rem', fontWeight: 600,
-                cursor: 'pointer', letterSpacing: '.04em',
-              }}>● Duplicates Only &nbsp;✕</div>
+              <div onClick={() => { setFilterDuplicate(false); setPage(0) }} style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '6px 12px', borderRadius: '20px', background: `${t.red}18`, border: `1px solid ${t.red}50`, color: t.red, fontSize: '.68rem', fontWeight: 600, cursor: 'pointer', letterSpacing: '.04em' }}>
+                ● Duplicates Only &nbsp;✕
+              </div>
             )}
-
             <div style={{ marginLeft: 'auto', display: 'flex', gap: '6px', alignItems: 'center' }}>
               <button style={s.btnSmall} disabled={exporting} onClick={() => handleExport('csv')}
                 onMouseEnter={e => { e.currentTarget.style.color = t.gold; e.currentTarget.style.borderColor = `${t.gold}60` }}
@@ -617,7 +602,7 @@ export default function PurchaseData() {
                         <input type="checkbox" style={s.checkbox} checked={allFilteredSelected} onChange={toggleAll} />
                       </th>
                     )}
-                    {['App ID','Date','Customer','Phone','Branch','Gross Wt','Stone','Wastage','Net Wt','Purity','Gross Amt','Svc%','Svc Amt','Final Amt','Type','Status','Flag'].map(h =>
+                    {['App ID','Date','Time','Customer','Phone','Branch','Gross Wt','Stone','Wastage','Net Wt','Purity','Gross Amt','Svc%','Svc Amt','Final Amt','Type','Status','Flag'].map(h =>
                       <th key={h} style={s.th}>{h}</th>
                     )}
                   </tr>
@@ -638,6 +623,7 @@ export default function PurchaseData() {
                         )}
                         <td style={{ ...s.td, color: t.gold, fontWeight: 500 }}>{p.application_id}</td>
                         <td style={s.td}>{fmtDate(p.purchase_date)}</td>
+                        <td style={{ ...s.td, color: t.text3, fontSize: '.68rem' }}>{fmtTime(p.transaction_time)}</td>
                         <td style={s.td}>{p.customer_name}</td>
                         <td style={{ ...s.td, color: t.text3 }}>{p.phone_number}</td>
                         <td style={{ ...s.td, color: t.text2 }}>{p.branch_name}</td>
@@ -661,7 +647,7 @@ export default function PurchaseData() {
                     )
                   })}
                   {filtered.length === 0 && (
-                    <tr><td colSpan={isSuperAdmin ? 18 : 17} style={{ ...s.td, textAlign: 'center', color: t.text4, padding: '48px' }}>
+                    <tr><td colSpan={isSuperAdmin ? 19 : 18} style={{ ...s.td, textAlign: 'center', color: t.text4, padding: '48px' }}>
                       {filterDuplicate ? 'No duplicate records found' : search || filterStatus || filterBranch ? 'No records match your filters' : 'No purchases yet'}
                     </td></tr>
                   )}
