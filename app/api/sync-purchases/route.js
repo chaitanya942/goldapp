@@ -42,6 +42,7 @@ export async function POST(request) {
         t.id                          AS txn_id,
         t.bill_no                     AS application_id,
         t.date                        AS purchase_date,
+        t.time                        AS transaction_time,
         t.cust_name                   AS customer_name,
         t.cust_mobile                 AS phone_number,
         t.branch_id,
@@ -92,9 +93,24 @@ export async function POST(request) {
       const branchName  = (branchMap[r.branch_id] || String(r.branch_id))?.trim()
       const txnType     = r.transaction_type?.trim()?.toLowerCase()
 
+      // Format time — MySQL returns time as HH:MM:SS string or Duration object
+      let txnTime = null
+      if (r.transaction_time !== null && r.transaction_time !== undefined) {
+        if (typeof r.transaction_time === 'string') {
+          txnTime = r.transaction_time.trim()
+        } else if (typeof r.transaction_time === 'object') {
+          // mysql2 may return time as a Duration object — convert to HH:MM:SS
+          const h = String(Math.floor(Math.abs(r.transaction_time) / 3600)).padStart(2, '0')
+          const m = String(Math.floor((Math.abs(r.transaction_time) % 3600) / 60)).padStart(2, '0')
+          const s = String(Math.abs(r.transaction_time) % 60).padStart(2, '0')
+          txnTime = `${h}:${m}:${s}`
+        }
+      }
+
       return {
         application_id:             String(r.application_id)?.trim(),
         purchase_date:              r.purchase_date ? new Date(r.purchase_date).toISOString().split('T')[0] : null,
+        transaction_time:           txnTime,
         customer_name:              r.customer_name?.trim() || null,
         phone_number:               r.phone_number?.trim()  || null,
         branch_name:                branchName,
