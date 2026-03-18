@@ -184,9 +184,10 @@ export default function ConsignmentData() {
 
   const toggleOcrRow = (id) => setOcrSelectedIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })
 
-  const ocrSelectedRows   = ocrResult?.rows?.filter(r => ocrSelectedIds.has(r.id)) || []
-  const ocrSelectedNetWt  = ocrSelectedRows.reduce((s, r) => s + (parseFloat(r.net_weight) || 0), 0)
-  const ocrSelectedBranches = [...new Set(ocrSelectedRows.map(r => r.branch_name).filter(Boolean))]
+  const ocrSelectedRows    = ocrResult?.rows?.filter(r => ocrSelectedIds.has(r.id)) || []
+const ocrSelectedNetWt   = ocrSelectedRows.reduce((s, r) => s + (parseFloat(r.net_weight) || 0), 0)
+const ocrSelectedValue   = ocrSelectedRows.reduce((s, r) => s + (parseFloat(r.total_amount) || 0), 0)
+const ocrSelectedBranches = [...new Set(ocrSelectedRows.map(r => r.branch_name).filter(Boolean))]
 
   const handleCreateFromOcr = async () => {
     if (ocrSelectedIds.size === 0) return
@@ -346,7 +347,8 @@ export default function ConsignmentData() {
               <div style={{ background: `${t.gold}12`, border: `1px solid ${t.gold}30`, borderRadius: '8px', padding: '10px 16px', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '20px' }}>
                 <span style={{ fontSize: '13px', color: t.gold, fontWeight: 600 }}>{ocrSelectedIds.size} bills selected</span>
                 <span style={{ fontSize: '13px', color: t.text2 }}>Net Wt: <span style={{ color: t.gold }}>{fmt(ocrSelectedNetWt)}g</span></span>
-                <span style={{ fontSize: '13px', color: t.text2 }}>Branches: <span style={{ color: t.text1 }}>{ocrSelectedBranches.join(', ')}</span></span>
+<span style={{ fontSize: '13px', color: t.text2 }}>Value: <span style={{ color: t.green }}>{fmtCr(ocrSelectedValue)}</span></span>
+<span style={{ fontSize: '13px', color: t.text2 }}>Branches: <span style={{ color: t.text1 }}>{ocrSelectedBranches.join(', ')}</span></span>
               </div>
             )}
 
