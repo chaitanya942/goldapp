@@ -1,585 +1,534 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect } from 'react'
 import { supabase } from '../../lib/supabase'
 import { useApp } from '../../lib/context'
 
 const THEMES = {
-  dark:  { bg: '#0e0e0e', card: '#141414', card2: '#1a1a1a', text1: '#f0e6c8', text2: '#c8b89a', text3: '#7a6a4a', text4: '#4a3a2a', gold: '#c9a84c', border: '#2a2a2a', green: '#3aaa6a', red: '#e05555', blue: '#3a8fbf', orange: '#c9981f' },
-  light: { bg: '#f5f0e8', card: '#ede8dc', card2: '#e8e0d0', text1: '#2a1f0a', text2: '#6a5a3a', text3: '#8a7a5a', text4: '#b0a080', gold: '#a07830', border: '#d5cfc0', green: '#2a8a5a', red: '#c03030', blue: '#2a6a9a', orange: '#a07010' },
+  dark:  { bg: '#0a0a0a', card: '#111111', card2: '#161616', text1: '#f0e6c8', text2: '#c8b89a', text3: '#9a8a6a', text4: '#6a5a3a', gold: '#c9a84c', border: '#1e1e1e', border2: '#252525', green: '#3aaa6a', red: '#e05555', blue: '#3a8fbf', orange: '#c9981f', purple: '#8c5ac8', shadow: '0 1px 3px rgba(0,0,0,.6), 0 4px 16px rgba(0,0,0,.4)' },
+  light: { bg: '#f0ebe0', card: '#e8e2d6', card2: '#e0d9cc', text1: '#1a1208', text2: '#5a4a2a', text3: '#7a6a4a', text4: '#9a8a6a', gold: '#a07830', border: '#d0c8b8', border2: '#c5bca8', green: '#2a8a5a', red: '#c03030', blue: '#2a6a9a', orange: '#a07010', purple: '#6a3a9a', shadow: '0 1px 3px rgba(0,0,0,.08), 0 4px 16px rgba(0,0,0,.06)' },
+}
+
+const STATUS_META = {
+  created:     { label: 'Created',     color: '#3a8fbf' },
+  in_transit:  { label: 'In Transit',  color: '#c9981f' },
+  received:    { label: 'Received',    color: '#3aaa6a' },
 }
 
 const fmt     = (n) => n != null ? Number(n).toLocaleString('en-IN', { maximumFractionDigits: 2 }) : '—'
-const fmtVal  = (n) => n != null ? `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 })}` : '—'
 const fmtDate = (d) => d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'
-
-// Days since a date
-const daysSince = (d) => {
-  if (!d) return null
-  const diff = Date.now() - new Date(d).getTime()
-  return Math.floor(diff / (1000 * 60 * 60 * 24))
+const fmtTime = (t) => {
+  if (!t) return ''
+  try {
+    const [h, m] = t.split(':')
+    const hr = parseInt(h)
+    return `${hr % 12 || 12}:${m} ${hr >= 12 ? 'PM' : 'AM'}`
+  } catch { return t }
 }
 
-// Stale threshold in days
-const STALE_DAYS = 7
-
-// CSV export helper
-const exportToCSV = (rows, filename) => {
-  const headers = ['App ID','Date','Customer','Phone','Gross Wt','Stone','Wastage','Net Wt','Purity','Gross Amt','Svc%','Final Amt','Type','Status']
-  const lines = [
-    headers.join(','),
-    ...rows.map(p => [
-      p.application_id, p.purchase_date, `"${p.customer_name}"`, p.phone_number,
-      p.gross_weight, p.stone_weight, p.wastage, p.net_weight, p.purity,
-      p.total_amount, p.service_charge_pct, p.final_amount_crm,
-      p.transaction_type, p.stock_status,
-    ].join(','))
-  ]
-  const blob = new Blob([lines.join('\n')], { type: 'text/csv' })
-  const url  = URL.createObjectURL(blob)
-  const a    = document.createElement('a')
-  a.href = url; a.download = filename; a.click()
-  URL.revokeObjectURL(url)
+function genConsignmentNo() {
+  const now = new Date()
+  const y = now.getFullYear().toString().slice(-2)
+  const m = String(now.getMonth() + 1).padStart(2, '0')
+  const d = String(now.getDate()).padStart(2, '0')
+  const rand = Math.floor(1000 + Math.random() * 9000)
+  return `CSN-${y}${m}${d}-${rand}`
 }
 
 export default function ConsignmentData() {
   const { theme, userProfile } = useApp()
-  const t = THEMES[theme] || THEMES.dark
+  const t = THEMES[theme]
 
-  // ── Summary state ──
-  const [branchSummary, setBranchSummary]   = useState([])
-  const [loadingSummary, setLoadingSummary] = useState(true)
-  const [totalKpis, setTotalKpis]           = useState(null)
-  const [filterState, setFilterState]       = useState('')
-  const [states, setStates]                 = useState([])
-  const [viewMode, setViewMode]             = useState('grid')
-  const [sortCol, setSortCol]               = useState('net')
-  const [sortDir, setSortDir]               = useState('desc')
-  const [branchSearch, setBranchSearch]     = useState('')
+  const canManage = ['super_admin', 'founders_office', 'admin'].includes(userProfile?.role)
 
-  // ── Drilldown state ──
-  const [selectedBranch, setSelectedBranch]     = useState(null)
-  const [purchases, setPurchases]               = useState([])
-  const [loadingPurchases, setLoadingPurchases] = useState(false)
-  const [page, setPage]                         = useState(0)
-  const [totalCount, setTotalCount]             = useState(0)
-  const [search, setSearch]                     = useState('')
-  const [filterTxn, setFilterTxn]               = useState('')   // NEW: Physical/Takeover filter
-  const [dateFrom, setDateFrom]                 = useState('')   // NEW: date range filter
-  const [dateTo, setDateTo]                     = useState('')   // NEW: date range filter
+  // ── Views: 'bills' | 'consignments'
+  const [view, setView] = useState('bills')
 
-  // ── Selection + dispatch state ──
-  const [selectedIds, setSelectedIds]   = useState(new Set())
-  const [dispatching, setDispatching]   = useState(false)
-  const [showConfirm, setShowConfirm]   = useState(false)
-  const [exporting, setExporting]       = useState(false)
+  // ── Bills state
+  const [bills, setBills] = useState([])
+  const [billsLoading, setBillsLoading] = useState(false)
+  const [selectedIds, setSelectedIds] = useState(new Set())
+  const [filterBranch, setFilterBranch] = useState('')
+  const [filterState, setFilterState] = useState('')
+  const [allBranches, setAllBranches] = useState([])
+  const [allStates, setAllStates] = useState([])
+  const [billsPage, setBillsPage] = useState(0)
+  const [billsTotal, setBillsTotal] = useState(0)
+  const BILLS_PAGE_SIZE = 100
 
-  const PAGE_SIZE    = 100
-  const isSuperAdmin = userProfile?.role === 'super_admin'
-  const isManager    = userProfile?.role === 'manager'
-  const canDispatch  = isSuperAdmin
+  // ── Consignments state
+  const [consignments, setConsignments] = useState([])
+  const [consLoading, setConsLoading] = useState(false)
+  const [filterConsStatus, setFilterConsStatus] = useState('')
 
-  // ── Selection helpers ──
-  const toggleSelect    = (id) => setSelectedIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })
-  const toggleSelectAll = ()   => setSelectedIds(selectedIds.size === purchases.length ? new Set() : new Set(purchases.map(p => p.id)))
-  const clearSelection  = ()   => setSelectedIds(new Set())
+  // ── Create consignment modal
+  const [showCreate, setShowCreate] = useState(false)
+  const [creating, setCreating] = useState(false)
+  const [form, setForm] = useState({
+    consignment_no:   genConsignmentNo(),
+    expected_arrival: '',
+    vehicle_details:  '',
+    notes:            '',
+  })
 
-  // ── Sort helper ──
-  const handleSort = (col) => {
-    if (sortCol === col) setSortDir(d => d === 'desc' ? 'asc' : 'desc')
-    else { setSortCol(col); setSortDir('desc') }
-  }
+  // ── Mark in transit modal
+  const [transitCon, setTransitCon] = useState(null)
+  const [marking, setMarking] = useState(false)
 
-  const SortIcon = ({ col }) => sortCol === col
-    ? <span style={{ marginLeft: '4px', fontSize: '.55rem' }}>{sortDir === 'desc' ? '▼' : '▲'}</span>
-    : <span style={{ marginLeft: '4px', fontSize: '.55rem', opacity: .3 }}>▼</span>
-
-  const sortedSummary = [...branchSummary]
-    .filter(b => !branchSearch || b.name.toLowerCase().includes(branchSearch.toLowerCase()))
-    .sort((a, b2) => {
-      const aVal = a[sortCol] ?? '', bVal = b2[sortCol] ?? ''
-      if (typeof aVal === 'string') return sortDir === 'asc' ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal)
-      return sortDir === 'desc' ? Number(bVal) - Number(aVal) : Number(aVal) - Number(bVal)
-    })
-
-  // ── Load summary ──
-  useEffect(() => { loadSummary() }, [filterState])
-
-  const loadSummary = async () => {
-    setLoadingSummary(true)
-    const { data } = await supabase.rpc('get_consignment_branch_summary')
-    const rows = data || []
-    const allStates = [...new Set(rows.map(b => b.state).filter(Boolean))].sort()
-    setStates(allStates)
-    const filtered = filterState ? rows.filter(b => b.state === filterState) : rows
-    const totals = filtered.reduce((acc, b) => ({
-      count: acc.count + Number(b.count), gross: acc.gross + Number(b.total_gross),
-      net:   acc.net   + Number(b.total_net), value: acc.value + Number(b.total_value),
-      branches: acc.branches + 1,
-    }), { count: 0, gross: 0, net: 0, value: 0, branches: 0 })
-    const summary = filtered.map(b => ({
-      name: b.branch_name, state: b.state, region: b.region, cluster: b.cluster,
-      count: Number(b.count), gross: Number(b.total_gross), net: Number(b.total_net),
-      value: Number(b.total_value), physical: Number(b.physical), takeover: Number(b.takeover),
-      oldest_date: b.oldest_date || null,  // NEW: oldest purchase date from RPC
-    }))
-    setTotalKpis(totals)
-    setBranchSummary(summary)
-    setLoadingSummary(false)
-  }
-
-  // ── Load purchases ──
-  useEffect(() => {
-    if (selectedBranch) { setPage(0); setTotalCount(0); loadPurchases(0) }
-  }, [selectedBranch, search, filterTxn, dateFrom, dateTo])
+  // ── Summary of selected bills
+  const selectedBills   = bills.filter(b => selectedIds.has(b.id))
+  const selectedNetWt   = selectedBills.reduce((s, b) => s + (parseFloat(b.net_weight) || 0), 0)
+  const selectedBranches = [...new Set(selectedBills.map(b => b.branch_name).filter(Boolean))]
 
   useEffect(() => {
-    if (selectedBranch) loadPurchases(page)
-  }, [page])
+    loadBranches()
+    loadBills(0)
+    loadConsignments()
+  }, [])
 
-  const loadPurchases = useCallback(async (pageNum) => {
-    if (!selectedBranch) return
-    setLoadingPurchases(true)
+  useEffect(() => {
+    loadBills(0)
+    setBillsPage(0)
+  }, [filterBranch, filterState])
+
+  useEffect(() => {
+    loadBills(billsPage)
+  }, [billsPage])
+
+  const loadBranches = async () => {
+    const { data: branches } = await supabase
+      .from('branches').select('name, state').eq('is_active', true).order('name')
+    if (branches) {
+      setAllBranches(branches.map(b => b.name))
+      setAllStates([...new Set(branches.map(b => b.state).filter(Boolean))].sort())
+    }
+  }
+
+  const loadBills = async (pageNum) => {
+    setBillsLoading(true)
     let q = supabase
       .from('purchases')
-      .select('*', { count: 'exact' })
+      .select('id, application_id, purchase_date, transaction_time, customer_name, branch_name, net_weight, purity, total_amount, transaction_type, stock_status', { count: 'exact' })
       .eq('stock_status', 'at_branch')
-      .eq('is_deleted', false)
-      .eq('branch_name', selectedBranch.name)
-    if (search)     q = q.or(`customer_name.ilike.%${search}%,application_id.ilike.%${search}%`)
-    if (filterTxn)  q = q.eq('transaction_type', filterTxn)
-    if (dateFrom)   q = q.gte('purchase_date', dateFrom)
-    if (dateTo)     q = q.lte('purchase_date', dateTo)
-    const from = pageNum * PAGE_SIZE
-    const { data, count } = await q.order('purchase_date', { ascending: true }).range(from, from + PAGE_SIZE - 1)
-    setPurchases(data || [])
-    if (count !== null) setTotalCount(count)
-    setLoadingPurchases(false)
-  }, [selectedBranch, search, filterTxn, dateFrom, dateTo])
+      .is('is_deleted', false)
+      .order('purchase_date', { ascending: false })
 
-  const totalPages = Math.ceil(totalCount / PAGE_SIZE)
-
-  // ── Dispatch selected ──
-  const dispatchSelected = async () => {
-    setDispatching(true)
-    const ids = [...selectedIds]
-    const now = new Date().toISOString()
-const { error } = await supabase
-  .from('purchases')
-  .update({
-    stock_status:  'in_consignment',
-    dispatched_at: now,
-    updated_at:    now,
-    updated_by:    userProfile?.email || userProfile?.id || 'unknown'
-  })
-  .in('id', ids)
-    setDispatching(false)
-    setShowConfirm(false)
-    if (!error) {
-      // Optimistically remove dispatched rows from current view
-      setPurchases(prev => prev.filter(p => !selectedIds.has(p.id)))
-      setTotalCount(prev => prev - ids.length)
-      clearSelection()
-      // Update branch card KPIs
-      const dispatched = purchases.filter(p => ids.includes(p.id))
-      const dNet   = dispatched.reduce((s, p) => s + Number(p.net_weight  || 0), 0)
-      const dGross = dispatched.reduce((s, p) => s + Number(p.gross_weight || 0), 0)
-      const dVal   = dispatched.reduce((s, p) => s + Number(p.total_amount || 0), 0)
-      // Update selected branch card in summary
-      setBranchSummary(prev => prev.map(b => b.name === selectedBranch.name
-        ? { ...b, count: b.count - ids.length, net: b.net - dNet, gross: b.gross - dGross, value: b.value - dVal }
-        : b
-      ))
-      // Update total KPIs
-      setTotalKpis(prev => prev ? {
-        ...prev, count: prev.count - ids.length, net: prev.net - dNet,
-        gross: prev.gross - dGross, value: prev.value - dVal,
-      } : prev)
-      // Also update selectedBranch so drilldown KPIs reflect new state
-      setSelectedBranch(prev => prev ? {
-        ...prev, count: prev.count - ids.length, net: prev.net - dNet,
-        gross: prev.gross - dGross, value: prev.value - dVal,
-      } : prev)
+    if (filterBranch) q = q.eq('branch_name', filterBranch)
+    if (filterState) {
+      const { data: stateBranches } = await supabase
+        .from('branches').select('name').eq('state', filterState).eq('is_active', true)
+      const names = (stateBranches || []).map(b => b.name)
+      if (names.length) q = q.in('branch_name', names)
+      else { setBills([]); setBillsTotal(0); setBillsLoading(false); return }
     }
+
+    const from = pageNum * BILLS_PAGE_SIZE
+    const { data, count } = await q.range(from, from + BILLS_PAGE_SIZE - 1)
+    if (data) setBills(data)
+    if (count !== null) setBillsTotal(count)
+    setSelectedIds(new Set())
+    setBillsLoading(false)
   }
 
-  // ── Export ──
-  const handleExport = async () => {
-    setExporting(true)
-    // If rows selected, export those; otherwise export all for this branch
-    if (selectedIds.size > 0) {
-      const rows = purchases.filter(p => selectedIds.has(p.id))
-      exportToCSV(rows, `${selectedBranch.name}_selected.csv`)
-    } else {
-      // Fetch all pages for this branch
-      let all = []
-      let q = supabase.from('purchases').select('*')
-        .eq('stock_status', 'at_branch').eq('is_deleted', false).eq('branch_name', selectedBranch.name)
-      if (filterTxn) q = q.eq('transaction_type', filterTxn)
-      if (dateFrom)  q = q.gte('purchase_date', dateFrom)
-      if (dateTo)    q = q.lte('purchase_date', dateTo)
-      const { data } = await q.order('purchase_date', { ascending: true })
-      all = data || []
-      exportToCSV(all, `${selectedBranch.name}_all.csv`)
-    }
-    setExporting(false)
+  const loadConsignments = async () => {
+    setConsLoading(true)
+    let q = supabase
+      .from('consignments')
+      .select('*')
+      .order('created_at', { ascending: false })
+    if (filterConsStatus) q = q.eq('status', filterConsStatus)
+    const { data } = await q
+    if (data) setConsignments(data)
+    setConsLoading(false)
   }
 
-  // ── Styles ──
+  useEffect(() => { loadConsignments() }, [filterConsStatus])
+
+  const toggleBill = (id) => {
+    setSelectedIds(prev => {
+      const n = new Set(prev)
+      n.has(id) ? n.delete(id) : n.add(id)
+      return n
+    })
+  }
+
+  const toggleAllBills = () => {
+    if (bills.length > 0 && bills.every(b => selectedIds.has(b.id)))
+      setSelectedIds(new Set())
+    else
+      setSelectedIds(new Set(bills.map(b => b.id)))
+  }
+
+  const handleCreateConsignment = async () => {
+    if (selectedIds.size === 0) return
+    setCreating(true)
+
+    const billIds = [...selectedIds]
+    const totalNetWt = selectedBills.reduce((s, b) => s + (parseFloat(b.net_weight) || 0), 0)
+    const branchNames = [...new Set(selectedBills.map(b => b.branch_name).filter(Boolean))]
+
+    // Insert consignment record
+    const { error: consError } = await supabase.from('consignments').insert({
+      consignment_no:   form.consignment_no,
+      created_by:       userProfile?.id,
+      expected_arrival: form.expected_arrival || null,
+      vehicle_details:  form.vehicle_details || null,
+      notes:            form.notes || null,
+      status:           'created',
+      total_bills:      billIds.length,
+      total_net_weight: totalNetWt,
+      branch_names:     branchNames,
+      bill_ids:         billIds,
+    })
+
+    if (consError) {
+      alert('Error creating consignment: ' + consError.message)
+      setCreating(false)
+      return
+    }
+
+    // Update purchases stock_status to in_consignment
+    const BATCH = 100
+    for (let i = 0; i < billIds.length; i += BATCH) {
+      await supabase
+        .from('purchases')
+        .update({ stock_status: 'in_consignment' })
+        .in('id', billIds.slice(i, i + BATCH))
+    }
+
+    setShowCreate(false)
+    setCreating(false)
+    setForm({ consignment_no: genConsignmentNo(), expected_arrival: '', vehicle_details: '', notes: '' })
+    loadBills(0)
+    loadConsignments()
+  }
+
+  const handleMarkInTransit = async (con) => {
+    setMarking(true)
+    await supabase
+      .from('consignments')
+      .update({ status: 'in_transit' })
+      .eq('id', con.id)
+    setTransitCon(null)
+    setMarking(false)
+    loadConsignments()
+  }
+
+  // ── Styles
   const s = {
-    wrap:  { padding: '32px', maxWidth: '100%' },
-    card:  { background: t.card, border: `1px solid ${t.border}`, borderRadius: '10px', padding: '20px', marginBottom: '16px' },
-    th:    { padding: '10px 14px', fontSize: '.58rem', color: t.text3, letterSpacing: '.1em', textTransform: 'uppercase', textAlign: 'left', borderBottom: `1px solid ${t.border}`, background: t.card, fontWeight: 400, whiteSpace: 'nowrap' },
-    td:    { padding: '10px 14px', fontSize: '.72rem', color: t.text1, borderBottom: `1px solid ${t.border}20`, whiteSpace: 'nowrap' },
-    input: { background: t.card, border: `1px solid ${t.border}`, borderRadius: '7px', padding: '8px 14px', color: t.text1, fontSize: '.75rem', outline: 'none' },
-    pill:  (active, color) => ({ padding: '5px 14px', borderRadius: '100px', border: `1px solid ${active ? (color || t.gold) : t.border}`, background: active ? `${color || t.gold}18` : 'transparent', color: active ? (color || t.gold) : t.text3, fontSize: '.65rem', cursor: 'pointer' }),
-    pgBtn: (dis) => ({ background: 'none', border: `1px solid ${t.border}`, borderRadius: '5px', padding: '3px 10px', color: dis ? t.text4 : t.text2, cursor: dis ? 'not-allowed' : 'pointer', fontSize: '.7rem' }),
+    wrap:       { padding: '32px', maxWidth: '100%' },
+    card:       { background: t.card, border: `1px solid ${t.border}`, borderRadius: '12px', padding: '20px 24px', marginBottom: '20px' },
+    th:         { padding: '10px 14px', fontSize: '11px', color: t.text3, letterSpacing: '.1em', textTransform: 'uppercase', textAlign: 'left', borderBottom: `1px solid ${t.border}`, background: t.card, fontWeight: 600, whiteSpace: 'nowrap' },
+    td:         { padding: '10px 14px', fontSize: '13px', color: t.text1, borderBottom: `1px solid ${t.border}20`, whiteSpace: 'nowrap' },
+    tblWrap:    { overflowX: 'auto', borderRadius: '10px', border: `1px solid ${t.border}` },
+    select:     { background: t.card, border: `1px solid ${t.border}`, borderRadius: '6px', padding: '7px 10px', color: t.text1, fontSize: '13px', cursor: 'pointer' },
+    input:      { background: t.card2, border: `1px solid ${t.border}`, borderRadius: '7px', padding: '9px 14px', color: t.text1, fontSize: '13px', outline: 'none', width: '100%' },
+    btnGold:    { background: t.gold, color: '#1a0a00', border: 'none', borderRadius: '8px', padding: '9px 20px', fontSize: '12px', fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase', cursor: 'pointer' },
+    btnOutline: { background: 'transparent', color: t.text3, border: `1px solid ${t.border}`, borderRadius: '8px', padding: '9px 20px', fontSize: '12px', letterSpacing: '.06em', textTransform: 'uppercase', cursor: 'pointer' },
+    btnBlue:    { background: t.blue, color: '#fff', border: 'none', borderRadius: '8px', padding: '7px 16px', fontSize: '12px', fontWeight: 600, letterSpacing: '.06em', textTransform: 'uppercase', cursor: 'pointer' },
+    checkbox:   { width: '15px', height: '15px', accentColor: t.gold, cursor: 'pointer' },
+    label:      { fontSize: '11px', color: t.text3, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 600, marginBottom: '6px', display: 'block' },
   }
 
-  // ── Stale badge ──
-  const StaleBadge = ({ days }) => {
-    if (days === null) return null
-    const color = days >= 14 ? t.red : days >= STALE_DAYS ? t.orange : t.green
-    const label = days >= 14 ? `${days}d ⚠` : days >= STALE_DAYS ? `${days}d` : `${days}d`
-    return (
-      <span style={{ fontSize: '.58rem', padding: '2px 7px', borderRadius: '4px', background: `${color}20`, color, fontWeight: 500 }}>
-        {label}
-      </span>
-    )
-  }
+  const totalBillsPages = Math.ceil(billsTotal / BILLS_PAGE_SIZE)
 
-  // ══════════════════════════════════════
-  // ── DRILLDOWN VIEW ──
-  // ══════════════════════════════════════
-  if (selectedBranch) {
-    const staleDays = daysSince(selectedBranch.oldest_date)
-
-    return (
-      <div style={s.wrap}>
-        {/* Breadcrumb */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
-          <button onClick={() => { setSelectedBranch(null); setSearch(''); setFilterTxn(''); setDateFrom(''); setDateTo(''); clearSelection() }}
-            style={{ background: 'none', border: `1px solid ${t.border}`, borderRadius: '6px', padding: '6px 14px', color: t.text3, fontSize: '.7rem', cursor: 'pointer' }}>
-            ← Back
-          </button>
-          <span style={{ fontSize: '.65rem', color: t.text3 }}>Consignment Data</span>
-          <span style={{ fontSize: '.65rem', color: t.text4 }}>›</span>
-          <span style={{ fontSize: '.65rem', color: t.gold }}>{selectedBranch.name}</span>
-          {staleDays !== null && staleDays >= STALE_DAYS && (
-            <span style={{ fontSize: '.62rem', color: t.orange, background: `${t.orange}15`, border: `1px solid ${t.orange}40`, borderRadius: '5px', padding: '3px 10px' }}>
-              ⚠ Oldest stock: {staleDays} days ago
-            </span>
-          )}
-        </div>
-
-        {/* Branch header */}
-        <div style={{ fontSize: '1.4rem', fontWeight: 300, color: t.text1, marginBottom: '3px' }}>{selectedBranch.name}</div>
-        <div style={{ fontSize: '.72rem', color: t.text3, marginBottom: '20px' }}>
-          {[selectedBranch.state, selectedBranch.region, selectedBranch.cluster].filter(Boolean).join(' · ')}
-        </div>
-
-        {/* KPI Cards */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '12px', marginBottom: '20px' }}>
-          {[
-            { label: 'Records',      value: selectedBranch.count.toLocaleString('en-IN'), color: t.gold  },
-            { label: 'Total Gross',  value: `${fmt(selectedBranch.gross)}g`,              color: t.text1 },
-            { label: 'Total Net',    value: `${fmt(selectedBranch.net)}g`,                color: t.gold  },
-            { label: 'Total Value',  value: fmtVal(selectedBranch.value),                 color: t.green },
-            { label: 'Oldest Stock', value: staleDays !== null ? `${staleDays}d ago` : '—', color: staleDays >= 14 ? t.red : staleDays >= STALE_DAYS ? t.orange : t.green },
-          ].map(c => (
-            <div key={c.label} style={{ ...s.card, textAlign: 'center', padding: '16px', marginBottom: 0 }}>
-              <div style={{ fontSize: '1.2rem', fontWeight: 200, color: c.color }}>{c.value}</div>
-              <div style={{ fontSize: '.6rem', color: t.text3, letterSpacing: '.12em', textTransform: 'uppercase', marginTop: '5px' }}>{c.label}</div>
-            </div>
-          ))}
-        </div>
-
-        {/* Dispatch bar */}
-        {canDispatch && selectedIds.size > 0 && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '14px', padding: '10px 16px', background: `${t.gold}10`, border: `1px solid ${t.gold}40`, borderRadius: '8px', flexWrap: 'wrap' }}>
-            <span style={{ fontSize: '.75rem', color: t.gold }}>{selectedIds.size} record{selectedIds.size > 1 ? 's' : ''} selected</span>
-            <button onClick={() => setShowConfirm(true)}
-              style={{ background: t.gold, border: 'none', borderRadius: '6px', padding: '7px 18px', color: '#0e0e0e', fontSize: '.72rem', fontWeight: 600, cursor: 'pointer' }}>
-              Mark as In Transit →
-            </button>
-            <button onClick={() => handleExport()}
-              style={{ background: 'none', border: `1px solid ${t.border}`, borderRadius: '6px', padding: '7px 14px', color: t.text2, fontSize: '.72rem', cursor: 'pointer' }}>
-              Export Selected
-            </button>
-            <button onClick={clearSelection}
-              style={{ background: 'none', border: `1px solid ${t.border}`, borderRadius: '6px', padding: '7px 14px', color: t.text3, fontSize: '.72rem', cursor: 'pointer' }}>
-              Clear
-            </button>
-          </div>
-        )}
-
-        {/* Confirm modal */}
-        {showConfirm && (
-          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }}>
-            <div style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: '12px', padding: '32px', width: '420px', textAlign: 'center' }}>
-              <div style={{ fontSize: '1.1rem', color: t.text1, marginBottom: '10px' }}>Mark as In Transit?</div>
-              <div style={{ fontSize: '.75rem', color: t.text3, marginBottom: '24px', lineHeight: 1.6 }}>
-                <span style={{ color: t.gold, fontWeight: 500 }}>{selectedIds.size}</span> record{selectedIds.size > 1 ? 's' : ''} from{' '}
-                <span style={{ color: t.gold }}>{selectedBranch.name}</span> will be marked as{' '}
-                <span style={{ color: t.blue }}>In Transit</span>. This cannot be undone.
-              </div>
-              <div style={{ display: 'flex', gap: '10px', justifyContent: 'center' }}>
-                <button onClick={() => setShowConfirm(false)}
-                  style={{ background: 'none', border: `1px solid ${t.border}`, borderRadius: '7px', padding: '9px 24px', color: t.text2, fontSize: '.75rem', cursor: 'pointer' }}>
-                  Cancel
-                </button>
-                <button onClick={dispatchSelected} disabled={dispatching}
-                  style={{ background: t.gold, border: 'none', borderRadius: '7px', padding: '9px 24px', color: '#0e0e0e', fontSize: '.75rem', fontWeight: 600, cursor: dispatching ? 'wait' : 'pointer' }}>
-                  {dispatching ? 'Updating...' : 'Confirm'}
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Filters row */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '14px', flexWrap: 'wrap' }}>
-          <input style={{ ...s.input, width: '240px' }} placeholder="Search customer, app ID..." value={search} onChange={e => setSearch(e.target.value)} />
-
-          {/* Txn type filter */}
-          <div style={{ display: 'flex', gap: '6px' }}>
-            <button style={s.pill(!filterTxn)}           onClick={() => setFilterTxn('')}>All</button>
-            <button style={s.pill(filterTxn==='PHYSICAL', t.gold)} onClick={() => setFilterTxn(filterTxn === 'PHYSICAL' ? '' : 'PHYSICAL')}>Physical</button>
-            <button style={s.pill(filterTxn==='TAKEOVER', t.blue)} onClick={() => setFilterTxn(filterTxn === 'TAKEOVER' ? '' : 'TAKEOVER')}>Takeover</button>
-          </div>
-
-          {/* Date range */}
-          <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
-            style={{ ...s.input, width: '140px', fontSize: '.7rem', cursor: 'pointer' }} />
-          <span style={{ fontSize: '.65rem', color: t.text4 }}>to</span>
-          <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}
-            style={{ ...s.input, width: '140px', fontSize: '.7rem', cursor: 'pointer' }} />
-          {(dateFrom || dateTo) && (
-            <button onClick={() => { setDateFrom(''); setDateTo('') }}
-              style={{ background: 'none', border: 'none', color: t.text4, fontSize: '.7rem', cursor: 'pointer' }}>✕ Clear dates</button>
-          )}
-
-          {/* Export all */}
-          <button onClick={handleExport} disabled={exporting}
-            style={{ marginLeft: 'auto', background: 'none', border: `1px solid ${t.border}`, borderRadius: '6px', padding: '7px 14px', color: t.text2, fontSize: '.7rem', cursor: exporting ? 'wait' : 'pointer' }}>
-            {exporting ? 'Exporting...' : '↓ Export CSV'}
-          </button>
-        </div>
-
-        {/* Pagination */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px', flexWrap: 'wrap', gap: '8px' }}>
-          <span style={{ fontSize: '.7rem', color: t.text3 }}>
-            Showing {totalCount === 0 ? 0 : page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, totalCount).toLocaleString('en-IN')} of <span style={{ color: t.text1 }}>{totalCount.toLocaleString('en-IN')}</span> records
-            {totalCount > PAGE_SIZE && <span style={{ color: t.orange, marginLeft: '8px' }}>· Showing page only — use Export for all records</span>}
-          </span>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <button style={s.pgBtn(page === 0)} onClick={() => setPage(p => Math.max(0, p - 1))} disabled={page === 0}>←</button>
-            <span style={{ fontSize: '.7rem', color: t.text3 }}>Page {page + 1} of {totalPages || 1}</span>
-            <button style={s.pgBtn(page >= totalPages - 1)} onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))} disabled={page >= totalPages - 1}>→</button>
-          </div>
-        </div>
-
-        {loadingPurchases ? (
-          <div style={{ textAlign: 'center', padding: '60px', color: t.text3, fontSize: '.8rem' }}>Loading...</div>
-        ) : (
-          <div style={{ overflowX: 'auto', borderRadius: '10px', border: `1px solid ${t.border}` }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead>
-                <tr>
-                  {canDispatch && (
-                    <th style={{ ...s.th, width: '36px' }}>
-                      <input type="checkbox" checked={purchases.length > 0 && selectedIds.size === purchases.length}
-                        onChange={toggleSelectAll} style={{ cursor: 'pointer', accentColor: t.gold }} />
-                    </th>
-                  )}
-                  {['App ID','Date','Customer','Phone','Gross Wt','Stone','Wastage','Net Wt','Purity','Gross Amt','Svc%','Final Amt','Type','Age'].map(h => (
-                    <th key={h} style={s.th}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {purchases.map((p, i) => {
-                  const age = daysSince(p.purchase_date)
-                  const isStale = age !== null && age >= STALE_DAYS
-                  return (
-                    <tr key={p.id}
-                      style={{ background: selectedIds.has(p.id) ? `${t.gold}12` : isStale ? `${t.orange}06` : i % 2 === 0 ? 'transparent' : `${t.border}20`, cursor: canDispatch ? 'pointer' : 'default' }}
-                      onClick={canDispatch ? () => toggleSelect(p.id) : undefined}>
-                      {canDispatch && (
-                        <td style={{ ...s.td, width: '36px' }} onClick={e => e.stopPropagation()}>
-                          <input type="checkbox" checked={selectedIds.has(p.id)} onChange={() => toggleSelect(p.id)}
-                            style={{ cursor: 'pointer', accentColor: t.gold }} />
-                        </td>
-                      )}
-                      <td style={{ ...s.td, color: t.gold, fontWeight: 500 }}>{p.application_id}</td>
-                      <td style={s.td}>{fmtDate(p.purchase_date)}</td>
-                      <td style={s.td}>{p.customer_name}</td>
-                      <td style={{ ...s.td, color: t.text3 }}>{p.phone_number}</td>
-                      <td style={s.td}>{fmt(p.gross_weight)}g</td>
-                      <td style={s.td}>{fmt(p.stone_weight)}g</td>
-                      <td style={s.td}>{fmt(p.wastage)}g</td>
-                      <td style={{ ...s.td, color: t.gold }}>{fmt(p.net_weight)}g</td>
-                      <td style={s.td}>{fmt(p.purity)}%</td>
-                      <td style={s.td}>₹{fmt(p.total_amount)}</td>
-                      <td style={s.td}>{fmt(p.service_charge_pct)}%</td>
-                      <td style={{ ...s.td, color: t.green }}>₹{fmt(p.final_amount_crm)}</td>
-                      <td style={{ ...s.td, fontSize: '.65rem', color: p.transaction_type === 'PHYSICAL' ? t.gold : t.blue }}>{p.transaction_type}</td>
-                      <td style={{ ...s.td }}>
-                        <StaleBadge days={age} />
-                      </td>
-                    </tr>
-                  )
-                })}
-                {purchases.length === 0 && (
-                  <tr><td colSpan={canDispatch ? 15 : 14} style={{ ...s.td, textAlign: 'center', color: t.text4, padding: '48px' }}>No records found</td></tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-    )
-  }
-
-  // ══════════════════════════════════════
-  // ── SUMMARY VIEW ──
-  // ══════════════════════════════════════
   return (
     <div style={s.wrap}>
-      <div style={{ marginBottom: '24px' }}>
-        <div style={{ fontSize: '1.6rem', fontWeight: 300, color: t.text1, letterSpacing: '.04em' }}>Consignment Data</div>
-        <div style={{ fontSize: '.72rem', color: t.text3, marginTop: '4px' }}>All purchases at branch — pending dispatch to HO</div>
+
+      {/* ── HEADER ── */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '24px' }}>
+        <div>
+          <div style={{ fontSize: '1.6rem', fontWeight: 300, color: t.text1, letterSpacing: '.04em' }}>Consignment Data</div>
+          <div style={{ fontSize: '12px', color: t.text3, marginTop: '4px' }}>Group bills into consignments and track shipments to HO</div>
+        </div>
+        {canManage && view === 'bills' && selectedIds.size > 0 && (
+          <button style={s.btnGold} onClick={() => setShowCreate(true)}>
+            + Create Consignment ({selectedIds.size} bills)
+          </button>
+        )}
       </div>
 
-      {/* KPI Cards */}
-      {totalKpis && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '12px', marginBottom: '24px' }}>
-          {[
-            { label: 'Total Records',  value: totalKpis.count.toLocaleString('en-IN'),                                                color: t.gold,  size: '1.6rem' },
-            { label: 'Total Gross Wt', value: `${Number(totalKpis.gross).toLocaleString('en-IN', { maximumFractionDigits: 2 })}g`,   color: t.text1, size: '1.2rem' },
-            { label: 'Total Net Wt',   value: `${Number(totalKpis.net).toLocaleString('en-IN',   { maximumFractionDigits: 2 })}g`,   color: t.gold,  size: '1.2rem' },
-            { label: 'Total Value',    value: `₹${Number(totalKpis.value).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`,   color: t.green, size: '1rem'   },
-            { label: 'Branches',       value: totalKpis.branches,                                                                    color: t.blue,  size: '1.6rem' },
-          ].map(c => (
-            <div key={c.label} style={{ ...s.card, textAlign: 'center', padding: '18px 14px', marginBottom: 0 }}>
-              <div style={{ fontSize: c.size, fontWeight: 200, color: c.color, lineHeight: 1.15 }}>{c.value}</div>
-              <div style={{ fontSize: '.6rem', color: t.text3, letterSpacing: '.12em', textTransform: 'uppercase', marginTop: '6px' }}>{c.label}</div>
+      {/* ── TAB SWITCHER ── */}
+      <div style={{ display: 'flex', gap: '4px', padding: '4px', background: t.card, borderRadius: '10px', border: `1px solid ${t.border}`, width: 'fit-content', marginBottom: '24px' }}>
+        {[
+          { key: 'bills', label: `Bills at Branch${billsTotal > 0 ? ` (${billsTotal.toLocaleString('en-IN')})` : ''}` },
+          { key: 'consignments', label: `Consignments${consignments.length > 0 ? ` (${consignments.length})` : ''}` },
+        ].map(tab => (
+          <button key={tab.key} onClick={() => setView(tab.key)} style={{
+            padding: '7px 18px', borderRadius: '7px', border: 'none', cursor: 'pointer',
+            background: view === tab.key ? `linear-gradient(135deg, ${t.gold}, ${t.gold}cc)` : 'transparent',
+            color: view === tab.key ? '#0a0a0a' : t.text3,
+            fontSize: '12px', fontWeight: view === tab.key ? 700 : 500,
+            letterSpacing: '.04em', transition: 'all .2s ease',
+          }}>{tab.label}</button>
+        ))}
+      </div>
+
+      {/* ══════════════════════════════════════════════ */}
+      {/* BILLS VIEW                                     */}
+      {/* ══════════════════════════════════════════════ */}
+      {view === 'bills' && (
+        <>
+          {/* Filters */}
+          <div style={{ display: 'flex', gap: '10px', marginBottom: '16px', flexWrap: 'wrap', alignItems: 'center' }}>
+            <select style={s.select} value={filterState} onChange={e => { setFilterState(e.target.value); setFilterBranch('') }}>
+              <option value="">All States</option>
+              {allStates.map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
+            <select style={s.select} value={filterBranch} onChange={e => setFilterBranch(e.target.value)}>
+              <option value="">All Branches</option>
+              {allBranches.map(b => <option key={b} value={b}>{b}</option>)}
+            </select>
+            {(filterBranch || filterState) && (
+              <button style={s.btnOutline} onClick={() => { setFilterBranch(''); setFilterState('') }}>Clear</button>
+            )}
+            <div style={{ marginLeft: 'auto', fontSize: '12px', color: t.text3 }}>
+              {selectedIds.size > 0 && (
+                <span style={{ color: t.gold, marginRight: '16px' }}>
+                  {selectedIds.size} selected · {fmt(selectedNetWt)}g net weight
+                </span>
+              )}
+              <span>
+                {billsTotal === 0 ? '0' : billsPage * BILLS_PAGE_SIZE + 1}–{Math.min((billsPage + 1) * BILLS_PAGE_SIZE, billsTotal).toLocaleString('en-IN')} of {billsTotal.toLocaleString('en-IN')} bills
+              </span>
+              <button onClick={() => setBillsPage(p => Math.max(0, p - 1))} disabled={billsPage === 0}
+                style={{ marginLeft: '10px', background: 'none', border: `1px solid ${t.border}`, borderRadius: '5px', padding: '3px 10px', color: billsPage === 0 ? t.text4 : t.text2, cursor: billsPage === 0 ? 'not-allowed' : 'pointer', fontSize: '12px' }}>←</button>
+              <span style={{ margin: '0 6px', fontSize: '12px', color: t.text3 }}>Page {billsPage + 1} of {totalBillsPages || 1}</span>
+              <button onClick={() => setBillsPage(p => Math.min(totalBillsPages - 1, p + 1))} disabled={billsPage >= totalBillsPages - 1}
+                style={{ background: 'none', border: `1px solid ${t.border}`, borderRadius: '5px', padding: '3px 10px', color: billsPage >= totalBillsPages - 1 ? t.text4 : t.text2, cursor: billsPage >= totalBillsPages - 1 ? 'not-allowed' : 'pointer', fontSize: '12px' }}>→</button>
             </div>
-          ))}
-        </div>
+          </div>
+
+          {/* Selected summary bar */}
+          {selectedIds.size > 0 && (
+            <div style={{ background: `${t.gold}12`, border: `1px solid ${t.gold}30`, borderRadius: '10px', padding: '12px 20px', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '24px', flexWrap: 'wrap' }}>
+              <div style={{ fontSize: '13px', color: t.gold, fontWeight: 600 }}>{selectedIds.size} bills selected</div>
+              <div style={{ fontSize: '13px', color: t.text2 }}>Net Weight: <span style={{ color: t.gold }}>{fmt(selectedNetWt)}g</span></div>
+              <div style={{ fontSize: '13px', color: t.text2 }}>Branches: <span style={{ color: t.text1 }}>{selectedBranches.join(', ')}</span></div>
+              {canManage && (
+                <button style={{ ...s.btnGold, marginLeft: 'auto' }} onClick={() => setShowCreate(true)}>
+                  + Create Consignment
+                </button>
+              )}
+            </div>
+          )}
+
+          {billsLoading ? (
+            <div style={{ textAlign: 'center', color: t.text3, padding: '48px' }}>Loading...</div>
+          ) : bills.length === 0 ? (
+            <div style={{ ...s.card, textAlign: 'center', padding: '48px' }}>
+              <div style={{ fontSize: '2rem', opacity: .2, marginBottom: '12px' }}>📦</div>
+              <div style={{ fontSize: '14px', color: t.text3 }}>No bills at branch</div>
+              <div style={{ fontSize: '12px', color: t.text4, marginTop: '6px' }}>All bills have been dispatched or there are no purchases with at_branch status</div>
+            </div>
+          ) : (
+            <div style={s.tblWrap}>
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr>
+                    {canManage && (
+                      <th style={{ ...s.th, width: '40px', textAlign: 'center' }}>
+                        <input type="checkbox" style={s.checkbox}
+                          checked={bills.length > 0 && bills.every(b => selectedIds.has(b.id))}
+                          onChange={toggleAllBills} />
+                      </th>
+                    )}
+                    {['App ID', 'Date', 'Time', 'Customer', 'Branch', 'Net Wt', 'Purity', 'Gross Value', 'Type'].map(h =>
+                      <th key={h} style={s.th}>{h}</th>
+                    )}
+                  </tr>
+                </thead>
+                <tbody>
+                  {bills.map(bill => (
+                    <tr key={bill.id} style={{ background: selectedIds.has(bill.id) ? `${t.gold}10` : 'transparent', transition: 'background .1s' }}>
+                      {canManage && (
+                        <td style={{ ...s.td, textAlign: 'center', padding: '10px 8px' }}>
+                          <input type="checkbox" style={s.checkbox} checked={selectedIds.has(bill.id)} onChange={() => toggleBill(bill.id)} />
+                        </td>
+                      )}
+                      <td style={{ ...s.td, color: t.gold, fontWeight: 500 }}>{bill.application_id}</td>
+                      <td style={s.td}>{fmtDate(bill.purchase_date)}</td>
+                      <td style={{ ...s.td, color: t.text3 }}>{fmtTime(bill.transaction_time) || '—'}</td>
+                      <td style={s.td}>{bill.customer_name}</td>
+                      <td style={{ ...s.td, color: t.text2 }}>{bill.branch_name}</td>
+                      <td style={{ ...s.td, color: t.gold }}>{fmt(bill.net_weight)}g</td>
+                      <td style={s.td}>{bill.purity ? `${Number(bill.purity).toFixed(2)}%` : '—'}</td>
+                      <td style={s.td}>₹{fmt(bill.total_amount)}</td>
+                      <td style={{ ...s.td, fontSize: '11px' }}>
+                        <span style={{ color: bill.transaction_type === 'PHYSICAL' ? t.gold : t.orange, background: `${bill.transaction_type === 'PHYSICAL' ? t.gold : t.orange}18`, border: `1px solid ${bill.transaction_type === 'PHYSICAL' ? t.gold : t.orange}40`, borderRadius: '4px', padding: '2px 7px' }}>
+                          {bill.transaction_type}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
       )}
 
-      {/* State Filter + Search + View Toggle */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '10px' }}>
-        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
-          <button style={s.pill(!filterState)} onClick={() => setFilterState('')}>All States</button>
-          {states.map(st => (
-            <button key={st} style={s.pill(filterState === st)} onClick={() => setFilterState(filterState === st ? '' : st)}>{st}</button>
-          ))}
-        </div>
-        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-          <input placeholder="Search branch..." value={branchSearch} onChange={e => setBranchSearch(e.target.value)}
-            style={{ ...s.input, width: '180px', padding: '6px 12px' }} />
-          <button onClick={() => setViewMode('grid')} style={{ ...s.pill(viewMode === 'grid'), padding: '5px 12px' }}>⊞ Grid</button>
-          <button onClick={() => setViewMode('list')} style={{ ...s.pill(viewMode === 'list'), padding: '5px 12px' }}>≡ List</button>
-        </div>
-      </div>
+      {/* ══════════════════════════════════════════════ */}
+      {/* CONSIGNMENTS VIEW                              */}
+      {/* ══════════════════════════════════════════════ */}
+      {view === 'consignments' && (
+        <>
+          <div style={{ display: 'flex', gap: '10px', marginBottom: '20px', alignItems: 'center' }}>
+            <select style={s.select} value={filterConsStatus} onChange={e => setFilterConsStatus(e.target.value)}>
+              <option value="">All Statuses</option>
+              {Object.entries(STATUS_META).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+            </select>
+          </div>
 
-      {/* Branch View */}
-      {loadingSummary ? (
-        <div style={{ textAlign: 'center', padding: '60px', color: t.text3, fontSize: '.8rem' }}>Loading...</div>
-      ) : branchSummary.length === 0 ? (
-        <div style={{ textAlign: 'center', padding: '60px', color: t.text4, fontSize: '.8rem' }}>No pending consignments</div>
-      ) : viewMode === 'grid' ? (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px' }}>
-          {sortedSummary.map((b) => {
-            const staleDays = daysSince(b.oldest_date)
-            const isStale   = staleDays !== null && staleDays >= STALE_DAYS
-            const staleColor = staleDays >= 14 ? t.red : t.orange
-            return (
-              <div key={b.name} onClick={() => setSelectedBranch(b)}
-                style={{ ...s.card, cursor: 'pointer', marginBottom: 0, transition: 'border-color .2s, background .2s', borderColor: isStale && staleDays >= 14 ? `${t.red}40` : t.border }}
-                onMouseEnter={e => { e.currentTarget.style.borderColor = t.gold; e.currentTarget.style.background = `${t.gold}08` }}
-                onMouseLeave={e => { e.currentTarget.style.borderColor = isStale && staleDays >= 14 ? `${t.red}40` : t.border; e.currentTarget.style.background = t.card }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '14px' }}>
-                  <div>
-                    <div style={{ fontSize: '.82rem', fontWeight: 500, color: t.gold, marginBottom: '3px' }}>{b.name}</div>
-                    <div style={{ fontSize: '.6rem', color: t.text3 }}>{[b.state, b.region].filter(Boolean).join(' · ')}</div>
-                  </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '5px' }}>
-                    <div style={{ fontSize: '.65rem', color: t.text3, background: t.card2, border: `1px solid ${t.border}`, borderRadius: '5px', padding: '3px 9px' }}>{b.count} records</div>
-                    {isStale && <StaleBadge days={staleDays} />}
-                  </div>
-                </div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-                  <div style={{ background: t.card2, borderRadius: '6px', padding: '10px' }}>
-                    <div style={{ fontSize: '.88rem', color: t.gold, fontWeight: 200 }}>{fmt(b.net)}g</div>
-                    <div style={{ fontSize: '.55rem', color: t.text4, textTransform: 'uppercase', letterSpacing: '.1em', marginTop: '3px' }}>Net Wt</div>
-                  </div>
-                  <div style={{ background: t.card2, borderRadius: '6px', padding: '10px' }}>
-                    <div style={{ fontSize: '.88rem', color: t.green, fontWeight: 200 }}>{fmtVal(b.value)}</div>
-                    <div style={{ fontSize: '.55rem', color: t.text4, textTransform: 'uppercase', letterSpacing: '.1em', marginTop: '3px' }}>Value</div>
-                  </div>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '10px', paddingTop: '10px', borderTop: `1px solid ${t.border}` }}>
-                  <span style={{ fontSize: '.62rem', color: t.text3 }}>Physical: <span style={{ color: t.gold }}>{b.physical}</span></span>
-                  <span style={{ fontSize: '.62rem', color: t.text3 }}>Takeover: <span style={{ color: t.blue }}>{b.takeover}</span></span>
-                  {isStale && <span style={{ fontSize: '.6rem', color: staleColor }}>⏱ {staleDays}d old</span>}
-                </div>
-              </div>
-            )
-          })}
-        </div>
-      ) : (
-        <div style={{ overflowX: 'auto', borderRadius: '10px', border: `1px solid ${t.border}` }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead>
-              <tr>
-                {[
-                  { label: '#',        col: null    },
-                  { label: 'Branch',   col: 'name'  },
-                  { label: 'State',    col: null     },
-                  { label: 'Region',   col: null     },
-                  { label: 'Cluster',  col: null     },
-                  { label: 'Records',  col: 'count'  },
-                  { label: 'Gross Wt', col: 'gross'  },
-                  { label: 'Net Wt',   col: 'net'    },
-                  { label: 'Value',    col: 'value'  },
-                  { label: 'Oldest',   col: null     },
-                ].map(({ label, col }) => (
-                  <th key={label} onClick={col ? () => handleSort(col) : undefined}
-                    style={{ ...s.th, color: col && sortCol === col ? t.gold : t.text3, cursor: col ? 'pointer' : 'default', userSelect: 'none' }}>
-                    {label}{col && <SortIcon col={col} />}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {sortedSummary.map((b, i) => {
-                const staleDays = daysSince(b.oldest_date)
-                const isStale   = staleDays !== null && staleDays >= STALE_DAYS
+          {consLoading ? (
+            <div style={{ textAlign: 'center', color: t.text3, padding: '48px' }}>Loading...</div>
+          ) : consignments.length === 0 ? (
+            <div style={{ ...s.card, textAlign: 'center', padding: '48px' }}>
+              <div style={{ fontSize: '2rem', opacity: .2, marginBottom: '12px' }}>🚚</div>
+              <div style={{ fontSize: '14px', color: t.text3 }}>No consignments yet</div>
+              <div style={{ fontSize: '12px', color: t.text4, marginTop: '6px' }}>Select bills from the Bills tab and create a consignment</div>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+              {consignments.map(con => {
+                const meta = STATUS_META[con.status] || { label: con.status, color: t.text3 }
                 return (
-                  <tr key={b.name} onClick={() => setSelectedBranch(b)}
-                    style={{ background: i % 2 === 0 ? 'transparent' : `${t.border}20`, cursor: 'pointer' }}
-                    onMouseEnter={e => e.currentTarget.style.background = `${t.gold}08`}
-                    onMouseLeave={e => e.currentTarget.style.background = i % 2 === 0 ? 'transparent' : `${t.border}20`}>
-                    <td style={{ ...s.td, color: t.text4 }}>{i + 1}</td>
-                    <td style={{ ...s.td, color: t.gold, fontWeight: 500 }}>{b.name}</td>
-                    <td style={{ ...s.td, color: t.text2 }}>{b.state}</td>
-                    <td style={{ ...s.td, color: t.text3 }}>{b.region}</td>
-                    <td style={{ ...s.td, color: t.text3 }}>{b.cluster}</td>
-                    <td style={{ ...s.td }}>{b.count.toLocaleString('en-IN')}</td>
-                    <td style={{ ...s.td }}>{fmt(b.gross)}g</td>
-                    <td style={{ ...s.td, color: t.gold }}>{fmt(b.net)}g</td>
-                    <td style={{ ...s.td, color: t.green }}>{fmtVal(b.value)}</td>
-                    <td style={{ ...s.td }}>{isStale ? <StaleBadge days={staleDays} /> : <span style={{ fontSize: '.65rem', color: t.text4 }}>{staleDays !== null ? `${staleDays}d` : '—'}</span>}</td>
-                  </tr>
+                  <div key={con.id} style={{ ...s.card, marginBottom: 0 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '12px' }}>
+                      {/* Left */}
+                      <div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '10px' }}>
+                          <div style={{ fontSize: '1rem', fontWeight: 600, color: t.gold, letterSpacing: '.04em' }}>{con.consignment_no}</div>
+                          <span style={{ fontSize: '11px', color: meta.color, background: `${meta.color}18`, border: `1px solid ${meta.color}40`, borderRadius: '4px', padding: '2px 8px', fontWeight: 600 }}>{meta.label}</span>
+                        </div>
+                        <div style={{ display: 'flex', gap: '28px', flexWrap: 'wrap' }}>
+                          <div>
+                            <div style={{ fontSize: '11px', color: t.text4, textTransform: 'uppercase', letterSpacing: '.08em', marginBottom: '2px' }}>Created</div>
+                            <div style={{ fontSize: '13px', color: t.text2 }}>{fmtDate(con.created_at)}</div>
+                          </div>
+                          <div>
+                            <div style={{ fontSize: '11px', color: t.text4, textTransform: 'uppercase', letterSpacing: '.08em', marginBottom: '2px' }}>Bills</div>
+                            <div style={{ fontSize: '13px', color: t.text1, fontWeight: 600 }}>{con.total_bills}</div>
+                          </div>
+                          <div>
+                            <div style={{ fontSize: '11px', color: t.text4, textTransform: 'uppercase', letterSpacing: '.08em', marginBottom: '2px' }}>Net Weight</div>
+                            <div style={{ fontSize: '13px', color: t.gold, fontWeight: 600 }}>{fmt(con.total_net_weight)}g</div>
+                          </div>
+                          {con.expected_arrival && (
+                            <div>
+                              <div style={{ fontSize: '11px', color: t.text4, textTransform: 'uppercase', letterSpacing: '.08em', marginBottom: '2px' }}>Expected Arrival</div>
+                              <div style={{ fontSize: '13px', color: t.text2 }}>{fmtDate(con.expected_arrival)}</div>
+                            </div>
+                          )}
+                          {con.vehicle_details && (
+                            <div>
+                              <div style={{ fontSize: '11px', color: t.text4, textTransform: 'uppercase', letterSpacing: '.08em', marginBottom: '2px' }}>Vehicle</div>
+                              <div style={{ fontSize: '13px', color: t.text2 }}>{con.vehicle_details}</div>
+                            </div>
+                          )}
+                        </div>
+                        {con.branch_names?.length > 0 && (
+                          <div style={{ marginTop: '10px', display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                            {con.branch_names.map(b => (
+                              <span key={b} style={{ fontSize: '11px', color: t.text3, background: t.card2, border: `1px solid ${t.border}`, borderRadius: '4px', padding: '2px 8px' }}>{b}</span>
+                            ))}
+                          </div>
+                        )}
+                        {con.notes && (
+                          <div style={{ marginTop: '10px', fontSize: '12px', color: t.text3, fontStyle: 'italic' }}>Note: {con.notes}</div>
+                        )}
+                      </div>
+
+                      {/* Actions */}
+                      {canManage && con.status === 'created' && (
+                        <button style={s.btnBlue} onClick={() => setTransitCon(con)}>
+                          🚚 Mark In Transit
+                        </button>
+                      )}
+                    </div>
+                  </div>
                 )
               })}
-            </tbody>
-          </table>
+            </div>
+          )}
+        </>
+      )}
+
+      {/* ══════════════════════════════════════════════ */}
+      {/* CREATE CONSIGNMENT MODAL                       */}
+      {/* ══════════════════════════════════════════════ */}
+      {showCreate && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
+          <div style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: '16px', padding: '36px', maxWidth: '520px', width: '100%', boxShadow: '0 24px 80px rgba(0,0,0,.6)' }}>
+            <div style={{ fontSize: '1.1rem', color: t.text1, fontWeight: 400, marginBottom: '6px' }}>Create Consignment</div>
+            <div style={{ fontSize: '12px', color: t.text3, marginBottom: '28px' }}>{selectedIds.size} bills · {fmt(selectedNetWt)}g net weight · {selectedBranches.length} {selectedBranches.length === 1 ? 'branch' : 'branches'}</div>
+
+            {/* Consignment No */}
+            <div style={{ marginBottom: '18px' }}>
+              <label style={s.label}>Consignment Number</label>
+              <input style={s.input} value={form.consignment_no} onChange={e => setForm(f => ({ ...f, consignment_no: e.target.value }))} />
+            </div>
+
+            {/* Expected Arrival */}
+            <div style={{ marginBottom: '18px' }}>
+              <label style={s.label}>Expected Arrival Date</label>
+              <input type="date" style={s.input} value={form.expected_arrival} onChange={e => setForm(f => ({ ...f, expected_arrival: e.target.value }))} />
+            </div>
+
+            {/* Vehicle Details */}
+            <div style={{ marginBottom: '18px' }}>
+              <label style={s.label}>Vehicle / Courier Details</label>
+              <input style={s.input} placeholder="e.g. KA-01-AB-1234 or BlueDart AWB no." value={form.vehicle_details} onChange={e => setForm(f => ({ ...f, vehicle_details: e.target.value }))} />
+            </div>
+
+            {/* Notes */}
+            <div style={{ marginBottom: '28px' }}>
+              <label style={s.label}>Notes / Remarks</label>
+              <textarea style={{ ...s.input, height: '80px', resize: 'vertical', fontFamily: 'inherit' }} placeholder="Any additional notes..." value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} />
+            </div>
+
+            {/* Branches included */}
+            <div style={{ marginBottom: '28px', padding: '14px 16px', background: t.card2, borderRadius: '8px', border: `1px solid ${t.border}` }}>
+              <div style={{ fontSize: '11px', color: t.text4, textTransform: 'uppercase', letterSpacing: '.08em', marginBottom: '8px' }}>Branches Included</div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                {selectedBranches.map(b => (
+                  <span key={b} style={{ fontSize: '11px', color: t.text2, background: t.card, border: `1px solid ${t.border}`, borderRadius: '4px', padding: '2px 8px' }}>{b}</span>
+                ))}
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+              <button style={s.btnOutline} onClick={() => setShowCreate(false)} disabled={creating}>Cancel</button>
+              <button style={s.btnGold} onClick={handleCreateConsignment} disabled={creating}>
+                {creating ? 'Creating...' : `Create Consignment`}
+              </button>
+            </div>
+          </div>
         </div>
       )}
+
+      {/* ══════════════════════════════════════════════ */}
+      {/* MARK IN TRANSIT MODAL                          */}
+      {/* ══════════════════════════════════════════════ */}
+      {transitCon && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
+          <div style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: '16px', padding: '36px', maxWidth: '420px', width: '100%', boxShadow: '0 24px 80px rgba(0,0,0,.6)', textAlign: 'center' }}>
+            <div style={{ fontSize: '2rem', marginBottom: '16px' }}>🚚</div>
+            <div style={{ fontSize: '1rem', color: t.text1, fontWeight: 400, marginBottom: '8px' }}>Mark as In Transit?</div>
+            <div style={{ fontSize: '13px', color: t.text2, marginBottom: '6px' }}>{transitCon.consignment_no}</div>
+            <div style={{ fontSize: '12px', color: t.text3, marginBottom: '28px', lineHeight: 1.6 }}>
+              This will mark the consignment as in transit.<br />The {transitCon.total_bills} bills in this consignment will remain in <span style={{ color: t.orange }}>in_consignment</span> status.
+            </div>
+            <div style={{ display: 'flex', gap: '10px', justifyContent: 'center' }}>
+              <button style={s.btnOutline} onClick={() => setTransitCon(null)} disabled={marking}>Cancel</button>
+              <button style={s.btnBlue} onClick={() => handleMarkInTransit(transitCon)} disabled={marking}>
+                {marking ? 'Marking...' : 'Confirm'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   )
 }
