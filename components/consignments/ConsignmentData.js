@@ -15,6 +15,13 @@ const STATUS_META = {
   received:   { label: 'Received',   color: '#3aaa6a' },
 }
 
+const SORT_OPTIONS = [
+  { key: 'bill_count', label: 'Bills' },
+  { key: 'total_net',  label: 'Net Weight' },
+  { key: 'total_value', label: 'Value' },
+  { key: 'oldest_date', label: 'Oldest First' },
+]
+
 const fmt     = (n) => n != null ? Number(n).toLocaleString('en-IN', { maximumFractionDigits: 2 }) : '—'
 const fmtCr   = (n) => { if (n == null) return '—'; const cr = Number(n) / 1e7; return cr >= 1 ? `₹${cr.toFixed(2)} Cr` : `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 })}` }
 const fmtDate = (d) => d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'
@@ -23,7 +30,7 @@ const fmtTime = (t) => {
   try { const [h, m] = t.split(':'); const hr = parseInt(h); return `${hr % 12 || 12}:${m} ${hr >= 12 ? 'PM' : 'AM'}` }
   catch { return t }
 }
-const daysOld = (d) => { if (!d) return null; return Math.floor((Date.now() - new Date(d).getTime()) / 86400000) }
+const daysOld  = (d) => { if (!d) return null; return Math.floor((Date.now() - new Date(d).getTime()) / 86400000) }
 const ageColor = (days, t) => {
   if (days == null) return t.text4
   if (days > 180) return t.red
@@ -44,21 +51,22 @@ export default function ConsignmentData() {
   const t = THEMES[theme]
   const canManage = ['super_admin', 'founders_office', 'admin'].includes(userProfile?.role)
 
-  const [view, setView]               = useState('bills')
-  const [drillLevel, setDrillLevel]   = useState('states')
+  const [view, setView]                     = useState('bills')
+  const [drillLevel, setDrillLevel]         = useState('states')
   const [selectedState, setSelectedState]   = useState(null)
   const [selectedBranch, setSelectedBranch] = useState(null)
+  const [sortBy, setSortBy]                 = useState('bill_count')
 
-  const [stateSummary, setStateSummary]     = useState([])
-  const [statesLoading, setStatesLoading]   = useState(false)
-  const [branchSummary, setBranchSummary]   = useState([])
+  const [stateSummary, setStateSummary]       = useState([])
+  const [statesLoading, setStatesLoading]     = useState(false)
+  const [branchSummary, setBranchSummary]     = useState([])
   const [branchesLoading, setBranchesLoading] = useState(false)
 
-  const [bills, setBills]           = useState([])
+  const [bills, setBills]               = useState([])
   const [billsLoading, setBillsLoading] = useState(false)
-  const [billsTotal, setBillsTotal] = useState(0)
-  const [billsPage, setBillsPage]   = useState(0)
-  const [selectedIds, setSelectedIds] = useState(new Set())
+  const [billsTotal, setBillsTotal]     = useState(0)
+  const [billsPage, setBillsPage]       = useState(0)
+  const [selectedIds, setSelectedIds]   = useState(new Set())
   const BILLS_PAGE_SIZE = 100
 
   const [consignments, setConsignments]         = useState([])
@@ -75,6 +83,21 @@ export default function ConsignmentData() {
   const selectedBills    = bills.filter(b => selectedIds.has(b.id))
   const selectedNetWt    = selectedBills.reduce((s, b) => s + (parseFloat(b.net_weight) || 0), 0)
   const selectedBranches = [...new Set(selectedBills.map(b => b.branch_name).filter(Boolean))]
+
+  // ── sorted state summary
+  const sortedStates = [...stateSummary].sort((a, b) => {
+    if (sortBy === 'oldest_date') return new Date(a.oldest_date) - new Date(b.oldest_date)
+    return Number(b[sortBy] || 0) - Number(a[sortBy] || 0)
+  })
+
+  // ── totals across all states
+  const grandTotal = {
+    bills:      stateSummary.reduce((s, r) => s + Number(r.bill_count || 0), 0),
+    net:        stateSummary.reduce((s, r) => s + Number(r.total_net || 0), 0),
+    value:      stateSummary.reduce((s, r) => s + Number(r.total_value || 0), 0),
+    branches:   stateSummary.reduce((s, r) => s + Number(r.branch_count || 0), 0),
+    avgAge:     stateSummary.length > 0 ? stateSummary.reduce((s, r) => s + Number(r.avg_age_days || 0), 0) / stateSummary.length : 0,
+  }
 
   useEffect(() => { loadStateSummary(); loadConsignments() }, [])
   useEffect(() => { loadConsignments() }, [filterConsStatus])
@@ -119,23 +142,23 @@ export default function ConsignmentData() {
     setConsLoading(false)
   }
 
-  const handleStateClick = (state) => { setSelectedState(state); setDrillLevel('branches'); loadBranchSummary(state) }
-  const handleBranchClick = (branch) => { setSelectedBranch(branch); setDrillLevel('bills'); setBillsPage(0); loadBills(branch, 0) }
+  const handleStateClick  = (state)  => { setSelectedState(state);   setDrillLevel('branches'); loadBranchSummary(state) }
+  const handleBranchClick = (branch) => { setSelectedBranch(branch); setDrillLevel('bills');    setBillsPage(0); loadBills(branch, 0) }
   const handleBack = () => {
-    if (drillLevel === 'bills') { setDrillLevel('branches'); setSelectedBranch(null); setBills([]); setSelectedIds(new Set()) }
-    else if (drillLevel === 'branches') { setDrillLevel('states'); setSelectedState(null); setBranchSummary([]) }
+    if (drillLevel === 'bills')     { setDrillLevel('branches'); setSelectedBranch(null); setBills([]);        setSelectedIds(new Set()) }
+    else if (drillLevel === 'branches') { setDrillLevel('states');   setSelectedState(null);  setBranchSummary([]) }
   }
 
-  const toggleBill    = (id) => setSelectedIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })
-  const toggleAllBills = () => { if (bills.length > 0 && bills.every(b => selectedIds.has(b.id))) setSelectedIds(new Set()); else setSelectedIds(new Set(bills.map(b => b.id))) }
+  const toggleBill     = (id) => setSelectedIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })
+  const toggleAllBills = ()   => { if (bills.length > 0 && bills.every(b => selectedIds.has(b.id))) setSelectedIds(new Set()); else setSelectedIds(new Set(bills.map(b => b.id))) }
 
   const handleCreateConsignment = async () => {
     if (selectedIds.size === 0) return
     setCreating(true)
-    const billIds    = [...selectedIds]
-    const totalNetWt = selectedBills.reduce((s, b) => s + (parseFloat(b.net_weight) || 0), 0)
+    const billIds     = [...selectedIds]
+    const totalNetWt  = selectedBills.reduce((s, b) => s + (parseFloat(b.net_weight) || 0), 0)
     const branchNames = [...new Set(selectedBills.map(b => b.branch_name).filter(Boolean))]
-    const { error } = await supabase.from('consignments').insert({
+    const { error }   = await supabase.from('consignments').insert({
       consignment_no: form.consignment_no, created_by: userProfile?.id,
       expected_arrival: form.expected_arrival || null, vehicle_details: form.vehicle_details || null,
       notes: form.notes || null, status: 'created',
@@ -188,55 +211,6 @@ export default function ConsignmentData() {
     </div>
   )
 
-  const StateCard = ({ row }) => {
-    const days = daysOld(row.oldest_date)
-    return (
-      <div onClick={() => handleStateClick(row.state)}
-        style={{ ...s.card, marginBottom: 0, cursor: 'pointer', transition: 'all .2s', position: 'relative', overflow: 'hidden' }}
-        onMouseEnter={e => { e.currentTarget.style.borderColor = `${t.gold}50`; e.currentTarget.style.transform = 'translateY(-2px)' }}
-        onMouseLeave={e => { e.currentTarget.style.borderColor = t.border; e.currentTarget.style.transform = 'translateY(0)' }}>
-        <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '2px', background: `linear-gradient(90deg, ${t.blue}, transparent)` }} />
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '16px' }}>
-          <div style={{ fontSize: '15px', fontWeight: 600, color: t.text1 }}>{row.state}</div>
-          {days != null && <span style={{ fontSize: '11px', color: ageColor(days, t), background: `${ageColor(days, t)}18`, border: `1px solid ${ageColor(days, t)}40`, borderRadius: '4px', padding: '2px 8px', fontWeight: 600 }}>⏱ {days}d old</span>}
-        </div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '10px' }}>
-          <div><div style={{ fontSize: '11px', color: t.text4, textTransform: 'uppercase', letterSpacing: '.08em', marginBottom: '4px' }}>Bills</div>
-            <div style={{ fontSize: '1.6rem', fontWeight: 300, color: t.blue }}>{Number(row.bill_count).toLocaleString('en-IN')}</div></div>
-          <div><div style={{ fontSize: '11px', color: t.text4, textTransform: 'uppercase', letterSpacing: '.08em', marginBottom: '4px' }}>Net Weight</div>
-            <div style={{ fontSize: '1rem', color: t.text1 }}>{fmt(row.total_net)}g</div></div>
-        </div>
-        <div style={{ marginBottom: '14px' }}><div style={{ fontSize: '11px', color: t.text4, textTransform: 'uppercase', letterSpacing: '.08em', marginBottom: '4px' }}>Value</div>
-          <div style={{ fontSize: '1rem', color: t.green }}>{fmtCr(row.total_value)}</div></div>
-        <div style={{ fontSize: '12px', color: t.gold, textAlign: 'right' }}>View branches ›</div>
-      </div>
-    )
-  }
-
-  const BranchCard = ({ row }) => {
-    const days = daysOld(row.oldest_date)
-    return (
-      <div onClick={() => handleBranchClick(row.branch_name)}
-        style={{ ...s.card, marginBottom: 0, cursor: 'pointer', transition: 'all .2s', position: 'relative', overflow: 'hidden' }}
-        onMouseEnter={e => { e.currentTarget.style.borderColor = `${t.gold}50`; e.currentTarget.style.transform = 'translateY(-2px)' }}
-        onMouseLeave={e => { e.currentTarget.style.borderColor = t.border; e.currentTarget.style.transform = 'translateY(0)' }}>
-        <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '2px', background: `linear-gradient(90deg, ${t.gold}, transparent)` }} />
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '14px' }}>
-          <div style={{ fontSize: '14px', fontWeight: 600, color: t.text1 }}>{row.branch_name}</div>
-          {days != null && <span style={{ fontSize: '11px', color: ageColor(days, t), background: `${ageColor(days, t)}18`, border: `1px solid ${ageColor(days, t)}40`, borderRadius: '4px', padding: '2px 7px', fontWeight: 600 }}>{days}d old</span>}
-        </div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '10px' }}>
-          <div><div style={{ fontSize: '11px', color: t.text4, textTransform: 'uppercase', letterSpacing: '.08em', marginBottom: '3px' }}>Bills</div>
-            <div style={{ fontSize: '1.4rem', fontWeight: 300, color: t.gold }}>{Number(row.bill_count).toLocaleString('en-IN')}</div></div>
-          <div><div style={{ fontSize: '11px', color: t.text4, textTransform: 'uppercase', letterSpacing: '.08em', marginBottom: '3px' }}>Net Wt</div>
-            <div style={{ fontSize: '1rem', color: t.text1 }}>{fmt(row.total_net)}g</div></div>
-        </div>
-        <div style={{ fontSize: '13px', color: t.green, marginBottom: '12px' }}>{fmtCr(row.total_value)}</div>
-        <div style={{ fontSize: '12px', color: t.gold, textAlign: 'right' }}>View bills ›</div>
-      </div>
-    )
-  }
-
   return (
     <div style={s.wrap}>
 
@@ -271,39 +245,159 @@ export default function ConsignmentData() {
         <>
           <Breadcrumb />
 
-          {/* STATES */}
+          {/* ── STATES LEVEL ── */}
           {drillLevel === 'states' && (
-            statesLoading ? <div style={{ textAlign: 'center', color: t.text3, padding: '48px' }}>Loading...</div>
-            : stateSummary.length === 0 ? (
-              <div style={{ ...s.card, textAlign: 'center', padding: '48px' }}>
-                <div style={{ fontSize: '2rem', opacity: .2, marginBottom: '12px' }}>📦</div>
-                <div style={{ fontSize: '14px', color: t.text3 }}>No bills at branch</div>
-              </div>
-            ) : (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '16px' }}>
-                {stateSummary.map(row => <StateCard key={row.state} row={row} />)}
-              </div>
-            )
-          )}
-
-          {/* BRANCHES */}
-          {drillLevel === 'branches' && (
             <>
-              <button style={{ ...s.btnBack, marginBottom: '16px' }} onClick={handleBack}>← Back</button>
-              {branchesLoading ? <div style={{ textAlign: 'center', color: t.text3, padding: '48px' }}>Loading...</div>
-              : branchSummary.length === 0 ? (
+              {/* TOTAL SUMMARY BAR */}
+              {!statesLoading && stateSummary.length > 0 && (
+                <div style={{ background: `linear-gradient(135deg, ${t.card} 0%, ${t.card2} 100%)`, border: `1px solid ${t.border}`, borderRadius: '14px', padding: '18px 28px', marginBottom: '24px', display: 'flex', gap: '0', position: 'relative', overflow: 'hidden' }}>
+                  <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '2px', background: `linear-gradient(90deg, ${t.gold}, ${t.green}, ${t.blue}, transparent)` }} />
+                  {[
+                    { label: 'Total Bills',    value: grandTotal.bills.toLocaleString('en-IN'),  color: t.gold,  size: '1.6rem' },
+                    { label: 'Total Net Wt',   value: `${fmt(grandTotal.net)}g`,                 color: t.text1, size: '1.2rem' },
+                    { label: 'Total Value',    value: fmtCr(grandTotal.value),                   color: t.green, size: '1.2rem' },
+                    { label: 'Active Branches',value: grandTotal.branches,                        color: t.blue,  size: '1.6rem' },
+                    { label: 'Avg Bill Age',   value: `${Math.round(grandTotal.avgAge)}d`,        color: ageColor(Math.round(grandTotal.avgAge), t), size: '1.6rem' },
+                  ].map((item, i, arr) => (
+                    <div key={item.label} style={{ flex: 1, textAlign: 'center', padding: '0 16px', borderRight: i < arr.length - 1 ? `1px solid ${t.border}` : 'none' }}>
+                      <div style={{ fontSize: item.size, fontWeight: 200, color: item.color, lineHeight: 1.1, marginBottom: '6px' }}>{item.value}</div>
+                      <div style={{ fontSize: '11px', color: t.text4, textTransform: 'uppercase', letterSpacing: '.1em' }}>{item.label}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* SORT BAR */}
+              {!statesLoading && stateSummary.length > 0 && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
+                  <span style={{ fontSize: '12px', color: t.text4 }}>Sort by:</span>
+                  {SORT_OPTIONS.map(opt => (
+                    <button key={opt.key} onClick={() => setSortBy(opt.key)} style={{
+                      padding: '5px 14px', borderRadius: '20px', border: `1px solid ${sortBy === opt.key ? t.gold : t.border}`,
+                      background: sortBy === opt.key ? `${t.gold}18` : 'transparent',
+                      color: sortBy === opt.key ? t.gold : t.text3,
+                      fontSize: '12px', cursor: 'pointer', transition: 'all .15s',
+                    }}>{opt.label}</button>
+                  ))}
+                </div>
+              )}
+
+              {statesLoading ? (
+                <div style={{ textAlign: 'center', color: t.text3, padding: '48px' }}>Loading...</div>
+              ) : stateSummary.length === 0 ? (
                 <div style={{ ...s.card, textAlign: 'center', padding: '48px' }}>
-                  <div style={{ fontSize: '14px', color: t.text3 }}>No branches with bills at branch</div>
+                  <div style={{ fontSize: '2rem', opacity: .2, marginBottom: '12px' }}>📦</div>
+                  <div style={{ fontSize: '14px', color: t.text3 }}>No bills at branch</div>
                 </div>
               ) : (
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: '14px' }}>
-                  {branchSummary.map(row => <BranchCard key={row.branch_name} row={row} />)}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '16px' }}>
+                  {sortedStates.map(row => {
+                    const days    = daysOld(row.oldest_date)
+                    const avgAge  = Math.round(Number(row.avg_age_days || 0))
+                    return (
+                      <div key={row.state}
+                        onClick={() => handleStateClick(row.state)}
+                        style={{ ...s.card, marginBottom: 0, cursor: 'pointer', transition: 'all .2s', position: 'relative', overflow: 'hidden' }}
+                        onMouseEnter={e => { e.currentTarget.style.borderColor = `${t.gold}50`; e.currentTarget.style.transform = 'translateY(-2px)' }}
+                        onMouseLeave={e => { e.currentTarget.style.borderColor = t.border; e.currentTarget.style.transform = 'translateY(0)' }}>
+                        <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '2px', background: `linear-gradient(90deg, ${t.blue}, transparent)` }} />
+
+                        {/* Title row */}
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '16px' }}>
+                          <div style={{ fontSize: '15px', fontWeight: 600, color: t.text1 }}>{row.state}</div>
+                          {days != null && (
+                            <span style={{ fontSize: '11px', color: ageColor(days, t), background: `${ageColor(days, t)}18`, border: `1px solid ${ageColor(days, t)}40`, borderRadius: '4px', padding: '2px 8px', fontWeight: 600 }}>⏱ {days}d old</span>
+                          )}
+                        </div>
+
+                        {/* KPI grid */}
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '12px' }}>
+                          <div>
+                            <div style={{ fontSize: '11px', color: t.text4, textTransform: 'uppercase', letterSpacing: '.08em', marginBottom: '4px' }}>Bills</div>
+                            <div style={{ fontSize: '1.6rem', fontWeight: 300, color: t.blue }}>{Number(row.bill_count).toLocaleString('en-IN')}</div>
+                          </div>
+                          <div>
+                            <div style={{ fontSize: '11px', color: t.text4, textTransform: 'uppercase', letterSpacing: '.08em', marginBottom: '4px' }}>Net Weight</div>
+                            <div style={{ fontSize: '1rem', color: t.text1 }}>{fmt(row.total_net)}g</div>
+                          </div>
+                        </div>
+
+                        <div style={{ marginBottom: '12px' }}>
+                          <div style={{ fontSize: '11px', color: t.text4, textTransform: 'uppercase', letterSpacing: '.08em', marginBottom: '4px' }}>Value</div>
+                          <div style={{ fontSize: '1rem', color: t.green }}>{fmtCr(row.total_value)}</div>
+                        </div>
+
+                        {/* Bottom meta row */}
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: '12px', borderTop: `1px solid ${t.border}` }}>
+                          <div style={{ display: 'flex', gap: '16px' }}>
+                            <span style={{ fontSize: '12px', color: t.text3 }}>
+                              <span style={{ color: t.text2, fontWeight: 600 }}>{Number(row.branch_count)}</span> branches
+                            </span>
+                            <span style={{ fontSize: '12px', color: t.text3 }}>
+                              Avg <span style={{ color: ageColor(avgAge, t), fontWeight: 600 }}>{avgAge}d</span> old
+                            </span>
+                          </div>
+                          <div style={{ fontSize: '12px', color: t.gold }}>View ›</div>
+                        </div>
+                      </div>
+                    )
+                  })}
                 </div>
               )}
             </>
           )}
 
-          {/* BILLS TABLE */}
+          {/* ── BRANCHES LEVEL ── */}
+          {drillLevel === 'branches' && (
+            <>
+              <button style={{ ...s.btnBack, marginBottom: '16px' }} onClick={handleBack}>← Back</button>
+              {branchesLoading ? (
+                <div style={{ textAlign: 'center', color: t.text3, padding: '48px' }}>Loading...</div>
+              ) : branchSummary.length === 0 ? (
+                <div style={{ ...s.card, textAlign: 'center', padding: '48px' }}>
+                  <div style={{ fontSize: '14px', color: t.text3 }}>No branches with bills at branch</div>
+                </div>
+              ) : (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: '14px' }}>
+                  {branchSummary.map(row => {
+                    const days = daysOld(row.oldest_date)
+                    return (
+                      <div key={row.branch_name}
+                        onClick={() => handleBranchClick(row.branch_name)}
+                        style={{ ...s.card, marginBottom: 0, cursor: 'pointer', transition: 'all .2s', position: 'relative', overflow: 'hidden' }}
+                        onMouseEnter={e => { e.currentTarget.style.borderColor = `${t.gold}50`; e.currentTarget.style.transform = 'translateY(-2px)' }}
+                        onMouseLeave={e => { e.currentTarget.style.borderColor = t.border; e.currentTarget.style.transform = 'translateY(0)' }}>
+                        <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '2px', background: `linear-gradient(90deg, ${t.gold}, transparent)` }} />
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '14px' }}>
+                          <div style={{ fontSize: '14px', fontWeight: 600, color: t.text1 }}>{row.branch_name}</div>
+                          {days != null && (
+                            <span style={{ fontSize: '11px', color: ageColor(days, t), background: `${ageColor(days, t)}18`, border: `1px solid ${ageColor(days, t)}40`, borderRadius: '4px', padding: '2px 7px', fontWeight: 600 }}>{days}d old</span>
+                          )}
+                        </div>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '10px' }}>
+                          <div>
+                            <div style={{ fontSize: '11px', color: t.text4, textTransform: 'uppercase', letterSpacing: '.08em', marginBottom: '3px' }}>Bills</div>
+                            <div style={{ fontSize: '1.4rem', fontWeight: 300, color: t.gold }}>{Number(row.bill_count).toLocaleString('en-IN')}</div>
+                          </div>
+                          <div>
+                            <div style={{ fontSize: '11px', color: t.text4, textTransform: 'uppercase', letterSpacing: '.08em', marginBottom: '3px' }}>Net Wt</div>
+                            <div style={{ fontSize: '1rem', color: t.text1 }}>{fmt(row.total_net)}g</div>
+                          </div>
+                        </div>
+                        <div style={{ marginBottom: '12px' }}>
+                          <div style={{ fontSize: '11px', color: t.text4, textTransform: 'uppercase', letterSpacing: '.08em', marginBottom: '3px' }}>Value</div>
+                          <div style={{ fontSize: '13px', color: t.green }}>{fmtCr(row.total_value)}</div>
+                        </div>
+                        <div style={{ fontSize: '12px', color: t.gold, textAlign: 'right' }}>View bills ›</div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </>
+          )}
+
+          {/* ── BILLS LEVEL ── */}
           {drillLevel === 'bills' && (
             <>
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px', flexWrap: 'wrap' }}>
@@ -390,11 +484,11 @@ export default function ConsignmentData() {
                         </div>
                         <div style={{ display: 'flex', gap: '28px', flexWrap: 'wrap' }}>
                           {[
-                            { label: 'Created', value: fmtDate(con.created_at) },
-                            { label: 'Bills', value: con.total_bills, bold: true },
-                            { label: 'Net Weight', value: `${fmt(con.total_net_weight)}g`, color: t.gold },
+                            { label: 'Created',  value: fmtDate(con.created_at) },
+                            { label: 'Bills',    value: con.total_bills, bold: true },
+                            { label: 'Net Wt',   value: `${fmt(con.total_net_weight)}g`, color: t.gold },
                             con.expected_arrival && { label: 'Expected', value: fmtDate(con.expected_arrival) },
-                            con.vehicle_details && { label: 'Vehicle', value: con.vehicle_details },
+                            con.vehicle_details  && { label: 'Vehicle',  value: con.vehicle_details },
                           ].filter(Boolean).map(item => (
                             <div key={item.label}>
                               <div style={{ fontSize: '11px', color: t.text4, textTransform: 'uppercase', letterSpacing: '.08em', marginBottom: '2px' }}>{item.label}</div>
@@ -428,9 +522,9 @@ export default function ConsignmentData() {
             <div style={{ fontSize: '1.1rem', color: t.text1, marginBottom: '6px' }}>Create Consignment</div>
             <div style={{ fontSize: '12px', color: t.text3, marginBottom: '28px' }}>{selectedIds.size} bills · {fmt(selectedNetWt)}g · {selectedBranches.length} {selectedBranches.length === 1 ? 'branch' : 'branches'}</div>
             {[
-              { label: 'Consignment Number', key: 'consignment_no', type: 'text' },
-              { label: 'Expected Arrival Date', key: 'expected_arrival', type: 'date' },
-              { label: 'Vehicle / Courier Details', key: 'vehicle_details', type: 'text', placeholder: 'e.g. KA-01-AB-1234 or BlueDart AWB' },
+              { label: 'Consignment Number',       key: 'consignment_no',   type: 'text' },
+              { label: 'Expected Arrival Date',    key: 'expected_arrival', type: 'date' },
+              { label: 'Vehicle / Courier Details',key: 'vehicle_details',  type: 'text', placeholder: 'e.g. KA-01-AB-1234 or BlueDart AWB' },
             ].map(f => (
               <div key={f.key} style={{ marginBottom: '18px' }}>
                 <label style={s.lbl}>{f.label}</label>
