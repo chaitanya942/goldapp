@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../../lib/supabase'
 import { useApp } from '../../lib/context'
 
@@ -16,8 +16,8 @@ const STATUS_META = {
 }
 
 const SORT_OPTIONS = [
-  { key: 'bill_count', label: 'Bills' },
-  { key: 'total_net',  label: 'Net Weight' },
+  { key: 'bill_count',  label: 'Bills' },
+  { key: 'total_net',   label: 'Net Weight' },
   { key: 'total_value', label: 'Value' },
   { key: 'oldest_date', label: 'Oldest First' },
 ]
@@ -50,6 +50,7 @@ export default function ConsignmentData() {
   const { theme, userProfile } = useApp()
   const t = THEMES[theme]
   const canManage = ['super_admin', 'founders_office', 'admin'].includes(userProfile?.role)
+  const fileInputRef = useRef(null)
 
   const [view, setView]                     = useState('bills')
   const [drillLevel, setDrillLevel]         = useState('states')
@@ -80,23 +81,28 @@ export default function ConsignmentData() {
   const [transitCon, setTransitCon] = useState(null)
   const [marking, setMarking]       = useState(false)
 
+  // ── OCR state
+  const [ocrMode, setOcrMode]         = useState(false)
+  const [ocrLoading, setOcrLoading]   = useState(false)
+  const [ocrResult, setOcrResult]     = useState(null)
+  const [ocrFileName, setOcrFileName] = useState('')
+  const [ocrSelectedIds, setOcrSelectedIds] = useState(new Set())
+
   const selectedBills    = bills.filter(b => selectedIds.has(b.id))
   const selectedNetWt    = selectedBills.reduce((s, b) => s + (parseFloat(b.net_weight) || 0), 0)
   const selectedBranches = [...new Set(selectedBills.map(b => b.branch_name).filter(Boolean))]
 
-  // ── sorted state summary
   const sortedStates = [...stateSummary].sort((a, b) => {
     if (sortBy === 'oldest_date') return new Date(a.oldest_date) - new Date(b.oldest_date)
     return Number(b[sortBy] || 0) - Number(a[sortBy] || 0)
   })
 
-  // ── totals across all states
   const grandTotal = {
-    bills:      stateSummary.reduce((s, r) => s + Number(r.bill_count || 0), 0),
-    net:        stateSummary.reduce((s, r) => s + Number(r.total_net || 0), 0),
-    value:      stateSummary.reduce((s, r) => s + Number(r.total_value || 0), 0),
-    branches:   stateSummary.reduce((s, r) => s + Number(r.branch_count || 0), 0),
-    avgAge:     stateSummary.length > 0 ? stateSummary.reduce((s, r) => s + Number(r.avg_age_days || 0), 0) / stateSummary.length : 0,
+    bills:    stateSummary.reduce((s, r) => s + Number(r.bill_count || 0), 0),
+    net:      stateSummary.reduce((s, r) => s + Number(r.total_net || 0), 0),
+    value:    stateSummary.reduce((s, r) => s + Number(r.total_value || 0), 0),
+    branches: stateSummary.reduce((s, r) => s + Number(r.branch_count || 0), 0),
+    avgAge:   stateSummary.length > 0 ? stateSummary.reduce((s, r) => s + Number(r.avg_age_days || 0), 0) / stateSummary.length : 0,
   }
 
   useEffect(() => { loadStateSummary(); loadConsignments() }, [])
@@ -145,12 +151,73 @@ export default function ConsignmentData() {
   const handleStateClick  = (state)  => { setSelectedState(state);   setDrillLevel('branches'); loadBranchSummary(state) }
   const handleBranchClick = (branch) => { setSelectedBranch(branch); setDrillLevel('bills');    setBillsPage(0); loadBills(branch, 0) }
   const handleBack = () => {
-    if (drillLevel === 'bills')     { setDrillLevel('branches'); setSelectedBranch(null); setBills([]);        setSelectedIds(new Set()) }
+    if (drillLevel === 'bills')         { setDrillLevel('branches'); setSelectedBranch(null); setBills([]);        setSelectedIds(new Set()) }
     else if (drillLevel === 'branches') { setDrillLevel('states');   setSelectedState(null);  setBranchSummary([]) }
   }
 
   const toggleBill     = (id) => setSelectedIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })
   const toggleAllBills = ()   => { if (bills.length > 0 && bills.every(b => selectedIds.has(b.id))) setSelectedIds(new Set()); else setSelectedIds(new Set(bills.map(b => b.id))) }
+
+  // ── OCR handlers
+  const handleOcrUpload = async (file) => {
+    if (!file) return
+    setOcrFileName(file.name)
+    setOcrLoading(true)
+    setOcrResult(null)
+    setOcrMode(true)
+
+    const fd = new FormData()
+    fd.append('image', file)
+
+    try {
+      const res  = await fetch('/api/ocr-consignment', { method: 'POST', body: fd })
+      const data = await res.json()
+      if (!data.success) { alert('OCR failed: ' + data.error); setOcrLoading(false); return }
+      setOcrResult(data)
+      setOcrSelectedIds(new Set(data.rows.map(r => r.id)))
+    } catch (err) {
+      alert('OCR error: ' + err.message)
+    }
+    setOcrLoading(false)
+    if (fileInputRef.current) fileInputRef.current.value = ''
+  }
+
+  const toggleOcrRow = (id) => setOcrSelectedIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })
+
+  const ocrSelectedRows   = ocrResult?.rows?.filter(r => ocrSelectedIds.has(r.id)) || []
+  const ocrSelectedNetWt  = ocrSelectedRows.reduce((s, r) => s + (parseFloat(r.net_weight) || 0), 0)
+  const ocrSelectedBranches = [...new Set(ocrSelectedRows.map(r => r.branch_name).filter(Boolean))]
+
+  const handleCreateFromOcr = async () => {
+    if (ocrSelectedIds.size === 0) return
+    setCreating(true)
+    const billIds     = [...ocrSelectedIds]
+    const totalNetWt  = ocrSelectedNetWt
+    const branchNames = ocrSelectedBranches
+
+    const { error } = await supabase.from('consignments').insert({
+      consignment_no:   form.consignment_no,
+      created_by:       userProfile?.id,
+      expected_arrival: form.expected_arrival || null,
+      vehicle_details:  form.vehicle_details || null,
+      notes:            form.notes || null,
+      status:           'created',
+      total_bills:      billIds.length,
+      total_net_weight: totalNetWt,
+      branch_names:     branchNames,
+      bill_ids:         billIds,
+    })
+    if (error) { alert('Error: ' + error.message); setCreating(false); return }
+
+    const BATCH = 100
+    for (let i = 0; i < billIds.length; i += BATCH)
+      await supabase.from('purchases').update({ stock_status: 'in_consignment' }).in('id', billIds.slice(i, i + BATCH))
+
+    setOcrMode(false); setOcrResult(null); setOcrSelectedIds(new Set()); setCreating(false)
+    setForm({ consignment_no: genConsignmentNo(), expected_arrival: '', vehicle_details: '', notes: '' })
+    loadStateSummary(); loadConsignments()
+    alert(`✓ Consignment created with ${billIds.length} bills`)
+  }
 
   const handleCreateConsignment = async () => {
     if (selectedIds.size === 0) return
@@ -159,11 +226,11 @@ export default function ConsignmentData() {
     const totalNetWt  = selectedBills.reduce((s, b) => s + (parseFloat(b.net_weight) || 0), 0)
     const branchNames = [...new Set(selectedBills.map(b => b.branch_name).filter(Boolean))]
     const { error }   = await supabase.from('consignments').insert({
-      consignment_no: form.consignment_no, created_by: userProfile?.id,
+      consignment_no:   form.consignment_no, created_by: userProfile?.id,
       expected_arrival: form.expected_arrival || null, vehicle_details: form.vehicle_details || null,
-      notes: form.notes || null, status: 'created',
-      total_bills: billIds.length, total_net_weight: totalNetWt,
-      branch_names: branchNames, bill_ids: billIds,
+      notes:            form.notes || null, status: 'created',
+      total_bills:      billIds.length, total_net_weight: totalNetWt,
+      branch_names:     branchNames, bill_ids: billIds,
     })
     if (error) { alert('Error: ' + error.message); setCreating(false); return }
     const BATCH = 100
@@ -211,8 +278,124 @@ export default function ConsignmentData() {
     </div>
   )
 
+  // ── OCR PREVIEW VIEW
+  if (ocrMode) {
+    return (
+      <div style={s.wrap}>
+        <input ref={fileInputRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={e => handleOcrUpload(e.target.files[0])} />
+
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '24px' }}>
+          <div>
+            <div style={{ fontSize: '1.6rem', fontWeight: 300, color: t.text1 }}>OCR — Movement Report</div>
+            <div style={{ fontSize: '12px', color: t.text3, marginTop: '4px' }}>{ocrFileName}</div>
+          </div>
+          <div style={{ display: 'flex', gap: '10px' }}>
+            <button style={s.btnOutline} onClick={() => { setOcrMode(false); setOcrResult(null) }}>← Back</button>
+            {ocrResult && ocrSelectedIds.size > 0 && canManage && (
+              <button style={s.btnGold} onClick={() => setShowCreate(true)}>
+                + Create Consignment ({ocrSelectedIds.size} bills)
+              </button>
+            )}
+          </div>
+        </div>
+
+        {ocrLoading && (
+          <div style={{ ...s.card, textAlign: 'center', padding: '64px' }}>
+            <div style={{ fontSize: '2rem', marginBottom: '16px', animation: 'spin 1s linear infinite', display: 'inline-block' }}>⟳</div>
+            <div style={{ fontSize: '14px', color: t.text2, marginBottom: '8px' }}>Reading movement report...</div>
+            <div style={{ fontSize: '12px', color: t.text3 }}>Claude is extracting all rows from the image</div>
+            <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
+          </div>
+        )}
+
+        {ocrResult && !ocrLoading && (
+          <>
+            {/* Summary */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '14px', marginBottom: '24px' }}>
+              {[
+                { label: 'Total Rows Extracted', value: ocrResult.total,       color: t.gold  },
+                { label: 'Matched in Supabase',  value: ocrResult.matched,     color: t.green },
+                { label: 'Not Found',            value: ocrResult.notFound,    color: ocrResult.notFound > 0 ? t.red : t.text3 },
+                { label: 'Wrong Status',         value: ocrResult.wrongStatus, color: ocrResult.wrongStatus > 0 ? t.orange : t.text3 },
+              ].map(item => (
+                <div key={item.label} style={{ ...s.card, textAlign: 'center', padding: '18px', marginBottom: 0 }}>
+                  <div style={{ fontSize: '2rem', fontWeight: 200, color: item.color }}>{item.value}</div>
+                  <div style={{ fontSize: '11px', color: t.text4, textTransform: 'uppercase', letterSpacing: '.1em', marginTop: '6px' }}>{item.label}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* Not found warning */}
+            {ocrResult.notFoundIds?.length > 0 && (
+              <div style={{ background: `${t.red}10`, border: `1px solid ${t.red}40`, borderRadius: '10px', padding: '14px 20px', marginBottom: '16px' }}>
+                <div style={{ fontSize: '13px', color: t.red, fontWeight: 600, marginBottom: '6px' }}>⚠ {ocrResult.notFoundIds.length} Application IDs not found in Supabase</div>
+                <div style={{ fontSize: '12px', color: t.text3, lineHeight: 1.8 }}>{ocrResult.notFoundIds.join(' · ')}</div>
+              </div>
+            )}
+
+            {/* Wrong status warning */}
+            {ocrResult.wrongStatusIds?.length > 0 && (
+              <div style={{ background: `${t.orange}10`, border: `1px solid ${t.orange}40`, borderRadius: '10px', padding: '14px 20px', marginBottom: '16px' }}>
+                <div style={{ fontSize: '13px', color: t.orange, fontWeight: 600, marginBottom: '6px' }}>⚠ {ocrResult.wrongStatusIds.length} bills not at at_branch status</div>
+                <div style={{ fontSize: '12px', color: t.text3, lineHeight: 1.8 }}>{ocrResult.wrongStatusIds.map(r => `${r.appId} (${r.status})`).join(' · ')}</div>
+              </div>
+            )}
+
+            {/* Selection bar */}
+            {ocrSelectedIds.size > 0 && (
+              <div style={{ background: `${t.gold}12`, border: `1px solid ${t.gold}30`, borderRadius: '8px', padding: '10px 16px', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '20px' }}>
+                <span style={{ fontSize: '13px', color: t.gold, fontWeight: 600 }}>{ocrSelectedIds.size} bills selected</span>
+                <span style={{ fontSize: '13px', color: t.text2 }}>Net Wt: <span style={{ color: t.gold }}>{fmt(ocrSelectedNetWt)}g</span></span>
+                <span style={{ fontSize: '13px', color: t.text2 }}>Branches: <span style={{ color: t.text1 }}>{ocrSelectedBranches.join(', ')}</span></span>
+              </div>
+            )}
+
+            {/* Matched rows table */}
+            {ocrResult.rows?.length > 0 && (
+              <div style={s.tblWrap}>
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr>
+                      <th style={{ ...s.th, width: '40px', textAlign: 'center' }}>
+                        <input type="checkbox" style={s.checkbox}
+                          checked={ocrResult.rows.length > 0 && ocrResult.rows.every(r => ocrSelectedIds.has(r.id))}
+                          onChange={() => {
+                            if (ocrResult.rows.every(r => ocrSelectedIds.has(r.id))) setOcrSelectedIds(new Set())
+                            else setOcrSelectedIds(new Set(ocrResult.rows.map(r => r.id)))
+                          }} />
+                      </th>
+                      {['App ID', 'Date', 'Customer', 'Branch', 'Net Wt', 'Status'].map(h => <th key={h} style={s.th}>{h}</th>)}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {ocrResult.rows.map(row => (
+                      <tr key={row.id} style={{ background: ocrSelectedIds.has(row.id) ? `${t.gold}10` : 'transparent' }}>
+                        <td style={{ ...s.td, textAlign: 'center', padding: '10px 8px' }}>
+                          <input type="checkbox" style={s.checkbox} checked={ocrSelectedIds.has(row.id)} onChange={() => toggleOcrRow(row.id)} />
+                        </td>
+                        <td style={{ ...s.td, color: t.gold, fontWeight: 500 }}>{row.application_id}</td>
+                        <td style={s.td}>{fmtDate(row.purchase_date)}</td>
+                        <td style={s.td}>{row.ocr_row?.customer_name || '—'}</td>
+                        <td style={{ ...s.td, color: t.text2 }}>{row.branch_name}</td>
+                        <td style={{ ...s.td, color: t.gold }}>{fmt(row.net_weight)}g</td>
+                        <td style={s.td}>
+                          <span style={{ fontSize: '11px', color: t.green, background: `${t.green}18`, border: `1px solid ${t.green}40`, borderRadius: '4px', padding: '2px 7px' }}>{row.stock_status}</span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    )
+  }
+
   return (
     <div style={s.wrap}>
+      <input ref={fileInputRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={e => handleOcrUpload(e.target.files[0])} />
 
       {/* HEADER */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '24px' }}>
@@ -220,9 +403,16 @@ export default function ConsignmentData() {
           <div style={{ fontSize: '1.6rem', fontWeight: 300, color: t.text1, letterSpacing: '.04em' }}>Consignment Data</div>
           <div style={{ fontSize: '12px', color: t.text3, marginTop: '4px' }}>Group bills into consignments and track shipments to HO</div>
         </div>
-        {canManage && view === 'bills' && drillLevel === 'bills' && selectedIds.size > 0 && (
-          <button style={s.btnGold} onClick={() => setShowCreate(true)}>+ Create Consignment ({selectedIds.size} bills)</button>
-        )}
+        <div style={{ display: 'flex', gap: '10px' }}>
+          {canManage && view === 'bills' && drillLevel === 'states' && (
+            <button style={{ ...s.btnOutline, color: t.blue, borderColor: `${t.blue}60` }} onClick={() => fileInputRef.current?.click()}>
+              📷 Upload Movement Report
+            </button>
+          )}
+          {canManage && view === 'bills' && drillLevel === 'bills' && selectedIds.size > 0 && (
+            <button style={s.btnGold} onClick={() => setShowCreate(true)}>+ Create Consignment ({selectedIds.size} bills)</button>
+          )}
+        </div>
       </div>
 
       {/* TABS */}
@@ -245,19 +435,18 @@ export default function ConsignmentData() {
         <>
           <Breadcrumb />
 
-          {/* ── STATES LEVEL ── */}
+          {/* STATES */}
           {drillLevel === 'states' && (
             <>
-              {/* TOTAL SUMMARY BAR */}
               {!statesLoading && stateSummary.length > 0 && (
-                <div style={{ background: `linear-gradient(135deg, ${t.card} 0%, ${t.card2} 100%)`, border: `1px solid ${t.border}`, borderRadius: '14px', padding: '18px 28px', marginBottom: '24px', display: 'flex', gap: '0', position: 'relative', overflow: 'hidden' }}>
+                <div style={{ background: `linear-gradient(135deg, ${t.card} 0%, ${t.card2} 100%)`, border: `1px solid ${t.border}`, borderRadius: '14px', padding: '18px 28px', marginBottom: '24px', display: 'flex', position: 'relative', overflow: 'hidden' }}>
                   <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '2px', background: `linear-gradient(90deg, ${t.gold}, ${t.green}, ${t.blue}, transparent)` }} />
                   {[
-                    { label: 'Total Bills',    value: grandTotal.bills.toLocaleString('en-IN'),  color: t.gold,  size: '1.6rem' },
-                    { label: 'Total Net Wt',   value: `${fmt(grandTotal.net)}g`,                 color: t.text1, size: '1.2rem' },
-                    { label: 'Total Value',    value: fmtCr(grandTotal.value),                   color: t.green, size: '1.2rem' },
-                    { label: 'Active Branches',value: grandTotal.branches,                        color: t.blue,  size: '1.6rem' },
-                    { label: 'Avg Bill Age',   value: `${Math.round(grandTotal.avgAge)}d`,        color: ageColor(Math.round(grandTotal.avgAge), t), size: '1.6rem' },
+                    { label: 'Total Bills',     value: grandTotal.bills.toLocaleString('en-IN'), color: t.gold,  size: '1.6rem' },
+                    { label: 'Total Net Wt',    value: `${fmt(grandTotal.net)}g`,               color: t.text1, size: '1.2rem' },
+                    { label: 'Total Value',     value: fmtCr(grandTotal.value),                 color: t.green, size: '1.2rem' },
+                    { label: 'Active Branches', value: grandTotal.branches,                      color: t.blue,  size: '1.6rem' },
+                    { label: 'Avg Bill Age',    value: `${Math.round(grandTotal.avgAge)}d`,      color: ageColor(Math.round(grandTotal.avgAge), t), size: '1.6rem' },
                   ].map((item, i, arr) => (
                     <div key={item.label} style={{ flex: 1, textAlign: 'center', padding: '0 16px', borderRight: i < arr.length - 1 ? `1px solid ${t.border}` : 'none' }}>
                       <div style={{ fontSize: item.size, fontWeight: 200, color: item.color, lineHeight: 1.1, marginBottom: '6px' }}>{item.value}</div>
@@ -267,7 +456,6 @@ export default function ConsignmentData() {
                 </div>
               )}
 
-              {/* SORT BAR */}
               {!statesLoading && stateSummary.length > 0 && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
                   <span style={{ fontSize: '12px', color: t.text4 }}>Sort by:</span>
@@ -275,8 +463,7 @@ export default function ConsignmentData() {
                     <button key={opt.key} onClick={() => setSortBy(opt.key)} style={{
                       padding: '5px 14px', borderRadius: '20px', border: `1px solid ${sortBy === opt.key ? t.gold : t.border}`,
                       background: sortBy === opt.key ? `${t.gold}18` : 'transparent',
-                      color: sortBy === opt.key ? t.gold : t.text3,
-                      fontSize: '12px', cursor: 'pointer', transition: 'all .15s',
+                      color: sortBy === opt.key ? t.gold : t.text3, fontSize: '12px', cursor: 'pointer', transition: 'all .15s',
                     }}>{opt.label}</button>
                   ))}
                 </div>
@@ -292,50 +479,32 @@ export default function ConsignmentData() {
               ) : (
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '16px' }}>
                   {sortedStates.map(row => {
-                    const days    = daysOld(row.oldest_date)
-                    const avgAge  = Math.round(Number(row.avg_age_days || 0))
+                    const days   = daysOld(row.oldest_date)
+                    const avgAge = Math.round(Number(row.avg_age_days || 0))
                     return (
-                      <div key={row.state}
-                        onClick={() => handleStateClick(row.state)}
+                      <div key={row.state} onClick={() => handleStateClick(row.state)}
                         style={{ ...s.card, marginBottom: 0, cursor: 'pointer', transition: 'all .2s', position: 'relative', overflow: 'hidden' }}
                         onMouseEnter={e => { e.currentTarget.style.borderColor = `${t.gold}50`; e.currentTarget.style.transform = 'translateY(-2px)' }}
                         onMouseLeave={e => { e.currentTarget.style.borderColor = t.border; e.currentTarget.style.transform = 'translateY(0)' }}>
                         <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '2px', background: `linear-gradient(90deg, ${t.blue}, transparent)` }} />
-
-                        {/* Title row */}
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '16px' }}>
                           <div style={{ fontSize: '15px', fontWeight: 600, color: t.text1 }}>{row.state}</div>
-                          {days != null && (
-                            <span style={{ fontSize: '11px', color: ageColor(days, t), background: `${ageColor(days, t)}18`, border: `1px solid ${ageColor(days, t)}40`, borderRadius: '4px', padding: '2px 8px', fontWeight: 600 }}>⏱ {days}d old</span>
-                          )}
+                          {days != null && <span style={{ fontSize: '11px', color: ageColor(days, t), background: `${ageColor(days, t)}18`, border: `1px solid ${ageColor(days, t)}40`, borderRadius: '4px', padding: '2px 8px', fontWeight: 600 }}>⏱ {days}d old</span>}
                         </div>
-
-                        {/* KPI grid */}
                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '12px' }}>
-                          <div>
-                            <div style={{ fontSize: '11px', color: t.text4, textTransform: 'uppercase', letterSpacing: '.08em', marginBottom: '4px' }}>Bills</div>
-                            <div style={{ fontSize: '1.6rem', fontWeight: 300, color: t.blue }}>{Number(row.bill_count).toLocaleString('en-IN')}</div>
-                          </div>
-                          <div>
-                            <div style={{ fontSize: '11px', color: t.text4, textTransform: 'uppercase', letterSpacing: '.08em', marginBottom: '4px' }}>Net Weight</div>
-                            <div style={{ fontSize: '1rem', color: t.text1 }}>{fmt(row.total_net)}g</div>
-                          </div>
+                          <div><div style={{ fontSize: '11px', color: t.text4, textTransform: 'uppercase', letterSpacing: '.08em', marginBottom: '4px' }}>Bills</div>
+                            <div style={{ fontSize: '1.6rem', fontWeight: 300, color: t.blue }}>{Number(row.bill_count).toLocaleString('en-IN')}</div></div>
+                          <div><div style={{ fontSize: '11px', color: t.text4, textTransform: 'uppercase', letterSpacing: '.08em', marginBottom: '4px' }}>Net Weight</div>
+                            <div style={{ fontSize: '1rem', color: t.text1 }}>{fmt(row.total_net)}g</div></div>
                         </div>
-
                         <div style={{ marginBottom: '12px' }}>
                           <div style={{ fontSize: '11px', color: t.text4, textTransform: 'uppercase', letterSpacing: '.08em', marginBottom: '4px' }}>Value</div>
                           <div style={{ fontSize: '1rem', color: t.green }}>{fmtCr(row.total_value)}</div>
                         </div>
-
-                        {/* Bottom meta row */}
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: '12px', borderTop: `1px solid ${t.border}` }}>
                           <div style={{ display: 'flex', gap: '16px' }}>
-                            <span style={{ fontSize: '12px', color: t.text3 }}>
-                              <span style={{ color: t.text2, fontWeight: 600 }}>{Number(row.branch_count)}</span> branches
-                            </span>
-                            <span style={{ fontSize: '12px', color: t.text3 }}>
-                              Avg <span style={{ color: ageColor(avgAge, t), fontWeight: 600 }}>{avgAge}d</span> old
-                            </span>
+                            <span style={{ fontSize: '12px', color: t.text3 }}><span style={{ color: t.text2, fontWeight: 600 }}>{Number(row.branch_count)}</span> branches</span>
+                            <span style={{ fontSize: '12px', color: t.text3 }}>Avg <span style={{ color: ageColor(avgAge, t), fontWeight: 600 }}>{avgAge}d</span> old</span>
                           </div>
                           <div style={{ fontSize: '12px', color: t.gold }}>View ›</div>
                         </div>
@@ -347,47 +516,35 @@ export default function ConsignmentData() {
             </>
           )}
 
-          {/* ── BRANCHES LEVEL ── */}
+          {/* BRANCHES */}
           {drillLevel === 'branches' && (
             <>
               <button style={{ ...s.btnBack, marginBottom: '16px' }} onClick={handleBack}>← Back</button>
-              {branchesLoading ? (
-                <div style={{ textAlign: 'center', color: t.text3, padding: '48px' }}>Loading...</div>
-              ) : branchSummary.length === 0 ? (
-                <div style={{ ...s.card, textAlign: 'center', padding: '48px' }}>
-                  <div style={{ fontSize: '14px', color: t.text3 }}>No branches with bills at branch</div>
-                </div>
+              {branchesLoading ? <div style={{ textAlign: 'center', color: t.text3, padding: '48px' }}>Loading...</div>
+              : branchSummary.length === 0 ? (
+                <div style={{ ...s.card, textAlign: 'center', padding: '48px' }}><div style={{ fontSize: '14px', color: t.text3 }}>No branches with bills at branch</div></div>
               ) : (
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: '14px' }}>
                   {branchSummary.map(row => {
                     const days = daysOld(row.oldest_date)
                     return (
-                      <div key={row.branch_name}
-                        onClick={() => handleBranchClick(row.branch_name)}
+                      <div key={row.branch_name} onClick={() => handleBranchClick(row.branch_name)}
                         style={{ ...s.card, marginBottom: 0, cursor: 'pointer', transition: 'all .2s', position: 'relative', overflow: 'hidden' }}
                         onMouseEnter={e => { e.currentTarget.style.borderColor = `${t.gold}50`; e.currentTarget.style.transform = 'translateY(-2px)' }}
                         onMouseLeave={e => { e.currentTarget.style.borderColor = t.border; e.currentTarget.style.transform = 'translateY(0)' }}>
                         <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '2px', background: `linear-gradient(90deg, ${t.gold}, transparent)` }} />
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '14px' }}>
                           <div style={{ fontSize: '14px', fontWeight: 600, color: t.text1 }}>{row.branch_name}</div>
-                          {days != null && (
-                            <span style={{ fontSize: '11px', color: ageColor(days, t), background: `${ageColor(days, t)}18`, border: `1px solid ${ageColor(days, t)}40`, borderRadius: '4px', padding: '2px 7px', fontWeight: 600 }}>{days}d old</span>
-                          )}
+                          {days != null && <span style={{ fontSize: '11px', color: ageColor(days, t), background: `${ageColor(days, t)}18`, border: `1px solid ${ageColor(days, t)}40`, borderRadius: '4px', padding: '2px 7px', fontWeight: 600 }}>{days}d old</span>}
                         </div>
                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '10px' }}>
-                          <div>
-                            <div style={{ fontSize: '11px', color: t.text4, textTransform: 'uppercase', letterSpacing: '.08em', marginBottom: '3px' }}>Bills</div>
-                            <div style={{ fontSize: '1.4rem', fontWeight: 300, color: t.gold }}>{Number(row.bill_count).toLocaleString('en-IN')}</div>
-                          </div>
-                          <div>
-                            <div style={{ fontSize: '11px', color: t.text4, textTransform: 'uppercase', letterSpacing: '.08em', marginBottom: '3px' }}>Net Wt</div>
-                            <div style={{ fontSize: '1rem', color: t.text1 }}>{fmt(row.total_net)}g</div>
-                          </div>
+                          <div><div style={{ fontSize: '11px', color: t.text4, textTransform: 'uppercase', letterSpacing: '.08em', marginBottom: '3px' }}>Bills</div>
+                            <div style={{ fontSize: '1.4rem', fontWeight: 300, color: t.gold }}>{Number(row.bill_count).toLocaleString('en-IN')}</div></div>
+                          <div><div style={{ fontSize: '11px', color: t.text4, textTransform: 'uppercase', letterSpacing: '.08em', marginBottom: '3px' }}>Net Wt</div>
+                            <div style={{ fontSize: '1rem', color: t.text1 }}>{fmt(row.total_net)}g</div></div>
                         </div>
-                        <div style={{ marginBottom: '12px' }}>
-                          <div style={{ fontSize: '11px', color: t.text4, textTransform: 'uppercase', letterSpacing: '.08em', marginBottom: '3px' }}>Value</div>
-                          <div style={{ fontSize: '13px', color: t.green }}>{fmtCr(row.total_value)}</div>
-                        </div>
+                        <div style={{ marginBottom: '12px' }}><div style={{ fontSize: '11px', color: t.text4, textTransform: 'uppercase', letterSpacing: '.08em', marginBottom: '3px' }}>Value</div>
+                          <div style={{ fontSize: '13px', color: t.green }}>{fmtCr(row.total_value)}</div></div>
                         <div style={{ fontSize: '12px', color: t.gold, textAlign: 'right' }}>View bills ›</div>
                       </div>
                     )
@@ -397,7 +554,7 @@ export default function ConsignmentData() {
             </>
           )}
 
-          {/* ── BILLS LEVEL ── */}
+          {/* BILLS TABLE */}
           {drillLevel === 'bills' && (
             <>
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px', flexWrap: 'wrap' }}>
@@ -418,7 +575,6 @@ export default function ConsignmentData() {
                     style={{ background: 'none', border: `1px solid ${t.border}`, borderRadius: '5px', padding: '3px 10px', color: billsPage >= totalBillsPages - 1 ? t.text4 : t.text2, cursor: billsPage >= totalBillsPages - 1 ? 'not-allowed' : 'pointer', fontSize: '12px' }}>→</button>
                 </div>
               </div>
-
               {billsLoading ? <div style={{ textAlign: 'center', color: t.text3, padding: '48px' }}>Loading...</div> : (
                 <div style={s.tblWrap}>
                   <table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -468,7 +624,6 @@ export default function ConsignmentData() {
             <div style={{ ...s.card, textAlign: 'center', padding: '48px' }}>
               <div style={{ fontSize: '2rem', opacity: .2, marginBottom: '12px' }}>🚚</div>
               <div style={{ fontSize: '14px', color: t.text3 }}>No consignments yet</div>
-              <div style={{ fontSize: '12px', color: t.text4, marginTop: '6px' }}>Select bills from the Bills tab and create a consignment</div>
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
@@ -484,9 +639,9 @@ export default function ConsignmentData() {
                         </div>
                         <div style={{ display: 'flex', gap: '28px', flexWrap: 'wrap' }}>
                           {[
-                            { label: 'Created',  value: fmtDate(con.created_at) },
-                            { label: 'Bills',    value: con.total_bills, bold: true },
-                            { label: 'Net Wt',   value: `${fmt(con.total_net_weight)}g`, color: t.gold },
+                            { label: 'Created', value: fmtDate(con.created_at) },
+                            { label: 'Bills',   value: con.total_bills, bold: true },
+                            { label: 'Net Wt',  value: `${fmt(con.total_net_weight)}g`, color: t.gold },
                             con.expected_arrival && { label: 'Expected', value: fmtDate(con.expected_arrival) },
                             con.vehicle_details  && { label: 'Vehicle',  value: con.vehicle_details },
                           ].filter(Boolean).map(item => (
@@ -520,11 +675,15 @@ export default function ConsignmentData() {
         <div style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
           <div style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: '16px', padding: '36px', maxWidth: '520px', width: '100%', boxShadow: '0 24px 80px rgba(0,0,0,.6)' }}>
             <div style={{ fontSize: '1.1rem', color: t.text1, marginBottom: '6px' }}>Create Consignment</div>
-            <div style={{ fontSize: '12px', color: t.text3, marginBottom: '28px' }}>{selectedIds.size} bills · {fmt(selectedNetWt)}g · {selectedBranches.length} {selectedBranches.length === 1 ? 'branch' : 'branches'}</div>
+            <div style={{ fontSize: '12px', color: t.text3, marginBottom: '28px' }}>
+              {ocrMode
+                ? `${ocrSelectedIds.size} bills from OCR · ${fmt(ocrSelectedNetWt)}g`
+                : `${selectedIds.size} bills · ${fmt(selectedNetWt)}g · ${selectedBranches.length} ${selectedBranches.length === 1 ? 'branch' : 'branches'}`}
+            </div>
             {[
-              { label: 'Consignment Number',       key: 'consignment_no',   type: 'text' },
-              { label: 'Expected Arrival Date',    key: 'expected_arrival', type: 'date' },
-              { label: 'Vehicle / Courier Details',key: 'vehicle_details',  type: 'text', placeholder: 'e.g. KA-01-AB-1234 or BlueDart AWB' },
+              { label: 'Consignment Number',        key: 'consignment_no',   type: 'text' },
+              { label: 'Expected Arrival Date',     key: 'expected_arrival', type: 'date' },
+              { label: 'Vehicle / Courier Details', key: 'vehicle_details',  type: 'text', placeholder: 'e.g. KA-01-AB-1234 or BlueDart AWB' },
             ].map(f => (
               <div key={f.key} style={{ marginBottom: '18px' }}>
                 <label style={s.lbl}>{f.label}</label>
@@ -538,12 +697,16 @@ export default function ConsignmentData() {
             <div style={{ marginBottom: '24px', padding: '12px 16px', background: t.card2, borderRadius: '8px', border: `1px solid ${t.border}` }}>
               <div style={{ fontSize: '11px', color: t.text4, textTransform: 'uppercase', letterSpacing: '.08em', marginBottom: '8px' }}>Branches Included</div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                {selectedBranches.map(b => <span key={b} style={{ fontSize: '11px', color: t.text2, background: t.card, border: `1px solid ${t.border}`, borderRadius: '4px', padding: '2px 8px' }}>{b}</span>)}
+                {(ocrMode ? ocrSelectedBranches : selectedBranches).map(b => (
+                  <span key={b} style={{ fontSize: '11px', color: t.text2, background: t.card, border: `1px solid ${t.border}`, borderRadius: '4px', padding: '2px 8px' }}>{b}</span>
+                ))}
               </div>
             </div>
             <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
               <button style={s.btnOutline} onClick={() => setShowCreate(false)} disabled={creating}>Cancel</button>
-              <button style={s.btnGold} onClick={handleCreateConsignment} disabled={creating}>{creating ? 'Creating...' : 'Create Consignment'}</button>
+              <button style={s.btnGold} onClick={ocrMode ? handleCreateFromOcr : handleCreateConsignment} disabled={creating}>
+                {creating ? 'Creating...' : 'Create Consignment'}
+              </button>
             </div>
           </div>
         </div>
