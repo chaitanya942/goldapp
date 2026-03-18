@@ -134,14 +134,15 @@ export default function ConsignmentData() {
 
   const [showCreate, setShowCreate] = useState(false)
   const [creating, setCreating]     = useState(false)
-  const [form, setForm] = useState({ expected_arrival: '', vehicle_details: '', notes: '' })
+  const [form, setForm]             = useState({ expected_arrival: '', vehicle_details: '', notes: '' })
   const [transitCon, setTransitCon] = useState(null)
+  const [undoCon, setUndoCon]       = useState(null)
   const [marking, setMarking]       = useState(false)
 
-  const [ocrMode, setOcrMode]         = useState(false)
-  const [ocrLoading, setOcrLoading]   = useState(false)
-  const [ocrResult, setOcrResult]     = useState(null)
-  const [ocrFileName, setOcrFileName] = useState('')
+  const [ocrMode, setOcrMode]               = useState(false)
+  const [ocrLoading, setOcrLoading]         = useState(false)
+  const [ocrResult, setOcrResult]           = useState(null)
+  const [ocrFileName, setOcrFileName]       = useState('')
   const [ocrSelectedIds, setOcrSelectedIds] = useState(new Set())
 
   const selectedBills    = bills.filter(b => selectedIds.has(b.id))
@@ -221,21 +222,14 @@ export default function ConsignmentData() {
 
   const handleOcrUpload = async (file) => {
     if (!file) return
-    setOcrFileName(file.name)
-    setOcrLoading(true)
-    setOcrResult(null)
-    setOcrMode(true)
-    const fd = new FormData()
-    fd.append('image', file)
+    setOcrFileName(file.name); setOcrLoading(true); setOcrResult(null); setOcrMode(true)
+    const fd = new FormData(); fd.append('image', file)
     try {
       const res  = await fetch('/api/ocr-consignment', { method: 'POST', body: fd })
       const data = await res.json()
       if (!data.success) { alert('OCR failed: ' + data.error); setOcrLoading(false); return }
-      setOcrResult(data)
-      setOcrSelectedIds(new Set(data.rows.map(r => r.id)))
-    } catch (err) {
-      alert('OCR error: ' + err.message)
-    }
+      setOcrResult(data); setOcrSelectedIds(new Set(data.rows.map(r => r.id)))
+    } catch (err) { alert('OCR error: ' + err.message) }
     setOcrLoading(false)
     if (fileInputRef.current) fileInputRef.current.value = ''
   }
@@ -245,29 +239,18 @@ export default function ConsignmentData() {
   const handleCreateFromOcr = async () => {
     if (ocrSelectedIds.size === 0) return
     setCreating(true)
-    const billIds     = [...ocrSelectedIds]
-    const totalNetWt  = ocrSelectedNetWt
-    const branchNames = ocrSelectedBranches
-    const consNo      = genConsignmentNo()
-
+    const billIds = [...ocrSelectedIds]
+    const consNo  = genConsignmentNo()
     const { error } = await supabase.from('consignments').insert({
-      consignment_no:   consNo,
-      created_by:       userProfile?.id,
-      expected_arrival: null,
-      vehicle_details:  null,
-      notes:            null,
-      status:           'in_transit',
-      total_bills:      billIds.length,
-      total_net_weight: totalNetWt,
-      branch_names:     branchNames,
-      bill_ids:         billIds,
+      consignment_no: consNo, created_by: userProfile?.id,
+      expected_arrival: null, vehicle_details: null, notes: null,
+      status: 'in_transit', total_bills: billIds.length,
+      total_net_weight: ocrSelectedNetWt, branch_names: ocrSelectedBranches, bill_ids: billIds,
     })
     if (error) { alert('Error: ' + error.message); setCreating(false); return }
-
     const BATCH = 100
     for (let i = 0; i < billIds.length; i += BATCH)
       await supabase.from('purchases').update({ stock_status: 'in_consignment' }).in('id', billIds.slice(i, i + BATCH))
-
     setOcrMode(false); setOcrResult(null); setOcrSelectedIds(new Set()); setCreating(false)
     loadStateSummary(); loadConsignments()
     alert(`✓ Consignment created — ${billIds.length} bills marked In Transit`)
@@ -280,16 +263,11 @@ export default function ConsignmentData() {
     const totalNetWt  = selectedBills.reduce((s, b) => s + (parseFloat(b.net_weight) || 0), 0)
     const branchNames = [...new Set(selectedBills.map(b => b.branch_name).filter(Boolean))]
     const { error }   = await supabase.from('consignments').insert({
-      consignment_no:   genConsignmentNo(),
-      created_by:       userProfile?.id,
-      expected_arrival: form.expected_arrival || null,
-      vehicle_details:  form.vehicle_details || null,
-      notes:            form.notes || null,
-      status:           'created',
-      total_bills:      billIds.length,
-      total_net_weight: totalNetWt,
-      branch_names:     branchNames,
-      bill_ids:         billIds,
+      consignment_no: genConsignmentNo(), created_by: userProfile?.id,
+      expected_arrival: form.expected_arrival || null, vehicle_details: form.vehicle_details || null,
+      notes: form.notes || null, status: 'created',
+      total_bills: billIds.length, total_net_weight: totalNetWt,
+      branch_names: branchNames, bill_ids: billIds,
     })
     if (error) { alert('Error: ' + error.message); setCreating(false); return }
     const BATCH = 100
@@ -307,6 +285,17 @@ export default function ConsignmentData() {
     setTransitCon(null); setMarking(false); loadConsignments()
   }
 
+  const handleUndo = async (con) => {
+    setMarking(true)
+    const billIds = con.bill_ids || []
+    const BATCH = 100
+    for (let i = 0; i < billIds.length; i += BATCH)
+      await supabase.from('purchases').update({ stock_status: 'at_branch' }).in('id', billIds.slice(i, i + BATCH))
+    await supabase.from('consignments').delete().eq('id', con.id)
+    setUndoCon(null); setMarking(false)
+    loadStateSummary(); loadConsignments()
+  }
+
   const s = {
     wrap:       { padding: '32px', maxWidth: '100%' },
     card:       { background: t.card, border: `1px solid ${t.border}`, borderRadius: '12px', padding: '20px 24px', marginBottom: '20px' },
@@ -319,6 +308,7 @@ export default function ConsignmentData() {
     btnOutline: { background: 'transparent', color: t.text3, border: `1px solid ${t.border}`, borderRadius: '8px', padding: '9px 20px', fontSize: '12px', cursor: 'pointer' },
     btnBlue:    { background: t.blue, color: '#fff', border: 'none', borderRadius: '8px', padding: '7px 16px', fontSize: '12px', fontWeight: 600, cursor: 'pointer' },
     btnBack:    { background: 'transparent', color: t.text3, border: `1px solid ${t.border}`, borderRadius: '8px', padding: '7px 14px', fontSize: '12px', cursor: 'pointer' },
+    btnRed:     { background: 'transparent', color: t.red, border: `1px solid ${t.red}50`, borderRadius: '8px', padding: '7px 14px', fontSize: '12px', cursor: 'pointer' },
     checkbox:   { width: '15px', height: '15px', accentColor: t.gold, cursor: 'pointer' },
     lbl:        { fontSize: '11px', color: t.text3, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 600, marginBottom: '6px', display: 'block' },
   }
@@ -713,15 +703,17 @@ export default function ConsignmentData() {
                         )}
                         {con.notes && <div style={{ marginTop: '10px', fontSize: '12px', color: t.text3, fontStyle: 'italic' }}>Note: {con.notes}</div>}
                       </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                         {canManage && con.status === 'created' && (
-                          <button style={s.btnBlue} onClick={e => { e.stopPropagation(); setTransitCon(con) }}>🚚 Mark In Transit</button>
+                          <button style={s.btnBlue} onClick={e => { e.stopPropagation(); setTransitCon(con) }}>🚚 In Transit</button>
+                        )}
+                        {canManage && (con.status === 'created' || con.status === 'in_transit') && (
+                          <button style={s.btnRed} onClick={e => { e.stopPropagation(); setUndoCon(con) }}>↩ Undo</button>
                         )}
                         <span style={{ fontSize: '20px', color: t.text3, transition: 'transform .2s', transform: isOpen ? 'rotate(180deg)' : 'rotate(0deg)', display: 'inline-block' }}>⌄</span>
                       </div>
                     </div>
 
-                    {/* Expanded bills */}
                     {isOpen && (
                       <div style={{ marginTop: '16px', borderTop: `1px solid ${t.border}`, paddingTop: '16px' }}
                         onClick={e => e.stopPropagation()}>
@@ -736,7 +728,7 @@ export default function ConsignmentData() {
         </>
       )}
 
-      {/* CREATE MODAL (manual) */}
+      {/* CREATE MODAL */}
       {showCreate && (
         <div style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
           <div style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: '16px', padding: '36px', maxWidth: '480px', width: '100%', boxShadow: '0 24px 80px rgba(0,0,0,.6)' }}>
@@ -779,6 +771,25 @@ export default function ConsignmentData() {
             <div style={{ display: 'flex', gap: '10px', justifyContent: 'center' }}>
               <button style={s.btnOutline} onClick={() => setTransitCon(null)} disabled={marking}>Cancel</button>
               <button style={s.btnBlue} onClick={() => handleMarkInTransit(transitCon)} disabled={marking}>{marking ? 'Marking...' : 'Confirm'}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* UNDO MODAL */}
+      {undoCon && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
+          <div style={{ background: t.card, border: `1px solid ${t.red}40`, borderRadius: '16px', padding: '36px', maxWidth: '420px', width: '100%', textAlign: 'center', boxShadow: `0 24px 80px rgba(0,0,0,.6)` }}>
+            <div style={{ fontSize: '2rem', marginBottom: '16px' }}>↩</div>
+            <div style={{ fontSize: '1rem', color: t.text1, marginBottom: '8px' }}>Undo Consignment?</div>
+            <div style={{ fontSize: '12px', color: t.text3, marginBottom: '6px', lineHeight: 1.7 }}>
+              <span style={{ color: t.text1, fontWeight: 600 }}>{undoCon.total_bills} bills</span> will be moved back to <span style={{ color: t.gold }}>at_branch</span><br />
+              The consignment record will be permanently deleted.
+            </div>
+            <div style={{ fontSize: '12px', color: t.red, marginBottom: '28px' }}>This cannot be undone.</div>
+            <div style={{ display: 'flex', gap: '10px', justifyContent: 'center' }}>
+              <button style={s.btnOutline} onClick={() => setUndoCon(null)} disabled={marking}>Cancel</button>
+              <button style={s.btnRed} onClick={() => handleUndo(undoCon)} disabled={marking}>{marking ? 'Undoing...' : 'Yes, Undo'}</button>
             </div>
           </div>
         </div>
