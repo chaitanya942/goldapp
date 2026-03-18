@@ -14,12 +14,10 @@ export async function POST(request) {
     const file     = formData.get('image')
     if (!file) return Response.json({ success: false, error: 'No image provided' }, { status: 400 })
 
-    // Convert to base64
     const bytes  = await file.arrayBuffer()
     const base64 = Buffer.from(bytes).toString('base64')
     const mime   = file.type || 'image/jpeg'
 
-    // Call Claude Vision
     const response = await anthropic.messages.create({
       model:      'claude-opus-4-5',
       max_tokens: 4096,
@@ -56,12 +54,10 @@ Return ONLY the JSON array starting with [ and ending with ].`
 
     const text = response.content[0].text.trim()
 
-    // Parse JSON
     let rows
     try {
       rows = JSON.parse(text)
     } catch {
-      // Try to extract JSON array if wrapped in anything
       const match = text.match(/\[[\s\S]*\]/)
       if (!match) return Response.json({ success: false, error: 'Could not parse OCR response', raw: text }, { status: 500 })
       rows = JSON.parse(match[0])
@@ -70,13 +66,11 @@ Return ONLY the JSON array starting with [ and ending with ].`
     if (!Array.isArray(rows) || rows.length === 0)
       return Response.json({ success: false, error: 'No rows extracted from image' }, { status: 500 })
 
-    // Extract application IDs
     const appIds = rows.map(r => String(r.application_no).trim()).filter(Boolean)
 
-    // Match against Supabase purchases
     const { data: found } = await supabaseAdmin
       .from('purchases')
-      .select('id, application_id, branch_name, net_weight, purchase_date, stock_status')
+      .select('id, application_id, branch_name, net_weight, total_amount, purchase_date, stock_status')
       .in('application_id', appIds)
 
     const foundMap  = new Map((found || []).map(r => [r.application_id, r]))
@@ -85,7 +79,7 @@ Return ONLY the JSON array starting with [ and ending with ].`
     const wrongStatus = []
 
     rows.forEach(row => {
-      const appId = String(row.application_no).trim()
+      const appId  = String(row.application_no).trim()
       const record = foundMap.get(appId)
       if (!record) {
         notFound.push(appId)
@@ -97,13 +91,13 @@ Return ONLY the JSON array starting with [ and ending with ].`
     })
 
     return Response.json({
-      success:     true,
-      total:       rows.length,
-      matched:     matched.length,
-      notFound:    notFound.length,
-      wrongStatus: wrongStatus.length,
-      rows:        matched,
-      notFoundIds: notFound,
+      success:        true,
+      total:          rows.length,
+      matched:        matched.length,
+      notFound:       notFound.length,
+      wrongStatus:    wrongStatus.length,
+      rows:           matched,
+      notFoundIds:    notFound,
       wrongStatusIds: wrongStatus,
     })
 

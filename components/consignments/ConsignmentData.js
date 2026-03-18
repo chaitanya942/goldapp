@@ -81,7 +81,7 @@ export default function ConsignmentData() {
   const [transitCon, setTransitCon] = useState(null)
   const [marking, setMarking]       = useState(false)
 
-  // ── OCR state
+  // OCR state
   const [ocrMode, setOcrMode]         = useState(false)
   const [ocrLoading, setOcrLoading]   = useState(false)
   const [ocrResult, setOcrResult]     = useState(null)
@@ -91,6 +91,11 @@ export default function ConsignmentData() {
   const selectedBills    = bills.filter(b => selectedIds.has(b.id))
   const selectedNetWt    = selectedBills.reduce((s, b) => s + (parseFloat(b.net_weight) || 0), 0)
   const selectedBranches = [...new Set(selectedBills.map(b => b.branch_name).filter(Boolean))]
+
+  const ocrSelectedRows     = ocrResult?.rows?.filter(r => ocrSelectedIds.has(r.id)) || []
+  const ocrSelectedNetWt    = ocrSelectedRows.reduce((s, r) => s + (parseFloat(r.net_weight) || 0), 0)
+  const ocrSelectedValue    = ocrSelectedRows.reduce((s, r) => s + (parseFloat(r.total_amount) || 0), 0)
+  const ocrSelectedBranches = [...new Set(ocrSelectedRows.map(r => r.branch_name).filter(Boolean))]
 
   const sortedStates = [...stateSummary].sort((a, b) => {
     if (sortBy === 'oldest_date') return new Date(a.oldest_date) - new Date(b.oldest_date)
@@ -158,17 +163,15 @@ export default function ConsignmentData() {
   const toggleBill     = (id) => setSelectedIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })
   const toggleAllBills = ()   => { if (bills.length > 0 && bills.every(b => selectedIds.has(b.id))) setSelectedIds(new Set()); else setSelectedIds(new Set(bills.map(b => b.id))) }
 
-  // ── OCR handlers
+  // OCR upload
   const handleOcrUpload = async (file) => {
     if (!file) return
     setOcrFileName(file.name)
     setOcrLoading(true)
     setOcrResult(null)
     setOcrMode(true)
-
     const fd = new FormData()
     fd.append('image', file)
-
     try {
       const res  = await fetch('/api/ocr-consignment', { method: 'POST', body: fd })
       const data = await res.json()
@@ -184,25 +187,22 @@ export default function ConsignmentData() {
 
   const toggleOcrRow = (id) => setOcrSelectedIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })
 
-  const ocrSelectedRows    = ocrResult?.rows?.filter(r => ocrSelectedIds.has(r.id)) || []
-const ocrSelectedNetWt   = ocrSelectedRows.reduce((s, r) => s + (parseFloat(r.net_weight) || 0), 0)
-const ocrSelectedValue   = ocrSelectedRows.reduce((s, r) => s + (parseFloat(r.total_amount) || 0), 0)
-const ocrSelectedBranches = [...new Set(ocrSelectedRows.map(r => r.branch_name).filter(Boolean))]
-
+  // Create consignment from OCR — directly in_transit, no modal
   const handleCreateFromOcr = async () => {
     if (ocrSelectedIds.size === 0) return
     setCreating(true)
     const billIds     = [...ocrSelectedIds]
     const totalNetWt  = ocrSelectedNetWt
     const branchNames = ocrSelectedBranches
+    const consNo      = genConsignmentNo()
 
     const { error } = await supabase.from('consignments').insert({
-      consignment_no:   form.consignment_no,
+      consignment_no:   consNo,
       created_by:       userProfile?.id,
-      expected_arrival: form.expected_arrival || null,
-      vehicle_details:  form.vehicle_details || null,
-      notes:            form.notes || null,
-      status:           'created',
+      expected_arrival: null,
+      vehicle_details:  null,
+      notes:            null,
+      status:           'in_transit',
       total_bills:      billIds.length,
       total_net_weight: totalNetWt,
       branch_names:     branchNames,
@@ -215,11 +215,11 @@ const ocrSelectedBranches = [...new Set(ocrSelectedRows.map(r => r.branch_name).
       await supabase.from('purchases').update({ stock_status: 'in_consignment' }).in('id', billIds.slice(i, i + BATCH))
 
     setOcrMode(false); setOcrResult(null); setOcrSelectedIds(new Set()); setCreating(false)
-    setForm({ consignment_no: genConsignmentNo(), expected_arrival: '', vehicle_details: '', notes: '' })
     loadStateSummary(); loadConsignments()
-    alert(`✓ Consignment created with ${billIds.length} bills`)
+    alert(`✓ Consignment ${consNo} created and marked In Transit — ${billIds.length} bills`)
   }
 
+  // Create consignment from manual selection
   const handleCreateConsignment = async () => {
     if (selectedIds.size === 0) return
     setCreating(true)
@@ -279,12 +279,11 @@ const ocrSelectedBranches = [...new Set(ocrSelectedRows.map(r => r.branch_name).
     </div>
   )
 
-  // ── OCR PREVIEW VIEW
+  // OCR PREVIEW
   if (ocrMode) {
     return (
       <div style={s.wrap}>
         <input ref={fileInputRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={e => handleOcrUpload(e.target.files[0])} />
-
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '24px' }}>
           <div>
             <div style={{ fontSize: '1.6rem', fontWeight: 300, color: t.text1 }}>OCR — Movement Report</div>
@@ -293,8 +292,8 @@ const ocrSelectedBranches = [...new Set(ocrSelectedRows.map(r => r.branch_name).
           <div style={{ display: 'flex', gap: '10px' }}>
             <button style={s.btnOutline} onClick={() => { setOcrMode(false); setOcrResult(null) }}>← Back</button>
             {ocrResult && ocrSelectedIds.size > 0 && canManage && (
-              <button style={s.btnGold} onClick={() => setShowCreate(true)}>
-                + Create Consignment ({ocrSelectedIds.size} bills)
+              <button style={s.btnGold} onClick={handleCreateFromOcr} disabled={creating}>
+                {creating ? 'Creating...' : `+ Create Consignment (${ocrSelectedIds.size} Bills)`}
               </button>
             )}
           </div>
@@ -302,7 +301,7 @@ const ocrSelectedBranches = [...new Set(ocrSelectedRows.map(r => r.branch_name).
 
         {ocrLoading && (
           <div style={{ ...s.card, textAlign: 'center', padding: '64px' }}>
-            <div style={{ fontSize: '2rem', marginBottom: '16px', animation: 'spin 1s linear infinite', display: 'inline-block' }}>⟳</div>
+            <div style={{ fontSize: '2.5rem', marginBottom: '16px', display: 'inline-block', animation: 'spin 1s linear infinite' }}>⟳</div>
             <div style={{ fontSize: '14px', color: t.text2, marginBottom: '8px' }}>Reading movement report...</div>
             <div style={{ fontSize: '12px', color: t.text3 }}>Claude is extracting all rows from the image</div>
             <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
@@ -311,8 +310,8 @@ const ocrSelectedBranches = [...new Set(ocrSelectedRows.map(r => r.branch_name).
 
         {ocrResult && !ocrLoading && (
           <>
-            {/* Summary */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '14px', marginBottom: '24px' }}>
+            {/* Summary cards */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '14px', marginBottom: '20px' }}>
               {[
                 { label: 'Total Rows Extracted', value: ocrResult.total,       color: t.gold  },
                 { label: 'Matched in Supabase',  value: ocrResult.matched,     color: t.green },
@@ -326,17 +325,15 @@ const ocrSelectedBranches = [...new Set(ocrSelectedRows.map(r => r.branch_name).
               ))}
             </div>
 
-            {/* Not found warning */}
+            {/* Warnings */}
             {ocrResult.notFoundIds?.length > 0 && (
-              <div style={{ background: `${t.red}10`, border: `1px solid ${t.red}40`, borderRadius: '10px', padding: '14px 20px', marginBottom: '16px' }}>
+              <div style={{ background: `${t.red}10`, border: `1px solid ${t.red}40`, borderRadius: '10px', padding: '14px 20px', marginBottom: '14px' }}>
                 <div style={{ fontSize: '13px', color: t.red, fontWeight: 600, marginBottom: '6px' }}>⚠ {ocrResult.notFoundIds.length} Application IDs not found in Supabase</div>
                 <div style={{ fontSize: '12px', color: t.text3, lineHeight: 1.8 }}>{ocrResult.notFoundIds.join(' · ')}</div>
               </div>
             )}
-
-            {/* Wrong status warning */}
             {ocrResult.wrongStatusIds?.length > 0 && (
-              <div style={{ background: `${t.orange}10`, border: `1px solid ${t.orange}40`, borderRadius: '10px', padding: '14px 20px', marginBottom: '16px' }}>
+              <div style={{ background: `${t.orange}10`, border: `1px solid ${t.orange}40`, borderRadius: '10px', padding: '14px 20px', marginBottom: '14px' }}>
                 <div style={{ fontSize: '13px', color: t.orange, fontWeight: 600, marginBottom: '6px' }}>⚠ {ocrResult.wrongStatusIds.length} bills not at at_branch status</div>
                 <div style={{ fontSize: '12px', color: t.text3, lineHeight: 1.8 }}>{ocrResult.wrongStatusIds.map(r => `${r.appId} (${r.status})`).join(' · ')}</div>
               </div>
@@ -344,15 +341,15 @@ const ocrSelectedBranches = [...new Set(ocrSelectedRows.map(r => r.branch_name).
 
             {/* Selection bar */}
             {ocrSelectedIds.size > 0 && (
-              <div style={{ background: `${t.gold}12`, border: `1px solid ${t.gold}30`, borderRadius: '8px', padding: '10px 16px', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '20px' }}>
+              <div style={{ background: `${t.gold}12`, border: `1px solid ${t.gold}30`, borderRadius: '8px', padding: '10px 16px', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '20px', flexWrap: 'wrap' }}>
                 <span style={{ fontSize: '13px', color: t.gold, fontWeight: 600 }}>{ocrSelectedIds.size} bills selected</span>
-                <span style={{ fontSize: '13px', color: t.text2 }}>Net Wt: <span style={{ color: t.gold }}>{fmt(ocrSelectedNetWt)}g</span></span>
-<span style={{ fontSize: '13px', color: t.text2 }}>Value: <span style={{ color: t.green }}>{fmtCr(ocrSelectedValue)}</span></span>
-<span style={{ fontSize: '13px', color: t.text2 }}>Branches: <span style={{ color: t.text1 }}>{ocrSelectedBranches.join(', ')}</span></span>
+                <span style={{ fontSize: '13px', color: t.text2 }}>Net Wt: <span style={{ color: t.gold, fontWeight: 600 }}>{fmt(ocrSelectedNetWt)}g</span></span>
+                <span style={{ fontSize: '13px', color: t.text2 }}>Value: <span style={{ color: t.green, fontWeight: 600 }}>{fmtCr(ocrSelectedValue)}</span></span>
+                <span style={{ fontSize: '13px', color: t.text2 }}>Branches: <span style={{ color: t.text1 }}>{ocrSelectedBranches.join(', ')}</span></span>
               </div>
             )}
 
-            {/* Matched rows table */}
+            {/* Table */}
             {ocrResult.rows?.length > 0 && (
               <div style={s.tblWrap}>
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -366,12 +363,12 @@ const ocrSelectedBranches = [...new Set(ocrSelectedRows.map(r => r.branch_name).
                             else setOcrSelectedIds(new Set(ocrResult.rows.map(r => r.id)))
                           }} />
                       </th>
-                      {['App ID', 'Date', 'Customer', 'Branch', 'Net Wt', 'Status'].map(h => <th key={h} style={s.th}>{h}</th>)}
+                      {['App ID', 'Date', 'Customer', 'Branch', 'Net Wt', 'Gross Value', 'Status'].map(h => <th key={h} style={s.th}>{h}</th>)}
                     </tr>
                   </thead>
                   <tbody>
                     {ocrResult.rows.map(row => (
-                      <tr key={row.id} style={{ background: ocrSelectedIds.has(row.id) ? `${t.gold}10` : 'transparent' }}>
+                      <tr key={row.id} style={{ background: ocrSelectedIds.has(row.id) ? `${t.gold}10` : 'transparent', transition: 'background .1s' }}>
                         <td style={{ ...s.td, textAlign: 'center', padding: '10px 8px' }}>
                           <input type="checkbox" style={s.checkbox} checked={ocrSelectedIds.has(row.id)} onChange={() => toggleOcrRow(row.id)} />
                         </td>
@@ -380,6 +377,7 @@ const ocrSelectedBranches = [...new Set(ocrSelectedRows.map(r => r.branch_name).
                         <td style={s.td}>{row.ocr_row?.customer_name || '—'}</td>
                         <td style={{ ...s.td, color: t.text2 }}>{row.branch_name}</td>
                         <td style={{ ...s.td, color: t.gold }}>{fmt(row.net_weight)}g</td>
+                        <td style={s.td}>₹{fmt(row.total_amount)}</td>
                         <td style={s.td}>
                           <span style={{ fontSize: '11px', color: t.green, background: `${t.green}18`, border: `1px solid ${t.green}40`, borderRadius: '4px', padding: '2px 7px' }}>{row.stock_status}</span>
                         </td>
@@ -432,7 +430,7 @@ const ocrSelectedBranches = [...new Set(ocrSelectedRows.map(r => r.branch_name).
         ))}
       </div>
 
-      {/* ── BILLS VIEW ── */}
+      {/* BILLS VIEW */}
       {view === 'bills' && (
         <>
           <Breadcrumb />
@@ -612,7 +610,7 @@ const ocrSelectedBranches = [...new Set(ocrSelectedRows.map(r => r.branch_name).
         </>
       )}
 
-      {/* ── CONSIGNMENTS VIEW ── */}
+      {/* CONSIGNMENTS VIEW */}
       {view === 'consignments' && (
         <>
           <div style={{ display: 'flex', gap: '10px', marginBottom: '20px' }}>
@@ -672,16 +670,12 @@ const ocrSelectedBranches = [...new Set(ocrSelectedRows.map(r => r.branch_name).
         </>
       )}
 
-      {/* ── CREATE MODAL ── */}
+      {/* CREATE MODAL (manual only) */}
       {showCreate && (
         <div style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
           <div style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: '16px', padding: '36px', maxWidth: '520px', width: '100%', boxShadow: '0 24px 80px rgba(0,0,0,.6)' }}>
             <div style={{ fontSize: '1.1rem', color: t.text1, marginBottom: '6px' }}>Create Consignment</div>
-            <div style={{ fontSize: '12px', color: t.text3, marginBottom: '28px' }}>
-              {ocrMode
-                ? `${ocrSelectedIds.size} bills from OCR · ${fmt(ocrSelectedNetWt)}g`
-                : `${selectedIds.size} bills · ${fmt(selectedNetWt)}g · ${selectedBranches.length} ${selectedBranches.length === 1 ? 'branch' : 'branches'}`}
-            </div>
+            <div style={{ fontSize: '12px', color: t.text3, marginBottom: '28px' }}>{selectedIds.size} bills · {fmt(selectedNetWt)}g · {selectedBranches.length} {selectedBranches.length === 1 ? 'branch' : 'branches'}</div>
             {[
               { label: 'Consignment Number',        key: 'consignment_no',   type: 'text' },
               { label: 'Expected Arrival Date',     key: 'expected_arrival', type: 'date' },
@@ -699,22 +693,18 @@ const ocrSelectedBranches = [...new Set(ocrSelectedRows.map(r => r.branch_name).
             <div style={{ marginBottom: '24px', padding: '12px 16px', background: t.card2, borderRadius: '8px', border: `1px solid ${t.border}` }}>
               <div style={{ fontSize: '11px', color: t.text4, textTransform: 'uppercase', letterSpacing: '.08em', marginBottom: '8px' }}>Branches Included</div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                {(ocrMode ? ocrSelectedBranches : selectedBranches).map(b => (
-                  <span key={b} style={{ fontSize: '11px', color: t.text2, background: t.card, border: `1px solid ${t.border}`, borderRadius: '4px', padding: '2px 8px' }}>{b}</span>
-                ))}
+                {selectedBranches.map(b => <span key={b} style={{ fontSize: '11px', color: t.text2, background: t.card, border: `1px solid ${t.border}`, borderRadius: '4px', padding: '2px 8px' }}>{b}</span>)}
               </div>
             </div>
             <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
               <button style={s.btnOutline} onClick={() => setShowCreate(false)} disabled={creating}>Cancel</button>
-              <button style={s.btnGold} onClick={ocrMode ? handleCreateFromOcr : handleCreateConsignment} disabled={creating}>
-                {creating ? 'Creating...' : 'Create Consignment'}
-              </button>
+              <button style={s.btnGold} onClick={handleCreateConsignment} disabled={creating}>{creating ? 'Creating...' : 'Create Consignment'}</button>
             </div>
           </div>
         </div>
       )}
 
-      {/* ── TRANSIT MODAL ── */}
+      {/* TRANSIT MODAL */}
       {transitCon && (
         <div style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
           <div style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: '16px', padding: '36px', maxWidth: '420px', width: '100%', textAlign: 'center' }}>
