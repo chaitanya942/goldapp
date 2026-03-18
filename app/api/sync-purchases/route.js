@@ -65,10 +65,10 @@ export async function POST(request) {
       return Response.json({ success: true, message: 'No records in CRM', synced: 0, newCount: 0 })
     }
 
-    // ── Branch lookup ─────────────────────────────────────
+    // ── Branch lookup — trim all names to avoid whitespace mismatch ──
     const [branches] = await conn.execute(`SELECT brnch_id, brnch_name FROM branch_tbl`)
     const branchMap = {}
-    branches.forEach(b => { branchMap[b.brnch_id] = b.brnch_name })
+    branches.forEach(b => { branchMap[b.brnch_id] = b.brnch_name?.trim() })
 
     // ── Get existing application_ids from Supabase ────────
     const { data: existing } = await supabaseAdmin
@@ -78,7 +78,7 @@ export async function POST(request) {
 
     const existingIds = new Set((existing || []).map(r => r.application_id))
 
-    // ── Map CRM rows → Supabase records ───────────────────
+    // ── Map CRM rows → Supabase records (trim all string fields) ──
     const allRecords = rows.map(r => {
       const grossWeight = sumCSV(r.gross_weight_str)
       const stoneWeight = sumCSV(r.stone_weight_str)
@@ -89,15 +89,16 @@ export async function POST(request) {
       const finalAmount = parseFloat(r.final_amount_crm) || 0
       const svcPct      = parseFloat(r.service_charge_pct) || 0
       const svcAmount   = finalAmount * (svcPct / 100)
-      const branchName  = branchMap[r.branch_id] || String(r.branch_id)
+      const branchName  = (branchMap[r.branch_id] || String(r.branch_id))?.trim()
+      const txnType     = r.transaction_type?.trim()?.toLowerCase()
 
       return {
-        application_id:             String(r.application_id),
+        application_id:             String(r.application_id)?.trim(),
         purchase_date:              r.purchase_date ? new Date(r.purchase_date).toISOString().split('T')[0] : null,
-        customer_name:              r.customer_name || null,
-        phone_number:               r.phone_number  || null,
+        customer_name:              r.customer_name?.trim() || null,
+        phone_number:               r.phone_number?.trim()  || null,
         branch_name:                branchName,
-        transaction_type:           r.transaction_type === 'physical' ? 'PHYSICAL' : 'TAKEOVER',
+        transaction_type:           txnType === 'physical' ? 'PHYSICAL' : 'TAKEOVER',
         gross_weight:               grossWeight,
         stone_weight:               stoneWeight,
         wastage:                    wastage,
@@ -120,7 +121,7 @@ export async function POST(request) {
       }
     })
 
-    // ── Filter to only NEW records ─────────────────────────
+    // ── Filter to only NEW records not already in Supabase ─
     const newRecords = allRecords.filter(r => !existingIds.has(r.application_id))
 
     if (!newRecords.length) {
