@@ -16,15 +16,13 @@ import ConsignmentData from '../../components/consignments/ConsignmentData'
 import ConsignmentReport from '../../components/consignments/ConsignmentReport'
 import ConsignmentSummary from '../../components/consignments/ConsignmentSummary'
 import CalTable from '../../components/sales/CalTable'
+import InboundBotTesting from '../../components/telesales/InboundBotTesting'
 
 const THEMES = {
   dark:  { bg: '#0e0e0e', card: '#111111', text1: '#f0e6c8', text2: '#c8b89a', text3: '#7a6a4a', text4: '#4a3a2a', gold: '#c9a84c', border: '#2a2a2a', red: '#e05555' },
   light: { bg: '#f5f0e8', card: '#e8e2d6', text1: '#2a1f0a', text2: '#5a4a2a', text3: '#8a7a5a', text4: '#b0a080', gold: '#a07830', border: '#d5cfc0', red: '#cc3333' },
 }
 
-// ─────────────────────────────────────────────
-// COMING SOON
-// ─────────────────────────────────────────────
 function ComingSoon({ title }) {
   const { theme } = useApp()
   const t = THEMES[theme]
@@ -37,38 +35,22 @@ function ComingSoon({ title }) {
   )
 }
 
-// ─────────────────────────────────────────────
-// ACCESS DENIED
-// ─────────────────────────────────────────────
 function AccessDenied() {
   const { theme, role, setActiveNav } = useApp()
   const t = THEMES[theme]
   return (
     <div style={{ padding: '80px 48px', textAlign: 'center' }}>
       <div style={{ fontSize: '2.5rem', marginBottom: '16px', opacity: .2 }}>⊘</div>
-      <div style={{ fontSize: '1rem', color: t.text1, marginBottom: '8px', fontWeight: 500 }}>
-        Access Restricted
-      </div>
+      <div style={{ fontSize: '1rem', color: t.text1, marginBottom: '8px', fontWeight: 500 }}>Access Restricted</div>
       <div style={{ fontSize: '.75rem', color: t.text3, marginBottom: '24px', lineHeight: 1.8 }}>
-        Your role{' '}
-        <span style={{ color: t.gold, fontWeight: 500 }}>
-          {ROLE_LABELS[role]?.label || role}
-        </span>{' '}
-        does not have access to this section.
+        Your role <span style={{ color: t.gold, fontWeight: 500 }}>{ROLE_LABELS[role]?.label || role}</span> does not have access to this section.
         <br />Contact your administrator to request access.
       </div>
-      <button
-        onClick={() => setActiveNav('dashboard')}
-        style={{ background: 'transparent', border: `1px solid ${t.border}`, borderRadius: '8px', padding: '8px 24px', color: t.text2, fontSize: '.75rem', cursor: 'pointer' }}>
-        ← Back to Dashboard
-      </button>
+      <button onClick={() => setActiveNav('dashboard')} style={{ background: 'transparent', border: `1px solid ${t.border}`, borderRadius: '8px', padding: '8px 24px', color: t.text2, fontSize: '.75rem', cursor: 'pointer' }}>← Back to Dashboard</button>
     </div>
   )
 }
 
-// ─────────────────────────────────────────────
-// ROLE LABELS (for display)
-// ─────────────────────────────────────────────
 const ROLE_LABELS = {
   super_admin:     { label: 'Super Admin',      color: '#c9a84c' },
   founders_office: { label: "Founder's Office", color: '#8c5ac8' },
@@ -76,13 +58,11 @@ const ROLE_LABELS = {
   manager:         { label: 'Manager',          color: '#3aaa6a' },
   branch_staff:    { label: 'Branch Staff',     color: '#c9981f' },
   viewer:          { label: 'View Only',        color: '#7a6a4a' },
+  telesales:       { label: 'Telesales',        color: '#8c5ac8' },
 }
 
 export { ROLE_LABELS }
 
-// ─────────────────────────────────────────────
-// DASHBOARD SHELL
-// ─────────────────────────────────────────────
 function DashboardShell() {
   const { theme, activeNav, setActiveNav, role, canSee } = useApp()
   const t = THEMES[theme]
@@ -110,10 +90,7 @@ function DashboardShell() {
   )
 
   const renderPage = () => {
-    if (activeNav !== 'dashboard' && !canSee(activeNav)) {
-      return <AccessDenied />
-    }
-
+    if (activeNav !== 'dashboard' && !canSee(activeNav)) return <AccessDenied />
     switch (activeNav) {
       case 'dashboard':           return <DashboardHome />
       case 'purchase-data':       return <PurchaseData />
@@ -128,6 +105,7 @@ function DashboardShell() {
       case 'branch-management':   return <BranchManagement />
       case 'user-management':     return <UserManagement />
       case 'import-logs':         return <ImportLogs />
+      case 'inbound-bot':         return <InboundBotTesting />
       default:                    return <DashboardHome />
     }
   }
@@ -137,17 +115,12 @@ function DashboardShell() {
       <Sidebar sidebarOpen={sidebarOpen} setSidebarOpen={setSidebarOpen} />
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         <Topbar />
-        <main style={{ flex: 1, overflowY: 'auto' }}>
-          {renderPage()}
-        </main>
+        <main style={{ flex: 1, overflowY: 'auto' }}>{renderPage()}</main>
       </div>
     </div>
   )
 }
 
-// ─────────────────────────────────────────────
-// PAGE EXPORT
-// ─────────────────────────────────────────────
 export default function DashboardPage() {
   return (
     <AppProvider>
