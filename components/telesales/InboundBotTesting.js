@@ -434,9 +434,29 @@ export default function InboundBotTesting() {
                   )
                 }
                 return (
-                  <div style={{ background: t.card2, border: `1px solid ${t.border}`, borderRadius: '8px', padding: '24px', textAlign: 'center' }}>
-                    <div style={{ fontSize: '13px', color: t.text3, marginBottom: '4px' }}>No transcript yet</div>
-                    <div style={{ fontSize: '11px', color: t.text4 }}>Free Whisper AI — supports Kannada, Telugu, Malayalam, Hindi</div>
+                  <div style={{ background: t.card2, border: `1px solid ${t.border}`, borderRadius: '8px', padding: '20px 24px' }}>
+                    <div style={{ textAlign: 'center', marginBottom: '16px' }}>
+                      <div style={{ fontSize: '13px', color: t.text3, marginBottom: '4px' }}>No transcript yet</div>
+                      <div style={{ fontSize: '11px', color: t.text4 }}>Currently using Groq Whisper large-v3 (free) · Auto-detects Kannada, Telugu, Malayalam, Hindi</div>
+                    </div>
+                    <div style={{ borderTop: `1px solid ${t.border}`, paddingTop: '14px' }}>
+                      <div style={{ fontSize: '11px', color: t.text4, marginBottom: '8px', letterSpacing: '.08em', textTransform: 'uppercase' }}>Upgrade options for better accuracy</div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                        {[
+                          { name: 'Deepgram Nova-2', note: 'Best accuracy + diarization', cost: '~₹85/day for 80 calls', color: t.blue },
+                          { name: 'Sarvam AI',       note: 'Best for Indian languages specifically', cost: '~₹90/day for 80 calls', color: t.purple },
+                          { name: 'AssemblyAI',      note: 'Industry standard diarization', cost: '~₹220/day for 80 calls', color: t.green },
+                        ].map(opt => (
+                          <div key={opt.name} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '7px 10px', background: `${opt.color}08`, border: `1px solid ${opt.color}20`, borderRadius: '6px' }}>
+                            <div>
+                              <span style={{ fontSize: '12px', color: opt.color, fontWeight: 600 }}>{opt.name}</span>
+                              <span style={{ fontSize: '11px', color: t.text4, marginLeft: '8px' }}>{opt.note}</span>
+                            </div>
+                            <span style={{ fontSize: '11px', color: t.text3 }}>{opt.cost}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
                   </div>
                 )
               })()}

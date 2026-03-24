@@ -1,5 +1,6 @@
 // app/api/transcribe-call/route.js
-// Groq Whisper (free) + Claude Haiku diarization (~₹0.0001 per call)
+// Step 1: Groq Whisper large-v3 — FREE, auto language detect
+// Step 2: Claude Haiku — diarization (~₹0.0001/call)
 
 export async function POST(req) {
   try {
@@ -11,12 +12,12 @@ export async function POST(req) {
     if (!audioRes.ok) throw new Error('Failed to fetch audio from S3')
     const audioBuffer = await audioRes.arrayBuffer()
 
-    // 2. Groq Whisper verbose_json — segments with timestamps
+    // 2. Groq Whisper — verbose_json, NO language hint (auto-detect)
     const formData = new FormData()
     formData.append('file', new Blob([audioBuffer], { type: 'audio/mpeg' }), 'recording.mp3')
     formData.append('model', 'whisper-large-v3')
     formData.append('response_format', 'verbose_json')
-    formData.append('language', 'kn')
+    // NO language hint — auto-detects Kannada, Telugu, Hindi, Malayalam accurately
 
     const groqRes = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
       method:  'POST',
@@ -26,14 +27,15 @@ export async function POST(req) {
 
     if (!groqRes.ok) throw new Error(`Groq error: ${await groqRes.text()}`)
 
-    const groqData = await groqRes.json()
-    const segments = groqData.segments || []
+    const groqData  = await groqRes.json()
+    const segments  = groqData.segments || []
+    const detectedLang = groqData.language || 'unknown'
 
     if (segments.length === 0) {
       return Response.json({ error: 'No speech detected in recording' }, { status: 400 })
     }
 
-    // 3. Annotate segments with duration + gap
+    // 3. Annotate segments with duration + gap for Claude
     const annotated = segments.map((seg, i) => ({
       id:       i,
       text:     seg.text.trim(),
@@ -43,7 +45,7 @@ export async function POST(req) {
       gap:      i > 0 ? parseFloat((seg.start - segments[i - 1].end).toFixed(2)) : 0,
     }))
 
-    // 4. Claude Haiku diarization with full context
+    // 4. Claude Haiku diarization
     const segmentList = annotated.map(s =>
       `[${s.id}] dur:${s.duration}s gap:${s.gap}s | ${s.text}`
     ).join('\n')
@@ -60,24 +62,21 @@ export async function POST(req) {
         max_tokens: 1000,
         messages: [{
           role:    'user',
-          content: `You are diarizing a call transcript from White Gold's AI inbound bot (Gnani AI) in Kannada.
+          content: `You are diarizing a call transcript from White Gold's AI inbound bot (Gnani AI).
 
-FACTS ABOUT THIS CALL:
-- This is an AUTOMATED BOT calling customers who called after 7 PM
-- The BOT has a fixed voice persona — it ALWAYS speaks first (segment [0] is ALWAYS Bot)
-- The BOT speaks in long, formal Kannada sentences — welcomes, asks structured questions about gold (sell/pledge/release)
-- The CUSTOMER gives short informal replies — yes/no, quantities, names
-- They strictly alternate: Bot asks → Customer replies → Bot follows up → Customer replies
-- Large gaps (>1s) almost always indicate a speaker switch
-- Short gaps (<0.3s) are breathing pauses — same speaker continuing
+FACTS:
+- This is an automated BOT calling customers who called after 7 PM
+- Segment [0] is ALWAYS Bot — never change this
+- The BOT speaks first, formally, in long sentences — welcomes, asks about gold (sell/pledge/release)
+- The CUSTOMER gives short informal replies
+- Large gaps (>1s) = speaker switch. Tiny gaps (<0.3s) = same speaker continuing
+- Language detected: ${detectedLang}
 
-Each segment shows: duration in seconds, gap before it, and text.
-
-Segments:
+Segments (dur = duration, gap = silence before this segment):
 ${segmentList}
 
-Assign Bot or Customer to each segment ID.
-Return ONLY JSON array: [{"id":0,"speaker":"Bot"},{"id":1,"speaker":"Customer"},...]`,
+Return ONLY a JSON array: [{"id":0,"speaker":"Bot"},{"id":1,"speaker":"Customer"},...]
+No explanation. Just JSON.`,
         }],
       }),
     })
@@ -91,16 +90,15 @@ Return ONLY JSON array: [{"id":0,"speaker":"Bot"},{"id":1,"speaker":"Customer"},
       } catch { diarized = [] }
     }
 
-    // 5. Build turns — Claude assignment, fallback to alternating with gap detection
+    // 5. Build turns with fallback gap-based diarization
     let currentSpeaker = 'Bot'
     const turns = annotated.map((seg, i) => {
-      const claudeAssign = diarized.find(d => d.id === i)
+      const assigned = diarized.find(d => d.id === i)
       let speaker
 
-      if (claudeAssign) {
-        speaker = claudeAssign.speaker
+      if (assigned) {
+        speaker = assigned.speaker
       } else {
-        // Fallback gap-based
         if (i === 0) speaker = 'Bot'
         else {
           if (seg.gap >= 0.6) currentSpeaker = currentSpeaker === 'Bot' ? 'Customer' : 'Bot'
@@ -108,10 +106,8 @@ Return ONLY JSON array: [{"id":0,"speaker":"Bot"},{"id":1,"speaker":"Customer"},
         }
       }
 
-      // Hard rule: segment 0 is ALWAYS Bot
-      if (i === 0) speaker = 'Bot'
+      if (i === 0) speaker = 'Bot' // hard rule
       currentSpeaker = speaker
-
       return { speaker, text: seg.text, start: seg.start, end: seg.end }
     })
 
@@ -129,17 +125,19 @@ Return ONLY JSON array: [{"id":0,"speaker":"Bot"},{"id":1,"speaker":"Customer"},
 
     const transcriptJson = JSON.stringify(merged)
 
-    // 7. Save to Supabase
+    // 7. Save transcript + detected language to Supabase
     if (callId) {
       const { createClient } = await import('@supabase/supabase-js')
       const supabase = createClient(
         process.env.NEXT_PUBLIC_SUPABASE_URL,
         process.env.SUPABASE_SERVICE_ROLE_KEY
       )
-      await supabase.from('telesales_calls').update({ transcript: transcriptJson }).eq('id', callId)
+      await supabase.from('telesales_calls')
+        .update({ transcript: transcriptJson, language: detectedLang })
+        .eq('id', callId)
     }
 
-    return Response.json({ transcript: transcriptJson, turns: merged })
+    return Response.json({ transcript: transcriptJson, turns: merged, language: detectedLang })
 
   } catch (err) {
     console.error('Transcribe error:', err)
