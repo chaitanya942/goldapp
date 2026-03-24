@@ -4,7 +4,7 @@ import { pipeline } from 'stream/promises'
 import { createWriteStream, createReadStream, mkdirSync, rmSync, existsSync, readdirSync, statSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
-import tar from 'tar'
+import { extract } from 'tar'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
@@ -122,7 +122,7 @@ export async function POST(req) {
         await downloadFromS3(tarKey, localTar)
 
         // 2. Extract using npm 'tar' package — no shell, works on Vercel
-        await tar.extract({ file: localTar, cwd: tmpDir, strict: false })
+        await extract({ file: localTar, cwd: tmpDir, strict: false })
 
         // 3. Find all MP3 files recursively
         const mp3Files = findMp3Files(tmpDir)
