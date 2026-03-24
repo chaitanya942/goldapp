@@ -44,6 +44,8 @@ export default function InboundBotTesting() {
   const [filterOutcome, setFilterOutcome] = useState('')
   const [filterDate, setFilterDate]       = useState('')
   const [selectedCall, setSelectedCall]   = useState(null)
+  const [presignedUrl, setPresignedUrl]   = useState(null)
+  const [loadingAudio, setLoadingAudio]   = useState(false)
   const [transcribing, setTranscribing]   = useState(false)
   const [savingOutcome, setSavingOutcome] = useState(false)
   const [outcomeForm, setOutcomeForm]     = useState({ outcome: '', notes: '' })
@@ -77,27 +79,32 @@ export default function InboundBotTesting() {
     }
   }
 
-  // Stats
-  const totalCalls      = calls.length
-  const totalDuration   = calls.reduce((s, c) => s + (c.duration_seconds || 0), 0)
-  const interestedCount = calls.filter(c => c.outcome === 'interested').length
-  const callbackCount   = calls.filter(c => c.outcome === 'callback').length
-  const conversionRate  = totalCalls > 0 ? ((interestedCount / totalCalls) * 100).toFixed(1) : 0
-
-  const filtered = calls.filter(c => {
-    const matchSearch  = !search || c.customer_number?.includes(search) || c.customer_name?.toLowerCase().includes(search.toLowerCase()) || c.branch_name?.toLowerCase().includes(search.toLowerCase())
-    const matchOutcome = !filterOutcome || c.outcome === filterOutcome
-    const matchDate    = !filterDate || c.call_date === filterDate
-    return matchSearch && matchOutcome && matchDate
-  })
-
-  const handleOpenCall = (call) => {
+  async function handleOpenCall(call) {
     setSelectedCall(call)
     setOutcomeForm({ outcome: call.outcome || '', notes: call.outcome_notes || '' })
+    setPresignedUrl(null)
+
+    // Fetch presigned URL if s3_key exists
+    if (call.s3_key) {
+      setLoadingAudio(true)
+      try {
+        const res  = await fetch('/api/presign-recording', {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({ s3_key: call.s3_key }),
+        })
+        const data = await res.json()
+        if (data.url) setPresignedUrl(data.url)
+      } catch (err) {
+        console.error('Presign error:', err)
+      } finally {
+        setLoadingAudio(false)
+      }
+    }
   }
 
-  const handleTranscribe = async () => {
-    if (!selectedCall?.recording_url) {
+  async function handleTranscribe() {
+    if (!presignedUrl) {
       alert('No recording available for this call.')
       return
     }
@@ -106,7 +113,7 @@ export default function InboundBotTesting() {
       const res  = await fetch('/api/transcribe-call', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ callId: selectedCall.id, recordingUrl: selectedCall.recording_url }),
+        body:    JSON.stringify({ callId: selectedCall.id, recordingUrl: presignedUrl }),
       })
       const data = await res.json()
       if (data.transcript) {
@@ -121,7 +128,7 @@ export default function InboundBotTesting() {
     }
   }
 
-  const handleSaveOutcome = async () => {
+  async function handleSaveOutcome() {
     if (!outcomeForm.outcome) return
     setSavingOutcome(true)
     const { error } = await supabase
@@ -138,6 +145,20 @@ export default function InboundBotTesting() {
     }
     setSavingOutcome(false)
   }
+
+  // Stats
+  const totalCalls      = calls.length
+  const totalDuration   = calls.reduce((s, c) => s + (c.duration_seconds || 0), 0)
+  const interestedCount = calls.filter(c => c.outcome === 'interested').length
+  const callbackCount   = calls.filter(c => c.outcome === 'callback').length
+  const conversionRate  = totalCalls > 0 ? ((interestedCount / totalCalls) * 100).toFixed(1) : 0
+
+  const filtered = calls.filter(c => {
+    const matchSearch  = !search || c.customer_number?.includes(search) || c.customer_name?.toLowerCase().includes(search.toLowerCase()) || c.branch_name?.toLowerCase().includes(search.toLowerCase())
+    const matchOutcome = !filterOutcome || c.outcome === filterOutcome
+    const matchDate    = !filterDate || c.call_date === filterDate
+    return matchSearch && matchOutcome && matchDate
+  })
 
   const s = {
     card:    { background: t.card, border: `1px solid ${t.border}`, borderRadius: '12px', padding: '20px 24px', marginBottom: '16px' },
@@ -157,7 +178,7 @@ export default function InboundBotTesting() {
       <div style={{ padding: '32px', maxWidth: '100%' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '24px' }}>
           <div>
-            <button style={{ ...s.btnOut, marginBottom: '12px', fontSize: '12px' }} onClick={() => setSelectedCall(null)}>← Back</button>
+            <button style={{ ...s.btnOut, marginBottom: '12px', fontSize: '12px' }} onClick={() => { setSelectedCall(null); setPresignedUrl(null) }}>← Back</button>
             <div style={{ fontSize: '1.4rem', fontWeight: 300, color: t.text1 }}>{selectedCall.customer_name || selectedCall.customer_number}</div>
             <div style={{ fontSize: '12px', color: t.text3, marginTop: '4px' }}>
               {fmtDate(selectedCall.call_date)} · {selectedCall.call_time?.slice(0,5)} · {fmtDuration(selectedCall.duration_seconds)} · {selectedCall.language || ''}
@@ -168,10 +189,15 @@ export default function InboundBotTesting() {
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
           <div>
+            {/* Audio Player */}
             <div style={{ ...s.card, marginBottom: '16px' }}>
               <div style={{ fontSize: '12px', color: t.text3, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 600, marginBottom: '16px' }}>Recording</div>
-              {selectedCall.recording_url ? (
-                <audio ref={audioRef} controls style={{ width: '100%', borderRadius: '8px' }} src={selectedCall.recording_url} />
+              {loadingAudio ? (
+                <div style={{ background: t.card2, border: `1px solid ${t.border}`, borderRadius: '10px', padding: '28px', textAlign: 'center' }}>
+                  <div style={{ fontSize: '13px', color: t.text3 }}>⟳ Loading audio...</div>
+                </div>
+              ) : presignedUrl ? (
+                <audio ref={audioRef} controls style={{ width: '100%', borderRadius: '8px' }} src={presignedUrl} />
               ) : (
                 <div style={{ background: t.card2, border: `1px solid ${t.border}`, borderRadius: '10px', padding: '28px', textAlign: 'center' }}>
                   <div style={{ fontSize: '2rem', opacity: .2, marginBottom: '8px' }}>🎙</div>
@@ -184,6 +210,7 @@ export default function InboundBotTesting() {
               </div>
             </div>
 
+            {/* Transcript */}
             <div style={s.card}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
                 <div style={{ fontSize: '12px', color: t.text3, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 600 }}>Transcript</div>
@@ -205,6 +232,7 @@ export default function InboundBotTesting() {
           </div>
 
           <div>
+            {/* Outcome */}
             <div style={s.card}>
               <div style={{ fontSize: '12px', color: t.text3, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 600, marginBottom: '16px' }}>Call Outcome</div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '16px' }}>
@@ -233,6 +261,7 @@ export default function InboundBotTesting() {
               </button>
             </div>
 
+            {/* Call Details */}
             <div style={s.card}>
               <div style={{ fontSize: '12px', color: t.text3, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 600, marginBottom: '16px' }}>Call Details</div>
               {[
@@ -242,7 +271,7 @@ export default function InboundBotTesting() {
                 { label: 'Date',      value: fmtDate(selectedCall.call_date) },
                 { label: 'Time',      value: selectedCall.call_time?.slice(0,5) || '—' },
                 { label: 'Duration',  value: fmtDuration(selectedCall.duration_seconds) },
-                { label: 'Gnani ID',  value: selectedCall.gnani_call_id ? selectedCall.gnani_call_id.slice(0, 16) + '...' : '—' },
+                { label: 'Gnani ID',  value: selectedCall.gnani_call_id ? selectedCall.gnani_call_id.slice(0,16) + '...' : '—' },
               ].map(item => (
                 <div key={item.label} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: `1px solid ${t.border}20` }}>
                   <span style={{ fontSize: '12px', color: t.text4 }}>{item.label}</span>
@@ -259,28 +288,21 @@ export default function InboundBotTesting() {
   // ── MAIN LIST VIEW
   return (
     <div style={{ padding: '32px', maxWidth: '100%' }}>
-      {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '24px' }}>
         <div>
           <div style={{ fontSize: '1.6rem', fontWeight: 300, color: t.text1, letterSpacing: '.04em' }}>Inbound Bot Testing</div>
           <div style={{ fontSize: '12px', color: t.text3, marginTop: '4px' }}>Gnani AI call recordings · Listen, transcribe, and track outcomes</div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          {/* Sync Result Toast */}
           {syncResult && (
             <div style={{ fontSize: '12px', color: syncResult.success ? t.green : t.red, background: syncResult.success ? `${t.green}15` : `${t.red}15`, border: `1px solid ${syncResult.success ? t.green : t.red}40`, borderRadius: '8px', padding: '6px 12px' }}>
               {syncResult.success ? `✓ ${syncResult.message}` : `✗ ${syncResult.error}`}
             </div>
           )}
-          {/* Sync Button */}
-          <button
-            onClick={handleSync}
-            disabled={syncing}
-            style={{ ...s.btnGold, display: 'flex', alignItems: 'center', gap: '6px', opacity: syncing ? .7 : 1 }}>
+          <button onClick={handleSync} disabled={syncing} style={{ ...s.btnGold, display: 'flex', alignItems: 'center', gap: '6px', opacity: syncing ? .7 : 1 }}>
             <span style={{ fontSize: '14px' }}>{syncing ? '⟳' : '↓'}</span>
             {syncing ? 'Syncing S3...' : 'Sync Recordings'}
           </button>
-          {/* Status Badge */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '6px 14px', borderRadius: '20px', background: `${t.green}15`, border: `1px solid ${t.green}40` }}>
             <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: t.green, display: 'inline-block' }} />
             <span style={{ fontSize: '12px', color: t.green, fontWeight: 600 }}>S3 Connected</span>
@@ -291,11 +313,11 @@ export default function InboundBotTesting() {
       {/* KPI Cards */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '14px', marginBottom: '24px' }}>
         {[
-          { label: 'Total Calls',     value: loading ? '—' : fmt(totalCalls),         color: t.gold,   size: '1.8rem' },
+          { label: 'Total Calls',     value: loading ? '—' : fmt(totalCalls),            color: t.gold,   size: '1.8rem' },
           { label: 'Total Duration',  value: loading ? '—' : fmtDuration(totalDuration), color: t.text1,  size: '1.4rem' },
-          { label: 'Interested',      value: loading ? '—' : fmt(interestedCount),    color: t.green,  size: '1.8rem' },
-          { label: 'Callbacks',       value: loading ? '—' : fmt(callbackCount),      color: t.blue,   size: '1.8rem' },
-          { label: 'Conversion Rate', value: loading ? '—' : `${conversionRate}%`,    color: t.purple, size: '1.8rem' },
+          { label: 'Interested',      value: loading ? '—' : fmt(interestedCount),        color: t.green,  size: '1.8rem' },
+          { label: 'Callbacks',       value: loading ? '—' : fmt(callbackCount),          color: t.blue,   size: '1.8rem' },
+          { label: 'Conversion Rate', value: loading ? '—' : `${conversionRate}%`,        color: t.purple, size: '1.8rem' },
         ].map(item => (
           <div key={item.label} style={{ ...s.card, textAlign: 'center', padding: '18px', marginBottom: 0 }}>
             <div style={{ fontSize: item.size, fontWeight: 200, color: item.color, lineHeight: 1.1, marginBottom: '6px' }}>{item.value}</div>
