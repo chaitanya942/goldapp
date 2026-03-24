@@ -30,7 +30,7 @@ const OUTCOME_META = {
 
 const fmt         = (n) => n != null ? Number(n).toLocaleString('en-IN') : '—'
 const fmtDate     = (d) => d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'
-const fmtDuration = (s) => { if (!s) return '—'; const m = Math.floor(s / 60); const sec = s % 60; return `${m}:${String(sec).padStart(2, '0')}` }
+const fmtDuration = (s) => { if (!s && s !== 0) return '—'; const m = Math.floor(s / 60); const sec = s % 60; return `${m}:${String(sec).padStart(2, '0')}` }
 
 export default function InboundBotTesting() {
   const { theme } = useApp()
@@ -40,18 +40,31 @@ export default function InboundBotTesting() {
   const [loading, setLoading]             = useState(true)
   const [syncing, setSyncing]             = useState(false)
   const [syncResult, setSyncResult]       = useState(null)
+  const [lastSynced, setLastSynced]       = useState(null)
   const [search, setSearch]               = useState('')
   const [filterOutcome, setFilterOutcome] = useState('')
-  const [filterDate, setFilterDate]       = useState('')
+  const [filterDateFrom, setFilterDateFrom] = useState('')
+  const [filterDateTo, setFilterDateTo]   = useState('')
   const [selectedCall, setSelectedCall]   = useState(null)
   const [presignedUrl, setPresignedUrl]   = useState(null)
   const [loadingAudio, setLoadingAudio]   = useState(false)
   const [transcribing, setTranscribing]   = useState(false)
   const [savingOutcome, setSavingOutcome] = useState(false)
   const [outcomeForm, setOutcomeForm]     = useState({ outcome: '', notes: '' })
+  const [currentTime, setCurrentTime]     = useState(0)
+  const [duration, setDuration]           = useState(0)
+  const [isPlaying, setIsPlaying]         = useState(false)
   const audioRef = useRef(null)
 
   useEffect(() => { fetchCalls() }, [])
+
+  // Sync result auto-clear after 5s
+  useEffect(() => {
+    if (syncResult) {
+      const timer = setTimeout(() => setSyncResult(null), 5000)
+      return () => clearTimeout(timer)
+    }
+  }, [syncResult])
 
   async function fetchCalls() {
     setLoading(true)
@@ -71,6 +84,7 @@ export default function InboundBotTesting() {
       const res  = await fetch('/api/sync-gnani', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) })
       const data = await res.json()
       setSyncResult(data)
+      setLastSynced(new Date())
       if (data.inserted > 0) await fetchCalls()
     } catch (err) {
       setSyncResult({ success: false, error: err.message })
@@ -83,15 +97,16 @@ export default function InboundBotTesting() {
     setSelectedCall(call)
     setOutcomeForm({ outcome: call.outcome || '', notes: call.outcome_notes || '' })
     setPresignedUrl(null)
+    setCurrentTime(0)
+    setDuration(0)
+    setIsPlaying(false)
 
-    // Fetch presigned URL if s3_key exists
     if (call.s3_key) {
       setLoadingAudio(true)
       try {
         const res  = await fetch('/api/presign-recording', {
-          method:  'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body:    JSON.stringify({ s3_key: call.s3_key }),
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ s3_key: call.s3_key }),
         })
         const data = await res.json()
         if (data.url) setPresignedUrl(data.url)
@@ -103,19 +118,42 @@ export default function InboundBotTesting() {
     }
   }
 
+  function handleAudioTimeUpdate() {
+    if (audioRef.current) setCurrentTime(audioRef.current.currentTime)
+  }
+
+  function handleAudioLoaded() {
+    if (audioRef.current) setDuration(audioRef.current.duration)
+  }
+
+  function handleSeek(e) {
+    const rect   = e.currentTarget.getBoundingClientRect()
+    const pct    = (e.clientX - rect.left) / rect.width
+    const newTime = pct * duration
+    if (audioRef.current) { audioRef.current.currentTime = newTime; setCurrentTime(newTime) }
+  }
+
+  function skipTime(secs) {
+    if (!audioRef.current) return
+    audioRef.current.currentTime = Math.max(0, Math.min(duration, audioRef.current.currentTime + secs))
+  }
+
+  function togglePlay() {
+    if (!audioRef.current) return
+    if (isPlaying) { audioRef.current.pause(); setIsPlaying(false) }
+    else { audioRef.current.play(); setIsPlaying(true) }
+  }
+
   async function handleTranscribe() {
-    if (!presignedUrl) {
-      alert('No recording available for this call.')
-      return
-    }
+    if (!presignedUrl) { alert('Audio not loaded yet. Please wait.'); return }
     setTranscribing(true)
     try {
       const res  = await fetch('/api/transcribe-call', {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ callId: selectedCall.id, recordingUrl: presignedUrl }),
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ callId: selectedCall.id, recordingUrl: presignedUrl }),
       })
       const data = await res.json()
+      if (data.error) throw new Error(data.error)
       if (data.transcript) {
         const updated = calls.map(c => c.id === selectedCall.id ? { ...c, transcript: data.transcript } : c)
         setCalls(updated)
@@ -137,9 +175,7 @@ export default function InboundBotTesting() {
       .eq('id', selectedCall.id)
     if (!error) {
       const updated = calls.map(c => c.id === selectedCall.id
-        ? { ...c, outcome: outcomeForm.outcome, outcome_notes: outcomeForm.notes }
-        : c
-      )
+        ? { ...c, outcome: outcomeForm.outcome, outcome_notes: outcomeForm.notes } : c)
       setCalls(updated)
       setSelectedCall(prev => ({ ...prev, outcome: outcomeForm.outcome, outcome_notes: outcomeForm.notes }))
     }
@@ -148,6 +184,7 @@ export default function InboundBotTesting() {
 
   // Stats
   const totalCalls      = calls.length
+  const pendingCount    = calls.filter(c => c.outcome === 'pending' || !c.outcome).length
   const totalDuration   = calls.reduce((s, c) => s + (c.duration_seconds || 0), 0)
   const interestedCount = calls.filter(c => c.outcome === 'interested').length
   const callbackCount   = calls.filter(c => c.outcome === 'callback').length
@@ -156,8 +193,9 @@ export default function InboundBotTesting() {
   const filtered = calls.filter(c => {
     const matchSearch  = !search || c.customer_number?.includes(search) || c.customer_name?.toLowerCase().includes(search.toLowerCase()) || c.branch_name?.toLowerCase().includes(search.toLowerCase())
     const matchOutcome = !filterOutcome || c.outcome === filterOutcome
-    const matchDate    = !filterDate || c.call_date === filterDate
-    return matchSearch && matchOutcome && matchDate
+    const matchFrom    = !filterDateFrom || c.call_date >= filterDateFrom
+    const matchTo      = !filterDateTo   || c.call_date <= filterDateTo
+    return matchSearch && matchOutcome && matchFrom && matchTo
   })
 
   const s = {
@@ -171,6 +209,67 @@ export default function InboundBotTesting() {
     lbl:     { fontSize: '11px', color: t.text3, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 600, marginBottom: '6px', display: 'block' },
   }
 
+  // ── CUSTOM AUDIO PLAYER
+  const AudioPlayer = () => {
+    const pct = duration > 0 ? (currentTime / duration) * 100 : 0
+    return (
+      <div style={{ background: t.card2, border: `1px solid ${t.border}`, borderRadius: '12px', padding: '16px 20px' }}>
+        {/* Hidden native audio */}
+        <audio
+          ref={audioRef}
+          src={presignedUrl}
+          onTimeUpdate={handleAudioTimeUpdate}
+          onLoadedMetadata={handleAudioLoaded}
+          onPlay={() => setIsPlaying(true)}
+          onPause={() => setIsPlaying(false)}
+          onEnded={() => setIsPlaying(false)}
+          style={{ display: 'none' }}
+        />
+
+        {/* Progress bar */}
+        <div
+          onClick={handleSeek}
+          style={{ height: '4px', background: `${t.border}`, borderRadius: '2px', cursor: 'pointer', marginBottom: '14px', position: 'relative' }}>
+          <div style={{ width: `${pct}%`, height: '100%', background: t.gold, borderRadius: '2px', transition: 'width .1s' }} />
+          <div style={{ position: 'absolute', top: '-4px', left: `${pct}%`, transform: 'translateX(-50%)', width: '12px', height: '12px', borderRadius: '50%', background: t.gold, boxShadow: `0 0 4px ${t.gold}60` }} />
+        </div>
+
+        {/* Time */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: t.text3, marginBottom: '14px' }}>
+          <span>{fmtDuration(Math.floor(currentTime))}</span>
+          <span>{duration > 0 ? fmtDuration(Math.floor(duration)) : '—'}</span>
+        </div>
+
+        {/* Controls */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '12px' }}>
+          {/* -10s */}
+          <button onClick={() => skipTime(-10)} style={{ background: 'transparent', border: `1px solid ${t.border}`, borderRadius: '8px', padding: '7px 12px', color: t.text3, fontSize: '12px', cursor: 'pointer', fontWeight: 600 }}>
+            ⟪ 10s
+          </button>
+
+          {/* Play/Pause */}
+          <button onClick={togglePlay}
+            style={{ background: t.gold, border: 'none', borderRadius: '50%', width: '44px', height: '44px', cursor: 'pointer', fontSize: '18px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#1a0a00', flexShrink: 0 }}>
+            {isPlaying ? '⏸' : '▶'}
+          </button>
+
+          {/* +10s */}
+          <button onClick={() => skipTime(10)} style={{ background: 'transparent', border: `1px solid ${t.border}`, borderRadius: '8px', padding: '7px 12px', color: t.text3, fontSize: '12px', cursor: 'pointer', fontWeight: 600 }}>
+            10s ⟫
+          </button>
+        </div>
+
+        {/* Meta */}
+        <div style={{ display: 'flex', justifyContent: 'center', gap: '20px', marginTop: '12px' }}>
+          <div style={{ fontSize: '12px', color: t.text3 }}>Number: <span style={{ color: t.gold }}>{selectedCall?.customer_number}</span></div>
+          {selectedCall?.duration_seconds && (
+            <div style={{ fontSize: '12px', color: t.text3 }}>Duration: <span style={{ color: t.text1 }}>{fmtDuration(selectedCall.duration_seconds)}</span></div>
+          )}
+        </div>
+      </div>
+    )
+  }
+
   // ── CALL DETAIL PANEL
   if (selectedCall) {
     const meta = OUTCOME_META[selectedCall.outcome] || null
@@ -178,13 +277,17 @@ export default function InboundBotTesting() {
       <div style={{ padding: '32px', maxWidth: '100%' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '24px' }}>
           <div>
-            <button style={{ ...s.btnOut, marginBottom: '12px', fontSize: '12px' }} onClick={() => { setSelectedCall(null); setPresignedUrl(null) }}>← Back</button>
+            <button style={{ ...s.btnOut, marginBottom: '12px', fontSize: '12px' }} onClick={() => { setSelectedCall(null); setPresignedUrl(null); setIsPlaying(false) }}>← Back</button>
             <div style={{ fontSize: '1.4rem', fontWeight: 300, color: t.text1 }}>{selectedCall.customer_name || selectedCall.customer_number}</div>
             <div style={{ fontSize: '12px', color: t.text3, marginTop: '4px' }}>
-              {fmtDate(selectedCall.call_date)} · {selectedCall.call_time?.slice(0,5)} · {fmtDuration(selectedCall.duration_seconds)} · {selectedCall.language || ''}
+              {fmtDate(selectedCall.call_date)} · {selectedCall.call_time?.slice(0,5)} · {selectedCall.language || ''}
             </div>
           </div>
-          {meta && <span style={{ fontSize: '12px', color: meta.color, background: `${meta.color}18`, border: `1px solid ${meta.color}40`, borderRadius: '6px', padding: '4px 12px', fontWeight: 600 }}>{meta.label}</span>}
+          {meta && (
+            <span style={{ fontSize: '12px', color: meta.color, background: `${meta.color}18`, border: `1px solid ${meta.color}40`, borderRadius: '6px', padding: '4px 12px', fontWeight: 600 }}>
+              {meta.label}
+            </span>
+          )}
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
@@ -197,35 +300,39 @@ export default function InboundBotTesting() {
                   <div style={{ fontSize: '13px', color: t.text3 }}>⟳ Loading audio...</div>
                 </div>
               ) : presignedUrl ? (
-                <audio ref={audioRef} controls style={{ width: '100%', borderRadius: '8px' }} src={presignedUrl} />
+                <AudioPlayer />
               ) : (
                 <div style={{ background: t.card2, border: `1px solid ${t.border}`, borderRadius: '10px', padding: '28px', textAlign: 'center' }}>
                   <div style={{ fontSize: '2rem', opacity: .2, marginBottom: '8px' }}>🎙</div>
-                  <div style={{ fontSize: '13px', color: t.text3, marginBottom: '4px' }}>Recording not available</div>
+                  <div style={{ fontSize: '13px', color: t.text3 }}>Recording not available</div>
                 </div>
               )}
-              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginTop: '14px' }}>
-                <div style={{ fontSize: '12px', color: t.text3 }}>Duration: <span style={{ color: t.text1 }}>{fmtDuration(selectedCall.duration_seconds)}</span></div>
-                <div style={{ fontSize: '12px', color: t.text3 }}>Number: <span style={{ color: t.gold }}>{selectedCall.customer_number}</span></div>
-              </div>
             </div>
 
             {/* Transcript */}
             <div style={s.card}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
                 <div style={{ fontSize: '12px', color: t.text3, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 600 }}>Transcript</div>
-                <button style={{ ...s.btnOut, fontSize: '11px', padding: '5px 12px', color: t.blue, borderColor: `${t.blue}50` }} onClick={handleTranscribe} disabled={transcribing}>
-                  {transcribing ? '⟳ Transcribing...' : '✦ Auto Transcribe'}
+                <button
+                  style={{ ...s.btnOut, fontSize: '11px', padding: '5px 12px', color: transcribing ? t.text4 : t.blue, borderColor: `${t.blue}50`, cursor: transcribing ? 'not-allowed' : 'pointer' }}
+                  onClick={handleTranscribe}
+                  disabled={transcribing}>
+                  {transcribing ? '⟳ Transcribing...' : '✦ Transcribe (Free)'}
                 </button>
               </div>
+              {transcribing && (
+                <div style={{ background: `${t.blue}10`, border: `1px solid ${t.blue}30`, borderRadius: '8px', padding: '12px 16px', marginBottom: '12px', fontSize: '12px', color: t.blue }}>
+                  ⟳ Whisper AI is transcribing... this may take 10–30 seconds
+                </div>
+              )}
               {selectedCall.transcript ? (
-                <div style={{ fontSize: '13px', color: t.text2, lineHeight: 1.8, maxHeight: '300px', overflowY: 'auto' }}>
+                <div style={{ fontSize: '13px', color: t.text2, lineHeight: 1.9, maxHeight: '320px', overflowY: 'auto', padding: '4px' }}>
                   {selectedCall.transcript}
                 </div>
               ) : (
                 <div style={{ background: t.card2, border: `1px solid ${t.border}`, borderRadius: '8px', padding: '24px', textAlign: 'center' }}>
                   <div style={{ fontSize: '13px', color: t.text3, marginBottom: '4px' }}>No transcript yet</div>
-                  <div style={{ fontSize: '11px', color: t.text4 }}>Click "Auto Transcribe" to generate using Claude AI</div>
+                  <div style={{ fontSize: '11px', color: t.text4 }}>Free Whisper AI transcription — supports Kannada, Telugu, Malayalam, Hindi</div>
                 </div>
               )}
             </div>
@@ -239,11 +346,12 @@ export default function InboundBotTesting() {
                 {OUTCOMES.filter(o => o.value && o.value !== 'pending').map(o => (
                   <button key={o.value} onClick={() => setOutcomeForm(p => ({ ...p, outcome: o.value }))}
                     style={{
-                      padding: '10px 12px', borderRadius: '8px', border: `1px solid ${outcomeForm.outcome === o.value ? o.color : t.border}`,
+                      padding: '10px 12px', borderRadius: '8px',
+                      border: `1px solid ${outcomeForm.outcome === o.value ? o.color : t.border}`,
                       background: outcomeForm.outcome === o.value ? `${o.color}18` : 'transparent',
                       color: outcomeForm.outcome === o.value ? o.color : t.text3,
-                      fontSize: '12px', fontWeight: outcomeForm.outcome === o.value ? 600 : 400, cursor: 'pointer',
-                      transition: 'all .15s', textAlign: 'left',
+                      fontSize: '12px', fontWeight: outcomeForm.outcome === o.value ? 600 : 400,
+                      cursor: 'pointer', transition: 'all .15s', textAlign: 'left',
                     }}>
                     {o.label}
                   </button>
@@ -251,12 +359,14 @@ export default function InboundBotTesting() {
               </div>
               <div style={{ marginBottom: '16px' }}>
                 <label style={s.lbl}>Notes</label>
-                <textarea style={{ ...s.input, width: '100%', height: '100px', resize: 'vertical', fontFamily: 'inherit', boxSizing: 'border-box' }}
+                <textarea
+                  style={{ ...s.input, width: '100%', height: '90px', resize: 'vertical', fontFamily: 'inherit', boxSizing: 'border-box' }}
                   placeholder="Add notes about this call..."
                   value={outcomeForm.notes}
                   onChange={e => setOutcomeForm(p => ({ ...p, notes: e.target.value }))} />
               </div>
-              <button style={{ ...s.btnGold, width: '100%' }} onClick={handleSaveOutcome} disabled={savingOutcome || !outcomeForm.outcome}>
+              <button style={{ ...s.btnGold, width: '100%', opacity: (!outcomeForm.outcome || savingOutcome) ? .6 : 1 }}
+                onClick={handleSaveOutcome} disabled={savingOutcome || !outcomeForm.outcome}>
                 {savingOutcome ? 'Saving...' : 'Save Outcome'}
               </button>
             </div>
@@ -265,13 +375,14 @@ export default function InboundBotTesting() {
             <div style={s.card}>
               <div style={{ fontSize: '12px', color: t.text3, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 600, marginBottom: '16px' }}>Call Details</div>
               {[
-                { label: 'Customer',  value: selectedCall.customer_name || '—' },
-                { label: 'Number',    value: selectedCall.customer_number },
-                { label: 'Language',  value: selectedCall.language || '—' },
-                { label: 'Date',      value: fmtDate(selectedCall.call_date) },
-                { label: 'Time',      value: selectedCall.call_time?.slice(0,5) || '—' },
-                { label: 'Duration',  value: fmtDuration(selectedCall.duration_seconds) },
-                { label: 'Gnani ID',  value: selectedCall.gnani_call_id ? selectedCall.gnani_call_id.slice(0,16) + '...' : '—' },
+                { label: 'Customer',     value: selectedCall.customer_name || '—' },
+                { label: 'Number',       value: selectedCall.customer_number },
+                { label: 'Language',     value: selectedCall.language || '—' },
+                { label: 'Date',         value: fmtDate(selectedCall.call_date) },
+                { label: 'Time',         value: selectedCall.call_time?.slice(0,5) || '—' },
+                { label: 'Duration',     value: fmtDuration(selectedCall.duration_seconds) },
+                { label: 'Disposition',  value: selectedCall.system_disposition || '—' },
+                { label: 'Gnani ID',     value: selectedCall.gnani_call_id ? selectedCall.gnani_call_id.slice(0,16) + '...' : '—' },
               ].map(item => (
                 <div key={item.label} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: `1px solid ${t.border}20` }}>
                   <span style={{ fontSize: '12px', color: t.text4 }}>{item.label}</span>
@@ -288,10 +399,14 @@ export default function InboundBotTesting() {
   // ── MAIN LIST VIEW
   return (
     <div style={{ padding: '32px', maxWidth: '100%' }}>
+      {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '24px' }}>
         <div>
           <div style={{ fontSize: '1.6rem', fontWeight: 300, color: t.text1, letterSpacing: '.04em' }}>Inbound Bot Testing</div>
-          <div style={{ fontSize: '12px', color: t.text3, marginTop: '4px' }}>Gnani AI call recordings · Listen, transcribe, and track outcomes</div>
+          <div style={{ fontSize: '12px', color: t.text3, marginTop: '4px' }}>
+            Gnani AI call recordings · Listen, transcribe, and track outcomes
+            {lastSynced && <span style={{ marginLeft: '12px', color: t.text4 }}>Last synced: {lastSynced.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</span>}
+          </div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           {syncResult && (
@@ -299,9 +414,10 @@ export default function InboundBotTesting() {
               {syncResult.success ? `✓ ${syncResult.message}` : `✗ ${syncResult.error}`}
             </div>
           )}
-          <button onClick={handleSync} disabled={syncing} style={{ ...s.btnGold, display: 'flex', alignItems: 'center', gap: '6px', opacity: syncing ? .7 : 1 }}>
+          <button onClick={handleSync} disabled={syncing}
+            style={{ ...s.btnGold, display: 'flex', alignItems: 'center', gap: '6px', opacity: syncing ? .7 : 1 }}>
             <span style={{ fontSize: '14px' }}>{syncing ? '⟳' : '↓'}</span>
-            {syncing ? 'Syncing S3...' : 'Sync Recordings'}
+            {syncing ? 'Syncing...' : 'Sync Recordings'}
           </button>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '6px 14px', borderRadius: '20px', background: `${t.green}15`, border: `1px solid ${t.green}40` }}>
             <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: t.green, display: 'inline-block' }} />
@@ -311,15 +427,16 @@ export default function InboundBotTesting() {
       </div>
 
       {/* KPI Cards */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '14px', marginBottom: '24px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: '12px', marginBottom: '24px' }}>
         {[
           { label: 'Total Calls',     value: loading ? '—' : fmt(totalCalls),            color: t.gold,   size: '1.8rem' },
-          { label: 'Total Duration',  value: loading ? '—' : fmtDuration(totalDuration), color: t.text1,  size: '1.4rem' },
+          { label: 'Pending Review',  value: loading ? '—' : fmt(pendingCount),           color: t.orange, size: '1.8rem' },
+          { label: 'Total Duration',  value: loading ? '—' : fmtDuration(totalDuration), color: t.text1,  size: '1.3rem' },
           { label: 'Interested',      value: loading ? '—' : fmt(interestedCount),        color: t.green,  size: '1.8rem' },
           { label: 'Callbacks',       value: loading ? '—' : fmt(callbackCount),          color: t.blue,   size: '1.8rem' },
           { label: 'Conversion Rate', value: loading ? '—' : `${conversionRate}%`,        color: t.purple, size: '1.8rem' },
         ].map(item => (
-          <div key={item.label} style={{ ...s.card, textAlign: 'center', padding: '18px', marginBottom: 0 }}>
+          <div key={item.label} style={{ ...s.card, textAlign: 'center', padding: '16px', marginBottom: 0 }}>
             <div style={{ fontSize: item.size, fontWeight: 200, color: item.color, lineHeight: 1.1, marginBottom: '6px' }}>{item.value}</div>
             <div style={{ fontSize: '11px', color: t.text4, textTransform: 'uppercase', letterSpacing: '.1em' }}>{item.label}</div>
           </div>
@@ -334,7 +451,9 @@ export default function InboundBotTesting() {
             const count = calls.filter(c => c.outcome === key).length
             const pct   = totalCalls > 0 ? ((count / totalCalls) * 100).toFixed(0) : 0
             return (
-              <div key={key} style={{ flex: 1, minWidth: '120px', padding: '12px 16px', background: `${meta.color}10`, border: `1px solid ${meta.color}30`, borderRadius: '10px', textAlign: 'center' }}>
+              <div key={key}
+                onClick={() => setFilterOutcome(filterOutcome === key ? '' : key)}
+                style={{ flex: 1, minWidth: '110px', padding: '12px 16px', background: filterOutcome === key ? `${meta.color}20` : `${meta.color}10`, border: `1px solid ${filterOutcome === key ? meta.color : meta.color + '30'}`, borderRadius: '10px', textAlign: 'center', cursor: 'pointer', transition: 'all .15s' }}>
                 <div style={{ fontSize: '1.4rem', fontWeight: 300, color: meta.color }}>{count}</div>
                 <div style={{ fontSize: '11px', color: meta.color, fontWeight: 600, marginTop: '2px' }}>{meta.label}</div>
                 <div style={{ fontSize: '11px', color: t.text4, marginTop: '2px' }}>{pct}%</div>
@@ -346,13 +465,18 @@ export default function InboundBotTesting() {
 
       {/* Filters */}
       <div style={{ display: 'flex', gap: '10px', marginBottom: '16px', flexWrap: 'wrap', alignItems: 'center' }}>
-        <input style={{ ...s.input, width: '240px' }} placeholder="Search name, number, branch..." value={search} onChange={e => setSearch(e.target.value)} />
+        <input style={{ ...s.input, width: '220px' }} placeholder="Search name, number..." value={search} onChange={e => setSearch(e.target.value)} />
         <select style={s.select} value={filterOutcome} onChange={e => setFilterOutcome(e.target.value)}>
           {OUTCOMES.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
         </select>
-        <input type="date" style={s.select} value={filterDate} onChange={e => setFilterDate(e.target.value)} />
-        {(search || filterOutcome || filterDate) && (
-          <button style={s.btnOut} onClick={() => { setSearch(''); setFilterOutcome(''); setFilterDate('') }}>Clear</button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <span style={{ fontSize: '12px', color: t.text3 }}>From</span>
+          <input type="date" style={s.select} value={filterDateFrom} onChange={e => setFilterDateFrom(e.target.value)} />
+          <span style={{ fontSize: '12px', color: t.text3 }}>To</span>
+          <input type="date" style={s.select} value={filterDateTo} onChange={e => setFilterDateTo(e.target.value)} />
+        </div>
+        {(search || filterOutcome || filterDateFrom || filterDateTo) && (
+          <button style={s.btnOut} onClick={() => { setSearch(''); setFilterOutcome(''); setFilterDateFrom(''); setFilterDateTo('') }}>Clear</button>
         )}
         <div style={{ marginLeft: 'auto', fontSize: '12px', color: t.text3 }}>{filtered.length} calls</div>
       </div>
@@ -376,21 +500,28 @@ export default function InboundBotTesting() {
                   {calls.length === 0 ? 'No calls yet — click "Sync Recordings" to load from S3' : 'No calls match filters'}
                 </td></tr>
               ) : filtered.map(call => {
-                const meta = OUTCOME_META[call.outcome]
+                const meta    = OUTCOME_META[call.outcome]
+                const pending = !call.outcome || call.outcome === 'pending'
                 return (
                   <tr key={call.id}
                     onClick={() => handleOpenCall(call)}
-                    style={{ cursor: 'pointer', transition: 'background .1s' }}
+                    style={{ cursor: 'pointer', transition: 'background .1s', background: pending ? `${t.orange}05` : 'transparent' }}
                     onMouseEnter={e => e.currentTarget.style.background = `${t.gold}08`}
-                    onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                    onMouseLeave={e => e.currentTarget.style.background = pending ? `${t.orange}05` : 'transparent'}>
                     <td style={s.td}>{fmtDate(call.call_date)}</td>
                     <td style={{ ...s.td, color: t.text3 }}>{call.call_time?.slice(0,5) || '—'}</td>
-                    <td style={{ ...s.td, color: t.gold }}>{call.customer_number}</td>
+                    <td style={{ ...s.td, color: t.gold, fontWeight: 500 }}>
+                      {call.customer_name
+                        ? <span>{call.customer_name} <span style={{ color: t.text4, fontSize: '11px' }}>{call.customer_number}</span></span>
+                        : call.customer_number}
+                    </td>
                     <td style={{ ...s.td, color: t.text2, textTransform: 'capitalize' }}>{call.language || '—'}</td>
                     <td style={s.td}>{fmtDuration(call.duration_seconds)}</td>
                     <td style={s.td}>
                       {meta ? (
-                        <span style={{ fontSize: '11px', color: meta.color, background: `${meta.color}18`, border: `1px solid ${meta.color}40`, borderRadius: '4px', padding: '2px 8px', fontWeight: 600 }}>{meta.label}</span>
+                        <span style={{ fontSize: '11px', color: meta.color, background: `${meta.color}18`, border: `1px solid ${meta.color}40`, borderRadius: '4px', padding: '2px 8px', fontWeight: 600 }}>
+                          {pending && '● '}{meta.label}
+                        </span>
                       ) : <span style={{ fontSize: '11px', color: t.text4 }}>—</span>}
                     </td>
                     <td style={{ ...s.td, color: t.text3, maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis' }}>{call.outcome_notes || '—'}</td>
