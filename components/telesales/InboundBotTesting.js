@@ -10,15 +10,17 @@ const THEMES = {
 }
 
 const OUTCOMES = [
-  { value: '',              label: 'All Outcomes',    color: '' },
-  { value: 'interested',    label: 'Interested',      color: '#3aaa6a' },
-  { value: 'callback',      label: 'Callback',        color: '#3a8fbf' },
-  { value: 'not_interested',label: 'Not Interested',  color: '#e05555' },
-  { value: 'no_answer',     label: 'No Answer',       color: '#9a8a6a' },
-  { value: 'wrong_number',  label: 'Wrong Number',    color: '#c9981f' },
+  { value: '',               label: 'All Outcomes',   color: '' },
+  { value: 'pending',        label: 'Pending',        color: '#9a8a6a' },
+  { value: 'interested',     label: 'Interested',     color: '#3aaa6a' },
+  { value: 'callback',       label: 'Callback',       color: '#3a8fbf' },
+  { value: 'not_interested', label: 'Not Interested', color: '#e05555' },
+  { value: 'no_answer',      label: 'No Answer',      color: '#9a8a6a' },
+  { value: 'wrong_number',   label: 'Wrong Number',   color: '#c9981f' },
 ]
 
 const OUTCOME_META = {
+  pending:        { label: 'Pending',        color: '#9a8a6a' },
   interested:     { label: 'Interested',     color: '#3aaa6a' },
   callback:       { label: 'Callback',       color: '#3a8fbf' },
   not_interested: { label: 'Not Interested', color: '#e05555' },
@@ -30,32 +32,50 @@ const fmt         = (n) => n != null ? Number(n).toLocaleString('en-IN') : '—'
 const fmtDate     = (d) => d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'
 const fmtDuration = (s) => { if (!s) return '—'; const m = Math.floor(s / 60); const sec = s % 60; return `${m}:${String(sec).padStart(2, '0')}` }
 
-// Mock data for now — replace with real Supabase data once S3 is wired up
-const MOCK_CALLS = [
-  { id: '1', call_date: '2026-03-18', call_time: '10:23:00', customer_number: '9876543210', customer_name: 'Rajesh Kumar', branch_name: 'MYSURU', duration_seconds: 183, recording_url: null, transcript: null, outcome: 'interested', outcome_notes: 'Customer interested in selling 20g gold next week' },
-  { id: '2', call_date: '2026-03-18', call_time: '11:05:00', customer_number: '8765432109', customer_name: 'Priya Sharma', branch_name: 'HUBLI', duration_seconds: 67, recording_url: null, transcript: null, outcome: 'callback', outcome_notes: 'Call back on Monday 10 AM' },
-  { id: '3', call_date: '2026-03-18', call_time: '11:45:00', customer_number: '7654321098', customer_name: 'Mohammed Farhan', branch_name: 'AP-KAKINADA', duration_seconds: 42, recording_url: null, transcript: null, outcome: 'not_interested', outcome_notes: null },
-  { id: '4', call_date: '2026-03-18', call_time: '14:12:00', customer_number: '6543210987', customer_name: null, branch_name: 'MANGALORE', duration_seconds: 8, recording_url: null, transcript: null, outcome: 'no_answer', outcome_notes: null },
-  { id: '5', call_date: '2026-03-17', call_time: '09:30:00', customer_number: '9543210876', customer_name: 'Sunita Devi', branch_name: 'MYSURU', duration_seconds: 224, recording_url: null, transcript: null, outcome: 'interested', outcome_notes: 'Has 35g ornaments, visiting branch tomorrow' },
-  { id: '6', call_date: '2026-03-17', call_time: '10:15:00', customer_number: '8432109765', customer_name: 'Venkat Rao', branch_name: 'KL-KOCHI', duration_seconds: 156, recording_url: null, transcript: null, outcome: 'callback', outcome_notes: 'Wants to discuss rates first' },
-  { id: '7', call_date: '2026-03-17', call_time: '12:00:00', customer_number: '7321098654', customer_name: 'Lakshmi Bai', branch_name: 'HUBLI', duration_seconds: 95, recording_url: null, transcript: null, outcome: 'wrong_number', outcome_notes: null },
-  { id: '8', call_date: '2026-03-16', call_time: '15:30:00', customer_number: '9210987543', customer_name: 'Arjun Nair', branch_name: 'KL-THRISSUR', duration_seconds: 312, recording_url: null, transcript: null, outcome: 'interested', outcome_notes: 'High value customer — 80g+ gold' },
-]
-
 export default function InboundBotTesting() {
   const { theme } = useApp()
   const t = THEMES[theme]
 
-  const [calls, setCalls]           = useState(MOCK_CALLS)
-  const [loading, setLoading]       = useState(false)
-  const [search, setSearch]         = useState('')
+  const [calls, setCalls]                 = useState([])
+  const [loading, setLoading]             = useState(true)
+  const [syncing, setSyncing]             = useState(false)
+  const [syncResult, setSyncResult]       = useState(null)
+  const [search, setSearch]               = useState('')
   const [filterOutcome, setFilterOutcome] = useState('')
-  const [filterDate, setFilterDate] = useState('')
+  const [filterDate, setFilterDate]       = useState('')
   const [selectedCall, setSelectedCall]   = useState(null)
   const [transcribing, setTranscribing]   = useState(false)
   const [savingOutcome, setSavingOutcome] = useState(false)
   const [outcomeForm, setOutcomeForm]     = useState({ outcome: '', notes: '' })
   const audioRef = useRef(null)
+
+  useEffect(() => { fetchCalls() }, [])
+
+  async function fetchCalls() {
+    setLoading(true)
+    const { data, error } = await supabase
+      .from('telesales_calls')
+      .select('*')
+      .order('call_date', { ascending: false })
+      .order('call_time', { ascending: false })
+    if (!error) setCalls(data || [])
+    setLoading(false)
+  }
+
+  async function handleSync() {
+    setSyncing(true)
+    setSyncResult(null)
+    try {
+      const res  = await fetch('/api/sync-gnani', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) })
+      const data = await res.json()
+      setSyncResult(data)
+      if (data.inserted > 0) await fetchCalls()
+    } catch (err) {
+      setSyncResult({ success: false, error: err.message })
+    } finally {
+      setSyncing(false)
+    }
+  }
 
   // Stats
   const totalCalls      = calls.length
@@ -78,26 +98,44 @@ export default function InboundBotTesting() {
 
   const handleTranscribe = async () => {
     if (!selectedCall?.recording_url) {
-      alert('No recording available yet — recordings will appear once S3 is connected.')
+      alert('No recording available for this call.')
       return
     }
     setTranscribing(true)
-    // TODO: Call Claude API to transcribe once S3 is wired
-    await new Promise(r => setTimeout(r, 2000))
-    setTranscribing(false)
-    alert('Transcription will be available once recordings are connected from S3.')
+    try {
+      const res  = await fetch('/api/transcribe-call', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ callId: selectedCall.id, recordingUrl: selectedCall.recording_url }),
+      })
+      const data = await res.json()
+      if (data.transcript) {
+        const updated = calls.map(c => c.id === selectedCall.id ? { ...c, transcript: data.transcript } : c)
+        setCalls(updated)
+        setSelectedCall(prev => ({ ...prev, transcript: data.transcript }))
+      }
+    } catch (err) {
+      alert('Transcription failed: ' + err.message)
+    } finally {
+      setTranscribing(false)
+    }
   }
 
   const handleSaveOutcome = async () => {
     if (!outcomeForm.outcome) return
     setSavingOutcome(true)
-    // Update in Supabase (mock for now)
-    const updated = calls.map(c => c.id === selectedCall.id
-      ? { ...c, outcome: outcomeForm.outcome, outcome_notes: outcomeForm.notes }
-      : c
-    )
-    setCalls(updated)
-    setSelectedCall(prev => ({ ...prev, outcome: outcomeForm.outcome, outcome_notes: outcomeForm.notes }))
+    const { error } = await supabase
+      .from('telesales_calls')
+      .update({ outcome: outcomeForm.outcome, outcome_notes: outcomeForm.notes })
+      .eq('id', selectedCall.id)
+    if (!error) {
+      const updated = calls.map(c => c.id === selectedCall.id
+        ? { ...c, outcome: outcomeForm.outcome, outcome_notes: outcomeForm.notes }
+        : c
+      )
+      setCalls(updated)
+      setSelectedCall(prev => ({ ...prev, outcome: outcomeForm.outcome, outcome_notes: outcomeForm.notes }))
+    }
     setSavingOutcome(false)
   }
 
@@ -117,22 +155,19 @@ export default function InboundBotTesting() {
     const meta = OUTCOME_META[selectedCall.outcome] || null
     return (
       <div style={{ padding: '32px', maxWidth: '100%' }}>
-        {/* Header */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '24px' }}>
           <div>
             <button style={{ ...s.btnOut, marginBottom: '12px', fontSize: '12px' }} onClick={() => setSelectedCall(null)}>← Back</button>
             <div style={{ fontSize: '1.4rem', fontWeight: 300, color: t.text1 }}>{selectedCall.customer_name || selectedCall.customer_number}</div>
             <div style={{ fontSize: '12px', color: t.text3, marginTop: '4px' }}>
-              {fmtDate(selectedCall.call_date)} · {selectedCall.call_time?.slice(0,5)} · {fmtDuration(selectedCall.duration_seconds)} · {selectedCall.branch_name}
+              {fmtDate(selectedCall.call_date)} · {selectedCall.call_time?.slice(0,5)} · {fmtDuration(selectedCall.duration_seconds)} · {selectedCall.language || ''}
             </div>
           </div>
           {meta && <span style={{ fontSize: '12px', color: meta.color, background: `${meta.color}18`, border: `1px solid ${meta.color}40`, borderRadius: '6px', padding: '4px 12px', fontWeight: 600 }}>{meta.label}</span>}
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
-          {/* Left — Recording + Transcript */}
           <div>
-            {/* Audio Player */}
             <div style={{ ...s.card, marginBottom: '16px' }}>
               <div style={{ fontSize: '12px', color: t.text3, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 600, marginBottom: '16px' }}>Recording</div>
               {selectedCall.recording_url ? (
@@ -140,8 +175,7 @@ export default function InboundBotTesting() {
               ) : (
                 <div style={{ background: t.card2, border: `1px solid ${t.border}`, borderRadius: '10px', padding: '28px', textAlign: 'center' }}>
                   <div style={{ fontSize: '2rem', opacity: .2, marginBottom: '8px' }}>🎙</div>
-                  <div style={{ fontSize: '13px', color: t.text3, marginBottom: '4px' }}>Recording not available yet</div>
-                  <div style={{ fontSize: '11px', color: t.text4 }}>Will appear once S3 is connected</div>
+                  <div style={{ fontSize: '13px', color: t.text3, marginBottom: '4px' }}>Recording not available</div>
                 </div>
               )}
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginTop: '14px' }}>
@@ -150,7 +184,6 @@ export default function InboundBotTesting() {
               </div>
             </div>
 
-            {/* Transcript */}
             <div style={s.card}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
                 <div style={{ fontSize: '12px', color: t.text3, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 600 }}>Transcript</div>
@@ -171,12 +204,11 @@ export default function InboundBotTesting() {
             </div>
           </div>
 
-          {/* Right — Outcome + Notes */}
           <div>
             <div style={s.card}>
               <div style={{ fontSize: '12px', color: t.text3, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 600, marginBottom: '16px' }}>Call Outcome</div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '16px' }}>
-                {OUTCOMES.filter(o => o.value).map(o => (
+                {OUTCOMES.filter(o => o.value && o.value !== 'pending').map(o => (
                   <button key={o.value} onClick={() => setOutcomeForm(p => ({ ...p, outcome: o.value }))}
                     style={{
                       padding: '10px 12px', borderRadius: '8px', border: `1px solid ${outcomeForm.outcome === o.value ? o.color : t.border}`,
@@ -201,16 +233,16 @@ export default function InboundBotTesting() {
               </button>
             </div>
 
-            {/* Call Details */}
             <div style={s.card}>
               <div style={{ fontSize: '12px', color: t.text3, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 600, marginBottom: '16px' }}>Call Details</div>
               {[
                 { label: 'Customer',  value: selectedCall.customer_name || '—' },
                 { label: 'Number',    value: selectedCall.customer_number },
-                { label: 'Branch',    value: selectedCall.branch_name || '—' },
+                { label: 'Language',  value: selectedCall.language || '—' },
                 { label: 'Date',      value: fmtDate(selectedCall.call_date) },
                 { label: 'Time',      value: selectedCall.call_time?.slice(0,5) || '—' },
                 { label: 'Duration',  value: fmtDuration(selectedCall.duration_seconds) },
+                { label: 'Gnani ID',  value: selectedCall.gnani_call_id ? selectedCall.gnani_call_id.slice(0, 16) + '...' : '—' },
               ].map(item => (
                 <div key={item.label} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: `1px solid ${t.border}20` }}>
                   <span style={{ fontSize: '12px', color: t.text4 }}>{item.label}</span>
@@ -233,20 +265,37 @@ export default function InboundBotTesting() {
           <div style={{ fontSize: '1.6rem', fontWeight: 300, color: t.text1, letterSpacing: '.04em' }}>Inbound Bot Testing</div>
           <div style={{ fontSize: '12px', color: t.text3, marginTop: '4px' }}>Gnani AI call recordings · Listen, transcribe, and track outcomes</div>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '6px 14px', borderRadius: '20px', background: `${t.orange}15`, border: `1px solid ${t.orange}40` }}>
-          <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: t.orange, display: 'inline-block' }} />
-          <span style={{ fontSize: '12px', color: t.orange, fontWeight: 600 }}>S3 Not Connected</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          {/* Sync Result Toast */}
+          {syncResult && (
+            <div style={{ fontSize: '12px', color: syncResult.success ? t.green : t.red, background: syncResult.success ? `${t.green}15` : `${t.red}15`, border: `1px solid ${syncResult.success ? t.green : t.red}40`, borderRadius: '8px', padding: '6px 12px' }}>
+              {syncResult.success ? `✓ ${syncResult.message}` : `✗ ${syncResult.error}`}
+            </div>
+          )}
+          {/* Sync Button */}
+          <button
+            onClick={handleSync}
+            disabled={syncing}
+            style={{ ...s.btnGold, display: 'flex', alignItems: 'center', gap: '6px', opacity: syncing ? .7 : 1 }}>
+            <span style={{ fontSize: '14px' }}>{syncing ? '⟳' : '↓'}</span>
+            {syncing ? 'Syncing S3...' : 'Sync Recordings'}
+          </button>
+          {/* Status Badge */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '6px 14px', borderRadius: '20px', background: `${t.green}15`, border: `1px solid ${t.green}40` }}>
+            <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: t.green, display: 'inline-block' }} />
+            <span style={{ fontSize: '12px', color: t.green, fontWeight: 600 }}>S3 Connected</span>
+          </div>
         </div>
       </div>
 
       {/* KPI Cards */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '14px', marginBottom: '24px' }}>
         {[
-          { label: 'Total Calls',     value: fmt(totalCalls),                      color: t.gold,   size: '1.8rem' },
-          { label: 'Total Duration',  value: fmtDuration(totalDuration),           color: t.text1,  size: '1.4rem' },
-          { label: 'Interested',      value: fmt(interestedCount),                 color: t.green,  size: '1.8rem' },
-          { label: 'Callbacks',       value: fmt(callbackCount),                   color: t.blue,   size: '1.8rem' },
-          { label: 'Conversion Rate', value: `${conversionRate}%`,                 color: t.purple, size: '1.8rem' },
+          { label: 'Total Calls',     value: loading ? '—' : fmt(totalCalls),         color: t.gold,   size: '1.8rem' },
+          { label: 'Total Duration',  value: loading ? '—' : fmtDuration(totalDuration), color: t.text1,  size: '1.4rem' },
+          { label: 'Interested',      value: loading ? '—' : fmt(interestedCount),    color: t.green,  size: '1.8rem' },
+          { label: 'Callbacks',       value: loading ? '—' : fmt(callbackCount),      color: t.blue,   size: '1.8rem' },
+          { label: 'Conversion Rate', value: loading ? '—' : `${conversionRate}%`,    color: t.purple, size: '1.8rem' },
         ].map(item => (
           <div key={item.label} style={{ ...s.card, textAlign: 'center', padding: '18px', marginBottom: 0 }}>
             <div style={{ fontSize: item.size, fontWeight: 200, color: item.color, lineHeight: 1.1, marginBottom: '6px' }}>{item.value}</div>
@@ -255,11 +304,11 @@ export default function InboundBotTesting() {
         ))}
       </div>
 
-      {/* Outcome breakdown */}
+      {/* Outcome Breakdown */}
       <div style={{ ...s.card, marginBottom: '24px' }}>
         <div style={{ fontSize: '12px', color: t.text3, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 600, marginBottom: '14px' }}>Outcome Breakdown</div>
         <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-          {Object.entries(OUTCOME_META).map(([key, meta]) => {
+          {Object.entries(OUTCOME_META).filter(([k]) => k !== 'pending').map(([key, meta]) => {
             const count = calls.filter(c => c.outcome === key).length
             const pct   = totalCalls > 0 ? ((count / totalCalls) * 100).toFixed(0) : 0
             return (
@@ -287,44 +336,49 @@ export default function InboundBotTesting() {
       </div>
 
       {/* Table */}
-      <div style={{ overflowX: 'auto', borderRadius: '10px', border: `1px solid ${t.border}` }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-          <thead>
-            <tr>
-              {['Date', 'Time', 'Customer', 'Number', 'Branch', 'Duration', 'Outcome', 'Notes'].map(h => (
-                <th key={h} style={s.th}>{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.length === 0 ? (
-              <tr><td colSpan={8} style={{ ...s.td, textAlign: 'center', color: t.text4, padding: '48px' }}>No calls found</td></tr>
-            ) : filtered.map(call => {
-              const meta = OUTCOME_META[call.outcome]
-              return (
-                <tr key={call.id}
-                  onClick={() => handleOpenCall(call)}
-                  style={{ cursor: 'pointer', transition: 'background .1s' }}
-                  onMouseEnter={e => e.currentTarget.style.background = `${t.gold}08`}
-                  onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
-                  <td style={s.td}>{fmtDate(call.call_date)}</td>
-                  <td style={{ ...s.td, color: t.text3 }}>{call.call_time?.slice(0,5) || '—'}</td>
-                  <td style={{ ...s.td, color: t.text2, fontWeight: 500 }}>{call.customer_name || '—'}</td>
-                  <td style={{ ...s.td, color: t.gold }}>{call.customer_number}</td>
-                  <td style={{ ...s.td, color: t.text2 }}>{call.branch_name || '—'}</td>
-                  <td style={s.td}>{fmtDuration(call.duration_seconds)}</td>
-                  <td style={s.td}>
-                    {meta ? (
-                      <span style={{ fontSize: '11px', color: meta.color, background: `${meta.color}18`, border: `1px solid ${meta.color}40`, borderRadius: '4px', padding: '2px 8px', fontWeight: 600 }}>{meta.label}</span>
-                    ) : <span style={{ fontSize: '11px', color: t.text4 }}>—</span>}
-                  </td>
-                  <td style={{ ...s.td, color: t.text3, maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis' }}>{call.outcome_notes || '—'}</td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
-      </div>
+      {loading ? (
+        <div style={{ textAlign: 'center', padding: '60px', color: t.text4, fontSize: '13px' }}>Loading calls...</div>
+      ) : (
+        <div style={{ overflowX: 'auto', borderRadius: '10px', border: `1px solid ${t.border}` }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr>
+                {['Date', 'Time', 'Number', 'Language', 'Duration', 'Outcome', 'Notes'].map(h => (
+                  <th key={h} style={s.th}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.length === 0 ? (
+                <tr><td colSpan={7} style={{ ...s.td, textAlign: 'center', color: t.text4, padding: '48px' }}>
+                  {calls.length === 0 ? 'No calls yet — click "Sync Recordings" to load from S3' : 'No calls match filters'}
+                </td></tr>
+              ) : filtered.map(call => {
+                const meta = OUTCOME_META[call.outcome]
+                return (
+                  <tr key={call.id}
+                    onClick={() => handleOpenCall(call)}
+                    style={{ cursor: 'pointer', transition: 'background .1s' }}
+                    onMouseEnter={e => e.currentTarget.style.background = `${t.gold}08`}
+                    onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                    <td style={s.td}>{fmtDate(call.call_date)}</td>
+                    <td style={{ ...s.td, color: t.text3 }}>{call.call_time?.slice(0,5) || '—'}</td>
+                    <td style={{ ...s.td, color: t.gold }}>{call.customer_number}</td>
+                    <td style={{ ...s.td, color: t.text2, textTransform: 'capitalize' }}>{call.language || '—'}</td>
+                    <td style={s.td}>{fmtDuration(call.duration_seconds)}</td>
+                    <td style={s.td}>
+                      {meta ? (
+                        <span style={{ fontSize: '11px', color: meta.color, background: `${meta.color}18`, border: `1px solid ${meta.color}40`, borderRadius: '4px', padding: '2px 8px', fontWeight: 600 }}>{meta.label}</span>
+                      ) : <span style={{ fontSize: '11px', color: t.text4 }}>—</span>}
+                    </td>
+                    <td style={{ ...s.td, color: t.text3, maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis' }}>{call.outcome_notes || '—'}</td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   )
 }
