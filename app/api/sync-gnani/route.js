@@ -1,10 +1,11 @@
 import { createClient } from '@supabase/supabase-js'
 import { S3Client, GetObjectCommand, PutObjectCommand, ListObjectsV2Command } from '@aws-sdk/client-s3'
 import { pipeline } from 'stream/promises'
-import { createWriteStream, createReadStream, mkdirSync, rmSync, existsSync, readdirSync, statSync, readFileSync } from 'fs'
+import { createWriteStream, createReadStream, mkdirSync, rmSync, existsSync, readdirSync, statSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { extract } from 'tar'
+import { getAudioDurationInSeconds } from 'get-audio-duration'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
@@ -47,63 +48,11 @@ function parseFilename(filename) {
   } catch { return null }
 }
 
-// Get MP3 duration using Xing/Info VBR header (accurate) with CBR fallback
-function getMp3DurationFromBuffer(buffer) {
+// Duration extracted via get-audio-duration package
+async function getMp3Duration(filePath) {
   try {
-    let offset = 0
-
-    // Skip ID3v2 tag
-    if (buffer[0] === 0x49 && buffer[1] === 0x44 && buffer[2] === 0x33) {
-      const id3Size = ((buffer[6] & 0x7f) << 21) | ((buffer[7] & 0x7f) << 14) |
-                      ((buffer[8] & 0x7f) << 7)  |  (buffer[9] & 0x7f)
-      offset = id3Size + 10
-    }
-
-    // Find first MPEG sync frame
-    while (offset < buffer.length - 4) {
-      if (buffer[offset] === 0xff && (buffer[offset + 1] & 0xe0) === 0xe0) {
-        const b1 = buffer[offset + 1]
-        const b2 = buffer[offset + 2]
-
-        const versionBits  = (b1 >> 3) & 0x3  // 3=MPEG1
-        const bitrateIdx   = (b2 >> 4) & 0xf
-        const sampleIdx    = (b2 >> 2) & 0x3
-        const padding      = (b2 >> 1) & 0x1
-        const channelMode  = (buffer[offset + 3] >> 6) & 0x3  // 3=mono
-
-        if (bitrateIdx === 0 || bitrateIdx === 15 || sampleIdx === 3) { offset++; continue }
-
-        const bitratesV1L3 = [0,32,40,48,56,64,80,96,112,128,160,192,224,256,320]
-        const bitrate      = (bitratesV1L3[bitrateIdx] || 0) * 1000
-        const srTable      = { 3: [44100,48000,32000], 2: [22050,24000,16000], 0: [11025,12000,8000] }
-        const sampleRate   = (srTable[versionBits] || [44100,48000,32000])[sampleIdx]
-
-        if (!bitrate || !sampleRate) { offset++; continue }
-
-        const samplesPerFrame = versionBits === 3 ? 1152 : 576
-        // Xing header offset: after frame header (4 bytes) + side info (17 bytes stereo / 9 bytes mono)
-        const sideInfoSize = channelMode === 3 ? 9 : 17
-        const xingOffset   = offset + 4 + sideInfoSize
-
-        // Check for Xing or Info tag (VBR/CBR marker with total frame count)
-        if (xingOffset + 12 < buffer.length) {
-          const tag = buffer.slice(xingOffset, xingOffset + 4).toString('ascii')
-          if (tag === 'Xing' || tag === 'Info') {
-            const flags = buffer.readUInt32BE(xingOffset + 4)
-            if (flags & 0x1) {
-              const totalFrames = buffer.readUInt32BE(xingOffset + 8)
-              return Math.round((totalFrames * samplesPerFrame) / sampleRate)
-            }
-          }
-        }
-
-        // CBR fallback: file size / bitrate
-        if (bitrate > 0) return Math.round((buffer.length * 8) / bitrate)
-        break
-      }
-      offset++
-    }
-    return null
+    const secs = await getAudioDurationInSeconds(filePath)
+    return secs ? Math.round(secs) : null
   } catch { return null }
 }
 
@@ -204,7 +153,7 @@ export async function POST(req) {
             // Upload + read duration in parallel
             const [recordingUrl, duration_seconds] = await Promise.all([
               uploadToS3(item.mp3Path, s3RecKey),
-              Promise.resolve(getMp3DurationFromBuffer(readFileSync(item.mp3Path))),
+              getMp3Duration(item.mp3Path),
             ])
 
             return {
