@@ -28,7 +28,7 @@ const OUTCOME_META = {
   wrong_number:   { label: 'Wrong Number',   color: '#c9981f' },
 }
 
-const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2]
+const SPEEDS   = [0.5, 0.75, 1, 1.25, 1.5, 2]
 const PAGE_SIZE = 20
 
 const fmt         = (n) => n != null ? Number(n).toLocaleString('en-IN') : '—'
@@ -49,15 +49,14 @@ function exportToCSV(calls) {
   const headers = ['Date', 'Time', 'Number', 'Customer', 'Language', 'Duration (s)', 'Outcome', 'Notes', 'Summary']
   const rows = calls.map(c => [
     c.call_date, c.call_time?.slice(0,5), c.customer_number, c.customer_name || '',
-    c.language || '', c.duration_seconds || '', c.outcome || '', 
+    c.language || '', c.duration_seconds || '', c.outcome || '',
     (c.outcome_notes || '').replace(/,/g, ';'), (c.summary || '').replace(/,/g, ';'),
   ])
-  const csv = [headers, ...rows].map(r => r.join(',')).join('\n')
+  const csv  = [headers, ...rows].map(r => r.join(',')).join('\n')
   const blob = new Blob([csv], { type: 'text/csv' })
   const url  = URL.createObjectURL(blob)
   const a    = document.createElement('a')
-  a.href     = url
-  a.download = `inbound-calls-${new Date().toISOString().slice(0,10)}.csv`
+  a.href = url; a.download = `calls-${new Date().toISOString().slice(0,10)}.csv`
   document.body.appendChild(a); a.click(); document.body.removeChild(a)
   URL.revokeObjectURL(url)
 }
@@ -66,36 +65,40 @@ export default function InboundBotTesting() {
   const { theme } = useApp()
   const t = THEMES[theme]
 
-  const [calls, setCalls]                   = useState([])
-  const [loading, setLoading]               = useState(true)
-  const [syncing, setSyncing]               = useState(false)
-  const [syncResult, setSyncResult]         = useState(null)
-  const [lastSynced, setLastSynced]         = useState(null)
-  const [search, setSearch]                 = useState('')
-  const [filterOutcome, setFilterOutcome]   = useState('')
-  const [filterDateFrom, setFilterDateFrom] = useState('')
-  const [filterDateTo, setFilterDateTo]     = useState('')
-  const [page, setPage]                     = useState(1)
-  const [selectedCall, setSelectedCall]     = useState(null)
-  const [presignedUrl, setPresignedUrl]     = useState(null)
-  const [loadingAudio, setLoadingAudio]     = useState(false)
-  const [transcribing, setTranscribing]     = useState(false)
-  const [transcribeAllProgress, setTranscribeAllProgress] = useState(null) // {done, total}
-  const [translating, setTranslating]       = useState(false)
-  const [translated, setTranslated]         = useState(null)
-  const [summarizing, setSummarizing]       = useState(false)
-  const [savingOutcome, setSavingOutcome]   = useState(false)
-  const [outcomeForm, setOutcomeForm]       = useState({ outcome: '', notes: '' })
-  const [currentTime, setCurrentTime]       = useState(0)
-  const [audioDuration, setAudioDuration]   = useState(0)
-  const [isPlaying, setIsPlaying]           = useState(false)
-  const [playbackSpeed, setPlaybackSpeed]   = useState(1)
-  const [showSpeedMenu, setShowSpeedMenu]   = useState(false)
+  const [calls, setCalls]                         = useState([])
+  const [loading, setLoading]                     = useState(true)
+  const [syncing, setSyncing]                     = useState(false)
+  const [syncResult, setSyncResult]               = useState(null)
+  const [lastSynced, setLastSynced]               = useState(null)
+  const [search, setSearch]                       = useState('')
+  const [filterOutcome, setFilterOutcome]         = useState('')
+  const [filterDateFrom, setFilterDateFrom]       = useState('')
+  const [filterDateTo, setFilterDateTo]           = useState('')
+  const [page, setPage]                           = useState(1)
+  const [sortBy, setSortBy]                       = useState('call_date')
+  const [sortDir, setSortDir]                     = useState('desc')
+  const [selectedIds, setSelectedIds]             = useState(new Set())
+  const [bulkDownloading, setBulkDownloading]     = useState(false)
+  const [selectedCall, setSelectedCall]           = useState(null)
+  const [presignedUrl, setPresignedUrl]           = useState(null)
+  const [loadingAudio, setLoadingAudio]           = useState(false)
+  const [transcribing, setTranscribing]           = useState(false)
+  const [transcribeAllProgress, setTranscribeAllProgress] = useState(null)
+  const [translating, setTranslating]             = useState(false)
+  const [translated, setTranslated]               = useState(null)
+  const [summarizing, setSummarizing]             = useState(false)
+  const [savingOutcome, setSavingOutcome]         = useState(false)
+  const [outcomeForm, setOutcomeForm]             = useState({ outcome: '', notes: '' })
+  const [currentTime, setCurrentTime]             = useState(0)
+  const [audioDuration, setAudioDuration]         = useState(0)
+  const [isPlaying, setIsPlaying]                 = useState(false)
+  const [playbackSpeed, setPlaybackSpeed]         = useState(1)
+  const [showSpeedMenu, setShowSpeedMenu]         = useState(false)
   const audioRef = useRef(null)
 
   useEffect(() => { fetchCalls() }, [])
   useEffect(() => {
-    if (syncResult) { const t = setTimeout(() => setSyncResult(null), 5000); return () => clearTimeout(t) }
+    if (syncResult) { const timer = setTimeout(() => setSyncResult(null), 5000); return () => clearTimeout(timer) }
   }, [syncResult])
   useEffect(() => {
     if (audioRef.current && presignedUrl) { audioRef.current.src = presignedUrl; audioRef.current.load() }
@@ -126,8 +129,8 @@ export default function InboundBotTesting() {
   async function handleOpenCall(call) {
     setSelectedCall(call)
     setOutcomeForm({ outcome: call.outcome || '', notes: call.outcome_notes || '' })
-    setPresignedUrl(null); setCurrentTime(0); setAudioDuration(0); setIsPlaying(false)
-    setTranslated(null); setShowSpeedMenu(false)
+    setPresignedUrl(null); setCurrentTime(0); setAudioDuration(0)
+    setIsPlaying(false); setTranslated(null); setShowSpeedMenu(false)
     if (call.s3_key) {
       setLoadingAudio(true)
       try {
@@ -158,6 +161,43 @@ export default function InboundBotTesting() {
     else audioRef.current.play().catch(console.error)
   }
 
+  function handleSort(col) {
+    if (sortBy === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
+    else { setSortBy(col); setSortDir('desc') }
+  }
+
+  function toggleSelect(id, e) {
+    e.stopPropagation()
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  function toggleSelectAll() {
+    if (selectedIds.size === paginated.length && paginated.length > 0) setSelectedIds(new Set())
+    else setSelectedIds(new Set(paginated.map(c => c.id)))
+  }
+
+  async function handleBulkDownload() {
+    const ids = selectedIds.size > 0 ? [...selectedIds] : filtered.map(c => c.id)
+    if (!ids.length) return
+    setBulkDownloading(true)
+    try {
+      const res  = await fetch('/api/bulk-download-recordings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids }) })
+      if (!res.ok) throw new Error('Download failed')
+      const blob = await res.blob()
+      const url  = URL.createObjectURL(blob)
+      const a    = document.createElement('a')
+      a.href = url; a.download = `calls-${new Date().toISOString().slice(0,10)}.zip`
+      document.body.appendChild(a); a.click(); document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+    } catch (err) { alert('Bulk download failed: ' + err.message) }
+    finally { setBulkDownloading(false) }
+  }
+
   async function handleTranscribe() {
     if (!presignedUrl) { alert('Audio not loaded yet.'); return }
     setTranscribing(true)
@@ -166,9 +206,9 @@ export default function InboundBotTesting() {
       const data = await res.json()
       if (data.error) throw new Error(data.error)
       if (data.transcript) {
-        const updated = calls.map(c => c.id === selectedCall.id ? { ...c, transcript: data.transcript } : c)
+        const updated = calls.map(c => c.id === selectedCall.id ? { ...c, transcript: data.transcript, language: data.language || c.language, duration_seconds: data.duration_seconds || c.duration_seconds } : c)
         setCalls(updated)
-        setSelectedCall(prev => ({ ...prev, transcript: data.transcript }))
+        setSelectedCall(prev => ({ ...prev, transcript: data.transcript, language: data.language || prev.language, duration_seconds: data.duration_seconds || prev.duration_seconds }))
       }
     } catch (err) { alert('Transcription failed: ' + err.message) }
     finally { setTranscribing(false) }
@@ -181,14 +221,13 @@ export default function InboundBotTesting() {
     for (let i = 0; i < pending.length; i++) {
       const call = pending[i]
       try {
-        // Get presigned URL for this call
         const presignRes  = await fetch('/api/presign-recording', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ s3_key: call.s3_key }) })
         const presignData = await presignRes.json()
         if (!presignData.url) continue
         const res  = await fetch('/api/transcribe-call', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ callId: call.id, recordingUrl: presignData.url }) })
         const data = await res.json()
         if (data.transcript) {
-          setCalls(prev => prev.map(c => c.id === call.id ? { ...c, transcript: data.transcript } : c))
+          setCalls(prev => prev.map(c => c.id === call.id ? { ...c, transcript: data.transcript, language: data.language || c.language, duration_seconds: data.duration_seconds || c.duration_seconds } : c))
         }
       } catch (err) { console.error('Transcribe error for', call.id, err) }
       setTranscribeAllProgress({ done: i + 1, total: pending.length })
@@ -255,25 +294,32 @@ export default function InboundBotTesting() {
   }
 
   // Stats
-  const totalCalls      = calls.length
-  const pendingCount    = calls.filter(c => !c.outcome || c.outcome === 'pending').length
-  const totalDuration   = calls.reduce((s, c) => s + (c.duration_seconds || 0), 0)
-  const interestedCount = calls.filter(c => c.outcome === 'interested').length
-  const callbackCount   = calls.filter(c => c.outcome === 'callback').length
-  const conversionRate  = totalCalls > 0 ? ((interestedCount / totalCalls) * 100).toFixed(1) : 0
+  const totalCalls       = calls.length
+  const pendingCount     = calls.filter(c => !c.outcome || c.outcome === 'pending').length
+  const totalDuration    = calls.reduce((s, c) => s + (c.duration_seconds || 0), 0)
+  const interestedCount  = calls.filter(c => c.outcome === 'interested').length
+  const callbackCount    = calls.filter(c => c.outcome === 'callback').length
+  const conversionRate   = totalCalls > 0 ? ((interestedCount / totalCalls) * 100).toFixed(1) : 0
   const transcribedCount = calls.filter(c => c.transcript).length
 
   const filtered = calls.filter(c => {
-    const matchSearch  = !search || c.customer_number?.includes(search) || c.customer_name?.toLowerCase().includes(search.toLowerCase()) || c.branch_name?.toLowerCase().includes(search.toLowerCase())
+    const matchSearch  = !search || c.customer_number?.includes(search) || c.customer_name?.toLowerCase().includes(search.toLowerCase())
     const matchOutcome = !filterOutcome || c.outcome === filterOutcome
     const matchFrom    = !filterDateFrom || c.call_date >= filterDateFrom
     const matchTo      = !filterDateTo   || c.call_date <= filterDateTo
     return matchSearch && matchOutcome && matchFrom && matchTo
   })
 
-  const totalPages  = Math.ceil(filtered.length / PAGE_SIZE)
-  const paginated   = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
-  const pct         = audioDuration > 0 ? (currentTime / audioDuration) * 100 : 0
+  const sorted = [...filtered].sort((a, b) => {
+    let av, bv
+    if (sortBy === 'duration_seconds') { av = a.duration_seconds || 0; bv = b.duration_seconds || 0 }
+    else { av = (a.call_date || '') + (a.call_time || ''); bv = (b.call_date || '') + (b.call_time || '') }
+    return sortDir === 'asc' ? (av > bv ? 1 : -1) : (av < bv ? 1 : -1)
+  })
+
+  const totalPages = Math.ceil(sorted.length / PAGE_SIZE)
+  const paginated  = sorted.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
+  const audioPct   = audioDuration > 0 ? (currentTime / audioDuration) * 100 : 0
 
   const s = {
     card:    { background: t.card, border: `1px solid ${t.border}`, borderRadius: '12px', padding: '20px 24px', marginBottom: '16px' },
@@ -307,21 +353,19 @@ export default function InboundBotTesting() {
               if (audioRef.current) audioRef.current.pause()
               setSelectedCall(null); setPresignedUrl(null); setIsPlaying(false); setTranslated(null)
             }}>← Back</button>
-            <div style={{ fontSize: '1.4rem', fontWeight: 300, color: t.text1 }}>
-              {selectedCall.customer_name || selectedCall.customer_number}
-            </div>
+            <div style={{ fontSize: '1.4rem', fontWeight: 300, color: t.text1 }}>{selectedCall.customer_name || selectedCall.customer_number}</div>
             <div style={{ fontSize: '12px', color: t.text3, marginTop: '4px' }}>
               {fmtDate(selectedCall.call_date)} · {selectedCall.call_time?.slice(0,5)} · {selectedCall.language || ''}
               {selectedCall.duration_seconds && <span style={{ marginLeft: '8px', color: t.text4 }}>{fmtDuration(selectedCall.duration_seconds)}</span>}
             </div>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', justifyContent: 'flex-end', maxWidth: '50%' }}>
             {selectedCall.summary && (
-              <div style={{ maxWidth: '300px', fontSize: '12px', color: t.text3, background: `${t.gold}10`, border: `1px solid ${t.gold}25`, borderRadius: '8px', padding: '6px 12px', lineHeight: 1.5 }}>
+              <div style={{ fontSize: '12px', color: t.text3, background: `${t.gold}10`, border: `1px solid ${t.gold}25`, borderRadius: '8px', padding: '6px 12px', lineHeight: 1.5, maxWidth: '280px' }}>
                 {selectedCall.summary}
               </div>
             )}
-            {meta && <span style={{ fontSize: '12px', color: meta.color, background: `${meta.color}18`, border: `1px solid ${meta.color}40`, borderRadius: '6px', padding: '4px 12px', fontWeight: 600 }}>{meta.label}</span>}
+            {meta && <span style={{ fontSize: '12px', color: meta.color, background: `${meta.color}18`, border: `1px solid ${meta.color}40`, borderRadius: '6px', padding: '4px 12px', fontWeight: 600, whiteSpace: 'nowrap' }}>{meta.label}</span>}
           </div>
         </div>
 
@@ -334,23 +378,20 @@ export default function InboundBotTesting() {
                 <div style={{ fontSize: '12px', color: t.text3, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 600 }}>Recording</div>
                 <button onClick={handleDownloadAudio} style={{ ...s.btnOut, fontSize: '11px', padding: '4px 10px' }}>↓ MP3</button>
               </div>
-
               {loadingAudio ? (
                 <div style={{ background: t.card2, border: `1px solid ${t.border}`, borderRadius: '10px', padding: '28px', textAlign: 'center' }}>
                   <div style={{ fontSize: '13px', color: t.text3 }}>⟳ Loading audio...</div>
                 </div>
               ) : presignedUrl ? (
                 <div style={{ background: t.card2, border: `1px solid ${t.border}`, borderRadius: '12px', padding: '16px 20px' }}>
-                  {/* Progress bar */}
                   <div onClick={handleSeek} style={{ height: '5px', background: t.border2, borderRadius: '3px', cursor: 'pointer', marginBottom: '10px', position: 'relative' }}>
-                    <div style={{ width: `${pct}%`, height: '100%', background: t.gold, borderRadius: '3px' }} />
-                    <div style={{ position: 'absolute', top: '-5px', left: `${pct}%`, transform: 'translateX(-50%)', width: '14px', height: '14px', borderRadius: '50%', background: t.gold, border: `2px solid ${t.card2}`, boxShadow: `0 0 6px ${t.gold}80` }} />
+                    <div style={{ width: `${audioPct}%`, height: '100%', background: t.gold, borderRadius: '3px' }} />
+                    <div style={{ position: 'absolute', top: '-5px', left: `${audioPct}%`, transform: 'translateX(-50%)', width: '14px', height: '14px', borderRadius: '50%', background: t.gold, border: `2px solid ${t.card2}`, boxShadow: `0 0 6px ${t.gold}80` }} />
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: t.text3, marginBottom: '16px' }}>
                     <span>{fmtDuration(Math.floor(currentTime))}</span>
                     <span>{audioDuration > 0 ? fmtDuration(Math.floor(audioDuration)) : '—'}</span>
                   </div>
-                  {/* Controls */}
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '12px' }}>
                     <button onClick={() => skipTime(-10)} style={{ ...s.btnOut, padding: '7px 12px', fontSize: '12px', fontWeight: 600 }}>⟪ 10s</button>
                     <button onClick={togglePlay} style={{ background: t.gold, border: 'none', borderRadius: '50%', width: '48px', height: '48px', cursor: 'pointer', fontSize: '20px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#1a0a00', boxShadow: `0 4px 12px ${t.gold}40` }}>
@@ -358,7 +399,7 @@ export default function InboundBotTesting() {
                     </button>
                     <button onClick={() => skipTime(10)} style={{ ...s.btnOut, padding: '7px 12px', fontSize: '12px', fontWeight: 600 }}>10s ⟫</button>
                   </div>
-                  {/* Speed control */}
+                  {/* Speed */}
                   <div style={{ display: 'flex', justifyContent: 'center', marginTop: '12px', position: 'relative' }}>
                     <button onClick={() => setShowSpeedMenu(p => !p)}
                       style={{ ...s.btnOut, fontSize: '11px', padding: '4px 12px', color: playbackSpeed !== 1 ? t.gold : t.text3, borderColor: playbackSpeed !== 1 ? `${t.gold}60` : t.border }}>
@@ -389,14 +430,12 @@ export default function InboundBotTesting() {
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
                 <div style={{ fontSize: '12px', color: t.text3, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 600 }}>Transcript</div>
                 <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-                  <button style={{ ...s.btnOut, fontSize: '11px', padding: '5px 10px', color: transcribing ? t.text4 : t.blue, borderColor: `${t.blue}50` }}
-                    onClick={handleTranscribe} disabled={transcribing}>
+                  <button style={{ ...s.btnOut, fontSize: '11px', padding: '5px 10px', color: transcribing ? t.text4 : t.blue, borderColor: `${t.blue}50` }} onClick={handleTranscribe} disabled={transcribing}>
                     {transcribing ? '⟳ ...' : '✦ Transcribe'}
                   </button>
                   {selectedCall.transcript && (
                     <>
-                      <button style={{ ...s.btnOut, fontSize: '11px', padding: '5px 10px', color: summarizing ? t.text4 : t.orange, borderColor: `${t.orange}50` }}
-                        onClick={handleSummarize} disabled={summarizing}>
+                      <button style={{ ...s.btnOut, fontSize: '11px', padding: '5px 10px', color: summarizing ? t.text4 : t.orange, borderColor: `${t.orange}50` }} onClick={handleSummarize} disabled={summarizing}>
                         {summarizing ? '⟳ ...' : '✦ Summarize'}
                       </button>
                       <button style={{ ...s.btnOut, fontSize: '11px', padding: '5px 10px', color: translating ? t.text4 : t.green, borderColor: `${t.green}50` }}
@@ -407,13 +446,11 @@ export default function InboundBotTesting() {
                   )}
                 </div>
               </div>
-
               {transcribing && (
                 <div style={{ background: `${t.blue}10`, border: `1px solid ${t.blue}30`, borderRadius: '8px', padding: '10px 14px', marginBottom: '12px', fontSize: '12px', color: t.blue }}>
                   ⟳ Whisper AI transcribing... 10–30 seconds
                 </div>
               )}
-
               {(() => {
                 const displayTurns = translated || turns
                 if (displayTurns.length > 0) {
@@ -470,7 +507,6 @@ export default function InboundBotTesting() {
 
           {/* RIGHT */}
           <div>
-            {/* Outcome */}
             <div style={s.card}>
               <div style={{ fontSize: '12px', color: t.text3, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 600, marginBottom: '16px' }}>Call Outcome</div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '16px' }}>
@@ -484,8 +520,8 @@ export default function InboundBotTesting() {
               <div style={{ marginBottom: '16px' }}>
                 <label style={s.lbl}>Notes</label>
                 <textarea style={{ ...s.input, width: '100%', height: '90px', resize: 'vertical', fontFamily: 'inherit', boxSizing: 'border-box' }}
-                  placeholder="Add notes about this call..."
-                  value={outcomeForm.notes} onChange={e => setOutcomeForm(p => ({ ...p, notes: e.target.value }))} />
+                  placeholder="Add notes about this call..." value={outcomeForm.notes}
+                  onChange={e => setOutcomeForm(p => ({ ...p, notes: e.target.value }))} />
               </div>
               <button style={{ ...s.btnGold, width: '100%', opacity: (!outcomeForm.outcome || savingOutcome) ? .6 : 1 }}
                 onClick={handleSaveOutcome} disabled={savingOutcome || !outcomeForm.outcome}>
@@ -493,7 +529,6 @@ export default function InboundBotTesting() {
               </button>
             </div>
 
-            {/* Call Details */}
             <div style={s.card}>
               <div style={{ fontSize: '12px', color: t.text3, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 600, marginBottom: '16px' }}>Call Details</div>
               {[
@@ -527,6 +562,7 @@ export default function InboundBotTesting() {
           <div style={{ fontSize: '1.6rem', fontWeight: 300, color: t.text1, letterSpacing: '.04em' }}>Inbound Bot Testing</div>
           <div style={{ fontSize: '12px', color: t.text3, marginTop: '4px' }}>
             Gnani AI · {totalCalls} calls · {transcribedCount} transcribed
+            {selectedIds.size > 0 && <span style={{ marginLeft: '8px', color: t.gold }}>{selectedIds.size} selected</span>}
             {lastSynced && <span style={{ marginLeft: '10px', color: t.text4 }}>Synced {lastSynced.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</span>}
           </div>
         </div>
@@ -541,8 +577,10 @@ export default function InboundBotTesting() {
               ⟳ Transcribing {transcribeAllProgress.done}/{transcribeAllProgress.total}...
             </div>
           )}
-          <button onClick={() => exportToCSV(filtered)} style={{ ...s.btnOut, fontSize: '12px', display: 'flex', alignItems: 'center', gap: '5px' }}>
-            ↓ Export CSV
+          <button onClick={() => exportToCSV(filtered)} style={{ ...s.btnOut, fontSize: '12px' }}>↓ CSV</button>
+          <button onClick={handleBulkDownload} disabled={bulkDownloading}
+            style={{ ...s.btnOut, fontSize: '12px', color: t.orange, borderColor: `${t.orange}50`, opacity: bulkDownloading ? .6 : 1 }}>
+            {bulkDownloading ? '⟳ Zipping...' : selectedIds.size > 0 ? `↓ Audio (${selectedIds.size})` : '↓ All Audio'}
           </button>
           <button onClick={handleTranscribeAll} disabled={!!transcribeAllProgress}
             style={{ ...s.btnOut, fontSize: '12px', color: t.blue, borderColor: `${t.blue}50`, opacity: transcribeAllProgress ? .6 : 1 }}>
@@ -561,12 +599,12 @@ export default function InboundBotTesting() {
       {/* KPI Cards */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: '12px', marginBottom: '24px' }}>
         {[
-          { label: 'Total Calls',     value: loading ? '—' : fmt(totalCalls),             color: t.gold,   size: '1.8rem' },
-          { label: 'Pending Review',  value: loading ? '—' : fmt(pendingCount),            color: t.orange, size: '1.8rem' },
-          { label: 'Total Duration',  value: loading ? '—' : fmtDuration(totalDuration),  color: t.text1,  size: '1.3rem' },
-          { label: 'Interested',      value: loading ? '—' : fmt(interestedCount),         color: t.green,  size: '1.8rem' },
-          { label: 'Callbacks',       value: loading ? '—' : fmt(callbackCount),           color: t.blue,   size: '1.8rem' },
-          { label: 'Conversion Rate', value: loading ? '—' : `${conversionRate}%`,         color: t.purple, size: '1.8rem' },
+          { label: 'Total Calls',     value: loading ? '—' : fmt(totalCalls),            color: t.gold,   size: '1.8rem' },
+          { label: 'Pending Review',  value: loading ? '—' : fmt(pendingCount),           color: t.orange, size: '1.8rem' },
+          { label: 'Total Duration',  value: loading ? '—' : fmtDuration(totalDuration), color: t.text1,  size: '1.3rem' },
+          { label: 'Interested',      value: loading ? '—' : fmt(interestedCount),        color: t.green,  size: '1.8rem' },
+          { label: 'Callbacks',       value: loading ? '—' : fmt(callbackCount),          color: t.blue,   size: '1.8rem' },
+          { label: 'Conversion Rate', value: loading ? '—' : `${conversionRate}%`,        color: t.purple, size: '1.8rem' },
         ].map(item => (
           <div key={item.label} style={{ ...s.card, textAlign: 'center', padding: '16px', marginBottom: 0 }}>
             <div style={{ fontSize: item.size, fontWeight: 200, color: item.color, lineHeight: 1.1, marginBottom: '6px' }}>{item.value}</div>
@@ -613,7 +651,7 @@ export default function InboundBotTesting() {
         {(search || filterOutcome || filterDateFrom || filterDateTo) && (
           <button style={s.btnOut} onClick={() => { setSearch(''); setFilterOutcome(''); setFilterDateFrom(''); setFilterDateTo(''); setPage(1) }}>Clear</button>
         )}
-        <div style={{ marginLeft: 'auto', fontSize: '12px', color: t.text3 }}>{filtered.length} calls</div>
+        <div style={{ marginLeft: 'auto', fontSize: '12px', color: t.text3 }}>{sorted.length} calls{selectedIds.size > 0 ? ` · ${selectedIds.size} selected` : ''}</div>
       </div>
 
       {/* Table */}
@@ -625,24 +663,45 @@ export default function InboundBotTesting() {
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead>
                 <tr>
-                  {['Date', 'Time', 'Number', 'Language', 'Duration', 'Transcript', 'Outcome', 'Notes'].map(h => (
-                    <th key={h} style={s.th}>{h}</th>
+                  <th style={{ ...s.th, width: '40px' }}>
+                    <input type="checkbox" checked={selectedIds.size === paginated.length && paginated.length > 0}
+                      onChange={toggleSelectAll} style={{ cursor: 'pointer', accentColor: t.gold }} />
+                  </th>
+                  {[
+                    { label: 'Date',       col: 'call_date' },
+                    { label: 'Time',       col: null },
+                    { label: 'Number',     col: null },
+                    { label: 'Language',   col: null },
+                    { label: 'Duration',   col: 'duration_seconds' },
+                    { label: 'Transcript', col: null },
+                    { label: 'Outcome',    col: null },
+                    { label: 'Notes',      col: null },
+                  ].map(h => (
+                    <th key={h.label} style={{ ...s.th, cursor: h.col ? 'pointer' : 'default', userSelect: 'none' }}
+                      onClick={() => h.col && handleSort(h.col)}>
+                      {h.label}{h.col && sortBy === h.col ? (sortDir === 'asc' ? ' ↑' : ' ↓') : ''}
+                    </th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {paginated.length === 0 ? (
-                  <tr><td colSpan={8} style={{ ...s.td, textAlign: 'center', color: t.text4, padding: '48px' }}>
+                  <tr><td colSpan={9} style={{ ...s.td, textAlign: 'center', color: t.text4, padding: '48px' }}>
                     {calls.length === 0 ? 'No calls yet — click "Sync Recordings" to load from S3' : 'No calls match filters'}
                   </td></tr>
                 ) : paginated.map(call => {
                   const meta    = OUTCOME_META[call.outcome]
                   const pending = !call.outcome || call.outcome === 'pending'
+                  const sel     = selectedIds.has(call.id)
                   return (
-                    <tr key={call.id} onClick={() => handleOpenCall(call)}
-                      style={{ cursor: 'pointer', transition: 'background .1s', background: pending ? `${t.orange}06` : 'transparent' }}
+                    <tr key={call.id}
+                      onClick={() => handleOpenCall(call)}
+                      style={{ cursor: 'pointer', transition: 'background .1s', background: sel ? `${t.gold}10` : pending ? `${t.orange}06` : 'transparent' }}
                       onMouseEnter={e => e.currentTarget.style.background = `${t.gold}08`}
-                      onMouseLeave={e => e.currentTarget.style.background = pending ? `${t.orange}06` : 'transparent'}>
+                      onMouseLeave={e => e.currentTarget.style.background = sel ? `${t.gold}10` : pending ? `${t.orange}06` : 'transparent'}>
+                      <td style={{ ...s.td, width: '40px' }} onClick={e => toggleSelect(call.id, e)}>
+                        <input type="checkbox" checked={sel} onChange={() => {}} style={{ cursor: 'pointer', accentColor: t.gold }} />
+                      </td>
                       <td style={s.td}>{fmtDate(call.call_date)}</td>
                       <td style={{ ...s.td, color: t.text3 }}>{call.call_time?.slice(0,5) || '—'}</td>
                       <td style={{ ...s.td, color: t.gold, fontWeight: 500 }}>
@@ -656,8 +715,7 @@ export default function InboundBotTesting() {
                           : <span style={{ fontSize: '11px', color: t.text4 }}>—</span>}
                       </td>
                       <td style={s.td}>
-                        {meta
-                          ? <span style={{ fontSize: '11px', color: meta.color, background: `${meta.color}18`, border: `1px solid ${meta.color}40`, borderRadius: '4px', padding: '2px 8px', fontWeight: 600 }}>{pending && '● '}{meta.label}</span>
+                        {meta ? <span style={{ fontSize: '11px', color: meta.color, background: `${meta.color}18`, border: `1px solid ${meta.color}40`, borderRadius: '4px', padding: '2px 8px', fontWeight: 600 }}>{pending && '● '}{meta.label}</span>
                           : <span style={{ fontSize: '11px', color: t.text4 }}>—</span>}
                       </td>
                       <td style={{ ...s.td, color: t.text3, maxWidth: '180px', overflow: 'hidden', textOverflow: 'ellipsis' }}>{call.outcome_notes || call.summary || '—'}</td>
@@ -679,7 +737,7 @@ export default function InboundBotTesting() {
                 </button>
               ))}
               <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages} style={{ ...s.btnOut, padding: '6px 12px', fontSize: '12px', opacity: page === totalPages ? .4 : 1 }}>→</button>
-              <span style={{ fontSize: '12px', color: t.text4, marginLeft: '8px' }}>{filtered.length} total</span>
+              <span style={{ fontSize: '12px', color: t.text4, marginLeft: '8px' }}>{sorted.length} total</span>
             </div>
           )}
         </>

@@ -125,7 +125,10 @@ No explanation. Just JSON.`,
 
     const transcriptJson = JSON.stringify(merged)
 
-    // 7. Save transcript + detected language to Supabase
+    // duration from Whisper
+    const duration_seconds = segments.length > 0 ? Math.round(segments[segments.length - 1].end) : null
+
+    // Save transcript + detected language + duration to Supabase
     if (callId) {
       const { createClient } = await import('@supabase/supabase-js')
       const supabase = createClient(
@@ -133,11 +136,11 @@ No explanation. Just JSON.`,
         process.env.SUPABASE_SERVICE_ROLE_KEY
       )
       await supabase.from('telesales_calls')
-        .update({ transcript: transcriptJson, language: detectedLang })
+        .update({ transcript: transcriptJson, language: detectedLang, duration_seconds })
         .eq('id', callId)
     }
 
-    return Response.json({ transcript: transcriptJson, turns: merged, language: detectedLang })
+    return Response.json({ transcript: transcriptJson, turns: merged, language: detectedLang, duration_seconds })
 
   } catch (err) {
     console.error('Transcribe error:', err)
