@@ -4,10 +4,7 @@ import { pipeline } from 'stream/promises'
 import { createWriteStream, createReadStream, mkdirSync, rmSync, existsSync, readdirSync, statSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
-import { exec } from 'child_process'
-import { promisify } from 'util'
-
-const execAsync = promisify(exec)
+import tar from 'tar'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
@@ -24,7 +21,7 @@ const s3 = new S3Client({
 
 const BUCKET = 'whitegold-call-recordings'
 
-// Cross-platform recursive MP3 finder — no shell commands needed
+// Cross-platform recursive MP3 finder — pure Node.js, no shell
 function findMp3Files(dir) {
   const results = []
   const entries = readdirSync(dir)
@@ -48,10 +45,8 @@ function parseFilename(filename) {
   try {
     const gnani_call_id   = parts[2]
     const customer_number = parts[3]
-    const datePart        = parts[4]
-    const timePart        = parts[5]
-    const call_date       = datePart.replace(/_/g, '-')
-    const call_time       = timePart.replace(/_/g, ':')
+    const call_date       = parts[4].replace(/_/g, '-') // 2026-03-23
+    const call_time       = parts[5].replace(/_/g, ':') // 19:07:41
     return { gnani_call_id, customer_number, call_date, call_time }
   } catch {
     return null
@@ -93,12 +88,14 @@ export async function POST(req) {
     let tarKeys = []
 
     if (body?.Records) {
+      // S3 Event Notification webhook
       tarKeys = body.Records
         .filter(r => r.s3?.object?.key?.endsWith('.tar.gz'))
         .map(r => decodeURIComponent(r.s3.object.key.replace(/\+/g, ' ')))
     } else if (body?.key) {
       tarKeys = [body.key]
     } else {
+      // Manual sync button — scan entire bucket
       const lang = body?.language || null
       tarKeys = await listTarFiles(lang)
     }
@@ -121,9 +118,13 @@ export async function POST(req) {
       const localTar = join(tmpDir, 'recordings.tar.gz')
 
       try {
+        // 1. Download tar.gz from S3
         await downloadFromS3(tarKey, localTar)
-        await execAsync(`tar -xzf "${localTar}" -C "${tmpDir}"`)
 
+        // 2. Extract using npm 'tar' package — no shell, works on Vercel
+        await tar.extract({ file: localTar, cwd: tmpDir, strict: false })
+
+        // 3. Find all MP3 files recursively
         const mp3Files = findMp3Files(tmpDir)
 
         for (const mp3Path of mp3Files) {
@@ -135,6 +136,7 @@ export async function POST(req) {
             continue
           }
 
+          // Skip duplicates
           const { data: existing } = await supabase
             .from('telesales_calls')
             .select('id')
@@ -146,9 +148,11 @@ export async function POST(req) {
             continue
           }
 
+          // 4. Re-upload MP3 to recordings/ prefix in S3
           const s3RecKey     = `recordings/${language}/${datePath}/${filename}`
           const recordingUrl = await uploadToS3(mp3Path, s3RecKey)
 
+          // 5. Insert into Supabase
           const { error: insertErr } = await supabase
             .from('telesales_calls')
             .insert({
