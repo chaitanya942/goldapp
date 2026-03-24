@@ -195,22 +195,27 @@ export default function InboundBotTesting() {
 
 
   async function handleDownloadAudio() {
-    if (!presignedUrl) return
+    if (!selectedCall?.s3_key) return
     try {
-      const res  = await fetch(presignedUrl)
+      const filename = `call-${selectedCall.customer_number}-${selectedCall.call_date}.mp3`
+      const res  = await fetch('/api/download-recording', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ s3_key: selectedCall.s3_key, filename }),
+      })
+      if (!res.ok) throw new Error('Download failed')
       const blob = await res.blob()
       const url  = URL.createObjectURL(blob)
       const a    = document.createElement('a')
       a.href     = url
-      a.download = `call-${selectedCall.customer_number}-${selectedCall.call_date}.mp3`
+      a.download = filename
       document.body.appendChild(a)
       a.click()
       document.body.removeChild(a)
       URL.revokeObjectURL(url)
     } catch (err) {
       console.error('Download error:', err)
-      // Fallback: open in new tab
-      window.open(presignedUrl, '_blank')
+      alert('Download failed: ' + err.message)
     }
   }
 

@@ -1,23 +1,23 @@
 // app/api/transcribe-call/route.js
-// Step 1: Groq Whisper (free) for transcription with timestamps
-// Step 2: Claude to diarize — assign Bot vs Customer to each segment
+// Groq Whisper (free) + Claude Haiku diarization
+// Key insight: Bot ALWAYS speaks first, voice persona is consistent throughout
 
 export async function POST(req) {
   try {
     const { callId, recordingUrl } = await req.json()
     if (!recordingUrl) return Response.json({ error: 'Missing recordingUrl' }, { status: 400 })
 
-    // 1. Fetch audio from presigned S3 URL
+    // 1. Fetch audio
     const audioRes = await fetch(recordingUrl)
     if (!audioRes.ok) throw new Error('Failed to fetch audio from S3')
     const audioBuffer = await audioRes.arrayBuffer()
 
-    // 2. Groq Whisper — verbose_json gives segments with timestamps
+    // 2. Groq Whisper with verbose_json — gets segments with timestamps
     const formData = new FormData()
     formData.append('file', new Blob([audioBuffer], { type: 'audio/mpeg' }), 'recording.mp3')
     formData.append('model', 'whisper-large-v3')
     formData.append('response_format', 'verbose_json')
-    formData.append('language', 'kn') // Kannada hint
+    formData.append('language', 'kn')
 
     const groqRes = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
       method:  'POST',
@@ -25,24 +25,49 @@ export async function POST(req) {
       body:    formData,
     })
 
-    if (!groqRes.ok) {
-      const err = await groqRes.text()
-      throw new Error(`Groq error: ${err}`)
-    }
+    if (!groqRes.ok) throw new Error(`Groq error: ${await groqRes.text()}`)
 
     const groqData = await groqRes.json()
-    const segments  = groqData.segments || []
-    const fullText  = groqData.text || ''
+    const segments = groqData.segments || []
 
-    // 3. Build segment list with timestamps for Claude to diarize
-    // Each segment: { start, end, text }
-    const segmentList = segments
-      .map((s, i) => `[${i + 1}] ${s.text.trim()}`)
-      .join('\n')
+    if (segments.length === 0) {
+      return Response.json({ error: 'No speech detected in recording' }, { status: 400 })
+    }
 
-    // 4. Claude diarization — identify Bot vs Customer per segment
-    // Context: inbound bot call, Bot always speaks first (greeting), 
-    // Bot speaks formally in Kannada, Customer responds
+    // 3. Detect speaker turns using gap analysis
+    // Logic: significant pause (>0.8s) between segments = speaker switch
+    // Bot ALWAYS starts (segment 0 = Bot)
+    // After a gap, speaker switches. Bot's turns tend to be longer (formal speech)
+    const GAP_THRESHOLD = 0.8 // seconds
+
+    const segmentsWithGaps = segments.map((seg, i) => {
+      const prevSeg = segments[i - 1]
+      const gap     = prevSeg ? seg.start - prevSeg.end : 0
+      return { ...seg, gap, index: i }
+    })
+
+    // Build initial speaker assignment based on gaps
+    let currentSpeaker = 'Bot' // Bot ALWAYS first
+    const speakerMap   = {}
+
+    for (const seg of segmentsWithGaps) {
+      if (seg.index === 0) {
+        speakerMap[seg.index] = 'Bot'
+        continue
+      }
+      // Switch speaker on significant gap
+      if (seg.gap >= GAP_THRESHOLD) {
+        currentSpeaker = currentSpeaker === 'Bot' ? 'Customer' : 'Bot'
+      }
+      speakerMap[seg.index] = currentSpeaker
+    }
+
+    // 4. Claude Haiku — refine the assignment using content analysis
+    // Give Claude the gap-based assignments + text to correct any mistakes
+    const segmentList = segmentsWithGaps.map((s, i) =>
+      `[${i}] gap:${s.gap.toFixed(1)}s speaker:${speakerMap[i]} | ${s.text.trim()}`
+    ).join('\n')
+
     const claudeRes = await fetch('https://api.anthropic.com/v1/messages', {
       method:  'POST',
       headers: {
@@ -55,53 +80,41 @@ export async function POST(req) {
         max_tokens: 2000,
         messages: [{
           role:    'user',
-          content: `This is a transcript of an inbound call from a gold purchasing company's AI bot system.
+          content: `You are analyzing a call transcript from a gold purchasing company's AI bot system.
 
-CONTEXT:
-- This is an automated inbound bot (Gnani AI) that answers customer calls after 7 PM
-- The BOT always speaks FIRST with a greeting/welcome message
-- The BOT speaks formally, introduces itself, asks structured questions
-- The CUSTOMER responds to the bot's questions
-- Calls are in Kannada language
-- The bot and customer alternate turns
+CRITICAL RULES:
+1. Segment [0] is ALWAYS "Bot" — never change this
+2. The Bot's voice persona is CONSISTENT throughout — it speaks formally, uses polite Kannada, asks structured questions about gold selling/pledging
+3. The Customer responds informally, gives short answers about their gold quantity, intent, etc.
+4. I've already done gap-based speaker detection. Review and correct only obvious mistakes.
+5. Do NOT flip speakers just because of content — trust the gap analysis mostly
 
-Here are the transcript segments in order:
+Segments (gap = silence before this segment, initial speaker assignment shown):
 ${segmentList}
 
-For each segment number, assign either "Bot" or "Customer" as the speaker.
-Rules:
-1. Segment [1] is ALWAYS Bot (first greeting)
-2. Identify speaker switches based on conversation flow
-3. Bot asks questions, Customer answers
-4. Return ONLY a JSON array like: [{"id":1,"speaker":"Bot"},{"id":2,"speaker":"Customer"},...]
-Return only the JSON, no explanation.`,
+Return ONLY a JSON array: [{"id":0,"speaker":"Bot"},{"id":1,"speaker":"Customer"},...]
+No explanation. Just JSON.`,
         }],
       }),
     })
 
-    let diarized = []
+    let refined = []
     if (claudeRes.ok) {
       const claudeData = await claudeRes.json()
       const raw = claudeData.content?.[0]?.text || '[]'
       try {
-        diarized = JSON.parse(raw.replace(/```json|```/g, '').trim())
-      } catch {
-        diarized = []
-      }
+        refined = JSON.parse(raw.replace(/```json|```/g, '').trim())
+      } catch { refined = [] }
     }
 
-    // 5. Build final transcript as JSON array of turns
+    // 5. Build final turns — use Claude refinement if available, else gap-based
     const turns = segments.map((seg, i) => {
-      const assignment = diarized.find(d => d.id === i + 1)
-      return {
-        speaker: assignment?.speaker || (i % 2 === 0 ? 'Bot' : 'Customer'),
-        text:    seg.text.trim(),
-        start:   seg.start,
-        end:     seg.end,
-      }
+      const claudeAssign = refined.find(r => r.id === i)
+      const speaker      = claudeAssign?.speaker || speakerMap[i] || (i === 0 ? 'Bot' : 'Customer')
+      return { speaker, text: seg.text.trim(), start: seg.start, end: seg.end }
     })
 
-    // Merge consecutive same-speaker turns
+    // 6. Merge consecutive same-speaker segments
     const merged = []
     for (const turn of turns) {
       const last = merged[merged.length - 1]
@@ -113,9 +126,9 @@ Return only the JSON, no explanation.`,
       }
     }
 
-    // Store as JSON string in Supabase
     const transcriptJson = JSON.stringify(merged)
 
+    // 7. Save to Supabase
     if (callId) {
       const { createClient } = await import('@supabase/supabase-js')
       const supabase = createClient(
