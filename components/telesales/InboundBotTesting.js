@@ -107,6 +107,19 @@ export default function InboundBotTesting() {
     if (audioRef.current) audioRef.current.playbackRate = playbackSpeed
   }, [playbackSpeed])
 
+  // Save accurate duration from audio player back to Supabase
+  async function handleAudioDurationLoaded(duration) {
+    const rounded = Math.round(duration)
+    setAudioDuration(duration)
+    if (!selectedCall || !rounded) return
+    // Only update if duration is missing or significantly different (>5s off)
+    if (!selectedCall.duration_seconds || Math.abs(selectedCall.duration_seconds - rounded) > 5) {
+      await supabase.from('telesales_calls').update({ duration_seconds: rounded }).eq('id', selectedCall.id)
+      setCalls(prev => prev.map(c => c.id === selectedCall.id ? { ...c, duration_seconds: rounded } : c))
+      setSelectedCall(prev => ({ ...prev, duration_seconds: rounded }))
+    }
+  }
+
   async function fetchCalls() {
     setLoading(true)
     const { data, error } = await supabase.from('telesales_calls').select('*')
@@ -341,7 +354,7 @@ export default function InboundBotTesting() {
       <div style={{ padding: '32px', maxWidth: '100%' }}>
         <audio ref={audioRef}
           onTimeUpdate={() => audioRef.current && setCurrentTime(audioRef.current.currentTime)}
-          onLoadedMetadata={() => audioRef.current && setAudioDuration(audioRef.current.duration)}
+          onLoadedMetadata={() => audioRef.current && handleAudioDurationLoaded(audioRef.current.duration)}
           onPlay={() => setIsPlaying(true)} onPause={() => setIsPlaying(false)}
           onEnded={() => { setIsPlaying(false); setCurrentTime(0) }}
           style={{ display: 'none' }} />
