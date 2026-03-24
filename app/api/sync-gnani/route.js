@@ -150,12 +150,11 @@ export async function POST(req) {
 
         if (!toInsert.length) continue
 
-        // Process all new files in parallel — upload + read duration simultaneously
+        // Process all new files in parallel
         const results = await Promise.all(toInsert.map(async (item) => {
           try {
-            const s3RecKey = `recordings/${pathParts[0]}/${datePath}/${item.filename}`
-
-            // Upload + read duration in parallel
+            const s3RecKey  = `recordings/${pathParts[0]}/${datePath}/${item.filename}`
+            const gnaniMeta = metadataMap[item.gnani_call_id] || {}
             const recordingUrl     = await uploadToS3(item.mp3Path, s3RecKey)
             const duration_seconds = gnaniMeta.call_duration ? Math.round(gnaniMeta.call_duration) : null
 
