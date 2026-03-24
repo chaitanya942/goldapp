@@ -156,10 +156,8 @@ export async function POST(req) {
             const s3RecKey = `recordings/${pathParts[0]}/${datePath}/${item.filename}`
 
             // Upload + read duration in parallel
-            const [recordingUrl, duration_seconds] = await Promise.all([
-              uploadToS3(item.mp3Path, s3RecKey),
-              getMp3Duration(item.mp3Path),
-            ])
+            const recordingUrl     = await uploadToS3(item.mp3Path, s3RecKey)
+            const duration_seconds = gnaniMeta.call_duration ? Math.round(gnaniMeta.call_duration) : null
 
             return {
               gnani_call_id:      item.gnani_call_id,
