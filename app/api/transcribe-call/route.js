@@ -1,6 +1,5 @@
 // app/api/transcribe-call/route.js
-// Groq Whisper (free) + Claude Haiku diarization
-// Key insight: Bot ALWAYS speaks first, voice persona is consistent throughout
+// Groq Whisper (free) + Claude Haiku diarization (~₹0.0001 per call)
 
 export async function POST(req) {
   try {
@@ -12,7 +11,7 @@ export async function POST(req) {
     if (!audioRes.ok) throw new Error('Failed to fetch audio from S3')
     const audioBuffer = await audioRes.arrayBuffer()
 
-    // 2. Groq Whisper with verbose_json — gets segments with timestamps
+    // 2. Groq Whisper verbose_json — segments with timestamps
     const formData = new FormData()
     formData.append('file', new Blob([audioBuffer], { type: 'audio/mpeg' }), 'recording.mp3')
     formData.append('model', 'whisper-large-v3')
@@ -34,38 +33,19 @@ export async function POST(req) {
       return Response.json({ error: 'No speech detected in recording' }, { status: 400 })
     }
 
-    // 3. Detect speaker turns using gap analysis
-    // Logic: significant pause (>0.8s) between segments = speaker switch
-    // Bot ALWAYS starts (segment 0 = Bot)
-    // After a gap, speaker switches. Bot's turns tend to be longer (formal speech)
-    const GAP_THRESHOLD = 0.8 // seconds
+    // 3. Annotate segments with duration + gap
+    const annotated = segments.map((seg, i) => ({
+      id:       i,
+      text:     seg.text.trim(),
+      start:    seg.start,
+      end:      seg.end,
+      duration: parseFloat((seg.end - seg.start).toFixed(2)),
+      gap:      i > 0 ? parseFloat((seg.start - segments[i - 1].end).toFixed(2)) : 0,
+    }))
 
-    const segmentsWithGaps = segments.map((seg, i) => {
-      const prevSeg = segments[i - 1]
-      const gap     = prevSeg ? seg.start - prevSeg.end : 0
-      return { ...seg, gap, index: i }
-    })
-
-    // Build initial speaker assignment based on gaps
-    let currentSpeaker = 'Bot' // Bot ALWAYS first
-    const speakerMap   = {}
-
-    for (const seg of segmentsWithGaps) {
-      if (seg.index === 0) {
-        speakerMap[seg.index] = 'Bot'
-        continue
-      }
-      // Switch speaker on significant gap
-      if (seg.gap >= GAP_THRESHOLD) {
-        currentSpeaker = currentSpeaker === 'Bot' ? 'Customer' : 'Bot'
-      }
-      speakerMap[seg.index] = currentSpeaker
-    }
-
-    // 4. Claude Haiku — refine the assignment using content analysis
-    // Give Claude the gap-based assignments + text to correct any mistakes
-    const segmentList = segmentsWithGaps.map((s, i) =>
-      `[${i}] gap:${s.gap.toFixed(1)}s speaker:${speakerMap[i]} | ${s.text.trim()}`
+    // 4. Claude Haiku diarization with full context
+    const segmentList = annotated.map(s =>
+      `[${s.id}] dur:${s.duration}s gap:${s.gap}s | ${s.text}`
     ).join('\n')
 
     const claudeRes = await fetch('https://api.anthropic.com/v1/messages', {
@@ -77,44 +57,65 @@ export async function POST(req) {
       },
       body: JSON.stringify({
         model:      'claude-haiku-4-5-20251001',
-        max_tokens: 2000,
+        max_tokens: 1000,
         messages: [{
           role:    'user',
-          content: `You are analyzing a call transcript from a gold purchasing company's AI bot system.
+          content: `You are diarizing a call transcript from White Gold's AI inbound bot (Gnani AI) in Kannada.
 
-CRITICAL RULES:
-1. Segment [0] is ALWAYS "Bot" — never change this
-2. The Bot's voice persona is CONSISTENT throughout — it speaks formally, uses polite Kannada, asks structured questions about gold selling/pledging
-3. The Customer responds informally, gives short answers about their gold quantity, intent, etc.
-4. I've already done gap-based speaker detection. Review and correct only obvious mistakes.
-5. Do NOT flip speakers just because of content — trust the gap analysis mostly
+FACTS ABOUT THIS CALL:
+- This is an AUTOMATED BOT calling customers who called after 7 PM
+- The BOT has a fixed voice persona — it ALWAYS speaks first (segment [0] is ALWAYS Bot)
+- The BOT speaks in long, formal Kannada sentences — welcomes, asks structured questions about gold (sell/pledge/release)
+- The CUSTOMER gives short informal replies — yes/no, quantities, names
+- They strictly alternate: Bot asks → Customer replies → Bot follows up → Customer replies
+- Large gaps (>1s) almost always indicate a speaker switch
+- Short gaps (<0.3s) are breathing pauses — same speaker continuing
 
-Segments (gap = silence before this segment, initial speaker assignment shown):
+Each segment shows: duration in seconds, gap before it, and text.
+
+Segments:
 ${segmentList}
 
-Return ONLY a JSON array: [{"id":0,"speaker":"Bot"},{"id":1,"speaker":"Customer"},...]
-No explanation. Just JSON.`,
+Assign Bot or Customer to each segment ID.
+Return ONLY JSON array: [{"id":0,"speaker":"Bot"},{"id":1,"speaker":"Customer"},...]`,
         }],
       }),
     })
 
-    let refined = []
+    let diarized = []
     if (claudeRes.ok) {
       const claudeData = await claudeRes.json()
       const raw = claudeData.content?.[0]?.text || '[]'
       try {
-        refined = JSON.parse(raw.replace(/```json|```/g, '').trim())
-      } catch { refined = [] }
+        diarized = JSON.parse(raw.replace(/```json|```/g, '').trim())
+      } catch { diarized = [] }
     }
 
-    // 5. Build final turns — use Claude refinement if available, else gap-based
-    const turns = segments.map((seg, i) => {
-      const claudeAssign = refined.find(r => r.id === i)
-      const speaker      = claudeAssign?.speaker || speakerMap[i] || (i === 0 ? 'Bot' : 'Customer')
-      return { speaker, text: seg.text.trim(), start: seg.start, end: seg.end }
+    // 5. Build turns — Claude assignment, fallback to alternating with gap detection
+    let currentSpeaker = 'Bot'
+    const turns = annotated.map((seg, i) => {
+      const claudeAssign = diarized.find(d => d.id === i)
+      let speaker
+
+      if (claudeAssign) {
+        speaker = claudeAssign.speaker
+      } else {
+        // Fallback gap-based
+        if (i === 0) speaker = 'Bot'
+        else {
+          if (seg.gap >= 0.6) currentSpeaker = currentSpeaker === 'Bot' ? 'Customer' : 'Bot'
+          speaker = currentSpeaker
+        }
+      }
+
+      // Hard rule: segment 0 is ALWAYS Bot
+      if (i === 0) speaker = 'Bot'
+      currentSpeaker = speaker
+
+      return { speaker, text: seg.text, start: seg.start, end: seg.end }
     })
 
-    // 6. Merge consecutive same-speaker segments
+    // 6. Merge consecutive same-speaker turns
     const merged = []
     for (const turn of turns) {
       const last = merged[merged.length - 1]
