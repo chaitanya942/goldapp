@@ -21,6 +21,8 @@ const s3 = new S3Client({
 
 const BUCKET = 'whitegold-call-recordings'
 
+// --- HELPER FUNCTIONS ---
+
 function findMp3Files(dir) {
   const results = []
   const entries = readdirSync(dir)
@@ -46,7 +48,7 @@ function findMetadataJson(dir) {
 }
 
 function parseFilename(filename) {
-  const base  = filename.replace(/\.mp3$/i, '')
+  const base = filename.replace(/\.mp3$/i, '')
   const parts = base.split('-')
   if (parts.length < 6) return null
   try {
@@ -59,10 +61,8 @@ function parseFilename(filename) {
   } catch { return null }
 }
 
-
-
 function fmtLanguage(lang) {
-  if (!lang) return 'unknown'
+  if (!lang) return 'Unknown'
   return lang.charAt(0).toUpperCase() + lang.slice(1).toLowerCase()
 }
 
@@ -86,8 +86,8 @@ async function listTarFiles(language = null) {
   return Contents.filter(obj => obj.Key.endsWith('.tar.gz')).map(obj => obj.Key)
 }
 
-// Check which gnani_call_ids already exist in bulk — avoids N+1 queries
 async function getExistingIds(gnaniIds) {
+  if (!gnaniIds.length) return new Set()
   const { data } = await supabase
     .from('telesales_calls')
     .select('gnani_call_id')
@@ -95,11 +95,14 @@ async function getExistingIds(gnaniIds) {
   return new Set((data || []).map(r => r.gnani_call_id))
 }
 
+// --- MAIN HANDLER ---
+
 export async function POST(req) {
   try {
     const body = await req.json().catch(() => ({}))
-
     let tarKeys = []
+
+    // 1. Determine which keys to process
     if (body?.Records) {
       tarKeys = body.Records
         .filter(r => r.s3?.object?.key?.endsWith('.tar.gz'))
@@ -123,7 +126,7 @@ export async function POST(req) {
       const language  = fmtLanguage(pathParts[0])
       const datePath  = `${pathParts[1]}/${pathParts[2]}/${pathParts[3]}`
 
-      const tmpDir   = join(tmpdir(), `gnani_${Date.now()}`)
+      const tmpDir = join(tmpdir(), `gnani_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`)
       mkdirSync(tmpDir, { recursive: true })
       const localTar = join(tmpDir, 'recordings.tar.gz')
 
@@ -131,31 +134,50 @@ export async function POST(req) {
         await downloadFromS3(tarKey, localTar)
         await extract({ file: localTar, cwd: tmpDir, strict: false })
 
-        const mp3Files = findMp3Files(tmpDir)
-        if (!mp3Files.length) continue
+        // FIX 1: Correctly load and map metadata.json
+        const metadataPath = findMetadataJson(tmpDir)
+        let metadataMap = {}
+        if (metadataPath) {
+          try {
+            const rawData = JSON.parse(readFileSync(metadataPath, 'utf8'))
+            // Handle if metadata is an array or a single object
+            const metaArray = Array.isArray(rawData) ? rawData : [rawData]
+            metaArray.forEach(m => {
+              if (m.gnani_call_id) metadataMap[m.gnani_call_id] = m
+            })
+          } catch (e) {
+            console.error(`Error parsing metadata.json in ${tarKey}:`, e)
+          }
+        }
 
-        // Parse all filenames first
+        const mp3Files = findMp3Files(tmpDir)
+        if (!mp3Files.length) {
+           console.log(`No MP3s found in ${tarKey}`)
+           continue
+        }
+
         const parsed = mp3Files.map(mp3Path => {
           const filename = mp3Path.split(/[\\/]/).pop()
           const meta     = parseFilename(filename)
           return meta ? { mp3Path, filename, ...meta } : null
         }).filter(Boolean)
 
-        // Bulk check which IDs already exist — single query instead of N queries
-        const allIds     = parsed.map(p => p.gnani_call_id)
+        // 2. Filter out what's already in Supabase
+        const allIds      = parsed.map(p => p.gnani_call_id)
         const existingIds = await getExistingIds(allIds)
-
-        const toInsert = parsed.filter(p => !existingIds.has(p.gnani_call_id))
-        totalSkipped  += parsed.length - toInsert.length
+        const toInsert    = parsed.filter(p => !existingIds.has(p.gnani_call_id))
+        
+        totalSkipped += (parsed.length - toInsert.length)
 
         if (!toInsert.length) continue
 
-        // Process all new files in parallel
+        // 3. Process new files
         const results = await Promise.all(toInsert.map(async (item) => {
           try {
             const s3RecKey  = `recordings/${pathParts[0]}/${datePath}/${item.filename}`
             const gnaniMeta = metadataMap[item.gnani_call_id] || {}
-            const recordingUrl     = await uploadToS3(item.mp3Path, s3RecKey)
+            
+            const recordingUrl = await uploadToS3(item.mp3Path, s3RecKey)
             const duration_seconds = gnaniMeta.call_duration ? Math.round(gnaniMeta.call_duration) : null
 
             return {
@@ -163,7 +185,7 @@ export async function POST(req) {
               customer_number:    item.customer_number,
               call_date:          item.call_date,
               call_time:          item.call_time,
-              language:           gnaniMeta.language ? gnaniMeta.language.charAt(0).toUpperCase() + gnaniMeta.language.slice(1).toLowerCase() : language,
+              language:           gnaniMeta.language ? fmtLanguage(gnaniMeta.language) : language,
               duration_seconds,
               customer_name:      gnaniMeta.customer_name || null,
               call_disposition:   gnaniMeta.call_disposition || null,
@@ -181,14 +203,14 @@ export async function POST(req) {
 
         const validRows = results.filter(Boolean)
 
-        // Bulk insert all rows at once — single query instead of N queries
+        // 4. Final Insert
         if (validRows.length > 0) {
           const { error: insertErr } = await supabase
             .from('telesales_calls')
             .insert(validRows)
 
           if (insertErr) {
-            // Fallback to individual inserts if bulk fails
+            console.error('Bulk insert error, trying individual:', insertErr)
             for (const row of validRows) {
               const { error: e } = await supabase.from('telesales_calls').insert(row)
               if (e) errors.push(`Insert failed: ${e.message}`)
@@ -199,6 +221,9 @@ export async function POST(req) {
           }
         }
 
+      } catch (err) {
+        console.error(`Error processing tarKey ${tarKey}:`, err)
+        errors.push(`Tar error ${tarKey}: ${err.message}`)
       } finally {
         if (existsSync(tmpDir)) rmSync(tmpDir, { recursive: true, force: true })
       }
@@ -213,7 +238,7 @@ export async function POST(req) {
     })
 
   } catch (err) {
-    console.error('Gnani sync error:', err)
+    console.error('Gnani sync root error:', err)
     return Response.json({ success: false, error: err.message }, { status: 500 })
   }
 }
