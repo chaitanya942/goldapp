@@ -397,39 +397,49 @@ export default function InboundBotTesting() {
                 </div>
               )}
 
-              {(() => { const displayTurns = translated || turns; return displayTurns.length > 0 ? (
-                <div style={{ maxHeight: '360px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '10px', paddingRight: '4px' }}>
-                  {displayTurns.map((turn, i) => {
-                    const isBot = turn.speaker === 'Bot'
-                    return (
-                      <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: isBot ? 'flex-start' : 'flex-end' }}>
-                        <div style={{ fontSize: '10px', color: t.text4, marginBottom: '3px', letterSpacing: '.08em', textTransform: 'uppercase', paddingLeft: isBot ? '4px' : '0', paddingRight: isBot ? '0' : '4px' }}>
-                          {isBot ? '🤖 Bot' : '👤 Customer'}
-                        </div>
-                        <div style={{
-                          maxWidth: '85%', padding: '8px 14px', borderRadius: isBot ? '4px 12px 12px 12px' : '12px 4px 12px 12px',
-                          background: isBot ? `${t.blue}15` : `${t.gold}12`,
-                          border: `1px solid ${isBot ? t.blue + '25' : t.gold + '25'}`,
-                          fontSize: '13px', color: t.text1, lineHeight: 1.6,
-                        }}>
-                          {turn.text}
-                        </div>
-                      </div>
-                    )
-                  })}
-                </div>
-              ) : null })()}
-              {!translated && !turns.length && selectedCall.transcript ? (
-                // Fallback: show as plain text if parsing returns nothing
-                <div style={{ fontSize: '13px', color: t.text2, lineHeight: 1.9, maxHeight: '360px', overflowY: 'auto' }}>
-                  {selectedCall.transcript}
-                </div>
-              ) : (
-                <div style={{ background: t.card2, border: `1px solid ${t.border}`, borderRadius: '8px', padding: '24px', textAlign: 'center' }}>
-                  <div style={{ fontSize: '13px', color: t.text3, marginBottom: '4px' }}>No transcript yet</div>
-                  <div style={{ fontSize: '11px', color: t.text4 }}>Free Whisper AI — supports Kannada, Telugu, Malayalam, Hindi</div>
-                </div>
-              )}
+              {(() => {
+                const displayTurns = translated || turns
+                if (displayTurns.length > 0) {
+                  return (
+                    <div style={{ maxHeight: '400px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '10px', paddingRight: '4px' }}>
+                      {displayTurns.map((turn, i) => {
+                        const isBot = turn.speaker === 'Bot'
+                        return (
+                          <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: isBot ? 'flex-start' : 'flex-end' }}>
+                            <div style={{ fontSize: '10px', color: t.text4, marginBottom: '3px', letterSpacing: '.08em', textTransform: 'uppercase', paddingLeft: isBot ? '4px' : '0', paddingRight: isBot ? '0' : '4px' }}>
+                              {isBot ? '🤖 Bot' : '👤 Customer'}
+                            </div>
+                            <div style={{
+                              maxWidth: '85%', padding: '10px 14px',
+                              borderRadius: isBot ? '4px 12px 12px 12px' : '12px 4px 12px 12px',
+                              background: isBot ? `${t.blue}15` : `${t.gold}12`,
+                              border: `1px solid ${isBot ? t.blue + '25' : t.gold + '25'}`,
+                              fontSize: '13px', color: t.text1, lineHeight: 1.7,
+                              wordBreak: 'break-word', whiteSpace: 'pre-wrap',
+                            }}>
+                              {turn.text}
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )
+                }
+                if (selectedCall.transcript) {
+                  // Plain text fallback
+                  return (
+                    <div style={{ fontSize: '13px', color: t.text2, lineHeight: 1.9, maxHeight: '400px', overflowY: 'auto' }}>
+                      {selectedCall.transcript}
+                    </div>
+                  )
+                }
+                return (
+                  <div style={{ background: t.card2, border: `1px solid ${t.border}`, borderRadius: '8px', padding: '24px', textAlign: 'center' }}>
+                    <div style={{ fontSize: '13px', color: t.text3, marginBottom: '4px' }}>No transcript yet</div>
+                    <div style={{ fontSize: '11px', color: t.text4 }}>Free Whisper AI — supports Kannada, Telugu, Malayalam, Hindi</div>
+                  </div>
+                )
+              })()}
             </div>
           </div>
 
