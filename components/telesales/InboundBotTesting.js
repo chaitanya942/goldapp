@@ -196,12 +196,22 @@ export default function InboundBotTesting() {
 
   async function handleDownloadAudio() {
     if (!presignedUrl) return
-    const a = document.createElement('a')
-    a.href = presignedUrl
-    a.download = `call-${selectedCall.customer_number}-${selectedCall.call_date}.mp3`
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
+    try {
+      const res  = await fetch(presignedUrl)
+      const blob = await res.blob()
+      const url  = URL.createObjectURL(blob)
+      const a    = document.createElement('a')
+      a.href     = url
+      a.download = `call-${selectedCall.customer_number}-${selectedCall.call_date}.mp3`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+    } catch (err) {
+      console.error('Download error:', err)
+      // Fallback: open in new tab
+      window.open(presignedUrl, '_blank')
+    }
   }
 
   async function handleTranslate() {
@@ -210,16 +220,10 @@ export default function InboundBotTesting() {
     setTranslating(true)
     setTranslated(null)
     try {
-      const plainText = turns.map(t => `${t.speaker}: ${t.text}`).join('\n')
-      const res = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-api-key': '', 'anthropic-version': '2023-06-01' },
-      })
-      // Use our own API route instead
-      const r = await fetch('/api/translate-transcript', {
-        method: 'POST',
+      const r    = await fetch('/api/translate-transcript', {
+        method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ turns, callId: selectedCall.id }),
+        body:    JSON.stringify({ turns, callId: selectedCall.id }),
       })
       const data = await r.json()
       if (data.error) throw new Error(data.error)
