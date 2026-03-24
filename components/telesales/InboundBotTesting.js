@@ -538,8 +538,9 @@ export default function InboundBotTesting() {
                 { label: 'Date',        value: fmtDate(selectedCall.call_date) },
                 { label: 'Time',        value: selectedCall.call_time?.slice(0,5) || '—' },
                 { label: 'Duration',    value: fmtDuration(selectedCall.duration_seconds) },
-                { label: 'Disposition', value: selectedCall.system_disposition || '—' },
-                { label: 'Gnani ID',    value: selectedCall.gnani_call_id ? selectedCall.gnani_call_id.slice(0,16) + '...' : '—' },
+                { label: 'Call Disposition',   value: selectedCall.call_disposition || '—' },
+                { label: 'System Disposition', value: selectedCall.system_disposition || '—' },
+                { label: 'Gnani ID',           value: selectedCall.gnani_call_id ? selectedCall.gnani_call_id.slice(0,16) + '...' : '—' },
               ].map(item => (
                 <div key={item.label} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: `1px solid ${t.border}20` }}>
                   <span style={{ fontSize: '12px', color: t.text4 }}>{item.label}</span>
@@ -668,14 +669,16 @@ export default function InboundBotTesting() {
                       onChange={toggleSelectAll} style={{ cursor: 'pointer', accentColor: t.gold }} />
                   </th>
                   {[
-                    { label: 'Date',       col: 'call_date' },
-                    { label: 'Time',       col: null },
-                    { label: 'Number',     col: null },
-                    { label: 'Language',   col: null },
-                    { label: 'Duration',   col: 'duration_seconds' },
-                    { label: 'Transcript', col: null },
-                    { label: 'Outcome',    col: null },
-                    { label: 'Notes',      col: null },
+                    { label: 'Date',         col: 'call_date' },
+                    { label: 'Time',         col: null },
+                    { label: 'Number',       col: null },
+                    { label: 'Customer',     col: null },
+                    { label: 'Language',     col: null },
+                    { label: 'Duration',     col: 'duration_seconds' },
+                    { label: 'Disposition',  col: null },
+                    { label: 'Transcript',   col: null },
+                    { label: 'Outcome',      col: null },
+                    { label: 'Notes',        col: null },
                   ].map(h => (
                     <th key={h.label} style={{ ...s.th, cursor: h.col ? 'pointer' : 'default', userSelect: 'none' }}
                       onClick={() => h.col && handleSort(h.col)}>
@@ -686,7 +689,7 @@ export default function InboundBotTesting() {
               </thead>
               <tbody>
                 {paginated.length === 0 ? (
-                  <tr><td colSpan={9} style={{ ...s.td, textAlign: 'center', color: t.text4, padding: '48px' }}>
+                  <tr><td colSpan={10} style={{ ...s.td, textAlign: 'center', color: t.text4, padding: '48px' }}>
                     {calls.length === 0 ? 'No calls yet — click "Sync Recordings" to load from S3' : 'No calls match filters'}
                   </td></tr>
                 ) : paginated.map(call => {
@@ -704,11 +707,15 @@ export default function InboundBotTesting() {
                       </td>
                       <td style={s.td}>{fmtDate(call.call_date)}</td>
                       <td style={{ ...s.td, color: t.text3 }}>{call.call_time?.slice(0,5) || '—'}</td>
-                      <td style={{ ...s.td, color: t.gold, fontWeight: 500 }}>
-                        {call.customer_name ? <>{call.customer_name} <span style={{ color: t.text4, fontSize: '11px' }}>{call.customer_number}</span></> : call.customer_number}
-                      </td>
+                      <td style={{ ...s.td, color: t.gold, fontWeight: 500 }}>{call.customer_number}</td>
+                      <td style={{ ...s.td, color: t.text2 }}>{call.customer_name || '—'}</td>
                       <td style={{ ...s.td, color: t.text2, textTransform: 'capitalize' }}>{call.language || '—'}</td>
                       <td style={s.td}>{fmtDuration(call.duration_seconds)}</td>
+                      <td style={s.td}>
+                        {call.system_disposition
+                          ? <span style={{ fontSize: '11px', color: t.blue, background: `${t.blue}12`, border: `1px solid ${t.blue}25`, borderRadius: '4px', padding: '2px 8px' }}>{call.system_disposition}</span>
+                          : <span style={{ fontSize: '11px', color: t.text4 }}>—</span>}
+                      </td>
                       <td style={s.td}>
                         {call.transcript
                           ? <span style={{ fontSize: '11px', color: t.green, background: `${t.green}12`, border: `1px solid ${t.green}30`, borderRadius: '4px', padding: '2px 8px' }}>✓ Done</span>
