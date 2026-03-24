@@ -68,6 +68,8 @@ export default function InboundBotTesting() {
   const [presignedUrl, setPresignedUrl]     = useState(null)
   const [loadingAudio, setLoadingAudio]     = useState(false)
   const [transcribing, setTranscribing]     = useState(false)
+  const [translating, setTranslating]       = useState(false)
+  const [translated, setTranslated]         = useState(null)
   const [savingOutcome, setSavingOutcome]   = useState(false)
   const [outcomeForm, setOutcomeForm]       = useState({ outcome: '', notes: '' })
   const [currentTime, setCurrentTime]       = useState(0)
@@ -191,6 +193,44 @@ export default function InboundBotTesting() {
     }
   }
 
+
+  async function handleDownloadAudio() {
+    if (!presignedUrl) return
+    const a = document.createElement('a')
+    a.href = presignedUrl
+    a.download = `call-${selectedCall.customer_number}-${selectedCall.call_date}.mp3`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+  }
+
+  async function handleTranslate() {
+    const turns = parseTranscript(selectedCall.transcript)
+    if (!turns.length) { alert('Transcribe the call first before translating.'); return }
+    setTranslating(true)
+    setTranslated(null)
+    try {
+      const plainText = turns.map(t => `${t.speaker}: ${t.text}`).join('\n')
+      const res = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-api-key': '', 'anthropic-version': '2023-06-01' },
+      })
+      // Use our own API route instead
+      const r = await fetch('/api/translate-transcript', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ turns, callId: selectedCall.id }),
+      })
+      const data = await r.json()
+      if (data.error) throw new Error(data.error)
+      if (data.turns) setTranslated(data.turns)
+    } catch (err) {
+      alert('Translation failed: ' + err.message)
+    } finally {
+      setTranslating(false)
+    }
+  }
+
   async function handleSaveOutcome() {
     if (!outcomeForm.outcome) return
     setSavingOutcome(true)
@@ -307,6 +347,12 @@ export default function InboundBotTesting() {
                       10s ⟫
                     </button>
                   </div>
+                  {/* Download */}
+                  <div style={{ display: 'flex', justifyContent: 'center', marginTop: '14px' }}>
+                    <button onClick={handleDownloadAudio} style={{ background: 'transparent', border: `1px solid ${t.border}`, borderRadius: '8px', padding: '6px 16px', color: t.text3, fontSize: '12px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      ↓ Download MP3
+                    </button>
+                  </div>
                 </div>
               ) : (
                 <div style={{ background: t.card2, border: `1px solid ${t.border}`, borderRadius: '10px', padding: '28px', textAlign: 'center' }}>
@@ -320,11 +366,20 @@ export default function InboundBotTesting() {
             <div style={s.card}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
                 <div style={{ fontSize: '12px', color: t.text3, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 600 }}>Transcript</div>
-                <button
-                  style={{ ...s.btnOut, fontSize: '11px', padding: '5px 12px', color: transcribing ? t.text4 : t.blue, borderColor: `${t.blue}50`, cursor: transcribing ? 'not-allowed' : 'pointer' }}
-                  onClick={handleTranscribe} disabled={transcribing}>
-                  {transcribing ? '⟳ Transcribing...' : '✦ Transcribe (Free)'}
-                </button>
+                <div style={{ display: 'flex', gap: '6px' }}>
+                  <button
+                    style={{ ...s.btnOut, fontSize: '11px', padding: '5px 12px', color: transcribing ? t.text4 : t.blue, borderColor: `${t.blue}50`, cursor: transcribing ? 'not-allowed' : 'pointer' }}
+                    onClick={handleTranscribe} disabled={transcribing}>
+                    {transcribing ? '⟳ Transcribing...' : '✦ Transcribe (Free)'}
+                  </button>
+                  {selectedCall.transcript && (
+                    <button
+                      style={{ ...s.btnOut, fontSize: '11px', padding: '5px 12px', color: translating ? t.text4 : t.green, borderColor: `${t.green}50`, cursor: translating ? 'not-allowed' : 'pointer' }}
+                      onClick={() => { if (translated) setTranslated(null); else handleTranslate() }} disabled={translating}>
+                      {translating ? '⟳ Translating...' : translated ? '✕ Original' : '🌐 Translate EN'}
+                    </button>
+                  )}
+                </div>
               </div>
 
               {transcribing && (
@@ -333,9 +388,9 @@ export default function InboundBotTesting() {
                 </div>
               )}
 
-              {turns.length > 0 ? (
+              {(() => { const displayTurns = translated || turns; return displayTurns.length > 0 ? (
                 <div style={{ maxHeight: '360px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '10px', paddingRight: '4px' }}>
-                  {turns.map((turn, i) => {
+                  {displayTurns.map((turn, i) => {
                     const isBot = turn.speaker === 'Bot'
                     return (
                       <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: isBot ? 'flex-start' : 'flex-end' }}>
@@ -354,7 +409,8 @@ export default function InboundBotTesting() {
                     )
                   })}
                 </div>
-              ) : selectedCall.transcript ? (
+              ) : null })()}
+              {!translated && !turns.length && selectedCall.transcript ? (
                 // Fallback: show as plain text if parsing returns nothing
                 <div style={{ fontSize: '13px', color: t.text2, lineHeight: 1.9, maxHeight: '360px', overflowY: 'auto' }}>
                   {selectedCall.transcript}
