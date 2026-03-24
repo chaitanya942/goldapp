@@ -211,6 +211,7 @@ export default function InboundBotTesting() {
     finally { setBulkDownloading(false) }
   }
 
+
   async function handleTranscribe() {
     if (!presignedUrl) { alert('Audio not loaded yet.'); return }
     setTranscribing(true)
@@ -600,6 +601,7 @@ export default function InboundBotTesting() {
             style={{ ...s.btnOut, fontSize: '12px', color: t.blue, borderColor: `${t.blue}50`, opacity: transcribeAllProgress ? .6 : 1 }}>
             ✦ Transcribe All
           </button>
+
           <button onClick={handleSync} disabled={syncing} style={{ ...s.btnGold, display: 'flex', alignItems: 'center', gap: '6px', opacity: syncing ? .7 : 1 }}>
             <span>{syncing ? '⟳' : '↓'}</span>{syncing ? 'Syncing...' : 'Sync Recordings'}
           </button>

@@ -1,11 +1,10 @@
 import { createClient } from '@supabase/supabase-js'
 import { S3Client, GetObjectCommand, PutObjectCommand, ListObjectsV2Command } from '@aws-sdk/client-s3'
 import { pipeline } from 'stream/promises'
-import { createWriteStream, createReadStream, mkdirSync, rmSync, existsSync, readdirSync, statSync } from 'fs'
+import { createWriteStream, createReadStream, mkdirSync, rmSync, existsSync, readdirSync, statSync, readFileSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { extract } from 'tar'
-import { getAudioDurationInSeconds } from 'get-audio-duration'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
@@ -34,6 +33,18 @@ function findMp3Files(dir) {
   return results
 }
 
+function findMetadataJson(dir) {
+  const entries = readdirSync(dir)
+  for (const entry of entries) {
+    const fullPath = join(dir, entry)
+    if (statSync(fullPath).isDirectory()) {
+      const found = findMetadataJson(fullPath)
+      if (found) return found
+    } else if (entry === 'metadata.json') return fullPath
+  }
+  return null
+}
+
 function parseFilename(filename) {
   const base  = filename.replace(/\.mp3$/i, '')
   const parts = base.split('-')
@@ -48,13 +59,7 @@ function parseFilename(filename) {
   } catch { return null }
 }
 
-// Duration extracted via get-audio-duration package
-async function getMp3Duration(filePath) {
-  try {
-    const secs = await getAudioDurationInSeconds(filePath)
-    return secs ? Math.round(secs) : null
-  } catch { return null }
-}
+
 
 function fmtLanguage(lang) {
   if (!lang) return 'unknown'
@@ -157,15 +162,19 @@ export async function POST(req) {
             ])
 
             return {
-              gnani_call_id:   item.gnani_call_id,
-              customer_number: item.customer_number,
-              call_date:       item.call_date,
-              call_time:       item.call_time,
-              language,
+              gnani_call_id:      item.gnani_call_id,
+              customer_number:    item.customer_number,
+              call_date:          item.call_date,
+              call_time:          item.call_time,
+              language:           gnaniMeta.language ? gnaniMeta.language.charAt(0).toUpperCase() + gnaniMeta.language.slice(1).toLowerCase() : language,
               duration_seconds,
-              recording_url:   recordingUrl,
-              s3_key:          s3RecKey,
-              outcome:         'pending',
+              customer_name:      gnaniMeta.customer_name || null,
+              call_disposition:   gnaniMeta.call_disposition || null,
+              system_disposition: gnaniMeta.system_disposition || null,
+              summary:            gnaniMeta.summary || null,
+              recording_url:      recordingUrl,
+              s3_key:             s3RecKey,
+              outcome:            'pending',
             }
           } catch (err) {
             errors.push(`Failed ${item.filename}: ${err.message}`)
