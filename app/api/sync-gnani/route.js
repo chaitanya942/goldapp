@@ -1,7 +1,7 @@
 import { createClient } from '@supabase/supabase-js'
 import { S3Client, GetObjectCommand, PutObjectCommand, ListObjectsV2Command } from '@aws-sdk/client-s3'
 import { pipeline } from 'stream/promises'
-import { createWriteStream, createReadStream, mkdirSync, rmSync, existsSync, readdirSync, statSync } from 'fs'
+import { createWriteStream, createReadStream, mkdirSync, rmSync, existsSync, readdirSync, statSync, readFileSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { extract } from 'tar'
@@ -21,59 +21,95 @@ const s3 = new S3Client({
 
 const BUCKET = 'whitegold-call-recordings'
 
-// Cross-platform recursive MP3 finder — pure Node.js, no shell
 function findMp3Files(dir) {
   const results = []
   const entries = readdirSync(dir)
   for (const entry of entries) {
     const fullPath = join(dir, entry)
     const stat = statSync(fullPath)
-    if (stat.isDirectory()) {
-      results.push(...findMp3Files(fullPath))
-    } else if (entry.toLowerCase().endsWith('.mp3')) {
-      results.push(fullPath)
-    }
+    if (stat.isDirectory()) results.push(...findMp3Files(fullPath))
+    else if (entry.toLowerCase().endsWith('.mp3')) results.push(fullPath)
   }
   return results
 }
 
-// Parse filename: prod-{batch_uuid}-{gnani_call_id}-{phone}-{YYYY_MM_DD}-{HH_MM_SS}.mp3
 function parseFilename(filename) {
   const base  = filename.replace(/\.mp3$/i, '')
   const parts = base.split('-')
   if (parts.length < 6) return null
   try {
-    const gnani_call_id   = parts[2]
-    const customer_number = parts[3]
-    const call_date       = parts[4].replace(/_/g, '-') // 2026-03-23
-    const call_time       = parts[5].replace(/_/g, ':') // 19:07:41
-    return { gnani_call_id, customer_number, call_date, call_time }
-  } catch {
-    return null
-  }
+    return {
+      gnani_call_id:   parts[2],
+      customer_number: parts[3],
+      call_date:       parts[4].replace(/_/g, '-'),
+      call_time:       parts[5].replace(/_/g, ':'),
+    }
+  } catch { return null }
 }
 
-// Download S3 object to local tmp file
+// Get MP3 duration by reading MPEG frame headers directly — no npm package needed
+function getMp3DurationFromBuffer(buffer) {
+  try {
+    // Look for ID3 tag to skip it
+    let offset = 0
+    if (buffer[0] === 0x49 && buffer[1] === 0x44 && buffer[2] === 0x33) {
+      // ID3v2 tag — skip it
+      const id3Size = ((buffer[6] & 0x7f) << 21) | ((buffer[7] & 0x7f) << 14) |
+                      ((buffer[8] & 0x7f) << 7)  |  (buffer[9] & 0x7f)
+      offset = id3Size + 10
+    }
+
+    // Find first valid MPEG frame sync
+    while (offset < buffer.length - 4) {
+      if (buffer[offset] === 0xff && (buffer[offset + 1] & 0xe0) === 0xe0) {
+        const b1 = buffer[offset + 1]
+        const b2 = buffer[offset + 2]
+
+        const version   = (b1 >> 3) & 0x3  // 3=MPEG1, 2=MPEG2, 0=MPEG2.5
+        const layer     = (b1 >> 1) & 0x3  // 3=LayerI, 2=LayerII, 1=LayerIII
+        const bitrateIdx = (b2 >> 4) & 0xf
+        const sampleIdx  = (b2 >> 2) & 0x3
+
+        if (bitrateIdx === 0 || bitrateIdx === 15) { offset++; continue }
+        if (sampleIdx === 3) { offset++; continue }
+
+        const bitratesV1L3 = [0,32,40,48,56,64,80,96,112,128,160,192,224,256,320,0]
+        const sampleRates  = [[11025,12000,8000,0],[0,0,0,0],[22050,24000,16000,0],[44100,48000,32000,0]]
+
+        const bitrate    = bitratesV1L3[bitrateIdx] * 1000
+        const sampleRate = sampleRates[version][sampleIdx]
+
+        if (!bitrate || !sampleRate) { offset++; continue }
+
+        // Estimate duration from file size and bitrate
+        const fileSize  = buffer.length
+        const duration  = (fileSize * 8) / bitrate
+        return Math.round(duration)
+      }
+      offset++
+    }
+    return null
+  } catch { return null }
+}
+
+function fmtLanguage(lang) {
+  if (!lang) return 'unknown'
+  return lang.charAt(0).toUpperCase() + lang.slice(1).toLowerCase()
+}
+
 async function downloadFromS3(key, localPath) {
   const cmd = new GetObjectCommand({ Bucket: BUCKET, Key: key })
   const { Body } = await s3.send(cmd)
   await pipeline(Body, createWriteStream(localPath))
 }
 
-// Upload local file to S3
 async function uploadToS3(localPath, s3Key, contentType = 'audio/mpeg') {
   const stream = createReadStream(localPath)
-  const cmd = new PutObjectCommand({
-    Bucket:      BUCKET,
-    Key:         s3Key,
-    Body:        stream,
-    ContentType: contentType,
-  })
+  const cmd = new PutObjectCommand({ Bucket: BUCKET, Key: s3Key, Body: stream, ContentType: contentType })
   await s3.send(cmd)
   return `https://${BUCKET}.s3.ap-south-1.amazonaws.com/${s3Key}`
 }
 
-// List all tar.gz files in the bucket
 async function listTarFiles(language = null) {
   const prefix = language ? `${language}/` : ''
   const cmd = new ListObjectsV2Command({ Bucket: BUCKET, Prefix: prefix })
@@ -81,23 +117,28 @@ async function listTarFiles(language = null) {
   return Contents.filter(obj => obj.Key.endsWith('.tar.gz')).map(obj => obj.Key)
 }
 
+// Check which gnani_call_ids already exist in bulk — avoids N+1 queries
+async function getExistingIds(gnaniIds) {
+  const { data } = await supabase
+    .from('telesales_calls')
+    .select('gnani_call_id')
+    .in('gnani_call_id', gnaniIds)
+  return new Set((data || []).map(r => r.gnani_call_id))
+}
+
 export async function POST(req) {
   try {
     const body = await req.json().catch(() => ({}))
 
     let tarKeys = []
-
     if (body?.Records) {
-      // S3 Event Notification webhook
       tarKeys = body.Records
         .filter(r => r.s3?.object?.key?.endsWith('.tar.gz'))
         .map(r => decodeURIComponent(r.s3.object.key.replace(/\+/g, ' ')))
     } else if (body?.key) {
       tarKeys = [body.key]
     } else {
-      // Manual sync button — scan entire bucket
-      const lang = body?.language || null
-      tarKeys = await listTarFiles(lang)
+      tarKeys = await listTarFiles(body?.language || null)
     }
 
     if (tarKeys.length === 0) {
@@ -110,7 +151,7 @@ export async function POST(req) {
 
     for (const tarKey of tarKeys) {
       const pathParts = tarKey.split('/')
-      const language  = pathParts[0] || 'unknown'
+      const language  = fmtLanguage(pathParts[0])
       const datePath  = `${pathParts[1]}/${pathParts[2]}/${pathParts[3]}`
 
       const tmpDir   = join(tmpdir(), `gnani_${Date.now()}`)
@@ -118,60 +159,76 @@ export async function POST(req) {
       const localTar = join(tmpDir, 'recordings.tar.gz')
 
       try {
-        // 1. Download tar.gz from S3
         await downloadFromS3(tarKey, localTar)
-
-        // 2. Extract using npm 'tar' package — no shell, works on Vercel
         await extract({ file: localTar, cwd: tmpDir, strict: false })
 
-        // 3. Find all MP3 files recursively
         const mp3Files = findMp3Files(tmpDir)
+        if (!mp3Files.length) continue
 
-        for (const mp3Path of mp3Files) {
+        // Parse all filenames first
+        const parsed = mp3Files.map(mp3Path => {
           const filename = mp3Path.split(/[\\/]/).pop()
           const meta     = parseFilename(filename)
+          return meta ? { mp3Path, filename, ...meta } : null
+        }).filter(Boolean)
 
-          if (!meta) {
-            errors.push(`Could not parse filename: ${filename}`)
-            continue
-          }
+        // Bulk check which IDs already exist — single query instead of N queries
+        const allIds     = parsed.map(p => p.gnani_call_id)
+        const existingIds = await getExistingIds(allIds)
 
-          // Skip duplicates
-          const { data: existing } = await supabase
-            .from('telesales_calls')
-            .select('id')
-            .eq('gnani_call_id', meta.gnani_call_id)
-            .single()
+        const toInsert = parsed.filter(p => !existingIds.has(p.gnani_call_id))
+        totalSkipped  += parsed.length - toInsert.length
 
-          if (existing) {
-            totalSkipped++
-            continue
-          }
+        if (!toInsert.length) continue
 
-          // 4. Re-upload MP3 to recordings/ prefix in S3
-          const s3RecKey     = `recordings/${language}/${datePath}/${filename}`
-          const recordingUrl = await uploadToS3(mp3Path, s3RecKey)
+        // Process all new files in parallel — upload + read duration simultaneously
+        const results = await Promise.all(toInsert.map(async (item) => {
+          try {
+            const s3RecKey = `recordings/${pathParts[0]}/${datePath}/${item.filename}`
 
-          // 5. Insert into Supabase
-          const { error: insertErr } = await supabase
-            .from('telesales_calls')
-            .insert({
-              gnani_call_id:   meta.gnani_call_id,
-              customer_number: meta.customer_number,
-              call_date:       meta.call_date,
-              call_time:       meta.call_time,
-              language:        language,
+            // Upload + read duration in parallel
+            const [recordingUrl, duration_seconds] = await Promise.all([
+              uploadToS3(item.mp3Path, s3RecKey),
+              Promise.resolve(getMp3DurationFromBuffer(readFileSync(item.mp3Path))),
+            ])
+
+            return {
+              gnani_call_id:   item.gnani_call_id,
+              customer_number: item.customer_number,
+              call_date:       item.call_date,
+              call_time:       item.call_time,
+              language,
+              duration_seconds,
               recording_url:   recordingUrl,
               s3_key:          s3RecKey,
               outcome:         'pending',
-            })
+            }
+          } catch (err) {
+            errors.push(`Failed ${item.filename}: ${err.message}`)
+            return null
+          }
+        }))
+
+        const validRows = results.filter(Boolean)
+
+        // Bulk insert all rows at once — single query instead of N queries
+        if (validRows.length > 0) {
+          const { error: insertErr } = await supabase
+            .from('telesales_calls')
+            .insert(validRows)
 
           if (insertErr) {
-            errors.push(`Insert failed for ${filename}: ${insertErr.message}`)
+            // Fallback to individual inserts if bulk fails
+            for (const row of validRows) {
+              const { error: e } = await supabase.from('telesales_calls').insert(row)
+              if (e) errors.push(`Insert failed: ${e.message}`)
+              else totalInserted++
+            }
           } else {
-            totalInserted++
+            totalInserted += validRows.length
           }
         }
+
       } finally {
         if (existsSync(tmpDir)) rmSync(tmpDir, { recursive: true, force: true })
       }
@@ -192,13 +249,6 @@ export async function POST(req) {
 }
 
 export async function GET() {
-  const { count } = await supabase
-    .from('telesales_calls')
-    .select('*', { count: 'exact', head: true })
-
-  return Response.json({
-    status:      'ok',
-    total_calls: count,
-    bucket:      BUCKET,
-  })
+  const { count } = await supabase.from('telesales_calls').select('*', { count: 'exact', head: true })
+  return Response.json({ status: 'ok', total_calls: count, bucket: BUCKET })
 }
