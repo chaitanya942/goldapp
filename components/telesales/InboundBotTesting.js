@@ -33,16 +33,18 @@ const fmtDate     = (d) => d ? new Date(d).toLocaleDateString('en-IN', { day: '2
 const fmtDuration = (s) => { if (!s && s !== 0) return '—'; const m = Math.floor(s / 60); const sec = s % 60; return `${m}:${String(sec).padStart(2, '0')}` }
 
 // Parse transcript into conversation turns
-// Whisper returns raw text — split on sentence boundaries and alternate Bot/Customer
+// Parse transcript — handles both new JSON format (diarized) and old plain text
 function parseTranscript(text) {
   if (!text) return []
-  // Split on . ? ! followed by space or newline, or on newlines
+  try {
+    const parsed = JSON.parse(text)
+    if (Array.isArray(parsed) && parsed[0]?.speaker) return parsed
+  } catch {}
   const sentences = text
     .replace(/([.?!])\s+/g, '$1\n')
     .split('\n')
     .map(s => s.trim())
     .filter(Boolean)
-
   return sentences.map((line, i) => ({
     speaker: i % 2 === 0 ? 'Bot' : 'Customer',
     text: line,
