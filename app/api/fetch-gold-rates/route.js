@@ -48,37 +48,64 @@ async function fetchKalingaRate() {
 }
 
 // ── Ambicaa ───────────────────────────────────────────────────────────────────
-// Scrape HTML page — IND-GOLD[999]-1KG sell rate is in the DOM table
+// Connect to Ambicaa's Socket.IO server via long-polling (no websocket needed)
+// Server: http://dashboard.ambicaaspot.com:10001
+// Event: 'message' → data.Rate[] → find IND-GOLD[999]-1KG → Ask = sell rate
 async function fetchAmbicaaRate() {
   try {
-    const res = await fetch('http://ambicaaspot.com', {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Accept': 'text/html',
-      },
+    // Step 1: Handshake to get session ID
+    const handshakeUrl = `http://dashboard.ambicaaspot.com:10001/socket.io/?EIO=4&transport=polling&t=${Date.now()}`
+    const handshakeRes = await fetch(handshakeUrl, {
       signal: AbortSignal.timeout(8000),
     })
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    const html = await res.text()
+    if (!handshakeRes.ok) throw new Error(`Handshake failed: ${handshakeRes.status}`)
+    const handshakeText = await handshakeRes.text()
 
-    // Find IND-GOLD[999]-1KG row and extract sell rate
-    // HTML structure: <td>IND-GOLD[999]-1KG --today</td><td>BUY</td><td>SELL</td>
-    const regex = /IND-GOLD\[999\]-1KG[^<]*<\/[^>]+>[\s\S]*?<td[^>]*>[\s\S]*?(\d{6})/i
-    const match = html.match(regex)
-    if (match) {
-      const sell = parseFloat(match[1])
-      if (sell > 100000) return sell
-    }
+    // Response format: 0{"sid":"...","upgrades":["websocket"],...}
+    const sidMatch = handshakeText.match(/"sid":"([^"]+)"/)
+    if (!sidMatch) throw new Error('No session ID in handshake')
+    const sid = sidMatch[1]
 
-    // Fallback: look for the number pattern near the product name
-    const idx = html.indexOf('IND-GOLD[999]-1KG')
-    if (idx !== -1) {
-      const chunk   = html.slice(idx, idx + 500)
-      const numbers = chunk.match(/\d{6}/g)
-      if (numbers && numbers.length >= 2) {
-        return parseFloat(numbers[1]) // second 6-digit number = sell
+    // Step 2: Poll for data with session ID
+    // Need to send room join first
+    const joinUrl = `http://dashboard.ambicaaspot.com:10001/socket.io/?EIO=4&transport=polling&t=${Date.now()}&sid=${sid}`
+    
+    // Send room join message (42 = socket.io message, emit room with username)
+    await fetch(joinUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
+      body: '42["room","ambicaaspot"]',
+      signal: AbortSignal.timeout(5000),
+    })
+
+    // Step 3: Poll for rate data
+    const pollUrl = `http://dashboard.ambicaaspot.com:10001/socket.io/?EIO=4&transport=polling&t=${Date.now()}&sid=${sid}`
+    const pollRes = await fetch(pollUrl, { signal: AbortSignal.timeout(8000) })
+    if (!pollRes.ok) throw new Error(`Poll failed: ${pollRes.status}`)
+    const pollText = await pollRes.text()
+
+    // Parse socket.io message — look for 'message' event with Rate array
+    // Format: 42["message",{"Rate":[{"Symbol":"IND-GOLD[999]-1KG --today","Ask":149779,...}]}]
+    const msgMatch = pollText.match(/42\["message",([\s\S]+?)\]\s*$/)
+    if (msgMatch) {
+      const data = JSON.parse(msgMatch[1])
+      const rates = data?.Rate || []
+      for (const rate of rates) {
+        if (rate.Symbol && rate.Symbol.includes('IND-GOLD[999]-1KG')) {
+          const sell = parseFloat(rate.Ask)
+          if (sell > 100000) return sell
+        }
       }
     }
+
+    // Fallback: look for any 6-digit number near IND-GOLD
+    const idx = pollText.indexOf('IND-GOLD')
+    if (idx !== -1) {
+      const chunk   = pollText.slice(idx, idx + 200)
+      const numbers = chunk.match(/\d{6}/g)
+      if (numbers && numbers.length >= 2) return parseFloat(numbers[1])
+    }
+
     return null
   } catch (err) {
     console.error('Ambicaa fetch error:', err.message)
