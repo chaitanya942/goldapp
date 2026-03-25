@@ -1,1 +1,8 @@
-{}
+{
+  "crons": [
+    {
+      "path": "/api/fetch-gold-rates",
+      "schedule": "* 3-13 * * 1-5"
+    }
+  ]
+}
