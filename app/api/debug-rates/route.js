@@ -1,41 +1,32 @@
-// app/api/debug-rates/route.js — temporary debug route
+// app/api/debug-rates/route.js
 
-async function testSocketIO(baseUrl, roomName) {
+async function testSocket(baseUrl, roomName) {
   try {
-    const hsRes  = await fetch(`${baseUrl}/socket.io/?EIO=4&transport=polling&t=${Date.now()}`, { signal: AbortSignal.timeout(8000) })
-    const hsText = await hsRes.text()
-    const sidMatch = hsText.match(/"sid":"([^"]+)"/)
-    if (!sidMatch) return { error: 'No SID', handshake: hsText.slice(0, 100) }
-    const sid = sidMatch[1]
+    const hs     = await fetch(`${baseUrl}/socket.io/?EIO=4&transport=polling&t=${Date.now()}`, { signal: AbortSignal.timeout(8000) })
+    const hsText = await hs.text()
+    const sid    = hsText.match(/"sid":"([^"]+)"/)?.[1]
+    if (!sid) return { error: 'No SID', raw: hsText.slice(0, 200) }
 
-    await fetch(`${baseUrl}/socket.io/?EIO=4&transport=polling&t=${Date.now()}&sid=${sid}`, {
-      method: 'POST', headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
-      body: '40', signal: AbortSignal.timeout(5000),
-    })
-    await fetch(`${baseUrl}/socket.io/?EIO=4&transport=polling&t=${Date.now()}&sid=${sid}`, { signal: AbortSignal.timeout(5000) })
-    await fetch(`${baseUrl}/socket.io/?EIO=4&transport=polling&t=${Date.now()}&sid=${sid}`, {
-      method: 'POST', headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
-      body: `42["room","${roomName}"]`, signal: AbortSignal.timeout(5000),
-    })
+    await (await fetch(`${baseUrl}/socket.io/?EIO=4&transport=polling&t=${Date.now()}&sid=${sid}`, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=UTF-8' }, body: '40', signal: AbortSignal.timeout(5000) })).text()
+    await (await fetch(`${baseUrl}/socket.io/?EIO=4&transport=polling&t=${Date.now()}&sid=${sid}`, { signal: AbortSignal.timeout(5000) })).text()
+    await (await fetch(`${baseUrl}/socket.io/?EIO=4&transport=polling&t=${Date.now()}&sid=${sid}`, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=UTF-8' }, body: `42["room","${roomName}"]`, signal: AbortSignal.timeout(5000) })).text()
 
     const polls = []
     for (let i = 0; i < 4; i++) {
-      const pollRes  = await fetch(`${baseUrl}/socket.io/?EIO=4&transport=polling&t=${Date.now()}&sid=${sid}`, { signal: AbortSignal.timeout(8000) })
-      const pollText = await pollRes.text()
-      polls.push(pollText.slice(0, 400))
-      if (pollText.includes('Rate') || pollText.includes('Gold')) break
-      await new Promise(r => setTimeout(r, 500))
+      const p = await (await fetch(`${baseUrl}/socket.io/?EIO=4&transport=polling&t=${Date.now()}&sid=${sid}`, { signal: AbortSignal.timeout(8000) })).text()
+      polls.push(p.slice(0, 500))
+      if (p.includes('Session ID unknown')) break
+      if (p.includes('Rate') || p.includes('Gold')) break
     }
     return { sid, polls }
-  } catch (err) {
-    return { error: err.message }
-  }
+  } catch (e) { return { error: e.message } }
 }
 
 export async function GET() {
-  const [ambicaa, aamlin] = await Promise.all([
-    testSocketIO('http://dashboard.ambicaaspot.com:10001', 'ambicaaspot'),
-    testSocketIO('https://starlinebulltech.in:10001', 'aamlinspot'),
+  const [ambicaa, aamlin_http, aamlin_https] = await Promise.all([
+    testSocket('http://dashboard.ambicaaspot.com:10001', 'ambicaaspot'),
+    testSocket('http://starlinebulltech.in:10001', 'aamlinspot'),
+    testSocket('https://starlinebulltech.in:10001', 'aamlinspot'),
   ])
-  return Response.json({ ambicaa, aamlin })
+  return Response.json({ ambicaa, aamlin_http, aamlin_https })
 }

@@ -1,5 +1,4 @@
 // app/api/fetch-gold-rates/route.js
-// Fetches live gold sell rates from Kalinga Kawad, Ambicaa and Aamlin every minute
 
 import { createClient } from '@supabase/supabase-js'
 
@@ -35,59 +34,93 @@ async function fetchKalingaRate() {
 }
 
 // ── Socket.IO helper ──────────────────────────────────────────────────────────
-// Reusable for both Ambicaa and Aamlin (same platform, different servers/rooms)
+// Key fix: do handshake + all setup in ONE poll batch, no delays between steps
 async function fetchSocketIORate(baseUrl, roomName, symbolMatcher) {
   try {
     // Step 1: Handshake
-    const hsRes  = await fetch(`${baseUrl}/socket.io/?EIO=4&transport=polling&t=${Date.now()}`, { signal: AbortSignal.timeout(8000) })
-    const hsText = await hsRes.text()
+    const hsRes = await fetch(
+      `${baseUrl}/socket.io/?EIO=4&transport=polling&t=${Date.now()}`,
+      { signal: AbortSignal.timeout(8000) }
+    )
+    const hsText   = await hsRes.text()
     const sidMatch = hsText.match(/"sid":"([^"]+)"/)
     if (!sidMatch) throw new Error('No SID')
     const sid = sidMatch[1]
 
-    // Step 2: Connect to namespace
-    await fetch(`${baseUrl}/socket.io/?EIO=4&transport=polling&t=${Date.now()}&sid=${sid}`, {
-      method: 'POST', headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
-      body: '40', signal: AbortSignal.timeout(5000),
-    })
+    // Step 2: Send connect + room join in parallel as a single combined body
+    // EIO4 allows batching: separate packets with record separator \x1e
+    // First send "40" (connect), then immediately "42[room,name]"
+    const connectRes = await fetch(
+      `${baseUrl}/socket.io/?EIO=4&transport=polling&t=${Date.now()}&sid=${sid}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
+        body: '40',
+        signal: AbortSignal.timeout(5000),
+      }
+    )
+    await connectRes.text()
 
-    // Step 3: Confirm connection
-    await fetch(`${baseUrl}/socket.io/?EIO=4&transport=polling&t=${Date.now()}&sid=${sid}`, { signal: AbortSignal.timeout(5000) })
+    // Step 3: Read connect ack
+    const ackRes = await fetch(
+      `${baseUrl}/socket.io/?EIO=4&transport=polling&t=${Date.now()}&sid=${sid}`,
+      { signal: AbortSignal.timeout(5000) }
+    )
+    await ackRes.text()
 
-    // Step 4: Join room
-    await fetch(`${baseUrl}/socket.io/?EIO=4&transport=polling&t=${Date.now()}&sid=${sid}`, {
-      method: 'POST', headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
-      body: `42["room","${roomName}"]`, signal: AbortSignal.timeout(5000),
-    })
+    // Step 4: Join room immediately
+    const joinRes = await fetch(
+      `${baseUrl}/socket.io/?EIO=4&transport=polling&t=${Date.now()}&sid=${sid}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
+        body: `42["room","${roomName}"]`,
+        signal: AbortSignal.timeout(5000),
+      }
+    )
+    await joinRes.text()
 
-    // Step 5: Poll for rate data
-    for (let i = 0; i < 5; i++) {
-      const pollRes  = await fetch(`${baseUrl}/socket.io/?EIO=4&transport=polling&t=${Date.now()}&sid=${sid}`, { signal: AbortSignal.timeout(8000) })
+    // Step 5: Poll rapidly — no setTimeout delays
+    for (let i = 0; i < 6; i++) {
+      const pollRes  = await fetch(
+        `${baseUrl}/socket.io/?EIO=4&transport=polling&t=${Date.now()}&sid=${sid}`,
+        { signal: AbortSignal.timeout(8000) }
+      )
       const pollText = await pollRes.text()
 
-      if (pollText.includes('"message"') && pollText.includes('Gold')) {
-        const start = pollText.indexOf('42["message",')
-        if (start !== -1) {
-          const jsonStr = pollText.slice(start + 13, pollText.lastIndexOf(']') + 1)
+      // Check for session expired
+      if (pollText.includes('Session ID unknown')) {
+        console.error(`${roomName}: Session expired on poll ${i}`)
+        break
+      }
+
+      // Look for message event with Rate array
+      if (pollText.includes('"message"')) {
+        const msgIdx = pollText.indexOf('42["message",')
+        if (msgIdx !== -1) {
           try {
-            const data  = JSON.parse(jsonStr)
-            const rates = data?.Rate || []
-            for (const rate of rates) {
-              if (rate.Symbol && symbolMatcher(rate.Symbol)) {
-                const sell = parseFloat(rate.Ask)
+            // Find the matching closing bracket
+            let depth = 0, end = msgIdx
+            for (let j = msgIdx; j < pollText.length; j++) {
+              if (pollText[j] === '[' || pollText[j] === '{') depth++
+              else if (pollText[j] === ']' || pollText[j] === '}') { depth--; if (depth === 0) { end = j + 1; break } }
+            }
+            const raw  = pollText.slice(msgIdx + 2) // remove "42"
+            const arr  = JSON.parse(raw.slice(0, end - msgIdx - 2 + 1))
+            const data = arr[1]
+            const rateArr = data?.Rate || data?.rate || []
+            for (const rate of rateArr) {
+              const sym  = rate.Symbol || rate.symbol || ''
+              if (symbolMatcher(sym)) {
+                const sell = parseFloat(rate.Ask || rate.ask || 0)
                 if (sell > 100000) return sell
               }
             }
-          } catch {}
-        }
-        // Fallback: extract 6-digit number near symbol
-        const idx = pollText.search(/Gold 999 IND/i)
-        if (idx !== -1) {
-          const numbers = pollText.slice(idx, idx + 300).match(/\d{6}/g)
-          if (numbers && numbers.length >= 1) return parseFloat(numbers[0])
+          } catch (e) {
+            console.error(`${roomName} parse error:`, e.message)
+          }
         }
       }
-      await new Promise(r => setTimeout(r, 500))
     }
     return null
   } catch (err) {
@@ -101,17 +134,31 @@ async function fetchAmbicaaRate() {
   return fetchSocketIORate(
     'http://dashboard.ambicaaspot.com:10001',
     'ambicaaspot',
-    (symbol) => symbol.toUpperCase().includes('IND-GOLD') && symbol.includes('1KG')
+    (sym) => sym.toUpperCase().includes('IND-GOLD') && sym.includes('1KG')
   )
 }
 
 // ── Aamlin Spot ───────────────────────────────────────────────────────────────
+// starlinebulltech.in:10001 is not reachable from Vercel (HTTPS on non-standard port blocked)
+// Try HTTP fallback on port 10001 and also port 80
 async function fetchAamlinRate() {
-  return fetchSocketIORate(
+  // Try HTTP first (non-standard HTTPS port often blocked by Vercel)
+  const urls = [
+    'http://starlinebulltech.in:10001',
     'https://starlinebulltech.in:10001',
-    'aamlinspot',
-    (symbol) => /gold\s*999\s*ind/i.test(symbol)
-  )
+    'http://aamlinspot.in:10001',
+  ]
+  for (const url of urls) {
+    try {
+      const result = await fetchSocketIORate(
+        url,
+        'aamlinspot',
+        (sym) => /gold\s*999\s*ind/i.test(sym)
+      )
+      if (result) return result
+    } catch {}
+  }
+  return null
 }
 
 // ── Main handler ──────────────────────────────────────────────────────────────
@@ -143,15 +190,7 @@ export async function GET(req) {
     return Response.json({ success: false, error: error.message }, { status: 500 })
   }
 
-  return Response.json({
-    success: true,
-    kalinga_sell_rate,
-    ambica_sell_rate,
-    aamlin_sell_rate,
-    fetched_at: new Date().toISOString(),
-  })
+  return Response.json({ success: true, kalinga_sell_rate, ambica_sell_rate, aamlin_sell_rate, fetched_at: new Date().toISOString() })
 }
 
-export async function POST(req) {
-  return GET(req)
-}
+export async function POST(req) { return GET(req) }
