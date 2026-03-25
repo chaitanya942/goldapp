@@ -16,6 +16,7 @@ import ConsignmentData from '../../components/consignments/ConsignmentData'
 import ConsignmentReport from '../../components/consignments/ConsignmentReport'
 import ConsignmentSummary from '../../components/consignments/ConsignmentSummary'
 import CalTable from '../../components/sales/CalTable'
+import LiveMarketRates from '../../components/sales/LiveMarketRates'
 import InboundBotTesting from '../../components/telesales/InboundBotTesting'
 
 const THEMES = {
@@ -101,6 +102,7 @@ function DashboardShell() {
       case 'melting':             return <ComingSoon title="Melting" />
       case 'sales':               return <ComingSoon title="Sales" />
       case 'cal-table':           return <CalTable />
+      case 'live-market-rates':   return <LiveMarketRates />
       case 'reports':             return <ComingSoon title="Reports" />
       case 'branch-management':   return <BranchManagement />
       case 'user-management':     return <UserManagement />
