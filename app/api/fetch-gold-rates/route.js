@@ -53,57 +53,69 @@ async function fetchKalingaRate() {
 // Event: 'message' → data.Rate[] → find IND-GOLD[999]-1KG → Ask = sell rate
 async function fetchAmbicaaRate() {
   try {
-    // Step 1: Handshake to get session ID
-    const handshakeUrl = `http://dashboard.ambicaaspot.com:10001/socket.io/?EIO=4&transport=polling&t=${Date.now()}`
-    const handshakeRes = await fetch(handshakeUrl, {
-      signal: AbortSignal.timeout(8000),
-    })
-    if (!handshakeRes.ok) throw new Error(`Handshake failed: ${handshakeRes.status}`)
-    const handshakeText = await handshakeRes.text()
+    const BASE = 'http://dashboard.ambicaaspot.com:10001'
 
-    // Response format: 0{"sid":"...","upgrades":["websocket"],...}
-    const sidMatch = handshakeText.match(/"sid":"([^"]+)"/)
-    if (!sidMatch) throw new Error('No session ID in handshake')
+    // Step 1: Handshake — get session ID
+    const hsRes  = await fetch(`${BASE}/socket.io/?EIO=4&transport=polling&t=${Date.now()}`, { signal: AbortSignal.timeout(8000) })
+    const hsText = await hsRes.text()
+    const sidMatch = hsText.match(/"sid":"([^"]+)"/)
+    if (!sidMatch) throw new Error('No SID')
     const sid = sidMatch[1]
 
-    // Step 2: Poll for data with session ID
-    // Need to send room join first
-    const joinUrl = `http://dashboard.ambicaaspot.com:10001/socket.io/?EIO=4&transport=polling&t=${Date.now()}&sid=${sid}`
-    
-    // Send room join message (42 = socket.io message, emit room with username)
-    await fetch(joinUrl, {
+    // Step 2: Send connect packet (40 = socket.io connect to default namespace)
+    await fetch(`${BASE}/socket.io/?EIO=4&transport=polling&t=${Date.now()}&sid=${sid}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
+      body: '40',
+      signal: AbortSignal.timeout(5000),
+    })
+
+    // Step 3: Poll to confirm connection
+    await fetch(`${BASE}/socket.io/?EIO=4&transport=polling&t=${Date.now()}&sid=${sid}`, {
+      signal: AbortSignal.timeout(5000),
+    })
+
+    // Step 4: Emit room join — 42["room","ambicaaspot"]
+    await fetch(`${BASE}/socket.io/?EIO=4&transport=polling&t=${Date.now()}&sid=${sid}`, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
       body: '42["room","ambicaaspot"]',
       signal: AbortSignal.timeout(5000),
     })
 
-    // Step 3: Poll for rate data
-    const pollUrl = `http://dashboard.ambicaaspot.com:10001/socket.io/?EIO=4&transport=polling&t=${Date.now()}&sid=${sid}`
-    const pollRes = await fetch(pollUrl, { signal: AbortSignal.timeout(8000) })
-    if (!pollRes.ok) throw new Error(`Poll failed: ${pollRes.status}`)
-    const pollText = await pollRes.text()
+    // Step 5: Poll multiple times — server sends data after room join
+    for (let i = 0; i < 5; i++) {
+      const pollRes  = await fetch(`${BASE}/socket.io/?EIO=4&transport=polling&t=${Date.now()}&sid=${sid}`, { signal: AbortSignal.timeout(8000) })
+      const pollText = await pollRes.text()
 
-    // Parse socket.io message — look for 'message' event with Rate array
-    // Format: 42["message",{"Rate":[{"Symbol":"IND-GOLD[999]-1KG --today","Ask":149779,...}]}]
-    const msgMatch = pollText.match(/42\["message",([\s\S]+?)\]\s*$/)
-    if (msgMatch) {
-      const data = JSON.parse(msgMatch[1])
-      const rates = data?.Rate || []
-      for (const rate of rates) {
-        if (rate.Symbol && rate.Symbol.includes('IND-GOLD[999]-1KG')) {
-          const sell = parseFloat(rate.Ask)
-          if (sell > 100000) return sell
+      // Look for message event with Rate data
+      // Format: 42["message",{"Rate":[...]}]
+      if (pollText.includes('"message"') && pollText.includes('IND-GOLD')) {
+        // Extract the JSON part after 42["message",
+        const start = pollText.indexOf('42["message",')
+        if (start !== -1) {
+          const jsonStr = pollText.slice(start + 13, pollText.lastIndexOf(']') + 1)
+          try {
+            const data  = JSON.parse(jsonStr)
+            const rates = data?.Rate || []
+            for (const rate of rates) {
+              if (rate.Symbol && rate.Symbol.toUpperCase().includes('IND-GOLD') && rate.Symbol.includes('1KG')) {
+                const sell = parseFloat(rate.Ask)
+                if (sell > 100000) return sell
+              }
+            }
+          } catch {}
+        }
+        // Fallback number extraction
+        const idx = pollText.indexOf('IND-GOLD')
+        if (idx !== -1) {
+          const numbers = pollText.slice(idx, idx + 300).match(/\d{6}/g)
+          if (numbers && numbers.length >= 2) return parseFloat(numbers[1])
         }
       }
-    }
 
-    // Fallback: look for any 6-digit number near IND-GOLD
-    const idx = pollText.indexOf('IND-GOLD')
-    if (idx !== -1) {
-      const chunk   = pollText.slice(idx, idx + 200)
-      const numbers = chunk.match(/\d{6}/g)
-      if (numbers && numbers.length >= 2) return parseFloat(numbers[1])
+      // Small wait before next poll
+      await new Promise(r => setTimeout(r, 500))
     }
 
     return null
@@ -153,4 +165,33 @@ export async function GET(req) {
 // Also allow POST for manual testing
 export async function POST(req) {
   return GET(req)
+}
+
+// Debug endpoint — call /api/fetch-gold-rates?debug=1 to see raw responses
+export async function GET_DEBUG(req) {
+  const url = new URL(req.url)
+  if (url.searchParams.get('debug') !== '1') return GET(req)
+
+  const results = {}
+
+  // Test Kalinga
+  try {
+    const kRes = await fetch(`https://bcast.kalingakawad.com:7768/VOTSBroadcastStreaming/Services/xml/GetLiveRateByTemplateID/kalingabanglore?_=${Date.now()}`, {
+      headers: { 'Referer': 'https://kalingakawad.com/' },
+      signal: AbortSignal.timeout(8000),
+    })
+    results.kalinga_status = kRes.status
+    results.kalinga_raw    = (await kRes.text()).slice(0, 300)
+  } catch (e) { results.kalinga_error = e.message }
+
+  // Test Ambicaa handshake
+  try {
+    const aRes = await fetch(`http://dashboard.ambicaaspot.com:10001/socket.io/?EIO=4&transport=polling&t=${Date.now()}`, {
+      signal: AbortSignal.timeout(8000),
+    })
+    results.ambicaa_status = aRes.status
+    results.ambicaa_raw    = (await aRes.text()).slice(0, 300)
+  } catch (e) { results.ambicaa_error = e.message }
+
+  return Response.json(results)
 }
