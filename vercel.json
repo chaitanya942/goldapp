@@ -2,7 +2,7 @@
   "crons": [
     {
       "path": "/api/fetch-gold-rates",
-      "schedule": "* 3-13 * * 1-5"
+      "schedule": "0 3 * * 1-5"
     }
   ]
 }
