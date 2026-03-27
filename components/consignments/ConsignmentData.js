@@ -9,807 +9,388 @@ const THEMES = {
   light: { bg: '#f0ebe0', card: '#e8e2d6', card2: '#e0d9cc', text1: '#1a1208', text2: '#5a4a2a', text3: '#7a6a4a', text4: '#9a8a6a', gold: '#a07830', border: '#d0c8b8', border2: '#c5bca8', green: '#2a8a5a', red: '#c03030', blue: '#2a6a9a', orange: '#a07010', purple: '#6a3a9a' },
 }
 
-const STATUS_META = {
-  created:    { label: 'Created',    color: '#3a8fbf' },
-  in_transit: { label: 'In Transit', color: '#c9981f' },
-  received:   { label: 'Received',   color: '#3aaa6a' },
-}
+const fmt     = (n) => n != null ? Number(n).toLocaleString('en-IN') : '—'
+const fmtWt   = (n) => n != null ? `${Number(n).toFixed(3)}g` : '—'
+const fmtDate = (d) => d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: '2-digit' }) : '—'
 
-const SORT_OPTIONS = [
-  { key: 'bill_count',  label: 'Bills' },
-  { key: 'total_net',   label: 'Net Weight' },
-  { key: 'total_value', label: 'Value' },
-  { key: 'oldest_date', label: 'Oldest First' },
-]
+const STATE_COLORS = { KA: '#c9a84c', AP: '#3a8fbf', TS: '#8c5ac8', KL: '#3aaa6a' }
 
-const fmt     = (n) => n != null ? Number(n).toLocaleString('en-IN', { maximumFractionDigits: 2 }) : '—'
-const fmtCr   = (n) => { if (n == null) return '—'; const cr = Number(n) / 1e7; return cr >= 1 ? `₹${cr.toFixed(2)} Cr` : `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 })}` }
-const fmtDate = (d) => d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'
-const fmtTime = (t) => {
-  if (!t) return ''
-  try { const [h, m] = t.split(':'); const hr = parseInt(h); return `${hr % 12 || 12}:${m} ${hr >= 12 ? 'PM' : 'AM'}` }
-  catch { return t }
-}
-const daysOld  = (d) => { if (!d) return null; return Math.floor((Date.now() - new Date(d).getTime()) / 86400000) }
-const ageColor = (days, t) => {
-  if (days == null) return t.text4
-  if (days > 180) return t.red
-  if (days > 90)  return t.orange
-  if (days > 30)  return t.gold
-  return t.green
-}
-function genConsignmentNo() {
-  const now = new Date()
-  const y = now.getFullYear().toString().slice(-2)
-  const m = String(now.getMonth() + 1).padStart(2, '0')
-  const d = String(now.getDate()).padStart(2, '0')
-  return `CSN-${y}${m}${d}-${Math.floor(1000 + Math.random() * 9000)}`
-}
+export default function ConsignmentData() {
+  const { theme } = useApp()
+  const t = THEMES[theme]
 
-function ConBillsList({ billIds, t, s }) {
-  const [bills, setBills]     = useState([])
-  const [loading, setLoading] = useState(true)
+  const [view, setView]               = useState('stock')      // stock | create | summary
+  const [purchases, setPurchases]     = useState([])
+  const [branches, setBranches]       = useState([])
+  const [branchSummary, setBranchSummary] = useState([])
+  const [loading, setLoading]         = useState(true)
+  const [selected, setSelected]       = useState(new Set())
+  const [filterBranch, setFilterBranch] = useState('')
+  const [filterState, setFilterState]   = useState('')
+  const [filterDateFrom, setFilterDateFrom] = useState('')
+  const [filterDateTo, setFilterDateTo]     = useState('')
+  const [search, setSearch]           = useState('')
+  const [creating, setCreating]       = useState(false)
+  const [moveType, setMoveType]       = useState('EXTERNAL')
+  const [showCreateModal, setShowCreateModal] = useState(false)
+  const [lastConsignment, setLastConsignment] = useState(null)
+  const [expandedStates, setExpandedStates]   = useState({})
+  const [expandedBranches, setExpandedBranches] = useState({})
 
   useEffect(() => {
-    if (!billIds?.length) { setLoading(false); return }
-    supabase.from('purchases')
-      .select('id, application_id, purchase_date, customer_name, branch_name, net_weight, total_amount, transaction_type')
-      .in('id', billIds)
-      .order('branch_name')
-      .then(({ data }) => { if (data) setBills(data); setLoading(false) })
+    fetchAll()
   }, [])
 
-  if (loading) return <div style={{ textAlign: 'center', color: t.text3, padding: '24px' }}>Loading bills...</div>
-  if (!bills.length) return <div style={{ textAlign: 'center', color: t.text4, padding: '24px' }}>No bills found</div>
+  async function fetchAll() {
+    setLoading(true)
+    const [p, b, s] = await Promise.all([
+      fetch('/api/consignments?action=stock_in_branch').then(r => r.json()),
+      fetch('/api/consignments?action=branches').then(r => r.json()),
+      fetch('/api/consignments?action=branch_summary').then(r => r.json()),
+    ])
+    setPurchases(p.data || [])
+    setBranches(b.data || [])
+    setBranchSummary(s.data || [])
+    setLoading(false)
+  }
 
-  const totalNet   = bills.reduce((s, b) => s + (parseFloat(b.net_weight) || 0), 0)
-  const totalValue = bills.reduce((s, b) => s + (parseFloat(b.total_amount) || 0), 0)
-
-  return (
-    <div>
-      <div style={{ display: 'flex', gap: '24px', marginBottom: '12px', padding: '10px 14px', background: t.card2, borderRadius: '8px', border: `1px solid ${t.border}` }}>
-        <span style={{ fontSize: '12px', color: t.text3 }}>Total: <span style={{ color: t.text1, fontWeight: 600 }}>{bills.length} bills</span></span>
-        <span style={{ fontSize: '12px', color: t.text3 }}>Net Wt: <span style={{ color: t.gold, fontWeight: 600 }}>{fmt(totalNet)}g</span></span>
-        <span style={{ fontSize: '12px', color: t.text3 }}>Value: <span style={{ color: t.green, fontWeight: 600 }}>{fmtCr(totalValue)}</span></span>
-      </div>
-      <div style={{ overflowX: 'auto', borderRadius: '8px', border: `1px solid ${t.border}` }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-          <thead>
-            <tr>{['App ID', 'Date', 'Customer', 'Branch', 'Net Wt', 'Gross Value', 'Type'].map(h => <th key={h} style={s.th}>{h}</th>)}</tr>
-          </thead>
-          <tbody>
-            {bills.map(bill => (
-              <tr key={bill.id}>
-                <td style={{ ...s.td, color: t.gold, fontWeight: 500 }}>{bill.application_id}</td>
-                <td style={s.td}>{fmtDate(bill.purchase_date)}</td>
-                <td style={s.td}>{bill.customer_name}</td>
-                <td style={{ ...s.td, color: t.text2 }}>{bill.branch_name}</td>
-                <td style={{ ...s.td, color: t.gold }}>{fmt(bill.net_weight)}g</td>
-                <td style={s.td}>₹{fmt(bill.total_amount)}</td>
-                <td style={{ ...s.td, fontSize: '11px' }}>
-                  <span style={{ color: bill.transaction_type === 'PHYSICAL' ? t.gold : t.orange, background: `${bill.transaction_type === 'PHYSICAL' ? t.gold : t.orange}18`, border: `1px solid ${bill.transaction_type === 'PHYSICAL' ? t.gold : t.orange}40`, borderRadius: '4px', padding: '2px 7px' }}>{bill.transaction_type}</span>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  )
-}
-
-// ── Reusable drill-down panel (used by both At Branch and In Transit tabs)
-function DrillDownPanel({ stockStatus, accentColor, rpcState, rpcBranch, canManage, t, s, onCreateConsignment }) {
-  const [drillLevel, setDrillLevel]         = useState('states')
-  const [selectedState, setSelectedState]   = useState(null)
-  const [selectedBranch, setSelectedBranch] = useState(null)
-  const [sortBy, setSortBy]                 = useState('bill_count')
-
-  const [stateSummary, setStateSummary]       = useState([])
-  const [statesLoading, setStatesLoading]     = useState(false)
-  const [branchSummary, setBranchSummary]     = useState([])
-  const [branchesLoading, setBranchesLoading] = useState(false)
-
-  const [bills, setBills]               = useState([])
-  const [billsLoading, setBillsLoading] = useState(false)
-  const [billsTotal, setBillsTotal]     = useState(0)
-  const [billsPage, setBillsPage]       = useState(0)
-  const [selectedIds, setSelectedIds]   = useState(new Set())
-  const BILLS_PAGE_SIZE = 100
-
-  const selectedBills    = bills.filter(b => selectedIds.has(b.id))
-  const selectedNetWt    = selectedBills.reduce((sv, b) => sv + (parseFloat(b.net_weight) || 0), 0)
-  const selectedBranches = [...new Set(selectedBills.map(b => b.branch_name).filter(Boolean))]
-
-  const sortedStates = [...stateSummary].sort((a, b) => {
-    if (sortBy === 'oldest_date') return new Date(a.oldest_date) - new Date(b.oldest_date)
-    return Number(b[sortBy] || 0) - Number(a[sortBy] || 0)
+  // Filter purchases
+  const filtered = purchases.filter(p => {
+    if (filterBranch && p.branch_name !== filterBranch) return false
+    if (filterState) {
+      const br = branches.find(b => b.branch_name === p.branch_name)
+      if (!br || br.state_code !== filterState) return false
+    }
+    if (filterDateFrom && p.purchase_date < filterDateFrom) return false
+    if (filterDateTo   && p.purchase_date > filterDateTo)   return false
+    if (search) {
+      const q = search.toLowerCase()
+      if (!p.customer_name?.toLowerCase().includes(q) &&
+          !p.phone_number?.includes(q) &&
+          !p.application_id?.toLowerCase().includes(q) &&
+          !p.branch_name?.toLowerCase().includes(q)) return false
+    }
+    return true
   })
 
-  const grandTotal = {
-    bills:    stateSummary.reduce((sv, r) => sv + Number(r.bill_count || 0), 0),
-    net:      stateSummary.reduce((sv, r) => sv + Number(r.total_net || 0), 0),
-    value:    stateSummary.reduce((sv, r) => sv + Number(r.total_value || 0), 0),
-    branches: stateSummary.reduce((sv, r) => sv + Number(r.branch_count || 0), 0),
-    avgAge:   stateSummary.length > 0 ? stateSummary.reduce((sv, r) => sv + Number(r.avg_age_days || 0), 0) / stateSummary.length : 0,
+  const allSelected    = filtered.length > 0 && filtered.every(p => selected.has(p.id))
+  const selectedRows   = filtered.filter(p => selected.has(p.id))
+  const totalSelWt     = selectedRows.reduce((s, p) => s + parseFloat(p.net_weight || 0), 0)
+  const totalSelAmt    = selectedRows.reduce((s, p) => s + parseFloat(p.total_amount || 0), 0)
+
+  // Get unique branches for selected items
+  const selectedBranches = [...new Set(selectedRows.map(p => p.branch_name))]
+
+  function toggleAll() {
+    if (allSelected) { const n = new Set(selected); filtered.forEach(p => n.delete(p.id)); setSelected(n) }
+    else { const n = new Set(selected); filtered.forEach(p => n.add(p.id)); setSelected(n) }
   }
 
-  useEffect(() => { loadStateSummary() }, [])
+  async function handleCreateConsignment() {
+    if (!selected.size) return
+    if (selectedBranches.length > 1) { alert('Please select bills from only ONE branch at a time to create a consignment.'); return }
 
-  const loadStateSummary = async () => {
-    setStatesLoading(true)
-    const { data } = await supabase.rpc(rpcState)
-    if (data) setStateSummary(data)
-    setStatesLoading(false)
+    setCreating(true)
+    try {
+      const branchName = selectedBranches[0]
+      const branch     = branches.find(b => b.branch_name === branchName)
+      if (!branch) { alert('Branch not found in master list.'); return }
+
+      const res = await fetch('/api/consignments', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action:       'create_consignment',
+          purchase_ids: [...selected],
+          branch_name:  branchName,
+          branch_code:  branch.branch_code,
+          state_code:   branch.state_code,
+          movement_type: moveType,
+        })
+      })
+      const result = await res.json()
+      if (result.error) { alert('Error: ' + result.error); return }
+
+      setLastConsignment(result.data)
+      setSelected(new Set())
+      setShowCreateModal(false)
+      await fetchAll()
+    } finally { setCreating(false) }
   }
 
-  const loadBranchSummary = async (state) => {
-    setBranchesLoading(true)
-    const { data } = await supabase.rpc(rpcBranch, { p_state: state })
-    if (data) setBranchSummary(data)
-    setBranchesLoading(false)
-  }
+  // Group branches by state for summary view
+  const stateGroups = branchSummary.reduce((acc, b) => {
+    const br = branches.find(x => x.branch_name === b.branch)
+    const state = br?.state_code || 'OTHER'
+    if (!acc[state]) acc[state] = []
+    acc[state].push({ ...b, state_name: br?.state_name })
+    return acc
+  }, {})
 
-  const loadBills = async (branch, pageNum = 0) => {
-    setBillsLoading(true)
-    const from = pageNum * BILLS_PAGE_SIZE
-    const { data, count } = await supabase
-      .from('purchases')
-      .select('id, application_id, purchase_date, transaction_time, customer_name, branch_name, net_weight, purity, total_amount, transaction_type', { count: 'exact' })
-      .eq('stock_status', stockStatus)
-      .is('is_deleted', false)
-      .eq('branch_name', branch)
-      .order('purchase_date', { ascending: false })
-      .range(from, from + BILLS_PAGE_SIZE - 1)
-    if (data) setBills(data)
-    if (count !== null) setBillsTotal(count)
-    setSelectedIds(new Set())
-    setBillsLoading(false)
-  }
-
-  const handleStateClick  = (state)  => { setSelectedState(state);   setDrillLevel('branches'); loadBranchSummary(state) }
-  const handleBranchClick = (branch) => { setSelectedBranch(branch); setDrillLevel('bills');    setBillsPage(0); loadBills(branch, 0) }
-  const handleBack = () => {
-    if (drillLevel === 'bills')         { setDrillLevel('branches'); setSelectedBranch(null); setBills([]);        setSelectedIds(new Set()) }
-    else if (drillLevel === 'branches') { setDrillLevel('states');   setSelectedState(null);  setBranchSummary([]) }
-  }
-
-  const toggleBill     = (id) => setSelectedIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })
-  const toggleAllBills = ()   => { if (bills.length > 0 && bills.every(b => selectedIds.has(b.id))) setSelectedIds(new Set()); else setSelectedIds(new Set(bills.map(b => b.id))) }
-
-  const totalBillsPages = Math.ceil(billsTotal / BILLS_PAGE_SIZE)
-
-  const Breadcrumb = () => (
-    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '20px', fontSize: '13px' }}>
-      <span onClick={() => { setDrillLevel('states'); setSelectedState(null); setSelectedBranch(null); setBills([]); setSelectedIds(new Set()) }}
-        style={{ color: drillLevel === 'states' ? t.text1 : t.gold, cursor: drillLevel === 'states' ? 'default' : 'pointer', fontWeight: drillLevel === 'states' ? 600 : 400 }}>All States</span>
-      {selectedState && (<><span style={{ color: t.text4 }}>›</span>
-        <span onClick={() => drillLevel === 'bills' ? (setDrillLevel('branches'), setSelectedBranch(null), setBills([]), setSelectedIds(new Set())) : null}
-          style={{ color: drillLevel === 'branches' ? t.text1 : t.gold, cursor: drillLevel === 'bills' ? 'pointer' : 'default', fontWeight: drillLevel === 'branches' ? 600 : 400 }}>{selectedState}</span></>)}
-      {selectedBranch && (<><span style={{ color: t.text4 }}>›</span>
-        <span style={{ color: t.text1, fontWeight: 600 }}>{selectedBranch}</span></>)}
-    </div>
-  )
+  const card   = { background: t.card, border: `1px solid ${t.border}`, borderRadius: '10px' }
+  const btnGold = { background: t.gold, color: '#1a0a00', border: 'none', borderRadius: '7px', padding: '6px 14px', fontSize: '12px', fontWeight: 700, cursor: 'pointer' }
+  const btnOut  = { background: 'transparent', border: `1px solid ${t.border}`, borderRadius: '7px', padding: '6px 14px', fontSize: '12px', color: t.text3, cursor: 'pointer' }
 
   return (
-    <>
-      <Breadcrumb />
+    <div style={{ padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
 
-      {/* STATES */}
-      {drillLevel === 'states' && (
-        <>
-          {!statesLoading && stateSummary.length > 0 && (
-            <div style={{ background: `linear-gradient(135deg, ${t.card} 0%, ${t.card2} 100%)`, border: `1px solid ${t.border}`, borderRadius: '14px', padding: '18px 28px', marginBottom: '24px', display: 'flex', position: 'relative', overflow: 'hidden' }}>
-              <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '2px', background: `linear-gradient(90deg, ${accentColor}, ${t.green}, ${t.blue}, transparent)` }} />
-              {[
-                { label: 'Total Bills',     value: grandTotal.bills.toLocaleString('en-IN'), color: accentColor, size: '1.6rem' },
-                { label: 'Total Net Wt',    value: `${fmt(grandTotal.net)}g`,               color: t.text1,    size: '1.2rem' },
-                { label: 'Total Value',     value: fmtCr(grandTotal.value),                 color: t.green,    size: '1.2rem' },
-                { label: 'Active Branches', value: grandTotal.branches,                      color: t.blue,     size: '1.6rem' },
-                { label: 'Avg Bill Age',    value: `${Math.round(grandTotal.avgAge)}d`,      color: ageColor(Math.round(grandTotal.avgAge), t), size: '1.6rem' },
-              ].map((item, i, arr) => (
-                <div key={item.label} style={{ flex: 1, textAlign: 'center', padding: '0 16px', borderRight: i < arr.length - 1 ? `1px solid ${t.border}` : 'none' }}>
-                  <div style={{ fontSize: item.size, fontWeight: 200, color: item.color, lineHeight: 1.1, marginBottom: '6px' }}>{item.value}</div>
-                  <div style={{ fontSize: '11px', color: t.text4, textTransform: 'uppercase', letterSpacing: '.1em' }}>{item.label}</div>
-                </div>
-              ))}
-            </div>
-          )}
+      {/* Header */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div>
+          <div style={{ fontSize: '1.3rem', fontWeight: 300, color: t.text1 }}>Stock in Branch</div>
+          <div style={{ fontSize: '11px', color: t.text3, marginTop: '2px' }}>
+            Outside Bangalore gold pending consignment · {purchases.length} bills
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <button onClick={() => setView('summary')} style={{ ...btnOut, color: view === 'summary' ? t.gold : t.text3, borderColor: view === 'summary' ? t.gold : t.border }}>
+            📊 Branch View
+          </button>
+          <button onClick={() => setView('stock')} style={{ ...btnOut, color: view === 'stock' ? t.gold : t.text3, borderColor: view === 'stock' ? t.gold : t.border }}>
+            📋 Stock List
+          </button>
+          <button onClick={fetchAll} style={btnOut}>⟳ Refresh</button>
+        </div>
+      </div>
 
-          {!statesLoading && stateSummary.length > 0 && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
-              <span style={{ fontSize: '12px', color: t.text4 }}>Sort by:</span>
-              {SORT_OPTIONS.map(opt => (
-                <button key={opt.key} onClick={() => setSortBy(opt.key)} style={{
-                  padding: '5px 14px', borderRadius: '20px', border: `1px solid ${sortBy === opt.key ? accentColor : t.border}`,
-                  background: sortBy === opt.key ? `${accentColor}18` : 'transparent',
-                  color: sortBy === opt.key ? accentColor : t.text3, fontSize: '12px', cursor: 'pointer', transition: 'all .15s',
-                }}>{opt.label}</button>
-              ))}
-            </div>
-          )}
-
-          {statesLoading ? <div style={{ textAlign: 'center', color: t.text3, padding: '48px' }}>Loading...</div>
-          : stateSummary.length === 0 ? (
-            <div style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: '12px', padding: '48px', textAlign: 'center', marginBottom: '20px' }}>
-              <div style={{ fontSize: '2rem', opacity: .2, marginBottom: '12px' }}>📦</div>
-              <div style={{ fontSize: '14px', color: t.text3 }}>No bills</div>
-            </div>
-          ) : (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '16px' }}>
-              {sortedStates.map(row => {
-                const days   = daysOld(row.oldest_date)
-                const avgAge = Math.round(Number(row.avg_age_days || 0))
-                return (
-                  <div key={row.state} onClick={() => handleStateClick(row.state)}
-                    style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: '12px', padding: '20px 24px', marginBottom: 0, cursor: 'pointer', transition: 'all .2s', position: 'relative', overflow: 'hidden' }}
-                    onMouseEnter={e => { e.currentTarget.style.borderColor = `${accentColor}50`; e.currentTarget.style.transform = 'translateY(-2px)' }}
-                    onMouseLeave={e => { e.currentTarget.style.borderColor = t.border; e.currentTarget.style.transform = 'translateY(0)' }}>
-                    <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '2px', background: `linear-gradient(90deg, ${accentColor}, transparent)` }} />
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '16px' }}>
-                      <div style={{ fontSize: '15px', fontWeight: 600, color: t.text1 }}>{row.state}</div>
-                      {days != null && <span style={{ fontSize: '11px', color: ageColor(days, t), background: `${ageColor(days, t)}18`, border: `1px solid ${ageColor(days, t)}40`, borderRadius: '4px', padding: '2px 8px', fontWeight: 600 }}>⏱ {days}d old</span>}
-                    </div>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '12px' }}>
-                      <div><div style={{ fontSize: '11px', color: t.text4, textTransform: 'uppercase', letterSpacing: '.08em', marginBottom: '4px' }}>Bills</div>
-                        <div style={{ fontSize: '1.6rem', fontWeight: 300, color: accentColor }}>{Number(row.bill_count).toLocaleString('en-IN')}</div></div>
-                      <div><div style={{ fontSize: '11px', color: t.text4, textTransform: 'uppercase', letterSpacing: '.08em', marginBottom: '4px' }}>Net Weight</div>
-                        <div style={{ fontSize: '1rem', color: t.text1 }}>{fmt(row.total_net)}g</div></div>
-                    </div>
-                    <div style={{ marginBottom: '12px' }}>
-                      <div style={{ fontSize: '11px', color: t.text4, textTransform: 'uppercase', letterSpacing: '.08em', marginBottom: '4px' }}>Value</div>
-                      <div style={{ fontSize: '1rem', color: t.green }}>{fmtCr(row.total_value)}</div>
-                    </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: '12px', borderTop: `1px solid ${t.border}` }}>
-                      <div style={{ display: 'flex', gap: '16px' }}>
-                        <span style={{ fontSize: '12px', color: t.text3 }}><span style={{ color: t.text2, fontWeight: 600 }}>{Number(row.branch_count)}</span> branches</span>
-                        <span style={{ fontSize: '12px', color: t.text3 }}>Avg <span style={{ color: ageColor(avgAge, t), fontWeight: 600 }}>{avgAge}d</span> old</span>
-                      </div>
-                      <div style={{ fontSize: '12px', color: accentColor }}>View ›</div>
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-          )}
-        </>
-      )}
-
-      {/* BRANCHES */}
-      {drillLevel === 'branches' && (
-        <>
-          <button style={{ background: 'transparent', color: t.text3, border: `1px solid ${t.border}`, borderRadius: '8px', padding: '7px 14px', fontSize: '12px', cursor: 'pointer', marginBottom: '16px' }} onClick={handleBack}>← Back</button>
-          {branchesLoading ? <div style={{ textAlign: 'center', color: t.text3, padding: '48px' }}>Loading...</div>
-          : branchSummary.length === 0 ? (
-            <div style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: '12px', padding: '48px', textAlign: 'center' }}><div style={{ fontSize: '14px', color: t.text3 }}>No branches</div></div>
-          ) : (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: '14px' }}>
-              {branchSummary.map(row => {
-                const days = daysOld(row.oldest_date)
-                return (
-                  <div key={row.branch_name} onClick={() => handleBranchClick(row.branch_name)}
-                    style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: '12px', padding: '20px 24px', marginBottom: 0, cursor: 'pointer', transition: 'all .2s', position: 'relative', overflow: 'hidden' }}
-                    onMouseEnter={e => { e.currentTarget.style.borderColor = `${accentColor}50`; e.currentTarget.style.transform = 'translateY(-2px)' }}
-                    onMouseLeave={e => { e.currentTarget.style.borderColor = t.border; e.currentTarget.style.transform = 'translateY(0)' }}>
-                    <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '2px', background: `linear-gradient(90deg, ${accentColor}, transparent)` }} />
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '14px' }}>
-                      <div style={{ fontSize: '14px', fontWeight: 600, color: t.text1 }}>{row.branch_name}</div>
-                      {days != null && <span style={{ fontSize: '11px', color: ageColor(days, t), background: `${ageColor(days, t)}18`, border: `1px solid ${ageColor(days, t)}40`, borderRadius: '4px', padding: '2px 7px', fontWeight: 600 }}>{days}d old</span>}
-                    </div>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '10px' }}>
-                      <div><div style={{ fontSize: '11px', color: t.text4, textTransform: 'uppercase', letterSpacing: '.08em', marginBottom: '3px' }}>Bills</div>
-                        <div style={{ fontSize: '1.4rem', fontWeight: 300, color: accentColor }}>{Number(row.bill_count).toLocaleString('en-IN')}</div></div>
-                      <div><div style={{ fontSize: '11px', color: t.text4, textTransform: 'uppercase', letterSpacing: '.08em', marginBottom: '3px' }}>Net Wt</div>
-                        <div style={{ fontSize: '1rem', color: t.text1 }}>{fmt(row.total_net)}g</div></div>
-                    </div>
-                    <div style={{ marginBottom: '12px' }}><div style={{ fontSize: '11px', color: t.text4, textTransform: 'uppercase', letterSpacing: '.08em', marginBottom: '3px' }}>Value</div>
-                      <div style={{ fontSize: '13px', color: t.green }}>{fmtCr(row.total_value)}</div></div>
-                    <div style={{ fontSize: '12px', color: accentColor, textAlign: 'right' }}>View bills ›</div>
-                  </div>
-                )
-              })}
-            </div>
-          )}
-        </>
-      )}
-
-      {/* BILLS TABLE */}
-      {drillLevel === 'bills' && (
-        <>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px', flexWrap: 'wrap' }}>
-            <button style={{ background: 'transparent', color: t.text3, border: `1px solid ${t.border}`, borderRadius: '8px', padding: '7px 14px', fontSize: '12px', cursor: 'pointer' }} onClick={handleBack}>← Back</button>
-            {selectedIds.size > 0 && stockStatus === 'at_branch' && (
-              <div style={{ background: `${t.gold}12`, border: `1px solid ${t.gold}30`, borderRadius: '8px', padding: '8px 16px', display: 'flex', alignItems: 'center', gap: '16px', flex: 1, minWidth: 0 }}>
-                <span style={{ fontSize: '13px', color: t.gold, fontWeight: 600 }}>{selectedIds.size} selected</span>
-                <span style={{ fontSize: '13px', color: t.text2 }}>Net Wt: <span style={{ color: t.gold }}>{fmt(selectedNetWt)}g</span></span>
-                {canManage && <button style={{ background: t.gold, color: '#1a0a00', border: 'none', borderRadius: '8px', padding: '6px 16px', fontSize: '12px', fontWeight: 700, cursor: 'pointer', marginLeft: 'auto' }}
-                  onClick={() => onCreateConsignment(selectedIds, selectedBills, selectedBranches)}>+ Create Consignment</button>}
-              </div>
-            )}
-            <div style={{ marginLeft: selectedIds.size > 0 ? 0 : 'auto', fontSize: '12px', color: t.text3, display: 'flex', alignItems: 'center', gap: '8px', whiteSpace: 'nowrap' }}>
-              <span>{billsTotal === 0 ? 0 : billsPage * BILLS_PAGE_SIZE + 1}–{Math.min((billsPage + 1) * BILLS_PAGE_SIZE, billsTotal).toLocaleString('en-IN')} of {billsTotal.toLocaleString('en-IN')}</span>
-              <button onClick={() => { const p = Math.max(0, billsPage - 1); setBillsPage(p); loadBills(selectedBranch, p) }} disabled={billsPage === 0}
-                style={{ background: 'none', border: `1px solid ${t.border}`, borderRadius: '5px', padding: '3px 10px', color: billsPage === 0 ? t.text4 : t.text2, cursor: billsPage === 0 ? 'not-allowed' : 'pointer', fontSize: '12px' }}>←</button>
-              <span>Page {billsPage + 1} of {totalBillsPages || 1}</span>
-              <button onClick={() => { const p = Math.min(totalBillsPages - 1, billsPage + 1); setBillsPage(p); loadBills(selectedBranch, p) }} disabled={billsPage >= totalBillsPages - 1}
-                style={{ background: 'none', border: `1px solid ${t.border}`, borderRadius: '5px', padding: '3px 10px', color: billsPage >= totalBillsPages - 1 ? t.text4 : t.text2, cursor: billsPage >= totalBillsPages - 1 ? 'not-allowed' : 'pointer', fontSize: '12px' }}>→</button>
+      {/* Success banner */}
+      {lastConsignment && (
+        <div style={{ ...card, padding: '12px 18px', background: `${t.green}15`, border: `1px solid ${t.green}40`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div>
+            <div style={{ fontSize: '12px', color: t.green, fontWeight: 600 }}>✓ Consignment Created</div>
+            <div style={{ fontSize: '11px', color: t.text3, marginTop: '2px' }}>
+              TMP PRF: <span style={{ color: t.gold, fontWeight: 600 }}>{lastConsignment.tmp_prf_no}</span>
+              &nbsp;·&nbsp; Challan: <span style={{ color: t.blue }}>{lastConsignment.challan_no}</span>
+              &nbsp;·&nbsp; {lastConsignment.total_bills} bills · {fmtWt(lastConsignment.total_net_wt)}
             </div>
           </div>
-          {billsLoading ? <div style={{ textAlign: 'center', color: t.text3, padding: '48px' }}>Loading...</div> : (
-            <div style={{ overflowX: 'auto', borderRadius: '10px', border: `1px solid ${t.border}` }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                <thead>
+          <button onClick={() => setLastConsignment(null)} style={{ ...btnOut, padding: '4px 10px', fontSize: '11px' }}>✕</button>
+        </div>
+      )}
+
+      {/* ── SUMMARY VIEW ── */}
+      {view === 'summary' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+          {Object.entries(stateGroups).map(([stateCode, brs]) => {
+            const stateTotal    = brs.reduce((s, b) => s + b.in_branch + b.in_transit, 0)
+            const stateInBranch = brs.reduce((s, b) => s + b.in_branch, 0)
+            const stateTransit  = brs.reduce((s, b) => s + b.in_transit, 0)
+            const stateColor    = STATE_COLORS[stateCode] || t.text3
+            const isExpanded    = expandedStates[stateCode]
+
+            return (
+              <div key={stateCode} style={card}>
+                {/* State header */}
+                <div onClick={() => setExpandedStates(p => ({ ...p, [stateCode]: !p[stateCode] }))}
+                  style={{ padding: '12px 16px', display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer' }}>
+                  <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: stateColor }} />
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: '13px', fontWeight: 600, color: stateColor }}>{stateCode} — {brs[0]?.state_name}</div>
+                    <div style={{ fontSize: '11px', color: t.text4 }}>{brs.length} branches · {stateTotal} bills total</div>
+                  </div>
+                  <div style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
+                    <div style={{ textAlign: 'right' }}>
+                      <div style={{ fontSize: '11px', color: t.text4 }}>In Branch</div>
+                      <div style={{ fontSize: '14px', fontWeight: 600, color: t.gold }}>{stateInBranch}</div>
+                    </div>
+                    <div style={{ textAlign: 'right' }}>
+                      <div style={{ fontSize: '11px', color: t.text4 }}>In Transit</div>
+                      <div style={{ fontSize: '14px', fontWeight: 600, color: t.orange }}>{stateTransit}</div>
+                    </div>
+                    <div style={{ fontSize: '12px', color: t.text4 }}>{isExpanded ? '▲' : '▼'}</div>
+                  </div>
+                </div>
+
+                {/* Branch rows */}
+                {isExpanded && (
+                  <div style={{ borderTop: `1px solid ${t.border}` }}>
+                    {brs.map(b => (
+                      <div key={b.branch} style={{ borderBottom: `1px solid ${t.border}15` }}>
+                        <div onClick={() => setExpandedBranches(p => ({ ...p, [b.branch]: !p[b.branch] }))}
+                          style={{ padding: '10px 16px 10px 32px', display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer' }}
+                          onMouseEnter={e => e.currentTarget.style.background = `${t.gold}06`}
+                          onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                          <div style={{ flex: 1, fontSize: '12px', color: t.text2 }}>{b.branch}</div>
+                          <div style={{ display: 'flex', gap: '24px' }}>
+                            <div style={{ textAlign: 'right' }}>
+                              <div style={{ fontSize: '10px', color: t.text4 }}>In Branch</div>
+                              <div style={{ fontSize: '13px', fontWeight: 600, color: t.gold }}>{b.in_branch}</div>
+                            </div>
+                            <div style={{ textAlign: 'right' }}>
+                              <div style={{ fontSize: '10px', color: t.text4 }}>In Transit</div>
+                              <div style={{ fontSize: '13px', fontWeight: 600, color: t.orange }}>{b.in_transit}</div>
+                            </div>
+                            <button onClick={(e) => { e.stopPropagation(); setFilterBranch(b.branch); setView('stock') }}
+                              style={{ ...btnOut, padding: '3px 8px', fontSize: '10px' }}>View Bills</button>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )
+          })}
+          {Object.keys(stateGroups).length === 0 && (
+            <div style={{ ...card, padding: '40px', textAlign: 'center', color: t.text4, fontSize: '13px' }}>
+              No stock data available
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── STOCK LIST VIEW ── */}
+      {view === 'stock' && (
+        <>
+          {/* Filters */}
+          <div style={{ ...card, padding: '12px 16px', display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }}>
+            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search name, phone, app ID..."
+              style={{ flex: 1, minWidth: '180px', background: t.card2, border: `1px solid ${t.border}`, borderRadius: '6px', padding: '6px 10px', fontSize: '12px', color: t.text1, outline: 'none' }} />
+
+            <select value={filterState} onChange={e => { setFilterState(e.target.value); setFilterBranch('') }}
+              style={{ background: t.card2, border: `1px solid ${t.border}`, borderRadius: '6px', padding: '6px 10px', fontSize: '12px', color: t.text2, outline: 'none' }}>
+              <option value="">All States</option>
+              {['KA','AP','TS','KL'].map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
+
+            <select value={filterBranch} onChange={e => setFilterBranch(e.target.value)}
+              style={{ background: t.card2, border: `1px solid ${t.border}`, borderRadius: '6px', padding: '6px 10px', fontSize: '12px', color: t.text2, outline: 'none', minWidth: '160px' }}>
+              <option value="">All Branches</option>
+              {branches.filter(b => !filterState || b.state_code === filterState).map(b => (
+                <option key={b.branch_code} value={b.branch_name}>{b.branch_name}</option>
+              ))}
+            </select>
+
+            <input type="date" value={filterDateFrom} onChange={e => setFilterDateFrom(e.target.value)}
+              style={{ background: t.card2, border: `1px solid ${t.border}`, borderRadius: '6px', padding: '6px 10px', fontSize: '12px', color: t.text2, outline: 'none' }} />
+            <input type="date" value={filterDateTo} onChange={e => setFilterDateTo(e.target.value)}
+              style={{ background: t.card2, border: `1px solid ${t.border}`, borderRadius: '6px', padding: '6px 10px', fontSize: '12px', color: t.text2, outline: 'none' }} />
+
+            {(filterBranch || filterState || filterDateFrom || filterDateTo || search) && (
+              <button onClick={() => { setFilterBranch(''); setFilterState(''); setFilterDateFrom(''); setFilterDateTo(''); setSearch('') }} style={{ ...btnOut, fontSize: '11px', padding: '5px 10px' }}>✕ Clear</button>
+            )}
+
+            <div style={{ marginLeft: 'auto', fontSize: '11px', color: t.text4 }}>{filtered.length} bills</div>
+          </div>
+
+          {/* Selection bar */}
+          {selected.size > 0 && (
+            <div style={{ ...card, padding: '10px 16px', background: `${t.gold}10`, border: `1px solid ${t.gold}30`, display: 'flex', alignItems: 'center', gap: '16px' }}>
+              <div style={{ fontSize: '12px', color: t.gold, fontWeight: 600 }}>{selected.size} bills selected</div>
+              <div style={{ fontSize: '12px', color: t.text3 }}>
+                {fmtWt(totalSelWt)} · ₹{fmt(Math.round(totalSelAmt))}
+              </div>
+              {selectedBranches.length === 1 && (
+                <div style={{ fontSize: '12px', color: t.text3 }}>Branch: <span style={{ color: t.text1, fontWeight: 600 }}>{selectedBranches[0]}</span></div>
+              )}
+              {selectedBranches.length > 1 && (
+                <div style={{ fontSize: '12px', color: t.red }}>⚠ Multiple branches selected — select one branch only</div>
+              )}
+              <div style={{ marginLeft: 'auto', display: 'flex', gap: '8px', alignItems: 'center' }}>
+                <select value={moveType} onChange={e => setMoveType(e.target.value)}
+                  style={{ background: t.card2, border: `1px solid ${t.border}`, borderRadius: '6px', padding: '5px 10px', fontSize: '11px', color: t.text2, outline: 'none' }}>
+                  <option value="EXTERNAL">External (Branch → HO)</option>
+                  <option value="INTERNAL">Internal (Branch → Hub)</option>
+                </select>
+                <button onClick={() => setShowCreateModal(true)} disabled={selectedBranches.length !== 1} style={{ ...btnGold, opacity: selectedBranches.length !== 1 ? .5 : 1 }}>
+                  Create Consignment
+                </button>
+                <button onClick={() => setSelected(new Set())} style={btnOut}>Clear</button>
+              </div>
+            </div>
+          )}
+
+          {/* Table */}
+          <div style={{ ...card, overflow: 'hidden' }}>
+            <div style={{ overflowX: 'auto', maxHeight: 'calc(100vh - 340px)', overflowY: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '900px' }}>
+                <thead style={{ position: 'sticky', top: 0, zIndex: 1 }}>
                   <tr>
-                    {canManage && stockStatus === 'at_branch' && <th style={{ ...s.th, width: '40px', textAlign: 'center' }}><input type="checkbox" style={{ width: '15px', height: '15px', accentColor: t.gold, cursor: 'pointer' }} checked={bills.length > 0 && bills.every(b => selectedIds.has(b.id))} onChange={toggleAllBills} /></th>}
-                    {['App ID', 'Date', 'Time', 'Customer', 'Net Wt', 'Purity', 'Gross Value', 'Type'].map(h => <th key={h} style={s.th}>{h}</th>)}
+                    <th style={{ padding: '9px 12px', background: t.card2, borderBottom: `1px solid ${t.border}`, width: '36px' }}>
+                      <input type="checkbox" checked={allSelected} onChange={toggleAll} style={{ cursor: 'pointer' }} />
+                    </th>
+                    {['Date', 'Branch', 'Cust Name', 'Phone', 'App ID', 'Grs Wt', 'Net Wt', 'Purity', 'Gross Amt', 'Final Amt', 'Type'].map(h => (
+                      <th key={h} style={{ padding: '9px 12px', fontSize: '10px', color: t.text4, letterSpacing: '.08em', textTransform: 'uppercase', textAlign: 'left', background: t.card2, borderBottom: `1px solid ${t.border}`, whiteSpace: 'nowrap', fontWeight: 600 }}>{h}</th>
+                    ))}
                   </tr>
                 </thead>
                 <tbody>
-                  {bills.map(bill => (
-                    <tr key={bill.id} style={{ background: selectedIds.has(bill.id) ? `${t.gold}10` : 'transparent', transition: 'background .1s' }}>
-                      {canManage && stockStatus === 'at_branch' && <td style={{ ...s.td, textAlign: 'center', padding: '10px 8px' }}><input type="checkbox" style={{ width: '15px', height: '15px', accentColor: t.gold, cursor: 'pointer' }} checked={selectedIds.has(bill.id)} onChange={() => toggleBill(bill.id)} /></td>}
-                      <td style={{ ...s.td, color: t.gold, fontWeight: 500 }}>{bill.application_id}</td>
-                      <td style={s.td}>{fmtDate(bill.purchase_date)}</td>
-                      <td style={{ ...s.td, color: t.text3 }}>{fmtTime(bill.transaction_time) || '—'}</td>
-                      <td style={s.td}>{bill.customer_name}</td>
-                      <td style={{ ...s.td, color: t.gold }}>{fmt(bill.net_weight)}g</td>
-                      <td style={s.td}>{bill.purity ? `${Number(bill.purity).toFixed(2)}%` : '—'}</td>
-                      <td style={s.td}>₹{fmt(bill.total_amount)}</td>
-                      <td style={{ ...s.td, fontSize: '11px' }}>
-                        <span style={{ color: bill.transaction_type === 'PHYSICAL' ? t.gold : t.orange, background: `${bill.transaction_type === 'PHYSICAL' ? t.gold : t.orange}18`, border: `1px solid ${bill.transaction_type === 'PHYSICAL' ? t.gold : t.orange}40`, borderRadius: '4px', padding: '2px 7px' }}>{bill.transaction_type}</span>
-                      </td>
-                    </tr>
-                  ))}
-                  {bills.length === 0 && <tr><td colSpan={9} style={{ ...s.td, textAlign: 'center', color: t.text4, padding: '48px' }}>No bills found</td></tr>}
+                  {loading ? (
+                    <tr><td colSpan={12} style={{ padding: '40px', textAlign: 'center', color: t.text4, fontSize: '13px' }}>Loading...</td></tr>
+                  ) : filtered.length === 0 ? (
+                    <tr><td colSpan={12} style={{ padding: '40px', textAlign: 'center', color: t.text4, fontSize: '13px' }}>No stock in branch{filterBranch ? ` for ${filterBranch}` : ''}</td></tr>
+                  ) : filtered.map(row => {
+                    const isSelected = selected.has(row.id)
+                    const br = branches.find(b => b.branch_name === row.branch_name)
+                    const stateColor = STATE_COLORS[br?.state_code] || t.text3
+                    return (
+                      <tr key={row.id}
+                        style={{ borderBottom: `1px solid ${t.border}15`, background: isSelected ? `${t.gold}08` : 'transparent', cursor: 'pointer' }}
+                        onClick={() => { const n = new Set(selected); isSelected ? n.delete(row.id) : n.add(row.id); setSelected(n) }}
+                        onMouseEnter={e => { if (!isSelected) e.currentTarget.style.background = `${t.gold}05` }}
+                        onMouseLeave={e => { if (!isSelected) e.currentTarget.style.background = 'transparent' }}>
+                        <td style={{ padding: '8px 12px' }} onClick={e => e.stopPropagation()}>
+                          <input type="checkbox" checked={isSelected} onChange={() => { const n = new Set(selected); isSelected ? n.delete(row.id) : n.add(row.id); setSelected(n) }} style={{ cursor: 'pointer' }} />
+                        </td>
+                        <td style={{ padding: '8px 12px', fontSize: '12px', color: t.text2, whiteSpace: 'nowrap' }}>{fmtDate(row.purchase_date)}</td>
+                        <td style={{ padding: '8px 12px', fontSize: '12px', whiteSpace: 'nowrap' }}>
+                          <span style={{ background: `${stateColor}20`, color: stateColor, borderRadius: '4px', padding: '2px 6px', fontSize: '11px', fontWeight: 600 }}>{row.branch_name}</span>
+                        </td>
+                        <td style={{ padding: '8px 12px', fontSize: '12px', color: t.text1, maxWidth: '140px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.customer_name}</td>
+                        <td style={{ padding: '8px 12px', fontSize: '12px', color: t.text3, fontFamily: 'monospace' }}>{row.phone_number}</td>
+                        <td style={{ padding: '8px 12px', fontSize: '11px', color: t.text4, fontFamily: 'monospace' }}>{row.application_id}</td>
+                        <td style={{ padding: '8px 12px', fontSize: '12px', color: t.text2, textAlign: 'right', fontFamily: 'monospace' }}>{fmtWt(row.gross_weight)}</td>
+                        <td style={{ padding: '8px 12px', fontSize: '12px', color: t.gold, textAlign: 'right', fontWeight: 600, fontFamily: 'monospace' }}>{fmtWt(row.net_weight)}</td>
+                        <td style={{ padding: '8px 12px', fontSize: '12px', color: t.text3, textAlign: 'right' }}>{row.purity}</td>
+                        <td style={{ padding: '8px 12px', fontSize: '12px', color: t.text2, textAlign: 'right', fontFamily: 'monospace' }}>₹{fmt(Math.round(row.total_amount))}</td>
+                        <td style={{ padding: '8px 12px', fontSize: '12px', color: t.blue, textAlign: 'right', fontFamily: 'monospace', fontWeight: 600 }}>₹{fmt(Math.round(row.final_amount_crm))}</td>
+                        <td style={{ padding: '8px 12px' }}>
+                          <span style={{ fontSize: '10px', color: row.transaction_type === 'TAKEOVER' ? t.purple : t.green, background: row.transaction_type === 'TAKEOVER' ? `${t.purple}15` : `${t.green}15`, borderRadius: '4px', padding: '2px 6px' }}>{row.transaction_type}</span>
+                        </td>
+                      </tr>
+                    )
+                  })}
                 </tbody>
               </table>
             </div>
-          )}
+          </div>
         </>
       )}
-    </>
-  )
-}
 
-export default function ConsignmentData() {
-  const { theme, userProfile } = useApp()
-  const t = THEMES[theme]
-  const canManage = ['super_admin', 'founders_office', 'admin'].includes(userProfile?.role)
-  const fileInputRef = useRef(null)
+      {/* Create Consignment Modal */}
+      {showCreateModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.7)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: '12px', padding: '24px', width: '460px', maxWidth: '90vw' }}>
+            <div style={{ fontSize: '15px', fontWeight: 600, color: t.text1, marginBottom: '16px' }}>Create Consignment</div>
 
-  const [view, setView]             = useState('at_branch')
-  const [expandedCon, setExpandedCon] = useState(null)
-
-  const [atBranchTotal, setAtBranchTotal]     = useState(0)
-  const [inTransitTotal, setInTransitTotal]   = useState(0)
-  const [consignments, setConsignments]       = useState([])
-  const [consLoading, setConsLoading]         = useState(false)
-  const [filterConsStatus, setFilterConsStatus] = useState('')
-
-  const [showCreate, setShowCreate] = useState(false)
-  const [creating, setCreating]     = useState(false)
-  const [form, setForm]             = useState({ expected_arrival: '', vehicle_details: '', notes: '' })
-  const [pendingCreate, setPendingCreate] = useState(null) // { ids, bills, branches }
-
-  const [transitCon, setTransitCon] = useState(null)
-  const [undoCon, setUndoCon]       = useState(null)
-  const [marking, setMarking]       = useState(false)
-
-  const [ocrMode, setOcrMode]               = useState(false)
-  const [ocrLoading, setOcrLoading]         = useState(false)
-  const [ocrResult, setOcrResult]           = useState(null)
-  const [ocrFileName, setOcrFileName]       = useState('')
-  const [ocrSelectedIds, setOcrSelectedIds] = useState(new Set())
-
-  const ocrSelectedRows     = ocrResult?.rows?.filter(r => ocrSelectedIds.has(r.id)) || []
-  const ocrSelectedNetWt    = ocrSelectedRows.reduce((s, r) => s + (parseFloat(r.net_weight) || 0), 0)
-  const ocrSelectedValue    = ocrSelectedRows.reduce((s, r) => s + (parseFloat(r.total_amount) || 0), 0)
-  const ocrSelectedBranches = [...new Set(ocrSelectedRows.map(r => r.branch_name).filter(Boolean))]
-
-  useEffect(() => {
-    loadCounts()
-    loadConsignments()
-  }, [])
-  useEffect(() => { loadConsignments() }, [filterConsStatus])
-
-  const loadCounts = async () => {
-    const [ab, it] = await Promise.all([
-      supabase.from('purchases').select('id', { count: 'exact', head: true }).eq('stock_status', 'at_branch').is('is_deleted', false),
-      supabase.from('purchases').select('id', { count: 'exact', head: true }).eq('stock_status', 'in_consignment').is('is_deleted', false),
-    ])
-    if (ab.count !== null) setAtBranchTotal(ab.count)
-    if (it.count !== null) setInTransitTotal(it.count)
-  }
-
-  const loadConsignments = async () => {
-    setConsLoading(true)
-    let q = supabase.from('consignments').select('*').order('created_at', { ascending: false })
-    if (filterConsStatus) q = q.eq('status', filterConsStatus)
-    const { data } = await q
-    if (data) setConsignments(data)
-    setConsLoading(false)
-  }
-
-  const handleOcrUpload = async (file) => {
-    if (!file) return
-    setOcrFileName(file.name); setOcrLoading(true); setOcrResult(null); setOcrMode(true)
-    const fd = new FormData(); fd.append('image', file)
-    try {
-      const res  = await fetch('/api/ocr-consignment', { method: 'POST', body: fd })
-      const data = await res.json()
-      if (!data.success) { alert('OCR failed: ' + data.error); setOcrLoading(false); return }
-      setOcrResult(data); setOcrSelectedIds(new Set(data.rows.map(r => r.id)))
-    } catch (err) { alert('OCR error: ' + err.message) }
-    setOcrLoading(false)
-    if (fileInputRef.current) fileInputRef.current.value = ''
-  }
-
-  const toggleOcrRow = (id) => setOcrSelectedIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })
-
-  const handleCreateFromOcr = async () => {
-    if (ocrSelectedIds.size === 0) return
-    setCreating(true)
-    const billIds = [...ocrSelectedIds]
-    const consNo  = genConsignmentNo()
-    const { error } = await supabase.from('consignments').insert({
-      consignment_no: consNo, created_by: userProfile?.id,
-      expected_arrival: null, vehicle_details: null, notes: null,
-      status: 'in_transit', total_bills: billIds.length,
-      total_net_weight: ocrSelectedNetWt, branch_names: ocrSelectedBranches, bill_ids: billIds,
-    })
-    if (error) { alert('Error: ' + error.message); setCreating(false); return }
-    const BATCH = 100
-    for (let i = 0; i < billIds.length; i += BATCH)
-      await supabase.from('purchases').update({ stock_status: 'in_consignment' }).in('id', billIds.slice(i, i + BATCH))
-    setOcrMode(false); setOcrResult(null); setOcrSelectedIds(new Set()); setCreating(false)
-    loadCounts(); loadConsignments()
-    alert(`✓ Consignment created — ${billIds.length} bills marked In Transit`)
-  }
-
-  const handleCreateConsignment = async () => {
-    if (!pendingCreate) return
-    setCreating(true)
-    const { ids, bills: pendingBills, branches } = pendingCreate
-    const billIds    = [...ids]
-    const totalNetWt = pendingBills.reduce((s, b) => s + (parseFloat(b.net_weight) || 0), 0)
-    const { error }  = await supabase.from('consignments').insert({
-      consignment_no: genConsignmentNo(), created_by: userProfile?.id,
-      expected_arrival: form.expected_arrival || null, vehicle_details: form.vehicle_details || null,
-      notes: form.notes || null, status: 'created',
-      total_bills: billIds.length, total_net_weight: totalNetWt,
-      branch_names: branches, bill_ids: billIds,
-    })
-    if (error) { alert('Error: ' + error.message); setCreating(false); return }
-    const BATCH = 100
-    for (let i = 0; i < billIds.length; i += BATCH)
-      await supabase.from('purchases').update({ stock_status: 'in_consignment' }).in('id', billIds.slice(i, i + BATCH))
-    setShowCreate(false); setCreating(false); setPendingCreate(null)
-    setForm({ expected_arrival: '', vehicle_details: '', notes: '' })
-    loadCounts(); loadConsignments()
-  }
-
-  const handleMarkInTransit = async (con) => {
-    setMarking(true)
-    await supabase.from('consignments').update({ status: 'in_transit' }).eq('id', con.id)
-    setTransitCon(null); setMarking(false); loadConsignments()
-  }
-
-  const handleUndo = async (con) => {
-    setMarking(true)
-    const billIds = con.bill_ids || []
-    const BATCH = 100
-    for (let i = 0; i < billIds.length; i += BATCH)
-      await supabase.from('purchases').update({ stock_status: 'at_branch' }).in('id', billIds.slice(i, i + BATCH))
-    await supabase.from('consignments').delete().eq('id', con.id)
-    setUndoCon(null); setMarking(false)
-    loadCounts(); loadConsignments()
-  }
-
-  const s = {
-    wrap:    { padding: '32px', maxWidth: '100%' },
-    th:      { padding: '10px 14px', fontSize: '11px', color: t.text3, letterSpacing: '.1em', textTransform: 'uppercase', textAlign: 'left', borderBottom: `1px solid ${t.border}`, background: t.card, fontWeight: 600, whiteSpace: 'nowrap' },
-    td:      { padding: '10px 14px', fontSize: '13px', color: t.text1, borderBottom: `1px solid ${t.border}20`, whiteSpace: 'nowrap' },
-    select:  { background: t.card, border: `1px solid ${t.border}`, borderRadius: '6px', padding: '7px 10px', color: t.text1, fontSize: '13px', cursor: 'pointer' },
-    input:   { background: t.card2, border: `1px solid ${t.border}`, borderRadius: '7px', padding: '9px 14px', color: t.text1, fontSize: '13px', outline: 'none', width: '100%' },
-    lbl:     { fontSize: '11px', color: t.text3, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 600, marginBottom: '6px', display: 'block' },
-  }
-
-  const TABS = [
-    { key: 'at_branch',   label: `Bills at Branch${atBranchTotal > 0 ? ` (${atBranchTotal.toLocaleString('en-IN')})` : ''}` },
-    { key: 'in_transit',  label: `In Transit${inTransitTotal > 0 ? ` (${inTransitTotal.toLocaleString('en-IN')})` : ''}` },
-    { key: 'consignments',label: `Consignments${consignments.length > 0 ? ` (${consignments.length})` : ''}` },
-  ]
-
-  // OCR PREVIEW
-  if (ocrMode) {
-    return (
-      <div style={s.wrap}>
-        <input ref={fileInputRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={e => handleOcrUpload(e.target.files[0])} />
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '24px' }}>
-          <div>
-            <div style={{ fontSize: '1.6rem', fontWeight: 300, color: t.text1 }}>OCR — Movement Report</div>
-            <div style={{ fontSize: '12px', color: t.text3, marginTop: '4px' }}>{ocrFileName}</div>
-          </div>
-          <div style={{ display: 'flex', gap: '10px' }}>
-            <button style={{ background: 'transparent', color: t.text3, border: `1px solid ${t.border}`, borderRadius: '8px', padding: '9px 20px', fontSize: '12px', cursor: 'pointer' }} onClick={() => { setOcrMode(false); setOcrResult(null) }}>← Back</button>
-            {ocrResult && ocrSelectedIds.size > 0 && canManage && (
-              <button style={{ background: t.gold, color: '#1a0a00', border: 'none', borderRadius: '8px', padding: '9px 20px', fontSize: '12px', fontWeight: 700, cursor: 'pointer' }} onClick={handleCreateFromOcr} disabled={creating}>
-                {creating ? 'Creating...' : `+ Create Consignment (${ocrSelectedIds.size} Bills)`}
-              </button>
-            )}
-          </div>
-        </div>
-
-        {ocrLoading && (
-          <div style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: '12px', padding: '64px', textAlign: 'center', marginBottom: '20px' }}>
-            <div style={{ fontSize: '2.5rem', marginBottom: '16px', display: 'inline-block', animation: 'spin 1s linear infinite' }}>⟳</div>
-            <div style={{ fontSize: '14px', color: t.text2, marginBottom: '8px' }}>Reading movement report...</div>
-            <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
-          </div>
-        )}
-
-        {ocrResult && !ocrLoading && (
-          <>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '14px', marginBottom: '20px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '20px' }}>
               {[
-                { label: 'Total Rows Extracted', value: ocrResult.total,       color: t.gold  },
-                { label: 'Matched in Supabase',  value: ocrResult.matched,     color: t.green },
-                { label: 'Not Found',            value: ocrResult.notFound,    color: ocrResult.notFound > 0 ? t.red : t.text3 },
-                { label: 'Wrong Status',         value: ocrResult.wrongStatus, color: ocrResult.wrongStatus > 0 ? t.orange : t.text3 },
+                { label: 'Branch', value: selectedBranches[0] },
+                { label: 'Bills Selected', value: `${selected.size} bills` },
+                { label: 'Total Net Weight', value: fmtWt(totalSelWt) },
+                { label: 'Total Amount', value: `₹${fmt(Math.round(totalSelAmt))}` },
+                { label: 'Movement Type', value: moveType === 'EXTERNAL' ? 'External (Branch → HO)' : 'Internal (Branch → Hub)' },
               ].map(item => (
-                <div key={item.label} style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: '12px', padding: '18px', textAlign: 'center', marginBottom: 0 }}>
-                  <div style={{ fontSize: '2rem', fontWeight: 200, color: item.color }}>{item.value}</div>
-                  <div style={{ fontSize: '11px', color: t.text4, textTransform: 'uppercase', letterSpacing: '.1em', marginTop: '6px' }}>{item.label}</div>
+                <div key={item.label} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 12px', background: t.card2, borderRadius: '6px' }}>
+                  <span style={{ fontSize: '12px', color: t.text3 }}>{item.label}</span>
+                  <span style={{ fontSize: '12px', color: t.text1, fontWeight: 600 }}>{item.value}</span>
                 </div>
               ))}
             </div>
-            {ocrResult.notFoundIds?.length > 0 && (
-              <div style={{ background: `${t.red}10`, border: `1px solid ${t.red}40`, borderRadius: '10px', padding: '14px 20px', marginBottom: '14px' }}>
-                <div style={{ fontSize: '13px', color: t.red, fontWeight: 600, marginBottom: '6px' }}>⚠ {ocrResult.notFoundIds.length} Application IDs not found</div>
-                <div style={{ fontSize: '12px', color: t.text3, lineHeight: 1.8 }}>{ocrResult.notFoundIds.join(' · ')}</div>
-              </div>
-            )}
-            {ocrSelectedIds.size > 0 && (
-              <div style={{ background: `${t.gold}12`, border: `1px solid ${t.gold}30`, borderRadius: '8px', padding: '10px 16px', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '20px', flexWrap: 'wrap' }}>
-                <span style={{ fontSize: '13px', color: t.gold, fontWeight: 600 }}>{ocrSelectedIds.size} bills selected</span>
-                <span style={{ fontSize: '13px', color: t.text2 }}>Net Wt: <span style={{ color: t.gold, fontWeight: 600 }}>{fmt(ocrSelectedNetWt)}g</span></span>
-                <span style={{ fontSize: '13px', color: t.text2 }}>Value: <span style={{ color: t.green, fontWeight: 600 }}>{fmtCr(ocrSelectedValue)}</span></span>
-                <span style={{ fontSize: '13px', color: t.text2 }}>Branches: <span style={{ color: t.text1 }}>{ocrSelectedBranches.join(', ')}</span></span>
-              </div>
-            )}
-            {ocrResult.rows?.length > 0 && (
-              <div style={{ overflowX: 'auto', borderRadius: '10px', border: `1px solid ${t.border}` }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                  <thead>
-                    <tr>
-                      <th style={{ ...s.th, width: '40px', textAlign: 'center' }}>
-                        <input type="checkbox" style={{ width: '15px', height: '15px', accentColor: t.gold, cursor: 'pointer' }}
-                          checked={ocrResult.rows.every(r => ocrSelectedIds.has(r.id))}
-                          onChange={() => { if (ocrResult.rows.every(r => ocrSelectedIds.has(r.id))) setOcrSelectedIds(new Set()); else setOcrSelectedIds(new Set(ocrResult.rows.map(r => r.id))) }} />
-                      </th>
-                      {['App ID', 'Date', 'Customer', 'Branch', 'Net Wt', 'Gross Value', 'Status'].map(h => <th key={h} style={s.th}>{h}</th>)}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {ocrResult.rows.map(row => (
-                      <tr key={row.id} style={{ background: ocrSelectedIds.has(row.id) ? `${t.gold}10` : 'transparent' }}>
-                        <td style={{ ...s.td, textAlign: 'center', padding: '10px 8px' }}>
-                          <input type="checkbox" style={{ width: '15px', height: '15px', accentColor: t.gold, cursor: 'pointer' }} checked={ocrSelectedIds.has(row.id)} onChange={() => toggleOcrRow(row.id)} />
-                        </td>
-                        <td style={{ ...s.td, color: t.gold, fontWeight: 500 }}>{row.application_id}</td>
-                        <td style={s.td}>{fmtDate(row.purchase_date)}</td>
-                        <td style={s.td}>{row.ocr_row?.customer_name || '—'}</td>
-                        <td style={{ ...s.td, color: t.text2 }}>{row.branch_name}</td>
-                        <td style={{ ...s.td, color: t.gold }}>{fmt(row.net_weight)}g</td>
-                        <td style={s.td}>₹{fmt(row.total_amount)}</td>
-                        <td style={s.td}><span style={{ fontSize: '11px', color: t.green, background: `${t.green}18`, border: `1px solid ${t.green}40`, borderRadius: '4px', padding: '2px 7px' }}>{row.stock_status}</span></td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </>
-        )}
-      </div>
-    )
-  }
 
-  return (
-    <div style={s.wrap}>
-      <input ref={fileInputRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={e => handleOcrUpload(e.target.files[0])} />
-
-      {/* HEADER */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '24px' }}>
-        <div>
-          <div style={{ fontSize: '1.6rem', fontWeight: 300, color: t.text1, letterSpacing: '.04em' }}>Consignment Data</div>
-          <div style={{ fontSize: '12px', color: t.text3, marginTop: '4px' }}>Track gold movement from branches to HO</div>
-        </div>
-        {canManage && view === 'at_branch' && (
-          <button style={{ background: 'transparent', color: t.blue, border: `1px solid ${t.blue}60`, borderRadius: '8px', padding: '9px 20px', fontSize: '12px', cursor: 'pointer' }} onClick={() => fileInputRef.current?.click()}>
-            📷 Upload Movement Report
-          </button>
-        )}
-      </div>
-
-      {/* TABS */}
-      <div style={{ display: 'flex', gap: '4px', padding: '4px', background: t.card, borderRadius: '10px', border: `1px solid ${t.border}`, width: 'fit-content', marginBottom: '24px' }}>
-        {TABS.map(tab => (
-          <button key={tab.key} onClick={() => setView(tab.key)} style={{
-            padding: '7px 18px', borderRadius: '7px', border: 'none', cursor: 'pointer',
-            background: view === tab.key ? `linear-gradient(135deg, ${t.gold}, ${t.gold}cc)` : 'transparent',
-            color: view === tab.key ? '#0a0a0a' : t.text3, fontSize: '12px',
-            fontWeight: view === tab.key ? 700 : 500, transition: 'all .2s',
-          }}>{tab.label}</button>
-        ))}
-      </div>
-
-      {/* AT BRANCH TAB */}
-      {view === 'at_branch' && (
-        <DrillDownPanel
-          stockStatus="at_branch"
-          accentColor={t.blue}
-          rpcState="get_consignment_state_summary"
-          rpcBranch="get_consignment_branch_summary"
-          canManage={canManage}
-          t={t} s={s}
-          onCreateConsignment={(ids, bills, branches) => { setPendingCreate({ ids, bills, branches }); setShowCreate(true) }}
-        />
-      )}
-
-      {/* IN TRANSIT TAB */}
-      {view === 'in_transit' && (
-        <DrillDownPanel
-          stockStatus="in_consignment"
-          accentColor={t.orange}
-          rpcState="get_intransit_state_summary"
-          rpcBranch="get_intransit_branch_summary"
-          canManage={canManage}
-          t={t} s={s}
-          onCreateConsignment={() => {}}
-        />
-      )}
-
-      {/* CONSIGNMENTS TAB */}
-      {view === 'consignments' && (
-        <>
-          <div style={{ display: 'flex', gap: '10px', marginBottom: '20px' }}>
-            <select style={s.select} value={filterConsStatus} onChange={e => setFilterConsStatus(e.target.value)}>
-              <option value="">All Statuses</option>
-              {Object.entries(STATUS_META).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
-            </select>
-          </div>
-          {consLoading ? <div style={{ textAlign: 'center', color: t.text3, padding: '48px' }}>Loading...</div>
-          : consignments.length === 0 ? (
-            <div style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: '12px', padding: '48px', textAlign: 'center', marginBottom: '20px' }}>
-              <div style={{ fontSize: '2rem', opacity: .2, marginBottom: '12px' }}>🚚</div>
-              <div style={{ fontSize: '14px', color: t.text3 }}>No consignments yet</div>
+            <div style={{ fontSize: '11px', color: t.text4, marginBottom: '16px', padding: '10px 12px', background: `${t.gold}08`, borderRadius: '6px', border: `1px solid ${t.gold}20` }}>
+              ℹ TMP PRF No and Challan No will be auto-generated on creation
             </div>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-              {consignments.map(con => {
-                const meta   = STATUS_META[con.status] || { label: con.status, color: t.text3 }
-                const isOpen = expandedCon === con.id
-                return (
-                  <div key={con.id} style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: '12px', padding: '20px 24px', marginBottom: 0, cursor: 'pointer' }}
-                    onClick={() => setExpandedCon(isOpen ? null : con.id)}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '12px' }}>
-                      <div style={{ flex: 1 }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '10px' }}>
-                          <span style={{ fontSize: '11px', color: meta.color, background: `${meta.color}18`, border: `1px solid ${meta.color}40`, borderRadius: '4px', padding: '2px 8px', fontWeight: 600 }}>{meta.label}</span>
-                          <span style={{ fontSize: '12px', color: t.text4 }}>{fmtDate(con.created_at)}</span>
-                        </div>
-                        <div style={{ display: 'flex', gap: '28px', flexWrap: 'wrap' }}>
-                          {[
-                            { label: 'Bills',  value: con.total_bills, bold: true },
-                            { label: 'Net Wt', value: `${fmt(con.total_net_weight)}g`, color: t.gold },
-                            con.expected_arrival && { label: 'Expected', value: fmtDate(con.expected_arrival) },
-                            con.vehicle_details  && { label: 'Vehicle',  value: con.vehicle_details },
-                          ].filter(Boolean).map(item => (
-                            <div key={item.label}>
-                              <div style={{ fontSize: '11px', color: t.text4, textTransform: 'uppercase', letterSpacing: '.08em', marginBottom: '2px' }}>{item.label}</div>
-                              <div style={{ fontSize: '13px', color: item.color || t.text2, fontWeight: item.bold ? 600 : 400 }}>{item.value}</div>
-                            </div>
-                          ))}
-                        </div>
-                        {con.branch_names?.length > 0 && (
-                          <div style={{ marginTop: '10px', display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                            {con.branch_names.map(b => <span key={b} style={{ fontSize: '11px', color: t.text3, background: t.card2, border: `1px solid ${t.border}`, borderRadius: '4px', padding: '2px 8px' }}>{b}</span>)}
-                          </div>
-                        )}
-                      </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        {canManage && con.status === 'created' && (
-                          <button style={{ background: t.blue, color: '#fff', border: 'none', borderRadius: '8px', padding: '7px 14px', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}
-                            onClick={e => { e.stopPropagation(); setTransitCon(con) }}>🚚 In Transit</button>
-                        )}
-                        {canManage && (con.status === 'created' || con.status === 'in_transit') && (
-                          <button style={{ background: 'transparent', color: t.red, border: `1px solid ${t.red}50`, borderRadius: '8px', padding: '7px 14px', fontSize: '12px', cursor: 'pointer' }}
-                            onClick={e => { e.stopPropagation(); setUndoCon(con) }}>↩ Undo</button>
-                        )}
-                        <span style={{ fontSize: '20px', color: t.text3, transition: 'transform .2s', transform: isOpen ? 'rotate(180deg)' : 'rotate(0deg)', display: 'inline-block' }}>⌄</span>
-                      </div>
-                    </div>
-                    {isOpen && (
-                      <div style={{ marginTop: '16px', borderTop: `1px solid ${t.border}`, paddingTop: '16px' }} onClick={e => e.stopPropagation()}>
-                        <ConBillsList billIds={con.bill_ids} t={t} s={s} />
-                      </div>
-                    )}
-                  </div>
-                )
-              })}
-            </div>
-          )}
-        </>
-      )}
 
-      {/* CREATE MODAL */}
-      {showCreate && pendingCreate && (
-        <div style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
-          <div style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: '16px', padding: '36px', maxWidth: '480px', width: '100%', boxShadow: '0 24px 80px rgba(0,0,0,.6)' }}>
-            <div style={{ fontSize: '1.1rem', color: t.text1, marginBottom: '6px' }}>Create Consignment</div>
-            <div style={{ fontSize: '12px', color: t.text3, marginBottom: '28px' }}>{pendingCreate.ids.size} bills · {pendingCreate.branches.length} {pendingCreate.branches.length === 1 ? 'branch' : 'branches'}</div>
-            {[
-              { label: 'Expected Arrival Date',     key: 'expected_arrival', type: 'date' },
-              { label: 'Vehicle / Courier Details', key: 'vehicle_details',  type: 'text', placeholder: 'e.g. KA-01-AB-1234 or BlueDart AWB' },
-            ].map(f => (
-              <div key={f.key} style={{ marginBottom: '18px' }}>
-                <label style={s.lbl}>{f.label}</label>
-                <input type={f.type} style={s.input} placeholder={f.placeholder || ''} value={form[f.key]} onChange={e => setForm(p => ({ ...p, [f.key]: e.target.value }))} />
-              </div>
-            ))}
-            <div style={{ marginBottom: '20px' }}>
-              <label style={s.lbl}>Notes / Remarks</label>
-              <textarea style={{ ...s.input, height: '72px', resize: 'vertical', fontFamily: 'inherit' }} value={form.notes} onChange={e => setForm(p => ({ ...p, notes: e.target.value }))} />
-            </div>
-            <div style={{ marginBottom: '24px', padding: '12px 16px', background: t.card2, borderRadius: '8px', border: `1px solid ${t.border}` }}>
-              <div style={{ fontSize: '11px', color: t.text4, textTransform: 'uppercase', letterSpacing: '.08em', marginBottom: '8px' }}>Branches Included</div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                {pendingCreate.branches.map(b => <span key={b} style={{ fontSize: '11px', color: t.text2, background: t.card, border: `1px solid ${t.border}`, borderRadius: '4px', padding: '2px 8px' }}>{b}</span>)}
-              </div>
-            </div>
-            <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
-              <button style={{ background: 'transparent', color: t.text3, border: `1px solid ${t.border}`, borderRadius: '8px', padding: '9px 20px', fontSize: '12px', cursor: 'pointer' }} onClick={() => { setShowCreate(false); setPendingCreate(null) }} disabled={creating}>Cancel</button>
-              <button style={{ background: t.gold, color: '#1a0a00', border: 'none', borderRadius: '8px', padding: '9px 20px', fontSize: '12px', fontWeight: 700, cursor: 'pointer' }} onClick={handleCreateConsignment} disabled={creating}>{creating ? 'Creating...' : 'Create Consignment'}</button>
+            <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+              <button onClick={() => setShowCreateModal(false)} style={btnOut}>Cancel</button>
+              <button onClick={handleCreateConsignment} disabled={creating} style={{ ...btnGold, opacity: creating ? .7 : 1 }}>
+                {creating ? 'Creating...' : 'Confirm & Create'}
+              </button>
             </div>
           </div>
         </div>
       )}
-
-      {/* TRANSIT MODAL */}
-      {transitCon && (
-        <div style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
-          <div style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: '16px', padding: '36px', maxWidth: '420px', width: '100%', textAlign: 'center' }}>
-            <div style={{ fontSize: '2rem', marginBottom: '16px' }}>🚚</div>
-            <div style={{ fontSize: '1rem', color: t.text1, marginBottom: '8px' }}>Mark as In Transit?</div>
-            <div style={{ fontSize: '12px', color: t.text3, marginBottom: '28px', lineHeight: 1.6 }}>{transitCon.total_bills} bills · {fmt(transitCon.total_net_weight)}g<br />This cannot be undone.</div>
-            <div style={{ display: 'flex', gap: '10px', justifyContent: 'center' }}>
-              <button style={{ background: 'transparent', color: t.text3, border: `1px solid ${t.border}`, borderRadius: '8px', padding: '9px 20px', fontSize: '12px', cursor: 'pointer' }} onClick={() => setTransitCon(null)} disabled={marking}>Cancel</button>
-              <button style={{ background: t.blue, color: '#fff', border: 'none', borderRadius: '8px', padding: '9px 20px', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }} onClick={() => handleMarkInTransit(transitCon)} disabled={marking}>{marking ? 'Marking...' : 'Confirm'}</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* UNDO MODAL */}
-      {undoCon && (
-        <div style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
-          <div style={{ background: t.card, border: `1px solid ${t.red}40`, borderRadius: '16px', padding: '36px', maxWidth: '420px', width: '100%', textAlign: 'center' }}>
-            <div style={{ fontSize: '2rem', marginBottom: '16px' }}>↩</div>
-            <div style={{ fontSize: '1rem', color: t.text1, marginBottom: '8px' }}>Undo Consignment?</div>
-            <div style={{ fontSize: '12px', color: t.text3, marginBottom: '6px', lineHeight: 1.7 }}>
-              <span style={{ color: t.text1, fontWeight: 600 }}>{undoCon.total_bills} bills</span> will be moved back to <span style={{ color: t.gold }}>at_branch</span><br />
-              The consignment record will be permanently deleted.
-            </div>
-            <div style={{ fontSize: '12px', color: t.red, marginBottom: '28px' }}>This cannot be undone.</div>
-            <div style={{ display: 'flex', gap: '10px', justifyContent: 'center' }}>
-              <button style={{ background: 'transparent', color: t.text3, border: `1px solid ${t.border}`, borderRadius: '8px', padding: '9px 20px', fontSize: '12px', cursor: 'pointer' }} onClick={() => setUndoCon(null)} disabled={marking}>Cancel</button>
-              <button style={{ background: 'transparent', color: t.red, border: `1px solid ${t.red}60`, borderRadius: '8px', padding: '9px 20px', fontSize: '12px', cursor: 'pointer' }} onClick={() => handleUndo(undoCon)} disabled={marking}>{marking ? 'Undoing...' : 'Yes, Undo'}</button>
-            </div>
-          </div>
-        </div>
-      )}
-
     </div>
   )
 }
