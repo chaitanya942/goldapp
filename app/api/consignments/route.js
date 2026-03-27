@@ -90,7 +90,7 @@ export async function GET(req) {
     let query = supabase
       .from('purchases')
       .select('*')
-      .eq('stock_status', 'in_branch')
+      .eq('stock_status', 'at_branch')
       .eq('is_deleted', false)
       .order('purchase_date', { ascending: false })
 
@@ -148,7 +148,7 @@ export async function GET(req) {
       .from('purchases')
       .select('branch_name, stock_status, net_weight, total_amount, purchase_date')
       .eq('is_deleted', false)
-      .in('stock_status', ['in_branch', 'in_transit'])
+      .in('stock_status', ['at_branch', 'in_consignment'])
 
     if (error) return Response.json({ error: error.message })
 
@@ -157,8 +157,8 @@ export async function GET(req) {
     for (const row of data || []) {
       const key = row.branch_name
       if (!summary[key]) summary[key] = { branch: key, in_branch: 0, in_transit: 0, in_branch_wt: 0, in_transit_wt: 0 }
-      if (row.stock_status === 'in_branch')  { summary[key].in_branch++;  summary[key].in_branch_wt  += parseFloat(row.net_weight || 0) }
-      if (row.stock_status === 'in_transit') { summary[key].in_transit++; summary[key].in_transit_wt += parseFloat(row.net_weight || 0) }
+      if (row.stock_status === 'at_branch')  { summary[key].in_branch++;  summary[key].in_branch_wt  += parseFloat(row.net_weight || 0) }
+      if (row.stock_status === 'in_consignment') { summary[key].in_transit++; summary[key].in_transit_wt += parseFloat(row.net_weight || 0) }
     }
     return Response.json({ data: Object.values(summary) })
   }
@@ -218,7 +218,7 @@ export async function POST(req) {
     await supabase.from('consignment_items').insert(items)
 
     // Update purchase stock_status to in_transit
-    await supabase.from('purchases').update({ stock_status: 'in_transit', dispatched_at: new Date().toISOString() }).in('id', purchase_ids)
+    await supabase.from('purchases').update({ stock_status: 'in_consignment', dispatched_at: new Date().toISOString() }).in('id', purchase_ids)
 
     return Response.json({ data: consignment })
   }
@@ -239,7 +239,7 @@ export async function POST(req) {
   if (action === 'remove_item') {
     const { consignment_id, purchase_id } = body
     await supabase.from('consignment_items').delete().eq('consignment_id', consignment_id).eq('purchase_id', purchase_id)
-    await supabase.from('purchases').update({ stock_status: 'in_branch', dispatched_at: null }).eq('id', purchase_id)
+    await supabase.from('purchases').update({ stock_status: 'at_branch', dispatched_at: null }).eq('id', purchase_id)
 
     // Recalculate totals
     const { data: items } = await supabase.from('consignment_items').select('purchase:purchase_id(net_weight,total_amount)').eq('consignment_id', consignment_id)
