@@ -5,8 +5,8 @@ import { supabase } from '../../lib/supabase'
 import { useApp } from '../../lib/context'
 
 const THEMES = {
-  dark:  { bg: '#0e0e0e', card: '#141414', text1: '#f0e6c8', text2: '#c8b89a', text3: '#7a6a4a', text4: '#4a3a2a', gold: '#c9a84c', border: '#2a2a2a', green: '#3aaa6a', red: '#e05555' },
-  light: { bg: '#f5f0e8', card: '#ede8dc', text1: '#2a1f0a', text2: '#6a5a3a', text3: '#8a7a5a', text4: '#b0a080', gold: '#a07830', border: '#d5cfc0', green: '#2a8a5a', red: '#c03030' },
+  dark:  { bg: '#0a0a0a', card: '#111111', card2: '#161616', text1: '#f0e6c8', text2: '#c8b89a', text3: '#9a8a6a', text4: '#6a5a3a', gold: '#c9a84c', border: '#1e1e1e', border2: '#252525', green: '#3aaa6a', red: '#e05555', blue: '#3a8fbf', orange: '#c9981f', purple: '#8c5ac8' },
+  light: { bg: '#f0ebe0', card: '#e8e2d6', card2: '#e0d9cc', text1: '#1a1208', text2: '#5a4a2a', text3: '#7a6a4a', text4: '#9a8a6a', gold: '#a07830', border: '#d0c8b8', border2: '#c5bca8', green: '#2a8a5a', red: '#c03030', blue: '#2a6a9a', orange: '#a07010', purple: '#6a3a9a' },
 }
 
 const STATUS_COLORS = {
@@ -28,6 +28,10 @@ function fmtTime(t) {
   const h12 = h % 12 || 12
   return `${h12}:${m} ${ampm}`
 }
+
+// ── DATE HELPERS ────────────────────────────────────────────────────────────
+const istNow = () => new Date(Date.now() + 5.5 * 60 * 60 * 1000)
+const istStr = (d = istNow()) => d.toISOString().split('T')[0]
 
 // ── EXPORT HELPERS ──────────────────────────────────────────────────────────
 const EXPORT_COLS = [
@@ -97,6 +101,9 @@ export default function PurchaseData() {
   const [search, setSearch]           = useState('')
   const [filterStatus, setFilterStatus] = useState('')
   const [filterBranch, setFilterBranch] = useState('')
+  const [filterTxn, setFilterTxn]     = useState('')
+  const [fromDate, setFromDate]     = useState('')
+  const [toDate, setToDate]         = useState('')
 
   const [page, setPage]             = useState(0)
   const [totalCount, setTotalCount] = useState(0)
@@ -116,7 +123,7 @@ export default function PurchaseData() {
     loadPage(0)
   }, [])
 
-  useEffect(() => { loadPage(page) }, [page, search, filterStatus, filterBranch])
+  useEffect(() => { loadPage(page) }, [page, search, filterStatus, filterBranch, filterTxn, fromDate, toDate])
 
   const loadKpis = async () => {
     const { data } = await supabase.rpc('get_purchase_kpis')
@@ -127,9 +134,13 @@ export default function PurchaseData() {
     let q = forExport
       ? supabase.from('purchases').select('*')
       : supabase.from('purchases').select('*', { count: 'exact' })
+    q = q.eq('is_deleted', false)
     if (search)       q = q.or(`customer_name.ilike.%${search}%,application_id.ilike.%${search}%,branch_name.ilike.%${search}%`)
     if (filterStatus) q = q.eq('stock_status', filterStatus)
     if (filterBranch) q = q.eq('branch_name', filterBranch)
+    if (filterTxn)    q = q.eq('transaction_type', filterTxn)
+    if (fromDate)     q = q.gte('purchase_date', fromDate)
+    if (toDate)       q = q.lte('purchase_date', toDate)
     return q
   }
 
@@ -148,6 +159,13 @@ export default function PurchaseData() {
   }
 
   const load = () => { setPage(0); loadKpis(); loadPage(0) }
+
+  // Quick filter functions
+  const setToday = () => { const d = istStr(); setFromDate(d); setToDate(d); setPage(0) }
+  const setYesterday = () => { const d = istNow(); d.setDate(d.getDate() - 1); const s = istStr(d); setFromDate(s); setToDate(s); setPage(0) }
+  const setThisWeek = () => { const to = istNow(); const fr = istNow(); fr.setDate(fr.getDate() - 7); setToDate(istStr(to)); setFromDate(istStr(fr)); setPage(0) }
+  const setThisMonth = () => { const now = istNow(); setFromDate(`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-01`); setToDate(istStr(now)); setPage(0) }
+  const clearFilters = () => { setFromDate(''); setToDate(''); setFilterBranch(''); setFilterStatus(''); setFilterTxn(''); setSearch(''); setPage(0) }
 
   const handleExport = async (format) => {
     setExporting(true)
@@ -189,13 +207,13 @@ export default function PurchaseData() {
         if (!data || data.length === 0) break
         const ids = data.map(r => r.id)
         for (let i = 0; i < ids.length; i += 100)
-          await supabase.from('purchases').delete().in('id', ids.slice(i, i + 100))
+          await supabase.from('purchases').update({ is_deleted: true }).in('id', ids.slice(i, i + 100))
         if (ids.length < 500) break
       }
     } else {
       const ids = [...selectedIds]
       for (let i = 0; i < ids.length; i += 100)
-        await supabase.from('purchases').delete().in('id', ids.slice(i, i + 100))
+        await supabase.from('purchases').update({ is_deleted: true }).in('id', ids.slice(i, i + 100))
     }
     setShowDeleteConfirm(false); setDeleteAllMode(false); setDeleting(false); load()
   }
@@ -307,6 +325,29 @@ export default function PurchaseData() {
         )
       })()}
 
+      {/* QUICK FILTERS */}
+      <div style={{ display: 'flex', gap: '6px', marginBottom: '12px', flexWrap: 'wrap', alignItems: 'center' }}>
+        {[
+          ['Today', setToday],
+          ['Yesterday', setYesterday],
+          ['This Week', setThisWeek],
+          ['This Month', setThisMonth],
+        ].map(([label, fn]) => (
+          <button key={label} onClick={fn}
+            style={{ padding: '5px 12px', borderRadius: '100px', border: `1px solid ${t.border}`, background: 'transparent', color: t.text3, fontSize: '.65rem', cursor: 'pointer', transition: 'all .15s', letterSpacing: '.04em' }}
+            onMouseEnter={e => { e.currentTarget.style.borderColor = t.gold; e.currentTarget.style.color = t.gold }}
+            onMouseLeave={e => { e.currentTarget.style.borderColor = t.border; e.currentTarget.style.color = t.text3 }}>
+            {label}
+          </button>
+        ))}
+        {(fromDate || toDate || filterBranch || filterStatus || filterTxn || search) && (
+          <button onClick={clearFilters}
+            style={{ padding: '5px 12px', borderRadius: '100px', border: `1px solid ${t.red}40`, background: 'transparent', color: t.red, fontSize: '.65rem', cursor: 'pointer', marginLeft: '8px' }}>
+            ✕ Clear All
+          </button>
+        )}
+      </div>
+
       {/* FILTERS */}
       <div style={{ display: 'flex', gap: '10px', marginBottom: '16px', flexWrap: 'wrap', alignItems: 'center' }}>
         <input style={s.input} placeholder="Search customer, app ID, branch..." value={search} onChange={e => { setSearch(e.target.value); setPage(0) }} />
@@ -318,6 +359,19 @@ export default function PurchaseData() {
           <option value="">All Status</option>
           {Object.entries(STATUS_COLORS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
         </select>
+        <select style={s.select} value={filterTxn} onChange={e => { setFilterTxn(e.target.value); setPage(0) }}>
+          <option value="">All Types</option>
+          <option value="PHYSICAL">Physical</option>
+          <option value="TAKEOVER">Takeover</option>
+        </select>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <span style={{ fontSize: '.68rem', color: t.text4 }}>From</span>
+          <input type="date" style={{ ...s.select, width: 'auto' }} value={fromDate} onChange={e => { setFromDate(e.target.value); setPage(0) }} />
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <span style={{ fontSize: '.68rem', color: t.text4 }}>To</span>
+          <input type="date" style={{ ...s.select, width: 'auto' }} value={toDate} onChange={e => { setToDate(e.target.value); setPage(0) }} />
+        </div>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: '6px', alignItems: 'center' }}>
           <button style={s.btnSmall} disabled={exporting} onClick={() => handleExport('csv')}
             onMouseEnter={e => { e.currentTarget.style.color = t.gold; e.currentTarget.style.borderColor = `${t.gold}60` }}

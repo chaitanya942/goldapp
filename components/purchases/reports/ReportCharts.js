@@ -71,7 +71,7 @@ export default function ReportCharts({ trend, monthly, dowData, hourlyTrend, isS
               </thead>
               <tbody>
                 {monthly.map((m, i) => {
-                  const prev = monthly[i - 1]
+                  const prev = monthly[i + 1]
                   const netG = prev ? growth(Number(m.total_net), Number(prev.total_net)) : null
                   return (
                     <tr key={i} style={{ background: i % 2 === 0 ? 'transparent' : `${t.border}20` }}>

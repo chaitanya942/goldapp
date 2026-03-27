@@ -194,6 +194,7 @@ export default function PurchaseReports() {
   const [activeSection, setActiveSection] = useState(null)
   const [exporting,     setExporting]     = useState(false)
   const [hourlyTrend,   setHourlyTrend]   = useState([])
+  const [error,         setError]         = useState(null)
 
   useEffect(() => {
     supabase.from('branches').select('name').order('name').then(({ data }) => {
@@ -205,12 +206,14 @@ export default function PurchaseReports() {
 
   const fetchAll = async () => {
     setLoading(true)
-    const isSingleDay = fromDate && toDate && fromDate === toDate
-    const p       = { p_from: fromDate || null, p_to: toDate || null, p_branch: filterBranch || null, p_txn_type: filterTxn || null, p_state: filterState || null }
-    const pBranch = { p_from: p.p_from, p_to: p.p_to, p_txn_type: p.p_txn_type, p_state: p.p_state }
-    const pState  = { p_from: p.p_from, p_to: p.p_to, p_txn_type: p.p_txn_type }
+    setError(null)
+    try {
+      const isSingleDay = fromDate && toDate && fromDate === toDate
+      const p       = { p_from: fromDate || null, p_to: toDate || null, p_branch: filterBranch || null, p_txn_type: filterTxn || null, p_state: filterState || null }
+      const pBranch = { p_from: p.p_from, p_to: p.p_to, p_txn_type: p.p_txn_type, p_state: p.p_state }
+      const pState  = { p_from: p.p_from, p_to: p.p_to, p_txn_type: p.p_txn_type }
 
-    const [k, tr, br, st, mo, dow, pur, wt, reg, mh, tb] = await Promise.all([
+      const [k, tr, br, st, mo, dow, pur, wt, reg, mh, tb] = await Promise.all([
       supabase.rpc('get_report_kpis', p),
       supabase.rpc('get_daily_trend', p),
       supabase.rpc('get_branch_summary', pBranch),
@@ -271,12 +274,17 @@ export default function PurchaseReports() {
           avg_purity: 0,
         })
       }
-      setHourlyTrend(hourlyData)
-    } else {
-      setHourlyTrend([])
-    }
+        setHourlyTrend(hourlyData)
+      } else {
+        setHourlyTrend([])
+      }
 
-    setLoading(false)
+      setLoading(false)
+    } catch (err) {
+      console.error('Error fetching report data:', err)
+      setError(err.message || 'Failed to load report data. Some RPC functions may be missing.')
+      setLoading(false)
+    }
   }
 
   const handleExport = async () => {
@@ -514,8 +522,22 @@ export default function PurchaseReports() {
         ))}
       </div>
 
+      {/* ERROR MESSAGE */}
+      {error && (
+        <div style={{ background: `${t.red}10`, border: `1px solid ${t.red}40`, borderRadius: '12px', padding: '20px 24px', marginBottom: '24px' }}>
+          <div style={{ fontSize: '.9rem', color: t.red, fontWeight: 600, marginBottom: '8px' }}>⚠ Error Loading Reports</div>
+          <div style={{ fontSize: '.75rem', color: t.text2, marginBottom: '12px' }}>{error}</div>
+          <div style={{ fontSize: '.7rem', color: t.text3, lineHeight: 1.6 }}>
+            This usually means some database RPC functions are missing. Contact your admin or check Supabase for the following functions:
+            <div style={{ marginTop: '8px', fontFamily: 'monospace', fontSize: '.68rem', color: t.text4 }}>
+              get_report_kpis, get_daily_trend, get_branch_summary, get_state_summary, get_monthly_summary, get_dow_summary, get_purity_distribution, get_weight_buckets, get_region_txn_split, get_month_half_split, get_top_bills
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* SECTIONS */}
-      {!loading && (
+      {!loading && !error && (
         <>
           {showSection('charts')       && <ReportCharts       trend={trend} monthly={monthly} dowData={dowData} hourlyTrend={hourlyTrend} isSingleDay={fromDate && toDate && fromDate === toDate} t={t} />}
           {showSection('distribution') && <ReportDistribution kpis={kpis} purityDist={purityDist} weightBuckets={weightBuckets} regionSplit={regionSplit} monthHalf={monthHalf} t={t} />}
