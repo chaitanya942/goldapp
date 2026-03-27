@@ -171,8 +171,10 @@ export default function PurchaseReports() {
     '--green': t.green, '--red': t.red, '--blue': t.blue,
   }
 
-  const [fromDate,      setFromDate]      = useState('')
-  const [toDate,        setToDate]        = useState('')
+  const _now = istNow()
+  const _mtdFrom = `${_now.getFullYear()}-${String(_now.getMonth()+1).padStart(2,'0')}-01`
+  const [fromDate,      setFromDate]      = useState(_mtdFrom)
+  const [toDate,        setToDate]        = useState(istStr(_now))
   const [filterBranch,  setFilterBranch]  = useState('')
   const [filterTxn,     setFilterTxn]     = useState('')
   const [filterState,   setFilterState]   = useState('')

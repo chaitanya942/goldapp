@@ -43,6 +43,20 @@ export async function POST(request) {
       password: process.env.CRM_DB_PASSWORD,
     })
 
+    // ── Find latest synced date in Supabase ───────────────
+    const { data: latestRow } = await supabaseAdmin
+      .from('purchases')
+      .select('purchase_date')
+      .order('purchase_date', { ascending: false })
+      .limit(1)
+      .single()
+
+    // Use latest synced date minus 2 days as buffer (to catch late CRM approvals)
+    // Fall back to 30 days ago if Supabase is empty
+    const cutoff = latestRow?.purchase_date
+      ? new Date(new Date(latestRow.purchase_date).getTime() - 2 * 86400000).toISOString().split('T')[0]
+      : new Date(Date.now() - 30 * 86400000).toISOString().split('T')[0]
+
     // ── Pull approved records from CRM ────────────────────
     const [rows] = await conn.execute(`
       SELECT
@@ -65,9 +79,9 @@ export async function POST(request) {
       FROM transac_tbl t
       LEFT JOIN ornments_tbl o ON o.trnxnn_id = t.id
       WHERE t.trxn_status = 'approved'
-      AND t.date >= '2026-03-15'
+      AND t.date >= ?
       GROUP BY t.id
-    `)
+    `, [cutoff])
 
     if (!rows.length) {
       return Response.json({ success: true, message: 'No records in CRM', synced: 0, newCount: 0 })
