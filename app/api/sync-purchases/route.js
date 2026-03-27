@@ -24,10 +24,17 @@ function weightedAvgPurity(netWetStr, purityStr) {
   return weighted / totalNet
 }
 
+// ── Normalize application_id — strip any existing WGKA prefix first ──────────
+function normalizeAppId(raw) {
+  const s = String(raw).trim()
+  // If already starts with WGKA, return as-is
+  if (s.toUpperCase().startsWith('WGKA')) return s.toUpperCase()
+  return `WGKA${s}`
+}
+
 export async function POST(request) {
   let conn
   try {
-    // ── Connect to CRM MySQL ──────────────────────────────
     conn = await mysql.createConnection({
       host:     process.env.CRM_DB_HOST,
       port:     parseInt(process.env.CRM_DB_PORT || '3306'),
@@ -36,7 +43,7 @@ export async function POST(request) {
       password: process.env.CRM_DB_PASSWORD,
     })
 
-    // ── Pull approved records from CRM (from 15 Mar 2026) ─
+    // ── Pull approved records from CRM ────────────────────
     const [rows] = await conn.execute(`
       SELECT
         t.id                          AS txn_id,
@@ -66,20 +73,28 @@ export async function POST(request) {
       return Response.json({ success: true, message: 'No records in CRM', synced: 0, newCount: 0 })
     }
 
-    // ── Branch lookup — trim all names to avoid whitespace mismatch ──
+    // ── Branch lookup ──────────────────────────────────────
     const [branches] = await conn.execute(`SELECT brnch_id, brnch_name FROM branch_tbl`)
-    const branchMap = {}
+    const branchMap  = {}
     branches.forEach(b => { branchMap[b.brnch_id] = b.brnch_name?.trim() })
 
-    // ── Get existing application_ids from Supabase ────────
-    const { data: existing } = await supabaseAdmin
-      .from('purchases')
-      .select('application_id')
-      .gte('purchase_date', '2026-03-15')
+    // ── Build normalized application_ids from CRM ─────────
+    const crmAppIds = rows.map(r => normalizeAppId(r.application_id))
 
-    const existingIds = new Set((existing || []).map(r => r.application_id))
+    // ── Get ALL existing application_ids from Supabase in one query ──
+    // Use chunks of 500 to avoid URL length limits
+    const existingIds = new Set()
+    const CHUNK = 500
+    for (let i = 0; i < crmAppIds.length; i += CHUNK) {
+      const chunk = crmAppIds.slice(i, i + CHUNK)
+      const { data } = await supabaseAdmin
+        .from('purchases')
+        .select('application_id')
+        .in('application_id', chunk)
+      ;(data || []).forEach(r => existingIds.add(r.application_id))
+    }
 
-    // ── Map CRM rows → Supabase records (trim all string fields) ──
+    // ── Map CRM rows → Supabase records ───────────────────
     const allRecords = rows.map(r => {
       const grossWeight = sumCSV(r.gross_weight_str)
       const stoneWeight = sumCSV(r.stone_weight_str)
@@ -92,14 +107,13 @@ export async function POST(request) {
       const svcAmount   = finalAmount * (svcPct / 100)
       const branchName  = (branchMap[r.branch_id] || String(r.branch_id))?.trim()
       const txnType     = r.transaction_type?.trim()?.toLowerCase()
+      const appId       = normalizeAppId(r.application_id)
 
-      // Format time — MySQL returns time as HH:MM:SS string or Duration object
       let txnTime = null
       if (r.transaction_time !== null && r.transaction_time !== undefined) {
         if (typeof r.transaction_time === 'string') {
           txnTime = r.transaction_time.trim()
         } else if (typeof r.transaction_time === 'object') {
-          // mysql2 may return time as a Duration object — convert to HH:MM:SS
           const h = String(Math.floor(Math.abs(r.transaction_time) / 3600)).padStart(2, '0')
           const m = String(Math.floor((Math.abs(r.transaction_time) % 3600) / 60)).padStart(2, '0')
           const s = String(Math.abs(r.transaction_time) % 60).padStart(2, '0')
@@ -108,7 +122,7 @@ export async function POST(request) {
       }
 
       return {
-        application_id:             `WGKA${String(r.application_id).trim()}`,
+        application_id:             appId,
         purchase_date:              r.purchase_date ? new Date(r.purchase_date).toISOString().split('T')[0] : null,
         transaction_time:           txnTime,
         customer_name:              r.customer_name?.trim() || null,
@@ -151,6 +165,7 @@ export async function POST(request) {
     }
 
     // ── Insert new records in batches of 100 ──────────────
+    // Use upsert with onConflict to prevent duplicates even on concurrent syncs
     const BATCH = 100
     let synced = 0, errors = 0, lastError = null
 
@@ -158,10 +173,9 @@ export async function POST(request) {
       const batch = newRecords.slice(i, i + BATCH)
       const { error } = await supabaseAdmin
         .from('purchases')
-        .insert(batch)
+        .upsert(batch, { onConflict: 'application_id', ignoreDuplicates: true })
       if (error) {
-        console.error('Insert error:', JSON.stringify(error, null, 2))
-        console.error('Sample record:', JSON.stringify(batch[0], null, 2))
+        console.error('Upsert error:', JSON.stringify(error, null, 2))
         lastError = error
         errors += batch.length
       } else {
