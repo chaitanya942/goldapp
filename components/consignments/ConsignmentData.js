@@ -154,7 +154,7 @@ export default function ConsignmentData() {
 
   // ── Nav helpers ───────────────────────────────────────────────────────────
   function drillRegion(region) { setNav({ type: 'region', region }); setSearch(''); setSelected(new Set()) }
-  function drillBranch(branch) { setNav({ type: 'branch', branch }); setSearch(''); setSelected(new Set()) }
+  function drillBranch(branch, fromRegion) { setNav({ type: 'branch', branch, fromRegion }); setSearch(''); setSelected(new Set()) }
   function goBack() {
     if (nav?.type === 'branch') setNav(prev => prev.fromRegion ? { type: 'region', region: prev.fromRegion } : null)
     else setNav(null)
