@@ -3,6 +3,10 @@
     {
       "path": "/api/fetch-gold-rates",
       "schedule": "0 3 * * 1-5"
+    },
+    {
+      "path": "/api/sync-purchases",
+      "schedule": "30 18 * * *"
     }
   ]
 }

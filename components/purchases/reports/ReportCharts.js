@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { fmt, fmtVal, fmtShort, growth, getStyles, GrowthBadge, BarChart, LineChart, HeatmapRow, CHART_COLORS, DAYS } from './reportUtils'
 
-export default function ReportCharts({ trend, monthly, dowData, t }) {
+export default function ReportCharts({ trend, monthly, dowData, hourlyTrend, isSingleDay, t }) {
   const [trendMetric, setTrendMetric] = useState('net_wt')
   const s = getStyles(t)
 
@@ -15,28 +15,33 @@ export default function ReportCharts({ trend, monthly, dowData, t }) {
     avg_purity: Number(d.avg_purity),
   }))
 
+  const showHourly  = isSingleDay && (hourlyTrend || []).length > 1
+  const chartData   = showHourly ? hourlyTrend : trendData
+  const chartTitle  = showHourly ? 'Hourly Trend' : 'Daily Trend'
+  const hasEnough   = chartData.length > 1
+
   const maxDow = Math.max(...(dowData || []).map(d => Number(d.net_wt) || 0))
 
   return (
     <>
-      {/* ── DAILY TREND ── */}
+      {/* ── DAILY / HOURLY TREND ── */}
       <div style={s.card}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
-          <div style={s.sTitle}>Daily Trend</div>
+          <div style={s.sTitle}>{chartTitle}</div>
           <div style={{ display: 'flex', gap: '6px' }}>
             {[['Net Wt', 'net_wt'], ['Value', 'value'], ['Txns', 'txn_count']].map(([l, v]) => (
               <button key={v} style={s.pill(trendMetric === v)} onClick={() => setTrendMetric(v)}>{l}</button>
             ))}
           </div>
         </div>
-        {trendData.length > 1
+        {hasEnough
           ? <>
-              <LineChart data={trendData} xKey="day" yKey={trendMetric} color={t.gold} height={150} t={t} />
+              <LineChart data={chartData} xKey="day" yKey={trendMetric} color={t.gold} height={150} t={t} />
               <div style={{ marginTop: '8px' }}>
-                <BarChart data={trendData} xKey="day" yKey={trendMetric} color={`${t.gold}50`} height={50} t={t} />
+                <BarChart data={chartData} xKey="day" yKey={trendMetric} color={`${t.gold}50`} height={50} t={t} />
               </div>
             </>
-          : <div style={{ textAlign: 'center', color: t.text4, padding: '48px', fontSize: '.75rem' }}>Not enough data for daily trend</div>
+          : <div style={{ textAlign: 'center', color: t.text4, padding: '48px', fontSize: '.75rem' }}>Not enough data for trend</div>
         }
       </div>
 

@@ -193,6 +193,7 @@ export default function PurchaseReports() {
   const [loading,       setLoading]       = useState(true)
   const [activeSection, setActiveSection] = useState(null)
   const [exporting,     setExporting]     = useState(false)
+  const [hourlyTrend,   setHourlyTrend]   = useState([])
 
   useEffect(() => {
     supabase.from('branches').select('name').order('name').then(({ data }) => {
@@ -204,6 +205,7 @@ export default function PurchaseReports() {
 
   const fetchAll = async () => {
     setLoading(true)
+    const isSingleDay = fromDate && toDate && fromDate === toDate
     const p       = { p_from: fromDate || null, p_to: toDate || null, p_branch: filterBranch || null, p_txn_type: filterTxn || null, p_state: filterState || null }
     const pBranch = { p_from: p.p_from, p_to: p.p_to, p_txn_type: p.p_txn_type, p_state: p.p_state }
     const pState  = { p_from: p.p_from, p_to: p.p_to, p_txn_type: p.p_txn_type }
@@ -233,6 +235,47 @@ export default function PurchaseReports() {
     if (reg.data) setRegionSplit(reg.data || [])
     if (mh.data)  setMonthHalf(mh.data   || [])
     if (tb.data)  setTopBills(tb.data    || [])
+
+    // ── Hourly trend for single-day view ──────────────────
+    if (isSingleDay) {
+      let hq = supabase.from('purchases')
+        .select('transaction_time, net_weight, final_amount_crm')
+        .eq('purchase_date', fromDate)
+        .eq('is_deleted', false)
+        .not('transaction_time', 'is', null)
+      if (filterBranch) hq = hq.eq('branch_name', filterBranch)
+      if (filterTxn)    hq = hq.eq('transaction_type', filterTxn)
+      const { data: rawRows } = await hq
+
+      const hmap = {}
+      for (const row of rawRows || []) {
+        const h = parseInt(String(row.transaction_time).split(':')[0])
+        if (isNaN(h) || h < 0 || h > 23) continue
+        if (!hmap[h]) hmap[h] = { net_wt: 0, value: 0, txn_count: 0 }
+        hmap[h].net_wt += parseFloat(row.net_weight || 0)
+        hmap[h].value  += parseFloat(row.final_amount_crm || 0)
+        hmap[h].txn_count++
+      }
+
+      const hours = Object.keys(hmap).map(Number)
+      const minH  = 10
+      const maxH  = hours.length > 0 ? Math.max(...hours) : 18
+      const hourlyData = []
+      for (let h = minH; h <= maxH; h++) {
+        const label = h < 12 ? `${h} AM` : h === 12 ? '12 PM' : `${h - 12} PM`
+        hourlyData.push({
+          day:       label,
+          net_wt:    parseFloat((hmap[h]?.net_wt || 0).toFixed(3)),
+          value:     Math.round(hmap[h]?.value || 0),
+          txn_count: hmap[h]?.txn_count || 0,
+          avg_purity: 0,
+        })
+      }
+      setHourlyTrend(hourlyData)
+    } else {
+      setHourlyTrend([])
+    }
+
     setLoading(false)
   }
 
@@ -474,7 +517,7 @@ export default function PurchaseReports() {
       {/* SECTIONS */}
       {!loading && (
         <>
-          {showSection('charts')       && <ReportCharts       trend={trend} monthly={monthly} dowData={dowData} t={t} />}
+          {showSection('charts')       && <ReportCharts       trend={trend} monthly={monthly} dowData={dowData} hourlyTrend={hourlyTrend} isSingleDay={fromDate && toDate && fromDate === toDate} t={t} />}
           {showSection('distribution') && <ReportDistribution kpis={kpis} purityDist={purityDist} weightBuckets={weightBuckets} regionSplit={regionSplit} monthHalf={monthHalf} t={t} />}
           {showSection('branches')     && <ReportBranches     branchData={branchData} stateData={stateData} topBills={topBills} fromDate={fromDate} toDate={toDate} filterTxn={filterTxn} t={t} />}
           {showSection('sameday')      && <ReportSameDay      t={t} />}

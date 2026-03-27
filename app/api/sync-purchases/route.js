@@ -214,3 +214,12 @@ export async function POST(request) {
     if (conn) await conn.end()
   }
 }
+
+// ── GET handler for Vercel cron (midnight auto-sync) ─────────────────────────
+export async function GET(req) {
+  const authHeader = req.headers.get('authorization')
+  if (process.env.CRON_SECRET && authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+    return Response.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+  return POST(req)
+}
