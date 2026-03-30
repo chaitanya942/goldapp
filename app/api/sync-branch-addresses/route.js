@@ -36,7 +36,7 @@ export async function POST(req) {
     // Get all branches from Supabase
     const { data: supabaseBranches, error: fetchError } = await supabase
       .from('branches')
-      .select('id, name, branch_code')
+      .select('id, name')
 
     if (fetchError) {
       return Response.json({ error: 'Failed to fetch Supabase branches', details: fetchError.message }, { status: 500 })
@@ -46,9 +46,6 @@ export async function POST(req) {
     const supabaseMap = {}
     supabaseBranches.forEach(b => {
       supabaseMap[b.name?.toUpperCase()] = b
-      if (b.branch_code) {
-        supabaseMap[b.branch_code?.toUpperCase()] = b
-      }
     })
 
     const updates = []
@@ -59,10 +56,9 @@ export async function POST(req) {
     // Match and prepare updates
     for (const crmBranch of crmBranches) {
       const crmName = crmBranch.brnch_name?.trim()?.toUpperCase()
-      const crmCode = crmBranch.branchcode?.trim()?.toUpperCase()
 
-      // Try to find match by name or branch code
-      let match = supabaseMap[crmName] || supabaseMap[crmCode]
+      // Try to find match by name
+      let match = supabaseMap[crmName]
 
       if (!match) {
         notFound.push(crmName)
