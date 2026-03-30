@@ -105,7 +105,7 @@ export async function GET(req) {
   if (action === 'branches') {
     const { data, error } = await supabase
       .from('branches')
-      .select('id, name, state, region, cluster, model_type')
+      .select('id, name, state, region, cluster, model_type, address, city, pin_code, contact_person, contact_phone, branch_gstin')
       .eq('is_active', true)
       .neq('region', 'Bangalore')
       .order('region')
