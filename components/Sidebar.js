@@ -37,6 +37,7 @@ const ADMIN_ITEMS = [
       { id: 'branch-management', label: 'Branch Management', dot: '#8c5ac8' },
       { id: 'user-management',   label: 'User Management',   dot: '#3aaa6a' },
       { id: 'company-settings',  label: 'Company Settings',  dot: '#c9a84c' },
+      { id: 'consignment-seeds', label: 'Consignment Seeds', dot: '#3a8fbf' },
       { id: 'import-logs',       label: 'Import Logs',       dot: '#c9981f' },
     ]
   },

@@ -28,15 +28,22 @@ export async function GET(req) {
       return Response.json({ error: 'Consignment not found' }, { status: 404 })
     }
 
-    // Fetch branch details
+    // Fetch branch details with address fields
     const { data: branch, error: be } = await supabase
       .from('branches')
-      .select('*')
-      .eq('name', consignment.branch_names)
+      .select('*, address, city, pin_code, contact_person, contact_phone, branch_gstin')
+      .eq('name', consignment.branch_name)
       .single()
 
     if (be || !branch) {
-      return Response.json({ error: 'Branch not found' }, { status: 404 })
+      return Response.json({ error: `Branch '${consignment.branch_name}' not found` }, { status: 404 })
+    }
+
+    // Validate required address data
+    if (!branch.address) {
+      return Response.json({
+        error: `Branch '${branch.name}' is missing address. Please update in Admin > Branch Management.`
+      }, { status: 400 })
     }
 
     // Fetch company settings
