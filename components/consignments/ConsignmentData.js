@@ -58,6 +58,8 @@ export default function ConsignmentData() {
   const [showModal,       setShowModal]       = useState(false)
   const [lastConsignment, setLastConsignment] = useState(null)
   const [dismissWarning,  setDismissWarning]  = useState(false)
+  const [previewNumbers,  setPreviewNumbers]  = useState(null)
+  const [loadingPreview,  setLoadingPreview]  = useState(false)
 
   const fetchAll = useCallback(async () => {
     setLoading(true)
@@ -133,6 +135,20 @@ export default function ConsignmentData() {
     else { const n = new Set(selected); visibleBills.forEach(p => n.add(p.id)); setSelected(n) }
   }
   function toggleRow(id) { const n = new Set(selected); n.has(id) ? n.delete(id) : n.add(id); setSelected(n) }
+
+  async function fetchPreviewNumbers() {
+    if (selectedBranches.length !== 1) return
+    setLoadingPreview(true)
+    try {
+      const res = await fetch(`/api/consignments-preview?branch=${encodeURIComponent(selectedBranches[0])}&movement_type=${moveType}`)
+      const data = await res.json()
+      if (!data.error) setPreviewNumbers(data)
+    } catch (err) {
+      console.error('Preview error:', err)
+    } finally {
+      setLoadingPreview(false)
+    }
+  }
 
   async function handleCreate() {
     if (!selected.size || selectedBranches.length !== 1) return
@@ -328,7 +344,7 @@ export default function ConsignmentData() {
               <option value="EXTERNAL">External (Branch → HO)</option>
               <option value="INTERNAL">Internal (Branch → Hub)</option>
             </select>
-            <button onClick={() => setShowModal(true)} disabled={selectedBranches.length !== 1} style={{ ...btnGold, opacity: selectedBranches.length !== 1 ? .5 : 1 }}>
+            <button onClick={() => { setShowModal(true); fetchPreviewNumbers() }} disabled={selectedBranches.length !== 1} style={{ ...btnGold, opacity: selectedBranches.length !== 1 ? .5 : 1 }}>
               Create Consignment
             </button>
             <button onClick={() => setSelected(new Set())} style={btnOut}>Clear</button>
@@ -517,9 +533,27 @@ export default function ConsignmentData() {
                 </div>
               ))}
             </div>
-            <div style={{ fontSize: '11px', color: t.text4, marginBottom: '18px', padding: '10px 14px', background: `${t.gold}08`, borderRadius: '7px', border: `1px solid ${t.gold}20` }}>
-              ℹ TMP PRF No and Challan No will be auto-generated
-            </div>
+            {/* Preview Numbers */}
+            {loadingPreview ? (
+              <div style={{ fontSize: '11px', color: t.text4, marginBottom: '18px', padding: '10px 14px', background: `${t.gold}08`, borderRadius: '7px', border: `1px solid ${t.gold}20`, textAlign: 'center' }}>
+                Loading preview...
+              </div>
+            ) : previewNumbers ? (
+              <div style={{ marginBottom: '18px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '9px 14px', background: `${t.gold}10`, borderRadius: '7px', border: `1px solid ${t.gold}30` }}>
+                  <span style={{ fontSize: '11px', color: t.text3, fontWeight: 600 }}>TMP PRF No</span>
+                  <span style={{ fontSize: '12px', color: t.gold, fontWeight: 700, fontFamily: 'monospace' }}>{previewNumbers.tmp_prf_no}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '9px 14px', background: `${t.blue}10`, borderRadius: '7px', border: `1px solid ${t.blue}30` }}>
+                  <span style={{ fontSize: '11px', color: t.text3, fontWeight: 600 }}>Challan No</span>
+                  <span style={{ fontSize: '11px', color: t.blue, fontWeight: 600, fontFamily: 'monospace' }}>{previewNumbers.challan_no}</span>
+                </div>
+              </div>
+            ) : (
+              <div style={{ fontSize: '11px', color: t.text4, marginBottom: '18px', padding: '10px 14px', background: `${t.gold}08`, borderRadius: '7px', border: `1px solid ${t.gold}20` }}>
+                ℹ TMP PRF No and Challan No will be auto-generated
+              </div>
+            )}
             <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
               <button onClick={() => setShowModal(false)} style={btnOut}>Cancel</button>
               <button onClick={handleCreate} disabled={creating} style={{ ...btnGold, padding: '8px 20px', opacity: creating ? .7 : 1 }}>
