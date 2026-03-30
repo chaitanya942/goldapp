@@ -172,7 +172,10 @@ export default function ConsignmentReport() {
           <div style={{ ...card, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
             <div style={{ padding: '12px 16px', borderBottom: `1px solid ${t.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div style={{ fontSize: '12px', fontWeight: 600, color: t.gold }}>{detail?.tmp_prf_no || '...'}</div>
-              <button onClick={() => { setSelected(null); setDetail(null) }} style={{ ...btnOut, padding: '3px 8px', fontSize: '11px' }}>✕</button>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button onClick={() => window.open(`/api/generate-challan-pdf?id=${selected}`, '_blank')} style={{ ...btnGold, padding: '4px 10px', fontSize: '11px' }}>📄 PDF</button>
+                <button onClick={() => { setSelected(null); setDetail(null) }} style={{ ...btnOut, padding: '3px 8px', fontSize: '11px' }}>✕</button>
+              </div>
             </div>
             {loadingDetail ? (
               <div style={{ padding: '40px', textAlign: 'center', color: t.text4, fontSize: '12px' }}>Loading...</div>

@@ -9,6 +9,7 @@ import Topbar from '../../components/Topbar'
 import DashboardHome from '../../components/dashboard/DashboardHome'
 import BranchManagement from '../../components/admin/BranchManagement'
 import UserManagement from '../../components/admin/UserManagement'
+import CompanySettings from '../../components/admin/CompanySettings'
 import ImportLogs from '../../components/admin/ImportLogs'
 import PurchaseData from '../../components/purchases/PurchaseData'
 import PurchaseReports from '../../components/purchases/reports/PurchaseReports'
@@ -106,6 +107,7 @@ function DashboardShell() {
       case 'reports':             return <ComingSoon title="Reports" />
       case 'branch-management':   return <BranchManagement />
       case 'user-management':     return <UserManagement />
+      case 'company-settings':    return <CompanySettings />
       case 'import-logs':         return <ImportLogs />
       case 'inbound-bot':         return <InboundBotTesting />
       default:                    return <DashboardHome />

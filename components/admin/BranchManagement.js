@@ -9,7 +9,7 @@ const THEMES = {
   light: { bg: '#f5f0e8', card: '#ede8dc', text1: '#2a1f0a', text3: '#8a7a5a', text4: '#b0a080', gold: '#a07830', border: '#d5cfc0', green: '#2a8a5a' },
 }
 
-const EMPTY_FORM = { name: '', opening_date: '', state: '', region: '', cluster: '', model_type: 'outside_bangalore' }
+const EMPTY_FORM = { name: '', opening_date: '', state: '', region: '', cluster: '', model_type: 'outside_bangalore', address: '', city: '', pin_code: '', contact_person: '', contact_phone: '', branch_gstin: '' }
 
 export default function BranchManagement() {
   const { theme, loadBranches } = useApp()
@@ -102,6 +102,12 @@ export default function BranchManagement() {
       name: form.name.toUpperCase().trim(),
       state: form.state, region: form.region, cluster: form.cluster,
       model_type: form.model_type, opening_date: form.opening_date || null,
+      address: form.address || null,
+      city: form.city || null,
+      pin_code: form.pin_code || null,
+      contact_person: form.contact_person || null,
+      contact_phone: form.contact_phone || null,
+      branch_gstin: form.branch_gstin || null,
     }
     const { error } = editId
       ? await supabase.from('branches').update(payload).eq('id', editId)
@@ -118,6 +124,12 @@ export default function BranchManagement() {
       name: b.name,
       opening_date: b.opening_date ? b.opening_date.split('T')[0] : '',
       state: b.state, region: b.region, cluster: b.cluster, model_type: b.model_type,
+      address: b.address || '',
+      city: b.city || '',
+      pin_code: b.pin_code || '',
+      contact_person: b.contact_person || '',
+      contact_phone: b.contact_phone || '',
+      branch_gstin: b.branch_gstin || '',
     })
     setEditId(b.id); setFormOpen(true); setMsg('')
     window.scrollTo({ top: 0, behavior: 'smooth' })
@@ -308,6 +320,47 @@ export default function BranchManagement() {
               </select>
             </div>
           </div>
+
+          {/* Address & Contact Details */}
+          <div style={{ borderTop: `1px solid ${t.border}`, marginTop: '20px', paddingTop: '20px' }}>
+            <div style={{ fontSize: '.7rem', color: t.text3, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: '16px', fontWeight: 600 }}>
+              Address & Contact Details (for Delivery Challan)
+            </div>
+            <div style={s.grid2}>
+              <div>
+                <label style={s.label}>Full Address</label>
+                <textarea style={{ ...s.input, minHeight: '60px', fontFamily: 'inherit', resize: 'vertical' }}
+                  placeholder="NO. 2179, 1ST FLOOR, MADUVANA, MG RD..."
+                  value={form.address}
+                  onChange={e => setField('address', e.target.value)} />
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                <div>
+                  <label style={s.label}>City</label>
+                  <input style={s.input} placeholder="TUMKUR" value={form.city} onChange={e => setField('city', e.target.value)} />
+                </div>
+                <div>
+                  <label style={s.label}>PIN Code</label>
+                  <input style={s.input} placeholder="572101" value={form.pin_code} onChange={e => setField('pin_code', e.target.value)} />
+                </div>
+              </div>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px' }}>
+              <div>
+                <label style={s.label}>Contact Person</label>
+                <input style={s.input} placeholder="RAKESH" value={form.contact_person} onChange={e => setField('contact_person', e.target.value)} />
+              </div>
+              <div>
+                <label style={s.label}>Contact Phone</label>
+                <input style={s.input} placeholder="9071410735" value={form.contact_phone} onChange={e => setField('contact_phone', e.target.value)} />
+              </div>
+              <div>
+                <label style={s.label}>Branch GSTIN (if different)</label>
+                <input style={s.input} placeholder="29AAPCA3170M1Z5" value={form.branch_gstin} onChange={e => setField('branch_gstin', e.target.value)} />
+              </div>
+            </div>
+          </div>
+
           <div style={s.row}>
             <button style={s.btnGold} onClick={save} disabled={saving}>
               {saving ? 'Saving...' : editId ? 'Update Branch' : 'Save Branch'}

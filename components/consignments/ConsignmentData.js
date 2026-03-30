@@ -261,7 +261,22 @@ export default function ConsignmentData() {
                     {oldest && <span>Oldest: {fmtDate(oldest.purchase_date)}</span>}
                     <AgeBadge days={oldD} t={t} />
                     {consigns.length > 0 && statusKey === 'in_consignment' && (
-                      <span style={{ color: t.blue }}>{consigns.map(c => c.tmp_prf_no).join(', ')}</span>
+                      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                        {consigns.map(c => (
+                          <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: '6px', background: `${t.blue}15`, borderRadius: '6px', padding: '3px 8px' }}>
+                            <span style={{ color: t.blue, fontSize: '11px', fontWeight: 600 }}>{c.tmp_prf_no}</span>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                window.open(`/api/generate-challan-pdf?id=${c.id}`, '_blank')
+                              }}
+                              style={{ background: t.gold, color: '#1a0a00', border: 'none', borderRadius: '4px', padding: '2px 8px', fontSize: '9px', fontWeight: 700, cursor: 'pointer', letterSpacing: '.03em' }}
+                            >
+                              PDF
+                            </button>
+                          </div>
+                        ))}
+                      </div>
                     )}
                   </div>
                 </div>

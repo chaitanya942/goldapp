@@ -36,6 +36,7 @@ const ADMIN_ITEMS = [
     children: [
       { id: 'branch-management', label: 'Branch Management', dot: '#8c5ac8' },
       { id: 'user-management',   label: 'User Management',   dot: '#3aaa6a' },
+      { id: 'company-settings',  label: 'Company Settings',  dot: '#c9a84c' },
       { id: 'import-logs',       label: 'Import Logs',       dot: '#c9981f' },
     ]
   },
