@@ -158,7 +158,14 @@ export default function BranchManagement() {
         const s = data.summary
         const parts = [`${s.new_branches_added} new added`, `${s.crm_id_stamped || 0} linked`, `${s.already_existed} unchanged`]
         if (s.errors) parts.push(`${s.errors} errors`)
-        setSyncMsg(`✓ ${parts.join(', ')}`)
+        let msg = `✓ ${parts.join(', ')}`
+        if (data.errors?.length) {
+          msg += '\nFailed: ' + data.errors.map(e => `${e.name} (${e.error})`).join(' | ')
+        }
+        if (data.new_branches?.length) {
+          msg += '\nAdded: ' + data.new_branches.join(', ')
+        }
+        setSyncMsg(msg)
         if (s.new_branches_added > 0) load()
       } else {
         setSyncMsg(`Error: ${data.error}${data.details ? ` — ${data.details}` : ''}`)
@@ -225,7 +232,7 @@ export default function BranchManagement() {
   }
 
   const s = {
-    wrap:       { padding: '32px', maxWidth: '1300px' },
+    wrap:       { padding: '32px', width: '100%', boxSizing: 'border-box' },
     header:     { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '24px' },
     title:      { fontSize: '1.6rem', fontWeight: 300, color: t.text1, letterSpacing: '.04em' },
     sub:        { fontSize: '.72rem', color: t.text3, marginTop: '4px' },
@@ -291,7 +298,7 @@ export default function BranchManagement() {
       </div>
 
       {syncMsg && (
-        <div style={{ background: syncMsg.startsWith('✓') ? `${t.green}18` : `${t.red}18`, border: `1px solid ${syncMsg.startsWith('✓') ? t.green : t.red}40`, borderRadius: '6px', padding: '8px 14px', fontSize: '.72rem', color: syncMsg.startsWith('✓') ? t.green : t.red, marginBottom: '16px' }}>
+        <div style={{ background: syncMsg.startsWith('✓') ? `${t.green}18` : `${t.red}18`, border: `1px solid ${syncMsg.startsWith('✓') ? t.green : t.red}40`, borderRadius: '6px', padding: '8px 14px', fontSize: '.72rem', color: syncMsg.startsWith('✓') ? t.green : t.red, marginBottom: '16px', whiteSpace: 'pre-line' }}>
           {syncMsg}
         </div>
       )}
