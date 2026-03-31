@@ -21,9 +21,24 @@ export async function GET(req) {
     }
 
     if (action === 'data') {
-      // Get all branch data
       const [branches] = await conn.execute(`SELECT * FROM branch_tbl LIMIT 100`)
       return Response.json({ branches })
+    }
+
+    if (action === 'tables') {
+      const [tables] = await conn.execute(`SHOW TABLES`)
+      return Response.json({ tables })
+    }
+
+    if (action === 'emp_schema') {
+      const table = req.url.includes('emp_tbl') ? 'emp_tbl' : 'employee_tbl'
+      const [columns] = await conn.execute(`DESCRIBE ${table}`)
+      return Response.json({ columns })
+    }
+
+    if (action === 'emp_data') {
+      const [rows] = await conn.execute(`SELECT * FROM emp_tbl LIMIT 10`)
+      return Response.json({ rows })
     }
 
     return Response.json({ error: 'Invalid action' }, { status: 400 })
