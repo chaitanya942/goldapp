@@ -38,13 +38,27 @@ const REGION_COLORS = [
   '#e05555', '#c9981f', '#c84a8c', '#6abf5e', '#bf6a3a',
 ]
 
-// Stable color per region — same region always gets the same color
-// regardless of how the data is sorted
+// Fixed color map — each region always gets the same color regardless of data order
+const REGION_COLOR_MAP = {
+  'bangalore':          '#c9a84c',
+  'kerala':             '#3a8fbf',
+  'rest of karnataka':  '#8c5ac8',
+  'andhra pradesh':     '#3aaa6a',
+  'telangana':          '#4ac8c8',
+  'tamil nadu':         '#e05555',
+  'maharashtra':        '#c9981f',
+  'unknown':            '#7a6a4a',
+}
+// Remaining colors for any region not in the map above
+const _EXTRA_COLORS = ['#c84a8c', '#6abf5e', '#bf6a3a', '#5e8fbf', '#bf5e5e']
+
 function getRegionColor(name) {
-  if (!name) return REGION_COLORS[0]
-  let hash = 0
-  for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash)
-  return REGION_COLORS[Math.abs(hash) % REGION_COLORS.length]
+  if (!name) return REGION_COLORS[REGION_COLORS.length - 1]
+  const fixed = REGION_COLOR_MAP[name.toLowerCase().trim()]
+  if (fixed) return fixed
+  // For unknown regions: pick from extra colors using a simple char-sum mod
+  const sum = name.split('').reduce((s, c) => s + c.charCodeAt(0), 0)
+  return _EXTRA_COLORS[sum % _EXTRA_COLORS.length]
 }
 
 // ─────────────────────────────────────────────
