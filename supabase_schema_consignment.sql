@@ -123,7 +123,7 @@ CREATE INDEX IF NOT EXISTS idx_consignment_items_purchase_id    ON consignment_i
 CREATE TABLE IF NOT EXISTS branch_employees (
   id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   branch_id        UUID REFERENCES branches(id) ON DELETE SET NULL,
-  crm_branch_id    INT,
+  crm_branch_id    TEXT,
   crm_branch_name  TEXT,
   crm_branch_code  TEXT,
   name             TEXT NOT NULL,
@@ -135,9 +135,22 @@ CREATE TABLE IF NOT EXISTS branch_employees (
   synced_at        TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Add new columns if table already existed without them
+-- If table already exists, ensure columns are correct types
 ALTER TABLE branch_employees ADD COLUMN IF NOT EXISTS crm_branch_name TEXT;
 ALTER TABLE branch_employees ADD COLUMN IF NOT EXISTS crm_branch_code TEXT;
+
+-- If crm_branch_id was created as INT, change to TEXT (supports codes like "WG-2051", "HO", etc.)
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'branch_employees'
+      AND column_name = 'crm_branch_id'
+      AND data_type = 'integer'
+  ) THEN
+    ALTER TABLE branch_employees ALTER COLUMN crm_branch_id TYPE TEXT USING crm_branch_id::TEXT;
+  END IF;
+END $$;
 
 CREATE INDEX IF NOT EXISTS idx_branch_employees_branch_id  ON branch_employees(branch_id);
 CREATE INDEX IF NOT EXISTS idx_branch_employees_crm_branch ON branch_employees(crm_branch_id);

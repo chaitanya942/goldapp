@@ -87,7 +87,8 @@ export async function POST() {
 
         return {
           branch_id:        branch?.id || null,
-          crm_branch_id:    emp.crm_branch_id   || null,
+          // Store as TEXT — CRM branch IDs can be numeric or string codes like "WG-2051"
+          crm_branch_id:    emp.crm_branch_id != null ? String(emp.crm_branch_id) : null,
           crm_branch_name:  emp.crm_branch_name?.trim() || null,
           crm_branch_code:  emp.crm_branch_code?.trim() || null,
           name:             emp.name.trim(),
@@ -108,8 +109,8 @@ export async function POST() {
       const chunk = rows.slice(i, i + CHUNK)
       const { error } = await supabase.from('branch_employees').insert(chunk)
       if (error) {
-        // If crm_branch_name/crm_branch_code column missing, retry without them
-        if (error.message?.includes('crm_branch')) {
+        // If optional columns don't exist yet, retry with only core columns
+        if (error.message?.includes('crm_branch_name') || error.message?.includes('crm_branch_code')) {
           const stripped = chunk.map(({ crm_branch_name, crm_branch_code, ...rest }) => rest)
           const { error: e2 } = await supabase.from('branch_employees').insert(stripped)
           if (e2) return Response.json({ error: 'Insert failed', details: e2.message }, { status: 500 })
