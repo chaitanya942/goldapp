@@ -156,8 +156,10 @@ export default function BranchManagement() {
       const data = await res.json()
       if (data.success) {
         const s = data.summary
-        setSyncMsg(`✓ ${s.updated} updated, ${s.created} new branches added${s.errors ? `, ${s.errors} errors` : ''}`)
-        load()
+        const parts = [`${s.new_branches_added} new branches added`, `${s.already_existed} already existed`]
+        if (s.errors) parts.push(`${s.errors} errors`)
+        setSyncMsg(`✓ ${parts.join(', ')}`)
+        if (s.new_branches_added > 0) load()
       } else {
         setSyncMsg(`Error: ${data.error}${data.details ? ` — ${data.details}` : ''}`)
       }

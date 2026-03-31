@@ -85,11 +85,16 @@ export async function POST() {
         const desig     = emp.designation?.trim() || ''
         const isManager = /branch manager|bm/i.test(desig)
 
+        // emp_tbl.branch can be a number (brnch_id) OR a string like 'HO' (Head Office)
+        // Only store as crm_branch_id if it's a valid integer
+        const branchNum    = parseInt(emp.branch)
+        const crmBranchId  = !isNaN(branchNum) && String(branchNum) === String(emp.branch) ? branchNum : null
+
         return {
-          branch_id:     branch?.id  || null,
-          crm_branch_id: emp.branch  || null,
+          branch_id:     branch?.id || null,
+          crm_branch_id: crmBranchId,
           name:          emp.name.trim(),
-          designation:   desig       || null,
+          designation:   desig || null,
           contact_phone: emp.contact?.trim() || null,
           mobile_phone:  emp.omn?.trim()     || null,
           emp_status:    emp.emp_status === 'unblock' ? 'active' : 'inactive',
