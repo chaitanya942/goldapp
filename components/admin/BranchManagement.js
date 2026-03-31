@@ -156,7 +156,7 @@ export default function BranchManagement() {
       const data = await res.json()
       if (data.success) {
         const s = data.summary
-        const parts = [`${s.new_branches_added} new branches added`, `${s.already_existed} already existed`]
+        const parts = [`${s.new_branches_added} new added`, `${s.crm_id_stamped || 0} linked`, `${s.already_existed} unchanged`]
         if (s.errors) parts.push(`${s.errors} errors`)
         setSyncMsg(`✓ ${parts.join(', ')}`)
         if (s.new_branches_added > 0) load()

@@ -52,33 +52,55 @@ export async function POST() {
       }
     }
 
-    // Get existing Supabase branches (name lookup only — crm_branch_id may not exist yet)
-    const { data: existingBranches, error: fetchErr } = await supabase
-      .from('branches')
-      .select('id, name')
+    // Get Supabase branches — try with crm_branch_id, fall back if column missing
+    let supabaseBranches
+    const hasCrmIdCol = await (async () => {
+      const { error } = await supabase.from('branches').select('crm_branch_id').limit(1)
+      return !error
+    })()
 
+    const selectCols = hasCrmIdCol ? 'id, name, crm_branch_id' : 'id, name'
+    const { data: fetched, error: fetchErr } = await supabase.from('branches').select(selectCols)
     if (fetchErr) {
       return Response.json({ error: 'Failed to fetch branches', details: fetchErr.message }, { status: 500 })
     }
+    supabaseBranches = fetched || []
 
-    // Build set of existing branch names (uppercase) for quick lookup
-    const existingNames = new Set(existingBranches.map(b => b.name?.toUpperCase()))
+    // Build lookup maps
+    const byId   = {}  // crm_branch_id → supabase branch
+    const byName = {}  // uppercase name → supabase branch
+    supabaseBranches.forEach(b => {
+      if (b.crm_branch_id) byId[b.crm_branch_id] = b
+      byName[b.name?.toUpperCase()] = b
+    })
 
-    const created  = []
-    const skipped  = []
-    const errors   = []
+    const created = []
+    const linked  = []  // existing branches that got crm_branch_id stamped
+    const skipped = []
+    const errors  = []
 
     for (const crm of crmBranches) {
       const crmName = crm.brnch_name?.trim()
       if (!crmName) continue
 
-      // Skip branches already in Supabase
-      if (existingNames.has(crmName.toUpperCase())) {
-        skipped.push(crmName)
+      const match = byId[crm.brnch_id] || byName[crmName.toUpperCase()]
+
+      if (match) {
+        // Branch already exists — only stamp crm_branch_id if not set yet
+        // This enables employee linking without overwriting any other data
+        if (hasCrmIdCol && !match.crm_branch_id) {
+          const { error } = await supabase
+            .from('branches')
+            .update({ crm_branch_id: crm.brnch_id })
+            .eq('id', match.id)
+          if (!error) linked.push(crmName)
+        } else {
+          skipped.push(crmName)
+        }
         continue
       }
 
-      // Only insert branches not yet in Supabase
+      // Branch does not exist in Supabase → INSERT it
       const manager    = managerMap[crm.brnch_id]
       const branchCode = crm.branchcode?.trim()
         ? crm.branchcode.trim().toUpperCase()
@@ -88,29 +110,26 @@ export async function POST() {
         name:      crmName,
         is_active: crm.brn_status === 'unblock',
       }
-
-      // Only include optional columns if they have values — missing columns won't cause errors
-      // (Supabase just ignores unknown columns in insert when using PostgREST? No — it errors.)
-      // We build a minimal safe payload and add extended columns conditionally.
       if (crm.brnch_address) payload.address      = crm.brnch_address.trim()
       if (crm.city)          payload.city          = crm.city.trim()
       if (crm.pincode)       payload.pin_code      = crm.pincode.trim()
       if (crm.brnch_contact) payload.contact_phone = crm.brnch_contact.trim()
-      if (manager?.name) {
-        payload.contact_person = manager.name.trim()
+      if (manager?.name)     payload.contact_person = manager.name.trim()
+      if (hasCrmIdCol)       payload.crm_branch_id = crm.brnch_id
+
+      // Try with branch_code first, retry without if column missing
+      let result = await supabase.from('branches').insert({ ...payload, branch_code: branchCode }).select('id').single()
+      if (result.error?.message?.includes('branch_code')) {
+        result = await supabase.from('branches').insert(payload).select('id').single()
       }
 
-      // Try inserting with branch_code (may not exist if SQL not run yet)
-      // If it fails, retry without extended columns
-      let insertResult = await supabase.from('branches').insert({ ...payload, branch_code: branchCode }).select('id, name').single()
-
-      if (insertResult.error) {
-        // Retry without extended columns (in case branch_code / others don't exist yet)
-        insertResult = await supabase.from('branches').insert(payload).select('id, name').single()
-      }
-
-      if (insertResult.error) {
-        errors.push({ name: crmName, error: insertResult.error.message })
+      if (result.error) {
+        // If it's a unique constraint (branch was found by different casing), just skip
+        if (result.error.code === '23505') {
+          skipped.push(crmName + ' (name conflict)')
+        } else {
+          errors.push({ name: crmName, error: result.error.message })
+        }
       } else {
         created.push(crmName)
       }
@@ -121,6 +140,7 @@ export async function POST() {
       summary: {
         total_crm_branches: crmBranches.length,
         new_branches_added: created.length,
+        crm_id_stamped:     linked.length,
         already_existed:    skipped.length,
         errors:             errors.length,
       },

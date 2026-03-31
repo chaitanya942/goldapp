@@ -6,26 +6,15 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 )
 
-// Ensure branch_employees table exists; returns true if ready
-async function ensureTable() {
-  const { error } = await supabase.from('branch_employees').select('id').limit(1)
-  if (!error || error.code !== '42P01') return { ok: true }
-
-  // Table doesn't exist — try to create it via branches API workaround
-  // We can't run DDL directly via JS client, so return a helpful error
-  return {
-    ok: false,
-    message: 'branch_employees table not found. Run Phase 2 SQL in Supabase SQL Editor (see supabase_schema_consignment.sql) then try again.'
-  }
-}
-
 export async function POST() {
   let conn
   try {
-    // Check table exists first
-    const tableCheck = await ensureTable()
-    if (!tableCheck.ok) {
-      return Response.json({ error: tableCheck.message }, { status: 400 })
+    // Check branch_employees table exists
+    const { error: checkErr } = await supabase.from('branch_employees').select('id').limit(1)
+    if (checkErr?.code === '42P01') {
+      return Response.json({
+        error: 'branch_employees table not found. Run Phase 2 SQL in Supabase SQL Editor first.'
+      }, { status: 400 })
     }
 
     conn = await mysql.createConnection({
@@ -36,65 +25,86 @@ export async function POST() {
       password: process.env.CRM_DB_PASSWORD,
     })
 
-    // Fetch all employees from CRM (active + inactive)
+    // Get all employees from CRM
     const [employees] = await conn.execute(`
-      SELECT
-        branch,
-        name,
-        designation,
-        contact,
-        omn,
-        emp_status
+      SELECT branch, name, designation, contact, omn, emp_status
       FROM emp_tbl
       WHERE name IS NOT NULL AND name != ''
       ORDER BY branch, designation, name
     `)
 
+    // Get CRM branch list — needed to resolve brnch_id → brnch_name for name-based matching
+    const [crmBranches] = await conn.execute(`
+      SELECT brnch_id, brnch_name FROM branch_tbl
+    `)
+
+    // Map: CRM brnch_id (int) → branch name (uppercase)
+    const crmNameById = {}
+    crmBranches.forEach(b => {
+      crmNameById[b.brnch_id] = b.brnch_name?.trim()?.toUpperCase()
+    })
+
     if (!employees.length) {
       return Response.json({ success: true, summary: { total: 0, inserted: 0 } })
     }
 
-    // Get all Supabase branches keyed by crm_branch_id
+    // Get all Supabase branches — match by crm_branch_id OR by name
     const { data: branches, error: branchErr } = await supabase
       .from('branches')
-      .select('id, crm_branch_id, name')
+      .select('id, name, crm_branch_id')
 
     if (branchErr) {
-      return Response.json({ error: 'Failed to fetch branches', details: branchErr.message }, { status: 500 })
+      // crm_branch_id column might not exist yet — fall back to name-only
+      const { data: fallback, error: fallbackErr } = await supabase
+        .from('branches')
+        .select('id, name')
+      if (fallbackErr) {
+        return Response.json({ error: 'Failed to fetch branches', details: fallbackErr.message }, { status: 500 })
+      }
+      branches = fallback
     }
 
-    const branchById   = {}  // crm_branch_id → branch
-    branches.forEach(b => {
+    const branchById   = {}  // crm_branch_id (int) → supabase branch
+    const branchByName = {}  // uppercase name    → supabase branch
+    ;(branches || []).forEach(b => {
       if (b.crm_branch_id) branchById[b.crm_branch_id] = b
+      branchByName[b.name?.toUpperCase()] = b
     })
 
-    // Wipe existing synced employees (full-refresh)
-    const { error: delError } = await supabase
+    // Wipe all existing synced employees (full refresh)
+    await supabase
       .from('branch_employees')
       .delete()
-      .gte('id', '00000000-0000-0000-0000-000000000000') // delete all rows
-
-    if (delError) {
-      return Response.json({ error: 'Failed to clear old employees', details: delError.message }, { status: 500 })
-    }
+      .gte('id', '00000000-0000-0000-0000-000000000000')
 
     // Build insert rows
     const rows = employees
       .map(emp => {
-        const branch    = branchById[emp.branch]
         const desig     = emp.designation?.trim() || ''
         const isManager = /branch manager|bm/i.test(desig)
 
-        // emp_tbl.branch can be a number (brnch_id) OR a string like 'HO' (Head Office)
-        // Only store as crm_branch_id if it's a valid integer
-        const branchNum    = parseInt(emp.branch)
-        const crmBranchId  = !isNaN(branchNum) && String(branchNum) === String(emp.branch) ? branchNum : null
+        // emp.branch can be numeric (brnch_id) or string like 'HO'
+        const branchNum   = parseInt(emp.branch)
+        const isNumeric   = !isNaN(branchNum) && String(branchNum) === String(emp.branch)
+        const crmBranchId = isNumeric ? branchNum : null
+
+        // Match to Supabase branch:
+        // 1. By crm_branch_id (if branches have that column set)
+        // 2. By CRM branch name → Supabase name (always works even without crm_branch_id)
+        let branch = null
+        if (crmBranchId) {
+          branch = branchById[crmBranchId]
+          if (!branch) {
+            const crmBranchName = crmNameById[crmBranchId]
+            if (crmBranchName) branch = branchByName[crmBranchName]
+          }
+        }
 
         return {
-          branch_id:     branch?.id || null,
+          branch_id:     branch?.id    || null,
           crm_branch_id: crmBranchId,
           name:          emp.name.trim(),
-          designation:   desig || null,
+          designation:   desig         || null,
           contact_phone: emp.contact?.trim() || null,
           mobile_phone:  emp.omn?.trim()     || null,
           emp_status:    emp.emp_status === 'unblock' ? 'active' : 'inactive',
@@ -115,7 +125,6 @@ export async function POST() {
           error:   'Insert failed',
           details: error.message,
           hint:    error.hint || null,
-          at_row:  i,
         }, { status: 500 })
       }
       inserted += chunk.length
@@ -123,7 +132,8 @@ export async function POST() {
 
     const managers  = rows.filter(r => r.is_manager).length
     const active    = rows.filter(r => r.emp_status === 'active').length
-    const unmatched = rows.filter(r => !r.branch_id).length
+    const matched   = rows.filter(r => r.branch_id).length
+    const unmatched = rows.length - matched
 
     return Response.json({
       success: true,
@@ -132,8 +142,9 @@ export async function POST() {
         inserted,
         managers,
         active,
-        inactive:         rows.length - active,
-        unmatched_branch: unmatched,
+        inactive:  rows.length - active,
+        matched,
+        unmatched,
       }
     })
 
