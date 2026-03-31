@@ -34,9 +34,18 @@ function Panel({ id, expanded, onExpand, onClose, t, cardStyle = {}, noExpand = 
 // REGION COLORS — fixed palette
 // ─────────────────────────────────────────────
 const REGION_COLORS = [
-  '#c9a84c', '#3a8fbf', '#8c5ac8', '#3aaa6a', '#c9981f',
-  '#e05555', '#4ac8c8', '#c84a8c',
+  '#c9a84c', '#3a8fbf', '#8c5ac8', '#3aaa6a', '#4ac8c8',
+  '#e05555', '#c9981f', '#c84a8c', '#6abf5e', '#bf6a3a',
 ]
+
+// Stable color per region — same region always gets the same color
+// regardless of how the data is sorted
+function getRegionColor(name) {
+  if (!name) return REGION_COLORS[0]
+  let hash = 0
+  for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash)
+  return REGION_COLORS[Math.abs(hash) % REGION_COLORS.length]
+}
 
 // ─────────────────────────────────────────────
 // DONUT CHART — region net weight split
@@ -54,10 +63,10 @@ function RegionDonut({ branchData, t }) {
 
   const cx = 130, cy = 130, r = 100, sw = 32, circ = 2 * Math.PI * r
   let offset = 0
-  const slices = regions.map(([name, val], i) => {
+  const slices = regions.map(([name, val]) => {
     const pct  = total > 0 ? val / total : 0
     const dash = pct * circ
-    const slice = { name, val, pct, color: REGION_COLORS[i % REGION_COLORS.length], offset, dash }
+    const slice = { name, val, pct, color: getRegionColor(name), offset, dash }
     offset += dash
     return slice
   })
@@ -227,7 +236,7 @@ function BranchHeatmap({ branchData, metric, t, fromDate, toDate, filterTxn }) {
 
   const regionColors = {}
   const regions = [...new Set((branchData || []).map(b => b.region || 'Unknown'))]
-  regions.forEach((r, i) => { regionColors[r] = REGION_COLORS[i % REGION_COLORS.length] })
+  regions.forEach(r => { regionColors[r] = getRegionColor(r) })
 
   const sorted = [...(branchData || [])]
     .filter(b => Number(b[metric] || 0) > 0)
@@ -310,9 +319,9 @@ function BranchHeatmap({ branchData, metric, t, fromDate, toDate, filterTxn }) {
       </div>
 
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', marginTop: '14px', paddingTop: '12px', borderTop: `1px solid ${t.border}` }}>
-        {regions.map((r, i) => (
-          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-            <div style={{ width: '10px', height: '10px', borderRadius: '2px', background: REGION_COLORS[i % REGION_COLORS.length] }} />
+        {regions.map(r => (
+          <div key={r} style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+            <div style={{ width: '10px', height: '10px', borderRadius: '2px', background: getRegionColor(r) }} />
             <span style={{ fontSize: '.6rem', color: t.text3 }}>{r}</span>
           </div>
         ))}
@@ -331,7 +340,7 @@ function ScatterChart({ branchData, t }) {
 
   const regionColors = {}
   const regions = [...new Set((branchData || []).map(b => b.region || 'Unknown'))]
-  regions.forEach((r, i) => { regionColors[r] = REGION_COLORS[i % REGION_COLORS.length] })
+  regions.forEach(r => { regionColors[r] = getRegionColor(r) })
 
   const points    = (branchData || []).filter(b => b.total_net > 0 && b.avg_purity > 0)
   const maxNet    = Math.max(...points.map(b => Number(b.total_net)))
@@ -404,9 +413,9 @@ function ScatterChart({ branchData, t }) {
         })}
       </svg>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', marginTop: '8px' }}>
-        {regions.map((r, i) => (
-          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-            <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: REGION_COLORS[i % REGION_COLORS.length] }} />
+        {regions.map(r => (
+          <div key={r} style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+            <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: getRegionColor(r) }} />
             <span style={{ fontSize: '.65rem', color: t.text3 }}>{r}</span>
           </div>
         ))}
