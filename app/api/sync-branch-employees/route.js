@@ -95,7 +95,8 @@ export async function POST() {
           designation:      desig || null,
           contact_phone:    emp.contact?.trim() || null,
           mobile_phone:     emp.omn?.trim()     || null,
-          emp_status:       emp.emp_status === 'unblock' ? 'active' : 'inactive',
+          // CRM uses 'unblock'/'block' — treat anything that isn't explicitly 'block' as active
+          emp_status:       emp.emp_status === 'block' ? 'inactive' : 'active',
           is_manager:       isManager,
           synced_at:        new Date().toISOString(),
         }
@@ -121,10 +122,13 @@ export async function POST() {
       inserted += chunk.length
     }
 
-    const managers  = rows.filter(r => r.is_manager).length
-    const active    = rows.filter(r => r.emp_status === 'active').length
-    const matched   = rows.filter(r => r.branch_id).length
-    const unmatched = rows.length - matched
+    const managers   = rows.filter(r => r.is_manager).length
+    const active     = rows.filter(r => r.emp_status === 'active').length
+    const matched    = rows.filter(r => r.branch_id).length
+    const unmatched  = rows.length - matched
+
+    // Collect distinct raw CRM status values for debugging
+    const rawStatuses = [...new Set(employees.map(e => e.emp_status))]
 
     return Response.json({
       success: true,
@@ -133,9 +137,10 @@ export async function POST() {
         inserted,
         managers,
         active,
-        inactive:  rows.length - active,
+        inactive:    rows.length - active,
         matched,
         unmatched,
+        crm_statuses_found: rawStatuses,  // shows all raw values from CRM for visibility
       }
     })
 
