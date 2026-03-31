@@ -114,7 +114,9 @@ export async function POST() {
         is_active:  crm.brn_status !== 'block',
         model_type: 'outside_bangalore',
       }
-      if (crm.brnch_address) payload.address  = crm.brnch_address.trim()
+      if (crm.brnch_address) payload.address   = crm.brnch_address.trim()
+      if (crm.city)          payload.city      = crm.city.trim()
+      if (crm.pincode)       payload.pin_code  = String(crm.pincode).trim()
       if (hasCrmIdCol)       payload.crm_branch_id = crmBranchId
 
       // Try with branch_code first, retry without if column missing

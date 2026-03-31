@@ -9,7 +9,7 @@ const THEMES = {
   light: { bg: '#f5f0e8', card: '#ede8dc', text1: '#2a1f0a', text3: '#8a7a5a', text4: '#b0a080', gold: '#a07830', border: '#d5cfc0', green: '#2a8a5a' },
 }
 
-const EMPTY_FORM = { name: '', opening_date: '', state: '', region: '', cluster: '', model_type: 'outside_bangalore', branch_code: '', address: '', city: '', pin_code: '', contact_person: '', contact_phone: '', branch_employee: '', branch_employee_phone: '', branch_gstin: '' }
+const EMPTY_FORM = { name: '', opening_date: '', state: '', region: '', cluster: '', model_type: 'outside_bangalore', branch_code: '', address: '', city: '', pin_code: '', crm_branch_id: '' }
 
 export default function BranchManagement() {
   const { theme, loadBranches } = useApp()
@@ -117,11 +117,6 @@ export default function BranchManagement() {
       address: form.address || null,
       city: form.city || null,
       pin_code: form.pin_code || null,
-      contact_person: form.contact_person || null,
-      contact_phone: form.contact_phone || null,
-      branch_employee: form.branch_employee || null,
-      branch_employee_phone: form.branch_employee_phone || null,
-      branch_gstin: form.branch_gstin || null,
     }
     const { error } = editId
       ? await supabase.from('branches').update(payload).eq('id', editId)
@@ -142,11 +137,7 @@ export default function BranchManagement() {
       address: b.address || '',
       city: b.city || '',
       pin_code: b.pin_code || '',
-      contact_person: b.contact_person || '',
-      contact_phone: b.contact_phone || '',
-      branch_employee: b.branch_employee || '',
-      branch_employee_phone: b.branch_employee_phone || '',
-      branch_gstin: b.branch_gstin || '',
+      crm_branch_id: b.crm_branch_id || '',
     })
     setEditId(b.id); setFormOpen(true); setMsg('')
     window.scrollTo({ top: 0, behavior: 'smooth' })
@@ -325,8 +316,13 @@ export default function BranchManagement() {
       {/* FORM */}
       {formOpen && (
         <div style={s.card}>
-          <div style={{ fontSize: '.65rem', color: t.text3, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: '16px' }}>
-            {editId ? `Editing — ${form.name}` : 'New Branch'}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
+            <span style={{ fontSize: '.65rem', color: t.text3, letterSpacing: '.1em', textTransform: 'uppercase' }}>
+              {editId ? `Editing — ${form.name}` : 'New Branch'}
+            </span>
+            {form.crm_branch_id && (
+              <span style={{ fontSize: '.65rem', color: t.text3, fontFamily: 'monospace' }}>CRM ID: <span style={{ color: t.gold }}>{form.crm_branch_id}</span></span>
+            )}
           </div>
           <div style={s.grid4}>
             <div>
@@ -388,52 +384,26 @@ export default function BranchManagement() {
             </div>
           </div>
 
-          {/* Address & Contact Details */}
+          {/* Address */}
           <div style={{ borderTop: `1px solid ${t.border}`, marginTop: '20px', paddingTop: '20px' }}>
             <div style={{ fontSize: '.7rem', color: t.text3, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: '16px', fontWeight: 600 }}>
-              Address & Contact Details (for Delivery Challan)
+              Address (for Delivery Challan)
             </div>
-            <div style={s.grid2}>
+            <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: '16px' }}>
               <div>
                 <label style={s.label}>Full Address</label>
-                <textarea style={{ ...s.input, minHeight: '60px', fontFamily: 'inherit', resize: 'vertical' }}
-                  placeholder="NO. 2179, 1ST FLOOR, MADUVANA, MG RD..."
+                <textarea style={{ ...s.input, minHeight: '64px', fontFamily: 'inherit', resize: 'vertical' }}
+                  placeholder="Street, Area, District..."
                   value={form.address}
                   onChange={e => setField('address', e.target.value)} />
               </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-                <div>
-                  <label style={s.label}>City</label>
-                  <input style={s.input} placeholder="TUMKUR" value={form.city} onChange={e => setField('city', e.target.value)} />
-                </div>
-                <div>
-                  <label style={s.label}>PIN Code</label>
-                  <input style={s.input} placeholder="572101" value={form.pin_code} onChange={e => setField('pin_code', e.target.value)} />
-                </div>
-              </div>
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px' }}>
               <div>
-                <label style={s.label}>Contact Person (Challan)</label>
-                <input style={s.input} placeholder="RAKESH" value={form.contact_person} onChange={e => setField('contact_person', e.target.value)} />
+                <label style={s.label}>City</label>
+                <input style={s.input} value={form.city} onChange={e => setField('city', e.target.value)} />
               </div>
               <div>
-                <label style={s.label}>Contact Phone</label>
-                <input style={s.input} placeholder="9071410735" value={form.contact_phone} onChange={e => setField('contact_phone', e.target.value)} />
-              </div>
-              <div>
-                <label style={s.label}>Branch GSTIN (if different)</label>
-                <input style={s.input} placeholder="29AAPCA3170M1Z5" value={form.branch_gstin} onChange={e => setField('branch_gstin', e.target.value)} />
-              </div>
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '12px', marginTop: '12px' }}>
-              <div>
-                <label style={s.label}>Branch Manager Name</label>
-                <input style={s.input} placeholder="e.g. SURESH KUMAR (from CRM)" value={form.branch_employee} onChange={e => setField('branch_employee', e.target.value)} />
-              </div>
-              <div>
-                <label style={s.label}>Branch Manager Phone</label>
-                <input style={s.input} placeholder="9876543210" value={form.branch_employee_phone} onChange={e => setField('branch_employee_phone', e.target.value)} />
+                <label style={s.label}>PIN Code</label>
+                <input style={s.input} value={form.pin_code} onChange={e => setField('pin_code', e.target.value)} />
               </div>
             </div>
           </div>
@@ -450,13 +420,23 @@ export default function BranchManagement() {
 
       {/* SEARCH + EXPORT */}
       <div style={{ marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
-        <input
-          style={s.search}
-          placeholder="🔍  Search by name, state, region, cluster..."
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-        />
-        {search && <span style={{ fontSize: '.7rem', color: t.text3 }}>{filtered.length} of {branches.length} branches</span>}
+        <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+          <input
+            style={s.search}
+            placeholder="🔍  Search by name, state, region, cluster..."
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+          />
+          {search && (
+            <button
+              onClick={() => setSearch('')}
+              style={{ position: 'absolute', right: '10px', background: 'none', border: 'none', color: t.text3, cursor: 'pointer', fontSize: '.85rem', lineHeight: 1, padding: 0 }}
+            >✕</button>
+          )}
+        </div>
+        {(search || filterIncomplete) && (
+          <span style={{ fontSize: '.7rem', color: t.text3 }}>{filtered.length} of {branches.length} branches</span>
+        )}
         <div style={{ marginLeft: 'auto', display: 'flex', gap: '8px' }}>
           <button style={s.btnOutline} onClick={exportCSV}>↓ CSV</button>
           <button style={s.btnOutline} onClick={exportXLSX}>↓ XLSX</button>
