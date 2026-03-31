@@ -9,7 +9,7 @@ const THEMES = {
   light: { bg: '#f5f0e8', card: '#ede8dc', text1: '#2a1f0a', text3: '#8a7a5a', text4: '#b0a080', gold: '#a07830', border: '#d5cfc0', green: '#2a8a5a' },
 }
 
-const EMPTY_FORM = { name: '', opening_date: '', state: '', region: '', cluster: '', model_type: 'outside_bangalore', address: '', city: '', pin_code: '', contact_person: '', contact_phone: '', branch_gstin: '' }
+const EMPTY_FORM = { name: '', opening_date: '', state: '', region: '', cluster: '', model_type: 'outside_bangalore', branch_code: '', address: '', city: '', pin_code: '', contact_person: '', contact_phone: '', branch_employee: '', branch_employee_phone: '', branch_gstin: '' }
 
 export default function BranchManagement() {
   const { theme, loadBranches } = useApp()
@@ -102,11 +102,14 @@ export default function BranchManagement() {
       name: form.name.toUpperCase().trim(),
       state: form.state, region: form.region, cluster: form.cluster,
       model_type: form.model_type, opening_date: form.opening_date || null,
+      branch_code: form.branch_code?.toUpperCase().trim() || null,
       address: form.address || null,
       city: form.city || null,
       pin_code: form.pin_code || null,
       contact_person: form.contact_person || null,
       contact_phone: form.contact_phone || null,
+      branch_employee: form.branch_employee || null,
+      branch_employee_phone: form.branch_employee_phone || null,
       branch_gstin: form.branch_gstin || null,
     }
     const { error } = editId
@@ -124,11 +127,14 @@ export default function BranchManagement() {
       name: b.name,
       opening_date: b.opening_date ? b.opening_date.split('T')[0] : '',
       state: b.state, region: b.region, cluster: b.cluster, model_type: b.model_type,
+      branch_code: b.branch_code || '',
       address: b.address || '',
       city: b.city || '',
       pin_code: b.pin_code || '',
       contact_person: b.contact_person || '',
       contact_phone: b.contact_phone || '',
+      branch_employee: b.branch_employee || '',
+      branch_employee_phone: b.branch_employee_phone || '',
       branch_gstin: b.branch_gstin || '',
     })
     setEditId(b.id); setFormOpen(true); setMsg('')
@@ -271,6 +277,10 @@ export default function BranchManagement() {
               <input style={s.input} placeholder="e.g. KORAMANGALA" value={form.name} onChange={e => setField('name', e.target.value)} />
             </div>
             <div>
+              <label style={s.label}>Branch Code</label>
+              <input style={s.input} placeholder="e.g. KOR (auto-generated if blank)" value={form.branch_code} onChange={e => setField('branch_code', e.target.value)} />
+            </div>
+            <div>
               <label style={s.label}>Opening Date</label>
               <input style={s.input} type="date" value={form.opening_date} onChange={e => setField('opening_date', e.target.value)} />
             </div>
@@ -347,7 +357,7 @@ export default function BranchManagement() {
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px' }}>
               <div>
-                <label style={s.label}>Contact Person</label>
+                <label style={s.label}>Contact Person (Challan)</label>
                 <input style={s.input} placeholder="RAKESH" value={form.contact_person} onChange={e => setField('contact_person', e.target.value)} />
               </div>
               <div>
@@ -357,6 +367,16 @@ export default function BranchManagement() {
               <div>
                 <label style={s.label}>Branch GSTIN (if different)</label>
                 <input style={s.input} placeholder="29AAPCA3170M1Z5" value={form.branch_gstin} onChange={e => setField('branch_gstin', e.target.value)} />
+              </div>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '12px', marginTop: '12px' }}>
+              <div>
+                <label style={s.label}>Branch Manager Name</label>
+                <input style={s.input} placeholder="e.g. SURESH KUMAR (from CRM)" value={form.branch_employee} onChange={e => setField('branch_employee', e.target.value)} />
+              </div>
+              <div>
+                <label style={s.label}>Branch Manager Phone</label>
+                <input style={s.input} placeholder="9876543210" value={form.branch_employee_phone} onChange={e => setField('branch_employee_phone', e.target.value)} />
               </div>
             </div>
           </div>
@@ -394,7 +414,7 @@ export default function BranchManagement() {
         <div style={s.tblWrap}>
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
-              <tr>{['#', 'Branch Name', 'State', 'Region', 'Cluster', 'Opening Date', 'Model', 'Status', 'Action'].map(h =>
+              <tr>{['#', 'Branch Name', 'Code', 'State', 'Region', 'Manager', 'Model', 'Status', 'Action'].map(h =>
                   <th key={h} style={{ ...s.th, textAlign: h === '#' ? 'center' : 'left' }}>{h}</th>
                 )}</tr>
             </thead>
@@ -403,10 +423,15 @@ export default function BranchManagement() {
                 <tr key={b.id} style={{ background: editId === b.id ? `${t.gold}08` : 'transparent' }}>
                   <td style={{ ...s.td, textAlign: 'center', color: t.text3, fontSize: '.65rem', width: '40px' }}>{i + 1}</td>
                   <td style={{ ...s.td, color: t.gold, fontWeight: 400 }}>{b.name}</td>
+                  <td style={{ ...s.td, fontFamily: 'monospace', fontSize: '.72rem', color: b.branch_code ? t.gold : t.text4 }}>
+                    {b.branch_code || '—'}
+                  </td>
                   <td style={s.td}>{b.state}</td>
                   <td style={s.td}>{b.region}</td>
-                  <td style={s.td}>{b.cluster}</td>
-                  <td style={s.td}>{b.opening_date ? new Date(b.opening_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'}</td>
+                  <td style={{ ...s.td, fontSize: '.7rem' }}>
+                    <div style={{ color: b.branch_employee ? t.text1 : t.text4 }}>{b.branch_employee || '—'}</div>
+                    {b.branch_employee_phone && <div style={{ fontSize: '.62rem', color: t.text3, marginTop: '2px' }}>{b.branch_employee_phone}</div>}
+                  </td>
                   <td style={{ ...s.td, fontSize: '.65rem', color: b.model_type === 'bangalore' ? t.green : t.text3 }}>
                     {b.model_type === 'bangalore' ? 'Same-day HO' : 'Consignment'}
                   </td>

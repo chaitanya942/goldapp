@@ -52,7 +52,7 @@ CREATE TABLE IF NOT EXISTS consignments (
   external_no TEXT,
   internal_no TEXT,
   challan_no TEXT UNIQUE NOT NULL,
-  branch_name TEXT NOT NULL,
+  branch_names TEXT NOT NULL,
   branch_code TEXT,
   state_code TEXT,
   movement_type TEXT DEFAULT 'EXTERNAL',
@@ -78,7 +78,7 @@ CREATE TABLE IF NOT EXISTS consignment_items (
 -- 5. Create indexes for performance
 CREATE INDEX IF NOT EXISTS idx_branches_name ON branches(name);
 CREATE INDEX IF NOT EXISTS idx_branches_active ON branches(is_active);
-CREATE INDEX IF NOT EXISTS idx_consignments_branch ON consignments(branch_name);
+CREATE INDEX IF NOT EXISTS idx_consignments_branch ON consignments(branch_names);
 CREATE INDEX IF NOT EXISTS idx_consignments_status ON consignments(status);
 CREATE INDEX IF NOT EXISTS idx_consignments_created_at ON consignments(created_at);
 CREATE INDEX IF NOT EXISTS idx_consignment_items_consignment_id ON consignment_items(consignment_id);
