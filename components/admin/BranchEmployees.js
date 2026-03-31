@@ -48,7 +48,7 @@ export default function BranchEmployees() {
         setSyncMsg(`✓ Synced ${s.inserted} employees — ${s.managers} managers, ${s.active} active, ${s.unmatched_branch} unmatched`)
         await load()
       } else {
-        setSyncMsg(`Error: ${data.error}`)
+        setSyncMsg(`Error: ${data.error}${data.details ? ` — ${data.details}` : ''}`)
       }
     } catch (e) {
       setSyncMsg(`Error: ${e.message}`)

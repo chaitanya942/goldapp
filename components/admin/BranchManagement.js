@@ -36,6 +36,8 @@ export default function BranchManagement() {
   const [newCluster, setNewCluster] = useState('')
 
   const [confirmDelete, setConfirmDelete] = useState(null) // holds branch id to delete
+  const [syncing,   setSyncing]   = useState(false)
+  const [syncMsg,   setSyncMsg]   = useState('')
 
   useEffect(() => { load(); loadTmap() }, [])
 
@@ -145,6 +147,22 @@ export default function BranchManagement() {
     await supabase.from('branches').delete().eq('id', id)
     setConfirmDelete(null)
     load()
+  }
+
+  const syncFromCRM = async () => {
+    setSyncing(true); setSyncMsg('')
+    try {
+      const res  = await fetch('/api/sync-branch-addresses', { method: 'POST' })
+      const data = await res.json()
+      if (data.success) {
+        const s = data.summary
+        setSyncMsg(`✓ ${s.updated} updated, ${s.created} new branches added${s.errors ? `, ${s.errors} errors` : ''}`)
+        load()
+      } else {
+        setSyncMsg(`Error: ${data.error}${data.details ? ` — ${data.details}` : ''}`)
+      }
+    } catch (e) { setSyncMsg(`Error: ${e.message}`) }
+    setSyncing(false)
   }
 
   const cancelForm = () => { setFormOpen(false); setEditId(null); setForm(EMPTY_FORM); setMsg('') }
@@ -260,10 +278,21 @@ export default function BranchManagement() {
           <div style={s.title}>Branch Management</div>
           <div style={s.sub}>Add, activate, and manage all branches across states</div>
         </div>
-        <button style={s.btnGold} onClick={() => formOpen ? cancelForm() : setFormOpen(true)}>
-          {formOpen ? '✕ Cancel' : '+ Add Branch'}
-        </button>
+        <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+          <button onClick={syncFromCRM} disabled={syncing} style={{ ...s.btnOutline, opacity: syncing ? .6 : 1 }}>
+            {syncing ? 'Syncing…' : '↻ Sync CRM'}
+          </button>
+          <button style={s.btnGold} onClick={() => formOpen ? cancelForm() : setFormOpen(true)}>
+            {formOpen ? '✕ Cancel' : '+ Add Branch'}
+          </button>
+        </div>
       </div>
+
+      {syncMsg && (
+        <div style={{ background: syncMsg.startsWith('✓') ? `${t.green}18` : `${t.red}18`, border: `1px solid ${syncMsg.startsWith('✓') ? t.green : t.red}40`, borderRadius: '6px', padding: '8px 14px', fontSize: '.72rem', color: syncMsg.startsWith('✓') ? t.green : t.red, marginBottom: '16px' }}>
+          {syncMsg}
+        </div>
+      )}
 
       {/* FORM */}
       {formOpen && (

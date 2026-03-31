@@ -6,14 +6,40 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 )
 
-// Auto-generate branch code from name if CRM doesn't have one
 function autoBranchCode(branchName) {
-  const name = branchName.toUpperCase().trim()
+  const name     = branchName.toUpperCase().trim()
   const stripped = name.replace(/^(AP|KL|TS|KA)-/, '')
-  const words = stripped.split(/[\s-]+/).filter(Boolean)
+  const words    = stripped.split(/[\s-]+/).filter(Boolean)
   if (words.length === 1) return words[0].substring(0, 4)
   if (words.length === 2) return (words[0].substring(0, 2) + words[1].substring(0, 2)).substring(0, 4)
   return words.map(w => w[0]).join('').substring(0, 4).toUpperCase()
+}
+
+// Retry update/insert, removing any column that doesn't exist (error code 42703)
+async function safeUpdate(id, data, attempt = 0) {
+  const { error } = await supabase.from('branches').update(data).eq('id', id)
+  if (!error) return { ok: true }
+  if (error.code === '42703' && attempt < 10) {
+    const col = error.message.match(/column "([^"]+)"/)?.[1]
+    if (col) {
+      const { [col]: _removed, ...rest } = data
+      return safeUpdate(id, rest, attempt + 1)
+    }
+  }
+  return { ok: false, error: error.message }
+}
+
+async function safeInsert(data, attempt = 0) {
+  const { data: row, error } = await supabase.from('branches').insert(data).select('id, name').single()
+  if (!error) return { ok: true, row }
+  if (error.code === '42703' && attempt < 10) {
+    const col = error.message.match(/column "([^"]+)"/)?.[1]
+    if (col) {
+      const { [col]: _removed, ...rest } = data
+      return safeInsert(rest, attempt + 1)
+    }
+  }
+  return { ok: false, error: error.message }
 }
 
 export async function POST() {
@@ -27,7 +53,7 @@ export async function POST() {
       password: process.env.CRM_DB_PASSWORD,
     })
 
-    // Fetch ALL branch data from CRM (active + inactive for completeness)
+    // Fetch ALL branches from CRM
     const [crmBranches] = await conn.execute(`
       SELECT
         brnch_id,
@@ -49,14 +75,10 @@ export async function POST() {
         name,
         contact,
         omn,
-        designation,
-        emp_status
+        designation
       FROM emp_tbl
       WHERE emp_status = 'unblock'
-        AND (
-          designation LIKE '%Branch Manager%'
-          OR designation LIKE '%BM%'
-        )
+        AND (designation LIKE '%Branch Manager%' OR designation LIKE '%BM%')
       ORDER BY
         CASE
           WHEN designation LIKE '%Level 1%' THEN 1
@@ -76,19 +98,23 @@ export async function POST() {
       }
     }
 
-    // Get all Supabase branches (by crm_branch_id and by name for legacy matching)
-    const { data: supabaseBranches, error: fetchError } = await supabase
-      .from('branches')
-      .select('id, name, crm_branch_id')
-
-    if (fetchError) {
-      return Response.json({ error: 'Failed to fetch Supabase branches', details: fetchError.message }, { status: 500 })
+    // Get all Supabase branches (try with crm_branch_id, fall back to name-only if column missing)
+    let supabaseBranches
+    {
+      const { data: d1, error: e1 } = await supabase.from('branches').select('id, name, crm_branch_id')
+      if (!e1) {
+        supabaseBranches = d1
+      } else {
+        const { data: d2, error: e2 } = await supabase.from('branches').select('id, name')
+        if (e2) return Response.json({ error: 'Failed to fetch branches', details: e2.message }, { status: 500 })
+        supabaseBranches = d2
+      }
     }
 
-    // Build two lookup maps
-    const byId   = {}  // crm_branch_id → supabase branch
-    const byName = {}  // uppercase name → supabase branch
-    supabaseBranches.forEach(b => {
+    // Build lookup maps
+    const byId   = {}
+    const byName = {}
+    ;(supabaseBranches || []).forEach(b => {
       if (b.crm_branch_id) byId[b.crm_branch_id] = b
       byName[b.name?.toUpperCase()] = b
     })
@@ -100,27 +126,27 @@ export async function POST() {
 
     for (const crm of crmBranches) {
       const crmName    = crm.brnch_name?.trim()
+      if (!crmName) continue
+
       const isActive   = crm.brn_status === 'unblock'
       const manager    = managerMap[crm.brnch_id]
       const branchCode = crm.branchcode?.trim()
         ? crm.branchcode.trim().toUpperCase()
         : autoBranchCode(crmName)
 
-      // Try match by CRM ID first, then by name
-      const match = byId[crm.brnch_id] || byName[crmName?.toUpperCase()]
+      const match = byId[crm.brnch_id] || byName[crmName.toUpperCase()]
 
+      // Build payload — safeUpdate/safeInsert will strip unknown columns automatically
       const payload = {
         crm_branch_id: crm.brnch_id,
         branch_code:   branchCode,
         is_active:     isActive,
       }
-
-      if (crmName)           payload.name          = crmName.trim()
       if (crm.brnch_address) payload.address       = crm.brnch_address.trim()
-      if (crm.city)          payload.city          = crm.city.trim()
-      if (crm.state)         payload.state         = crm.state.trim()
-      if (crm.pincode)       payload.pin_code      = crm.pincode.trim()
-      if (crm.brnch_contact) payload.contact_phone = crm.brnch_contact.trim()
+      if (crm.city)          payload.city           = crm.city.trim()
+      if (crm.state)         payload.state          = crm.state.trim()
+      if (crm.pincode)       payload.pin_code       = crm.pincode.trim()
+      if (crm.brnch_contact) payload.contact_phone  = crm.brnch_contact.trim()
       if (manager?.name) {
         payload.branch_employee = manager.name.trim()
         payload.contact_person  = manager.name.trim()
@@ -131,28 +157,23 @@ export async function POST() {
       }
 
       if (match) {
-        // UPDATE existing branch
-        const { error } = await supabase.from('branches').update(payload).eq('id', match.id)
-        if (error) {
-          results.push({ name: crmName, status: 'error', error: error.message })
-        } else {
+        const res = await safeUpdate(match.id, payload)
+        if (res.ok) {
           results.push({ name: crmName, status: 'updated', branch_code: branchCode, manager: manager?.name })
           updated++
+        } else {
+          results.push({ name: crmName, status: 'error', error: res.error })
         }
       } else {
-        // INSERT new branch — CRM has it but Supabase doesn't
-        const { data: newBranch, error } = await supabase
-          .from('branches')
-          .insert(payload)
-          .select('id, name')
-          .single()
-
-        if (error) {
-          results.push({ name: crmName, status: 'insert_error', error: error.message })
-        } else {
-          results.push({ name: crmName, status: 'created', branch_code: branchCode, id: newBranch.id })
+        // INSERT — new branch from CRM not yet in Supabase
+        const insertPayload = { name: crmName, ...payload }
+        const res = await safeInsert(insertPayload)
+        if (res.ok) {
+          results.push({ name: crmName, status: 'created', branch_code: branchCode })
           created.push(crmName)
           inserted++
+        } else {
+          results.push({ name: crmName, status: 'insert_error', error: res.error })
         }
       }
     }
@@ -167,7 +188,7 @@ export async function POST() {
         errors: results.filter(r => r.status.includes('error')).length,
       },
       new_branches: created,
-      sample_results: results.slice(0, 20),
+      sample_results: results.slice(0, 30),
     })
 
   } catch (err) {
