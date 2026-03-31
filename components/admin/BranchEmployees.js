@@ -31,6 +31,16 @@ export default function BranchEmployees() {
   const [filterUnmatched, setFilterUnmatched] = useState(false)
   const [selected,        setSelected]        = useState(null)
 
+  const hasActiveFilters = search || filterBranch || filterRole !== 'all' || filterStatus !== 'active' || filterUnmatched
+
+  const clearFilters = () => {
+    setSearch('')
+    setFilterBranch('')
+    setFilterRole('all')
+    setFilterStatus('active')
+    setFilterUnmatched(false)
+  }
+
   useEffect(() => { load() }, [])
 
   const load = async () => {
@@ -216,6 +226,14 @@ export default function BranchEmployees() {
           <option value="inactive">Inactive</option>
           <option value="all">All Status</option>
         </select>
+        {hasActiveFilters && (
+          <button
+            onClick={clearFilters}
+            style={{ background: 'none', border: `1px solid ${t.border}`, borderRadius: '6px', padding: '6px 12px', color: t.text3, fontSize: '.7rem', cursor: 'pointer', whiteSpace: 'nowrap' }}
+          >
+            ✕ Clear Filters
+          </button>
+        )}
         <span style={{ fontSize: '.68rem', color: t.text3, whiteSpace: 'nowrap' }}>{filtered.length} records</span>
       </div>
 
