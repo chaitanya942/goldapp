@@ -25,10 +25,11 @@ export default function BranchEmployees() {
   const [syncing,   setSyncing]     = useState(false)
   const [syncMsg,   setSyncMsg]     = useState('')
   const [search,    setSearch]      = useState('')
-  const [filterBranch,  setFilterBranch]  = useState('')
-  const [filterRole,    setFilterRole]    = useState('all')   // all | manager | staff
-  const [filterStatus,  setFilterStatus]  = useState('active') // all | active | inactive
-  const [selected,  setSelected]    = useState(null)
+  const [filterBranch,    setFilterBranch]    = useState('')
+  const [filterRole,      setFilterRole]      = useState('all')
+  const [filterStatus,    setFilterStatus]    = useState('active')
+  const [filterUnmatched, setFilterUnmatched] = useState(false)
+  const [selected,        setSelected]        = useState(null)
 
   useEffect(() => { load() }, [])
 
@@ -72,6 +73,7 @@ export default function BranchEmployees() {
   // Filtered list
   const filtered = useMemo(() => {
     let list = employees
+    if (filterUnmatched) return list.filter(e => !e.branch_id && !e.crm_branch_name)
     if (filterStatus !== 'all') list = list.filter(e => e.emp_status === filterStatus)
     if (filterRole === 'manager') list = list.filter(e => e.is_manager)
     if (filterRole === 'staff')   list = list.filter(e => !e.is_manager)
@@ -92,10 +94,11 @@ export default function BranchEmployees() {
 
   // Stats
   const stats = useMemo(() => ({
-    total:    employees.length,
-    active:   employees.filter(e => e.emp_status === 'active').length,
-    managers: employees.filter(e => e.is_manager).length,
-    branches: new Set(employees.map(e => e.branch_id || e.crm_branch_name).filter(Boolean)).size,
+    total:     employees.length,
+    active:    employees.filter(e => e.emp_status === 'active').length,
+    managers:  employees.filter(e => e.is_manager).length,
+    branches:  new Set(employees.map(e => e.branch_id || e.crm_branch_name).filter(Boolean)).size,
+    unmatched: employees.filter(e => !e.branch_id && !e.crm_branch_name).length,
   }), [employees])
 
   const s = {
@@ -180,6 +183,15 @@ export default function BranchEmployees() {
             <div style={s.statLbl}>{lbl}</div>
           </div>
         ))}
+        {stats.unmatched > 0 && (
+          <div
+            onClick={() => { setFilterUnmatched(f => !f); setFilterStatus('all') }}
+            style={{ ...s.stat, border: `1px solid ${filterUnmatched ? t.red : t.red + '55'}`, background: filterUnmatched ? `${t.red}18` : t.card, cursor: 'pointer', flexShrink: 0 }}
+          >
+            <div style={{ ...s.statVal, color: t.red }}>{stats.unmatched}</div>
+            <div style={{ ...s.statLbl, color: t.red }}>{filterUnmatched ? '✕ Unmatched' : '⚠ Unmatched'}</div>
+          </div>
+        )}
       </div>
 
       {/* Filters */}
@@ -190,16 +202,16 @@ export default function BranchEmployees() {
           onChange={e => setSearch(e.target.value)}
           style={s.input}
         />
-        <select value={filterBranch} onChange={e => setFilterBranch(e.target.value)} style={s.select}>
+        <select value={filterBranch} onChange={e => { setFilterBranch(e.target.value); setFilterUnmatched(false) }} style={s.select}>
           <option value="">All Branches</option>
           {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
         </select>
-        <select value={filterRole} onChange={e => setFilterRole(e.target.value)} style={s.select}>
+        <select value={filterRole} onChange={e => { setFilterRole(e.target.value); setFilterUnmatched(false) }} style={s.select}>
           <option value="all">All Roles</option>
           <option value="manager">Managers Only</option>
           <option value="staff">Non-Manager Staff</option>
         </select>
-        <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} style={s.select}>
+        <select value={filterStatus} onChange={e => { setFilterStatus(e.target.value); setFilterUnmatched(false) }} style={s.select}>
           <option value="active">Active</option>
           <option value="inactive">Inactive</option>
           <option value="all">All Status</option>
