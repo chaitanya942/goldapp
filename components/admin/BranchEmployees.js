@@ -73,7 +73,7 @@ export default function BranchEmployees() {
   // Filtered list
   const filtered = useMemo(() => {
     let list = employees
-    if (filterUnmatched) return list.filter(e => !e.branch_id && !e.crm_branch_name)
+    if (filterUnmatched) return list.filter(e => !e.branch_id)
     if (filterStatus !== 'all') list = list.filter(e => e.emp_status === filterStatus)
     if (filterRole === 'manager') list = list.filter(e => e.is_manager)
     if (filterRole === 'staff')   list = list.filter(e => !e.is_manager)
@@ -98,7 +98,7 @@ export default function BranchEmployees() {
     active:    employees.filter(e => e.emp_status === 'active').length,
     managers:  employees.filter(e => e.is_manager).length,
     branches:  new Set(employees.map(e => e.branch_id || e.crm_branch_name).filter(Boolean)).size,
-    unmatched: employees.filter(e => !e.branch_id && !e.crm_branch_name).length,
+    unmatched: employees.filter(e => !e.branch_id).length,
   }), [employees])
 
   const s = {
