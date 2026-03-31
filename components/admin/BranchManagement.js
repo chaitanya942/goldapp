@@ -35,9 +35,10 @@ export default function BranchManagement() {
   const [newRegion, setNewRegion] = useState('')
   const [newCluster, setNewCluster] = useState('')
 
-  const [confirmDelete, setConfirmDelete] = useState(null) // holds branch id to delete
-  const [syncing,   setSyncing]   = useState(false)
-  const [syncMsg,   setSyncMsg]   = useState('')
+  const [confirmDelete,    setConfirmDelete]    = useState(null)
+  const [syncing,          setSyncing]          = useState(false)
+  const [syncMsg,          setSyncMsg]          = useState('')
+  const [filterIncomplete, setFilterIncomplete] = useState(false)
 
   useEffect(() => { load(); loadTmap() }, [])
 
@@ -93,9 +94,12 @@ export default function BranchManagement() {
     setNewCluster(''); setAddingCluster(false)
   }
 
-  const filtered = branches.filter(b =>
-    [b.name, b.state, b.region, b.cluster].some(v => v?.toLowerCase().includes(search.toLowerCase()))
-  )
+  const incompleteBranches = branches.filter(b => !b.state || !b.region || !b.cluster)
+
+  const filtered = branches.filter(b => {
+    if (filterIncomplete) return !b.state || !b.region || !b.cluster
+    return [b.name, b.state, b.region, b.cluster].some(v => v?.toLowerCase().includes(search.toLowerCase()))
+  })
 
   const save = async () => {
     if (!form.name || !form.state || !form.region || !form.cluster) { setMsg('Please fill all required fields'); return }
@@ -303,6 +307,16 @@ export default function BranchManagement() {
         </div>
       )}
 
+      {incompleteBranches.length > 0 && (
+        <div
+          onClick={() => setFilterIncomplete(f => !f)}
+          style={{ background: filterIncomplete ? '#c9a84c18' : '#c9a84c0a', border: `1px solid ${filterIncomplete ? t.gold : t.gold + '44'}`, borderRadius: '6px', padding: '8px 14px', fontSize: '.72rem', color: t.gold, marginBottom: '16px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
+        >
+          <span>⚠ {incompleteBranches.length} {incompleteBranches.length === 1 ? 'branch has' : 'branches have'} incomplete data — missing state / region / cluster. Click to {filterIncomplete ? 'show all' : 'view them'}.</span>
+          {filterIncomplete && <span style={{ fontSize: '.68rem', opacity: .7 }}>✕ Clear filter</span>}
+        </div>
+      )}
+
       {/* FORM */}
       {formOpen && (
         <div style={s.card}>
@@ -452,24 +466,29 @@ export default function BranchManagement() {
         <div style={s.tblWrap}>
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
-              <tr>{['#', 'Branch Name', 'Code', 'State', 'Region', 'Manager', 'Model', 'Status', 'Action'].map(h =>
+              <tr>{['#', 'Branch Name', 'CRM ID', 'Code', 'Address', 'State', 'Region', 'Model', 'Status', 'Action'].map(h =>
                   <th key={h} style={{ ...s.th, textAlign: h === '#' ? 'center' : 'left' }}>{h}</th>
                 )}</tr>
             </thead>
             <tbody>
               {filtered.map((b, i) => (
-                <tr key={b.id} style={{ background: editId === b.id ? `${t.gold}08` : 'transparent' }}>
+                <tr key={b.id} style={{ background: editId === b.id ? `${t.gold}08` : (!b.state || !b.region || !b.cluster) ? '#c9a84c06' : 'transparent' }}>
                   <td style={{ ...s.td, textAlign: 'center', color: t.text3, fontSize: '.65rem', width: '40px' }}>{i + 1}</td>
-                  <td style={{ ...s.td, color: t.gold, fontWeight: 400 }}>{b.name}</td>
+                  <td style={{ ...s.td, color: t.gold, fontWeight: 400 }}>
+                    {b.name}
+                    {(!b.state || !b.region || !b.cluster) && <span style={{ marginLeft: '6px', fontSize: '.58rem', color: t.gold, opacity: .6, border: `1px solid ${t.gold}44`, borderRadius: '3px', padding: '1px 4px' }}>incomplete</span>}
+                  </td>
+                  <td style={{ ...s.td, fontFamily: 'monospace', fontSize: '.68rem', color: b.crm_branch_id ? t.text2 : t.text4 }}>
+                    {b.crm_branch_id || '—'}
+                  </td>
                   <td style={{ ...s.td, fontFamily: 'monospace', fontSize: '.72rem', color: b.branch_code ? t.gold : t.text4 }}>
                     {b.branch_code || '—'}
                   </td>
-                  <td style={s.td}>{b.state}</td>
-                  <td style={s.td}>{b.region}</td>
-                  <td style={{ ...s.td, fontSize: '.7rem' }}>
-                    <div style={{ color: b.branch_employee ? t.text1 : t.text4 }}>{b.branch_employee || '—'}</div>
-                    {b.branch_employee_phone && <div style={{ fontSize: '.62rem', color: t.text3, marginTop: '2px' }}>{b.branch_employee_phone}</div>}
+                  <td style={{ ...s.td, fontSize: '.68rem', color: b.address ? t.text2 : t.text4, maxWidth: '200px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {b.address || '—'}
                   </td>
+                  <td style={{ ...s.td, color: b.state ? t.text1 : '#c9a84c88' }}>{b.state || '⚠ missing'}</td>
+                  <td style={{ ...s.td, color: b.region ? t.text1 : '#c9a84c88' }}>{b.region || '⚠ missing'}</td>
                   <td style={{ ...s.td, fontSize: '.65rem', color: b.model_type === 'bangalore' ? t.green : t.text3 }}>
                     {b.model_type === 'bangalore' ? 'Same-day HO' : 'Consignment'}
                   </td>
@@ -494,7 +513,7 @@ export default function BranchManagement() {
                 </tr>
               ))}
               {filtered.length === 0 && (
-                <tr><td colSpan={9} style={{ ...s.td, textAlign: 'center', color: t.text4, padding: '48px' }}>
+                <tr><td colSpan={10} style={{ ...s.td, textAlign: 'center', color: t.text4, padding: '48px' }}>
                   {search ? `No branches matching "${search}"` : 'No branches yet.'}
                 </td></tr>
               )}
