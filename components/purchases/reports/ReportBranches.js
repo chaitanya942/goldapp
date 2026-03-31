@@ -38,27 +38,27 @@ const REGION_COLORS = [
   '#e05555', '#c9981f', '#c84a8c', '#6abf5e', '#bf6a3a',
 ]
 
-// Fixed color map — each region always gets the same color regardless of data order
-const REGION_COLOR_MAP = {
-  'bangalore':          '#c9a84c',
-  'kerala':             '#3a8fbf',
-  'rest of karnataka':  '#8c5ac8',
-  'andhra pradesh':     '#3aaa6a',
-  'telangana':          '#4ac8c8',
-  'tamil nadu':         '#e05555',
-  'maharashtra':        '#c9981f',
-  'unknown':            '#7a6a4a',
-}
-// Remaining colors for any region not in the map above
-const _EXTRA_COLORS = ['#c84a8c', '#6abf5e', '#bf6a3a', '#5e8fbf', '#bf5e5e']
+// Preferred order — determines which color index each region gets.
+// Regions at position 0 get REGION_COLORS[0] (gold), position 1 gets blue, etc.
+// This is stable: adding new data never shifts existing region colors.
+const REGION_PRIORITY = [
+  'Bangalore', 'Kerala', 'Rest of Karnataka',
+  'Andhra Pradesh', 'Telangana', 'Tamil Nadu',
+  'Maharashtra', 'Rajasthan', 'Gujarat', 'Unknown',
+]
 
-function getRegionColor(name) {
-  if (!name) return REGION_COLORS[REGION_COLORS.length - 1]
-  const fixed = REGION_COLOR_MAP[name.toLowerCase().trim()]
-  if (fixed) return fixed
-  // For unknown regions: pick from extra colors using a simple char-sum mod
-  const sum = name.split('').reduce((s, c) => s + c.charCodeAt(0), 0)
-  return _EXTRA_COLORS[sum % _EXTRA_COLORS.length]
+function buildRegionColors(names) {
+  const map = {}
+  let nextIdx = 0
+  // Assign colors in priority order first
+  REGION_PRIORITY.forEach(r => {
+    if (names.includes(r)) map[r] = REGION_COLORS[nextIdx++ % REGION_COLORS.length]
+  })
+  // Then assign any region not in the priority list
+  names.forEach(r => {
+    if (!map[r]) map[r] = REGION_COLORS[nextIdx++ % REGION_COLORS.length]
+  })
+  return map
 }
 
 // ─────────────────────────────────────────────
@@ -74,13 +74,14 @@ function RegionDonut({ branchData, t }) {
   })
   const regions = Object.entries(regionMap).sort((a, b) => b[1] - a[1])
   const total   = regions.reduce((s, [, v]) => s + v, 0)
+  const colorMap = buildRegionColors(regions.map(([name]) => name))
 
   const cx = 130, cy = 130, r = 100, sw = 32, circ = 2 * Math.PI * r
   let offset = 0
   const slices = regions.map(([name, val]) => {
     const pct  = total > 0 ? val / total : 0
     const dash = pct * circ
-    const slice = { name, val, pct, color: getRegionColor(name), offset, dash }
+    const slice = { name, val, pct, color: colorMap[name], offset, dash }
     offset += dash
     return slice
   })
@@ -248,9 +249,8 @@ function BranchHeatmap({ branchData, metric, t, fromDate, toDate, filterTxn }) {
   const [hovered,        setHovered]        = useState(null)
   const [selectedBranch, setSelectedBranch] = useState(null)
 
-  const regionColors = {}
   const regions = [...new Set((branchData || []).map(b => b.region || 'Unknown'))]
-  regions.forEach(r => { regionColors[r] = getRegionColor(r) })
+  const regionColors = buildRegionColors(regions)
 
   const sorted = [...(branchData || [])]
     .filter(b => Number(b[metric] || 0) > 0)
@@ -335,7 +335,7 @@ function BranchHeatmap({ branchData, metric, t, fromDate, toDate, filterTxn }) {
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', marginTop: '14px', paddingTop: '12px', borderTop: `1px solid ${t.border}` }}>
         {regions.map(r => (
           <div key={r} style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-            <div style={{ width: '10px', height: '10px', borderRadius: '2px', background: getRegionColor(r) }} />
+            <div style={{ width: '10px', height: '10px', borderRadius: '2px', background: regionColors[r] }} />
             <span style={{ fontSize: '.6rem', color: t.text3 }}>{r}</span>
           </div>
         ))}
@@ -352,9 +352,8 @@ function ScatterChart({ branchData, t }) {
   const [hovered, setHovered] = useState(null)
   const W = 700, H = 300, PL = 56, PR = 60, PT = 20, PB = 40
 
-  const regionColors = {}
   const regions = [...new Set((branchData || []).map(b => b.region || 'Unknown'))]
-  regions.forEach(r => { regionColors[r] = getRegionColor(r) })
+  const regionColors = buildRegionColors(regions)
 
   const points    = (branchData || []).filter(b => b.total_net > 0 && b.avg_purity > 0)
   const maxNet    = Math.max(...points.map(b => Number(b.total_net)))
