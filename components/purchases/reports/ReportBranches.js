@@ -125,7 +125,10 @@ function RegionDonut({ branchData, t }) {
             style={{ cursor: 'default', opacity: hovered != null && hovered !== i ? 0.35 : 1, transition: 'opacity .15s' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
               <div style={{ width: '10px', height: '10px', borderRadius: '3px', background: sl.color, flexShrink: 0 }} />
-              <div style={{ flex: 1, fontSize: '.72rem', color: t.text1, fontWeight: 400 }}>{sl.name}</div>
+              <div style={{ flex: 1, fontSize: '.72rem', color: t.text1, fontWeight: 400 }}>
+                {sl.name}
+                {sl.name === 'Unknown' && <span style={{ marginLeft: '6px', fontSize: '.6rem', color: '#c9a84c', opacity: .7 }}>⚠ branches missing region</span>}
+              </div>
               <div style={{ fontSize: '.72rem', color: sl.color, fontWeight: 500 }}>{fmt(sl.val)}g</div>
               <div style={{ width: '42px', textAlign: 'right', fontSize: '.65rem', color: t.text3 }}>{(sl.pct * 100).toFixed(1)}%</div>
             </div>
