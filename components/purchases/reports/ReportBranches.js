@@ -428,7 +428,7 @@ function ScatterChart({ branchData, t }) {
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', marginTop: '8px' }}>
         {regions.map(r => (
           <div key={r} style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-            <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: getRegionColor(r) }} />
+            <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: regionColors[r] }} />
             <span style={{ fontSize: '.65rem', color: t.text3 }}>{r}</span>
           </div>
         ))}
