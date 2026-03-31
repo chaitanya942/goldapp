@@ -88,8 +88,9 @@ export async function POST() {
         : autoBranchCode(crmName)
 
       const payload = {
-        name:      crmName,
-        is_active: crm.brn_status !== 'block',
+        name:       crmName,
+        is_active:  crm.brn_status !== 'block',
+        model_type: 'outside_bangalore',
       }
       if (crm.brnch_address) payload.address  = crm.brnch_address.trim()
       if (hasCrmIdCol)       payload.crm_branch_id = crmBranchId
