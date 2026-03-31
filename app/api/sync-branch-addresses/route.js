@@ -83,7 +83,8 @@ export async function POST() {
       const crmName = crm.brnch_name?.trim()
       if (!crmName) continue
 
-      const match = byId[crm.brnch_id] || byName[crmName.toUpperCase()]
+      const crmBranchId = crm.brnch_id != null ? String(crm.brnch_id) : null
+      const match = byId[crmBranchId] || byName[crmName.toUpperCase()]
 
       if (match) {
         // Branch already exists — only stamp crm_branch_id if not set yet
@@ -91,7 +92,7 @@ export async function POST() {
         if (hasCrmIdCol && !match.crm_branch_id) {
           const { error } = await supabase
             .from('branches')
-            .update({ crm_branch_id: crm.brnch_id })
+            .update({ crm_branch_id: crmBranchId })
             .eq('id', match.id)
           if (!error) linked.push(crmName)
         } else {
@@ -115,7 +116,7 @@ export async function POST() {
       if (crm.pincode)       payload.pin_code      = crm.pincode.trim()
       if (crm.brnch_contact) payload.contact_phone = crm.brnch_contact.trim()
       if (manager?.name)     payload.contact_person = manager.name.trim()
-      if (hasCrmIdCol)       payload.crm_branch_id = crm.brnch_id
+      if (hasCrmIdCol)       payload.crm_branch_id = crmBranchId
 
       // Try with branch_code first, retry without if column missing
       let result = await supabase.from('branches').insert({ ...payload, branch_code: branchCode }).select('id').single()
