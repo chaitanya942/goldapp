@@ -48,20 +48,17 @@ export async function POST() {
       return Response.json({ success: true, summary: { total: 0, inserted: 0 } })
     }
 
-    // Get all Supabase branches — match by crm_branch_id OR by name
-    const { data: branches, error: branchErr } = await supabase
-      .from('branches')
-      .select('id, name, crm_branch_id')
-
-    if (branchErr) {
-      // crm_branch_id column might not exist yet — fall back to name-only
-      const { data: fallback, error: fallbackErr } = await supabase
-        .from('branches')
-        .select('id, name')
-      if (fallbackErr) {
-        return Response.json({ error: 'Failed to fetch branches', details: fallbackErr.message }, { status: 500 })
+    // Get all Supabase branches — try with crm_branch_id, fall back if column missing
+    let branches
+    {
+      const { data: d1, error: e1 } = await supabase.from('branches').select('id, name, crm_branch_id')
+      if (!e1) {
+        branches = d1
+      } else {
+        const { data: d2, error: e2 } = await supabase.from('branches').select('id, name')
+        if (e2) return Response.json({ error: 'Failed to fetch branches', details: e2.message }, { status: 500 })
+        branches = d2
       }
-      branches = fallback
     }
 
     const branchById   = {}  // crm_branch_id (int) → supabase branch
