@@ -6,13 +6,31 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 )
 
-function autoBranchCode(branchName) {
+function autoBranchCode(branchName, usedCodes) {
   const name     = branchName.toUpperCase().trim()
-  const stripped = name.replace(/^(AP|KL|TS|KA)-/, '')
+  const stripped = name.replace(/^(AP|KL|TS|KA|TN|MH|GJ|RJ|MP|UP|HR|PB|DL)-/, '')
   const words    = stripped.split(/[\s-]+/).filter(Boolean)
-  if (words.length === 1) return words[0].substring(0, 4)
-  if (words.length === 2) return (words[0].substring(0, 2) + words[1].substring(0, 2)).substring(0, 4)
-  return words.map(w => w[0]).join('').substring(0, 4).toUpperCase()
+
+  // Generate a base code: prefer 4+ chars so collisions are rare
+  let base
+  if (words.length === 1) {
+    base = words[0].substring(0, 5)
+  } else if (words.length === 2) {
+    base = (words[0].substring(0, 3) + words[1].substring(0, 2)).toUpperCase()
+  } else {
+    // 3+ words: first 2 chars of first word + first char of each remaining
+    base = (words[0].substring(0, 2) + words.slice(1).map(w => w[0]).join('')).substring(0, 5).toUpperCase()
+  }
+
+  // If no collision, use base
+  if (!usedCodes.has(base)) return base
+
+  // Append incrementing number until unique
+  for (let i = 2; i <= 99; i++) {
+    const candidate = base.substring(0, 4) + i
+    if (!usedCodes.has(candidate)) return candidate
+  }
+  return base // fallback (shouldn't happen)
 }
 
 export async function POST() {
@@ -40,7 +58,7 @@ export async function POST() {
       return !error
     })()
 
-    const selectCols = hasCrmIdCol ? 'id, name, crm_branch_id' : 'id, name'
+    const selectCols = hasCrmIdCol ? 'id, name, crm_branch_id, branch_code' : 'id, name, branch_code'
     const { data: fetched, error: fetchErr } = await supabase.from('branches').select(selectCols)
     if (fetchErr) {
       return Response.json({ error: 'Failed to fetch branches', details: fetchErr.message }, { status: 500 })
@@ -48,11 +66,13 @@ export async function POST() {
     supabaseBranches = fetched || []
 
     // Build lookup maps
-    const byId   = {}  // crm_branch_id → supabase branch
-    const byName = {}  // uppercase name → supabase branch
+    const byId    = {}  // crm_branch_id → supabase branch
+    const byName  = {}  // uppercase name → supabase branch
+    const usedCodes = new Set()  // all existing branch codes (for collision-free generation)
     supabaseBranches.forEach(b => {
       if (b.crm_branch_id) byId[b.crm_branch_id] = b
       byName[b.name?.toUpperCase()] = b
+      if (b.branch_code) usedCodes.add(b.branch_code.toUpperCase())
     })
 
     const created = []
@@ -85,7 +105,9 @@ export async function POST() {
       // Branch does not exist in Supabase → INSERT it
       const branchCode = crm.branchcode?.trim()
         ? crm.branchcode.trim().toUpperCase()
-        : autoBranchCode(crmName)
+        : autoBranchCode(crmName, usedCodes)
+      // Reserve this code so subsequent branches in the same sync don't reuse it
+      if (branchCode) usedCodes.add(branchCode.toUpperCase())
 
       const payload = {
         name:       crmName,

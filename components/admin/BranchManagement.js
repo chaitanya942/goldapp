@@ -103,6 +103,11 @@ export default function BranchManagement() {
 
   const save = async () => {
     if (!form.name || !form.state || !form.region || !form.cluster) { setMsg('Please fill all required fields'); return }
+    if (form.branch_code) {
+      const code = form.branch_code.toUpperCase().trim()
+      const duplicate = branches.find(b => b.branch_code?.toUpperCase() === code && b.id !== editId)
+      if (duplicate) { setMsg(`Branch code "${code}" is already used by ${duplicate.name}`); return }
+    }
     setSaving(true); setMsg('')
     const payload = {
       name: form.name.toUpperCase().trim(),
