@@ -33,25 +33,6 @@ export async function POST() {
       FROM branch_tbl
     `)
 
-    // Active branch managers per branch
-    const [crmManagers] = await conn.execute(`
-      SELECT branch, name, contact, omn, designation
-      FROM emp_tbl
-      WHERE emp_status = 'unblock'
-        AND (designation LIKE '%Branch Manager%' OR designation LIKE '%BM%')
-      ORDER BY
-        CASE WHEN designation LIKE '%Level 1%' THEN 1
-             WHEN designation LIKE '%Branch Manager%' THEN 2
-             ELSE 3 END
-    `)
-
-    const managerMap = {}
-    for (const emp of crmManagers) {
-      if (!managerMap[emp.branch]) {
-        managerMap[emp.branch] = { name: emp.name, phone: emp.omn || emp.contact || '' }
-      }
-    }
-
     // Get Supabase branches — try with crm_branch_id, fall back if column missing
     let supabaseBranches
     const hasCrmIdCol = await (async () => {
@@ -102,20 +83,15 @@ export async function POST() {
       }
 
       // Branch does not exist in Supabase → INSERT it
-      const manager    = managerMap[crm.brnch_id]
       const branchCode = crm.branchcode?.trim()
         ? crm.branchcode.trim().toUpperCase()
         : autoBranchCode(crmName)
 
       const payload = {
         name:      crmName,
-        is_active: crm.brn_status === 'unblock',
+        is_active: crm.brn_status !== 'block',
       }
-      if (crm.brnch_address) payload.address      = crm.brnch_address.trim()
-      if (crm.city)          payload.city          = crm.city.trim()
-      if (crm.pincode)       payload.pin_code      = crm.pincode.trim()
-      if (crm.brnch_contact) payload.contact_phone = crm.brnch_contact.trim()
-      if (manager?.name)     payload.contact_person = manager.name.trim()
+      if (crm.brnch_address) payload.address  = crm.brnch_address.trim()
       if (hasCrmIdCol)       payload.crm_branch_id = crmBranchId
 
       // Try with branch_code first, retry without if column missing
