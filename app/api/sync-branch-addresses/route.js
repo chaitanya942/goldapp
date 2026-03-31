@@ -11,9 +11,9 @@ function autoBranchCode(branchName) {
   const name = branchName.toUpperCase().trim()
   const stripped = name.replace(/^(AP|KL|TS|KA)-/, '')
   const words = stripped.split(/[\s-]+/).filter(Boolean)
-  if (words.length === 1) return words[0].substring(0, 3)
+  if (words.length === 1) return words[0].substring(0, 4)
   if (words.length === 2) return (words[0].substring(0, 2) + words[1].substring(0, 2)).substring(0, 4)
-  return words.map(w => w[0]).join('').substring(0, 4)
+  return words.map(w => w[0]).join('').substring(0, 4).toUpperCase()
 }
 
 export async function POST() {
@@ -27,7 +27,7 @@ export async function POST() {
       password: process.env.CRM_DB_PASSWORD,
     })
 
-    // Fetch all branch data from CRM (including branch code)
+    // Fetch ALL branch data from CRM (active + inactive for completeness)
     const [crmBranches] = await conn.execute(`
       SELECT
         brnch_id,
@@ -37,13 +37,12 @@ export async function POST() {
         state,
         pincode,
         brnch_contact,
-        branchcode
+        branchcode,
+        brn_status
       FROM branch_tbl
-      WHERE brn_status = 'unblock'
     `)
 
-    // Fetch active branch managers from emp_tbl per branch
-    // Pick the most senior active manager per branch
+    // Fetch active branch managers per branch
     const [crmManagers] = await conn.execute(`
       SELECT
         branch,
@@ -71,81 +70,90 @@ export async function POST() {
     for (const emp of crmManagers) {
       if (!managerMap[emp.branch]) {
         managerMap[emp.branch] = {
-          name: emp.name,
+          name:  emp.name,
           phone: emp.omn || emp.contact || ''
         }
       }
     }
 
-    // Get all branches from Supabase
+    // Get all Supabase branches (by crm_branch_id and by name for legacy matching)
     const { data: supabaseBranches, error: fetchError } = await supabase
       .from('branches')
-      .select('id, name')
+      .select('id, name, crm_branch_id')
 
     if (fetchError) {
       return Response.json({ error: 'Failed to fetch Supabase branches', details: fetchError.message }, { status: 500 })
     }
 
-    // Create mapping: CRM branch name → Supabase branch
-    const supabaseMap = {}
+    // Build two lookup maps
+    const byId   = {}  // crm_branch_id → supabase branch
+    const byName = {}  // uppercase name → supabase branch
     supabaseBranches.forEach(b => {
-      supabaseMap[b.name?.toUpperCase()] = b
+      if (b.crm_branch_id) byId[b.crm_branch_id] = b
+      byName[b.name?.toUpperCase()] = b
     })
 
-    const updates = []
-    const notFound = []
-    let updated = 0
+    const results  = []
+    const created  = []
+    let   updated  = 0
+    let   inserted = 0
 
-    for (const crmBranch of crmBranches) {
-      const crmName = crmBranch.brnch_name?.trim()?.toUpperCase()
-      const match = supabaseMap[crmName]
+    for (const crm of crmBranches) {
+      const crmName    = crm.brnch_name?.trim()
+      const isActive   = crm.brn_status === 'unblock'
+      const manager    = managerMap[crm.brnch_id]
+      const branchCode = crm.branchcode?.trim()
+        ? crm.branchcode.trim().toUpperCase()
+        : autoBranchCode(crmName)
 
-      if (!match) {
-        notFound.push(crmName)
-        continue
+      // Try match by CRM ID first, then by name
+      const match = byId[crm.brnch_id] || byName[crmName?.toUpperCase()]
+
+      const payload = {
+        crm_branch_id: crm.brnch_id,
+        branch_code:   branchCode,
+        is_active:     isActive,
       }
 
-      const manager = managerMap[crmBranch.brnch_id]
-
-      // Use CRM branch code if exists, else auto-generate
-      const branchCode = crmBranch.branchcode?.trim()
-        ? crmBranch.branchcode.trim().toUpperCase()
-        : autoBranchCode(crmBranch.brnch_name)
-
-      const updateData = {
-        branch_code: branchCode,
-      }
-
-      if (crmBranch.brnch_address) updateData.address       = crmBranch.brnch_address.trim()
-      if (crmBranch.city)          updateData.city           = crmBranch.city.trim()
-      if (crmBranch.pincode)       updateData.pin_code       = crmBranch.pincode.trim()
-      if (crmBranch.brnch_contact) updateData.contact_phone  = crmBranch.brnch_contact.trim()
+      if (crmName)           payload.name          = crmName.trim()
+      if (crm.brnch_address) payload.address       = crm.brnch_address.trim()
+      if (crm.city)          payload.city          = crm.city.trim()
+      if (crm.state)         payload.state         = crm.state.trim()
+      if (crm.pincode)       payload.pin_code      = crm.pincode.trim()
+      if (crm.brnch_contact) payload.contact_phone = crm.brnch_contact.trim()
       if (manager?.name) {
-        updateData.branch_employee  = manager.name.trim()
-        updateData.contact_person   = manager.name.trim() // also set challan contact
+        payload.branch_employee = manager.name.trim()
+        payload.contact_person  = manager.name.trim()
       }
       if (manager?.phone) {
-        updateData.branch_employee_phone = manager.phone.trim()
-        if (!updateData.contact_phone) updateData.contact_phone = manager.phone.trim()
+        payload.branch_employee_phone = manager.phone.trim()
+        if (!payload.contact_phone) payload.contact_phone = manager.phone.trim()
       }
 
-      updates.push({ id: match.id, name: match.name, ...updateData })
-    }
-
-    // Perform batch updates
-    const results = []
-    for (const update of updates) {
-      const { id, name, ...data } = update
-      const { error: updateError } = await supabase
-        .from('branches')
-        .update(data)
-        .eq('id', id)
-
-      if (updateError) {
-        results.push({ name, status: 'error', error: updateError.message })
+      if (match) {
+        // UPDATE existing branch
+        const { error } = await supabase.from('branches').update(payload).eq('id', match.id)
+        if (error) {
+          results.push({ name: crmName, status: 'error', error: error.message })
+        } else {
+          results.push({ name: crmName, status: 'updated', branch_code: branchCode, manager: manager?.name })
+          updated++
+        }
       } else {
-        results.push({ name, status: 'success', branch_code: data.branch_code, manager: data.contact_person })
-        updated++
+        // INSERT new branch — CRM has it but Supabase doesn't
+        const { data: newBranch, error } = await supabase
+          .from('branches')
+          .insert(payload)
+          .select('id, name')
+          .single()
+
+        if (error) {
+          results.push({ name: crmName, status: 'insert_error', error: error.message })
+        } else {
+          results.push({ name: crmName, status: 'created', branch_code: branchCode, id: newBranch.id })
+          created.push(crmName)
+          inserted++
+        }
       }
     }
 
@@ -153,13 +161,13 @@ export async function POST() {
       success: true,
       summary: {
         total_crm_branches: crmBranches.length,
-        matched: updates.length,
         updated,
-        not_found: notFound.length,
-        with_manager: results.filter(r => r.manager).length
+        created: inserted,
+        with_manager: results.filter(r => r.manager).length,
+        errors: results.filter(r => r.status.includes('error')).length,
       },
-      not_found_branches: notFound.slice(0, 20),
-      sample_results: results.slice(0, 10)
+      new_branches: created,
+      sample_results: results.slice(0, 20),
     })
 
   } catch (err) {

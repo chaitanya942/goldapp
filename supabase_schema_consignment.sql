@@ -90,3 +90,46 @@ CREATE INDEX IF NOT EXISTS idx_consignment_items_purchase_id ON consignment_item
 -- 2. Go to Branch Management to add address/contact for each branch
 -- 3. Generate delivery challan PDFs
 -- ============================================================================
+
+-- ============================================================================
+-- Phase 2: Branch CRM Sync & Employee Directory
+-- Run this section in Supabase SQL Editor
+-- ============================================================================
+
+-- 6. Add CRM tracking + state to branches
+ALTER TABLE branches ADD COLUMN IF NOT EXISTS crm_branch_id INT;
+ALTER TABLE branches ADD COLUMN IF NOT EXISTS state TEXT;
+ALTER TABLE branches ADD COLUMN IF NOT EXISTS branch_code TEXT;
+ALTER TABLE branches ADD COLUMN IF NOT EXISTS branch_employee TEXT;
+ALTER TABLE branches ADD COLUMN IF NOT EXISTS branch_employee_phone TEXT;
+
+-- Unique index so sync can match/upsert by CRM ID
+CREATE UNIQUE INDEX IF NOT EXISTS idx_branches_crm_id ON branches(crm_branch_id)
+  WHERE crm_branch_id IS NOT NULL;
+
+-- 7. Fix consignments column name (run only if you created table with branch_names)
+-- ALTER TABLE consignments RENAME COLUMN branch_names TO branch_name;
+ALTER TABLE consignments ADD COLUMN IF NOT EXISTS branch_code TEXT;
+DROP INDEX IF EXISTS idx_consignments_branch;
+CREATE INDEX IF NOT EXISTS idx_consignments_branch ON consignments(branch_name);
+
+-- 8. Branch Employees Table
+CREATE TABLE IF NOT EXISTS branch_employees (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  branch_id       UUID REFERENCES branches(id) ON DELETE SET NULL,
+  crm_branch_id   INT,
+  name            TEXT NOT NULL,
+  designation     TEXT,
+  contact_phone   TEXT,
+  mobile_phone    TEXT,
+  emp_status      TEXT DEFAULT 'active',
+  is_manager      BOOLEAN DEFAULT false,
+  synced_at       TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_branch_employees_branch_id  ON branch_employees(branch_id);
+CREATE INDEX IF NOT EXISTS idx_branch_employees_crm_branch ON branch_employees(crm_branch_id);
+CREATE INDEX IF NOT EXISTS idx_branch_employees_status     ON branch_employees(emp_status);
+CREATE INDEX IF NOT EXISTS idx_branch_employees_manager    ON branch_employees(is_manager);
+
+-- ============================================================================
