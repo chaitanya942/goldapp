@@ -9,7 +9,7 @@ const THEMES = {
   light: { bg: '#f5f0e8', card: '#ede8dc', text1: '#2a1f0a', text3: '#8a7a5a', text4: '#b0a080', gold: '#a07830', border: '#d5cfc0', green: '#2a8a5a' },
 }
 
-const EMPTY_FORM = { name: '', opening_date: '', state: '', region: '', cluster: '', model_type: 'outside_bangalore', branch_code: '', address: '', city: '', pin_code: '', crm_branch_id: '' }
+const EMPTY_FORM = { name: '', opening_date: '', state: '', region: '', cluster: '', model_type: 'outside_bangalore', branch_code: '', address: '', city: '', pin_code: '', branch_gstin: '', crm_branch_id: '' }
 
 export default function BranchManagement() {
   const { theme, loadBranches } = useApp()
@@ -117,6 +117,7 @@ export default function BranchManagement() {
       address: form.address || null,
       city: form.city || null,
       pin_code: form.pin_code || null,
+      branch_gstin: form.branch_gstin || null,
     }
     const { error } = editId
       ? await supabase.from('branches').update(payload).eq('id', editId)
@@ -137,6 +138,7 @@ export default function BranchManagement() {
       address: b.address || '',
       city: b.city || '',
       pin_code: b.pin_code || '',
+      branch_gstin: b.branch_gstin || '',
       crm_branch_id: b.crm_branch_id || '',
     })
     setEditId(b.id); setFormOpen(true); setMsg('')
@@ -389,7 +391,7 @@ export default function BranchManagement() {
             <div style={{ fontSize: '.7rem', color: t.text3, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: '16px', fontWeight: 600 }}>
               Address (for Delivery Challan)
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: '16px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr', gap: '16px' }}>
               <div>
                 <label style={s.label}>Full Address</label>
                 <textarea style={{ ...s.input, minHeight: '64px', fontFamily: 'inherit', resize: 'vertical' }}
@@ -404,6 +406,10 @@ export default function BranchManagement() {
               <div>
                 <label style={s.label}>PIN Code</label>
                 <input style={s.input} value={form.pin_code} onChange={e => setField('pin_code', e.target.value)} />
+              </div>
+              <div>
+                <label style={s.label}>Branch GSTIN</label>
+                <input style={s.input} placeholder="29AAPCA3170M1Z5" value={form.branch_gstin} onChange={e => setField('branch_gstin', e.target.value)} />
               </div>
             </div>
           </div>

@@ -58,7 +58,9 @@ export async function POST() {
       return !error
     })()
 
-    const selectCols = hasCrmIdCol ? 'id, name, crm_branch_id, branch_code' : 'id, name, branch_code'
+    const selectCols = hasCrmIdCol
+      ? 'id, name, crm_branch_id, branch_code, city, pin_code, address, state'
+      : 'id, name, branch_code, city, pin_code, address, state'
     const { data: fetched, error: fetchErr } = await supabase.from('branches').select(selectCols)
     if (fetchErr) {
       return Response.json({ error: 'Failed to fetch branches', details: fetchErr.message }, { status: 500 })
@@ -88,13 +90,16 @@ export async function POST() {
       const match = byId[crmBranchId] || byName[crmName.toUpperCase()]
 
       if (match) {
-        // Branch already exists — only stamp crm_branch_id if not set yet
-        // This enables employee linking without overwriting any other data
-        if (hasCrmIdCol && !match.crm_branch_id) {
-          const { error } = await supabase
-            .from('branches')
-            .update({ crm_branch_id: crmBranchId })
-            .eq('id', match.id)
+        // Build an update with any blank fields we can fill from CRM
+        const updates = {}
+        if (hasCrmIdCol && !match.crm_branch_id) updates.crm_branch_id = crmBranchId
+        if (!match.city     && crm.city)          updates.city      = crm.city.trim()
+        if (!match.pin_code && crm.pincode)        updates.pin_code  = String(crm.pincode).trim()
+        if (!match.address  && crm.brnch_address)  updates.address   = crm.brnch_address.trim()
+        if (!match.state    && crm.state)          updates.state     = crm.state.trim()
+
+        if (Object.keys(updates).length > 0) {
+          const { error } = await supabase.from('branches').update(updates).eq('id', match.id)
           if (!error) linked.push(crmName)
         } else {
           skipped.push(crmName)
@@ -114,9 +119,10 @@ export async function POST() {
         is_active:  crm.brn_status !== 'block',
         model_type: 'outside_bangalore',
       }
-      if (crm.brnch_address) payload.address   = crm.brnch_address.trim()
-      if (crm.city)          payload.city      = crm.city.trim()
-      if (crm.pincode)       payload.pin_code  = String(crm.pincode).trim()
+      if (crm.brnch_address) payload.address       = crm.brnch_address.trim()
+      if (crm.city)          payload.city          = crm.city.trim()
+      if (crm.pincode)       payload.pin_code      = String(crm.pincode).trim()
+      if (crm.state)         payload.state         = crm.state.trim()
       if (hasCrmIdCol)       payload.crm_branch_id = crmBranchId
 
       // Try with branch_code first, retry without if column missing
