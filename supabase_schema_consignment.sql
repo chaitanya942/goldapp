@@ -132,4 +132,8 @@ CREATE INDEX IF NOT EXISTS idx_branch_employees_crm_branch ON branch_employees(c
 CREATE INDEX IF NOT EXISTS idx_branch_employees_status     ON branch_employees(emp_status);
 CREATE INDEX IF NOT EXISTS idx_branch_employees_manager    ON branch_employees(is_manager);
 
+-- Add CRM branch name/code columns (run after table is created)
+ALTER TABLE branch_employees ADD COLUMN IF NOT EXISTS crm_branch_name TEXT;
+ALTER TABLE branch_employees ADD COLUMN IF NOT EXISTS crm_branch_code TEXT;
+
 -- ============================================================================

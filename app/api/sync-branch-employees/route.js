@@ -25,50 +25,48 @@ export async function POST() {
       password: process.env.CRM_DB_PASSWORD,
     })
 
-    // Get all employees from CRM
+    // JOIN emp_tbl with branch_tbl to get branch name directly — most reliable matching
     const [employees] = await conn.execute(`
-      SELECT branch, name, designation, contact, omn, emp_status
-      FROM emp_tbl
-      WHERE name IS NOT NULL AND name != ''
-      ORDER BY branch, designation, name
+      SELECT
+        e.name,
+        e.designation,
+        e.contact,
+        e.omn,
+        e.emp_status,
+        b.brnch_id   AS crm_branch_id,
+        b.brnch_name AS crm_branch_name,
+        b.branchcode AS crm_branch_code,
+        b.city       AS crm_branch_city,
+        b.state      AS crm_branch_state
+      FROM emp_tbl e
+      LEFT JOIN branch_tbl b ON b.brnch_id = e.branch
+      WHERE e.name IS NOT NULL AND TRIM(e.name) != ''
+      ORDER BY b.brnch_name, e.designation, e.name
     `)
-
-    // Get CRM branch list — needed to resolve brnch_id → brnch_name for name-based matching
-    const [crmBranches] = await conn.execute(`
-      SELECT brnch_id, brnch_name FROM branch_tbl
-    `)
-
-    // Map: CRM brnch_id (int) → branch name (uppercase)
-    const crmNameById = {}
-    crmBranches.forEach(b => {
-      crmNameById[b.brnch_id] = b.brnch_name?.trim()?.toUpperCase()
-    })
 
     if (!employees.length) {
       return Response.json({ success: true, summary: { total: 0, inserted: 0 } })
     }
 
-    // Get all Supabase branches — try with crm_branch_id, fall back if column missing
+    // Get Supabase branches for linking
     let branches
-    {
-      const { data: d1, error: e1 } = await supabase.from('branches').select('id, name, crm_branch_id')
-      if (!e1) {
-        branches = d1
-      } else {
-        const { data: d2, error: e2 } = await supabase.from('branches').select('id, name')
-        if (e2) return Response.json({ error: 'Failed to fetch branches', details: e2.message }, { status: 500 })
-        branches = d2
-      }
+    const { data: d1, error: e1 } = await supabase.from('branches').select('id, name, crm_branch_id')
+    if (!e1) {
+      branches = d1
+    } else {
+      const { data: d2, error: e2 } = await supabase.from('branches').select('id, name')
+      if (e2) return Response.json({ error: 'Failed to fetch branches', details: e2.message }, { status: 500 })
+      branches = d2
     }
 
-    const branchById   = {}  // crm_branch_id (int) → supabase branch
-    const branchByName = {}  // uppercase name    → supabase branch
+    const branchById   = {}  // crm_branch_id → supabase branch
+    const branchByName = {}  // uppercase name → supabase branch
     ;(branches || []).forEach(b => {
       if (b.crm_branch_id) branchById[b.crm_branch_id] = b
-      branchByName[b.name?.toUpperCase()] = b
+      branchByName[b.name?.toUpperCase()?.trim()] = b
     })
 
-    // Wipe all existing synced employees (full refresh)
+    // Wipe and re-insert (full refresh)
     await supabase
       .from('branch_employees')
       .delete()
@@ -80,33 +78,25 @@ export async function POST() {
         const desig     = emp.designation?.trim() || ''
         const isManager = /branch manager|bm/i.test(desig)
 
-        // emp.branch can be numeric (brnch_id) or string like 'HO'
-        const branchNum   = parseInt(emp.branch)
-        const isNumeric   = !isNaN(branchNum) && String(branchNum) === String(emp.branch)
-        const crmBranchId = isNumeric ? branchNum : null
-
         // Match to Supabase branch:
-        // 1. By crm_branch_id (if branches have that column set)
-        // 2. By CRM branch name → Supabase name (always works even without crm_branch_id)
-        let branch = null
-        if (crmBranchId) {
-          branch = branchById[crmBranchId]
-          if (!branch) {
-            const crmBranchName = crmNameById[crmBranchId]
-            if (crmBranchName) branch = branchByName[crmBranchName]
-          }
-        }
+        // 1. By crm_branch_id (if column exists on branches)
+        // 2. By branch name (direct from JOIN — no lookup chain)
+        const branch =
+          branchById[emp.crm_branch_id] ||
+          branchByName[emp.crm_branch_name?.toUpperCase()?.trim()]
 
         return {
-          branch_id:     branch?.id    || null,
-          crm_branch_id: crmBranchId,
-          name:          emp.name.trim(),
-          designation:   desig         || null,
-          contact_phone: emp.contact?.trim() || null,
-          mobile_phone:  emp.omn?.trim()     || null,
-          emp_status:    emp.emp_status === 'unblock' ? 'active' : 'inactive',
-          is_manager:    isManager,
-          synced_at:     new Date().toISOString(),
+          branch_id:        branch?.id || null,
+          crm_branch_id:    emp.crm_branch_id   || null,
+          crm_branch_name:  emp.crm_branch_name?.trim() || null,
+          crm_branch_code:  emp.crm_branch_code?.trim() || null,
+          name:             emp.name.trim(),
+          designation:      desig || null,
+          contact_phone:    emp.contact?.trim() || null,
+          mobile_phone:     emp.omn?.trim()     || null,
+          emp_status:       emp.emp_status === 'unblock' ? 'active' : 'inactive',
+          is_manager:       isManager,
+          synced_at:        new Date().toISOString(),
         }
       })
       .filter(r => r.name)
@@ -118,11 +108,14 @@ export async function POST() {
       const chunk = rows.slice(i, i + CHUNK)
       const { error } = await supabase.from('branch_employees').insert(chunk)
       if (error) {
-        return Response.json({
-          error:   'Insert failed',
-          details: error.message,
-          hint:    error.hint || null,
-        }, { status: 500 })
+        // If crm_branch_name/crm_branch_code column missing, retry without them
+        if (error.message?.includes('crm_branch')) {
+          const stripped = chunk.map(({ crm_branch_name, crm_branch_code, ...rest }) => rest)
+          const { error: e2 } = await supabase.from('branch_employees').insert(stripped)
+          if (e2) return Response.json({ error: 'Insert failed', details: e2.message }, { status: 500 })
+        } else {
+          return Response.json({ error: 'Insert failed', details: error.message }, { status: 500 })
+        }
       }
       inserted += chunk.length
     }
