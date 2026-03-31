@@ -93,17 +93,22 @@ function RegionDonut({ branchData, t }) {
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '20px' }}>
       <svg width="260" height="260">
         <circle cx={cx} cy={cy} r={r} fill="none" stroke={t.border} strokeWidth={sw} />
-        {slices.map((sl, i) => (
-          <circle key={i} cx={cx} cy={cy} r={r} fill="none"
-            stroke={sl.color} strokeWidth={hovered === i ? sw + 5 : sw}
-            strokeDasharray={`${sl.dash - 3} ${circ - sl.dash + 3}`}
-            strokeDashoffset={-sl.offset + circ / 4}
-            style={{ cursor: 'pointer', transition: 'stroke-width .15s' }}
-            onMouseEnter={() => setHovered(i)}
-            onMouseLeave={() => setHovered(null)}
-            transform={`rotate(-90 ${cx} ${cy})`}
-          />
-        ))}
+        {[...slices].reverse().map((sl, ri) => {
+          const i    = slices.length - 1 - ri
+          const d    = Math.max(0, sl.dash - 2)
+          const gap  = circ - d
+          return (
+            <circle key={i} cx={cx} cy={cy} r={r} fill="none"
+              stroke={sl.color} strokeWidth={hovered === i ? sw + 5 : sw}
+              strokeDasharray={`${d} ${gap}`}
+              strokeDashoffset={-sl.offset + circ / 4}
+              style={{ cursor: 'pointer', transition: 'stroke-width .15s' }}
+              onMouseEnter={() => setHovered(i)}
+              onMouseLeave={() => setHovered(null)}
+              transform={`rotate(-90 ${cx} ${cy})`}
+            />
+          )
+        })}
         {hov ? (
           <>
             <text x={cx} y={cy - 14} textAnchor="middle" fill={hov.color} fontSize="22" fontWeight="700">{(hov.pct * 100).toFixed(1)}%</text>
