@@ -40,6 +40,9 @@ function autoBranchCode(branchName) {
 }
 
 // ── Generate TMP PRF No (WG + 6 digits, global sequential) ───────────────────
+// Seed floor: WG000464 was the last used number across all branches (as of Apr 2026)
+const TMP_PRF_SEED = 464
+
 async function generateTmpPrfNo() {
   const { data } = await supabase
     .from('consignments')
@@ -48,9 +51,9 @@ async function generateTmpPrfNo() {
     .limit(1)
     .single()
 
-  if (!data?.tmp_prf_no) return 'WG000001'
-  const last = parseInt(data.tmp_prf_no.replace('WG', '')) || 0
-  return `WG${String(last + 1).padStart(6, '0')}`
+  const last = data?.tmp_prf_no ? parseInt(data.tmp_prf_no.replace('WG', '')) || 0 : 0
+  const base = Math.max(last, TMP_PRF_SEED)
+  return `WG${String(base + 1).padStart(6, '0')}`
 }
 
 // ── Generate External No + Challan No ────────────────────────────────────────

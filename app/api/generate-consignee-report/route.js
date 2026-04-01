@@ -70,9 +70,7 @@ export async function GET(req) {
     // Generate PDF
     const pdf = generateConsigneeReport({
       consignment,
-      branch:          branch || { name: consignment.branch_name },
-      companySettings,
-      items:           items || [],
+      items: items || [],
     })
 
     const pdfBuffer = Buffer.from(pdf.output('arraybuffer'))
