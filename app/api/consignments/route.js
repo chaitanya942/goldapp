@@ -57,6 +57,9 @@ async function generateTmpPrfNo(branchName) {
 
 // ── Generate External No + Challan No ────────────────────────────────────────
 // External No is GLOBAL sequential across all branches — forms part of challan number
+// Seed floor: 001903 was the last used number (as of Apr 2026)
+const EXT_NO_SEED = 1903
+
 async function generateExternalNo(branchCode, stateCode) {
   const now   = new Date()
   const month = now.toLocaleString('en-US', { month: 'short' }).toUpperCase()
@@ -71,7 +74,7 @@ async function generateExternalNo(branchCode, stateCode) {
     .single()
 
   const lastNo  = data?.external_no ? parseInt(data.external_no) : 0
-  const extNo   = String(lastNo + 1).padStart(6, '0')
+  const extNo   = String(Math.max(lastNo, EXT_NO_SEED) + 1).padStart(6, '0')
   const challan = `WG${stateCode}/${stateCode}-${branchCode}/${month}/${year}/${extNo}`
   return { extNo, challan }
 }

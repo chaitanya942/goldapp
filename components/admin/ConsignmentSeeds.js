@@ -151,7 +151,7 @@ export default function ConsignmentSeeds() {
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead style={{ position: 'sticky', top: 0, zIndex: 1 }}>
                 <tr>
-                  {['Branch', 'Last TMP PRF', 'Next TMP PRF', 'Last Challan Ext No', 'Last Challan No', 'Action'].map(h => (
+                  {['Branch', 'Last TMP PRF', 'Next TMP PRF', 'Last Challan No', 'Action'].map(h => (
                     <th key={h} style={{ padding: '9px 12px', fontSize: '10px', color: t.text4, letterSpacing: '.08em', textTransform: 'uppercase', textAlign: 'left', background: t.card2, borderBottom: `1px solid ${t.border}`, fontWeight: 600, whiteSpace: 'nowrap' }}>{h}</th>
                   ))}
                 </tr>
@@ -165,7 +165,7 @@ export default function ConsignmentSeeds() {
                     <React.Fragment key={region}>
                       {/* Region header */}
                       <tr onClick={() => toggleRegion(region)} style={{ cursor: 'pointer', userSelect: 'none' }}>
-                        <td colSpan={6} style={{ padding: '8px 12px', background: `${t.gold}14`, borderBottom: `1px solid ${t.border}`, borderTop: `1px solid ${t.border}` }}>
+                        <td colSpan={5} style={{ padding: '8px 12px', background: `${t.gold}14`, borderBottom: `1px solid ${t.border}`, borderTop: `1px solid ${t.border}` }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                             <span style={{ fontSize: '10px', color: t.gold }}>{isCollapsed ? '▶' : '▼'}</span>
                             <span style={{ fontSize: '11px', fontWeight: 700, color: t.gold, letterSpacing: '.1em', textTransform: 'uppercase' }}>{region}</span>
@@ -194,8 +194,7 @@ export default function ConsignmentSeeds() {
                             </td>
                             <td style={{ padding: '9px 12px', fontSize: '12px', color: t.gold,  fontFamily: 'monospace', fontWeight: 600 }}>{b.last_tmp_prf_no}</td>
                             <td style={{ padding: '9px 12px', fontSize: '12px', color: t.green, fontFamily: 'monospace', fontWeight: 600 }}>{nextBranchTmp}</td>
-                            <td style={{ padding: '9px 12px', fontSize: '12px', color: t.text2, fontFamily: 'monospace' }}>{b.last_external_no}</td>
-                            <td style={{ padding: '9px 12px', fontSize: '11px', color: t.text3, maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.last_challan_no}</td>
+                            <td style={{ padding: '9px 12px', fontSize: '11px', color: t.text3, maxWidth: '260px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.last_challan_no}</td>
                             <td style={{ padding: '9px 12px' }}>
                               <button onClick={() => setSeed(b)} style={btnGold}>Set Seed</button>
                             </td>
