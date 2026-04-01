@@ -9,12 +9,12 @@ const supabase = createClient(
 // GET: Fetch current seed values
 export async function GET(req) {
   try {
-    // Get last TMP PRF number (zero-padded → alphabetical = numeric order)
+    // Get last External No — global unique across all branches
     const { data: lastTmpPrf } = await supabase
       .from('consignments')
-      .select('tmp_prf_no')
-      .not('tmp_prf_no', 'is', null)
-      .order('tmp_prf_no', { ascending: false })
+      .select('external_no')
+      .not('external_no', 'is', null)
+      .order('external_no', { ascending: false })
       .limit(1)
       .single()
 
@@ -29,7 +29,7 @@ export async function GET(req) {
 
     const branchSeeds = []
     for (const branch of branches || []) {
-      // Last TMP PRF for this branch
+      // Last TMP PRF for this branch (per-branch sequence)
       const { data: lastTmp } = await supabase
         .from('consignments')
         .select('tmp_prf_no')
@@ -39,12 +39,12 @@ export async function GET(req) {
         .limit(1)
         .single()
 
-      // Last external/challan for this branch
+      // Last challan for this branch (external_no here is for reference only — global counter)
       const { data: lastExt } = await supabase
         .from('consignments')
         .select('external_no, challan_no, branch_code')
         .eq('branch_name', branch.name)
-        .not('external_no', 'is', null)
+        .not('challan_no', 'is', null)
         .order('external_no', { ascending: false })
         .limit(1)
         .single()
@@ -53,15 +53,15 @@ export async function GET(req) {
         branch_name:      branch.name,
         region:           branch.region,
         last_tmp_prf_no:  lastTmp?.tmp_prf_no  || '—',
-        last_external_no: lastExt?.external_no || '000000',
+        last_external_no: lastExt?.external_no || '—',
         last_challan_no:  lastExt?.challan_no  || 'Not set',
         branch_code:      lastExt?.branch_code,
       })
     }
 
     return Response.json({
-      tmp_prf_no: lastTmpPrf?.tmp_prf_no || 'WG000000',
-      branches:   branchSeeds,
+      last_external_no: lastTmpPrf?.external_no || '000000',
+      branches:         branchSeeds,
     })
   } catch (err) {
     return Response.json({ error: err.message }, { status: 500 })

@@ -16,9 +16,9 @@ export default function ConsignmentSeeds() {
   const { theme } = useApp()
   const t = THEMES[theme]
 
-  const [loading, setLoading]     = useState(true)
-  const [tmpPrfNo, setTmpPrfNo]   = useState('')
-  const [branches, setBranches]   = useState([])
+  const [loading, setLoading]       = useState(true)
+  const [lastExtNo, setLastExtNo]   = useState('')
+  const [branches, setBranches]     = useState([])
   const [message, setMessage]     = useState(null)
   const [collapsed, setCollapsed] = useState({})
   const [search, setSearch]       = useState('')
@@ -29,7 +29,7 @@ export default function ConsignmentSeeds() {
     setLoading(true)
     const res  = await fetch('/api/consignment-seed')
     const data = await res.json()
-    setTmpPrfNo(data.tmp_prf_no || 'WG000000')
+    setLastExtNo(data.last_external_no || '000000')
     setBranches(data.branches || [])
     setLoading(false)
   }
@@ -37,7 +37,7 @@ export default function ConsignmentSeeds() {
   async function setSeed(branch) {
     const newExtNo = prompt(`Enter last used External No for ${branch.branch_name}:`, branch.last_external_no)
     if (!newExtNo) return
-    const newTmpPrf = prompt('Enter last used TMP PRF No (global):', tmpPrfNo)
+    const newTmpPrf = prompt('Enter last used TMP PRF No for this branch:', branch.last_tmp_prf_no === '—' ? 'WG000000' : branch.last_tmp_prf_no)
     if (!newTmpPrf) return
 
     setLoading(true)
@@ -84,9 +84,9 @@ export default function ConsignmentSeeds() {
   function collapseAll() { const s = {}; regions.forEach(r => { s[r] = true }); setCollapsed(s) }
   function expandAll()   { setCollapsed({}) }
 
-  const seeded  = branches.filter(b => b.last_tmp_prf_no !== '—').length
-  const pending = branches.length - seeded
-  const nextTmp = tmpPrfNo ? `WG${nextNo(tmpPrfNo.replace('WG', ''))}` : 'WG000001'
+  const seeded    = branches.filter(b => b.last_tmp_prf_no !== '—').length
+  const pending   = branches.length - seeded
+  const nextExtNo = nextNo(lastExtNo)
 
   const card    = { background: t.card, border: `1px solid ${t.border}`, borderRadius: '10px' }
   const btnGold = { background: t.gold, color: '#1a0a00', border: 'none', borderRadius: '7px', padding: '4px 10px', fontSize: '11px', fontWeight: 700, cursor: 'pointer' }
@@ -123,9 +123,9 @@ export default function ConsignmentSeeds() {
           </div>
         ))}
         <div style={{ flex: 2, background: t.card2, border: `1px solid ${t.blue}40`, borderRadius: '8px', padding: '12px 16px' }}>
-          <div style={{ fontSize: '10px', color: t.text4, letterSpacing: '.08em', textTransform: 'uppercase', fontWeight: 600 }}>Next TMP PRF — Global</div>
-          <div style={{ fontSize: '20px', fontWeight: 700, color: t.blue, fontFamily: 'monospace', marginTop: '4px' }}>{nextTmp}</div>
-          <div style={{ fontSize: '10px', color: t.text4, marginTop: '2px' }}>Last used: {tmpPrfNo}</div>
+          <div style={{ fontSize: '10px', color: t.text4, letterSpacing: '.08em', textTransform: 'uppercase', fontWeight: 600 }}>Next External No — Global</div>
+          <div style={{ fontSize: '20px', fontWeight: 700, color: t.blue, fontFamily: 'monospace', marginTop: '4px' }}>{nextExtNo}</div>
+          <div style={{ fontSize: '10px', color: t.text4, marginTop: '2px' }}>Last used: {lastExtNo} · forms the challan suffix</div>
         </div>
       </div>
 
@@ -151,7 +151,7 @@ export default function ConsignmentSeeds() {
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead style={{ position: 'sticky', top: 0, zIndex: 1 }}>
                 <tr>
-                  {['Branch', 'Last TMP PRF', 'Next TMP PRF', 'Last Ext No', 'Next Ext No', 'Last Challan No', 'Action'].map(h => (
+                  {['Branch', 'Last TMP PRF', 'Next TMP PRF', 'Last Challan Ext No', 'Last Challan No', 'Action'].map(h => (
                     <th key={h} style={{ padding: '9px 12px', fontSize: '10px', color: t.text4, letterSpacing: '.08em', textTransform: 'uppercase', textAlign: 'left', background: t.card2, borderBottom: `1px solid ${t.border}`, fontWeight: 600, whiteSpace: 'nowrap' }}>{h}</th>
                   ))}
                 </tr>
@@ -165,7 +165,7 @@ export default function ConsignmentSeeds() {
                     <React.Fragment key={region}>
                       {/* Region header */}
                       <tr onClick={() => toggleRegion(region)} style={{ cursor: 'pointer', userSelect: 'none' }}>
-                        <td colSpan={7} style={{ padding: '8px 12px', background: `${t.gold}14`, borderBottom: `1px solid ${t.border}`, borderTop: `1px solid ${t.border}` }}>
+                        <td colSpan={6} style={{ padding: '8px 12px', background: `${t.gold}14`, borderBottom: `1px solid ${t.border}`, borderTop: `1px solid ${t.border}` }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                             <span style={{ fontSize: '10px', color: t.gold }}>{isCollapsed ? '▶' : '▼'}</span>
                             <span style={{ fontSize: '11px', fontWeight: 700, color: t.gold, letterSpacing: '.1em', textTransform: 'uppercase' }}>{region}</span>
@@ -180,8 +180,7 @@ export default function ConsignmentSeeds() {
 
                       {/* Branch rows */}
                       {!isCollapsed && regionBranches.map(b => {
-                        const isSeeded    = b.last_tmp_prf_no !== '—'
-                        const nextExtNo   = nextNo(b.last_external_no)
+                        const isSeeded      = b.last_tmp_prf_no !== '—'
                         const nextBranchTmp = isSeeded ? `WG${nextNo(b.last_tmp_prf_no.replace('WG', ''))}` : '—'
                         return (
                           <tr key={b.branch_name} style={{ borderBottom: `1px solid ${t.border}15` }}
@@ -196,7 +195,6 @@ export default function ConsignmentSeeds() {
                             <td style={{ padding: '9px 12px', fontSize: '12px', color: t.gold,  fontFamily: 'monospace', fontWeight: 600 }}>{b.last_tmp_prf_no}</td>
                             <td style={{ padding: '9px 12px', fontSize: '12px', color: t.green, fontFamily: 'monospace', fontWeight: 600 }}>{nextBranchTmp}</td>
                             <td style={{ padding: '9px 12px', fontSize: '12px', color: t.text2, fontFamily: 'monospace' }}>{b.last_external_no}</td>
-                            <td style={{ padding: '9px 12px', fontSize: '12px', color: t.blue,  fontFamily: 'monospace', fontWeight: 600 }}>{nextExtNo}</td>
                             <td style={{ padding: '9px 12px', fontSize: '11px', color: t.text3, maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.last_challan_no}</td>
                             <td style={{ padding: '9px 12px' }}>
                               <button onClick={() => setSeed(b)} style={btnGold}>Set Seed</button>

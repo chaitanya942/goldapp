@@ -39,40 +39,34 @@ function autoBranchCode(branchName) {
   return words.map(w => w[0]).join('').substring(0, 4)
 }
 
-// ── Generate TMP PRF No (WG + 6 digits, global sequential) ───────────────────
-// Seed floor: WG000464 was the last used number across all branches (as of Apr 2026)
-const TMP_PRF_SEED = 464
-
-async function generateTmpPrfNo() {
-  // Order by tmp_prf_no DESC (zero-padded, so alphabetical = numeric order)
-  // This correctly finds the global max even when seed records are inserted together
+// ── Generate TMP PRF No (WG + 6 digits, per-branch sequential) ───────────────
+// Each branch has its own independent WG sequence starting from 000001
+async function generateTmpPrfNo(branchName) {
   const { data } = await supabase
     .from('consignments')
     .select('tmp_prf_no')
+    .eq('branch_name', branchName)
     .not('tmp_prf_no', 'is', null)
     .order('tmp_prf_no', { ascending: false })
     .limit(1)
     .single()
 
   const last = data?.tmp_prf_no ? parseInt(data.tmp_prf_no.replace('WG', '')) || 0 : 0
-  const base = Math.max(last, TMP_PRF_SEED)
-  return `WG${String(base + 1).padStart(6, '0')}`
+  return `WG${String(last + 1).padStart(6, '0')}`
 }
 
 // ── Generate External No + Challan No ────────────────────────────────────────
+// External No is GLOBAL sequential across all branches — forms part of challan number
 async function generateExternalNo(branchCode, stateCode) {
-  const now        = new Date()
-  const month      = now.toLocaleString('en-US', { month: 'short' }).toUpperCase()
-  const year       = now.getFullYear()
-  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString()
+  const now   = new Date()
+  const month = now.toLocaleString('en-US', { month: 'short' }).toUpperCase()
+  const year  = now.getFullYear()
 
   const { data } = await supabase
     .from('consignments')
     .select('external_no')
-    .eq('branch_code', branchCode)
-    .gte('created_at', monthStart)
     .not('external_no', 'is', null)
-    .order('created_at', { ascending: false })
+    .order('external_no', { ascending: false })
     .limit(1)
     .single()
 
@@ -296,7 +290,7 @@ export async function POST(req) {
     const stateCode  = branchData ? regionToStateCode(branchData.region) : 'KA'
     const branchCode = autoBranchCode(branch_name)
 
-    const tmpPrfNo           = await generateTmpPrfNo()
+    const tmpPrfNo           = await generateTmpPrfNo(branch_name)
     const { extNo, challan } = await generateExternalNo(branchCode, stateCode)
     const internalNo         = movement_type === 'INTERNAL' ? await generateInternalNo(branchCode) : null
 
