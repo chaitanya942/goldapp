@@ -12,16 +12,16 @@ export default function ConsignmentSeeds() {
   const { theme } = useApp()
   const t = THEMES[theme]
 
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading]   = useState(true)
   const [tmpPrfNo, setTmpPrfNo] = useState('')
   const [branches, setBranches] = useState([])
-  const [message, setMessage] = useState(null)
+  const [message, setMessage]   = useState(null)
 
   useEffect(() => { fetchSeeds() }, [])
 
   async function fetchSeeds() {
     setLoading(true)
-    const res = await fetch('/api/consignment-seed')
+    const res  = await fetch('/api/consignment-seed')
     const data = await res.json()
     setTmpPrfNo(data.tmp_prf_no || 'WG000000')
     setBranches(data.branches || [])
@@ -41,12 +41,12 @@ export default function ConsignmentSeeds() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         branch_name: branch.branch_name,
-        tmp_prf_no: newTmpPrf,
+        tmp_prf_no:  newTmpPrf,
         external_no: newExtNo,
-        challan_no: `SEED-${branch.branch_name}-${newExtNo}`,
-        state_code: branch.branch_code?.substring(0, 2) || 'KA',
-        branch_code: branch.branch_code
-      })
+        challan_no:  `SEED-${branch.branch_name}-${newExtNo}`,
+        state_code:  branch.branch_code?.substring(0, 2) || 'KA',
+        branch_code: branch.branch_code,
+      }),
     })
 
     const result = await res.json()
@@ -57,11 +57,21 @@ export default function ConsignmentSeeds() {
       setMessage({ type: 'error', text: result.error })
     }
     setLoading(false)
-
     setTimeout(() => setMessage(null), 3000)
   }
 
-  const card = { background: t.card, border: `1px solid ${t.border}`, borderRadius: '10px' }
+  // Group branches by region
+  const grouped = {}
+  for (const b of branches) {
+    if (!grouped[b.region]) grouped[b.region] = []
+    grouped[b.region].push(b)
+  }
+
+  const nextTmpPrf = tmpPrfNo
+    ? `WG${String(parseInt(tmpPrfNo.replace('WG', '')) + 1).padStart(6, '0')}`
+    : 'WG000001'
+
+  const card   = { background: t.card, border: `1px solid ${t.border}`, borderRadius: '10px' }
   const btnGold = { background: t.gold, color: '#1a0a00', border: 'none', borderRadius: '7px', padding: '6px 14px', fontSize: '12px', fontWeight: 700, cursor: 'pointer' }
 
   return (
@@ -93,7 +103,7 @@ export default function ConsignmentSeeds() {
         </div>
       </div>
 
-      {/* Current TMP PRF */}
+      {/* Global TMP PRF */}
       <div style={card}>
         <div style={{ padding: '12px 16px', borderBottom: `1px solid ${t.border}` }}>
           <div style={{ fontSize: '11px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 600 }}>Global TMP PRF Number</div>
@@ -101,39 +111,52 @@ export default function ConsignmentSeeds() {
         <div style={{ padding: '14px 16px' }}>
           <div style={{ fontSize: '12px', color: t.text3, marginBottom: '6px' }}>Last Used TMP PRF No:</div>
           <div style={{ fontSize: '20px', fontWeight: 600, color: t.gold, fontFamily: 'monospace' }}>{tmpPrfNo}</div>
-          <div style={{ fontSize: '11px', color: t.text4, marginTop: '4px' }}>Next will be: <span style={{ color: t.green, fontWeight: 600 }}>WG{String(parseInt(tmpPrfNo.replace('WG', '')) + 1).padStart(6, '0')}</span></div>
+          <div style={{ fontSize: '11px', color: t.text4, marginTop: '4px' }}>
+            Next will be: <span style={{ color: t.green, fontWeight: 600 }}>{nextTmpPrf}</span>
+          </div>
         </div>
       </div>
 
       {/* Branch Seeds */}
       <div style={card}>
-        <div style={{ padding: '12px 16px', borderBottom: `1px solid ${t.border}` }}>
-          <div style={{ fontSize: '11px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 600 }}>Branch External Numbers</div>
+        <div style={{ padding: '12px 16px', borderBottom: `1px solid ${t.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div style={{ fontSize: '11px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 600 }}>Branch Seeds — Outside Bangalore</div>
+          {!loading && <div style={{ fontSize: '11px', color: t.text3 }}>{branches.length} branches</div>}
         </div>
         {loading ? (
           <div style={{ padding: '40px', textAlign: 'center', color: t.text4 }}>Loading...</div>
         ) : (
-          <div style={{ overflowX: 'auto', maxHeight: 'calc(100vh - 450px)', overflowY: 'auto' }}>
+          <div style={{ overflowX: 'auto', maxHeight: 'calc(100vh - 420px)', overflowY: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead style={{ position: 'sticky', top: 0, zIndex: 1 }}>
                 <tr>
-                  {['Branch', 'Last External No', 'Last Challan No', 'Action'].map(h => (
+                  {['Branch', 'Last TMP PRF No', 'Last External No', 'Last Challan No', 'Action'].map(h => (
                     <th key={h} style={{ padding: '9px 12px', fontSize: '10px', color: t.text4, letterSpacing: '.08em', textTransform: 'uppercase', textAlign: 'left', background: t.card2, borderBottom: `1px solid ${t.border}`, fontWeight: 600 }}>{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {branches.map(b => (
-                  <tr key={b.branch_name} style={{ borderBottom: `1px solid ${t.border}15` }}
-                    onMouseEnter={e => e.currentTarget.style.background = `${t.gold}05`}
-                    onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
-                    <td style={{ padding: '9px 12px', fontSize: '12px', color: t.text1, fontWeight: 500 }}>{b.branch_name}</td>
-                    <td style={{ padding: '9px 12px', fontSize: '12px', color: t.gold, fontFamily: 'monospace' }}>{b.last_external_no}</td>
-                    <td style={{ padding: '9px 12px', fontSize: '11px', color: t.text3, maxWidth: '300px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.last_challan_no}</td>
-                    <td style={{ padding: '9px 12px' }}>
-                      <button onClick={() => setSeed(b)} style={{ ...btnGold, padding: '4px 10px', fontSize: '11px' }}>Set Seed</button>
-                    </td>
-                  </tr>
+                {Object.entries(grouped).map(([region, regionBranches]) => (
+                  <>
+                    <tr key={`region-${region}`}>
+                      <td colSpan={5} style={{ padding: '6px 12px', fontSize: '10px', fontWeight: 700, color: t.gold, background: `${t.gold}10`, letterSpacing: '.1em', textTransform: 'uppercase', borderBottom: `1px solid ${t.border}` }}>
+                        {region}
+                      </td>
+                    </tr>
+                    {regionBranches.map(b => (
+                      <tr key={b.branch_name} style={{ borderBottom: `1px solid ${t.border}15` }}
+                        onMouseEnter={e => e.currentTarget.style.background = `${t.gold}05`}
+                        onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                        <td style={{ padding: '9px 12px', fontSize: '12px', color: t.text1, fontWeight: 500 }}>{b.branch_name}</td>
+                        <td style={{ padding: '9px 12px', fontSize: '12px', color: t.gold, fontFamily: 'monospace', fontWeight: 600 }}>{b.last_tmp_prf_no}</td>
+                        <td style={{ padding: '9px 12px', fontSize: '12px', color: t.text2, fontFamily: 'monospace' }}>{b.last_external_no}</td>
+                        <td style={{ padding: '9px 12px', fontSize: '11px', color: t.text3, maxWidth: '220px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.last_challan_no}</td>
+                        <td style={{ padding: '9px 12px' }}>
+                          <button onClick={() => setSeed(b)} style={{ ...btnGold, padding: '4px 10px', fontSize: '11px' }}>Set Seed</button>
+                        </td>
+                      </tr>
+                    ))}
+                  </>
                 ))}
               </tbody>
             </table>

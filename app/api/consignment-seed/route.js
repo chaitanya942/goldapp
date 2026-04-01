@@ -9,41 +9,59 @@ const supabase = createClient(
 // GET: Fetch current seed values
 export async function GET(req) {
   try {
-    // Get last TMP PRF number
+    // Get last TMP PRF number (zero-padded → alphabetical = numeric order)
     const { data: lastTmpPrf } = await supabase
       .from('consignments')
       .select('tmp_prf_no')
-      .order('created_at', { ascending: false })
+      .not('tmp_prf_no', 'is', null)
+      .order('tmp_prf_no', { ascending: false })
       .limit(1)
       .single()
 
-    // Get last external numbers per branch
+    // Get all outside-Bangalore branches
     const { data: branches } = await supabase
       .from('branches')
-      .select('name')
+      .select('name, region')
       .eq('is_active', true)
+      .neq('region', 'Bangalore')
+      .order('region')
+      .order('name')
 
     const branchSeeds = []
     for (const branch of branches || []) {
+      // Last TMP PRF for this branch
+      const { data: lastTmp } = await supabase
+        .from('consignments')
+        .select('tmp_prf_no')
+        .eq('branch_name', branch.name)
+        .not('tmp_prf_no', 'is', null)
+        .order('tmp_prf_no', { ascending: false })
+        .limit(1)
+        .single()
+
+      // Last external/challan for this branch
       const { data: lastExt } = await supabase
         .from('consignments')
         .select('external_no, challan_no, branch_code')
         .eq('branch_name', branch.name)
-        .order('created_at', { ascending: false })
+        .not('external_no', 'is', null)
+        .order('external_no', { ascending: false })
         .limit(1)
         .single()
 
       branchSeeds.push({
-        branch_name: branch.name,
+        branch_name:      branch.name,
+        region:           branch.region,
+        last_tmp_prf_no:  lastTmp?.tmp_prf_no  || '—',
         last_external_no: lastExt?.external_no || '000000',
-        last_challan_no: lastExt?.challan_no || 'Not set',
-        branch_code: lastExt?.branch_code
+        last_challan_no:  lastExt?.challan_no  || 'Not set',
+        branch_code:      lastExt?.branch_code,
       })
     }
 
     return Response.json({
       tmp_prf_no: lastTmpPrf?.tmp_prf_no || 'WG000000',
-      branches: branchSeeds.slice(0, 20) // First 20 for display
+      branches:   branchSeeds,
     })
   } catch (err) {
     return Response.json({ error: err.message }, { status: 500 })
@@ -72,11 +90,11 @@ export async function POST(req) {
         branch_code: branch_code || branch_name.substring(0, 3).toUpperCase(),
         state_code: state_code || 'KA',
         movement_type: 'EXTERNAL',
-        status: 'seed', // Special status for seed records
+        status: 'seed',
         total_bills: 0,
         total_net_wt: 0,
         total_amount: 0,
-        created_by: 'SYSTEM_SEED'
+        created_by: 'SYSTEM_SEED',
       })
       .select()
       .single()
