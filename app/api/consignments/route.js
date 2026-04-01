@@ -309,6 +309,7 @@ export async function POST(req) {
     const { data: consignment, error: ce } = await supabase
       .from('consignments')
       .insert({
+        consignment_no: challan,          // legacy NOT NULL column — use challan as unique ID
         tmp_prf_no:    tmpPrfNo,
         external_no:   extNo,
         internal_no:   internalNo,
