@@ -28,17 +28,6 @@ export async function GET(req) {
       return Response.json({ error: 'Consignment not found' }, { status: 404 })
     }
 
-    // Fetch branch details
-    const { data: branch } = await supabase
-      .from('branches')
-      .select('name, address, city, state, pin_code, contact_person, contact_phone, branch_gstin')
-      .eq('name', consignment.branch_name)
-      .single()
-
-    // Fetch company settings — fall back to defaults if not configured
-    const { data: rawSettings } = await supabase.from('company_settings').select('*').single()
-    const companySettings = rawSettings || {}
-
     // Fetch consignment items + purchase details
     const { data: consignmentItems, error: cie } = await supabase
       .from('consignment_items')
@@ -61,18 +50,17 @@ export async function GET(req) {
       return Response.json({ error: 'Failed to fetch purchase items' }, { status: 500 })
     }
 
-    // Generate PDF
-    const pdf = generateConsigneeReport({
+    // Generate JPEG image
+    const jpegBuffer = await generateConsigneeReport({
       consignment,
       items: items || [],
     })
 
-    const pdfBuffer = Buffer.from(pdf.output('arraybuffer'))
-    const filename  = `GoldConsigneeReport-${consignment.tmp_prf_no}.pdf`
+    const filename = `GoldConsigneeReport-${consignment.tmp_prf_no}.jpg`
 
-    return new Response(pdfBuffer, {
+    return new Response(jpegBuffer, {
       headers: {
-        'Content-Type':        'application/pdf',
+        'Content-Type':        'image/jpeg',
         'Content-Disposition': `attachment; filename="${filename}"`,
       },
     })
