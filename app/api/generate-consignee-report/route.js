@@ -35,15 +35,9 @@ export async function GET(req) {
       .eq('name', consignment.branch_name)
       .single()
 
-    // Fetch company settings
-    const { data: companySettings, error: cse } = await supabase
-      .from('company_settings')
-      .select('*')
-      .single()
-
-    if (cse || !companySettings) {
-      return Response.json({ error: 'Company settings not found' }, { status: 404 })
-    }
+    // Fetch company settings — fall back to defaults if not configured
+    const { data: rawSettings } = await supabase.from('company_settings').select('*').single()
+    const companySettings = rawSettings || {}
 
     // Fetch consignment items + purchase details
     const { data: consignmentItems, error: cie } = await supabase

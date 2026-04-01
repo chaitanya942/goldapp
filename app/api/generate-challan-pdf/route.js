@@ -46,15 +46,22 @@ export async function GET(req) {
       }, { status: 400 })
     }
 
-    // Fetch company settings
-    const { data: companySettings, error: cse } = await supabase
-      .from('company_settings')
-      .select('*')
-      .single()
-
-    if (cse || !companySettings) {
-      return Response.json({ error: 'Company settings not found' }, { status: 404 })
+    // Fetch company settings — fall back to defaults if not configured
+    const DEFAULT_COMPANY = {
+      company_name:          'WHITE GOLD BULLION PVT LTD',
+      gstin:                 '29AABCW4361M1ZX',
+      pan:                   'AABCW4361M',
+      hsn_code:              '711319',
+      transporter_name:      'BVC LOGISTICS PVT. LTD.',
+      transportation_mode:   'BY AIR & ROAD',
+      head_office_building:  'HOUSE OF WHITE GOLD',
+      head_office_address:   'NO. 1, COMMERCIAL STREET',
+      head_office_city:      'BENGALURU',
+      head_office_state:     'KARNATAKA',
+      head_office_pin:       '560001',
     }
+    const { data: rawSettings } = await supabase.from('company_settings').select('*').single()
+    const companySettings = { ...DEFAULT_COMPANY, ...(rawSettings || {}) }
 
     // Fetch consignment items (purchases)
     const { data: consignmentItems, error: cie } = await supabase
