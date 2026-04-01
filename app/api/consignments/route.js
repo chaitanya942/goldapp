@@ -44,10 +44,13 @@ function autoBranchCode(branchName) {
 const TMP_PRF_SEED = 464
 
 async function generateTmpPrfNo() {
+  // Order by tmp_prf_no DESC (zero-padded, so alphabetical = numeric order)
+  // This correctly finds the global max even when seed records are inserted together
   const { data } = await supabase
     .from('consignments')
     .select('tmp_prf_no')
-    .order('created_at', { ascending: false })
+    .not('tmp_prf_no', 'is', null)
+    .order('tmp_prf_no', { ascending: false })
     .limit(1)
     .single()
 
@@ -242,6 +245,7 @@ export async function GET(req) {
     let query = supabase
       .from('consignments')
       .select('*')
+      .neq('status', 'seed')          // never show seed records in reports
       .order('created_at', { ascending: false })
 
     if (status)   query = query.eq('status', status)
