@@ -3,6 +3,17 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useApp } from '../../lib/context'
 
+async function triggerDownload(url, filename) {
+  const res  = await fetch(url)
+  if (!res.ok) { alert('Download failed: ' + (await res.text())); return }
+  const blob = await res.blob()
+  const a    = document.createElement('a')
+  a.href     = URL.createObjectURL(blob)
+  a.download = filename
+  a.click()
+  URL.revokeObjectURL(a.href)
+}
+
 const THEMES = {
   dark:  { bg: '#0a0a0a', card: '#111111', card2: '#161616', text1: '#f0e6c8', text2: '#c8b89a', text3: '#9a8a6a', text4: '#6a5a3a', gold: '#c9a84c', border: '#1e1e1e', border2: '#252525', green: '#3aaa6a', red: '#e05555', blue: '#3a8fbf', orange: '#c9981f', purple: '#8c5ac8' },
   light: { bg: '#f0ebe0', card: '#e8e2d6', card2: '#e0d9cc', text1: '#1a1208', text2: '#5a4a2a', text3: '#7a6a4a', text4: '#9a8a6a', gold: '#a07830', border: '#d0c8b8', border2: '#c5bca8', green: '#2a8a5a', red: '#c03030', blue: '#2a6a9a', orange: '#a07010', purple: '#6a3a9a' },
@@ -284,7 +295,7 @@ export default function ConsignmentData() {
                             <button
                               onClick={(e) => {
                                 e.stopPropagation()
-                                window.open(`/api/generate-challan-pdf?id=${c.id}`, '_blank')
+                                triggerDownload(`/api/generate-challan-pdf?id=${c.id}`, `${c.challan_no?.replace(/\//g,'-')}.pdf`)
                               }}
                               style={{ background: t.gold, color: '#1a0a00', border: 'none', borderRadius: '4px', padding: '2px 8px', fontSize: '9px', fontWeight: 700, cursor: 'pointer', letterSpacing: '.03em' }}
                             >

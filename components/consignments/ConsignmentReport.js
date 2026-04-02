@@ -3,6 +3,17 @@
 import { useState, useEffect } from 'react'
 import { useApp } from '../../lib/context'
 
+async function triggerDownload(url, filename) {
+  const res  = await fetch(url)
+  if (!res.ok) { alert('Download failed: ' + (await res.text())); return }
+  const blob = await res.blob()
+  const a    = document.createElement('a')
+  a.href     = URL.createObjectURL(blob)
+  a.download = filename
+  a.click()
+  URL.revokeObjectURL(a.href)
+}
+
 const THEMES = {
   dark:  { bg: '#0a0a0a', card: '#111111', card2: '#161616', text1: '#f0e6c8', text2: '#c8b89a', text3: '#9a8a6a', text4: '#6a5a3a', gold: '#c9a84c', border: '#1e1e1e', green: '#3aaa6a', red: '#e05555', blue: '#3a8fbf', orange: '#c9981f', purple: '#8c5ac8' },
   light: { bg: '#f0ebe0', card: '#e8e2d6', card2: '#e0d9cc', text1: '#1a1208', text2: '#5a4a2a', text3: '#7a6a4a', text4: '#9a8a6a', gold: '#a07830', border: '#d0c8b8', green: '#2a8a5a', red: '#c03030', blue: '#2a6a9a', orange: '#a07010', purple: '#6a3a9a' },
@@ -29,6 +40,16 @@ export default function ConsignmentReport() {
   const [filterDateFrom, setFilterDateFrom] = useState('')
   const [filterDateTo, setFilterDateTo]     = useState('')
   const [search, setSearch]             = useState('')
+  const [downloading, setDownloading]   = useState(null)   // 'report' | 'challan' | null
+
+  async function download(type, id, filename) {
+    setDownloading(type)
+    const url = type === 'report'
+      ? `/api/generate-consignee-report?id=${id}`
+      : `/api/generate-challan-pdf?id=${id}`
+    await triggerDownload(url, filename)
+    setDownloading(null)
+  }
 
   useEffect(() => { fetchConsignments() }, [])
 
@@ -173,8 +194,8 @@ export default function ConsignmentReport() {
             <div style={{ padding: '12px 16px', borderBottom: `1px solid ${t.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div style={{ fontSize: '12px', fontWeight: 600, color: t.gold }}>{detail?.tmp_prf_no || '...'}</div>
               <div style={{ display: 'flex', gap: '8px' }}>
-                <button onClick={() => window.open(`/api/generate-consignee-report?id=${selected}`, '_blank')} style={{ ...btnOut, padding: '4px 10px', fontSize: '11px' }}>📋 Consignee Report</button>
-                <button onClick={() => window.open(`/api/generate-challan-pdf?id=${selected}`, '_blank')} style={{ ...btnGold, padding: '4px 10px', fontSize: '11px' }}>📄 Delivery Challan</button>
+                <button disabled={!!downloading} onClick={() => download('report', selected, `GoldConsigneeReport-${detail?.tmp_prf_no}.jpg`)} style={{ ...btnOut, padding: '4px 10px', fontSize: '11px', opacity: downloading === 'report' ? 0.6 : 1 }}>{downloading === 'report' ? '⏳ Downloading...' : '📋 Consignee Report'}</button>
+                <button disabled={!!downloading} onClick={() => download('challan', selected, `${detail?.challan_no?.replace(/\//g,'-')}.pdf`)} style={{ ...btnGold, padding: '4px 10px', fontSize: '11px', opacity: downloading === 'challan' ? 0.6 : 1 }}>{downloading === 'challan' ? '⏳ Downloading...' : '📄 Delivery Challan'}</button>
                 <button onClick={() => { setSelected(null); setDetail(null) }} style={{ ...btnOut, padding: '3px 8px', fontSize: '11px' }}>✕</button>
               </div>
             </div>
