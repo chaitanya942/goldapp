@@ -17,19 +17,27 @@ export async function GET(req) {
   }
 
   try {
+    // Fetch consignment
     const { data: consignment, error: ce } = await supabase
-      .from('consignments').select('*').eq('id', consignmentId).single()
+      .from('consignments')
+      .select('*')
+      .eq('id', consignmentId)
+      .single()
 
     if (ce || !consignment) {
       return Response.json({ error: 'Consignment not found' }, { status: 404 })
     }
 
+    // Fetch consignment items
     const { data: consignmentItems, error: cie } = await supabase
-      .from('consignment_items').select('purchase_id').eq('consignment_id', consignmentId)
+      .from('consignment_items')
+      .select('purchase_id')
+      .eq('consignment_id', consignmentId)
 
-    if (cie) return Response.json({ error: 'Failed to fetch items' }, { status: 500 })
+    if (cie) return Response.json({ error: 'Failed to fetch consignment items' }, { status: 500 })
 
-    const purchaseIds = consignmentItems.map(i => i.purchase_id)
+    const purchaseIds = consignmentItems.map(item => item.purchase_id)
+    if (!purchaseIds.length) return Response.json({ error: 'No items in consignment' }, { status: 400 })
 
     const { data: items, error: ie } = await supabase
       .from('purchases')
@@ -37,20 +45,24 @@ export async function GET(req) {
       .in('id', purchaseIds)
       .order('purchase_date', { ascending: true })
 
-    if (ie) return Response.json({ error: 'Failed to fetch purchases' }, { status: 500 })
+    if (ie) return Response.json({ error: 'Failed to fetch purchase items' }, { status: 500 })
 
-    const pdf    = generateConsigneeReport({ consignment, items: items || [] })
-    const buffer = Buffer.from(pdf.output('arraybuffer'))
-    const filename = `GoldConsigneeReport-${consignment.tmp_prf_no}.pdf`
+    // Generate JPEG image
+    const jpegBuffer = await generateConsigneeReport({
+      consignment,
+      items: items || [],
+    })
 
-    return new Response(buffer, {
+    const filename = `GoldConsigneeReport-${consignment.tmp_prf_no}.jpg`
+
+    return new Response(jpegBuffer, {
       headers: {
-        'Content-Type':        'application/pdf',
+        'Content-Type':        'image/jpeg',
         'Content-Disposition': `attachment; filename="${filename}"`,
       },
     })
-  } catch (err) {
-    console.error('Consignee report error:', err)
-    return Response.json({ error: err.message || 'Failed to generate report' }, { status: 500 })
+  } catch (error) {
+    console.error('Consignee report error:', error)
+    return Response.json({ error: error.message || 'Failed to generate report' }, { status: 500 })
   }
 }
