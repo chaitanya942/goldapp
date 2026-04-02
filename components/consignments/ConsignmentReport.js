@@ -194,7 +194,7 @@ export default function ConsignmentReport() {
             <div style={{ padding: '12px 16px', borderBottom: `1px solid ${t.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div style={{ fontSize: '12px', fontWeight: 600, color: t.gold }}>{detail?.tmp_prf_no || '...'}</div>
               <div style={{ display: 'flex', gap: '8px' }}>
-                <button disabled={!!downloading} onClick={() => download('report', selected, `GoldConsigneeReport-${detail?.tmp_prf_no}.jpg`)} style={{ ...btnOut, padding: '4px 10px', fontSize: '11px', opacity: downloading === 'report' ? 0.6 : 1 }}>{downloading === 'report' ? '⏳ Downloading...' : '📋 Consignee Report'}</button>
+                <button disabled={!!downloading} onClick={() => download('report', selected, `GoldConsigneeReport-${detail?.tmp_prf_no}.pdf`)} style={{ ...btnOut, padding: '4px 10px', fontSize: '11px', opacity: downloading === 'report' ? 0.6 : 1 }}>{downloading === 'report' ? '⏳ Downloading...' : '📋 Consignee Report'}</button>
                 <button disabled={!!downloading} onClick={() => download('challan', selected, `${detail?.challan_no?.replace(/\//g,'-')}.pdf`)} style={{ ...btnGold, padding: '4px 10px', fontSize: '11px', opacity: downloading === 'challan' ? 0.6 : 1 }}>{downloading === 'challan' ? '⏳ Downloading...' : '📄 Delivery Challan'}</button>
                 <button onClick={() => { setSelected(null); setDetail(null) }} style={{ ...btnOut, padding: '3px 8px', fontSize: '11px' }}>✕</button>
               </div>

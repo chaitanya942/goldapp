@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git add:*)",
+      "Bash(git commit -m \"fix: table fills full width on sidebar collapse; show sync error details:*)",
+      "Bash(git push:*)",
+      "Bash(npx vercel:*)"
+    ]
+  }
+}

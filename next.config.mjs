@@ -1,6 +1,6 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  serverExternalPackages: ['@napi-rs/canvas'],
+  /* config options here */
 };
 
 export default nextConfig;
