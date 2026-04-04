@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useApp } from '../../lib/context'
+import GoldSpinner from '../ui/GoldSpinner'
 
 async function triggerDownload(url, filename) {
   const res  = await fetch(url)
@@ -186,7 +187,7 @@ export default function ConsignmentSummary() {
               </thead>
               <tbody>
                 {loading ? (
-                  <tr><td colSpan={9} style={{ padding: '40px', textAlign: 'center', color: t.text4 }}>Loading...</td></tr>
+                  <tr><td colSpan={9} style={{ padding: '40px', textAlign: 'center' }}><div style={{ display: 'flex', justifyContent: 'center' }}><GoldSpinner size={28} /></div></td></tr>
                 ) : filtered.length === 0 ? (
                   <tr><td colSpan={9} style={{ padding: '40px', textAlign: 'center', color: t.text4 }}>No movements found</td></tr>
                 ) : filtered.map(m => (
@@ -233,7 +234,7 @@ export default function ConsignmentSummary() {
               </div>
             </div>
             {loadingDetail ? (
-              <div style={{ padding: '40px', textAlign: 'center', color: t.text4, fontSize: '12px' }}>Loading...</div>
+              <div style={{ padding: '40px', display: 'flex', justifyContent: 'center' }}><GoldSpinner size={28} /></div>
             ) : detail && (
               <div style={{ flex: 1, overflowY: 'auto' }}>
                 {/* Movement timeline */}

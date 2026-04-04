@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../../lib/supabase'
 import { useApp } from '../../lib/context'
+import GoldSpinner from '../ui/GoldSpinner'
 
 const THEMES = {
   dark:  { bg: '#0a0a0a', card: '#111111', card2: '#161616', text1: '#f0e6c8', text2: '#c8b89a', text3: '#9a8a6a', text4: '#6a5a3a', gold: '#c9a84c', border: '#1e1e1e', border2: '#252525', green: '#3aaa6a', red: '#e05555', blue: '#3a8fbf', orange: '#c9981f', purple: '#8c5ac8' },
@@ -401,7 +402,7 @@ export default function PurchaseData() {
 
       {/* TABLE */}
       {loading ? (
-        <div style={{ textAlign: 'center', color: t.text3, padding: '48px' }}>Loading...</div>
+        <div style={{ display: 'flex', justifyContent: 'center', padding: '48px' }}><GoldSpinner size={32} /></div>
       ) : (
         <div style={s.tblWrap}>
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>

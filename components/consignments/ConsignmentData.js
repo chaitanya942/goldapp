@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { useApp } from '../../lib/context'
+import GoldSpinner from '../ui/GoldSpinner'
 
 async function triggerDownload(url, filename) {
   const res  = await fetch(url)
@@ -379,7 +380,7 @@ export default function ConsignmentData() {
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={9} style={{ padding: '48px', textAlign: 'center', color: t.text4 }}>Loading...</td></tr>
+                <tr><td colSpan={9} style={{ padding: '48px', textAlign: 'center' }}><div style={{ display: 'flex', justifyContent: 'center' }}><GoldSpinner size={28} /></div></td></tr>
               ) : visibleBills.length === 0 ? (
                 <tr><td colSpan={9} style={{ padding: '48px', textAlign: 'center', color: t.text4 }}>No bills found</td></tr>
               ) : visibleBills.map(row => {
@@ -516,7 +517,7 @@ export default function ConsignmentData() {
 
       {/* Content */}
       {loading ? (
-        <div style={{ padding: '48px', textAlign: 'center', color: t.text4 }}>Loading...</div>
+        <div style={{ padding: '48px', display: 'flex', justifyContent: 'center' }}><GoldSpinner size={32} /></div>
       ) : nav?.type === 'branch' ? (
         <BillList />
       ) : nav?.type === 'region' ? (
