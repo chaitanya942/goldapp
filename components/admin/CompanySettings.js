@@ -8,44 +8,60 @@ const THEMES = {
   light: { bg: '#f0ebe0', card: '#e8e2d6', card2: '#e0d9cc', text1: '#1a1208', text2: '#5a4a2a', text3: '#7a6a4a', text4: '#9a8a6a', gold: '#a07830', border: '#d0c8b8', green: '#2a8a5a', red: '#c03030' },
 }
 
+const EMPTY_FORM = {
+  // ── Core ─────────────────────────────────────────────────────────────────
+  company_name:          '',
+  pan:                   '',
+  // ── Head Office / Consignee ───────────────────────────────────────────────
+  gstin:                 '',   // HO GSTIN (Karnataka — consignee side of challan)
+  head_office_building:  '',
+  head_office_address:   '',
+  head_office_city:      '',
+  head_office_state:     '',
+  head_office_pin:       '',
+  // ── State-wise branch GSTINs (bill-from side of challan) ──────────────────
+  gstin_ka:              '',
+  gstin_ap:              '',
+  gstin_kl:              '',
+  gstin_ts:              '',
+  gstin_tn:              '',
+  // ── Transport & product ───────────────────────────────────────────────────
+  transporter_name:      'BVC LOGISTICS PVT. LTD.',
+  transportation_mode:   'BY AIR & ROAD',
+  hsn_code:              '711319',
+  // ── Tax rates ─────────────────────────────────────────────────────────────
+  igst_rate:             '3',
+  value_uplift_pct:      '7.5',
+  // ── Logo ──────────────────────────────────────────────────────────────────
+  logo_url:              '',
+}
+
 export default function CompanySettings() {
   const { theme } = useApp()
   const t = THEMES[theme]
 
   const [loading, setLoading] = useState(true)
-  const [saving, setSaving] = useState(false)
+  const [saving,  setSaving]  = useState(false)
   const [message, setMessage] = useState('')
-  const [form, setForm] = useState({
-    company_name: '',
-    head_office_address: '',
-    head_office_city: '',
-    head_office_state: '',
-    head_office_pin: '',
-    gstin: '',
-    pan: '',
-    hsn_code: '711319',
-    transporter_name: 'BVC LOGISTICS PVT. LTD.',
-    transportation_mode: 'BY AIR & ROAD',
-    logo_url: '',
-  })
+  const [form,    setForm]    = useState(EMPTY_FORM)
 
   useEffect(() => { loadSettings() }, [])
 
   const loadSettings = async () => {
     setLoading(true)
-    const res = await fetch('/api/company-settings')
+    const res  = await fetch('/api/company-settings')
     const json = await res.json()
-    if (json.data) setForm(json.data)
+    if (json.data) setForm(f => ({ ...f, ...json.data }))
     setLoading(false)
   }
 
   const handleSave = async () => {
     setSaving(true)
     setMessage('')
-    const res = await fetch('/api/company-settings', {
-      method: 'POST',
+    const res  = await fetch('/api/company-settings', {
+      method:  'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(form),
+      body:    JSON.stringify(form),
     })
     const json = await res.json()
     if (json.error) {
@@ -57,111 +73,160 @@ export default function CompanySettings() {
     setSaving(false)
   }
 
-  const setField = (key, val) => setForm(f => ({ ...f, [key]: val }))
+  const sf = (key, val) => setForm(f => ({ ...f, [key]: val }))
 
   const s = {
-    input: { background: t.card2, border: `1px solid ${t.border}`, borderRadius: '8px', padding: '10px 14px', color: t.text1, fontSize: '.75rem', outline: 'none', width: '100%' },
-    label: { fontSize: '.68rem', color: t.text3, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: '6px', fontWeight: 500 },
-    btnGold: { background: t.gold, color: '#1a0a00', border: 'none', borderRadius: '8px', padding: '10px 24px', fontSize: '.75rem', fontWeight: 700, cursor: 'pointer', letterSpacing: '.05em' },
+    input:  { background: t.card2, border: `1px solid ${t.border}`, borderRadius: '8px', padding: '10px 14px', color: t.text1, fontSize: '.75rem', outline: 'none', width: '100%', boxSizing: 'border-box' },
+    label:  { fontSize: '.68rem', color: t.text3, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: '6px', fontWeight: 500, display: 'block' },
+    section:{ background: t.card, border: `1px solid ${t.border}`, borderRadius: '12px', padding: '24px', display: 'grid', gap: '16px' },
+    title:  { fontSize: '.9rem', fontWeight: 600, color: t.text1, marginBottom: '4px' },
+    sub:    { fontSize: '.72rem', color: t.text3, marginBottom: '12px' },
   }
 
-  if (loading) {
-    return <div style={{ padding: '32px', textAlign: 'center', color: t.text3 }}>Loading...</div>
-  }
+  const Field = ({ label, fieldKey, placeholder, type = 'text', half }) => (
+    <div style={half ? {} : {}}>
+      <label style={s.label}>{label}</label>
+      <input
+        type={type}
+        style={s.input}
+        value={form[fieldKey] ?? ''}
+        onChange={e => sf(fieldKey, e.target.value)}
+        placeholder={placeholder}
+      />
+    </div>
+  )
+
+  if (loading) return <div style={{ padding: '32px', textAlign: 'center', color: t.text3 }}>Loading...</div>
 
   return (
     <div style={{ padding: '32px', maxWidth: '900px' }}>
+
       <div style={{ marginBottom: '28px' }}>
         <div style={{ fontSize: '1.4rem', fontWeight: 300, color: t.text1, letterSpacing: '.03em' }}>Company Settings</div>
-        <div style={{ fontSize: '.72rem', color: t.text3, marginTop: '4px' }}>Configure company details for delivery challans</div>
+        <div style={{ fontSize: '.72rem', color: t.text3, marginTop: '4px' }}>All delivery challan data is pulled from here — no hardcoding</div>
       </div>
 
       {message && (
-        <div style={{ padding: '12px 16px', marginBottom: '20px', borderRadius: '8px', background: message.includes('success') ? `${t.green}15` : `${t.red}15`, border: `1px solid ${message.includes('success') ? t.green : t.red}40`, fontSize: '.75rem', color: message.includes('success') ? t.green : t.red }}>
+        <div style={{
+          padding: '12px 16px', marginBottom: '20px', borderRadius: '8px',
+          background: message.includes('success') ? `${t.green}15` : `${t.red}15`,
+          border: `1px solid ${message.includes('success') ? t.green : t.red}40`,
+          fontSize: '.75rem', color: message.includes('success') ? t.green : t.red,
+        }}>
           {message}
         </div>
       )}
 
       <div style={{ display: 'grid', gap: '20px' }}>
-        {/* Company Details */}
-        <div style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: '12px', padding: '24px' }}>
-          <div style={{ fontSize: '.9rem', fontWeight: 600, color: t.text1, marginBottom: '16px' }}>Company Details</div>
-          <div style={{ display: 'grid', gap: '16px' }}>
+
+        {/* ── Company Core ─────────────────────────────────────────────────── */}
+        <div style={s.section}>
+          <div>
+            <div style={s.title}>Company Details</div>
+            <div style={s.sub}>Core identity used throughout the challan</div>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+            <Field label="Company Name"   fieldKey="company_name"   placeholder="WHITE GOLD BULLION PVT.LTD" />
+            <Field label="PAN"            fieldKey="pan"            placeholder="AAPCA3170M" />
+          </div>
+        </div>
+
+        {/* ── Head Office / Consignee ──────────────────────────────────────── */}
+        <div style={s.section}>
+          <div>
+            <div style={s.title}>Head Office — Consignee (Right side of challan)</div>
+            <div style={s.sub}>This is the receiving end — always White Gold HO, Bengaluru</div>
+          </div>
+          <Field label="HO GSTIN (Karnataka — consignee side)" fieldKey="gstin" placeholder="29AAPCA3170M1Z5" />
+          <Field label="Building / Landmark Name" fieldKey="head_office_building" placeholder="HOUSE OF WHITE GOLD" />
+          <Field label="Street Address" fieldKey="head_office_address" placeholder="NO. 1, COMMERCIAL STREET" />
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '16px' }}>
+            <Field label="City"     fieldKey="head_office_city"  placeholder="BENGALURU" />
+            <Field label="State"    fieldKey="head_office_state" placeholder="KARNATAKA" />
+            <Field label="PIN Code" fieldKey="head_office_pin"   placeholder="560001" />
+          </div>
+        </div>
+
+        {/* ── State-wise Branch GSTINs ────────────────────────────────────── */}
+        <div style={s.section}>
+          <div>
+            <div style={s.title}>State-wise Branch GSTINs — Bill From (Left side of challan)</div>
+            <div style={s.sub}>Used when a branch does not have a GSTIN stored individually. These are the company's registrations in each state.</div>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
             <div>
-              <div style={s.label}>Company Name</div>
-              <input type="text" style={s.input} value={form.company_name} onChange={e => setField('company_name', e.target.value)} placeholder="WHITE GOLD BULLION PVT.LTD" />
+              <label style={s.label}>Karnataka (KA — 29)</label>
+              <input type="text" style={s.input} value={form.gstin_ka ?? ''} onChange={e => sf('gstin_ka', e.target.value)} placeholder="29AAPCA3170M1Z5" />
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
-              <div>
-                <div style={s.label}>GSTIN</div>
-                <input type="text" style={s.input} value={form.gstin} onChange={e => setField('gstin', e.target.value)} placeholder="29AAPCA3170M1Z5" />
-              </div>
-              <div>
-                <div style={s.label}>PAN</div>
-                <input type="text" style={s.input} value={form.pan} onChange={e => setField('pan', e.target.value)} placeholder="AAPCA3170M" />
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Head Office Address */}
-        <div style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: '12px', padding: '24px' }}>
-          <div style={{ fontSize: '.9rem', fontWeight: 600, color: t.text1, marginBottom: '16px' }}>Head Office Address (Consignee)</div>
-          <div style={{ display: 'grid', gap: '16px' }}>
             <div>
-              <div style={s.label}>Address</div>
-              <textarea style={{ ...s.input, minHeight: '80px', fontFamily: 'inherit' }} value={form.head_office_address} onChange={e => setField('head_office_address', e.target.value)} placeholder="NO-75 FIRST FLOOR HOSUR ROAD KORAMANGALA, INDUSTRIAL AREA" />
+              <label style={s.label}>Andhra Pradesh (AP — 37)</label>
+              <input type="text" style={s.input} value={form.gstin_ap ?? ''} onChange={e => sf('gstin_ap', e.target.value)} placeholder="37AAPCA3170M1Z8" />
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '16px' }}>
-              <div>
-                <div style={s.label}>City</div>
-                <input type="text" style={s.input} value={form.head_office_city} onChange={e => setField('head_office_city', e.target.value)} placeholder="BENGALURU URBAN" />
-              </div>
-              <div>
-                <div style={s.label}>State</div>
-                <input type="text" style={s.input} value={form.head_office_state} onChange={e => setField('head_office_state', e.target.value)} placeholder="KARNATAKA" />
-              </div>
-              <div>
-                <div style={s.label}>PIN Code</div>
-                <input type="text" style={s.input} value={form.head_office_pin} onChange={e => setField('head_office_pin', e.target.value)} placeholder="560095" />
-              </div>
+            <div>
+              <label style={s.label}>Kerala (KL — 32)</label>
+              <input type="text" style={s.input} value={form.gstin_kl ?? ''} onChange={e => sf('gstin_kl', e.target.value)} placeholder="32AAPCA3170M1ZI" />
             </div>
+            <div>
+              <label style={s.label}>Telangana (TS — 36)</label>
+              <input type="text" style={s.input} value={form.gstin_ts ?? ''} onChange={e => sf('gstin_ts', e.target.value)} placeholder="36AAPCA3170M1ZA" />
+            </div>
+            <div>
+              <label style={s.label}>Tamil Nadu (TN — 33)</label>
+              <input type="text" style={s.input} value={form.gstin_tn ?? ''} onChange={e => sf('gstin_tn', e.target.value)} placeholder="33AAPCA3170M1ZG" />
+            </div>
+          </div>
+          <div style={{ fontSize: '.68rem', color: t.text3, padding: '10px 12px', background: `${t.gold}10`, borderRadius: '6px', border: `1px solid ${t.gold}30` }}>
+            Priority order: Branch record (branch_gstin) → State GSTIN above → Blank
           </div>
         </div>
 
-        {/* Transporter & Other Details */}
-        <div style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: '12px', padding: '24px' }}>
-          <div style={{ fontSize: '.9rem', fontWeight: 600, color: t.text1, marginBottom: '16px' }}>Transporter & Product Details</div>
-          <div style={{ display: 'grid', gap: '16px' }}>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
-              <div>
-                <div style={s.label}>Transporter Name</div>
-                <input type="text" style={s.input} value={form.transporter_name} onChange={e => setField('transporter_name', e.target.value)} placeholder="BVC LOGISTICS PVT. LTD." />
-              </div>
-              <div>
-                <div style={s.label}>Transportation Mode</div>
-                <input type="text" style={s.input} value={form.transportation_mode} onChange={e => setField('transportation_mode', e.target.value)} placeholder="BY AIR & ROAD" />
-              </div>
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: '16px' }}>
-              <div>
-                <div style={s.label}>HSN Code</div>
-                <input type="text" style={s.input} value={form.hsn_code} onChange={e => setField('hsn_code', e.target.value)} placeholder="711319" />
-              </div>
-              <div>
-                <div style={s.label}>Logo URL (optional)</div>
-                <input type="text" style={s.input} value={form.logo_url} onChange={e => setField('logo_url', e.target.value)} placeholder="https://example.com/logo.png" />
-              </div>
-            </div>
+        {/* ── Transport & Product ──────────────────────────────────────────── */}
+        <div style={s.section}>
+          <div>
+            <div style={s.title}>Transporter & Product</div>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+            <Field label="Transporter Name"    fieldKey="transporter_name"    placeholder="BVC LOGISTICS PVT. LTD." />
+            <Field label="Transportation Mode" fieldKey="transportation_mode"  placeholder="BY AIR & ROAD" />
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: '16px' }}>
+            <Field label="HSN Code" fieldKey="hsn_code" placeholder="711319" />
+            <Field label="Logo URL (optional — leave blank to use /logo.png)" fieldKey="logo_url" placeholder="https://..." />
           </div>
         </div>
 
-        {/* Save Button */}
+        {/* ── Tax Rates ────────────────────────────────────────────────────── */}
+        <div style={s.section}>
+          <div>
+            <div style={s.title}>Interstate Tax Rates</div>
+            <div style={s.sub}>Applied only for non-Karnataka branches (interstate stock transfer)</div>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+            <div>
+              <label style={s.label}>Value Uplift % (applied to invoice value before IGST)</label>
+              <input type="number" step="0.01" style={s.input} value={form.value_uplift_pct ?? ''} onChange={e => sf('value_uplift_pct', e.target.value)} placeholder="7.5" />
+            </div>
+            <div>
+              <label style={s.label}>IGST Rate %</label>
+              <input type="number" step="0.01" style={s.input} value={form.igst_rate ?? ''} onChange={e => sf('igst_rate', e.target.value)} placeholder="3" />
+            </div>
+          </div>
+          <div style={{ fontSize: '.68rem', color: t.text3, padding: '10px 12px', background: `${t.gold}10`, borderRadius: '6px', border: `1px solid ${t.gold}30` }}>
+            Formula: Value of Goods = Invoice Amount × (1 + Uplift%) &nbsp;|&nbsp; IGST = Value of Goods × IGST% &nbsp;|&nbsp; Grand Total = Value of Goods + IGST
+          </div>
+        </div>
+
+        {/* ── Save ─────────────────────────────────────────────────────────── */}
         <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '8px' }}>
-          <button onClick={handleSave} disabled={saving} style={{ ...s.btnGold, opacity: saving ? 0.7 : 1 }}>
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            style={{ background: t.gold, color: '#1a0a00', border: 'none', borderRadius: '8px', padding: '10px 28px', fontSize: '.75rem', fontWeight: 700, cursor: 'pointer', letterSpacing: '.05em', opacity: saving ? 0.7 : 1 }}
+          >
             {saving ? 'Saving...' : 'Save Settings'}
           </button>
         </div>
+
       </div>
     </div>
   )
