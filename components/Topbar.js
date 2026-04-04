@@ -127,7 +127,7 @@ export default function Topbar() {
         Sign Out
       </button>
 
+      {toast && <Toast msg={toast.msg} type={toast.type} onDone={() => setToast(null)} />}
     </div>
-    {toast && <Toast msg={toast.msg} type={toast.type} onDone={() => setToast(null)} />}
   )
 }
