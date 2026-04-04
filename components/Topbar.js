@@ -4,6 +4,8 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '../lib/supabase'
 import { useApp } from '../lib/context'
+import GoldButton from './ui/GoldButton'
+import Toast from './ui/Toast'
 
 const THEMES = {
   dark:  { bg: '#141414', text1: '#f0e6c8', text2: '#c8b89a', text3: '#7a6a4a', gold: '#c9a84c', border: '#2a2a2a', card2: '#1a1a1a', green: '#3aaa6a', red: '#e05555' },
@@ -28,9 +30,8 @@ export default function Topbar() {
   const t = THEMES[theme]
   const router = useRouter()
 
-  const [syncing,   setSyncing]   = useState(false)
-  const [syncMsg,   setSyncMsg]   = useState('')
-  const [syncOk,    setSyncOk]    = useState(null)   // true=success false=error null=idle
+  const [syncing, setSyncing] = useState(false)
+  const [toast,   setToast]   = useState(null)
 
   const signOut = async () => {
     await supabase.auth.signOut()
@@ -39,25 +40,18 @@ export default function Topbar() {
 
   const handleSync = async () => {
     setSyncing(true)
-    setSyncMsg('')
-    setSyncOk(null)
     try {
       const res  = await fetch('/api/sync-purchases', { method: 'POST' })
       const data = await res.json()
       if (data.success) {
-        setSyncOk(true)
-        setSyncMsg(`✓ ${data.synced} records synced`)
+        setToast({ msg: `${data.synced} records synced`, type: 'success' })
       } else {
-        setSyncOk(false)
-        setSyncMsg(`✗ ${data.error || 'Sync failed'}`)
+        setToast({ msg: data.error || 'Sync failed', type: 'error' })
       }
     } catch (e) {
-      setSyncOk(false)
-      setSyncMsg('✗ Network error')
+      setToast({ msg: 'Network error', type: 'error' })
     } finally {
       setSyncing(false)
-      // clear message after 4 seconds
-      setTimeout(() => { setSyncMsg(''); setSyncOk(null) }, 4000)
     }
   }
 
@@ -82,44 +76,14 @@ export default function Topbar() {
 
       {/* CRM Sync button — only for super_admin and founders_office */}
       {canSync && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          {syncMsg && (
-            <span style={{
-              fontSize: '.62rem',
-              color: syncOk ? t.green : t.red,
-              letterSpacing: '.02em',
-              transition: 'opacity .3s',
-            }}>
-              {syncMsg}
-            </span>
-          )}
-          <button
-            onClick={handleSync}
-            disabled={syncing}
-            style={{
-              background: syncing ? 'transparent' : `${t.gold}18`,
-              border: `1px solid ${syncing ? t.border : t.gold}`,
-              color: syncing ? t.text3 : t.gold,
-              borderRadius: '6px',
-              padding: '5px 12px',
-              cursor: syncing ? 'wait' : 'pointer',
-              fontSize: '.62rem',
-              letterSpacing: '.08em',
-              textTransform: 'uppercase',
-              display: 'flex', alignItems: 'center', gap: '5px',
-              transition: 'all .2s',
-            }}
-          >
-            {syncing ? (
-              <>
-                <span style={{ display: 'inline-block', animation: 'spin 1s linear infinite' }}>⟳</span>
-                Syncing…
-              </>
-            ) : (
-              <>⟳ Sync CRM</>
-            )}
-          </button>
-        </div>
+        <GoldButton
+          variant="outline"
+          onClick={handleSync}
+          disabled={syncing}
+          style={{ padding: '5px 14px', fontSize: '.62rem' }}
+        >
+          {syncing ? <span style={{ display: 'inline-block', animation: 'spin 1s linear infinite' }}>⟳</span> : '⟳'} Sync CRM
+        </GoldButton>
       )}
 
       {/* Theme toggle */}
@@ -163,9 +127,7 @@ export default function Topbar() {
         Sign Out
       </button>
 
-      <style>{`
-        @keyframes spin { from { transform: rotate(0deg) } to { transform: rotate(360deg) } }
-      `}</style>
     </div>
+    {toast && <Toast msg={toast.msg} type={toast.type} onDone={() => setToast(null)} />}
   )
 }

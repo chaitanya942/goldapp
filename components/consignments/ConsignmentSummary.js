@@ -3,6 +3,8 @@
 import { useState, useEffect } from 'react'
 import { useApp } from '../../lib/context'
 import GoldSpinner from '../ui/GoldSpinner'
+import Toast from '../ui/Toast'
+import Badge from '../ui/Badge'
 
 async function triggerDownload(url, filename) {
   const res  = await fetch(url)
@@ -34,6 +36,7 @@ export default function ConsignmentSummary() {
   const [selected, setSelected]   = useState(null)
   const [detail, setDetail]       = useState(null)
   const [loadingDetail, setLoadingDetail] = useState(false)
+  const [toast, setToast] = useState(null)
   const [filterType, setFilterType] = useState('')
   const [filterBranchFrom, setFilterBranchFrom] = useState('')
   const [filterBranchTo, setFilterBranchTo]     = useState('')
@@ -206,14 +209,7 @@ export default function ConsignmentSummary() {
                     <td style={{ padding: '8px 12px', fontSize: '12px', color: t.text2, textAlign: 'right', fontFamily: 'monospace' }}>{fmtWt(m.total_net_wt)}</td>
                     <td style={{ padding: '8px 12px', fontSize: '12px', color: t.text2, textAlign: 'right', fontFamily: 'monospace' }}>₹{fmt(Math.round(m.total_amount))}</td>
                     <td style={{ padding: '8px 12px' }}>
-                      <span style={{
-                        fontSize: '10px',
-                        color: m.status === 'received' ? t.green : m.status === 'dispatched' ? t.blue : t.orange,
-                        background: m.status === 'received' ? `${t.green}15` : m.status === 'dispatched' ? `${t.blue}15` : `${t.orange}15`,
-                        borderRadius: '4px',
-                        padding: '2px 7px',
-                        textTransform: 'capitalize'
-                      }}>{m.status}</span>
+                      <Badge label={m.status} color={m.status === 'received' ? 'green' : m.status === 'dispatched' ? 'blue' : 'orange'} />
                     </td>
                     <td style={{ padding: '8px 12px', fontSize: '11px', color: t.text4, whiteSpace: 'nowrap' }}>{fmtDate(m.created_at)}</td>
                   </tr>
@@ -309,6 +305,7 @@ export default function ConsignmentSummary() {
           </div>
         )}
       </div>
+      {toast && <Toast msg={toast.msg} type={toast.type} onDone={() => setToast(null)} />}
     </div>
   )
 }

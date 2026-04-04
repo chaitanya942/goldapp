@@ -3,6 +3,8 @@
 import { useState, useEffect } from 'react'
 import { useApp } from '../../lib/context'
 import GoldSpinner from '../ui/GoldSpinner'
+import Badge from '../ui/Badge'
+import Toast from '../ui/Toast'
 
 async function triggerDownload(url, filename) {
   const res  = await fetch(url)
@@ -39,6 +41,7 @@ export default function ConsignmentReport() {
   const [filterStatus, setFilterStatus] = useState('')
   const [filterBranch, setFilterBranch] = useState('')
   const [filterDateFrom, setFilterDateFrom] = useState('')
+  const [toast, setToast] = useState(null)
   const [filterDateTo, setFilterDateTo]     = useState('')
   const [search, setSearch]             = useState('')
   const [downloading, setDownloading]   = useState(null)   // 'report' | 'challan' | null
@@ -179,7 +182,7 @@ export default function ConsignmentReport() {
                     <td style={{ padding: '8px 12px', fontSize: '12px', color: t.text2, textAlign: 'right', fontFamily: 'monospace' }}>{fmtWt(c.total_net_wt)}</td>
                     <td style={{ padding: '8px 12px', fontSize: '12px', color: t.text2, textAlign: 'right', fontFamily: 'monospace' }}>₹{fmt(Math.round(c.total_amount))}</td>
                     <td style={{ padding: '8px 12px' }}>
-                      <span style={{ fontSize: '10px', color: STATUS_COLORS[c.status] || t.text3, background: `${STATUS_COLORS[c.status] || t.text3}15`, borderRadius: '4px', padding: '2px 7px', textTransform: 'capitalize' }}>{c.status}</span>
+                      <Badge label={c.status} color={c.status === 'received' ? 'green' : c.status === 'dispatched' ? 'blue' : 'orange'} />
                     </td>
                     <td style={{ padding: '8px 12px', fontSize: '11px', color: t.text4, whiteSpace: 'nowrap' }}>{fmtTS(c.created_at)}</td>
                   </tr>
@@ -256,6 +259,7 @@ export default function ConsignmentReport() {
           </div>
         )}
       </div>
+      {toast && <Toast msg={toast.msg} type={toast.type} onDone={() => setToast(null)} />}
     </div>
   )
 }

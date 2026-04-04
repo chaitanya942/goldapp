@@ -8,6 +8,7 @@ import ReportCharts from './ReportCharts'
 import ReportDistribution from './ReportDistribution'
 import ReportBranches from './ReportBranches'
 import ReportCompare from './ReportCompare'
+import GoldModal from '../../ui/GoldModal'
 import ReportSameDay from './ReportSameDay'
 
 const SECTIONS = [
@@ -41,7 +42,19 @@ const EXPORT_COLS = [
 ]
 
 // ── KPI CARD ──
-function KpiCard({ label, value, sub, color, loading }) {
+const DRILL_MAP = {
+  'Total Transactions':    { field: 'total_count',          fmt: v => Number(v||0).toLocaleString('en-IN'),  col: 'Bills' },
+  'Gross Weight':          { field: 'total_gross',          fmt: v => `${fmt(v)}g`,                          col: 'Gross Wt' },
+  'Net Weight':            { field: 'total_net',            fmt: v => `${fmt(v)}g`,                          col: 'Net Wt' },
+  'Avg Purity %':          { field: 'avg_purity',           fmt: v => `${Number(v||0).toFixed(2)}%`,         col: 'Avg Purity' },
+  'Gross Purchase Value':  { field: 'total_value',          fmt: v => fmtVal(v),                             col: 'Value' },
+  'Avg Net Wt / Bill':     { field: 'avg_net_per_txn',      fmt: v => `${fmt(v)}g`,                         col: 'Avg Net Wt' },
+  'Avg Service Charge %':  { field: 'avg_service_charge_pct', fmt: v => `${Number(v||0).toFixed(2)}%`,      col: 'Avg Svc %' },
+  'Avg Rate / Gram':       { field: 'avg_rate_per_gram',    fmt: v => fmtVal(v),                             col: 'Rate/g' },
+  'Transacted Branches':   { field: 'total_count',          fmt: v => Number(v||0).toLocaleString('en-IN'),  col: 'Bills' },
+}
+
+function KpiCard({ label, value, sub, color, loading, onClick }) {
   return (
     <div
       style={{
@@ -57,7 +70,9 @@ function KpiCard({ label, value, sub, color, loading }) {
         display: 'flex',
         flexDirection: 'column',
         justifyContent: 'space-between',
+        cursor: onClick ? 'pointer' : 'default',
       }}
+      onClick={onClick}
       onMouseEnter={e => {
         e.currentTarget.style.transform = 'translateY(-1px)'
         e.currentTarget.style.boxShadow = `0 4px 24px rgba(0,0,0,.5), 0 0 0 1px ${color}30`
@@ -68,7 +83,10 @@ function KpiCard({ label, value, sub, color, loading }) {
       }}
     >
       <div style={{ position: 'absolute', top: 0, left: '16px', right: '16px', height: '1.5px', background: `linear-gradient(90deg, transparent, ${color}70, transparent)` }} />
-      <div style={{ fontSize: '.55rem', color: 'var(--text3)', letterSpacing: '.16em', textTransform: 'uppercase', fontWeight: 500 }}>{label}</div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+        <div style={{ fontSize: '.55rem', color: 'var(--text3)', letterSpacing: '.16em', textTransform: 'uppercase', fontWeight: 500 }}>{label}</div>
+        {onClick && !loading && <div style={{ fontSize: '9px', color: color, opacity: 0.6, letterSpacing: '.08em' }}>↗ BRANCHES</div>}
+      </div>
       <div style={{ flex: 1, display: 'flex', alignItems: 'center' }}>
         {loading
           ? <div style={{ height: '28px', background: 'var(--border)', borderRadius: '6px', width: '55%', animation: 'shimmer 1.5s infinite' }} />
@@ -193,6 +211,7 @@ export default function PurchaseReports() {
   const [loading,       setLoading]       = useState(true)
   const [activeSection, setActiveSection] = useState(null)
   const [exporting,     setExporting]     = useState(false)
+  const [selectedKpi,   setSelectedKpi]   = useState(null)
   const [hourlyTrend,   setHourlyTrend]   = useState([])
   const [error,         setError]         = useState(null)
 
@@ -453,14 +472,17 @@ export default function PurchaseReports() {
       {/* ROW 1 — Volume (4 cols) */}
       <div style={gridRow4}>
         <KpiCard label="Total Transactions"    color={t.gold}  loading={loading}
-          value={Number(k?.total_count || 0).toLocaleString('en-IN')} />
+          value={Number(k?.total_count || 0).toLocaleString('en-IN')}
+          onClick={branchData.length ? () => setSelectedKpi('Total Transactions') : null} />
         <KpiCard label="Gross Weight"          color={t.text1} loading={loading}
-          value={`${fmt(k?.total_gross)}g`} />
+          value={`${fmt(k?.total_gross)}g`}
+          onClick={branchData.length ? () => setSelectedKpi('Gross Weight') : null} />
         <KpiCard label="Avg Stone & Wastage / Bill" color={t.text2} loading={loading}
           value={`${fmt(k?.avg_stone_wastage_bill)}g`}
           sub="avg deduction per transaction" />
         <KpiCard label="Net Weight"            color={t.gold}  loading={loading}
-          value={`${fmt(k?.total_net)}g`} />
+          value={`${fmt(k?.total_net)}g`}
+          onClick={branchData.length ? () => setSelectedKpi('Net Weight') : null} />
       </div>
 
       {/* ROW 2 — Quality + Split (5 cols) */}
@@ -470,7 +492,8 @@ export default function PurchaseReports() {
           sub="of gross weight" />
         <KpiCard label="Avg Purity %" color={t.purple} loading={loading}
           value={`${Number(k?.avg_purity || 0).toFixed(2)}%`}
-          sub="weighted by net weight" />
+          sub="weighted by net weight"
+          onClick={branchData.length ? () => setSelectedKpi('Avg Purity %') : null} />
         <SplitCard
           title="Physical & Takeover — Bills"
           leftLabel="Physical"  leftValue={Number(k?.physical_count || 0).toLocaleString('en-IN')}  leftColor={t.gold}  leftSub={`Physical · ${phPct}%`}
@@ -484,18 +507,22 @@ export default function PurchaseReports() {
           loading={loading} t={t}
         />
         <KpiCard label="Avg Net Wt / Bill" color={t.blue} loading={loading}
-          value={`${fmt(k?.avg_net_per_txn)}g`} />
+          value={`${fmt(k?.avg_net_per_txn)}g`}
+          onClick={branchData.length ? () => setSelectedKpi('Avg Net Wt / Bill') : null} />
       </div>
 
       {/* ROW 3 — Value (5 cols) */}
       <div style={gridRow5b}>
         <KpiCard label="Avg Service Charge %" color={t.text2} loading={loading}
-          value={`${Number(k?.avg_service_charge_pct || 0).toFixed(2)}%`} />
+          value={`${Number(k?.avg_service_charge_pct || 0).toFixed(2)}%`}
+          onClick={branchData.length ? () => setSelectedKpi('Avg Service Charge %') : null} />
         <KpiCard label="Gross Purchase Value" color={t.green} loading={loading}
-          value={fmtVal(k?.total_value)} />
+          value={fmtVal(k?.total_value)}
+          onClick={branchData.length ? () => setSelectedKpi('Gross Purchase Value') : null} />
         <KpiCard label="Avg Rate / Gram" color={t.green} loading={loading}
           value={fmtVal(k?.avg_rate_per_gram)}
-          sub="gross value ÷ net weight" />
+          sub="gross value ÷ net weight"
+          onClick={branchData.length ? () => setSelectedKpi('Avg Rate / Gram') : null} />
         <KpiCard label="Transacted Branches" color={t.blue} loading={loading}
           value={Number(k?.branch_count || 0).toLocaleString('en-IN')} />
         <KpiCard label="Business Days" color={t.text2} loading={loading}
@@ -554,6 +581,43 @@ export default function PurchaseReports() {
           ))}
         </div>
       )}
+
+      {/* KPI Drill-Down Modal */}
+      {selectedKpi && (() => {
+        const drill = DRILL_MAP[selectedKpi]
+        if (!drill || !branchData.length) return null
+        const sorted = [...branchData]
+          .filter(b => b[drill.field] != null && Number(b[drill.field]) > 0)
+          .sort((a, b) => Number(b[drill.field] || 0) - Number(a[drill.field] || 0))
+        const maxVal = Number(sorted[0]?.[drill.field] || 0)
+        return (
+          <GoldModal open={true} onClose={() => setSelectedKpi(null)} title={selectedKpi} width={520}>
+            <div style={{ fontSize: 10, color: t.text3, letterSpacing: '.1em', marginBottom: 16 }}>
+              BRANCH BREAKDOWN — {sorted.length} BRANCHES
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {sorted.map((b, i) => {
+                const val = Number(b[drill.field] || 0)
+                const pct = maxVal > 0 ? (val / maxVal) * 100 : 0
+                return (
+                  <div key={b.branch_name} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <div style={{ fontSize: 10, color: t.text3, width: 16, textAlign: 'right', flexShrink: 0 }}>{i + 1}</div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                        <span style={{ fontSize: 11, color: '#e8d9b0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.branch_name}</span>
+                        <span style={{ fontSize: 11, color: '#C9A84C', fontVariantNumeric: 'tabular-nums', flexShrink: 0, marginLeft: 8 }}>{drill.fmt(b[drill.field])}</span>
+                      </div>
+                      <div style={{ height: 3, background: 'rgba(201,168,76,0.1)', borderRadius: 2, overflow: 'hidden' }}>
+                        <div style={{ width: `${pct}%`, height: '100%', background: 'linear-gradient(90deg, #8B6914, #FFD700)', borderRadius: 2, transition: 'width .6s ease' }} />
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </GoldModal>
+        )
+      })()}
     </div>
   )
 }

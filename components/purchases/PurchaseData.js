@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { supabase } from '../../lib/supabase'
 import { useApp } from '../../lib/context'
 import GoldSpinner from '../ui/GoldSpinner'
+import Badge from '../ui/Badge'
 
 const THEMES = {
   dark:  { bg: '#0a0a0a', card: '#111111', card2: '#161616', text1: '#f0e6c8', text2: '#c8b89a', text3: '#9a8a6a', text4: '#6a5a3a', gold: '#c9a84c', border: '#1e1e1e', border2: '#252525', green: '#3aaa6a', red: '#e05555', blue: '#3a8fbf', orange: '#c9981f', purple: '#8c5ac8' },
@@ -447,9 +448,20 @@ export default function PurchaseData() {
                     <td style={s.td}>{p.service_charge_pct}%</td>
                     <td style={s.td}>₹{fmt(p.service_charge_amount_crm)}</td>
                     <td style={{ ...s.td, fontWeight: 500 }}>₹{fmt(p.final_amount_crm)}</td>
-                    <td style={{ ...s.td, fontSize: '.65rem', color: t.text3 }}>{p.transaction_type}</td>
                     <td style={s.td}>
-                      <span style={{ fontSize: '.62rem', color: status.color, background: `${status.color}18`, border: `1px solid ${status.color}40`, borderRadius: '4px', padding: '2px 7px', whiteSpace: 'nowrap' }}>{status.label}</span>
+                      <Badge label={p.transaction_type} color={p.transaction_type === 'TAKEOVER' ? 'purple' : 'gold'} />
+                    </td>
+                    <td style={s.td}>
+                      <Badge
+                        label={status.label}
+                        color={
+                          p.stock_status === 'at_ho' ? 'green' :
+                          p.stock_status === 'at_branch' ? 'blue' :
+                          p.stock_status === 'in_consignment' ? 'orange' :
+                          p.stock_status === 'sent_for_melting' ? 'red' :
+                          p.stock_status === 'melted' ? 'purple' : 'dim'
+                        }
+                      />
                     </td>
                   </tr>
                 )

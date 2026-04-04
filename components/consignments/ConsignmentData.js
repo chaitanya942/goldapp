@@ -3,6 +3,8 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useApp } from '../../lib/context'
 import GoldSpinner from '../ui/GoldSpinner'
+import Badge from '../ui/Badge'
+import Toast from '../ui/Toast'
 
 async function triggerDownload(url, filename) {
   const res  = await fetch(url)
@@ -72,6 +74,7 @@ export default function ConsignmentData() {
   const [dismissWarning,  setDismissWarning]  = useState(false)
   const [previewNumbers,  setPreviewNumbers]  = useState(null)
   const [loadingPreview,  setLoadingPreview]  = useState(false)
+  const [toast,           setToast]           = useState(null)
 
   const fetchAll = useCallback(async () => {
     setLoading(true)
@@ -171,7 +174,7 @@ export default function ConsignmentData() {
         body: JSON.stringify({ action: 'create_consignment', purchase_ids: [...selected], branch_name: selectedBranches[0], movement_type: moveType })
       })
       const result = await res.json()
-      if (result.error) { alert('Error: ' + result.error); return }
+      if (result.error) { setToast({ msg: result.error, type: 'error' }); return }
       setLastConsignment(result.data)
       setSelected(new Set())
       setShowModal(false)
@@ -406,7 +409,7 @@ export default function ConsignmentData() {
                     <td style={{ padding: '10px 14px', fontSize: '12px', color: t.blue, textAlign: 'right', fontFamily: 'monospace' }}>₹{fmt(Math.round(row.final_amount_crm))}</td>
                     <td style={{ padding: '10px 14px' }}><AgeBadge days={days} t={t} /></td>
                     <td style={{ padding: '10px 14px' }}>
-                      <span style={{ fontSize: '10px', color: row.transaction_type === 'TAKEOVER' ? t.purple : t.green, background: row.transaction_type === 'TAKEOVER' ? `${t.purple}15` : `${t.green}15`, borderRadius: '4px', padding: '2px 6px' }}>{row.transaction_type}</span>
+                      <Badge label={row.transaction_type} color={row.transaction_type === 'TAKEOVER' ? 'purple' : 'green'} />
                     </td>
                   </tr>
                 )
@@ -575,6 +578,7 @@ export default function ConsignmentData() {
           </div>
         </div>
       )}
+      {toast && <Toast msg={toast.msg} type={toast.type} onDone={() => setToast(null)} />}
     </div>
   )
 }
