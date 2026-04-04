@@ -47,10 +47,14 @@ export async function GET(req) {
 
     if (ie) return Response.json({ error: 'Failed to fetch purchase items' }, { status: 500 })
 
+    // Fetch company settings so tax rates are dynamic (not hardcoded)
+    const { data: companySettings } = await supabase.from('company_settings').select('*').single()
+
     // Generate JPEG image
     const jpegBuffer = await generateConsigneeReport({
       consignment,
       items: items || [],
+      companySettings: companySettings || {},
     })
 
     const filename = `GoldConsigneeReport-${consignment.tmp_prf_no}.jpg`

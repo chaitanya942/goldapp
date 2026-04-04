@@ -1,103 +1,18 @@
 // app/api/consignments/route.js
 
 import { createClient } from '@supabase/supabase-js'
+import {
+  regionToStateCode,
+  autoBranchCode,
+  generateTmpPrfNo,
+  generateExternalNo,
+  generateInternalNo,
+} from '../../../lib/consignmentUtils'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY
 )
-
-// ── Derive state code from region ─────────────────────────────────────────────
-function regionToStateCode(region) {
-  const map = {
-    'Andhra Pradesh':    'AP',
-    'Kerala':            'KL',
-    'Telangana':         'TS',
-    'Rest of Karnataka': 'KA',
-    'Bangalore':         'KA',
-  }
-  return map[region] || 'KA'
-}
-
-// ── Auto-generate branch code from branch name ────────────────────────────────
-// KL-THRISSUR → THR, AP-GUNTUR → GNT, TUMKUR → TUM, TS-KUKATPALLY → KKP
-function autoBranchCode(branchName) {
-  const name = branchName.toUpperCase().trim()
-  // Remove state prefix if present (AP-, KL-, TS-)
-  const stripped = name.replace(/^(AP|KL|TS|KA)-/, '')
-  const words    = stripped.split(/[\s-]+/).filter(Boolean)
-
-  if (words.length === 1) {
-    // Single word — take first 3 chars
-    return words[0].substring(0, 3)
-  }
-  if (words.length === 2) {
-    // Two words — take first 2 chars of each
-    return (words[0].substring(0, 2) + words[1].substring(0, 2)).substring(0, 4)
-  }
-  // Multiple words — take first char of each word, up to 4
-  return words.map(w => w[0]).join('').substring(0, 4)
-}
-
-// ── Generate TMP PRF No (WG + 6 digits, per-branch sequential) ───────────────
-// Each branch has its own independent WG sequence starting from 000001
-async function generateTmpPrfNo(branchName) {
-  const { data } = await supabase
-    .from('consignments')
-    .select('tmp_prf_no')
-    .eq('branch_name', branchName)
-    .not('tmp_prf_no', 'is', null)
-    .order('tmp_prf_no', { ascending: false })
-    .limit(1)
-    .single()
-
-  const last = data?.tmp_prf_no ? parseInt(data.tmp_prf_no.replace('WG', '')) || 0 : 0
-  return `WG${String(last + 1).padStart(6, '0')}`
-}
-
-// ── Generate External No + Challan No ────────────────────────────────────────
-// External No is GLOBAL sequential across all branches — forms part of challan number
-// Seed floor: 001903 was the last used number (as of Apr 2026)
-const EXT_NO_SEED = 1903
-
-async function generateExternalNo(branchCode, stateCode) {
-  const now   = new Date()
-  const month = now.toLocaleString('en-US', { month: 'short' }).toUpperCase()
-  const year  = now.getFullYear()
-
-  const { data } = await supabase
-    .from('consignments')
-    .select('external_no')
-    .not('external_no', 'is', null)
-    .order('external_no', { ascending: false })
-    .limit(1)
-    .single()
-
-  const lastNo  = data?.external_no ? parseInt(data.external_no) : 0
-  const extNo   = String(Math.max(lastNo, EXT_NO_SEED) + 1).padStart(6, '0')
-  const challan = `WG${stateCode}/${stateCode}-${branchCode}/${month}/${year}/${extNo}`
-  return { extNo, challan }
-}
-
-// ── Generate Internal No ──────────────────────────────────────────────────────
-async function generateInternalNo(branchCode) {
-  const now        = new Date()
-  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString()
-
-  const { data } = await supabase
-    .from('consignments')
-    .select('internal_no')
-    .eq('branch_code', branchCode)
-    .eq('movement_type', 'INTERNAL')
-    .gte('created_at', monthStart)
-    .not('internal_no', 'is', null)
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .single()
-
-  const lastNo = data?.internal_no ? parseInt(data.internal_no) : 0
-  return String(lastNo + 1).padStart(6, '0')
-}
 
 // ── GET handler ───────────────────────────────────────────────────────────────
 export async function GET(req) {
@@ -282,29 +197,55 @@ export async function POST(req) {
   if (action === 'create_consignment') {
     const { purchase_ids, branch_name, movement_type, created_by } = body
     if (!purchase_ids?.length) return Response.json({ error: 'No purchases selected' }, { status: 400 })
+    if (!branch_name)          return Response.json({ error: 'Branch name required' },  { status: 400 })
 
     // Get branch meta from branches table
-    const { data: branchData } = await supabase
+    const { data: branchData, error: branchErr } = await supabase
       .from('branches')
       .select('name, region, state')
       .eq('name', branch_name)
       .single()
 
-    const stateCode  = branchData ? regionToStateCode(branchData.region) : 'KA'
+    if (branchErr || !branchData) {
+      return Response.json({ error: `Branch '${branch_name}' not found in branch master` }, { status: 400 })
+    }
+
+    const stateCode  = regionToStateCode(branchData.region)
     const branchCode = autoBranchCode(branch_name)
 
-    const tmpPrfNo           = await generateTmpPrfNo(branch_name)
-    const { extNo, challan } = await generateExternalNo(branchCode, stateCode)
-    const internalNo         = movement_type === 'INTERNAL' ? await generateInternalNo(branchCode) : null
+    // Validate all selected purchases belong to this branch
+    const { data: purchaseCheck } = await supabase
+      .from('purchases')
+      .select('id, branch_name, stock_status')
+      .in('id', purchase_ids)
 
-    // Totals
-    const { data: purchases } = await supabase
+    const wrongBranch = (purchaseCheck || []).filter(p => p.branch_name !== branch_name)
+    if (wrongBranch.length) {
+      return Response.json({
+        error: `${wrongBranch.length} purchase(s) do not belong to branch '${branch_name}'. All items must be from the same branch.`,
+      }, { status: 400 })
+    }
+
+    const alreadyInConsignment = (purchaseCheck || []).filter(p => p.stock_status === 'in_consignment')
+    if (alreadyInConsignment.length) {
+      return Response.json({
+        error: `${alreadyInConsignment.length} purchase(s) are already in a consignment.`,
+      }, { status: 400 })
+    }
+
+    const tmpPrfNo           = await generateTmpPrfNo(supabase, branch_name)
+    const { extNo, challan } = await generateExternalNo(supabase, branchCode, stateCode)
+    const internalNo         = movement_type === 'INTERNAL' ? await generateInternalNo(supabase, branchCode) : null
+
+    // Totals — reuse the already-fetched purchases
+    const purchases  = purchaseCheck || []
+    const { data: purchaseTotals } = await supabase
       .from('purchases')
       .select('net_weight, total_amount')
       .in('id', purchase_ids)
 
-    const totalNetWt  = purchases?.reduce((s, p) => s + parseFloat(p.net_weight || 0), 0) || 0
-    const totalAmount = purchases?.reduce((s, p) => s + parseFloat(p.total_amount || 0), 0) || 0
+    const totalNetWt  = (purchaseTotals || []).reduce((s, p) => s + parseFloat(p.net_weight || 0), 0)
+    const totalAmount = (purchaseTotals || []).reduce((s, p) => s + parseFloat(p.total_amount || 0), 0)
 
     const { data: consignment, error: ce } = await supabase
       .from('consignments')
@@ -345,6 +286,11 @@ export async function POST(req) {
   // ── Dispatch consignment ─────────────────────────────────────────────────
   if (action === 'dispatch') {
     const { id, dispatched_by } = body
+    // Validate: must be in draft status to dispatch
+    const { data: current } = await supabase.from('consignments').select('status').eq('id', id).single()
+    if (current?.status !== 'draft') {
+      return Response.json({ error: `Cannot dispatch — consignment is '${current?.status}', must be 'draft'` }, { status: 400 })
+    }
     const { data, error } = await supabase
       .from('consignments')
       .update({ status: 'dispatched', dispatched_at: new Date().toISOString(), dispatched_by })
@@ -355,6 +301,12 @@ export async function POST(req) {
   // ── Receive consignment ───────────────────────────────────────────────────
   if (action === 'receive') {
     const { id, received_by } = body
+
+    // Validate: must be in dispatched status to receive
+    const { data: current } = await supabase.from('consignments').select('status').eq('id', id).single()
+    if (current?.status !== 'dispatched') {
+      return Response.json({ error: `Cannot receive — consignment is '${current?.status}', must be 'dispatched'` }, { status: 400 })
+    }
 
     // Get all purchase IDs in this consignment
     const { data: items } = await supabase
