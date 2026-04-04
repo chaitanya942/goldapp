@@ -93,7 +93,7 @@ async function exportXLSX(rows, filename) {
 
 export default function PurchaseData() {
   const { theme, userProfile } = useApp()
-  const t = THEMES[theme]
+  const t = THEMES[theme] || THEMES.dark
   const isSuperAdmin = userProfile?.role === 'super_admin'
 
   const [purchases, setPurchases]     = useState([])

@@ -15,7 +15,7 @@ const PAGE_SIZE = 100
 
 export default function PendingBills() {
   const { theme } = useApp()
-  const t = THEMES[theme]
+  const t = THEMES[theme] || THEMES.dark
 
   const [rows, setRows]         = useState([])
   const [total, setTotal]       = useState(0)

@@ -52,7 +52,7 @@ ALTER TABLE branches ADD COLUMN IF NOT EXISTS branch_employee_phone TEXT;
 ALTER TABLE branches ADD COLUMN IF NOT EXISTS crm_branch_id        TEXT;
 
 -- Convert INT to TEXT if column was previously created as INT
-DO $
+DO $$
 BEGIN
   IF EXISTS (
     SELECT 1 FROM information_schema.columns
@@ -60,7 +60,7 @@ BEGIN
   ) THEN
     ALTER TABLE branches ALTER COLUMN crm_branch_id TYPE TEXT USING crm_branch_id::TEXT;
   END IF;
-END $;
+END $$;
 
 -- Unique index for CRM sync matching
 CREATE UNIQUE INDEX IF NOT EXISTS idx_branches_crm_id
