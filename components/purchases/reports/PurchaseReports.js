@@ -181,7 +181,7 @@ function FilterChip({ label, onRemove, color }) {
 // ── MAIN ──
 export default function PurchaseReports() {
   const { theme } = useApp()
-  const t = THEMES[theme]
+  const t = THEMES[theme] || THEMES.dark
   const s = getStyles(t)
 
   const cssVars = {
@@ -568,7 +568,7 @@ export default function PurchaseReports() {
       {/* SECTIONS */}
       {!loading && !error && (
         <>
-          {showSection('charts')       && <ReportCharts       trend={trend} monthly={monthly} dowData={dowData} hourlyTrend={hourlyTrend} isSingleDay={fromDate && toDate && fromDate === toDate} t={t} />}
+          {showSection('charts')       && <ReportCharts       trend={trend} monthly={monthly} dowData={dowData} hourlyTrend={hourlyTrend} isSingleDay={fromDate && toDate && fromDate === toDate} t={t} fromDate={fromDate} filterBranch={filterBranch} filterTxn={filterTxn} />}
           {showSection('distribution') && <ReportDistribution kpis={kpis} purityDist={purityDist} weightBuckets={weightBuckets} regionSplit={regionSplit} monthHalf={monthHalf} t={t} />}
           {showSection('branches')     && <ReportBranches     branchData={branchData} stateData={stateData} topBills={topBills} fromDate={fromDate} toDate={toDate} filterTxn={filterTxn} t={t} />}
           {showSection('sameday')      && <ReportSameDay      t={t} />}

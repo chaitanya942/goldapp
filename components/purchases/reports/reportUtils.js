@@ -51,8 +51,8 @@ export const STATES = ['Karnataka','Kerala','Andhra Pradesh','Telangana']
 // ── FORMATTERS ──
 export const fmt      = (n) => n != null ? Number(n).toLocaleString('en-IN', { maximumFractionDigits: 2 }) : '—'
 export const fmtVal   = (n) => n != null ? `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 })}` : '—'
-export const fmtDate  = (d) => d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'
-export const fmtShort = (d) => d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) : ''
+export const fmtDate  = (d) => { if (!d) return '—'; const dt = new Date(d); return isNaN(dt.getTime()) ? String(d) : dt.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) }
+export const fmtShort = (d) => { if (!d) return ''; const dt = new Date(d); return isNaN(dt.getTime()) ? String(d) : dt.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) }
 export const pct      = (a, b) => b ? ((Number(a) / Number(b)) * 100).toFixed(1) : '0.0'
 export const growth   = (cur, prev) => (prev && Number(prev) > 0) ? (((Number(cur) - Number(prev)) / Number(prev)) * 100).toFixed(1) : null
 
