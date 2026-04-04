@@ -1,0 +1,169 @@
+/* ── GoldApp Animation System ──────────────────────────────────────────── */
+
+/* ── CSS VARIABLES ── */
+:root {
+  --gold:             #FFD700;
+  --gold-bright:      #FFD700;
+  --gold-mid:         #C9A84C;
+  --gold-dim:         #8B6914;
+  --gold-glow:        rgba(255,215,0,0.15);
+  --gold-glow-strong: rgba(255,215,0,0.35);
+  --gold-text:        #080808;
+  --bg:               #080808;
+  --bg2:              #0f0f0f;
+  --bg3:              #161616;
+  --surface:          #111111;
+  --surface2:         #1a1a1a;
+  --surface3:         #222222;
+  --border:           rgba(201,168,76,0.2);
+  --border-hover:     rgba(201,168,76,0.5);
+  --text:             #e8d9b0;
+  --text-2:           #c8b89a;
+  --text-dim:         #8B7355;
+  --text-muted:       #6a5a3a;
+  --green:            #4ade80;
+  --green-dim:        rgba(74,222,128,0.15);
+  --red:              #f87171;
+  --red-dim:          rgba(239,68,68,0.15);
+  --shadow:           rgba(0,0,0,0.8);
+  --shadow-md:        0 4px 16px rgba(0,0,0,0.6);
+  --shadow-lg:        0 8px 32px rgba(0,0,0,0.8);
+  --skeleton-base:    #1a1a1a;
+  --skeleton-shine:   #2a2618;
+  --scrollbar:        #3a2e14;
+  --scrollbar-hover:  #C9A84C;
+  --backdrop:         rgba(0,0,0,0.85);
+}
+
+/* ── KEYFRAMES ── */
+
+@keyframes shimmer {
+  0%   { background-position: -200% center; }
+  100% { background-position:  200% center; }
+}
+
+@keyframes goldPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(255,215,0,0.4); }
+  50%       { box-shadow: 0 0 0 8px rgba(255,215,0,0); }
+}
+
+@keyframes flashUp {
+  0%   { background: rgba(74,222,128,0.3); }
+  100% { background: transparent; }
+}
+
+@keyframes flashDown {
+  0%   { background: rgba(239,68,68,0.3); }
+  100% { background: transparent; }
+}
+
+@keyframes fadeSlideUp {
+  from { opacity: 0; transform: translateY(16px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fadeSlideIn {
+  from { opacity: 0; transform: translateX(-12px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes modalIn {
+  from { opacity: 0; transform: scale(0.94) translateY(20px); }
+  to   { opacity: 1; transform: scale(1)    translateY(0); }
+}
+
+@keyframes backdropIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes drawerIn {
+  from { transform: translateX(100%); }
+  to   { transform: translateX(0); }
+}
+
+@keyframes countUp {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes ripple {
+  to { transform: scale(4); opacity: 0; }
+}
+
+@keyframes barGrow {
+  from { transform: scaleY(0); }
+  to   { transform: scaleY(1); }
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes pageWipe {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes lineDraw {
+  from { stroke-dashoffset: 300; }
+  to   { stroke-dashoffset: 0; }
+}
+
+@keyframes glowBreathe {
+  0%, 100% { text-shadow: 0 0 20px rgba(255,215,0,0.3); }
+  50%       { text-shadow: 0 0 40px rgba(255,215,0,0.8), 0 0 80px rgba(255,215,0,0.3); }
+}
+
+@keyframes notifIn {
+  from { opacity: 0; transform: translateX(110%); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes notifOut {
+  from { opacity: 1; transform: translateX(0); }
+  to   { opacity: 0; transform: translateX(110%); }
+}
+
+/* ── UTILITY CLASSES ── */
+
+/* Shimmer skeleton */
+.skeleton,
+.gold-shimmer {
+  background: linear-gradient(90deg,
+    var(--skeleton-base)  25%,
+    var(--skeleton-shine) 50%,
+    var(--skeleton-base)  75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.8s ease-in-out infinite;
+  border-radius: 4px;
+}
+
+/* Page transition */
+.page-enter {
+  animation: pageWipe 0.32s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* Stagger children */
+.stagger > *,
+.stagger-children > * {
+  animation: fadeSlideUp 0.5s ease both;
+}
+.stagger > *:nth-child(1),  .stagger-children > *:nth-child(1)  { animation-delay: 0.05s; }
+.stagger > *:nth-child(2),  .stagger-children > *:nth-child(2)  { animation-delay: 0.12s; }
+.stagger > *:nth-child(3),  .stagger-children > *:nth-child(3)  { animation-delay: 0.19s; }
+.stagger > *:nth-child(4),  .stagger-children > *:nth-child(4)  { animation-delay: 0.26s; }
+.stagger > *:nth-child(5),  .stagger-children > *:nth-child(5)  { animation-delay: 0.33s; }
+.stagger > *:nth-child(6),  .stagger-children > *:nth-child(6)  { animation-delay: 0.40s; }
+.stagger > *:nth-child(7),  .stagger-children > *:nth-child(7)  { animation-delay: 0.47s; }
+.stagger > *:nth-child(8),  .stagger-children > *:nth-child(8)  { animation-delay: 0.54s; }
+
+/* Scrollbar */
+::-webkit-scrollbar       { width: 4px; }
+::-webkit-scrollbar-track { background: var(--bg2); }
+::-webkit-scrollbar-thumb { background: var(--scrollbar); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-hover); }
+
+/* Selection */
+::selection { background: rgba(255,215,0,0.2); color: var(--gold); }

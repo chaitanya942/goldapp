@@ -89,7 +89,11 @@ function DashboardShell() {
 
   if (checking) return (
     <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: t.bg }}>
-      <div style={{ fontSize: '.75rem', color: t.text3, letterSpacing: '.1em' }}>Loading…</div>
+      <svg width="36" height="36" viewBox="0 0 32 32" style={{ animation: 'spin 1s linear infinite' }}>
+        <circle cx="16" cy="16" r="12" fill="none" stroke="rgba(201,168,76,0.15)" strokeWidth="2" />
+        <circle cx="16" cy="16" r="12" fill="none" stroke="#C9A84C" strokeWidth="2"
+          strokeDasharray="20 56" strokeLinecap="round" />
+      </svg>
     </div>
   )
 
@@ -123,7 +127,9 @@ function DashboardShell() {
       <Sidebar sidebarOpen={sidebarOpen} setSidebarOpen={setSidebarOpen} />
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         <Topbar />
-        <main style={{ flex: 1, overflowY: 'auto' }}>{renderPage()}</main>
+        <main style={{ flex: 1, overflowY: 'auto' }}>
+          <div key={activeNav} className="page-enter">{renderPage()}</div>
+        </main>
       </div>
     </div>
   )
