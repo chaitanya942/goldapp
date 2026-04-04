@@ -6,9 +6,9 @@ import GoldSpinner from '../ui/GoldSpinner'
 import Badge from '../ui/Badge'
 import Toast from '../ui/Toast'
 
-async function triggerDownload(url, filename) {
+async function triggerDownload(url, filename, onError) {
   const res  = await fetch(url)
-  if (!res.ok) { alert('Download failed: ' + (await res.text())); return }
+  if (!res.ok) { onError?.('Download failed: ' + (await res.text())); return }
   const blob = await res.blob()
   const a    = document.createElement('a')
   a.href     = URL.createObjectURL(blob)
@@ -299,7 +299,7 @@ export default function ConsignmentData() {
                             <button
                               onClick={(e) => {
                                 e.stopPropagation()
-                                triggerDownload(`/api/generate-challan-pdf?id=${c.id}`, `${c.challan_no?.replace(/\//g,'-')}.pdf`)
+                                triggerDownload(`/api/generate-challan-pdf?id=${c.id}`, `${c.challan_no?.replace(/\//g,'-')}.pdf`, msg => setToast({ msg, type: 'error' }))
                               }}
                               style={{ background: t.gold, color: '#1a0a00', border: 'none', borderRadius: '4px', padding: '2px 8px', fontSize: '9px', fontWeight: 700, cursor: 'pointer', letterSpacing: '.03em' }}
                             >

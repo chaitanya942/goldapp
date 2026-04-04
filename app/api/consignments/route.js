@@ -352,6 +352,36 @@ export async function POST(req) {
     return Response.json({ data, error: error?.message })
   }
 
+  // ── Receive consignment ───────────────────────────────────────────────────
+  if (action === 'receive') {
+    const { id, received_by } = body
+
+    // Get all purchase IDs in this consignment
+    const { data: items } = await supabase
+      .from('consignment_items')
+      .select('purchase_id')
+      .eq('consignment_id', id)
+
+    const purchaseIds = (items || []).map(i => i.purchase_id)
+
+    // Update consignment status
+    const { data, error } = await supabase
+      .from('consignments')
+      .update({ status: 'received', received_at: new Date().toISOString(), received_by })
+      .eq('id', id).select().single()
+
+    if (error) return Response.json({ error: error.message }, { status: 500 })
+
+    // Move purchases to at_ho
+    if (purchaseIds.length) {
+      await supabase.from('purchases')
+        .update({ stock_status: 'at_ho' })
+        .in('id', purchaseIds)
+    }
+
+    return Response.json({ data })
+  }
+
   // ── Remove item from consignment ─────────────────────────────────────────
   if (action === 'remove_item') {
     const { consignment_id, purchase_id } = body

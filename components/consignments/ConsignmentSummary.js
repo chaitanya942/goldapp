@@ -6,9 +6,9 @@ import GoldSpinner from '../ui/GoldSpinner'
 import Toast from '../ui/Toast'
 import Badge from '../ui/Badge'
 
-async function triggerDownload(url, filename) {
+async function triggerDownload(url, filename, onError) {
   const res  = await fetch(url)
-  if (!res.ok) { alert('Download failed: ' + (await res.text())); return }
+  if (!res.ok) { onError?.('Download failed: ' + (await res.text())); return }
   const blob = await res.blob()
   const a    = document.createElement('a')
   a.href     = URL.createObjectURL(blob)
@@ -42,12 +42,32 @@ export default function ConsignmentSummary() {
   const [filterBranchTo, setFilterBranchTo]     = useState('')
   const [filterDateFrom, setFilterDateFrom]     = useState('')
   const [filterDateTo, setFilterDateTo]         = useState('')
-  const [downloading, setDownloading]           = useState(false)
+  const [downloading, setDownloading] = useState(false)
+  const [updating, setUpdating]       = useState(false)
 
   async function downloadChallan(id, challanNo) {
     setDownloading(true)
-    await triggerDownload(`/api/generate-challan-pdf?id=${id}`, `${challanNo?.replace(/\//g,'-')}.pdf`)
+    await triggerDownload(`/api/generate-challan-pdf?id=${id}`, `${challanNo?.replace(/\//g,'-')}.pdf`, msg => setToast({ msg, type: 'error' }))
     setDownloading(false)
+  }
+
+  async function updateStatus(action) {
+    if (!selected) return
+    setUpdating(true)
+    try {
+      const res  = await fetch('/api/consignments', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action, id: selected }),
+      })
+      const data = await res.json()
+      if (data.error) { setToast({ msg: data.error, type: 'error' }); return }
+      setToast({ msg: `Consignment marked as ${action === 'dispatch' ? 'dispatched' : 'received'}`, type: 'success' })
+      await fetchMovements()
+      await fetchDetail(selected)
+    } finally {
+      setUpdating(false)
+    }
   }
   const [search, setSearch]                     = useState('')
 
@@ -203,7 +223,7 @@ export default function ConsignmentSummary() {
                     <td style={{ padding: '8px 12px', fontSize: '11px', color: t.blue, fontFamily: 'monospace', maxWidth: '180px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.challan_no}</td>
                     <td style={{ padding: '8px 12px', fontSize: '12px', color: t.text2 }}>{m.branch_name}</td>
                     <td style={{ padding: '8px 12px' }}>
-                      <span style={{ fontSize: '10px', color: m.movement_type === 'INTERNAL' ? t.purple : t.orange, background: m.movement_type === 'INTERNAL' ? `${t.purple}15` : `${t.orange}15`, borderRadius: '4px', padding: '2px 6px' }}>{m.movement_type}</span>
+                      <Badge label={m.movement_type} color={m.movement_type === 'INTERNAL' ? 'purple' : 'orange'} />
                     </td>
                     <td style={{ padding: '8px 12px', fontSize: '12px', color: t.text2, textAlign: 'right' }}>{m.total_bills}</td>
                     <td style={{ padding: '8px 12px', fontSize: '12px', color: t.text2, textAlign: 'right', fontFamily: 'monospace' }}>{fmtWt(m.total_net_wt)}</td>
@@ -224,8 +244,26 @@ export default function ConsignmentSummary() {
           <div style={{ ...card, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
             <div style={{ padding: '12px 16px', borderBottom: `1px solid ${t.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div style={{ fontSize: '12px', fontWeight: 600, color: t.gold }}>{detail?.tmp_prf_no || '...'}</div>
-              <div style={{ display: 'flex', gap: '8px' }}>
-                <button disabled={downloading} onClick={() => downloadChallan(selected, detail?.challan_no)} style={{ ...btnGold, padding: '4px 10px', fontSize: '11px', opacity: downloading ? 0.6 : 1 }}>{downloading ? '⏳ Downloading...' : '📄 Delivery Challan'}</button>
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+                {detail?.status === 'draft' && (
+                  <button
+                    disabled={updating}
+                    onClick={() => updateStatus('dispatch')}
+                    style={{ ...btnGold, padding: '4px 12px', fontSize: '11px', background: '#3a8fbf', opacity: updating ? 0.6 : 1 }}
+                  >
+                    {updating ? '...' : '↑ Mark Dispatched'}
+                  </button>
+                )}
+                {detail?.status === 'dispatched' && (
+                  <button
+                    disabled={updating}
+                    onClick={() => updateStatus('receive')}
+                    style={{ ...btnGold, padding: '4px 12px', fontSize: '11px', background: '#3aaa6a', opacity: updating ? 0.6 : 1 }}
+                  >
+                    {updating ? '...' : '✓ Mark Received'}
+                  </button>
+                )}
+                <button disabled={downloading} onClick={() => downloadChallan(selected, detail?.challan_no)} style={{ ...btnGold, padding: '4px 10px', fontSize: '11px', opacity: downloading ? 0.6 : 1 }}>{downloading ? '⏳...' : '📄 Challan'}</button>
                 <button onClick={() => { setSelected(null); setDetail(null) }} style={{ ...btnOut, padding: '3px 8px', fontSize: '11px' }}>✕</button>
               </div>
             </div>
