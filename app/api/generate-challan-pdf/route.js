@@ -10,24 +10,25 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 )
 
-// ── Actual company GSTINs (used as fallback if company_settings row is missing) ─
+// ── Structural defaults only — no hardcoded GSTINs, PANs, or addresses ───────
+// All company data must be configured via Admin > Company Settings
 const DEFAULT_COMPANY = {
-  company_name:          'WHITE GOLD BULLION PVT.LTD',
-  gstin:                 '29AAPCA3170M1Z5',   // HO (Karnataka) — consignee side
-  gstin_ka:              '29AAPCA3170M1Z5',   // Karnataka branches
-  gstin_ap:              '37AAPCA3170M1Z8',   // Andhra Pradesh branches
-  gstin_kl:              '32AAPCA3170M1ZI',   // Kerala branches
-  gstin_ts:              '36AAPCA3170M1ZA',   // Telangana branches
-  gstin_tn:              '33AAPCA3170M1ZG',   // Tamil Nadu branches
-  pan:                   'AAPCA3170M',
+  company_name:          '',
+  gstin:                 '',
+  gstin_ka:              '',
+  gstin_ap:              '',
+  gstin_kl:              '',
+  gstin_ts:              '',
+  gstin_tn:              '',
+  pan:                   '',
   hsn_code:              '711319',
   transporter_name:      'BVC LOGISTICS PVT. LTD.',
   transportation_mode:   'BY AIR & ROAD',
-  head_office_building:  'HOUSE OF WHITE GOLD',
-  head_office_address:   'NO. 1, COMMERCIAL STREET',
-  head_office_city:      'BENGALURU',
-  head_office_state:     'KARNATAKA',
-  head_office_pin:       '560001',
+  head_office_building:  '',
+  head_office_address:   '',
+  head_office_city:      '',
+  head_office_state:     '',
+  head_office_pin:       '',
   igst_rate:             3,
   value_uplift_pct:      7.5,
 }
