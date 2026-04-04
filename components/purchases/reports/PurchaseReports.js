@@ -10,13 +10,15 @@ import ReportBranches from './ReportBranches'
 import ReportCompare from './ReportCompare'
 import GoldModal from '../../ui/GoldModal'
 import ReportSameDay from './ReportSameDay'
+import ReportCrmInsights from './ReportCrmInsights'
 
 const SECTIONS = [
-  { key: 'charts',       label: 'Trends',      icon: '↗' },
-  { key: 'distribution', label: 'Distribution', icon: '◎' },
-  { key: 'branches',     label: 'Branches',     icon: '⬡' },
-  { key: 'sameday',      label: 'Same Day',     icon: '⊙' },
-  { key: 'compare',      label: 'Compare',      icon: '⇄' },
+  { key: 'charts',       label: 'Trends',       icon: '↗' },
+  { key: 'distribution', label: 'Distribution',  icon: '◎' },
+  { key: 'branches',     label: 'Branches',      icon: '⬡' },
+  { key: 'sameday',      label: 'Same Day',      icon: '⊙' },
+  { key: 'compare',      label: 'Compare',       icon: '⇄' },
+  { key: 'crm',          label: 'CRM Insights',  icon: '⚡' },
 ]
 
 const istNow = () => new Date(Date.now() + 5.5 * 60 * 60 * 1000)
@@ -571,6 +573,7 @@ export default function PurchaseReports() {
           {showSection('branches')     && <ReportBranches     branchData={branchData} stateData={stateData} topBills={topBills} fromDate={fromDate} toDate={toDate} filterTxn={filterTxn} t={t} />}
           {showSection('sameday')      && <ReportSameDay      t={t} />}
           {showSection('compare')      && <ReportCompare      t={t} />}
+          {showSection('crm')          && <ReportCrmInsights  t={t} />}
         </>
       )}
 
