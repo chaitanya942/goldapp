@@ -3,7 +3,7 @@
 
 import mysql from 'mysql2/promise'
 
-const ALLOWED_ACTIONS = new Set(['rejected', 'pending', 'walkin', 'blacklisted', 'branches', 'kpis'])
+const ALLOWED_ACTIONS = new Set(['rejected', 'pending', 'walkin', 'blacklisted', 'branches', 'kpis', 'live'])
 
 function createConn() {
   return mysql.createConnection({
@@ -213,6 +213,95 @@ export async function GET(req) {
         `SELECT brnch_id, brnch_name FROM branch_tbl ORDER BY brnch_name`
       )
       return Response.json({ branches })
+    }
+
+    // ── LIVE FEED ─────────────────────────────────────────────────────────────
+    if (action === 'live') {
+      // IST today
+      const istNow = new Date(Date.now() + 5.5 * 60 * 60 * 1000)
+      const todayIST = istNow.toISOString().split('T')[0]
+
+      // Today's transaction summary
+      const [[todaySummary]] = await conn.execute(`
+        SELECT
+          COUNT(*) AS total,
+          SUM(CASE WHEN trxn_status='approved' THEN 1 ELSE 0 END) AS approved,
+          SUM(CASE WHEN trxn_status='rejected' THEN 1 ELSE 0 END) AS rejected,
+          SUM(CASE WHEN trxn_status='pending'  THEN 1 ELSE 0 END) AS pending,
+          COUNT(DISTINCT branch_id) AS branches_active,
+          SUM(CASE WHEN trxn_status='approved' THEN (finl_amnt+0) ELSE 0 END) AS approved_value
+        FROM transac_tbl WHERE date = ?
+      `, [todayIST])
+
+      // Today's walk-ins count
+      const [[walkinToday]] = await conn.execute(
+        `SELECT COUNT(*) AS count FROM customer_walkin WHERE date = ?`, [todayIST]
+      )
+
+      // Today's transactions (detail)
+      const [todayTxns] = await conn.execute(`
+        SELECT t.id, t.bill_no, t.cust_name, t.cust_mobile,
+          t.time, t.branch_id, b.brnch_name AS branch_name,
+          t.type_gold, t.trxn_status, (t.finl_amnt+0) AS amount, t.txn_rmrk, t.pymt_mde
+        FROM transac_tbl t
+        LEFT JOIN branch_tbl b ON b.brnch_id = t.branch_id
+        WHERE t.date = ?
+        ORDER BY t.time DESC
+      `, [todayIST])
+
+      // Today's walk-ins (detail)
+      const [todayWalkins] = await conn.execute(`
+        SELECT cw.id, cw.cust_name, cw.cust_mobile, cw.time,
+          cw.walkin_status, cw.item_type, cw.gms_weight,
+          cw.walk_reason, cw.source, cw.branch_id, b.brnch_name AS branch_name
+        FROM customer_walkin cw
+        LEFT JOIN branch_tbl b ON b.brnch_id = cw.branch_id
+        WHERE cw.date = ?
+        ORDER BY cw.time DESC
+      `, [todayIST])
+
+      // ── PENDING GOLD AT EACH BRANCH ──────────────────────────────────────
+      // Gold physically present at branch — bill created & weighed but NOT paid yet
+      const [pendingGold] = await conn.execute(`
+        SELECT
+          t.branch_id,
+          b.brnch_name                          AS branch_name,
+          COUNT(DISTINCT t.id)                  AS pending_bills,
+          ROUND(SUM(o.grms_wet + 0), 2)         AS gross_weight_g,
+          ROUND(SUM(o.net_wet   + 0), 2)         AS net_weight_g,
+          SUM(t.finl_amnt + 0)                  AS pending_value,
+          DATEDIFF(CURDATE(), MIN(t.date))       AS oldest_days,
+          MIN(t.date)                            AS oldest_date
+        FROM transac_tbl t
+        LEFT JOIN branch_tbl b  ON b.brnch_id  = t.branch_id
+        LEFT JOIN ornments_tbl o ON o.trnxnn_id = t.id
+        WHERE t.trxn_status = 'pending'
+          AND t.branch_id IS NOT NULL AND t.branch_id != ''
+        GROUP BY t.branch_id, b.brnch_name
+        HAVING pending_bills > 0
+        ORDER BY net_weight_g DESC
+      `)
+
+      // ── PENDING GOLD TOTALS ───────────────────────────────────────────────
+      const [[pendingTotals]] = await conn.execute(`
+        SELECT
+          COUNT(DISTINCT t.id)          AS total_bills,
+          ROUND(SUM(o.net_wet + 0), 2)  AS total_net_g,
+          SUM(t.finl_amnt + 0)          AS total_value
+        FROM transac_tbl t
+        LEFT JOIN ornments_tbl o ON o.trnxnn_id = t.id
+        WHERE t.trxn_status = 'pending'
+      `)
+
+      return Response.json({
+        todayIST,
+        todaySummary,
+        walkinToday: walkinToday.count,
+        todayTxns,
+        todayWalkins,
+        pendingGold,
+        pendingTotals,
+      })
     }
 
     // ── KPI COUNTS ───────────────────────────────────────────────────────────
