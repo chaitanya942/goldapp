@@ -13,9 +13,10 @@ import CompanySettings from '../../components/admin/CompanySettings'
 import ConsignmentSeeds from '../../components/admin/ConsignmentSeeds'
 import BranchEmployees from '../../components/admin/BranchEmployees'
 import ImportLogs from '../../components/admin/ImportLogs'
-import PurchaseData          from '../../components/purchases/PurchaseData'
-import PurchaseReports        from '../../components/purchases/reports/PurchaseReports'
-import RejectedBills          from '../../components/purchases/RejectedBills'
+import PurchaseData            from '../../components/purchases/PurchaseData'
+import PurchaseReports         from '../../components/purchases/reports/PurchaseReports'
+import PurchaseIntelligence    from '../../components/purchases/intelligence/PurchaseIntelligence'
+import RejectedBills           from '../../components/purchases/RejectedBills'
 import PendingBills            from '../../components/purchases/PendingBills'
 import WalkinPipeline          from '../../components/purchases/WalkinPipeline'
 import BlacklistedCustomers    from '../../components/purchases/BlacklistedCustomers'
@@ -105,12 +106,13 @@ function DashboardShell() {
     if (activeNav !== 'dashboard' && !canSee(activeNav)) return <AccessDenied />
     switch (activeNav) {
       case 'dashboard':           return <DashboardHome />
-      case 'purchase-data':       return <PurchaseData />
-      case 'purchase-reports':    return <PurchaseReports />
-      case 'rejected-bills':      return <RejectedBills />
-      case 'pending-bills':       return <PendingBills />
-      case 'walkin-pipeline':     return <WalkinPipeline />
-      case 'blacklisted':         return <BlacklistedCustomers />
+      case 'purchase-data':          return <PurchaseData />
+      case 'purchase-intelligence':  return <PurchaseIntelligence />
+      case 'purchase-reports':       return <PurchaseReports />
+      case 'rejected-bills':         return <RejectedBills />
+      case 'pending-bills':          return <PendingBills />
+      case 'walkin-pipeline':        return <WalkinPipeline />
+      case 'blacklisted':            return <BlacklistedCustomers />
       case 'consignment-data':    return <ConsignmentData />
       case 'consignment-report':  return <ConsignmentReport />
       case 'consignment-summary': return <ConsignmentSummary />
