@@ -204,22 +204,6 @@ export default function DashboardHome() {
             Every gram.<br/>
             <span style={{ fontStyle:'italic', color:t.gold, textShadow:`0 0 40px ${t.gold}40` }}>Accounted for.</span>
           </div>
-          <div style={{ display:'flex', alignItems:'center', gap:24, flexWrap:'wrap' }}>
-            {[
-              { dot:t.gold,  label:'GoldApp v1.0', pulse:false },
-              { dot:t.blue,  label: totalBranches > 0 ? `${totalBranches} Branches across ${stateCount} States` : 'Loading...', pulse:false },
-              { dot:t.green, label:'Phase 1 — Live', pulse:true },
-            ].map(item => (
-              <div key={item.label} style={{ display:'flex', alignItems:'center', fontSize:13, color:t.text3, gap:8 }}>
-                <span style={{ width:7, height:7, borderRadius:'50%', background:item.dot, boxShadow:`0 0 8px ${item.dot}`, display:'inline-block', animation:item.pulse?'pglow 2s ease-in-out infinite':'none' }}/>
-                {item.label}
-              </div>
-            ))}
-            <div style={{ marginLeft:'auto', padding:'7px 18px', borderRadius:100, background:`linear-gradient(135deg,${t.green}20,${t.green}10)`, border:`1px solid ${t.green}40`, fontSize:12, color:t.green, fontWeight:600, letterSpacing:'.06em', display:'flex', alignItems:'center', gap:8 }}>
-              <span style={{ width:6, height:6, borderRadius:'50%', background:t.green, animation:'pglow 2s ease-in-out infinite' }}/>
-              Phase 1 — Live
-            </div>
-          </div>
         </div>
       </div>
 
@@ -227,7 +211,7 @@ export default function DashboardHome() {
       <LiveTicker />
 
       {/* ── PURCHASE OVERVIEW ── */}
-      <div style={{ border:`1px solid ${t.border2}`, borderRadius:20, background:`linear-gradient(160deg,${t.card2},${t.card3})`, boxShadow:`${t.shadow},inset 0 1px 0 rgba(255,255,255,.03)`, position:'relative', overflow:'hidden', transition:'all .35s ease' }}>
+      <div style={{ marginTop: 8, border:`1px solid ${t.border2}`, borderRadius:20, background:`linear-gradient(160deg,${t.card2},${t.card3})`, boxShadow:`${t.shadow},inset 0 1px 0 rgba(255,255,255,.03)`, position:'relative', overflow:'hidden', transition:'all .35s ease' }}>
         <div style={{ position:'absolute', top:0, left:0, width:160, height:160, background:`radial-gradient(circle at top left,${t.gold}08,transparent 70%)`, pointerEvents:'none' }}/>
 
         {/* ── Clickable Header ── */}
