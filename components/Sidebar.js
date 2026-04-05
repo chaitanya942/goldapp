@@ -171,8 +171,8 @@ export default function Sidebar({ sidebarOpen, setSidebarOpen }) {
     <div style={{ width: sidebarOpen ? '232px' : '52px', flexShrink: 0, background: t.side, borderRight: `1px solid ${t.border}`, display: 'flex', flexDirection: 'column', transition: 'width .22s cubic-bezier(.4,0,.2,1)', overflow: 'hidden', height: '100vh', position: 'relative' }}>
       <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '120px', background: t.topGlow, pointerEvents: 'none', zIndex: 0 }} />
       <div style={{ padding: sidebarOpen ? '18px 16px 16px' : '18px 0 16px', display: 'flex', alignItems: 'center', gap: '10px', justifyContent: sidebarOpen ? 'flex-start' : 'center', borderBottom: `1px solid ${t.border}`, flexShrink: 0, position: 'relative', zIndex: 1 }}>
-        <div style={{ width: '34px', height: '34px', flexShrink: 0, borderRadius: '9px', overflow: 'hidden', background: '#0a0804', boxShadow: t.logoSdw }}>
-          <img src="/logo.png" alt="White Gold" style={{ width: '100%', height: '170%', objectFit: 'cover', objectPosition: 'center 8%', filter: 'brightness(10) saturate(0.08)', mixBlendMode: 'lighten' }} />
+        <div style={{ width: '34px', height: '34px', flexShrink: 0, borderRadius: '9px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(201,168,76,0.07)', border: `1px solid rgba(201,168,76,0.2)`, boxShadow: '0 2px 12px rgba(201,168,76,0.15)' }}>
+          <img src="/emblem.svg" alt="W" style={{ width: '24px', height: '24px' }} />
         </div>
         {sidebarOpen && (
           <div>
