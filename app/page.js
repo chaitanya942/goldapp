@@ -79,88 +79,99 @@ export default function LoginPage() {
         }
 
         /* ── FACETED BACKGROUND PANELS ── */
-        /* Like a cut gemstone — angled dark panels, slightly different shades */
         .panel {
-          position: absolute;
-          inset: 0;
-          pointer-events: none;
+          position: absolute; inset: 0; pointer-events: none;
         }
-
-        /* Top-left large facet */
+        /* Top-left large facet — warmest */
         .p-tl {
-          background: #0e0b06;
-          clip-path: polygon(0 0, 68% 0, 38% 100%, 0 100%);
+          background: linear-gradient(135deg, #141008 0%, #0c0904 100%);
+          clip-path: polygon(0 0, 68% 0, 36% 100%, 0 100%);
         }
         /* Top-right facet */
         .p-tr {
-          background: #0b0905;
-          clip-path: polygon(72% 0, 100% 0, 100% 65%, 100% 100%, 58% 100%);
+          background: linear-gradient(225deg, #110e07 0%, #090703 100%);
+          clip-path: polygon(72% 0, 100% 0, 100% 100%, 60% 100%);
         }
-        /* Bottom centre darker */
+        /* Bottom centre — darkest, makes panels "pop" */
         .p-bc {
-          background: #050401;
-          clip-path: polygon(30% 100%, 65% 100%, 100% 60%, 100% 100%, 0 100%, 0 72%);
+          background: #030200;
+          clip-path: polygon(28% 100%, 62% 100%, 100% 58%, 100% 100%, 0 100%, 0 70%);
         }
 
-        /* ── LIGHT STREAKS (the hero detail) ── */
-        .streaks {
+        /* Sharp gold edge lines exactly where panels meet — the key CRM detail */
+        .edges {
           position: absolute; inset: 0; pointer-events: none;
         }
-        /* Main diagonal streak top-left to mid-right */
+        .edges svg { width: 100%; height: 100%; }
+
+        /* ── LIGHT STREAKS ── */
+        .streaks { position: absolute; inset: 0; pointer-events: none; }
+
+        /* Main broad streak — left diagonal */
         .streak-1 {
-          position: absolute;
-          top: -10%; left: -5%;
-          width: 55%; height: 100%;
+          position: absolute; top: -10%; left: -5%;
+          width: 60%; height: 120%;
           background: linear-gradient(
             148deg,
-            transparent 0%,
-            transparent 38%,
-            rgba(201,168,76,0.11) 39%,
-            rgba(240,210,80,0.22) 39.6%,
-            rgba(201,168,76,0.11) 40.2%,
+            transparent 0%, transparent 35%,
+            rgba(201,168,76,0.07) 36.5%,
+            rgba(240,215,90,0.32) 37.4%,
+            rgba(255,230,100,0.18) 37.9%,
+            rgba(240,215,90,0.32) 38.4%,
+            rgba(201,168,76,0.07) 39.5%,
             transparent 41%
           );
-          animation: streakPulse 6s ease-in-out infinite;
+          animation: streakPulse 5s ease-in-out infinite;
         }
-        /* Secondary thinner streak */
+        /* Thin accent streak alongside */
         .streak-2 {
-          position: absolute;
-          top: -10%; left: 5%;
-          width: 55%; height: 100%;
+          position: absolute; top: -10%; left: 2%;
+          width: 60%; height: 120%;
           background: linear-gradient(
             148deg,
-            transparent 0%,
-            transparent 45%,
-            rgba(201,168,76,0.06) 45.5%,
-            rgba(201,168,76,0.12) 46%,
-            rgba(201,168,76,0.06) 46.5%,
+            transparent 0%, transparent 44%,
+            rgba(201,168,76,0.04) 44.8%,
+            rgba(201,168,76,0.14) 45.4%,
+            rgba(201,168,76,0.04) 46%,
             transparent 47%
           );
-          animation: streakPulse 6s ease-in-out 1.5s infinite;
+          animation: streakPulse 5s ease-in-out 1.2s infinite;
         }
         /* Right side streak */
         .streak-3 {
-          position: absolute;
-          top: 0; right: -5%;
-          width: 45%; height: 100%;
+          position: absolute; top: 0; right: -5%;
+          width: 50%; height: 100%;
           background: linear-gradient(
-            -138deg,
-            transparent 0%,
-            transparent 50%,
-            rgba(201,168,76,0.07) 50.8%,
-            rgba(201,168,76,0.14) 51.5%,
-            rgba(201,168,76,0.07) 52.2%,
-            transparent 53%
+            -140deg,
+            transparent 0%, transparent 46%,
+            rgba(201,168,76,0.05) 47%,
+            rgba(240,210,80,0.22) 47.8%,
+            rgba(201,168,76,0.05) 48.6%,
+            transparent 50%
           );
-          animation: streakPulse 8s ease-in-out 3s infinite;
+          animation: streakPulse 7s ease-in-out 2.5s infinite;
+        }
+        /* Extra glint — short bright flash top-left */
+        .streak-4 {
+          position: absolute; top: -5%; left: 10%;
+          width: 40%; height: 60%;
+          background: linear-gradient(
+            148deg,
+            transparent 0%, transparent 55%,
+            rgba(255,235,120,0.08) 56%,
+            rgba(255,235,120,0.18) 56.5%,
+            rgba(255,235,120,0.08) 57%,
+            transparent 58%
+          );
+          animation: streakPulse 9s ease-in-out 4s infinite;
         }
 
         /* ── ATMOSPHERIC GLOW ── */
         .atm {
           position: absolute; inset: 0; pointer-events: none;
           background:
-            radial-gradient(ellipse 50% 55% at 50% 42%, rgba(201,168,76,0.10) 0%, transparent 60%),
-            radial-gradient(ellipse 80% 60% at 50% 50%, rgba(120,85,10,0.06) 0%, transparent 70%);
+            radial-gradient(ellipse 55% 60% at 50% 44%, rgba(201,168,76,0.13) 0%, transparent 60%),
+            radial-gradient(ellipse 85% 65% at 50% 50%, rgba(120,85,10,0.07) 0%, transparent 70%);
         }
 
         /* Particles */
@@ -196,9 +207,9 @@ export default function LoginPage() {
         }
         .logo-img {
           position: relative; z-index: 1;
-          width: 200px; height: auto;
-          filter: brightness(8) saturate(0.1) drop-shadow(0 0 28px rgba(201,168,76,0.28));
-          opacity: 0.92;
+          width: 240px; height: auto;
+          filter: brightness(10) saturate(0.08) drop-shadow(0 0 36px rgba(201,168,76,0.35)) drop-shadow(0 0 12px rgba(201,168,76,0.2));
+          opacity: 0.95;
           mix-blend-mode: lighten;
           animation: float 8s ease-in-out infinite;
         }
@@ -206,16 +217,17 @@ export default function LoginPage() {
         /* Form card — glass panel */
         .card {
           width: 100%;
-          background: rgba(255,255,255,0.025);
-          border: 1px solid rgba(201,168,76,0.12);
+          background: rgba(22,16,8,0.72);
+          border: 1px solid rgba(201,168,76,0.18);
           border-radius: 16px;
           padding: 36px 36px 32px;
-          backdrop-filter: blur(12px);
-          -webkit-backdrop-filter: blur(12px);
+          backdrop-filter: blur(20px);
+          -webkit-backdrop-filter: blur(20px);
           box-shadow:
-            0 24px 64px rgba(0,0,0,0.55),
-            0 1px 0 rgba(201,168,76,0.08) inset,
-            0 -1px 0 rgba(0,0,0,0.3) inset;
+            0 32px 80px rgba(0,0,0,0.7),
+            0 8px 32px rgba(0,0,0,0.4),
+            0 1px 0 rgba(201,168,76,0.12) inset,
+            0 -1px 0 rgba(0,0,0,0.4) inset;
           opacity: 0;
           animation: fadeUp 1.1s cubic-bezier(.22,1,.36,1) .3s forwards;
         }
@@ -364,11 +376,48 @@ export default function LoginPage() {
         <div className="panel p-tr" />
         <div className="panel p-bc" />
 
+        {/* Sharp gold panel edge lines */}
+        <div className="edges">
+          <svg viewBox="0 0 1440 900" preserveAspectRatio="none">
+            <defs>
+              <linearGradient id="eg1" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%"   stopColor="rgba(240,210,80,0)" />
+                <stop offset="20%"  stopColor="rgba(240,210,80,0.55)" />
+                <stop offset="50%"  stopColor="rgba(255,230,100,0.9)" />
+                <stop offset="80%"  stopColor="rgba(240,210,80,0.55)" />
+                <stop offset="100%" stopColor="rgba(240,210,80,0)" />
+              </linearGradient>
+              <linearGradient id="eg2" x1="100%" y1="0%" x2="0%" y2="100%">
+                <stop offset="0%"   stopColor="rgba(240,210,80,0)" />
+                <stop offset="25%"  stopColor="rgba(240,210,80,0.45)" />
+                <stop offset="55%"  stopColor="rgba(255,230,100,0.8)" />
+                <stop offset="80%"  stopColor="rgba(240,210,80,0.45)" />
+                <stop offset="100%" stopColor="rgba(240,210,80,0)" />
+              </linearGradient>
+              <linearGradient id="eg3" x1="0%" y1="100%" x2="100%" y2="0%">
+                <stop offset="0%"   stopColor="rgba(240,210,80,0)" />
+                <stop offset="30%"  stopColor="rgba(240,210,80,0.4)" />
+                <stop offset="60%"  stopColor="rgba(255,230,100,0.7)" />
+                <stop offset="100%" stopColor="rgba(240,210,80,0)" />
+              </linearGradient>
+            </defs>
+            {/* Left panel right edge: top-right corner of p-tl → bottom of p-tl */}
+            <line x1="979" y1="0" x2="518" y2="900" stroke="url(#eg1)" strokeWidth="1.2" />
+            {/* Right panel left edge */}
+            <line x1="1037" y1="0" x2="864" y2="900" stroke="url(#eg2)" strokeWidth="1.2" />
+            {/* Bottom panel top edge — left side */}
+            <line x1="0" y1="630" x2="403" y2="900" stroke="url(#eg3)" strokeWidth="1" />
+            {/* Bottom panel top edge — right side */}
+            <line x1="1440" y1="522" x2="893" y2="900" stroke="url(#eg3)" strokeWidth="1" />
+          </svg>
+        </div>
+
         {/* Light streaks */}
         <div className="streaks">
           <div className="streak-1" />
           <div className="streak-2" />
           <div className="streak-3" />
+          <div className="streak-4" />
         </div>
 
         {/* Atmospheric glow */}
