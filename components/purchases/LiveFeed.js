@@ -72,8 +72,7 @@ export default function LiveFeed() {
     </div>
   )
 
-  const { todaySummary: ts, walkinToday, todayTxns = [], todayWalkins = [], pendingGold = [], pendingTotals } = data || {}
-  const maxNetWt = Math.max(...pendingGold.map(b => Number(b.net_weight_g) || 0), 1)
+  const { todaySummary: ts, walkinToday, todayTxns = [], todayWalkins = [] } = data || {}
 
   // Merge today's timeline: walk-ins + transactions
   const timeline = [
@@ -126,73 +125,6 @@ export default function LiveFeed() {
             <div style={{ fontSize: '.55rem', color: t.text3, letterSpacing: '.1em', textTransform: 'uppercase', marginTop: '6px' }}>{c.label}</div>
           </div>
         ))}
-      </div>
-
-      {/* PENDING GOLD AT BRANCHES — THE KEY SECTION */}
-      <div style={{ fontSize: '.58rem', color: t.text4, letterSpacing: '.18em', textTransform: 'uppercase', marginBottom: '10px' }}>
-        Gold at Branches (Pending Payment)
-        <span style={{ marginLeft: '10px', color: t.orange, textTransform: 'none', letterSpacing: 0, fontWeight: 400 }}>
-          — {pendingGold.length} branches · {fmtWt(pendingTotals?.total_net_g)} total · {fmtAmt(pendingTotals?.total_value)}
-        </span>
-      </div>
-      <div style={{ ...card, marginBottom: '28px', padding: '0' }}>
-        {pendingGold.length === 0 ? (
-          <div style={{ padding: '32px', textAlign: 'center', color: t.text4, fontSize: '.75rem' }}>No pending gold at any branch</div>
-        ) : (
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead>
-                <tr style={{ background: t.card2 }}>
-                  {['Branch', 'Pending Bills', 'Net Weight', 'Gross Weight', 'Pending Value', 'Oldest Bill', 'Weight Bar'].map(h => (
-                    <th key={h} style={{ padding: '10px 14px', fontSize: '.55rem', color: t.text3, letterSpacing: '.1em', textTransform: 'uppercase', textAlign: 'left', borderBottom: `1px solid ${t.border}`, fontWeight: 400, whiteSpace: 'nowrap' }}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {pendingGold.map((b, i) => {
-                  const isOld = Number(b.oldest_days) > 30
-                  return (
-                    <tr key={b.branch_id || i}
-                      style={{ background: isOld ? `${t.red}05` : 'transparent', transition: 'background .1s' }}
-                      onMouseEnter={e => e.currentTarget.style.background = t.card2}
-                      onMouseLeave={e => e.currentTarget.style.background = isOld ? `${t.red}05` : 'transparent'}>
-                      <td style={{ padding: '10px 14px', fontSize: '.75rem', fontWeight: 500, color: t.text1, borderBottom: `1px solid ${t.border}20` }}>{b.branch_name || b.branch_id}</td>
-                      <td style={{ padding: '10px 14px', fontSize: '.72rem', color: t.orange, textAlign: 'right', borderBottom: `1px solid ${t.border}20` }}>{b.pending_bills}</td>
-                      <td style={{ padding: '10px 14px', borderBottom: `1px solid ${t.border}20` }}>
-                        <span style={{ fontSize: '.8rem', fontWeight: 600, color: t.gold }}>{fmtWt(b.net_weight_g)}</span>
-                      </td>
-                      <td style={{ padding: '10px 14px', fontSize: '.72rem', color: t.text3, borderBottom: `1px solid ${t.border}20` }}>{fmtWt(b.gross_weight_g)}</td>
-                      <td style={{ padding: '10px 14px', fontSize: '.75rem', fontWeight: 500, color: t.green, borderBottom: `1px solid ${t.border}20` }}>{fmtAmt(b.pending_value)}</td>
-                      <td style={{ padding: '10px 14px', borderBottom: `1px solid ${t.border}20`, whiteSpace: 'nowrap' }}>
-                        <div style={{ fontSize: '.7rem', color: isOld ? t.red : t.text3 }}>{fmtDate(b.oldest_date)}</div>
-                        <div style={{ fontSize: '.62rem', color: isOld ? t.red : t.text4 }}>
-                          {b.oldest_days === 0 ? 'Today' : `${b.oldest_days}d ago`}
-                          {isOld ? ' ⚠' : ''}
-                        </div>
-                      </td>
-                      <td style={{ padding: '10px 14px', borderBottom: `1px solid ${t.border}20`, minWidth: '100px' }}>
-                        <div style={{ height: '6px', background: `${t.border}40`, borderRadius: '3px' }}>
-                          <div style={{ width: `${Math.round((Number(b.net_weight_g) / maxNetWt) * 100)}%`, height: '100%', background: t.gold, borderRadius: '3px' }} />
-                        </div>
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-              <tfoot>
-                <tr style={{ background: t.card2 }}>
-                  <td style={{ padding: '10px 14px', fontSize: '.68rem', color: t.text3, fontWeight: 500, borderTop: `1px solid ${t.border}` }}>TOTAL</td>
-                  <td style={{ padding: '10px 14px', fontSize: '.72rem', color: t.orange, textAlign: 'right', borderTop: `1px solid ${t.border}` }}>{pendingTotals?.total_bills}</td>
-                  <td style={{ padding: '10px 14px', borderTop: `1px solid ${t.border}` }}>
-                    <span style={{ fontSize: '.8rem', fontWeight: 600, color: t.gold }}>{fmtWt(pendingTotals?.total_net_g)}</span>
-                  </td>
-                  <td colSpan={2} style={{ padding: '10px 14px', fontSize: '.75rem', fontWeight: 500, color: t.green, borderTop: `1px solid ${t.border}` }}>{fmtAmt(pendingTotals?.total_value)}</td>
-                  <td colSpan={2} style={{ borderTop: `1px solid ${t.border}` }} />
-                </tr>
-              </tfoot>
-            </table>
-          </div>
-        )}
       </div>
 
       {/* TODAY'S TIMELINE */}
