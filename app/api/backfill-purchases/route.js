@@ -124,7 +124,7 @@ export async function POST(request) {
 
       return {
         application_id:             `WGKA${String(r.application_id).trim()}`,
-        purchase_date:              r.purchase_date ? new Date(r.purchase_date).toISOString().split('T')[0] : null,
+        purchase_date:              r.purchase_date ? (r.purchase_date instanceof Date ? `${r.purchase_date.getFullYear()}-${String(r.purchase_date.getMonth()+1).padStart(2,'0')}-${String(r.purchase_date.getDate()).padStart(2,'0')}` : String(r.purchase_date).split('T')[0].split(' ')[0]) : null,
         transaction_time:           txnTime,
         customer_name:              r.customer_name?.trim() || null,
         phone_number:               r.phone_number?.trim()  || null,
