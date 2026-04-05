@@ -12,9 +12,7 @@ export default function LoginPage() {
 
   const canvasRef   = useRef(null)
   const bgRef       = useRef(null)   // parallax background wrapper
-  const cursorRef   = useRef(null)   // cursor glow dot
   const mousePos    = useRef({ x: 0, y: 0 })
-  const curSmooth   = useRef({ x: 0, y: 0 })
   const bgSmooth    = useRef({ x: 0, y: 0 })
   const rafRef      = useRef(null)
 
@@ -62,7 +60,7 @@ export default function LoginPage() {
     return () => { cancelAnimationFrame(animId); window.removeEventListener('resize', init) }
   }, [])
 
-  // ── Mouse parallax + cursor glow ───────────────────────────
+  // ── Mouse parallax ─────────────────────────────────────────
   useEffect(() => {
     const onMove = (e) => {
       mousePos.current = { x: e.clientX, y: e.clientY }
@@ -72,19 +70,9 @@ export default function LoginPage() {
     const tick = () => {
       const { x: mx, y: my } = mousePos.current
       const W = window.innerWidth, H = window.innerHeight
-      // Normalise -1 to 1
       const nx = (mx / W - 0.5) * 2
       const ny = (my / H - 0.5) * 2
 
-      // Smooth cursor
-      curSmooth.current.x += (mx - curSmooth.current.x) * 0.1
-      curSmooth.current.y += (my - curSmooth.current.y) * 0.1
-      if (cursorRef.current) {
-        cursorRef.current.style.transform =
-          `translate(${curSmooth.current.x - 12}px, ${curSmooth.current.y - 12}px)`
-      }
-
-      // Smooth bg parallax (very subtle)
       bgSmooth.current.x += (nx * 14 - bgSmooth.current.x) * 0.04
       bgSmooth.current.y += (ny * 10 - bgSmooth.current.y) * 0.04
       if (bgRef.current) {
@@ -147,18 +135,6 @@ export default function LoginPage() {
           background: #060401;
           /* Nudge content zone slightly below centre so logo clears the top-right edge line */
           padding-top: 48px;
-        }
-
-        /* ── CURSOR GLOW ── */
-        .cursor-glow {
-          position: fixed; top: 0; left: 0;
-          width: 24px; height: 24px;
-          border-radius: 50%;
-          background: radial-gradient(circle, rgba(201,168,76,0.55) 0%, transparent 70%);
-          pointer-events: none; z-index: 9999;
-          will-change: transform;
-          mix-blend-mode: screen;
-          transition: opacity .3s;
         }
 
         /* ── PARALLAX BG WRAPPER ── */
@@ -483,9 +459,6 @@ export default function LoginPage() {
           .logo-img { width: 180px; }
         }
       `}</style>
-
-      {/* Cursor glow */}
-      <div ref={cursorRef} className="cursor-glow" />
 
       <div className="stage">
 
