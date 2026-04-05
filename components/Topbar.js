@@ -83,7 +83,6 @@ function ThemeToggle({ theme, setTheme, t }) {
   return (
     <button
       onClick={toggle}
-      title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
       style={{
         width: '36px', height: '36px',
         borderRadius: '10px',

@@ -41,17 +41,30 @@ h1, h2, h3, h4, h5, h6 {
   line-height: 1.2;
 }
 
-/* Input resets */
+/* Input / select inherit font */
 input, select, textarea, button {
   font-family: inherit;
 }
 
-/* Remove default button styles */
-button {
-  cursor: pointer;
+button { cursor: pointer; }
+
+/* Native date/select inputs match theme */
+input[type="date"],
+input[type="text"],
+input[type="search"],
+select {
+  color-scheme: inherit;
 }
 
-/* Smooth theme body transition */
-body {
-  transition: background-color 0.22s ease, color 0.22s ease;
+/* Light theme: browser input chrome  */
+[data-theme="light"] input,
+[data-theme="light"] select,
+[data-theme="light"] textarea {
+  color-scheme: light;
+}
+
+[data-theme="dark"] input,
+[data-theme="dark"] select,
+[data-theme="dark"] textarea {
+  color-scheme: dark;
 }

@@ -414,7 +414,7 @@ export default function PurchaseReports() {
       </div>
 
       {/* FILTER BAR */}
-      <div style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: '14px', padding: '16px 20px', marginBottom: '24px', boxShadow: '0 1px 3px rgba(0,0,0,.4)' }}>
+      <div style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: '14px', padding: '16px 20px', marginBottom: '24px', boxShadow: t.shadow }}>
         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
           <div style={{ display: 'flex', gap: '5px', marginRight: '4px' }}>
             {[

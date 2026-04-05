@@ -42,7 +42,7 @@ function KpiCard({ label, value, sub, color, icon, loading, t, delay=0 }) {
       border: `1px solid ${hov?color+'55':t.border}`,
       borderRadius: 16, padding: '20px 22px',
       position: 'relative', overflow: 'hidden',
-      boxShadow: hov ? `0 8px 32px rgba(0,0,0,.6),0 0 0 1px ${color}20` : `${t.shadow},inset 0 1px 0 rgba(255,255,255,.03)`,
+      boxShadow: hov ? `${t.shadow},0 0 0 1px ${color}25` : t.shadow,
       transform: hov ? 'translateY(-2px)' : vis ? 'translateY(0)' : 'translateY(10px)',
       opacity: vis ? 1 : 0, transition: 'all .25s cubic-bezier(.34,1.56,.64,1)',
     }}>
@@ -167,7 +167,7 @@ export default function DashboardHome() {
   const panel = {
     background:`linear-gradient(145deg,${t.card},${t.card2})`,
     border:`1px solid ${t.border}`, borderRadius:16, padding:'20px 22px',
-    boxShadow:`${t.shadow},inset 0 1px 0 rgba(255,255,255,.03)`
+    boxShadow: t.shadow,
   }
   const panelTitle = { fontSize:13, color:t.text2, letterSpacing:'.1em', textTransform:'uppercase', fontWeight:600 }
   const panelMeta  = { fontSize:12, color:t.text4 }

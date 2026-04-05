@@ -115,30 +115,9 @@
   --topbar-border:    #ddd8cc;
 }
 
-/* ── SMOOTH THEME TRANSITION ──────────────────────────────────────────────── */
-/* Only transition color properties, not layout/transform (prevents jank) */
-html {
-  color-scheme: dark;
-}
-[data-theme="light"] {
-  color-scheme: light;
-}
-
-body,
-.theme-transition,
-.theme-transition * {
-  transition:
-    background-color 0.22s ease,
-    border-color     0.22s ease,
-    color            0.22s ease,
-    box-shadow       0.22s ease !important;
-}
-
-/* Disable transition on initial load (added via JS after first render) */
-.no-transition,
-.no-transition * {
-  transition: none !important;
-}
+/* ── COLOR SCHEME ─────────────────────────────────────────────────────────── */
+html { color-scheme: dark; }
+[data-theme="light"] { color-scheme: light; }
 
 /* ── KEYFRAMES ────────────────────────────────────────────────────────────── */
 
