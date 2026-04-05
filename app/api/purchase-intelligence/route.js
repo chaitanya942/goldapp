@@ -42,7 +42,7 @@ export async function GET(req) {
           ROUND(SUM(CASE WHEN trxn_status='rejected' THEN 1 ELSE 0 END)
             / NULLIF(COUNT(*), 0) * 100, 1)                                             AS overall_rejection_rate,
           -- today
-          SUM(CASE WHEN trxn_status='approved' AND date = CURDATE() THEN 1 ELSE 0 END)  AS approved_today,
+          SUM(CASE WHEN trxn_status='approved' AND DATE(date) = CURDATE() THEN 1 ELSE 0 END) AS approved_today,
           SUM(CASE WHEN trxn_status='approved' AND date >= DATE_FORMAT(CURDATE(),'%Y-%m-01') THEN 1 ELSE 0 END) AS approved_mtd,
           SUM(CASE WHEN trxn_status='approved' AND date >= DATE_FORMAT(CURDATE(),'%Y-%m-01')
                 THEN (finl_amnt + 0) ELSE 0 END)                                       AS value_mtd
@@ -59,11 +59,11 @@ export async function GET(req) {
           SUM(CASE WHEN days_since >= 30 THEN 1 ELSE 0 END)                                                    AS inactive
         FROM (
           SELECT branch_id,
-            DATEDIFF(CURDATE(), MAX(CASE WHEN trxn_status='approved' THEN date END)) AS days_since
+            DATEDIFF(CURDATE(), MAX(CASE WHEN trxn_status='approved' THEN DATE(date) END)) AS days_since
           FROM transac_tbl
           WHERE branch_id IS NOT NULL AND branch_id != ''
           GROUP BY branch_id
-          HAVING MAX(CASE WHEN trxn_status='approved' THEN date END) IS NOT NULL
+          HAVING MAX(CASE WHEN trxn_status='approved' THEN DATE(date) END) IS NOT NULL
         ) sub
       `)
 
@@ -71,15 +71,15 @@ export async function GET(req) {
       const [pendingAging] = await conn.execute(`
         SELECT
           CASE
-            WHEN DATEDIFF(CURDATE(), date) = 0          THEN 'Today'
-            WHEN DATEDIFF(CURDATE(), date) <= 7         THEN '1–7 days'
-            WHEN DATEDIFF(CURDATE(), date) <= 30        THEN '8–30 days'
-            WHEN DATEDIFF(CURDATE(), date) <= 90        THEN '31–90 days'
+            WHEN DATEDIFF(CURDATE(), DATE(date)) = 0    THEN 'Today'
+            WHEN DATEDIFF(CURDATE(), DATE(date)) <= 7   THEN '1–7 days'
+            WHEN DATEDIFF(CURDATE(), DATE(date)) <= 30  THEN '8–30 days'
+            WHEN DATEDIFF(CURDATE(), DATE(date)) <= 90  THEN '31–90 days'
             ELSE '90+ days'
           END AS bucket,
           COUNT(*) AS count,
           SUM(finl_amnt + 0) AS total_value,
-          MAX(DATEDIFF(CURDATE(), date)) AS max_days
+          MAX(DATEDIFF(CURDATE(), DATE(date))) AS max_days
         FROM transac_tbl
         WHERE trxn_status = 'pending'
         GROUP BY bucket
@@ -127,8 +127,8 @@ export async function GET(req) {
           SUM(CASE WHEN t.trxn_status='approved' THEN 1 ELSE 0 END)                               AS total_approved,
           SUM(CASE WHEN t.trxn_status='rejected' THEN 1 ELSE 0 END)                               AS total_rejected,
           SUM(CASE WHEN t.trxn_status='pending'  THEN 1 ELSE 0 END)                               AS total_pending,
-          MAX(CASE WHEN t.trxn_status='approved' THEN t.date END)                                 AS last_approved_date,
-          DATEDIFF(CURDATE(), MAX(CASE WHEN t.trxn_status='approved' THEN t.date END))            AS days_since_purchase,
+          MAX(CASE WHEN t.trxn_status='approved' THEN DATE(t.date) END)                           AS last_approved_date,
+          DATEDIFF(CURDATE(), MAX(CASE WHEN t.trxn_status='approved' THEN DATE(t.date) END))      AS days_since_purchase,
           ROUND(
             SUM(CASE WHEN t.trxn_status='rejected' THEN 1 ELSE 0 END)
             / NULLIF(COUNT(t.id), 0) * 100, 1)                                                    AS rejection_rate,
@@ -213,9 +213,9 @@ export async function GET(req) {
            SUM(CASE WHEN trxn_status='pending'  THEN 1 ELSE 0 END)                    AS pending_visits,
            SUM(CASE WHEN trxn_status='approved' THEN (finl_amnt+0) ELSE 0 END)        AS total_value,
            COUNT(DISTINCT branch_id)                                                   AS branches_visited,
-           MIN(date)                                                                   AS first_visit,
-           MAX(date)                                                                   AS last_visit,
-           DATEDIFF(CURDATE(), MAX(date))                                              AS days_since_last
+           MIN(DATE(date))                                                             AS first_visit,
+           MAX(DATE(date))                                                             AS last_visit,
+           DATEDIFF(CURDATE(), MAX(DATE(date)))                                       AS days_since_last
          FROM transac_tbl
          WHERE cust_mobile IS NOT NULL AND cust_mobile != '' AND LENGTH(cust_mobile) >= 8
            ${searchCond}
@@ -253,8 +253,8 @@ export async function GET(req) {
       const [rows] = await conn.execute(`
         SELECT
           t.id, t.bill_no, t.cust_name, t.cust_mobile,
-          t.date, t.branch_id, b.brnch_name AS branch_name,
-          DATEDIFF(CURDATE(), t.date)        AS days_pending,
+          DATE(t.date) AS txn_date, t.branch_id, b.brnch_name AS branch_name,
+          DATEDIFF(CURDATE(), DATE(t.date))  AS days_pending,
           (t.finl_amnt + 0)                  AS amount,
           t.pymt_mde, t.txn_rmrk, t.type_gold,
           t.pmt_status
@@ -269,13 +269,13 @@ export async function GET(req) {
         SELECT
           COUNT(*) AS total_pending,
           SUM(finl_amnt + 0) AS total_value,
-          MAX(DATEDIFF(CURDATE(), date)) AS oldest_days,
-          AVG(DATEDIFF(CURDATE(), date)) AS avg_days,
-          SUM(CASE WHEN DATEDIFF(CURDATE(), date) = 0 THEN 1 ELSE 0 END) AS today_count,
-          SUM(CASE WHEN DATEDIFF(CURDATE(), date) BETWEEN 1 AND 7 THEN 1 ELSE 0 END) AS week_count,
-          SUM(CASE WHEN DATEDIFF(CURDATE(), date) BETWEEN 8 AND 30 THEN 1 ELSE 0 END) AS month_count,
-          SUM(CASE WHEN DATEDIFF(CURDATE(), date) BETWEEN 31 AND 90 THEN 1 ELSE 0 END) AS quarter_count,
-          SUM(CASE WHEN DATEDIFF(CURDATE(), date) > 90 THEN 1 ELSE 0 END) AS old_count
+          MAX(DATEDIFF(CURDATE(), DATE(date))) AS oldest_days,
+          AVG(DATEDIFF(CURDATE(), DATE(date))) AS avg_days,
+          SUM(CASE WHEN DATEDIFF(CURDATE(), DATE(date)) = 0 THEN 1 ELSE 0 END) AS today_count,
+          SUM(CASE WHEN DATEDIFF(CURDATE(), DATE(date)) BETWEEN 1 AND 7 THEN 1 ELSE 0 END) AS week_count,
+          SUM(CASE WHEN DATEDIFF(CURDATE(), DATE(date)) BETWEEN 8 AND 30 THEN 1 ELSE 0 END) AS month_count,
+          SUM(CASE WHEN DATEDIFF(CURDATE(), DATE(date)) BETWEEN 31 AND 90 THEN 1 ELSE 0 END) AS quarter_count,
+          SUM(CASE WHEN DATEDIFF(CURDATE(), DATE(date)) > 90 THEN 1 ELSE 0 END) AS old_count
         FROM transac_tbl WHERE trxn_status = 'pending'
       `)
 
@@ -284,8 +284,8 @@ export async function GET(req) {
         SELECT t.branch_id, b.brnch_name AS branch_name,
           COUNT(*) AS count,
           SUM(t.finl_amnt + 0) AS total_value,
-          MAX(DATEDIFF(CURDATE(), t.date)) AS oldest_days,
-          AVG(DATEDIFF(CURDATE(), t.date)) AS avg_days
+          MAX(DATEDIFF(CURDATE(), DATE(t.date))) AS oldest_days,
+          AVG(DATEDIFF(CURDATE(), DATE(t.date))) AS avg_days
         FROM transac_tbl t
         LEFT JOIN branch_tbl b ON b.brnch_id = t.branch_id
         WHERE t.trxn_status = 'pending'
@@ -315,12 +315,12 @@ export async function GET(req) {
       const [[pipelineAging]] = await conn.execute(`
         SELECT
           COUNT(*) AS total_pipeline,
-          MAX(DATEDIFF(CURDATE(), date)) AS oldest_days,
-          AVG(DATEDIFF(CURDATE(), date)) AS avg_days,
-          SUM(CASE WHEN DATEDIFF(CURDATE(), date) <= 3 THEN 1 ELSE 0 END) AS fresh,
-          SUM(CASE WHEN DATEDIFF(CURDATE(), date) BETWEEN 4 AND 14 THEN 1 ELSE 0 END) AS recent,
-          SUM(CASE WHEN DATEDIFF(CURDATE(), date) BETWEEN 15 AND 30 THEN 1 ELSE 0 END) AS stale,
-          SUM(CASE WHEN DATEDIFF(CURDATE(), date) > 30 THEN 1 ELSE 0 END) AS old_leads
+          MAX(DATEDIFF(CURDATE(), DATE(date))) AS oldest_days,
+          AVG(DATEDIFF(CURDATE(), DATE(date))) AS avg_days,
+          SUM(CASE WHEN DATEDIFF(CURDATE(), DATE(date)) <= 3 THEN 1 ELSE 0 END) AS fresh,
+          SUM(CASE WHEN DATEDIFF(CURDATE(), DATE(date)) BETWEEN 4 AND 14 THEN 1 ELSE 0 END) AS recent,
+          SUM(CASE WHEN DATEDIFF(CURDATE(), DATE(date)) BETWEEN 15 AND 30 THEN 1 ELSE 0 END) AS stale,
+          SUM(CASE WHEN DATEDIFF(CURDATE(), DATE(date)) > 30 THEN 1 ELSE 0 END) AS old_leads
         FROM customer_walkin
         WHERE walkin_status IN ('visited not sold','enquiry','planning to visit','call later')
       `)

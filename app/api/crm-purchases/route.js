@@ -39,8 +39,8 @@ export async function GET(req) {
       const conditions = ["t.trxn_status = 'rejected'"]
       const params = []
       if (branch)   { conditions.push('t.branch_id = ?');                                  params.push(branch) }
-      if (fromDate) { conditions.push('t.date >= ?');                                       params.push(fromDate) }
-      if (toDate)   { conditions.push('t.date <= ?');                                       params.push(toDate) }
+      if (fromDate) { conditions.push('DATE(t.date + INTERVAL 330 MINUTE) >= ?');          params.push(fromDate) }
+      if (toDate)   { conditions.push('DATE(t.date + INTERVAL 330 MINUTE) <= ?');          params.push(toDate) }
       if (search)   { conditions.push('(t.cust_name LIKE ? OR t.bill_no LIKE ? OR t.cust_mobile LIKE ?)'); params.push(`%${search}%`, `%${search}%`, `%${search}%`) }
       if (reason)   { conditions.push('t.txn_rmrk LIKE ?');                                params.push(`%${reason}%`) }
 
@@ -55,7 +55,8 @@ export async function GET(req) {
       const [rows] = await conn.execute(
         `SELECT
            t.id, t.bill_no, t.cust_name, t.cust_mobile,
-           t.date, t.time, t.branch_id, t.type_gold,
+           DATE(t.date + INTERVAL 330 MINUTE) AS txn_date,
+           t.time, t.branch_id, t.type_gold,
            t.finl_amnt, t.txn_rmrk, t.trxn_status,
            b.brnch_name AS branch_name
          FROM transac_tbl t
@@ -83,8 +84,8 @@ export async function GET(req) {
       const conditions = ["t.trxn_status = 'pending'"]
       const params = []
       if (branch)   { conditions.push('t.branch_id = ?');                                  params.push(branch) }
-      if (fromDate) { conditions.push('t.date >= ?');                                       params.push(fromDate) }
-      if (toDate)   { conditions.push('t.date <= ?');                                       params.push(toDate) }
+      if (fromDate) { conditions.push('DATE(t.date + INTERVAL 330 MINUTE) >= ?');          params.push(fromDate) }
+      if (toDate)   { conditions.push('DATE(t.date + INTERVAL 330 MINUTE) <= ?');          params.push(toDate) }
       if (search)   { conditions.push('(t.cust_name LIKE ? OR t.bill_no LIKE ? OR t.cust_mobile LIKE ?)'); params.push(`%${search}%`, `%${search}%`, `%${search}%`) }
 
       const where = conditions.join(' AND ')
@@ -98,9 +99,11 @@ export async function GET(req) {
       const [rows] = await conn.execute(
         `SELECT
            t.id, t.bill_no, t.cust_name, t.cust_mobile,
-           t.date, t.time, t.branch_id, t.type_gold,
+           DATE(t.date + INTERVAL 330 MINUTE) AS txn_date,
+           t.time, t.branch_id, t.type_gold,
            t.finl_amnt, t.txn_rmrk,
            t.pymt_mde, t.pmt_status, t.trxn_status,
+           DATEDIFF(CURDATE(), DATE(t.date + INTERVAL 330 MINUTE)) AS days_pending,
            b.brnch_name AS branch_name
          FROM transac_tbl t
          LEFT JOIN branch_tbl b ON b.brnch_id = t.branch_id
@@ -120,10 +123,10 @@ export async function GET(req) {
       const conditions = [`cw.walkin_status IN (${statusPlaceholders})`]
       const params = [...PIPELINE_STATUSES]
 
-      if (branch)   { conditions.push('cw.branch_id = ?');                                  params.push(branch) }
-      if (fromDate) { conditions.push('cw.date >= ?');                                       params.push(fromDate) }
-      if (toDate)   { conditions.push('cw.date <= ?');                                       params.push(toDate) }
-      if (search)   { conditions.push('(cw.cust_name LIKE ? OR cw.cust_mobile LIKE ?)');   params.push(`%${search}%`, `%${search}%`) }
+      if (branch)   { conditions.push('cw.branch_id = ?');                                                params.push(branch) }
+      if (fromDate) { conditions.push('DATE(cw.date + INTERVAL 330 MINUTE) >= ?');                      params.push(fromDate) }
+      if (toDate)   { conditions.push('DATE(cw.date + INTERVAL 330 MINUTE) <= ?');                      params.push(toDate) }
+      if (search)   { conditions.push('(cw.cust_name LIKE ? OR cw.cust_mobile LIKE ?)');               params.push(`%${search}%`, `%${search}%`) }
 
       const where = conditions.join(' AND ')
       const offset = page * pageSize
@@ -136,8 +139,9 @@ export async function GET(req) {
       const [rows] = await conn.execute(
         `SELECT
            cw.id, cw.cust_name, cw.cust_mobile, cw.item_type, cw.gms_weight,
-           cw.walkin_status, cw.walk_reason, cw.source, cw.date, cw.time,
-           cw.branch_id, b.brnch_name AS branch_name
+           cw.walkin_status, cw.walk_reason, cw.source,
+           DATE(cw.date + INTERVAL 330 MINUTE) AS walkin_date,
+           cw.time, cw.branch_id, b.brnch_name AS branch_name
          FROM customer_walkin cw
          LEFT JOIN branch_tbl b ON b.brnch_id = cw.branch_id
          WHERE ${where}
@@ -221,7 +225,7 @@ export async function GET(req) {
       const istNow = new Date(Date.now() + 5.5 * 60 * 60 * 1000)
       const todayIST = istNow.toISOString().split('T')[0]
 
-      // Today's transaction summary
+      // Today's transaction summary — dates stored as UTC; IST = UTC+5:30 = +330 min
       const [[todaySummary]] = await conn.execute(`
         SELECT
           COUNT(*) AS total,
@@ -230,12 +234,12 @@ export async function GET(req) {
           SUM(CASE WHEN trxn_status='pending'  THEN 1 ELSE 0 END) AS pending,
           COUNT(DISTINCT branch_id) AS branches_active,
           SUM(CASE WHEN trxn_status='approved' THEN (finl_amnt+0) ELSE 0 END) AS approved_value
-        FROM transac_tbl WHERE date = ?
+        FROM transac_tbl WHERE DATE(date + INTERVAL 330 MINUTE) = ?
       `, [todayIST])
 
       // Today's walk-ins count
       const [[walkinToday]] = await conn.execute(
-        `SELECT COUNT(*) AS count FROM customer_walkin WHERE date = ?`, [todayIST]
+        `SELECT COUNT(*) AS count FROM customer_walkin WHERE DATE(date + INTERVAL 330 MINUTE) = ?`, [todayIST]
       )
 
       // Today's transactions (detail)
@@ -245,7 +249,7 @@ export async function GET(req) {
           t.type_gold, t.trxn_status, (t.finl_amnt+0) AS amount, t.txn_rmrk, t.pymt_mde
         FROM transac_tbl t
         LEFT JOIN branch_tbl b ON b.brnch_id = t.branch_id
-        WHERE t.date = ?
+        WHERE DATE(t.date + INTERVAL 330 MINUTE) = ?
         ORDER BY t.time DESC
       `, [todayIST])
 
@@ -256,7 +260,7 @@ export async function GET(req) {
           cw.walk_reason, cw.source, cw.branch_id, b.brnch_name AS branch_name
         FROM customer_walkin cw
         LEFT JOIN branch_tbl b ON b.brnch_id = cw.branch_id
-        WHERE cw.date = ?
+        WHERE DATE(cw.date + INTERVAL 330 MINUTE) = ?
         ORDER BY cw.time DESC
       `, [todayIST])
 
@@ -270,8 +274,8 @@ export async function GET(req) {
           ROUND(SUM(o.grms_wet + 0), 2)         AS gross_weight_g,
           ROUND(SUM(o.net_wet   + 0), 2)         AS net_weight_g,
           SUM(t.finl_amnt + 0)                  AS pending_value,
-          DATEDIFF(CURDATE(), MIN(t.date))       AS oldest_days,
-          MIN(t.date)                            AS oldest_date
+          DATEDIFF(CURDATE(), MIN(DATE(t.date))) AS oldest_days,
+          MIN(DATE(t.date))                      AS oldest_date
         FROM transac_tbl t
         LEFT JOIN branch_tbl b  ON b.brnch_id  = t.branch_id
         LEFT JOIN ornments_tbl o ON o.trnxnn_id = t.id
