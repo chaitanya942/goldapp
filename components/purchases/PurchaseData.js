@@ -111,6 +111,9 @@ export default function PurchaseData() {
   const [totalCount, setTotalCount] = useState(0)
   const PAGE_SIZE = 100
 
+  const [sortCol, setSortCol] = useState('purchase_date')
+  const [sortDir, setSortDir] = useState('desc')
+
   const [kpis, setKpis] = useState(null)
 
   const [selectedIds, setSelectedIds]             = useState(new Set())
@@ -125,7 +128,7 @@ export default function PurchaseData() {
     loadPage(0)
   }, [])
 
-  useEffect(() => { loadPage(page) }, [page, search, filterStatus, filterBranch, filterTxn, fromDate, toDate])
+  useEffect(() => { loadPage(page) }, [page, search, filterStatus, filterBranch, filterTxn, fromDate, toDate, sortCol, sortDir])
 
   const loadKpis = async () => {
     const { data } = await supabase.rpc('get_purchase_kpis')
@@ -150,14 +153,20 @@ export default function PurchaseData() {
     setLoading(true)
     const from = pageNum * PAGE_SIZE
     const to   = from + PAGE_SIZE - 1
-    const { data, count } = await buildQuery()
-      .order('purchase_date', { ascending: false })
-      .order('transaction_time', { ascending: false, nullsFirst: false })
-      .range(from, to)
+    const asc  = sortDir === 'asc'
+    let q = buildQuery().order(sortCol, { ascending: asc, nullsFirst: false })
+    if (sortCol !== 'transaction_time') q = q.order('transaction_time', { ascending: false, nullsFirst: false })
+    const { data, count } = await q.range(from, to)
     if (data) setPurchases(data)
     if (count !== null) setTotalCount(count)
     setSelectedIds(new Set())
     setLoading(false)
+  }
+
+  const handleSort = (col) => {
+    if (sortCol === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
+    else { setSortCol(col); setSortDir('asc') }
+    setPage(0)
   }
 
   const load = () => { setPage(0); loadKpis(); loadPage(0) }
@@ -414,9 +423,41 @@ export default function PurchaseData() {
                     <input type="checkbox" style={s.checkbox} checked={allPageSelected} onChange={toggleAll} />
                   </th>
                 )}
-                {['App ID','Date','Time','Customer','Phone','Branch','Gross Wt','Stone','Wastage','Net Wt','Purity','Gross Amt','Svc%','Svc Amt','Final Amt','Type','Status'].map(h =>
-                  <th key={h} style={s.th}>{h}</th>
-                )}
+                {[
+                  { label: 'App ID',    col: 'application_id' },
+                  { label: 'Date',      col: 'purchase_date' },
+                  { label: 'Time',      col: 'transaction_time' },
+                  { label: 'Customer',  col: 'customer_name' },
+                  { label: 'Phone',     col: null },
+                  { label: 'Branch',    col: 'branch_name' },
+                  { label: 'Gross Wt',  col: 'gross_weight' },
+                  { label: 'Stone',     col: null },
+                  { label: 'Wastage',   col: null },
+                  { label: 'Net Wt',    col: 'net_weight' },
+                  { label: 'Purity',    col: 'purity' },
+                  { label: 'Gross Amt', col: 'total_amount' },
+                  { label: 'Svc%',      col: null },
+                  { label: 'Svc Amt',   col: null },
+                  { label: 'Final Amt', col: 'final_amount_crm' },
+                  { label: 'Type',      col: 'transaction_type' },
+                  { label: 'Status',    col: 'stock_status' },
+                ].map(({ label, col }) => (
+                  <th key={label}
+                    onClick={col ? () => handleSort(col) : undefined}
+                    style={{ ...s.th, cursor: col ? 'pointer' : 'default', userSelect: 'none' }}
+                    onMouseEnter={col ? e => { e.currentTarget.style.color = t.gold } : undefined}
+                    onMouseLeave={col ? e => { e.currentTarget.style.color = t.text3 } : undefined}
+                  >
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                      {label}
+                      {col && (
+                        <span style={{ opacity: sortCol === col ? 1 : 0.3, fontSize: '.55rem', lineHeight: 1 }}>
+                          {sortCol === col ? (sortDir === 'asc' ? '▲' : '▼') : '⇅'}
+                        </span>
+                      )}
+                    </span>
+                  </th>
+                ))}
               </tr>
             </thead>
             <tbody>

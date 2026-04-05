@@ -115,6 +115,7 @@ export default function Sidebar({ sidebarOpen, setSidebarOpen }) {
       <div key={item.id} style={{ marginBottom: '1px' }}>
         <div
           onClick={() => handleParentClick(item)}
+          title={!sidebarOpen ? item.label : undefined}
           style={{
             display: 'flex', alignItems: 'center',
             gap: sidebarOpen ? '10px' : '0',

@@ -102,7 +102,7 @@ export default function DashboardHome() {
   const COLOR_PALETTE = [t.gold, t.green, t.blue, t.purple, t.orange, t.red]
 
   const [period,        setPeriod]        = useState('mtd')
-  const [overviewOpen,  setOverviewOpen]  = useState(false)
+  const [overviewOpen,  setOverviewOpen]  = useState(true)
   const [loading,       setLoading]       = useState(true)
   const [kpis,          setKpis]          = useState(null)
   const [stateData,     setStateData]     = useState([])

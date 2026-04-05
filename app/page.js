@@ -82,11 +82,9 @@ export default function LoginPage() {
   return (
     <>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;1,300;1,400&family=Outfit:wght@200;300;400;500&display=swap');
-
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
         html, body { height: 100%; overflow: hidden; background: #0a0702; }
-        body { font-family: 'Outfit', sans-serif; }
+        body { font-family: var(--font-jakarta), 'Plus Jakarta Sans', -apple-system, sans-serif; }
 
         .pg {
           height: 100vh;
@@ -122,7 +120,7 @@ export default function LoginPage() {
         }
 
         .wordmark {
-          font-family: 'Cormorant Garamond', serif;
+          font-family: var(--font-jakarta), 'Plus Jakarta Sans', sans-serif;
           font-weight: 300;
           font-size: clamp(3.4rem, 5.2vw, 6rem);
           letter-spacing: 0.28em;
@@ -150,7 +148,7 @@ export default function LoginPage() {
         }
 
         .tagline {
-          font-family: 'Cormorant Garamond', serif;
+          font-family: var(--font-jakarta), 'Plus Jakarta Sans', sans-serif;
           font-style: italic;
           font-weight: 300;
           font-size: clamp(1.4rem, 2.2vw, 2rem);
@@ -263,7 +261,7 @@ export default function LoginPage() {
           width: 100%; background: transparent;
           border: none; border-bottom: 1px solid rgba(201,168,76,0.17);
           border-radius: 0; padding: 12px 0;
-          font-family: 'Outfit', sans-serif;
+          font-family: var(--font-jakarta), 'Plus Jakarta Sans', sans-serif;
           font-size: 0.9rem; font-weight: 300;
           color: rgba(255,255,255,0.88); outline: none;
           transition: color 0.3s; letter-spacing: 0.05em;
@@ -298,7 +296,7 @@ export default function LoginPage() {
         .pwbtn {
           position: absolute; right: 0; top: 50%; transform: translateY(-50%);
           background: none; border: none; cursor: pointer;
-          font-family: 'Outfit', sans-serif; font-size: 0.6rem; font-weight: 300;
+          font-family: var(--font-jakarta), 'Plus Jakarta Sans', sans-serif; font-size: 0.6rem; font-weight: 300;
           letter-spacing: 0.18em; text-transform: uppercase;
           color: rgba(201,168,76,0.5); transition: color 0.25s; padding: 4px;
         }
@@ -322,7 +320,7 @@ export default function LoginPage() {
           background: linear-gradient(120deg, #a07828 0%, #c9a84c 32%, #efd870 55%, #c09030 78%, #a07828 100%);
           background-size: 250% 100%;
           border: none; border-radius: 2px;
-          font-family: 'Outfit', sans-serif;
+          font-family: var(--font-jakarta), 'Plus Jakarta Sans', sans-serif;
           font-size: 0.72rem; font-weight: 500;
           letter-spacing: 0.38em; text-transform: uppercase;
           color: #060402; cursor: pointer;
