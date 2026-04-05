@@ -105,16 +105,34 @@ export default function LoginPage() {
           align-items: center;
           justify-content: center;
           overflow: hidden;
-          background: #080603;
+          background: #060402;
         }
 
-        /* Atmospheric glow — warm centre, cool corners */
+        /* Deep atmospheric layers — warm amber core, dark edges */
         .atm {
           position: absolute; inset: 0; pointer-events: none;
           background:
-            radial-gradient(ellipse 65% 55% at 50% 50%, rgba(201,168,76,0.09) 0%, transparent 68%),
-            radial-gradient(ellipse 30% 25% at 80% 15%, rgba(160,110,10,0.045) 0%, transparent 55%),
-            radial-gradient(ellipse 22% 20% at 12% 82%, rgba(201,168,76,0.03) 0%, transparent 55%);
+            radial-gradient(ellipse 55% 48% at 50% 46%, rgba(201,168,76,0.13) 0%, rgba(160,110,10,0.06) 45%, transparent 70%),
+            radial-gradient(ellipse 80% 80% at 50% 50%, rgba(120,80,10,0.07) 0%, transparent 65%),
+            radial-gradient(ellipse 35% 25% at 78% 12%, rgba(180,130,15,0.04) 0%, transparent 50%),
+            radial-gradient(ellipse 25% 20% at 10% 88%, rgba(201,168,76,0.025) 0%, transparent 50%);
+        }
+
+        /* The bright "sun disc" halo directly behind the logo — no border, pure gradient light */
+        .logo-sun {
+          position: absolute;
+          top: 50%; left: 50%;
+          transform: translate(-50%, -54%);
+          width: 500px; height: 500px;
+          background: radial-gradient(ellipse,
+            rgba(201,168,76,0.22) 0%,
+            rgba(201,168,76,0.10) 22%,
+            rgba(160,110,10,0.04) 45%,
+            transparent 68%);
+          border-radius: 50%;
+          pointer-events: none;
+          animation: breathe 5s ease-in-out infinite;
+          filter: blur(2px);
         }
 
         /* Particle canvas */
@@ -123,12 +141,13 @@ export default function LoginPage() {
           width: 100%; height: 100%;
         }
 
-        /* Fine geometric diamond lines */
-        .geo {
-          position: absolute; inset: 0;
-          width: 100%; height: 100%;
-          pointer-events: none;
-          opacity: 1;
+        /* Subtle background grid texture — far background, NOT framing the logo */
+        .grid-tex {
+          position: absolute; inset: 0; pointer-events: none; opacity: 0.028;
+          background-image:
+            linear-gradient(rgba(201,168,76,1) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(201,168,76,1) 1px, transparent 1px);
+          background-size: 60px 60px;
         }
 
         /* Centered content */
@@ -136,97 +155,83 @@ export default function LoginPage() {
           position: relative; z-index: 2;
           display: flex; flex-direction: column; align-items: center;
           text-align: center;
-          gap: 0;
           padding: 0 80px;
         }
 
-        /* Logo — the only brand identity on the left */
+        /* Logo — large, free, hero */
         .logo-area {
           position: relative;
           display: flex; align-items: center; justify-content: center;
-          margin-bottom: 40px;
+          margin-bottom: 36px;
           opacity: 0;
-          animation: fadeUp 1.2s cubic-bezier(.22,1,.36,1) .15s forwards;
+          animation: fadeUp 1.3s cubic-bezier(.22,1,.36,1) .1s forwards;
         }
-        /* Soft ground glow beneath logo */
-        .logo-glow {
+        /* Soft blurred underglow pool beneath logo */
+        .logo-pool {
           position: absolute;
-          bottom: -20px; left: 50%;
+          bottom: -30px; left: 50%;
           transform: translateX(-50%);
-          width: 240px; height: 70px;
-          background: radial-gradient(ellipse, rgba(201,168,76,0.2) 0%, transparent 70%);
-          animation: breathe 5s ease-in-out infinite;
+          width: 280px; height: 60px;
+          background: radial-gradient(ellipse, rgba(201,168,76,0.28) 0%, transparent 70%);
+          filter: blur(16px);
           pointer-events: none;
           border-radius: 50%;
-          filter: blur(8px);
-        }
-        /* Ambient ring behind logo — single, very subtle */
-        .logo-ring {
-          position: absolute;
-          width: 200px; height: 200px; border-radius: 50%;
-          border: 1px solid rgba(201,168,76,0.07);
           animation: breathe 5s ease-in-out infinite;
-        }
-        .logo-ring-2 {
-          position: absolute;
-          width: 270px; height: 270px; border-radius: 50%;
-          border: 1px solid rgba(201,168,76,0.035);
-          animation: breathe 5s ease-in-out 0.8s infinite;
         }
         .logo-img {
           position: relative; z-index: 1;
-          width: 148px; height: auto;
-          filter: brightness(9) saturate(0.15) drop-shadow(0 0 24px rgba(201,168,76,0.25));
-          opacity: 0.88;
+          width: 230px; height: auto;
+          filter: brightness(8) saturate(0.1) drop-shadow(0 0 32px rgba(201,168,76,0.3));
+          opacity: 0.9;
           mix-blend-mode: lighten;
-          animation: float 7s ease-in-out infinite;
+          animation: float 8s ease-in-out infinite;
         }
 
-        /* Thin divider with centre gem */
+        /* Thin ornament */
         .orn {
           display: flex; align-items: center; gap: 16px;
-          margin-bottom: 28px;
+          margin-bottom: 22px;
           opacity: 0;
-          animation: fadeUp 1.2s cubic-bezier(.22,1,.36,1) .5s forwards;
+          animation: fadeUp 1.2s cubic-bezier(.22,1,.36,1) .55s forwards;
         }
-        .orn-line { height: 1px; width: 64px; }
-        .orn-line-l { background: linear-gradient(90deg, transparent, rgba(201,168,76,0.35)); }
-        .orn-line-r { background: linear-gradient(90deg, rgba(201,168,76,0.35), transparent); }
+        .orn-line { height: 1px; width: 60px; }
+        .orn-line-l { background: linear-gradient(90deg, transparent, rgba(201,168,76,0.32)); }
+        .orn-line-r { background: linear-gradient(90deg, rgba(201,168,76,0.32), transparent); }
         .orn-gem {
-          width: 6px; height: 6px;
+          width: 5px; height: 5px;
           background: #c9a84c;
           transform: rotate(45deg);
-          box-shadow: 0 0 12px rgba(201,168,76,0.7), 0 0 4px rgba(201,168,76,1);
+          box-shadow: 0 0 10px rgba(201,168,76,0.7), 0 0 3px rgba(201,168,76,1);
         }
 
         /* Tagline */
         .tagline {
           opacity: 0;
-          animation: fadeUp 1.2s cubic-bezier(.22,1,.36,1) .65s forwards;
+          animation: fadeUp 1.2s cubic-bezier(.22,1,.36,1) .7s forwards;
         }
         .tg-1 {
-          font-size: clamp(.95rem, 1.5vw, 1.3rem);
+          font-size: clamp(.9rem, 1.4vw, 1.2rem);
           font-weight: 300;
-          color: rgba(220,200,155,0.35);
-          letter-spacing: .01em;
+          color: rgba(220,200,155,0.32);
+          letter-spacing: .02em;
           line-height: 1.5;
         }
         .tg-2 {
-          font-size: clamp(1.05rem, 1.7vw, 1.45rem);
+          font-size: clamp(1rem, 1.6vw, 1.35rem);
           font-weight: 700;
-          color: rgba(240,218,155,0.68);
+          color: rgba(240,218,155,0.62);
           letter-spacing: -.01em;
           line-height: 1.2;
         }
 
-        /* Vertical divider between panels */
+        /* Vertical divider */
         .vdiv {
           position: absolute; right: 0; top: 0; bottom: 0; width: 1px;
           background: linear-gradient(to bottom,
             transparent 0%,
-            rgba(201,168,76,0.09) 20%,
-            rgba(201,168,76,0.2) 50%,
-            rgba(201,168,76,0.09) 80%,
+            rgba(201,168,76,0.08) 20%,
+            rgba(201,168,76,0.18) 50%,
+            rgba(201,168,76,0.08) 80%,
             transparent 100%);
           z-index: 3;
         }
@@ -418,40 +423,16 @@ export default function LoginPage() {
 
         {/* ─── LEFT PANEL ─────────────────────────── */}
         <div className="lft">
+          {/* Order matters: darkest first */}
+          <div className="grid-tex" />
           <div className="atm" />
+          <div className="logo-sun" />
           <canvas ref={canvasRef} />
 
-          {/* Geometric diamond SVG — fine, not circles */}
-          <svg className="geo" viewBox="0 0 900 700" preserveAspectRatio="xMidYMid slice">
-            <defs>
-              <linearGradient id="gg" x1="0%" y1="0%" x2="100%" y2="100%">
-                <stop offset="0%"   stopColor="#c9a84c" stopOpacity=".65" />
-                <stop offset="60%"  stopColor="#c9a84c" stopOpacity=".18" />
-                <stop offset="100%" stopColor="#c9a84c" stopOpacity=".04" />
-              </linearGradient>
-            </defs>
-            {/* Diamond outline layers — no circles */}
-            <polygon points="450,60  820,350 450,640  80,350"  fill="none" stroke="url(#gg)" strokeWidth=".7"  />
-            <polygon points="450,130 750,350 450,570 150,350"  fill="none" stroke="url(#gg)" strokeWidth=".5"  />
-            <polygon points="450,200 680,350 450,500 220,350"  fill="none" stroke="url(#gg)" strokeWidth=".38" />
-            <polygon points="450,270 610,350 450,430 290,350"  fill="none" stroke="url(#gg)" strokeWidth=".26" />
-            {/* Cross hairlines */}
-            <line x1="80"  y1="350" x2="820" y2="350" stroke="#c9a84c" strokeWidth=".28" strokeDasharray="1.5 14" opacity=".28" />
-            <line x1="450" y1="60"  x2="450" y2="640" stroke="#c9a84c" strokeWidth=".28" strokeDasharray="1.5 14" opacity=".28" />
-            {/* Corner dots */}
-            <circle cx="450" cy="60"  r="2" fill="#c9a84c" opacity=".35" />
-            <circle cx="820" cy="350" r="2" fill="#c9a84c" opacity=".35" />
-            <circle cx="450" cy="640" r="2" fill="#c9a84c" opacity=".35" />
-            <circle cx="80"  cy="350" r="2" fill="#c9a84c" opacity=".35" />
-            <circle cx="450" cy="350" r="3" fill="none" stroke="#c9a84c" strokeWidth=".6" opacity=".22" />
-          </svg>
-
           <div className="lft-body">
-            {/* Logo — single, hero */}
+            {/* Logo — large, hero, no framing borders */}
             <div className="logo-area">
-              <div className="logo-ring" />
-              <div className="logo-ring-2" />
-              <div className="logo-glow" />
+              <div className="logo-pool" />
               <img src="/logo.png" alt="White Gold" className="logo-img" />
             </div>
 
@@ -462,7 +443,7 @@ export default function LoginPage() {
               <div className="orn-line orn-line-r" />
             </div>
 
-            {/* Tagline only — no text wordmark since logo already has it */}
+            {/* Tagline */}
             <div className="tagline">
               <div className="tg-1">Every gram.</div>
               <div className="tg-2">Accounted for.</div>
