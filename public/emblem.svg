@@ -1,10 +1,10 @@
 <svg viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <!-- Outer W shape -->
-  <polyline points="6,18 22,80 50,44 78,80 94,18" stroke="#c9a84c" strokeWidth="4.5" strokeLinecap="round" strokeLinejoin="round"/>
-  <!-- Inner W (parallel offset inward) -->
-  <polyline points="14,22 28,72 50,52 72,72 86,22" stroke="#c9a84c" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
-  <!-- Outer diamond (tall, centered at top of W) -->
-  <polygon points="50,10 62,30 50,48 38,30" stroke="#c9a84c" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round"/>
+  <!-- Outer W -->
+  <polyline points="7,26 27,83 50,56 73,83 93,26" stroke="#c9a84c" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round"/>
+  <!-- Inner W (parallel inset) -->
+  <polyline points="15,30 32,76 50,64 68,76 85,30" stroke="#c9a84c" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
+  <!-- Outer diamond — bottom tip meets W center peak -->
+  <polygon points="50,5 67,32 50,56 33,32" stroke="#c9a84c" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round"/>
   <!-- Inner diamond -->
-  <polygon points="50,18 57,30 50,40 43,30" stroke="#c9a84c" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+  <polygon points="50,15 60,32 50,46 40,32" stroke="#c9a84c" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
 </svg>
