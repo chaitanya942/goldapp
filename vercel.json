@@ -1,7 +1,9 @@
 {
   "functions": {
     "app/api/generate-consignee-report/route.js": { "maxDuration": 60 },
-    "app/api/generate-challan-pdf/route.js":      { "maxDuration": 60 }
+    "app/api/generate-challan-pdf/route.js":      { "maxDuration": 60 },
+    "app/api/backfill-purchases/route.js":        { "maxDuration": 60 },
+    "app/api/sync-purchases/route.js":            { "maxDuration": 60 }
   },
   "crons": [
     {
