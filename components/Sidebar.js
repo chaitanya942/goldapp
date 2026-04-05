@@ -171,8 +171,10 @@ export default function Sidebar({ sidebarOpen, setSidebarOpen }) {
     <div style={{ width: sidebarOpen ? '232px' : '52px', flexShrink: 0, background: t.side, borderRight: `1px solid ${t.border}`, display: 'flex', flexDirection: 'column', transition: 'width .22s cubic-bezier(.4,0,.2,1)', overflow: 'hidden', height: '100vh', position: 'relative' }}>
       <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '120px', background: t.topGlow, pointerEvents: 'none', zIndex: 0 }} />
       <div style={{ padding: sidebarOpen ? '18px 16px 16px' : '18px 0 16px', display: 'flex', alignItems: 'center', gap: '10px', justifyContent: sidebarOpen ? 'flex-start' : 'center', borderBottom: `1px solid ${t.border}`, flexShrink: 0, position: 'relative', zIndex: 1 }}>
-        <div style={{ width: '34px', height: '34px', flexShrink: 0, borderRadius: '9px', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', background: '#0c0b09' }}>
-          <img src="/logo.png" alt="White Gold" style={{ width: '34px', height: '34px', objectFit: 'contain', filter: 'brightness(10) saturate(0.08)', mixBlendMode: 'lighten' }} />
+        <div style={{ width: '34px', height: '34px', flexShrink: 0, background: t.logoBg, borderRadius: '9px', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: t.logoSdw }}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+          </svg>
         </div>
         {sidebarOpen && (
           <div>
