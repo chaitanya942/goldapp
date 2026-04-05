@@ -9,8 +9,16 @@ export default function LoginPage() {
   const [loading,      setLoading]      = useState(false)
   const [error,        setError]        = useState('')
   const [showPassword, setShowPassword] = useState(false)
-  const canvasRef                        = useRef(null)
 
+  const canvasRef   = useRef(null)
+  const bgRef       = useRef(null)   // parallax background wrapper
+  const cursorRef   = useRef(null)   // cursor glow dot
+  const mousePos    = useRef({ x: 0, y: 0 })
+  const curSmooth   = useRef({ x: 0, y: 0 })
+  const bgSmooth    = useRef({ x: 0, y: 0 })
+  const rafRef      = useRef(null)
+
+  // ── Particles ──────────────────────────────────────────────
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas) return
@@ -20,15 +28,15 @@ export default function LoginPage() {
     const init = () => {
       canvas.width  = canvas.offsetWidth
       canvas.height = canvas.offsetHeight
-      pts = Array.from({ length: 55 }, () => ({
+      pts = Array.from({ length: 60 }, () => ({
         x: Math.random() * canvas.width,
         y: Math.random() * canvas.height,
-        r: Math.random() * 0.9 + 0.1,
-        vx: (Math.random() - 0.5) * 0.18,
-        vy: (Math.random() - 0.5) * 0.14,
-        a: Math.random() * 0.38 + 0.06,
+        r: Math.random() * 1.0 + 0.1,
+        vx: (Math.random() - 0.5) * 0.16,
+        vy: (Math.random() - 0.5) * 0.12,
+        a: Math.random() * 0.35 + 0.05,
         ph: Math.random() * Math.PI * 2,
-        spd: Math.random() * 0.012 + 0.007,
+        spd: Math.random() * 0.011 + 0.006,
       }))
     }
     init()
@@ -40,7 +48,7 @@ export default function LoginPage() {
         p.ph += p.spd
         ctx.beginPath()
         ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2)
-        ctx.fillStyle = `rgba(201,168,76,${p.a * (0.5 + 0.5 * Math.sin(p.ph))})`
+        ctx.fillStyle = `rgba(201,168,76,${p.a * (0.45 + 0.55 * Math.sin(p.ph))})`
         ctx.fill()
         p.x += p.vx; p.y += p.vy
         if (p.x < 0) p.x = canvas.width
@@ -54,6 +62,67 @@ export default function LoginPage() {
     return () => { cancelAnimationFrame(animId); window.removeEventListener('resize', init) }
   }, [])
 
+  // ── Mouse parallax + cursor glow ───────────────────────────
+  useEffect(() => {
+    const onMove = (e) => {
+      mousePos.current = { x: e.clientX, y: e.clientY }
+    }
+    window.addEventListener('mousemove', onMove)
+
+    const tick = () => {
+      const { x: mx, y: my } = mousePos.current
+      const W = window.innerWidth, H = window.innerHeight
+      // Normalise -1 to 1
+      const nx = (mx / W - 0.5) * 2
+      const ny = (my / H - 0.5) * 2
+
+      // Smooth cursor
+      curSmooth.current.x += (mx - curSmooth.current.x) * 0.1
+      curSmooth.current.y += (my - curSmooth.current.y) * 0.1
+      if (cursorRef.current) {
+        cursorRef.current.style.transform =
+          `translate(${curSmooth.current.x - 12}px, ${curSmooth.current.y - 12}px)`
+      }
+
+      // Smooth bg parallax (very subtle)
+      bgSmooth.current.x += (nx * 14 - bgSmooth.current.x) * 0.04
+      bgSmooth.current.y += (ny * 10 - bgSmooth.current.y) * 0.04
+      if (bgRef.current) {
+        bgRef.current.style.transform =
+          `translate(${bgSmooth.current.x}px, ${bgSmooth.current.y}px) scale(1.04)`
+      }
+
+      rafRef.current = requestAnimationFrame(tick)
+    }
+    rafRef.current = requestAnimationFrame(tick)
+
+    return () => {
+      window.removeEventListener('mousemove', onMove)
+      cancelAnimationFrame(rafRef.current)
+    }
+  }, [])
+
+  // ── Button ripple ───────────────────────────────────────────
+  const handleRipple = (e) => {
+    const btn = e.currentTarget
+    const rect = btn.getBoundingClientRect()
+    const rip  = document.createElement('span')
+    const size = Math.max(rect.width, rect.height) * 2
+    rip.style.cssText = `
+      position:absolute;
+      width:${size}px; height:${size}px;
+      left:${e.clientX - rect.left - size/2}px;
+      top:${e.clientY - rect.top - size/2}px;
+      background:rgba(255,255,255,0.18);
+      border-radius:50%;
+      transform:scale(0);
+      animation:ripple .55s ease-out forwards;
+      pointer-events:none;
+    `
+    btn.appendChild(rip)
+    setTimeout(() => rip.remove(), 600)
+  }
+
   const handleLogin = async (e) => {
     e.preventDefault()
     setError(''); setLoading(true)
@@ -66,264 +135,302 @@ export default function LoginPage() {
     <>
       <style>{`
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-        html, body { height: 100%; overflow: hidden; background: #07050200; }
+        html, body { height: 100%; overflow: hidden; background: #060401; }
         body { font-family: var(--font-jakarta), 'Plus Jakarta Sans', -apple-system, sans-serif; }
 
-        /* ── FULL SCREEN STAGE ── */
+        /* ── STAGE ── */
         .stage {
           position: relative;
           height: 100vh; width: 100vw;
           display: flex; align-items: center; justify-content: center;
           overflow: hidden;
-          background: #070502;
+          background: #060401;
+          /* Nudge content zone slightly below centre so logo clears the top-right edge line */
+          padding-top: 48px;
         }
 
-        /* ── FACETED BACKGROUND PANELS ── */
-        .panel {
-          position: absolute; inset: 0; pointer-events: none;
+        /* ── CURSOR GLOW ── */
+        .cursor-glow {
+          position: fixed; top: 0; left: 0;
+          width: 24px; height: 24px;
+          border-radius: 50%;
+          background: radial-gradient(circle, rgba(201,168,76,0.55) 0%, transparent 70%);
+          pointer-events: none; z-index: 9999;
+          will-change: transform;
+          mix-blend-mode: screen;
+          transition: opacity .3s;
         }
-        /* Top-left large facet — warmest */
+
+        /* ── PARALLAX BG WRAPPER ── */
+        .bg-wrap {
+          position: absolute;
+          inset: -5%;           /* slightly oversized so parallax doesn't expose edges */
+          will-change: transform;
+          transform-origin: center;
+        }
+
+        /* ── FACETED PANELS ── */
+        .panel { position: absolute; inset: 0; pointer-events: none; }
         .p-tl {
           background: linear-gradient(135deg, #141008 0%, #0c0904 100%);
           clip-path: polygon(0 0, 68% 0, 36% 100%, 0 100%);
         }
-        /* Top-right facet */
         .p-tr {
           background: linear-gradient(225deg, #110e07 0%, #090703 100%);
           clip-path: polygon(72% 0, 100% 0, 100% 100%, 60% 100%);
         }
-        /* Bottom centre — darkest, makes panels "pop" */
         .p-bc {
           background: #030200;
           clip-path: polygon(28% 100%, 62% 100%, 100% 58%, 100% 100%, 0 100%, 0 70%);
         }
 
-        /* Sharp gold edge lines exactly where panels meet — the key CRM detail */
-        .edges {
-          position: absolute; inset: 0; pointer-events: none;
-        }
+        /* ── SHARP EDGE LINES ── */
+        .edges { position: absolute; inset: 0; pointer-events: none; }
         .edges svg { width: 100%; height: 100%; }
 
-        /* ── LIGHT STREAKS ── */
+        /* ── STREAKS ── */
         .streaks { position: absolute; inset: 0; pointer-events: none; }
-
-        /* Main broad streak — left diagonal */
         .streak-1 {
-          position: absolute; top: -10%; left: -5%;
-          width: 60%; height: 120%;
-          background: linear-gradient(
-            148deg,
+          position: absolute; top: -10%; left: -5%; width: 60%; height: 120%;
+          background: linear-gradient(148deg,
             transparent 0%, transparent 35%,
             rgba(201,168,76,0.07) 36.5%,
             rgba(240,215,90,0.32) 37.4%,
             rgba(255,230,100,0.18) 37.9%,
             rgba(240,215,90,0.32) 38.4%,
             rgba(201,168,76,0.07) 39.5%,
-            transparent 41%
-          );
+            transparent 41%);
           animation: streakPulse 5s ease-in-out infinite;
         }
-        /* Thin accent streak alongside */
         .streak-2 {
-          position: absolute; top: -10%; left: 2%;
-          width: 60%; height: 120%;
-          background: linear-gradient(
-            148deg,
+          position: absolute; top: -10%; left: 2%; width: 60%; height: 120%;
+          background: linear-gradient(148deg,
             transparent 0%, transparent 44%,
             rgba(201,168,76,0.04) 44.8%,
             rgba(201,168,76,0.14) 45.4%,
             rgba(201,168,76,0.04) 46%,
-            transparent 47%
-          );
+            transparent 47%);
           animation: streakPulse 5s ease-in-out 1.2s infinite;
         }
-        /* Right side streak */
         .streak-3 {
-          position: absolute; top: 0; right: -5%;
-          width: 50%; height: 100%;
-          background: linear-gradient(
-            -140deg,
+          position: absolute; top: 0; right: -5%; width: 50%; height: 100%;
+          background: linear-gradient(-140deg,
             transparent 0%, transparent 46%,
             rgba(201,168,76,0.05) 47%,
-            rgba(240,210,80,0.22) 47.8%,
+            rgba(240,210,80,0.24) 47.8%,
             rgba(201,168,76,0.05) 48.6%,
-            transparent 50%
-          );
+            transparent 50%);
           animation: streakPulse 7s ease-in-out 2.5s infinite;
         }
-        /* Extra glint — short bright flash top-left */
         .streak-4 {
-          position: absolute; top: -5%; left: 10%;
-          width: 40%; height: 60%;
-          background: linear-gradient(
-            148deg,
+          position: absolute; top: -5%; left: 10%; width: 40%; height: 60%;
+          background: linear-gradient(148deg,
             transparent 0%, transparent 55%,
-            rgba(255,235,120,0.08) 56%,
-            rgba(255,235,120,0.18) 56.5%,
-            rgba(255,235,120,0.08) 57%,
-            transparent 58%
-          );
+            rgba(255,235,120,0.07) 56%,
+            rgba(255,235,120,0.16) 56.5%,
+            rgba(255,235,120,0.07) 57%,
+            transparent 58%);
           animation: streakPulse 9s ease-in-out 4s infinite;
         }
 
-        /* ── ATMOSPHERIC GLOW ── */
+        /* ── ATM GLOW ── */
         .atm {
           position: absolute; inset: 0; pointer-events: none;
           background:
-            radial-gradient(ellipse 55% 60% at 50% 44%, rgba(201,168,76,0.13) 0%, transparent 60%),
-            radial-gradient(ellipse 85% 65% at 50% 50%, rgba(120,85,10,0.07) 0%, transparent 70%);
+            radial-gradient(ellipse 55% 60% at 50% 50%, rgba(201,168,76,0.12) 0%, transparent 60%),
+            radial-gradient(ellipse 85% 65% at 50% 50%, rgba(120,85,10,0.06) 0%, transparent 70%);
         }
 
         /* Particles */
-        canvas {
-          position: absolute; inset: 0;
-          width: 100%; height: 100%;
-        }
+        canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
 
-        /* ── CENTRED CONTENT ── */
+        /* ── CONTENT ── */
         .content {
           position: relative; z-index: 10;
-          display: flex; flex-direction: column;
-          align-items: center;
-          width: 100%; max-width: 420px;
+          display: flex; flex-direction: column; align-items: center;
+          width: 100%; max-width: 400px;
           padding: 0 24px;
         }
 
-        /* Logo */
+        /* ── LOGO ── */
         .logo-wrap {
           position: relative;
           display: flex; align-items: center; justify-content: center;
-          margin-bottom: 44px;
+          margin-bottom: 36px;
           opacity: 0;
-          animation: fadeUp 1.2s cubic-bezier(.22,1,.36,1) .1s forwards;
+          animation: fadeUp 1.3s cubic-bezier(.22,1,.36,1) .1s forwards;
         }
         .logo-halo {
           position: absolute;
-          width: 320px; height: 200px;
-          background: radial-gradient(ellipse, rgba(201,168,76,0.16) 0%, transparent 65%);
-          filter: blur(4px);
-          border-radius: 50%;
+          width: 340px; height: 180px; border-radius: 50%;
+          background: radial-gradient(ellipse, rgba(201,168,76,0.18) 0%, transparent 65%);
+          filter: blur(6px);
           animation: breathe 5s ease-in-out infinite;
         }
         .logo-img {
           position: relative; z-index: 1;
-          width: 240px; height: auto;
-          filter: brightness(10) saturate(0.08) drop-shadow(0 0 36px rgba(201,168,76,0.35)) drop-shadow(0 0 12px rgba(201,168,76,0.2));
+          width: 230px; height: auto;
+          filter: brightness(10) saturate(0.08)
+                  drop-shadow(0 0 40px rgba(201,168,76,0.38))
+                  drop-shadow(0 0 14px rgba(201,168,76,0.22));
           opacity: 0.95;
           mix-blend-mode: lighten;
           animation: float 8s ease-in-out infinite;
         }
 
-        /* Form card — glass panel */
+        /* ── CARD ── */
         .card {
-          width: 100%;
-          background: rgba(22,16,8,0.72);
-          border: 1px solid rgba(201,168,76,0.18);
+          position: relative; width: 100%;
+          background: rgba(18,13,6,0.78);
+          border: 1px solid rgba(201,168,76,0.16);
           border-radius: 16px;
-          padding: 36px 36px 32px;
-          backdrop-filter: blur(20px);
-          -webkit-backdrop-filter: blur(20px);
+          padding: 34px 34px 30px;
+          backdrop-filter: blur(24px);
+          -webkit-backdrop-filter: blur(24px);
           box-shadow:
-            0 32px 80px rgba(0,0,0,0.7),
-            0 8px 32px rgba(0,0,0,0.4),
-            0 1px 0 rgba(201,168,76,0.12) inset,
-            0 -1px 0 rgba(0,0,0,0.4) inset;
+            0 32px 80px rgba(0,0,0,0.75),
+            0 8px 32px rgba(0,0,0,0.5),
+            0 1px 0 rgba(201,168,76,0.1) inset,
+            0 -1px 0 rgba(0,0,0,0.5) inset;
           opacity: 0;
-          animation: fadeUp 1.1s cubic-bezier(.22,1,.36,1) .3s forwards;
+          animation: fadeUp 1.1s cubic-bezier(.22,1,.36,1) .28s forwards;
+          overflow: hidden;
+          transition: box-shadow .3s ease;
+        }
+        .card:hover {
+          box-shadow:
+            0 36px 90px rgba(0,0,0,0.8),
+            0 8px 32px rgba(0,0,0,0.5),
+            0 0 0 1px rgba(201,168,76,0.22),
+            0 1px 0 rgba(201,168,76,0.14) inset,
+            0 -1px 0 rgba(0,0,0,0.5) inset;
         }
 
         /* Card top shimmer line */
         .card::before {
           content: '';
-          position: absolute; top: 0; left: 20%; right: 20%; height: 1px;
-          background: linear-gradient(90deg, transparent, rgba(201,168,76,0.4) 30%, rgba(240,210,80,0.65) 50%, rgba(201,168,76,0.4) 70%, transparent);
-          border-radius: 100%;
+          position: absolute; top: 0; left: 15%; right: 15%; height: 1px;
+          background: linear-gradient(90deg,
+            transparent,
+            rgba(201,168,76,0.38) 25%,
+            rgba(255,230,100,0.7) 50%,
+            rgba(201,168,76,0.38) 75%,
+            transparent);
         }
 
-        /* Corner brackets on card */
-        .card { position: relative; }
-        .card-cb { position: absolute; width: 14px; height: 14px; }
-        .card-tl { top: -1px; left: -1px; border-top: 1px solid rgba(201,168,76,0.4); border-left: 1px solid rgba(201,168,76,0.4); border-radius: 16px 0 0 0; }
-        .card-tr { top: -1px; right: -1px; border-top: 1px solid rgba(201,168,76,0.4); border-right: 1px solid rgba(201,168,76,0.4); border-radius: 0 16px 0 0; }
-        .card-bl { bottom: -1px; left: -1px; border-bottom: 1px solid rgba(201,168,76,0.4); border-left: 1px solid rgba(201,168,76,0.4); border-radius: 0 0 0 16px; }
-        .card-br { bottom: -1px; right: -1px; border-bottom: 1px solid rgba(201,168,76,0.4); border-right: 1px solid rgba(201,168,76,0.4); border-radius: 0 0 16px 0; }
+        /* Card entry shimmer sweep */
+        .card::after {
+          content: '';
+          position: absolute; top: 0; left: -100%; width: 60%; height: 100%;
+          background: linear-gradient(105deg,
+            transparent 40%,
+            rgba(201,168,76,0.04) 50%,
+            rgba(255,230,100,0.07) 52%,
+            rgba(201,168,76,0.04) 54%,
+            transparent 64%);
+          animation: cardShimmer 1.4s cubic-bezier(.22,1,.36,1) .5s forwards;
+          pointer-events: none;
+        }
 
-        /* Card header */
+        /* Corner brackets */
+        .card-cb { position: absolute; width: 14px; height: 14px; }
+        .card-tl { top: -1px; left: -1px; border-top: 1px solid rgba(201,168,76,0.42); border-left: 1px solid rgba(201,168,76,0.42); border-radius: 16px 0 0 0; }
+        .card-tr { top: -1px; right: -1px; border-top: 1px solid rgba(201,168,76,0.42); border-right: 1px solid rgba(201,168,76,0.42); border-radius: 0 16px 0 0; }
+        .card-bl { bottom: -1px; left: -1px; border-bottom: 1px solid rgba(201,168,76,0.42); border-left: 1px solid rgba(201,168,76,0.42); border-radius: 0 0 0 16px; }
+        .card-br { bottom: -1px; right: -1px; border-bottom: 1px solid rgba(201,168,76,0.42); border-right: 1px solid rgba(201,168,76,0.42); border-radius: 0 0 16px 0; }
+
+        /* Card heading */
         .card-title {
-          font-size: 1.45rem; font-weight: 300;
-          color: rgba(255,255,255,0.88);
-          letter-spacing: -.025em;
-          margin-bottom: 4px;
+          font-size: 1.5rem; font-weight: 300;
+          color: rgba(255,255,255,0.9);
+          letter-spacing: -.028em; margin-bottom: 4px;
         }
         .card-sub {
-          font-size: .65rem; font-weight: 400;
-          color: rgba(255,255,255,0.24);
-          letter-spacing: .01em;
-          margin-bottom: 28px;
+          font-size: .63rem; font-weight: 400;
+          color: rgba(255,255,255,0.22);
+          margin-bottom: 28px; letter-spacing: .01em;
         }
 
-        /* Fields */
-        .field { margin-bottom: 14px; }
+        /* ── FIELDS ── */
+        .field { margin-bottom: 16px; }
         .flbl {
           display: block;
-          font-size: .56rem; font-weight: 700;
-          letter-spacing: .2em; text-transform: uppercase;
-          color: rgba(201,168,76,0.36);
+          font-size: .55rem; font-weight: 700;
+          letter-spacing: .22em; text-transform: uppercase;
+          color: rgba(201,168,76,0.34);
           margin-bottom: 7px;
-          transition: color .2s;
+          transition: color .22s, letter-spacing .22s;
         }
-        .field:focus-within .flbl { color: rgba(201,168,76,0.72); }
+        .field:focus-within .flbl {
+          color: rgba(201,168,76,0.78);
+          letter-spacing: .18em;
+        }
 
         .inp-wrap { position: relative; }
+
+        /* Animated gold focus bar underneath input */
+        .inp-wrap::after {
+          content: '';
+          position: absolute; bottom: 0; left: 50%;
+          width: 0; height: 2px;
+          background: linear-gradient(90deg, transparent, rgba(201,168,76,0.7) 30%, #c9a84c 50%, rgba(201,168,76,0.7) 70%, transparent);
+          border-radius: 0 0 9px 9px;
+          transform: translateX(-50%);
+          transition: width .35s cubic-bezier(.22,1,.36,1);
+          pointer-events: none;
+        }
+        .field:focus-within .inp-wrap::after { width: 100%; }
+
         .inp {
           width: 100%;
-          background: rgba(0,0,0,0.28);
-          border: 1px solid rgba(255,255,255,0.06);
+          background: rgba(0,0,0,0.3);
+          border: 1px solid rgba(255,255,255,0.055);
           border-radius: 9px;
           padding: 12px 15px;
           font-family: inherit;
           font-size: .875rem; font-weight: 400;
-          color: rgba(255,255,255,0.86); outline: none;
-          transition: border-color .2s, background .2s, box-shadow .2s;
+          color: rgba(255,255,255,0.88); outline: none;
+          transition: border-color .22s, background .22s, box-shadow .22s, transform .15s;
           caret-color: #c9a84c;
         }
         .inp:focus {
-          border-color: rgba(201,168,76,0.35);
-          background: rgba(201,168,76,0.04);
-          box-shadow: 0 0 0 3px rgba(201,168,76,0.05);
+          border-color: rgba(201,168,76,0.3);
+          background: rgba(201,168,76,0.035);
+          box-shadow: 0 0 0 3px rgba(201,168,76,0.045), 0 4px 16px rgba(0,0,0,0.3);
+          transform: translateY(-1px);
         }
         .inp:-webkit-autofill,
         .inp:-webkit-autofill:hover,
         .inp:-webkit-autofill:focus {
           -webkit-box-shadow: 0 0 0 1000px #100d09 inset !important;
-          -webkit-text-fill-color: rgba(255,255,255,0.86) !important;
+          -webkit-text-fill-color: rgba(255,255,255,0.88) !important;
           caret-color: #c9a84c;
         }
-        .inp::placeholder { color: rgba(255,255,255,0.14); }
+        .inp::placeholder { color: rgba(255,255,255,0.13); }
         .inp.pw { padding-right: 46px; }
 
         .eye-btn {
           position: absolute; right: 12px; top: 50%; transform: translateY(-50%);
           background: none; border: none; cursor: pointer; padding: 4px;
-          color: rgba(201,168,76,0.28); transition: color .2s;
+          color: rgba(201,168,76,0.25); transition: color .2s;
           display: flex; align-items: center;
         }
         .eye-btn:hover { color: rgba(201,168,76,0.65); }
         .eye-btn svg { width: 15px; height: 15px; }
 
-        /* Error */
+        /* ── ERROR ── */
         .errmsg {
           display: flex; align-items: center; gap: 9px;
-          background: rgba(180,40,40,0.07);
-          border: 1px solid rgba(200,70,70,0.14);
+          background: rgba(180,40,40,0.08);
+          border: 1px solid rgba(200,70,70,0.15);
           border-radius: 8px;
           padding: 9px 12px; margin-bottom: 12px;
-          font-size: .73rem; color: rgba(255,140,140,0.8);
+          font-size: .72rem; color: rgba(255,140,140,0.82);
           animation: shake .36s ease;
         }
         .errdot { width: 3px; height: 3px; border-radius: 50%; background: rgba(255,100,100,0.5); flex-shrink: 0; }
 
-        /* CTA */
+        /* ── BUTTON ── */
         .btn-wrap { margin-top: 20px; }
         .btn {
           width: 100%; padding: 14px 20px;
@@ -331,111 +438,115 @@ export default function LoginPage() {
           background-size: 240% 100%;
           border: none; border-radius: 9px;
           font-family: inherit;
-          font-size: .67rem; font-weight: 800;
-          letter-spacing: .22em; text-transform: uppercase;
-          color: rgba(6,4,1,0.88); cursor: pointer;
+          font-size: .66rem; font-weight: 800;
+          letter-spacing: .24em; text-transform: uppercase;
+          color: rgba(5,3,0,0.9); cursor: pointer;
           position: relative; overflow: hidden;
           transition: transform .24s cubic-bezier(.22,1,.36,1), box-shadow .24s;
           animation: gold-slide 4s linear infinite;
         }
+        /* Hover sweep */
         .btn::before {
           content: '';
           position: absolute; top: 0; left: -90%;
           width: 58%; height: 100%;
-          background: linear-gradient(90deg, transparent, rgba(255,255,255,0.18), transparent);
-          transform: skewX(-22deg); transition: left .5s ease;
+          background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
+          transform: skewX(-22deg); transition: left .48s ease;
         }
         .btn:hover::before { left: 140%; }
-        .btn:hover { transform: translateY(-2px); box-shadow: 0 10px 28px rgba(201,168,76,0.32), 0 3px 8px rgba(201,168,76,0.14); }
-        .btn:active { transform: translateY(0); }
-        .btn:disabled { opacity: .4; cursor: not-allowed; transform: none; box-shadow: none; animation: none; }
-        .btn-inner { display: flex; align-items: center; justify-content: center; gap: 10px; }
-        .spinner { width: 13px; height: 13px; border: 1.5px solid rgba(0,0,0,0.1); border-top-color: rgba(0,0,0,0.65); border-radius: 50%; animation: spin .65s linear infinite; }
+        .btn:hover {
+          transform: translateY(-2px);
+          box-shadow: 0 12px 32px rgba(201,168,76,0.38), 0 4px 12px rgba(201,168,76,0.18);
+        }
+        .btn:active { transform: scale(0.99) translateY(0); }
+        .btn:disabled { opacity: .38; cursor: not-allowed; transform: none; box-shadow: none; animation: none; }
+        .btn-inner { display: flex; align-items: center; justify-content: center; gap: 10px; position: relative; z-index: 1; }
+        .spinner { width: 13px; height: 13px; border: 1.5px solid rgba(0,0,0,0.12); border-top-color: rgba(0,0,0,0.7); border-radius: 50%; animation: spin .65s linear infinite; }
         .arrow { font-size: .95rem; transition: transform .24s; display: inline-block; }
         .btn:hover .arrow { transform: translateX(5px); }
 
         /* ── KEYFRAMES ── */
-        @keyframes fadeUp     { from{opacity:0;transform:translateY(16px)} to{opacity:1;transform:translateY(0)} }
-        @keyframes breathe    { 0%,100%{opacity:.55;transform:scale(1)} 50%{opacity:1;transform:scale(1.08)} }
-        @keyframes float      { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-7px)} }
-        @keyframes spin       { to{transform:rotate(360deg)} }
-        @keyframes shake      { 0%,100%{transform:translateX(0)} 25%{transform:translateX(-5px)} 75%{transform:translateX(5px)} }
-        @keyframes gold-slide { 0%{background-position:0 50%} 100%{background-position:240% 50%} }
-        @keyframes streakPulse { 0%,100%{opacity:.7} 50%{opacity:1} }
+        @keyframes fadeUp      { from{opacity:0;transform:translateY(18px)} to{opacity:1;transform:translateY(0)} }
+        @keyframes breathe     { 0%,100%{opacity:.5;transform:scale(1)} 50%{opacity:1;transform:scale(1.1)} }
+        @keyframes float       { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-8px)} }
+        @keyframes spin        { to{transform:rotate(360deg)} }
+        @keyframes shake       { 0%,100%{transform:translateX(0)} 25%{transform:translateX(-5px)} 75%{transform:translateX(5px)} }
+        @keyframes gold-slide  { 0%{background-position:0 50%} 100%{background-position:240% 50%} }
+        @keyframes streakPulse { 0%,100%{opacity:.65} 50%{opacity:1} }
+        @keyframes cardShimmer { from{left:-100%} to{left:120%} }
+        @keyframes ripple      { to{transform:scale(1);opacity:0} }
 
         @media (max-width:520px) {
+          .stage { padding-top: 24px; }
           .content { padding: 0 16px; }
-          .card { padding: 28px 24px; }
-          .logo-img { width: 160px; }
+          .card { padding: 28px 22px; }
+          .logo-img { width: 180px; }
         }
       `}</style>
 
+      {/* Cursor glow */}
+      <div ref={cursorRef} className="cursor-glow" />
+
       <div className="stage">
-        {/* Angled background facets */}
-        <div className="panel p-tl" />
-        <div className="panel p-tr" />
-        <div className="panel p-bc" />
 
-        {/* Sharp gold panel edge lines */}
-        <div className="edges">
-          <svg viewBox="0 0 1440 900" preserveAspectRatio="none">
-            <defs>
-              <linearGradient id="eg1" x1="0%" y1="0%" x2="100%" y2="100%">
-                <stop offset="0%"   stopColor="rgba(240,210,80,0)" />
-                <stop offset="20%"  stopColor="rgba(240,210,80,0.55)" />
-                <stop offset="50%"  stopColor="rgba(255,230,100,0.9)" />
-                <stop offset="80%"  stopColor="rgba(240,210,80,0.55)" />
-                <stop offset="100%" stopColor="rgba(240,210,80,0)" />
-              </linearGradient>
-              <linearGradient id="eg2" x1="100%" y1="0%" x2="0%" y2="100%">
-                <stop offset="0%"   stopColor="rgba(240,210,80,0)" />
-                <stop offset="25%"  stopColor="rgba(240,210,80,0.45)" />
-                <stop offset="55%"  stopColor="rgba(255,230,100,0.8)" />
-                <stop offset="80%"  stopColor="rgba(240,210,80,0.45)" />
-                <stop offset="100%" stopColor="rgba(240,210,80,0)" />
-              </linearGradient>
-              <linearGradient id="eg3" x1="0%" y1="100%" x2="100%" y2="0%">
-                <stop offset="0%"   stopColor="rgba(240,210,80,0)" />
-                <stop offset="30%"  stopColor="rgba(240,210,80,0.4)" />
-                <stop offset="60%"  stopColor="rgba(255,230,100,0.7)" />
-                <stop offset="100%" stopColor="rgba(240,210,80,0)" />
-              </linearGradient>
-            </defs>
-            {/* Left panel right edge: top-right corner of p-tl → bottom of p-tl */}
-            <line x1="979" y1="0" x2="518" y2="900" stroke="url(#eg1)" strokeWidth="1.2" />
-            {/* Right panel left edge */}
-            <line x1="1037" y1="0" x2="864" y2="900" stroke="url(#eg2)" strokeWidth="1.2" />
-            {/* Bottom panel top edge — left side */}
-            <line x1="0" y1="630" x2="403" y2="900" stroke="url(#eg3)" strokeWidth="1" />
-            {/* Bottom panel top edge — right side */}
-            <line x1="1440" y1="522" x2="893" y2="900" stroke="url(#eg3)" strokeWidth="1" />
-          </svg>
+        {/* ── Parallax background ── */}
+        <div ref={bgRef} className="bg-wrap">
+          <div className="panel p-tl" />
+          <div className="panel p-tr" />
+          <div className="panel p-bc" />
+
+          {/* Sharp gold edge lines */}
+          <div className="edges">
+            <svg viewBox="0 0 1440 900" preserveAspectRatio="none">
+              <defs>
+                <linearGradient id="eg1" x1="0%" y1="0%" x2="100%" y2="100%">
+                  <stop offset="0%"   stopColor="rgba(240,210,80,0)" />
+                  <stop offset="20%"  stopColor="rgba(240,210,80,0.5)" />
+                  <stop offset="50%"  stopColor="rgba(255,230,100,0.92)" />
+                  <stop offset="80%"  stopColor="rgba(240,210,80,0.5)" />
+                  <stop offset="100%" stopColor="rgba(240,210,80,0)" />
+                </linearGradient>
+                <linearGradient id="eg2" x1="100%" y1="0%" x2="0%" y2="100%">
+                  <stop offset="0%"   stopColor="rgba(240,210,80,0)" />
+                  <stop offset="25%"  stopColor="rgba(240,210,80,0.45)" />
+                  <stop offset="55%"  stopColor="rgba(255,230,100,0.85)" />
+                  <stop offset="80%"  stopColor="rgba(240,210,80,0.45)" />
+                  <stop offset="100%" stopColor="rgba(240,210,80,0)" />
+                </linearGradient>
+                <linearGradient id="eg3" x1="0%" y1="100%" x2="100%" y2="0%">
+                  <stop offset="0%"   stopColor="rgba(240,210,80,0)" />
+                  <stop offset="30%"  stopColor="rgba(240,210,80,0.38)" />
+                  <stop offset="60%"  stopColor="rgba(255,230,100,0.65)" />
+                  <stop offset="100%" stopColor="rgba(240,210,80,0)" />
+                </linearGradient>
+              </defs>
+              <line x1="979" y1="0"   x2="518" y2="900" stroke="url(#eg1)" strokeWidth="1.2" />
+              <line x1="1037" y1="0"  x2="864" y2="900" stroke="url(#eg2)" strokeWidth="1.2" />
+              <line x1="0" y1="630"   x2="403" y2="900" stroke="url(#eg3)" strokeWidth="1" />
+              <line x1="1440" y1="522" x2="893" y2="900" stroke="url(#eg3)" strokeWidth="1" />
+            </svg>
+          </div>
+
+          {/* Streaks */}
+          <div className="streaks">
+            <div className="streak-1" />
+            <div className="streak-2" />
+            <div className="streak-3" />
+            <div className="streak-4" />
+          </div>
+
+          <div className="atm" />
+          <canvas ref={canvasRef} />
         </div>
 
-        {/* Light streaks */}
-        <div className="streaks">
-          <div className="streak-1" />
-          <div className="streak-2" />
-          <div className="streak-3" />
-          <div className="streak-4" />
-        </div>
-
-        {/* Atmospheric glow */}
-        <div className="atm" />
-
-        {/* Particles */}
-        <canvas ref={canvasRef} />
-
-        {/* ── Centred Content ── */}
+        {/* ── Centred content ── */}
         <div className="content">
 
-          {/* Logo */}
           <div className="logo-wrap">
             <div className="logo-halo" />
             <img src="/logo.png" alt="White Gold" className="logo-img" />
           </div>
 
-          {/* Glass form card */}
           <div className="card">
             <div className="card-cb card-tl" />
             <div className="card-cb card-tr" />
@@ -487,7 +598,7 @@ export default function LoginPage() {
               {error && <div className="errmsg"><div className="errdot" />{error}</div>}
 
               <div className="btn-wrap">
-                <button type="submit" className="btn" disabled={loading}>
+                <button type="submit" className="btn" disabled={loading} onMouseDown={handleRipple}>
                   <div className="btn-inner">
                     {loading
                       ? <><div className="spinner" /> Signing in…</>
