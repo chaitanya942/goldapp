@@ -6,7 +6,7 @@ import { useApp } from '../../lib/context'
 
 const THEMES = {
   dark:  { bg: '#0e0e0e', card: '#141414', text1: '#f0e6c8', text3: '#7a6a4a', text4: '#4a3a2a', gold: '#c9a84c', border: '#2a2a2a', green: '#3aaa6a' },
-  light: { bg: '#f5f0e8', card: '#ede8dc', text1: '#2a1f0a', text3: '#8a7a5a', text4: '#b0a080', gold: '#a07830', border: '#d5cfc0', green: '#2a8a5a' },
+  light: { bg: '#f5f0e8', card: '#ede8dc', text1: '#1a1208', text3: '#8a7a5a', text4: '#b0a080', gold: '#9a7228', border: '#e0dace', green: '#2a8a5a' },
 }
 
 const EMPTY_FORM = { name: '', opening_date: '', state: '', region: '', cluster: '', model_type: 'outside_bangalore', branch_code: '', address: '', city: '', pin_code: '', branch_gstin: '', crm_branch_id: '' }

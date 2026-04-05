@@ -7,7 +7,7 @@ import PurchaseIntelligence from './intelligence/PurchaseIntelligence'
 
 const THEMES = {
   dark:  { card: '#111111', text1: '#f0e6c8', text3: '#9a8a6a', gold: '#c9a84c', border: '#1e1e1e', purple: '#8c5ac8', blue: '#3a8fbf' },
-  light: { card: '#e8e2d6', text1: '#1a1208', text3: '#7a6a4a', gold: '#a07830', border: '#d0c8b8', purple: '#6a3a9a', blue: '#2a6a9a' },
+  light: { card: '#faf7f2', text1: '#1a1208', text3: '#7a6a4a', gold: '#9a7228', border: '#e0dace', purple: '#6a3a9a', blue: '#2a6a9a' },
 }
 
 const TABS = [

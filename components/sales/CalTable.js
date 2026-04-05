@@ -18,9 +18,9 @@ const T = {
     rowAlt: 'rgba(255,255,255,.018)',
   },
   light: {
-    bg: '#f0ebe0', card: '#e8e2d6', card2: '#e0d9cc', card3: '#d8d0c2',
+    bg: '#f5f0e8', card: '#faf7f2', card2: '#e0d9cc', card3: '#d8d0c2',
     text1: '#1a1208', text2: '#4a3a1a', text3: '#8a7a5a', text4: '#b0a080',
-    gold: '#a07830', goldDim: 'rgba(160,120,48,.1)', goldBdr: 'rgba(160,120,48,.35)',
+    gold: '#9a7228', goldDim: 'rgba(160,120,48,.1)', goldBdr: 'rgba(160,120,48,.35)',
     border: '#ccc5b5', border2: '#c0b8a8',
     green: '#2a7a4a', greenDim: 'rgba(42,122,74,.1)',
     red: '#c03030', redDim: 'rgba(192,48,48,.1)',

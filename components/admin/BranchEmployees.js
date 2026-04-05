@@ -12,7 +12,7 @@ async function fetchEmployees() {
 
 const THEMES = {
   dark:  { bg: '#0e0e0e', card: '#141414', text1: '#f0e6c8', text2: '#c8b89a', text3: '#7a6a4a', text4: '#4a3a2a', gold: '#c9a84c', border: '#2a2a2a', green: '#3aaa6a', red: '#e05555', blue: '#3a8fbf', purple: '#8c5ac8' },
-  light: { bg: '#f5f0e8', card: '#ede8dc', text1: '#2a1f0a', text2: '#5a4a2a', text3: '#8a7a5a', text4: '#b0a080', gold: '#a07830', border: '#d5cfc0', green: '#2a8a5a', red: '#cc3333', blue: '#2a6f9f', purple: '#6c3aa8' },
+  light: { bg: '#f5f0e8', card: '#ede8dc', text1: '#1a1208', text2: '#3a2a10', text3: '#8a7a5a', text4: '#b0a080', gold: '#9a7228', border: '#e0dace', green: '#2a8a5a', red: '#cc3333', blue: '#2a6f9f', purple: '#6c3aa8' },
 }
 
 export default function BranchEmployees() {
