@@ -34,7 +34,7 @@ function mapStatus(status) {
   const s = status.toUpperCase()
   if (s === 'FINAL_PAYMENT_COMPLETED') return 'approved'
   if (s === 'WALKOUT') return 'rejected'
-  return 'pending'
+  return 'pending'  // everything else: ESTIMATION_PENDING, KYC_PENDING, FINAL_PAYMENT_PENDING, etc.
 }
 
 function mapTxnType(type) {
@@ -107,7 +107,7 @@ async function main() {
     LEFT JOIN "Quotation" q ON q.transaction_id = t.id
     LEFT JOIN "Ornament"  o ON o.quotation_id = q.id
     WHERE t.created_at >= $1
-      AND t.status NOT IN ('WALKIN', 'WALKOUT', 'ESTIMATION_PENDING')
+      AND t.status != 'WALKIN'
     GROUP BY t.id, t.code, t.status, t.transaction_type, t.created_at,
              c.first_name, c.last_name, c.mobile, b.name,
              q.service_charge, q.service_charge_amount, q.final_amount
