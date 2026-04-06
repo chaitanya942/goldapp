@@ -249,10 +249,14 @@ export async function GET(req) {
         conn.execute(`
           SELECT t.id, t.bill_no, t.cust_name, t.cust_mobile,
             t.time, t.branch_id, b.brnch_name AS branch_name,
-            t.type_gold, t.trxn_status, (t.finl_amnt+0) AS amount, t.txn_rmrk, t.pymt_mde
+            t.type_gold, t.trxn_status, (t.finl_amnt+0) AS amount, t.txn_rmrk, t.pymt_mde,
+            ROUND(SUM(o.net_wet + 0), 2) AS net_weight_g
           FROM transac_tbl t
           LEFT JOIN branch_tbl b ON b.brnch_id = t.branch_id
+          LEFT JOIN ornments_tbl o ON o.trnxnn_id = t.id
           WHERE DATE(t.date + INTERVAL 330 MINUTE) = ?
+          GROUP BY t.id, t.bill_no, t.cust_name, t.cust_mobile, t.time,
+            t.branch_id, b.brnch_name, t.type_gold, t.trxn_status, t.finl_amnt, t.txn_rmrk, t.pymt_mde
           ORDER BY t.time DESC
         `, [todayIST]),
         conn.execute(`

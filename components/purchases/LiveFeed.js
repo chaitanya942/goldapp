@@ -12,8 +12,7 @@ const THEMES = {
 const REFRESH_SECS = 60
 
 function fmtAmt(n) { return n != null ? `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 })}` : '—' }
-function fmtWt(g)  { return g != null ? `${Number(g).toFixed(2)}g` : '—' }
-function fmtDate(d){ return d ? new Date(d).toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric' }) : '—' }
+function fmtWt(g)  { return g != null && Number(g) > 0 ? `${Number(g).toFixed(2)}g` : null }
 
 function fmtTime(t) {
   if (!t) return '—'
@@ -33,10 +32,12 @@ export default function LiveFeed() {
   const { theme } = useApp()
   const t = THEMES[theme] || THEMES.dark
 
-  const [data, setData]       = useState(null)
-  const [loading, setLoading] = useState(true)
+  const [data, setData]             = useState(null)
+  const [loading, setLoading]       = useState(true)
   const [lastUpdated, setLastUpdated] = useState(null)
   const [countdown, setCountdown]   = useState(REFRESH_SECS)
+  const [filterType, setFilterType] = useState('')   // '', 'walkin', 'bills', 'approved', 'pending', 'rejected'
+  const [search, setSearch]         = useState('')
   const timerRef = useRef(null)
 
   const load = useCallback(async () => {
@@ -53,11 +54,7 @@ export default function LiveFeed() {
 
   useEffect(() => {
     load()
-    // Auto-refresh every 60s
-    const interval = setInterval(() => {
-      load()
-    }, REFRESH_SECS * 1000)
-    // Countdown ticker
+    const interval = setInterval(load, REFRESH_SECS * 1000)
     timerRef.current = setInterval(() => {
       setCountdown(c => (c <= 1 ? REFRESH_SECS : c - 1))
     }, 1000)
@@ -74,15 +71,47 @@ export default function LiveFeed() {
 
   const { todaySummary: ts, walkinToday, todayTxns = [], todayWalkins = [] } = data || {}
 
-  // Merge today's timeline: walk-ins + transactions
+  // Merge & sort timeline
   const timeline = [
     ...todayWalkins.map(w => ({ ...w, _type: 'walkin' })),
     ...todayTxns.map(tx => ({ ...tx, _type: 'txn' })),
   ].sort((a, b) => {
     const ta = String(a.time || '').padStart(8, '0')
     const tb = String(b.time || '').padStart(8, '0')
-    return tb.localeCompare(ta)  // newest first
+    return tb.localeCompare(ta)
   })
+
+  // Apply KPI filter
+  const typeFiltered = filterType === 'walkin'   ? timeline.filter(i => i._type === 'walkin') :
+                       filterType === 'bills'    ? timeline.filter(i => i._type === 'txn') :
+                       filterType === 'approved' ? timeline.filter(i => i._type === 'txn' && i.trxn_status === 'approved') :
+                       filterType === 'pending'  ? timeline.filter(i => i._type === 'txn' && i.trxn_status === 'pending') :
+                       filterType === 'rejected' ? timeline.filter(i => i._type === 'txn' && i.trxn_status === 'rejected') :
+                       timeline
+
+  // Apply search
+  const filteredTimeline = search.trim()
+    ? typeFiltered.filter(i => {
+        const q = search.toLowerCase()
+        return (i.cust_name  || '').toLowerCase().includes(q) ||
+               (i.cust_mobile|| '').includes(q) ||
+               (i.bill_no    || '').toLowerCase().includes(q) ||
+               (i.branch_name|| '').toLowerCase().includes(q)
+      })
+    : typeFiltered
+
+  const toggleFilter = (key) => setFilterType(f => f === key ? '' : key)
+  const hasFilter = filterType || search.trim()
+
+  // KPI card definitions
+  const kpiCards = [
+    { key: 'walkin',   label: 'Walk-ins',        value: walkinToday ?? 0,           color: t.blue   },
+    { key: 'bills',    label: 'Bills Submitted',  value: ts?.total ?? 0,             color: t.text1  },
+    { key: 'approved', label: 'Approved',         value: ts?.approved ?? 0,          color: t.green  },
+    { key: 'pending',  label: 'Pending',          value: ts?.pending ?? 0,           color: t.orange },
+    { key: 'rejected', label: 'Rejected',         value: ts?.rejected ?? 0,          color: t.red    },
+    { key: '',         label: 'Approved Value',   value: fmtAmt(ts?.approved_value), color: t.gold, noFilter: true },
+  ]
 
   return (
     <div style={{ padding: '0' }}>
@@ -107,41 +136,84 @@ export default function LiveFeed() {
         </div>
       </div>
 
-      {/* TODAY SUMMARY */}
+      {/* TODAY SUMMARY — clickable KPI cards */}
       <div style={{ fontSize: '.58rem', color: t.text4, letterSpacing: '.18em', textTransform: 'uppercase', marginBottom: '10px' }}>
         Today's Activity · {data?.todayIST}
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: '10px', marginBottom: '28px' }}>
-        {[
-          { label: 'Walk-ins',        value: walkinToday ?? 0,          color: t.blue   },
-          { label: 'Bills Submitted', value: ts?.total ?? 0,            color: t.text1  },
-          { label: 'Approved',        value: ts?.approved ?? 0,         color: t.green  },
-          { label: 'Pending',         value: ts?.pending ?? 0,          color: t.orange },
-          { label: 'Rejected',        value: ts?.rejected ?? 0,         color: t.red    },
-          { label: 'Approved Value',  value: fmtAmt(ts?.approved_value), color: t.gold  },
-        ].map(c => (
-          <div key={c.label} style={{ ...card, padding: '14px 16px', textAlign: 'center' }}>
-            <div style={{ fontSize: '1.3rem', fontWeight: 200, color: c.color }}>{c.value}</div>
-            <div style={{ fontSize: '.55rem', color: t.text3, letterSpacing: '.1em', textTransform: 'uppercase', marginTop: '6px' }}>{c.label}</div>
-          </div>
-        ))}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: '10px', marginBottom: '20px' }}>
+        {kpiCards.map(c => {
+          const active = !c.noFilter && filterType === c.key
+          return (
+            <div key={c.label}
+              onClick={() => !c.noFilter && toggleFilter(c.key)}
+              style={{
+                ...card, padding: '14px 16px', textAlign: 'center',
+                cursor: c.noFilter ? 'default' : 'pointer',
+                border: `1px solid ${active ? c.color : t.border}`,
+                background: active ? `${c.color}14` : t.card,
+                transition: 'all .15s',
+                position: 'relative',
+              }}
+              onMouseEnter={e => { if (!c.noFilter) e.currentTarget.style.borderColor = c.color }}
+              onMouseLeave={e => { if (!c.noFilter) e.currentTarget.style.borderColor = active ? c.color : t.border }}
+            >
+              {active && (
+                <div style={{ position: 'absolute', top: '6px', right: '8px', fontSize: '.5rem', color: c.color, opacity: .7 }}>✕</div>
+              )}
+              <div style={{ fontSize: '1.3rem', fontWeight: 200, color: c.color }}>{c.value}</div>
+              <div style={{ fontSize: '.55rem', color: t.text3, letterSpacing: '.1em', textTransform: 'uppercase', marginTop: '6px' }}>{c.label}</div>
+            </div>
+          )
+        })}
+      </div>
+
+      {/* SEARCH + FILTER BAR */}
+      <div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginBottom: '16px' }}>
+        <input
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          placeholder="Search name, phone, bill no, branch..."
+          style={{
+            flex: 1, background: t.card, border: `1px solid ${t.border}`, borderRadius: '8px',
+            padding: '8px 14px', color: t.text1, fontSize: '.72rem', outline: 'none',
+          }}
+        />
+        {hasFilter && (
+          <button
+            onClick={() => { setFilterType(''); setSearch('') }}
+            style={{ background: 'transparent', border: `1px solid ${t.red}50`, borderRadius: '8px', padding: '8px 16px', color: t.red, fontSize: '.65rem', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+            ✕ Clear Filter
+          </button>
+        )}
       </div>
 
       {/* TODAY'S TIMELINE */}
-      <div style={{ fontSize: '.58rem', color: t.text4, letterSpacing: '.18em', textTransform: 'uppercase', marginBottom: '10px' }}>
-        Today's Timeline ({timeline.length} events)
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+        <div style={{ fontSize: '.58rem', color: t.text4, letterSpacing: '.18em', textTransform: 'uppercase' }}>
+          Today's Timeline
+          {hasFilter
+            ? ` — ${filteredTimeline.length} of ${timeline.length} events`
+            : ` (${timeline.length} events)`}
+        </div>
+        {filterType && (
+          <div style={{ fontSize: '.6rem', color: t.text3 }}>
+            Filtering: <span style={{ color: kpiCards.find(k => k.key === filterType)?.color }}>{kpiCards.find(k => k.key === filterType)?.label}</span>
+          </div>
+        )}
       </div>
-      {timeline.length === 0 ? (
+
+      {filteredTimeline.length === 0 ? (
         <div style={{ ...card, textAlign: 'center', color: t.text4, fontSize: '.75rem', padding: '40px' }}>
-          No activity logged yet today — data will appear here in real-time as branch staff enter it in the CRM
+          {hasFilter ? 'No events match the current filter' : 'No activity logged yet today'}
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-          {timeline.map((item, i) => {
+          {filteredTimeline.map((item, i) => {
             const isWalkin = item._type === 'walkin'
             const statusColor = isWalkin
               ? (item.walkin_status === 'sold' ? t.green : t.blue)
               : (STATUS_STYLE[item.trxn_status]?.color || t.text3)
+            const wt = !isWalkin ? fmtWt(item.net_weight_g) : (item.gms_weight ? `${item.gms_weight}g` : null)
 
             return (
               <div key={`${item._type}-${item.id}-${i}`} style={{
@@ -163,32 +235,43 @@ export default function LiveFeed() {
                     border: `1px solid ${isWalkin ? t.blue : statusColor}40`,
                     letterSpacing: '.08em', textTransform: 'uppercase',
                   }}>
-                    {isWalkin ? 'Walk-in' : item.trxn_status}
+                    {isWalkin ? 'Walk-in' : (STATUS_STYLE[item.trxn_status]?.label || item.trxn_status)}
                   </span>
                 </div>
 
                 {/* DETAILS */}
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: '.75rem', color: t.text1, fontWeight: 500 }}>{item.cust_name || '—'}</div>
-                  <div style={{ fontSize: '.65rem', color: t.text3, marginTop: '2px' }}>
-                    {item.cust_mobile}
-                    {item.branch_name && <span style={{ marginLeft: '8px', color: t.text4 }}>· {item.branch_name}</span>}
+                  <div style={{ fontSize: '.65rem', color: t.text3, marginTop: '2px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                    {item.cust_mobile && <span>{item.cust_mobile}</span>}
+                    {item.branch_name && <span style={{ color: t.text4 }}>· {item.branch_name}</span>}
+                    {!isWalkin && item.bill_no && <span style={{ color: t.gold, opacity: .6 }}>· {item.bill_no}</span>}
                   </div>
                 </div>
 
-                {/* ITEM-SPECIFIC INFO */}
-                {isWalkin ? (
-                  <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                    <div style={{ fontSize: '.7rem', color: t.text2 }}>{item.item_type || '—'}</div>
-                    <div style={{ fontSize: '.65rem', color: t.text4 }}>{item.gms_weight ? `${item.gms_weight}g` : ''}{item.walk_reason ? ` · ${item.walk_reason}` : ''}</div>
-                  </div>
-                ) : (
-                  <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                    <div style={{ fontSize: '.75rem', color: t.gold, fontWeight: 500 }}>{fmtAmt(item.amount)}</div>
-                    <div style={{ fontSize: '.65rem', color: t.text4 }}>{item.type_gold}{item.pymt_mde ? ` · ${item.pymt_mde}` : ''}</div>
-                  </div>
-                )}
+                {/* RIGHT SIDE */}
+                <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                  {isWalkin ? (
+                    <>
+                      <div style={{ fontSize: '.7rem', color: t.text2 }}>{item.item_type || '—'}</div>
+                      <div style={{ fontSize: '.65rem', color: t.text4 }}>
+                        {wt && <span>{wt}</span>}
+                        {item.walk_reason && <span>{wt ? ' · ' : ''}{item.walk_reason}</span>}
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div style={{ fontSize: '.75rem', color: t.gold, fontWeight: 500 }}>{fmtAmt(item.amount)}</div>
+                      <div style={{ fontSize: '.65rem', color: t.text4, display: 'flex', gap: '5px', justifyContent: 'flex-end' }}>
+                        {wt && <span style={{ color: t.text3 }}>{wt}</span>}
+                        {item.type_gold && <span>{wt ? '·' : ''} {item.type_gold}</span>}
+                        {item.pymt_mde && <span>· {item.pymt_mde}</span>}
+                      </div>
+                    </>
+                  )}
+                </div>
 
+                {/* REJECTION REMARK */}
                 {item.txn_rmrk && (
                   <div style={{ fontSize: '.65rem', color: t.red, maxWidth: '140px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flexShrink: 0 }}>
                     {item.txn_rmrk}
