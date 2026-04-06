@@ -131,7 +131,6 @@ export default function PurchaseData() {
   useEffect(() => {
     supabase.from('branches').select('name').eq('is_active', true).order('name')
       .then(({ data }) => { if (data) setAllBranches(data.map(b => b.name)) })
-    loadKpis('')
     loadPage(0)
   }, [])
 
@@ -139,9 +138,7 @@ export default function PurchaseData() {
   useEffect(() => { loadKpis(filterCrmStatus) }, [filterCrmStatus])
 
   const loadKpis = async (crmStatus = '') => {
-    const { data } = crmStatus
-      ? await supabase.rpc('get_purchase_kpis', { p_crm_status: crmStatus })
-      : await supabase.rpc('get_purchase_kpis')
+    const { data } = await supabase.rpc('get_purchase_kpis', { p_crm_status: crmStatus || null })
     if (data) setKpis(data)
   }
 
