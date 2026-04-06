@@ -225,77 +225,46 @@ export async function GET(req) {
       const istNow = new Date(Date.now() + 5.5 * 60 * 60 * 1000)
       const todayIST = istNow.toISOString().split('T')[0]
 
-      // Today's transaction summary — dates stored as UTC; IST = UTC+5:30 = +330 min
-      const [[todaySummary]] = await conn.execute(`
-        SELECT
-          COUNT(*) AS total,
-          SUM(CASE WHEN trxn_status='approved' THEN 1 ELSE 0 END) AS approved,
-          SUM(CASE WHEN trxn_status='rejected' THEN 1 ELSE 0 END) AS rejected,
-          SUM(CASE WHEN trxn_status='pending'  THEN 1 ELSE 0 END) AS pending,
-          COUNT(DISTINCT branch_id) AS branches_active,
-          SUM(CASE WHEN trxn_status='approved' THEN (finl_amnt+0) ELSE 0 END) AS approved_value
-        FROM transac_tbl WHERE DATE(date + INTERVAL 330 MINUTE) = ?
-      `, [todayIST])
-
-      // Today's walk-ins count
-      const [[walkinToday]] = await conn.execute(
-        `SELECT COUNT(*) AS count FROM customer_walkin WHERE DATE(date + INTERVAL 330 MINUTE) = ?`, [todayIST]
-      )
-
-      // Today's transactions (detail)
-      const [todayTxns] = await conn.execute(`
-        SELECT t.id, t.bill_no, t.cust_name, t.cust_mobile,
-          t.time, t.branch_id, b.brnch_name AS branch_name,
-          t.type_gold, t.trxn_status, (t.finl_amnt+0) AS amount, t.txn_rmrk, t.pymt_mde
-        FROM transac_tbl t
-        LEFT JOIN branch_tbl b ON b.brnch_id = t.branch_id
-        WHERE DATE(t.date + INTERVAL 330 MINUTE) = ?
-        ORDER BY t.time DESC
-      `, [todayIST])
-
-      // Today's walk-ins (detail)
-      const [todayWalkins] = await conn.execute(`
-        SELECT cw.id, cw.cust_name, cw.cust_mobile, cw.time,
-          cw.walkin_status, cw.item_type, cw.gms_weight,
-          cw.walk_reason, cw.source, cw.branch_id, b.brnch_name AS branch_name
-        FROM customer_walkin cw
-        LEFT JOIN branch_tbl b ON b.brnch_id = cw.branch_id
-        WHERE DATE(cw.date + INTERVAL 330 MINUTE) = ?
-        ORDER BY cw.time DESC
-      `, [todayIST])
-
-      // ── PENDING GOLD AT EACH BRANCH ──────────────────────────────────────
-      // Gold physically present at branch — bill created & weighed but NOT paid yet
-      const [pendingGold] = await conn.execute(`
-        SELECT
-          t.branch_id,
-          b.brnch_name                          AS branch_name,
-          COUNT(DISTINCT t.id)                  AS pending_bills,
-          ROUND(SUM(o.grms_wet + 0), 2)         AS gross_weight_g,
-          ROUND(SUM(o.net_wet   + 0), 2)         AS net_weight_g,
-          SUM(t.finl_amnt + 0)                  AS pending_value,
-          DATEDIFF(CURDATE(), MIN(DATE(t.date))) AS oldest_days,
-          MIN(DATE(t.date))                      AS oldest_date
-        FROM transac_tbl t
-        LEFT JOIN branch_tbl b  ON b.brnch_id  = t.branch_id
-        LEFT JOIN ornments_tbl o ON o.trnxnn_id = t.id
-        WHERE t.trxn_status = 'pending'
-          AND t.branch_id IS NOT NULL AND t.branch_id != ''
-        GROUP BY t.branch_id, b.brnch_name
-        HAVING pending_bills > 0
-        ORDER BY net_weight_g DESC
-      `)
-
-      // ── PENDING GOLD TOTALS ───────────────────────────────────────────────
-      const [[pendingTotals]] = await conn.execute(`
-        SELECT
-          COUNT(DISTINCT t.id)          AS total_bills,
-          ROUND(SUM(o.net_wet + 0), 2)  AS total_net_g,
-          SUM(t.finl_amnt + 0)          AS total_value
-        FROM transac_tbl t
-        LEFT JOIN ornments_tbl o ON o.trnxnn_id = t.id
-        WHERE t.trxn_status = 'pending'
-      `)
+      // Run all 4 queries in parallel — they're independent reads
+      const [
+        [[todaySummary]],
+        [[walkinToday]],
+        [todayTxns],
+        [todayWalkins],
+      ] = await Promise.all([
+        conn.execute(`
+          SELECT
+            COUNT(*) AS total,
+            SUM(CASE WHEN trxn_status='approved' THEN 1 ELSE 0 END) AS approved,
+            SUM(CASE WHEN trxn_status='rejected' THEN 1 ELSE 0 END) AS rejected,
+            SUM(CASE WHEN trxn_status='pending'  THEN 1 ELSE 0 END) AS pending,
+            COUNT(DISTINCT branch_id) AS branches_active,
+            SUM(CASE WHEN trxn_status='approved' THEN (finl_amnt+0) ELSE 0 END) AS approved_value
+          FROM transac_tbl WHERE DATE(date + INTERVAL 330 MINUTE) = ?
+        `, [todayIST]),
+        conn.execute(
+          `SELECT COUNT(*) AS count FROM customer_walkin WHERE DATE(date + INTERVAL 330 MINUTE) = ?`,
+          [todayIST]
+        ),
+        conn.execute(`
+          SELECT t.id, t.bill_no, t.cust_name, t.cust_mobile,
+            t.time, t.branch_id, b.brnch_name AS branch_name,
+            t.type_gold, t.trxn_status, (t.finl_amnt+0) AS amount, t.txn_rmrk, t.pymt_mde
+          FROM transac_tbl t
+          LEFT JOIN branch_tbl b ON b.brnch_id = t.branch_id
+          WHERE DATE(t.date + INTERVAL 330 MINUTE) = ?
+          ORDER BY t.time DESC
+        `, [todayIST]),
+        conn.execute(`
+          SELECT cw.id, cw.cust_name, cw.cust_mobile, cw.time,
+            cw.walkin_status, cw.item_type, cw.gms_weight,
+            cw.walk_reason, cw.source, cw.branch_id, b.brnch_name AS branch_name
+          FROM customer_walkin cw
+          LEFT JOIN branch_tbl b ON b.brnch_id = cw.branch_id
+          WHERE DATE(cw.date + INTERVAL 330 MINUTE) = ?
+          ORDER BY cw.time DESC
+        `, [todayIST]),
+      ])
 
       return Response.json({
         todayIST,
@@ -303,8 +272,6 @@ export async function GET(req) {
         walkinToday: walkinToday.count,
         todayTxns,
         todayWalkins,
-        pendingGold,
-        pendingTotals,
       })
     }
 
