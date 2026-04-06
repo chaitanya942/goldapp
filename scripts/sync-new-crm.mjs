@@ -173,19 +173,20 @@ async function main() {
   }
 
   const newRecords    = allRecords.filter(r => !existingIds.has(r.application_id))
-  const statusChanged = allRecords.filter(r =>
-    existingIds.has(r.application_id) && existingStatus.get(r.application_id) !== r.crm_status
-  )
+  // All existing records from new CRM need crm_source + crm_status updated
+  const existingToUpdate = allRecords.filter(r => existingIds.has(r.application_id))
 
-  // ── Status updates ────────────────────────────────────────────────────────
+  // ── Update crm_source + crm_status for existing records ──────────────────
   let statusUpdated = 0
-  for (let i = 0; i < statusChanged.length; i += 20) {
-    const chunk = statusChanged.slice(i, i + 20)
+  for (let i = 0; i < existingToUpdate.length; i += 20) {
+    const chunk = existingToUpdate.slice(i, i + 20)
     const results = await Promise.all(
-      chunk.map(r => supabase.from('purchases').update({ crm_status: r.crm_status }).eq('application_id', r.application_id))
+      chunk.map(r => supabase.from('purchases')
+        .update({ crm_status: r.crm_status, crm_source: 'new_crm' })
+        .eq('application_id', r.application_id))
     )
     results.forEach(({ error }, idx) => {
-      if (error) console.error(`  ❌ Status update failed: ${chunk[idx].application_id}`)
+      if (error) console.error(`  ❌ Update failed: ${chunk[idx].application_id}`)
       else statusUpdated++
     })
   }
