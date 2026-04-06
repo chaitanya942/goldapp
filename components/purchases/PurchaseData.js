@@ -139,8 +139,9 @@ export default function PurchaseData() {
   useEffect(() => { loadKpis(filterCrmStatus) }, [filterCrmStatus])
 
   const loadKpis = async (crmStatus = '') => {
-    const params = crmStatus ? { p_crm_status: crmStatus } : {}
-    const { data } = await supabase.rpc('get_purchase_kpis', params)
+    const { data } = crmStatus
+      ? await supabase.rpc('get_purchase_kpis', { p_crm_status: crmStatus })
+      : await supabase.rpc('get_purchase_kpis')
     if (data) setKpis(data)
   }
 
