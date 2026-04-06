@@ -218,19 +218,24 @@ export async function POST(request) {
       existingStatus.get(r.application_id) !== r.crm_status
     )
 
-    // ── Push crm_status updates — batch upsert with only 2 fields so other
-    //    columns (stock_status etc.) are not touched on conflict ─────────────
-    const STATUS_BATCH = 100
+    // ── Update crm_status for records whose status changed in CRM ─────────────
+    // Use individual .update() per record — upsert can't partially update columns
+    // without violating NOT NULL constraints on unspecified fields
+    const STATUS_CONCURRENCY = 20
     let statusUpdated = 0
-    for (let i = 0; i < statusChanged.length; i += STATUS_BATCH) {
-      const chunk = statusChanged.slice(i, i + STATUS_BATCH).map(r => ({
-        application_id: r.application_id,
-        crm_status:     r.crm_status,
-      }))
-      const { error: statusErr } = await supabaseAdmin.from('purchases')
-        .upsert(chunk, { onConflict: 'application_id', ignoreDuplicates: false })
-      if (statusErr) console.error('Status update error:', statusErr.message)
-      else statusUpdated += chunk.length
+    for (let i = 0; i < statusChanged.length; i += STATUS_CONCURRENCY) {
+      const chunk = statusChanged.slice(i, i + STATUS_CONCURRENCY)
+      const results = await Promise.all(
+        chunk.map(r =>
+          supabaseAdmin.from('purchases')
+            .update({ crm_status: r.crm_status })
+            .eq('application_id', r.application_id)
+        )
+      )
+      results.forEach(({ error }, idx) => {
+        if (error) console.error(`Status update failed for ${chunk[idx].application_id}:`, error.message)
+        else statusUpdated++
+      })
     }
 
     // ── Insert new records in batches of 100 ──────────────────────────────────
