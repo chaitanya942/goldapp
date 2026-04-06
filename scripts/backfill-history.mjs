@@ -44,6 +44,36 @@ function normalizeAppId(raw) {
   return s.toUpperCase().startsWith('WGKA') ? s.toUpperCase() : `WGKA${s}`
 }
 
+function smartDedup(records) {
+  const grouped = new Map()
+  records.forEach(r => {
+    if (!grouped.has(r.application_id)) grouped.set(r.application_id, [])
+    grouped.get(r.application_id).push(r)
+  })
+  const result = []
+  for (const group of grouped.values()) {
+    if (group.length === 1) { result.push(group[0]); continue }
+    const kept = []
+    for (const r of group) {
+      const dupIdx = kept.findIndex(d =>
+        d.customer_name === r.customer_name &&
+        d.purchase_date === r.purchase_date &&
+        Math.abs((d.net_weight||0) - (r.net_weight||0)) < 0.01 &&
+        Math.abs((d.final_amount_crm||0) - (r.final_amount_crm||0)) < 1 &&
+        d.phone_number === r.phone_number
+      )
+      if (dupIdx >= 0) {
+        kept[dupIdx].is_duplicate = true
+      } else {
+        if (kept.length > 0) r.application_id = `${r.application_id}-${r._txn_id}`
+        kept.push(r)
+      }
+    }
+    result.push(...kept)
+  }
+  return result
+}
+
 // ── Quarter ranges to backfill (everything before 2025-04-01) ────────────────
 const QUARTERS = [
   { from: '2020-01-01', to: '2020-12-31' },
@@ -61,9 +91,9 @@ async function backfillRange(conn, branchMap, from, to) {
 
   const [rows] = await conn.execute(`
     SELECT
-      t.id, t.bill_no AS application_id, t.date AS purchase_date,
-      t.time AS transaction_time, t.cust_name AS customer_name,
-      t.cust_mobile AS phone_number, t.branch_id,
+      t.id, t.bill_no AS application_id, t.trxn_status AS crm_status,
+      t.date AS purchase_date, t.time AS transaction_time,
+      t.cust_name AS customer_name, t.cust_mobile AS phone_number, t.branch_id,
       t.type_gold AS transaction_type, t.serv_chr AS service_charge_pct,
       t.finl_amnt AS final_amount_crm,
       GROUP_CONCAT(o.grms_wet)   AS gross_weight_str,
@@ -74,76 +104,75 @@ async function backfillRange(conn, branchMap, from, to) {
       GROUP_CONCAT(o.grs_amnt)   AS total_amount_str
     FROM transac_tbl t
     LEFT JOIN ornments_tbl o ON o.trnxnn_id = t.id
-    WHERE t.trxn_status = 'approved' AND t.date >= ? AND t.date <= ?
+    WHERE t.date >= ? AND t.date <= ?
     GROUP BY t.id
   `, [from, to])
 
   if (!rows.length) { console.log('   ⚪ No records found — skipping'); return }
   console.log(`   Found ${rows.length} CRM records`)
 
-  // Check which already exist in Supabase
-  const crmIds = rows.map(r => normalizeAppId(r.application_id))
-  const existingIds = new Set()
-  for (let i = 0; i < crmIds.length; i += 500) {
-    const chunk = crmIds.slice(i, i + 500)
-    const { data } = await supabase.from('purchases').select('application_id').in('application_id', chunk)
-    ;(data || []).forEach(r => existingIds.add(r.application_id))
-  }
-
-  const newRecords = rows
-    .map(r => {
-      const netWeight   = sumCSV(r.net_weight_str)
-      const finalAmount = parseFloat(r.final_amount_crm) || 0
-      const svcPct      = parseFloat(r.service_charge_pct) || 0
-      let txnTime = null
-      if (r.transaction_time != null) {
-        if (typeof r.transaction_time === 'string') txnTime = r.transaction_time.trim()
-        else if (typeof r.transaction_time === 'object') {
-          const abs = Math.abs(r.transaction_time)
-          const h = String(Math.floor(abs / 3600)).padStart(2, '0')
-          const m = String(Math.floor((abs % 3600) / 60)).padStart(2, '0')
-          const s = String(abs % 60).padStart(2, '0')
-          txnTime = `${h}:${m}:${s}`
-        }
+  const records = rows.map(r => {
+    const netWeight   = sumCSV(r.net_weight_str)
+    const finalAmount = parseFloat(r.final_amount_crm) || 0
+    const svcPct      = parseFloat(r.service_charge_pct) || 0
+    let txnTime = null
+    if (r.transaction_time != null) {
+      if (typeof r.transaction_time === 'string') txnTime = r.transaction_time.trim()
+      else if (typeof r.transaction_time === 'object') {
+        const abs = Math.abs(r.transaction_time)
+        const h = String(Math.floor(abs / 3600)).padStart(2, '0')
+        const m = String(Math.floor((abs % 3600) / 60)).padStart(2, '0')
+        const s = String(abs % 60).padStart(2, '0')
+        txnTime = `${h}:${m}:${s}`
       }
-      return {
-        application_id:             normalizeAppId(r.application_id),
-        purchase_date:              r.purchase_date ? (r.purchase_date instanceof Date ? `${r.purchase_date.getFullYear()}-${String(r.purchase_date.getMonth()+1).padStart(2,'0')}-${String(r.purchase_date.getDate()).padStart(2,'0')}` : String(r.purchase_date).split('T')[0].split(' ')[0]) : null,
-        transaction_time:           txnTime,
-        customer_name:              r.customer_name?.trim() || null,
-        phone_number:               r.phone_number?.trim()  || null,
-        branch_name:                (branchMap[r.branch_id] || String(r.branch_id))?.trim(),
-        transaction_type:           r.transaction_type?.trim()?.toLowerCase() === 'physical' ? 'PHYSICAL' : 'TAKEOVER',
-        gross_weight:               sumCSV(r.gross_weight_str),
-        stone_weight:               sumCSV(r.stone_weight_str),
-        wastage:                    sumCSV(r.wastage_str),
-        net_weight:                 netWeight,
-        net_weight_crm:             netWeight,
-        net_weight_calculated:      netWeight,
-        purity:                     weightedAvgPurity(r.net_weight_str, r.purity_str),
-        total_amount:               sumCSV(r.total_amount_str),
-        final_amount_crm:           finalAmount,
-        final_amount_calc:          finalAmount,
-        service_charge_pct:         svcPct,
-        service_charge_amount_crm:  finalAmount * (svcPct / 100),
-        service_charge_amount_calc: finalAmount * (svcPct / 100),
-        net_weight_mismatch:        false,
-        service_charge_mismatch:    false,
-        final_amount_mismatch:      false,
-        stock_status:               'at_branch',
-        is_duplicate:               false,
-        is_deleted:                 false,
-      }
-    })
-    .filter(r => !existingIds.has(r.application_id))
+    }
+    const pd = r.purchase_date
+    const purchase_date = pd ? (pd instanceof Date
+      ? `${pd.getFullYear()}-${String(pd.getMonth()+1).padStart(2,'0')}-${String(pd.getDate()).padStart(2,'0')}`
+      : String(pd).split('T')[0].split(' ')[0]) : null
+    return {
+      _txn_id:                    r.id,
+      application_id:             normalizeAppId(r.application_id),
+      crm_status:                 r.crm_status || 'approved',
+      purchase_date,
+      transaction_time:           txnTime,
+      customer_name:              r.customer_name?.trim() || null,
+      phone_number:               r.phone_number?.trim()  || null,
+      branch_name:                (branchMap[r.branch_id] || String(r.branch_id))?.trim(),
+      transaction_type:           r.transaction_type?.trim()?.toLowerCase() === 'physical' ? 'PHYSICAL' : 'TAKEOVER',
+      gross_weight:               sumCSV(r.gross_weight_str),
+      stone_weight:               sumCSV(r.stone_weight_str),
+      wastage:                    sumCSV(r.wastage_str),
+      net_weight:                 netWeight,
+      net_weight_crm:             netWeight,
+      net_weight_calculated:      netWeight,
+      purity:                     weightedAvgPurity(r.net_weight_str, r.purity_str),
+      total_amount:               sumCSV(r.total_amount_str),
+      final_amount_crm:           finalAmount,
+      final_amount_calc:          finalAmount,
+      service_charge_pct:         svcPct,
+      service_charge_amount_crm:  finalAmount * (svcPct / 100),
+      service_charge_amount_calc: finalAmount * (svcPct / 100),
+      net_weight_mismatch:        false,
+      service_charge_mismatch:    false,
+      final_amount_mismatch:      false,
+      stock_status:               'at_branch',
+      is_duplicate:               false,
+      is_deleted:                 false,
+    }
+  })
 
-  if (!newRecords.length) { console.log(`   ✅ All ${rows.length} already in Supabase`); return }
-  console.log(`   Inserting ${newRecords.length} new records...`)
+  // Smart dedup — same bill_no only a true dup if key fields also match
+  const deduped = smartDedup(records).map(({ _txn_id, ...r }) => r)
+  if (deduped.length !== records.length)
+    console.log(`   ⚠ Deduped ${records.length - deduped.length} duplicate(s) (true field match)`)
+
+  console.log(`   Upserting ${deduped.length} records with corrected dates...`)
 
   let synced = 0, errors = 0
-  for (let i = 0; i < newRecords.length; i += 100) {
-    const batch = newRecords.slice(i, i + 100)
-    const { error } = await supabase.from('purchases').upsert(batch, { onConflict: 'application_id', ignoreDuplicates: true })
+  for (let i = 0; i < deduped.length; i += 100) {
+    const batch = deduped.slice(i, i + 100)
+    const { error } = await supabase.from('purchases').upsert(batch, { onConflict: 'application_id', ignoreDuplicates: false })
     if (error) { console.error('   ❌ Batch error:', error.message); errors += batch.length }
     else { synced += batch.length; process.stdout.write('.') }
   }

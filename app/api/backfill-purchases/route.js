@@ -24,6 +24,42 @@ function weightedAvgPurity(netWetStr, purityStr) {
   return weighted / totalNet
 }
 
+function fmtDate(d) {
+  if (!d) return null
+  if (d instanceof Date) return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
+  return String(d).split('T')[0].split(' ')[0]
+}
+
+function smartDedup(records) {
+  const grouped = new Map()
+  records.forEach(r => {
+    if (!grouped.has(r.application_id)) grouped.set(r.application_id, [])
+    grouped.get(r.application_id).push(r)
+  })
+  const result = []
+  for (const group of grouped.values()) {
+    if (group.length === 1) { result.push(group[0]); continue }
+    const kept = []
+    for (const r of group) {
+      const dupIdx = kept.findIndex(d =>
+        d.customer_name === r.customer_name &&
+        d.purchase_date === r.purchase_date &&
+        Math.abs((d.net_weight||0) - (r.net_weight||0)) < 0.01 &&
+        Math.abs((d.final_amount_crm||0) - (r.final_amount_crm||0)) < 1 &&
+        d.phone_number === r.phone_number
+      )
+      if (dupIdx >= 0) {
+        kept[dupIdx].is_duplicate = true
+      } else {
+        if (kept.length > 0) r.application_id = `${r.application_id}-${r._txn_id}`
+        kept.push(r)
+      }
+    }
+    result.push(...kept)
+  }
+  return result
+}
+
 export async function POST(request) {
   let conn
   try {
@@ -48,11 +84,12 @@ export async function POST(request) {
       password: process.env.CRM_DB_PASSWORD,
     })
 
-    // ── Pull records for the given date range ─────────────
+    // ── Pull ALL records for the given date range ─────────
     const [rows] = await conn.execute(`
       SELECT
         t.id                          AS txn_id,
         t.bill_no                     AS application_id,
+        t.trxn_status                 AS crm_status,
         t.date                        AS purchase_date,
         t.time                        AS transaction_time,
         t.cust_name                   AS customer_name,
@@ -69,8 +106,7 @@ export async function POST(request) {
         GROUP_CONCAT(o.grs_amnt)      AS total_amount_str
       FROM transac_tbl t
       LEFT JOIN ornments_tbl o ON o.trnxnn_id = t.id
-      WHERE t.trxn_status = 'approved'
-      AND t.date >= ? AND t.date <= ?
+      WHERE t.date >= ? AND t.date <= ?
       GROUP BY t.id
     `, [from, to])
 
@@ -123,8 +159,10 @@ export async function POST(request) {
       }
 
       return {
+        _txn_id:                    r.txn_id,
         application_id:             `WGKA${String(r.application_id).trim()}`,
-        purchase_date:              r.purchase_date ? (r.purchase_date instanceof Date ? `${r.purchase_date.getFullYear()}-${String(r.purchase_date.getMonth()+1).padStart(2,'0')}-${String(r.purchase_date.getDate()).padStart(2,'0')}` : String(r.purchase_date).split('T')[0].split(' ')[0]) : null,
+        crm_status:                 r.crm_status || 'approved',
+        purchase_date:              fmtDate(r.purchase_date),
         transaction_time:           txnTime,
         customer_name:              r.customer_name?.trim() || null,
         phone_number:               r.phone_number?.trim()  || null,
@@ -152,8 +190,9 @@ export async function POST(request) {
       }
     })
 
-    // ── Filter to only NEW records ─────────────────────────
-    const newRecords = allRecords.filter(r => !existingIds.has(r.application_id))
+    // ── Smart dedup then filter to only NEW records ────────
+    const deduped = smartDedup(allRecords).map(({ _txn_id, ...r }) => r)
+    const newRecords = deduped.filter(r => !existingIds.has(r.application_id))
 
     if (!newRecords.length) {
       return Response.json({
