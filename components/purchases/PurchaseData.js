@@ -131,14 +131,16 @@ export default function PurchaseData() {
   useEffect(() => {
     supabase.from('branches').select('name').eq('is_active', true).order('name')
       .then(({ data }) => { if (data) setAllBranches(data.map(b => b.name)) })
-    loadKpis()
+    loadKpis('')
     loadPage(0)
   }, [])
 
   useEffect(() => { loadPage(page) }, [page, search, filterCrmStatus, filterStatus, filterBranch, filterTxn, fromDate, toDate, sortCol, sortDir])
+  useEffect(() => { loadKpis(filterCrmStatus) }, [filterCrmStatus])
 
-  const loadKpis = async () => {
-    const { data } = await supabase.rpc('get_purchase_kpis')
+  const loadKpis = async (crmStatus = '') => {
+    const params = crmStatus ? { p_crm_status: crmStatus } : {}
+    const { data } = await supabase.rpc('get_purchase_kpis', params)
     if (data) setKpis(data)
   }
 
@@ -177,7 +179,7 @@ export default function PurchaseData() {
     setPage(0)
   }
 
-  const load = () => { setPage(0); loadKpis(); loadPage(0) }
+  const load = () => { setPage(0); loadKpis(filterCrmStatus); loadPage(0) }
 
   // Quick filter functions
   const setToday = () => { const d = istStr(); setFromDate(d); setToDate(d); setPage(0) }
