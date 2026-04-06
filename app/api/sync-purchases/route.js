@@ -218,16 +218,17 @@ export async function POST(request) {
       existingStatus.get(r.application_id) !== r.crm_status
     )
 
-    // ── Push crm_status updates for existing records ───────────────────────────
-    const STATUS_CHUNK = 50
+    // ── Push crm_status updates — batch upsert with only 2 fields so other
+    //    columns (stock_status etc.) are not touched on conflict ─────────────
+    const STATUS_BATCH = 100
     let statusUpdated = 0
-    for (let i = 0; i < statusChanged.length; i += STATUS_CHUNK) {
-      const chunk = statusChanged.slice(i, i + STATUS_CHUNK)
-      await Promise.all(chunk.map(r =>
-        supabaseAdmin.from('purchases')
-          .update({ crm_status: r.crm_status })
-          .eq('application_id', r.application_id)
-      ))
+    for (let i = 0; i < statusChanged.length; i += STATUS_BATCH) {
+      const chunk = statusChanged.slice(i, i + STATUS_BATCH).map(r => ({
+        application_id: r.application_id,
+        crm_status:     r.crm_status,
+      }))
+      await supabaseAdmin.from('purchases')
+        .upsert(chunk, { onConflict: 'application_id', ignoreDuplicates: false })
       statusUpdated += chunk.length
     }
 
