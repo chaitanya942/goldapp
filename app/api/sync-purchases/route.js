@@ -109,12 +109,12 @@ export async function POST(request) {
         t.type_gold                   AS transaction_type,
         t.serv_chr                    AS service_charge_pct,
         t.finl_amnt                   AS final_amount_crm,
-        GROUP_CONCAT(o.grms_wet)      AS gross_weight_str,
-        GROUP_CONCAT(o.stnt_wet)      AS stone_weight_str,
-        GROUP_CONCAT(o.wastag_wet)    AS wastage_str,
-        GROUP_CONCAT(o.net_wet)       AS net_weight_str,
-        GROUP_CONCAT(o.purity)        AS purity_str,
-        GROUP_CONCAT(o.grs_amnt)      AS total_amount_str
+        GROUP_CONCAT(o.grms_wet   ORDER BY o.id) AS gross_weight_str,
+        GROUP_CONCAT(o.stnt_wet   ORDER BY o.id) AS stone_weight_str,
+        GROUP_CONCAT(o.wastag_wet ORDER BY o.id) AS wastage_str,
+        GROUP_CONCAT(o.net_wet    ORDER BY o.id) AS net_weight_str,
+        GROUP_CONCAT(o.purity     ORDER BY o.id) AS purity_str,
+        GROUP_CONCAT(o.grs_amnt   ORDER BY o.id) AS total_amount_str
       FROM transac_tbl t
       LEFT JOIN ornments_tbl o ON o.trnxnn_id = t.id
       WHERE t.date >= ?
@@ -227,9 +227,10 @@ export async function POST(request) {
         application_id: r.application_id,
         crm_status:     r.crm_status,
       }))
-      await supabaseAdmin.from('purchases')
+      const { error: statusErr } = await supabaseAdmin.from('purchases')
         .upsert(chunk, { onConflict: 'application_id', ignoreDuplicates: false })
-      statusUpdated += chunk.length
+      if (statusErr) console.error('Status update error:', statusErr.message)
+      else statusUpdated += chunk.length
     }
 
     // ── Insert new records in batches of 100 ──────────────────────────────────

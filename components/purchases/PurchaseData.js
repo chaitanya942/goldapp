@@ -131,7 +131,6 @@ export default function PurchaseData() {
   useEffect(() => {
     supabase.from('branches').select('name').eq('is_active', true).order('name')
       .then(({ data }) => { if (data) setAllBranches(data.map(b => b.name)) })
-    loadPage(0)
   }, [])
 
   useEffect(() => { loadPage(page) }, [page, search, filterCrmStatus, filterStatus, filterBranch, filterTxn, fromDate, toDate, sortCol, sortDir])
@@ -272,7 +271,7 @@ export default function PurchaseData() {
         </div>
         <div style={{ fontSize: '.72rem', color: t.red, textAlign: 'center', marginBottom: '28px', lineHeight: 1.7 }}>
           {deleteAllMode
-            ? <>Permanently deletes <strong>ALL {totalCount.toLocaleString('en-IN')}</strong> purchase records{(filterBranch || filterStatus || search) ? ' matching current filters' : ''}.<br />This cannot be undone.</>
+            ? <>Permanently deletes <strong>ALL {totalCount.toLocaleString('en-IN')}</strong> purchase records{(filterBranch || filterStatus || search || filterCrmStatus || filterTxn || fromDate || toDate) ? ' matching current filters' : ''}.<br />This cannot be undone.</>
             : <>Permanently deletes <strong>{selectedIds.size}</strong> purchase {selectedIds.size === 1 ? 'record' : 'records'}.<br />This cannot be undone.</>}
         </div>
         <div style={{ display: 'flex', gap: '10px', justifyContent: 'center' }}>
@@ -558,7 +557,7 @@ export default function PurchaseData() {
               })}
               {purchases.length === 0 && (
                 <tr><td colSpan={isSuperAdmin ? 19 : 18} style={{ ...s.td, textAlign: 'center', color: t.text4, padding: '48px' }}>
-                  {search || filterStatus || filterBranch ? 'No records match your filters' : 'No data yet — click ⟳ Sync CRM in the topbar to pull latest data'}
+                  {(search || filterStatus || filterBranch || filterCrmStatus || filterTxn || fromDate || toDate) ? 'No records match your filters' : 'No purchase data yet — auto-syncing from CRM'}
                 </td></tr>
               )}
             </tbody>
