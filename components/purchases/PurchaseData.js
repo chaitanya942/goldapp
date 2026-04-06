@@ -128,6 +128,7 @@ export default function PurchaseData() {
   const [sortDir, setSortDir] = useState('desc')
 
   const [kpis, setKpis] = useState(null)
+  const [bothCrmIds, setBothCrmIds] = useState(new Set())
 
   const [selectedIds, setSelectedIds]             = useState(new Set())
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
@@ -171,7 +172,23 @@ export default function PurchaseData() {
     let q = buildQuery().order(sortCol, { ascending: asc, nullsFirst: false })
     if (sortCol !== 'transaction_time') q = q.order('transaction_time', { ascending: false, nullsFirst: false })
     const { data, count } = await q.range(from, to)
-    if (data) setPurchases(data)
+    if (data) {
+      setPurchases(data)
+      // Find which app IDs exist in both CRMs
+      const ids = data.map(r => r.application_id)
+      if (ids.length) {
+        const { data: both } = await supabase
+          .from('purchases')
+          .select('application_id')
+          .in('application_id', ids)
+          .eq('is_deleted', false)
+        if (both) {
+          const counts = {}
+          both.forEach(r => { counts[r.application_id] = (counts[r.application_id] || 0) + 1 })
+          setBothCrmIds(new Set(Object.keys(counts).filter(id => counts[id] > 1)))
+        }
+      }
+    }
     if (count !== null) setTotalCount(count)
     setSelectedIds(new Set())
     setLoading(false)
@@ -589,6 +606,7 @@ export default function PurchaseData() {
                           return <Badge label={cs.label} color={cs.color} />
                         })()}
                         {p.crm_source === 'new_crm' && <Badge label="NEW CRM" color="purple" />}
+                        {bothCrmIds.has(p.application_id) && <Badge label="Both CRMs" color="gold" />}
                       </div>
                     </td>
                   </tr>

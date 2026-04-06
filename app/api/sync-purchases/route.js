@@ -133,15 +133,16 @@ export async function POST(request) {
     // ── Build normalized application_ids from CRM ─────────
     const crmAppIds = rows.map(r => normalizeAppId(r.application_id))
 
-    // ── Get existing records from Supabase (app_id + crm_status) ────────────
-    const existingIds  = new Set()
-    const existingStatus = new Map() // app_id → crm_status stored in Supabase
+    // ── Get existing OLD CRM records from Supabase ───────────────────────────
+    const existingIds    = new Set()
+    const existingStatus = new Map()
     const CHUNK = 500
     for (let i = 0; i < crmAppIds.length; i += CHUNK) {
       const chunk = crmAppIds.slice(i, i + CHUNK)
       const { data } = await supabaseAdmin
         .from('purchases')
         .select('application_id, crm_status')
+        .eq('crm_source', 'old_crm')
         .in('application_id', chunk)
       ;(data || []).forEach(r => {
         existingIds.add(r.application_id)
@@ -205,6 +206,7 @@ export async function POST(request) {
         stock_status:               'at_branch',
         is_duplicate:               false,
         is_deleted:                 false,
+        crm_source:                 'old_crm',
       }
     })
 
@@ -230,6 +232,7 @@ export async function POST(request) {
           supabaseAdmin.from('purchases')
             .update({ crm_status: r.crm_status })
             .eq('application_id', r.application_id)
+            .eq('crm_source', 'old_crm')
         )
       )
       results.forEach(({ error }, idx) => {
@@ -246,7 +249,7 @@ export async function POST(request) {
       const batch = newRecords.slice(i, i + BATCH)
       const { error } = await supabaseAdmin
         .from('purchases')
-        .upsert(batch, { onConflict: 'application_id', ignoreDuplicates: true })
+        .upsert(batch, { onConflict: 'application_id,crm_source', ignoreDuplicates: true })
       if (error) {
         console.error('Upsert error:', JSON.stringify(error, null, 2))
         lastError = error

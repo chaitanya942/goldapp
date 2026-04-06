@@ -164,6 +164,7 @@ export async function POST(request) {
       const { data } = await supabaseAdmin
         .from('purchases')
         .select('application_id, crm_status')
+        .eq('crm_source', 'new_crm')
         .in('application_id', chunk)
       ;(data || []).forEach(r => {
         existingIds.add(r.application_id)
@@ -188,6 +189,7 @@ export async function POST(request) {
           supabaseAdmin.from('purchases')
             .update({ crm_status: r.crm_status })
             .eq('application_id', r.application_id)
+            .eq('crm_source', 'new_crm')
         )
       )
       results.forEach(({ error }, idx) => {
@@ -203,7 +205,7 @@ export async function POST(request) {
       const batch = newRecords.slice(i, i + BATCH)
       const { error } = await supabaseAdmin
         .from('purchases')
-        .upsert(batch, { onConflict: 'application_id', ignoreDuplicates: true })
+        .upsert(batch, { onConflict: 'application_id,crm_source', ignoreDuplicates: true })
       if (error) {
         console.error('New CRM upsert error:', error.message)
         lastError = error

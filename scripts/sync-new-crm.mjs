@@ -168,7 +168,7 @@ async function main() {
   const CHUNK = 500
   for (let i = 0; i < appIds.length; i += CHUNK) {
     const chunk = appIds.slice(i, i + CHUNK)
-    const { data } = await supabase.from('purchases').select('application_id, crm_status').in('application_id', chunk)
+    const { data } = await supabase.from('purchases').select('application_id, crm_status').eq('crm_source', 'new_crm').in('application_id', chunk)
     ;(data || []).forEach(r => { existingIds.add(r.application_id); existingStatus.set(r.application_id, r.crm_status) })
   }
 
@@ -195,7 +195,7 @@ async function main() {
   let synced = 0, errors = 0
   for (let i = 0; i < newRecords.length; i += 100) {
     const batch = newRecords.slice(i, i + 100)
-    const { error } = await supabase.from('purchases').upsert(batch, { onConflict: 'application_id', ignoreDuplicates: true })
+    const { error } = await supabase.from('purchases').upsert(batch, { onConflict: 'application_id,crm_source', ignoreDuplicates: true })
     if (error) { console.error('  ❌ Batch error:', error.message); errors += batch.length }
     else { synced += batch.length; process.stdout.write('.') }
   }
