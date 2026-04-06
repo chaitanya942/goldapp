@@ -26,6 +26,11 @@ const CRM_STATUS = {
   rejected: { label: 'Rejected', color: 'red'    },
 }
 
+const CRM_SOURCE = {
+  old_crm: { label: 'Old CRM', color: 'dim'    },
+  new_crm: { label: 'NEW CRM', color: 'purple' },
+}
+
 function fmtTime(t) {
   if (!t) return '—'
   const parts = String(t).split(':')
@@ -108,6 +113,7 @@ export default function PurchaseData() {
   const [exporting, setExporting]     = useState(false)
   const [search, setSearch]           = useState('')
   const [filterCrmStatus, setFilterCrmStatus] = useState('')
+  const [filterCrmSource, setFilterCrmSource] = useState('')
   const [filterStatus, setFilterStatus] = useState('')
   const [filterBranch, setFilterBranch] = useState('')
   const [filterTxn, setFilterTxn]     = useState('')
@@ -133,7 +139,7 @@ export default function PurchaseData() {
       .then(({ data }) => { if (data) setAllBranches(data.map(b => b.name)) })
   }, [])
 
-  useEffect(() => { loadPage(page) }, [page, search, filterCrmStatus, filterStatus, filterBranch, filterTxn, fromDate, toDate, sortCol, sortDir])
+  useEffect(() => { loadPage(page) }, [page, search, filterCrmStatus, filterCrmSource, filterStatus, filterBranch, filterTxn, fromDate, toDate, sortCol, sortDir])
   useEffect(() => { loadKpis(filterCrmStatus) }, [filterCrmStatus])
 
   const loadKpis = async (crmStatus = '') => {
@@ -148,6 +154,7 @@ export default function PurchaseData() {
     q = q.eq('is_deleted', false)
     if (search)            q = q.or(`customer_name.ilike.%${search}%,application_id.ilike.%${search}%,branch_name.ilike.%${search}%`)
     if (filterCrmStatus)   q = q.eq('crm_status', filterCrmStatus)
+    if (filterCrmSource)   q = q.eq('crm_source', filterCrmSource)
     if (filterStatus)      q = q.eq('stock_status', filterStatus)
     if (filterBranch) q = q.eq('branch_name', filterBranch)
     if (filterTxn)    q = q.eq('transaction_type', filterTxn)
@@ -183,7 +190,7 @@ export default function PurchaseData() {
   const setYesterday = () => { const d = istNow(); d.setDate(d.getDate() - 1); const s = istStr(d); setFromDate(s); setToDate(s); setPage(0) }
   const setThisWeek = () => { const to = istNow(); const fr = istNow(); fr.setDate(fr.getDate() - 7); setToDate(istStr(to)); setFromDate(istStr(fr)); setPage(0) }
   const setThisMonth = () => { const now = istNow(); setFromDate(`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-01`); setToDate(istStr(now)); setPage(0) }
-  const clearFilters = () => { setFromDate(''); setToDate(''); setFilterBranch(''); setFilterStatus(''); setFilterTxn(''); setSearch(''); setFilterCrmStatus(''); setPage(0) }
+  const clearFilters = () => { setFromDate(''); setToDate(''); setFilterBranch(''); setFilterStatus(''); setFilterTxn(''); setSearch(''); setFilterCrmStatus(''); setFilterCrmSource(''); setPage(0) }
 
   const handleExport = async (format) => {
     setExporting(true)
@@ -271,7 +278,7 @@ export default function PurchaseData() {
         </div>
         <div style={{ fontSize: '.72rem', color: t.red, textAlign: 'center', marginBottom: '28px', lineHeight: 1.7 }}>
           {deleteAllMode
-            ? <>Permanently deletes <strong>ALL {totalCount.toLocaleString('en-IN')}</strong> purchase records{(filterBranch || filterStatus || search || filterCrmStatus || filterTxn || fromDate || toDate) ? ' matching current filters' : ''}.<br />This cannot be undone.</>
+            ? <>Permanently deletes <strong>ALL {totalCount.toLocaleString('en-IN')}</strong> purchase records{(filterBranch || filterStatus || search || filterCrmStatus || filterCrmSource || filterTxn || fromDate || toDate) ? ' matching current filters' : ''}.<br />This cannot be undone.</>
             : <>Permanently deletes <strong>{selectedIds.size}</strong> purchase {selectedIds.size === 1 ? 'record' : 'records'}.<br />This cannot be undone.</>}
         </div>
         <div style={{ display: 'flex', gap: '10px', justifyContent: 'center' }}>
@@ -343,6 +350,35 @@ export default function PurchaseData() {
         )
       })()}
 
+      {/* CRM SOURCE PILLS */}
+      <div style={{ display: 'flex', gap: '8px', marginBottom: '10px', alignItems: 'center' }}>
+        {[
+          { key: '',        label: 'All Sources' },
+          { key: 'old_crm', label: 'Old CRM' },
+          { key: 'new_crm', label: 'NEW CRM' },
+        ].map(({ key, label }) => {
+          const active = filterCrmSource === key
+          const accent = key === 'new_crm' ? t.purple : key === 'old_crm' ? t.text3 : t.gold
+          return (
+            <button key={key}
+              onClick={() => { setFilterCrmSource(key); setPage(0) }}
+              style={{
+                padding: '5px 16px', borderRadius: '100px',
+                border: `1px solid ${active ? accent : t.border}`,
+                background: active ? `${accent}18` : 'transparent',
+                color: active ? accent : t.text3,
+                fontSize: '.68rem', fontWeight: active ? 600 : 400,
+                letterSpacing: '.05em', cursor: 'pointer', transition: 'all .15s',
+              }}
+              onMouseEnter={e => { if (!active) { e.currentTarget.style.borderColor = accent; e.currentTarget.style.color = accent } }}
+              onMouseLeave={e => { if (!active) { e.currentTarget.style.borderColor = t.border; e.currentTarget.style.color = t.text3 } }}
+            >
+              {label}
+            </button>
+          )
+        })}
+      </div>
+
       {/* CRM STATUS PILLS */}
       <div style={{ display: 'flex', gap: '8px', marginBottom: '20px', alignItems: 'center' }}>
         {[
@@ -392,7 +428,7 @@ export default function PurchaseData() {
             {label}
           </button>
         ))}
-        {(fromDate || toDate || filterBranch || filterStatus || filterTxn || search || filterCrmStatus) && (
+        {(fromDate || toDate || filterBranch || filterStatus || filterTxn || search || filterCrmStatus || filterCrmSource) && (
           <button onClick={clearFilters}
             style={{ padding: '5px 12px', borderRadius: '100px', border: `1px solid ${t.red}40`, background: 'transparent', color: t.red, fontSize: '.65rem', cursor: 'pointer', marginLeft: '8px' }}>
             ✕ Clear All
@@ -547,10 +583,13 @@ export default function PurchaseData() {
                       />
                     </td>
                     <td style={s.td}>
-                      {(() => {
-                        const cs = CRM_STATUS[p.crm_status?.toLowerCase()] || { label: p.crm_status || 'approved', color: 'green' }
-                        return <Badge label={cs.label} color={cs.color} />
-                      })()}
+                      <div style={{ display: 'flex', gap: '4px', flexDirection: 'column' }}>
+                        {(() => {
+                          const cs = CRM_STATUS[p.crm_status?.toLowerCase()] || { label: p.crm_status || 'approved', color: 'green' }
+                          return <Badge label={cs.label} color={cs.color} />
+                        })()}
+                        {p.crm_source === 'new_crm' && <Badge label="NEW CRM" color="purple" />}
+                      </div>
                     </td>
                   </tr>
                 )
