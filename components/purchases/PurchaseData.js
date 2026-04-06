@@ -20,6 +20,12 @@ const STATUS_COLORS = {
   sold:             { color: '#888888', label: 'Sold' },
 }
 
+const CRM_STATUS = {
+  approved: { label: 'Approved', color: 'green'  },
+  pending:  { label: 'Pending',  color: 'orange' },
+  rejected: { label: 'Rejected', color: 'red'    },
+}
+
 function fmtTime(t) {
   if (!t) return '—'
   const parts = String(t).split(':')
@@ -441,6 +447,7 @@ export default function PurchaseData() {
                   { label: 'Final Amt', col: 'final_amount_crm' },
                   { label: 'Type',      col: 'transaction_type' },
                   { label: 'Status',    col: 'stock_status' },
+                  { label: 'CRM',       col: 'crm_status' },
                 ].map(({ label, col }) => (
                   <th key={label}
                     onClick={col ? () => handleSort(col) : undefined}
@@ -504,11 +511,17 @@ export default function PurchaseData() {
                         }
                       />
                     </td>
+                    <td style={s.td}>
+                      {(() => {
+                        const cs = CRM_STATUS[p.crm_status?.toLowerCase()] || { label: p.crm_status || 'approved', color: 'green' }
+                        return <Badge label={cs.label} color={cs.color} />
+                      })()}
+                    </td>
                   </tr>
                 )
               })}
               {purchases.length === 0 && (
-                <tr><td colSpan={isSuperAdmin ? 18 : 17} style={{ ...s.td, textAlign: 'center', color: t.text4, padding: '48px' }}>
+                <tr><td colSpan={isSuperAdmin ? 19 : 18} style={{ ...s.td, textAlign: 'center', color: t.text4, padding: '48px' }}>
                   {search || filterStatus || filterBranch ? 'No records match your filters' : 'No data yet — click ⟳ Sync CRM in the topbar to pull latest data'}
                 </td></tr>
               )}
