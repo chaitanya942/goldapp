@@ -133,17 +133,20 @@ export async function POST(request) {
     // ── Build normalized application_ids from CRM ─────────
     const crmAppIds = rows.map(r => normalizeAppId(r.application_id))
 
-    // ── Get ALL existing application_ids from Supabase in one query ──
-    // Use chunks of 500 to avoid URL length limits
-    const existingIds = new Set()
+    // ── Get existing records from Supabase (app_id + crm_status) ────────────
+    const existingIds  = new Set()
+    const existingStatus = new Map() // app_id → crm_status stored in Supabase
     const CHUNK = 500
     for (let i = 0; i < crmAppIds.length; i += CHUNK) {
       const chunk = crmAppIds.slice(i, i + CHUNK)
       const { data } = await supabaseAdmin
         .from('purchases')
-        .select('application_id')
+        .select('application_id, crm_status')
         .in('application_id', chunk)
-      ;(data || []).forEach(r => existingIds.add(r.application_id))
+      ;(data || []).forEach(r => {
+        existingIds.add(r.application_id)
+        existingStatus.set(r.application_id, r.crm_status)
+      })
     }
 
     // ── Map CRM rows → Supabase records ───────────────────
@@ -205,22 +208,30 @@ export async function POST(request) {
       }
     })
 
-    // ── Smart dedup then filter to only NEW records ────────
-    const deduped = smartDedup(allRecords).map(({ _txn_id, ...r }) => r)
+    // ── Smart dedup → split into new vs changed-status ────────────────────────
+    const deduped    = smartDedup(allRecords).map(({ _txn_id, ...r }) => r)
     const newRecords = deduped.filter(r => !existingIds.has(r.application_id))
 
-    if (!newRecords.length) {
-      return Response.json({
-        success:  true,
-        total:    rows.length,
-        synced:   0,
-        newCount: 0,
-        message:  'All records already synced — nothing new to add',
-      })
+    // Records already in Supabase whose crm_status changed in CRM
+    const statusChanged = deduped.filter(r =>
+      existingIds.has(r.application_id) &&
+      existingStatus.get(r.application_id) !== r.crm_status
+    )
+
+    // ── Push crm_status updates for existing records ───────────────────────────
+    const STATUS_CHUNK = 50
+    let statusUpdated = 0
+    for (let i = 0; i < statusChanged.length; i += STATUS_CHUNK) {
+      const chunk = statusChanged.slice(i, i + STATUS_CHUNK)
+      await Promise.all(chunk.map(r =>
+        supabaseAdmin.from('purchases')
+          .update({ crm_status: r.crm_status })
+          .eq('application_id', r.application_id)
+      ))
+      statusUpdated += chunk.length
     }
 
-    // ── Insert new records in batches of 100 ──────────────
-    // Use upsert with onConflict to prevent duplicates even on concurrent syncs
+    // ── Insert new records in batches of 100 ──────────────────────────────────
     const BATCH = 100
     let synced = 0, errors = 0, lastError = null
 
@@ -238,14 +249,26 @@ export async function POST(request) {
       }
     }
 
+    if (!newRecords.length && !statusChanged.length) {
+      return Response.json({
+        success:  true,
+        total:    rows.length,
+        synced:   0,
+        newCount: 0,
+        statusUpdated: 0,
+        message:  'All records already synced — nothing new to add',
+      })
+    }
+
     return Response.json({
       success:  errors === 0,
       total:    rows.length,
       newCount: newRecords.length,
       synced,
+      statusUpdated,
       errors,
       lastError: lastError ? JSON.stringify(lastError) : null,
-      message:  `${newRecords.length} new records found — synced ${synced} (${errors} errors)`,
+      message:  `${newRecords.length} new, ${statusUpdated} status updates — synced ${synced} (${errors} errors)`,
     })
 
   } catch (err) {
