@@ -79,9 +79,13 @@ async function main() {
     .limit(1)
     .single()
 
+  const GO_LIVE = '2026-04-06'
   const cutoffDate = latestRow?.purchase_date
-    ? new Date(new Date(latestRow.purchase_date).getTime() - 2 * 86400000).toISOString().split('T')[0]
-    : '2026-04-06'
+    ? new Date(Math.max(
+        new Date(latestRow.purchase_date).getTime() - 2 * 86400000,
+        new Date(GO_LIVE).getTime()
+      )).toISOString().split('T')[0]
+    : GO_LIVE
 
   console.log(`📅 Syncing from ${cutoffDate}...`)
 

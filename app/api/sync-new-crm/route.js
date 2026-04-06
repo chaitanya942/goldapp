@@ -63,9 +63,13 @@ export async function POST(request) {
       .single()
 
     // 2-day buffer to catch late approvals; fall back to Apr 6 2026 (go-live date)
+    const GO_LIVE = '2026-04-06'
     const cutoffDate = latestRow?.purchase_date
-      ? new Date(new Date(latestRow.purchase_date).getTime() - 2 * 86400000).toISOString().split('T')[0]
-      : '2026-04-06'
+      ? new Date(Math.max(
+          new Date(latestRow.purchase_date).getTime() - 2 * 86400000,
+          new Date(GO_LIVE).getTime()
+        )).toISOString().split('T')[0]
+      : GO_LIVE
 
     // ── Pull transactions from new CRM ─────────────────────────────────────
     const { rows } = await client.query(`
