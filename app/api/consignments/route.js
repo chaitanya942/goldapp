@@ -25,30 +25,36 @@ export async function GET(req) {
     const now      = new Date(new Date().getTime() + 5.5 * 60 * 60 * 1000)
     const todayIST = `${now.getUTCFullYear()}-${String(now.getUTCMonth()+1).padStart(2,'0')}-${String(now.getUTCDate()).padStart(2,'0')}`
 
-    const { data: branches } = await supabase
-      .from('branches')
-      .select('name, region, state')
-      .eq('is_active', true)
-      .neq('region', 'Bangalore')
-
-    const branchMeta = {}
-    for (const b of branches || []) {
-      branchMeta[b.name] = { region: b.region, state: b.state }
-    }
-
+    // Fetch all purchases at_branch (approved, not deleted)
     const { data: purchases } = await supabase
       .from('purchases')
       .select('branch_name, purchase_date, gross_weight, net_weight')
       .eq('stock_status', 'at_branch')
       .eq('crm_status', 'approved')
       .eq('is_deleted', false)
-      .in('branch_name', Object.keys(branchMeta))
+
+    // Fetch branch metadata for region lookup (all active branches, filter in JS)
+    const { data: branches } = await supabase
+      .from('branches')
+      .select('name, region, state')
+      .eq('is_active', true)
+
+    const branchMeta = {}
+    for (const b of branches || []) {
+      branchMeta[b.name] = { region: b.region || 'Unknown', state: b.state }
+    }
+
+    // Bangalore branch names to exclude
+    const bangaloreBranches = new Set(
+      (branches || []).filter(b => b.region === 'Bangalore').map(b => b.name)
+    )
 
     const summary = {}
     for (const row of purchases || []) {
       const key  = row.branch_name
-      const meta = branchMeta[key]
-      if (!meta) continue
+      // Skip Bangalore branches
+      if (bangaloreBranches.has(key)) continue
+      const meta = branchMeta[key] || { region: 'Unknown', state: null }
       if (!summary[key]) {
         summary[key] = {
           branch_name: key, region: meta.region,
