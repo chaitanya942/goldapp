@@ -152,6 +152,13 @@ export async function POST(req) {
       return handleBackfill()
     }
 
+    // ── Fast re-import: rebuild Supabase records from already-uploaded recordings/
+    // Use this after wiping DB — reads MP3 keys from S3, pairs with metadata, inserts.
+    // Much faster than re-downloading all tars.
+    if (body?.reimport) {
+      return handleReimport()
+    }
+
     let tarKeys = []
 
     // 1. Determine which keys to process
@@ -284,6 +291,88 @@ export async function POST(req) {
     console.error('Gnani sync root error:', err)
     return Response.json({ success: false, error: err.message }, { status: 500 })
   }
+}
+
+// ── Fast re-import: rebuild DB from already-uploaded recordings/ MP3s ──────────
+// Reads recordings/{language}/{year}/{month}/{day}/{filename}.mp3 keys from S3,
+// pairs each with metadata.json (fetched once per date), inserts into Supabase.
+async function handleReimport() {
+  // List all MP3s in recordings/ prefix
+  const allObjects  = await listAllS3Objects('recordings/')
+  const mp3Objects  = allObjects.filter(o => o.key.endsWith('.mp3'))
+
+  if (!mp3Objects.length) {
+    return Response.json({ success: true, inserted: 0, message: 'No uploaded recordings found in recordings/ prefix' })
+  }
+
+  // Group by language/date to fetch metadata once per group
+  const groups = new Map()
+  for (const { key } of mp3Objects) {
+    // key format: recordings/{language}/{year}/{month}/{day}/{filename}.mp3
+    const parts = key.split('/')
+    if (parts.length < 6) continue
+    const [, language, year, month, day] = parts
+    const filename = parts[parts.length - 1]
+    const groupKey = `${language}/${year}/${month}/${day}`
+    if (!groups.has(groupKey)) groups.set(groupKey, { language, year, month, day, files: [] })
+    groups.get(groupKey).files.push({ key, filename })
+  }
+
+  let totalInserted = 0
+  const errors = []
+
+  for (const [, group] of groups) {
+    const { language, year, month, day, files } = group
+    const metadataMap = await fetchMetadataFromS3(language, year, month, day)
+
+    const rows = files.map(({ key, filename }) => {
+      const meta = parseFilename(filename)
+      if (!meta) return null
+      const gnaniMeta = metadataMap[meta.gnani_call_id] || {}
+      return {
+        gnani_call_id:      meta.gnani_call_id,
+        customer_number:    meta.customer_number,
+        call_date:          meta.call_date,
+        call_time:          meta.call_time,
+        language:           gnaniMeta.language ? fmtLanguage(gnaniMeta.language) : fmtLanguage(language),
+        duration_seconds:   gnaniMeta.call_duration ? Math.round(gnaniMeta.call_duration) : null,
+        customer_name:      gnaniMeta.customer_name      || null,
+        call_disposition:   gnaniMeta.call_disposition   || null,
+        system_disposition: gnaniMeta.system_disposition || null,
+        summary:            gnaniMeta.summary            || null,
+        recording_url:      `https://${BUCKET}.s3.ap-south-1.amazonaws.com/${key}`,
+        s3_key:             key,
+        outcome:            'pending',
+      }
+    }).filter(Boolean)
+
+    if (!rows.length) continue
+
+    // Check which ones already exist (skip on re-run)
+    const ids = rows.map(r => r.gnani_call_id)
+    const existingSet = await getExistingIds(ids)
+    const toInsert = rows.filter(r => !existingSet.has(r.gnani_call_id))
+
+    if (!toInsert.length) continue
+
+    // Insert in batches of 100
+    for (let i = 0; i < toInsert.length; i += 100) {
+      const batch = toInsert.slice(i, i + 100)
+      const { error } = await supabase.from('telesales_calls').insert(batch)
+      if (error) {
+        errors.push(`Insert error (${language} ${year}-${month}-${day}): ${error.message}`)
+      } else {
+        totalInserted += batch.length
+      }
+    }
+  }
+
+  return Response.json({
+    success:  errors.length === 0,
+    inserted: totalInserted,
+    errors:   errors.length ? errors : undefined,
+    message:  `Re-imported ${totalInserted} calls from ${groups.size} date groups`,
+  })
 }
 
 // ── Backfill: fetch metadata for existing records that have null fields ─────────
