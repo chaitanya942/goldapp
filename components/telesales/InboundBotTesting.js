@@ -46,14 +46,16 @@
   }
 
   function exportToCSV(calls) {
-    const headers = ['Date', 'Time', 'Number', 'Customer', 'Language', 'Duration (s)', 'Outcome', 'Notes', 'Summary']
+    const q = (v) => `"${String(v ?? '').replace(/"/g, '""')}"` // RFC 4180 CSV quoting
+    const headers = ['Date', 'Time', 'Number', 'Customer', 'Language', 'Duration (s)', 'Call Disposition', 'System Disposition', 'Outcome', 'Notes', 'Summary']
     const rows = calls.map(c => [
-      c.call_date, c.call_time?.slice(0,5), c.customer_number, c.customer_name || '',
-      c.language || '', c.duration_seconds || '', c.outcome || '',
-      (c.outcome_notes || '').replace(/,/g, ';'), (c.summary || '').replace(/,/g, ';'),
-    ])
-    const csv  = [headers, ...rows].map(r => r.join(',')).join('\n')
-    const blob = new Blob([csv], { type: 'text/csv' })
+      c.call_date, c.call_time?.slice(0,5) ?? '', c.customer_number ?? '',
+      c.customer_name ?? '', c.language ?? '', c.duration_seconds ?? '',
+      c.call_disposition ?? '', c.system_disposition ?? '',
+      c.outcome ?? '', c.outcome_notes ?? '', c.summary ?? '',
+    ].map(q))
+    const csv  = [headers.map(q), ...rows].map(r => r.join(',')).join('\n')
+    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' }) // BOM for Excel
     const url  = URL.createObjectURL(blob)
     const a    = document.createElement('a')
     a.href = url; a.download = `calls-${new Date().toISOString().slice(0,10)}.csv`
@@ -122,7 +124,9 @@
 
     async function fetchCalls() {
       setLoading(true)
-      const { data, error } = await supabase.from('telesales_calls').select('*')
+      // Exclude heavy `transcript` column from list fetch — loaded on demand in handleOpenCall
+      const { data, error } = await supabase.from('telesales_calls')
+        .select('id,gnani_call_id,s3_key,customer_number,customer_name,call_date,call_time,language,duration_seconds,call_disposition,system_disposition,outcome,outcome_notes,summary')
         .order('call_date', { ascending: false }).order('call_time', { ascending: false })
       if (!error) setCalls(data || [])
       setLoading(false)
@@ -144,6 +148,16 @@
       setOutcomeForm({ outcome: call.outcome || '', notes: call.outcome_notes || '' })
       setPresignedUrl(null); setCurrentTime(0); setAudioDuration(0)
       setIsPlaying(false); setTranslated(null); setShowSpeedMenu(false)
+
+      // Load transcript on demand (not included in list fetch)
+      if (!call.transcript) {
+        const { data } = await supabase.from('telesales_calls').select('transcript').eq('id', call.id).single()
+        if (data?.transcript) {
+          setSelectedCall(prev => ({ ...prev, transcript: data.transcript }))
+          setCalls(prev => prev.map(c => c.id === call.id ? { ...c, transcript: data.transcript } : c))
+        }
+      }
+
       if (call.s3_key) {
         setLoadingAudio(true)
         try {
@@ -190,8 +204,9 @@
     }
 
     function toggleSelectAll() {
-      if (selectedIds.size === paginated.length && paginated.length > 0) setSelectedIds(new Set())
-      else setSelectedIds(new Set(paginated.map(c => c.id)))
+      // Select / deselect ALL filtered rows (not just current page)
+      if (selectedIds.size === filtered.length && filtered.length > 0) setSelectedIds(new Set())
+      else setSelectedIds(new Set(filtered.map(c => c.id)))
     }
 
     async function handleBulkDownload() {
@@ -200,14 +215,15 @@
       setBulkDownloading(true)
       try {
         const res  = await fetch('/api/bulk-download-recordings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids }) })
-        if (!res.ok) throw new Error('Download failed')
+        if (!res.ok) throw new Error(`Download failed (${res.status})`)
         const blob = await res.blob()
         const url  = URL.createObjectURL(blob)
         const a    = document.createElement('a')
-        a.href = url; a.download = `calls-${new Date().toISOString().slice(0,10)}.zip`
+        const label = selectedIds.size > 0 ? `${selectedIds.size}-calls` : `all-${filtered.length}-calls`
+        a.href = url; a.download = `recordings-${label}-${new Date().toISOString().slice(0,10)}.zip`
         document.body.appendChild(a); a.click(); document.body.removeChild(a)
         URL.revokeObjectURL(url)
-      } catch (err) { alert('Bulk download failed: ' + err.message) }
+      } catch (err) { setSyncResult({ success: false, error: err.message }) }
       finally { setBulkDownloading(false) }
     }
 
@@ -283,7 +299,12 @@
     async function handleDownloadAudio() {
       if (!selectedCall?.s3_key) return
       try {
-        const filename = `call-${selectedCall.customer_number}-${selectedCall.call_date}.mp3`
+        const safeName = (str) => str ? str.trim().replace(/[^\w\s-]/g, '').replace(/\s+/g, '_').slice(0, 30) : ''
+        const time        = (selectedCall.call_time || '').slice(0, 5).replace(':', '-')
+        const customer    = safeName(selectedCall.customer_name)
+        const disposition = safeName(selectedCall.call_disposition)
+        const nameParts   = [selectedCall.call_date, time, selectedCall.customer_number, customer, disposition].filter(Boolean)
+        const filename    = `${nameParts.join('_')}.mp3`
         const res  = await fetch('/api/download-recording', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ s3_key: selectedCall.s3_key, filename }) })
         if (!res.ok) throw new Error('Download failed')
         const blob = await res.blob()
@@ -641,7 +662,7 @@
               const pctVal = totalCalls > 0 ? ((count / totalCalls) * 100).toFixed(0) : 0
               const active = filterOutcome === key
               return (
-                <div key={key} onClick={() => setFilterOutcome(active ? '' : key)}
+                <div key={key} onClick={() => { setFilterOutcome(active ? '' : key); setPage(1) }}
                   style={{ flex: 1, minWidth: '110px', padding: '12px 16px', background: active ? `${meta.color}20` : `${meta.color}10`, border: `1px solid ${active ? meta.color : meta.color + '30'}`, borderRadius: '10px', textAlign: 'center', cursor: 'pointer', transition: 'all .15s' }}>
                   <div style={{ fontSize: '1.4rem', fontWeight: 300, color: meta.color }}>{count}</div>
                   <div style={{ fontSize: '11px', color: meta.color, fontWeight: 600, marginTop: '2px' }}>{meta.label}</div>
@@ -680,7 +701,9 @@
                 <thead>
                   <tr>
                     <th style={{ ...s.th, width: '40px' }}>
-                      <input type="checkbox" checked={selectedIds.size === paginated.length && paginated.length > 0}
+                      <input type="checkbox"
+                        checked={filtered.length > 0 && selectedIds.size === filtered.length}
+                        ref={el => { if (el) el.indeterminate = selectedIds.size > 0 && selectedIds.size < filtered.length }}
                         onChange={toggleSelectAll} style={{ cursor: 'pointer', accentColor: t.gold }} />
                     </th>
                     {[
