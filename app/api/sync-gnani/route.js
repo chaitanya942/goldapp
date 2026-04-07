@@ -278,14 +278,20 @@ export async function POST(req) {
       }
     }
 
+    // Get actual DB count so message matches the table
+    const { count: totalInDb } = await supabase
+      .from('telesales_calls')
+      .select('*', { count: 'exact', head: true })
+
     return Response.json({
       success:  true,
       inserted: totalInserted,
       skipped:  totalSkipped,
+      total:    totalInDb,
       errors:   errors.length > 0 ? errors : undefined,
       message:  totalInserted > 0
-        ? `✓ ${totalInserted} new calls synced (${totalSkipped} already up to date)`
-        : `All ${totalSkipped} calls already up to date`,
+        ? `✓ ${totalInserted} new calls synced · ${totalInDb} total`
+        : `Up to date · ${totalInDb} calls`,
     })
 
   } catch (err) {
