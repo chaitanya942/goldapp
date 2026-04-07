@@ -40,6 +40,7 @@ export async function GET(req) {
       .from('purchases')
       .select('branch_name, purchase_date, gross_weight, net_weight')
       .eq('stock_status', 'at_branch')
+      .eq('crm_status', 'approved')
       .eq('is_deleted', false)
       .in('branch_name', Object.keys(branchMeta))
 
@@ -118,6 +119,7 @@ export async function GET(req) {
       .from('purchases')
       .select('*')
       .eq('stock_status', 'at_branch')
+      .eq('crm_status', 'approved')
       .eq('is_deleted', false)
       .in('branch_name', outsideNames)
       .order('purchase_date', { ascending: false })
