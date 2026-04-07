@@ -16,6 +16,7 @@ const ROLES = [
   { value: 'manager',         label: 'Manager',          color: '#3aaa6a' },
   { value: 'branch_staff',    label: 'Branch Staff',     color: '#c9981f' },
   { value: 'viewer',          label: 'View Only',        color: '#7a6a4a' },
+  { value: 'telesales',       label: 'Telesales',        color: '#e07840' },
 ]
 
 function getRoleStyle(role) {
