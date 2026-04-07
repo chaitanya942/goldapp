@@ -33,11 +33,19 @@ export default function UserManagement() {
 
   // Invite form
   const [showInvite, setShowInvite] = useState(false)
+  const [invTab,     setInvTab]     = useState('invite') // 'invite' | 'existing'
   const [invEmail,   setInvEmail]   = useState('')
   const [invName,    setInvName]    = useState('')
   const [invRole,    setInvRole]    = useState('viewer')
   const [inviting,   setInviting]   = useState(false)
   const [invMsg,     setInvMsg]     = useState(null)  // { type: 'success'|'error', text }
+
+  // Add existing user form (created directly in Supabase)
+  const [exUuid,     setExUuid]     = useState('')
+  const [exEmail,    setExEmail]    = useState('')
+  const [exName,     setExName]     = useState('')
+  const [exRole,     setExRole]     = useState('viewer')
+  const [exSaving,   setExSaving]   = useState(false)
 
   useEffect(() => { load() }, [])
 
@@ -98,6 +106,28 @@ export default function UserManagement() {
     setSavingId(null)
   }
 
+  // ── ADD EXISTING USER (created directly in Supabase Auth) ──
+  const addExistingUser = async () => {
+    if (!exUuid.trim() || !exEmail.trim()) return
+    setExSaving(true)
+    setInvMsg(null)
+    const { error } = await supabase.from('user_profiles').upsert({
+      id:        exUuid.trim(),
+      email:     exEmail.trim(),
+      full_name: exName.trim() || exEmail.trim(),
+      role:      exRole,
+      is_active: true,
+    }, { onConflict: 'id' })
+    if (error) {
+      setInvMsg({ type: 'error', text: error.message })
+    } else {
+      setInvMsg({ type: 'success', text: `${exEmail.trim()} added with ${exRole} role.` })
+      setExUuid(''); setExEmail(''); setExName(''); setExRole('viewer')
+      await load()
+    }
+    setExSaving(false)
+  }
+
   // ── SHARED INPUT STYLE ───────────────────────────────────
   const inp = {
     background: t.card2,
@@ -134,7 +164,7 @@ export default function UserManagement() {
               cursor: 'pointer',
               transition: 'all .2s',
             }}>
-            {showInvite ? '✕  Cancel' : '+ Invite User'}
+            {showInvite ? '✕  Cancel' : '+ Add User'}
           </button>
         )}
       </div>
@@ -153,72 +183,72 @@ export default function UserManagement() {
           {/* Gold top accent */}
           <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '2px', background: `linear-gradient(90deg,${t.gold},${t.gold}00)` }}/>
 
-          <div style={{ fontSize: '.6rem', color: t.gold, letterSpacing: '.15em', textTransform: 'uppercase', marginBottom: '18px', fontWeight: 600 }}>
-            Invite New User
+          {/* Tabs */}
+          <div style={{ display: 'flex', gap: '4px', marginBottom: '20px', background: t.card2, borderRadius: '8px', padding: '3px', width: 'fit-content' }}>
+            {[{ key: 'invite', label: 'Invite via Email' }, { key: 'existing', label: 'Add Existing User' }].map(tab => (
+              <button key={tab.key} onClick={() => { setInvTab(tab.key); setInvMsg(null) }}
+                style={{ padding: '6px 16px', fontSize: '.65rem', fontWeight: 600, borderRadius: '6px', border: 'none', cursor: 'pointer', transition: 'all .15s',
+                  background: invTab === tab.key ? t.gold : 'transparent',
+                  color: invTab === tab.key ? '#0a0a0a' : t.text3 }}>
+                {tab.label}
+              </button>
+            ))}
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '14px', marginBottom: '18px' }}>
-            {/* Full Name */}
-            <div>
-              <div style={{ fontSize: '.58rem', color: t.text3, marginBottom: '5px', letterSpacing: '.08em', textTransform: 'uppercase' }}>Full Name</div>
-              <input
-                style={inp}
-                placeholder="e.g. Rahul Sharma"
-                value={invName}
-                onChange={e => setInvName(e.target.value)}
-              />
+          {invTab === 'invite' ? (<>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '14px', marginBottom: '18px' }}>
+              <div>
+                <div style={{ fontSize: '.58rem', color: t.text3, marginBottom: '5px', letterSpacing: '.08em', textTransform: 'uppercase' }}>Full Name</div>
+                <input style={inp} placeholder="e.g. Rahul Sharma" value={invName} onChange={e => setInvName(e.target.value)} />
+              </div>
+              <div>
+                <div style={{ fontSize: '.58rem', color: t.text3, marginBottom: '5px', letterSpacing: '.08em', textTransform: 'uppercase' }}>Email Address</div>
+                <input style={inp} placeholder="rahul@whitegold.money" type="email" value={invEmail}
+                  onChange={e => setInvEmail(e.target.value)} onKeyDown={e => e.key === 'Enter' && inviteUser()} />
+              </div>
+              <div>
+                <div style={{ fontSize: '.58rem', color: t.text3, marginBottom: '5px', letterSpacing: '.08em', textTransform: 'uppercase' }}>Role</div>
+                <select style={{ ...inp, cursor: 'pointer' }} value={invRole} onChange={e => setInvRole(e.target.value)}>
+                  {ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+                </select>
+              </div>
             </div>
-
-            {/* Email */}
-            <div>
-              <div style={{ fontSize: '.58rem', color: t.text3, marginBottom: '5px', letterSpacing: '.08em', textTransform: 'uppercase' }}>Email Address</div>
-              <input
-                style={inp}
-                placeholder="rahul@whitegold.money"
-                type="email"
-                value={invEmail}
-                onChange={e => setInvEmail(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && inviteUser()}
-              />
+            <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+              <button onClick={inviteUser} disabled={inviting || !invEmail.trim()}
+                style={{ background: inviting || !invEmail.trim() ? t.border2 : t.gold, border: 'none', borderRadius: '7px', padding: '9px 28px', color: '#0a0a0a', fontSize: '.75rem', fontWeight: 700, cursor: inviting || !invEmail.trim() ? 'not-allowed' : 'pointer', opacity: inviting || !invEmail.trim() ? .6 : 1 }}>
+                {inviting ? 'Sending…' : 'Send Invite →'}
+              </button>
+              <div style={{ fontSize: '.65rem', color: t.text4, lineHeight: 1.5 }}>User will receive an email with a link to set their password</div>
             </div>
-
-            {/* Role */}
-            <div>
-              <div style={{ fontSize: '.58rem', color: t.text3, marginBottom: '5px', letterSpacing: '.08em', textTransform: 'uppercase' }}>Role</div>
-              <select
-                style={{ ...inp, cursor: 'pointer' }}
-                value={invRole}
-                onChange={e => setInvRole(e.target.value)}>
-                {ROLES.map(r => (
-                  <option key={r.value} value={r.value}>{r.label}</option>
-                ))}
-              </select>
+          </>) : (<>
+            <div style={{ fontSize: '.65rem', color: t.text4, marginBottom: '14px', lineHeight: 1.6, background: `${t.blue}10`, border: `1px solid ${t.blue}25`, borderRadius: '6px', padding: '8px 12px' }}>
+              Use this when a user was created directly in Supabase Auth dashboard. Copy their UUID from Authentication → Users and paste it below.
             </div>
-          </div>
-
-          {/* Send button */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-            <button
-              onClick={inviteUser}
-              disabled={inviting || !invEmail.trim()}
-              style={{
-                background: inviting || !invEmail.trim() ? t.border2 : t.gold,
-                border: 'none',
-                borderRadius: '7px',
-                padding: '9px 28px',
-                color: '#0a0a0a',
-                fontSize: '.75rem',
-                fontWeight: 700,
-                cursor: inviting || !invEmail.trim() ? 'not-allowed' : 'pointer',
-                opacity: inviting || !invEmail.trim() ? .6 : 1,
-                transition: 'all .2s',
-              }}>
-              {inviting ? 'Sending…' : 'Send Invite →'}
+            <div style={{ display: 'grid', gridTemplateColumns: '1.6fr 1fr 1fr 0.8fr', gap: '14px', marginBottom: '18px' }}>
+              <div>
+                <div style={{ fontSize: '.58rem', color: t.text3, marginBottom: '5px', letterSpacing: '.08em', textTransform: 'uppercase' }}>User UUID</div>
+                <input style={inp} placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" value={exUuid} onChange={e => setExUuid(e.target.value)} />
+              </div>
+              <div>
+                <div style={{ fontSize: '.58rem', color: t.text3, marginBottom: '5px', letterSpacing: '.08em', textTransform: 'uppercase' }}>Email</div>
+                <input style={inp} placeholder="user@example.com" type="email" value={exEmail} onChange={e => setExEmail(e.target.value)} />
+              </div>
+              <div>
+                <div style={{ fontSize: '.58rem', color: t.text3, marginBottom: '5px', letterSpacing: '.08em', textTransform: 'uppercase' }}>Full Name</div>
+                <input style={inp} placeholder="Optional" value={exName} onChange={e => setExName(e.target.value)} />
+              </div>
+              <div>
+                <div style={{ fontSize: '.58rem', color: t.text3, marginBottom: '5px', letterSpacing: '.08em', textTransform: 'uppercase' }}>Role</div>
+                <select style={{ ...inp, cursor: 'pointer' }} value={exRole} onChange={e => setExRole(e.target.value)}>
+                  {ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+                </select>
+              </div>
+            </div>
+            <button onClick={addExistingUser} disabled={exSaving || !exUuid.trim() || !exEmail.trim()}
+              style={{ background: exSaving || !exUuid.trim() || !exEmail.trim() ? t.border2 : t.gold, border: 'none', borderRadius: '7px', padding: '9px 28px', color: '#0a0a0a', fontSize: '.75rem', fontWeight: 700, cursor: 'pointer', opacity: exSaving || !exUuid.trim() || !exEmail.trim() ? .6 : 1 }}>
+              {exSaving ? 'Adding…' : 'Add User →'}
             </button>
-            <div style={{ fontSize: '.65rem', color: t.text4, lineHeight: 1.5 }}>
-              User will receive an email with a link to set their password
-            </div>
-          </div>
+          </>)}
 
           {/* Status message */}
           {invMsg && (
