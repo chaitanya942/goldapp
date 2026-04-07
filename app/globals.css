@@ -48,13 +48,26 @@ input, select, textarea, button {
 
 button { cursor: pointer; }
 
-/* Recharts: transparent SVG backgrounds — v3 uses CSS var + SVG rect */
-.recharts-surface { background: transparent; }
-.recharts-wrapper { background: transparent; --recharts-background-color: transparent; }
-/* Override the background rect recharts injects as first SVG child */
-.recharts-surface > rect:first-child { fill: transparent !important; }
-/* Remove white cursor highlight on bar charts */
-.recharts-rectangle.recharts-bar-background-rectangle { fill: transparent !important; }
+/* ── Recharts: kill all white boxes ─────────────────────────────────── */
+.recharts-surface,
+.recharts-wrapper { background: transparent !important; --recharts-background-color: transparent; }
+
+/* Focus ring when SVG receives click focus */
+.recharts-surface:focus,
+.recharts-surface:focus-visible,
+.recharts-wrapper:focus,
+.recharts-wrapper:focus-visible { outline: none !important; box-shadow: none !important; }
+
+/* Cursor rectangle on hover — recharts default is stroke:#ccc which draws a white box */
+.recharts-tooltip-cursor { stroke: none !important; }
+
+/* Bar background rectangles */
+.recharts-rectangle.recharts-bar-background-rectangle { fill: transparent !important; stroke: none !important; }
+
+/* Any unclassed rect inside recharts SVG (background rects, clip rects) */
+.recharts-surface rect:not([class]) { fill: transparent !important; stroke: none !important; }
+.recharts-surface > rect { fill: transparent !important; stroke: none !important; }
+.recharts-surface > g > rect:first-of-type { fill: transparent !important; stroke: none !important; }
 
 /* Native date/select inputs match theme */
 input[type="date"],

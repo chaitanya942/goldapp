@@ -214,7 +214,7 @@ export default function TelesalesDashboard() {
                 <CartesianGrid strokeDasharray="3 3" stroke={`${t.border2}60`} vertical={false} />
                 <XAxis dataKey="date" tick={{ fill: t.text4, fontSize: 10 }} axisLine={false} tickLine={false} />
                 <YAxis tick={{ fill: t.text4, fontSize: 10 }} axisLine={false} tickLine={false} allowDecimals={false} />
-                <Tooltip content={<TT />} cursor={{ fill: `${t.border2}50` }} />
+                <Tooltip content={<TT />} cursor={{ fill: t.border2, opacity: 0.25, stroke: 'none' }} />
                 <Bar dataKey="count" name="Calls" radius={[4,4,0,0]}>
                   {callsByDate.map((e, i) => (
                     <Cell key={i} fill={activeFilter?.type === 'date' && activeFilter?.value === e.rawDate ? t.gold : t.purple}
@@ -279,7 +279,7 @@ export default function TelesalesDashboard() {
               <XAxis dataKey="hour" tick={{ fill: t.text4, fontSize: 9 }} axisLine={false} tickLine={false}
                 tickFormatter={v => v.slice(0,2)} interval={2} />
               <YAxis hide />
-              <Tooltip content={<TT />} cursor={{ fill: `${t.border2}50` }} />
+              <Tooltip content={<TT />} cursor={{ fill: t.border2, opacity: 0.25, stroke: 'none' }} />
               <Bar dataKey="count" name="Calls" radius={[3,3,0,0]}>
                 {callsByHour.map((e, i) => (
                   <Cell key={i} cursor="pointer"
