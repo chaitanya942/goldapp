@@ -283,7 +283,9 @@ export async function POST(req) {
       inserted: totalInserted,
       skipped:  totalSkipped,
       errors:   errors.length > 0 ? errors : undefined,
-      message:  `Synced ${totalInserted} new calls, skipped ${totalSkipped} duplicates`,
+      message:  totalInserted > 0
+        ? `✓ ${totalInserted} new calls synced (${totalSkipped} already up to date)`
+        : `All ${totalSkipped} calls already up to date`,
     })
 
   } catch (err) {
