@@ -1,7 +1,7 @@
 import { createClient } from '@supabase/supabase-js'
 import { S3Client, GetObjectCommand, PutObjectCommand, ListObjectsV2Command } from '@aws-sdk/client-s3'
 import { pipeline } from 'stream/promises'
-import { createWriteStream, createReadStream, mkdirSync, rmSync, existsSync, readdirSync, statSync, readFileSync } from 'fs'
+import { createWriteStream, createReadStream, mkdirSync, rmSync, existsSync, readdirSync, statSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { extract } from 'tar'
@@ -33,18 +33,6 @@ function findMp3Files(dir) {
     else if (entry.toLowerCase().endsWith('.mp3')) results.push(fullPath)
   }
   return results
-}
-
-function findMetadataJson(dir) {
-  const entries = readdirSync(dir)
-  for (const entry of entries) {
-    const fullPath = join(dir, entry)
-    if (statSync(fullPath).isDirectory()) {
-      const found = findMetadataJson(fullPath)
-      if (found) return found
-    } else if (entry === 'metadata.json') return fullPath
-  }
-  return null
 }
 
 function parseFilename(filename) {
@@ -95,11 +83,42 @@ async function getExistingIds(gnaniIds) {
   return new Set((data || []).map(r => r.gnani_call_id))
 }
 
+// ── Fetch metadata.json from S3 as a separate object (not inside tar) ──────────
+// Gnani places it at: {language}/{year}/{month}/{day}/metadata.json
+// Each entry has a `unique_id` field that matches gnani_call_id in MP3 filenames
+async function fetchMetadataFromS3(language, year, month, day) {
+  const key = `${language}/${year}/${month}/${day}/metadata.json`
+  try {
+    const cmd = new GetObjectCommand({ Bucket: BUCKET, Key: key })
+    const { Body } = await s3.send(cmd)
+    const chunks = []
+    for await (const chunk of Body) chunks.push(chunk)
+    const text = Buffer.concat(chunks).toString('utf8')
+    const rawData = JSON.parse(text)
+    const metaArray = Array.isArray(rawData) ? rawData : [rawData]
+    // Key by unique_id (matches gnani_call_id in MP3 filename)
+    const map = {}
+    metaArray.forEach(m => {
+      if (m.unique_id) map[m.unique_id] = m
+    })
+    return map
+  } catch (err) {
+    if (err.name !== 'NoSuchKey') console.warn(`metadata.json not found at ${key}:`, err.message)
+    return {}
+  }
+}
+
 // --- MAIN HANDLER ---
 
 export async function POST(req) {
   try {
     const body = await req.json().catch(() => ({}))
+
+    // ── Backfill mode: update existing records that have null metadata ─────────
+    if (body?.backfill) {
+      return handleBackfill()
+    }
+
     let tarKeys = []
 
     // 1. Determine which keys to process
@@ -123,37 +142,27 @@ export async function POST(req) {
 
     for (const tarKey of tarKeys) {
       const pathParts = tarKey.split('/')
-      const language  = fmtLanguage(pathParts[0])
-      const datePath  = `${pathParts[1]}/${pathParts[2]}/${pathParts[3]}`
+      const language  = pathParts[0]  // lowercase e.g. 'kannada'
+      const year      = pathParts[1]
+      const month     = pathParts[2]
+      const day       = pathParts[3]
+      const datePath  = `${year}/${month}/${day}`
 
       const tmpDir = join(tmpdir(), `gnani_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`)
       mkdirSync(tmpDir, { recursive: true })
       const localTar = join(tmpDir, 'recordings.tar.gz')
 
       try {
+        // Fetch metadata.json from S3 (separate object, not inside tar)
+        const metadataMap = await fetchMetadataFromS3(language, year, month, day)
+
         await downloadFromS3(tarKey, localTar)
         await extract({ file: localTar, cwd: tmpDir, strict: false })
 
-        // FIX 1: Correctly load and map metadata.json
-        const metadataPath = findMetadataJson(tmpDir)
-        let metadataMap = {}
-        if (metadataPath) {
-          try {
-            const rawData = JSON.parse(readFileSync(metadataPath, 'utf8'))
-            // Handle if metadata is an array or a single object
-            const metaArray = Array.isArray(rawData) ? rawData : [rawData]
-            metaArray.forEach(m => {
-              if (m.gnani_call_id) metadataMap[m.gnani_call_id] = m
-            })
-          } catch (e) {
-            console.error(`Error parsing metadata.json in ${tarKey}:`, e)
-          }
-        }
-
         const mp3Files = findMp3Files(tmpDir)
         if (!mp3Files.length) {
-           console.log(`No MP3s found in ${tarKey}`)
-           continue
+          console.log(`No MP3s found in ${tarKey}`)
+          continue
         }
 
         const parsed = mp3Files.map(mp3Path => {
@@ -166,7 +175,7 @@ export async function POST(req) {
         const allIds      = parsed.map(p => p.gnani_call_id)
         const existingIds = await getExistingIds(allIds)
         const toInsert    = parsed.filter(p => !existingIds.has(p.gnani_call_id))
-        
+
         totalSkipped += (parsed.length - toInsert.length)
 
         if (!toInsert.length) continue
@@ -174,10 +183,11 @@ export async function POST(req) {
         // 3. Process new files
         const results = await Promise.all(toInsert.map(async (item) => {
           try {
-            const s3RecKey  = `recordings/${pathParts[0]}/${datePath}/${item.filename}`
+            const s3RecKey  = `recordings/${language}/${datePath}/${item.filename}`
+            // Match by unique_id (= gnani_call_id from filename)
             const gnaniMeta = metadataMap[item.gnani_call_id] || {}
-            
-            const recordingUrl = await uploadToS3(item.mp3Path, s3RecKey)
+
+            const recordingUrl     = await uploadToS3(item.mp3Path, s3RecKey)
             const duration_seconds = gnaniMeta.call_duration ? Math.round(gnaniMeta.call_duration) : null
 
             return {
@@ -185,7 +195,7 @@ export async function POST(req) {
               customer_number:    item.customer_number,
               call_date:          item.call_date,
               call_time:          item.call_time,
-              language:           gnaniMeta.language ? fmtLanguage(gnaniMeta.language) : language,
+              language:           gnaniMeta.language ? fmtLanguage(gnaniMeta.language) : fmtLanguage(language),
               duration_seconds,
               customer_name:      gnaniMeta.customer_name || null,
               call_disposition:   gnaniMeta.call_disposition || null,
@@ -241,6 +251,67 @@ export async function POST(req) {
     console.error('Gnani sync root error:', err)
     return Response.json({ success: false, error: err.message }, { status: 500 })
   }
+}
+
+// ── Backfill: fetch metadata for existing records that have null fields ─────────
+async function handleBackfill() {
+  // Find all records missing metadata (customer_name or call_disposition is null)
+  const { data: nullRecords, error } = await supabase
+    .from('telesales_calls')
+    .select('gnani_call_id, call_date, language')
+    .or('customer_name.is.null,call_disposition.is.null')
+    .order('call_date', { ascending: false })
+
+  if (error) return Response.json({ success: false, error: error.message }, { status: 500 })
+  if (!nullRecords?.length) return Response.json({ success: true, updated: 0, message: 'All records already have metadata' })
+
+  // Group by date + language to minimize S3 fetches
+  const groups = new Map()
+  nullRecords.forEach(r => {
+    const lang = (r.language || 'Kannada').toLowerCase()
+    const [year, month, day] = (r.call_date || '').split('-')
+    if (!year || !month || !day) return
+    const key = `${lang}/${year}/${month}/${day}`
+    if (!groups.has(key)) groups.set(key, { lang, year, month, day, ids: [] })
+    groups.get(key).ids.push(r.gnani_call_id)
+  })
+
+  let totalUpdated = 0
+  const errors = []
+
+  for (const [, group] of groups) {
+    const metadataMap = await fetchMetadataFromS3(group.lang, group.year, group.month, group.day)
+    if (!Object.keys(metadataMap).length) continue
+
+    // Update each record that has metadata available
+    const results = await Promise.all(
+      group.ids.map(gnani_call_id => {
+        const m = metadataMap[gnani_call_id]
+        if (!m) return Promise.resolve(null)
+        return supabase.from('telesales_calls').update({
+          customer_name:      m.customer_name      || null,
+          call_disposition:   m.call_disposition   || null,
+          system_disposition: m.system_disposition || null,
+          duration_seconds:   m.call_duration ? Math.round(m.call_duration) : null,
+          summary:            m.summary            || null,
+          language:           m.language ? fmtLanguage(m.language) : undefined,
+        }).eq('gnani_call_id', gnani_call_id)
+      })
+    )
+
+    results.forEach((res, i) => {
+      if (!res) return
+      if (res.error) errors.push(`Update failed ${group.ids[i]}: ${res.error.message}`)
+      else totalUpdated++
+    })
+  }
+
+  return Response.json({
+    success: true,
+    updated: totalUpdated,
+    errors:  errors.length ? errors : undefined,
+    message: `Backfilled metadata for ${totalUpdated} calls`,
+  })
 }
 
 export async function GET() {
