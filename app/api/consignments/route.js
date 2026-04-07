@@ -79,7 +79,7 @@ export async function GET(req) {
       return { ...s, oldest_age_days: oldestDays }
     }).sort((a, b) => b.total_gross_wt - a.total_gross_wt)
 
-    return Response.json({ data: result })
+    return Response.json({ data: result, _debug: { purchases_count: (purchases||[]).length, branches_count: (branches||[]).length, summary_count: Object.keys(summary).length } })
   }
 
   // ── Get outside-Bangalore branches from branches master ──────────────────
