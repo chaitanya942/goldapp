@@ -88,8 +88,7 @@ async function listTarFiles(language = null) {
   return keys
 }
 
-async function listAllS3Objects(language = null) {
-  const prefix = language ? `${language}/` : ''
+async function listAllS3Objects(prefix = '') {
   const keys = []
   let continuationToken
 
@@ -441,7 +440,7 @@ export async function GET(req) {
   const { count } = await supabase.from('telesales_calls').select('*', { count: 'exact', head: true })
 
   if (searchParams.get('inventory') === '1') {
-    const allObjects = await listAllS3Objects()
+    const allObjects = await listAllS3Objects('')
     const tarFiles   = allObjects.filter(o => o.key.endsWith('.tar.gz'))
     const metaFiles  = allObjects.filter(o => o.key.endsWith('metadata.json'))
     const recFiles   = allObjects.filter(o => o.key.startsWith('recordings/') && o.key.endsWith('.mp3'))
