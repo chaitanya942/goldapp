@@ -19,6 +19,65 @@ export async function GET(req) {
   const { searchParams } = new URL(req.url)
   const action = searchParams.get('action')
 
+  // ── Branch Stock Overview (new landing view) ──────────────────────────────
+  if (action === 'branch_overview') {
+    // Today in IST
+    const now      = new Date(new Date().getTime() + 5.5 * 60 * 60 * 1000)
+    const todayIST = `${now.getUTCFullYear()}-${String(now.getUTCMonth()+1).padStart(2,'0')}-${String(now.getUTCDate()).padStart(2,'0')}`
+
+    const { data: branches } = await supabase
+      .from('branches')
+      .select('name, region, state, ship_before')
+      .eq('is_active', true)
+      .neq('region', 'Bangalore')
+
+    const branchMeta = {}
+    for (const b of branches || []) {
+      branchMeta[b.name] = { region: b.region, state: b.state, ship_before: b.ship_before ?? null }
+    }
+
+    const { data: purchases } = await supabase
+      .from('purchases')
+      .select('branch_name, purchase_date, gross_weight, net_weight')
+      .eq('stock_status', 'at_branch')
+      .eq('is_deleted', false)
+      .in('branch_name', Object.keys(branchMeta))
+
+    const summary = {}
+    for (const row of purchases || []) {
+      const key  = row.branch_name
+      const meta = branchMeta[key]
+      if (!meta) continue
+      if (!summary[key]) {
+        summary[key] = {
+          branch_name: key, region: meta.region,
+          ship_before: meta.ship_before,
+          total_bills: 0, today_bills: 0, older_bills: 0,
+          total_gross_wt: 0, total_net_wt: 0, oldest_date: null,
+        }
+      }
+      const s = summary[key]
+      s.total_bills++
+      if (row.purchase_date === todayIST) s.today_bills++
+      else s.older_bills++
+      s.total_gross_wt += parseFloat(row.gross_weight || 0)
+      s.total_net_wt   += parseFloat(row.net_weight   || 0)
+      if (!s.oldest_date || row.purchase_date < s.oldest_date) s.oldest_date = row.purchase_date
+    }
+
+    // Compute oldest_age_days; fallback ship_before = oldest_date + 21 days
+    const SHIP_DAYS = 21
+    const result = Object.values(summary).map(s => {
+      const oldestMs   = s.oldest_date ? new Date(s.oldest_date).getTime() : null
+      const oldestDays = oldestMs ? Math.floor((Date.now() - oldestMs) / 86400000) : 0
+      const shipBefore = s.ship_before
+        || (oldestMs ? new Date(oldestMs + SHIP_DAYS * 86400000).toISOString().slice(0, 10) : null)
+      return { ...s, oldest_age_days: oldestDays, ship_before: shipBefore }
+    }).sort((a, b) => b.total_gross_wt - a.total_gross_wt)
+
+    return Response.json({ data: result })
+  }
+
   // ── Get outside-Bangalore branches from branches master ──────────────────
   if (action === 'branches') {
     const { data, error } = await supabase

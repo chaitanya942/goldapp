@@ -15,6 +15,7 @@ import BranchEmployees from '../../components/admin/BranchEmployees'
 import ImportLogs from '../../components/admin/ImportLogs'
 import PurchaseHub   from '../../components/purchases/PurchaseHub'
 import ReportsHub    from '../../components/purchases/ReportsHub'
+import ConsignmentOverview from '../../components/consignments/ConsignmentOverview'
 import ConsignmentData from '../../components/consignments/ConsignmentData'
 import ConsignmentReport from '../../components/consignments/ConsignmentReport'
 import ConsignmentSummary from '../../components/consignments/ConsignmentSummary'
@@ -104,6 +105,7 @@ function DashboardShell() {
       case 'dashboard':           return role === 'telesales' ? <TelesalesDashboard /> : <DashboardHome />
       case 'purchase-data':     return <PurchaseHub />
       case 'purchase-reports':  return <ReportsHub />
+      case 'consignment-overview': return <ConsignmentOverview />
       case 'consignment-data':    return <ConsignmentData />
       case 'consignment-report':  return <ConsignmentReport />
       case 'consignment-summary': return <ConsignmentSummary />
