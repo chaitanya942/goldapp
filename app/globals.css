@@ -48,9 +48,13 @@ input, select, textarea, button {
 
 button { cursor: pointer; }
 
-/* Recharts: transparent SVG backgrounds */
+/* Recharts: transparent SVG backgrounds — v3 uses CSS var + SVG rect */
 .recharts-surface { background: transparent; }
-.recharts-wrapper { background: transparent; }
+.recharts-wrapper { background: transparent; --recharts-background-color: transparent; }
+/* Override the background rect recharts injects as first SVG child */
+.recharts-surface > rect:first-child { fill: transparent !important; }
+/* Remove white cursor highlight on bar charts */
+.recharts-rectangle.recharts-bar-background-rectangle { fill: transparent !important; }
 
 /* Native date/select inputs match theme */
 input[type="date"],
