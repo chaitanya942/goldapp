@@ -111,19 +111,31 @@ export default function UserManagement() {
     if (!exUuid.trim() || !exEmail.trim()) return
     setExSaving(true)
     setInvMsg(null)
-    const { error } = await supabase.from('user_profiles').upsert({
-      id:        exUuid.trim(),
-      email:     exEmail.trim(),
-      full_name: exName.trim() || exEmail.trim(),
-      role:      exRole,
-      is_active: true,
-    }, { onConflict: 'id' })
-    if (error) {
-      setInvMsg({ type: 'error', text: error.message })
-    } else {
-      setInvMsg({ type: 'success', text: `${exEmail.trim()} added with ${exRole} role.` })
-      setExUuid(''); setExEmail(''); setExName(''); setExRole('viewer')
-      await load()
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      const res = await fetch('/api/add-user-profile', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session?.access_token}`,
+        },
+        body: JSON.stringify({
+          id:        exUuid.trim(),
+          email:     exEmail.trim(),
+          full_name: exName.trim() || exEmail.trim(),
+          role:      exRole,
+        }),
+      })
+      if (!res.ok) {
+        const msg = await res.text()
+        setInvMsg({ type: 'error', text: msg })
+      } else {
+        setInvMsg({ type: 'success', text: `${exEmail.trim()} added with ${exRole} role.` })
+        setExUuid(''); setExEmail(''); setExName(''); setExRole('viewer')
+        await load()
+      }
+    } catch (err) {
+      setInvMsg({ type: 'error', text: err.message })
     }
     setExSaving(false)
   }
