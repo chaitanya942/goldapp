@@ -69,9 +69,42 @@ async function uploadToS3(localPath, s3Key, contentType = 'audio/mpeg') {
 
 async function listTarFiles(language = null) {
   const prefix = language ? `${language}/` : ''
-  const cmd = new ListObjectsV2Command({ Bucket: BUCKET, Prefix: prefix })
-  const { Contents = [] } = await s3.send(cmd)
-  return Contents.filter(obj => obj.Key.endsWith('.tar.gz')).map(obj => obj.Key)
+  const keys = []
+  let continuationToken
+
+  do {
+    const cmd = new ListObjectsV2Command({
+      Bucket: BUCKET,
+      Prefix: prefix,
+      ContinuationToken: continuationToken,
+    })
+    const res = await s3.send(cmd)
+    ;(res.Contents || []).forEach(obj => {
+      if (obj.Key.endsWith('.tar.gz')) keys.push(obj.Key)
+    })
+    continuationToken = res.IsTruncated ? res.NextContinuationToken : null
+  } while (continuationToken)
+
+  return keys
+}
+
+async function listAllS3Objects(language = null) {
+  const prefix = language ? `${language}/` : ''
+  const keys = []
+  let continuationToken
+
+  do {
+    const cmd = new ListObjectsV2Command({
+      Bucket: BUCKET,
+      Prefix: prefix,
+      ContinuationToken: continuationToken,
+    })
+    const res = await s3.send(cmd)
+    ;(res.Contents || []).forEach(obj => keys.push({ key: obj.Key, size: obj.Size }))
+    continuationToken = res.IsTruncated ? res.NextContinuationToken : null
+  } while (continuationToken)
+
+  return keys
 }
 
 async function getExistingIds(gnaniIds) {
@@ -314,7 +347,43 @@ async function handleBackfill() {
   })
 }
 
-export async function GET() {
+export async function GET(req) {
+  const { searchParams } = new URL(req.url)
   const { count } = await supabase.from('telesales_calls').select('*', { count: 'exact', head: true })
+
+  if (searchParams.get('inventory') === '1') {
+    const allObjects = await listAllS3Objects()
+    const tarFiles   = allObjects.filter(o => o.key.endsWith('.tar.gz'))
+    const metaFiles  = allObjects.filter(o => o.key.endsWith('metadata.json'))
+    const recFiles   = allObjects.filter(o => o.key.startsWith('recordings/') && o.key.endsWith('.mp3'))
+
+    // Summarize by language/date
+    const summary = {}
+    tarFiles.forEach(({ key }) => {
+      const p = key.split('/')
+      const lang = p[0], date = `${p[1]}-${p[2]}-${p[3]}`
+      const k = `${lang}/${date}`
+      if (!summary[k]) summary[k] = { tar: false, metadata: false }
+      summary[k].tar = true
+    })
+    metaFiles.forEach(({ key }) => {
+      const p = key.split('/')
+      const lang = p[0], date = `${p[1]}-${p[2]}-${p[3]}`
+      const k = `${lang}/${date}`
+      if (!summary[k]) summary[k] = { tar: false, metadata: false }
+      summary[k].metadata = true
+    })
+
+    return Response.json({
+      status:         'ok',
+      total_calls_db: count,
+      bucket:         BUCKET,
+      tar_files:      tarFiles.length,
+      metadata_files: metaFiles.length,
+      uploaded_mp3s:  recFiles.length,
+      by_date:        summary,
+    })
+  }
+
   return Response.json({ status: 'ok', total_calls: count, bucket: BUCKET })
 }
