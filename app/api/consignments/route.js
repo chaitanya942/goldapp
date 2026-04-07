@@ -27,13 +27,13 @@ export async function GET(req) {
 
     const { data: branches } = await supabase
       .from('branches')
-      .select('name, region, state, ship_before')
+      .select('name, region, state')
       .eq('is_active', true)
       .neq('region', 'Bangalore')
 
     const branchMeta = {}
     for (const b of branches || []) {
-      branchMeta[b.name] = { region: b.region, state: b.state, ship_before: b.ship_before ?? null }
+      branchMeta[b.name] = { region: b.region, state: b.state }
     }
 
     const { data: purchases } = await supabase
@@ -52,7 +52,7 @@ export async function GET(req) {
       if (!summary[key]) {
         summary[key] = {
           branch_name: key, region: meta.region,
-          ship_before: meta.ship_before,
+          ship_before: null,
           total_bills: 0, today_bills: 0, older_bills: 0,
           total_gross_wt: 0, total_net_wt: 0, oldest_date: null,
         }
@@ -66,14 +66,11 @@ export async function GET(req) {
       if (!s.oldest_date || row.purchase_date < s.oldest_date) s.oldest_date = row.purchase_date
     }
 
-    // Compute oldest_age_days; fallback ship_before = oldest_date + 21 days
-    const SHIP_DAYS = 21
+    // Compute oldest_age_days; ship_before is null until set manually per branch
     const result = Object.values(summary).map(s => {
       const oldestMs   = s.oldest_date ? new Date(s.oldest_date).getTime() : null
       const oldestDays = oldestMs ? Math.floor((Date.now() - oldestMs) / 86400000) : 0
-      const shipBefore = s.ship_before
-        || (oldestMs ? new Date(oldestMs + SHIP_DAYS * 86400000).toISOString().slice(0, 10) : null)
-      return { ...s, oldest_age_days: oldestDays, ship_before: shipBefore }
+      return { ...s, oldest_age_days: oldestDays }
     }).sort((a, b) => b.total_gross_wt - a.total_gross_wt)
 
     return Response.json({ data: result })
