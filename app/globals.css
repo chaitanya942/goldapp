@@ -48,6 +48,10 @@ input, select, textarea, button {
 
 button { cursor: pointer; }
 
+/* Recharts: transparent SVG backgrounds */
+.recharts-surface { background: transparent; }
+.recharts-wrapper { background: transparent; }
+
 /* Native date/select inputs match theme */
 input[type="date"],
 input[type="text"],

@@ -69,7 +69,7 @@ const ROLE_LABELS = {
 export { ROLE_LABELS }
 
 function DashboardShell() {
-  const { theme, activeNav, setActiveNav, role, canSee } = useApp()
+  const { theme, activeNav, setActiveNav, role, canSee, profileLoaded } = useApp()
   const t = THEMES[theme]
   const router = useRouter()
   const [sidebarOpen, setSidebarOpen] = useState(true)
@@ -88,7 +88,7 @@ function DashboardShell() {
     }
   }, [role, activeNav, checking])
 
-  if (checking) return (
+  if (checking || !profileLoaded) return (
     <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: t.bg }}>
       <svg width="36" height="36" viewBox="0 0 32 32" style={{ animation: 'spin 1s linear infinite' }}>
         <circle cx="16" cy="16" r="12" fill="none" stroke="rgba(201,168,76,0.15)" strokeWidth="2" />

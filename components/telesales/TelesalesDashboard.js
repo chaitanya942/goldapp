@@ -29,7 +29,7 @@ const daysAgo = (n) => {
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,'0')}-${String(d.getUTCDate()).padStart(2,'0')}`
 }
 
-const OUTCOME_COLORS = { interested: '#3aaa6a', callback: '#3a8fbf', not_interested: '#e05555', no_answer: '#9a8a6a', wrong_number: '#c9981f', pending: '#3a3060' }
+const OUTCOME_COLORS = { interested: '#4ade80', callback: '#60a5fa', not_interested: '#f87171', no_answer: '#94a3b8', wrong_number: '#fb923c', pending: '#a78bfa' }
 const OUTCOME_LABELS = { interested: 'Interested', callback: 'Callback', not_interested: 'Not Interested', no_answer: 'No Answer', wrong_number: 'Wrong Number', pending: 'Pending' }
 
 // ── Active donut sector (expanded on hover) ───────────────────────────────────
@@ -209,7 +209,7 @@ export default function TelesalesDashboard() {
           <span style={s.label}>Calls Per Day — Last 14 Days <span style={{ color: t.text4, fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>(click bar to filter)</span></span>
           {callsByDate.length > 0 ? (
             <ResponsiveContainer width="100%" height={185}>
-              <BarChart data={callsByDate} barSize={16} background={{ fill: 'transparent' }}
+              <BarChart data={callsByDate} barSize={16}
                 onClick={d => d?.activePayload && toggleFilter('date', d.activePayload[0]?.payload?.rawDate)}>
                 <CartesianGrid strokeDasharray="3 3" stroke={`${t.border2}60`} vertical={false} />
                 <XAxis dataKey="date" tick={{ fill: t.text4, fontSize: 10 }} axisLine={false} tickLine={false} />
