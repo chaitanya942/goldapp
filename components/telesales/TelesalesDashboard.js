@@ -36,7 +36,7 @@ const OUTCOME_LABELS = { interested: 'Interested', callback: 'Callback', not_int
 const ActiveShape = ({ cx, cy, innerRadius, outerRadius, startAngle, endAngle, fill, payload, value, percent }) => (
   <g>
     <Sector cx={cx} cy={cy} innerRadius={innerRadius - 4} outerRadius={outerRadius + 8}
-      startAngle={startAngle} endAngle={endAngle} fill={fill} />
+      startAngle={startAngle} endAngle={endAngle} fill={fill} stroke="none" />
     <text x={cx} y={cy - 10} textAnchor="middle" fill={fill} fontSize={22} fontWeight={200}>{value}</text>
     <text x={cx} y={cy + 12} textAnchor="middle" fill="#9a8a6a" fontSize={11}>{payload.name}</text>
     <text x={cx} y={cy + 27} textAnchor="middle" fill="#6a5a3a" fontSize={10}>{(percent * 100).toFixed(0)}%</text>
@@ -209,7 +209,7 @@ export default function TelesalesDashboard() {
           <span style={s.label}>Calls Per Day — Last 14 Days <span style={{ color: t.text4, fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>(click bar to filter)</span></span>
           {callsByDate.length > 0 ? (
             <ResponsiveContainer width="100%" height={185}>
-              <BarChart data={callsByDate} barSize={16}
+              <BarChart data={callsByDate} barSize={16} background={{ fill: 'transparent' }}
                 onClick={d => d?.activePayload && toggleFilter('date', d.activePayload[0]?.payload?.rawDate)}>
                 <CartesianGrid strokeDasharray="3 3" stroke={`${t.border2}60`} vertical={false} />
                 <XAxis dataKey="date" tick={{ fill: t.text4, fontSize: 10 }} axisLine={false} tickLine={false} />
@@ -232,7 +232,7 @@ export default function TelesalesDashboard() {
           <ResponsiveContainer width="100%" height={180}>
             <PieChart>
               <Pie data={outcomeDist} cx="50%" cy="50%" innerRadius={50} outerRadius={78}
-                dataKey="value" paddingAngle={2}
+                dataKey="value" paddingAngle={2} stroke="none"
                 activeIndex={activeSlice}
                 activeShape={<ActiveShape />}
                 onMouseEnter={(_, i) => setActiveSlice(i)}
