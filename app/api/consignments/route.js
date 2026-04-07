@@ -26,18 +26,22 @@ export async function GET(req) {
     const todayIST = `${now.getUTCFullYear()}-${String(now.getUTCMonth()+1).padStart(2,'0')}-${String(now.getUTCDate()).padStart(2,'0')}`
 
     // Fetch all purchases at_branch (approved, not deleted)
-    const { data: purchases } = await supabase
+    const { data: purchases, error: pErr } = await supabase
       .from('purchases')
       .select('branch_name, purchase_date, gross_weight, net_weight')
       .eq('stock_status', 'at_branch')
       .eq('crm_status', 'approved')
       .eq('is_deleted', false)
 
+    if (pErr) return Response.json({ data: [], _debug: { purchases_error: pErr.message } })
+
     // Fetch branch metadata for region lookup (all active branches, filter in JS)
-    const { data: branches } = await supabase
+    const { data: branches, error: bErr } = await supabase
       .from('branches')
       .select('name, region, state')
       .eq('is_active', true)
+
+    if (bErr) return Response.json({ data: [], _debug: { branches_error: bErr.message, purchases_count: purchases?.length } })
 
     const branchMeta = {}
     for (const b of branches || []) {
@@ -79,7 +83,7 @@ export async function GET(req) {
       return { ...s, oldest_age_days: oldestDays }
     }).sort((a, b) => b.total_gross_wt - a.total_gross_wt)
 
-    return Response.json({ data: result, _debug: { purchases_count: (purchases||[]).length, branches_count: (branches||[]).length, summary_count: Object.keys(summary).length } })
+    return Response.json({ data: result, _debug: { purchases_count: purchases.length, branches_count: (branches||[]).length, summary_keys: Object.keys(summary), bangalore_set: [...bangaloreBranches] } })
   }
 
   // ── Get outside-Bangalore branches from branches master ──────────────────
