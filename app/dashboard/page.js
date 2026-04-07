@@ -21,6 +21,7 @@ import ConsignmentSummary from '../../components/consignments/ConsignmentSummary
 import CalTable from '../../components/sales/CalTable'
 import LiveMarketRates from '../../components/sales/LiveMarketRates'
 import InboundBotTesting from '../../components/telesales/InboundBotTesting'
+import TelesalesDashboard from '../../components/telesales/TelesalesDashboard'
 
 const THEMES = {
   dark:  { bg: '#0a0a0a', card: '#111111', text1: '#f0e6c8', text2: '#c8b89a', text3: '#7a6a4a', text4: '#4a3a2a', gold: '#c9a84c', border: '#1e1e1e', red: '#e05555' },
@@ -100,7 +101,7 @@ function DashboardShell() {
   const renderPage = () => {
     if (activeNav !== 'dashboard' && !canSee(activeNav)) return <AccessDenied />
     switch (activeNav) {
-      case 'dashboard':           return <DashboardHome />
+      case 'dashboard':           return role === 'telesales' ? <TelesalesDashboard /> : <DashboardHome />
       case 'purchase-data':     return <PurchaseHub />
       case 'purchase-reports':  return <ReportsHub />
       case 'consignment-data':    return <ConsignmentData />
