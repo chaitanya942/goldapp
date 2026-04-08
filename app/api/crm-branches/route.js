@@ -36,6 +36,13 @@ export async function GET(req) {
       return Response.json({ columns })
     }
 
+    if (action === 'describe') {
+      const table = searchParams.get('table') || ''
+      if (!table.match(/^[a-zA-Z0-9_]+$/)) return Response.json({ error: 'Invalid table name' }, { status: 400 })
+      const [columns] = await conn.execute(`DESCRIBE ${table}`)
+      return Response.json({ columns })
+    }
+
     if (action === 'emp_data') {
       const [rows] = await conn.execute(`SELECT * FROM emp_tbl LIMIT 10`)
       return Response.json({ rows })

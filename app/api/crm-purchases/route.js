@@ -335,10 +335,9 @@ export async function GET(req) {
           ORDER BY cw.time DESC
         `, [todayIST]),
 
-        // 7. KYC blacklisted today (rejctd_tbl) — include mobiles to detect overrides
+        // 7. KYC blacklisted today (rejctd_tbl)
         conn.execute(`
-          SELECT COUNT(*) AS cnt, ROUND(SUM(grams+0),2) AS total_grams,
-            GROUP_CONCAT(cust_mobile SEPARATOR ',') AS mobiles
+          SELECT COUNT(*) AS cnt, ROUND(SUM(grams+0),2) AS total_grams
           FROM rejctd_tbl WHERE DATE(date + INTERVAL 330 MINUTE) = ?
         `, [todayIST]),
 
