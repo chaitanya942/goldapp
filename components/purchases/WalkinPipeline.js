@@ -265,7 +265,7 @@ export default function WalkinPipeline() {
                 <tr key={r.id} style={{ transition: 'background .12s' }}
                   onMouseEnter={e => e.currentTarget.style.background = t.card2}
                   onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
-                  <td style={s.td}>{fmtDate(r.date)}</td>
+                  <td style={s.td}>{fmtDate(r.walkin_date)}</td>
                   <td style={{ ...s.td, fontWeight: 500 }}>{r.cust_name}</td>
                   <td style={{ ...s.td, color: t.text3 }}>{r.cust_mobile}</td>
                   <td style={{ ...s.td, color: t.text2 }}>{r.branch_name || r.branch_id}</td>

@@ -176,7 +176,7 @@ export default function RejectedBills() {
                   onMouseEnter={e => e.currentTarget.style.background = `${t.card2}`}
                   onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
                   <td style={{ ...s.td, color: t.gold, fontWeight: 500 }}>{r.bill_no || '—'}</td>
-                  <td style={s.td}>{fmtDate(r.date)}</td>
+                  <td style={s.td}>{fmtDate(r.txn_date)}</td>
                   <td style={s.td}>{r.cust_name}</td>
                   <td style={{ ...s.td, color: t.text3 }}>{r.cust_mobile}</td>
                   <td style={{ ...s.td, color: t.text2 }}>{r.branch_name || r.branch_id}</td>

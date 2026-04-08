@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useApp } from '../../lib/context'
 import GoldSpinner from '../ui/GoldSpinner'
 
@@ -22,6 +22,7 @@ export default function BlacklistedCustomers() {
   const [page, setPage]           = useState(0)
   // Track actual DB columns from first load
   const [columns, setColumns]     = useState([])
+  const columnsSet                = useRef(false)
 
   const [search, setSearch]       = useState('')
   const [filterReason, setFilterReason] = useState('')
@@ -42,8 +43,8 @@ export default function BlacklistedCustomers() {
       setRows(d.rows || [])
       setTotal(d.total || 0)
       if (d.reasonDist) setReasonDist(d.reasonDist)
-      // Derive columns from first row
-      if (d.rows?.length > 0 && columns.length === 0) {
+      if (d.rows?.length > 0 && !columnsSet.current) {
+        columnsSet.current = true
         setColumns(Object.keys(d.rows[0]))
       }
     } catch (e) {
@@ -51,7 +52,7 @@ export default function BlacklistedCustomers() {
     } finally {
       setLoading(false)
     }
-  }, [search, filterReason, columns.length])
+  }, [search, filterReason])
 
   useEffect(() => { load(0); setPage(0) }, [load])
 

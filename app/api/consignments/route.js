@@ -33,7 +33,7 @@ export async function GET(req) {
       .eq('crm_status', 'approved')
       .eq('is_deleted', false)
 
-    if (pErr) return Response.json({ data: [], _debug: { purchases_error: pErr.message } })
+    if (pErr) return Response.json({ data: [], error: pErr.message })
 
     // Fetch branch metadata for region lookup (all active branches, filter in JS)
     const { data: branches, error: bErr } = await supabase
@@ -41,7 +41,7 @@ export async function GET(req) {
       .select('name, region, state')
       .eq('is_active', true)
 
-    if (bErr) return Response.json({ data: [], _debug: { branches_error: bErr.message, purchases_count: purchases?.length } })
+    if (bErr) return Response.json({ data: [], error: bErr.message })
 
     const branchMeta = {}
     for (const b of branches || []) {
@@ -83,7 +83,7 @@ export async function GET(req) {
       return { ...s, oldest_age_days: oldestDays }
     }).sort((a, b) => b.total_gross_wt - a.total_gross_wt)
 
-    return Response.json({ data: result, _debug: { purchases_count: purchases.length, branches_count: (branches||[]).length, summary_keys: Object.keys(summary), bangalore_set: [...bangaloreBranches] } })
+    return Response.json({ data: result })
   }
 
   // ── Get outside-Bangalore branches from branches master ──────────────────
@@ -306,7 +306,6 @@ export async function POST(req) {
     const internalNo         = movement_type === 'INTERNAL' ? await generateInternalNo(supabase, branchCode) : null
 
     // Totals — reuse the already-fetched purchases
-    const purchases  = purchaseCheck || []
     const { data: purchaseTotals } = await supabase
       .from('purchases')
       .select('net_weight, total_amount')
