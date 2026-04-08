@@ -2,6 +2,9 @@
 // Queries CRM MySQL for rejected, pending, walk-in, and blacklisted data
 
 import mysql from 'mysql2/promise'
+import pg    from 'pg'
+
+const { Client: PgClient } = pg
 
 const ALLOWED_ACTIONS = new Set(['rejected', 'pending', 'walkin', 'blacklisted', 'branches', 'kpis', 'live'])
 
@@ -221,31 +224,108 @@ export async function GET(req) {
 
     // ── LIVE FEED ─────────────────────────────────────────────────────────────
     if (action === 'live') {
-      // IST today
-      const istNow = new Date(Date.now() + 5.5 * 60 * 60 * 1000)
+      const istNow  = new Date(Date.now() + 5.5 * 60 * 60 * 1000)
       const todayIST = istNow.toISOString().split('T')[0]
 
-      // Run all 4 queries in parallel — they're independent reads
+      // All old-CRM queries in parallel
       const [
-        [[todaySummary]],
-        [[walkinToday]],
+        [[summary]],
+        [[walkinSummary]],
+        [goldByStatus],
+        [branches],
+        [hourly],
+        [payments],
         [todayTxns],
         [todayWalkins],
       ] = await Promise.all([
+
+        // 1. Transaction summary
         conn.execute(`
           SELECT
-            COUNT(*) AS total,
-            SUM(CASE WHEN trxn_status='approved' THEN 1 ELSE 0 END) AS approved,
-            SUM(CASE WHEN trxn_status='rejected' THEN 1 ELSE 0 END) AS rejected,
-            SUM(CASE WHEN trxn_status='pending'  THEN 1 ELSE 0 END) AS pending,
-            COUNT(DISTINCT branch_id) AS branches_active,
-            SUM(CASE WHEN trxn_status='approved' THEN (finl_amnt+0) ELSE 0 END) AS approved_value
-          FROM transac_tbl WHERE DATE(date + INTERVAL 330 MINUTE) = ?
+            COUNT(*)                                                                 AS total,
+            SUM(CASE WHEN trxn_status='approved' THEN 1 ELSE 0 END)                AS approved,
+            SUM(CASE WHEN trxn_status='rejected' THEN 1 ELSE 0 END)                AS rejected,
+            SUM(CASE WHEN trxn_status='pending'  THEN 1 ELSE 0 END)                AS pending,
+            COUNT(DISTINCT branch_id)                                               AS branches_active,
+            SUM(CASE WHEN trxn_status='approved' THEN (finl_amnt+0) ELSE 0 END)   AS approved_value,
+            SUM(CASE WHEN type_gold='physical'   THEN 1 ELSE 0 END)               AS physical_count,
+            SUM(CASE WHEN type_gold!='physical'  THEN 1 ELSE 0 END)               AS takeover_count
+          FROM transac_tbl
+          WHERE DATE(date + INTERVAL 330 MINUTE) = ?
         `, [todayIST]),
-        conn.execute(
-          `SELECT COUNT(*) AS count FROM customer_walkin WHERE DATE(date + INTERVAL 330 MINUTE) = ?`,
-          [todayIST]
-        ),
+
+        // 2. Walk-in summary
+        conn.execute(`
+          SELECT
+            COUNT(*)                                                                          AS total,
+            SUM(CASE WHEN walkin_status='sold'             THEN 1 ELSE 0 END)                AS sold,
+            SUM(CASE WHEN walkin_status='visited not sold' THEN 1 ELSE 0 END)                AS visited_not_sold,
+            SUM(CASE WHEN walkin_status='enquiry'          THEN 1 ELSE 0 END)                AS enquiry,
+            SUM(CASE WHEN walkin_status='planning to visit'THEN 1 ELSE 0 END)                AS planning_to_visit,
+            SUM(CASE WHEN walkin_status='call later'       THEN 1 ELSE 0 END)                AS call_later,
+            ROUND(SUM(gms_weight + 0), 2)                                                    AS total_gold_wt
+          FROM customer_walkin
+          WHERE DATE(date + INTERVAL 330 MINUTE) = ?
+        `, [todayIST]),
+
+        // 3. Gold weight by transaction status
+        conn.execute(`
+          SELECT
+            t.trxn_status,
+            ROUND(SUM(o.net_wet  + 0), 3) AS net_wt,
+            ROUND(SUM(o.grss_wet + 0), 3) AS gross_wt,
+            COUNT(DISTINCT t.id)           AS count
+          FROM transac_tbl t
+          LEFT JOIN ornments_tbl o ON o.trnxnn_id = t.id
+          WHERE DATE(t.date + INTERVAL 330 MINUTE) = ?
+          GROUP BY t.trxn_status
+        `, [todayIST]),
+
+        // 4. Branch breakdown
+        conn.execute(`
+          SELECT
+            b.brnch_name  AS branch_name,
+            COUNT(*)      AS bills,
+            SUM(CASE WHEN t.trxn_status='approved' THEN 1 ELSE 0 END)              AS approved,
+            SUM(CASE WHEN t.trxn_status='pending'  THEN 1 ELSE 0 END)              AS pending,
+            SUM(CASE WHEN t.trxn_status='rejected' THEN 1 ELSE 0 END)              AS rejected,
+            ROUND(SUM(CASE WHEN t.trxn_status='approved' THEN (t.finl_amnt+0) ELSE 0 END), 0) AS value
+          FROM transac_tbl t
+          LEFT JOIN branch_tbl b ON b.brnch_id = t.branch_id
+          WHERE DATE(t.date + INTERVAL 330 MINUTE) = ?
+          GROUP BY t.branch_id, b.brnch_name
+          ORDER BY value DESC
+          LIMIT 20
+        `, [todayIST]),
+
+        // 5. Hourly activity
+        conn.execute(`
+          SELECT
+            HOUR(TIME(date + INTERVAL 330 MINUTE))                                  AS hour,
+            COUNT(*)                                                                 AS bills,
+            SUM(CASE WHEN trxn_status='approved' THEN 1 ELSE 0 END)                AS approved,
+            SUM(CASE WHEN trxn_status='rejected' THEN 1 ELSE 0 END)                AS rejected
+          FROM transac_tbl
+          WHERE DATE(date + INTERVAL 330 MINUTE) = ?
+          GROUP BY hour
+          ORDER BY hour
+        `, [todayIST]),
+
+        // 6. Payment method split (approved only)
+        conn.execute(`
+          SELECT
+            LOWER(TRIM(pymt_mde)) AS method,
+            COUNT(*)              AS count,
+            ROUND(SUM(finl_amnt+0), 0) AS value
+          FROM transac_tbl
+          WHERE DATE(date + INTERVAL 330 MINUTE) = ?
+            AND trxn_status = 'approved'
+            AND pymt_mde IS NOT NULL AND pymt_mde != ''
+          GROUP BY pymt_mde
+          ORDER BY count DESC
+        `, [todayIST]),
+
+        // 7. Today's transactions (for timeline)
         conn.execute(`
           SELECT t.id, t.bill_no, t.cust_name, t.cust_mobile,
             t.time, t.branch_id, b.brnch_name AS branch_name,
@@ -259,6 +339,8 @@ export async function GET(req) {
             t.branch_id, b.brnch_name, t.type_gold, t.trxn_status, t.finl_amnt, t.txn_rmrk, t.pymt_mde
           ORDER BY t.time DESC
         `, [todayIST]),
+
+        // 8. Today's walk-ins (for timeline)
         conn.execute(`
           SELECT cw.id, cw.cust_name, cw.cust_mobile, cw.time,
             cw.walkin_status, cw.item_type, cw.gms_weight,
@@ -270,12 +352,77 @@ export async function GET(req) {
         `, [todayIST]),
       ])
 
+      // Build gold pipeline from weight data
+      const goldByStatusMap = {}
+      for (const r of goldByStatus) goldByStatusMap[r.trxn_status] = r
+
+      const goldPipeline = {
+        walked_in_wt:  parseFloat(walkinSummary.total_gold_wt) || 0,
+        purchased_wt:  parseFloat(goldByStatusMap.approved?.net_wt)  || 0,
+        purchased_gross: parseFloat(goldByStatusMap.approved?.gross_wt) || 0,
+        pending_wt:    parseFloat(goldByStatusMap.pending?.net_wt)   || 0,
+        rejected_wt:   parseFloat(goldByStatusMap.rejected?.net_wt)  || 0,
+      }
+
+      // Try new CRM for stage breakdown (best-effort, don't fail if unreachable)
+      let stages = null
+      let pgClient
+      try {
+        pgClient = new PgClient({
+          host:     process.env.NEW_CRM_DB_HOST,
+          port:     parseInt(process.env.NEW_CRM_DB_PORT || '5432'),
+          database: process.env.NEW_CRM_DB_NAME,
+          user:     process.env.NEW_CRM_DB_USER,
+          password: process.env.NEW_CRM_DB_PASSWORD,
+          ssl:      { rejectUnauthorized: false },
+          connectionTimeoutMillis: 5000,
+        })
+        await pgClient.connect()
+
+        const todayStart = `${todayIST}T00:00:00+05:30`
+        const todayEnd   = `${todayIST}T23:59:59+05:30`
+
+        const { rows: stageRows } = await pgClient.query(`
+          SELECT
+            t.status,
+            COUNT(*)                                   AS count,
+            COALESCE(ROUND(SUM(ow.net_weight)::numeric, 2), 0) AS net_wt
+          FROM "Transaction" t
+          LEFT JOIN (
+            SELECT q.transaction_id, SUM(o.net_weight) AS net_weight
+            FROM "Quotation" q
+            JOIN "Ornament" o ON o.quotation_id = q.id
+            GROUP BY q.transaction_id
+          ) ow ON ow.transaction_id = t.id
+          WHERE t.created_at BETWEEN $1 AND $2
+          GROUP BY t.status
+          ORDER BY count DESC
+        `, [todayStart, todayEnd])
+
+        stages = {}
+        for (const r of stageRows) {
+          stages[r.status] = { count: Number(r.count), net_wt: parseFloat(r.net_wt) || 0 }
+        }
+      } catch (e) {
+        // New CRM unreachable — stages will be null, UI falls back gracefully
+      } finally {
+        if (pgClient) try { await pgClient.end() } catch {}
+      }
+
       return Response.json({
         todayIST,
-        todaySummary,
-        walkinToday: walkinToday.count,
+        summary,
+        walkinSummary,
+        goldPipeline,
+        stages,
+        branches,
+        hourly,
+        payments,
         todayTxns,
         todayWalkins,
+        // legacy compat
+        todaySummary: summary,
+        walkinToday:  walkinSummary.total,
       })
     }
 
