@@ -295,7 +295,7 @@ export async function GET(req) {
             t.trxn_status,
             COUNT(*)                                     AS count,
             ROUND(SUM(t.finl_amnt + 0), 2)              AS total_amt,
-            ROUND(SUM(COALESCE(o.net_wet, 0)), 2)        AS total_net_wt
+            ROUND(SUM(COALESCE(o.grms_wet, 0)), 2)       AS total_net_wt
           FROM transac_tbl t
           LEFT JOIN (
             SELECT trnxnn_id, SUM(net_wet + 0) AS net_wet
@@ -355,11 +355,11 @@ export async function GET(req) {
           SELECT t.id, t.bill_no, t.cust_name, t.cust_mobile,
             t.time, t.branch_id, b.brnch_name AS branch_name,
             t.type_gold, t.trxn_status, (t.finl_amnt+0) AS amount, t.txn_rmrk, t.pymt_mde,
-            ROUND(COALESCE(o.net_wet, 0), 2) AS net_weight_g
+            ROUND(COALESCE(o.grms_wet, 0), 2) AS net_weight_g
           FROM transac_tbl t
           LEFT JOIN branch_tbl b ON b.brnch_id = t.branch_id
           LEFT JOIN (
-            SELECT trnxnn_id, SUM(net_wet + 0) AS net_wet
+            SELECT trnxnn_id, SUM(grms_wet + 0) AS grms_wet
             FROM ornments_tbl
             GROUP BY trnxnn_id
           ) o ON o.trnxnn_id = t.id

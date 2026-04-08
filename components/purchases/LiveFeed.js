@@ -461,7 +461,7 @@ function OldCrmTab({
           <MetricCard t={t} label="Gold Pending"    value={goldPending > 0 ? fmtWt(goldPending) : '—'}     color={t.orange} sub={`${pending} pending`} />
           <MetricCard t={t} label="Gold Rejected"   value={goldRejected > 0 ? fmtWt(goldRejected) : '—'}   color={t.red}    sub={`${rejected} rejected`} />
           <MetricCard t={t} label="Not Billed Wt"  value={goldNotBilled > 0 ? fmtWt(goldNotBilled) : '—'} color={t.text3}  sub={`${notYetBilled} not billed`} />
-          <MetricCard t={t} label="Avg Net Weight"  value={avgNetWeight > 0 ? fmtWt(avgNetWeight) : '—'}   color={t.text2}  sub={approved > 0 ? 'per approved txn' : 'no sales yet'} />
+          <MetricCard t={t} label="Avg Gross Weight" value={avgNetWeight > 0 ? fmtWt(avgNetWeight) : '—'}   color={t.text2}  sub={approved > 0 ? 'per approved txn' : 'no sales yet'} />
           <MetricCard t={t} label="Approved Value"  value={fmtAmt(approvedValue)}                          color={t.gold}   sub={`${approved} transactions`} />
         </div>
         {/* Reconciliation note */}
