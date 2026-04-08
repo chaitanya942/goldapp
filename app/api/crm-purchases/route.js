@@ -389,11 +389,16 @@ export async function GET(req) {
       const goldByStatusMap = {}
       for (const r of goldByStatus) goldByStatusMap[r.trxn_status] = r
 
+      const notBilledWt = todayWalkins
+        .filter(w => w.walkin_status !== 'sold')
+        .reduce((s, w) => s + (parseFloat(w.gms_weight) || 0), 0)
+
       const goldPipeline = {
-        walked_in_wt: parseFloat(walkinSummary.total_gold_wt) || 0,
-        purchased_wt: parseFloat(goldByStatusMap['approved']?.total_net_wt) || 0,
-        pending_wt:   parseFloat(goldByStatusMap['pending']?.total_net_wt)  || 0,
-        rejected_wt:  parseFloat(goldByStatusMap['rejected']?.total_net_wt) || 0,
+        walked_in_wt:   parseFloat(walkinSummary.total_gold_wt) || 0,
+        purchased_wt:   parseFloat(goldByStatusMap['approved']?.total_net_wt) || 0,
+        pending_wt:     parseFloat(goldByStatusMap['pending']?.total_net_wt)  || 0,
+        rejected_wt:    parseFloat(goldByStatusMap['rejected']?.total_net_wt) || 0,
+        not_billed_wt:  parseFloat(notBilledWt.toFixed(2)),
       }
 
       // Try new CRM for stage breakdown (best-effort, don't fail if unreachable)

@@ -206,10 +206,11 @@ export default function LiveFeed() {
 
   // Gold pipeline — when region active, derive from filtered individual txn weights
   const effectiveGoldPipeline = regionFilter ? {
-    walked_in_wt: rWalkins.reduce((s, w) => s + (Number(w.gms_weight) || 0), 0),
-    purchased_wt: rTxns.filter(t => t.trxn_status === 'approved').reduce((s, t) => s + (Number(t.net_weight_g) || 0), 0),
-    pending_wt:   rTxns.filter(t => t.trxn_status === 'pending').reduce((s, t)  => s + (Number(t.net_weight_g) || 0), 0),
-    rejected_wt:  rTxns.filter(t => t.trxn_status === 'rejected').reduce((s, t) => s + (Number(t.net_weight_g) || 0), 0),
+    walked_in_wt:  rWalkins.reduce((s, w) => s + (Number(w.gms_weight) || 0), 0),
+    purchased_wt:  rTxns.filter(t => t.trxn_status === 'approved').reduce((s, t) => s + (Number(t.net_weight_g) || 0), 0),
+    pending_wt:    rTxns.filter(t => t.trxn_status === 'pending').reduce((s, t)  => s + (Number(t.net_weight_g) || 0), 0),
+    rejected_wt:   rTxns.filter(t => t.trxn_status === 'rejected').reduce((s, t) => s + (Number(t.net_weight_g) || 0), 0),
+    not_billed_wt: rWalkins.filter(w => w.walkin_status !== 'sold').reduce((s, w) => s + (Number(w.gms_weight) || 0), 0),
   } : goldPipeline
 
   /* ── Timeline items ── */
@@ -385,9 +386,10 @@ function OldCrmTab({
 }) {
   const approvedValue = summary.approved_value || 0
   const avgTicket = approved > 0 ? Math.round(approvedValue / approved) : 0
-  const goldWalkedIn  = goldPipeline?.walked_in_wt || walkinSummary.total_gold_wt || 0
-  const goldPurchased = goldPipeline?.purchased_wt || 0
-  const goldPending   = goldPipeline?.pending_wt   || 0
+  const goldWalkedIn  = goldPipeline?.walked_in_wt  || walkinSummary.total_gold_wt || 0
+  const goldPurchased = goldPipeline?.purchased_wt  || 0
+  const goldPending   = goldPipeline?.pending_wt    || 0
+  const goldNotBilled = goldPipeline?.not_billed_wt || 0
   const avgNetWeight  = approved > 0 && goldPurchased > 0 ? (goldPurchased / approved) : 0
   const billedPct = totalWalkins > 0 ? Math.round((totalBilled / totalWalkins) * 100) : 0
   const approvedPctBilled = totalBilled > 0 ? Math.round((approved / totalBilled) * 100) : 0
@@ -449,10 +451,11 @@ function OldCrmTab({
       </div>
 
       {/* ──────── 3. METRICS ROW ──────── */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 12 }}>
-        <MetricCard t={t} label="Gold Walked In"  value={goldWalkedIn > 0 ? fmtWt(goldWalkedIn) : '—'}   color={t.blue}   sub={`${totalWalkins} walk-ins`} />
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 12 }}>
+        <MetricCard t={t} label="Gold Walked In"   value={goldWalkedIn > 0 ? fmtWt(goldWalkedIn) : '—'}   color={t.blue}   sub={`${totalWalkins} walk-ins`} />
         <MetricCard t={t} label="Gold Purchased"  value={goldPurchased > 0 ? fmtWt(goldPurchased) : '—'} color={t.green}  sub={approved > 0 ? `${approved} approved` : 'no sales yet'} />
         <MetricCard t={t} label="Gold Pending"    value={goldPending > 0 ? fmtWt(goldPending) : '—'}     color={t.orange} sub={pending > 0 ? `${pending} pending` : 'none pending'} />
+        <MetricCard t={t} label="Not Billed Wt"  value={goldNotBilled > 0 ? fmtWt(goldNotBilled) : '—'} color={t.red}    sub={`${notYetBilled} not billed`} />
         <MetricCard t={t} label="Avg Ticket"      value={avgTicket > 0 ? fmtAmt(avgTicket) : '—'}        color={t.text1}  sub={approved > 0 ? `${approved} approved` : 'no sales yet'} />
         <MetricCard t={t} label="Avg Net Weight"  value={avgNetWeight > 0 ? fmtWt(avgNetWeight) : '—'}   color={t.text3}  sub={approved > 0 ? `per transaction` : 'no sales yet'} />
         <MetricCard t={t} label="Approved Value"  value={fmtAmt(approvedValue)}                          color={t.gold}   sub={`${approved} transactions`} />
