@@ -289,15 +289,21 @@ export async function GET(req) {
           WHERE DATE(date + INTERVAL 330 MINUTE) = ?
         `, [todayIST]),
 
-        // 3. Count by transaction status (no ornments join — column names unknown)
+        // 3. Count + weight by transaction status (via ornments_tbl)
         conn.execute(`
           SELECT
-            trxn_status,
-            COUNT(*)                                    AS count,
-            ROUND(SUM(finl_amnt + 0), 2)               AS total_amt
-          FROM transac_tbl
-          WHERE DATE(date + INTERVAL 330 MINUTE) = ?
-          GROUP BY trxn_status
+            t.trxn_status,
+            COUNT(*)                                     AS count,
+            ROUND(SUM(t.finl_amnt + 0), 2)              AS total_amt,
+            ROUND(SUM(COALESCE(o.net_wet, 0)), 2)        AS total_net_wt
+          FROM transac_tbl t
+          LEFT JOIN (
+            SELECT trnxnn_id, SUM(net_wet + 0) AS net_wet
+            FROM ornments_tbl
+            GROUP BY trnxnn_id
+          ) o ON o.trnxnn_id = t.id
+          WHERE DATE(t.date + INTERVAL 330 MINUTE) = ?
+          GROUP BY t.trxn_status
         `, [todayIST]),
 
         // 4. Branch breakdown
@@ -344,14 +350,19 @@ export async function GET(req) {
           ORDER BY count DESC
         `, [todayIST]),
 
-        // 7. Today's transactions (for timeline)
+        // 7. Today's transactions (for timeline) with ornment weight
         conn.execute(`
           SELECT t.id, t.bill_no, t.cust_name, t.cust_mobile,
             t.time, t.branch_id, b.brnch_name AS branch_name,
             t.type_gold, t.trxn_status, (t.finl_amnt+0) AS amount, t.txn_rmrk, t.pymt_mde,
-            0 AS net_weight_g
+            ROUND(COALESCE(o.net_wet, 0), 2) AS net_weight_g
           FROM transac_tbl t
           LEFT JOIN branch_tbl b ON b.brnch_id = t.branch_id
+          LEFT JOIN (
+            SELECT trnxnn_id, SUM(net_wet + 0) AS net_wet
+            FROM ornments_tbl
+            GROUP BY trnxnn_id
+          ) o ON o.trnxnn_id = t.id
           WHERE DATE(t.date + INTERVAL 330 MINUTE) = ?
           ORDER BY t.time DESC
           LIMIT 300
@@ -379,11 +390,10 @@ export async function GET(req) {
       for (const r of goldByStatus) goldByStatusMap[r.trxn_status] = r
 
       const goldPipeline = {
-        walked_in_wt:    parseFloat(walkinSummary.total_gold_wt) || 0,
-        purchased_wt:    0,   // ornments_tbl column names unknown — show counts instead
-        purchased_gross: 0,
-        pending_wt:      0,
-        rejected_wt:     0,
+        walked_in_wt: parseFloat(walkinSummary.total_gold_wt) || 0,
+        purchased_wt: parseFloat(goldByStatusMap['approved']?.total_net_wt) || 0,
+        pending_wt:   parseFloat(goldByStatusMap['pending']?.total_net_wt)  || 0,
+        rejected_wt:  parseFloat(goldByStatusMap['rejected']?.total_net_wt) || 0,
       }
 
       // Try new CRM for stage breakdown (best-effort, don't fail if unreachable)
