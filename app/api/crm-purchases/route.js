@@ -335,9 +335,10 @@ export async function GET(req) {
           ORDER BY cw.time DESC
         `, [todayIST]),
 
-        // 7. KYC blacklisted today (rejctd_tbl)
+        // 7. KYC blacklisted today (rejctd_tbl) — include mobiles to detect overrides
         conn.execute(`
-          SELECT COUNT(*) AS cnt, ROUND(SUM(grams+0),2) AS total_grams
+          SELECT COUNT(*) AS cnt, ROUND(SUM(grams+0),2) AS total_grams,
+            GROUP_CONCAT(cust_mobile SEPARATOR ',') AS mobiles
           FROM rejctd_tbl WHERE DATE(date + INTERVAL 330 MINUTE) = ?
         `, [todayIST]),
 
@@ -431,6 +432,12 @@ export async function GET(req) {
         (!w.walkin_status || w.walkin_status === '') && billedMobiles.has(w.cust_mobile)
       ).length
 
+      // KYC initially rejected today but later got an approved bill
+      const kycMobiles = new Set(
+        String(kycBlacklisted.mobiles || '').split(',').map(m => m.trim()).filter(Boolean)
+      )
+      const kycOverriddenCount = [...kycMobiles].filter(m => approvedMobiles.has(m)).length
+
       // Build summary
       const summary = {
         total:           Object.values(txnMeta).length,
@@ -458,6 +465,7 @@ export async function GET(req) {
         crm_not_updated_cnt: crmNotUpdatedCount,
         kyc_blacklisted_cnt: Number(kycBlacklisted.cnt) || 0,
         kyc_blacklisted_wt:  parseFloat(kycBlacklisted.total_grams) || 0,
+        kyc_overridden_cnt:  kycOverriddenCount,
         kyc_checklist_cnt:   Number(chklistCount.cnt) || 0,
         physical: { approved: byType['physical']?.approved || 0, pending: byType['physical']?.pending || 0, rejected: byType['physical']?.rejected || 0 },
         released: { approved: byType['released']?.approved || 0, pending: byType['released']?.pending || 0, rejected: byType['released']?.rejected || 0 },

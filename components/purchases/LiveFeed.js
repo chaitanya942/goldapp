@@ -235,6 +235,7 @@ export default function LiveFeed() {
     // KYC fields not region-filterable (rejctd_tbl has no branch join yet)
     kyc_blacklisted_cnt: goldPipeline.kyc_blacklisted_cnt || 0,
     kyc_blacklisted_wt:  goldPipeline.kyc_blacklisted_wt  || 0,
+    kyc_overridden_cnt:  goldPipeline.kyc_overridden_cnt  || 0,
     kyc_checklist_cnt:   goldPipeline.kyc_checklist_cnt   || 0,
     physical:  goldPipeline.physical  || {},
     released:  goldPipeline.released  || {},
@@ -421,9 +422,10 @@ function OldCrmTab({
   const goldPending       = parseFloat(goldPipeline?.pending_wt)        || 0
   const goldRejected      = parseFloat(goldPipeline?.rejected_wt)       || 0
   const goldNotBilled     = parseFloat(goldPipeline?.not_billed_wt)     || 0
-  const kycBlacklistedCnt = goldPipeline?.kyc_blacklisted_cnt           || 0
+  const kycBlacklistedCnt = goldPipeline?.kyc_blacklisted_cnt            || 0
   const kycBlacklistedWt  = parseFloat(goldPipeline?.kyc_blacklisted_wt) || 0
-  const kycChecklistCnt   = goldPipeline?.kyc_checklist_cnt             || 0
+  const kycOverriddenCnt  = goldPipeline?.kyc_overridden_cnt             || 0
+  const kycChecklistCnt   = goldPipeline?.kyc_checklist_cnt              || 0
   const missingWeightCnt  = walkinSummary.missing_weight_count          || 0
   const avgGrossWeight    = approved > 0 && goldPurchased > 0 ? goldPurchased / approved : 0
   const billedPct         = totalWalkins > 0 ? Math.round((totalBilled / totalWalkins) * 100) : 0
@@ -467,7 +469,11 @@ function OldCrmTab({
           <FlowSep t={t} />
           <HeroNum label="Bill Rejected" value={trueRejected} color={t.red} t={t} small />
           <FlowSep t={t} />
+          <HeroNum label="Re-billed & Approved" value={wrongEntry} color={t.orange} t={t} small />
+          <FlowSep t={t} />
           <HeroNum label="KYC Blocked" value={kycBlacklistedCnt} color={t.purple} t={t} small />
+          <FlowSep t={t} />
+          <HeroNum label="KYC Cleared Later" value={kycOverriddenCnt} color={t.blue} t={t} small />
           <FlowSep t={t} />
           <HeroNum label="Left Unbilled" value={notBilledCnt} color={t.text3} t={t} small muted />
         </div>
