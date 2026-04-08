@@ -298,7 +298,7 @@ export async function GET(req) {
             ROUND(SUM(COALESCE(o.grms_wet, 0)), 2)       AS total_net_wt
           FROM transac_tbl t
           LEFT JOIN (
-            SELECT trnxnn_id, SUM(net_wet + 0) AS net_wet
+            SELECT trnxnn_id, SUM(grms_wet + 0) AS grms_wet
             FROM ornments_tbl
             GROUP BY trnxnn_id
           ) o ON o.trnxnn_id = t.id
