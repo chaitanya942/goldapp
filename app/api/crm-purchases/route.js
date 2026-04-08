@@ -224,22 +224,10 @@ export async function GET(req) {
 
     // ── LIVE FEED ─────────────────────────────────────────────────────────────
     if (action === 'live') {
-      const istNow     = new Date(Date.now() + 5.5 * 60 * 60 * 1000)
+      const istNow  = new Date(Date.now() + 5.5 * 60 * 60 * 1000)
       const defaultIST = istNow.toISOString().split('T')[0]
-      const requestedDate = searchParams.get('date') || defaultIST
-
-      // If no explicit date requested, auto-detect latest date with data
-      let todayIST = requestedDate
-      if (!searchParams.get('date')) {
-        const [[latestRow]] = await conn.execute(
-          `SELECT MAX(DATE(date + INTERVAL 330 MINUTE)) AS latest FROM transac_tbl
-           WHERE DATE(date + INTERVAL 330 MINUTE) <= ?`,
-          [defaultIST]
-        )
-        if (latestRow?.latest) todayIST = latestRow.latest instanceof Date
-          ? latestRow.latest.toISOString().split('T')[0]
-          : String(latestRow.latest)
-      }
+      // Allow explicit date override via ?date=; default to today IST
+      const todayIST = searchParams.get('date') || defaultIST
 
       // All old-CRM queries in parallel
       const [
@@ -282,17 +270,15 @@ export async function GET(req) {
           WHERE DATE(date + INTERVAL 330 MINUTE) = ?
         `, [todayIST]),
 
-        // 3. Gold weight by transaction status
+        // 3. Count by transaction status (no ornments join — column names unknown)
         conn.execute(`
           SELECT
-            t.trxn_status,
-            ROUND(SUM(o.net_wet  + 0), 3) AS net_wt,
-            ROUND(SUM(o.grss_wet + 0), 3) AS gross_wt,
-            COUNT(DISTINCT t.id)           AS count
-          FROM transac_tbl t
-          LEFT JOIN ornments_tbl o ON o.trnxnn_id = t.id
-          WHERE DATE(t.date + INTERVAL 330 MINUTE) = ?
-          GROUP BY t.trxn_status
+            trxn_status,
+            COUNT(*)                                    AS count,
+            ROUND(SUM(finl_amnt + 0), 2)               AS total_amt
+          FROM transac_tbl
+          WHERE DATE(date + INTERVAL 330 MINUTE) = ?
+          GROUP BY trxn_status
         `, [todayIST]),
 
         // 4. Branch breakdown
@@ -344,14 +330,12 @@ export async function GET(req) {
           SELECT t.id, t.bill_no, t.cust_name, t.cust_mobile,
             t.time, t.branch_id, b.brnch_name AS branch_name,
             t.type_gold, t.trxn_status, (t.finl_amnt+0) AS amount, t.txn_rmrk, t.pymt_mde,
-            ROUND(SUM(o.net_wet + 0), 2) AS net_weight_g
+            0 AS net_weight_g
           FROM transac_tbl t
           LEFT JOIN branch_tbl b ON b.brnch_id = t.branch_id
-          LEFT JOIN ornments_tbl o ON o.trnxnn_id = t.id
           WHERE DATE(t.date + INTERVAL 330 MINUTE) = ?
-          GROUP BY t.id, t.bill_no, t.cust_name, t.cust_mobile, t.time,
-            t.branch_id, b.brnch_name, t.type_gold, t.trxn_status, t.finl_amnt, t.txn_rmrk, t.pymt_mde
           ORDER BY t.time DESC
+          LIMIT 200
         `, [todayIST]),
 
         // 8. Today's walk-ins (for timeline)
@@ -366,16 +350,16 @@ export async function GET(req) {
         `, [todayIST]),
       ])
 
-      // Build gold pipeline from weight data
+      // Build gold pipeline from walkin weight + transaction counts
       const goldByStatusMap = {}
       for (const r of goldByStatus) goldByStatusMap[r.trxn_status] = r
 
       const goldPipeline = {
-        walked_in_wt:  parseFloat(walkinSummary.total_gold_wt) || 0,
-        purchased_wt:  parseFloat(goldByStatusMap.approved?.net_wt)  || 0,
-        purchased_gross: parseFloat(goldByStatusMap.approved?.gross_wt) || 0,
-        pending_wt:    parseFloat(goldByStatusMap.pending?.net_wt)   || 0,
-        rejected_wt:   parseFloat(goldByStatusMap.rejected?.net_wt)  || 0,
+        walked_in_wt:    parseFloat(walkinSummary.total_gold_wt) || 0,
+        purchased_wt:    0,   // ornments_tbl column names unknown — show counts instead
+        purchased_gross: 0,
+        pending_wt:      0,
+        rejected_wt:     0,
       }
 
       // Try new CRM for stage breakdown (best-effort, don't fail if unreachable)
