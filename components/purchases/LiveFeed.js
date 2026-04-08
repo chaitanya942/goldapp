@@ -478,7 +478,7 @@ function OldCrmTab({
   notBilledCnt, notBilledWalkins, crmNotUpdatedCnt,
   goldPipeline,
   todayTxns, todayWalkins, allTxns, allWalkins, allKycRows, regions,
-  kycRows,
+  kycRows, regionFilter,
   filteredTimeline, isToday, viewDate,
   newEventCount, clearNewEvents,
 }) {
@@ -970,12 +970,15 @@ function downloadCSV(filename, headers, rows, extractor) {
 
 /* ── Region Breakdown Table ── */
 function RegionTable({ t, regions, allTxns, allWalkins, allKycRows }) {
-  const rows = regions.map(r => {
-    const rTx  = allTxns.filter(tx => tx.region === r)
-    const rWk  = allWalkins.filter(w => w.region === r)
+  const safeTxns    = allTxns    || []
+  const safeWalkins = allWalkins || []
+  const safeKyc     = allKycRows || []
+  const rows = (regions || []).map(r => {
+    const rTx  = safeTxns.filter(tx => tx.region === r)
+    const rWk  = safeWalkins.filter(w => w.region === r)
     const rApp = rTx.filter(tx => tx.trxn_status === 'approved')
     const rPend= rTx.filter(tx => tx.trxn_status === 'pending')
-    const rKyc = (allKycRows || []).filter(k => k.region === r)
+    const rKyc = safeKyc.filter(k => k.region === r)
     const value = rApp.reduce((s, tx) => s + (Number(tx.amount) || 0), 0)
     const conv  = rWk.length > 0 ? Math.round(rApp.length / rWk.length * 100) : 0
     return { region: r, walkins: rWk.length, billed: rTx.length, purchased: rApp.length, pending: rPend.length, kyc: rKyc.length, value, conv }
