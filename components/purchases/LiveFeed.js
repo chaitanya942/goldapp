@@ -406,11 +406,11 @@ function OldCrmTab({
           <FlowArrow t={t} pct={billedPct} />
           <HeroNum label="Bills Submitted" value={totalBilled} color={t.gold} t={t} />
           <FlowArrow t={t} pct={approvedPctBilled} />
-          <HeroNum label="Approved" value={approved} color={t.green} t={t} />
+          <HeroNum label="Bills Approved" value={approved} color={t.green} t={t} />
           <FlowSep t={t} />
-          <HeroNum label="Pending" value={pending} color={t.orange} t={t} small />
+          <HeroNum label="Bills Pending" value={pending} color={t.orange} t={t} small />
           <FlowSep t={t} />
-          <HeroNum label="Rejected" value={rejected} color={t.red} t={t} small />
+          <HeroNum label="Bills Rejected" value={rejected} color={t.red} t={t} small />
           <FlowSep t={t} />
           <HeroNum label="Not Billed" value={notYetBilled} color={t.text3} t={t} small muted />
         </div>
