@@ -156,6 +156,7 @@ export default function LiveFeed() {
   const todayIST = new Date(Date.now() + 5.5 * 60 * 60 * 1000).toISOString().split('T')[0]
 
   const [viewDate,      setViewDate]      = useState(todayIST)
+  const isToday = viewDate === todayIST
   const [crmTab,        setCrmTab]        = useState('old')
   const [regionFilter,  setRegionFilter]  = useState('')   // '' = all regions
   const [data,          setData]          = useState(null)
@@ -191,9 +192,10 @@ export default function LiveFeed() {
   /* ── Auto-refresh ── */
   useEffect(() => {
     load()
+    if (!isToday) return  // historical dates: no auto-refresh
     timerRef.current = setInterval(() => load(), REFRESH_SECS * 1000)
     return () => clearInterval(timerRef.current)
-  }, [load])
+  }, [load, isToday])
 
   useEffect(() => {
     setCountdown(REFRESH_SECS)
@@ -219,8 +221,6 @@ export default function LiveFeed() {
   const regions     = data?.allRegions  || []
   const goldPipeline = data?.goldPipeline || {}
   const kycRows      = data?.kycRows      || []
-
-  const isToday = viewDate === todayIST
 
   // Region-filtered raw rows
   const rTxns    = regionFilter ? todayTxns.filter(tx => tx.region === regionFilter)   : todayTxns
@@ -357,7 +357,7 @@ export default function LiveFeed() {
         <input
           type="date"
           value={viewDate}
-          onChange={e => { setViewDate(e.target.value); load(e.target.value) }}
+          onChange={e => setViewDate(e.target.value)}
           style={{
             background: t.card, color: t.text2, border: `1px solid ${t.border}`, borderRadius: 6,
             padding: '5px 10px', fontSize: '.72rem', fontFamily: 'ui-monospace, monospace',
@@ -662,12 +662,9 @@ function OldCrmTab({
       {/* ──────── 3. REGION BREAKDOWN ──────── */}
       {regions && regions.length > 1 && !regionFilter && (
         <div className="lf-region">
-          <RegionTable t={t} regions={regions} allTxns={allTxns} allWalkins={allWalkins} allKycRows={allKycRows}
-            activeMetric={activeMetric} toggleMetric={toggleMetric} />
+          <RegionTable t={t} regions={regions} allTxns={allTxns} allWalkins={allWalkins} allKycRows={allKycRows} />
         </div>
       )}
-
-      {/* ──────── 4. DETAIL TABLE ──────── */}
 
       {/* ──────── 4. DETAIL TABLE (shown only when a hero is clicked) ──────── */}
       {activeMetric && (
