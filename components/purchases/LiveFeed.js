@@ -456,11 +456,11 @@ function OldCrmTab({
       {/* ──────── 3. METRICS ROW ──────── */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 10 }}>
-          <MetricCard t={t} label="Gold Walked In"  value={goldWalkedIn > 0 ? fmtWt(goldWalkedIn) : '—'}   color={t.blue}   sub={`${totalWalkins} walk-ins · declared`} />
-          <MetricCard t={t} label="Gold Purchased"  value={goldPurchased > 0 ? fmtWt(goldPurchased) : '—'} color={t.green}  sub={`${approved} approved · net wt`} />
-          <MetricCard t={t} label="Gold Pending"    value={goldPending > 0 ? fmtWt(goldPending) : '—'}     color={t.orange} sub={`${pending} pending · net wt`} />
-          <MetricCard t={t} label="Gold Rejected"   value={goldRejected > 0 ? fmtWt(goldRejected) : '—'}   color={t.red}    sub={`${rejected} rejected · net wt`} />
-          <MetricCard t={t} label="Not Billed Wt"  value={goldNotBilled > 0 ? fmtWt(goldNotBilled) : '—'} color={t.text3}  sub={`${notYetBilled} not billed · declared`} />
+          <MetricCard t={t} label="Gold Walked In"  value={goldWalkedIn > 0 ? fmtWt(goldWalkedIn) : '—'}   color={t.blue}   sub={`${totalWalkins} walk-ins`} />
+          <MetricCard t={t} label="Gold Purchased"  value={goldPurchased > 0 ? fmtWt(goldPurchased) : '—'} color={t.green}  sub={`${approved} approved`} />
+          <MetricCard t={t} label="Gold Pending"    value={goldPending > 0 ? fmtWt(goldPending) : '—'}     color={t.orange} sub={`${pending} pending`} />
+          <MetricCard t={t} label="Gold Rejected"   value={goldRejected > 0 ? fmtWt(goldRejected) : '—'}   color={t.red}    sub={`${rejected} rejected`} />
+          <MetricCard t={t} label="Not Billed Wt"  value={goldNotBilled > 0 ? fmtWt(goldNotBilled) : '—'} color={t.text3}  sub={`${notYetBilled} not billed`} />
           <MetricCard t={t} label="Avg Net Weight"  value={avgNetWeight > 0 ? fmtWt(avgNetWeight) : '—'}   color={t.text2}  sub={approved > 0 ? 'per approved txn' : 'no sales yet'} />
           <MetricCard t={t} label="Approved Value"  value={fmtAmt(approvedValue)}                          color={t.gold}   sub={`${approved} transactions`} />
         </div>
@@ -480,7 +480,6 @@ function OldCrmTab({
           {Math.abs(reconDiff) > 0.01 && (
             <span style={{ marginLeft: 8, color: t.text4 }}>
               · diff: <span style={{ fontFamily: 'ui-monospace,monospace', color: Math.abs(reconDiff) > 50 ? t.orange : t.text3 }}>{reconDiff > 0 ? '+' : ''}{fmtWt(reconDiff)}</span>
-              <span style={{ marginLeft: 4 }}>(gross-to-net deduction on billed gold)</span>
             </span>
           )}
         </div>
