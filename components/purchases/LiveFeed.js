@@ -181,13 +181,29 @@ export default function LiveFeed() {
   const rTxns    = regionFilter ? todayTxns.filter(tx => tx.region === regionFilter)   : todayTxns
   const rWalkins = regionFilter ? todayWalkins.filter(w => w.region === regionFilter)  : todayWalkins
 
+  // Mobile sets for cross-table deduplication (region-scoped)
+  const rApprovedMobiles = new Set(rTxns.filter(t => t.trxn_status === 'approved').map(t => t.cust_mobile).filter(Boolean))
+  const rBilledMobiles   = new Set(rTxns.map(t => t.cust_mobile).filter(Boolean))
+
   // All counts — always derive from row data for consistency
-  const totalWalkins   = regionFilter ? rWalkins.length : (walkinSummary.total || 0)
-  const approved       = regionFilter ? rTxns.filter(t => t.trxn_status === 'approved').length : (summary.approved || 0)
-  const pending        = regionFilter ? rTxns.filter(t => t.trxn_status === 'pending').length  : (summary.pending  || 0)
-  const rejected       = regionFilter ? rTxns.filter(t => t.trxn_status === 'rejected').length : (summary.rejected || 0)
-  const totalBilled    = approved + pending + rejected
-  const notYetBilled   = Math.max(0, totalWalkins - totalBilled)
+  const totalWalkins = regionFilter ? rWalkins.length : (walkinSummary.total || 0)
+  const approved     = regionFilter ? rTxns.filter(t => t.trxn_status === 'approved').length : (summary.approved || 0)
+  const pending      = regionFilter ? rTxns.filter(t => t.trxn_status === 'pending').length  : (summary.pending  || 0)
+  const rejected     = regionFilter ? rTxns.filter(t => t.trxn_status === 'rejected').length : (summary.rejected || 0)
+  const totalBilled  = approved + pending + rejected
+
+  // True rejected (excluding wrong entries that later got approved)
+  const trueRejected = regionFilter
+    ? rTxns.filter(t => t.trxn_status === 'rejected' && !rApprovedMobiles.has(t.cust_mobile)).length
+    : (summary.true_rejected ?? rejected)
+  const wrongEntry = regionFilter ? (rejected - trueRejected) : (summary.wrong_entry || 0)
+
+  // Truly unbilled walkins (no bill at all today — not double-counted with purchased)
+  const notBilledWalkins  = rWalkins.filter(w => !rBilledMobiles.has(w.cust_mobile))
+  const notBilledCnt      = regionFilter ? notBilledWalkins.length : (goldPipeline.not_billed_cnt ?? notBilledWalkins.length)
+  const crmNotUpdatedCnt  = regionFilter
+    ? rWalkins.filter(w => (!w.walkin_status || w.walkin_status === '') && rBilledMobiles.has(w.cust_mobile)).length
+    : (goldPipeline.crm_not_updated_cnt || 0)
 
   const effectiveSummary = regionFilter ? {
     ...summary,
@@ -205,11 +221,17 @@ export default function LiveFeed() {
   } : walkinSummary
 
   const effectiveGoldPipeline = regionFilter ? {
-    walked_in_wt:  rWalkins.reduce((s, w) => s + (Number(w.gms_weight) || 0), 0),
-    purchased_wt:  rTxns.filter(t => t.trxn_status === 'approved').reduce((s, t) => s + csvSum(t.grms_wet_csv), 0),
-    pending_wt:    rTxns.filter(t => t.trxn_status === 'pending').reduce((s, t)  => s + csvSum(t.grms_wet_csv), 0),
-    rejected_wt:   rTxns.filter(t => t.trxn_status === 'rejected').reduce((s, t) => s + csvSum(t.grms_wet_csv), 0),
-    not_billed_wt: rWalkins.filter(w => w.walkin_status !== 'sold').reduce((s, w) => s + (Number(w.gms_weight) || 0), 0),
+    walked_in_wt:    rWalkins.reduce((s, w) => s + (Number(w.gms_weight) || 0), 0),
+    purchased_wt:    rTxns.filter(t => t.trxn_status === 'approved').reduce((s, t) => s + csvSum(t.grms_wet_csv), 0),
+    pending_wt:      rTxns.filter(t => t.trxn_status === 'pending').reduce((s, t)  => s + csvSum(t.grms_wet_csv), 0),
+    // Only truly rejected weight (exclude wrong entries that got re-approved)
+    rejected_wt:     rTxns.filter(t => t.trxn_status === 'rejected' && !rApprovedMobiles.has(t.cust_mobile)).reduce((s, t) => s + csvSum(t.grms_wet_csv), 0),
+    rejected_cnt:    trueRejected,
+    wrong_entry_cnt: wrongEntry,
+    // Only walkins with no bill at all today
+    not_billed_wt:   notBilledWalkins.reduce((s, w) => s + (Number(w.gms_weight) || 0), 0),
+    not_billed_cnt:  notBilledCnt,
+    crm_not_updated_cnt: crmNotUpdatedCnt,
     // KYC fields not region-filterable (rejctd_tbl has no branch join yet)
     kyc_blacklisted_cnt: goldPipeline.kyc_blacklisted_cnt || 0,
     kyc_blacklisted_wt:  goldPipeline.kyc_blacklisted_wt  || 0,
@@ -365,7 +387,9 @@ export default function LiveFeed() {
         ) : crmTab === 'old' ? (
           <OldCrmTab t={t} summary={effectiveSummary} walkinSummary={effectiveWalkinSummary}
             totalWalkins={totalWalkins} totalBilled={totalBilled} approved={approved} pending={pending} rejected={rejected}
-            notYetBilled={notYetBilled} goldPipeline={effectiveGoldPipeline}
+            trueRejected={trueRejected} wrongEntry={wrongEntry}
+            notBilledCnt={notBilledCnt} notBilledWalkins={notBilledWalkins} crmNotUpdatedCnt={crmNotUpdatedCnt}
+            goldPipeline={effectiveGoldPipeline}
             branches={branches} hourly={hourly} todayWalkins={rWalkins}
             regionFilter={regionFilter}
             filteredTimeline={filteredTimeline} tlFilter={tlFilter} setTlFilter={setTlFilter}
@@ -383,9 +407,11 @@ export default function LiveFeed() {
 /* ════════════════════════════════════════════════════════════════ */
 function OldCrmTab({
   t, summary, walkinSummary,
-  totalWalkins, totalBilled, approved, pending, rejected,
-  notYetBilled, goldPipeline,
-  branches, hourly, todayWalkins,
+  totalWalkins, totalBilled, approved, pending,
+  trueRejected, wrongEntry,
+  notBilledCnt, notBilledWalkins, crmNotUpdatedCnt,
+  goldPipeline,
+  branches, hourly,
   regionFilter,
   filteredTimeline, tlFilter, setTlFilter, search, setSearch, isToday,
 }) {
@@ -439,16 +465,18 @@ function OldCrmTab({
           <FlowSep t={t} />
           <HeroNum label="In Pipeline" value={pending} color={t.orange} t={t} small />
           <FlowSep t={t} />
-          <HeroNum label="Bill Rejected" value={rejected} color={t.red} t={t} small />
+          <HeroNum label="Bill Rejected" value={trueRejected} color={t.red} t={t} small />
           <FlowSep t={t} />
           <HeroNum label="KYC Blocked" value={kycBlacklistedCnt} color={t.purple} t={t} small />
           <FlowSep t={t} />
-          <HeroNum label="Left Unbilled" value={notYetBilled} color={t.text3} t={t} small muted />
+          <HeroNum label="Left Unbilled" value={notBilledCnt} color={t.text3} t={t} small muted />
         </div>
         <div style={{ display: 'flex', gap: 10, marginTop: 10, flexWrap: 'wrap' }}>
           <Pill label="Walk→Bill" value={`${billedPct}%`} color={t.gold} bg={t.goldDim} />
           <Pill label="Bill→Purchase" value={`${approvedPctBilled}%`} color={t.green} bg={t.greenDim} />
           <Pill label="Overall conversion" value={`${conversionPct}%`} color={t.blue} bg={t.blueDim} />
+          {wrongEntry > 0 && <Pill label="Wrong entries resubmitted" value={wrongEntry} color={t.orange} bg={t.orangeDim} />}
+          {crmNotUpdatedCnt > 0 && <Pill label="CRM not updated" value={crmNotUpdatedCnt} color={t.text3} bg={t.card2} />}
           {kycChecklistCnt > 0 && <Pill label="KYC checklist done" value={kycChecklistCnt} color={t.text3} bg={t.card2} />}
         </div>
       </div>
@@ -468,13 +496,13 @@ function OldCrmTab({
             sub={`${pending} bills · ${physicalPending} physical · ${releasePending} takeover`} />
           <MetricCard t={t} label="Bill Rejected Wt" color={t.red}
             value={goldRejected > 0 ? fmtWt(goldRejected) : '—'}
-            sub={`${rejected} bills rejected`} />
+            sub={wrongEntry > 0 ? `${trueRejected} rejected · ${wrongEntry} wrong entries` : `${trueRejected} bills rejected`} />
           <MetricCard t={t} label="KYC Blocked Wt" color={t.purple}
             value={kycBlacklistedWt > 0 ? fmtWt(kycBlacklistedWt) : '—'}
             sub={`${kycBlacklistedCnt} customers blocked`} />
           <MetricCard t={t} label="Left Unbilled Wt" color={t.text3}
             value={goldNotBilled > 0 ? fmtWt(goldNotBilled) : '—'}
-            sub={`${notYetBilled} left without billing`} />
+            sub={crmNotUpdatedCnt > 0 ? `${notBilledCnt} unbilled · ${crmNotUpdatedCnt} CRM not updated` : `${notBilledCnt} left without billing`} />
         </div>
         <div style={{ display: 'flex', gap: 16, marginTop: 8, flexWrap: 'wrap', padding: '6px 14px', background: t.card, border: `1px solid ${t.border}`, borderRadius: 8, alignItems: 'center' }}>
           <span style={{ fontSize: '.6rem', color: t.text3 }}>Avg gross weight per purchase:</span>
@@ -493,9 +521,9 @@ function OldCrmTab({
             { label: 'Bills Submitted', value: totalBilled,    color: t.gold   },
             { label: 'Purchased',     value: approved,         color: t.green  },
             { label: 'In Pipeline',   value: pending,          color: t.orange },
-            { label: 'Bill Rejected', value: rejected,         color: t.red    },
+            { label: 'Bill Rejected', value: trueRejected,      color: t.red    },
             { label: 'KYC Blocked',   value: kycBlacklistedCnt, color: t.purple },
-          ]} totalWalkins={totalWalkins} notConverted={notYetBilled} t={t} />
+          ]} totalWalkins={totalWalkins} notConverted={notBilledCnt} t={t} />
         </Card>
       </div>
 
@@ -571,12 +599,7 @@ function OldCrmTab({
       )}
 
       {/* ──────── 6b. NOT BILLED DETAILS ──────── */}
-      {notYetBilled > 0 && todayWalkins.length > 0 && (() => {
-        const notBilledWalkins = todayWalkins.filter(w =>
-          w.walkin_status !== 'sold' &&
-          (!regionFilter || w.region === regionFilter)
-        )
-        if (!notBilledWalkins.length) return null
+      {notBilledCnt > 0 && notBilledWalkins.length > 0 && (() => {
         return (
           <div>
             <SectionLabel t={t}>Not Billed — Walk-in Details ({notBilledWalkins.length})</SectionLabel>

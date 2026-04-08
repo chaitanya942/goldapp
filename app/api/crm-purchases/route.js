@@ -358,61 +358,109 @@ export async function GET(req) {
         const n = parseFloat(v.trim()); return s + (isNaN(n) ? 0 : n)
       }, 0)
 
-      // Build per-status and per-type_gold aggregates from ornment rows
-      const byStatus    = {}  // { approved: { count, wt, value }, pending: {...}, rejected: {...} }
-      const byType      = {}  // { physical: { approved, pending, rejected, wt }, released: {...} }
-      const seenTxns    = new Set()
+      // --- Build mobile-level sets for cross-table linking ---
+      // Mobile numbers that have an approved bill today
+      const approvedMobiles = new Set(
+        todayTxns.filter(t => t.trxn_status === 'approved').map(t => t.cust_mobile).filter(Boolean)
+      )
+      // Mobile numbers that have ANY bill today (approved/pending/rejected)
+      const billedMobiles = new Set(
+        todayTxns.map(t => t.cust_mobile).filter(Boolean)
+      )
 
+      // --- Aggregate ornment rows by status + type ---
+      const byStatus = {}  // { approved: { count, wt, value }, pending: {...}, rejected: {...} }
+      const byType   = {}  // { physical: { approved, pending, rejected }, released: {...} }
+      const seenTxns = new Set()
+
+      // Build per-txn weight map first (sum all ornment rows per txn)
+      const txnWeightMap = {}
+      const txnMeta = {}
       for (const r of ornmentRows) {
-        const st = r.trxn_status
-        const tp = r.type_gold || 'physical'
-        const wt = csvSum(r.grms_wet)
-
-        if (!byStatus[st]) byStatus[st] = { count: 0, wt: 0, value: 0 }
-        if (!seenTxns.has(r.txn_id)) {
-          byStatus[st].count++
-          byStatus[st].value += parseFloat(r.amount) || 0
-          seenTxns.add(r.txn_id)
+        if (!txnWeightMap[r.txn_id]) {
+          txnWeightMap[r.txn_id] = 0
+          txnMeta[r.txn_id] = { status: r.trxn_status, type: r.type_gold || 'physical', amount: parseFloat(r.amount) || 0 }
         }
-        byStatus[st].wt += wt
-
-        if (!byType[tp]) byType[tp] = { approved: 0, pending: 0, rejected: 0, wt: 0 }
-        byType[tp][st] = (byType[tp][st] || 0) + (seenTxns.has(r.txn_id) ? 0 : 1)
-        byType[tp].wt += wt
+        txnWeightMap[r.txn_id] += csvSum(r.grms_wet)
       }
 
-      // Walkins not billed = walkin_status not 'sold'
-      const walkedOutCount   = todayWalkins.filter(w => w.walkin_status === 'visited not sold').length
-      const noBillCount      = todayWalkins.filter(w => !w.walkin_status || w.walkin_status === '').length
-      const notBilledWt      = todayWalkins
-        .filter(w => w.walkin_status !== 'sold')
-        .reduce((s, w) => s + (parseFloat(w.gms_weight) || 0), 0)
+      // Also include txns with no ornment record (they appear in todayTxns but not ornmentRows)
+      for (const tx of todayTxns) {
+        if (!txnMeta[tx.id]) {
+          txnMeta[tx.id] = { status: tx.trxn_status, type: tx.type_gold || 'physical', amount: parseFloat(tx.amount) || 0 }
+          txnWeightMap[tx.id] = 0
+        }
+      }
 
-      // Build summary object from ornment rows (more accurate than old query 1)
+      for (const [txnId, meta] of Object.entries(txnMeta)) {
+        const st = meta.status
+        const tp = meta.type
+        const wt = txnWeightMap[txnId] || 0
+
+        if (!byStatus[st]) byStatus[st] = { count: 0, wt: 0, value: 0 }
+        byStatus[st].count++
+        byStatus[st].value += meta.amount
+        byStatus[st].wt   += wt
+
+        if (!byType[tp]) byType[tp] = { approved: 0, pending: 0, rejected: 0 }
+        byType[tp][st] = (byType[tp][st] || 0) + 1
+      }
+
+      // --- FIX 1: Rejected weight — only count truly rejected customers ---
+      // If a customer's mobile has an approved bill today, their rejected bill was a wrong entry
+      // that got re-submitted and approved. Don't double-count the weight.
+      const trueRejectedTxns = todayTxns.filter(t =>
+        t.trxn_status === 'rejected' && !approvedMobiles.has(t.cust_mobile)
+      )
+      const trueRejectedCount = trueRejectedTxns.length
+      const trueRejectedWt = trueRejectedTxns.reduce((s, t) => s + (txnWeightMap[t.id] || 0), 0)
+
+      // Wrong entries (rejected but customer eventually approved)
+      const wrongEntryCount = (byStatus['rejected']?.count || 0) - trueRejectedCount
+
+      // --- FIX 2: Left Unbilled — exclude walkins where customer got a bill today ---
+      // customer_walkin and transac_tbl aren't linked by ID, but mobile number works
+      const trulyUnbilledWalkins = todayWalkins.filter(w =>
+        !billedMobiles.has(w.cust_mobile) // no bill at all today for this mobile
+      )
+      const trulyUnbilledCount = trulyUnbilledWalkins.length
+      const trulyUnbilledWt    = trulyUnbilledWalkins.reduce((s, w) => s + (parseFloat(w.gms_weight) || 0), 0)
+
+      // Walkins where status=null but they DID get a bill (CRM not updated)
+      const crmNotUpdatedCount = todayWalkins.filter(w =>
+        (!w.walkin_status || w.walkin_status === '') && billedMobiles.has(w.cust_mobile)
+      ).length
+
+      // Build summary
       const summary = {
-        total:          seenTxns.size,
-        approved:       byStatus['approved']?.count || 0,
-        pending:        byStatus['pending']?.count  || 0,
-        rejected:       byStatus['rejected']?.count || 0,
-        approved_value: parseFloat((byStatus['approved']?.value || 0).toFixed(2)),
+        total:           Object.values(txnMeta).length,
+        approved:        byStatus['approved']?.count || 0,
+        pending:         byStatus['pending']?.count  || 0,
+        rejected:        byStatus['rejected']?.count || 0,
+        true_rejected:   trueRejectedCount,
+        wrong_entry:     wrongEntryCount,
+        approved_value:  parseFloat((byStatus['approved']?.value || 0).toFixed(2)),
         branches_active: new Set(todayTxns.map(t => t.branch_id)).size,
       }
 
       const goldPipeline = {
-        walked_in_wt:       parseFloat(walkinSummary.total_gold_wt) || 0,
-        missing_weight_cnt: walkinSummary.missing_weight_count || 0,
-        purchased_wt:       parseFloat((byStatus['approved']?.wt || 0).toFixed(2)),
-        pending_wt:         parseFloat((byStatus['pending']?.wt  || 0).toFixed(2)),
-        rejected_wt:        parseFloat((byStatus['rejected']?.wt || 0).toFixed(2)),
-        not_billed_wt:      parseFloat(notBilledWt.toFixed(2)),
+        walked_in_wt:        parseFloat(walkinSummary.total_gold_wt) || 0,
+        missing_weight_cnt:  walkinSummary.missing_weight_count || 0,
+        purchased_wt:        parseFloat((byStatus['approved']?.wt || 0).toFixed(2)),
+        pending_wt:          parseFloat((byStatus['pending']?.wt  || 0).toFixed(2)),
+        // Only truly rejected (not wrong entries that got re-approved)
+        rejected_wt:         parseFloat(trueRejectedWt.toFixed(2)),
+        rejected_cnt:        trueRejectedCount,
+        wrong_entry_cnt:     wrongEntryCount,
+        // Only walkins with no bill at all today
+        not_billed_wt:       parseFloat(trulyUnbilledWt.toFixed(2)),
+        not_billed_cnt:      trulyUnbilledCount,
+        crm_not_updated_cnt: crmNotUpdatedCount,
         kyc_blacklisted_cnt: Number(kycBlacklisted.cnt) || 0,
         kyc_blacklisted_wt:  parseFloat(kycBlacklisted.total_grams) || 0,
         kyc_checklist_cnt:   Number(chklistCount.cnt) || 0,
-        walked_out_cnt:      walkedOutCount,
-        no_bill_cnt:         noBillCount,
-        // Physical vs released/takeover split
-        physical:  { approved: byType['physical']?.approved || 0, pending: byType['physical']?.pending || 0, rejected: byType['physical']?.rejected || 0 },
-        released:  { approved: byType['released']?.approved || 0, pending: byType['released']?.pending || 0, rejected: byType['released']?.rejected || 0 },
+        physical: { approved: byType['physical']?.approved || 0, pending: byType['physical']?.pending || 0, rejected: byType['physical']?.rejected || 0 },
+        released: { approved: byType['released']?.approved || 0, pending: byType['released']?.pending || 0, rejected: byType['released']?.rejected || 0 },
       }
 
       // Try new CRM for stage breakdown (best-effort, don't fail if unreachable)
