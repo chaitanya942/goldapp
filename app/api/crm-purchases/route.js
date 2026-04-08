@@ -250,7 +250,6 @@ export async function GET(req) {
 
       // All old-CRM queries in parallel
       const [
-        [[summary]],
         [[walkinSummary]],
         [ornmentRows],
         [branches],
