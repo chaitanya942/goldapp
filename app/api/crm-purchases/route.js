@@ -193,7 +193,7 @@ export async function GET(req) {
     if (action === 'blacklisted') {
       const conditions = ['1=1']
       const params = []
-      if (search) { conditions.push('(cust_name LIKE ? OR cust_mobile LIKE ?)'); params.push(`%${search}%`, `%${search}%`) }
+      if (search) { conditions.push('(name LIKE ? OR mob_num LIKE ?)'); params.push(`%${search}%`, `%${search}%`) }
       if (reason) { conditions.push('rej_rsn LIKE ?'); params.push(`%${reason}%`) }
 
       const where = conditions.join(' AND ')
@@ -335,9 +335,10 @@ export async function GET(req) {
           ORDER BY cw.time DESC
         `, [todayIST]),
 
-        // 7. KYC blacklisted today (rejctd_tbl)
+        // 7. KYC blacklisted today (rejctd_tbl) — mob_num for override detection
         conn.execute(`
-          SELECT COUNT(*) AS cnt, ROUND(SUM(grams+0),2) AS total_grams
+          SELECT COUNT(*) AS cnt, ROUND(SUM(grams+0),2) AS total_grams,
+            GROUP_CONCAT(mob_num SEPARATOR ',') AS mobiles
           FROM rejctd_tbl WHERE DATE(date + INTERVAL 330 MINUTE) = ?
         `, [todayIST]),
 
@@ -431,7 +432,7 @@ export async function GET(req) {
         (!w.walkin_status || w.walkin_status === '') && billedMobiles.has(w.cust_mobile)
       ).length
 
-      // KYC initially rejected today but later got an approved bill
+      // KYC blocked today but later got an approved bill (mob_num → cust_mobile cross-ref)
       const kycMobiles = new Set(
         String(kycBlacklisted.mobiles || '').split(',').map(m => m.trim()).filter(Boolean)
       )
