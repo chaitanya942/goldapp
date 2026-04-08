@@ -183,14 +183,36 @@ export default function LiveFeed() {
   // Derive unique regions from branch data
   const regions = [...new Set(branches.map(b => deriveRegion(b.branch_name, b.region)))].sort()
 
-  // Walkin funnel logic
-  const totalWalkins = walkinSummary.total || 0
-  const totalBilled = summary.total || 0
-  const approved = summary.approved || 0
-  const pending = summary.pending || 0
+  const isToday = viewDate === todayIST
+
+  // Region-filtered raw rows (used for both timeline and metric re-computation)
+  const rTxns    = regionFilter ? todayTxns.filter(tx => tx.region === regionFilter)   : todayTxns
+  const rWalkins = regionFilter ? todayWalkins.filter(w  => w.region  === regionFilter) : todayWalkins
+
+  // Walkin funnel — when region active, derive from individual rows; else use API aggregates
+  const totalWalkins = regionFilter ? rWalkins.length              : (walkinSummary.total    || 0)
+  const totalBilled  = regionFilter ? rTxns.length                 : (summary.total          || 0)
+  const approved     = regionFilter ? rTxns.filter(t => t.trxn_status === 'approved').length : (summary.approved || 0)
+  const pending      = regionFilter ? rTxns.filter(t => t.trxn_status === 'pending').length  : (summary.pending  || 0)
+  const rejected     = regionFilter ? rTxns.filter(t => t.trxn_status === 'rejected').length : (summary.rejected || 0)
   const notYetBilled = Math.max(0, totalWalkins - totalBilled)
 
-  const isToday = viewDate === todayIST
+  // Region-aware summary/walkinSummary passed down to OldCrmTab
+  const effectiveSummary = regionFilter ? {
+    ...summary,
+    total: totalBilled, approved, pending, rejected,
+    approved_value: rTxns.filter(t => t.trxn_status === 'approved').reduce((s, t) => s + (Number(t.amount) || 0), 0),
+  } : summary
+
+  const effectiveWalkinSummary = regionFilter ? {
+    total: totalWalkins,
+    sold:              rWalkins.filter(w => w.walkin_status === 'sold').length,
+    visited_not_sold:  rWalkins.filter(w => w.walkin_status === 'visited not sold').length,
+    enquiry:           rWalkins.filter(w => w.walkin_status === 'enquiry').length,
+    planning_to_visit: rWalkins.filter(w => w.walkin_status === 'planning to visit').length,
+    call_later:        rWalkins.filter(w => w.walkin_status === 'call later').length,
+    total_gold_wt:     rWalkins.reduce((s, w) => s + (Number(w.gms_weight) || 0), 0).toFixed(2),
+  } : walkinSummary
 
   /* ── Timeline items ── */
   const timelineItems = (() => {
@@ -198,7 +220,7 @@ export default function LiveFeed() {
     todayTxns.forEach(tx => {
       items.push({
         type: 'txn', time: tx.time, id: `txn-${tx.id}`,
-        name: tx.cust_name, mobile: tx.cust_mobile, branch: tx.branch_name,
+        name: tx.cust_name, mobile: tx.cust_mobile, branch: tx.branch_name, region: tx.region,
         status: tx.trxn_status, amount: tx.amount, bill: tx.bill_no,
         goldType: tx.type_gold, weight: tx.net_weight_g, payment: tx.pymt_mde, remark: tx.txn_rmrk,
       })
@@ -206,7 +228,7 @@ export default function LiveFeed() {
     todayWalkins.forEach(w => {
       items.push({
         type: 'walkin', time: w.time, id: `wk-${w.id}`,
-        name: w.cust_name, mobile: w.cust_mobile, branch: w.branch_name,
+        name: w.cust_name, mobile: w.cust_mobile, branch: w.branch_name, region: w.region,
         walkinStatus: w.walkin_status, itemType: w.item_type, weight: w.gms_weight,
         reason: w.walk_reason, source: w.source,
       })
@@ -337,10 +359,10 @@ export default function LiveFeed() {
             <span style={{ fontSize: '.72rem', color: t.text3 }}>Loading live data...</span>
           </div>
         ) : crmTab === 'old' ? (
-          <OldCrmTab t={t} summary={summary} walkinSummary={walkinSummary}
-            totalWalkins={totalWalkins} totalBilled={totalBilled} approved={approved} pending={pending}
+          <OldCrmTab t={t} summary={effectiveSummary} walkinSummary={effectiveWalkinSummary}
+            totalWalkins={totalWalkins} totalBilled={totalBilled} approved={approved} pending={pending} rejected={rejected}
             notYetBilled={notYetBilled}
-            branches={branches} hourly={hourly} todayWalkins={todayWalkins}
+            branches={branches} hourly={hourly} todayWalkins={rWalkins}
             regionFilter={regionFilter}
             filteredTimeline={filteredTimeline} tlFilter={tlFilter} setTlFilter={setTlFilter}
             search={search} setSearch={setSearch} isToday={isToday} />
@@ -357,7 +379,7 @@ export default function LiveFeed() {
 /* ════════════════════════════════════════════════════════════════ */
 function OldCrmTab({
   t, summary, walkinSummary,
-  totalWalkins, totalBilled, approved, pending,
+  totalWalkins, totalBilled, approved, pending, rejected,
   notYetBilled, branches, hourly, todayWalkins,
   regionFilter,
   filteredTimeline, tlFilter, setTlFilter, search, setSearch, isToday,
@@ -399,7 +421,9 @@ function OldCrmTab({
           <FlowSep t={t} />
           <HeroNum label="Pending" value={pending} color={t.orange} t={t} small />
           <FlowSep t={t} />
-          <HeroNum label="Not Billed" value={notYetBilled} color={t.red} t={t} small muted />
+          <HeroNum label="Rejected" value={rejected} color={t.red} t={t} small />
+          <FlowSep t={t} />
+          <HeroNum label="Not Billed" value={notYetBilled} color={t.text3} t={t} small muted />
         </div>
       </div>
 
@@ -412,6 +436,7 @@ function OldCrmTab({
             { label: 'Billed', value: totalBilled, color: t.gold },
             { label: 'Approved', value: approved, color: t.green },
             { label: 'Pending', value: pending, color: t.orange },
+            { label: 'Rejected', value: rejected, color: t.red },
           ]} totalWalkins={totalWalkins} notConverted={notYetBilled} t={t} />
           <div style={{ display: 'flex', gap: 16, marginTop: 14, flexWrap: 'wrap' }}>
             <Pill label="Walk-to-bill" value={`${billedPct}%`} color={t.gold} bg={t.goldDim} />
