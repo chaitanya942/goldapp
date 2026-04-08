@@ -48,6 +48,8 @@ const STATUS_STYLE = {
 }
 
 
+const csvSum = str => String(str || '').split(',').reduce((s, v) => { const n = parseFloat(v.trim()); return s + (isNaN(n) ? 0 : n) }, 0)
+
 /* ── Formatters ── */
 const fmtAmt = n => n != null ? `\u20b9${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 })}` : '\u2014'
 const fmtNum = n => Number(n || 0).toLocaleString('en-IN')
@@ -207,9 +209,9 @@ export default function LiveFeed() {
   // Gold pipeline — when region active, derive from filtered individual txn weights
   const effectiveGoldPipeline = regionFilter ? {
     walked_in_wt:  rWalkins.reduce((s, w) => s + (Number(w.gms_weight) || 0), 0),
-    purchased_wt:  rTxns.filter(t => t.trxn_status === 'approved').reduce((s, t) => s + (Number(t.net_weight_g) || 0), 0),
-    pending_wt:    rTxns.filter(t => t.trxn_status === 'pending').reduce((s, t)  => s + (Number(t.net_weight_g) || 0), 0),
-    rejected_wt:   rTxns.filter(t => t.trxn_status === 'rejected').reduce((s, t) => s + (Number(t.net_weight_g) || 0), 0),
+    purchased_wt:  rTxns.filter(t => t.trxn_status === 'approved').reduce((s, t) => s + csvSum(t.grms_wet_csv), 0),
+    pending_wt:    rTxns.filter(t => t.trxn_status === 'pending').reduce((s, t)  => s + csvSum(t.grms_wet_csv), 0),
+    rejected_wt:   rTxns.filter(t => t.trxn_status === 'rejected').reduce((s, t) => s + csvSum(t.grms_wet_csv), 0),
     not_billed_wt: rWalkins.filter(w => w.walkin_status !== 'sold').reduce((s, w) => s + (Number(w.gms_weight) || 0), 0),
   } : goldPipeline
 

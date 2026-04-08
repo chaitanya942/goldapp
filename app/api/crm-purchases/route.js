@@ -289,17 +289,12 @@ export async function GET(req) {
           WHERE DATE(date + INTERVAL 330 MINUTE) = ?
         `, [todayIST]),
 
-        // 3. Weight by transaction status — filter by ornments_tbl.date (when ornament was weighed)
+        // 3. Raw ornment weights (CSV per row) — summed in JS to handle multi-ornament rows
         conn.execute(`
-          SELECT
-            t.trxn_status,
-            COUNT(DISTINCT t.id)                         AS count,
-            ROUND(SUM(t.finl_amnt + 0), 2)              AS total_amt,
-            ROUND(SUM(o.grms_wet + 0), 2)               AS total_net_wt
+          SELECT t.trxn_status, t.id AS txn_id, o.grms_wet
           FROM ornments_tbl o
           JOIN transac_tbl t ON t.id = o.trnxnn_id
-          WHERE DATE(o.date + INTERVAL 330 MINUTE) = ?
-          GROUP BY t.trxn_status
+          WHERE DATE(t.date + INTERVAL 330 MINUTE) = ?
         `, [todayIST]),
 
         // 4. Branch breakdown
@@ -346,24 +341,19 @@ export async function GET(req) {
           ORDER BY count DESC
         `, [todayIST]),
 
-        // 7. Today's transactions (for timeline) — filter by ornments.date for weight accuracy
+        // 7. Today's transactions (for timeline) — grms_wet is CSV, summed in frontend
         conn.execute(`
           SELECT t.id, t.bill_no, t.cust_name, t.cust_mobile,
             t.time, t.branch_id, b.brnch_name AS branch_name,
             t.type_gold, t.trxn_status, (t.finl_amnt+0) AS amount, t.txn_rmrk, t.pymt_mde,
-            ROUND(COALESCE(o.grms_wet, 0), 2) AS net_weight_g
+            o.grms_wet AS grms_wet_csv
           FROM transac_tbl t
           LEFT JOIN branch_tbl b ON b.brnch_id = t.branch_id
-          LEFT JOIN (
-            SELECT trnxnn_id, SUM(grms_wet + 0) AS grms_wet
-            FROM ornments_tbl
-            WHERE DATE(date + INTERVAL 330 MINUTE) = ?
-            GROUP BY trnxnn_id
-          ) o ON o.trnxnn_id = t.id
+          LEFT JOIN ornments_tbl o ON o.trnxnn_id = t.id
           WHERE DATE(t.date + INTERVAL 330 MINUTE) = ?
           ORDER BY t.time DESC
           LIMIT 300
-        `, [todayIST, todayIST]),
+        `, [todayIST]),
 
         // 8. Today's walk-ins (for timeline)
         conn.execute(`
@@ -384,18 +374,27 @@ export async function GET(req) {
 
       // Build gold pipeline from walkin weight + transaction counts
       const goldByStatusMap = {}
-      for (const r of goldByStatus) goldByStatusMap[r.trxn_status] = r
+      // grms_wet is a CSV string per row (e.g. "24.91,17.05,2.96") — parse in JS
+      const csvSum = str => String(str || '').split(',').reduce((s, v) => {
+        const n = parseFloat(v.trim()); return s + (isNaN(n) ? 0 : n)
+      }, 0)
+
+      const weightByStatus = {}
+      for (const r of goldByStatus) {
+        const st = r.trxn_status
+        weightByStatus[st] = (weightByStatus[st] || 0) + csvSum(r.grms_wet)
+      }
 
       const notBilledWt = todayWalkins
         .filter(w => w.walkin_status !== 'sold')
         .reduce((s, w) => s + (parseFloat(w.gms_weight) || 0), 0)
 
       const goldPipeline = {
-        walked_in_wt:   parseFloat(walkinSummary.total_gold_wt) || 0,
-        purchased_wt:   parseFloat(goldByStatusMap['approved']?.total_net_wt) || 0,
-        pending_wt:     parseFloat(goldByStatusMap['pending']?.total_net_wt)  || 0,
-        rejected_wt:    parseFloat(goldByStatusMap['rejected']?.total_net_wt) || 0,
-        not_billed_wt:  parseFloat(notBilledWt.toFixed(2)),
+        walked_in_wt:  parseFloat(walkinSummary.total_gold_wt) || 0,
+        purchased_wt:  parseFloat((weightByStatus['approved'] || 0).toFixed(2)),
+        pending_wt:    parseFloat((weightByStatus['pending']  || 0).toFixed(2)),
+        rejected_wt:   parseFloat((weightByStatus['rejected'] || 0).toFixed(2)),
+        not_billed_wt: parseFloat(notBilledWt.toFixed(2)),
       }
 
       // Try new CRM for stage breakdown (best-effort, don't fail if unreachable)
