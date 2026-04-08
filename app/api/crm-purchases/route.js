@@ -225,7 +225,9 @@ export async function GET(req) {
     // ── LIVE FEED ─────────────────────────────────────────────────────────────
     if (action === 'live') {
       const istNow  = new Date(Date.now() + 5.5 * 60 * 60 * 1000)
-      const todayIST = istNow.toISOString().split('T')[0]
+      const defaultIST = istNow.toISOString().split('T')[0]
+      // Allow caller to pass a specific date; fall back to today IST
+      const todayIST = searchParams.get('date') || defaultIST
 
       // All old-CRM queries in parallel
       const [

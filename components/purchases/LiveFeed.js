@@ -61,6 +61,9 @@ export default function LiveFeed() {
   const { theme } = useApp()
   const t = THEMES[theme] || THEMES.dark
 
+  // Default to today in IST
+  const todayIST = new Date(Date.now() + 5.5 * 60 * 60 * 1000).toISOString().split('T')[0]
+
   const [data,        setData]        = useState(null)
   const [loading,     setLoading]     = useState(true)
   const [lastUpdated, setLastUpdated] = useState(null)
@@ -68,15 +71,17 @@ export default function LiveFeed() {
   const [search,      setSearch]      = useState('')
   const [tlFilter,    setTlFilter]    = useState('')
   const [crmTab,      setCrmTab]      = useState('old')  // 'old' | 'new'
+  const [viewDate,    setViewDate]    = useState(todayIST)
   const timerRef = useRef(null)
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (date) => {
+    const d = date || viewDate
     try {
-      const res = await fetch('/api/crm-purchases?action=live')
-      const d   = await res.json()
-      if (!d.error) { setData(d); setLastUpdated(new Date()); setCountdown(REFRESH_SECS) }
+      const res = await fetch(`/api/crm-purchases?action=live&date=${d}`)
+      const json = await res.json()
+      if (!json.error) { setData(json); setLastUpdated(new Date()); setCountdown(REFRESH_SECS) }
     } catch (e) { console.error(e) } finally { setLoading(false) }
-  }, [])
+  }, [viewDate])
 
   useEffect(() => {
     load()
@@ -91,7 +96,7 @@ export default function LiveFeed() {
   const {
     summary = {}, walkinSummary = {}, goldPipeline = {},
     stages, branches = [], hourly = [], payments = [],
-    todayTxns = [], todayWalkins = [], todayIST,
+    todayTxns = [], todayWalkins = [],
   } = data || {}
 
   const card = { background: t.card, border: `1px solid ${t.border}`, borderRadius: '10px' }
@@ -157,7 +162,7 @@ export default function LiveFeed() {
           <span style={{ fontSize: '.72rem', color: t.green, fontWeight: 600, letterSpacing: '.06em' }}>LIVE</span>
           <span style={{ fontSize: '.65rem', color: t.text4 }}>·</span>
           <span style={{ fontSize: '.65rem', color: t.text4 }}>
-            {summary.branches_active || 0} branches active · {todayIST}
+            {summary.branches_active || 0} branches active
           </span>
           {lastUpdated && (
             <>
@@ -169,8 +174,20 @@ export default function LiveFeed() {
           )}
         </div>
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          {viewDate !== todayIST && (
+            <span style={{ fontSize: '.62rem', color: t.orange, background: `${t.orange}14`, border: `1px solid ${t.orange}40`, borderRadius: '5px', padding: '3px 8px' }}>
+              Viewing {viewDate}
+            </span>
+          )}
+          <input
+            type="date"
+            value={viewDate}
+            max={todayIST}
+            onChange={e => { setViewDate(e.target.value); load(e.target.value) }}
+            style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: '6px', padding: '4px 8px', color: t.text2, fontSize: '.65rem', cursor: 'pointer' }}
+          />
           <span style={{ fontSize: '.62rem', color: t.text4 }}>Refresh in {countdown}s</span>
-          <button onClick={load} style={{ background: 'transparent', border: `1px solid ${t.border}`, borderRadius: '6px', padding: '5px 14px', color: t.text3, fontSize: '.65rem', cursor: 'pointer' }}>↻ Refresh</button>
+          <button onClick={() => load(viewDate)} style={{ background: 'transparent', border: `1px solid ${t.border}`, borderRadius: '6px', padding: '5px 14px', color: t.text3, fontSize: '.65rem', cursor: 'pointer' }}>↻ Refresh</button>
         </div>
       </div>
 
