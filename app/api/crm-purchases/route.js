@@ -224,10 +224,22 @@ export async function GET(req) {
 
     // ── LIVE FEED ─────────────────────────────────────────────────────────────
     if (action === 'live') {
-      const istNow  = new Date(Date.now() + 5.5 * 60 * 60 * 1000)
+      const istNow     = new Date(Date.now() + 5.5 * 60 * 60 * 1000)
       const defaultIST = istNow.toISOString().split('T')[0]
-      // Allow caller to pass a specific date; fall back to today IST
-      const todayIST = searchParams.get('date') || defaultIST
+      const requestedDate = searchParams.get('date') || defaultIST
+
+      // If no explicit date requested, auto-detect latest date with data
+      let todayIST = requestedDate
+      if (!searchParams.get('date')) {
+        const [[latestRow]] = await conn.execute(
+          `SELECT MAX(DATE(date + INTERVAL 330 MINUTE)) AS latest FROM transac_tbl
+           WHERE DATE(date + INTERVAL 330 MINUTE) <= ?`,
+          [defaultIST]
+        )
+        if (latestRow?.latest) todayIST = latestRow.latest instanceof Date
+          ? latestRow.latest.toISOString().split('T')[0]
+          : String(latestRow.latest)
+      }
 
       // All old-CRM queries in parallel
       const [

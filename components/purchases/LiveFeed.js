@@ -97,6 +97,7 @@ export default function LiveFeed() {
     summary = {}, walkinSummary = {}, goldPipeline = {},
     stages, branches = [], hourly = [], payments = [],
     todayTxns = [], todayWalkins = [],
+    todayIST: dataDate,
   } = data || {}
 
   const card = { background: t.card, border: `1px solid ${t.border}`, borderRadius: '10px' }
@@ -174,9 +175,9 @@ export default function LiveFeed() {
           )}
         </div>
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-          {viewDate !== todayIST && (
+          {dataDate && dataDate !== todayIST && (
             <span style={{ fontSize: '.62rem', color: t.orange, background: `${t.orange}14`, border: `1px solid ${t.orange}40`, borderRadius: '5px', padding: '3px 8px' }}>
-              Viewing {viewDate}
+              Showing {dataDate} (latest with data)
             </span>
           )}
           <input
