@@ -93,6 +93,11 @@ const PING_CSS = `
 @keyframes fadeIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
 @keyframes slideUp{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
 @keyframes pulseGlow{0%,100%{box-shadow:0 0 0 0 transparent}50%{box-shadow:0 0 10px 2px rgba(201,168,76,.18)}}
+@keyframes loadBar{0%{transform:translateX(-100%)}60%{transform:translateX(0%)}100%{transform:translateX(100%)}}
+@keyframes shimmer{0%{opacity:1}50%{opacity:.55}100%{opacity:1}}
+@media(max-width:900px){.ws-item{flex:0 0 33.334%!important;border-bottom:1px solid #2a2a2a}}
+@media(max-width:600px){.ws-item{flex:0 0 50%!important}}
+@media(max-width:700px){.lf-hero{padding:16px 8px!important}.sum-bar-item{padding:8px 10px!important}.lf-region{overflow-x:auto}}
 `
 
 /* ── Tiny reusable components ── */
@@ -317,6 +322,13 @@ export default function LiveFeed() {
     <div style={{ background: t.bg, minHeight: '100vh', color: t.text1, padding: '0 0 40px 0' }}>
       <style>{PING_CSS}</style>
 
+      {/* ── Loading bar (top of screen during refresh) ── */}
+      {loading && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, height: 2, zIndex: 200, overflow: 'hidden', background: 'transparent' }}>
+          <div style={{ height: '100%', width: '60%', background: `linear-gradient(90deg, transparent, ${t.gold}, transparent)`, animation: 'loadBar 1.1s ease infinite' }} />
+        </div>
+      )}
+
       {/* ── TOP BAR ── */}
       <div style={{
         position: 'sticky', top: 0, zIndex: 50, background: `${t.bg}f0`,
@@ -434,18 +446,20 @@ export default function LiveFeed() {
             <span style={{ fontSize: '.72rem', color: t.text3 }}>Loading live data...</span>
           </div>
         ) : crmTab === 'old' ? (
-          <OldCrmTab t={t} summary={effectiveSummary} walkinSummary={effectiveWalkinSummary}
-            totalWalkins={totalWalkins} totalBilled={totalBilled} approved={approved} pending={pending}
-            trueRejected={trueRejected} wrongEntry={wrongEntry}
-            notBilledCnt={notBilledCnt} notBilledWalkins={notBilledWalkins} crmNotUpdatedCnt={crmNotUpdatedCnt}
-            goldPipeline={effectiveGoldPipeline}
-            todayTxns={rTxns} todayWalkins={rWalkins}
-            allTxns={todayTxns} allWalkins={todayWalkins} allKycRows={kycRows} regions={regions}
-            kycRows={regionFilter ? kycRows.filter(r => r.region === regionFilter) : kycRows}
-            regionFilter={regionFilter}
-            filteredTimeline={filteredTimeline} isToday={isToday}
-            viewDate={viewDate}
-            newEventCount={newEventCount} clearNewEvents={() => setNewEventCount(0)} />
+          <div style={{ opacity: loading && data ? 0.6 : 1, transition: 'opacity .3s', pointerEvents: loading && data ? 'none' : 'auto', animation: loading && data ? 'shimmer 1.4s ease infinite' : 'none' }}>
+            <OldCrmTab t={t} summary={effectiveSummary} walkinSummary={effectiveWalkinSummary}
+              totalWalkins={totalWalkins} totalBilled={totalBilled} approved={approved} pending={pending}
+              trueRejected={trueRejected} wrongEntry={wrongEntry}
+              notBilledCnt={notBilledCnt} notBilledWalkins={notBilledWalkins} crmNotUpdatedCnt={crmNotUpdatedCnt}
+              goldPipeline={effectiveGoldPipeline}
+              todayTxns={rTxns} todayWalkins={rWalkins}
+              allTxns={todayTxns} allWalkins={todayWalkins} allKycRows={kycRows} regions={regions}
+              kycRows={regionFilter ? kycRows.filter(r => r.region === regionFilter) : kycRows}
+              regionFilter={regionFilter}
+              filteredTimeline={filteredTimeline} isToday={isToday}
+              viewDate={viewDate}
+              newEventCount={newEventCount} clearNewEvents={() => setNewEventCount(0)} />
+          </div>
         ) : (
           <NewCrmTab t={t} stages={stages} />
         )}
@@ -471,7 +485,12 @@ function OldCrmTab({
   const [activeMetric, setActiveMetric] = useState(null)
   const [tlOpen, setTlOpen] = useState(false)
   const [tlSearch, setTlSearch] = useState('')
+  const [tlFilter, setTlFilter] = useState('all')
   const toggleMetric = key => setActiveMetric(prev => prev === key ? null : key)
+
+  const topTxn = todayTxns
+    .filter(tx => tx.trxn_status === 'approved')
+    .sort((a, b) => (Number(b.amount) || 0) - (Number(a.amount) || 0))[0]
   const approvedValue     = summary.approved_value || 0
   const goldWalkedIn      = parseFloat(goldPipeline?.walked_in_wt)      || parseFloat(walkinSummary.total_gold_wt) || 0
   const goldPurchased     = parseFloat(goldPipeline?.purchased_wt)      || 0
@@ -521,7 +540,7 @@ function OldCrmTab({
           ...(pending > 0     ? [{ label: 'Pending',  value: fmtNum(pending),          color: t.orange, accent: null }] : []),
           ...(kycBlacklistedCnt > 0 ? [{ label: 'KYC Blocked', value: fmtNum(kycBlacklistedCnt), color: t.purple, accent: null }] : []),
         ].map((item, i) => (
-          <div key={i} style={{
+          <div key={i} className="sum-bar-item" style={{
             display: 'flex', alignItems: 'center', gap: 6,
             padding: '10px 18px',
             borderRight: `1px solid ${t.border}`,
@@ -537,12 +556,20 @@ function OldCrmTab({
             )}
           </div>
         ))}
+        {topTxn && (
+          <div className="sum-bar-item" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 18px', marginLeft: 'auto', borderLeft: `1px solid ${t.border}` }}>
+            <span style={{ fontSize: '.52rem', color: t.text4, letterSpacing: '.08em', textTransform: 'uppercase' }}>Top sale</span>
+            <span style={{ fontSize: '.75rem', fontFamily: 'ui-monospace,monospace', fontWeight: 600, color: t.gold }}>{fmtAmt(topTxn.amount)}</span>
+            <span style={{ fontSize: '.62rem', color: t.text2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 120 }}>{topTxn.cust_name}</span>
+            <span style={{ fontSize: '.58rem', color: t.text4 }}>{topTxn.branch_name}</span>
+          </div>
+        )}
       </div>
 
       {/* ──────── 1. CUSTOMER JOURNEY ──────── */}
       <div>
         <SectionLabel t={t}>Customer Journey · from Walk-in to Outcome</SectionLabel>
-        <div style={{
+        <div className="lf-hero" style={{
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           gap: 0, flexWrap: 'wrap', background: t.surface, borderRadius: 16,
           border: `1px solid ${t.border}`, padding: '28px 16px',
@@ -587,7 +614,7 @@ function OldCrmTab({
       <div>
         <SectionLabel t={t}>Gold Weight Flow</SectionLabel>
         {/* Compact proportion strip */}
-        <div style={{ display: 'flex', background: t.card, border: `1px solid ${t.border}`, borderRadius: 12, overflow: 'hidden', boxShadow: '0 2px 8px rgba(0,0,0,.10)' }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', background: t.card, border: `1px solid ${t.border}`, borderRadius: 12, overflow: 'hidden', boxShadow: '0 2px 8px rgba(0,0,0,.10)' }}>
           {[
             { key: 'walkin',    label: 'Walked In',    wt: goldWalkedIn,      color: t.blue,   pct: 100 },
             { key: 'purchased', label: 'Purchased',    wt: goldPurchased,     color: t.green,  pct: goldWalkedIn > 0 ? goldPurchased / goldWalkedIn * 100 : 0 },
@@ -597,11 +624,12 @@ function OldCrmTab({
             { key: 'unbilled',  label: 'Left Unbilled', wt: goldNotBilled,    color: t.text3,  pct: goldWalkedIn > 0 ? goldNotBilled / goldWalkedIn * 100 : 0 },
           ].map((item, i, arr) => (
             <div key={item.key}
+              className="ws-item"
               onClick={() => toggleMetric(item.key)}
               onMouseEnter={e => e.currentTarget.style.background = t.card2}
-              onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+              onMouseLeave={e => e.currentTarget.style.background = activeMetric === item.key ? `${item.color}0c` : 'transparent'}
               style={{
-                flex: 1, padding: '12px 14px', cursor: 'pointer',
+                flex: 1, minWidth: 'calc(16.667% - 1px)', padding: '12px 14px', cursor: 'pointer',
                 borderRight: i < arr.length - 1 ? `1px solid ${t.border}` : 'none',
                 borderTop: activeMetric === item.key ? `3px solid ${item.color}` : `3px solid transparent`,
                 background: activeMetric === item.key ? `${item.color}0c` : 'transparent',
@@ -632,9 +660,11 @@ function OldCrmTab({
       </div>
 
       {/* ──────── 3. REGION BREAKDOWN ──────── */}
-      {regions && regions.length > 1 && (
-        <RegionTable t={t} regions={regions} allTxns={allTxns} allWalkins={allWalkins} allKycRows={allKycRows}
-          activeMetric={activeMetric} toggleMetric={toggleMetric} />
+      {regions && regions.length > 1 && !regionFilter && (
+        <div className="lf-region">
+          <RegionTable t={t} regions={regions} allTxns={allTxns} allWalkins={allWalkins} allKycRows={allKycRows}
+            activeMetric={activeMetric} toggleMetric={toggleMetric} />
+        </div>
       )}
 
       {/* ──────── 4. DETAIL TABLE ──────── */}
@@ -669,13 +699,24 @@ function OldCrmTab({
         </div>
         {tlOpen && (
           <Card t={t} style={{ padding: 0, overflow: 'hidden' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 16px', borderBottom: `1px solid ${t.border}` }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 16px', borderBottom: `1px solid ${t.border}`, flexWrap: 'wrap' }}>
+              {/* Type filter tabs */}
+              <div style={{ display: 'flex', background: t.card2, borderRadius: 6, border: `1px solid ${t.border}`, overflow: 'hidden' }}>
+                {[['all','All'],['txn','Bills'],['walkin','Walk-ins']].map(([val, lbl]) => (
+                  <button key={val} onClick={() => setTlFilter(val)} style={{
+                    padding: '4px 10px', fontSize: '.58rem', cursor: 'pointer', border: 'none',
+                    background: tlFilter === val ? t.gold : 'transparent',
+                    color: tlFilter === val ? '#000' : t.text3,
+                    fontWeight: tlFilter === val ? 600 : 400, transition: 'all .15s',
+                  }}>{lbl}</button>
+                ))}
+              </div>
               <input
                 type="text" placeholder="Search name, mobile, branch..."
                 value={tlSearch} onChange={e => setTlSearch(e.target.value)}
-                style={{ background: t.card2, border: `1px solid ${t.border}`, borderRadius: 6, padding: '5px 10px', fontSize: '.62rem', color: t.text2, outline: 'none', width: 200, fontFamily: 'ui-monospace, monospace' }}
+                style={{ background: t.card2, border: `1px solid ${t.border}`, borderRadius: 6, padding: '5px 10px', fontSize: '.62rem', color: t.text2, outline: 'none', width: 180, fontFamily: 'ui-monospace, monospace' }}
               />
-              <span style={{ fontSize: '.6rem', color: t.text4 }}>{filteredTimeline.length} events</span>
+              <span style={{ fontSize: '.6rem', color: t.text4, marginLeft: 4 }}>{filteredTimeline.filter(item => tlFilter === 'txn' ? item.type === 'txn' : tlFilter === 'walkin' ? item.type === 'walkin' : true).length} events</span>
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: '70px 28px 1fr 110px 120px', gap: '0 12px', padding: '8px 20px', background: t.card2, borderBottom: `1px solid ${t.border}` }}>
               {['Time', '', 'Customer / Branch', 'Weight', 'Amount'].map((h, i) => (
@@ -684,9 +725,13 @@ function OldCrmTab({
             </div>
             <div style={{ maxHeight: 480, overflowY: 'auto' }}>
               {filteredTimeline.filter(item => {
-                if (!tlSearch) return true
-                const s = tlSearch.toLowerCase()
-                return (item.name||'').toLowerCase().includes(s) || (item.mobile||'').includes(s) || (item.branch||'').toLowerCase().includes(s)
+                if (tlFilter === 'txn'    && item.type !== 'txn')    return false
+                if (tlFilter === 'walkin' && item.type !== 'walkin') return false
+                if (tlSearch) {
+                  const s = tlSearch.toLowerCase()
+                  return (item.name||'').toLowerCase().includes(s) || (item.mobile||'').includes(s) || (item.branch||'').toLowerCase().includes(s)
+                }
+                return true
               }).map((item, i, arr) => (
                 <TimelineRow key={item.id} item={item} t={t} isLast={i === arr.length - 1} />
               ))}
