@@ -289,20 +289,16 @@ export async function GET(req) {
           WHERE DATE(date + INTERVAL 330 MINUTE) = ?
         `, [todayIST]),
 
-        // 3. Count + weight by transaction status (via ornments_tbl)
+        // 3. Weight by transaction status — filter by ornments_tbl.date (when ornament was weighed)
         conn.execute(`
           SELECT
             t.trxn_status,
-            COUNT(*)                                     AS count,
+            COUNT(DISTINCT t.id)                         AS count,
             ROUND(SUM(t.finl_amnt + 0), 2)              AS total_amt,
-            ROUND(SUM(COALESCE(o.grms_wet, 0)), 2)       AS total_net_wt
-          FROM transac_tbl t
-          LEFT JOIN (
-            SELECT trnxnn_id, SUM(grms_wet + 0) AS grms_wet
-            FROM ornments_tbl
-            GROUP BY trnxnn_id
-          ) o ON o.trnxnn_id = t.id
-          WHERE DATE(t.date + INTERVAL 330 MINUTE) = ?
+            ROUND(SUM(o.grms_wet + 0), 2)               AS total_net_wt
+          FROM ornments_tbl o
+          JOIN transac_tbl t ON t.id = o.trnxnn_id
+          WHERE DATE(o.date + INTERVAL 330 MINUTE) = ?
           GROUP BY t.trxn_status
         `, [todayIST]),
 
@@ -350,7 +346,7 @@ export async function GET(req) {
           ORDER BY count DESC
         `, [todayIST]),
 
-        // 7. Today's transactions (for timeline) with ornment weight
+        // 7. Today's transactions (for timeline) — filter by ornments.date for weight accuracy
         conn.execute(`
           SELECT t.id, t.bill_no, t.cust_name, t.cust_mobile,
             t.time, t.branch_id, b.brnch_name AS branch_name,
@@ -361,12 +357,13 @@ export async function GET(req) {
           LEFT JOIN (
             SELECT trnxnn_id, SUM(grms_wet + 0) AS grms_wet
             FROM ornments_tbl
+            WHERE DATE(date + INTERVAL 330 MINUTE) = ?
             GROUP BY trnxnn_id
           ) o ON o.trnxnn_id = t.id
           WHERE DATE(t.date + INTERVAL 330 MINUTE) = ?
           ORDER BY t.time DESC
           LIMIT 300
-        `, [todayIST]),
+        `, [todayIST, todayIST]),
 
         // 8. Today's walk-ins (for timeline)
         conn.execute(`
