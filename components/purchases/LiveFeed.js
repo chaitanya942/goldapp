@@ -357,7 +357,7 @@ export default function LiveFeed() {
         <input
           type="date"
           value={viewDate}
-          onChange={e => setViewDate(e.target.value)}
+          onChange={e => { setViewDate(e.target.value); load(e.target.value) }}
           style={{
             background: t.card, color: t.text2, border: `1px solid ${t.border}`, borderRadius: 6,
             padding: '5px 10px', fontSize: '.72rem', fontFamily: 'ui-monospace, monospace',
