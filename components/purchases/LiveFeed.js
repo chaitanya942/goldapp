@@ -168,28 +168,27 @@ export default function LiveFeed() {
   const summary = data?.summary || {}
   const walkinSummary = data?.walkinSummary || {}
   const stages = data?.stages || null
-  const branches = data?.branches || []
-  const hourly = data?.hourly || []
-  const todayTxns = data?.todayTxns || []
+  const branches    = data?.branches    || []
+  const hourly      = data?.hourly      || []
+  const todayTxns   = data?.todayTxns   || []
   const todayWalkins = data?.todayWalkins || []
-  const regions = data?.allRegions || []
+  const regions     = data?.allRegions  || []
   const goldPipeline = data?.goldPipeline || {}
 
   const isToday = viewDate === todayIST
 
-  // Region-filtered raw rows (used for both timeline and metric re-computation)
-  const rTxns    = regionFilter ? todayTxns.filter(tx => tx.region    === regionFilter) : todayTxns
-  const rWalkins = regionFilter ? todayWalkins.filter(w  => w.region  === regionFilter) : todayWalkins
+  // Region-filtered raw rows
+  const rTxns    = regionFilter ? todayTxns.filter(tx => tx.region === regionFilter)   : todayTxns
+  const rWalkins = regionFilter ? todayWalkins.filter(w => w.region === regionFilter)  : todayWalkins
 
-  // Walkin funnel — when region active, derive from individual rows; else use API aggregates
-  const totalWalkins = regionFilter ? rWalkins.length              : (walkinSummary.total    || 0)
-  const totalBilled  = regionFilter ? rTxns.length                 : (summary.total          || 0)
-  const approved     = regionFilter ? rTxns.filter(t => t.trxn_status === 'approved').length : (summary.approved || 0)
-  const pending      = regionFilter ? rTxns.filter(t => t.trxn_status === 'pending').length  : (summary.pending  || 0)
-  const rejected     = regionFilter ? rTxns.filter(t => t.trxn_status === 'rejected').length : (summary.rejected || 0)
-  const notYetBilled = Math.max(0, totalWalkins - totalBilled)
+  // All counts — always derive from row data for consistency
+  const totalWalkins   = regionFilter ? rWalkins.length : (walkinSummary.total || 0)
+  const approved       = regionFilter ? rTxns.filter(t => t.trxn_status === 'approved').length : (summary.approved || 0)
+  const pending        = regionFilter ? rTxns.filter(t => t.trxn_status === 'pending').length  : (summary.pending  || 0)
+  const rejected       = regionFilter ? rTxns.filter(t => t.trxn_status === 'rejected').length : (summary.rejected || 0)
+  const totalBilled    = approved + pending + rejected
+  const notYetBilled   = Math.max(0, totalWalkins - totalBilled)
 
-  // Region-aware summary/walkinSummary passed down to OldCrmTab
   const effectiveSummary = regionFilter ? {
     ...summary,
     total: totalBilled, approved, pending, rejected,
@@ -198,21 +197,25 @@ export default function LiveFeed() {
 
   const effectiveWalkinSummary = regionFilter ? {
     total: totalWalkins,
-    sold:              rWalkins.filter(w => w.walkin_status === 'sold').length,
-    visited_not_sold:  rWalkins.filter(w => w.walkin_status === 'visited not sold').length,
-    enquiry:           rWalkins.filter(w => w.walkin_status === 'enquiry').length,
-    planning_to_visit: rWalkins.filter(w => w.walkin_status === 'planning to visit').length,
-    call_later:        rWalkins.filter(w => w.walkin_status === 'call later').length,
-    total_gold_wt:     rWalkins.reduce((s, w) => s + (Number(w.gms_weight) || 0), 0).toFixed(2),
+    sold:             rWalkins.filter(w => w.walkin_status === 'sold').length,
+    visited_not_sold: rWalkins.filter(w => w.walkin_status === 'visited not sold').length,
+    no_update:        rWalkins.filter(w => !w.walkin_status || w.walkin_status === '').length,
+    total_gold_wt:    rWalkins.reduce((s, w) => s + (Number(w.gms_weight) || 0), 0).toFixed(2),
+    missing_weight_count: rWalkins.filter(w => !w.gms_weight || Number(w.gms_weight) === 0).length,
   } : walkinSummary
 
-  // Gold pipeline — when region active, derive from filtered individual txn weights
   const effectiveGoldPipeline = regionFilter ? {
     walked_in_wt:  rWalkins.reduce((s, w) => s + (Number(w.gms_weight) || 0), 0),
     purchased_wt:  rTxns.filter(t => t.trxn_status === 'approved').reduce((s, t) => s + csvSum(t.grms_wet_csv), 0),
     pending_wt:    rTxns.filter(t => t.trxn_status === 'pending').reduce((s, t)  => s + csvSum(t.grms_wet_csv), 0),
     rejected_wt:   rTxns.filter(t => t.trxn_status === 'rejected').reduce((s, t) => s + csvSum(t.grms_wet_csv), 0),
     not_billed_wt: rWalkins.filter(w => w.walkin_status !== 'sold').reduce((s, w) => s + (Number(w.gms_weight) || 0), 0),
+    // KYC fields not region-filterable (rejctd_tbl has no branch join yet)
+    kyc_blacklisted_cnt: goldPipeline.kyc_blacklisted_cnt || 0,
+    kyc_blacklisted_wt:  goldPipeline.kyc_blacklisted_wt  || 0,
+    kyc_checklist_cnt:   goldPipeline.kyc_checklist_cnt   || 0,
+    physical:  goldPipeline.physical  || {},
+    released:  goldPipeline.released  || {},
   } : goldPipeline
 
   /* ── Timeline items ── */
@@ -386,19 +389,24 @@ function OldCrmTab({
   regionFilter,
   filteredTimeline, tlFilter, setTlFilter, search, setSearch, isToday,
 }) {
-  const approvedValue = summary.approved_value || 0
-  const goldWalkedIn  = goldPipeline?.walked_in_wt  || walkinSummary.total_gold_wt || 0
-  const goldPurchased = goldPipeline?.purchased_wt  || 0
-  const goldPending   = goldPipeline?.pending_wt    || 0
-  const goldRejected  = goldPipeline?.rejected_wt   || 0
-  const goldNotBilled = goldPipeline?.not_billed_wt || 0
-  const avgNetWeight  = approved > 0 && goldPurchased > 0 ? (goldPurchased / approved) : 0
-  // Reconciliation: walkin gross vs ornments net — difference is stone/wastage deduction
-  const billedSideWt  = goldPurchased + goldPending + goldRejected
-  const reconDiff     = parseFloat((goldWalkedIn - billedSideWt - goldNotBilled).toFixed(2))
-  const billedPct = totalWalkins > 0 ? Math.round((totalBilled / totalWalkins) * 100) : 0
-  const approvedPctBilled = totalBilled > 0 ? Math.round((approved / totalBilled) * 100) : 0
-  const conversionPct = totalWalkins > 0 ? Math.round((approved / totalWalkins) * 100) : 0
+  const approvedValue     = summary.approved_value || 0
+  const goldWalkedIn      = parseFloat(goldPipeline?.walked_in_wt)      || parseFloat(walkinSummary.total_gold_wt) || 0
+  const goldPurchased     = parseFloat(goldPipeline?.purchased_wt)      || 0
+  const goldPending       = parseFloat(goldPipeline?.pending_wt)        || 0
+  const goldRejected      = parseFloat(goldPipeline?.rejected_wt)       || 0
+  const goldNotBilled     = parseFloat(goldPipeline?.not_billed_wt)     || 0
+  const kycBlacklistedCnt = goldPipeline?.kyc_blacklisted_cnt           || 0
+  const kycBlacklistedWt  = parseFloat(goldPipeline?.kyc_blacklisted_wt) || 0
+  const kycChecklistCnt   = goldPipeline?.kyc_checklist_cnt             || 0
+  const missingWeightCnt  = walkinSummary.missing_weight_count          || 0
+  const avgGrossWeight    = approved > 0 && goldPurchased > 0 ? goldPurchased / approved : 0
+  const billedPct         = totalWalkins > 0 ? Math.round((totalBilled / totalWalkins) * 100) : 0
+  const approvedPctBilled = totalBilled  > 0 ? Math.round((approved   / totalBilled)  * 100) : 0
+  const conversionPct     = totalWalkins > 0 ? Math.round((approved   / totalWalkins) * 100) : 0
+  const physicalApproved  = goldPipeline?.physical?.approved || 0
+  const releaseApproved   = goldPipeline?.released?.approved || 0
+  const physicalPending   = goldPipeline?.physical?.pending  || 0
+  const releasePending    = goldPipeline?.released?.pending  || 0
 
   const hasData = totalWalkins > 0 || totalBilled > 0
 
@@ -413,78 +421,82 @@ function OldCrmTab({
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
-      {/* ──────── 1. HERO STRIP ──────── */}
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+
+      {/* ──────── 1. CUSTOMER JOURNEY ──────── */}
       <div>
-        <SectionLabel t={t}>Customer Journey</SectionLabel>
+        <SectionLabel t={t}>Customer Journey · from Walk-in to Outcome</SectionLabel>
         <div style={{
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           gap: 0, flexWrap: 'wrap', background: t.surface, borderRadius: 14,
-          border: `1px solid ${t.border}`, padding: '24px 12px', position: 'relative',
+          border: `1px solid ${t.border}`, padding: '24px 12px',
         }}>
           <HeroNum label="Walked In" value={totalWalkins} color={t.blue} t={t} />
           <FlowArrow t={t} pct={billedPct} />
           <HeroNum label="Bills Submitted" value={totalBilled} color={t.gold} t={t} />
           <FlowArrow t={t} pct={approvedPctBilled} />
-          <HeroNum label="Bills Approved" value={approved} color={t.green} t={t} />
+          <HeroNum label="Purchased" value={approved} color={t.green} t={t} />
           <FlowSep t={t} />
-          <HeroNum label="Bills Pending" value={pending} color={t.orange} t={t} small />
+          <HeroNum label="In Pipeline" value={pending} color={t.orange} t={t} small />
           <FlowSep t={t} />
-          <HeroNum label="Bills Rejected" value={rejected} color={t.red} t={t} small />
+          <HeroNum label="Bill Rejected" value={rejected} color={t.red} t={t} small />
           <FlowSep t={t} />
-          <HeroNum label="Not Billed" value={notYetBilled} color={t.text3} t={t} small muted />
+          <HeroNum label="KYC Blocked" value={kycBlacklistedCnt} color={t.purple} t={t} small />
+          <FlowSep t={t} />
+          <HeroNum label="Left Unbilled" value={notYetBilled} color={t.text3} t={t} small muted />
+        </div>
+        <div style={{ display: 'flex', gap: 10, marginTop: 10, flexWrap: 'wrap' }}>
+          <Pill label="Walk→Bill" value={`${billedPct}%`} color={t.gold} bg={t.goldDim} />
+          <Pill label="Bill→Purchase" value={`${approvedPctBilled}%`} color={t.green} bg={t.greenDim} />
+          <Pill label="Overall conversion" value={`${conversionPct}%`} color={t.blue} bg={t.blueDim} />
+          {kycChecklistCnt > 0 && <Pill label="KYC checklist done" value={kycChecklistCnt} color={t.text3} bg={t.card2} />}
         </div>
       </div>
 
-      {/* ──────── 2. CONVERSION FUNNEL ──────── */}
+      {/* ──────── 2. GOLD WEIGHT FLOW ──────── */}
+      <div>
+        <SectionLabel t={t}>Gold Weight Flow</SectionLabel>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 10 }}>
+          <MetricCard t={t} label="Walked In" color={t.blue}
+            value={goldWalkedIn > 0 ? fmtWt(goldWalkedIn) : '—'}
+            sub={missingWeightCnt > 0 ? `${missingWeightCnt} walkins missing wt` : `${totalWalkins} walk-ins`} />
+          <MetricCard t={t} label="Purchased" color={t.green}
+            value={goldPurchased > 0 ? fmtWt(goldPurchased) : '—'}
+            sub={`${approved} bills · ${physicalApproved} physical · ${releaseApproved} takeover`} />
+          <MetricCard t={t} label="In Pipeline" color={t.orange}
+            value={goldPending > 0 ? fmtWt(goldPending) : '—'}
+            sub={`${pending} bills · ${physicalPending} physical · ${releasePending} takeover`} />
+          <MetricCard t={t} label="Bill Rejected Wt" color={t.red}
+            value={goldRejected > 0 ? fmtWt(goldRejected) : '—'}
+            sub={`${rejected} bills rejected`} />
+          <MetricCard t={t} label="KYC Blocked Wt" color={t.purple}
+            value={kycBlacklistedWt > 0 ? fmtWt(kycBlacklistedWt) : '—'}
+            sub={`${kycBlacklistedCnt} customers blocked`} />
+          <MetricCard t={t} label="Left Unbilled Wt" color={t.text3}
+            value={goldNotBilled > 0 ? fmtWt(goldNotBilled) : '—'}
+            sub={`${notYetBilled} left without billing`} />
+        </div>
+        <div style={{ display: 'flex', gap: 16, marginTop: 8, flexWrap: 'wrap', padding: '6px 14px', background: t.card, border: `1px solid ${t.border}`, borderRadius: 8, alignItems: 'center' }}>
+          <span style={{ fontSize: '.6rem', color: t.text3 }}>Avg gross weight per purchase:</span>
+          <span style={{ fontSize: '.72rem', color: t.text1, fontFamily: 'ui-monospace,monospace', fontWeight: 500 }}>{avgGrossWeight > 0 ? fmtWt(avgGrossWeight) : '—'}</span>
+          <span style={{ fontSize: '.6rem', color: t.text3, marginLeft: 16 }}>Approved value:</span>
+          <span style={{ fontSize: '.72rem', color: t.gold, fontFamily: 'ui-monospace,monospace', fontWeight: 500 }}>{fmtAmt(approvedValue)}</span>
+        </div>
+      </div>
+
+      {/* ──────── 3. FUNNEL VISUAL ──────── */}
       <div>
         <SectionLabel t={t}>Conversion Funnel</SectionLabel>
         <Card t={t} style={{ padding: '20px 24px' }}>
           <FunnelBar stages={[
-            { label: 'Walked In', value: totalWalkins, color: t.blue },
-            { label: 'Billed', value: totalBilled, color: t.gold },
-            { label: 'Approved', value: approved, color: t.green },
-            { label: 'Pending', value: pending, color: t.orange },
-            { label: 'Rejected', value: rejected, color: t.red },
+            { label: 'Walked In',     value: totalWalkins,     color: t.blue   },
+            { label: 'Bills Submitted', value: totalBilled,    color: t.gold   },
+            { label: 'Purchased',     value: approved,         color: t.green  },
+            { label: 'In Pipeline',   value: pending,          color: t.orange },
+            { label: 'Bill Rejected', value: rejected,         color: t.red    },
+            { label: 'KYC Blocked',   value: kycBlacklistedCnt, color: t.purple },
           ]} totalWalkins={totalWalkins} notConverted={notYetBilled} t={t} />
-          <div style={{ display: 'flex', gap: 16, marginTop: 14, flexWrap: 'wrap' }}>
-            <Pill label="Walk-to-bill" value={`${billedPct}%`} color={t.gold} bg={t.goldDim} />
-            <Pill label="Bill-to-approve" value={`${approvedPctBilled}%`} color={t.green} bg={t.greenDim} />
-            <Pill label="Overall conversion" value={`${conversionPct}%`} color={t.blue} bg={t.blueDim} />
-          </div>
         </Card>
-      </div>
-
-      {/* ──────── 3. METRICS ROW ──────── */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 10 }}>
-          <MetricCard t={t} label="Gold Walked In"  value={goldWalkedIn > 0 ? fmtWt(goldWalkedIn) : '—'}   color={t.blue}   sub={`${totalWalkins} walk-ins`} />
-          <MetricCard t={t} label="Gold Purchased"  value={goldPurchased > 0 ? fmtWt(goldPurchased) : '—'} color={t.green}  sub={`${approved} approved`} />
-          <MetricCard t={t} label="Gold Pending"    value={goldPending > 0 ? fmtWt(goldPending) : '—'}     color={t.orange} sub={`${pending} pending`} />
-          <MetricCard t={t} label="Gold Rejected"   value={goldRejected > 0 ? fmtWt(goldRejected) : '—'}   color={t.red}    sub={`${rejected} rejected`} />
-          <MetricCard t={t} label="Not Billed Wt"  value={goldNotBilled > 0 ? fmtWt(goldNotBilled) : '—'} color={t.text3}  sub={`${notYetBilled} not billed`} />
-          <MetricCard t={t} label="Avg Gross Weight" value={avgNetWeight > 0 ? fmtWt(avgNetWeight) : '—'}   color={t.text2}  sub={approved > 0 ? 'per approved txn' : 'no sales yet'} />
-          <MetricCard t={t} label="Approved Value"  value={fmtAmt(approvedValue)}                          color={t.gold}   sub={`${approved} transactions`} />
-        </div>
-        {/* Reconciliation note */}
-        <div style={{ fontSize: '.62rem', color: t.text4, padding: '6px 14px', background: t.card, border: `1px solid ${t.border}`, borderRadius: 8, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-          <span style={{ color: t.text3 }}>Weight check:</span>
-          <span style={{ color: t.blue, fontFamily: 'ui-monospace,monospace' }}>{fmtWt(goldWalkedIn)}</span>
-          <span>=</span>
-          <span style={{ color: t.green, fontFamily: 'ui-monospace,monospace' }}>{fmtWt(goldPurchased)}</span>
-          <span style={{ color: t.text4 }}>purchased +</span>
-          <span style={{ color: t.orange, fontFamily: 'ui-monospace,monospace' }}>{fmtWt(goldPending)}</span>
-          <span style={{ color: t.text4 }}>pending +</span>
-          <span style={{ color: t.red, fontFamily: 'ui-monospace,monospace' }}>{fmtWt(goldRejected)}</span>
-          <span style={{ color: t.text4 }}>rejected +</span>
-          <span style={{ color: t.text3, fontFamily: 'ui-monospace,monospace' }}>{fmtWt(goldNotBilled)}</span>
-          <span style={{ color: t.text4 }}>not billed</span>
-          {Math.abs(reconDiff) > 0.01 && (
-            <span style={{ marginLeft: 8, color: t.text4 }}>
-              · diff: <span style={{ fontFamily: 'ui-monospace,monospace', color: Math.abs(reconDiff) > 50 ? t.orange : t.text3 }}>{reconDiff > 0 ? '+' : ''}{fmtWt(reconDiff)}</span>
-            </span>
-          )}
-        </div>
       </div>
 
       {/* ──────── 4. BRANCH ACTIVITY ──────── */}
@@ -541,17 +553,20 @@ function OldCrmTab({
         </Card>
       </div>
 
-      {/* ──────── 6. WALKIN BREAKDOWN ──────── */}
+      {/* ──────── 6. WALKIN STATUS BREAKDOWN ──────── */}
       {totalWalkins > 0 && (
         <div>
-          <SectionLabel t={t}>Walk-in Breakdown</SectionLabel>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 10 }}>
-            <WalkinCard t={t} label="Sold" value={walkinSummary.sold || 0} icon="✓" color={t.green} bg={t.greenDim} />
+          <SectionLabel t={t}>Walk-in Status (from CRM)</SectionLabel>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10 }}>
+            <WalkinCard t={t} label="Sold (CRM updated)" value={walkinSummary.sold || 0} icon="✓" color={t.green} bg={t.greenDim} />
             <WalkinCard t={t} label="Visited, Not Sold" value={walkinSummary.visited_not_sold || 0} icon="✕" color={t.red} bg={t.redDim} />
-            <WalkinCard t={t} label="Enquiry" value={walkinSummary.enquiry || 0} icon="?" color={t.blue} bg={t.blueDim} />
-            <WalkinCard t={t} label="Planning to Visit" value={walkinSummary.planning_to_visit || 0} icon="↻" color={t.orange} bg={t.orangeDim} />
-            <WalkinCard t={t} label="Call Later" value={walkinSummary.call_later || 0} icon="☎" color={t.purple} bg={`${t.purple}20`} />
+            <WalkinCard t={t} label="Status Not Updated" value={walkinSummary.no_update || 0} icon="~" color={t.text3} bg={t.card2} />
           </div>
+          {(walkinSummary.no_update || 0) > 0 && (
+            <div style={{ fontSize: '.6rem', color: t.text4, marginTop: 6, padding: '4px 8px' }}>
+              {walkinSummary.no_update} walk-ins have no status update yet — could be still in branch, or CRM not updated after visit
+            </div>
+          )}
         </div>
       )}
 

@@ -252,59 +252,45 @@ export async function GET(req) {
       const [
         [[summary]],
         [[walkinSummary]],
-        [goldByStatus],
+        [ornmentRows],
         [branches],
         [hourly],
-        [payments],
         [todayTxns],
         [todayWalkins],
+        [[kycBlacklisted]],
+        [[chklistCount]],
       ] = await Promise.all([
 
-        // 1. Transaction summary
+        // 1. Walk-in summary
         conn.execute(`
           SELECT
-            COUNT(*)                                                                 AS total,
-            SUM(CASE WHEN trxn_status='approved' THEN 1 ELSE 0 END)                AS approved,
-            SUM(CASE WHEN trxn_status='rejected' THEN 1 ELSE 0 END)                AS rejected,
-            SUM(CASE WHEN trxn_status='pending'  THEN 1 ELSE 0 END)                AS pending,
-            COUNT(DISTINCT branch_id)                                               AS branches_active,
-            SUM(CASE WHEN trxn_status='approved' THEN (finl_amnt+0) ELSE 0 END)   AS approved_value,
-            SUM(CASE WHEN type_gold='physical'   THEN 1 ELSE 0 END)               AS physical_count,
-            SUM(CASE WHEN type_gold!='physical'  THEN 1 ELSE 0 END)               AS takeover_count
-          FROM transac_tbl
-          WHERE DATE(date + INTERVAL 330 MINUTE) = ?
-        `, [todayIST]),
-
-        // 2. Walk-in summary
-        conn.execute(`
-          SELECT
-            COUNT(*)                                                                          AS total,
-            SUM(CASE WHEN walkin_status='sold'             THEN 1 ELSE 0 END)                AS sold,
-            SUM(CASE WHEN walkin_status='visited not sold' THEN 1 ELSE 0 END)                AS visited_not_sold,
-            SUM(CASE WHEN walkin_status='enquiry'          THEN 1 ELSE 0 END)                AS enquiry,
-            SUM(CASE WHEN walkin_status='planning to visit'THEN 1 ELSE 0 END)                AS planning_to_visit,
-            SUM(CASE WHEN walkin_status='call later'       THEN 1 ELSE 0 END)                AS call_later,
-            ROUND(SUM(gms_weight + 0), 2)                                                    AS total_gold_wt
+            COUNT(*)                                                                    AS total,
+            SUM(CASE WHEN walkin_status='sold'              THEN 1 ELSE 0 END)         AS sold,
+            SUM(CASE WHEN walkin_status='visited not sold'  THEN 1 ELSE 0 END)         AS visited_not_sold,
+            SUM(CASE WHEN walkin_status IS NULL OR walkin_status='' THEN 1 ELSE 0 END) AS no_update,
+            ROUND(SUM(gms_weight + 0), 2)                                              AS total_gold_wt,
+            SUM(CASE WHEN gms_weight IS NULL OR gms_weight=0 THEN 1 ELSE 0 END)        AS missing_weight_count
           FROM customer_walkin
           WHERE DATE(date + INTERVAL 330 MINUTE) = ?
         `, [todayIST]),
 
-        // 3. Raw ornment weights (CSV per row) — summed in JS to handle multi-ornament rows
+        // 2. Raw ornment rows (grms_wet is CSV) — summed in JS per status + type_gold
         conn.execute(`
-          SELECT t.trxn_status, t.id AS txn_id, o.grms_wet
-          FROM ornments_tbl o
-          JOIN transac_tbl t ON t.id = o.trnxnn_id
+          SELECT t.trxn_status, t.type_gold, t.id AS txn_id,
+            (t.finl_amnt+0) AS amount, o.grms_wet
+          FROM transac_tbl t
+          LEFT JOIN ornments_tbl o ON o.trnxnn_id = t.id
           WHERE DATE(t.date + INTERVAL 330 MINUTE) = ?
         `, [todayIST]),
 
-        // 4. Branch breakdown
+        // 3. Branch breakdown
         conn.execute(`
           SELECT
             b.brnch_name  AS branch_name,
             COUNT(*)      AS bills,
-            SUM(CASE WHEN t.trxn_status='approved' THEN 1 ELSE 0 END)              AS approved,
-            SUM(CASE WHEN t.trxn_status='pending'  THEN 1 ELSE 0 END)              AS pending,
-            SUM(CASE WHEN t.trxn_status='rejected' THEN 1 ELSE 0 END)              AS rejected,
+            SUM(CASE WHEN t.trxn_status='approved' THEN 1 ELSE 0 END) AS approved,
+            SUM(CASE WHEN t.trxn_status='pending'  THEN 1 ELSE 0 END) AS pending,
+            SUM(CASE WHEN t.trxn_status='rejected' THEN 1 ELSE 0 END) AS rejected,
             ROUND(SUM(CASE WHEN t.trxn_status='approved' THEN (t.finl_amnt+0) ELSE 0 END), 0) AS value
           FROM transac_tbl t
           LEFT JOIN branch_tbl b ON b.brnch_id = t.branch_id
@@ -314,48 +300,32 @@ export async function GET(req) {
           LIMIT 40
         `, [todayIST]),
 
-        // 5. Hourly activity
+        // 4. Hourly activity
         conn.execute(`
           SELECT
-            HOUR(TIME(date + INTERVAL 330 MINUTE))                                  AS hour,
-            COUNT(*)                                                                 AS bills,
-            SUM(CASE WHEN trxn_status='approved' THEN 1 ELSE 0 END)                AS approved,
-            SUM(CASE WHEN trxn_status='rejected' THEN 1 ELSE 0 END)                AS rejected
+            HOUR(TIME(date + INTERVAL 330 MINUTE)) AS hour,
+            COUNT(*) AS bills,
+            SUM(CASE WHEN trxn_status='approved' THEN 1 ELSE 0 END) AS approved,
+            SUM(CASE WHEN trxn_status='rejected' THEN 1 ELSE 0 END) AS rejected
           FROM transac_tbl
           WHERE DATE(date + INTERVAL 330 MINUTE) = ?
-          GROUP BY hour
-          ORDER BY hour
+          GROUP BY hour ORDER BY hour
         `, [todayIST]),
 
-        // 6. Payment method split (approved only)
-        conn.execute(`
-          SELECT
-            LOWER(TRIM(pymt_mde)) AS method,
-            COUNT(*)              AS count,
-            ROUND(SUM(finl_amnt+0), 0) AS value
-          FROM transac_tbl
-          WHERE DATE(date + INTERVAL 330 MINUTE) = ?
-            AND trxn_status = 'approved'
-            AND pymt_mde IS NOT NULL AND pymt_mde != ''
-          GROUP BY pymt_mde
-          ORDER BY count DESC
-        `, [todayIST]),
-
-        // 7. Today's transactions (for timeline) — grms_wet is CSV, summed in frontend
+        // 5. Today's transactions for timeline (grms_wet CSV summed in frontend)
         conn.execute(`
           SELECT t.id, t.bill_no, t.cust_name, t.cust_mobile,
             t.time, t.branch_id, b.brnch_name AS branch_name,
-            t.type_gold, t.trxn_status, (t.finl_amnt+0) AS amount, t.txn_rmrk, t.pymt_mde,
-            o.grms_wet AS grms_wet_csv
+            t.type_gold, t.trxn_status, (t.finl_amnt+0) AS amount,
+            t.txn_rmrk, t.pymt_mde, o.grms_wet AS grms_wet_csv
           FROM transac_tbl t
           LEFT JOIN branch_tbl b ON b.brnch_id = t.branch_id
           LEFT JOIN ornments_tbl o ON o.trnxnn_id = t.id
           WHERE DATE(t.date + INTERVAL 330 MINUTE) = ?
-          ORDER BY t.time DESC
-          LIMIT 300
+          ORDER BY t.time DESC LIMIT 300
         `, [todayIST]),
 
-        // 8. Today's walk-ins (for timeline)
+        // 6. Today's walk-ins for timeline
         conn.execute(`
           SELECT cw.id, cw.cust_name, cw.cust_mobile, cw.time,
             cw.walkin_status, cw.item_type, cw.gms_weight,
@@ -365,36 +335,85 @@ export async function GET(req) {
           WHERE DATE(cw.date + INTERVAL 330 MINUTE) = ?
           ORDER BY cw.time DESC
         `, [todayIST]),
+
+        // 7. KYC blacklisted today (rejctd_tbl)
+        conn.execute(`
+          SELECT COUNT(*) AS cnt, ROUND(SUM(grams+0),2) AS total_grams
+          FROM rejctd_tbl WHERE DATE(date + INTERVAL 330 MINUTE) = ?
+        `, [todayIST]),
+
+        // 8. KYC checklist filled today (chklist_tbl) — customers who went through KYC
+        conn.execute(`
+          SELECT COUNT(*) AS cnt FROM chklist_tbl
+          WHERE DATE(date + INTERVAL 330 MINUTE) = ?
+        `, [todayIST]),
       ])
 
       // Attach region from Supabase to MySQL rows
-      for (const b  of branches)    b.region  = regionMap[String(b.branch_id)]  || ''
-      for (const tx of todayTxns)   tx.region = regionMap[String(tx.branch_id)] || ''
-      for (const w  of todayWalkins) w.region = regionMap[String(w.branch_id)]  || ''
+      for (const b  of branches)     b.region  = regionMap[String(b.branch_id)]  || ''
+      for (const tx of todayTxns)    tx.region = regionMap[String(tx.branch_id)] || ''
+      for (const w  of todayWalkins) w.region  = regionMap[String(w.branch_id)]  || ''
 
-      // Build gold pipeline from walkin weight + transaction counts
-      const goldByStatusMap = {}
-      // grms_wet is a CSV string per row (e.g. "24.91,17.05,2.96") — parse in JS
+      // grms_wet is CSV per row (e.g. "24.91,17.05,2.96") — must parse in JS
       const csvSum = str => String(str || '').split(',').reduce((s, v) => {
         const n = parseFloat(v.trim()); return s + (isNaN(n) ? 0 : n)
       }, 0)
 
-      const weightByStatus = {}
-      for (const r of goldByStatus) {
+      // Build per-status and per-type_gold aggregates from ornment rows
+      const byStatus    = {}  // { approved: { count, wt, value }, pending: {...}, rejected: {...} }
+      const byType      = {}  // { physical: { approved, pending, rejected, wt }, released: {...} }
+      const seenTxns    = new Set()
+
+      for (const r of ornmentRows) {
         const st = r.trxn_status
-        weightByStatus[st] = (weightByStatus[st] || 0) + csvSum(r.grms_wet)
+        const tp = r.type_gold || 'physical'
+        const wt = csvSum(r.grms_wet)
+
+        if (!byStatus[st]) byStatus[st] = { count: 0, wt: 0, value: 0 }
+        if (!seenTxns.has(r.txn_id)) {
+          byStatus[st].count++
+          byStatus[st].value += parseFloat(r.amount) || 0
+          seenTxns.add(r.txn_id)
+        }
+        byStatus[st].wt += wt
+
+        if (!byType[tp]) byType[tp] = { approved: 0, pending: 0, rejected: 0, wt: 0 }
+        byType[tp][st] = (byType[tp][st] || 0) + (seenTxns.has(r.txn_id) ? 0 : 1)
+        byType[tp].wt += wt
       }
 
-      const notBilledWt = todayWalkins
+      // Walkins not billed = walkin_status not 'sold'
+      const walkedOutCount   = todayWalkins.filter(w => w.walkin_status === 'visited not sold').length
+      const noBillCount      = todayWalkins.filter(w => !w.walkin_status || w.walkin_status === '').length
+      const notBilledWt      = todayWalkins
         .filter(w => w.walkin_status !== 'sold')
         .reduce((s, w) => s + (parseFloat(w.gms_weight) || 0), 0)
 
+      // Build summary object from ornment rows (more accurate than old query 1)
+      const summary = {
+        total:          seenTxns.size,
+        approved:       byStatus['approved']?.count || 0,
+        pending:        byStatus['pending']?.count  || 0,
+        rejected:       byStatus['rejected']?.count || 0,
+        approved_value: parseFloat((byStatus['approved']?.value || 0).toFixed(2)),
+        branches_active: new Set(todayTxns.map(t => t.branch_id)).size,
+      }
+
       const goldPipeline = {
-        walked_in_wt:  parseFloat(walkinSummary.total_gold_wt) || 0,
-        purchased_wt:  parseFloat((weightByStatus['approved'] || 0).toFixed(2)),
-        pending_wt:    parseFloat((weightByStatus['pending']  || 0).toFixed(2)),
-        rejected_wt:   parseFloat((weightByStatus['rejected'] || 0).toFixed(2)),
-        not_billed_wt: parseFloat(notBilledWt.toFixed(2)),
+        walked_in_wt:       parseFloat(walkinSummary.total_gold_wt) || 0,
+        missing_weight_cnt: walkinSummary.missing_weight_count || 0,
+        purchased_wt:       parseFloat((byStatus['approved']?.wt || 0).toFixed(2)),
+        pending_wt:         parseFloat((byStatus['pending']?.wt  || 0).toFixed(2)),
+        rejected_wt:        parseFloat((byStatus['rejected']?.wt || 0).toFixed(2)),
+        not_billed_wt:      parseFloat(notBilledWt.toFixed(2)),
+        kyc_blacklisted_cnt: Number(kycBlacklisted.cnt) || 0,
+        kyc_blacklisted_wt:  parseFloat(kycBlacklisted.total_grams) || 0,
+        kyc_checklist_cnt:   Number(chklistCount.cnt) || 0,
+        walked_out_cnt:      walkedOutCount,
+        no_bill_cnt:         noBillCount,
+        // Physical vs released/takeover split
+        physical:  { approved: byType['physical']?.approved || 0, pending: byType['physical']?.pending || 0, rejected: byType['physical']?.rejected || 0 },
+        released:  { approved: byType['released']?.approved || 0, pending: byType['released']?.pending || 0, rejected: byType['released']?.rejected || 0 },
       }
 
       // Try new CRM for stage breakdown (best-effort, don't fail if unreachable)
@@ -450,13 +469,9 @@ export async function GET(req) {
         stages,
         branches,
         hourly,
-        payments,
         todayTxns,
         todayWalkins,
         allRegions,
-        // legacy compat
-        todaySummary: summary,
-        walkinToday:  walkinSummary.total,
       })
     }
 
