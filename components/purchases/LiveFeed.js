@@ -163,6 +163,8 @@ export default function LiveFeed() {
 
   const timerRef = useRef(null)
   const countRef = useRef(null)
+  const prevTlCountRef = useRef(0)
+  const [newEventCount, setNewEventCount] = useState(0)
 
   /* ── Load data ── */
   const load = useCallback(async (date) => {
@@ -195,6 +197,15 @@ export default function LiveFeed() {
     countRef.current = setInterval(() => setCountdown(c => Math.max(0, c - 1)), 1000)
     return () => clearInterval(countRef.current)
   }, [lastUpdated])
+
+  /* ── New-event detection ── */
+  useEffect(() => {
+    if (!data) return
+    const count = (data.todayTxns?.length || 0) + (data.todayWalkins?.length || 0)
+    const prev = prevTlCountRef.current
+    if (prev > 0 && count > prev) setNewEventCount(count - prev)
+    prevTlCountRef.current = count
+  }, [data])
 
   /* ── Derived ── */
   const summary = data?.summary || {}
@@ -324,8 +335,8 @@ export default function LiveFeed() {
       <div style={{
         position: 'sticky', top: 0, zIndex: 50, background: `${t.bg}f0`,
         backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)',
-        borderBottom: `1px solid ${t.border}`,
-        boxShadow: '0 2px 12px rgba(0,0,0,.15)',
+        borderBottom: isToday ? `1px solid ${t.border}` : `1px solid ${t.orange}50`,
+        boxShadow: isToday ? '0 2px 12px rgba(0,0,0,.15)' : `0 2px 12px ${t.orange}18`,
         padding: '11px 24px', display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap',
       }}>
         {/* Live indicator */}
@@ -410,6 +421,20 @@ export default function LiveFeed() {
         </div>
       </div>
 
+      {/* ── HISTORICAL BANNER ── */}
+      {!isToday && (
+        <div style={{
+          background: `${t.orange}0d`, borderBottom: `1px solid ${t.orange}30`,
+          padding: '8px 28px', display: 'flex', alignItems: 'center', gap: 10,
+        }}>
+          <span style={{ fontSize: '.75rem', color: t.orange }}>📅</span>
+          <span style={{ fontSize: '.68rem', color: t.orange, fontWeight: 600 }}>
+            Historical view — {fmtDate(viewDate)}
+          </span>
+          <span style={{ fontSize: '.62rem', color: t.text4 }}>Auto-refresh paused · showing data as of end of day</span>
+        </div>
+      )}
+
       {/* ── BODY ── */}
       <div style={{ padding: '24px 28px' }}>
         {loadError && (
@@ -431,7 +456,9 @@ export default function LiveFeed() {
             todayTxns={rTxns} todayWalkins={rWalkins}
             kycRows={regionFilter ? kycRows.filter(r => r.region === regionFilter) : kycRows}
             regionFilter={regionFilter}
-            filteredTimeline={filteredTimeline} isToday={isToday} />
+            filteredTimeline={filteredTimeline} isToday={isToday}
+            viewDate={viewDate}
+            newEventCount={newEventCount} clearNewEvents={() => setNewEventCount(0)} />
         ) : (
           <NewCrmTab t={t} stages={stages} />
         )}
@@ -450,7 +477,8 @@ function OldCrmTab({
   notBilledCnt, notBilledWalkins, crmNotUpdatedCnt,
   goldPipeline,
   todayTxns, todayWalkins, kycRows,
-  filteredTimeline, isToday,
+  filteredTimeline, isToday, viewDate,
+  newEventCount, clearNewEvents,
 }) {
   const [activeMetric, setActiveMetric] = useState(null)
   const [tlOpen, setTlOpen] = useState(false)
@@ -491,6 +519,41 @@ function OldCrmTab({
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
 
+      {/* ──────── 0. SUMMARY BAR ──────── */}
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 0,
+        background: t.surface, border: `1px solid ${t.border}`, borderRadius: 12,
+        padding: '0', overflow: 'hidden', flexWrap: 'wrap',
+        boxShadow: '0 2px 8px rgba(0,0,0,.10)',
+      }}>
+        {[
+          { label: isToday ? 'Today' : fmtDate(viewDate), value: null, color: t.text3, accent: t.border },
+          { label: 'Walked In',  value: fmtNum(totalWalkins), color: t.blue,  accent: t.blue },
+          { label: 'Billed',     value: fmtNum(totalBilled),  color: t.gold,  accent: t.gold },
+          { label: 'Purchased',  value: fmtNum(approved),     color: t.green, accent: t.green },
+          { label: 'Value',      value: fmtAmt(approvedValue), color: t.green, accent: t.green },
+          { label: 'Conversion', value: `${conversionPct}%`,  color: conversionPct >= 50 ? t.green : t.orange, accent: null },
+          ...(pending > 0     ? [{ label: 'Pending',  value: fmtNum(pending),          color: t.orange, accent: null }] : []),
+          ...(kycBlacklistedCnt > 0 ? [{ label: 'KYC Blocked', value: fmtNum(kycBlacklistedCnt), color: t.purple, accent: null }] : []),
+        ].map((item, i) => (
+          <div key={i} style={{
+            display: 'flex', alignItems: 'center', gap: 6,
+            padding: '10px 18px',
+            borderRight: `1px solid ${t.border}`,
+            borderLeft: item.accent ? `3px solid ${item.accent}` : undefined,
+          }}>
+            {item.value != null ? (
+              <>
+                <span style={{ fontSize: '.75rem', fontFamily: 'ui-monospace,monospace', fontWeight: 600, color: item.color }}>{item.value}</span>
+                <span style={{ fontSize: '.58rem', color: t.text4, letterSpacing: '.08em', textTransform: 'uppercase' }}>{item.label}</span>
+              </>
+            ) : (
+              <span style={{ fontSize: '.65rem', color: t.text3, fontWeight: 700, letterSpacing: '.1em', textTransform: 'uppercase' }}>{item.label}</span>
+            )}
+          </div>
+        ))}
+      </div>
+
       {/* ──────── 1. CUSTOMER JOURNEY ──────── */}
       <div>
         <SectionLabel t={t}>Customer Journey · from Walk-in to Outcome</SectionLabel>
@@ -514,8 +577,8 @@ function OldCrmTab({
           <HeroNum label="Re-billed & Approved" value={wrongEntry} color={t.orange} t={t} small active={activeMetric==='rebilled'} onClick={() => toggleMetric('rebilled')} />
           <FlowSep t={t} />
           <HeroNum label="KYC Blocked" value={kycBlacklistedCnt} color={t.purple} t={t} small active={activeMetric==='kyc_blocked'} onClick={() => toggleMetric('kyc_blocked')} />
-          <FlowSep t={t} />
-          <HeroNum label="KYC Cleared Later" value={kycOverriddenCnt} color={t.blue} t={t} small active={activeMetric==='kyc_cleared'} onClick={() => toggleMetric('kyc_cleared')} />
+          {kycOverriddenCnt > 0 && <FlowSep t={t} />}
+          {kycOverriddenCnt > 0 && <HeroNum label="KYC Cleared Later" value={kycOverriddenCnt} color={t.blue} t={t} small active={activeMetric==='kyc_cleared'} onClick={() => toggleMetric('kyc_cleared')} />}
           <FlowSep t={t} />
           <HeroNum label="Left Unbilled" value={notBilledCnt} color={t.text3} t={t} small muted active={activeMetric==='unbilled'} onClick={() => toggleMetric('unbilled')} />
         </div>
@@ -593,25 +656,7 @@ function OldCrmTab({
         </div>
       </div>
 
-      {/* ──────── 3. WALKIN STATUS ──────── */}
-      {totalWalkins > 0 && (
-        <div>
-          <SectionLabel t={t}>Walk-in Status (from CRM)</SectionLabel>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10 }}>
-            <WalkinCard t={t} label="Sold (CRM updated)" value={walkinSummary.sold || 0} icon="✓" color={t.green} bg={t.greenDim} />
-            <WalkinCard t={t} label="Visited, Not Sold" value={walkinSummary.visited_not_sold || 0} icon="✕" color={t.red} bg={t.redDim} />
-            <WalkinCard t={t} label="Status Not Updated" value={walkinSummary.no_update || 0} icon="~" color={t.text3} bg={t.card2} />
-          </div>
-          {(walkinSummary.no_update || 0) > 0 && (
-            <div style={{ fontSize: '.6rem', color: t.text4, marginTop: 6, padding: '4px 8px' }}>
-              {walkinSummary.no_update} walk-ins have no status update yet — could be still in branch, or CRM not updated after visit
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* ──────── 4. GOLD WEIGHT FLOW ──────── */}
-      {/* (already rendered above — moved inline) */}
+      {/* ──────── 4. DETAIL TABLE ──────── */}
 
       {/* ──────── 4. DETAIL TABLE (shown only when a hero is clicked) ──────── */}
       {activeMetric && (
@@ -624,10 +669,20 @@ function OldCrmTab({
       <div>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: tlOpen ? 10 : 0 }}>
           <SectionLabel t={t}>{isToday ? 'Live Timeline' : 'Timeline'}</SectionLabel>
-          <button onClick={() => setTlOpen(o => !o)} style={{
+          <button onClick={() => { setTlOpen(o => !o); clearNewEvents() }} style={{
             padding: '4px 12px', borderRadius: 6, fontSize: '.6rem', cursor: 'pointer',
-            border: `1px solid ${t.border}`, background: t.card, color: t.text3, marginBottom: 10,
+            border: `1px solid ${newEventCount > 0 ? t.green : t.border}`,
+            background: newEventCount > 0 ? `${t.green}14` : t.card,
+            color: newEventCount > 0 ? t.green : t.text3,
+            marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6,
+            transition: 'all .2s',
           }}>
+            {newEventCount > 0 && (
+              <span style={{
+                background: t.green, color: '#000', borderRadius: 8,
+                fontSize: '.52rem', fontWeight: 700, padding: '1px 5px', lineHeight: 1.4,
+              }}>+{newEventCount}</span>
+            )}
             {tlOpen ? 'Collapse ▲' : 'Expand ▼'}
           </button>
         </div>
@@ -902,28 +957,6 @@ function MetricCard({ t, label, value, color, sub, dim, bar, onClick, active }) 
 
 
 
-/* ── Walkin Card ── */
-function WalkinCard({ t, label, value, icon, color, bg }) {
-  return (
-    <Card t={t} style={{ padding: '16px 18px', display: 'flex', alignItems: 'center', gap: 14, borderLeft: `3px solid ${color}` }}>
-      <div style={{
-        width: 38, height: 38, borderRadius: 10, background: bg,
-        border: `1px solid ${color}30`,
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        fontSize: '1rem', color, flexShrink: 0,
-        boxShadow: `0 2px 8px ${color}18`,
-      }}>
-        {icon}
-      </div>
-      <div>
-        <Mono size="1.6rem" color={color} weight={200}>{value}</Mono>
-        <div style={{ fontSize: '.6rem', color: t.text3, letterSpacing: '.08em', textTransform: 'uppercase', marginTop: 4, fontWeight: 600 }}>
-          {label}
-        </div>
-      </div>
-    </Card>
-  )
-}
 
 /* ── Timeline Row ── */
 function TimelineRow({ item, t, isLast }) {
