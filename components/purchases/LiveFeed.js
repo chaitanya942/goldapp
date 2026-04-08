@@ -174,6 +174,7 @@ export default function LiveFeed() {
   const todayWalkins = data?.todayWalkins || []
   const regions     = data?.allRegions  || []
   const goldPipeline = data?.goldPipeline || {}
+  const kycRows      = data?.kycRows      || []
 
   const isToday = viewDate === todayIST
 
@@ -232,11 +233,11 @@ export default function LiveFeed() {
     not_billed_wt:   notBilledWalkins.reduce((s, w) => s + (Number(w.gms_weight) || 0), 0),
     not_billed_cnt:  notBilledCnt,
     crm_not_updated_cnt: crmNotUpdatedCnt,
-    // KYC fields not region-filterable (rejctd_tbl has no branch join yet)
-    kyc_blacklisted_cnt: goldPipeline.kyc_blacklisted_cnt || 0,
-    kyc_blacklisted_wt:  goldPipeline.kyc_blacklisted_wt  || 0,
-    kyc_overridden_cnt:  goldPipeline.kyc_overridden_cnt  || 0,
-    kyc_checklist_cnt:   goldPipeline.kyc_checklist_cnt   || 0,
+    // KYC — region-filtered via branh_id→region mapping
+    kyc_blacklisted_cnt: kycRows.filter(r => r.region === regionFilter).length,
+    kyc_blacklisted_wt:  parseFloat(kycRows.filter(r => r.region === regionFilter).reduce((s, r) => s + (parseFloat(r.grams) || 0), 0).toFixed(2)),
+    kyc_overridden_cnt:  kycRows.filter(r => r.region === regionFilter && rApprovedMobiles.has(r.mob_num)).length,
+    kyc_checklist_cnt:   goldPipeline.kyc_checklist_cnt || 0,
     physical:  goldPipeline.physical  || {},
     released:  goldPipeline.released  || {},
   } : goldPipeline

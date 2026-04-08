@@ -256,7 +256,7 @@ export async function GET(req) {
         [hourly],
         [todayTxns],
         [todayWalkins],
-        [[kycBlacklisted]],
+        [kycRows],
         [[chklistCount]],
       ] = await Promise.all([
 
@@ -335,10 +335,9 @@ export async function GET(req) {
           ORDER BY cw.time DESC
         `, [todayIST]),
 
-        // 7. KYC blacklisted today (rejctd_tbl) — mob_num for override detection
+        // 7. KYC blacklisted today — individual rows so frontend can filter by region
         conn.execute(`
-          SELECT COUNT(*) AS cnt, ROUND(SUM(grams+0),2) AS total_grams,
-            GROUP_CONCAT(mob_num SEPARATOR ',') AS mobiles
+          SELECT branh_id, mob_num, grams+0 AS grams
           FROM rejctd_tbl WHERE DATE(date + INTERVAL 330 MINUTE) = ?
         `, [todayIST]),
 
@@ -353,6 +352,7 @@ export async function GET(req) {
       for (const b  of branches)     b.region  = regionMap[String(b.branch_id)]  || ''
       for (const tx of todayTxns)    tx.region = regionMap[String(tx.branch_id)] || ''
       for (const w  of todayWalkins) w.region  = regionMap[String(w.branch_id)]  || ''
+      for (const k  of kycRows)      k.region  = regionMap[String(k.branh_id)]   || ''
 
       // grms_wet is CSV per row (e.g. "24.91,17.05,2.96") — must parse in JS
       const csvSum = str => String(str || '').split(',').reduce((s, v) => {
@@ -433,9 +433,7 @@ export async function GET(req) {
       ).length
 
       // KYC blocked today but later got an approved bill (mob_num → cust_mobile cross-ref)
-      const kycMobiles = new Set(
-        String(kycBlacklisted.mobiles || '').split(',').map(m => m.trim()).filter(Boolean)
-      )
+      const kycMobiles = new Set(kycRows.map(r => r.mob_num).filter(Boolean))
       const kycOverriddenCount = [...kycMobiles].filter(m => approvedMobiles.has(m)).length
 
       // Build summary
@@ -463,8 +461,8 @@ export async function GET(req) {
         not_billed_wt:       parseFloat(trulyUnbilledWt.toFixed(2)),
         not_billed_cnt:      trulyUnbilledCount,
         crm_not_updated_cnt: crmNotUpdatedCount,
-        kyc_blacklisted_cnt: Number(kycBlacklisted.cnt) || 0,
-        kyc_blacklisted_wt:  parseFloat(kycBlacklisted.total_grams) || 0,
+        kyc_blacklisted_cnt: kycRows.length,
+        kyc_blacklisted_wt:  parseFloat(kycRows.reduce((s, r) => s + (parseFloat(r.grams) || 0), 0).toFixed(2)),
         kyc_overridden_cnt:  kycOverriddenCount,
         kyc_checklist_cnt:   Number(chklistCount.cnt) || 0,
         physical: { approved: byType['physical']?.approved || 0, pending: byType['physical']?.pending || 0, rejected: byType['physical']?.rejected || 0 },
@@ -526,6 +524,7 @@ export async function GET(req) {
         hourly,
         todayTxns,
         todayWalkins,
+        kycRows,
         allRegions,
       })
     }
