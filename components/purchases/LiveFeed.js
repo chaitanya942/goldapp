@@ -498,10 +498,6 @@ function OldCrmTab({
         </div>
       </div>
 
-      {/* ──────── 1b. DETAIL TABLE ──────── */}
-      <LiveDetail t={t} activeMetric={activeMetric}
-        todayTxns={todayTxns} todayWalkins={todayWalkins}
-        kycRows={kycRows} notBilledWalkins={notBilledWalkins} />
 
       {/* ──────── 2. GOLD WEIGHT FLOW ──────── */}
       <div>
@@ -568,6 +564,13 @@ function OldCrmTab({
 
       {/* ──────── 4. GOLD WEIGHT FLOW ──────── */}
       {/* (already rendered above — moved inline) */}
+
+      {/* ──────── 4. DETAIL TABLE (shown only when a hero is clicked) ──────── */}
+      {activeMetric && (
+        <LiveDetail t={t} activeMetric={activeMetric}
+          todayTxns={todayTxns} todayWalkins={todayWalkins}
+          kycRows={kycRows} notBilledWalkins={notBilledWalkins} />
+      )}
 
       {/* ──────── 5. LIVE TIMELINE (collapsed by default) ──────── */}
       <div>
@@ -701,7 +704,7 @@ function TxnTable({ rows, t }) {
                   onMouseEnter={e => e.currentTarget.style.background = t.card2}
                   onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
                   <span style={{ fontSize: '.68rem', color: t.gold, fontFamily: 'ui-monospace,monospace', fontWeight: 500 }}>{r.bill_no || '—'}</span>
-                  <span style={{ fontSize: '.65rem', color: t.text2 }}>{r.txn_date || '—'}</span>
+                  <span style={{ fontSize: '.65rem', color: t.text2 }}>{r.txn_date ? String(r.txn_date).slice(0,10) : '—'}</span>
                   <span style={{ fontSize: '.65rem', color: t.text2, fontFamily: 'ui-monospace,monospace' }}>{fmtTime(r.time)}</span>
                   <span style={{ fontSize: '.72rem', color: t.text1, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.cust_name || '—'}</span>
                   <span style={{ fontSize: '.65rem', color: t.text2, fontFamily: 'ui-monospace,monospace' }}>{r.cust_mobile || '—'}</span>
@@ -710,7 +713,7 @@ function TxnTable({ rows, t }) {
                   <span style={{ fontSize: '.65rem', color: t.text3, fontFamily: 'ui-monospace,monospace' }}>{csvSum(r.stnt_wet_csv) > 0 ? `${csvSum(r.stnt_wet_csv).toFixed(2)}g` : '0g'}</span>
                   <span style={{ fontSize: '.65rem', color: t.text3, fontFamily: 'ui-monospace,monospace' }}>{csvSum(r.wastag_csv) > 0 ? `${csvSum(r.wastag_csv).toFixed(2)}g` : '0g'}</span>
                   <span style={{ fontSize: '.68rem', color: t.text1, fontFamily: 'ui-monospace,monospace' }}>{csvSum(r.net_wet_csv) > 0 ? `${csvSum(r.net_wet_csv).toFixed(2)}g` : '—'}</span>
-                  <span style={{ fontSize: '.65rem', color: t.text2 }}>{r.purity_all || '—'}</span>
+                  <span style={{ fontSize: '.65rem', color: t.text2 }}>{r.purity_all ? [...new Set(String(r.purity_all).split(', ').map(p => p.trim()))].join(', ') : '—'}</span>
                   <span style={{ fontSize: '.68rem', color: t.gold, fontFamily: 'ui-monospace,monospace' }}>{csvSum(r.grs_amnt_csv) > 0 ? `₹${Math.round(csvSum(r.grs_amnt_csv)).toLocaleString('en-IN')}` : '—'}</span>
                   <span style={{ fontSize: '.65rem', color: t.text3 }}>{r.serv_chr ? `${r.serv_chr}%` : '—'}</span>
                   <span style={{ fontSize: '.58rem', padding: '2px 7px', borderRadius: 4, fontWeight: 600, background: `${sc}18`, color: sc, border: `1px solid ${sc}30`, whiteSpace: 'nowrap', textTransform: 'capitalize' }}>{r.trxn_status || '—'}</span>
