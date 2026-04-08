@@ -419,14 +419,6 @@ export async function GET(req) {
       // Wrong entries (rejected but customer eventually approved)
       const wrongEntryCount = (byStatus['rejected']?.count || 0) - trueRejectedCount
 
-      // --- FIX 2: Left Unbilled — exclude walkins where customer got a bill today ---
-      // customer_walkin and transac_tbl aren't linked by ID, but mobile number works
-      const trulyUnbilledWalkins = todayWalkins.filter(w =>
-        !billedMobiles.has(w.cust_mobile) // no bill at all today for this mobile
-      )
-      const trulyUnbilledCount = trulyUnbilledWalkins.length
-      const trulyUnbilledWt    = trulyUnbilledWalkins.reduce((s, w) => s + (parseFloat(w.gms_weight) || 0), 0)
-
       // Walkins where status=null but they DID get a bill (CRM not updated)
       const crmNotUpdatedCount = todayWalkins.filter(w =>
         (!w.walkin_status || w.walkin_status === '') && billedMobiles.has(w.cust_mobile)
@@ -435,6 +427,15 @@ export async function GET(req) {
       // KYC blocked today but later got an approved bill (mob_num → cust_mobile cross-ref)
       const kycMobiles = new Set(kycRows.map(r => r.mob_num).filter(Boolean))
       const kycOverriddenCount = [...kycMobiles].filter(m => approvedMobiles.has(m)).length
+
+      // FIX 3: Exclude KYC blocked walkins from Left Unbilled to avoid double-counting weight
+      // A KYC-blocked customer's gold is already counted in kyc_blacklisted_wt (rejctd_tbl.grams)
+      // If they're also in customer_walkin, their gms_weight would be double-counted in not_billed_wt
+      const trulyUnbilledWalkins = todayWalkins.filter(w =>
+        !billedMobiles.has(w.cust_mobile) && !kycMobiles.has(w.cust_mobile)
+      )
+      const trulyUnbilledCount = trulyUnbilledWalkins.length
+      const trulyUnbilledWt    = trulyUnbilledWalkins.reduce((s, w) => s + (parseFloat(w.gms_weight) || 0), 0)
 
       // Build summary
       const summary = {

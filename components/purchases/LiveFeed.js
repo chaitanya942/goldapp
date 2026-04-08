@@ -185,6 +185,9 @@ export default function LiveFeed() {
   // Mobile sets for cross-table deduplication (region-scoped)
   const rApprovedMobiles = new Set(rTxns.filter(t => t.trxn_status === 'approved').map(t => t.cust_mobile).filter(Boolean))
   const rBilledMobiles   = new Set(rTxns.map(t => t.cust_mobile).filter(Boolean))
+  const rKycMobiles      = new Set(
+    (regionFilter ? kycRows.filter(r => r.region === regionFilter) : kycRows).map(r => r.mob_num).filter(Boolean)
+  )
 
   // All counts — always derive from row data for consistency
   const totalWalkins = regionFilter ? rWalkins.length : (walkinSummary.total || 0)
@@ -199,8 +202,8 @@ export default function LiveFeed() {
     : (summary.true_rejected ?? rejected)
   const wrongEntry = regionFilter ? (rejected - trueRejected) : (summary.wrong_entry || 0)
 
-  // Truly unbilled walkins (no bill at all today — not double-counted with purchased)
-  const notBilledWalkins  = rWalkins.filter(w => !rBilledMobiles.has(w.cust_mobile))
+  // Truly unbilled walkins — exclude billed AND KYC-blocked (to avoid weight double-count)
+  const notBilledWalkins  = rWalkins.filter(w => !rBilledMobiles.has(w.cust_mobile) && !rKycMobiles.has(w.cust_mobile))
   const notBilledCnt      = regionFilter ? notBilledWalkins.length : (goldPipeline.not_billed_cnt ?? notBilledWalkins.length)
   const crmNotUpdatedCnt  = regionFilter
     ? rWalkins.filter(w => (!w.walkin_status || w.walkin_status === '') && rBilledMobiles.has(w.cust_mobile)).length
@@ -237,6 +240,7 @@ export default function LiveFeed() {
     kyc_blacklisted_cnt: kycRows.filter(r => r.region === regionFilter).length,
     kyc_blacklisted_wt:  parseFloat(kycRows.filter(r => r.region === regionFilter).reduce((s, r) => s + (parseFloat(r.grams) || 0), 0).toFixed(2)),
     kyc_overridden_cnt:  kycRows.filter(r => r.region === regionFilter && rApprovedMobiles.has(r.mob_num)).length,
+    // not_billed already excludes KYC blocked (computed above via notBilledWalkins)
     kyc_checklist_cnt:   goldPipeline.kyc_checklist_cnt || 0,
     physical:  goldPipeline.physical  || {},
     released:  goldPipeline.released  || {},
@@ -516,6 +520,21 @@ function OldCrmTab({
           <span style={{ fontSize: '.72rem', color: t.text1, fontFamily: 'ui-monospace,monospace', fontWeight: 500 }}>{avgGrossWeight > 0 ? fmtWt(avgGrossWeight) : '—'}</span>
           <span style={{ fontSize: '.6rem', color: t.text3, marginLeft: 16 }}>Approved value:</span>
           <span style={{ fontSize: '.72rem', color: t.gold, fontFamily: 'ui-monospace,monospace', fontWeight: 500 }}>{fmtAmt(approvedValue)}</span>
+        </div>
+
+        {/* Data quality note */}
+        <div style={{
+          marginTop: 10, padding: '10px 14px', borderRadius: 8,
+          background: `${t.orange}0e`, border: `1px solid ${t.orange}30`,
+          display: 'flex', gap: 10, alignItems: 'flex-start',
+        }}>
+          <span style={{ color: t.orange, fontSize: '.75rem', flexShrink: 0, marginTop: 1 }}>ⓘ</span>
+          <div style={{ fontSize: '.62rem', color: t.text3, lineHeight: 1.7 }}>
+            <strong style={{ color: t.text2 }}>Data quality notes —</strong>{' '}
+            All weights are <strong>gross weights</strong> as declared by the customer at walk-in registration; actual weighed gold may differ slightly.{' '}
+            <strong>KYC Blocked</strong> weight comes from a separate KYC system (not walk-in registration) and is excluded from Left Unbilled to avoid double-counting.{' '}
+            A small number of walkins may not match to a bill due to missing or mismatched mobile numbers in the CRM.
+          </div>
         </div>
       </div>
 
