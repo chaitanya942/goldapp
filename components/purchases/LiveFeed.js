@@ -131,6 +131,7 @@ export default function LiveFeed() {
   const [search,        setSearch]        = useState('')
   const [regionFilter,  setRegionFilter]  = useState('')   // '' = all regions
   const [data,          setData]          = useState(null)
+  const [loadError,     setLoadError]     = useState(null)
   const [loading,       setLoading]       = useState(true)
   const [lastUpdated,   setLastUpdated]   = useState(null)
   const [countdown,     setCountdown]     = useState(REFRESH_SECS)
@@ -143,6 +144,7 @@ export default function LiveFeed() {
     const d = date || viewDate
     try {
       setLoading(true)
+      setLoadError(null)
       const res = await fetch(`/api/crm-purchases?action=live&date=${d}`)
       const json = await res.json()
       if (json.error) throw new Error(json.error)
@@ -150,6 +152,7 @@ export default function LiveFeed() {
       setLastUpdated(new Date())
     } catch (e) {
       console.error('LiveFeed load error:', e)
+      setLoadError(e.message)
     } finally {
       setLoading(false)
     }
@@ -323,6 +326,11 @@ export default function LiveFeed() {
 
       {/* ── BODY ── */}
       <div style={{ padding: '24px 28px' }}>
+        {loadError && (
+          <div style={{ background: `${t.red}15`, border: `1px solid ${t.red}40`, borderRadius: 8, padding: '12px 16px', marginBottom: 20, fontSize: '.72rem', color: t.red, fontFamily: 'ui-monospace, monospace' }}>
+            API error: {loadError}
+          </div>
+        )}
         {loading && !data ? (
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: 400, gap: 16 }}>
             <GoldSpinner size={40} />
