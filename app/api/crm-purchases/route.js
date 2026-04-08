@@ -3,6 +3,12 @@
 
 import mysql from 'mysql2/promise'
 import pg    from 'pg'
+import { createClient } from '@supabase/supabase-js'
+
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_ROLE_KEY
+)
 
 const { Client: PgClient } = pg
 
@@ -229,6 +235,16 @@ export async function GET(req) {
       // Allow explicit date override via ?date=; default to today IST
       const todayIST = searchParams.get('date') || defaultIST
 
+      // Fetch region mapping from Supabase branch management (crm_branch_id → region)
+      const { data: sbBranches } = await supabase
+        .from('branches')
+        .select('crm_branch_id, region')
+        .not('crm_branch_id', 'is', null)
+      const regionMap = {}
+      for (const b of sbBranches || []) {
+        if (b.crm_branch_id) regionMap[String(b.crm_branch_id)] = b.region || ''
+      }
+
       // All old-CRM queries in parallel
       const [
         [[summary]],
@@ -349,6 +365,11 @@ export async function GET(req) {
           ORDER BY cw.time DESC
         `, [todayIST]),
       ])
+
+      // Attach region from Supabase to MySQL rows
+      for (const b  of branches)    b.region  = regionMap[String(b.branch_id)]  || ''
+      for (const tx of todayTxns)   tx.region = regionMap[String(tx.branch_id)] || ''
+      for (const w  of todayWalkins) w.region = regionMap[String(w.branch_id)]  || ''
 
       // Build gold pipeline from walkin weight + transaction counts
       const goldByStatusMap = {}
