@@ -8,9 +8,9 @@ const REFRESH_SECS = 60
 
 const THEMES = {
   dark: {
-    bg: '#080808', surface: '#0f0f0f', card: '#141414', card2: '#1a1a1a',
-    border: '#222222', border2: '#2a2a2a',
-    text1: '#f0e8d8', text2: '#c8b898', text3: '#8a7a5a', text4: '#4a3a2a',
+    bg: '#080808', surface: '#0f0f0f', card: '#141414', card2: '#1c1c1c',
+    border: '#2a2a2a', border2: '#383838',
+    text1: '#f5edd8', text2: '#d8c8a0', text3: '#a89870', text4: '#6a5a40',
     gold: '#c9a84c', goldDim: '#c9a84c30',
     green: '#3aaa6a', greenDim: '#3aaa6a20',
     red: '#e05555', redDim: '#e0555520',
@@ -21,7 +21,7 @@ const THEMES = {
   light: {
     bg: '#f0ebe0', surface: '#f8f4ec', card: '#faf7f0', card2: '#ede8dc',
     border: '#ddd5c0', border2: '#ccc5b0',
-    text1: '#1a1005', text2: '#3a2a10', text3: '#7a6a48', text4: '#9a8a68',
+    text1: '#1a1005', text2: '#3a2a10', text3: '#6a5838', text4: '#8a7858',
     gold: '#9a7228', goldDim: '#9a722820',
     green: '#2a8a52', greenDim: '#2a8a5220',
     red: '#c03030', redDim: '#c0303020',
@@ -67,12 +67,14 @@ function fmtWt(g) {
 const PING_CSS = `@keyframes ping{75%,100%{transform:scale(2);opacity:0}}@keyframes fadeIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}`
 
 /* ── Tiny reusable components ── */
-function Bar({ pct, color, height = 4, bg }) {
-  return (
-    <div style={{ height, background: bg || '#ffffff12', borderRadius: height / 2, overflow: 'hidden', flex: 1 }}>
-      <div style={{ height: '100%', width: `${Math.min(100, pct || 0)}%`, background: color, borderRadius: height / 2, transition: 'width .6s ease' }} />
-    </div>
-  )
+/* ── Region helper ── */
+function deriveRegion(branchName, dbRegion) {
+  if (dbRegion) return dbRegion
+  const n = (branchName || '').toUpperCase()
+  if (n.startsWith('KL-') || n.startsWith('KL ')) return 'Kerala'
+  if (n.startsWith('AP-') || n.startsWith('AP ')) return 'Andhra Pradesh'
+  if (n.startsWith('TS-') || n.startsWith('TS ')) return 'Telangana'
+  return 'Karnataka'
 }
 
 function SectionLabel({ children, t }) {
@@ -123,14 +125,15 @@ export default function LiveFeed() {
 
   const todayIST = new Date(Date.now() + 5.5 * 60 * 60 * 1000).toISOString().split('T')[0]
 
-  const [viewDate, setViewDate] = useState(todayIST)
-  const [crmTab, setCrmTab] = useState('old')
-  const [tlFilter, setTlFilter] = useState('all')
-  const [search, setSearch] = useState('')
-  const [data, setData] = useState(null)
-  const [loading, setLoading] = useState(true)
-  const [lastUpdated, setLastUpdated] = useState(null)
-  const [countdown, setCountdown] = useState(REFRESH_SECS)
+  const [viewDate,      setViewDate]      = useState(todayIST)
+  const [crmTab,        setCrmTab]        = useState('old')
+  const [tlFilter,      setTlFilter]      = useState('all')
+  const [search,        setSearch]        = useState('')
+  const [regionFilter,  setRegionFilter]  = useState('')   // '' = all regions
+  const [data,          setData]          = useState(null)
+  const [loading,       setLoading]       = useState(true)
+  const [lastUpdated,   setLastUpdated]   = useState(null)
+  const [countdown,     setCountdown]     = useState(REFRESH_SECS)
 
   const timerRef = useRef(null)
   const countRef = useRef(null)
@@ -174,6 +177,9 @@ export default function LiveFeed() {
   const todayTxns = data?.todayTxns || []
   const todayWalkins = data?.todayWalkins || []
 
+  // Derive unique regions from branch data
+  const regions = [...new Set(branches.map(b => deriveRegion(b.branch_name, b.region)))].sort()
+
   // Walkin funnel logic
   const totalWalkins = walkinSummary.total || 0
   const totalBilled = summary.total || 0
@@ -211,6 +217,7 @@ export default function LiveFeed() {
     if (tlFilter === 'walkin' && item.type !== 'walkin') return false
     if (tlFilter === 'approved' && !(item.type === 'txn' && item.status === 'approved')) return false
     if (tlFilter === 'pending' && !(item.type === 'txn' && item.status === 'pending')) return false
+    if (regionFilter && deriveRegion(item.branch, item.region) !== regionFilter) return false
     if (search) {
       const s = search.toLowerCase()
       return (item.name || '').toLowerCase().includes(s) ||
@@ -275,6 +282,27 @@ export default function LiveFeed() {
           ))}
         </div>
 
+        {/* Region filter */}
+        {regions.length > 1 && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ fontSize: '.58rem', color: t.text4, letterSpacing: '.08em' }}>REGION</span>
+            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+              {['', ...regions].map(r => (
+                <button key={r || 'all'} onClick={() => setRegionFilter(r)} style={{
+                  padding: '4px 10px', borderRadius: 20, fontSize: '.62rem', cursor: 'pointer',
+                  border: `1px solid ${regionFilter === r ? t.gold : t.border}`,
+                  background: regionFilter === r ? `${t.gold}18` : 'transparent',
+                  color: regionFilter === r ? t.gold : t.text3,
+                  fontWeight: regionFilter === r ? 600 : 400,
+                  transition: 'all .15s',
+                }}>
+                  {r || 'All'}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         <div style={{ flex: 1 }} />
 
         {/* Refresh info */}
@@ -305,6 +333,7 @@ export default function LiveFeed() {
             totalWalkins={totalWalkins} totalBilled={totalBilled} approved={approved} pending={pending}
             notYetBilled={notYetBilled}
             branches={branches} hourly={hourly} todayWalkins={todayWalkins}
+            regionFilter={regionFilter}
             filteredTimeline={filteredTimeline} tlFilter={tlFilter} setTlFilter={setTlFilter}
             search={search} setSearch={setSearch} isToday={isToday} />
         ) : (
@@ -322,6 +351,7 @@ function OldCrmTab({
   t, summary, walkinSummary,
   totalWalkins, totalBilled, approved, pending,
   notYetBilled, branches, hourly, todayWalkins,
+  regionFilter,
   filteredTimeline, tlFilter, setTlFilter, search, setSearch, isToday,
 }) {
   const approvedValue = summary.approved_value || 0
@@ -397,46 +427,55 @@ function OldCrmTab({
       {branches.length > 0 && (
         <div>
           <SectionLabel t={t}>Branch Activity</SectionLabel>
-          <BranchTable branches={branches} t={t} />
+          <BranchTable branches={branches} t={t} regionFilter={regionFilter} />
         </div>
       )}
 
       {/* ──────── 5. HOURLY PULSE ──────── */}
-      {hourly.length > 0 && (
-        <div>
-          <SectionLabel t={t}>Hourly Pulse</SectionLabel>
-          <Card t={t} style={{ padding: '16px 20px' }}>
-            <div style={{ display: 'flex', alignItems: 'flex-end', gap: 4, height: 64 }}>
-              {hourly.map(h => {
-                const maxH = Math.max(...hourly.map(x => x.bills || 0), 1)
-                const ht = Math.max(4, ((h.bills || 0) / maxH) * 58)
-                const isNow = h.hour === new Date(Date.now() + 5.5*60*60*1000).getUTCHours()
-                return (
-                  <div key={h.hour} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flex: 1, gap: 3 }} title={`${h.hour}:00 — ${h.bills} bills, ${h.approved} approved`}>
-                    <div style={{
-                      width: '100%', height: ht, borderRadius: '3px 3px 0 0',
-                      background: isNow ? t.gold : (h.approved || 0) > 0 ? t.green : (h.bills || 0) > 0 ? t.blue : t.border2,
-                      transition: 'height .4s ease', position: 'relative',
-                    }}>
-                      {isNow && <div style={{ position: 'absolute', inset: 0, borderRadius: '3px 3px 0 0', boxShadow: `0 0 8px ${t.gold}80` }} />}
-                    </div>
-                    <span style={{ fontSize: '.46rem', color: isNow ? t.gold : t.text4, fontFamily: 'ui-monospace, monospace' }}>
-                      {h.hour === 0 ? '12a' : h.hour < 12 ? `${h.hour}a` : h.hour === 12 ? '12p' : `${h.hour-12}p`}
-                    </span>
+      <div>
+        <SectionLabel t={t}>Hourly Pulse · Bills by Hour</SectionLabel>
+        <Card t={t} style={{ padding: '16px 20px' }}>
+          <div style={{ display: 'flex', alignItems: 'flex-end', gap: 3, height: 72 }}>
+            {Array.from({ length: 24 }, (_, h) => {
+              const hd     = hourly.find(x => Number(x.hour) === h)
+              const bills  = hd ? Number(hd.bills)    : 0
+              const appr   = hd ? Number(hd.approved) : 0
+              const maxH   = Math.max(...hourly.map(x => Number(x.bills) || 0), 1)
+              const barH   = bills > 0 ? Math.max(6, (bills / maxH) * 64) : 3
+              const isNow  = h === new Date(Date.now() + 5.5*60*60*1000).getUTCHours()
+              const isPast = h < new Date(Date.now() + 5.5*60*60*1000).getUTCHours()
+              const bg     = isNow ? t.gold : appr > 0 && appr === bills ? t.green : bills > 0 ? t.blue : t.border
+              return (
+                <div key={h} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}
+                  title={`${h}:00–${h+1}:00 · ${bills} bills · ${appr} approved`}>
+                  <div style={{
+                    width: '100%', height: barH, borderRadius: '2px 2px 0 0',
+                    background: bg, opacity: isPast || isNow ? 1 : 0.3,
+                    transition: 'height .4s ease', position: 'relative',
+                  }}>
+                    {isNow && <div style={{ position: 'absolute', inset: 0, boxShadow: `0 0 10px ${t.gold}60`, borderRadius: '2px 2px 0 0' }} />}
+                    {bills > 0 && appr > 0 && appr < bills && (
+                      <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: `${Math.round((appr/bills)*100)}%`, background: t.green, borderRadius: '0 0 2px 2px' }} />
+                    )}
                   </div>
-                )
-              })}
-            </div>
-            <div style={{ display: 'flex', gap: 16, marginTop: 8 }}>
-              {[{c: t.gold, l: 'Now'}, {c: t.green, l: 'Has approvals'}, {c: t.blue, l: 'Activity'}, {c: t.border2, l: 'Quiet'}].map(x => (
-                <span key={x.l} style={{ fontSize: '.56rem', color: t.text4, display: 'flex', alignItems: 'center', gap: 4 }}>
-                  <span style={{ width: 7, height: 7, borderRadius: 2, background: x.c, display: 'inline-block' }} />{x.l}
-                </span>
-              ))}
-            </div>
-          </Card>
-        </div>
-      )}
+                  {(h % 3 === 0 || isNow) && (
+                    <span style={{ fontSize: '.44rem', color: isNow ? t.gold : t.text4, fontFamily: 'ui-monospace, monospace', whiteSpace: 'nowrap' }}>
+                      {h === 0 ? '12a' : h < 12 ? `${h}a` : h === 12 ? '12p' : `${h-12}p`}
+                    </span>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+          <div style={{ display: 'flex', gap: 16, marginTop: 10 }}>
+            {[{c: t.gold, l: 'Current hour'}, {c: t.green, l: 'All approved'}, {c: t.blue, l: 'Mixed'}, {c: t.border, l: 'No activity'}].map(x => (
+              <span key={x.l} style={{ fontSize: '.6rem', color: t.text3, display: 'flex', alignItems: 'center', gap: 5 }}>
+                <span style={{ width: 8, height: 8, borderRadius: 2, background: x.c, display: 'inline-block', flexShrink: 0 }} />{x.l}
+              </span>
+            ))}
+          </div>
+        </Card>
+      </div>
 
       {/* ──────── 6. WALKIN BREAKDOWN ──────── */}
       {totalWalkins > 0 && (
@@ -454,7 +493,10 @@ function OldCrmTab({
 
       {/* ──────── 6b. NOT BILLED DETAILS ──────── */}
       {notYetBilled > 0 && todayWalkins.length > 0 && (() => {
-        const notBilledWalkins = todayWalkins.filter(w => w.walkin_status !== 'sold')
+        const notBilledWalkins = todayWalkins.filter(w =>
+          w.walkin_status !== 'sold' &&
+          (!regionFilter || deriveRegion(w.branch_name, w.region) === regionFilter)
+        )
         if (!notBilledWalkins.length) return null
         return (
           <div>
@@ -665,37 +707,41 @@ function MetricCard({ t, label, value, color, sub, dim }) {
 }
 
 /* ── Branch Table ── */
-function BranchTable({ branches, t }) {
-  const maxVal = Math.max(...branches.map(b => b.value || 0), 1)
-  const sorted = [...branches].sort((a, b) => (b.value || 0) - (a.value || 0))
+function BranchTable({ branches, t, regionFilter }) {
+  const filtered = regionFilter
+    ? branches.filter(b => deriveRegion(b.branch_name, b.region) === regionFilter)
+    : branches
+  const sorted = [...filtered].sort((a, b) => (b.approved || 0) - (a.approved || 0))
   return (
     <Card t={t} style={{ padding: 0, overflow: 'hidden' }}>
-      {/* Header */}
       <div style={{
-        display: 'grid', gridTemplateColumns: '1.5fr 60px 60px 60px 1.4fr',
-        padding: '10px 16px', borderBottom: `1px solid ${t.border}`, gap: 8,
+        display: 'grid', gridTemplateColumns: '1fr 90px 90px 90px',
+        padding: '10px 20px', borderBottom: `1px solid ${t.border}`, gap: 12, background: t.card2,
       }}>
-        {['Branch', 'Appr.', 'Pend.', 'Rej.', 'Value'].map(h => (
-          <span key={h} style={{ fontSize: '.48rem', letterSpacing: '.14em', textTransform: 'uppercase', color: t.text4 }}>{h}</span>
+        {['Branch', 'Approved', 'Pending', 'Rejected'].map((h, i) => (
+          <span key={h} style={{ fontSize: '.62rem', letterSpacing: '.1em', textTransform: 'uppercase', color: t.text3, fontWeight: 500, textAlign: i > 0 ? 'center' : 'left' }}>{h}</span>
         ))}
       </div>
+      {sorted.length === 0 && (
+        <div style={{ padding: '24px', textAlign: 'center', color: t.text4, fontSize: '.72rem' }}>No branch data for this region</div>
+      )}
       {sorted.map((b, i) => (
         <div key={b.branch_name || i} style={{
-          display: 'grid', gridTemplateColumns: '1.5fr 60px 60px 60px 1.4fr',
-          padding: '8px 16px', borderBottom: `1px solid ${t.border}`, gap: 8,
+          display: 'grid', gridTemplateColumns: '1fr 90px 90px 90px',
+          padding: '11px 20px', borderBottom: i < sorted.length - 1 ? `1px solid ${t.border}` : 'none', gap: 12,
           alignItems: 'center',
         }}>
-          <span style={{ fontSize: '.68rem', color: t.text2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          <span style={{ fontSize: '.75rem', color: t.text1, fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
             {b.branch_name || 'Unknown'}
           </span>
-          <Mono size=".72rem" color={t.green}>{b.approved || 0}</Mono>
-          <Mono size=".72rem" color={t.orange}>{b.pending || 0}</Mono>
-          <Mono size=".72rem" color={b.rejected ? t.red : t.text4}>{b.rejected || 0}</Mono>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <Bar pct={((b.value || 0) / maxVal) * 100} color={t.gold} height={6} bg={t.border} />
-            <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: '.58rem', color: t.text3, whiteSpace: 'nowrap' }}>
-              {fmtAmt(b.value)}
-            </span>
+          <div style={{ textAlign: 'center' }}>
+            <Mono size=".82rem" color={Number(b.approved) > 0 ? t.green : t.text4}>{b.approved || 0}</Mono>
+          </div>
+          <div style={{ textAlign: 'center' }}>
+            <Mono size=".82rem" color={Number(b.pending) > 0 ? t.orange : t.text4}>{b.pending || 0}</Mono>
+          </div>
+          <div style={{ textAlign: 'center' }}>
+            <Mono size=".82rem" color={Number(b.rejected) > 0 ? t.red : t.text4}>{b.rejected || 0}</Mono>
           </div>
         </div>
       ))}
