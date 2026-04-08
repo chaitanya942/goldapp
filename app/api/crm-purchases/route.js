@@ -295,7 +295,7 @@ export async function GET(req) {
           WHERE DATE(t.date + INTERVAL 330 MINUTE) = ?
           GROUP BY t.branch_id, b.brnch_name
           ORDER BY value DESC
-          LIMIT 20
+          LIMIT 40
         `, [todayIST]),
 
         // 5. Hourly activity
@@ -335,7 +335,7 @@ export async function GET(req) {
           LEFT JOIN branch_tbl b ON b.brnch_id = t.branch_id
           WHERE DATE(t.date + INTERVAL 330 MINUTE) = ?
           ORDER BY t.time DESC
-          LIMIT 200
+          LIMIT 300
         `, [todayIST]),
 
         // 8. Today's walk-ins (for timeline)
