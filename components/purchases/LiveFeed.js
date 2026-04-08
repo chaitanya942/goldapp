@@ -152,8 +152,6 @@ export default function LiveFeed() {
 
   const [viewDate,      setViewDate]      = useState(todayIST)
   const [crmTab,        setCrmTab]        = useState('old')
-  const [tlFilter,      setTlFilter]      = useState('all') // kept for filteredTimeline
-  const [search,        setSearch]        = useState('')   // kept for filteredTimeline
   const [regionFilter,  setRegionFilter]  = useState('')   // '' = all regions
   const [data,          setData]          = useState(null)
   const [loadError,     setLoadError]     = useState(null)
@@ -310,21 +308,9 @@ export default function LiveFeed() {
     return items
   })()
 
-  const filteredTimeline = timelineItems.filter(item => {
-    if (tlFilter === 'txn' && item.type !== 'txn') return false
-    if (tlFilter === 'walkin' && item.type !== 'walkin') return false
-    if (tlFilter === 'approved' && !(item.type === 'txn' && item.status === 'approved')) return false
-    if (tlFilter === 'pending' && !(item.type === 'txn' && item.status === 'pending')) return false
-    if (regionFilter && item.region !== regionFilter) return false
-    if (search) {
-      const s = search.toLowerCase()
-      return (item.name || '').toLowerCase().includes(s) ||
-        (item.mobile || '').includes(s) ||
-        (item.branch || '').toLowerCase().includes(s) ||
-        (item.bill || '').toLowerCase().includes(s)
-    }
-    return true
-  })
+  const filteredTimeline = regionFilter
+    ? timelineItems.filter(item => item.region === regionFilter)
+    : timelineItems
 
   /* ═══ RENDER ═══ */
   return (
@@ -454,6 +440,7 @@ export default function LiveFeed() {
             notBilledCnt={notBilledCnt} notBilledWalkins={notBilledWalkins} crmNotUpdatedCnt={crmNotUpdatedCnt}
             goldPipeline={effectiveGoldPipeline}
             todayTxns={rTxns} todayWalkins={rWalkins}
+            allTxns={todayTxns} allWalkins={todayWalkins} allKycRows={kycRows} regions={regions}
             kycRows={regionFilter ? kycRows.filter(r => r.region === regionFilter) : kycRows}
             regionFilter={regionFilter}
             filteredTimeline={filteredTimeline} isToday={isToday}
@@ -476,7 +463,8 @@ function OldCrmTab({
   trueRejected, wrongEntry,
   notBilledCnt, notBilledWalkins, crmNotUpdatedCnt,
   goldPipeline,
-  todayTxns, todayWalkins, kycRows,
+  todayTxns, todayWalkins, allTxns, allWalkins, allKycRows, regions,
+  kycRows,
   filteredTimeline, isToday, viewDate,
   newEventCount, clearNewEvents,
 }) {
@@ -494,15 +482,12 @@ function OldCrmTab({
   const kycBlacklistedWt  = parseFloat(goldPipeline?.kyc_blacklisted_wt) || 0
   const kycOverriddenCnt  = goldPipeline?.kyc_overridden_cnt             || 0
   const kycChecklistCnt   = goldPipeline?.kyc_checklist_cnt              || 0
-  const missingWeightCnt  = walkinSummary.missing_weight_count          || 0
   const avgGrossWeight    = approved > 0 && goldPurchased > 0 ? goldPurchased / approved : 0
   const billedPct         = totalWalkins > 0 ? Math.round((totalBilled / totalWalkins) * 100) : 0
   const approvedPctBilled = totalBilled  > 0 ? Math.round((approved   / totalBilled)  * 100) : 0
   const conversionPct     = totalWalkins > 0 ? Math.round((approved   / totalWalkins) * 100) : 0
   const physicalApproved  = goldPipeline?.physical?.approved || 0
   const releaseApproved   = goldPipeline?.released?.approved || 0
-  const physicalPending   = goldPipeline?.physical?.pending  || 0
-  const releasePending    = goldPipeline?.released?.pending  || 0
 
   const hasData = totalWalkins > 0 || totalBilled > 0
 
@@ -564,23 +549,23 @@ function OldCrmTab({
           boxShadow: `0 4px 20px rgba(0,0,0,.12), inset 0 1px 0 ${t.border}`,
           backdropFilter: 'blur(4px)',
         }}>
-          <HeroNum label="Walked In" value={totalWalkins} color={t.blue} t={t} active={activeMetric==='walkin'} onClick={() => toggleMetric('walkin')} />
+          <HeroNum label="Walked In" value={totalWalkins} color={t.blue} t={t} weight={goldWalkedIn} active={activeMetric==='walkin'} onClick={() => toggleMetric('walkin')} />
           <FlowArrow t={t} pct={billedPct} />
-          <HeroNum label="Bills Submitted" value={totalBilled} color={t.gold} t={t} active={activeMetric==='billed'} onClick={() => toggleMetric('billed')} />
+          <HeroNum label="Bills Submitted" value={totalBilled} color={t.gold} t={t} weight={goldPurchased+goldPending+goldRejected} active={activeMetric==='billed'} onClick={() => toggleMetric('billed')} />
           <FlowArrow t={t} pct={approvedPctBilled} />
-          <HeroNum label="Purchased" value={approved} color={t.green} t={t} active={activeMetric==='purchased'} onClick={() => toggleMetric('purchased')} />
+          <HeroNum label="Purchased" value={approved} color={t.green} t={t} weight={goldPurchased} active={activeMetric==='purchased'} onClick={() => toggleMetric('purchased')} />
           <FlowSep t={t} />
-          <HeroNum label="In Pipeline" value={pending} color={t.orange} t={t} small active={activeMetric==='pending'} onClick={() => toggleMetric('pending')} />
+          <HeroNum label="In Pipeline" value={pending} color={t.orange} t={t} small weight={goldPending} active={activeMetric==='pending'} onClick={() => toggleMetric('pending')} />
           <FlowSep t={t} />
-          <HeroNum label="Bill Rejected" value={trueRejected} color={t.red} t={t} small active={activeMetric==='rejected'} onClick={() => toggleMetric('rejected')} />
+          <HeroNum label="Bill Rejected" value={trueRejected} color={t.red} t={t} small weight={goldRejected} active={activeMetric==='rejected'} onClick={() => toggleMetric('rejected')} />
           <FlowSep t={t} />
           <HeroNum label="Re-billed & Approved" value={wrongEntry} color={t.orange} t={t} small active={activeMetric==='rebilled'} onClick={() => toggleMetric('rebilled')} />
           <FlowSep t={t} />
-          <HeroNum label="KYC Blocked" value={kycBlacklistedCnt} color={t.purple} t={t} small active={activeMetric==='kyc_blocked'} onClick={() => toggleMetric('kyc_blocked')} />
+          <HeroNum label="KYC Blocked" value={kycBlacklistedCnt} color={t.purple} t={t} small weight={kycBlacklistedWt} active={activeMetric==='kyc_blocked'} onClick={() => toggleMetric('kyc_blocked')} />
           {kycOverriddenCnt > 0 && <FlowSep t={t} />}
           {kycOverriddenCnt > 0 && <HeroNum label="KYC Cleared Later" value={kycOverriddenCnt} color={t.blue} t={t} small active={activeMetric==='kyc_cleared'} onClick={() => toggleMetric('kyc_cleared')} />}
           <FlowSep t={t} />
-          <HeroNum label="Left Unbilled" value={notBilledCnt} color={t.text3} t={t} small muted active={activeMetric==='unbilled'} onClick={() => toggleMetric('unbilled')} />
+          <HeroNum label="Left Unbilled" value={notBilledCnt} color={t.text3} t={t} small muted weight={goldNotBilled} active={activeMetric==='unbilled'} onClick={() => toggleMetric('unbilled')} />
         </div>
         <div style={{ display: 'flex', gap: 10, marginTop: 10, flexWrap: 'wrap' }}>
           <Pill label="Walk→Bill" value={`${billedPct}%`} color={t.gold} bg={t.goldDim} />
@@ -598,63 +583,59 @@ function OldCrmTab({
       </div>
 
 
-      {/* ──────── 2. GOLD WEIGHT FLOW ──────── */}
+      {/* ──────── 2. GOLD WEIGHT STRIP + REGION TABLE ──────── */}
       <div>
         <SectionLabel t={t}>Gold Weight Flow</SectionLabel>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 10 }}>
-          <MetricCard t={t} label="Walked In" color={t.blue}
-            value={goldWalkedIn > 0 ? fmtWt(goldWalkedIn) : '—'}
-            sub={missingWeightCnt > 0 ? `${missingWeightCnt} walkins missing wt` : `${totalWalkins} walk-ins`}
-            bar={100}
-            active={activeMetric === 'walkin'} onClick={() => toggleMetric('walkin')} />
-          <MetricCard t={t} label="Purchased" color={t.green}
-            value={goldPurchased > 0 ? fmtWt(goldPurchased) : '—'}
-            sub={`${approved} bills · ${physicalApproved} physical · ${releaseApproved} takeover`}
-            bar={goldWalkedIn > 0 ? (goldPurchased / goldWalkedIn) * 100 : 0}
-            active={activeMetric === 'purchased'} onClick={() => toggleMetric('purchased')} />
-          <MetricCard t={t} label="In Pipeline" color={t.orange}
-            value={goldPending > 0 ? fmtWt(goldPending) : '—'}
-            sub={`${pending} bills · ${physicalPending} physical · ${releasePending} takeover`}
-            bar={goldWalkedIn > 0 ? (goldPending / goldWalkedIn) * 100 : 0}
-            active={activeMetric === 'pending'} onClick={() => toggleMetric('pending')} />
-          <MetricCard t={t} label="Bill Rejected Wt" color={t.red}
-            value={goldRejected > 0 ? fmtWt(goldRejected) : '—'}
-            sub={wrongEntry > 0 ? `${trueRejected} rejected · ${wrongEntry} wrong entries` : `${trueRejected} bills rejected`}
-            bar={goldWalkedIn > 0 ? (goldRejected / goldWalkedIn) * 100 : 0}
-            active={activeMetric === 'rejected'} onClick={() => toggleMetric('rejected')} />
-          <MetricCard t={t} label="KYC Blocked Wt" color={t.purple}
-            value={kycBlacklistedWt > 0 ? fmtWt(kycBlacklistedWt) : '—'}
-            sub={`${kycBlacklistedCnt} customers blocked`}
-            bar={goldWalkedIn > 0 ? (kycBlacklistedWt / goldWalkedIn) * 100 : 0}
-            active={activeMetric === 'kyc_blocked'} onClick={() => toggleMetric('kyc_blocked')} />
-          <MetricCard t={t} label="Left Unbilled Wt" color={t.text3}
-            value={goldNotBilled > 0 ? fmtWt(goldNotBilled) : '—'}
-            sub={crmNotUpdatedCnt > 0 ? `${notBilledCnt} unbilled · ${crmNotUpdatedCnt} CRM not updated` : `${notBilledCnt} left without billing`}
-            bar={goldWalkedIn > 0 ? (goldNotBilled / goldWalkedIn) * 100 : 0}
-            active={activeMetric === 'unbilled'} onClick={() => toggleMetric('unbilled')} />
-        </div>
-        <div style={{ display: 'flex', gap: 16, marginTop: 8, flexWrap: 'wrap', padding: '6px 14px', background: t.card, border: `1px solid ${t.border}`, borderRadius: 8, alignItems: 'center' }}>
-          <span style={{ fontSize: '.6rem', color: t.text3 }}>Avg gross weight per purchase:</span>
-          <span style={{ fontSize: '.72rem', color: t.text1, fontFamily: 'ui-monospace,monospace', fontWeight: 500 }}>{avgGrossWeight > 0 ? fmtWt(avgGrossWeight) : '—'}</span>
-          <span style={{ fontSize: '.6rem', color: t.text3, marginLeft: 16 }}>Approved value:</span>
-          <span style={{ fontSize: '.72rem', color: t.gold, fontFamily: 'ui-monospace,monospace', fontWeight: 500 }}>{fmtAmt(approvedValue)}</span>
+        {/* Compact proportion strip */}
+        <div style={{ display: 'flex', background: t.card, border: `1px solid ${t.border}`, borderRadius: 12, overflow: 'hidden', boxShadow: '0 2px 8px rgba(0,0,0,.10)' }}>
+          {[
+            { key: 'walkin',    label: 'Walked In',    wt: goldWalkedIn,      color: t.blue,   pct: 100 },
+            { key: 'purchased', label: 'Purchased',    wt: goldPurchased,     color: t.green,  pct: goldWalkedIn > 0 ? goldPurchased / goldWalkedIn * 100 : 0 },
+            { key: 'pending',   label: 'In Pipeline',  wt: goldPending,       color: t.orange, pct: goldWalkedIn > 0 ? goldPending / goldWalkedIn * 100 : 0 },
+            { key: 'rejected',  label: 'Rejected Wt',  wt: goldRejected,      color: t.red,    pct: goldWalkedIn > 0 ? goldRejected / goldWalkedIn * 100 : 0 },
+            { key: 'kyc_blocked', label: 'KYC Blocked', wt: kycBlacklistedWt, color: t.purple, pct: goldWalkedIn > 0 ? kycBlacklistedWt / goldWalkedIn * 100 : 0 },
+            { key: 'unbilled',  label: 'Left Unbilled', wt: goldNotBilled,    color: t.text3,  pct: goldWalkedIn > 0 ? goldNotBilled / goldWalkedIn * 100 : 0 },
+          ].map((item, i, arr) => (
+            <div key={item.key}
+              onClick={() => toggleMetric(item.key)}
+              onMouseEnter={e => e.currentTarget.style.background = t.card2}
+              onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+              style={{
+                flex: 1, padding: '12px 14px', cursor: 'pointer',
+                borderRight: i < arr.length - 1 ? `1px solid ${t.border}` : 'none',
+                borderTop: activeMetric === item.key ? `3px solid ${item.color}` : `3px solid transparent`,
+                background: activeMetric === item.key ? `${item.color}0c` : 'transparent',
+                transition: 'background .15s, border-top .15s',
+              }}>
+              <div style={{ fontSize: '.55rem', color: item.color, textTransform: 'uppercase', letterSpacing: '.1em', fontWeight: 700 }}>{item.label}</div>
+              <div style={{ fontSize: '.95rem', fontFamily: 'ui-monospace,monospace', color: t.text1, fontWeight: 300, marginTop: 4 }}>
+                {item.wt > 0 ? fmtWt(item.wt) : '—'}
+              </div>
+              <div style={{ marginTop: 7, height: 3, borderRadius: 2, background: t.border, overflow: 'hidden' }}>
+                <div style={{ height: '100%', width: `${Math.min(100, item.pct)}%`, background: item.color, borderRadius: 2, transition: 'width .6s ease' }} />
+              </div>
+              <div style={{ fontSize: '.5rem', color: t.text4, marginTop: 3 }}>
+                {item.pct > 0 ? `${item.pct.toFixed(0)}% of walked-in` : ''}
+              </div>
+            </div>
+          ))}
         </div>
 
-        {/* Data quality note */}
-        <div style={{
-          marginTop: 10, padding: '10px 14px', borderRadius: 8,
-          background: `${t.orange}0e`, border: `1px solid ${t.orange}30`,
-          display: 'flex', gap: 10, alignItems: 'flex-start',
-        }}>
-          <span style={{ color: t.orange, fontSize: '.75rem', flexShrink: 0, marginTop: 1 }}>ⓘ</span>
-          <div style={{ fontSize: '.62rem', color: t.text3, lineHeight: 1.7 }}>
-            <strong style={{ color: t.text2 }}>Data quality notes —</strong>{' '}
-            All weights are <strong>gross weights</strong> as declared by the customer at walk-in registration; actual weighed gold may differ slightly.{' '}
-            <strong>KYC Blocked</strong> weight comes from a separate KYC system (not walk-in registration) and is excluded from Left Unbilled to avoid double-counting.{' '}
-            A small number of walkins may not match to a bill due to missing or mismatched mobile numbers in the CRM.
-          </div>
+        {/* Stats + data quality */}
+        <div style={{ display: 'flex', gap: 20, marginTop: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <span style={{ fontSize: '.6rem', color: t.text3 }}>Avg wt/purchase: <strong style={{ color: t.text1, fontFamily: 'ui-monospace,monospace' }}>{avgGrossWeight > 0 ? fmtWt(avgGrossWeight) : '—'}</strong></span>
+          <span style={{ fontSize: '.6rem', color: t.text3 }}>Approved value: <strong style={{ color: t.gold, fontFamily: 'ui-monospace,monospace' }}>{fmtAmt(approvedValue)}</strong></span>
+          {physicalApproved > 0 && <span style={{ fontSize: '.6rem', color: t.text3 }}>Physical: <strong style={{ color: t.text2 }}>{physicalApproved}</strong></span>}
+          {releaseApproved > 0  && <span style={{ fontSize: '.6rem', color: t.text3 }}>Takeover: <strong style={{ color: t.text2 }}>{releaseApproved}</strong></span>}
+          <span style={{ fontSize: '.56rem', color: t.text4, marginLeft: 'auto' }}>ⓘ Weights are gross as declared at walk-in · KYC weight excluded from Unbilled</span>
         </div>
       </div>
+
+      {/* ──────── 3. REGION BREAKDOWN ──────── */}
+      {regions && regions.length > 1 && (
+        <RegionTable t={t} regions={regions} allTxns={allTxns} allWalkins={allWalkins} allKycRows={allKycRows}
+          activeMetric={activeMetric} toggleMetric={toggleMetric} />
+      )}
 
       {/* ──────── 4. DETAIL TABLE ──────── */}
 
@@ -722,7 +703,7 @@ function OldCrmTab({
 /* ════════════════════════════════════════════════════════════════ */
 
 /* ── Hero Number (clickable) ── */
-function HeroNum({ label, value, color, t, small, muted, onClick, active }) {
+function HeroNum({ label, value, color, t, small, muted, onClick, active, weight }) {
   return (
     <div
       onClick={onClick}
@@ -738,19 +719,27 @@ function HeroNum({ label, value, color, t, small, muted, onClick, active }) {
         boxShadow: active ? `0 0 18px ${color}22` : 'none',
         transition: 'background .18s, outline .18s, box-shadow .18s, transform .15s, opacity .18s',
       }}>
-      <Mono size={small ? '1.9rem' : '2.6rem'} color={active ? color : color} weight={200}>
+      <Mono size={small ? '1.9rem' : '2.6rem'} color={color} weight={200}>
         {fmtNum(value)}
       </Mono>
       <span style={{
         fontSize: '.6rem', letterSpacing: '.12em', textTransform: 'uppercase',
-        color: active ? color : t.text3, marginTop: 6,
+        color: active ? color : t.text3, marginTop: 4,
         fontWeight: active ? 700 : 500,
         transition: 'color .18s',
       }}>
         {label}
       </span>
+      {weight > 0 && (
+        <span style={{
+          fontSize: '.55rem', color: active ? `${color}cc` : t.text4,
+          fontFamily: 'ui-monospace,monospace', marginTop: 3, letterSpacing: '.04em',
+        }}>
+          {fmtWt(weight)}
+        </span>
+      )}
       {active && (
-        <span style={{ width: 20, height: 2, borderRadius: 1, background: color, marginTop: 6, display: 'block' }} />
+        <span style={{ width: 20, height: 2, borderRadius: 1, background: color, marginTop: 5, display: 'block' }} />
       )}
     </div>
   )
@@ -788,10 +777,29 @@ function LiveDetail({ t, activeMetric, todayTxns, todayWalkins, kycRows, notBill
 
   return (
     <div style={{ animation: 'slideUp .22s ease' }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10, gap: 10, flexWrap: 'wrap' }}>
         <SectionLabel t={t}>{label} · {filtered.length} records</SectionLabel>
-        <input type="text" placeholder="Search..." value={search} onChange={e => setSearch(e.target.value)}
-          style={{ background: t.card2, border: `1px solid ${t.border}`, borderRadius: 6, padding: '4px 10px', fontSize: '.62rem', color: t.text2, outline: 'none', width: 170, fontFamily: 'ui-monospace, monospace' }} />
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <input type="text" placeholder="Search..." value={search} onChange={e => setSearch(e.target.value)}
+            style={{ background: t.card2, border: `1px solid ${t.border}`, borderRadius: 6, padding: '4px 10px', fontSize: '.62rem', color: t.text2, outline: 'none', width: 160, fontFamily: 'ui-monospace, monospace' }} />
+          <button onClick={() => {
+            if (type === 'txn') downloadCSV(`${label}.csv`,
+              ['Bill No','Date','Time','Customer','Phone','Branch','Gross Wt','Stone','Wastage','Net Wt','Purity','Gross Amt','Svc%','Status'],
+              filtered, r => [r.bill_no, fmtDate(r.txn_date), r.time, r.cust_name, r.cust_mobile, r.branch_name,
+                csvSum(r.grms_wet_csv).toFixed(2), csvSum(r.stnt_wet_csv).toFixed(2),
+                csvSum(r.wastag_csv).toFixed(2), csvSum(r.net_wet_csv).toFixed(2),
+                wtdAvgPurity(r.grms_wet_csv, r.purity_csv)?.toFixed(1) ?? '',
+                csvSum(r.grs_amnt_csv).toFixed(0), r.serv_chr, r.trxn_status])
+            else if (type === 'walkin') downloadCSV(`${label}.csv`,
+              ['Time','Customer','Phone','Branch','Gold Wt','Item Type','Walk Reason','Status'],
+              filtered, r => [r.time, r.cust_name, r.cust_mobile, r.branch_name, r.gms_weight, r.item_type, r.walk_reason, r.walkin_status])
+            else downloadCSV(`${label}.csv`,
+              ['Time','Name','Phone','Branch','Grams','Reason'],
+              filtered, r => [r.time, r.name, r.mob_num, r.branch_name, r.grams, r.rej_rsn])
+          }} style={{ padding: '4px 12px', borderRadius: 6, fontSize: '.58rem', cursor: 'pointer', border: `1px solid ${t.border}`, background: t.card, color: t.text3, whiteSpace: 'nowrap' }}>
+            ↓ CSV
+          </button>
+        </div>
       </div>
       {type === 'txn'    && <TxnTable    rows={filtered} t={t} />}
       {type === 'walkin' && <WalkinTable rows={filtered} t={t} />}
@@ -901,6 +909,71 @@ function KycTable({ rows, t }) {
         ))}
       </div>
     </Card>
+  )
+}
+
+/* ── CSV Download ── */
+function downloadCSV(filename, headers, rows, extractor) {
+  const lines = [headers.join(',')]
+  rows.forEach(r => lines.push(extractor(r).map(v => `"${String(v ?? '').replace(/"/g, '""')}"`).join(',')))
+  const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url; a.download = filename; a.click()
+  URL.revokeObjectURL(url)
+}
+
+/* ── Region Breakdown Table ── */
+function RegionTable({ t, regions, allTxns, allWalkins, allKycRows }) {
+  const rows = regions.map(r => {
+    const rTx  = allTxns.filter(tx => tx.region === r)
+    const rWk  = allWalkins.filter(w => w.region === r)
+    const rApp = rTx.filter(tx => tx.trxn_status === 'approved')
+    const rPend= rTx.filter(tx => tx.trxn_status === 'pending')
+    const rKyc = (allKycRows || []).filter(k => k.region === r)
+    const value = rApp.reduce((s, tx) => s + (Number(tx.amount) || 0), 0)
+    const conv  = rWk.length > 0 ? Math.round(rApp.length / rWk.length * 100) : 0
+    return { region: r, walkins: rWk.length, billed: rTx.length, purchased: rApp.length, pending: rPend.length, kyc: rKyc.length, value, conv }
+  }).sort((a, b) => b.purchased - a.purchased)
+
+  const cols = ['Region', 'Walk-ins', 'Billed', 'Purchased', 'Pending', 'KYC Blocked', 'Value', 'Conversion']
+  return (
+    <div>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+        <SectionLabel t={t}>Region Breakdown</SectionLabel>
+        <button onClick={() => downloadCSV('regions.csv', cols, rows, r => [r.region, r.walkins, r.billed, r.purchased, r.pending, r.kyc, r.value, `${r.conv}%`])}
+          style={{ padding: '4px 12px', borderRadius: 6, fontSize: '.58rem', cursor: 'pointer', border: `1px solid ${t.border}`, background: t.card, color: t.text3, marginBottom: 12 }}>
+          ↓ CSV
+        </button>
+      </div>
+      <Card t={t} style={{ padding: 0, overflow: 'hidden' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 80px 80px 90px 80px 90px 110px 90px', gap: 8, padding: '8px 16px', background: t.card2, borderBottom: `1px solid ${t.border}` }}>
+          {cols.map(h => <span key={h} style={{ fontSize: '.56rem', color: t.text3, fontWeight: 600, letterSpacing: '.1em', textTransform: 'uppercase' }}>{h}</span>)}
+        </div>
+        {rows.map((r, i) => (
+          <div key={r.region} style={{
+            display: 'grid', gridTemplateColumns: '1fr 80px 80px 90px 80px 90px 110px 90px',
+            gap: 8, padding: '11px 16px', borderBottom: i < rows.length - 1 ? `1px solid ${t.border}18` : 'none', alignItems: 'center',
+          }}
+            onMouseEnter={e => e.currentTarget.style.background = t.card2}
+            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+            <span style={{ fontSize: '.75rem', color: t.text1, fontWeight: 600 }}>{r.region}</span>
+            <span style={{ fontSize: '.68rem', color: t.blue,   fontFamily: 'ui-monospace,monospace' }}>{r.walkins}</span>
+            <span style={{ fontSize: '.68rem', color: t.gold,   fontFamily: 'ui-monospace,monospace' }}>{r.billed}</span>
+            <span style={{ fontSize: '.68rem', color: t.green,  fontFamily: 'ui-monospace,monospace', fontWeight: 600 }}>{r.purchased}</span>
+            <span style={{ fontSize: '.68rem', color: t.orange, fontFamily: 'ui-monospace,monospace' }}>{r.pending}</span>
+            <span style={{ fontSize: '.68rem', color: t.purple, fontFamily: 'ui-monospace,monospace' }}>{r.kyc || '—'}</span>
+            <span style={{ fontSize: '.68rem', color: t.gold,   fontFamily: 'ui-monospace,monospace' }}>{r.value > 0 ? fmtAmt(r.value) : '—'}</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <div style={{ flex: 1, height: 4, borderRadius: 2, background: t.border, overflow: 'hidden' }}>
+                <div style={{ height: '100%', width: `${r.conv}%`, background: r.conv >= 50 ? t.green : r.conv >= 30 ? t.orange : t.red, borderRadius: 2 }} />
+              </div>
+              <span style={{ fontSize: '.6rem', color: t.text3, fontFamily: 'ui-monospace,monospace', whiteSpace: 'nowrap' }}>{r.conv}%</span>
+            </div>
+          </div>
+        ))}
+      </Card>
+    </div>
   )
 }
 
