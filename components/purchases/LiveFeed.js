@@ -47,7 +47,6 @@ const STATUS_STYLE = {
   pending:  { color: '#e09830', label: 'Pending' },
 }
 
-const PMT_COLORS = { cash: '#3aaa6a', bank: '#4a9fdf', cheque: '#e09830', upi: '#9a6adf', neft: '#4a9fdf', rtgs: '#4a9fdf', imps: '#4a9fdf' }
 
 /* ── Formatters ── */
 const fmtAmt = n => n != null ? `\u20b9${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 })}` : '\u2014'
@@ -78,7 +77,7 @@ function Bar({ pct, color, height = 4, bg }) {
 
 function SectionLabel({ children, t }) {
   return (
-    <div style={{ fontSize: '.52rem', letterSpacing: '.18em', textTransform: 'uppercase', color: t.text4, marginBottom: 10, fontWeight: 500 }}>
+    <div style={{ fontSize: '.65rem', letterSpacing: '.14em', textTransform: 'uppercase', color: t.text3, marginBottom: 10, fontWeight: 600 }}>
       {children}
     </div>
   )
@@ -172,7 +171,6 @@ export default function LiveFeed() {
   const stages = data?.stages || null
   const branches = data?.branches || []
   const hourly = data?.hourly || []
-  const payments = data?.payments || []
   const todayTxns = data?.todayTxns || []
   const todayWalkins = data?.todayWalkins || []
 
@@ -296,7 +294,7 @@ export default function LiveFeed() {
       </div>
 
       {/* ── BODY ── */}
-      <div style={{ maxWidth: 1200, margin: '0 auto', padding: '24px 20px' }}>
+      <div style={{ padding: '24px 28px' }}>
         {loading && !data ? (
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: 400, gap: 16 }}>
             <GoldSpinner size={40} />
@@ -306,7 +304,7 @@ export default function LiveFeed() {
           <OldCrmTab t={t} summary={summary} walkinSummary={walkinSummary}
             totalWalkins={totalWalkins} totalBilled={totalBilled} approved={approved} pending={pending}
             notYetBilled={notYetBilled}
-            branches={branches} hourly={hourly} payments={payments}
+            branches={branches} hourly={hourly} todayWalkins={todayWalkins}
             filteredTimeline={filteredTimeline} tlFilter={tlFilter} setTlFilter={setTlFilter}
             search={search} setSearch={setSearch} isToday={isToday} />
         ) : (
@@ -323,14 +321,12 @@ export default function LiveFeed() {
 function OldCrmTab({
   t, summary, walkinSummary,
   totalWalkins, totalBilled, approved, pending,
-  notYetBilled, branches, hourly, payments,
+  notYetBilled, branches, hourly, todayWalkins,
   filteredTimeline, tlFilter, setTlFilter, search, setSearch, isToday,
 }) {
   const approvedValue = summary.approved_value || 0
   const avgTicket = approved > 0 ? Math.round(approvedValue / approved) : 0
   const goldWalkedIn = walkinSummary.total_gold_wt || 0
-  const physicalCount = summary.physical_count || 0
-  const takeoverCount = summary.takeover_count || 0
   const billedPct = totalWalkins > 0 ? Math.round((totalBilled / totalWalkins) * 100) : 0
   const approvedPctBilled = totalBilled > 0 ? Math.round((approved / totalBilled) * 100) : 0
   const conversionPct = totalWalkins > 0 ? Math.round((approved / totalWalkins) * 100) : 0
@@ -388,11 +384,13 @@ function OldCrmTab({
       </div>
 
       {/* ──────── 3. METRICS ROW ──────── */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 14 }}>
-        <MetricCard t={t} label="Approved Value" value={fmtAmt(approvedValue)} color={t.gold} sub={`${approved} transactions`} />
-        <MetricCard t={t} label="Average Ticket" value={fmtAmt(avgTicket)} color={t.text2} sub={approved > 0 ? `across ${approved} approved` : 'no approved txns'} />
-        <MetricCard t={t} label="Gold Walked In" value={fmtWt(goldWalkedIn)} color={t.gold}
-          sub={`from ${totalWalkins} walk-ins`} />
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 12 }}>
+        <MetricCard t={t} label="Gold Walked In"    value={goldWalkedIn > 0 ? fmtWt(goldWalkedIn) : '—'} color={t.blue}   sub={`${totalWalkins} walk-ins`} />
+        <MetricCard t={t} label="Gold Purchased"    value="—"                                              color={t.green}  sub="ornament data pending" dim />
+        <MetricCard t={t} label="Gold Pending"      value="—"                                              color={t.orange} sub="ornament data pending" dim />
+        <MetricCard t={t} label="Avg Ticket"        value={avgTicket > 0 ? fmtAmt(avgTicket) : '—'}        color={t.text1}  sub={approved > 0 ? `${approved} approved` : 'no sales yet'} />
+        <MetricCard t={t} label="Avg Net Weight"    value="—"                                              color={t.text3}  sub="ornament data pending" dim />
+        <MetricCard t={t} label="Approved Value"    value={fmtAmt(approvedValue)}                          color={t.gold}   sub={`${approved} transactions`} />
       </div>
 
       {/* ──────── 4. BRANCH ACTIVITY ──────── */}
@@ -403,95 +401,113 @@ function OldCrmTab({
         </div>
       )}
 
-      {/* ──────── 5. TWO COLUMNS ──────── */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 14 }}>
-        {/* Payment methods */}
+      {/* ──────── 5. HOURLY PULSE ──────── */}
+      {hourly.length > 0 && (
         <div>
-          <SectionLabel t={t}>Payment Methods</SectionLabel>
-          <Card t={t}>
-            {payments.length > 0 ? payments.map(pm => {
-              const maxVal = Math.max(...payments.map(p => p.value || 0), 1)
-              return (
-                <div key={pm.method} style={{ marginBottom: 10 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-                    <span style={{ fontSize: '.62rem', color: t.text3, textTransform: 'uppercase', letterSpacing: '.08em' }}>
-                      {pm.method || 'Unknown'}
-                    </span>
-                    <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: '.68rem', color: t.text2 }}>
-                      {fmtAmt(pm.value)} <span style={{ color: t.text4, fontSize: '.58rem' }}>({pm.count})</span>
+          <SectionLabel t={t}>Hourly Pulse</SectionLabel>
+          <Card t={t} style={{ padding: '16px 20px' }}>
+            <div style={{ display: 'flex', alignItems: 'flex-end', gap: 4, height: 64 }}>
+              {hourly.map(h => {
+                const maxH = Math.max(...hourly.map(x => x.bills || 0), 1)
+                const ht = Math.max(4, ((h.bills || 0) / maxH) * 58)
+                const isNow = h.hour === new Date(Date.now() + 5.5*60*60*1000).getUTCHours()
+                return (
+                  <div key={h.hour} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flex: 1, gap: 3 }} title={`${h.hour}:00 — ${h.bills} bills, ${h.approved} approved`}>
+                    <div style={{
+                      width: '100%', height: ht, borderRadius: '3px 3px 0 0',
+                      background: isNow ? t.gold : (h.approved || 0) > 0 ? t.green : (h.bills || 0) > 0 ? t.blue : t.border2,
+                      transition: 'height .4s ease', position: 'relative',
+                    }}>
+                      {isNow && <div style={{ position: 'absolute', inset: 0, borderRadius: '3px 3px 0 0', boxShadow: `0 0 8px ${t.gold}80` }} />}
+                    </div>
+                    <span style={{ fontSize: '.46rem', color: isNow ? t.gold : t.text4, fontFamily: 'ui-monospace, monospace' }}>
+                      {h.hour === 0 ? '12a' : h.hour < 12 ? `${h.hour}a` : h.hour === 12 ? '12p' : `${h.hour-12}p`}
                     </span>
                   </div>
-                  <Bar pct={(pm.value / maxVal) * 100} color={PMT_COLORS[(pm.method || '').toLowerCase()] || t.gold} height={5} bg={t.border} />
-                </div>
-              )
-            }) : <EmptySmall t={t} msg="No payments" />}
+                )
+              })}
+            </div>
+            <div style={{ display: 'flex', gap: 16, marginTop: 8 }}>
+              {[{c: t.gold, l: 'Now'}, {c: t.green, l: 'Has approvals'}, {c: t.blue, l: 'Activity'}, {c: t.border2, l: 'Quiet'}].map(x => (
+                <span key={x.l} style={{ fontSize: '.56rem', color: t.text4, display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <span style={{ width: 7, height: 7, borderRadius: 2, background: x.c, display: 'inline-block' }} />{x.l}
+                </span>
+              ))}
+            </div>
           </Card>
         </div>
-
-        {/* Gold type + Hourly */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          {/* Gold type */}
-          <div>
-            <SectionLabel t={t}>Gold Type</SectionLabel>
-            <Card t={t}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
-                <DonutMini physical={physicalCount} takeover={takeoverCount} t={t} />
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <span style={{ width: 8, height: 8, borderRadius: '50%', background: t.gold }} />
-                    <span style={{ fontSize: '.68rem', color: t.text2 }}>Physical: <Mono size=".78rem" color={t.text1}>{physicalCount}</Mono></span>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <span style={{ width: 8, height: 8, borderRadius: '50%', background: t.purple }} />
-                    <span style={{ fontSize: '.68rem', color: t.text2 }}>Takeover: <Mono size=".78rem" color={t.text1}>{takeoverCount}</Mono></span>
-                  </div>
-                </div>
-              </div>
-            </Card>
-          </div>
-
-          {/* Hourly pulse */}
-          {hourly.length > 0 && (
-            <div>
-              <SectionLabel t={t}>Hourly Pulse</SectionLabel>
-              <Card t={t}>
-                <div style={{ display: 'flex', alignItems: 'flex-end', gap: 3, height: 60 }}>
-                  {hourly.map(h => {
-                    const maxH = Math.max(...hourly.map(x => x.bills || 0), 1)
-                    const ht = Math.max(4, ((h.bills || 0) / maxH) * 56)
-                    return (
-                      <div key={h.hour} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flex: 1, gap: 2 }}>
-                        <div style={{
-                          width: '100%', maxWidth: 22, height: ht, borderRadius: 3,
-                          background: (h.approved || 0) > 0 ? t.green : (h.bills || 0) > 0 ? t.gold : t.border,
-                          transition: 'height .4s ease',
-                        }} />
-                        <span style={{ fontSize: '.42rem', color: t.text4, fontFamily: 'ui-monospace, monospace' }}>
-                          {h.hour % 12 || 12}{h.hour >= 12 ? 'p' : 'a'}
-                        </span>
-                      </div>
-                    )
-                  })}
-                </div>
-              </Card>
-            </div>
-          )}
-        </div>
-      </div>
+      )}
 
       {/* ──────── 6. WALKIN BREAKDOWN ──────── */}
       {totalWalkins > 0 && (
         <div>
           <SectionLabel t={t}>Walk-in Breakdown</SectionLabel>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 10 }}>
-            <WalkinCard t={t} label="Sold" value={walkinSummary.sold || 0} icon="\u2713" color={t.green} bg={t.greenDim} />
-            <WalkinCard t={t} label="Visited, Not Sold" value={walkinSummary.visited_not_sold || 0} icon="\u2715" color={t.red} bg={t.redDim} />
+            <WalkinCard t={t} label="Sold" value={walkinSummary.sold || 0} icon="✓" color={t.green} bg={t.greenDim} />
+            <WalkinCard t={t} label="Visited, Not Sold" value={walkinSummary.visited_not_sold || 0} icon="✕" color={t.red} bg={t.redDim} />
             <WalkinCard t={t} label="Enquiry" value={walkinSummary.enquiry || 0} icon="?" color={t.blue} bg={t.blueDim} />
-            <WalkinCard t={t} label="Planning to Visit" value={walkinSummary.planning_to_visit || 0} icon="\u21bb" color={t.orange} bg={t.orangeDim} />
-            <WalkinCard t={t} label="Call Later" value={walkinSummary.call_later || 0} icon="\u260e" color={t.purple} bg={`${t.purple}20`} />
+            <WalkinCard t={t} label="Planning to Visit" value={walkinSummary.planning_to_visit || 0} icon="↻" color={t.orange} bg={t.orangeDim} />
+            <WalkinCard t={t} label="Call Later" value={walkinSummary.call_later || 0} icon="☎" color={t.purple} bg={`${t.purple}20`} />
           </div>
         </div>
       )}
+
+      {/* ──────── 6b. NOT BILLED DETAILS ──────── */}
+      {notYetBilled > 0 && todayWalkins.length > 0 && (() => {
+        const notBilledWalkins = todayWalkins.filter(w => w.walkin_status !== 'sold')
+        if (!notBilledWalkins.length) return null
+        return (
+          <div>
+            <SectionLabel t={t}>Not Billed — Walk-in Details ({notBilledWalkins.length})</SectionLabel>
+            <Card t={t} style={{ padding: 0, overflow: 'hidden' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 120px 100px 110px 100px', padding: '9px 16px', borderBottom: `1px solid ${t.border}`, gap: 12 }}>
+                {['Customer', 'Mobile', 'Gold Weight', 'Branch', 'Status'].map(h => (
+                  <span key={h} style={{ fontSize: '.58rem', letterSpacing: '.1em', textTransform: 'uppercase', color: t.text3, fontWeight: 500 }}>{h}</span>
+                ))}
+              </div>
+              {notBilledWalkins.slice(0, 40).map((w, i) => {
+                const statusColors = {
+                  'visited not sold': t.red, 'enquiry': t.blue,
+                  'planning to visit': t.orange, 'call later': t.purple,
+                }
+                const sc = statusColors[w.walkin_status] || t.text3
+                return (
+                  <div key={w.id || i} style={{
+                    display: 'grid', gridTemplateColumns: '1fr 120px 100px 110px 100px',
+                    padding: '10px 16px', borderBottom: `1px solid ${t.border}18`,
+                    alignItems: 'center', gap: 12,
+                  }}
+                    onMouseEnter={e => e.currentTarget.style.background = t.card2}
+                    onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                  >
+                    <div>
+                      <div style={{ fontSize: '.75rem', color: t.text1, fontWeight: 500 }}>{w.cust_name || '—'}</div>
+                      {w.item_type && <div style={{ fontSize: '.6rem', color: t.text3, marginTop: 2 }}>{w.item_type}</div>}
+                    </div>
+                    <span style={{ fontSize: '.68rem', color: t.text2, fontFamily: 'ui-monospace, monospace' }}>{w.cust_mobile || '—'}</span>
+                    <span style={{ fontSize: '.7rem', color: t.gold, fontFamily: 'ui-monospace, monospace' }}>
+                      {w.gms_weight && Number(w.gms_weight) > 0 ? `${Number(w.gms_weight).toFixed(2)}g` : '—'}
+                    </span>
+                    <span style={{ fontSize: '.65rem', color: t.text2 }}>{w.branch_name || '—'}</span>
+                    <span style={{
+                      fontSize: '.6rem', padding: '2px 8px', borderRadius: 4, fontWeight: 500,
+                      background: `${sc}18`, color: sc, border: `1px solid ${sc}30`,
+                      textTransform: 'capitalize', whiteSpace: 'nowrap',
+                    }}>
+                      {w.walkin_status || 'unknown'}
+                    </span>
+                  </div>
+                )
+              })}
+              {notBilledWalkins.length > 40 && (
+                <div style={{ padding: '10px 16px', fontSize: '.62rem', color: t.text4, textAlign: 'center' }}>
+                  Showing 40 of {notBilledWalkins.length} · Use timeline below to see all
+                </div>
+              )}
+            </Card>
+          </div>
+        )
+      })()}
 
       {/* ──────── 7. LIVE TIMELINE ──────── */}
       <div>
@@ -524,10 +540,16 @@ function OldCrmTab({
             />
           </div>
 
+          {/* Timeline column headers */}
+          <div style={{ display: 'grid', gridTemplateColumns: '72px 8px 1fr 130px 120px', gap: '0 14px', padding: '8px 20px', background: t.card2, borderBottom: `1px solid ${t.border}` }}>
+            {['Time', '', 'Customer / Branch', 'Weight', 'Amount'].map((h, i) => (
+              <span key={i} style={{ fontSize: '.58rem', color: t.text3, fontWeight: 500, letterSpacing: '.08em', textTransform: 'uppercase', textAlign: i >= 3 ? 'right' : i === 0 ? 'right' : 'left' }}>{h}</span>
+            ))}
+          </div>
           {/* Timeline items */}
-          <div style={{ maxHeight: 420, overflowY: 'auto' }}>
+          <div style={{ maxHeight: 480, overflowY: 'auto' }}>
             {filteredTimeline.length === 0 ? (
-              <div style={{ padding: 32, textAlign: 'center', color: t.text4, fontSize: '.72rem' }}>
+              <div style={{ padding: 40, textAlign: 'center', color: t.text4, fontSize: '.75rem' }}>
                 No events match your filter
               </div>
             ) : filteredTimeline.map((item, i) => (
@@ -549,12 +571,12 @@ function HeroNum({ label, value, color, t, small, muted }) {
   return (
     <div style={{
       display: 'flex', flexDirection: 'column', alignItems: 'center',
-      padding: small ? '0 14px' : '0 20px', opacity: muted ? .7 : 1,
+      padding: small ? '0 16px' : '0 24px', opacity: muted ? .65 : 1,
     }}>
-      <Mono size={small ? '1.6rem' : '2.2rem'} color={color} weight={200}>
+      <Mono size={small ? '1.8rem' : '2.4rem'} color={color} weight={200}>
         {fmtNum(value)}
       </Mono>
-      <span style={{ fontSize: '.52rem', letterSpacing: '.12em', textTransform: 'uppercase', color: t.text4, marginTop: 4 }}>
+      <span style={{ fontSize: '.62rem', letterSpacing: '.1em', textTransform: 'uppercase', color: t.text3, marginTop: 5, fontWeight: 500 }}>
         {label}
       </span>
     </div>
@@ -630,14 +652,14 @@ function FunnelBar({ stages, totalWalkins, notConverted, t }) {
 }
 
 /* ── Metric Card ── */
-function MetricCard({ t, label, value, color, sub }) {
+function MetricCard({ t, label, value, color, sub, dim }) {
   return (
-    <Card t={t} style={{ padding: '18px 20px' }}>
-      <span style={{ fontSize: '.52rem', letterSpacing: '.14em', textTransform: 'uppercase', color: t.text4 }}>{label}</span>
-      <div style={{ marginTop: 6 }}>
-        <Mono size="1.8rem" color={color} weight={200}>{value}</Mono>
+    <Card t={t} style={{ padding: '16px 18px', opacity: dim ? 0.5 : 1 }}>
+      <span style={{ fontSize: '.6rem', letterSpacing: '.1em', textTransform: 'uppercase', color: t.text3, fontWeight: 500 }}>{label}</span>
+      <div style={{ marginTop: 8 }}>
+        <Mono size="1.6rem" color={color} weight={200}>{value}</Mono>
       </div>
-      {sub && <span style={{ fontSize: '.58rem', color: t.text4, marginTop: 4, display: 'block' }}>{sub}</span>}
+      {sub && <span style={{ fontSize: '.62rem', color: t.text4, marginTop: 4, display: 'block' }}>{sub}</span>}
     </Card>
   )
 }
@@ -681,28 +703,6 @@ function BranchTable({ branches, t }) {
   )
 }
 
-/* ── Mini Donut (SVG) ── */
-function DonutMini({ physical, takeover, t }) {
-  const total = physical + takeover
-  if (total === 0) return <div style={{ width: 52, height: 52 }} />
-  const physPct = physical / total
-  const r = 20
-  const circ = 2 * Math.PI * r
-  const physLen = physPct * circ
-  return (
-    <svg width={52} height={52} viewBox="0 0 52 52">
-      <circle cx="26" cy="26" r={r} fill="none" stroke={t.purple} strokeWidth="6" />
-      <circle cx="26" cy="26" r={r} fill="none" stroke={t.gold} strokeWidth="6"
-        strokeDasharray={`${physLen} ${circ - physLen}`}
-        strokeDashoffset={circ * 0.25}
-        strokeLinecap="round"
-      />
-      <text x="26" y="28" textAnchor="middle" fontSize="9" fill={t.text3} fontFamily="ui-monospace, monospace">
-        {total}
-      </text>
-    </svg>
-  )
-}
 
 /* ── Walkin Card ── */
 function WalkinCard({ t, label, value, icon, color, bg }) {
@@ -716,8 +716,8 @@ function WalkinCard({ t, label, value, icon, color, bg }) {
         {icon}
       </div>
       <div>
-        <Mono size="1.2rem" color={t.text1} weight={300}>{value}</Mono>
-        <div style={{ fontSize: '.52rem', color: t.text4, letterSpacing: '.08em', textTransform: 'uppercase', marginTop: 2 }}>
+        <Mono size="1.4rem" color={t.text1} weight={300}>{value}</Mono>
+        <div style={{ fontSize: '.62rem', color: t.text3, letterSpacing: '.06em', textTransform: 'uppercase', marginTop: 4, fontWeight: 500 }}>
           {label}
         </div>
       </div>
@@ -729,75 +729,59 @@ function WalkinCard({ t, label, value, icon, color, bg }) {
 function TimelineRow({ item, t, isLast }) {
   const isTxn = item.type === 'txn'
   const statusStyle = isTxn ? (STATUS_STYLE[item.status] || {}) : {}
-  const dotColor = isTxn ? (statusStyle.color || t.gold) : t.blue
+  const accentColor = isTxn ? (statusStyle.color || t.gold) : t.blue
   return (
     <div style={{
-      display: 'flex', gap: 12, padding: '10px 16px',
+      display: 'grid',
+      gridTemplateColumns: '72px 8px 1fr 130px 120px',
+      gap: '0 14px',
+      padding: '13px 20px',
       borderBottom: isLast ? 'none' : `1px solid ${t.border}`,
-      animation: 'fadeIn .3s ease',
-    }}>
-      {/* Time + dot */}
-      <div style={{ width: 56, flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
-        <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: '.6rem', color: t.text3 }}>
-          {fmtTime(item.time)}
-        </span>
-        <span style={{ width: 7, height: 7, borderRadius: '50%', background: dotColor }} />
-      </div>
-      {/* Content */}
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-          <span style={{ fontSize: '.72rem', color: t.text1, fontWeight: 500 }}>{item.name || 'Unknown'}</span>
-          {isTxn && item.status && (
-            <span style={{
-              fontSize: '.48rem', padding: '1px 6px', borderRadius: 3, letterSpacing: '.06em',
-              textTransform: 'uppercase', fontWeight: 600,
-              background: `${statusStyle.color}20`, color: statusStyle.color,
-            }}>
-              {statusStyle.label}
-            </span>
-          )}
-          {!isTxn && item.walkinStatus && (
-            <span style={{
-              fontSize: '.48rem', padding: '1px 6px', borderRadius: 3, letterSpacing: '.06em',
-              textTransform: 'uppercase', fontWeight: 500,
-              background: t.blueDim, color: t.blue,
-            }}>
-              {item.walkinStatus}
-            </span>
-          )}
+      alignItems: 'center',
+      borderLeft: `3px solid ${accentColor}30`,
+      transition: 'background .1s',
+    }}
+      onMouseEnter={e => e.currentTarget.style.background = t.card2}
+      onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+    >
+      {/* Time */}
+      <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: '.68rem', color: t.text3, textAlign: 'right' }}>
+        {fmtTime(item.time)}
+      </span>
+      {/* Dot */}
+      <span style={{ width: 8, height: 8, borderRadius: '50%', background: accentColor, display: 'block', justifySelf: 'center' }} />
+      {/* Main info */}
+      <div style={{ minWidth: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: '.8rem', color: t.text1, fontWeight: 500 }}>{item.name || 'Unknown'}</span>
+          <span style={{
+            fontSize: '.58rem', padding: '2px 8px', borderRadius: 4,
+            background: `${accentColor}18`, color: accentColor, border: `1px solid ${accentColor}30`,
+            fontWeight: 600, letterSpacing: '.04em', textTransform: 'uppercase', whiteSpace: 'nowrap',
+          }}>
+            {isTxn ? (statusStyle.label || item.status) : (item.walkinStatus || 'walk-in')}
+          </span>
         </div>
-        <div style={{ display: 'flex', gap: 10, marginTop: 3, flexWrap: 'wrap' }}>
-          {item.branch && (
-            <span style={{ fontSize: '.58rem', color: t.text4 }}>{item.branch}</span>
-          )}
-          {isTxn && item.amount != null && (
-            <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: '.62rem', color: t.gold }}>
-              {fmtAmt(item.amount)}
-            </span>
-          )}
-          {isTxn && item.bill && (
-            <span style={{ fontSize: '.54rem', color: t.text4 }}>#{item.bill}</span>
-          )}
-          {!isTxn && item.weight != null && Number(item.weight) > 0 && (
-            <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: '.62rem', color: t.gold }}>
-              {fmtWt(item.weight)}
-            </span>
-          )}
-          {item.mobile && (
-            <span style={{ fontSize: '.54rem', color: t.text4 }}>{item.mobile}</span>
-          )}
+        <div style={{ display: 'flex', gap: 10, marginTop: 4, alignItems: 'center' }}>
+          {item.branch && <span style={{ fontSize: '.65rem', color: t.text3 }}>{item.branch}</span>}
+          {item.mobile && <span style={{ fontSize: '.62rem', color: t.text4, fontFamily: 'ui-monospace, monospace' }}>{item.mobile}</span>}
+          {isTxn && item.bill && <span style={{ fontSize: '.6rem', color: t.text4 }}>#{item.bill}</span>}
         </div>
       </div>
+      {/* Weight */}
+      <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: '.72rem', color: t.text2, textAlign: 'right' }}>
+        {isTxn
+          ? (item.weight > 0 ? fmtWt(item.weight) : '—')
+          : (item.weight && Number(item.weight) > 0 ? fmtWt(item.weight) : '—')}
+      </span>
+      {/* Amount */}
+      <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: '.75rem', color: isTxn ? t.gold : t.text4, textAlign: 'right', fontWeight: isTxn ? 500 : 400 }}>
+        {isTxn && item.amount != null ? fmtAmt(item.amount) : '—'}
+      </span>
     </div>
   )
 }
 
-/* ── Empty small state ── */
-function EmptySmall({ t, msg }) {
-  return (
-    <div style={{ padding: 16, textAlign: 'center', color: t.text4, fontSize: '.62rem' }}>{msg}</div>
-  )
-}
 
 /* ════════════════════════════════════════════════════════════════ */
 /*                        NEW CRM TAB                            */
