@@ -120,8 +120,8 @@ export default function LiveFeed() {
 
   const [viewDate,      setViewDate]      = useState(todayIST)
   const [crmTab,        setCrmTab]        = useState('old')
-  const [tlFilter,      setTlFilter]      = useState('all')
-  const [search,        setSearch]        = useState('')
+  const [tlFilter,      setTlFilter]      = useState('all') // kept for filteredTimeline
+  const [search,        setSearch]        = useState('')   // kept for filteredTimeline
   const [regionFilter,  setRegionFilter]  = useState('')   // '' = all regions
   const [data,          setData]          = useState(null)
   const [loadError,     setLoadError]     = useState(null)
@@ -168,8 +168,6 @@ export default function LiveFeed() {
   const summary = data?.summary || {}
   const walkinSummary = data?.walkinSummary || {}
   const stages = data?.stages || null
-  const branches    = data?.branches    || []
-  const hourly      = data?.hourly      || []
   const todayTxns   = data?.todayTxns   || []
   const todayWalkins = data?.todayWalkins || []
   const regions     = data?.allRegions  || []
@@ -392,14 +390,14 @@ export default function LiveFeed() {
           </div>
         ) : crmTab === 'old' ? (
           <OldCrmTab t={t} summary={effectiveSummary} walkinSummary={effectiveWalkinSummary}
-            totalWalkins={totalWalkins} totalBilled={totalBilled} approved={approved} pending={pending} rejected={rejected}
+            totalWalkins={totalWalkins} totalBilled={totalBilled} approved={approved} pending={pending}
             trueRejected={trueRejected} wrongEntry={wrongEntry}
             notBilledCnt={notBilledCnt} notBilledWalkins={notBilledWalkins} crmNotUpdatedCnt={crmNotUpdatedCnt}
             goldPipeline={effectiveGoldPipeline}
-            branches={branches} hourly={hourly} todayWalkins={rWalkins}
+            todayTxns={rTxns} todayWalkins={rWalkins}
+            kycRows={regionFilter ? kycRows.filter(r => r.region === regionFilter) : kycRows}
             regionFilter={regionFilter}
-            filteredTimeline={filteredTimeline} tlFilter={tlFilter} setTlFilter={setTlFilter}
-            search={search} setSearch={setSearch} isToday={isToday} />
+            filteredTimeline={filteredTimeline} isToday={isToday} />
         ) : (
           <NewCrmTab t={t} stages={stages} />
         )}
@@ -417,10 +415,13 @@ function OldCrmTab({
   trueRejected, wrongEntry,
   notBilledCnt, notBilledWalkins, crmNotUpdatedCnt,
   goldPipeline,
-  branches, hourly,
-  regionFilter,
-  filteredTimeline, tlFilter, setTlFilter, search, setSearch, isToday,
+  todayTxns, todayWalkins, kycRows,
+  filteredTimeline, isToday,
 }) {
+  const [activeMetric, setActiveMetric] = useState(null)
+  const [tlOpen, setTlOpen] = useState(false)
+  const [tlSearch, setTlSearch] = useState('')
+  const toggleMetric = key => setActiveMetric(prev => prev === key ? null : key)
   const approvedValue     = summary.approved_value || 0
   const goldWalkedIn      = parseFloat(goldPipeline?.walked_in_wt)      || parseFloat(walkinSummary.total_gold_wt) || 0
   const goldPurchased     = parseFloat(goldPipeline?.purchased_wt)      || 0
@@ -464,23 +465,23 @@ function OldCrmTab({
           gap: 0, flexWrap: 'wrap', background: t.surface, borderRadius: 14,
           border: `1px solid ${t.border}`, padding: '24px 12px',
         }}>
-          <HeroNum label="Walked In" value={totalWalkins} color={t.blue} t={t} />
+          <HeroNum label="Walked In" value={totalWalkins} color={t.blue} t={t} active={activeMetric==='walkin'} onClick={() => toggleMetric('walkin')} />
           <FlowArrow t={t} pct={billedPct} />
-          <HeroNum label="Bills Submitted" value={totalBilled} color={t.gold} t={t} />
+          <HeroNum label="Bills Submitted" value={totalBilled} color={t.gold} t={t} active={activeMetric==='billed'} onClick={() => toggleMetric('billed')} />
           <FlowArrow t={t} pct={approvedPctBilled} />
-          <HeroNum label="Purchased" value={approved} color={t.green} t={t} />
+          <HeroNum label="Purchased" value={approved} color={t.green} t={t} active={activeMetric==='purchased'} onClick={() => toggleMetric('purchased')} />
           <FlowSep t={t} />
-          <HeroNum label="In Pipeline" value={pending} color={t.orange} t={t} small />
+          <HeroNum label="In Pipeline" value={pending} color={t.orange} t={t} small active={activeMetric==='pending'} onClick={() => toggleMetric('pending')} />
           <FlowSep t={t} />
-          <HeroNum label="Bill Rejected" value={trueRejected} color={t.red} t={t} small />
+          <HeroNum label="Bill Rejected" value={trueRejected} color={t.red} t={t} small active={activeMetric==='rejected'} onClick={() => toggleMetric('rejected')} />
           <FlowSep t={t} />
-          <HeroNum label="Re-billed & Approved" value={wrongEntry} color={t.orange} t={t} small />
+          <HeroNum label="Re-billed & Approved" value={wrongEntry} color={t.orange} t={t} small active={activeMetric==='rebilled'} onClick={() => toggleMetric('rebilled')} />
           <FlowSep t={t} />
-          <HeroNum label="KYC Blocked" value={kycBlacklistedCnt} color={t.purple} t={t} small />
+          <HeroNum label="KYC Blocked" value={kycBlacklistedCnt} color={t.purple} t={t} small active={activeMetric==='kyc_blocked'} onClick={() => toggleMetric('kyc_blocked')} />
           <FlowSep t={t} />
-          <HeroNum label="KYC Cleared Later" value={kycOverriddenCnt} color={t.blue} t={t} small />
+          <HeroNum label="KYC Cleared Later" value={kycOverriddenCnt} color={t.blue} t={t} small active={activeMetric==='kyc_cleared'} onClick={() => toggleMetric('kyc_cleared')} />
           <FlowSep t={t} />
-          <HeroNum label="Left Unbilled" value={notBilledCnt} color={t.text3} t={t} small muted />
+          <HeroNum label="Left Unbilled" value={notBilledCnt} color={t.text3} t={t} small muted active={activeMetric==='unbilled'} onClick={() => toggleMetric('unbilled')} />
         </div>
         <div style={{ display: 'flex', gap: 10, marginTop: 10, flexWrap: 'wrap' }}>
           <Pill label="Walk→Bill" value={`${billedPct}%`} color={t.gold} bg={t.goldDim} />
@@ -489,8 +490,18 @@ function OldCrmTab({
           {wrongEntry > 0 && <Pill label="Wrong entries resubmitted" value={wrongEntry} color={t.orange} bg={t.orangeDim} />}
           {crmNotUpdatedCnt > 0 && <Pill label="CRM not updated" value={crmNotUpdatedCnt} color={t.text3} bg={t.card2} />}
           {kycChecklistCnt > 0 && <Pill label="KYC checklist done" value={kycChecklistCnt} color={t.text3} bg={t.card2} />}
+          {activeMetric && (
+            <button onClick={() => setActiveMetric(null)} style={{ marginLeft: 'auto', padding: '3px 10px', borderRadius: 20, fontSize: '.58rem', cursor: 'pointer', border: `1px solid ${t.border}`, background: t.card2, color: t.text3 }}>
+              Clear filter ✕
+            </button>
+          )}
         </div>
       </div>
+
+      {/* ──────── 1b. DETAIL TABLE ──────── */}
+      <LiveDetail t={t} activeMetric={activeMetric}
+        todayTxns={todayTxns} todayWalkins={todayWalkins}
+        kycRows={kycRows} notBilledWalkins={notBilledWalkins} />
 
       {/* ──────── 2. GOLD WEIGHT FLOW ──────── */}
       <div>
@@ -538,76 +549,7 @@ function OldCrmTab({
         </div>
       </div>
 
-      {/* ──────── 3. FUNNEL VISUAL ──────── */}
-      <div>
-        <SectionLabel t={t}>Conversion Funnel</SectionLabel>
-        <Card t={t} style={{ padding: '20px 24px' }}>
-          <FunnelBar stages={[
-            { label: 'Walked In',     value: totalWalkins,     color: t.blue   },
-            { label: 'Bills Submitted', value: totalBilled,    color: t.gold   },
-            { label: 'Purchased',     value: approved,         color: t.green  },
-            { label: 'In Pipeline',   value: pending,          color: t.orange },
-            { label: 'Bill Rejected', value: trueRejected,      color: t.red    },
-            { label: 'KYC Blocked',   value: kycBlacklistedCnt, color: t.purple },
-          ]} totalWalkins={totalWalkins} notConverted={notBilledCnt} t={t} />
-        </Card>
-      </div>
-
-      {/* ──────── 4. BRANCH ACTIVITY ──────── */}
-      {branches.length > 0 && (
-        <div>
-          <SectionLabel t={t}>Branch Activity</SectionLabel>
-          <BranchTable branches={branches} t={t} regionFilter={regionFilter} />
-        </div>
-      )}
-
-      {/* ──────── 5. HOURLY PULSE ──────── */}
-      <div>
-        <SectionLabel t={t}>Hourly Pulse · Bills by Hour</SectionLabel>
-        <Card t={t} style={{ padding: '16px 20px' }}>
-          <div style={{ display: 'flex', alignItems: 'flex-end', gap: 3, height: 72 }}>
-            {Array.from({ length: 24 }, (_, h) => {
-              const hd     = hourly.find(x => Number(x.hour) === h)
-              const bills  = hd ? Number(hd.bills)    : 0
-              const appr   = hd ? Number(hd.approved) : 0
-              const maxH   = Math.max(...hourly.map(x => Number(x.bills) || 0), 1)
-              const barH   = bills > 0 ? Math.max(6, (bills / maxH) * 64) : 3
-              const isNow  = h === new Date(Date.now() + 5.5*60*60*1000).getUTCHours()
-              const isPast = h < new Date(Date.now() + 5.5*60*60*1000).getUTCHours()
-              const bg     = isNow ? t.gold : appr > 0 && appr === bills ? t.green : bills > 0 ? t.blue : t.border
-              return (
-                <div key={h} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}
-                  title={`${h}:00–${h+1}:00 · ${bills} bills · ${appr} approved`}>
-                  <div style={{
-                    width: '100%', height: barH, borderRadius: '2px 2px 0 0',
-                    background: bg, opacity: isPast || isNow ? 1 : 0.3,
-                    transition: 'height .4s ease', position: 'relative',
-                  }}>
-                    {isNow && <div style={{ position: 'absolute', inset: 0, boxShadow: `0 0 10px ${t.gold}60`, borderRadius: '2px 2px 0 0' }} />}
-                    {bills > 0 && appr > 0 && appr < bills && (
-                      <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: `${Math.round((appr/bills)*100)}%`, background: t.green, borderRadius: '0 0 2px 2px' }} />
-                    )}
-                  </div>
-                  {(h % 3 === 0 || isNow) && (
-                    <span style={{ fontSize: '.44rem', color: isNow ? t.gold : t.text4, fontFamily: 'ui-monospace, monospace', whiteSpace: 'nowrap' }}>
-                      {h === 0 ? '12a' : h < 12 ? `${h}a` : h === 12 ? '12p' : `${h-12}p`}
-                    </span>
-                  )}
-                </div>
-              )
-            })}
-          </div>
-          <div style={{ display: 'flex', gap: 16, marginTop: 10 }}>
-            {[{c: t.gold, l: 'Current hour'}, {c: t.green, l: 'All approved'}, {c: t.blue, l: 'Mixed'}, {c: t.border, l: 'No activity'}].map(x => (
-              <span key={x.l} style={{ fontSize: '.6rem', color: t.text3, display: 'flex', alignItems: 'center', gap: 5 }}>
-                <span style={{ width: 8, height: 8, borderRadius: 2, background: x.c, display: 'inline-block', flexShrink: 0 }} />{x.l}
-              </span>
-            ))}
-          </div>
-        </Card>
-      </div>
-
-      {/* ──────── 6. WALKIN STATUS BREAKDOWN ──────── */}
+      {/* ──────── 3. WALKIN STATUS ──────── */}
       {totalWalkins > 0 && (
         <div>
           <SectionLabel t={t}>Walk-in Status (from CRM)</SectionLabel>
@@ -624,109 +566,46 @@ function OldCrmTab({
         </div>
       )}
 
-      {/* ──────── 6b. NOT BILLED DETAILS ──────── */}
-      {notBilledCnt > 0 && notBilledWalkins.length > 0 && (() => {
-        return (
-          <div>
-            <SectionLabel t={t}>Not Billed — Walk-in Details ({notBilledWalkins.length})</SectionLabel>
-            <Card t={t} style={{ padding: 0, overflow: 'hidden' }}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 120px 100px 110px 100px', padding: '9px 16px', borderBottom: `1px solid ${t.border}`, gap: 12 }}>
-                {['Customer', 'Mobile', 'Gold Weight', 'Branch', 'Status'].map(h => (
-                  <span key={h} style={{ fontSize: '.58rem', letterSpacing: '.1em', textTransform: 'uppercase', color: t.text3, fontWeight: 500 }}>{h}</span>
-                ))}
-              </div>
-              {notBilledWalkins.slice(0, 40).map((w, i) => {
-                const statusColors = {
-                  'visited not sold': t.red, 'enquiry': t.blue,
-                  'planning to visit': t.orange, 'call later': t.purple,
-                }
-                const sc = statusColors[w.walkin_status] || t.text3
-                return (
-                  <div key={w.id || i} style={{
-                    display: 'grid', gridTemplateColumns: '1fr 120px 100px 110px 100px',
-                    padding: '10px 16px', borderBottom: `1px solid ${t.border}18`,
-                    alignItems: 'center', gap: 12,
-                  }}
-                    onMouseEnter={e => e.currentTarget.style.background = t.card2}
-                    onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-                  >
-                    <div>
-                      <div style={{ fontSize: '.75rem', color: t.text1, fontWeight: 500 }}>{w.cust_name || '—'}</div>
-                      {w.item_type && <div style={{ fontSize: '.6rem', color: t.text3, marginTop: 2 }}>{w.item_type}</div>}
-                    </div>
-                    <span style={{ fontSize: '.68rem', color: t.text2, fontFamily: 'ui-monospace, monospace' }}>{w.cust_mobile || '—'}</span>
-                    <span style={{ fontSize: '.7rem', color: t.gold, fontFamily: 'ui-monospace, monospace' }}>
-                      {w.gms_weight && Number(w.gms_weight) > 0 ? `${Number(w.gms_weight).toFixed(2)}g` : '—'}
-                    </span>
-                    <span style={{ fontSize: '.65rem', color: t.text2 }}>{w.branch_name || '—'}</span>
-                    <span style={{
-                      fontSize: '.6rem', padding: '2px 8px', borderRadius: 4, fontWeight: 500,
-                      background: `${sc}18`, color: sc, border: `1px solid ${sc}30`,
-                      textTransform: 'capitalize', whiteSpace: 'nowrap',
-                    }}>
-                      {w.walkin_status || 'unknown'}
-                    </span>
-                  </div>
-                )
-              })}
-              {notBilledWalkins.length > 40 && (
-                <div style={{ padding: '10px 16px', fontSize: '.62rem', color: t.text4, textAlign: 'center' }}>
-                  Showing 40 of {notBilledWalkins.length} · Use timeline below to see all
-                </div>
-              )}
-            </Card>
-          </div>
-        )
-      })()}
+      {/* ──────── 4. GOLD WEIGHT FLOW ──────── */}
+      {/* (already rendered above — moved inline) */}
 
-      {/* ──────── 7. LIVE TIMELINE ──────── */}
+      {/* ──────── 5. LIVE TIMELINE (collapsed by default) ──────── */}
       <div>
-        <SectionLabel t={t}>{isToday ? 'Live Timeline' : 'Timeline'}</SectionLabel>
-        <Card t={t} style={{ padding: 0, overflow: 'hidden' }}>
-          {/* Timeline controls */}
-          <div style={{
-            display: 'flex', alignItems: 'center', gap: 8, padding: '12px 16px',
-            borderBottom: `1px solid ${t.border}`, flexWrap: 'wrap',
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: tlOpen ? 10 : 0 }}>
+          <SectionLabel t={t}>{isToday ? 'Live Timeline' : 'Timeline'}</SectionLabel>
+          <button onClick={() => setTlOpen(o => !o)} style={{
+            padding: '4px 12px', borderRadius: 6, fontSize: '.6rem', cursor: 'pointer',
+            border: `1px solid ${t.border}`, background: t.card, color: t.text3, marginBottom: 10,
           }}>
-            {[['all', 'All'], ['txn', 'Transactions'], ['walkin', 'Walk-ins'], ['approved', 'Approved'], ['pending', 'Pending']].map(([k, l]) => (
-              <button key={k} onClick={() => setTlFilter(k)} style={{
-                padding: '4px 10px', borderRadius: 5, border: `1px solid ${tlFilter === k ? t.gold : t.border}`,
-                background: tlFilter === k ? t.goldDim : 'transparent',
-                color: tlFilter === k ? t.gold : t.text3,
-                fontSize: '.58rem', cursor: 'pointer', letterSpacing: '.04em',
-              }}>
-                {l}
-              </button>
-            ))}
-            <div style={{ flex: 1 }} />
-            <input
-              type="text" placeholder="Search name, mobile, branch..."
-              value={search} onChange={e => setSearch(e.target.value)}
-              style={{
-                background: t.card2, border: `1px solid ${t.border}`, borderRadius: 6,
-                padding: '5px 10px', fontSize: '.62rem', color: t.text2, outline: 'none', width: 180,
-                fontFamily: 'ui-monospace, monospace',
-              }}
-            />
-          </div>
-
-          {/* Timeline column headers */}
-          <div style={{ display: 'grid', gridTemplateColumns: '72px 8px 1fr 130px 120px', gap: '0 14px', padding: '8px 20px', background: t.card2, borderBottom: `1px solid ${t.border}` }}>
-            {['Time', '', 'Customer / Branch', 'Weight', 'Amount'].map((h, i) => (
-              <span key={i} style={{ fontSize: '.58rem', color: t.text3, fontWeight: 500, letterSpacing: '.08em', textTransform: 'uppercase', textAlign: i >= 3 ? 'right' : i === 0 ? 'right' : 'left' }}>{h}</span>
-            ))}
-          </div>
-          {/* Timeline items */}
-          <div style={{ maxHeight: 480, overflowY: 'auto' }}>
-            {filteredTimeline.length === 0 ? (
-              <div style={{ padding: 40, textAlign: 'center', color: t.text4, fontSize: '.75rem' }}>
-                No events match your filter
-              </div>
-            ) : filteredTimeline.map((item, i) => (
-              <TimelineRow key={item.id} item={item} t={t} isLast={i === filteredTimeline.length - 1} />
-            ))}
-          </div>
-        </Card>
+            {tlOpen ? 'Collapse ▲' : 'Expand ▼'}
+          </button>
+        </div>
+        {tlOpen && (
+          <Card t={t} style={{ padding: 0, overflow: 'hidden' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 16px', borderBottom: `1px solid ${t.border}` }}>
+              <input
+                type="text" placeholder="Search name, mobile, branch..."
+                value={tlSearch} onChange={e => setTlSearch(e.target.value)}
+                style={{ background: t.card2, border: `1px solid ${t.border}`, borderRadius: 6, padding: '5px 10px', fontSize: '.62rem', color: t.text2, outline: 'none', width: 200, fontFamily: 'ui-monospace, monospace' }}
+              />
+              <span style={{ fontSize: '.6rem', color: t.text4 }}>{filteredTimeline.length} events</span>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '72px 8px 1fr 130px 120px', gap: '0 14px', padding: '8px 20px', background: t.card2, borderBottom: `1px solid ${t.border}` }}>
+              {['Time', '', 'Customer / Branch', 'Weight', 'Amount'].map((h, i) => (
+                <span key={i} style={{ fontSize: '.58rem', color: t.text3, fontWeight: 500, letterSpacing: '.08em', textTransform: 'uppercase', textAlign: i >= 3 ? 'right' : i === 0 ? 'right' : 'left' }}>{h}</span>
+              ))}
+            </div>
+            <div style={{ maxHeight: 480, overflowY: 'auto' }}>
+              {filteredTimeline.filter(item => {
+                if (!tlSearch) return true
+                const s = tlSearch.toLowerCase()
+                return (item.name||'').toLowerCase().includes(s) || (item.mobile||'').includes(s) || (item.branch||'').toLowerCase().includes(s)
+              }).map((item, i, arr) => (
+                <TimelineRow key={item.id} item={item} t={t} isLast={i === arr.length - 1} />
+              ))}
+            </div>
+          </Card>
+        )}
       </div>
     </div>
   )
@@ -736,20 +615,173 @@ function OldCrmTab({
 /*                      SUB-COMPONENTS                           */
 /* ════════════════════════════════════════════════════════════════ */
 
-/* ── Hero Number ── */
-function HeroNum({ label, value, color, t, small, muted }) {
+/* ── Hero Number (clickable) ── */
+function HeroNum({ label, value, color, t, small, muted, onClick, active }) {
   return (
-    <div style={{
+    <div onClick={onClick} style={{
       display: 'flex', flexDirection: 'column', alignItems: 'center',
-      padding: small ? '0 16px' : '0 24px', opacity: muted ? .65 : 1,
+      padding: small ? '0 16px' : '0 24px', opacity: muted && !active ? .65 : 1,
+      cursor: onClick ? 'pointer' : 'default',
+      borderRadius: 10,
+      background: active ? `${color}14` : 'transparent',
+      outline: active ? `2px solid ${color}50` : 'none',
+      transition: 'background .15s, outline .15s',
     }}>
       <Mono size={small ? '1.8rem' : '2.4rem'} color={color} weight={200}>
         {fmtNum(value)}
       </Mono>
-      <span style={{ fontSize: '.62rem', letterSpacing: '.1em', textTransform: 'uppercase', color: t.text3, marginTop: 5, fontWeight: 500 }}>
+      <span style={{ fontSize: '.62rem', letterSpacing: '.1em', textTransform: 'uppercase', color: active ? color : t.text3, marginTop: 5, fontWeight: active ? 600 : 500 }}>
         {label}
       </span>
     </div>
+  )
+}
+
+/* ── Live Detail Table ── */
+function LiveDetail({ t, activeMetric, todayTxns, todayWalkins, kycRows, notBilledWalkins }) {
+  const [search, setSearch] = useState('')
+
+  const approvedMobiles = new Set(
+    todayTxns.filter(tx => tx.trxn_status === 'approved').map(tx => tx.cust_mobile).filter(Boolean)
+  )
+
+  let rows, type, label
+  switch (activeMetric) {
+    case 'walkin':    rows = todayWalkins; type = 'walkin'; label = `All Walk-ins`; break
+    case 'billed':    rows = todayTxns;   type = 'txn';    label = `All Bills Submitted`; break
+    case 'purchased': rows = todayTxns.filter(t => t.trxn_status === 'approved'); type = 'txn'; label = `Purchased`; break
+    case 'pending':   rows = todayTxns.filter(t => t.trxn_status === 'pending');  type = 'txn'; label = `In Pipeline`; break
+    case 'rejected':  rows = todayTxns.filter(t => t.trxn_status === 'rejected' && !approvedMobiles.has(t.cust_mobile)); type = 'txn'; label = `Bill Rejected`; break
+    case 'rebilled':  rows = todayTxns.filter(t => t.trxn_status === 'rejected' &&  approvedMobiles.has(t.cust_mobile)); type = 'txn'; label = `Re-billed & Approved`; break
+    case 'kyc_blocked': rows = kycRows; type = 'kyc'; label = `KYC Blocked`; break
+    case 'kyc_cleared': rows = kycRows.filter(r => approvedMobiles.has(r.mob_num)); type = 'kyc'; label = `KYC Cleared Later`; break
+    case 'unbilled':  rows = notBilledWalkins; type = 'walkin'; label = `Left Unbilled`; break
+    default:          rows = todayTxns.filter(t => t.trxn_status === 'approved'); type = 'txn'; label = `Purchased Today`
+  }
+
+  const q = search.toLowerCase()
+  const filtered = q ? rows.filter(r => {
+    if (type === 'txn')    return (r.cust_name||'').toLowerCase().includes(q) || (r.cust_mobile||'').includes(q) || (r.bill_no||'').toLowerCase().includes(q) || (r.branch_name||'').toLowerCase().includes(q)
+    if (type === 'walkin') return (r.cust_name||'').toLowerCase().includes(q) || (r.cust_mobile||'').includes(q) || (r.branch_name||'').toLowerCase().includes(q)
+    if (type === 'kyc')    return (r.name||'').toLowerCase().includes(q) || (r.mob_num||'').includes(q)
+    return true
+  }) : rows
+
+  return (
+    <div>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+        <SectionLabel t={t}>{label} · {filtered.length} records</SectionLabel>
+        <input type="text" placeholder="Search..." value={search} onChange={e => setSearch(e.target.value)}
+          style={{ background: t.card2, border: `1px solid ${t.border}`, borderRadius: 6, padding: '4px 10px', fontSize: '.62rem', color: t.text2, outline: 'none', width: 170, fontFamily: 'ui-monospace, monospace' }} />
+      </div>
+      {type === 'txn'    && <TxnTable    rows={filtered} t={t} />}
+      {type === 'walkin' && <WalkinTable rows={filtered} t={t} />}
+      {type === 'kyc'    && <KycTable    rows={filtered} t={t} />}
+    </div>
+  )
+}
+
+/* ── Transaction table (Purchase-Data style) ── */
+function TxnTable({ rows, t }) {
+  const cols = ['Bill No','Date','Time','Customer','Phone','Branch','Gross Wt','Stone','Wastage','Net Wt','Purity','Gross Amt','Svc%','Status']
+  const widths = '100px 90px 70px 160px 110px 160px 76px 60px 70px 70px 66px 96px 46px 80px'
+  return (
+    <Card t={t} style={{ padding: 0, overflow: 'hidden' }}>
+      <div style={{ overflowX: 'auto' }}>
+        <div style={{ minWidth: 1260 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: widths, padding: '9px 16px', borderBottom: `1px solid ${t.border}`, gap: 8, background: t.card2, position: 'sticky', top: 0 }}>
+            {cols.map(h => <span key={h} style={{ fontSize: '.56rem', letterSpacing: '.1em', textTransform: 'uppercase', color: t.text3, fontWeight: 600 }}>{h}</span>)}
+          </div>
+          <div style={{ maxHeight: 480, overflowY: 'auto' }}>
+            {rows.length === 0 && <div style={{ padding: 32, textAlign: 'center', color: t.text4, fontSize: '.72rem' }}>No records</div>}
+            {rows.map((r, i) => {
+              const sc = { approved: t.green, pending: t.orange, rejected: t.red }[r.trxn_status] || t.text3
+              return (
+                <div key={r.id || i} style={{ display: 'grid', gridTemplateColumns: widths, padding: '10px 16px', borderBottom: `1px solid ${t.border}18`, gap: 8, alignItems: 'center' }}
+                  onMouseEnter={e => e.currentTarget.style.background = t.card2}
+                  onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                  <span style={{ fontSize: '.68rem', color: t.gold, fontFamily: 'ui-monospace,monospace', fontWeight: 500 }}>{r.bill_no || '—'}</span>
+                  <span style={{ fontSize: '.65rem', color: t.text2 }}>{r.txn_date || '—'}</span>
+                  <span style={{ fontSize: '.65rem', color: t.text2, fontFamily: 'ui-monospace,monospace' }}>{fmtTime(r.time)}</span>
+                  <span style={{ fontSize: '.72rem', color: t.text1, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.cust_name || '—'}</span>
+                  <span style={{ fontSize: '.65rem', color: t.text2, fontFamily: 'ui-monospace,monospace' }}>{r.cust_mobile || '—'}</span>
+                  <span style={{ fontSize: '.65rem', color: t.text2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.branch_name || '—'}</span>
+                  <span style={{ fontSize: '.68rem', color: t.text1, fontFamily: 'ui-monospace,monospace' }}>{csvSum(r.grms_wet_csv) > 0 ? `${csvSum(r.grms_wet_csv).toFixed(2)}g` : '—'}</span>
+                  <span style={{ fontSize: '.65rem', color: t.text3, fontFamily: 'ui-monospace,monospace' }}>{csvSum(r.stnt_wet_csv) > 0 ? `${csvSum(r.stnt_wet_csv).toFixed(2)}g` : '0g'}</span>
+                  <span style={{ fontSize: '.65rem', color: t.text3, fontFamily: 'ui-monospace,monospace' }}>{csvSum(r.wastag_csv) > 0 ? `${csvSum(r.wastag_csv).toFixed(2)}g` : '0g'}</span>
+                  <span style={{ fontSize: '.68rem', color: t.text1, fontFamily: 'ui-monospace,monospace' }}>{csvSum(r.net_wet_csv) > 0 ? `${csvSum(r.net_wet_csv).toFixed(2)}g` : '—'}</span>
+                  <span style={{ fontSize: '.65rem', color: t.text2 }}>{r.purity_all || '—'}</span>
+                  <span style={{ fontSize: '.68rem', color: t.gold, fontFamily: 'ui-monospace,monospace' }}>{csvSum(r.grs_amnt_csv) > 0 ? `₹${Math.round(csvSum(r.grs_amnt_csv)).toLocaleString('en-IN')}` : '—'}</span>
+                  <span style={{ fontSize: '.65rem', color: t.text3 }}>{r.serv_chr ? `${r.serv_chr}%` : '—'}</span>
+                  <span style={{ fontSize: '.58rem', padding: '2px 7px', borderRadius: 4, fontWeight: 600, background: `${sc}18`, color: sc, border: `1px solid ${sc}30`, whiteSpace: 'nowrap', textTransform: 'capitalize' }}>{r.trxn_status || '—'}</span>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      </div>
+    </Card>
+  )
+}
+
+/* ── Walk-in table ── */
+function WalkinTable({ rows, t }) {
+  const cols = ['Time','Customer','Phone','Branch','Gold Wt','Item Type','Walk Reason','Status']
+  const widths = '70px 180px 120px 160px 76px 110px 1fr 110px'
+  return (
+    <Card t={t} style={{ padding: 0, overflow: 'hidden' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: widths, padding: '9px 16px', borderBottom: `1px solid ${t.border}`, gap: 8, background: t.card2 }}>
+        {cols.map(h => <span key={h} style={{ fontSize: '.56rem', letterSpacing: '.1em', textTransform: 'uppercase', color: t.text3, fontWeight: 600 }}>{h}</span>)}
+      </div>
+      <div style={{ maxHeight: 480, overflowY: 'auto' }}>
+        {rows.length === 0 && <div style={{ padding: 32, textAlign: 'center', color: t.text4, fontSize: '.72rem' }}>No records</div>}
+        {rows.map((r, i) => {
+          const sc = { sold: t.green, 'visited not sold': t.red, enquiry: t.blue, 'planning to visit': t.orange, 'call later': t.purple }[r.walkin_status] || t.text3
+          return (
+            <div key={r.id || i} style={{ display: 'grid', gridTemplateColumns: widths, padding: '10px 16px', borderBottom: `1px solid ${t.border}18`, gap: 8, alignItems: 'center' }}
+              onMouseEnter={e => e.currentTarget.style.background = t.card2}
+              onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+              <span style={{ fontSize: '.65rem', color: t.text2, fontFamily: 'ui-monospace,monospace' }}>{fmtTime(r.time)}</span>
+              <span style={{ fontSize: '.72rem', color: t.text1, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.cust_name || '—'}</span>
+              <span style={{ fontSize: '.65rem', color: t.text2, fontFamily: 'ui-monospace,monospace' }}>{r.cust_mobile || '—'}</span>
+              <span style={{ fontSize: '.65rem', color: t.text2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.branch_name || '—'}</span>
+              <span style={{ fontSize: '.68rem', color: t.gold, fontFamily: 'ui-monospace,monospace' }}>{r.gms_weight > 0 ? `${Number(r.gms_weight).toFixed(2)}g` : '—'}</span>
+              <span style={{ fontSize: '.65rem', color: t.text3 }}>{r.item_type || '—'}</span>
+              <span style={{ fontSize: '.65rem', color: t.text3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.walk_reason || '—'}</span>
+              <span style={{ fontSize: '.58rem', padding: '2px 7px', borderRadius: 4, fontWeight: 600, background: `${sc}18`, color: sc, border: `1px solid ${sc}30`, whiteSpace: 'nowrap', textTransform: 'capitalize' }}>{r.walkin_status || 'unknown'}</span>
+            </div>
+          )
+        })}
+      </div>
+    </Card>
+  )
+}
+
+/* ── KYC Blocked table ── */
+function KycTable({ rows, t }) {
+  const cols = ['Time','Name','Phone','Branch','Grams','Reason']
+  const widths = '70px 180px 120px 160px 76px 1fr'
+  return (
+    <Card t={t} style={{ padding: 0, overflow: 'hidden' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: widths, padding: '9px 16px', borderBottom: `1px solid ${t.border}`, gap: 8, background: t.card2 }}>
+        {cols.map(h => <span key={h} style={{ fontSize: '.56rem', letterSpacing: '.1em', textTransform: 'uppercase', color: t.text3, fontWeight: 600 }}>{h}</span>)}
+      </div>
+      <div style={{ maxHeight: 480, overflowY: 'auto' }}>
+        {rows.length === 0 && <div style={{ padding: 32, textAlign: 'center', color: t.text4, fontSize: '.72rem' }}>No records</div>}
+        {rows.map((r, i) => (
+          <div key={i} style={{ display: 'grid', gridTemplateColumns: widths, padding: '10px 16px', borderBottom: `1px solid ${t.border}18`, gap: 8, alignItems: 'center' }}
+            onMouseEnter={e => e.currentTarget.style.background = t.card2}
+            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+            <span style={{ fontSize: '.65rem', color: t.text2, fontFamily: 'ui-monospace,monospace' }}>{fmtTime(r.time)}</span>
+            <span style={{ fontSize: '.72rem', color: t.text1, fontWeight: 500 }}>{r.name || '—'}</span>
+            <span style={{ fontSize: '.65rem', color: t.text2, fontFamily: 'ui-monospace,monospace' }}>{r.mob_num || '—'}</span>
+            <span style={{ fontSize: '.65rem', color: t.text2 }}>{r.branch_name || '—'}</span>
+            <span style={{ fontSize: '.68rem', color: t.purple, fontFamily: 'ui-monospace,monospace' }}>{r.grams > 0 ? `${Number(r.grams).toFixed(2)}g` : '—'}</span>
+            <span style={{ fontSize: '.65rem', color: t.text3 }}>{r.rej_rsn || '—'}</span>
+          </div>
+        ))}
+      </div>
+    </Card>
   )
 }
 
@@ -771,56 +803,6 @@ function FlowSep({ t }) {
   return <div style={{ width: 1, height: 32, background: t.border2, margin: '0 6px' }} />
 }
 
-/* ── Funnel Bar ── */
-function FunnelBar({ stages, totalWalkins, notConverted, t }) {
-  if (totalWalkins === 0) return null
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-      {stages.map((s) => {
-        const w = totalWalkins > 0 ? Math.max(8, (s.value / totalWalkins) * 100) : 0
-        return (
-          <div key={s.label} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <span style={{ fontSize: '.58rem', color: t.text3, width: 70, textAlign: 'right', flexShrink: 0 }}>
-              {s.label}
-            </span>
-            <div style={{ flex: 1, position: 'relative' }}>
-              <div style={{
-                height: 22, width: `${w}%`, background: s.color,
-                borderRadius: 4, display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
-                paddingRight: 8, minWidth: 36, transition: 'width .5s ease',
-              }}>
-                <span style={{ fontSize: '.62rem', fontWeight: 600, color: '#fff', fontFamily: 'ui-monospace, monospace', textShadow: '0 1px 2px rgba(0,0,0,.3)' }}>
-                  {s.value}
-                </span>
-              </div>
-            </div>
-          </div>
-        )
-      })}
-      {/* Not converted */}
-      {notConverted > 0 && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <span style={{ fontSize: '.58rem', color: t.text3, width: 70, textAlign: 'right', flexShrink: 0 }}>
-            Not billed
-          </span>
-          <div style={{ flex: 1 }}>
-            <div style={{
-              height: 22, width: `${Math.max(8, (notConverted / totalWalkins) * 100)}%`,
-              borderRadius: 4, display: 'flex', alignItems: 'center', paddingLeft: 8,
-              border: `1.5px dashed ${t.red}`, background: t.redDim, minWidth: 36,
-              transition: 'width .5s ease',
-            }}>
-              <span style={{ fontSize: '.62rem', fontWeight: 600, color: t.red, fontFamily: 'ui-monospace, monospace' }}>
-                {notConverted}
-              </span>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  )
-}
-
 /* ── Metric Card ── */
 function MetricCard({ t, label, value, color, sub, dim }) {
   return (
@@ -834,48 +816,6 @@ function MetricCard({ t, label, value, color, sub, dim }) {
   )
 }
 
-/* ── Branch Table ── */
-function BranchTable({ branches, t, regionFilter }) {
-  const filtered = regionFilter
-    ? branches.filter(b => b.region === regionFilter)
-    : branches
-  const sorted = [...filtered].sort((a, b) => (b.approved || 0) - (a.approved || 0))
-  return (
-    <Card t={t} style={{ padding: 0, overflow: 'hidden' }}>
-      <div style={{
-        display: 'grid', gridTemplateColumns: '1fr 90px 90px 90px',
-        padding: '10px 20px', borderBottom: `1px solid ${t.border}`, gap: 12, background: t.card2,
-      }}>
-        {['Branch', 'Approved', 'Pending', 'Rejected'].map((h, i) => (
-          <span key={h} style={{ fontSize: '.62rem', letterSpacing: '.1em', textTransform: 'uppercase', color: t.text3, fontWeight: 500, textAlign: i > 0 ? 'center' : 'left' }}>{h}</span>
-        ))}
-      </div>
-      {sorted.length === 0 && (
-        <div style={{ padding: '24px', textAlign: 'center', color: t.text4, fontSize: '.72rem' }}>No branch data for this region</div>
-      )}
-      {sorted.map((b, i) => (
-        <div key={b.branch_name || i} style={{
-          display: 'grid', gridTemplateColumns: '1fr 90px 90px 90px',
-          padding: '11px 20px', borderBottom: i < sorted.length - 1 ? `1px solid ${t.border}` : 'none', gap: 12,
-          alignItems: 'center',
-        }}>
-          <span style={{ fontSize: '.75rem', color: t.text1, fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-            {b.branch_name || 'Unknown'}
-          </span>
-          <div style={{ textAlign: 'center' }}>
-            <Mono size=".82rem" color={Number(b.approved) > 0 ? t.green : t.text4}>{b.approved || 0}</Mono>
-          </div>
-          <div style={{ textAlign: 'center' }}>
-            <Mono size=".82rem" color={Number(b.pending) > 0 ? t.orange : t.text4}>{b.pending || 0}</Mono>
-          </div>
-          <div style={{ textAlign: 'center' }}>
-            <Mono size=".82rem" color={Number(b.rejected) > 0 ? t.red : t.text4}>{b.rejected || 0}</Mono>
-          </div>
-        </div>
-      ))}
-    </Card>
-  )
-}
 
 
 /* ── Walkin Card ── */

@@ -311,17 +311,26 @@ export async function GET(req) {
           GROUP BY hour ORDER BY hour
         `, [todayIST]),
 
-        // 5. Today's transactions for timeline (grms_wet CSV summed in frontend)
+        // 5. Today's transactions — GROUP BY transaction so each bill is one row
         conn.execute(`
           SELECT t.id, t.bill_no, t.cust_name, t.cust_mobile,
+            DATE(t.date + INTERVAL 330 MINUTE) AS txn_date,
             t.time, t.branch_id, b.brnch_name AS branch_name,
             t.type_gold, t.trxn_status, (t.finl_amnt+0) AS amount,
-            t.txn_rmrk, t.pymt_mde, o.grms_wet AS grms_wet_csv
+            t.txn_rmrk, t.pymt_mde, t.serv_chr,
+            GROUP_CONCAT(o.grms_wet   SEPARATOR ',') AS grms_wet_csv,
+            GROUP_CONCAT(o.stnt_wet   SEPARATOR ',') AS stnt_wet_csv,
+            GROUP_CONCAT(o.wastag_wet SEPARATOR ',') AS wastag_csv,
+            GROUP_CONCAT(o.net_wet    SEPARATOR ',') AS net_wet_csv,
+            GROUP_CONCAT(DISTINCT o.purity ORDER BY o.id SEPARATOR ', ') AS purity_all,
+            GROUP_CONCAT(o.grs_amnt   SEPARATOR ',') AS grs_amnt_csv
           FROM transac_tbl t
           LEFT JOIN branch_tbl b ON b.brnch_id = t.branch_id
           LEFT JOIN ornments_tbl o ON o.trnxnn_id = t.id
           WHERE DATE(t.date + INTERVAL 330 MINUTE) = ?
-          ORDER BY t.time DESC LIMIT 300
+          GROUP BY t.id
+          ORDER BY t.time DESC
+          LIMIT 500
         `, [todayIST]),
 
         // 6. Today's walk-ins for timeline
@@ -335,10 +344,14 @@ export async function GET(req) {
           ORDER BY cw.time DESC
         `, [todayIST]),
 
-        // 7. KYC blacklisted today — individual rows so frontend can filter by region
+        // 7. KYC blacklisted today — full detail for region filter + detail table
         conn.execute(`
-          SELECT branh_id, mob_num, grams+0 AS grams
-          FROM rejctd_tbl WHERE DATE(date + INTERVAL 330 MINUTE) = ?
+          SELECT r.branh_id, r.mob_num, r.grams+0 AS grams,
+            r.name, r.rej_rsn, r.time,
+            b.brnch_name AS branch_name
+          FROM rejctd_tbl r
+          LEFT JOIN branch_tbl b ON b.brnch_id = r.branh_id
+          WHERE DATE(r.date + INTERVAL 330 MINUTE) = ?
         `, [todayIST]),
 
         // 8. KYC checklist filled today (chklist_tbl) — customers who went through KYC
