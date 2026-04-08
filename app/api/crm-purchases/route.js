@@ -322,7 +322,7 @@ export async function GET(req) {
             GROUP_CONCAT(o.stnt_wet   SEPARATOR ',') AS stnt_wet_csv,
             GROUP_CONCAT(o.wastag_wet SEPARATOR ',') AS wastag_csv,
             GROUP_CONCAT(o.net_wet    SEPARATOR ',') AS net_wet_csv,
-            GROUP_CONCAT(DISTINCT o.purity ORDER BY o.id SEPARATOR ', ') AS purity_all,
+            GROUP_CONCAT(o.purity     ORDER BY o.id SEPARATOR ',') AS purity_csv,
             GROUP_CONCAT(o.grs_amnt   SEPARATOR ',') AS grs_amnt_csv
           FROM transac_tbl t
           LEFT JOIN branch_tbl b ON b.brnch_id = t.branch_id

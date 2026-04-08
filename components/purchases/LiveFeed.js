@@ -50,6 +50,28 @@ const STATUS_STYLE = {
 
 const csvSum = str => String(str || '').split(',').reduce((s, v) => { const n = parseFloat(v.trim()); return s + (isNaN(n) ? 0 : n) }, 0)
 
+const csvVals = str => String(str || '').split(',').map(v => parseFloat(v.trim())).filter(n => !isNaN(n))
+
+function wtdAvgPurity(grmsWetCsv, purityCsv) {
+  const wts = csvVals(grmsWetCsv)
+  const pur = csvVals(purityCsv)
+  if (!wts.length || !pur.length) return null
+  let totalWt = 0, totalWtdPur = 0
+  wts.forEach((w, i) => {
+    const p = pur[i] ?? pur[pur.length - 1] // fallback to last if mismatched
+    if (w > 0 && p > 0) { totalWt += w; totalWtdPur += w * p }
+  })
+  return totalWt > 0 ? totalWtdPur / totalWt : null
+}
+
+function fmtDate(d) {
+  if (!d) return '—'
+  const s = String(d).slice(0, 10)
+  const [y, m, day] = s.split('-')
+  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+  return `${day}-${months[parseInt(m) - 1]}-${y}`
+}
+
 /* ── Formatters ── */
 const fmtAmt = n => n != null ? `\u20b9${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 })}` : '\u2014'
 const fmtNum = n => Number(n || 0).toLocaleString('en-IN')
@@ -520,27 +542,33 @@ function OldCrmTab({
           <MetricCard t={t} label="Walked In" color={t.blue}
             value={goldWalkedIn > 0 ? fmtWt(goldWalkedIn) : '—'}
             sub={missingWeightCnt > 0 ? `${missingWeightCnt} walkins missing wt` : `${totalWalkins} walk-ins`}
-            bar={100} />
+            bar={100}
+            active={activeMetric === 'walkin'} onClick={() => toggleMetric('walkin')} />
           <MetricCard t={t} label="Purchased" color={t.green}
             value={goldPurchased > 0 ? fmtWt(goldPurchased) : '—'}
             sub={`${approved} bills · ${physicalApproved} physical · ${releaseApproved} takeover`}
-            bar={goldWalkedIn > 0 ? (goldPurchased / goldWalkedIn) * 100 : 0} />
+            bar={goldWalkedIn > 0 ? (goldPurchased / goldWalkedIn) * 100 : 0}
+            active={activeMetric === 'purchased'} onClick={() => toggleMetric('purchased')} />
           <MetricCard t={t} label="In Pipeline" color={t.orange}
             value={goldPending > 0 ? fmtWt(goldPending) : '—'}
             sub={`${pending} bills · ${physicalPending} physical · ${releasePending} takeover`}
-            bar={goldWalkedIn > 0 ? (goldPending / goldWalkedIn) * 100 : 0} />
+            bar={goldWalkedIn > 0 ? (goldPending / goldWalkedIn) * 100 : 0}
+            active={activeMetric === 'pending'} onClick={() => toggleMetric('pending')} />
           <MetricCard t={t} label="Bill Rejected Wt" color={t.red}
             value={goldRejected > 0 ? fmtWt(goldRejected) : '—'}
             sub={wrongEntry > 0 ? `${trueRejected} rejected · ${wrongEntry} wrong entries` : `${trueRejected} bills rejected`}
-            bar={goldWalkedIn > 0 ? (goldRejected / goldWalkedIn) * 100 : 0} />
+            bar={goldWalkedIn > 0 ? (goldRejected / goldWalkedIn) * 100 : 0}
+            active={activeMetric === 'rejected'} onClick={() => toggleMetric('rejected')} />
           <MetricCard t={t} label="KYC Blocked Wt" color={t.purple}
             value={kycBlacklistedWt > 0 ? fmtWt(kycBlacklistedWt) : '—'}
             sub={`${kycBlacklistedCnt} customers blocked`}
-            bar={goldWalkedIn > 0 ? (kycBlacklistedWt / goldWalkedIn) * 100 : 0} />
+            bar={goldWalkedIn > 0 ? (kycBlacklistedWt / goldWalkedIn) * 100 : 0}
+            active={activeMetric === 'kyc_blocked'} onClick={() => toggleMetric('kyc_blocked')} />
           <MetricCard t={t} label="Left Unbilled Wt" color={t.text3}
             value={goldNotBilled > 0 ? fmtWt(goldNotBilled) : '—'}
             sub={crmNotUpdatedCnt > 0 ? `${notBilledCnt} unbilled · ${crmNotUpdatedCnt} CRM not updated` : `${notBilledCnt} left without billing`}
-            bar={goldWalkedIn > 0 ? (goldNotBilled / goldWalkedIn) * 100 : 0} />
+            bar={goldWalkedIn > 0 ? (goldNotBilled / goldWalkedIn) * 100 : 0}
+            active={activeMetric === 'unbilled'} onClick={() => toggleMetric('unbilled')} />
         </div>
         <div style={{ display: 'flex', gap: 16, marginTop: 8, flexWrap: 'wrap', padding: '6px 14px', background: t.card, border: `1px solid ${t.border}`, borderRadius: 8, alignItems: 'center' }}>
           <span style={{ fontSize: '.6rem', color: t.text3 }}>Avg gross weight per purchase:</span>
@@ -737,7 +765,7 @@ function TxnTable({ rows, t }) {
                   onMouseEnter={e => e.currentTarget.style.background = t.card2}
                   onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
                   <span style={{ fontSize: '.68rem', color: t.gold, fontFamily: 'ui-monospace,monospace', fontWeight: 500 }}>{r.bill_no || '—'}</span>
-                  <span style={{ fontSize: '.65rem', color: t.text2 }}>{r.txn_date ? String(r.txn_date).slice(0,10) : '—'}</span>
+                  <span style={{ fontSize: '.65rem', color: t.text2 }}>{fmtDate(r.txn_date)}</span>
                   <span style={{ fontSize: '.65rem', color: t.text2, fontFamily: 'ui-monospace,monospace' }}>{fmtTime(r.time)}</span>
                   <span style={{ fontSize: '.72rem', color: t.text1, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.cust_name || '—'}</span>
                   <span style={{ fontSize: '.65rem', color: t.text2, fontFamily: 'ui-monospace,monospace' }}>{r.cust_mobile || '—'}</span>
@@ -746,7 +774,7 @@ function TxnTable({ rows, t }) {
                   <span style={{ fontSize: '.65rem', color: t.text3, fontFamily: 'ui-monospace,monospace' }}>{csvSum(r.stnt_wet_csv) > 0 ? `${csvSum(r.stnt_wet_csv).toFixed(2)}g` : '0g'}</span>
                   <span style={{ fontSize: '.65rem', color: t.text3, fontFamily: 'ui-monospace,monospace' }}>{csvSum(r.wastag_csv) > 0 ? `${csvSum(r.wastag_csv).toFixed(2)}g` : '0g'}</span>
                   <span style={{ fontSize: '.68rem', color: t.text1, fontFamily: 'ui-monospace,monospace' }}>{csvSum(r.net_wet_csv) > 0 ? `${csvSum(r.net_wet_csv).toFixed(2)}g` : '—'}</span>
-                  <span style={{ fontSize: '.65rem', color: t.text2 }}>{r.purity_all ? [...new Set(String(r.purity_all).split(', ').map(p => p.trim()))].join(', ') : '—'}</span>
+                  <span style={{ fontSize: '.65rem', color: t.text2 }}>{(() => { const wp = wtdAvgPurity(r.grms_wet_csv, r.purity_csv); return wp ? `${wp.toFixed(1)}` : '—' })()}</span>
                   <span style={{ fontSize: '.68rem', color: t.gold, fontFamily: 'ui-monospace,monospace' }}>{csvSum(r.grs_amnt_csv) > 0 ? `₹${Math.round(csvSum(r.grs_amnt_csv)).toLocaleString('en-IN')}` : '—'}</span>
                   <span style={{ fontSize: '.65rem', color: t.text3 }}>{r.serv_chr ? `${r.serv_chr}%` : '—'}</span>
                   <span style={{ fontSize: '.58rem', padding: '2px 7px', borderRadius: 4, fontWeight: 600, background: `${sc}18`, color: sc, border: `1px solid ${sc}30`, whiteSpace: 'nowrap', textTransform: 'capitalize' }}>{r.trxn_status || '—'}</span>
@@ -840,14 +868,23 @@ function FlowSep({ t }) {
 }
 
 /* ── Metric Card ── */
-function MetricCard({ t, label, value, color, sub, dim, bar }) {
+function MetricCard({ t, label, value, color, sub, dim, bar, onClick, active }) {
   return (
     <Card t={t} style={{
       padding: '0', opacity: dim ? 0.5 : 1, overflow: 'hidden',
-      borderTop: `3px solid ${color}`,
+      borderTop: `3px solid ${active ? color : `${color}70`}`,
+      outline: active ? `2px solid ${color}50` : '2px solid transparent',
+      boxShadow: active ? `0 0 16px ${color}20, 0 2px 8px rgba(0,0,0,.12)` : '0 2px 8px rgba(0,0,0,.12)',
+      cursor: onClick ? 'pointer' : 'default',
+      transition: 'outline .15s, box-shadow .15s',
     }}>
-      <div style={{ padding: '14px 16px 12px' }}>
-        <span style={{ fontSize: '.58rem', letterSpacing: '.12em', textTransform: 'uppercase', color: t.text3, fontWeight: 600 }}>{label}</span>
+      <div
+        style={{ padding: '14px 16px 12px' }}
+        onMouseEnter={e => { if (onClick) e.currentTarget.parentElement.style.transform = 'translateY(-1px)' }}
+        onMouseLeave={e => { if (onClick) e.currentTarget.parentElement.style.transform = 'translateY(0)' }}
+        onClick={onClick}
+      >
+        <span style={{ fontSize: '.58rem', letterSpacing: '.12em', textTransform: 'uppercase', color: active ? color : t.text3, fontWeight: 600 }}>{label}</span>
         <div style={{ marginTop: 8 }}>
           <Mono size="1.55rem" color={color} weight={200}>{value}</Mono>
         </div>
@@ -857,6 +894,7 @@ function MetricCard({ t, label, value, color, sub, dim, bar }) {
             <div style={{ height: '100%', width: `${Math.min(100, bar)}%`, background: `${color}90`, borderRadius: 2, transition: 'width .5s ease' }} />
           </div>
         )}
+        {active && <span style={{ display: 'block', marginTop: 6, fontSize: '.52rem', color, letterSpacing: '.08em', fontWeight: 700 }}>▼ showing below</span>}
       </div>
     </Card>
   )
