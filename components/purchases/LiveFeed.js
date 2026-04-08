@@ -67,15 +67,6 @@ function fmtWt(g) {
 const PING_CSS = `@keyframes ping{75%,100%{transform:scale(2);opacity:0}}@keyframes fadeIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}`
 
 /* ── Tiny reusable components ── */
-/* ── Region helper ── */
-function deriveRegion(branchName, dbRegion) {
-  if (dbRegion) return dbRegion
-  const n = (branchName || '').toUpperCase()
-  if (n.startsWith('KL-') || n.startsWith('KL ')) return 'Kerala'
-  if (n.startsWith('AP-') || n.startsWith('AP ')) return 'Andhra Pradesh'
-  if (n.startsWith('TS-') || n.startsWith('TS ')) return 'Telangana'
-  return 'Karnataka'
-}
 
 function SectionLabel({ children, t }) {
   return (
@@ -179,14 +170,12 @@ export default function LiveFeed() {
   const hourly = data?.hourly || []
   const todayTxns = data?.todayTxns || []
   const todayWalkins = data?.todayWalkins || []
-
-  // Derive unique regions from branch data
-  const regions = [...new Set(branches.map(b => deriveRegion(b.branch_name, b.region)))].sort()
+  const regions = data?.allRegions || []
 
   const isToday = viewDate === todayIST
 
   // Region-filtered raw rows (used for both timeline and metric re-computation)
-  const rTxns    = regionFilter ? todayTxns.filter(tx => tx.region === regionFilter)   : todayTxns
+  const rTxns    = regionFilter ? todayTxns.filter(tx => tx.region    === regionFilter) : todayTxns
   const rWalkins = regionFilter ? todayWalkins.filter(w  => w.region  === regionFilter) : todayWalkins
 
   // Walkin funnel — when region active, derive from individual rows; else use API aggregates
@@ -242,7 +231,7 @@ export default function LiveFeed() {
     if (tlFilter === 'walkin' && item.type !== 'walkin') return false
     if (tlFilter === 'approved' && !(item.type === 'txn' && item.status === 'approved')) return false
     if (tlFilter === 'pending' && !(item.type === 'txn' && item.status === 'pending')) return false
-    if (regionFilter && deriveRegion(item.branch, item.region) !== regionFilter) return false
+    if (regionFilter && item.region !== regionFilter) return false
     if (search) {
       const s = search.toLowerCase()
       return (item.name || '').toLowerCase().includes(s) ||
@@ -528,7 +517,7 @@ function OldCrmTab({
       {notYetBilled > 0 && todayWalkins.length > 0 && (() => {
         const notBilledWalkins = todayWalkins.filter(w =>
           w.walkin_status !== 'sold' &&
-          (!regionFilter || deriveRegion(w.branch_name, w.region) === regionFilter)
+          (!regionFilter || w.region === regionFilter)
         )
         if (!notBilledWalkins.length) return null
         return (
@@ -742,7 +731,7 @@ function MetricCard({ t, label, value, color, sub, dim }) {
 /* ── Branch Table ── */
 function BranchTable({ branches, t, regionFilter }) {
   const filtered = regionFilter
-    ? branches.filter(b => deriveRegion(b.branch_name, b.region) === regionFilter)
+    ? branches.filter(b => b.region === regionFilter)
     : branches
   const sorted = [...filtered].sort((a, b) => (b.approved || 0) - (a.approved || 0))
   return (

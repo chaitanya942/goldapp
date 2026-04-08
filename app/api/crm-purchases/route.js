@@ -241,9 +241,12 @@ export async function GET(req) {
         .select('crm_branch_id, region')
         .not('crm_branch_id', 'is', null)
       const regionMap = {}
+      const allRegions = []
       for (const b of sbBranches || []) {
         if (b.crm_branch_id) regionMap[String(b.crm_branch_id)] = b.region || ''
+        if (b.region && !allRegions.includes(b.region)) allRegions.push(b.region)
       }
+      allRegions.sort()
 
       // All old-CRM queries in parallel
       const [
@@ -439,6 +442,7 @@ export async function GET(req) {
         payments,
         todayTxns,
         todayWalkins,
+        allRegions,
         // legacy compat
         todaySummary: summary,
         walkinToday:  walkinSummary.total,
