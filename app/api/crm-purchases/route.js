@@ -497,7 +497,7 @@ export async function GET(req) {
           database: process.env.NEW_CRM_DB_NAME,
           username: process.env.NEW_CRM_DB_USER,
           password: process.env.NEW_CRM_DB_PASSWORD,
-          ssl:      'require',
+          ssl:      { rejectUnauthorized: false },
           connect_timeout: 8,
           max:      1,
         })
