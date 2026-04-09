@@ -168,7 +168,8 @@ export default function RoleManagement() {
       if (!selected && json.roles.length > 0) setSelected(json.roles[0].name)
     } catch (e) {
       console.error('RBAC load error:', e)
-      setLoadErr(e.message || String(e))
+      const detail = (e.stack || e.message || String(e))
+      setLoadErr(detail)
     } finally {
       setLoading(false)
     }
