@@ -9,7 +9,8 @@ const THEMES = {
   light: { bg: '#f5f0e8', card: '#ede8dc', card2: '#e4dfd3', text1: '#1a1208', text2: '#3a2a10', text3: '#8a7a5a', text4: '#b0a080', gold: '#9a7228', border: '#e0dace', border2: '#c8c0b0', green: '#2a8a5a', red: '#cc3333', blue: '#2a6fa0' },
 }
 
-const ROLES = [
+// Fallback used only before API loads
+const DEFAULT_ROLES = [
   { value: 'super_admin',     label: 'Super Admin',      color: '#c9a84c' },
   { value: 'founders_office', label: "Founder's Office", color: '#8c5ac8' },
   { value: 'admin',           label: 'Admin',            color: '#3a8fbf' },
@@ -19,14 +20,11 @@ const ROLES = [
   { value: 'telesales',       label: 'Telesales',        color: '#e07840' },
 ]
 
-function getRoleStyle(role) {
-  return ROLES.find(r => r.value === role) ?? { label: role, color: '#7a6a4a' }
-}
-
 export default function UserManagement() {
   const { theme, canDo } = useApp()
   const t = THEMES[theme]
 
+  const [roles,      setRoles]      = useState(DEFAULT_ROLES)
   const [users,      setUsers]      = useState([])
   const [loading,    setLoading]    = useState(false)
   const [savingId,   setSavingId]   = useState(null)
@@ -51,10 +49,18 @@ export default function UserManagement() {
 
   const load = async () => {
     setLoading(true)
-    const { data } = await supabase.from('user_profiles').select('*').order('full_name')
+    const [{ data }, rbacRes] = await Promise.all([
+      supabase.from('user_profiles').select('*').order('full_name'),
+      fetch('/api/rbac?action=all').then(r => r.json()).catch(() => null),
+    ])
     if (data) setUsers(data)
+    if (rbacRes?.roles?.length) {
+      setRoles(rbacRes.roles.map(r => ({ value: r.name, label: r.label, color: r.color || '#7a6a4a' })))
+    }
     setLoading(false)
   }
+
+  const getRoleStyle = (role) => roles.find(r => r.value === role) ?? { label: role, color: '#7a6a4a' }
 
   // ── INVITE ──────────────────────────────────────────────
   const inviteUser = async () => {
@@ -221,7 +227,7 @@ export default function UserManagement() {
               <div>
                 <div style={{ fontSize: '.58rem', color: t.text3, marginBottom: '5px', letterSpacing: '.08em', textTransform: 'uppercase' }}>Role</div>
                 <select style={{ ...inp, cursor: 'pointer' }} value={invRole} onChange={e => setInvRole(e.target.value)}>
-                  {ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+                  {roles.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
                 </select>
               </div>
             </div>
@@ -252,7 +258,7 @@ export default function UserManagement() {
               <div>
                 <div style={{ fontSize: '.58rem', color: t.text3, marginBottom: '5px', letterSpacing: '.08em', textTransform: 'uppercase' }}>Role</div>
                 <select style={{ ...inp, cursor: 'pointer' }} value={exRole} onChange={e => setExRole(e.target.value)}>
-                  {ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+                  {roles.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
                 </select>
               </div>
             </div>
@@ -338,7 +344,7 @@ export default function UserManagement() {
                         cursor: 'pointer',
                         outline: 'none',
                       }}>
-                      {ROLES.map(r => (
+                      {roles.map(r => (
                         <option key={r.value} value={r.value}>{r.label}</option>
                       ))}
                     </select>
@@ -388,7 +394,7 @@ export default function UserManagement() {
       {/* ── Role Legend ── */}
       <div style={{ marginTop: '20px', display: 'flex', gap: '16px', flexWrap: 'wrap', alignItems: 'center' }}>
         <span style={{ fontSize: '.58rem', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase' }}>Roles:</span>
-        {ROLES.map(r => (
+        {roles.map(r => (
           <div key={r.value} style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
             <div style={{ width: '7px', height: '7px', borderRadius: '50%', background: r.color }}/>
             <span style={{ fontSize: '.62rem', color: t.text3 }}>{r.label}</span>
