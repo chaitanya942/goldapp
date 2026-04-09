@@ -1,8 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { useApp } from '../../lib/context'
-import { ROLE_PAGES, ROLE_RESTRICTIONS } from '../../lib/context'
+import { useApp, ROLE_PAGES, ROLE_RESTRICTIONS } from '../../lib/context'
 
 const THEMES = {
   dark:  { bg: '#0e0e0e', surface: '#111', card: '#141414', card2: '#1a1a1a', text1: '#f0e6c8', text2: '#c8b89a', text3: '#7a6a4a', text4: '#4a3a2a', gold: '#c9a84c', goldDim: '#c9a84c18', border: '#2a2a2a', border2: '#333', green: '#3aaa6a', greenDim: '#3aaa6a20', red: '#e05555', redDim: '#e0555520', blue: '#3a8fbf' },
@@ -71,8 +70,8 @@ const ALL_KEYS = PERMISSION_REGISTRY.flatMap(g => g.items.map(i => i.key))
 
 // Build default permissions from hardcoded ROLE_PAGES + ROLE_RESTRICTIONS
 function buildDefaults(roleName) {
-  const pages       = ROLE_PAGES[roleName]       || []
-  const restrictions = ROLE_RESTRICTIONS[roleName] || []
+  const pages        = (ROLE_PAGES        && ROLE_PAGES[roleName])        || []
+  const restrictions = (ROLE_RESTRICTIONS && ROLE_RESTRICTIONS[roleName]) || []
   const perms = new Set()
 
   pages.forEach(p => perms.add('page.' + p))
@@ -145,7 +144,7 @@ export default function RoleManagement() {
 
       // Overlay with DB values (DB overrides defaults)
       const dbByRole = {}
-      for (const p of json.permissions) {
+      for (const p of (json.permissions || [])) {
         if (!dbByRole[p.role_name]) dbByRole[p.role_name] = []
         dbByRole[p.role_name].push(p)
       }
@@ -169,7 +168,7 @@ export default function RoleManagement() {
       if (!selected && json.roles.length > 0) setSelected(json.roles[0].name)
     } catch (e) {
       console.error('RBAC load error:', e)
-      setLoadErr(e.message)
+      setLoadErr(e.message || String(e))
     } finally {
       setLoading(false)
     }
