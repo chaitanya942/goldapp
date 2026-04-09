@@ -389,7 +389,7 @@ export async function GET(req) {
       // --- Aggregate ornment rows by status + type ---
       const byStatus = {}  // { approved: { count, wt, value }, pending: {...}, rejected: {...} }
       const byType   = {}  // { physical: { approved, pending, rejected }, released: {...} }
-      const seenTxns = new Set()
+
 
       // Build per-txn weight map first (sum all ornment rows per txn)
       const txnWeightMap = {}
@@ -499,7 +499,7 @@ export async function GET(req) {
           database: process.env.NEW_CRM_DB_NAME,
           user:     process.env.NEW_CRM_DB_USER,
           password: process.env.NEW_CRM_DB_PASSWORD,
-          ssl:      { rejectUnauthorized: false },
+          ssl:      { rejectUnauthorized: false, servername: process.env.NEW_CRM_DB_HOSTNAME || process.env.NEW_CRM_DB_HOST },
           connectionTimeoutMillis: 5000,
         })
         await pgClient.connect()
