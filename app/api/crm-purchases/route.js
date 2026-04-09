@@ -235,18 +235,22 @@ export async function GET(req) {
       // Allow explicit date override via ?date=; default to today IST
       const todayIST = searchParams.get('date') || defaultIST
 
-      // Fetch region mapping from Supabase branch management (crm_branch_id → region)
+      // Fetch region mapping from Supabase branch management
       const { data: sbBranches } = await supabase
         .from('branches')
-        .select('crm_branch_id, region')
-        .not('crm_branch_id', 'is', null)
-      const regionMap = {}
-      const allRegions = []
+        .select('crm_branch_id, name, region')
+        .not('region', 'is', null)
+      const regionMap     = {}  // old CRM: crm_branch_id → region
+      const nameRegionMap = {}  // new CRM: lowercase branch name → region
+      const allRegionsSet = new Set()
       for (const b of sbBranches || []) {
-        if (b.crm_branch_id) regionMap[String(b.crm_branch_id)] = b.region || ''
-        if (b.region && !allRegions.includes(b.region)) allRegions.push(b.region)
+        const region = b.region || ''
+        if (!region) continue
+        if (b.crm_branch_id) regionMap[String(b.crm_branch_id)] = region
+        if (b.name) nameRegionMap[b.name.trim().toLowerCase()] = region
+        allRegionsSet.add(region)
       }
-      allRegions.sort()
+      const allRegions = Array.from(allRegionsSet).sort()
 
       // All old-CRM queries in parallel
       const [
@@ -483,8 +487,9 @@ export async function GET(req) {
         released: { approved: byType['released']?.approved || 0, pending: byType['released']?.pending || 0, rejected: byType['released']?.rejected || 0 },
       }
 
-      // Try new CRM for stage breakdown (best-effort, don't fail if unreachable)
+      // Try new CRM (best-effort, don't fail if unreachable)
       let stages = null
+      let newCrmTxns = null   // null = offline; [] = online but no data
       let pgClient
       try {
         pgClient = new PgClient({
@@ -501,29 +506,69 @@ export async function GET(req) {
         const todayStart = `${todayIST}T00:00:00+05:30`
         const todayEnd   = `${todayIST}T23:59:59+05:30`
 
-        const { rows: stageRows } = await pgClient.query(`
-          SELECT
-            t.status,
-            COUNT(*)                                   AS count,
-            COALESCE(ROUND(SUM(ow.net_weight)::numeric, 2), 0) AS net_wt
-          FROM "Transaction" t
-          LEFT JOIN (
-            SELECT q.transaction_id, SUM(o.net_weight) AS net_weight
-            FROM "Quotation" q
-            JOIN "Ornament" o ON o.quotation_id = q.id
-            GROUP BY q.transaction_id
-          ) ow ON ow.transaction_id = t.id
-          WHERE t.created_at BETWEEN $1 AND $2
-          GROUP BY t.status
-          ORDER BY count DESC
-        `, [todayStart, todayEnd])
+        const [{ rows: stageRows }, { rows: txnRows }] = await Promise.all([
+          // Stage counts
+          pgClient.query(`
+            SELECT
+              t.status,
+              COUNT(*) AS count,
+              COALESCE(ROUND(SUM(ow.net_weight)::numeric, 2), 0) AS net_wt
+            FROM "Transaction" t
+            LEFT JOIN (
+              SELECT q.transaction_id, SUM(o.net_weight) AS net_weight
+              FROM "Quotation" q
+              JOIN "Ornament" o ON o.quotation_id = q.id
+              GROUP BY q.transaction_id
+            ) ow ON ow.transaction_id = t.id
+            WHERE t.created_at BETWEEN $1 AND $2
+            GROUP BY t.status ORDER BY count DESC
+          `, [todayStart, todayEnd]),
+
+          // Full transaction rows for today
+          pgClient.query(`
+            SELECT
+              t.id, t.code AS bill_no, t.status, t.transaction_type,
+              TO_CHAR(t.created_at AT TIME ZONE 'Asia/Kolkata', 'HH24:MI:SS') AS txn_time,
+              TO_CHAR(t.created_at AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM-DD') AS txn_date,
+              TRIM(COALESCE(c.first_name,'') || ' ' || COALESCE(c.last_name,'')) AS cust_name,
+              c.mobile AS cust_mobile,
+              b.name AS branch_name,
+              COALESCE(q.final_amount, 0)::float AS amount,
+              q.service_charge::float AS serv_chr,
+              COALESCE(SUM(o.gross_weight), 0)::float AS gross_weight,
+              COALESCE(SUM(o.stone_weight), 0)::float AS stone_weight,
+              COALESCE(SUM(o.wastage), 0)::float       AS wastage,
+              COALESCE(SUM(o.net_weight), 0)::float    AS net_weight,
+              CASE WHEN COALESCE(SUM(o.net_weight), 0) > 0
+                THEN ROUND((SUM(o.net_weight * o.purity) / SUM(o.net_weight))::numeric, 1)::float
+                ELSE NULL END AS avg_purity
+            FROM "Transaction" t
+            LEFT JOIN "Customer"  c ON c.id = t.customer_id
+            LEFT JOIN "Branch"    b ON b.id = t.branch_id
+            LEFT JOIN "Quotation" q ON q.transaction_id = t.id
+            LEFT JOIN "Ornament"  o ON o.quotation_id = q.id
+            WHERE t.created_at BETWEEN $1 AND $2
+            GROUP BY t.id, t.code, t.status, t.transaction_type, t.created_at,
+                     c.first_name, c.last_name, c.mobile,
+                     b.name, q.final_amount, q.service_charge
+            ORDER BY t.created_at DESC
+            LIMIT 1000
+          `, [todayStart, todayEnd]),
+        ])
 
         stages = {}
         for (const r of stageRows) {
           stages[r.status] = { count: Number(r.count), net_wt: parseFloat(r.net_wt) || 0 }
         }
+
+        // Attach region via branch name
+        for (const row of txnRows) {
+          row.region = nameRegionMap[(row.branch_name || '').trim().toLowerCase()] || ''
+        }
+        newCrmTxns = txnRows
+
       } catch (e) {
-        // New CRM unreachable — stages will be null, UI falls back gracefully
+        // New CRM unreachable — newCrmTxns stays null, UI falls back gracefully
       } finally {
         if (pgClient) try { await pgClient.end() } catch {}
       }
@@ -540,6 +585,7 @@ export async function GET(req) {
         todayWalkins,
         kycRows,
         allRegions,
+        newCrmTxns,
       })
     }
 

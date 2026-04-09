@@ -206,7 +206,7 @@ export default function LiveFeed() {
   /* ── New-event detection ── */
   useEffect(() => {
     if (!data) return
-    const count = (data.todayTxns?.length || 0) + (data.todayWalkins?.length || 0)
+    const count = (data.todayTxns?.length || 0) + (data.todayWalkins?.length || 0) + (data.newCrmTxns?.length || 0)
     const prev = prevTlCountRef.current
     if (prev > 0 && count > prev) setNewEventCount(count - prev)
     prevTlCountRef.current = count
@@ -216,11 +216,12 @@ export default function LiveFeed() {
   const summary = data?.summary || {}
   const walkinSummary = data?.walkinSummary || {}
   const stages = data?.stages || null
-  const todayTxns   = data?.todayTxns   || []
+  const todayTxns    = data?.todayTxns    || []
   const todayWalkins = data?.todayWalkins || []
-  const regions     = data?.allRegions  || []
+  const regions      = data?.allRegions   || []
   const goldPipeline = data?.goldPipeline || {}
   const kycRows      = data?.kycRows      || []
+  const newCrmTxns   = data ? (data.newCrmTxns ?? null) : null  // null = offline
 
   // Region-filtered raw rows
   const rTxns    = regionFilter ? todayTxns.filter(tx => tx.region === regionFilter)   : todayTxns
@@ -461,7 +462,12 @@ export default function LiveFeed() {
               newEventCount={newEventCount} clearNewEvents={() => setNewEventCount(0)} />
           </div>
         ) : (
-          <NewCrmTab t={t} stages={stages} />
+          <div style={{ opacity: loading && data ? 0.6 : 1, transition: 'opacity .3s', pointerEvents: loading && data ? 'none' : 'auto', animation: loading && data ? 'shimmer 1.4s ease infinite' : 'none' }}>
+            <NewCrmTab t={t} stages={stages} newCrmTxns={newCrmTxns}
+              regionFilter={regionFilter} regions={regions}
+              viewDate={viewDate} isToday={isToday}
+              newEventCount={newEventCount} clearNewEvents={() => setNewEventCount(0)} />
+          </div>
         )}
       </div>
     </div>
@@ -1157,153 +1163,396 @@ function TimelineRow({ item, t, isLast }) {
 /* ════════════════════════════════════════════════════════════════ */
 /*                        NEW CRM TAB                            */
 /* ════════════════════════════════════════════════════════════════ */
-function NewCrmTab({ t, stages }) {
-  if (!stages) {
+
+const NEW_CRM_STATUS = {
+  WALKIN:                  { label: 'Walk-in',    color: '#4a9fdf' },
+  ESTIMATION_PENDING:      { label: 'Estimation', color: '#e09830' },
+  KYC_PENDING:             { label: 'KYC',        color: '#9a6adf' },
+  FINAL_PAYMENT_PENDING:   { label: 'Payment Due', color: '#c9a84c' },
+  FINAL_PAYMENT_COMPLETED: { label: 'Completed',  color: '#3aaa6a' },
+  WALKOUT:                 { label: 'Walkout',    color: '#e05555' },
+}
+const IN_PROGRESS_STATUSES = ['ESTIMATION_PENDING', 'KYC_PENDING', 'FINAL_PAYMENT_PENDING']
+
+function NewCrmTab({ t, newCrmTxns, regionFilter, regions, viewDate, isToday, newEventCount, clearNewEvents }) {
+  const [activeMetric, setActiveMetric] = useState(null)
+  const [tlOpen, setTlOpen] = useState(false)
+  const [tlSearch, setTlSearch] = useState('')
+  const toggleMetric = key => setActiveMetric(prev => prev === key ? null : key)
+
+  // Offline state (connection failed)
+  if (newCrmTxns === null || newCrmTxns === undefined) {
     return (
-      <div style={{
-        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-        minHeight: 360, gap: 16,
-      }}>
-        <div style={{
-          width: 64, height: 64, borderRadius: 16, background: t.card,
-          border: `1px solid ${t.border}`, display: 'flex', alignItems: 'center', justifyContent: 'center',
-          fontSize: '1.6rem', color: t.text4,
-        }}>
-          ~
-        </div>
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: 360, gap: 16 }}>
+        <div style={{ width: 64, height: 64, borderRadius: 16, background: t.card, border: `1px solid ${t.border}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.6rem', color: t.text4 }}>~</div>
         <span style={{ fontSize: '.88rem', color: t.text2, fontWeight: 300 }}>New CRM Offline</span>
         <span style={{ fontSize: '.62rem', color: t.text4, maxWidth: 320, textAlign: 'center', lineHeight: 1.6 }}>
-          The new PostgreSQL-based CRM is not reporting data at this time.
-          This tab will activate automatically when stage data becomes available.
+          The new PostgreSQL-based CRM is not reporting data at this time. This tab will activate automatically when data becomes available.
         </span>
-        <div style={{
-          marginTop: 8, padding: '8px 20px', borderRadius: 8, background: t.card,
-          border: `1px solid ${t.border}`, fontSize: '.58rem', color: t.text3,
-        }}>
+        <div style={{ marginTop: 8, padding: '8px 20px', borderRadius: 8, background: t.card, border: `1px solid ${t.border}`, fontSize: '.58rem', color: t.text3 }}>
           Expected stages: Walk-in {'\u2192'} Valuation {'\u2192'} KYC {'\u2192'} Payment {'\u2192'} Completed
         </div>
       </div>
     )
   }
 
-  // Build stage data
-  const stageData = STAGE_ORDER_FUNNEL.map(key => ({
-    key,
-    ...(STAGE_META[key] || {}),
-    count: stages[key]?.count || 0,
-    netWt: stages[key]?.net_wt || 0,
-  }))
-  const walkoutData = {
-    key: 'WALKOUT',
-    ...STAGE_META.WALKOUT,
-    count: stages.WALKOUT?.count || 0,
-    netWt: stages.WALKOUT?.net_wt || 0,
+  // Region filter
+  const txns    = regionFilter ? newCrmTxns.filter(tx => tx.region === regionFilter) : newCrmTxns
+  const allTxns = newCrmTxns
+
+  // Derived counts
+  const walkinTxns     = txns.filter(tx => tx.status === 'WALKIN')
+  const estimationTxns = txns.filter(tx => tx.status === 'ESTIMATION_PENDING')
+  const kycTxns        = txns.filter(tx => tx.status === 'KYC_PENDING')
+  const paymentTxns    = txns.filter(tx => tx.status === 'FINAL_PAYMENT_PENDING')
+  const completedTxns  = txns.filter(tx => tx.status === 'FINAL_PAYMENT_COMPLETED')
+  const walkoutTxns    = txns.filter(tx => tx.status === 'WALKOUT')
+  const inProgressTxns = txns.filter(tx => IN_PROGRESS_STATUSES.includes(tx.status))
+
+  const total      = txns.length
+  const inProgress = inProgressTxns.length
+  const completed  = completedTxns.length
+  const walkout    = walkoutTxns.length
+
+  const completedValue = completedTxns.reduce((s, tx) => s + (Number(tx.amount) || 0), 0)
+  const totalWt        = txns.reduce((s, tx) => s + (Number(tx.gross_weight) || 0), 0)
+  const completedWt    = completedTxns.reduce((s, tx) => s + (Number(tx.gross_weight) || 0), 0)
+  const inProgressWt   = inProgressTxns.reduce((s, tx) => s + (Number(tx.gross_weight) || 0), 0)
+  const walkoutWt      = walkoutTxns.reduce((s, tx) => s + (Number(tx.gross_weight) || 0), 0)
+  const walkinWt       = walkinTxns.reduce((s, tx) => s + (Number(tx.gross_weight) || 0), 0)
+
+  const conversionPct       = total > 0 ? Math.round(completed / total * 100) : 0
+  const walkoutRate         = total > 0 ? Math.round(walkout / total * 100) : 0
+  const progressedPct       = total > 0 ? Math.round((inProgress + completed) / total * 100) : 0
+  const completedOfProgPct  = (inProgress + completed) > 0 ? Math.round(completed / (inProgress + completed) * 100) : 0
+  const avgWt               = completed > 0 && completedWt > 0 ? completedWt / completed : 0
+  const topTxn              = [...completedTxns].sort((a, b) => (Number(b.amount) || 0) - (Number(a.amount) || 0))[0]
+
+  if (!total) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: 300, gap: 12 }}>
+        <span style={{ fontSize: '2rem', opacity: .3 }}>~</span>
+        <span style={{ fontSize: '.82rem', color: t.text3 }}>No activity recorded yet</span>
+        <span style={{ fontSize: '.62rem', color: t.text4 }}>Data will appear as transactions come in</span>
+      </div>
+    )
   }
-  const maxCount = Math.max(...stageData.map(s => s.count), walkoutData.count, 1)
-  const totalNew = stageData.reduce((s, d) => s + d.count, 0) + walkoutData.count
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
-      {/* Summary strip */}
-      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-        <MetricCard t={t} label="Total in Pipeline" value={fmtNum(totalNew)} color={t.blue} sub="across all stages" />
-        <MetricCard t={t} label="Completed" value={fmtNum(stageData.find(s => s.key === 'FINAL_PAYMENT_COMPLETED')?.count || 0)}
-          color={t.green} sub="payments done" />
-        <MetricCard t={t} label="Walkouts" value={fmtNum(walkoutData.count)} color={t.red} sub="lost customers" />
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+
+      {/* ──────── 0. SUMMARY BAR ──────── */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 0, background: t.surface, border: `1px solid ${t.border}`, borderRadius: 12, padding: '0', overflow: 'hidden', flexWrap: 'wrap', boxShadow: '0 2px 8px rgba(0,0,0,.10)' }}>
+        {[
+          { label: isToday ? 'Today' : fmtDate(viewDate), value: null, color: t.text3, accent: t.border },
+          { label: 'Total',       value: fmtNum(total),          color: t.blue,   accent: t.blue },
+          { label: 'In Progress', value: fmtNum(inProgress),     color: t.orange, accent: t.orange },
+          { label: 'Completed',   value: fmtNum(completed),      color: t.green,  accent: t.green },
+          { label: 'Value',       value: fmtAmt(completedValue), color: t.green,  accent: t.green },
+          { label: 'Conversion',  value: `${conversionPct}%`,    color: conversionPct >= 50 ? t.green : t.orange, accent: null },
+          ...(walkout > 0 ? [{ label: 'Walkout', value: fmtNum(walkout), color: t.red, accent: null }] : []),
+        ].map((item, i) => (
+          <div key={i} className="sum-bar-item" style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '10px 18px', borderRight: `1px solid ${t.border}`, borderLeft: item.accent ? `3px solid ${item.accent}` : undefined }}>
+            {item.value != null ? (
+              <>
+                <span style={{ fontSize: '.75rem', fontFamily: 'ui-monospace,monospace', fontWeight: 600, color: item.color }}>{item.value}</span>
+                <span style={{ fontSize: '.58rem', color: t.text4, letterSpacing: '.08em', textTransform: 'uppercase' }}>{item.label}</span>
+              </>
+            ) : (
+              <span style={{ fontSize: '.65rem', color: t.text3, fontWeight: 700, letterSpacing: '.1em', textTransform: 'uppercase' }}>{item.label}</span>
+            )}
+          </div>
+        ))}
+        {topTxn && (
+          <div className="sum-bar-item" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 18px', marginLeft: 'auto', borderLeft: `1px solid ${t.border}` }}>
+            <span style={{ fontSize: '.52rem', color: t.text4, letterSpacing: '.08em', textTransform: 'uppercase' }}>Top sale</span>
+            <span style={{ fontSize: '.75rem', fontFamily: 'ui-monospace,monospace', fontWeight: 600, color: t.gold }}>{fmtAmt(topTxn.amount)}</span>
+            <span style={{ fontSize: '.62rem', color: t.text2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 120 }}>{topTxn.cust_name}</span>
+            <span style={{ fontSize: '.58rem', color: t.text4 }}>{topTxn.branch_name}</span>
+          </div>
+        )}
       </div>
 
-      {/* Stage funnel */}
+      {/* ──────── 1. CUSTOMER JOURNEY ──────── */}
       <div>
-        <SectionLabel t={t}>Stage Funnel</SectionLabel>
-        <Card t={t} style={{ padding: '20px 24px' }}>
-          {stageData.map((s, i) => {
-            const w = maxCount > 0 ? Math.max(8, (s.count / maxCount) * 100) : 0
-            const prevCount = i > 0 ? stageData[i - 1].count : null
-            const convPct = prevCount && prevCount > 0 ? Math.round((s.count / prevCount) * 100) : null
-            return (
-              <div key={s.key}>
-                {i > 0 && convPct != null && (
-                  <div style={{
-                    textAlign: 'center', fontSize: '.46rem', color: t.text4,
-                    fontFamily: 'ui-monospace, monospace', padding: '2px 0', letterSpacing: '.06em',
-                  }}>
-                    {'\u2193'} {convPct}% conversion
-                  </div>
-                )}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 2 }}>
-                  <span style={{ fontSize: '.8rem', width: 20, textAlign: 'center' }}>{s.icon}</span>
-                  <span style={{ fontSize: '.58rem', color: t.text3, width: 90, flexShrink: 0 }}>{s.label}</span>
-                  <div style={{ flex: 1 }}>
-                    <div style={{
-                      height: 24, width: `${w}%`, background: s.color, borderRadius: 4,
-                      display: 'flex', alignItems: 'center', justifyContent: 'flex-end', paddingRight: 8,
-                      minWidth: 40, transition: 'width .5s ease',
-                    }}>
-                      <span style={{ fontSize: '.64rem', fontWeight: 600, color: '#fff', fontFamily: 'ui-monospace, monospace', textShadow: '0 1px 2px rgba(0,0,0,.3)' }}>
-                        {s.count}
-                      </span>
-                    </div>
-                  </div>
-                  {s.netWt > 0 && (
-                    <span style={{ fontSize: '.54rem', color: t.text4, fontFamily: 'ui-monospace, monospace', whiteSpace: 'nowrap' }}>
-                      {fmtWt(s.netWt)}
-                    </span>
-                  )}
-                </div>
-              </div>
-            )
-          })}
-          {/* Walkout */}
-          {walkoutData.count > 0 && (
-            <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px dashed ${t.border2}` }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <span style={{ fontSize: '.8rem', width: 20, textAlign: 'center' }}>{walkoutData.icon}</span>
-                <span style={{ fontSize: '.58rem', color: t.text3, width: 90, flexShrink: 0 }}>{walkoutData.label}</span>
-                <div style={{ flex: 1 }}>
-                  <div style={{
-                    height: 24, width: `${Math.max(8, (walkoutData.count / maxCount) * 100)}%`,
-                    borderRadius: 4, display: 'flex', alignItems: 'center', paddingLeft: 8,
-                    border: `1.5px dashed ${t.red}`, background: t.redDim, minWidth: 40,
-                  }}>
-                    <span style={{ fontSize: '.64rem', fontWeight: 600, color: t.red, fontFamily: 'ui-monospace, monospace' }}>
-                      {walkoutData.count}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            </div>
+        <SectionLabel t={t}>Customer Journey · New CRM</SectionLabel>
+        <div className="lf-hero" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0, flexWrap: 'wrap', background: t.surface, borderRadius: 16, border: `1px solid ${t.border}`, padding: '28px 16px', boxShadow: `0 4px 20px rgba(0,0,0,.12), inset 0 1px 0 ${t.border}`, backdropFilter: 'blur(4px)' }}>
+          <HeroNum label="Total Today"  value={total}      color={t.blue}   t={t} weight={totalWt}      active={activeMetric==='total'}      onClick={() => toggleMetric('total')} />
+          <FlowArrow t={t} pct={progressedPct || null} />
+          <HeroNum label="In Progress"  value={inProgress} color={t.orange} t={t} weight={inProgressWt} active={activeMetric==='inprogress'} onClick={() => toggleMetric('inprogress')} />
+          <FlowArrow t={t} pct={completedOfProgPct || null} />
+          <HeroNum label="Completed"    value={completed}  color={t.green}  t={t} weight={completedWt}  active={activeMetric==='completed'}  onClick={() => toggleMetric('completed')} />
+          <FlowSep t={t} />
+          <HeroNum label="At Walk-in"   value={walkinTxns.length}     color={t.blue}   t={t} small weight={walkinWt}   active={activeMetric==='walkin'}     onClick={() => toggleMetric('walkin')} />
+          <FlowSep t={t} />
+          <HeroNum label="Estimation"   value={estimationTxns.length} color={t.orange} t={t} small                    active={activeMetric==='estimation'} onClick={() => toggleMetric('estimation')} />
+          <FlowSep t={t} />
+          <HeroNum label="KYC"          value={kycTxns.length}        color={t.purple} t={t} small                    active={activeMetric==='kyc'}        onClick={() => toggleMetric('kyc')} />
+          <FlowSep t={t} />
+          <HeroNum label="Payment Due"  value={paymentTxns.length}    color={t.gold}   t={t} small                    active={activeMetric==='payment'}    onClick={() => toggleMetric('payment')} />
+          <FlowSep t={t} />
+          <HeroNum label="Walkout"      value={walkout}                color={t.red}    t={t} small weight={walkoutWt}  active={activeMetric==='walkout'}    onClick={() => toggleMetric('walkout')} />
+        </div>
+        <div style={{ display: 'flex', gap: 10, marginTop: 10, flexWrap: 'wrap' }}>
+          <Pill label="Overall conversion" value={`${conversionPct}%`} color={t.green} bg={t.greenDim} />
+          {inProgress > 0 && <Pill label="In pipeline" value={fmtNum(inProgress)} color={t.orange} bg={t.orangeDim} />}
+          {walkout > 0 && <Pill label="Walkout rate" value={`${walkoutRate}%`} color={t.red} bg={t.redDim} />}
+          {avgWt > 0 && <Pill label="Avg wt/completed" value={fmtWt(avgWt)} color={t.gold} bg={t.goldDim} />}
+          {activeMetric && (
+            <button onClick={() => setActiveMetric(null)} style={{ marginLeft: 'auto', padding: '3px 10px', borderRadius: 20, fontSize: '.58rem', cursor: 'pointer', border: `1px solid ${t.border}`, background: t.card2, color: t.text3 }}>
+              Clear filter ✕
+            </button>
           )}
-        </Card>
-      </div>
-
-      {/* Stage detail cards */}
-      <div>
-        <SectionLabel t={t}>Stage Details</SectionLabel>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10 }}>
-          {[...stageData, walkoutData].map(s => (
-            <Card key={s.key} t={t} style={{ padding: '14px 16px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                <span style={{
-                  width: 28, height: 28, borderRadius: 6, background: `${s.color}20`,
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  fontSize: '.78rem', color: s.color,
-                }}>
-                  {s.icon}
-                </span>
-                <span style={{ fontSize: '.56rem', color: t.text3, letterSpacing: '.06em', textTransform: 'uppercase' }}>
-                  {s.label}
-                </span>
-              </div>
-              <Mono size="1.4rem" color={t.text1} weight={200}>{s.count}</Mono>
-              {s.netWt > 0 && (
-                <div style={{ marginTop: 4, fontSize: '.56rem', color: t.text4, fontFamily: 'ui-monospace, monospace' }}>
-                  {fmtWt(s.netWt)} gold
-                </div>
-              )}
-            </Card>
-          ))}
         </div>
       </div>
+
+      {/* ──────── 2. GOLD WEIGHT FLOW ──────── */}
+      <div>
+        <SectionLabel t={t}>Gold Weight Flow</SectionLabel>
+        <div style={{ display: 'flex', flexWrap: 'wrap', background: t.card, border: `1px solid ${t.border}`, borderRadius: 12, overflow: 'hidden', boxShadow: '0 2px 8px rgba(0,0,0,.10)' }}>
+          {[
+            { key: 'total',      label: 'Total',       wt: totalWt,      color: t.blue,   pct: 100 },
+            { key: 'completed',  label: 'Completed',   wt: completedWt,  color: t.green,  pct: totalWt > 0 ? completedWt / totalWt * 100 : 0 },
+            { key: 'inprogress', label: 'In Pipeline', wt: inProgressWt, color: t.orange, pct: totalWt > 0 ? inProgressWt / totalWt * 100 : 0 },
+            { key: 'walkin',     label: 'At Walk-in',  wt: walkinWt,     color: t.blue,   pct: totalWt > 0 ? walkinWt / totalWt * 100 : 0 },
+            { key: 'walkout',    label: 'Walkout',     wt: walkoutWt,    color: t.red,    pct: totalWt > 0 ? walkoutWt / totalWt * 100 : 0 },
+          ].map((item, i, arr) => (
+            <div key={item.key}
+              className="ws-item"
+              onClick={() => toggleMetric(item.key)}
+              onMouseEnter={e => e.currentTarget.style.background = t.card2}
+              onMouseLeave={e => e.currentTarget.style.background = activeMetric === item.key ? `${item.color}0c` : 'transparent'}
+              style={{ flex: 1, minWidth: 'calc(20% - 1px)', padding: '12px 14px', cursor: 'pointer', borderRight: i < arr.length - 1 ? `1px solid ${t.border}` : 'none', borderTop: activeMetric === item.key ? `3px solid ${item.color}` : `3px solid transparent`, background: activeMetric === item.key ? `${item.color}0c` : 'transparent', transition: 'background .15s, border-top .15s' }}>
+              <div style={{ fontSize: '.55rem', color: item.color, textTransform: 'uppercase', letterSpacing: '.1em', fontWeight: 700 }}>{item.label}</div>
+              <div style={{ fontSize: '.95rem', fontFamily: 'ui-monospace,monospace', color: t.text1, fontWeight: 300, marginTop: 4 }}>{item.wt > 0 ? fmtWt(item.wt) : '—'}</div>
+              <div style={{ marginTop: 7, height: 3, borderRadius: 2, background: t.border, overflow: 'hidden' }}>
+                <div style={{ height: '100%', width: `${Math.min(100, item.pct)}%`, background: item.color, borderRadius: 2, transition: 'width .6s ease' }} />
+              </div>
+              <div style={{ fontSize: '.5rem', color: t.text4, marginTop: 3 }}>{item.pct > 0 ? `${item.pct.toFixed(0)}% of total` : ''}</div>
+            </div>
+          ))}
+        </div>
+        <div style={{ display: 'flex', gap: 20, marginTop: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <span style={{ fontSize: '.6rem', color: t.text3 }}>Avg wt/completed: <strong style={{ color: t.text1, fontFamily: 'ui-monospace,monospace' }}>{avgWt > 0 ? fmtWt(avgWt) : '—'}</strong></span>
+          <span style={{ fontSize: '.6rem', color: t.text3 }}>Completed value: <strong style={{ color: t.gold, fontFamily: 'ui-monospace,monospace' }}>{fmtAmt(completedValue)}</strong></span>
+        </div>
+      </div>
+
+      {/* ──────── 3. REGION BREAKDOWN ──────── */}
+      {regions && regions.length > 1 && !regionFilter && (
+        <div className="lf-region">
+          <NewCrmRegionTable t={t} regions={regions} allTxns={allTxns} />
+        </div>
+      )}
+
+      {/* ──────── 4. DETAIL TABLE ──────── */}
+      {activeMetric && (
+        <NewCrmDetail t={t} activeMetric={activeMetric} txns={txns} />
+      )}
+
+      {/* ──────── 5. LIVE TIMELINE ──────── */}
+      <div>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: tlOpen ? 10 : 0 }}>
+          <SectionLabel t={t}>{isToday ? 'Live Timeline' : 'Timeline'} · New CRM</SectionLabel>
+          <button onClick={() => { setTlOpen(o => !o); clearNewEvents() }} style={{ padding: '4px 12px', borderRadius: 6, fontSize: '.6rem', cursor: 'pointer', border: `1px solid ${newEventCount > 0 ? t.green : t.border}`, background: newEventCount > 0 ? `${t.green}14` : t.card, color: newEventCount > 0 ? t.green : t.text3, marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6, transition: 'all .2s' }}>
+            {newEventCount > 0 && <span style={{ background: t.green, color: '#000', borderRadius: 8, fontSize: '.52rem', fontWeight: 700, padding: '1px 5px', lineHeight: 1.4 }}>+{newEventCount}</span>}
+            {tlOpen ? 'Collapse ▲' : 'Expand ▼'}
+          </button>
+        </div>
+        {tlOpen && (
+          <Card t={t} style={{ padding: 0, overflow: 'hidden' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 16px', borderBottom: `1px solid ${t.border}`, flexWrap: 'wrap' }}>
+              <input type="text" placeholder="Search name, mobile, branch..." value={tlSearch} onChange={e => setTlSearch(e.target.value)}
+                style={{ background: t.card2, border: `1px solid ${t.border}`, borderRadius: 6, padding: '5px 10px', fontSize: '.62rem', color: t.text2, outline: 'none', width: 220, fontFamily: 'ui-monospace, monospace' }} />
+              <span style={{ fontSize: '.6rem', color: t.text4, marginLeft: 4 }}>{txns.length} events</span>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '70px 28px 1fr 110px 120px', gap: '0 12px', padding: '8px 20px', background: t.card2, borderBottom: `1px solid ${t.border}` }}>
+              {['Time', '', 'Customer / Branch', 'Weight', 'Amount'].map((h, i) => (
+                <span key={i} style={{ fontSize: '.57rem', color: t.text3, fontWeight: 600, letterSpacing: '.1em', textTransform: 'uppercase', textAlign: i >= 3 ? 'right' : i === 0 ? 'right' : 'left' }}>{h}</span>
+              ))}
+            </div>
+            <div style={{ maxHeight: 480, overflowY: 'auto' }}>
+              {[...txns].sort((a, b) => (b.txn_time || '').localeCompare(a.txn_time || '')).filter(tx => {
+                if (!tlSearch) return true
+                const s = tlSearch.toLowerCase()
+                return (tx.cust_name||'').toLowerCase().includes(s) || (tx.cust_mobile||'').includes(s) || (tx.branch_name||'').toLowerCase().includes(s)
+              }).map((tx, i, arr) => (
+                <NewCrmTimelineRow key={tx.id} item={tx} t={t} isLast={i === arr.length - 1} />
+              ))}
+            </div>
+          </Card>
+        )}
+      </div>
+    </div>
+  )
+}
+
+/* ── New CRM Detail Table ── */
+function NewCrmDetail({ t, activeMetric, txns }) {
+  const [search, setSearch] = useState('')
+
+  let rows, label
+  switch (activeMetric) {
+    case 'total':      rows = txns; label = 'All Transactions'; break
+    case 'walkin':     rows = txns.filter(tx => tx.status === 'WALKIN'); label = 'Still at Walk-in'; break
+    case 'inprogress': rows = txns.filter(tx => IN_PROGRESS_STATUSES.includes(tx.status)); label = 'In Progress'; break
+    case 'completed':  rows = txns.filter(tx => tx.status === 'FINAL_PAYMENT_COMPLETED'); label = 'Completed'; break
+    case 'walkout':    rows = txns.filter(tx => tx.status === 'WALKOUT'); label = 'Walkout'; break
+    case 'estimation': rows = txns.filter(tx => tx.status === 'ESTIMATION_PENDING'); label = 'Estimation Pending'; break
+    case 'kyc':        rows = txns.filter(tx => tx.status === 'KYC_PENDING'); label = 'KYC Pending'; break
+    case 'payment':    rows = txns.filter(tx => tx.status === 'FINAL_PAYMENT_PENDING'); label = 'Payment Due'; break
+    default:           rows = txns.filter(tx => tx.status === 'FINAL_PAYMENT_COMPLETED'); label = 'Completed'
+  }
+
+  const q = search.toLowerCase()
+  const filtered = q ? rows.filter(r =>
+    (r.cust_name||'').toLowerCase().includes(q) || (r.cust_mobile||'').includes(q) ||
+    (r.bill_no||'').toLowerCase().includes(q) || (r.branch_name||'').toLowerCase().includes(q)
+  ) : rows
+
+  return (
+    <div style={{ animation: 'slideUp .22s ease' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10, gap: 10, flexWrap: 'wrap' }}>
+        <SectionLabel t={t}>{label} · {filtered.length} records</SectionLabel>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <input type="text" placeholder="Search..." value={search} onChange={e => setSearch(e.target.value)}
+            style={{ background: t.card2, border: `1px solid ${t.border}`, borderRadius: 6, padding: '4px 10px', fontSize: '.62rem', color: t.text2, outline: 'none', width: 160, fontFamily: 'ui-monospace, monospace' }} />
+          <button onClick={() => downloadCSV(`${label}.csv`,
+            ['Bill No','Date','Time','Customer','Phone','Branch','Gross Wt','Net Wt','Purity','Amount','Status'],
+            filtered, r => [r.bill_no, r.txn_date, r.txn_time, r.cust_name, r.cust_mobile, r.branch_name,
+              Number(r.gross_weight||0).toFixed(2), Number(r.net_weight||0).toFixed(2),
+              r.avg_purity ? Number(r.avg_purity).toFixed(1) : '', Number(r.amount||0).toFixed(0), r.status]
+          )} style={{ padding: '4px 12px', borderRadius: 6, fontSize: '.58rem', cursor: 'pointer', border: `1px solid ${t.border}`, background: t.card, color: t.text3, whiteSpace: 'nowrap' }}>
+            ↓ CSV
+          </button>
+        </div>
+      </div>
+      <NewCrmTxnTable rows={filtered} t={t} />
+    </div>
+  )
+}
+
+/* ── New CRM Transaction Table ── */
+function NewCrmTxnTable({ rows, t }) {
+  const cols   = ['Bill No','Date','Time','Customer','Phone','Branch','Gross Wt','Net Wt','Purity','Amount','Status']
+  const widths = '110px 90px 70px 160px 110px 160px 76px 70px 60px 96px 100px'
+  return (
+    <Card t={t} style={{ padding: 0, overflow: 'hidden' }}>
+      <div style={{ overflowX: 'auto' }}>
+        <div style={{ minWidth: 1100 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: widths, padding: '9px 16px', borderBottom: `1px solid ${t.border}`, gap: 8, background: t.card2, position: 'sticky', top: 0 }}>
+            {cols.map(h => <span key={h} style={{ fontSize: '.56rem', letterSpacing: '.1em', textTransform: 'uppercase', color: t.text3, fontWeight: 600 }}>{h}</span>)}
+          </div>
+          <div style={{ maxHeight: 480, overflowY: 'auto' }}>
+            {rows.length === 0 && <div style={{ padding: 32, textAlign: 'center', color: t.text4, fontSize: '.72rem' }}>No records</div>}
+            {rows.map((r, i) => {
+              const sc = NEW_CRM_STATUS[r.status]?.color || t.text3
+              const sl = NEW_CRM_STATUS[r.status]?.label || r.status
+              return (
+                <div key={r.id || i} style={{ display: 'grid', gridTemplateColumns: widths, padding: '10px 16px', borderBottom: `1px solid ${t.border}18`, gap: 8, alignItems: 'center' }}
+                  onMouseEnter={e => e.currentTarget.style.background = t.card2}
+                  onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                  <span style={{ fontSize: '.68rem', color: t.gold, fontFamily: 'ui-monospace,monospace', fontWeight: 500 }}>{r.bill_no || '—'}</span>
+                  <span style={{ fontSize: '.65rem', color: t.text2 }}>{fmtDate(r.txn_date)}</span>
+                  <span style={{ fontSize: '.65rem', color: t.text2, fontFamily: 'ui-monospace,monospace' }}>{fmtTime(r.txn_time)}</span>
+                  <span style={{ fontSize: '.72rem', color: t.text1, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.cust_name || '—'}</span>
+                  <span style={{ fontSize: '.65rem', color: t.text2, fontFamily: 'ui-monospace,monospace' }}>{r.cust_mobile || '—'}</span>
+                  <span style={{ fontSize: '.65rem', color: t.text2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.branch_name || '—'}</span>
+                  <span style={{ fontSize: '.68rem', color: t.text1, fontFamily: 'ui-monospace,monospace' }}>{Number(r.gross_weight||0) > 0 ? `${Number(r.gross_weight).toFixed(2)}g` : '—'}</span>
+                  <span style={{ fontSize: '.68rem', color: t.text1, fontFamily: 'ui-monospace,monospace' }}>{Number(r.net_weight||0) > 0 ? `${Number(r.net_weight).toFixed(2)}g` : '—'}</span>
+                  <span style={{ fontSize: '.65rem', color: t.text2 }}>{r.avg_purity ? `${Number(r.avg_purity).toFixed(1)}` : '—'}</span>
+                  <span style={{ fontSize: '.68rem', color: t.gold, fontFamily: 'ui-monospace,monospace' }}>{Number(r.amount||0) > 0 ? fmtAmt(r.amount) : '—'}</span>
+                  <span style={{ fontSize: '.58rem', padding: '2px 7px', borderRadius: 4, fontWeight: 600, background: `${sc}18`, color: sc, border: `1px solid ${sc}30`, whiteSpace: 'nowrap' }}>{sl}</span>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      </div>
+    </Card>
+  )
+}
+
+/* ── New CRM Region Table ── */
+function NewCrmRegionTable({ t, regions, allTxns }) {
+  const safeTxns = allTxns || []
+  const rows = (regions || []).map(r => {
+    const rTx   = safeTxns.filter(tx => tx.region === r)
+    const rComp = rTx.filter(tx => tx.status === 'FINAL_PAYMENT_COMPLETED')
+    const rProg = rTx.filter(tx => IN_PROGRESS_STATUSES.includes(tx.status))
+    const rWout = rTx.filter(tx => tx.status === 'WALKOUT')
+    const value = rComp.reduce((s, tx) => s + (Number(tx.amount) || 0), 0)
+    const conv  = rTx.length > 0 ? Math.round(rComp.length / rTx.length * 100) : 0
+    return { region: r, total: rTx.length, inProgress: rProg.length, completed: rComp.length, walkout: rWout.length, value, conv }
+  }).sort((a, b) => b.completed - a.completed)
+
+  const cols = ['Region', 'Total', 'In Progress', 'Completed', 'Walkout', 'Value', 'Conversion']
+  return (
+    <div>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+        <SectionLabel t={t}>Region Breakdown</SectionLabel>
+        <button onClick={() => downloadCSV('new-crm-regions.csv', cols, rows, r => [r.region, r.total, r.inProgress, r.completed, r.walkout, r.value, `${r.conv}%`])}
+          style={{ padding: '4px 12px', borderRadius: 6, fontSize: '.58rem', cursor: 'pointer', border: `1px solid ${t.border}`, background: t.card, color: t.text3, marginBottom: 12 }}>
+          ↓ CSV
+        </button>
+      </div>
+      <Card t={t} style={{ padding: 0, overflow: 'hidden' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 70px 100px 90px 80px 110px 90px', gap: 8, padding: '8px 16px', background: t.card2, borderBottom: `1px solid ${t.border}` }}>
+          {cols.map(h => <span key={h} style={{ fontSize: '.56rem', color: t.text3, fontWeight: 600, letterSpacing: '.1em', textTransform: 'uppercase' }}>{h}</span>)}
+        </div>
+        {rows.map((r, i) => (
+          <div key={r.region} style={{ display: 'grid', gridTemplateColumns: '1fr 70px 100px 90px 80px 110px 90px', gap: 8, padding: '11px 16px', borderBottom: i < rows.length - 1 ? `1px solid ${t.border}18` : 'none', alignItems: 'center' }}
+            onMouseEnter={e => e.currentTarget.style.background = t.card2}
+            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+            <span style={{ fontSize: '.75rem', color: t.text1, fontWeight: 600 }}>{r.region}</span>
+            <span style={{ fontSize: '.68rem', color: t.blue,   fontFamily: 'ui-monospace,monospace' }}>{r.total}</span>
+            <span style={{ fontSize: '.68rem', color: t.orange, fontFamily: 'ui-monospace,monospace' }}>{r.inProgress || '—'}</span>
+            <span style={{ fontSize: '.68rem', color: t.green,  fontFamily: 'ui-monospace,monospace', fontWeight: 600 }}>{r.completed}</span>
+            <span style={{ fontSize: '.68rem', color: t.red,    fontFamily: 'ui-monospace,monospace' }}>{r.walkout || '—'}</span>
+            <span style={{ fontSize: '.68rem', color: t.gold,   fontFamily: 'ui-monospace,monospace' }}>{r.value > 0 ? fmtAmt(r.value) : '—'}</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <div style={{ flex: 1, height: 4, borderRadius: 2, background: t.border, overflow: 'hidden' }}>
+                <div style={{ height: '100%', width: `${r.conv}%`, background: r.conv >= 50 ? t.green : r.conv >= 30 ? t.orange : t.red, borderRadius: 2 }} />
+              </div>
+              <span style={{ fontSize: '.6rem', color: t.text3, fontFamily: 'ui-monospace,monospace', whiteSpace: 'nowrap' }}>{r.conv}%</span>
+            </div>
+          </div>
+        ))}
+      </Card>
+    </div>
+  )
+}
+
+/* ── New CRM Timeline Row ── */
+function NewCrmTimelineRow({ item, t, isLast }) {
+  const statusStyle = NEW_CRM_STATUS[item.status] || { label: item.status, color: t.text3 }
+  const accentColor = statusStyle.color
+  const wt = Number(item.gross_weight) || 0
+  const isTakeover = (item.transaction_type || '').toUpperCase().includes('RELEASE')
+
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: '70px 28px 1fr 110px 120px', gap: '0 12px', padding: '12px 20px', borderBottom: isLast ? 'none' : `1px solid ${t.border}18`, alignItems: 'center', borderLeft: `3px solid ${accentColor}40`, transition: 'background .12s' }}
+      onMouseEnter={e => e.currentTarget.style.background = t.card2}
+      onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+      <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: '.66rem', color: t.text3, textAlign: 'right', lineHeight: 1 }}>{fmtTime(item.txn_time)}</span>
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}>
+        <span style={{ fontSize: '.75rem', lineHeight: 1 }}>📋</span>
+        <span style={{ width: 6, height: 6, borderRadius: '50%', background: accentColor, display: 'block', boxShadow: `0 0 5px ${accentColor}60` }} />
+      </div>
+      <div style={{ minWidth: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: '.78rem', color: t.text1, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 180 }}>{item.cust_name || 'Unknown'}</span>
+          <span style={{ fontSize: '.56rem', padding: '2px 7px', borderRadius: 4, background: `${accentColor}18`, color: accentColor, border: `1px solid ${accentColor}35`, fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>{statusStyle.label}</span>
+          {isTakeover && <span style={{ fontSize: '.52rem', padding: '2px 6px', borderRadius: 4, background: `${t.gold}12`, color: t.gold, border: `1px solid ${t.gold}25`, fontWeight: 600, whiteSpace: 'nowrap' }}>Takeover</span>}
+        </div>
+        <div style={{ display: 'flex', gap: 10, marginTop: 3, alignItems: 'center', flexWrap: 'wrap' }}>
+          {item.branch_name && <span style={{ fontSize: '.62rem', color: t.text3 }}>{item.branch_name}</span>}
+          {item.cust_mobile && <span style={{ fontSize: '.6rem', color: t.text4, fontFamily: 'ui-monospace, monospace' }}>{item.cust_mobile}</span>}
+          {item.bill_no && <span style={{ fontSize: '.58rem', color: t.gold, fontFamily: 'ui-monospace, monospace', opacity: .7 }}>#{item.bill_no}</span>}
+        </div>
+      </div>
+      <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: '.72rem', color: wt > 0 ? t.text1 : t.text4, textAlign: 'right', fontWeight: wt > 0 ? 500 : 400 }}>{wt > 0 ? fmtWt(wt) : '—'}</span>
+      <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: '.74rem', color: item.status === 'FINAL_PAYMENT_COMPLETED' && item.amount ? t.gold : t.text4, textAlign: 'right', fontWeight: item.status === 'FINAL_PAYMENT_COMPLETED' && item.amount ? 600 : 400 }}>{item.amount ? fmtAmt(item.amount) : '—'}</span>
     </div>
   )
 }
