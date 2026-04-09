@@ -490,6 +490,7 @@ export async function GET(req) {
       // Try new CRM (best-effort, don't fail if unreachable)
       let stages = null
       let newCrmTxns = null   // null = offline; [] = online but no data
+      let newCrmError = null
       let pgClient
       try {
         pgClient = new PgClient({
@@ -568,7 +569,8 @@ export async function GET(req) {
         newCrmTxns = txnRows
 
       } catch (e) {
-        // New CRM unreachable — newCrmTxns stays null, UI falls back gracefully
+        console.error('New CRM connect error:', e.message)
+        newCrmError = e.message
       } finally {
         if (pgClient) try { await pgClient.end() } catch {}
       }
@@ -586,6 +588,7 @@ export async function GET(req) {
         kycRows,
         allRegions,
         newCrmTxns,
+        newCrmError,
       })
     }
 

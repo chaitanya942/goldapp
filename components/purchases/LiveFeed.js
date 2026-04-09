@@ -222,6 +222,7 @@ export default function LiveFeed() {
   const goldPipeline = data?.goldPipeline || {}
   const kycRows      = data?.kycRows      || []
   const newCrmTxns   = data ? (data.newCrmTxns ?? null) : null  // null = offline
+  const newCrmError  = data?.newCrmError || null
 
   // Region-filtered raw rows
   const rTxns    = regionFilter ? todayTxns.filter(tx => tx.region === regionFilter)   : todayTxns
@@ -463,7 +464,7 @@ export default function LiveFeed() {
           </div>
         ) : (
           <div style={{ opacity: loading && data ? 0.6 : 1, transition: 'opacity .3s', pointerEvents: loading && data ? 'none' : 'auto', animation: loading && data ? 'shimmer 1.4s ease infinite' : 'none' }}>
-            <NewCrmTab t={t} stages={stages} newCrmTxns={newCrmTxns}
+            <NewCrmTab t={t} stages={stages} newCrmTxns={newCrmTxns} newCrmError={newCrmError}
               regionFilter={regionFilter} regions={regions}
               viewDate={viewDate} isToday={isToday}
               newEventCount={newEventCount} clearNewEvents={() => setNewEventCount(0)} />
@@ -1174,7 +1175,7 @@ const NEW_CRM_STATUS = {
 }
 const IN_PROGRESS_STATUSES = ['ESTIMATION_PENDING', 'KYC_PENDING', 'FINAL_PAYMENT_PENDING']
 
-function NewCrmTab({ t, newCrmTxns, regionFilter, regions, viewDate, isToday, newEventCount, clearNewEvents }) {
+function NewCrmTab({ t, newCrmTxns, newCrmError, regionFilter, regions, viewDate, isToday, newEventCount, clearNewEvents }) {
   const [activeMetric, setActiveMetric] = useState(null)
   const [tlOpen, setTlOpen] = useState(false)
   const [tlSearch, setTlSearch] = useState('')
@@ -1186,12 +1187,14 @@ function NewCrmTab({ t, newCrmTxns, regionFilter, regions, viewDate, isToday, ne
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: 360, gap: 16 }}>
         <div style={{ width: 64, height: 64, borderRadius: 16, background: t.card, border: `1px solid ${t.border}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.6rem', color: t.text4 }}>~</div>
         <span style={{ fontSize: '.88rem', color: t.text2, fontWeight: 300 }}>New CRM Offline</span>
+        {newCrmError && (
+          <div style={{ background: `${t.red}12`, border: `1px solid ${t.red}30`, borderRadius: 8, padding: '8px 16px', maxWidth: 480, fontFamily: 'ui-monospace,monospace', fontSize: '.62rem', color: t.red, wordBreak: 'break-all', textAlign: 'center' }}>
+            {newCrmError}
+          </div>
+        )}
         <span style={{ fontSize: '.62rem', color: t.text4, maxWidth: 320, textAlign: 'center', lineHeight: 1.6 }}>
-          The new PostgreSQL-based CRM is not reporting data at this time. This tab will activate automatically when data becomes available.
+          The new PostgreSQL-based CRM is not reporting data at this time.
         </span>
-        <div style={{ marginTop: 8, padding: '8px 20px', borderRadius: 8, background: t.card, border: `1px solid ${t.border}`, fontSize: '.58rem', color: t.text3 }}>
-          Expected stages: Walk-in {'\u2192'} Valuation {'\u2192'} KYC {'\u2192'} Payment {'\u2192'} Completed
-        </div>
       </div>
     )
   }
