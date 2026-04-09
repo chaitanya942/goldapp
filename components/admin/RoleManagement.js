@@ -116,6 +116,11 @@ const PERM_TREE = [
     ],
   },
   {
+    label: 'Melting', icon: '🔥',
+    key: 'page.melting',
+    children: [],
+  },
+  {
     label: 'Sales', icon: '◎',
     children: [
       { key: 'page.cal-table',         label: 'Cal Table',         desc: 'Sales calculation and pricing table' },
@@ -195,7 +200,9 @@ function flattenVisible(nodes, expanded, depth = 0) {
     const nodeId = node.key || ('__' + node.label)
     const isLeaf = !node.children || node.children.length === 0
     result.push({ node, depth, id: nodeId, isLeaf })
-    if (!isLeaf && expanded.has(nodeId)) result.push(...flattenVisible(node.children, expanded, depth + 1))
+    if (!isLeaf && node.children.length > 0 && expanded.has(nodeId)) {
+      result.push(...flattenVisible(node.children, expanded, depth + 1))
+    }
   })
   return result
 }

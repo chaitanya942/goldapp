@@ -81,15 +81,21 @@ export async function POST(req) {
       if (!role_name || !Array.isArray(permissions)) {
         return Response.json({ error: 'role_name and permissions[] required' }, { status: 400 })
       }
+      // DELETE all existing rows for this role, then INSERT fresh —
+      // ensures stale keys from old schema versions never leak permissions
+      const { error: delErr } = await supabase
+        .from('role_permissions')
+        .delete()
+        .eq('role_name', role_name)
+      if (delErr) throw delErr
+
       const rows = permissions.map(p => ({
         role_name,
         permission_key: p.key,
         enabled: !!p.enabled,
       }))
       if (rows.length > 0) {
-        const { error } = await supabase
-          .from('role_permissions')
-          .upsert(rows, { onConflict: 'role_name,permission_key' })
+        const { error } = await supabase.from('role_permissions').insert(rows)
         if (error) throw error
       }
       return Response.json({ success: true })
