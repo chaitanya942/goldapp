@@ -1,16 +1,14 @@
 // app/api/crm-purchases/route.js
 // Queries CRM MySQL for rejected, pending, walk-in, and blacklisted data
 
-import mysql from 'mysql2/promise'
-import pg    from 'pg'
+import mysql    from 'mysql2/promise'
+import postgres  from 'postgres'
 import { createClient } from '@supabase/supabase-js'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY
 )
-
-const { Client: PgClient } = pg
 
 const ALLOWED_ACTIONS = new Set(['rejected', 'pending', 'walkin', 'blacklisted', 'branches', 'kpis', 'live'])
 
@@ -491,30 +489,25 @@ export async function GET(req) {
       let stages = null
       let newCrmTxns = null   // null = offline; [] = online but no data
       let newCrmError = null
-      let pgClient
+      let sql
       try {
-        const _host = process.env.NEW_CRM_DB_HOSTNAME || process.env.NEW_CRM_DB_HOST
-        const _port = process.env.NEW_CRM_DB_PORT || '5432'
-        const _db   = process.env.NEW_CRM_DB_NAME
-        const _user = process.env.NEW_CRM_DB_USER
-        const _pass = process.env.NEW_CRM_DB_PASSWORD
-        pgClient = new PgClient({
-          host:     _host,
-          port:     parseInt(_port),
-          database: _db,
-          user:     _user,
-          password: _pass,
-          ssl:      { ca: process.env.NEW_CRM_DB_CA, rejectUnauthorized: true },
-          connectionTimeoutMillis: 8000,
+        sql = postgres({
+          host:     process.env.NEW_CRM_DB_HOSTNAME || process.env.NEW_CRM_DB_HOST,
+          port:     parseInt(process.env.NEW_CRM_DB_PORT || '5432'),
+          database: process.env.NEW_CRM_DB_NAME,
+          username: process.env.NEW_CRM_DB_USER,
+          password: process.env.NEW_CRM_DB_PASSWORD,
+          ssl:      'require',
+          connect_timeout: 8,
+          max:      1,
         })
-        await pgClient.connect()
 
         const todayStart = `${todayIST}T00:00:00+05:30`
         const todayEnd   = `${todayIST}T23:59:59+05:30`
 
-        const [{ rows: stageRows }, { rows: txnRows }] = await Promise.all([
+        const [stageRows, txnRows] = await Promise.all([
           // Stage counts
-          pgClient.query(`
+          sql`
             SELECT
               t.status,
               COUNT(*) AS count,
@@ -526,12 +519,12 @@ export async function GET(req) {
               JOIN "Ornament" o ON o.quotation_id = q.id
               GROUP BY q.transaction_id
             ) ow ON ow.transaction_id = t.id
-            WHERE t.created_at BETWEEN $1 AND $2
+            WHERE t.created_at BETWEEN ${todayStart} AND ${todayEnd}
             GROUP BY t.status ORDER BY count DESC
-          `, [todayStart, todayEnd]),
+          `,
 
           // Full transaction rows for today
-          pgClient.query(`
+          sql`
             SELECT
               t.id, t.code AS bill_no, t.status, t.transaction_type,
               TO_CHAR(t.created_at AT TIME ZONE 'Asia/Kolkata', 'HH24:MI:SS') AS txn_time,
@@ -553,13 +546,13 @@ export async function GET(req) {
             LEFT JOIN "Branch"    b ON b.id = t.branch_id
             LEFT JOIN "Quotation" q ON q.transaction_id = t.id
             LEFT JOIN "Ornament"  o ON o.quotation_id = q.id
-            WHERE t.created_at BETWEEN $1 AND $2
+            WHERE t.created_at BETWEEN ${todayStart} AND ${todayEnd}
             GROUP BY t.id, t.code, t.status, t.transaction_type, t.created_at,
                      c.first_name, c.last_name, c.mobile,
                      b.name, q.final_amount, q.service_charge
             ORDER BY t.created_at DESC
             LIMIT 1000
-          `, [todayStart, todayEnd]),
+          `,
         ])
 
         stages = {}
@@ -567,20 +560,17 @@ export async function GET(req) {
           stages[r.status] = { count: Number(r.count), net_wt: parseFloat(r.net_wt) || 0 }
         }
 
-        // Attach region via branch name
-        for (const row of txnRows) {
+        const txnArr = [...txnRows]
+        for (const row of txnArr) {
           row.region = nameRegionMap[(row.branch_name || '').trim().toLowerCase()] || ''
         }
-        newCrmTxns = txnRows
+        newCrmTxns = txnArr
 
       } catch (e) {
         console.error('New CRM connect error:', e.message)
-        const u = process.env.NEW_CRM_DB_USER || ''
-        const p = process.env.NEW_CRM_DB_PASSWORD || ''
-        const h = process.env.NEW_CRM_DB_HOSTNAME || ''
-        newCrmError = `${e.message} [debug: host=${h.slice(0,12)} user_len=${u.length} pass_len=${p.length} pass_last=${p.slice(-4)}]`
+        newCrmError = e.message
       } finally {
-        if (pgClient) try { await pgClient.end() } catch {}
+        if (sql) try { await sql.end() } catch {}
       }
 
       return Response.json({
