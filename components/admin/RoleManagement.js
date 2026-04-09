@@ -1,7 +1,27 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { useApp, ROLE_PAGES, ROLE_RESTRICTIONS } from '../../lib/context'
+import { useApp } from '../../lib/context'
+
+// Local copies — avoids circular-init issues with the 'use client' context module
+const _ROLE_PAGES = {
+  super_admin:     ['dashboard','purchase-data','purchase-reports','consignment-overview','consignment-data','consignment-report','consignment-summary','melting','sales','cal-table','live-market-rates','reports','branch-management','branch-employees','user-management','company-settings','consignment-seeds','import-logs','inbound-bot'],
+  founders_office: ['dashboard','purchase-data','purchase-reports','consignment-overview','consignment-data','consignment-report','consignment-summary','melting','sales','cal-table','live-market-rates','reports','branch-management','branch-employees','user-management','company-settings','consignment-seeds','import-logs','inbound-bot'],
+  admin:           ['dashboard','purchase-data','purchase-reports','consignment-overview','consignment-data','consignment-report','consignment-summary','cal-table','live-market-rates'],
+  manager:         ['dashboard','purchase-data','purchase-reports','live-market-rates'],
+  branch_staff:    ['dashboard','purchase-data','purchase-reports'],
+  viewer:          ['dashboard','purchase-reports'],
+  telesales:       ['dashboard','inbound-bot'],
+}
+const _ROLE_RESTRICTIONS = {
+  super_admin:     [],
+  founders_office: ['delete'],
+  admin:           ['delete'],
+  manager:         ['delete'],
+  branch_staff:    ['delete','import'],
+  viewer:          ['delete','import','edit'],
+  telesales:       ['delete','import','edit'],
+}
 
 const THEMES = {
   dark:  { bg: '#0e0e0e', surface: '#111', card: '#141414', card2: '#1a1a1a', text1: '#f0e6c8', text2: '#c8b89a', text3: '#7a6a4a', text4: '#4a3a2a', gold: '#c9a84c', goldDim: '#c9a84c18', border: '#2a2a2a', border2: '#333', green: '#3aaa6a', greenDim: '#3aaa6a20', red: '#e05555', redDim: '#e0555520', blue: '#3a8fbf' },
@@ -68,10 +88,10 @@ export const PERMISSION_REGISTRY = [
 
 const ALL_KEYS = PERMISSION_REGISTRY.flatMap(g => g.items.map(i => i.key))
 
-// Build default permissions from hardcoded ROLE_PAGES + ROLE_RESTRICTIONS
+// Build default permissions from hardcoded role maps
 function buildDefaults(roleName) {
-  const pages        = (ROLE_PAGES        && ROLE_PAGES[roleName])        || []
-  const restrictions = (ROLE_RESTRICTIONS && ROLE_RESTRICTIONS[roleName]) || []
+  const pages        = (_ROLE_PAGES        && _ROLE_PAGES[roleName])        || []
+  const restrictions = (_ROLE_RESTRICTIONS && _ROLE_RESTRICTIONS[roleName]) || []
   const perms = new Set()
 
   pages.forEach(p => perms.add('page.' + p))
