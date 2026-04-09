@@ -97,7 +97,8 @@ function buildDefaults(roleName) {
   pages.forEach(p => perms.add('page.' + p))
 
   // Actions: enabled unless restricted
-  ['delete', 'edit', 'import', 'export', 'sync_crm'].forEach(a => {
+  const ACTIONS = ['delete', 'edit', 'import', 'export', 'sync_crm']
+  ACTIONS.forEach(a => {
     if (!restrictions.includes(a)) perms.add('action.' + a)
   })
 
