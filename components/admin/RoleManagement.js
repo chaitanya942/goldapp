@@ -460,7 +460,9 @@ export default function RoleManagement() {
   function toggleNode(node) {
     const keys = getAllKeys(node)
     if (!keys.length) return
-    const forceOn = nodeState(node, selectedPerms) === 'off'
+    // off → on; partial → on (select all missing, like a standard indeterminate checkbox); on → off
+    const state = nodeState(node, selectedPerms)
+    const forceOn = state !== 'on'
     setRolePerms(prev => {
       const next = new Set(prev[selected] || [])
       keys.forEach(k => forceOn ? next.add(k) : next.delete(k))
@@ -784,8 +786,8 @@ export default function RoleManagement() {
                       if (isPage) {
                         return (
                           <div key={id}
-                            onClick={() => !isLeaf && toggleExpand(id)}
-                            style={{ cursor: isLeaf ? 'default' : 'pointer', borderBottom: `1px solid ${t.border}18`, position: 'relative', transition: 'background .1s', background: 'transparent' }}
+                            onClick={() => isLeaf ? toggleNode(node) : toggleExpand(id)}
+                            style={{ cursor: 'pointer', borderBottom: `1px solid ${t.border}18`, position: 'relative', transition: 'background .1s', background: 'transparent' }}
                             onMouseEnter={e => e.currentTarget.style.background = t.card2}
                             onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
                             {/* Vertical guide line */}
@@ -816,8 +818,8 @@ export default function RoleManagement() {
                       if (isTab) {
                         return (
                           <div key={id}
-                            onClick={() => !isLeaf && toggleExpand(id)}
-                            style={{ cursor: isLeaf ? 'default' : 'pointer', borderBottom: `1px solid ${t.border}10`, position: 'relative', transition: 'background .1s', background: isExp ? `${t.gold}04` : 'transparent' }}
+                            onClick={() => isLeaf ? toggleNode(node) : toggleExpand(id)}
+                            style={{ cursor: 'pointer', borderBottom: `1px solid ${t.border}10`, position: 'relative', transition: 'background .1s', background: isExp ? `${t.gold}04` : 'transparent' }}
                             onMouseEnter={e => e.currentTarget.style.background = `${t.gold}06`}
                             onMouseLeave={e => e.currentTarget.style.background = isExp ? `${t.gold}04` : 'transparent'}>
                             {/* Guide lines */}
