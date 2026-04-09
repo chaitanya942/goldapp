@@ -494,13 +494,14 @@ export async function GET(req) {
       let pgClient
       try {
         const _host = process.env.NEW_CRM_DB_HOSTNAME || process.env.NEW_CRM_DB_HOST
+        const _port = process.env.NEW_CRM_DB_PORT || '5432'
+        const _db   = process.env.NEW_CRM_DB_NAME
+        const _user = process.env.NEW_CRM_DB_USER
+        const _pass = process.env.NEW_CRM_DB_PASSWORD
+        const connectionString = `postgresql://${encodeURIComponent(_user)}:${encodeURIComponent(_pass)}@${_host}:${_port}/${_db}?sslmode=require`
         pgClient = new PgClient({
-          host:     _host,
-          port:     parseInt(process.env.NEW_CRM_DB_PORT || '5432'),
-          database: process.env.NEW_CRM_DB_NAME,
-          user:     process.env.NEW_CRM_DB_USER,
-          password: process.env.NEW_CRM_DB_PASSWORD,
-          ssl:      { rejectUnauthorized: false },
+          connectionString,
+          ssl: { rejectUnauthorized: false },
           connectionTimeoutMillis: 8000,
         })
         await pgClient.connect()
