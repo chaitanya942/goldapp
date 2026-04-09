@@ -491,13 +491,16 @@ export async function GET(req) {
       let newCrmError = null
       let sql
       try {
+        const sslOptions = process.env.NEW_CRM_DB_CA
+          ? { ca: process.env.NEW_CRM_DB_CA, rejectUnauthorized: true }
+          : { rejectUnauthorized: false }
         sql = postgres({
           host:     process.env.NEW_CRM_DB_HOSTNAME || process.env.NEW_CRM_DB_HOST,
           port:     parseInt(process.env.NEW_CRM_DB_PORT || '5432'),
           database: process.env.NEW_CRM_DB_NAME,
           username: process.env.NEW_CRM_DB_USER,
           password: process.env.NEW_CRM_DB_PASSWORD,
-          ssl:      true,
+          ssl:      sslOptions,
           connect_timeout: 8,
           max:      1,
         })
