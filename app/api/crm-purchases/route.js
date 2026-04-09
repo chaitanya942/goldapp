@@ -571,7 +571,10 @@ export async function GET(req) {
 
       } catch (e) {
         console.error('New CRM connect error:', e.message)
-        newCrmError = e.message
+        const u = process.env.NEW_CRM_DB_USER || ''
+        const p = process.env.NEW_CRM_DB_PASSWORD || ''
+        const h = process.env.NEW_CRM_DB_HOSTNAME || ''
+        newCrmError = `${e.message} [debug: host=${h.slice(0,12)} user_len=${u.length} pass_len=${p.length} pass_last=${p.slice(-4)}]`
       } finally {
         if (pgClient) try { await pgClient.end() } catch {}
       }
