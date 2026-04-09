@@ -570,7 +570,6 @@ export async function GET(req) {
         newCrmTxns = txnArr
 
       } catch (e) {
-        console.error('New CRM connect error:', e.message)
         newCrmError = e.message
       } finally {
         if (sql) try { await sql.end() } catch {}

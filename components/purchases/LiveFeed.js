@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useApp } from '../../lib/context'
 import GoldSpinner from '../ui/GoldSpinner'
 
@@ -30,16 +30,6 @@ const THEMES = {
     purple: '#6a3aaa',
   }
 }
-
-const STAGE_META = {
-  WALKIN:                  { label: 'Walk-in',        color: '#4a9fdf', order: 0, icon: '\u2192' },
-  ESTIMATION_PENDING:      { label: 'Valuation',      color: '#e09830', order: 1, icon: '\u2696' },
-  KYC_PENDING:             { label: 'KYC',            color: '#9a6adf', order: 2, icon: '\ud83e\udea3' },
-  FINAL_PAYMENT_PENDING:   { label: 'Payment Due',    color: '#c9a84c', order: 3, icon: '\u20b9' },
-  FINAL_PAYMENT_COMPLETED: { label: 'Purchased',      color: '#3aaa6a', order: 4, icon: '\u2713' },
-  WALKOUT:                 { label: 'Walkout',        color: '#e05555', order: 5, icon: '\u2715' },
-}
-const STAGE_ORDER_FUNNEL = ['WALKIN', 'ESTIMATION_PENDING', 'KYC_PENDING', 'FINAL_PAYMENT_PENDING', 'FINAL_PAYMENT_COMPLETED']
 
 const STATUS_STYLE = {
   approved: { color: '#3aaa6a', label: 'Approved' },
@@ -231,9 +221,8 @@ export default function LiveFeed() {
   // Mobile sets for cross-table deduplication (region-scoped)
   const rApprovedMobiles = new Set(rTxns.filter(t => t.trxn_status === 'approved').map(t => t.cust_mobile).filter(Boolean))
   const rBilledMobiles   = new Set(rTxns.map(t => t.cust_mobile).filter(Boolean))
-  const rKycMobiles      = new Set(
-    (regionFilter ? kycRows.filter(r => r.region === regionFilter) : kycRows).map(r => r.mob_num).filter(Boolean)
-  )
+  const rKycRows     = regionFilter ? kycRows.filter(r => r.region === regionFilter) : kycRows
+  const rKycMobiles  = new Set(rKycRows.map(r => r.mob_num).filter(Boolean))
 
   // All counts — always derive from row data for consistency
   const totalWalkins = regionFilter ? rWalkins.length : (walkinSummary.total || 0)
@@ -282,10 +271,10 @@ export default function LiveFeed() {
     not_billed_wt:   notBilledWalkins.reduce((s, w) => s + (Number(w.gms_weight) || 0), 0),
     not_billed_cnt:  notBilledCnt,
     crm_not_updated_cnt: crmNotUpdatedCnt,
-    // KYC — region-filtered via branh_id→region mapping
-    kyc_blacklisted_cnt: kycRows.filter(r => r.region === regionFilter).length,
-    kyc_blacklisted_wt:  parseFloat(kycRows.filter(r => r.region === regionFilter).reduce((s, r) => s + (parseFloat(r.grams) || 0), 0).toFixed(2)),
-    kyc_overridden_cnt:  kycRows.filter(r => r.region === regionFilter && rApprovedMobiles.has(r.mob_num)).length,
+    // KYC — region-filtered
+    kyc_blacklisted_cnt: rKycRows.length,
+    kyc_blacklisted_wt:  parseFloat(rKycRows.reduce((s, r) => s + (parseFloat(r.grams) || 0), 0).toFixed(2)),
+    kyc_overridden_cnt:  rKycRows.filter(r => rApprovedMobiles.has(r.mob_num)).length,
     // not_billed already excludes KYC blocked (computed above via notBilledWalkins)
     kyc_checklist_cnt:   goldPipeline.kyc_checklist_cnt || 0,
     physical:  goldPipeline.physical  || {},
@@ -293,7 +282,7 @@ export default function LiveFeed() {
   } : goldPipeline
 
   /* ── Timeline items ── */
-  const timelineItems = (() => {
+  const timelineItems = useMemo(() => {
     const items = []
     todayTxns.forEach(tx => {
       items.push({
@@ -313,7 +302,7 @@ export default function LiveFeed() {
     })
     items.sort((a, b) => (b.time || '').localeCompare(a.time || ''))
     return items
-  })()
+  }, [todayTxns, todayWalkins])
 
   const filteredTimeline = regionFilter
     ? timelineItems.filter(item => item.region === regionFilter)
@@ -360,7 +349,7 @@ export default function LiveFeed() {
           <input
             type="date"
             value={viewDate}
-            onChange={e => { setViewDate(e.target.value); load(e.target.value) }}
+            onChange={e => { setViewDate(e.target.value); setRegionFilter(''); setNewEventCount(0); load(e.target.value) }}
             style={{
               background: t.card, color: t.text2, border: `1px solid ${t.border}`, borderRadius: 6,
               padding: '5px 10px', fontSize: '.72rem', fontFamily: 'ui-monospace, monospace',
@@ -375,7 +364,7 @@ export default function LiveFeed() {
             {[['old', 'Old CRM'], ['new', 'New CRM']].filter(([key]) =>
               key === 'old' ? canSee('livefeed.old_crm_tab') : canSee('livefeed.new_crm_tab')
             ).map(([key, label]) => (
-              <button key={key} onClick={() => setCrmTab(key)} style={{
+              <button key={key} onClick={() => { setCrmTab(key); setNewEventCount(0) }} style={{
                 padding: '6px 16px', fontSize: '.62rem', letterSpacing: '.08em', textTransform: 'uppercase',
                 fontWeight: crmTab === key ? 600 : 400, cursor: 'pointer', border: 'none',
                 background: crmTab === key ? t.gold : 'transparent',
@@ -454,7 +443,7 @@ export default function LiveFeed() {
             <span style={{ fontSize: '.72rem', color: t.text3 }}>Loading live data...</span>
           </div>
         ) : crmTab === 'old' ? (
-          <div style={{ opacity: loading && data ? 0.6 : 1, transition: 'opacity .3s', pointerEvents: loading && data ? 'none' : 'auto', animation: loading && data ? 'shimmer 1.4s ease infinite' : 'none' }}>
+          <div style={{ opacity: loading && data ? 0.6 : 1, transition: 'opacity .3s' }}>
             <OldCrmTab t={t} summary={effectiveSummary} walkinSummary={effectiveWalkinSummary}
               totalWalkins={totalWalkins} totalBilled={totalBilled} approved={approved} pending={pending}
               trueRejected={trueRejected} wrongEntry={wrongEntry}
@@ -469,7 +458,7 @@ export default function LiveFeed() {
               newEventCount={newEventCount} clearNewEvents={() => setNewEventCount(0)} />
           </div>
         ) : (
-          <div style={{ opacity: loading && data ? 0.6 : 1, transition: 'opacity .3s', pointerEvents: loading && data ? 'none' : 'auto', animation: loading && data ? 'shimmer 1.4s ease infinite' : 'none' }}>
+          <div style={{ opacity: loading && data ? 0.6 : 1, transition: 'opacity .3s' }}>
             <NewCrmTab t={t} stages={stages} newCrmTxns={newCrmTxns} newCrmError={newCrmError}
               regionFilter={regionFilter} regions={regions}
               viewDate={viewDate} isToday={isToday}
@@ -1056,41 +1045,6 @@ function FlowSep({ t }) {
   return <div style={{ width: 1, height: 32, background: t.border2, margin: '0 6px' }} />
 }
 
-/* ── Metric Card ── */
-function MetricCard({ t, label, value, color, sub, dim, bar, onClick, active }) {
-  return (
-    <Card t={t} style={{
-      padding: '0', opacity: dim ? 0.5 : 1, overflow: 'hidden',
-      borderTop: `3px solid ${active ? color : `${color}70`}`,
-      outline: active ? `2px solid ${color}50` : '2px solid transparent',
-      boxShadow: active ? `0 0 16px ${color}20, 0 2px 8px rgba(0,0,0,.12)` : '0 2px 8px rgba(0,0,0,.12)',
-      cursor: onClick ? 'pointer' : 'default',
-      transition: 'outline .15s, box-shadow .15s',
-    }}>
-      <div
-        style={{ padding: '14px 16px 12px' }}
-        onMouseEnter={e => { if (onClick) e.currentTarget.parentElement.style.transform = 'translateY(-1px)' }}
-        onMouseLeave={e => { if (onClick) e.currentTarget.parentElement.style.transform = 'translateY(0)' }}
-        onClick={onClick}
-      >
-        <span style={{ fontSize: '.58rem', letterSpacing: '.12em', textTransform: 'uppercase', color: active ? color : t.text3, fontWeight: 600 }}>{label}</span>
-        <div style={{ marginTop: 8 }}>
-          <Mono size="1.55rem" color={color} weight={200}>{value}</Mono>
-        </div>
-        {sub && <span style={{ fontSize: '.6rem', color: t.text4, marginTop: 5, display: 'block', lineHeight: 1.5 }}>{sub}</span>}
-        {bar != null && bar > 0 && (
-          <div style={{ marginTop: 10, height: 3, borderRadius: 2, background: t.border, overflow: 'hidden' }}>
-            <div style={{ height: '100%', width: `${Math.min(100, bar)}%`, background: `${color}90`, borderRadius: 2, transition: 'width .5s ease' }} />
-          </div>
-        )}
-        {active && <span style={{ display: 'block', marginTop: 6, fontSize: '.52rem', color, letterSpacing: '.08em', fontWeight: 700 }}>▼ showing below</span>}
-      </div>
-    </Card>
-  )
-}
-
-
-
 
 /* ── Timeline Row ── */
 function TimelineRow({ item, t, isLast }) {
@@ -1175,14 +1129,28 @@ function TimelineRow({ item, t, isLast }) {
 /* ════════════════════════════════════════════════════════════════ */
 
 const NEW_CRM_STATUS = {
-  WALKIN:                  { label: 'Walk-in',    color: '#4a9fdf' },
-  ESTIMATION_PENDING:      { label: 'Estimation', color: '#e09830' },
-  KYC_PENDING:             { label: 'KYC',        color: '#9a6adf' },
-  FINAL_PAYMENT_PENDING:   { label: 'Payment Due', color: '#c9a84c' },
-  FINAL_PAYMENT_COMPLETED: { label: 'Completed',  color: '#3aaa6a' },
-  WALKOUT:                 { label: 'Walkout',    color: '#e05555' },
+  WALKIN:                    { label: 'Walk-in',          color: '#4a9fdf' },
+  QUOTATION_PENDING:         { label: 'Quotation',        color: '#4a9fdf' },
+  ESTIMATION_PENDING:        { label: 'Estimation',       color: '#e09830' },
+  PLEDGE_ESTIMATION_PENDING: { label: 'Pledge Est.',      color: '#e09830' },
+  REVALUATION_PENDING:       { label: 'Revaluation',      color: '#e09830' },
+  SALES_NEGOTIATION_PENDING: { label: 'Negotiation',      color: '#e09830' },
+  KYC_PENDING:               { label: 'KYC',              color: '#9a6adf' },
+  BRANCH_KYC_PENDING:        { label: 'Branch KYC',       color: '#9a6adf' },
+  PLEDGE_APPROVAL_PENDING:   { label: 'Pledge Approval',  color: '#9a6adf' },
+  PENNY_DROP_PENDING:        { label: 'Penny Drop',       color: '#c9a84c' },
+  FINAL_PAYMENT_PENDING:     { label: 'Payment Due',      color: '#c9a84c' },
+  RELEASE_PENDING:           { label: 'Release',          color: '#c9a84c' },
+  RELEASE_AGREEMENT_PENDING: { label: 'Release Agmt.',    color: '#c9a84c' },
+  FINAL_PAYMENT_COMPLETED:   { label: 'Completed',        color: '#3aaa6a' },
+  WALKOUT:                   { label: 'Walkout',          color: '#e05555' },
 }
-const IN_PROGRESS_STATUSES = ['ESTIMATION_PENDING', 'KYC_PENDING', 'FINAL_PAYMENT_PENDING']
+const IN_PROGRESS_STATUSES = [
+  'ESTIMATION_PENDING', 'PLEDGE_ESTIMATION_PENDING', 'REVALUATION_PENDING', 'SALES_NEGOTIATION_PENDING',
+  'QUOTATION_PENDING',
+  'KYC_PENDING', 'BRANCH_KYC_PENDING', 'PLEDGE_APPROVAL_PENDING',
+  'PENNY_DROP_PENDING', 'FINAL_PAYMENT_PENDING', 'RELEASE_PENDING', 'RELEASE_AGREEMENT_PENDING',
+]
 
 function NewCrmTab({ t, newCrmTxns, newCrmError, regionFilter, regions, viewDate, isToday, newEventCount, clearNewEvents }) {
   const [activeMetric, setActiveMetric] = useState(null)
@@ -1376,7 +1344,7 @@ function NewCrmTab({ t, newCrmTxns, newCrmError, regionFilter, regions, viewDate
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 16px', borderBottom: `1px solid ${t.border}`, flexWrap: 'wrap' }}>
               <input type="text" placeholder="Search name, mobile, branch..." value={tlSearch} onChange={e => setTlSearch(e.target.value)}
                 style={{ background: t.card2, border: `1px solid ${t.border}`, borderRadius: 6, padding: '5px 10px', fontSize: '.62rem', color: t.text2, outline: 'none', width: 220, fontFamily: 'ui-monospace, monospace' }} />
-              <span style={{ fontSize: '.6rem', color: t.text4, marginLeft: 4 }}>{txns.length} events</span>
+              <span style={{ fontSize: '.6rem', color: t.text4, marginLeft: 4 }}>{tlSearch ? txns.filter(tx => { const s = tlSearch.toLowerCase(); return (tx.cust_name||'').toLowerCase().includes(s) || (tx.cust_mobile||'').includes(s) || (tx.branch_name||'').toLowerCase().includes(s) }).length : txns.length} events</span>
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: '70px 28px 1fr 110px 120px', gap: '0 12px', padding: '8px 20px', background: t.card2, borderBottom: `1px solid ${t.border}` }}>
               {['Time', '', 'Customer / Branch', 'Weight', 'Amount'].map((h, i) => (
@@ -1384,13 +1352,18 @@ function NewCrmTab({ t, newCrmTxns, newCrmError, regionFilter, regions, viewDate
               ))}
             </div>
             <div style={{ maxHeight: 480, overflowY: 'auto' }}>
-              {[...txns].sort((a, b) => (b.txn_time || '').localeCompare(a.txn_time || '')).filter(tx => {
-                if (!tlSearch) return true
-                const s = tlSearch.toLowerCase()
-                return (tx.cust_name||'').toLowerCase().includes(s) || (tx.cust_mobile||'').includes(s) || (tx.branch_name||'').toLowerCase().includes(s)
-              }).map((tx, i, arr) => (
-                <NewCrmTimelineRow key={tx.id} item={tx} t={t} isLast={i === arr.length - 1} />
-              ))}
+              {(() => {
+                const sorted = [...txns].sort((a, b) => (b.txn_time || '').localeCompare(a.txn_time || ''))
+                const visible = tlSearch
+                  ? sorted.filter(tx => {
+                      const s = tlSearch.toLowerCase()
+                      return (tx.cust_name||'').toLowerCase().includes(s) || (tx.cust_mobile||'').includes(s) || (tx.branch_name||'').toLowerCase().includes(s)
+                    })
+                  : sorted
+                return visible.map((tx, i, arr) => (
+                  <NewCrmTimelineRow key={tx.id} item={tx} t={t} isLast={i === arr.length - 1} />
+                ))
+              })()}
             </div>
           </Card>
         )}
@@ -1410,9 +1383,9 @@ function NewCrmDetail({ t, activeMetric, txns }) {
     case 'inprogress': rows = txns.filter(tx => IN_PROGRESS_STATUSES.includes(tx.status)); label = 'In Progress'; break
     case 'completed':  rows = txns.filter(tx => tx.status === 'FINAL_PAYMENT_COMPLETED'); label = 'Completed'; break
     case 'walkout':    rows = txns.filter(tx => tx.status === 'WALKOUT'); label = 'Walkout'; break
-    case 'estimation': rows = txns.filter(tx => tx.status === 'ESTIMATION_PENDING'); label = 'Estimation Pending'; break
-    case 'kyc':        rows = txns.filter(tx => tx.status === 'KYC_PENDING'); label = 'KYC Pending'; break
-    case 'payment':    rows = txns.filter(tx => tx.status === 'FINAL_PAYMENT_PENDING'); label = 'Payment Due'; break
+    case 'estimation': rows = txns.filter(tx => ['ESTIMATION_PENDING','PLEDGE_ESTIMATION_PENDING','REVALUATION_PENDING','SALES_NEGOTIATION_PENDING','QUOTATION_PENDING'].includes(tx.status)); label = 'Estimation / Valuation'; break
+    case 'kyc':        rows = txns.filter(tx => ['KYC_PENDING','BRANCH_KYC_PENDING','PLEDGE_APPROVAL_PENDING'].includes(tx.status)); label = 'KYC Pending'; break
+    case 'payment':    rows = txns.filter(tx => ['FINAL_PAYMENT_PENDING','PENNY_DROP_PENDING','RELEASE_PENDING','RELEASE_AGREEMENT_PENDING'].includes(tx.status)); label = 'Payment Due'; break
     default:           rows = txns.filter(tx => tx.status === 'FINAL_PAYMENT_COMPLETED'); label = 'Completed'
   }
 
