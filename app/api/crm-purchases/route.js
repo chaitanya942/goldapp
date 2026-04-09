@@ -498,9 +498,13 @@ export async function GET(req) {
         const _db   = process.env.NEW_CRM_DB_NAME
         const _user = process.env.NEW_CRM_DB_USER
         const _pass = process.env.NEW_CRM_DB_PASSWORD
-        const connectionString = `postgresql://${encodeURIComponent(_user)}:${encodeURIComponent(_pass)}@${_host}:${_port}/${_db}?sslmode=disable`
         pgClient = new PgClient({
-          connectionString,
+          host:     _host,
+          port:     parseInt(_port),
+          database: _db,
+          user:     _user,
+          password: _pass,
+          ssl:      { ca: process.env.NEW_CRM_DB_CA, rejectUnauthorized: true },
           connectionTimeoutMillis: 8000,
         })
         await pgClient.connect()
