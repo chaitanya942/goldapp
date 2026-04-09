@@ -493,14 +493,15 @@ export async function GET(req) {
       let newCrmError = null
       let pgClient
       try {
+        const _host = process.env.NEW_CRM_DB_HOSTNAME || process.env.NEW_CRM_DB_HOST
         pgClient = new PgClient({
-          host:     process.env.NEW_CRM_DB_HOST,
+          host:     _host,
           port:     parseInt(process.env.NEW_CRM_DB_PORT || '5432'),
           database: process.env.NEW_CRM_DB_NAME,
           user:     process.env.NEW_CRM_DB_USER,
           password: process.env.NEW_CRM_DB_PASSWORD,
-          ssl:      { rejectUnauthorized: false, servername: process.env.NEW_CRM_DB_HOSTNAME || process.env.NEW_CRM_DB_HOST },
-          connectionTimeoutMillis: 5000,
+          ssl:      { rejectUnauthorized: false },
+          connectionTimeoutMillis: 8000,
         })
         await pgClient.connect()
 
