@@ -150,7 +150,7 @@ function Pill({ label, value, color, bg }) {
 /*                  MAIN COMPONENT                    */
 /* ════════════════════════════════════════════════════ */
 export default function LiveFeed() {
-  const { theme: appTheme } = useApp()
+  const { theme: appTheme, canSee } = useApp()
   const t = THEMES[appTheme] || THEMES.dark
 
   const todayIST = new Date(Date.now() + 5.5 * 60 * 60 * 1000).toISOString().split('T')[0]
@@ -356,34 +356,40 @@ export default function LiveFeed() {
         </div>
 
         {/* Date picker */}
-        <input
-          type="date"
-          value={viewDate}
-          onChange={e => { setViewDate(e.target.value); load(e.target.value) }}
-          style={{
-            background: t.card, color: t.text2, border: `1px solid ${t.border}`, borderRadius: 6,
-            padding: '5px 10px', fontSize: '.72rem', fontFamily: 'ui-monospace, monospace',
-            outline: 'none', cursor: 'pointer',
-          }}
-        />
+        {canSee('livefeed.date_picker') && (
+          <input
+            type="date"
+            value={viewDate}
+            onChange={e => { setViewDate(e.target.value); load(e.target.value) }}
+            style={{
+              background: t.card, color: t.text2, border: `1px solid ${t.border}`, borderRadius: 6,
+              padding: '5px 10px', fontSize: '.72rem', fontFamily: 'ui-monospace, monospace',
+              outline: 'none', cursor: 'pointer',
+            }}
+          />
+        )}
 
         {/* CRM tabs */}
-        <div style={{ display: 'flex', background: t.card, borderRadius: 8, border: `1px solid ${t.border}`, overflow: 'hidden' }}>
-          {[['old', 'Old CRM'], ['new', 'New CRM']].map(([key, label]) => (
-            <button key={key} onClick={() => setCrmTab(key)} style={{
-              padding: '6px 16px', fontSize: '.62rem', letterSpacing: '.08em', textTransform: 'uppercase',
-              fontWeight: crmTab === key ? 600 : 400, cursor: 'pointer', border: 'none',
-              background: crmTab === key ? t.gold : 'transparent',
-              color: crmTab === key ? '#000' : t.text3,
-              transition: 'all .2s',
-            }}>
-              {label}
-            </button>
-          ))}
-        </div>
+        {(canSee('livefeed.old_crm_tab') || canSee('livefeed.new_crm_tab')) && (
+          <div style={{ display: 'flex', background: t.card, borderRadius: 8, border: `1px solid ${t.border}`, overflow: 'hidden' }}>
+            {[['old', 'Old CRM'], ['new', 'New CRM']].filter(([key]) =>
+              key === 'old' ? canSee('livefeed.old_crm_tab') : canSee('livefeed.new_crm_tab')
+            ).map(([key, label]) => (
+              <button key={key} onClick={() => setCrmTab(key)} style={{
+                padding: '6px 16px', fontSize: '.62rem', letterSpacing: '.08em', textTransform: 'uppercase',
+                fontWeight: crmTab === key ? 600 : 400, cursor: 'pointer', border: 'none',
+                background: crmTab === key ? t.gold : 'transparent',
+                color: crmTab === key ? '#000' : t.text3,
+                transition: 'all .2s',
+              }}>
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
 
         {/* Region filter */}
-        {regions.length > 1 && (
+        {canSee('livefeed.region_filter') && regions.length > 1 && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <span style={{ fontSize: '.58rem', color: t.text4, letterSpacing: '.08em' }}>REGION</span>
             <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
@@ -489,6 +495,7 @@ function OldCrmTab({
   filteredTimeline, isToday, viewDate,
   newEventCount, clearNewEvents,
 }) {
+  const { canSee } = useApp()
   const [activeMetric, setActiveMetric] = useState(null)
   const [tlOpen, setTlOpen] = useState(false)
   const [tlSearch, setTlSearch] = useState('')
@@ -531,12 +538,13 @@ function OldCrmTab({
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
 
       {/* ──────── 0. SUMMARY BAR ──────── */}
-      <div style={{
+      {canSee('livefeed.summary_bar') && <div style={{
         display: 'flex', alignItems: 'center', gap: 0,
         background: t.surface, border: `1px solid ${t.border}`, borderRadius: 12,
         padding: '0', overflow: 'hidden', flexWrap: 'wrap',
         boxShadow: '0 2px 8px rgba(0,0,0,.10)',
       }}>
+
         {[
           { label: isToday ? 'Today' : fmtDate(viewDate), value: null, color: t.text3, accent: t.border },
           { label: 'Walked In',  value: fmtNum(totalWalkins), color: t.blue,  accent: t.blue },
@@ -571,10 +579,10 @@ function OldCrmTab({
             <span style={{ fontSize: '.58rem', color: t.text4 }}>{topTxn.branch_name}</span>
           </div>
         )}
-      </div>
+      </div>}
 
       {/* ──────── 1. CUSTOMER JOURNEY ──────── */}
-      <div>
+      {canSee('livefeed.customer_journey') && <div>
         <SectionLabel t={t}>Customer Journey · from Walk-in to Outcome</SectionLabel>
         <div className="lf-hero" style={{
           display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -614,11 +622,11 @@ function OldCrmTab({
             </button>
           )}
         </div>
-      </div>
-
+      </div>}
 
       {/* ──────── 2. GOLD WEIGHT STRIP + REGION TABLE ──────── */}
-      <div>
+      {canSee('livefeed.weight_flow') && <div>
+
         <SectionLabel t={t}>Gold Weight Flow</SectionLabel>
         {/* Compact proportion strip */}
         <div style={{ display: 'flex', flexWrap: 'wrap', background: t.card, border: `1px solid ${t.border}`, borderRadius: 12, overflow: 'hidden', boxShadow: '0 2px 8px rgba(0,0,0,.10)' }}>
@@ -664,24 +672,24 @@ function OldCrmTab({
           {releaseApproved > 0  && <span style={{ fontSize: '.6rem', color: t.text3 }}>Takeover: <strong style={{ color: t.text2 }}>{releaseApproved}</strong></span>}
           <span style={{ fontSize: '.56rem', color: t.text4, marginLeft: 'auto' }}>ⓘ Weights are gross as declared at walk-in · KYC weight excluded from Unbilled</span>
         </div>
-      </div>
+      </div>}
 
       {/* ──────── 3. REGION BREAKDOWN ──────── */}
-      {regions && regions.length > 1 && !regionFilter && (
+      {canSee('livefeed.region_breakdown') && regions && regions.length > 1 && !regionFilter && (
         <div className="lf-region">
           <RegionTable t={t} regions={regions} allTxns={allTxns} allWalkins={allWalkins} allKycRows={allKycRows} />
         </div>
       )}
 
       {/* ──────── 4. DETAIL TABLE (shown only when a hero is clicked) ──────── */}
-      {activeMetric && (
+      {canSee('livefeed.detail_table') && activeMetric && (
         <LiveDetail t={t} activeMetric={activeMetric}
           todayTxns={todayTxns} todayWalkins={todayWalkins}
           kycRows={kycRows} notBilledWalkins={notBilledWalkins} />
       )}
 
       {/* ──────── 5. LIVE TIMELINE (collapsed by default) ──────── */}
-      <div>
+      {canSee('livefeed.timeline') && <div>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: tlOpen ? 10 : 0 }}>
           <SectionLabel t={t}>{isToday ? 'Live Timeline' : 'Timeline'}</SectionLabel>
           <button onClick={() => { setTlOpen(o => !o); clearNewEvents() }} style={{
@@ -742,7 +750,7 @@ function OldCrmTab({
             </div>
           </Card>
         )}
-      </div>
+      </div>}
     </div>
   )
 }
@@ -797,6 +805,7 @@ function HeroNum({ label, value, color, t, small, muted, onClick, active, weight
 /* ── Live Detail Table ── */
 function LiveDetail({ t, activeMetric, todayTxns, todayWalkins, kycRows, notBilledWalkins }) {
   const [search, setSearch] = useState('')
+  const { canSee } = useApp()
 
   const approvedMobiles = new Set(
     todayTxns.filter(tx => tx.trxn_status === 'approved').map(tx => tx.cust_mobile).filter(Boolean)
@@ -831,7 +840,7 @@ function LiveDetail({ t, activeMetric, todayTxns, todayWalkins, kycRows, notBill
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <input type="text" placeholder="Search..." value={search} onChange={e => setSearch(e.target.value)}
             style={{ background: t.card2, border: `1px solid ${t.border}`, borderRadius: 6, padding: '4px 10px', fontSize: '.62rem', color: t.text2, outline: 'none', width: 160, fontFamily: 'ui-monospace, monospace' }} />
-          <button onClick={() => {
+          {canSee('livefeed.csv_export') && <button onClick={() => {
             if (type === 'txn') downloadCSV(`${label}.csv`,
               ['Bill No','Date','Time','Customer','Phone','Branch','Gross Wt','Stone','Wastage','Net Wt','Purity','Gross Amt','Svc%','Status'],
               filtered, r => [r.bill_no, fmtDate(r.txn_date), r.time, r.cust_name, r.cust_mobile, r.branch_name,
@@ -847,7 +856,7 @@ function LiveDetail({ t, activeMetric, todayTxns, todayWalkins, kycRows, notBill
               filtered, r => [r.time, r.name, r.mob_num, r.branch_name, r.grams, r.rej_rsn])
           }} style={{ padding: '4px 12px', borderRadius: 6, fontSize: '.58rem', cursor: 'pointer', border: `1px solid ${t.border}`, background: t.card, color: t.text3, whiteSpace: 'nowrap' }}>
             ↓ CSV
-          </button>
+          </button>}
         </div>
       </div>
       {type === 'txn'    && <TxnTable    rows={filtered} t={t} />}

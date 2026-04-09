@@ -41,6 +41,7 @@ const ADMIN_ITEMS = [
       { id: 'company-settings',  label: 'Company Settings',  dot: '#c9a84c' },
       { id: 'consignment-seeds', label: 'Consignment Seeds', dot: '#3a8fbf' },
       { id: 'import-logs',       label: 'Import Logs',       dot: '#c9981f' },
+      { id: 'role-management',   label: 'Role Management',   dot: '#e05555' },
     ]
   },
 ]

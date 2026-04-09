@@ -13,6 +13,7 @@ import CompanySettings from '../../components/admin/CompanySettings'
 import ConsignmentSeeds from '../../components/admin/ConsignmentSeeds'
 import BranchEmployees from '../../components/admin/BranchEmployees'
 import ImportLogs from '../../components/admin/ImportLogs'
+import RoleManagement from '../../components/admin/RoleManagement'
 import PurchaseHub   from '../../components/purchases/PurchaseHub'
 import ReportsHub    from '../../components/purchases/ReportsHub'
 import ConsignmentOverview from '../../components/consignments/ConsignmentOverview'
@@ -120,6 +121,7 @@ function DashboardShell() {
       case 'consignment-seeds':   return <ConsignmentSeeds />
       case 'branch-employees':    return <BranchEmployees />
       case 'import-logs':         return <ImportLogs />
+      case 'role-management':     return role === 'super_admin' ? <RoleManagement /> : <AccessDenied />
       case 'inbound-bot':         return <InboundBotTesting />
       default:                    return <DashboardHome />
     }
