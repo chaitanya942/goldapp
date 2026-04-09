@@ -103,7 +103,13 @@ function DashboardShell() {
   const renderPage = () => {
     if (activeNav !== 'dashboard' && !canSee(activeNav)) return <AccessDenied />
     switch (activeNav) {
-      case 'dashboard':           return role === 'telesales' ? <TelesalesDashboard /> : <DashboardHome />
+      case 'dashboard': {
+        // Telesales-only roles get the full dedicated telesales dashboard
+        const hasPurchase = canSee('purchase-data') || canSee('purchase-reports')
+        const hasTelesales = canSee('inbound-bot')
+        if (hasTelesales && !hasPurchase) return <TelesalesDashboard />
+        return <DashboardHome />
+      }
       case 'purchase-data':     return <PurchaseHub />
       case 'purchase-reports':  return <ReportsHub />
       case 'consignment-overview': return <ConsignmentOverview />

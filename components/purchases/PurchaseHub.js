@@ -24,9 +24,13 @@ const TABS = [
 ]
 
 export default function PurchaseHub() {
-  const { theme } = useApp()
+  const { theme, canSee } = useApp()
   const t = THEMES[theme] || THEMES.dark
-  const [active, setActive] = useState('live')
+  const [activeTab, setActiveTab] = useState('live')
+
+  const visibleTabs = TABS.filter(tab => canSee(`tab.purchase-data.${tab.id}`))
+  // If active tab was hidden by permissions change, fall back to first visible
+  const active = visibleTabs.some(t => t.id === activeTab) ? activeTab : (visibleTabs[0]?.id ?? 'live')
 
   return (
     <div style={{ minHeight: '100vh' }}>
@@ -36,11 +40,11 @@ export default function PurchaseHub() {
         padding: '0 32px', display: 'flex', overflowX: 'auto',
         position: 'sticky', top: 0, zIndex: 50,
       }}>
-        {TABS.map(tab => {
+        {visibleTabs.map(tab => {
           const accent  = tab.accentFn(t)
           const isActive = active === tab.id
           return (
-            <button key={tab.id} onClick={() => setActive(tab.id)} style={{
+            <button key={tab.id} onClick={() => setActiveTab(tab.id)} style={{
               background: 'transparent', border: 'none',
               borderBottom: isActive ? `2px solid ${accent}` : '2px solid transparent',
               padding: '14px 20px', cursor: 'pointer',

@@ -16,9 +16,12 @@ const TABS = [
 ]
 
 export default function ReportsHub() {
-  const { theme } = useApp()
+  const { theme, canSee } = useApp()
   const t = THEMES[theme] || THEMES.dark
-  const [active, setActive] = useState('analytics')
+  const [activeTab, setActiveTab] = useState('analytics')
+
+  const visibleTabs = TABS.filter(tab => canSee(`tab.purchase-reports.${tab.id}`))
+  const active = visibleTabs.some(t => t.id === activeTab) ? activeTab : (visibleTabs[0]?.id ?? 'analytics')
 
   return (
     <div style={{ minHeight: '100vh' }}>
@@ -28,11 +31,11 @@ export default function ReportsHub() {
         padding: '0 32px', display: 'flex', overflowX: 'auto',
         position: 'sticky', top: 0, zIndex: 50,
       }}>
-        {TABS.map(tab => {
+        {visibleTabs.map(tab => {
           const isActive = active === tab.id
           const accent = tab.id === 'intelligence' ? t.purple : t.gold
           return (
-            <button key={tab.id} onClick={() => setActive(tab.id)} style={{
+            <button key={tab.id} onClick={() => setActiveTab(tab.id)} style={{
               background: 'transparent', border: 'none',
               borderBottom: isActive ? `2px solid ${accent}` : '2px solid transparent',
               padding: '14px 24px', cursor: 'pointer',

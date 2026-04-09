@@ -96,8 +96,10 @@ const EmptyPanel = ({ t }) => (
 )
 
 export default function DashboardHome() {
-  const { theme, userProfile } = useApp()
+  const { theme, userProfile, canSee } = useApp()
   const t = THEMES[theme]
+
+  const showPurchase = canSee('purchase-data') || canSee('purchase-reports')
 
   const COLOR_PALETTE = [t.gold, t.green, t.blue, t.purple, t.orange, t.red]
 
@@ -115,6 +117,7 @@ export default function DashboardHome() {
   useEffect(() => { setTimeout(()=>setHeroVis(true), 50) }, [])
 
   useEffect(() => {
+    if (!showPurchase) return
     supabase.from('branches').select('name, region, state').eq('is_active', true).then(({ data }) => {
       if (!data) return
       setBranchMeta(data)
@@ -124,9 +127,9 @@ export default function DashboardHome() {
       const states = new Set(data.map(b => b.state).filter(Boolean))
       setStateCount(states.size)
     })
-  }, [])
+  }, [showPurchase])
 
-  useEffect(() => { fetchAll() }, [period])
+  useEffect(() => { if (showPurchase) fetchAll() }, [period, showPurchase])
 
   const fetchAll = async () => {
     setLoading(true)
@@ -210,8 +213,20 @@ export default function DashboardHome() {
       {/* ── LIVE RATES ── */}
       <LiveTicker />
 
+      {/* ── NO-MODULE WELCOME (for roles with no configured module access) ── */}
+      {!showPurchase && (
+        <div style={{ marginTop: 8, background:`linear-gradient(135deg,${t.card},${t.card2})`, border:`1px solid ${t.border}`, borderRadius:20, padding:'40px 44px', boxShadow:t.shadow, textAlign:'center' }}>
+          <div style={{ fontSize:'2rem', opacity:.15, marginBottom:16 }}>◈</div>
+          <div style={{ fontSize:15, color:t.text2, fontWeight:500, marginBottom:8 }}>Your workspace is ready</div>
+          <div style={{ fontSize:13, color:t.text4, lineHeight:1.7 }}>
+            The modules available to your role will appear here.<br />
+            Contact your administrator if you need access to additional sections.
+          </div>
+        </div>
+      )}
+
       {/* ── PURCHASE OVERVIEW ── */}
-      <div style={{ marginTop: 8, border:`1px solid ${t.border2}`, borderRadius:20, background:`linear-gradient(160deg,${t.card2},${t.card3})`, boxShadow:`${t.shadow},inset 0 1px 0 rgba(255,255,255,.03)`, position:'relative', overflow:'hidden', transition:'all .35s ease' }}>
+      {showPurchase && <div style={{ marginTop: 8, border:`1px solid ${t.border2}`, borderRadius:20, background:`linear-gradient(160deg,${t.card2},${t.card3})`, boxShadow:`${t.shadow},inset 0 1px 0 rgba(255,255,255,.03)`, position:'relative', overflow:'hidden', transition:'all .35s ease' }}>
         <div style={{ position:'absolute', top:0, left:0, width:160, height:160, background:`radial-gradient(circle at top left,${t.gold}08,transparent 70%)`, pointerEvents:'none' }}/>
 
         {/* ── Clickable Header ── */}
@@ -370,7 +385,7 @@ export default function DashboardHome() {
             </div>
           </div>
         </div>
-      </div>
+      </div>}
 
       {/* ── ROADMAP ── */}
       <div style={{ marginTop:20, background:`linear-gradient(135deg,${t.card},${t.card2})`, border:`1px solid ${t.border}`, borderRadius:16, padding:'20px 28px', boxShadow:t.shadow }}>
