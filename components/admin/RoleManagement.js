@@ -108,10 +108,11 @@ export default function RoleManagement() {
   const t = THEMES[theme]
 
   const [roles,        setRoles]        = useState([])
-  const [rolePerms,    setRolePerms]    = useState({})  // role_name → Set<key>
-  const [dirty,        setDirty]        = useState({})  // role_name → bool
+  const [rolePerms,    setRolePerms]    = useState({})
+  const [dirty,        setDirty]        = useState({})
   const [selected,     setSelected]     = useState(null)
   const [loading,      setLoading]      = useState(true)
+  const [loadErr,      setLoadErr]      = useState(null)
   const [saving,       setSaving]       = useState(false)
   const [saveMsg,      setSaveMsg]      = useState(null)
   const [activeGroup,  setActiveGroup]  = useState(0)
@@ -128,10 +129,12 @@ export default function RoleManagement() {
 
   const load = useCallback(async () => {
     setLoading(true)
+    setLoadErr(null)
     try {
       const res  = await fetch('/api/rbac?action=all')
       const json = await res.json()
       if (json.error) throw new Error(json.error)
+      if (!json.roles) throw new Error('No roles returned from API')
 
       const permsMap = {}
 
@@ -166,6 +169,7 @@ export default function RoleManagement() {
       if (!selected && json.roles.length > 0) setSelected(json.roles[0].name)
     } catch (e) {
       console.error('RBAC load error:', e)
+      setLoadErr(e.message)
     } finally {
       setLoading(false)
     }
@@ -262,6 +266,15 @@ export default function RoleManagement() {
     <div style={{ padding: 48, textAlign: 'center', color: t.text3 }}>Loading role configuration...</div>
   )
 
+  if (loadErr) return (
+    <div style={{ padding: 48, textAlign: 'center' }}>
+      <div style={{ color: t.red, fontSize: '.8rem', marginBottom: 12 }}>Failed to load roles</div>
+      <div style={{ fontFamily: 'ui-monospace,monospace', fontSize: '.65rem', color: t.text3, background: t.card, border: `1px solid ${t.border}`, borderRadius: 8, padding: '10px 16px', display: 'inline-block', marginBottom: 16 }}>{loadErr}</div>
+      <br />
+      <button onClick={load} style={{ padding: '8px 20px', borderRadius: 7, background: t.gold, color: '#000', border: 'none', fontSize: '.72rem', cursor: 'pointer', fontWeight: 600 }}>Retry</button>
+    </div>
+  )
+
   return (
     <div style={{ padding: '24px 28px', height: '100%', display: 'flex', flexDirection: 'column', gap: 20 }}>
 
@@ -282,6 +295,11 @@ export default function RoleManagement() {
         {/* ── Left: Role list ── */}
         <div style={{ width: 220, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
           <div style={{ fontSize: '.52rem', color: t.text4, letterSpacing: '.15em', textTransform: 'uppercase', fontWeight: 700, padding: '0 8px 8px' }}>Roles</div>
+          {roles.length === 0 && (
+            <div style={{ padding: '12px 8px', fontSize: '.65rem', color: t.red, lineHeight: 1.6 }}>
+              No roles found. Run the SQL setup in Supabase dashboard to seed the roles table.
+            </div>
+          )}
           {roles.map(r => (
             <div key={r.name} onClick={() => setSelected(r.name)} style={{
               display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', borderRadius: 8, cursor: 'pointer',
@@ -397,23 +415,24 @@ export default function RoleManagement() {
 
       {/* ── Add Role Modal ── */}
       {showAdd && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.55)', zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.55)', zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}
           onClick={e => { if (e.target === e.currentTarget) setShowAdd(false) }}>
-          <div style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: 14, padding: 28, width: 380, display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div style={{ background: t.card, border: `1px solid ${t.border2}`, borderRadius: 14, padding: 28, width: 400, maxWidth: '100%', maxHeight: '90vh', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 16, boxShadow: '0 20px 60px rgba(0,0,0,.4)' }}>
             <div style={{ fontSize: '.9rem', fontWeight: 700, color: t.text1 }}>Add Custom Role</div>
 
             <div>
               <label style={{ fontSize: '.62rem', color: t.text3, letterSpacing: '.08em', textTransform: 'uppercase', display: 'block', marginBottom: 6 }}>Display Name *</label>
               <input value={newLabel} onChange={e => { setNewLabel(e.target.value); setNewName(e.target.value) }}
                 placeholder="e.g. Regional Manager"
-                style={{ width: '100%', background: t.card2, border: `1px solid ${t.border}`, borderRadius: 7, padding: '9px 12px', fontSize: '.78rem', color: t.text1, outline: 'none', boxSizing: 'border-box' }} />
+                autoFocus
+                style={{ width: '100%', background: t.card2, border: `1px solid ${t.border2}`, borderRadius: 7, padding: '9px 12px', fontSize: '.78rem', color: t.text1, outline: `2px solid ${t.gold}40`, boxSizing: 'border-box' }} />
             </div>
 
             <div>
               <label style={{ fontSize: '.62rem', color: t.text3, letterSpacing: '.08em', textTransform: 'uppercase', display: 'block', marginBottom: 6 }}>Internal ID (auto-generated)</label>
               <input value={newName.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '')}
                 readOnly
-                style={{ width: '100%', background: t.bg, border: `1px solid ${t.border}`, borderRadius: 7, padding: '9px 12px', fontSize: '.72rem', color: t.text4, fontFamily: 'ui-monospace,monospace', boxSizing: 'border-box' }} />
+                style={{ width: '100%', background: t.bg, border: `1px solid ${t.border}`, borderRadius: 7, padding: '9px 12px', fontSize: '.72rem', color: t.text3, fontFamily: 'ui-monospace,monospace', boxSizing: 'border-box' }} />
             </div>
 
             <div>
