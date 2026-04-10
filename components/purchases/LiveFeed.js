@@ -781,21 +781,18 @@ function OldCrmTab({
         }}>
           <HeroNum label="Walked In" value={totalWalkins} color={t.blue} t={t} weight={goldWalkedIn} active={activeMetric==='walkin'} onClick={() => toggleMetric('walkin')} />
           <FlowArrow t={t} pct={billedPct} />
-          <HeroNum label="Bills Submitted" value={totalBilled} color={t.gold} t={t} weight={goldPurchased+goldPending+goldRejected} active={activeMetric==='billed'} onClick={() => toggleMetric('billed')}
-            breakdown={[
-              { value: approved,     label: 'purch',    color: t.green  },
-              { value: pending,      label: 'pend',     color: t.orange },
-              { value: trueRejected, label: 'rej',      color: t.red    },
-              ...(wrongEntry > 0 ? [{ value: wrongEntry, label: 're-billed', color: t.text3 }] : []),
-            ]} />
+          <HeroNum label="Bills Submitted" value={totalBilled} color={t.gold} t={t} weight={goldPurchased+goldPending+goldRejected} active={activeMetric==='billed'} onClick={() => toggleMetric('billed')} />
           <FlowArrow t={t} pct={approvedPctBilled} />
-          <HeroNum label="Purchased" value={approved} color={t.green} t={t} weight={goldPurchased} active={activeMetric==='purchased'} onClick={() => toggleMetric('purchased')} />
-          <FlowSep t={t} />
-          <HeroNum label="In Pipeline" value={pending} color={t.orange} t={t} small weight={goldPending} active={activeMetric==='pending'} onClick={() => toggleMetric('pending')} />
-          <FlowSep t={t} />
-          <HeroNum label="Bill Rejected" value={trueRejected} color={t.red} t={t} small weight={goldRejected} active={activeMetric==='rejected'} onClick={() => toggleMetric('rejected')} />
-          <FlowSep t={t} />
-          <HeroNum label="Re-billed & Approved" value={wrongEntry} color={t.orange} t={t} small active={activeMetric==='rebilled'} onClick={() => toggleMetric('rebilled')} />
+          {/* Breakdown box — shows what makes up Bills Submitted */}
+          <div style={{ display:'flex', alignItems:'center', border:`1px solid ${t.gold}30`, borderRadius:12, background:`${t.gold}06`, padding:'4px 2px', gap:0 }}>
+            <HeroNum label="Purchased" value={approved} color={t.green} t={t} weight={goldPurchased} active={activeMetric==='purchased'} onClick={() => toggleMetric('purchased')} />
+            <FlowSep t={t} />
+            <HeroNum label="In Pipeline" value={pending} color={t.orange} t={t} small weight={goldPending} active={activeMetric==='pending'} onClick={() => toggleMetric('pending')} />
+            <FlowSep t={t} />
+            <HeroNum label="Bill Rejected" value={trueRejected} color={t.red} t={t} small weight={goldRejected} active={activeMetric==='rejected'} onClick={() => toggleMetric('rejected')} />
+            <FlowSep t={t} />
+            <HeroNum label="Re-billed & Approved" value={wrongEntry} color={t.orange} t={t} small active={activeMetric==='rebilled'} onClick={() => toggleMetric('rebilled')} />
+          </div>
           <FlowSep t={t} />
           <HeroNum label="KYC Blocked" value={kycBlacklistedCnt} color={t.purple} t={t} small weight={kycBlacklistedWt} active={activeMetric==='kyc_blocked'} onClick={() => toggleMetric('kyc_blocked')} />
           {kycOverriddenCnt > 0 && <FlowSep t={t} />}
@@ -1511,16 +1508,14 @@ function NewCrmTab({ t, newCrmTxns, newCrmError, regionFilter, regions, viewDate
       <div>
         <SectionLabel t={t}>Customer Journey · New CRM</SectionLabel>
         <div className="lf-hero" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0, flexWrap: 'wrap', background: t.surface, borderRadius: 16, border: `1px solid ${t.border}`, padding: '28px 16px', boxShadow: `0 4px 20px rgba(0,0,0,.12), inset 0 1px 0 ${t.border}`, backdropFilter: 'blur(4px)' }}>
-          <HeroNum label="Total Today"  value={total}      color={t.blue}   t={t} weight={totalWt}      active={activeMetric==='total'}      onClick={() => toggleMetric('total')}
-            breakdown={[
-              { value: completed,  label: 'done',    color: t.green  },
-              { value: inProgress, label: 'in-prog', color: t.orange },
-              ...(walkout > 0 ? [{ value: walkout, label: 'walkout', color: t.red }] : []),
-            ]} />
+          <HeroNum label="Total Today"  value={total}      color={t.blue}   t={t} weight={totalWt}      active={activeMetric==='total'}      onClick={() => toggleMetric('total')} />
           <FlowArrow t={t} pct={progressedPct || null} />
-          <HeroNum label="In Progress"  value={inProgress} color={t.orange} t={t} weight={inProgressWt} active={activeMetric==='inprogress'} onClick={() => toggleMetric('inprogress')} />
-          <FlowArrow t={t} pct={completedOfProgPct || null} />
-          <HeroNum label="Completed"    value={completed}  color={t.green}  t={t} weight={completedWt}  active={activeMetric==='completed'}  onClick={() => toggleMetric('completed')} />
+          {/* Breakdown box — In Progress + Completed make up Total */}
+          <div style={{ display:'flex', alignItems:'center', border:`1px solid ${t.blue}30`, borderRadius:12, background:`${t.blue}06`, padding:'4px 2px', gap:0 }}>
+            <HeroNum label="In Progress"  value={inProgress} color={t.orange} t={t} weight={inProgressWt} active={activeMetric==='inprogress'} onClick={() => toggleMetric('inprogress')} />
+            <FlowArrow t={t} pct={completedOfProgPct || null} />
+            <HeroNum label="Completed"    value={completed}  color={t.green}  t={t} weight={completedWt}  active={activeMetric==='completed'}  onClick={() => toggleMetric('completed')} />
+          </div>
           <FlowSep t={t} />
           <HeroNum label="At Walk-in"   value={walkinTxns.length}     color={t.blue}   t={t} small weight={walkinWt}   active={activeMetric==='walkin'}     onClick={() => toggleMetric('walkin')} />
           <FlowSep t={t} />
