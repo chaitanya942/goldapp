@@ -30,12 +30,15 @@ const Shimmer = ({ h = 24, w = '60%', t }) => (
 // ── KPI tile ─────────────────────────────────────────────────────────────────
 function KpiTile({ label, value, color, loading, t, border }) {
   return (
-    <div style={{ background: t.card3, borderRadius: 12, padding: '14px 16px', border: `1px solid ${border || t.border}` }}>
+    <div style={{ background: t.card3, borderRadius: 12, padding: '16px 18px', border: `1px solid ${border || t.border}`, position: 'relative', overflow: 'hidden' }}>
+      <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 2, background: `linear-gradient(90deg,${color}60,${color}20)`, borderRadius: '12px 12px 0 0' }} />
       {loading
-        ? <Shimmer h={26} t={t} />
-        : <div style={{ fontSize: 24, fontWeight: 200, color, letterSpacing: '-.01em', lineHeight: 1, fontVariantNumeric: 'tabular-nums' }}>{value}</div>
+        ? <><Shimmer h={28} w="70%" t={t} /><Shimmer h={11} w="50%" t={t} style={{ marginTop: 8 }} /></>
+        : <>
+            <div style={{ fontSize: 26, fontWeight: 300, color, letterSpacing: '-.02em', lineHeight: 1, fontVariantNumeric: 'tabular-nums' }}>{value}</div>
+            <div style={{ fontSize: 11, color: t.text3, marginTop: 6, lineHeight: 1.3, fontWeight: 500 }}>{label}</div>
+          </>
       }
-      <div style={{ fontSize: 11, color: t.text4, marginTop: 5, lineHeight: 1.3 }}>{label}</div>
     </div>
   )
 }
@@ -47,16 +50,19 @@ function Section({ title, icon, color, t, children, onOpen, ctaLabel, delay = 0 
   return (
     <div style={{
       background: `linear-gradient(145deg,${t.card},${t.card2})`,
-      border: `1px solid ${t.border}`, borderRadius: 18, padding: '22px 26px',
+      border: `1px solid ${t.border}`, borderRadius: 20, padding: '24px 28px',
       position: 'relative', overflow: 'hidden',
       opacity: vis ? 1 : 0, transform: vis ? 'translateY(0)' : 'translateY(14px)',
       transition: 'all .4s cubic-bezier(.34,1.2,.64,1)',
     }}>
-      <div style={{ position: 'absolute', top: 0, left: 24, right: 24, height: 1, background: `linear-gradient(90deg,transparent,${color}60,transparent)` }} />
-      <div style={{ position: 'absolute', top: -40, right: -40, width: 140, height: 140, borderRadius: '50%', background: `radial-gradient(circle,${color}10 0%,transparent 70%)`, pointerEvents: 'none' }} />
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20, position: 'relative' }}>
+      {/* Top accent line */}
+      <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 2, background: `linear-gradient(90deg,transparent 5%,${color}70 40%,${color}40 60%,transparent 95%)` }} />
+      {/* Background glow orb */}
+      <div style={{ position: 'absolute', top: -60, right: -60, width: 200, height: 200, borderRadius: '50%', background: `radial-gradient(circle,${color}14 0%,transparent 65%)`, pointerEvents: 'none' }} />
+      {/* Header */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 0, position: 'relative' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <div style={{ width: 30, height: 30, borderRadius: 8, background: `${color}18`, border: `1px solid ${color}30`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1rem', flexShrink: 0 }}>{icon}</div>
+          <div style={{ width: 32, height: 32, borderRadius: 9, background: `${color}18`, border: `1px solid ${color}35`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1rem', flexShrink: 0 }}>{icon}</div>
           <div style={{ fontSize: 13, fontWeight: 700, color: t.text1, letterSpacing: '.04em', textTransform: 'uppercase' }}>{title}</div>
         </div>
         {onOpen && (
@@ -67,6 +73,8 @@ function Section({ title, icon, color, t, children, onOpen, ctaLabel, delay = 0 
           </button>
         )}
       </div>
+      {/* Divider */}
+      <div style={{ height: 1, background: `linear-gradient(90deg,${color}25,transparent)`, margin: '16px 0' }} />
       <div style={{ position: 'relative' }}>{children}</div>
     </div>
   )
@@ -76,13 +84,13 @@ function Section({ title, icon, color, t, children, onOpen, ctaLabel, delay = 0 
 function MiniBarRow({ label, value, max, color, sub, t }) {
   const pct = max > 0 ? Math.min(100, (value / max) * 100) : 0
   return (
-    <div style={{ marginBottom: 9 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
-        <span style={{ fontSize: 11, color: t.text2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '62%' }}>{label}</span>
-        <span style={{ fontSize: 11, color, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{sub}</span>
+    <div style={{ marginBottom: 11 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 5 }}>
+        <span style={{ fontSize: 11.5, color: t.text2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '62%', fontWeight: 500 }}>{label}</span>
+        <span style={{ fontSize: 11.5, color, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{sub}</span>
       </div>
-      <div style={{ height: 3, background: t.border2, borderRadius: 2, overflow: 'hidden' }}>
-        <div style={{ height: '100%', width: `${pct}%`, background: color, borderRadius: 2, transition: 'width .6s ease' }} />
+      <div style={{ height: 4, background: t.border2, borderRadius: 3, overflow: 'hidden' }}>
+        <div style={{ height: '100%', width: `${pct}%`, background: `linear-gradient(90deg,${color},${color}bb)`, borderRadius: 3, transition: 'width .7s cubic-bezier(.34,1.2,.64,1)' }} />
       </div>
     </div>
   )
@@ -161,35 +169,57 @@ function PurchaseSection({ t, setActiveNav, canSee }) {
 
           {/* Chart + branches row */}
           {(showChart || showBranches) && (
-            <div style={{ display: 'grid', gridTemplateColumns: showChart && showBranches ? '1fr 260px' : '1fr', gap: 20 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: showChart && showBranches ? '1fr 280px' : '1fr', gap: 24 }}>
               {showChart && (
                 <div>
-                  <div style={{ fontSize: 10, color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: 10 }}>14-day bill trend</div>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                    <div style={{ fontSize: 10, color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 600 }}>14-day net weight (g)</div>
+                    {trend.length > 0 && !loading && (
+                      <div style={{ fontSize: 10, color: t.text3 }}>
+                        avg {fmt(trend.reduce((s, d) => s + Number(d.net_wt || 0), 0) / trend.filter(d => Number(d.net_wt || 0) > 0).length)}g/day
+                      </div>
+                    )}
+                  </div>
                   {loading
-                    ? <Shimmer h={110} w="100%" t={t} />
+                    ? <Shimmer h={140} w="100%" t={t} />
                     : trend.length > 0
-                      ? <ResponsiveContainer width="100%" height={110}>
-                          <BarChart data={trend} barSize={9} margin={{ top: 2, right: 0, left: 0, bottom: 0 }}>
-                            <CartesianGrid vertical={false} strokeDasharray="2 4" stroke={t.border} />
+                      ? <ResponsiveContainer width="100%" height={140}>
+                          <BarChart data={trend} barSize={14} margin={{ top: 4, right: 2, left: 2, bottom: 0 }}>
+                            <defs>
+                              <linearGradient id="barGrad" x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="0%" stopColor={t.gold} stopOpacity={0.95} />
+                                <stop offset="100%" stopColor={t.gold} stopOpacity={0.5} />
+                              </linearGradient>
+                            </defs>
+                            <CartesianGrid vertical={false} strokeDasharray="3 5" stroke={t.border} strokeOpacity={0.8} />
                             <XAxis dataKey="day" tickFormatter={fmtDay} tick={{ fontSize: 9, fill: t.text4 }} axisLine={false} tickLine={false} interval={1} />
-                            <YAxis hide />
-                            <Tooltip contentStyle={{ background: t.card2, border: `1px solid ${t.border}`, borderRadius: 8, fontSize: 11 }} labelFormatter={fmtDay} formatter={v => [fmtN(v), 'Bills']} cursor={{ fill: `${t.gold}10` }} />
-                            <Bar dataKey="txn_count" fill={t.gold} radius={[3, 3, 0, 0]} opacity={.85} />
+                            <YAxis hide domain={[0, 'auto']} />
+                            <Tooltip
+                              contentStyle={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: 10, fontSize: 11, boxShadow: '0 4px 16px rgba(0,0,0,.15)' }}
+                              labelFormatter={fmtDay}
+                              formatter={v => [`${fmt(v)}g`, 'Net Weight']}
+                              cursor={{ fill: `${t.gold}12`, radius: 4 }}
+                            />
+                            <Bar dataKey="net_wt" fill="url(#barGrad)" radius={[4, 4, 0, 0]} />
                           </BarChart>
                         </ResponsiveContainer>
-                      : <div style={{ height: 110, display: 'flex', alignItems: 'center', justifyContent: 'center', color: t.text4, fontSize: 12 }}>No data this period</div>
+                      : <div style={{ height: 140, display: 'flex', alignItems: 'center', justifyContent: 'center', color: t.text4, fontSize: 12 }}>No data this period</div>
                   }
                 </div>
               )}
               {showBranches && (
                 <div>
-                  <div style={{ fontSize: 10, color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: 10 }}>Top branches · MTD weight</div>
+                  <div style={{ fontSize: 10, color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: 14, fontWeight: 600 }}>Top branches · MTD weight</div>
                   {loading
-                    ? [0,1,2,3,4,5].map(i => <Shimmer key={i} h={18} w="100%" t={t} />)
+                    ? [0,1,2,3,4,5].map(i => <div key={i} style={{ marginBottom: 11 }}><Shimmer h={20} w="100%" t={t} /></div>)
                     : branches.length === 0
                       ? <div style={{ color: t.text4, fontSize: 12 }}>No data this month</div>
-                      : branches.map(b => (
-                          <MiniBarRow key={b.branch_name} label={b.branch_name} value={Number(b.total_net || 0)} max={maxBranch} color={t.gold} sub={`${fmt(b.total_net)}g`} t={t} />
+                      : branches.map((b, i) => (
+                          <MiniBarRow key={b.branch_name}
+                            label={`${i + 1}. ${b.branch_name}`}
+                            value={Number(b.total_net || 0)} max={maxBranch}
+                            color={t.gold} sub={`${fmt(b.total_net)}g`} t={t}
+                          />
                         ))
                   }
                 </div>
