@@ -786,33 +786,37 @@ function OldCrmTab({
           {/* Breakdown box — shows what makes up Bills Submitted */}
           <div style={{
             position:'relative',
-            background:`linear-gradient(145deg, ${t.gold}14 0%, ${t.gold}06 50%, ${t.gold}10 100%)`,
-            border:`1px solid ${t.gold}50`,
-            borderRadius:18,
-            boxShadow:`0 8px 32px ${t.gold}18, 0 2px 8px rgba(0,0,0,.12), inset 0 1px 0 ${t.gold}45, inset 0 -1px 0 rgba(0,0,0,.06)`,
-            padding:'18px 10px 10px 10px',
+            background:`linear-gradient(160deg, ${t.bg} 0%, ${t.card} 60%, ${t.bg} 100%)`,
+            border:`1.5px solid ${t.gold}55`,
+            borderRadius:22,
+            boxShadow:`0 0 0 1px ${t.gold}12, 0 16px 48px ${t.gold}20, 0 4px 16px rgba(0,0,0,.16), inset 0 0 60px ${t.gold}08, inset 0 1px 0 ${t.gold}35`,
+            padding:'22px 14px 14px',
           }}>
-            {/* Floating label tab */}
-            <div style={{ position:'absolute', top:-10, left:'50%', transform:'translateX(-50%)', background:`linear-gradient(90deg,${t.gold},${t.gold}cc)`, borderRadius:20, padding:'2px 10px', boxShadow:`0 2px 8px ${t.gold}40` }}>
-              <span style={{ fontSize:'.48rem', letterSpacing:'.12em', textTransform:'uppercase', color:'#0a0a0a', fontWeight:800 }}>breakdown of {fmtNum(totalBilled)}</span>
-            </div>
+            {/* Ambient glow behind the stage */}
+            <div style={{ position:'absolute', inset:-1, borderRadius:22, background:`radial-gradient(ellipse at 50% 0%, ${t.gold}18 0%, transparent 65%)`, pointerEvents:'none' }}/>
             {/* Dot-grid texture */}
-            <div style={{ position:'absolute', inset:0, borderRadius:18, backgroundImage:`radial-gradient(${t.gold}15 1px, transparent 1px)`, backgroundSize:'16px 16px', pointerEvents:'none' }}/>
-            <div style={{ position:'relative', display:'flex', alignItems:'center', gap:6 }}>
+            <div style={{ position:'absolute', inset:0, borderRadius:22, backgroundImage:`radial-gradient(${t.gold}18 1px, transparent 1px)`, backgroundSize:'18px 18px', pointerEvents:'none', opacity:.6 }}/>
+            {/* Floating pill label */}
+            <div style={{ position:'absolute', top:-14, left:'50%', transform:'translateX(-50%)', background:`linear-gradient(90deg,${t.gold}ee,${t.gold}bb)`, borderRadius:20, padding:'4px 14px', boxShadow:`0 4px 14px ${t.gold}55, 0 0 0 1px ${t.gold}30`, whiteSpace:'nowrap' }}>
+              <span style={{ fontSize:'.52rem', letterSpacing:'.14em', textTransform:'uppercase', color:'#0a0a0a', fontWeight:900 }}>breakdown of {fmtNum(totalBilled)}</span>
+            </div>
+            <div style={{ position:'relative', display:'flex', alignItems:'center', gap:8 }}>
               {[
                 { node: <HeroNum label="Purchased" value={approved} color={t.green} t={t} weight={goldPurchased} active={activeMetric==='purchased'} onClick={() => toggleMetric('purchased')} />, color: t.green },
                 { node: <HeroNum label="In Pipeline" value={pending} color={t.orange} t={t} small weight={goldPending} active={activeMetric==='pending'} onClick={() => toggleMetric('pending')} />, color: t.orange },
                 { node: <HeroNum label="Bill Rejected" value={trueRejected} color={t.red} t={t} small weight={goldRejected} active={activeMetric==='rejected'} onClick={() => toggleMetric('rejected')} />, color: t.red },
                 { node: <HeroNum label="Re-billed & Approved" value={wrongEntry} color={t.orange} t={t} small active={activeMetric==='rebilled'} onClick={() => toggleMetric('rebilled')} />, color: t.orange },
               ].map((item, i) => (
-                <div key={i} style={{ display:'flex', alignItems:'center', gap:6 }}>
+                <div key={i} style={{ display:'flex', alignItems:'center', gap:8 }}>
                   {i > 0 && <FlowSep t={t} />}
                   <div style={{
-                    background:`linear-gradient(145deg, ${t.surface}, ${t.card})`,
-                    border:`1px solid ${item.color}25`,
-                    borderRadius:12,
-                    boxShadow:`0 4px 14px rgba(0,0,0,.10), 0 1px 3px rgba(0,0,0,.08), inset 0 1px 0 ${item.color}20`,
-                    transform:'translateY(-3px)',
+                    background:`linear-gradient(160deg, ${t.card2} 0%, ${t.card} 100%)`,
+                    border:`1px solid ${item.color}30`,
+                    borderTop:`2px solid ${item.color}70`,
+                    borderRadius:14,
+                    boxShadow:`0 8px 24px rgba(0,0,0,.14), 0 2px 6px rgba(0,0,0,.10), inset 0 1px 0 ${item.color}18`,
+                    transform:'translateY(-5px)',
+                    transition:'transform .2s, box-shadow .2s',
                   }}>
                     {item.node}
                   </div>
@@ -1540,29 +1544,32 @@ function NewCrmTab({ t, newCrmTxns, newCrmError, regionFilter, regions, viewDate
           {/* Breakdown box — In Progress + Completed make up Total */}
           <div style={{
             position:'relative',
-            background:`linear-gradient(145deg, ${t.blue}14 0%, ${t.blue}06 50%, ${t.blue}10 100%)`,
-            border:`1px solid ${t.blue}50`,
-            borderRadius:18,
-            boxShadow:`0 8px 32px ${t.blue}18, 0 2px 8px rgba(0,0,0,.12), inset 0 1px 0 ${t.blue}45, inset 0 -1px 0 rgba(0,0,0,.06)`,
-            padding:'18px 10px 10px 10px',
+            background:`linear-gradient(160deg, ${t.bg} 0%, ${t.card} 60%, ${t.bg} 100%)`,
+            border:`1.5px solid ${t.blue}55`,
+            borderRadius:22,
+            boxShadow:`0 0 0 1px ${t.blue}12, 0 16px 48px ${t.blue}20, 0 4px 16px rgba(0,0,0,.16), inset 0 0 60px ${t.blue}08, inset 0 1px 0 ${t.blue}35`,
+            padding:'22px 14px 14px',
           }}>
-            <div style={{ position:'absolute', top:-10, left:'50%', transform:'translateX(-50%)', background:`linear-gradient(90deg,${t.blue},${t.blue}cc)`, borderRadius:20, padding:'2px 10px', boxShadow:`0 2px 8px ${t.blue}40` }}>
-              <span style={{ fontSize:'.48rem', letterSpacing:'.12em', textTransform:'uppercase', color:'#fff', fontWeight:800 }}>breakdown of {fmtNum(total)}</span>
+            <div style={{ position:'absolute', inset:-1, borderRadius:22, background:`radial-gradient(ellipse at 50% 0%, ${t.blue}18 0%, transparent 65%)`, pointerEvents:'none' }}/>
+            <div style={{ position:'absolute', inset:0, borderRadius:22, backgroundImage:`radial-gradient(${t.blue}18 1px, transparent 1px)`, backgroundSize:'18px 18px', pointerEvents:'none', opacity:.6 }}/>
+            <div style={{ position:'absolute', top:-14, left:'50%', transform:'translateX(-50%)', background:`linear-gradient(90deg,${t.blue}ee,${t.blue}bb)`, borderRadius:20, padding:'4px 14px', boxShadow:`0 4px 14px ${t.blue}55, 0 0 0 1px ${t.blue}30`, whiteSpace:'nowrap' }}>
+              <span style={{ fontSize:'.52rem', letterSpacing:'.14em', textTransform:'uppercase', color:'#fff', fontWeight:900 }}>breakdown of {fmtNum(total)}</span>
             </div>
-            <div style={{ position:'absolute', inset:0, borderRadius:18, backgroundImage:`radial-gradient(${t.blue}15 1px, transparent 1px)`, backgroundSize:'16px 16px', pointerEvents:'none' }}/>
-            <div style={{ position:'relative', display:'flex', alignItems:'center', gap:6 }}>
+            <div style={{ position:'relative', display:'flex', alignItems:'center', gap:8 }}>
               {[
                 { node: <HeroNum label="In Progress" value={inProgress} color={t.orange} t={t} weight={inProgressWt} active={activeMetric==='inprogress'} onClick={() => toggleMetric('inprogress')} />, color: t.orange },
                 { node: <HeroNum label="Completed"   value={completed}  color={t.green}  t={t} weight={completedWt}  active={activeMetric==='completed'}  onClick={() => toggleMetric('completed')}  />, color: t.green  },
               ].map((item, i) => (
-                <div key={i} style={{ display:'flex', alignItems:'center', gap:6 }}>
+                <div key={i} style={{ display:'flex', alignItems:'center', gap:8 }}>
                   {i > 0 && <FlowArrow t={t} pct={completedOfProgPct || null} />}
                   <div style={{
-                    background:`linear-gradient(145deg, ${t.surface}, ${t.card})`,
-                    border:`1px solid ${item.color}25`,
-                    borderRadius:12,
-                    boxShadow:`0 4px 14px rgba(0,0,0,.10), 0 1px 3px rgba(0,0,0,.08), inset 0 1px 0 ${item.color}20`,
-                    transform:'translateY(-3px)',
+                    background:`linear-gradient(160deg, ${t.card2} 0%, ${t.card} 100%)`,
+                    border:`1px solid ${item.color}30`,
+                    borderTop:`2px solid ${item.color}70`,
+                    borderRadius:14,
+                    boxShadow:`0 8px 24px rgba(0,0,0,.14), 0 2px 6px rgba(0,0,0,.10), inset 0 1px 0 ${item.color}18`,
+                    transform:'translateY(-5px)',
+                    transition:'transform .2s, box-shadow .2s',
                   }}>
                     {item.node}
                   </div>
