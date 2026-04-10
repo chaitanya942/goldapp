@@ -192,7 +192,7 @@ function PurchaseSection({ t, setActiveNav, canSee }) {
                     ? <Shimmer h={140} w="100%" t={t} />
                     : trend.length > 0
                       ? <div style={{ borderRadius: 10, overflow: 'hidden' }}>
-                          <ResponsiveContainer width="100%" height={140}>
+                          <ResponsiveContainer width="100%" height={140} style={{ outline: 'none' }}>
                             <BarChart data={trend} barSize={14} margin={{ top: 4, right: 2, left: 2, bottom: 0 }}>
                               <defs>
                                 <linearGradient id="barGrad" x1="0" y1="0" x2="0" y2="1">
@@ -534,6 +534,306 @@ function RatesSection({ t, setActiveNav, canSeeRates, canSeeCalTable }) {
   )
 }
 
+// ── Accordion helpers ─────────────────────────────────────────────────────────
+const PERIODS = [
+  { key:'today', label:'Today' }, { key:'yesterday', label:'Yesterday' },
+  { key:'week',  label:'This Week' }, { key:'mtd', label:'MTD' },
+  { key:'prev',  label:'Prev Month' }, { key:'ytd', label:'YTD' },
+]
+const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+const fmtDate2 = (iso) => { if (!iso) return ''; const [y,m,d] = iso.split('-'); return `${d}-${MONTHS[+m-1]}-${y}` }
+const fmtCr2   = (n) => { if (n == null) return '—'; const cr = Number(n)/1e7; return cr >= 1 ? `₹${cr.toFixed(2)} Cr` : `₹${Number(n).toLocaleString('en-IN',{maximumFractionDigits:0})}` }
+const fmtPct   = (n) => n != null ? `${Number(n).toFixed(2)}%` : '—'
+const fmt2     = (n) => n != null ? Number(n).toLocaleString('en-IN', { maximumFractionDigits: 2 }) : '—'
+
+function getRange(key) {
+  const now = istNow(), y = now.getFullYear(), m = now.getMonth(), today = istStr(now)
+  if (key === 'today')     return { from: today, to: today, label: 'Today' }
+  if (key === 'yesterday') { const d = istStr(new Date(now - 86400000)); return { from: d, to: d, label: 'Yesterday' } }
+  if (key === 'week')      { const off = now.getDay()===0?6:now.getDay()-1; return { from: istStr(new Date(now - off*86400000)), to: today, label: 'This Week' } }
+  if (key === 'mtd')       return { from: `${y}-${String(m+1).padStart(2,'0')}-01`, to: today, label: 'Month to Date' }
+  if (key === 'prev')      { const pm=m===0?11:m-1, pY=m===0?y-1:y, last=new Date(pY,pm+1,0).getDate(); return { from:`${pY}-${String(pm+1).padStart(2,'0')}-01`, to:`${pY}-${String(pm+1).padStart(2,'0')}-${String(last).padStart(2,'0')}`, label:'Previous Month' } }
+  if (key === 'ytd')       { const fy=m>=3?`${y}-04-01`:`${y-1}-04-01`; return { from:fy, to:today, label:'Year to Date (FY)' } }
+  return { from: null, to: null, label: 'All Time' }
+}
+
+function AccordionKpiCard({ label, value, sub, color, icon, loading, t, delay=0 }) {
+  const [vis, setVis] = useState(false)
+  useEffect(() => { const id = setTimeout(()=>setVis(true), delay); return ()=>clearTimeout(id) }, [delay])
+  return (
+    <div style={{ background:`linear-gradient(145deg,${t.card},${t.card2})`, border:`1px solid ${t.border}`, borderRadius:16, padding:'20px 22px', position:'relative', overflow:'hidden', opacity:vis?1:0, transform:vis?'translateY(0)':'translateY(10px)', transition:'all .25s cubic-bezier(.34,1.56,.64,1)' }}>
+      <div style={{ position:'absolute', top:0, left:16, right:16, height:1, background:`linear-gradient(90deg,transparent,${color}80,transparent)` }}/>
+      <div style={{ position:'absolute', top:-30, right:-30, width:100, height:100, borderRadius:'50%', background:`radial-gradient(circle,${color}08 0%,transparent 70%)`, pointerEvents:'none' }}/>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:14 }}>
+        <div style={{ fontSize:11, color:t.text3, letterSpacing:'.1em', textTransform:'uppercase', fontWeight:600 }}>{label}</div>
+        <div style={{ width:30, height:30, borderRadius:8, background:`${color}18`, border:`1px solid ${color}25`, display:'flex', alignItems:'center', justifyContent:'center', fontSize:'.9rem', flexShrink:0 }}>{icon}</div>
+      </div>
+      {loading
+        ? <div style={{ height:30, background:`linear-gradient(90deg,${t.border},${t.border2},${t.border})`, backgroundSize:'200% 100%', borderRadius:8, width:'60%', animation:'shimmer 1.5s infinite' }}/>
+        : <div style={{ fontSize:26, fontWeight:200, color, letterSpacing:'-.02em', lineHeight:1, fontVariantNumeric:'tabular-nums' }}>{value ?? '—'}</div>
+      }
+      {sub && !loading && <div style={{ fontSize:12, color:t.text4, marginTop:8, lineHeight:1.4 }}>{sub}</div>}
+    </div>
+  )
+}
+
+function AccordionStatRow({ label, value, sub, color, t, bar, barMax, delay=0 }) {
+  const [vis, setVis] = useState(false)
+  useEffect(() => { const id = setTimeout(()=>setVis(true), delay); return ()=>clearTimeout(id) }, [delay])
+  const pct = bar!=null && barMax>0 ? Math.min(100,(bar/barMax)*100) : 0
+  return (
+    <div style={{ display:'flex', alignItems:'center', gap:10, padding:'9px 0', borderBottom:`1px solid ${t.border}25`, opacity:vis?1:0, transform:vis?'translateX(0)':'translateX(-8px)', transition:'all .3s ease' }}>
+      <div style={{ flex:1, minWidth:0 }}>
+        <div style={{ fontSize:13, color:t.text2, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', fontWeight:500 }}>{label}</div>
+        {sub && <div style={{ fontSize:12, color:t.text4, marginTop:2 }}>{sub}</div>}
+      </div>
+      {bar!=null && barMax>0 && (
+        <div style={{ width:56, height:4, background:t.border2, borderRadius:2, overflow:'hidden', flexShrink:0 }}>
+          <div style={{ width:vis?`${pct}%`:'0%', height:'100%', background:`linear-gradient(90deg,${color}90,${color})`, borderRadius:2, transition:'width .7s cubic-bezier(.4,0,.2,1)' }}/>
+        </div>
+      )}
+      <div style={{ fontSize:13, fontWeight:600, color, minWidth:64, textAlign:'right', fontVariantNumeric:'tabular-nums' }}>{value}</div>
+    </div>
+  )
+}
+
+const AccordionEmptyPanel = ({ t }) => (
+  <div style={{ display:'flex', flexDirection:'column', alignItems:'center', padding:'28px 0', gap:10 }}>
+    <div style={{ fontSize:'2rem', opacity:.2 }}>📊</div>
+    <div style={{ color:t.text4, fontSize:13 }}>No activity this period</div>
+  </div>
+)
+
+// ══ PURCHASE OVERVIEW ACCORDION ══════════════════════════════════════════════
+function PurchaseAccordion({ t, canSee }) {
+  const COLOR_PALETTE = [t.gold, t.green, t.blue, t.purple, t.orange, t.red]
+
+  const showKpiCards       = canSee('element.dashboard.kpi_cards')
+  const showPeriodSelector = canSee('element.dashboard.period_selector')
+  const showStateTable     = canSee('element.dashboard.state_table')
+  const showTopBranches    = canSee('element.dashboard.top_branches')
+  const showRegionCards    = canSee('element.dashboard.region_cards')
+  const visiblePanels      = [showStateTable, showRegionCards, showTopBranches].filter(Boolean).length
+
+  const [period,       setPeriod]       = useState('mtd')
+  const [open,         setOpen]         = useState(false)
+  const [loading,      setLoading]      = useState(true)
+  const [kpis,         setKpis]         = useState(null)
+  const [stateData,    setStateData]    = useState([])
+  const [topBranches,  setTopBranches]  = useState([])
+  const [branchMeta,   setBranchMeta]   = useState([])
+  const [regionCounts, setRegionCounts] = useState({})
+
+  useEffect(() => {
+    supabase.from('branches').select('name, region, state').eq('is_active', true).then(({ data }) => {
+      if (!data) return
+      setBranchMeta(data)
+      const rc = {}
+      data.forEach(b => { if (b.region) rc[b.region] = (rc[b.region] || 0) + 1 })
+      setRegionCounts(rc)
+    })
+  }, [])
+
+  useEffect(() => { fetchAll() }, [period]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const fetchAll = async () => {
+    setLoading(true)
+    const { from, to } = getRange(period)
+    const p = { p_from:from, p_to:to, p_branch:null, p_txn_type:null, p_state:null }
+    const [all, states, branches] = await Promise.all([
+      supabase.rpc('get_report_kpis', p),
+      supabase.rpc('get_state_summary', { p_from:from, p_to:to, p_txn_type:null }),
+      supabase.rpc('get_branch_summary', { p_from:from, p_to:to, p_txn_type:null, p_state:null }),
+    ])
+    if (all.data)      setKpis(Array.isArray(all.data)?all.data[0]:all.data)
+    if (states.data)   setStateData(states.data||[])
+    if (branches.data) setTopBranches((branches.data||[]).sort((a,b)=>Number(b.total_net||0)-Number(a.total_net||0)).slice(0,7))
+    setLoading(false)
+  }
+
+  const branchRegionMap = {}
+  branchMeta.forEach(b => { if (b.name && b.region) branchRegionMap[b.name] = b.region })
+  const orderedRegions = [...new Set([
+    ...stateData.filter(s=>s.state).map(s=>s.state),
+    ...Object.keys(regionCounts),
+  ])]
+  const regionColorMap = {}
+  orderedRegions.forEach((r, i) => { regionColorMap[r] = COLOR_PALETTE[i % COLOR_PALETTE.length] })
+
+  const totalBranches  = Object.values(regionCounts).reduce((a,b)=>a+b,0)
+  const maxStateNet    = Math.max(...stateData.map(s=>Number(s.total_net||0)), 1)
+  const hasData        = kpis?.total_count > 0
+  const hasStateData   = stateData.filter(s=>s.state && Number(s.total_net||0)>0).length > 0
+  const physPct        = hasData ? (kpis.physical_count/kpis.total_count)*100 : 0
+  const takePct        = hasData ? (kpis.takeover_count/kpis.total_count)*100 : 0
+  const { label: periodLabel, from: pFrom, to: pTo } = getRange(period)
+  const dateLabel = pFrom&&pTo ? (pFrom===pTo ? fmtDate2(pFrom) : `${fmtDate2(pFrom)} — ${fmtDate2(pTo)}`) : ''
+
+  const panel = { background:`linear-gradient(135deg,${t.card},${t.card2})`, border:`1px solid ${t.border}`, borderRadius:14, padding:'18px 22px' }
+  const panelTitle = { fontSize:13, color:t.text2, letterSpacing:'.1em', textTransform:'uppercase', fontWeight:600 }
+  const panelMeta  = { fontSize:11, color:t.text4 }
+
+  return (
+    <div style={{ border:`1px solid ${t.border2}`, borderRadius:20, background:`linear-gradient(160deg,${t.card2},${t.card3 || t.card})`, position:'relative', overflow:'hidden' }}>
+      <div style={{ position:'absolute', top:0, left:0, width:160, height:160, background:`radial-gradient(circle at top left,${t.gold}08,transparent 70%)`, pointerEvents:'none' }}/>
+
+      {/* Header */}
+      <div
+        onClick={() => setOpen(o => !o)}
+        style={{ display:'flex', alignItems:'center', gap:14, padding: open ? '20px 24px' : '14px 24px', flexWrap:'wrap', position:'relative', zIndex:1, cursor:'pointer', userSelect:'none', borderBottom: open ? `1px solid ${t.border}` : 'none', transition:'all .3s ease' }}
+      >
+        <div style={{ display:'flex', alignItems:'center', gap:10 }}>
+          <div style={{ width:3, height:20, borderRadius:2, background:`linear-gradient(180deg,${t.gold},${t.gold}40)`, boxShadow:`0 0 8px ${t.gold}60` }}/>
+          <div style={{ fontSize:14, color:t.text2, letterSpacing:'.12em', textTransform:'uppercase', fontWeight:700 }}>Purchase Overview</div>
+        </div>
+
+        {open && <>
+          {showPeriodSelector && (
+            <div onClick={e=>e.stopPropagation()} style={{ display:'flex', gap:3, padding:4, background:t.card, borderRadius:10, border:`1px solid ${t.border}`, boxShadow:'inset 0 1px 3px rgba(0,0,0,.2)' }}>
+              {PERIODS.map(({ key, label }) => (
+                <button key={key} onClick={()=>setPeriod(key)} style={{ padding:'6px 14px', borderRadius:7, border:'none', cursor:'pointer', background:period===key?`linear-gradient(135deg,${t.gold},${t.gold}cc)`:'transparent', color:period===key?'#0a0a0a':t.text3, fontSize:12, fontWeight:period===key?700:500, letterSpacing:'.03em', transition:'all .2s', boxShadow:period===key?`0 2px 8px ${t.gold}40`:'none', whiteSpace:'nowrap' }}>
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
+          {showPeriodSelector && <div style={{ fontSize:12, color:t.text3, fontStyle:'italic' }}>{!loading && dateLabel}</div>}
+        </>}
+
+        <div style={{ marginLeft:'auto', width:28, height:28, borderRadius:8, background:`${t.gold}12`, border:`1px solid ${t.gold}28`, display:'flex', alignItems:'center', justifyContent:'center', color:t.gold, fontSize:11, transition:'transform .35s cubic-bezier(.4,0,.2,1)', transform: open ? 'rotate(0deg)' : 'rotate(-90deg)' }}>▼</div>
+      </div>
+
+      {/* Body */}
+      <div className={`overview-body${open ? '' : ' collapsed'}`}>
+        <div style={{ padding: open ? '24px 24px 28px' : '0' }}>
+
+          {/* 8 KPI cards */}
+          {showKpiCards && <>
+            <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:14, marginBottom:14 }}>
+              <AccordionKpiCard t={t} delay={0}   label="Total Bills"          icon="🧾" color={t.gold}   loading={loading} value={hasData?Number(kpis.total_count).toLocaleString('en-IN'):'—'} sub={periodLabel}/>
+              <AccordionKpiCard t={t} delay={60}  label="Total Net Weight"     icon="⚖️" color={t.gold}   loading={loading} value={hasData?`${fmt2(kpis.total_net)}g`:'—'} sub="Net weight purchased"/>
+              <AccordionKpiCard t={t} delay={120} label="Gross Purchase Value" icon="₹"  color={t.green}  loading={loading} value={hasData?fmtCr2(kpis.total_value):'—'} sub="Before service charges"/>
+              <AccordionKpiCard t={t} delay={180} label="Avg Rate / Gram"      icon="📈" color={t.green}  loading={loading} value={hasData&&kpis.avg_rate_per_gram>0?`₹${Number(kpis.avg_rate_per_gram).toLocaleString('en-IN',{maximumFractionDigits:0})}/g`:'—'} sub="Gross value ÷ net weight"/>
+            </div>
+            <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:14, marginBottom:22 }}>
+              <AccordionKpiCard t={t} delay={240} label="Avg Purity"         icon="✦"  color={t.purple} loading={loading} value={hasData?fmtPct(kpis.avg_purity):'—'} sub="Weighted by net weight"/>
+              <AccordionKpiCard t={t} delay={300} label="Avg Wt / Bill"      icon="◈"  color={t.text2}  loading={loading} value={hasData?`${fmt2(kpis.avg_net_per_txn)}g`:'—'} sub="Net weight ÷ bills"/>
+              <AccordionKpiCard t={t} delay={360} label="Avg Service Charge" icon="%"  color={t.red}    loading={loading} value={hasData?`${Number(kpis.avg_service_charge_pct||0).toFixed(2)}%`:'—'} sub="Service charge ÷ gross value"/>
+              <AccordionKpiCard t={t} delay={420} label="Active Branches"    icon="⬡"  color={t.blue}   loading={loading} value={hasData?`${kpis.branch_count} / ${totalBranches}`:`— / ${totalBranches}`} sub={hasData?'branches purchased this period':'No purchases this period'}/>
+            </div>
+
+            {/* Purchase Mix */}
+            {!loading && hasData && (
+              <div style={{ background:`linear-gradient(135deg,${t.card},${t.card2})`, border:`1px solid ${t.border}`, borderRadius:14, padding:'18px 22px', marginBottom:22 }}>
+                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:14 }}>
+                  <div style={{ fontSize:13, color:t.text2, letterSpacing:'.1em', textTransform:'uppercase', fontWeight:600 }}>Purchase Mix</div>
+                  <div style={{ display:'flex', gap:20 }}>
+                    {[{ color:t.gold, label:'Physical', pct:physPct, count:kpis.physical_count },{ color:'#e07820', label:'Takeover', pct:takePct, count:kpis.takeover_count }].map(item=>(
+                      <div key={item.label} style={{ display:'flex', alignItems:'center', gap:7 }}>
+                        <div style={{ width:10, height:10, borderRadius:3, background:item.color, boxShadow:`0 0 6px ${item.color}60` }}/>
+                        <span style={{ fontSize:13, color:t.text2, fontWeight:500 }}>{item.label}</span>
+                        <span style={{ fontSize:13, color:item.color, fontWeight:700 }}>{item.pct.toFixed(1)}%</span>
+                        <span style={{ fontSize:12, color:t.text4 }}>({Number(item.count||0).toLocaleString('en-IN')} bills)</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div style={{ display:'flex', height:10, borderRadius:100, overflow:'hidden', gap:2, boxShadow:'inset 0 1px 3px rgba(0,0,0,.3)' }}>
+                  <div style={{ width:`${physPct}%`, background:`linear-gradient(90deg,${t.gold}aa,${t.gold})`, borderRadius:'100px 0 0 100px', transition:'width .8s cubic-bezier(.4,0,.2,1)', boxShadow:`0 0 10px ${t.gold}50` }}/>
+                  <div style={{ flex:1, background:'linear-gradient(90deg,#e07820,#c85010)', borderRadius:'0 100px 100px 0', boxShadow:'0 0 10px #e0782050' }}/>
+                </div>
+              </div>
+            )}
+          </>}
+
+          {/* Bottom panels */}
+          {visiblePanels > 0 && (
+            <div style={{ display:'grid', gridTemplateColumns:`repeat(${visiblePanels},1fr)`, gap:16 }}>
+
+              {showStateTable && (
+                <div style={panel}>
+                  <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16 }}>
+                    <div style={panelTitle}>By Region</div>
+                    <div style={panelMeta}>Net Weight</div>
+                  </div>
+                  {loading
+                    ? [0,1,2,3,4].map(i=><div key={i} style={{ height:30, background:`linear-gradient(90deg,${t.border},${t.border2},${t.border})`, backgroundSize:'200% 100%', borderRadius:6, marginBottom:6, animation:'shimmer 1.5s infinite' }}/>)
+                    : !hasStateData ? <AccordionEmptyPanel t={t} />
+                      : stateData.filter(s=>s.state&&Number(s.total_net||0)>0).map((s,i)=>(
+                          <AccordionStatRow key={s.state||i} delay={i*60} label={s.state}
+                            sub={`${regionCounts[s.state]||0} branches · ${Number(s.txn_count||s.total_count||0).toLocaleString('en-IN')} bills`}
+                            value={`${fmt2(s.total_net)}g`}
+                            color={regionColorMap[s.state]||COLOR_PALETTE[i%COLOR_PALETTE.length]} t={t}
+                            bar={Number(s.total_net||0)} barMax={maxStateNet}/>
+                        ))
+                  }
+                </div>
+              )}
+
+              {showRegionCards && (
+                <div style={panel}>
+                  <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16 }}>
+                    <div style={panelTitle}>Active Branches</div>
+                    <div style={panelMeta}>Count</div>
+                  </div>
+                  {loading
+                    ? [0,1,2,3].map(i=><div key={i} style={{ height:30, background:`linear-gradient(90deg,${t.border},${t.border2},${t.border})`, backgroundSize:'200% 100%', borderRadius:6, marginBottom:6, animation:'shimmer 1.5s infinite' }}/>)
+                    : Object.entries(regionCounts).map(([region, count]) => {
+                        const color = regionColorMap[region] || t.text2
+                        const pct   = totalBranches > 0 ? (count / totalBranches) * 100 : 0
+                        return (
+                          <div key={region} style={{ display:'flex', alignItems:'center', gap:10, padding:'10px 0', borderBottom:`1px solid ${t.border}25` }}>
+                            <div style={{ width:9, height:9, borderRadius:'50%', background:color, boxShadow:`0 0 7px ${color}90`, flexShrink:0 }}/>
+                            <div style={{ flex:1, fontSize:13, color:t.text2, fontWeight:500 }}>{region}</div>
+                            <div style={{ width:52, height:4, background:t.border2, borderRadius:2, overflow:'hidden' }}>
+                              <div style={{ width:`${pct}%`, height:'100%', background:`linear-gradient(90deg,${color}80,${color})`, borderRadius:2 }}/>
+                            </div>
+                            <div style={{ fontSize:14, fontWeight:700, color, minWidth:24, textAlign:'right' }}>{count}</div>
+                          </div>
+                        )
+                      })
+                  }
+                  {!loading && (
+                    <div style={{ marginTop:12, paddingTop:12, borderTop:`1px solid ${t.border}`, display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                      <div style={{ fontSize:12, color:t.text4, letterSpacing:'.1em', textTransform:'uppercase' }}>Total</div>
+                      <div style={{ fontSize:22, fontWeight:200, color:t.blue }}>{totalBranches}</div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {showTopBranches && (
+                <div style={panel}>
+                  <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16 }}>
+                    <div style={panelTitle}>Top Branches</div>
+                    <div style={panelMeta}>Net Weight</div>
+                  </div>
+                  {loading
+                    ? [0,1,2,3,4,5,6].map(i=><div key={i} style={{ height:26, background:`linear-gradient(90deg,${t.border},${t.border2},${t.border})`, backgroundSize:'200% 100%', borderRadius:4, marginBottom:6, animation:'shimmer 1.5s infinite' }}/>)
+                    : !hasData ? <AccordionEmptyPanel t={t} />
+                      : topBranches.map((b,i)=>{
+                          const region = branchRegionMap[b.branch_name]
+                          const color  = regionColorMap[region] || t.green
+                          return (
+                            <AccordionStatRow key={b.branch_name} delay={i*50}
+                              label={b.branch_name} value={`${fmt2(b.total_net)}g`}
+                              color={color} t={t}
+                              bar={Number(b.total_net||0)}
+                              barMax={Math.max(...topBranches.map(x=>Number(x.total_net||0)),1)}/>
+                          )
+                        })
+                  }
+                </div>
+              )}
+
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ══ MAIN COMPONENT ════════════════════════════════════════════════════════════
 export default function DynamicDashboard() {
   const { theme, userProfile, canSee, setActiveNav } = useApp()
@@ -554,6 +854,9 @@ export default function DynamicDashboard() {
     <div style={{ padding: '28px 32px', display: 'flex', flexDirection: 'column', gap: 16 }}>
       <style>{`
         @keyframes shimmer { 0% { background-position: 200% 0 } 100% { background-position: -200% 0 } }
+        .overview-body { display:grid; grid-template-rows:1fr; transition:grid-template-rows .35s cubic-bezier(.4,0,.2,1), opacity .3s ease; overflow:hidden; }
+        .overview-body.collapsed { grid-template-rows:0fr; opacity:0; }
+        .overview-body > div { min-height:0; }
       `}</style>
 
       {/* ── Hero ── */}
@@ -581,6 +884,7 @@ export default function DynamicDashboard() {
 
       {/* ── Dynamic sections — each driven by element-level permissions ── */}
       {hasPurchase    && <PurchaseSection    t={t} setActiveNav={setActiveNav} canSee={canSee} />}
+      {hasPurchase    && <PurchaseAccordion  t={t} canSee={canSee} />}
       {hasTelesales   && <TelesalesSection   t={t} setActiveNav={setActiveNav} />}
       {hasConsignment && <ConsignmentSection t={t} setActiveNav={setActiveNav} canSee={canSee} />}
       {hasAdmin       && <AdminSection       t={t} setActiveNav={setActiveNav} canSeeUsers={canSee('user-management')} canSeeBranches={canSee('branch-management')} />}
