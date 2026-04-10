@@ -105,18 +105,17 @@ function DashboardShell() {
     if (activeNav !== 'dashboard' && !canSee(activeNav)) return <AccessDenied />
     switch (activeNav) {
       case 'dashboard': {
+        // Super admin's own session → full DashboardHome (unrestricted overview)
+        if (role === 'super_admin' && !previewRole) return <DashboardHome />
+
         const hasPurchase  = canSee('purchase-data') || canSee('purchase-reports')
         const hasTelesales = canSee('inbound-bot')
 
         // Telesales-only → dedicated rich dashboard (charts, filters, call log)
         if (hasTelesales && !hasPurchase) return <TelesalesDashboard />
 
-        // Purchase access → DashboardHome: full purchase overview accordion +
-        // module hub cards (telesales, consignment, admin, rates shown if permitted)
-        if (hasPurchase) return <DashboardHome />
-
-        // No purchase, no telesales → DynamicDashboard assembles from whatever they have
-        // (consignment-only, admin-only, rates-only, etc.)
+        // Everyone else → element-driven DynamicDashboard:
+        // each section renders only the widgets their element-level permissions allow
         return <DynamicDashboard />
       }
       case 'purchase-data':     return <PurchaseHub />

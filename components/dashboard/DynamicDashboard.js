@@ -88,82 +88,132 @@ function MiniBarRow({ label, value, max, color, sub, t }) {
   )
 }
 
+// ── No-widget placeholder ─────────────────────────────────────────────────────
+function NoWidgets({ t, label }) {
+  return (
+    <div style={{ padding: '14px 0', display: 'flex', alignItems: 'center', gap: 10 }}>
+      <div style={{ width: 6, height: 6, borderRadius: '50%', background: t.border2, flexShrink: 0 }} />
+      <div style={{ fontSize: 12, color: t.text4 }}>{label}</div>
+    </div>
+  )
+}
+
 // ══ PURCHASE SECTION ══════════════════════════════════════════════════════════
-function PurchaseSection({ t, setActiveNav, canSeeData, canSeeReports }) {
-  const [todayKpis, setTodayKpis]   = useState(null)
-  const [mtdKpis,   setMtdKpis]     = useState(null)
-  const [trend,     setTrend]       = useState([])
-  const [branches,  setBranches]    = useState([])
-  const [loading,   setLoading]     = useState(true)
+// Element keys used:
+//   element.dashboard.kpi_cards    → today + MTD KPI grid
+//   element.reports.charts         → 14-day bill trend chart
+//   element.dashboard.top_branches → top branches by MTD weight
+function PurchaseSection({ t, setActiveNav, canSee }) {
+  const canSeeData    = canSee('purchase-data')
+  const canSeeReports = canSee('purchase-reports')
+  const showKpis      = canSee('element.dashboard.kpi_cards')
+  const showChart     = canSee('element.reports.charts')
+  const showBranches  = canSee('element.dashboard.top_branches')
+  const hasWidgets    = showKpis || showChart || showBranches
+
+  const [todayKpis, setTodayKpis] = useState(null)
+  const [mtdKpis,   setMtdKpis]   = useState(null)
+  const [trend,     setTrend]     = useState([])
+  const [branches,  setBranches]  = useState([])
+  const [loading,   setLoading]   = useState(true)
 
   useEffect(() => {
-    const now      = istNow()
-    const todayStr = istStr()
-    const mtdFrom  = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`
+    if (!hasWidgets) { setLoading(false); return }
+    const now       = istNow()
+    const todayStr  = istStr()
+    const mtdFrom   = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`
     const trendFrom = daysBack(13)
     const p0   = { p_from: todayStr, p_to: todayStr, p_branch: null, p_txn_type: null, p_state: null }
     const pMtd = { p_from: mtdFrom,  p_to: todayStr, p_branch: null, p_txn_type: null, p_state: null }
-    Promise.all([
-      supabase.rpc('get_report_kpis', p0).then(({ data }) => setTodayKpis(Array.isArray(data) ? data[0] : data)),
-      supabase.rpc('get_report_kpis', pMtd).then(({ data }) => setMtdKpis(Array.isArray(data) ? data[0] : data)),
-      supabase.rpc('get_daily_trend', { p_from: trendFrom, p_to: todayStr, p_branch: null, p_txn_type: null, p_state: null })
-        .then(({ data }) => setTrend(data || [])),
-      supabase.rpc('get_branch_summary', { p_from: mtdFrom, p_to: todayStr, p_txn_type: null, p_state: null })
-        .then(({ data }) => setBranches((data || []).sort((a, b) => Number(b.total_net || 0) - Number(a.total_net || 0)).slice(0, 6))),
-    ]).catch(() => {}).finally(() => setLoading(false))
+    const fetches = []
+    if (showKpis) {
+      fetches.push(
+        supabase.rpc('get_report_kpis', p0).then(({ data }) => setTodayKpis(Array.isArray(data) ? data[0] : data)),
+        supabase.rpc('get_report_kpis', pMtd).then(({ data }) => setMtdKpis(Array.isArray(data) ? data[0] : data)),
+      )
+    }
+    if (showChart) {
+      fetches.push(
+        supabase.rpc('get_daily_trend', { p_from: trendFrom, p_to: todayStr, p_branch: null, p_txn_type: null, p_state: null })
+          .then(({ data }) => setTrend(data || [])),
+      )
+    }
+    if (showBranches) {
+      fetches.push(
+        supabase.rpc('get_branch_summary', { p_from: mtdFrom, p_to: todayStr, p_txn_type: null, p_state: null })
+          .then(({ data }) => setBranches((data || []).sort((a, b) => Number(b.total_net || 0) - Number(a.total_net || 0)).slice(0, 6))),
+      )
+    }
+    Promise.all(fetches).catch(() => {}).finally(() => setLoading(false))
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const maxBranch = Math.max(...branches.map(b => Number(b.total_net || 0)), 1)
+  const openTarget = canSeeData ? 'purchase-data' : canSeeReports ? 'purchase-reports' : null
 
   return (
     <Section title="Purchase Data" icon="◉" color={t.gold} t={t} delay={100}
-      onOpen={canSeeData ? () => setActiveNav('purchase-data') : () => setActiveNav('purchase-reports')}
+      onOpen={openTarget ? () => setActiveNav(openTarget) : null}
       ctaLabel={canSeeData ? 'Open Purchase Data' : 'Open Reports'}
     >
-      {/* KPI row */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 12, marginBottom: 20 }}>
-        <KpiTile label="Today's Bills"   value={fmtN(todayKpis?.total_count)}    color={t.gold}  loading={loading} t={t} />
-        <KpiTile label="Today's Weight"  value={todayKpis?.total_net > 0 ? `${fmt(todayKpis.total_net)}g` : '—'} color={t.gold} loading={loading} t={t} />
-        <KpiTile label="MTD Bills"       value={fmtN(mtdKpis?.total_count)}      color={t.green} loading={loading} t={t} />
-        <KpiTile label="MTD Value"       value={fmtCr(mtdKpis?.total_value)}     color={t.green} loading={loading} t={t} />
-      </div>
+      {!hasWidgets ? (
+        <NoWidgets t={t} label="Purchase access granted — enable KPI Cards, Charts or Top Branches in Role Management to see insights here." />
+      ) : (
+        <>
+          {/* KPI grid */}
+          {showKpis && (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 12, marginBottom: (showChart || showBranches) ? 20 : 0 }}>
+              <KpiTile label="Today's Bills"   value={fmtN(todayKpis?.total_count)}    color={t.gold}  loading={loading} t={t} />
+              <KpiTile label="Today's Weight"  value={todayKpis?.total_net > 0 ? `${fmt(todayKpis.total_net)}g` : '—'} color={t.gold} loading={loading} t={t} />
+              <KpiTile label="MTD Bills"       value={fmtN(mtdKpis?.total_count)}      color={t.green} loading={loading} t={t} />
+              <KpiTile label="MTD Value"       value={fmtCr(mtdKpis?.total_value)}     color={t.green} loading={loading} t={t} />
+            </div>
+          )}
 
-      {/* Trend + branches */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 260px', gap: 20 }}>
-        <div>
-          <div style={{ fontSize: 10, color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: 10 }}>14-day bill trend</div>
-          {loading
-            ? <Shimmer h={110} w="100%" t={t} />
-            : trend.length > 0
-              ? <ResponsiveContainer width="100%" height={110}>
-                  <BarChart data={trend} barSize={9} margin={{ top: 2, right: 0, left: 0, bottom: 0 }}>
-                    <CartesianGrid vertical={false} strokeDasharray="2 4" stroke={t.border} />
-                    <XAxis dataKey="purchase_date" tickFormatter={fmtDay} tick={{ fontSize: 9, fill: t.text4 }} axisLine={false} tickLine={false} interval={1} />
-                    <YAxis hide />
-                    <Tooltip contentStyle={{ background: t.card2, border: `1px solid ${t.border}`, borderRadius: 8, fontSize: 11 }} labelFormatter={fmtDay} formatter={v => [fmtN(v), 'Bills']} cursor={{ fill: `${t.gold}10` }} />
-                    <Bar dataKey="total_count" fill={t.gold} radius={[3, 3, 0, 0]} opacity={.85} />
-                  </BarChart>
-                </ResponsiveContainer>
-              : <div style={{ height: 110, display: 'flex', alignItems: 'center', justifyContent: 'center', color: t.text4, fontSize: 12 }}>No data this period</div>
-          }
-        </div>
-        <div>
-          <div style={{ fontSize: 10, color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: 10 }}>Top branches · MTD weight</div>
-          {loading
-            ? [0,1,2,3,4,5].map(i => <Shimmer key={i} h={18} w="100%" t={t} />)
-            : branches.length === 0
-              ? <div style={{ color: t.text4, fontSize: 12 }}>No data this month</div>
-              : branches.map(b => (
-                  <MiniBarRow key={b.branch_name} label={b.branch_name} value={Number(b.total_net || 0)} max={maxBranch} color={t.gold} sub={`${fmt(b.total_net)}g`} t={t} />
-                ))
-          }
-        </div>
-      </div>
+          {/* Chart + branches row */}
+          {(showChart || showBranches) && (
+            <div style={{ display: 'grid', gridTemplateColumns: showChart && showBranches ? '1fr 260px' : '1fr', gap: 20 }}>
+              {showChart && (
+                <div>
+                  <div style={{ fontSize: 10, color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: 10 }}>14-day bill trend</div>
+                  {loading
+                    ? <Shimmer h={110} w="100%" t={t} />
+                    : trend.length > 0
+                      ? <ResponsiveContainer width="100%" height={110}>
+                          <BarChart data={trend} barSize={9} margin={{ top: 2, right: 0, left: 0, bottom: 0 }}>
+                            <CartesianGrid vertical={false} strokeDasharray="2 4" stroke={t.border} />
+                            <XAxis dataKey="purchase_date" tickFormatter={fmtDay} tick={{ fontSize: 9, fill: t.text4 }} axisLine={false} tickLine={false} interval={1} />
+                            <YAxis hide />
+                            <Tooltip contentStyle={{ background: t.card2, border: `1px solid ${t.border}`, borderRadius: 8, fontSize: 11 }} labelFormatter={fmtDay} formatter={v => [fmtN(v), 'Bills']} cursor={{ fill: `${t.gold}10` }} />
+                            <Bar dataKey="total_count" fill={t.gold} radius={[3, 3, 0, 0]} opacity={.85} />
+                          </BarChart>
+                        </ResponsiveContainer>
+                      : <div style={{ height: 110, display: 'flex', alignItems: 'center', justifyContent: 'center', color: t.text4, fontSize: 12 }}>No data this period</div>
+                  }
+                </div>
+              )}
+              {showBranches && (
+                <div>
+                  <div style={{ fontSize: 10, color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: 10 }}>Top branches · MTD weight</div>
+                  {loading
+                    ? [0,1,2,3,4,5].map(i => <Shimmer key={i} h={18} w="100%" t={t} />)
+                    : branches.length === 0
+                      ? <div style={{ color: t.text4, fontSize: 12 }}>No data this month</div>
+                      : branches.map(b => (
+                          <MiniBarRow key={b.branch_name} label={b.branch_name} value={Number(b.total_net || 0)} max={maxBranch} color={t.gold} sub={`${fmt(b.total_net)}g`} t={t} />
+                        ))
+                  }
+                </div>
+              )}
+            </div>
+          )}
+        </>
+      )}
     </Section>
   )
 }
 
 // ══ TELESALES SECTION ════════════════════════════════════════════════════════
+// No element-level keys defined for inbound-bot — all widgets shown when section is visible
 function TelesalesSection({ t, setActiveNav }) {
   const [calls,   setCalls]   = useState([])
   const [loading, setLoading] = useState(true)
@@ -184,7 +234,6 @@ function TelesalesSection({ t, setActiveNav }) {
   const interested   = calls.filter(c => c.outcome === 'interested').length
   const engageRate   = total > 0 ? Math.round(engaged / total * 100) : 0
 
-  // Group by day for chart
   const byDate = {}
   calls.forEach(c => { if (c.call_date) byDate[c.call_date] = (byDate[c.call_date] || 0) + 1 })
   const chartData = Array.from({ length: 14 }, (_, i) => {
@@ -192,8 +241,7 @@ function TelesalesSection({ t, setActiveNav }) {
     return { date: d, calls: byDate[d] || 0 }
   })
 
-  // Outcomes breakdown
-  const OUTS = ['interested', 'callback', 'not_interested', 'no_answer', 'pending']
+  const OUTS       = ['interested', 'callback', 'not_interested', 'no_answer', 'pending']
   const OUT_COLORS = { interested: '#4ade80', callback: '#60a5fa', not_interested: '#f87171', no_answer: '#94a3b8', pending: '#a78bfa' }
   const OUT_LABELS = { interested: 'Interested', callback: 'Callback', not_interested: 'Not Interested', no_answer: 'No Answer', pending: 'Pending' }
   const outcomeRows = OUTS
@@ -207,11 +255,10 @@ function TelesalesSection({ t, setActiveNav }) {
     >
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 12, marginBottom: 20 }}>
         <KpiTile label="Today's Calls" value={String(todayCalls)} color={t.purple} loading={loading} t={t} />
-        <KpiTile label="This Week"     value={String(thisWeek)}  color={t.blue}   loading={loading} t={t} />
-        <KpiTile label="Engage Rate"   value={`${engageRate}%`}  color={t.green}  loading={loading} t={t} />
-        <KpiTile label="Interested"    value={String(interested)} color="#4ade80" loading={loading} t={t} />
+        <KpiTile label="This Week"     value={String(thisWeek)}   color={t.blue}   loading={loading} t={t} />
+        <KpiTile label="Engage Rate"   value={`${engageRate}%`}   color={t.green}  loading={loading} t={t} />
+        <KpiTile label="Interested"    value={String(interested)}  color="#4ade80"  loading={loading} t={t} />
       </div>
-
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 220px', gap: 20 }}>
         <div>
           <div style={{ fontSize: 10, color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: 10 }}>14-day call volume</div>
@@ -241,16 +288,25 @@ function TelesalesSection({ t, setActiveNav }) {
 }
 
 // ══ CONSIGNMENT SECTION ═══════════════════════════════════════════════════════
-function ConsignmentSection({ t, setActiveNav, canSeeOverview }) {
+// Element keys used:
+//   element.consignment-overview.region_cards → region summary bars
+//   element.consignment-overview.table        → KPI tiles (total branches, weight, urgent)
+function ConsignmentSection({ t, setActiveNav, canSee }) {
+  const canSeeOverview = canSee('consignment-overview')
+  const showKpis       = canSee('element.consignment-overview.table') || canSee('element.consignment-overview.region_cards')
+  const showRegion     = canSee('element.consignment-overview.region_cards')
+  const hasWidgets     = canSeeOverview && (showKpis || showRegion)
+
   const [data,    setData]    = useState([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
+    if (!canSeeOverview) { setLoading(false); return }
     fetch('/api/consignments?action=branch_overview')
       .then(r => r.json())
       .then(json => { setData(json.data || []); setLoading(false) })
       .catch(() => setLoading(false))
-  }, [])
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const totalBranches = data.length
   const totalWeight   = data.reduce((s, b) => s + (b.total_gross_wt || 0), 0)
@@ -265,7 +321,6 @@ function ConsignmentSection({ t, setActiveNav, canSeeOverview }) {
     return { region: r, branches: bs.length, weight: bs.reduce((s, b) => s + (b.total_gross_wt || 0), 0) }
   }).sort((a, b) => b.weight - a.weight)
   const maxWeight = Math.max(...regionStats.map(r => r.weight), 1)
-
   const REGION_COLORS = { 'Rest of Karnataka': t.gold, 'Andhra Pradesh': t.blue, 'Telangana': t.purple, 'Kerala': t.green }
 
   return (
@@ -273,29 +328,38 @@ function ConsignmentSection({ t, setActiveNav, canSeeOverview }) {
       onOpen={canSeeOverview ? () => setActiveNav('consignment-overview') : null}
       ctaLabel="Open Branch Stock"
     >
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 12, marginBottom: 20 }}>
-        <KpiTile label="Branches with Stock" value={String(totalBranches)} color={t.orange} loading={loading} t={t} />
-        <KpiTile label="Total Gross Weight"  value={loading ? '—' : `${fmt(totalWeight, 0)}g`} color={t.gold} loading={loading} t={t} />
-        <KpiTile label="Urgent Alerts (≤3d)" value={String(urgent)} color={urgent > 0 ? t.red : t.green} loading={loading} t={t} border={urgent > 0 ? `${t.red}40` : undefined} />
-      </div>
-
-      <div>
-        <div style={{ fontSize: 10, color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: 10 }}>Stock by region</div>
-        {loading
-          ? [0,1,2,3].map(i => <Shimmer key={i} h={22} w="100%" t={t} />)
-          : regionStats.length === 0
-            ? <div style={{ color: t.text4, fontSize: 12 }}>No data</div>
-            : regionStats.map(r => (
-                <MiniBarRow key={r.region}
-                  label={`${r.region} · ${r.branches} branch${r.branches !== 1 ? 'es' : ''}`}
-                  value={r.weight} max={maxWeight}
-                  color={REGION_COLORS[r.region] || t.orange}
-                  sub={`${fmt(r.weight, 0)}g`}
-                  t={t}
-                />
-              ))
-        }
-      </div>
+      {!hasWidgets ? (
+        <NoWidgets t={t} label="Consignment access granted — enable Region Cards or Branch Stock Table in Role Management to see insights here." />
+      ) : (
+        <>
+          {showKpis && (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 12, marginBottom: showRegion ? 20 : 0 }}>
+              <KpiTile label="Branches with Stock" value={String(totalBranches)} color={t.orange} loading={loading} t={t} />
+              <KpiTile label="Total Gross Weight"  value={loading ? '—' : `${fmt(totalWeight, 0)}g`} color={t.gold} loading={loading} t={t} />
+              <KpiTile label="Urgent Alerts (≤3d)" value={String(urgent)} color={urgent > 0 ? t.red : t.green} loading={loading} t={t} border={urgent > 0 ? `${t.red}40` : undefined} />
+            </div>
+          )}
+          {showRegion && (
+            <div>
+              <div style={{ fontSize: 10, color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: 10 }}>Stock by region</div>
+              {loading
+                ? [0,1,2,3].map(i => <Shimmer key={i} h={22} w="100%" t={t} />)
+                : regionStats.length === 0
+                  ? <div style={{ color: t.text4, fontSize: 12 }}>No data</div>
+                  : regionStats.map(r => (
+                      <MiniBarRow key={r.region}
+                        label={`${r.region} · ${r.branches} branch${r.branches !== 1 ? 'es' : ''}`}
+                        value={r.weight} max={maxWeight}
+                        color={REGION_COLORS[r.region] || t.orange}
+                        sub={`${fmt(r.weight, 0)}g`}
+                        t={t}
+                      />
+                    ))
+              }
+            </div>
+          )}
+        </>
+      )}
     </Section>
   )
 }
@@ -329,10 +393,9 @@ function AdminSection({ t, setActiveNav, canSeeUsers, canSeeBranches }) {
       ctaLabel={canSeeUsers ? 'Open User Management' : 'Open Branches'}
     >
       <div style={{ display: 'grid', gridTemplateColumns: `repeat(${[canSeeUsers, canSeeBranches].filter(Boolean).length},1fr)`, gap: 12, marginBottom: 20 }}>
-        {canSeeUsers   && <KpiTile label="Active Users"    value={stats ? String(stats.userCount)   : '—'} color={t.blue}  loading={loading} t={t} />}
+        {canSeeUsers    && <KpiTile label="Active Users"    value={stats ? String(stats.userCount)   : '—'} color={t.blue}  loading={loading} t={t} />}
         {canSeeBranches && <KpiTile label="Active Branches" value={stats ? String(stats.branchCount) : '—'} color={t.green} loading={loading} t={t} />}
       </div>
-
       {canSeeUsers && (
         <div>
           <div style={{ fontSize: 10, color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: 10 }}>Users by role</div>
@@ -375,7 +438,6 @@ function RatesSection({ t, setActiveNav, canSeeRates, canSeeCalTable }) {
     }).catch(() => setLoading(false))
   }, [])
 
-  const base = rate?.kalinga_sell_rate
   const rateRows = [
     { label: 'Kalinga',  value: rate?.kalinga_sell_rate, color: t.gold   },
     { label: 'Ambica',   value: rate?.ambica_sell_rate,  color: t.blue   },
@@ -425,7 +487,7 @@ export default function DynamicDashboard() {
 
   const hasPurchase    = canSee('purchase-data') || canSee('purchase-reports')
   const hasTelesales   = canSee('inbound-bot')
-  const hasConsignment = canSee('consignment-overview') || canSee('consignment-data') || canSee('consignment-report')
+  const hasConsignment = canSee('consignment-overview') || canSee('consignment-data') || canSee('consignment-report') || canSee('consignment-summary')
   const hasAdmin       = canSee('user-management') || canSee('branch-management')
   const hasRates       = canSee('live-market-rates') || canSee('cal-table')
   const hasAnything    = hasPurchase || hasTelesales || hasConsignment || hasAdmin || hasRates
@@ -459,10 +521,10 @@ export default function DynamicDashboard() {
         </div>
       </div>
 
-      {/* ── Dynamic sections ── */}
-      {hasPurchase    && <PurchaseSection    t={t} setActiveNav={setActiveNav} canSeeData={canSee('purchase-data')} canSeeReports={canSee('purchase-reports')} />}
+      {/* ── Dynamic sections — each driven by element-level permissions ── */}
+      {hasPurchase    && <PurchaseSection    t={t} setActiveNav={setActiveNav} canSee={canSee} />}
       {hasTelesales   && <TelesalesSection   t={t} setActiveNav={setActiveNav} />}
-      {hasConsignment && <ConsignmentSection t={t} setActiveNav={setActiveNav} canSeeOverview={canSee('consignment-overview')} />}
+      {hasConsignment && <ConsignmentSection t={t} setActiveNav={setActiveNav} canSee={canSee} />}
       {hasAdmin       && <AdminSection       t={t} setActiveNav={setActiveNav} canSeeUsers={canSee('user-management')} canSeeBranches={canSee('branch-management')} />}
       {hasRates       && <RatesSection       t={t} setActiveNav={setActiveNav} canSeeRates={canSee('live-market-rates')} canSeeCalTable={canSee('cal-table')} />}
 
