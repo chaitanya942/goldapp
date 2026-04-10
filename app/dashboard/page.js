@@ -71,7 +71,7 @@ const ROLE_LABELS = {
 export { ROLE_LABELS }
 
 function DashboardShell() {
-  const { theme, activeNav, setActiveNav, role, canSee, profileLoaded } = useApp()
+  const { theme, activeNav, setActiveNav, role, canSee, profileLoaded, previewRole } = useApp()
   const t = THEMES[theme]
   const router = useRouter()
   const [sidebarOpen, setSidebarOpen] = useState(true)
@@ -88,7 +88,7 @@ function DashboardShell() {
     if (!checking && role && activeNav !== 'dashboard' && !canSee(activeNav)) {
       setActiveNav('dashboard')
     }
-  }, [role, activeNav, checking])
+  }, [role, activeNav, checking, previewRole])
 
   if (checking || !profileLoaded) return (
     <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: t.bg }}>

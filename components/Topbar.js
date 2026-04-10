@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '../lib/supabase'
 import { useApp } from '../lib/context'
@@ -143,9 +143,109 @@ function SyncButton({ syncing, onSync, t }) {
   )
 }
 
+// ─── View As Dropdown ────────────────────────────────────────────────────────
+function ViewAsDropdown({ previewRole, setPreviewRole, t }) {
+  const [open,  setOpen]  = useState(false)
+  const [roles, setRoles] = useState([])
+  const ref = useRef(null)
+
+  useEffect(() => {
+    fetch('/api/rbac?action=roles').then(r => r.json()).then(d => {
+      if (d.roles) setRoles(d.roles.filter(r => r.name !== 'super_admin'))
+    }).catch(() => {})
+  }, [])
+
+  useEffect(() => {
+    if (!open) return
+    const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false) }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [open])
+
+  const activeRole = roles.find(r => r.name === previewRole)
+
+  if (previewRole) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <div style={{
+          height: 36, padding: '0 12px', borderRadius: 10,
+          background: `${activeRole?.color || '#c9a84c'}18`,
+          border: `1px solid ${activeRole?.color || '#c9a84c'}50`,
+          display: 'flex', alignItems: 'center', gap: 8,
+          animation: 'previewPulse 2.5s ease-in-out infinite',
+        }}>
+          <span style={{ fontSize: 11, color: activeRole?.color || '#c9a84c' }}>👁</span>
+          <span style={{ fontSize: '.68rem', color: activeRole?.color || '#c9a84c', fontWeight: 600 }}>
+            {activeRole?.label || previewRole}
+          </span>
+        </div>
+        <button onClick={() => setPreviewRole(null)} style={{
+          height: 36, width: 36, borderRadius: 10, border: `1px solid ${t.border}`,
+          background: t.pillBg, color: t.text3, cursor: 'pointer', fontSize: 14,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          transition: 'all .15s',
+        }}
+          onMouseEnter={e => { e.currentTarget.style.borderColor = '#e05555'; e.currentTarget.style.color = '#e05555' }}
+          onMouseLeave={e => { e.currentTarget.style.borderColor = t.border; e.currentTarget.style.color = t.text3 }}
+          title="Exit preview"
+        >✕</button>
+      </div>
+    )
+  }
+
+  return (
+    <div ref={ref} style={{ position: 'relative' }}>
+      <button onClick={() => setOpen(o => !o)} style={{
+        height: 36, padding: '0 13px', borderRadius: 10,
+        border: `1px solid ${t.border}`, background: t.pillBg,
+        display: 'flex', alignItems: 'center', gap: 7, cursor: 'pointer',
+        transition: 'all .15s',
+      }}
+        onMouseEnter={e => { e.currentTarget.style.background = t.pillHov; e.currentTarget.style.borderColor = t.goldBorder }}
+        onMouseLeave={e => { e.currentTarget.style.background = t.pillBg; e.currentTarget.style.borderColor = t.border }}
+      >
+        <span style={{ fontSize: 13 }}>👁</span>
+        <span style={{ fontSize: '.68rem', color: t.text3, fontWeight: 500 }}>View as</span>
+        <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke={t.text4} strokeWidth="2.5" strokeLinecap="round"
+          style={{ transform: open ? 'rotate(180deg)' : 'none', transition: 'transform .15s' }}>
+          <path d="M6 9l6 6 6-6" />
+        </svg>
+      </button>
+
+      {open && (
+        <div style={{
+          position: 'absolute', top: 'calc(100% + 6px)', right: 0, minWidth: 200,
+          background: t.bg, border: `1px solid ${t.border}`, borderRadius: 12,
+          boxShadow: '0 8px 32px rgba(0,0,0,.5)', overflow: 'hidden',
+          animation: 'fadeSlideDown 0.14s ease both', zIndex: 100,
+        }}>
+          <div style={{ padding: '10px 14px 6px', fontSize: '.55rem', color: t.text4, letterSpacing: '.14em', textTransform: 'uppercase', fontWeight: 700 }}>
+            Preview as role
+          </div>
+          {roles.map(r => (
+            <button key={r.name} onClick={() => { setPreviewRole(r.name); setOpen(false) }} style={{
+              width: '100%', textAlign: 'left', padding: '9px 14px',
+              border: 'none', background: 'transparent', cursor: 'pointer',
+              display: 'flex', alignItems: 'center', gap: 10, transition: 'background .12s',
+            }}
+              onMouseEnter={e => e.currentTarget.style.background = `${r.color || '#c9a84c'}12`}
+              onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+            >
+              <div style={{ width: 8, height: 8, borderRadius: '50%', background: r.color || '#c9a84c', flexShrink: 0 }} />
+              <span style={{ fontSize: '.72rem', color: t.text2, fontWeight: 500 }}>{r.label}</span>
+              {r.is_system && <span style={{ fontSize: '.48rem', color: t.text4, background: `${t.border}80`, borderRadius: 3, padding: '1px 4px', marginLeft: 'auto' }}>SYS</span>}
+            </button>
+          ))}
+          <div style={{ height: 6 }} />
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ─── Main Topbar ──────────────────────────────────────────────────────────────
 export default function Topbar() {
-  const { theme, setTheme, activeNav, user, role } = useApp()
+  const { theme, setTheme, activeNav, user, role, previewRole, setPreviewRole } = useApp()
   const t = THEMES[theme] || THEMES.dark
   const router = useRouter()
 
@@ -185,16 +285,20 @@ export default function Topbar() {
   const section   = SECTION_LABELS[activeNav]
   const canSync   = role === 'super_admin' || role === 'founders_office'
 
+  const previewRoleData = previewRole ? null : null  // resolved in ViewAsDropdown
+
   return (
     <header style={{
-      height: '56px',
+      height: previewRole ? '92px' : '56px',
       background: t.bg,
       borderBottom: `1px solid ${t.border}`,
-      display: 'flex', alignItems: 'center',
-      padding: '0 20px 0 24px',
-      gap: '10px', flexShrink: 0,
-      position: 'relative', zIndex: 40,
+      display: 'flex', flexDirection: 'column',
+      flexShrink: 0, position: 'relative', zIndex: 40,
+      transition: 'height .2s ease',
     }}>
+
+      {/* ── Main row ── */}
+      <div style={{ height: 56, display: 'flex', alignItems: 'center', padding: '0 20px 0 24px', gap: '10px' }}>
 
       {/* ── Breadcrumb ── */}
       <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0 }}>
@@ -216,11 +320,15 @@ export default function Topbar() {
       {/* ── Right actions ── */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
 
+        {/* View As (super_admin only) */}
+        {role === 'super_admin' && <ViewAsDropdown previewRole={previewRole} setPreviewRole={setPreviewRole} t={t} />}
+        {role === 'super_admin' && <div style={{ width: '1px', height: '22px', background: t.border, flexShrink: 0 }} />}
+
         {/* Sync CRM */}
-        {canSync && <SyncButton syncing={syncing} onSync={handleSync} t={t} />}
+        {canSync && !previewRole && <SyncButton syncing={syncing} onSync={handleSync} t={t} />}
 
         {/* Divider */}
-        {canSync && <div style={{ width: '1px', height: '22px', background: t.border, flexShrink: 0 }} />}
+        {canSync && !previewRole && <div style={{ width: '1px', height: '22px', background: t.border, flexShrink: 0 }} />}
 
         {/* Theme toggle */}
         <ThemeToggle theme={theme} setTheme={setTheme} t={t} />
@@ -316,6 +424,39 @@ export default function Topbar() {
           )}
         </div>
       </div>
+
+      </div>{/* end main row */}
+
+      {/* ── Preview mode banner ── */}
+      {previewRole && (
+        <div style={{
+          height: 36, background: '#c9a84c18', borderTop: '1px solid #c9a84c30',
+          display: 'flex', alignItems: 'center', padding: '0 24px', gap: 10,
+        }}>
+          <span style={{ fontSize: 12, animation: 'pglow 2s ease-in-out infinite' }}>👁</span>
+          <span style={{ fontSize: '.62rem', color: '#c9a84c', fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase' }}>
+            Preview Mode
+          </span>
+          <span style={{ fontSize: '.62rem', color: t.text4 }}>—</span>
+          <span style={{ fontSize: '.68rem', color: t.text2 }}>
+            You are viewing the app <strong style={{ color: '#c9a84c' }}>as it would appear for this role.</strong> No data or permissions are changed.
+          </span>
+          <button onClick={() => setPreviewRole(null)} style={{
+            marginLeft: 'auto', padding: '3px 12px', borderRadius: 6, border: '1px solid #c9a84c50',
+            background: 'transparent', color: '#c9a84c', fontSize: '.62rem', fontWeight: 600, cursor: 'pointer',
+          }}
+            onMouseEnter={e => e.currentTarget.style.background = '#c9a84c15'}
+            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+          >
+            Exit Preview
+          </button>
+        </div>
+      )}
+
+      <style>{`
+        @keyframes previewPulse { 0%,100%{opacity:.8} 50%{opacity:1} }
+        @keyframes pglow { 0%,100%{opacity:.6;transform:scale(1)} 50%{opacity:1;transform:scale(1.2)} }
+      `}</style>
 
       {toast && <Toast msg={toast.msg} type={toast.type} onDone={() => setToast(null)} />}
     </header>
