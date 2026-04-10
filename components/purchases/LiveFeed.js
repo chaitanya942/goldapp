@@ -781,7 +781,13 @@ function OldCrmTab({
         }}>
           <HeroNum label="Walked In" value={totalWalkins} color={t.blue} t={t} weight={goldWalkedIn} active={activeMetric==='walkin'} onClick={() => toggleMetric('walkin')} />
           <FlowArrow t={t} pct={billedPct} />
-          <HeroNum label="Bills Submitted" value={totalBilled} color={t.gold} t={t} weight={goldPurchased+goldPending+goldRejected} active={activeMetric==='billed'} onClick={() => toggleMetric('billed')} />
+          <HeroNum label="Bills Submitted" value={totalBilled} color={t.gold} t={t} weight={goldPurchased+goldPending+goldRejected} active={activeMetric==='billed'} onClick={() => toggleMetric('billed')}
+            breakdown={[
+              { value: approved,     label: 'purch',    color: t.green  },
+              { value: pending,      label: 'pend',     color: t.orange },
+              { value: trueRejected, label: 'rej',      color: t.red    },
+              ...(wrongEntry > 0 ? [{ value: wrongEntry, label: 're-billed', color: t.text3 }] : []),
+            ]} />
           <FlowArrow t={t} pct={approvedPctBilled} />
           <HeroNum label="Purchased" value={approved} color={t.green} t={t} weight={goldPurchased} active={activeMetric==='purchased'} onClick={() => toggleMetric('purchased')} />
           <FlowSep t={t} />
@@ -948,7 +954,7 @@ function OldCrmTab({
 /* ════════════════════════════════════════════════════════════════ */
 
 /* ── Hero Number (clickable) ── */
-function HeroNum({ label, value, color, t, small, muted, onClick, active, weight }) {
+function HeroNum({ label, value, color, t, small, muted, onClick, active, weight, breakdown }) {
   return (
     <div
       onClick={onClick}
@@ -982,6 +988,17 @@ function HeroNum({ label, value, color, t, small, muted, onClick, active, weight
         }}>
           {fmtWt(weight)}
         </span>
+      )}
+      {breakdown && (
+        <div style={{ display:'flex', alignItems:'center', gap:5, marginTop:6, padding:'3px 7px', background:t.card2, border:`1px solid ${t.border}`, borderRadius:5 }}>
+          {breakdown.map((item, i) => (
+            <span key={i} style={{ display:'flex', alignItems:'center', gap:3 }}>
+              {i > 0 && <span style={{ color:t.border2, fontSize:'.45rem' }}>|</span>}
+              <span style={{ fontSize:'.58rem', fontFamily:'ui-monospace,monospace', fontWeight:700, color:item.color }}>{item.value}</span>
+              <span style={{ fontSize:'.45rem', color:t.text4 }}>{item.label}</span>
+            </span>
+          ))}
+        </div>
       )}
       {active && (
         <span style={{ width: 20, height: 2, borderRadius: 1, background: color, marginTop: 5, display: 'block' }} />
@@ -1494,7 +1511,12 @@ function NewCrmTab({ t, newCrmTxns, newCrmError, regionFilter, regions, viewDate
       <div>
         <SectionLabel t={t}>Customer Journey · New CRM</SectionLabel>
         <div className="lf-hero" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0, flexWrap: 'wrap', background: t.surface, borderRadius: 16, border: `1px solid ${t.border}`, padding: '28px 16px', boxShadow: `0 4px 20px rgba(0,0,0,.12), inset 0 1px 0 ${t.border}`, backdropFilter: 'blur(4px)' }}>
-          <HeroNum label="Total Today"  value={total}      color={t.blue}   t={t} weight={totalWt}      active={activeMetric==='total'}      onClick={() => toggleMetric('total')} />
+          <HeroNum label="Total Today"  value={total}      color={t.blue}   t={t} weight={totalWt}      active={activeMetric==='total'}      onClick={() => toggleMetric('total')}
+            breakdown={[
+              { value: completed,  label: 'done',    color: t.green  },
+              { value: inProgress, label: 'in-prog', color: t.orange },
+              ...(walkout > 0 ? [{ value: walkout, label: 'walkout', color: t.red }] : []),
+            ]} />
           <FlowArrow t={t} pct={progressedPct || null} />
           <HeroNum label="In Progress"  value={inProgress} color={t.orange} t={t} weight={inProgressWt} active={activeMetric==='inprogress'} onClick={() => toggleMetric('inprogress')} />
           <FlowArrow t={t} pct={completedOfProgPct || null} />
