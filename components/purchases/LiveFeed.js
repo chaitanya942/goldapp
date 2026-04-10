@@ -517,7 +517,6 @@ function CombinedCrmTab({
   const newCompleted   = (newCrmTxns || []).filter(tx => tx.status === 'FINAL_PAYMENT_COMPLETED')
   const newCompletedVal = newCompleted.reduce((s, tx) => s + (Number(tx.amount) || 0), 0)
   const newTotal        = (newCrmTxns || []).length
-  const newInProgress   = (newCrmTxns || []).filter(tx => ['WALKIN','ESTIMATION_PENDING','KYC_PENDING','FINAL_PAYMENT_PENDING'].includes(tx.status)).length
   const combinedValue = approvedValue + newCompletedVal
 
   return (
@@ -541,42 +540,16 @@ function CombinedCrmTab({
           <span style={{ fontSize:'.58rem', color:t.text4, letterSpacing:'.08em', textTransform:'uppercase' }}>Walk-ins (Old)</span>
         </div>
 
-        {/* Old CRM Billed — grouped */}
-        <div className="sum-bar-item" style={{ display:'flex', flexDirection:'column', gap:6, padding:'8px 18px', borderRight:`1px solid ${t.border}`, borderLeft:`3px solid ${t.gold}` }}>
-          <div style={{ display:'flex', alignItems:'center', gap:6 }}>
-            <span style={{ fontSize:'.75rem', fontFamily:'ui-monospace,monospace', fontWeight:600, color:t.gold }}>{fmtNum(totalBilled)}</span>
-            <span style={{ fontSize:'.58rem', color:t.text4, letterSpacing:'.08em', textTransform:'uppercase' }}>Old CRM Billed</span>
-          </div>
-          <div style={{ display:'flex', alignItems:'center', gap:6, padding:'4px 8px', background:t.card2, border:`1px solid ${t.border}`, borderRadius:6 }}>
-            <span style={{ fontSize:'.6rem', color:t.green,  fontFamily:'ui-monospace,monospace', fontWeight:700 }}>{approved}</span>
-            <span style={{ fontSize:'.5rem', color:t.text4 }}>purch</span>
-            <span style={{ color:t.border2, fontSize:'.5rem' }}>|</span>
-            <span style={{ fontSize:'.6rem', color:t.orange, fontFamily:'ui-monospace,monospace', fontWeight:700 }}>{pending}</span>
-            <span style={{ fontSize:'.5rem', color:t.text4 }}>pend</span>
-            <span style={{ color:t.border2, fontSize:'.5rem' }}>|</span>
-            <span style={{ fontSize:'.6rem', color:t.red,    fontFamily:'ui-monospace,monospace', fontWeight:700 }}>{trueRejected}</span>
-            <span style={{ fontSize:'.5rem', color:t.text4 }}>rej</span>
-            {wrongEntry > 0 && <>
-              <span style={{ color:t.border2, fontSize:'.5rem' }}>|</span>
-              <span style={{ fontSize:'.6rem', color:t.text3, fontFamily:'ui-monospace,monospace', fontWeight:700 }}>{wrongEntry}</span>
-              <span style={{ fontSize:'.5rem', color:t.text4 }}>re-billed</span>
-            </>}
-          </div>
+        {/* Old CRM Billed */}
+        <div className="sum-bar-item" style={{ display:'flex', alignItems:'center', gap:6, padding:'10px 18px', borderRight:`1px solid ${t.border}`, borderLeft:`3px solid ${t.gold}` }}>
+          <span style={{ fontSize:'.75rem', fontFamily:'ui-monospace,monospace', fontWeight:600, color:t.gold }}>{fmtNum(totalBilled)}</span>
+          <span style={{ fontSize:'.58rem', color:t.text4, letterSpacing:'.08em', textTransform:'uppercase' }}>Old CRM Billed</span>
         </div>
 
-        {/* New CRM Total — grouped */}
-        <div className="sum-bar-item" style={{ display:'flex', flexDirection:'column', gap:6, padding:'8px 18px', borderRight:`1px solid ${t.border}`, borderLeft:`3px solid ${t.blue}` }}>
-          <div style={{ display:'flex', alignItems:'center', gap:6 }}>
-            <span style={{ fontSize:'.75rem', fontFamily:'ui-monospace,monospace', fontWeight:600, color:t.blue }}>{fmtNum(newTotal)}</span>
-            <span style={{ fontSize:'.58rem', color:t.text4, letterSpacing:'.08em', textTransform:'uppercase' }}>New CRM Total</span>
-          </div>
-          <div style={{ display:'flex', alignItems:'center', gap:6, padding:'4px 8px', background:t.card2, border:`1px solid ${t.border}`, borderRadius:6 }}>
-            <span style={{ fontSize:'.6rem', color:t.green,  fontFamily:'ui-monospace,monospace', fontWeight:700 }}>{newCompleted.length}</span>
-            <span style={{ fontSize:'.5rem', color:t.text4 }}>done</span>
-            <span style={{ color:t.border2, fontSize:'.5rem' }}>|</span>
-            <span style={{ fontSize:'.6rem', color:t.orange, fontFamily:'ui-monospace,monospace', fontWeight:700 }}>{newInProgress}</span>
-            <span style={{ fontSize:'.5rem', color:t.text4 }}>in-prog</span>
-          </div>
+        {/* New CRM Total */}
+        <div className="sum-bar-item" style={{ display:'flex', alignItems:'center', gap:6, padding:'10px 18px', borderRight:`1px solid ${t.border}`, borderLeft:`3px solid ${t.blue}` }}>
+          <span style={{ fontSize:'.75rem', fontFamily:'ui-monospace,monospace', fontWeight:600, color:t.blue }}>{fmtNum(newTotal)}</span>
+          <span style={{ fontSize:'.58rem', color:t.text4, letterSpacing:'.08em', textTransform:'uppercase' }}>New CRM Total</span>
         </div>
 
         {/* Combined Value */}
@@ -703,27 +676,10 @@ function OldCrmTab({
           <span style={{ fontSize:'.58rem', color:t.text4, letterSpacing:'.08em', textTransform:'uppercase' }}>Walked In</span>
         </div>
 
-        {/* Billed — grouped breakdown */}
-        <div className="sum-bar-item" style={{ display:'flex', flexDirection:'column', gap:6, padding:'8px 18px', borderRight:`1px solid ${t.border}`, borderLeft:`3px solid ${t.gold}` }}>
-          <div style={{ display:'flex', alignItems:'center', gap:6 }}>
-            <span style={{ fontSize:'.75rem', fontFamily:'ui-monospace,monospace', fontWeight:600, color:t.gold }}>{fmtNum(totalBilled)}</span>
-            <span style={{ fontSize:'.58rem', color:t.text4, letterSpacing:'.08em', textTransform:'uppercase' }}>Billed</span>
-          </div>
-          <div style={{ display:'flex', alignItems:'center', gap:6, padding:'4px 8px', background:t.card2, border:`1px solid ${t.border}`, borderRadius:6 }}>
-            <span style={{ fontSize:'.6rem', color:t.green,  fontFamily:'ui-monospace,monospace', fontWeight:700 }}>{approved}</span>
-            <span style={{ fontSize:'.5rem', color:t.text4 }}>purch</span>
-            <span style={{ color:t.border2, fontSize:'.5rem' }}>|</span>
-            <span style={{ fontSize:'.6rem', color:t.orange, fontFamily:'ui-monospace,monospace', fontWeight:700 }}>{pending}</span>
-            <span style={{ fontSize:'.5rem', color:t.text4 }}>pend</span>
-            <span style={{ color:t.border2, fontSize:'.5rem' }}>|</span>
-            <span style={{ fontSize:'.6rem', color:t.red,    fontFamily:'ui-monospace,monospace', fontWeight:700 }}>{trueRejected}</span>
-            <span style={{ fontSize:'.5rem', color:t.text4 }}>rej</span>
-            {wrongEntry > 0 && <>
-              <span style={{ color:t.border2, fontSize:'.5rem' }}>|</span>
-              <span style={{ fontSize:'.6rem', color:t.text3, fontFamily:'ui-monospace,monospace', fontWeight:700 }}>{wrongEntry}</span>
-              <span style={{ fontSize:'.5rem', color:t.text4 }}>re-billed</span>
-            </>}
-          </div>
+        {/* Billed */}
+        <div className="sum-bar-item" style={{ display:'flex', alignItems:'center', gap:6, padding:'10px 18px', borderRight:`1px solid ${t.border}`, borderLeft:`3px solid ${t.gold}` }}>
+          <span style={{ fontSize:'.75rem', fontFamily:'ui-monospace,monospace', fontWeight:600, color:t.gold }}>{fmtNum(totalBilled)}</span>
+          <span style={{ fontSize:'.58rem', color:t.text4, letterSpacing:'.08em', textTransform:'uppercase' }}>Billed</span>
         </div>
 
         {/* Purchased */}
