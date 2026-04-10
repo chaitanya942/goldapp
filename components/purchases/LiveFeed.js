@@ -784,25 +784,40 @@ function OldCrmTab({
           <HeroNum label="Bills Submitted" value={totalBilled} color={t.gold} t={t} weight={goldPurchased+goldPending+goldRejected} active={activeMetric==='billed'} onClick={() => toggleMetric('billed')} />
           <FlowArrow t={t} pct={approvedPctBilled} />
           {/* Breakdown box — shows what makes up Bills Submitted */}
-          <div style={{ position:'relative', display:'flex', flexDirection:'column', alignItems:'center', gap:0 }}>
-            <div style={{ fontSize:'.48rem', letterSpacing:'.12em', textTransform:'uppercase', color:t.gold, fontWeight:700, marginBottom:4, opacity:.7 }}>breakdown of {fmtNum(totalBilled)}</div>
-            <div style={{
-              display:'flex', alignItems:'center', gap:0,
-              border:`1px solid ${t.gold}45`,
-              borderRadius:14,
-              background:`linear-gradient(135deg, ${t.gold}10 0%, ${t.gold}04 100%)`,
-              boxShadow:`0 0 0 1px ${t.gold}12, 0 4px 16px ${t.gold}12, inset 0 1px 0 ${t.gold}22`,
-              padding:'4px 2px',
-              position:'relative', overflow:'hidden',
-            }}>
-              <div style={{ position:'absolute', top:0, left:'10%', right:'10%', height:1, background:`linear-gradient(90deg,transparent,${t.gold}50,transparent)`, pointerEvents:'none' }}/>
-              <HeroNum label="Purchased" value={approved} color={t.green} t={t} weight={goldPurchased} active={activeMetric==='purchased'} onClick={() => toggleMetric('purchased')} />
-              <FlowSep t={t} />
-              <HeroNum label="In Pipeline" value={pending} color={t.orange} t={t} small weight={goldPending} active={activeMetric==='pending'} onClick={() => toggleMetric('pending')} />
-              <FlowSep t={t} />
-              <HeroNum label="Bill Rejected" value={trueRejected} color={t.red} t={t} small weight={goldRejected} active={activeMetric==='rejected'} onClick={() => toggleMetric('rejected')} />
-              <FlowSep t={t} />
-              <HeroNum label="Re-billed & Approved" value={wrongEntry} color={t.orange} t={t} small active={activeMetric==='rebilled'} onClick={() => toggleMetric('rebilled')} />
+          <div style={{
+            position:'relative',
+            background:`linear-gradient(145deg, ${t.gold}14 0%, ${t.gold}06 50%, ${t.gold}10 100%)`,
+            border:`1px solid ${t.gold}50`,
+            borderRadius:18,
+            boxShadow:`0 8px 32px ${t.gold}18, 0 2px 8px rgba(0,0,0,.12), inset 0 1px 0 ${t.gold}45, inset 0 -1px 0 rgba(0,0,0,.06)`,
+            padding:'18px 10px 10px 10px',
+          }}>
+            {/* Floating label tab */}
+            <div style={{ position:'absolute', top:-10, left:'50%', transform:'translateX(-50%)', background:`linear-gradient(90deg,${t.gold},${t.gold}cc)`, borderRadius:20, padding:'2px 10px', boxShadow:`0 2px 8px ${t.gold}40` }}>
+              <span style={{ fontSize:'.48rem', letterSpacing:'.12em', textTransform:'uppercase', color:'#0a0a0a', fontWeight:800 }}>breakdown of {fmtNum(totalBilled)}</span>
+            </div>
+            {/* Dot-grid texture */}
+            <div style={{ position:'absolute', inset:0, borderRadius:18, backgroundImage:`radial-gradient(${t.gold}15 1px, transparent 1px)`, backgroundSize:'16px 16px', pointerEvents:'none' }}/>
+            <div style={{ position:'relative', display:'flex', alignItems:'center', gap:6 }}>
+              {[
+                { node: <HeroNum label="Purchased" value={approved} color={t.green} t={t} weight={goldPurchased} active={activeMetric==='purchased'} onClick={() => toggleMetric('purchased')} />, color: t.green },
+                { node: <HeroNum label="In Pipeline" value={pending} color={t.orange} t={t} small weight={goldPending} active={activeMetric==='pending'} onClick={() => toggleMetric('pending')} />, color: t.orange },
+                { node: <HeroNum label="Bill Rejected" value={trueRejected} color={t.red} t={t} small weight={goldRejected} active={activeMetric==='rejected'} onClick={() => toggleMetric('rejected')} />, color: t.red },
+                { node: <HeroNum label="Re-billed & Approved" value={wrongEntry} color={t.orange} t={t} small active={activeMetric==='rebilled'} onClick={() => toggleMetric('rebilled')} />, color: t.orange },
+              ].map((item, i) => (
+                <div key={i} style={{ display:'flex', alignItems:'center', gap:6 }}>
+                  {i > 0 && <FlowSep t={t} />}
+                  <div style={{
+                    background:`linear-gradient(145deg, ${t.surface}, ${t.card})`,
+                    border:`1px solid ${item.color}25`,
+                    borderRadius:12,
+                    boxShadow:`0 4px 14px rgba(0,0,0,.10), 0 1px 3px rgba(0,0,0,.08), inset 0 1px 0 ${item.color}20`,
+                    transform:'translateY(-3px)',
+                  }}>
+                    {item.node}
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
           <FlowSep t={t} />
@@ -1523,21 +1538,36 @@ function NewCrmTab({ t, newCrmTxns, newCrmError, regionFilter, regions, viewDate
           <HeroNum label="Total Today"  value={total}      color={t.blue}   t={t} weight={totalWt}      active={activeMetric==='total'}      onClick={() => toggleMetric('total')} />
           <FlowArrow t={t} pct={progressedPct || null} />
           {/* Breakdown box — In Progress + Completed make up Total */}
-          <div style={{ position:'relative', display:'flex', flexDirection:'column', alignItems:'center', gap:0 }}>
-            <div style={{ fontSize:'.48rem', letterSpacing:'.12em', textTransform:'uppercase', color:t.blue, fontWeight:700, marginBottom:4, opacity:.7 }}>breakdown of {fmtNum(total)}</div>
-            <div style={{
-              display:'flex', alignItems:'center', gap:0,
-              border:`1px solid ${t.blue}45`,
-              borderRadius:14,
-              background:`linear-gradient(135deg, ${t.blue}10 0%, ${t.blue}04 100%)`,
-              boxShadow:`0 0 0 1px ${t.blue}12, 0 4px 16px ${t.blue}12, inset 0 1px 0 ${t.blue}22`,
-              padding:'4px 2px',
-              position:'relative', overflow:'hidden',
-            }}>
-              <div style={{ position:'absolute', top:0, left:'10%', right:'10%', height:1, background:`linear-gradient(90deg,transparent,${t.blue}50,transparent)`, pointerEvents:'none' }}/>
-              <HeroNum label="In Progress"  value={inProgress} color={t.orange} t={t} weight={inProgressWt} active={activeMetric==='inprogress'} onClick={() => toggleMetric('inprogress')} />
-              <FlowArrow t={t} pct={completedOfProgPct || null} />
-              <HeroNum label="Completed"    value={completed}  color={t.green}  t={t} weight={completedWt}  active={activeMetric==='completed'}  onClick={() => toggleMetric('completed')} />
+          <div style={{
+            position:'relative',
+            background:`linear-gradient(145deg, ${t.blue}14 0%, ${t.blue}06 50%, ${t.blue}10 100%)`,
+            border:`1px solid ${t.blue}50`,
+            borderRadius:18,
+            boxShadow:`0 8px 32px ${t.blue}18, 0 2px 8px rgba(0,0,0,.12), inset 0 1px 0 ${t.blue}45, inset 0 -1px 0 rgba(0,0,0,.06)`,
+            padding:'18px 10px 10px 10px',
+          }}>
+            <div style={{ position:'absolute', top:-10, left:'50%', transform:'translateX(-50%)', background:`linear-gradient(90deg,${t.blue},${t.blue}cc)`, borderRadius:20, padding:'2px 10px', boxShadow:`0 2px 8px ${t.blue}40` }}>
+              <span style={{ fontSize:'.48rem', letterSpacing:'.12em', textTransform:'uppercase', color:'#fff', fontWeight:800 }}>breakdown of {fmtNum(total)}</span>
+            </div>
+            <div style={{ position:'absolute', inset:0, borderRadius:18, backgroundImage:`radial-gradient(${t.blue}15 1px, transparent 1px)`, backgroundSize:'16px 16px', pointerEvents:'none' }}/>
+            <div style={{ position:'relative', display:'flex', alignItems:'center', gap:6 }}>
+              {[
+                { node: <HeroNum label="In Progress" value={inProgress} color={t.orange} t={t} weight={inProgressWt} active={activeMetric==='inprogress'} onClick={() => toggleMetric('inprogress')} />, color: t.orange },
+                { node: <HeroNum label="Completed"   value={completed}  color={t.green}  t={t} weight={completedWt}  active={activeMetric==='completed'}  onClick={() => toggleMetric('completed')}  />, color: t.green  },
+              ].map((item, i) => (
+                <div key={i} style={{ display:'flex', alignItems:'center', gap:6 }}>
+                  {i > 0 && <FlowArrow t={t} pct={completedOfProgPct || null} />}
+                  <div style={{
+                    background:`linear-gradient(145deg, ${t.surface}, ${t.card})`,
+                    border:`1px solid ${item.color}25`,
+                    borderRadius:12,
+                    boxShadow:`0 4px 14px rgba(0,0,0,.10), 0 1px 3px rgba(0,0,0,.08), inset 0 1px 0 ${item.color}20`,
+                    transform:'translateY(-3px)',
+                  }}>
+                    {item.node}
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
           <FlowSep t={t} />
