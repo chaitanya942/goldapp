@@ -165,6 +165,17 @@ function getAllKeys(node) {
   return keys
 }
 
+// Map each key → ancestor page.* keys so enabling a child auto-enables its parent pages
+const KEY_PAGE_ANCESTORS = {}
+function buildAncestorMap(nodes, ancestorPageKeys = []) {
+  for (const node of nodes) {
+    const pageKeys = node.key?.startsWith('page.') ? [...ancestorPageKeys, node.key] : ancestorPageKeys
+    if (node.key) KEY_PAGE_ANCESTORS[node.key] = pageKeys
+    if (node.children?.length) buildAncestorMap(node.children, pageKeys)
+  }
+}
+buildAncestorMap(PERM_TREE)
+
 const ALL_TREE_KEYS = PERM_TREE.flatMap(getAllKeys)
 const TOTAL_PERMS   = ALL_TREE_KEYS.length
 
@@ -465,7 +476,15 @@ export default function RoleManagement() {
     const forceOn = state !== 'on'
     setRolePerms(prev => {
       const next = new Set(prev[selected] || [])
-      keys.forEach(k => forceOn ? next.add(k) : next.delete(k))
+      keys.forEach(k => {
+        if (forceOn) {
+          next.add(k)
+          // Auto-enable ancestor page.* keys so sidebar always shows the parent page
+          KEY_PAGE_ANCESTORS[k]?.forEach(pk => next.add(pk))
+        } else {
+          next.delete(k)
+        }
+      })
       return { ...prev, [selected]: next }
     })
     setDirty(prev => ({ ...prev, [selected]: true }))
