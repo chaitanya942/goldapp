@@ -97,22 +97,21 @@ function MiniBarRow({ label, value, max, color, sub, t }) {
 }
 
 // ══ PURCHASE SECTION ══════════════════════════════════════════════════════════
-// Element keys — default to visible when no module-level element config exists:
-//   element.dashboard.kpi_cards    → today + MTD KPI grid
-//   element.reports.charts         → 14-day bill trend chart
-//   element.dashboard.top_branches → top branches by MTD weight
 function PurchaseSection({ t, setActiveNav, canSee }) {
   const canSeeData    = canSee('purchase-data')
   const canSeeReports = canSee('purchase-reports')
   const showKpis      = canSee('element.dashboard.kpi_cards')
   const showChart     = canSee('element.reports.charts')
   const showBranches  = canSee('element.dashboard.top_branches')
-  const hasWidgets    = showKpis || showChart || showBranches
+  const showBranchTable = canSeeReports && canSee('element.reports.branch_table')
+  const showStateTable  = canSeeReports && canSee('element.dashboard.state_table')
+  const hasWidgets    = showKpis || showChart || showBranches || showBranchTable || showStateTable
 
   const [todayKpis, setTodayKpis] = useState(null)
   const [mtdKpis,   setMtdKpis]   = useState(null)
   const [trend,     setTrend]     = useState([])
   const [branches,  setBranches]  = useState([])
+  const [stateData, setStateData] = useState([])
   const [loading,   setLoading]   = useState(true)
 
   useEffect(() => {
@@ -136,20 +135,30 @@ function PurchaseSection({ t, setActiveNav, canSee }) {
           .then(({ data }) => setTrend(data || [])),
       )
     }
-    if (showBranches) {
+    if (showBranches || showBranchTable) {
       fetches.push(
         supabase.rpc('get_branch_summary', { p_from: mtdFrom, p_to: todayStr, p_txn_type: null, p_state: null })
-          .then(({ data }) => setBranches((data || []).sort((a, b) => Number(b.total_net || 0) - Number(a.total_net || 0)).slice(0, 6))),
+          .then(({ data }) => setBranches((data || []).sort((a, b) => Number(b.total_net || 0) - Number(a.total_net || 0)).slice(0, 8))),
+      )
+    }
+    if (showStateTable) {
+      fetches.push(
+        supabase.rpc('get_state_summary', { p_from: mtdFrom, p_to: todayStr, p_txn_type: null })
+          .then(({ data }) => setStateData((data || []).filter(s => s.state && Number(s.total_net || 0) > 0))),
       )
     }
     Promise.all(fetches).catch(() => {}).finally(() => setLoading(false))
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const maxBranch = Math.max(...branches.map(b => Number(b.total_net || 0)), 1)
+  const maxState  = Math.max(...stateData.map(s => Number(s.total_net || 0)), 1)
   const openTarget = canSeeData ? 'purchase-data' : canSeeReports ? 'purchase-reports' : null
+  const avgWt = trend.length > 0
+    ? trend.reduce((s, d) => s + Number(d.net_wt || 0), 0) / trend.filter(d => Number(d.net_wt || 0) > 0).length
+    : 0
 
   return (
-    <Section title="Purchase Data" icon="◉" color={t.gold} t={t} delay={100}
+    <Section title="Purchase Overview" icon="◉" color={t.gold} t={t} delay={100}
       onOpen={openTarget ? () => setActiveNav(openTarget) : null}
       ctaLabel={canSeeData ? 'Open Purchase Data' : 'Open Reports'}
     >
@@ -159,7 +168,7 @@ function PurchaseSection({ t, setActiveNav, canSee }) {
         <>
           {/* KPI grid */}
           {showKpis && (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 12, marginBottom: (showChart || showBranches) ? 20 : 0 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 12, marginBottom: 20 }}>
               <KpiTile label="Today's Bills"   value={fmtN(todayKpis?.total_count)}    color={t.gold}  loading={loading} t={t} />
               <KpiTile label="Today's Weight"  value={todayKpis?.total_net > 0 ? `${fmt(todayKpis.total_net)}g` : '—'} color={t.gold} loading={loading} t={t} />
               <KpiTile label="MTD Bills"       value={fmtN(mtdKpis?.total_count)}      color={t.green} loading={loading} t={t} />
@@ -167,61 +176,90 @@ function PurchaseSection({ t, setActiveNav, canSee }) {
             </div>
           )}
 
-          {/* Chart + branches row */}
-          {(showChart || showBranches) && (
-            <div style={{ display: 'grid', gridTemplateColumns: showChart && showBranches ? '1fr 280px' : '1fr', gap: 24 }}>
+          {/* Chart + branches/state row */}
+          {(showChart || showBranches || showBranchTable || showStateTable) && (
+            <div style={{ display: 'grid', gridTemplateColumns: showChart ? '1fr 280px' : '1fr', gap: 24 }}>
+              {/* Left: trend chart */}
               {showChart && (
                 <div>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
                     <div style={{ fontSize: 10, color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 600 }}>14-day net weight (g)</div>
-                    {trend.length > 0 && !loading && (
-                      <div style={{ fontSize: 10, color: t.text3 }}>
-                        avg {fmt(trend.reduce((s, d) => s + Number(d.net_wt || 0), 0) / trend.filter(d => Number(d.net_wt || 0) > 0).length)}g/day
-                      </div>
+                    {avgWt > 0 && !loading && (
+                      <div style={{ fontSize: 10, color: t.text3 }}>avg {fmt(avgWt)}g/day</div>
                     )}
                   </div>
                   {loading
                     ? <Shimmer h={140} w="100%" t={t} />
                     : trend.length > 0
-                      ? <ResponsiveContainer width="100%" height={140}>
-                          <BarChart data={trend} barSize={14} margin={{ top: 4, right: 2, left: 2, bottom: 0 }}>
-                            <defs>
-                              <linearGradient id="barGrad" x1="0" y1="0" x2="0" y2="1">
-                                <stop offset="0%" stopColor={t.gold} stopOpacity={0.95} />
-                                <stop offset="100%" stopColor={t.gold} stopOpacity={0.5} />
-                              </linearGradient>
-                            </defs>
-                            <CartesianGrid vertical={false} strokeDasharray="3 5" stroke={t.border} strokeOpacity={0.8} />
-                            <XAxis dataKey="day" tickFormatter={fmtDay} tick={{ fontSize: 9, fill: t.text4 }} axisLine={false} tickLine={false} interval={1} />
-                            <YAxis hide domain={[0, 'auto']} />
-                            <Tooltip
-                              contentStyle={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: 10, fontSize: 11, boxShadow: '0 4px 16px rgba(0,0,0,.15)' }}
-                              labelFormatter={fmtDay}
-                              formatter={v => [`${fmt(v)}g`, 'Net Weight']}
-                              cursor={{ fill: `${t.gold}12`, radius: 4 }}
-                            />
-                            <Bar dataKey="net_wt" fill="url(#barGrad)" radius={[4, 4, 0, 0]} />
-                          </BarChart>
-                        </ResponsiveContainer>
+                      ? <div style={{ borderRadius: 10, overflow: 'hidden' }}>
+                          <ResponsiveContainer width="100%" height={140}>
+                            <BarChart data={trend} barSize={14} margin={{ top: 4, right: 2, left: 2, bottom: 0 }}>
+                              <defs>
+                                <linearGradient id="barGrad" x1="0" y1="0" x2="0" y2="1">
+                                  <stop offset="0%" stopColor={t.gold} stopOpacity={0.95} />
+                                  <stop offset="100%" stopColor={t.gold} stopOpacity={0.45} />
+                                </linearGradient>
+                              </defs>
+                              <CartesianGrid vertical={false} strokeDasharray="3 5" stroke={t.border} strokeOpacity={0.8} />
+                              <XAxis dataKey="day" tickFormatter={fmtDay} tick={{ fontSize: 9, fill: t.text4 }} axisLine={false} tickLine={false} interval={1} />
+                              <YAxis hide domain={[0, 'auto']} />
+                              <Tooltip
+                                contentStyle={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: 10, fontSize: 11, boxShadow: '0 4px 16px rgba(0,0,0,.15)' }}
+                                labelFormatter={fmtDay}
+                                formatter={v => [`${fmt(v)}g`, 'Net Weight']}
+                                cursor={{ fill: `${t.gold}12` }}
+                              />
+                              <Bar dataKey="net_wt" fill="url(#barGrad)" radius={[4, 4, 0, 0]} />
+                            </BarChart>
+                          </ResponsiveContainer>
+                        </div>
                       : <div style={{ height: 140, display: 'flex', alignItems: 'center', justifyContent: 'center', color: t.text4, fontSize: 12 }}>No data this period</div>
                   }
                 </div>
               )}
-              {showBranches && (
-                <div>
-                  <div style={{ fontSize: 10, color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: 14, fontWeight: 600 }}>Top branches · MTD weight</div>
-                  {loading
-                    ? [0,1,2,3,4,5].map(i => <div key={i} style={{ marginBottom: 11 }}><Shimmer h={20} w="100%" t={t} /></div>)
-                    : branches.length === 0
-                      ? <div style={{ color: t.text4, fontSize: 12 }}>No data this month</div>
-                      : branches.map((b, i) => (
-                          <MiniBarRow key={b.branch_name}
-                            label={`${i + 1}. ${b.branch_name}`}
-                            value={Number(b.total_net || 0)} max={maxBranch}
-                            color={t.gold} sub={`${fmt(b.total_net)}g`} t={t}
-                          />
-                        ))
-                  }
+
+              {/* Right: branches or state */}
+              {(showBranches || showBranchTable || showStateTable) && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+                  {/* Top branches (weight) */}
+                  {(showBranches || showBranchTable) && (
+                    <div>
+                      <div style={{ fontSize: 10, color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: 14, fontWeight: 600 }}>
+                        Top branches · MTD weight
+                      </div>
+                      {loading
+                        ? [0,1,2,3,4,5].map(i => <div key={i} style={{ marginBottom: 11 }}><Shimmer h={20} w="100%" t={t} /></div>)
+                        : branches.length === 0
+                          ? <div style={{ color: t.text4, fontSize: 12 }}>No data this month</div>
+                          : branches.slice(0, 6).map((b, i) => (
+                              <MiniBarRow key={b.branch_name}
+                                label={`${i + 1}. ${b.branch_name}`}
+                                value={Number(b.total_net || 0)} max={maxBranch}
+                                color={t.gold} sub={`${fmt(b.total_net)}g`} t={t}
+                              />
+                            ))
+                      }
+                    </div>
+                  )}
+
+                  {/* State breakdown */}
+                  {showStateTable && stateData.length > 0 && (
+                    <div>
+                      <div style={{ fontSize: 10, color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: 14, fontWeight: 600 }}>
+                        State breakdown · MTD weight
+                      </div>
+                      {loading
+                        ? [0,1,2,3].map(i => <div key={i} style={{ marginBottom: 11 }}><Shimmer h={20} w="100%" t={t} /></div>)
+                        : stateData.map(s => (
+                            <MiniBarRow key={s.state}
+                              label={s.state}
+                              value={Number(s.total_net || 0)} max={maxState}
+                              color={t.blue} sub={`${fmt(s.total_net)}g`} t={t}
+                            />
+                          ))
+                      }
+                    </div>
+                  )}
                 </div>
               )}
             </div>
