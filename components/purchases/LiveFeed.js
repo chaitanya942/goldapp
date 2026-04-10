@@ -359,11 +359,14 @@ export default function LiveFeed() {
         )}
 
         {/* CRM tabs */}
-        {(canSee('livefeed.old_crm_tab') || canSee('livefeed.new_crm_tab')) && (
+        {(canSee('livefeed.old_crm_tab') || canSee('livefeed.new_crm_tab') || canSee('livefeed.combined_tab')) && (
           <div style={{ display: 'flex', background: t.card, borderRadius: 8, border: `1px solid ${t.border}`, overflow: 'hidden' }}>
-            {[['old', 'Old CRM'], ['new', 'New CRM']].filter(([key]) =>
-              key === 'old' ? canSee('livefeed.old_crm_tab') : canSee('livefeed.new_crm_tab')
-            ).map(([key, label]) => (
+            {[['old', 'Old CRM'], ['new', 'New CRM'], ['combined', 'Both']].filter(([key]) => {
+              if (key === 'old')      return canSee('livefeed.old_crm_tab')
+              if (key === 'new')      return canSee('livefeed.new_crm_tab')
+              if (key === 'combined') return canSee('livefeed.combined_tab')
+              return false
+            }).map(([key, label]) => (
               <button key={key} onClick={() => { setCrmTab(key); setNewEventCount(0) }} style={{
                 padding: '6px 16px', fontSize: '.62rem', letterSpacing: '.08em', textTransform: 'uppercase',
                 fontWeight: crmTab === key ? 600 : 400, cursor: 'pointer', border: 'none',
@@ -457,15 +460,140 @@ export default function LiveFeed() {
               viewDate={viewDate}
               newEventCount={newEventCount} clearNewEvents={() => setNewEventCount(0)} />
           </div>
-        ) : (
+        ) : crmTab === 'new' ? (
           <div style={{ opacity: loading && data ? 0.6 : 1, transition: 'opacity .3s' }}>
             <NewCrmTab t={t} stages={stages} newCrmTxns={newCrmTxns} newCrmError={newCrmError}
               regionFilter={regionFilter} regions={regions}
               viewDate={viewDate} isToday={isToday}
               newEventCount={newEventCount} clearNewEvents={() => setNewEventCount(0)} />
           </div>
+        ) : (
+          <div style={{ opacity: loading && data ? 0.6 : 1, transition: 'opacity .3s' }}>
+            <CombinedCrmTab
+              t={t}
+              /* Old CRM props */
+              summary={effectiveSummary} walkinSummary={effectiveWalkinSummary}
+              totalWalkins={totalWalkins} totalBilled={totalBilled} approved={approved} pending={pending}
+              trueRejected={trueRejected} wrongEntry={wrongEntry}
+              notBilledCnt={notBilledCnt} notBilledWalkins={notBilledWalkins} crmNotUpdatedCnt={crmNotUpdatedCnt}
+              goldPipeline={effectiveGoldPipeline}
+              todayTxns={rTxns} todayWalkins={rWalkins}
+              allTxns={todayTxns} allWalkins={todayWalkins} allKycRows={kycRows} regions={regions}
+              kycRows={regionFilter ? kycRows.filter(r => r.region === regionFilter) : kycRows}
+              regionFilter={regionFilter}
+              filteredTimeline={filteredTimeline}
+              /* New CRM props */
+              stages={stages} newCrmTxns={newCrmTxns} newCrmError={newCrmError}
+              /* Shared */
+              isToday={isToday} viewDate={viewDate}
+              newEventCount={newEventCount} clearNewEvents={() => setNewEventCount(0)} />
+          </div>
         )}
       </div>
+    </div>
+  )
+}
+
+/* ════════════════════════════════════════════════════════════════ */
+/*                       COMBINED TAB                            */
+/* ════════════════════════════════════════════════════════════════ */
+function CombinedCrmTab({
+  t,
+  // Old CRM
+  summary, walkinSummary,
+  totalWalkins, totalBilled, approved, pending,
+  trueRejected, wrongEntry,
+  notBilledCnt, notBilledWalkins, crmNotUpdatedCnt,
+  goldPipeline,
+  todayTxns, todayWalkins, allTxns, allWalkins, allKycRows, regions,
+  kycRows, regionFilter,
+  filteredTimeline,
+  // New CRM
+  stages, newCrmTxns, newCrmError,
+  // Shared
+  isToday, viewDate, newEventCount, clearNewEvents,
+}) {
+  const approvedValue  = summary?.approved_value || 0
+  const newCompleted   = (newCrmTxns || []).filter(tx => tx.status === 'FINAL_PAYMENT_COMPLETED')
+  const newCompletedVal = newCompleted.reduce((s, tx) => s + (Number(tx.amount) || 0), 0)
+  const newTotal        = (newCrmTxns || []).length
+  const newInProgress   = (newCrmTxns || []).filter(tx => ['WALKIN','ESTIMATION_PENDING','KYC_PENDING','FINAL_PAYMENT_PENDING'].includes(tx.status)).length
+  const combinedValue = approvedValue + newCompletedVal
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 32 }}>
+
+      {/* ── Combined summary bar ── */}
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 0,
+        background: t.surface, border: `1px solid ${t.border}`, borderRadius: 12,
+        padding: 0, overflow: 'hidden', flexWrap: 'wrap',
+        boxShadow: '0 2px 8px rgba(0,0,0,.10)',
+      }}>
+        {[
+          { label: isToday ? 'Today · Both CRMs' : fmtDate(viewDate), value: null, color: t.text3, accent: t.border },
+          { label: 'Walk-ins (Old)',   value: fmtNum(totalWalkins),        color: t.blue,   accent: t.blue },
+          { label: 'Old CRM Billed',  value: fmtNum(totalBilled),         color: t.gold,   accent: t.gold },
+          { label: 'Old Purchased',   value: fmtNum(approved),            color: t.green,  accent: t.green },
+          { label: 'New CRM Total',   value: fmtNum(newTotal),            color: t.blue,   accent: null },
+          { label: 'New In Progress', value: fmtNum(newInProgress),       color: t.orange, accent: null },
+          { label: 'New Completed',   value: fmtNum(newCompleted.length), color: t.green,  accent: null },
+          { label: 'Combined Value',  value: fmtAmt(combinedValue),       color: t.green,  accent: t.green },
+        ].map((item, i) => (
+          <div key={i} className="sum-bar-item" style={{
+            display: 'flex', alignItems: 'center', gap: 6,
+            padding: '10px 18px', borderRight: `1px solid ${t.border}`,
+            borderLeft: item.accent ? `3px solid ${item.accent}` : undefined,
+          }}>
+            {item.value != null ? (
+              <>
+                <span style={{ fontSize: '.75rem', fontFamily: 'ui-monospace,monospace', fontWeight: 600, color: item.color }}>{item.value}</span>
+                <span style={{ fontSize: '.58rem', color: t.text4, letterSpacing: '.08em', textTransform: 'uppercase' }}>{item.label}</span>
+              </>
+            ) : (
+              <span style={{ fontSize: '.65rem', color: t.text3, fontWeight: 700, letterSpacing: '.1em', textTransform: 'uppercase' }}>{item.label}</span>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {/* ── Old CRM section ── */}
+      <div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+          <div style={{ width: 3, height: 20, borderRadius: 2, background: t.gold }} />
+          <span style={{ fontSize: '.7rem', fontWeight: 700, letterSpacing: '.12em', textTransform: 'uppercase', color: t.gold }}>Old CRM</span>
+          <div style={{ flex: 1, height: 1, background: `linear-gradient(90deg,${t.gold}30,transparent)` }} />
+        </div>
+        <OldCrmTab
+          t={t} summary={summary} walkinSummary={walkinSummary}
+          totalWalkins={totalWalkins} totalBilled={totalBilled} approved={approved} pending={pending}
+          trueRejected={trueRejected} wrongEntry={wrongEntry}
+          notBilledCnt={notBilledCnt} notBilledWalkins={notBilledWalkins} crmNotUpdatedCnt={crmNotUpdatedCnt}
+          goldPipeline={goldPipeline}
+          todayTxns={todayTxns} todayWalkins={todayWalkins}
+          allTxns={allTxns} allWalkins={allWalkins} allKycRows={allKycRows} regions={regions}
+          kycRows={kycRows} regionFilter={regionFilter}
+          filteredTimeline={filteredTimeline} isToday={isToday} viewDate={viewDate}
+          newEventCount={newEventCount} clearNewEvents={clearNewEvents} />
+      </div>
+
+      {/* ── Divider ── */}
+      <div style={{ height: 1, background: `linear-gradient(90deg,transparent,${t.border},transparent)` }} />
+
+      {/* ── New CRM section ── */}
+      <div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+          <div style={{ width: 3, height: 20, borderRadius: 2, background: t.blue }} />
+          <span style={{ fontSize: '.7rem', fontWeight: 700, letterSpacing: '.12em', textTransform: 'uppercase', color: t.blue }}>New CRM</span>
+          <div style={{ flex: 1, height: 1, background: `linear-gradient(90deg,${t.blue}30,transparent)` }} />
+        </div>
+        <NewCrmTab
+          t={t} stages={stages} newCrmTxns={newCrmTxns} newCrmError={newCrmError}
+          regionFilter={regionFilter} regions={regions}
+          viewDate={viewDate} isToday={isToday}
+          newEventCount={newEventCount} clearNewEvents={clearNewEvents} />
+      </div>
+
     </div>
   )
 }
