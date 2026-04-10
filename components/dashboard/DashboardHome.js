@@ -95,8 +95,60 @@ const EmptyPanel = ({ t }) => (
   </div>
 )
 
+// ── Module summary card ────────────────────────────────────────────────────────
+function ModuleCard({ icon, label, color, metrics, cta, onClick, loading, t, delay = 0 }) {
+  const [vis, setVis] = useState(false)
+  const [hov, setHov] = useState(false)
+  useEffect(() => { const id = setTimeout(() => setVis(true), delay); return () => clearTimeout(id) }, [delay])
+  return (
+    <div
+      onClick={onClick}
+      onMouseEnter={() => setHov(true)}
+      onMouseLeave={() => setHov(false)}
+      style={{
+        background: `linear-gradient(145deg,${t.card},${t.card2})`,
+        border: `1px solid ${hov ? color + '60' : t.border}`,
+        borderRadius: 16, padding: '18px 20px', cursor: 'pointer',
+        position: 'relative', overflow: 'hidden',
+        boxShadow: hov ? `0 4px 20px ${color}20, inset 0 1px 0 rgba(255,255,255,.04)` : '0 2px 8px rgba(0,0,0,.3), inset 0 1px 0 rgba(255,255,255,.03)',
+        transform: hov ? 'translateY(-2px)' : vis ? 'translateY(0)' : 'translateY(12px)',
+        opacity: vis ? 1 : 0, transition: 'all .28s cubic-bezier(.34,1.4,.64,1)',
+      }}
+    >
+      <div style={{ position: 'absolute', top: -24, right: -24, width: 80, height: 80, borderRadius: '50%', background: `radial-gradient(circle,${color}${hov ? '18' : '08'} 0%,transparent 70%)`, pointerEvents: 'none', transition: 'all .3s' }} />
+      <div style={{ position: 'absolute', top: 0, left: 16, right: 16, height: 1, background: `linear-gradient(90deg,transparent,${color}60,transparent)` }} />
+      {/* Header */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+        <div style={{ width: 32, height: 32, borderRadius: 9, background: `${color}18`, border: `1px solid ${color}30`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1rem', flexShrink: 0 }}>{icon}</div>
+        <div style={{ fontSize: 12, color: t.text3, letterSpacing: '.08em', textTransform: 'uppercase', fontWeight: 600, flex: 1 }}>{label}</div>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={hov ? color : t.text4} strokeWidth="2" strokeLinecap="round" style={{ transition: 'stroke .2s', transform: hov ? 'translateX(2px)' : 'none' }}>
+          <path d="M5 12h14M12 5l7 7-7 7" />
+        </svg>
+      </div>
+      {/* Metrics */}
+      <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+        {metrics.map((m, i) => (
+          <div key={i} style={{ minWidth: 64 }}>
+            {loading
+              ? <div style={{ height: 22, width: 56, background: `linear-gradient(90deg,${t.border},${t.border2},${t.border})`, backgroundSize: '200% 100%', borderRadius: 6, animation: 'shimmer 1.5s infinite' }} />
+              : <div style={{ fontSize: 20, fontWeight: 200, color, letterSpacing: '-.01em', lineHeight: 1, fontVariantNumeric: 'tabular-nums' }}>{m.value ?? '—'}</div>
+            }
+            <div style={{ fontSize: 11, color: t.text4, marginTop: 4, lineHeight: 1.3 }}>{m.label}</div>
+          </div>
+        ))}
+      </div>
+      {/* CTA */}
+      {cta && (
+        <div style={{ marginTop: 14, fontSize: 12, color: hov ? color : t.text4, fontWeight: hov ? 600 : 400, transition: 'all .2s', letterSpacing: '.02em' }}>
+          {cta} →
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function DashboardHome() {
-  const { theme, userProfile, canSee } = useApp()
+  const { theme, userProfile, canSee, setActiveNav } = useApp()
   const t = THEMES[theme]
 
   const showPurchase       = canSee('purchase-data') || canSee('purchase-reports')
@@ -120,7 +172,68 @@ export default function DashboardHome() {
   const [stateCount,    setStateCount]    = useState(0)
   const [heroVis,       setHeroVis]       = useState(false)
 
+  // ── Module hub data ──────────────────────────────────────────────────────────
+  const [hubLoading,     setHubLoading]     = useState(true)
+  const [todayKpis,      setTodayKpis]      = useState(null)
+  const [telesalesStats, setTelesalesStats] = useState(null)
+  const [consignStats,   setConsignStats]   = useState(null)
+  const [adminStats,     setAdminStats]     = useState(null)
+
   useEffect(() => { setTimeout(()=>setHeroVis(true), 50) }, [])
+
+  // Fetch all module-card data in parallel, once on mount
+  useEffect(() => {
+    const todayStr = istStr()
+    const ps = []
+
+    if (canSee('purchase-data') || canSee('purchase-reports')) {
+      ps.push(
+        supabase.rpc('get_report_kpis', { p_from: todayStr, p_to: todayStr, p_branch: null, p_txn_type: null, p_state: null })
+          .then(({ data }) => setTodayKpis(Array.isArray(data) ? data[0] : data))
+          .catch(() => {})
+      )
+    }
+    if (canSee('inbound-bot')) {
+      ps.push(
+        supabase.from('telesales_calls').select('outcome,duration_seconds').gte('call_date', todayStr)
+          .then(({ data }) => {
+            if (!data) return
+            const total    = data.length
+            const engaged  = data.filter(c => (c.duration_seconds || 0) >= 30).length
+            const interest = data.filter(c => c.outcome === 'interested').length
+            setTelesalesStats({ total, engaged, interested: interest, engageRate: total > 0 ? Math.round(engaged / total * 100) : 0 })
+          }).catch(() => {})
+      )
+    }
+    if (canSee('consignment-overview')) {
+      ps.push(
+        fetch('/api/consignments?action=branch_overview')
+          .then(r => r.json())
+          .then(json => {
+            const rows = json.data || []
+            const totalBranches = rows.length
+            const totalWeight   = rows.reduce((s, b) => s + (b.total_gross_wt || 0), 0)
+            const urgent = rows.filter(b => {
+              if (!b.ship_before) return false
+              const days = Math.floor((new Date(b.ship_before).getTime() - Date.now()) / 86400000)
+              return days <= 3
+            }).length
+            setConsignStats({ totalBranches, totalWeight, urgent })
+          }).catch(() => {})
+      )
+    }
+    if (canSee('user-management') || canSee('branch-management')) {
+      ps.push(
+        Promise.all([
+          supabase.from('user_profiles').select('id', { count: 'exact', head: true }).eq('is_active', true),
+          supabase.from('branches').select('id', { count: 'exact', head: true }).eq('is_active', true),
+        ]).then(([u, b]) => setAdminStats({ userCount: u.count ?? 0, branchCount: b.count ?? 0 }))
+          .catch(() => {})
+      )
+    }
+
+    Promise.all(ps).finally(() => setHubLoading(false))
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!showPurchase) return
@@ -219,17 +332,97 @@ export default function DashboardHome() {
       {/* ── LIVE RATES ── */}
       <LiveTicker />
 
-      {/* ── NO-MODULE WELCOME (for roles with no configured module access) ── */}
-      {!showPurchase && (
-        <div style={{ marginTop: 8, background:`linear-gradient(135deg,${t.card},${t.card2})`, border:`1px solid ${t.border}`, borderRadius:20, padding:'40px 44px', boxShadow:t.shadow, textAlign:'center' }}>
-          <div style={{ fontSize:'2rem', opacity:.15, marginBottom:16 }}>◈</div>
-          <div style={{ fontSize:15, color:t.text2, fontWeight:500, marginBottom:8 }}>Your workspace is ready</div>
-          <div style={{ fontSize:13, color:t.text4, lineHeight:1.7 }}>
-            The modules available to your role will appear here.<br />
-            Contact your administrator if you need access to additional sections.
+      {/* ── MODULE HUB ── */}
+      {(() => {
+        const cards = [
+          canSee('purchase-data') && {
+            id: 'purchase-data', icon: '◉', label: 'Purchase Data', color: t.gold,
+            metrics: [
+              { label: "Today's Bills",  value: todayKpis?.total_count > 0 ? Number(todayKpis.total_count).toLocaleString('en-IN') : '—' },
+              { label: 'Net Weight',     value: todayKpis?.total_net > 0 ? `${Number(todayKpis.total_net).toFixed(1)}g` : '—' },
+            ],
+            cta: 'Open Purchase Data',
+          },
+          canSee('purchase-reports') && {
+            id: 'purchase-reports', icon: '📈', label: 'Purchase Reports', color: t.green,
+            metrics: [
+              { label: 'MTD Bills',  value: kpis?.total_count > 0 ? Number(kpis.total_count).toLocaleString('en-IN') : '—' },
+              { label: 'MTD Value',  value: kpis?.total_value > 0 ? (Number(kpis.total_value)/1e7 >= 1 ? `₹${(Number(kpis.total_value)/1e7).toFixed(1)}Cr` : `₹${Number(kpis.total_value).toLocaleString('en-IN',{maximumFractionDigits:0})}`) : '—' },
+            ],
+            cta: 'Open Reports',
+          },
+          canSee('consignment-overview') && {
+            id: 'consignment-overview', icon: '📦', label: 'Branch Stock', color: t.orange,
+            metrics: [
+              { label: 'Branches with Stock', value: consignStats ? String(consignStats.totalBranches) : '—' },
+              { label: 'Urgent Alerts',       value: consignStats ? String(consignStats.urgent) : '—' },
+            ],
+            cta: 'Open Branch Stock',
+          },
+          (canSee('consignment-data') || canSee('consignment-report') || canSee('consignment-summary')) && !canSee('consignment-overview') && {
+            id: 'consignment-data', icon: '📦', label: 'Consignments', color: t.orange,
+            metrics: [{ label: 'Data & Reports', value: '→' }],
+            cta: 'Open Consignments',
+          },
+          canSee('inbound-bot') && {
+            id: 'inbound-bot', icon: '◑', label: 'Telesales', color: t.purple,
+            metrics: [
+              { label: "Today's Calls",  value: telesalesStats ? String(telesalesStats.total) : '—' },
+              { label: 'Engagement',     value: telesalesStats ? `${telesalesStats.engageRate}%` : '—' },
+              { label: 'Interested',     value: telesalesStats ? String(telesalesStats.interested) : '—' },
+            ],
+            cta: 'Open Inbound Bot',
+          },
+          canSee('live-market-rates') && {
+            id: 'live-market-rates', icon: '◎', label: 'Market Rates', color: t.blue,
+            metrics: [{ label: 'Live gold rates', value: '24K / 22K / 18K' }],
+            cta: 'Open Market Rates',
+          },
+          canSee('cal-table') && {
+            id: 'cal-table', icon: '⊛', label: 'Cal Table', color: t.text2,
+            metrics: [{ label: 'Sales pricing calculator', value: '→' }],
+            cta: 'Open Cal Table',
+          },
+          (canSee('user-management') || canSee('branch-management')) && {
+            id: 'user-management', icon: '⚙', label: 'Administration', color: t.red,
+            metrics: [
+              { label: 'Active Users',    value: adminStats ? String(adminStats.userCount) : '—' },
+              { label: 'Active Branches', value: adminStats ? String(adminStats.branchCount) : '—' },
+            ],
+            cta: canSee('user-management') ? 'Open User Management' : 'Open Branch Management',
+          },
+        ].filter(Boolean)
+
+        if (cards.length === 0) return (
+          <div style={{ marginTop: 8, background:`linear-gradient(135deg,${t.card},${t.card2})`, border:`1px solid ${t.border}`, borderRadius:20, padding:'40px 44px', boxShadow:t.shadow, textAlign:'center' }}>
+            <div style={{ fontSize:'2rem', opacity:.15, marginBottom:16 }}>◈</div>
+            <div style={{ fontSize:15, color:t.text2, fontWeight:500, marginBottom:8 }}>Your workspace is ready</div>
+            <div style={{ fontSize:13, color:t.text4, lineHeight:1.7 }}>
+              The modules available to your role will appear here.<br />
+              Contact your administrator if you need access to additional sections.
+            </div>
           </div>
-        </div>
-      )}
+        )
+
+        const cols = cards.length === 1 ? 1 : cards.length === 2 ? 2 : cards.length <= 4 ? 2 : 3
+        return (
+          <div style={{ marginTop: 8, marginBottom: 4 }}>
+            <div style={{ fontSize: 11, color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 600, marginBottom: 12 }}>Your Modules</div>
+            <div style={{ display: 'grid', gridTemplateColumns: `repeat(${cols}, 1fr)`, gap: 14 }}>
+              {cards.map((card, i) => (
+                <ModuleCard
+                  key={card.id}
+                  icon={card.icon} label={card.label} color={card.color}
+                  metrics={card.metrics} cta={card.cta}
+                  onClick={() => setActiveNav(card.id)}
+                  loading={hubLoading}
+                  t={t} delay={i * 60}
+                />
+              ))}
+            </div>
+          </div>
+        )
+      })()}
 
       {/* ── PURCHASE OVERVIEW ── */}
       {showPurchase && <div style={{ marginTop: 8, border:`1px solid ${t.border2}`, borderRadius:20, background:`linear-gradient(160deg,${t.card2},${t.card3})`, boxShadow:`${t.shadow},inset 0 1px 0 rgba(255,255,255,.03)`, position:'relative', overflow:'hidden', transition:'all .35s ease' }}>
