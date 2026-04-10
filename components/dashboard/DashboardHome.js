@@ -333,7 +333,7 @@ export default function DashboardHome() {
                           bar={Number(s.total_net||0)} barMax={maxStateNet}/>
                       ))
                 }
-              </div>
+              </div>}
 
               {/* Active Branches */}
               {showRegionCards && <div style={panel}>
