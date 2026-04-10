@@ -542,34 +542,40 @@ function CombinedCrmTab({
         </div>
 
         {/* Old CRM Billed — grouped */}
-        <div className="sum-bar-item" style={{ display:'flex', flexDirection:'column', gap:5, padding:'8px 18px', borderRight:`1px solid ${t.border}`, borderLeft:`3px solid ${t.gold}` }}>
+        <div className="sum-bar-item" style={{ display:'flex', flexDirection:'column', gap:6, padding:'8px 18px', borderRight:`1px solid ${t.border}`, borderLeft:`3px solid ${t.gold}` }}>
           <div style={{ display:'flex', alignItems:'center', gap:6 }}>
             <span style={{ fontSize:'.75rem', fontFamily:'ui-monospace,monospace', fontWeight:600, color:t.gold }}>{fmtNum(totalBilled)}</span>
             <span style={{ fontSize:'.58rem', color:t.text4, letterSpacing:'.08em', textTransform:'uppercase' }}>Old CRM Billed</span>
           </div>
-          <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-            <span style={{ fontSize:'.6rem', color:t.green,  fontFamily:'ui-monospace,monospace', fontWeight:600 }}>{approved}<span style={{ fontSize:'.5rem', marginLeft:2, fontWeight:400, opacity:.8 }}>purchased</span></span>
-            <span style={{ color:t.border, fontSize:'.5rem' }}>·</span>
-            <span style={{ fontSize:'.6rem', color:t.orange, fontFamily:'ui-monospace,monospace', fontWeight:600 }}>{pending}<span style={{ fontSize:'.5rem', marginLeft:2, fontWeight:400, opacity:.8 }}>pending</span></span>
-            <span style={{ color:t.border, fontSize:'.5rem' }}>·</span>
-            <span style={{ fontSize:'.6rem', color:t.red,    fontFamily:'ui-monospace,monospace', fontWeight:600 }}>{trueRejected}<span style={{ fontSize:'.5rem', marginLeft:2, fontWeight:400, opacity:.8 }}>rejected</span></span>
+          <div style={{ display:'flex', alignItems:'center', gap:6, padding:'4px 8px', background:t.card2, border:`1px solid ${t.border}`, borderRadius:6 }}>
+            <span style={{ fontSize:'.6rem', color:t.green,  fontFamily:'ui-monospace,monospace', fontWeight:700 }}>{approved}</span>
+            <span style={{ fontSize:'.5rem', color:t.text4 }}>purch</span>
+            <span style={{ color:t.border2, fontSize:'.5rem' }}>|</span>
+            <span style={{ fontSize:'.6rem', color:t.orange, fontFamily:'ui-monospace,monospace', fontWeight:700 }}>{pending}</span>
+            <span style={{ fontSize:'.5rem', color:t.text4 }}>pend</span>
+            <span style={{ color:t.border2, fontSize:'.5rem' }}>|</span>
+            <span style={{ fontSize:'.6rem', color:t.red,    fontFamily:'ui-monospace,monospace', fontWeight:700 }}>{trueRejected}</span>
+            <span style={{ fontSize:'.5rem', color:t.text4 }}>rej</span>
             {wrongEntry > 0 && <>
-              <span style={{ color:t.border, fontSize:'.5rem' }}>·</span>
-              <span style={{ fontSize:'.6rem', color:t.text3, fontFamily:'ui-monospace,monospace', fontWeight:600 }}>{wrongEntry}<span style={{ fontSize:'.5rem', marginLeft:2, fontWeight:400, opacity:.8 }}>re-billed</span></span>
+              <span style={{ color:t.border2, fontSize:'.5rem' }}>|</span>
+              <span style={{ fontSize:'.6rem', color:t.text3, fontFamily:'ui-monospace,monospace', fontWeight:700 }}>{wrongEntry}</span>
+              <span style={{ fontSize:'.5rem', color:t.text4 }}>re-billed</span>
             </>}
           </div>
         </div>
 
         {/* New CRM Total — grouped */}
-        <div className="sum-bar-item" style={{ display:'flex', flexDirection:'column', gap:5, padding:'8px 18px', borderRight:`1px solid ${t.border}`, borderLeft:`3px solid ${t.blue}` }}>
+        <div className="sum-bar-item" style={{ display:'flex', flexDirection:'column', gap:6, padding:'8px 18px', borderRight:`1px solid ${t.border}`, borderLeft:`3px solid ${t.blue}` }}>
           <div style={{ display:'flex', alignItems:'center', gap:6 }}>
             <span style={{ fontSize:'.75rem', fontFamily:'ui-monospace,monospace', fontWeight:600, color:t.blue }}>{fmtNum(newTotal)}</span>
             <span style={{ fontSize:'.58rem', color:t.text4, letterSpacing:'.08em', textTransform:'uppercase' }}>New CRM Total</span>
           </div>
-          <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-            <span style={{ fontSize:'.6rem', color:t.green,  fontFamily:'ui-monospace,monospace', fontWeight:600 }}>{newCompleted.length}<span style={{ fontSize:'.5rem', marginLeft:2, fontWeight:400, opacity:.8 }}>completed</span></span>
-            <span style={{ color:t.border, fontSize:'.5rem' }}>·</span>
-            <span style={{ fontSize:'.6rem', color:t.orange, fontFamily:'ui-monospace,monospace', fontWeight:600 }}>{newInProgress}<span style={{ fontSize:'.5rem', marginLeft:2, fontWeight:400, opacity:.8 }}>in-progress</span></span>
+          <div style={{ display:'flex', alignItems:'center', gap:6, padding:'4px 8px', background:t.card2, border:`1px solid ${t.border}`, borderRadius:6 }}>
+            <span style={{ fontSize:'.6rem', color:t.green,  fontFamily:'ui-monospace,monospace', fontWeight:700 }}>{newCompleted.length}</span>
+            <span style={{ fontSize:'.5rem', color:t.text4 }}>done</span>
+            <span style={{ color:t.border2, fontSize:'.5rem' }}>|</span>
+            <span style={{ fontSize:'.6rem', color:t.orange, fontFamily:'ui-monospace,monospace', fontWeight:700 }}>{newInProgress}</span>
+            <span style={{ fontSize:'.5rem', color:t.text4 }}>in-prog</span>
           </div>
         </div>
 
@@ -698,20 +704,24 @@ function OldCrmTab({
         </div>
 
         {/* Billed — grouped breakdown */}
-        <div className="sum-bar-item" style={{ display:'flex', flexDirection:'column', gap:5, padding:'8px 18px', borderRight:`1px solid ${t.border}`, borderLeft:`3px solid ${t.gold}` }}>
+        <div className="sum-bar-item" style={{ display:'flex', flexDirection:'column', gap:6, padding:'8px 18px', borderRight:`1px solid ${t.border}`, borderLeft:`3px solid ${t.gold}` }}>
           <div style={{ display:'flex', alignItems:'center', gap:6 }}>
             <span style={{ fontSize:'.75rem', fontFamily:'ui-monospace,monospace', fontWeight:600, color:t.gold }}>{fmtNum(totalBilled)}</span>
             <span style={{ fontSize:'.58rem', color:t.text4, letterSpacing:'.08em', textTransform:'uppercase' }}>Billed</span>
           </div>
-          <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-            <span style={{ fontSize:'.6rem', color:t.green,  fontFamily:'ui-monospace,monospace', fontWeight:600 }}>{approved}<span style={{ fontSize:'.5rem', marginLeft:2, fontWeight:400, opacity:.8 }}>purchased</span></span>
-            <span style={{ color:t.border, fontSize:'.5rem' }}>·</span>
-            <span style={{ fontSize:'.6rem', color:t.orange, fontFamily:'ui-monospace,monospace', fontWeight:600 }}>{pending}<span style={{ fontSize:'.5rem', marginLeft:2, fontWeight:400, opacity:.8 }}>pending</span></span>
-            <span style={{ color:t.border, fontSize:'.5rem' }}>·</span>
-            <span style={{ fontSize:'.6rem', color:t.red,    fontFamily:'ui-monospace,monospace', fontWeight:600 }}>{trueRejected}<span style={{ fontSize:'.5rem', marginLeft:2, fontWeight:400, opacity:.8 }}>rejected</span></span>
+          <div style={{ display:'flex', alignItems:'center', gap:6, padding:'4px 8px', background:t.card2, border:`1px solid ${t.border}`, borderRadius:6 }}>
+            <span style={{ fontSize:'.6rem', color:t.green,  fontFamily:'ui-monospace,monospace', fontWeight:700 }}>{approved}</span>
+            <span style={{ fontSize:'.5rem', color:t.text4 }}>purch</span>
+            <span style={{ color:t.border2, fontSize:'.5rem' }}>|</span>
+            <span style={{ fontSize:'.6rem', color:t.orange, fontFamily:'ui-monospace,monospace', fontWeight:700 }}>{pending}</span>
+            <span style={{ fontSize:'.5rem', color:t.text4 }}>pend</span>
+            <span style={{ color:t.border2, fontSize:'.5rem' }}>|</span>
+            <span style={{ fontSize:'.6rem', color:t.red,    fontFamily:'ui-monospace,monospace', fontWeight:700 }}>{trueRejected}</span>
+            <span style={{ fontSize:'.5rem', color:t.text4 }}>rej</span>
             {wrongEntry > 0 && <>
-              <span style={{ color:t.border, fontSize:'.5rem' }}>·</span>
-              <span style={{ fontSize:'.6rem', color:t.text3, fontFamily:'ui-monospace,monospace', fontWeight:600 }}>{wrongEntry}<span style={{ fontSize:'.5rem', marginLeft:2, fontWeight:400, opacity:.8 }}>re-billed</span></span>
+              <span style={{ color:t.border2, fontSize:'.5rem' }}>|</span>
+              <span style={{ fontSize:'.6rem', color:t.text3, fontFamily:'ui-monospace,monospace', fontWeight:700 }}>{wrongEntry}</span>
+              <span style={{ fontSize:'.5rem', color:t.text4 }}>re-billed</span>
             </>}
           </div>
         </div>
@@ -1419,18 +1429,21 @@ function NewCrmTab({ t, newCrmTxns, newCrmError, regionFilter, regions, viewDate
         </div>
 
         {/* Total — grouped breakdown */}
-        <div className="sum-bar-item" style={{ display:'flex', flexDirection:'column', gap:5, padding:'8px 18px', borderRight:`1px solid ${t.border}`, borderLeft:`3px solid ${t.blue}` }}>
+        <div className="sum-bar-item" style={{ display:'flex', flexDirection:'column', gap:6, padding:'8px 18px', borderRight:`1px solid ${t.border}`, borderLeft:`3px solid ${t.blue}` }}>
           <div style={{ display:'flex', alignItems:'center', gap:6 }}>
             <span style={{ fontSize:'.75rem', fontFamily:'ui-monospace,monospace', fontWeight:600, color:t.blue }}>{fmtNum(total)}</span>
             <span style={{ fontSize:'.58rem', color:t.text4, letterSpacing:'.08em', textTransform:'uppercase' }}>Total</span>
           </div>
-          <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-            <span style={{ fontSize:'.6rem', color:t.green,  fontFamily:'ui-monospace,monospace', fontWeight:600 }}>{completed}<span style={{ fontSize:'.5rem', marginLeft:2, fontWeight:400, opacity:.8 }}>completed</span></span>
-            <span style={{ color:t.border, fontSize:'.5rem' }}>·</span>
-            <span style={{ fontSize:'.6rem', color:t.orange, fontFamily:'ui-monospace,monospace', fontWeight:600 }}>{inProgress}<span style={{ fontSize:'.5rem', marginLeft:2, fontWeight:400, opacity:.8 }}>in-progress</span></span>
+          <div style={{ display:'flex', alignItems:'center', gap:6, padding:'4px 8px', background:t.card2, border:`1px solid ${t.border}`, borderRadius:6 }}>
+            <span style={{ fontSize:'.6rem', color:t.green,  fontFamily:'ui-monospace,monospace', fontWeight:700 }}>{completed}</span>
+            <span style={{ fontSize:'.5rem', color:t.text4 }}>done</span>
+            <span style={{ color:t.border2, fontSize:'.5rem' }}>|</span>
+            <span style={{ fontSize:'.6rem', color:t.orange, fontFamily:'ui-monospace,monospace', fontWeight:700 }}>{inProgress}</span>
+            <span style={{ fontSize:'.5rem', color:t.text4 }}>in-prog</span>
             {walkout > 0 && <>
-              <span style={{ color:t.border, fontSize:'.5rem' }}>·</span>
-              <span style={{ fontSize:'.6rem', color:t.red, fontFamily:'ui-monospace,monospace', fontWeight:600 }}>{walkout}<span style={{ fontSize:'.5rem', marginLeft:2, fontWeight:400, opacity:.8 }}>walkout</span></span>
+              <span style={{ color:t.border2, fontSize:'.5rem' }}>|</span>
+              <span style={{ fontSize:'.6rem', color:t.red, fontFamily:'ui-monospace,monospace', fontWeight:700 }}>{walkout}</span>
+              <span style={{ fontSize:'.5rem', color:t.text4 }}>walkout</span>
             </>}
           </div>
         </div>
