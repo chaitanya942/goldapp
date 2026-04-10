@@ -784,14 +784,26 @@ function OldCrmTab({
           <HeroNum label="Bills Submitted" value={totalBilled} color={t.gold} t={t} weight={goldPurchased+goldPending+goldRejected} active={activeMetric==='billed'} onClick={() => toggleMetric('billed')} />
           <FlowArrow t={t} pct={approvedPctBilled} />
           {/* Breakdown box — shows what makes up Bills Submitted */}
-          <div style={{ display:'flex', alignItems:'center', border:`1px solid ${t.gold}30`, borderRadius:12, background:`${t.gold}06`, padding:'4px 2px', gap:0 }}>
-            <HeroNum label="Purchased" value={approved} color={t.green} t={t} weight={goldPurchased} active={activeMetric==='purchased'} onClick={() => toggleMetric('purchased')} />
-            <FlowSep t={t} />
-            <HeroNum label="In Pipeline" value={pending} color={t.orange} t={t} small weight={goldPending} active={activeMetric==='pending'} onClick={() => toggleMetric('pending')} />
-            <FlowSep t={t} />
-            <HeroNum label="Bill Rejected" value={trueRejected} color={t.red} t={t} small weight={goldRejected} active={activeMetric==='rejected'} onClick={() => toggleMetric('rejected')} />
-            <FlowSep t={t} />
-            <HeroNum label="Re-billed & Approved" value={wrongEntry} color={t.orange} t={t} small active={activeMetric==='rebilled'} onClick={() => toggleMetric('rebilled')} />
+          <div style={{ position:'relative', display:'flex', flexDirection:'column', alignItems:'center', gap:0 }}>
+            <div style={{ fontSize:'.48rem', letterSpacing:'.12em', textTransform:'uppercase', color:t.gold, fontWeight:700, marginBottom:4, opacity:.7 }}>breakdown of {fmtNum(totalBilled)}</div>
+            <div style={{
+              display:'flex', alignItems:'center', gap:0,
+              border:`1px solid ${t.gold}45`,
+              borderRadius:14,
+              background:`linear-gradient(135deg, ${t.gold}10 0%, ${t.gold}04 100%)`,
+              boxShadow:`0 0 0 1px ${t.gold}12, 0 4px 16px ${t.gold}12, inset 0 1px 0 ${t.gold}22`,
+              padding:'4px 2px',
+              position:'relative', overflow:'hidden',
+            }}>
+              <div style={{ position:'absolute', top:0, left:'10%', right:'10%', height:1, background:`linear-gradient(90deg,transparent,${t.gold}50,transparent)`, pointerEvents:'none' }}/>
+              <HeroNum label="Purchased" value={approved} color={t.green} t={t} weight={goldPurchased} active={activeMetric==='purchased'} onClick={() => toggleMetric('purchased')} />
+              <FlowSep t={t} />
+              <HeroNum label="In Pipeline" value={pending} color={t.orange} t={t} small weight={goldPending} active={activeMetric==='pending'} onClick={() => toggleMetric('pending')} />
+              <FlowSep t={t} />
+              <HeroNum label="Bill Rejected" value={trueRejected} color={t.red} t={t} small weight={goldRejected} active={activeMetric==='rejected'} onClick={() => toggleMetric('rejected')} />
+              <FlowSep t={t} />
+              <HeroNum label="Re-billed & Approved" value={wrongEntry} color={t.orange} t={t} small active={activeMetric==='rebilled'} onClick={() => toggleMetric('rebilled')} />
+            </div>
           </div>
           <FlowSep t={t} />
           <HeroNum label="KYC Blocked" value={kycBlacklistedCnt} color={t.purple} t={t} small weight={kycBlacklistedWt} active={activeMetric==='kyc_blocked'} onClick={() => toggleMetric('kyc_blocked')} />
@@ -1511,10 +1523,22 @@ function NewCrmTab({ t, newCrmTxns, newCrmError, regionFilter, regions, viewDate
           <HeroNum label="Total Today"  value={total}      color={t.blue}   t={t} weight={totalWt}      active={activeMetric==='total'}      onClick={() => toggleMetric('total')} />
           <FlowArrow t={t} pct={progressedPct || null} />
           {/* Breakdown box — In Progress + Completed make up Total */}
-          <div style={{ display:'flex', alignItems:'center', border:`1px solid ${t.blue}30`, borderRadius:12, background:`${t.blue}06`, padding:'4px 2px', gap:0 }}>
-            <HeroNum label="In Progress"  value={inProgress} color={t.orange} t={t} weight={inProgressWt} active={activeMetric==='inprogress'} onClick={() => toggleMetric('inprogress')} />
-            <FlowArrow t={t} pct={completedOfProgPct || null} />
-            <HeroNum label="Completed"    value={completed}  color={t.green}  t={t} weight={completedWt}  active={activeMetric==='completed'}  onClick={() => toggleMetric('completed')} />
+          <div style={{ position:'relative', display:'flex', flexDirection:'column', alignItems:'center', gap:0 }}>
+            <div style={{ fontSize:'.48rem', letterSpacing:'.12em', textTransform:'uppercase', color:t.blue, fontWeight:700, marginBottom:4, opacity:.7 }}>breakdown of {fmtNum(total)}</div>
+            <div style={{
+              display:'flex', alignItems:'center', gap:0,
+              border:`1px solid ${t.blue}45`,
+              borderRadius:14,
+              background:`linear-gradient(135deg, ${t.blue}10 0%, ${t.blue}04 100%)`,
+              boxShadow:`0 0 0 1px ${t.blue}12, 0 4px 16px ${t.blue}12, inset 0 1px 0 ${t.blue}22`,
+              padding:'4px 2px',
+              position:'relative', overflow:'hidden',
+            }}>
+              <div style={{ position:'absolute', top:0, left:'10%', right:'10%', height:1, background:`linear-gradient(90deg,transparent,${t.blue}50,transparent)`, pointerEvents:'none' }}/>
+              <HeroNum label="In Progress"  value={inProgress} color={t.orange} t={t} weight={inProgressWt} active={activeMetric==='inprogress'} onClick={() => toggleMetric('inprogress')} />
+              <FlowArrow t={t} pct={completedOfProgPct || null} />
+              <HeroNum label="Completed"    value={completed}  color={t.green}  t={t} weight={completedWt}  active={activeMetric==='completed'}  onClick={() => toggleMetric('completed')} />
+            </div>
           </div>
           <FlowSep t={t} />
           <HeroNum label="At Walk-in"   value={walkinTxns.length}     color={t.blue}   t={t} small weight={walkinWt}   active={activeMetric==='walkin'}     onClick={() => toggleMetric('walkin')} />
