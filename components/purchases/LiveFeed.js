@@ -529,11 +529,6 @@ function CombinedCrmTab({
         padding: 0, overflow: 'hidden', flexWrap: 'wrap',
         boxShadow: '0 2px 8px rgba(0,0,0,.10)',
       }}>
-        {/* Date label */}
-        <div className="sum-bar-item" style={{ display:'flex', alignItems:'center', gap:6, padding:'10px 18px', borderRight:`1px solid ${t.border}`, borderLeft:`3px solid ${t.border}` }}>
-          <span style={{ fontSize:'.65rem', color:t.text3, fontWeight:700, letterSpacing:'.1em', textTransform:'uppercase' }}>{isToday ? 'Today · Both CRMs' : fmtDate(viewDate)}</span>
-        </div>
-
         {/* Walk-ins (Old CRM) */}
         <div className="sum-bar-item" style={{ display:'flex', alignItems:'center', gap:6, padding:'10px 18px', borderRight:`1px solid ${t.border}`, borderLeft:`3px solid ${t.blue}` }}>
           <span style={{ fontSize:'.75rem', fontFamily:'ui-monospace,monospace', fontWeight:600, color:t.blue }}>{fmtNum(totalWalkins)}</span>
@@ -664,11 +659,6 @@ function OldCrmTab({
         padding: '0', overflow: 'hidden', flexWrap: 'wrap',
         boxShadow: '0 2px 8px rgba(0,0,0,.10)',
       }}>
-
-        {/* Date label */}
-        <div className="sum-bar-item" style={{ display:'flex', alignItems:'center', gap:6, padding:'10px 18px', borderRight:`1px solid ${t.border}`, borderLeft:`3px solid ${t.border}` }}>
-          <span style={{ fontSize:'.65rem', color:t.text3, fontWeight:700, letterSpacing:'.1em', textTransform:'uppercase' }}>{isToday ? 'Today' : fmtDate(viewDate)}</span>
-        </div>
 
         {/* Walked In */}
         <div className="sum-bar-item" style={{ display:'flex', alignItems:'center', gap:6, padding:'10px 18px', borderRight:`1px solid ${t.border}`, borderLeft:`3px solid ${t.blue}` }}>
@@ -1352,7 +1342,7 @@ const IN_PROGRESS_STATUSES = [
   'PENNY_DROP_PENDING', 'FINAL_PAYMENT_PENDING', 'RELEASE_PENDING', 'RELEASE_AGREEMENT_PENDING',
 ]
 
-function NewCrmTab({ t, newCrmTxns, newCrmError, regionFilter, regions, viewDate, isToday, newEventCount, clearNewEvents }) {
+function NewCrmTab({ t, newCrmTxns, newCrmError, regionFilter, regions, isToday, newEventCount, clearNewEvents }) {
   const [activeMetric, setActiveMetric] = useState(null)
   const [tlOpen, setTlOpen] = useState(false)
   const [tlSearch, setTlSearch] = useState('')
@@ -1423,11 +1413,6 @@ function NewCrmTab({ t, newCrmTxns, newCrmError, regionFilter, regions, viewDate
 
       {/* ──────── 0. SUMMARY BAR ──────── */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 0, background: t.surface, border: `1px solid ${t.border}`, borderRadius: 12, padding: '0', overflow: 'hidden', flexWrap: 'wrap', boxShadow: '0 2px 8px rgba(0,0,0,.10)' }}>
-
-        {/* Date label */}
-        <div className="sum-bar-item" style={{ display:'flex', alignItems:'center', gap:6, padding:'10px 18px', borderRight:`1px solid ${t.border}`, borderLeft:`3px solid ${t.border}` }}>
-          <span style={{ fontSize:'.65rem', color:t.text3, fontWeight:700, letterSpacing:'.1em', textTransform:'uppercase' }}>{isToday ? 'Today' : fmtDate(viewDate)}</span>
-        </div>
 
         {/* Total — grouped breakdown */}
         <div className="sum-bar-item" style={{ display:'flex', flexDirection:'column', gap:6, padding:'8px 18px', borderRight:`1px solid ${t.border}`, borderLeft:`3px solid ${t.blue}` }}>
