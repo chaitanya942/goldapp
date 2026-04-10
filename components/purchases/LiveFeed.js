@@ -662,32 +662,69 @@ function OldCrmTab({
         boxShadow: '0 2px 8px rgba(0,0,0,.10)',
       }}>
 
-        {[
-          { label: isToday ? 'Today' : fmtDate(viewDate), value: null, color: t.text3, accent: t.border },
-          { label: 'Walked In',  value: fmtNum(totalWalkins), color: t.blue,  accent: t.blue },
-          { label: 'Billed',     value: fmtNum(totalBilled),  color: t.gold,  accent: t.gold },
-          { label: 'Purchased',  value: fmtNum(approved),     color: t.green, accent: t.green },
-          { label: 'Value',      value: fmtAmt(approvedValue), color: t.green, accent: t.green },
-          { label: 'Conversion', value: `${conversionPct}%`,  color: conversionPct >= 50 ? t.green : t.orange, accent: null },
-          ...(pending > 0     ? [{ label: 'Pending',  value: fmtNum(pending),          color: t.orange, accent: null }] : []),
-          ...(kycBlacklistedCnt > 0 ? [{ label: 'KYC Blocked', value: fmtNum(kycBlacklistedCnt), color: t.purple, accent: null }] : []),
-        ].map((item, i) => (
-          <div key={i} className="sum-bar-item" style={{
-            display: 'flex', alignItems: 'center', gap: 6,
-            padding: '10px 18px',
-            borderRight: `1px solid ${t.border}`,
-            borderLeft: item.accent ? `3px solid ${item.accent}` : undefined,
-          }}>
-            {item.value != null ? (
-              <>
-                <span style={{ fontSize: '.75rem', fontFamily: 'ui-monospace,monospace', fontWeight: 600, color: item.color }}>{item.value}</span>
-                <span style={{ fontSize: '.58rem', color: t.text4, letterSpacing: '.08em', textTransform: 'uppercase' }}>{item.label}</span>
-              </>
-            ) : (
-              <span style={{ fontSize: '.65rem', color: t.text3, fontWeight: 700, letterSpacing: '.1em', textTransform: 'uppercase' }}>{item.label}</span>
-            )}
+        {/* Date label */}
+        <div className="sum-bar-item" style={{ display:'flex', alignItems:'center', gap:6, padding:'10px 18px', borderRight:`1px solid ${t.border}`, borderLeft:`3px solid ${t.border}` }}>
+          <span style={{ fontSize:'.65rem', color:t.text3, fontWeight:700, letterSpacing:'.1em', textTransform:'uppercase' }}>{isToday ? 'Today' : fmtDate(viewDate)}</span>
+        </div>
+
+        {/* Walked In */}
+        <div className="sum-bar-item" style={{ display:'flex', alignItems:'center', gap:6, padding:'10px 18px', borderRight:`1px solid ${t.border}`, borderLeft:`3px solid ${t.blue}` }}>
+          <span style={{ fontSize:'.75rem', fontFamily:'ui-monospace,monospace', fontWeight:600, color:t.blue }}>{fmtNum(totalWalkins)}</span>
+          <span style={{ fontSize:'.58rem', color:t.text4, letterSpacing:'.08em', textTransform:'uppercase' }}>Walked In</span>
+        </div>
+
+        {/* Billed — grouped breakdown */}
+        <div className="sum-bar-item" style={{ display:'flex', flexDirection:'column', gap:5, padding:'8px 18px', borderRight:`1px solid ${t.border}`, borderLeft:`3px solid ${t.gold}` }}>
+          <div style={{ display:'flex', alignItems:'center', gap:6 }}>
+            <span style={{ fontSize:'.75rem', fontFamily:'ui-monospace,monospace', fontWeight:600, color:t.gold }}>{fmtNum(totalBilled)}</span>
+            <span style={{ fontSize:'.58rem', color:t.text4, letterSpacing:'.08em', textTransform:'uppercase' }}>Billed</span>
           </div>
-        ))}
+          <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+            <span style={{ fontSize:'.6rem', color:t.green,  fontFamily:'ui-monospace,monospace', fontWeight:600 }}>{approved}<span style={{ fontSize:'.5rem', marginLeft:2, fontWeight:400, opacity:.8 }}>purchased</span></span>
+            <span style={{ color:t.border, fontSize:'.5rem' }}>·</span>
+            <span style={{ fontSize:'.6rem', color:t.orange, fontFamily:'ui-monospace,monospace', fontWeight:600 }}>{pending}<span style={{ fontSize:'.5rem', marginLeft:2, fontWeight:400, opacity:.8 }}>pending</span></span>
+            <span style={{ color:t.border, fontSize:'.5rem' }}>·</span>
+            <span style={{ fontSize:'.6rem', color:t.red,    fontFamily:'ui-monospace,monospace', fontWeight:600 }}>{trueRejected}<span style={{ fontSize:'.5rem', marginLeft:2, fontWeight:400, opacity:.8 }}>rejected</span></span>
+            {wrongEntry > 0 && <>
+              <span style={{ color:t.border, fontSize:'.5rem' }}>·</span>
+              <span style={{ fontSize:'.6rem', color:t.text3, fontFamily:'ui-monospace,monospace', fontWeight:600 }}>{wrongEntry}<span style={{ fontSize:'.5rem', marginLeft:2, fontWeight:400, opacity:.8 }}>re-billed</span></span>
+            </>}
+          </div>
+        </div>
+
+        {/* Purchased */}
+        <div className="sum-bar-item" style={{ display:'flex', alignItems:'center', gap:6, padding:'10px 18px', borderRight:`1px solid ${t.border}`, borderLeft:`3px solid ${t.green}` }}>
+          <span style={{ fontSize:'.75rem', fontFamily:'ui-monospace,monospace', fontWeight:600, color:t.green }}>{fmtNum(approved)}</span>
+          <span style={{ fontSize:'.58rem', color:t.text4, letterSpacing:'.08em', textTransform:'uppercase' }}>Purchased</span>
+        </div>
+
+        {/* Value */}
+        <div className="sum-bar-item" style={{ display:'flex', alignItems:'center', gap:6, padding:'10px 18px', borderRight:`1px solid ${t.border}`, borderLeft:`3px solid ${t.green}` }}>
+          <span style={{ fontSize:'.75rem', fontFamily:'ui-monospace,monospace', fontWeight:600, color:t.green }}>{fmtAmt(approvedValue)}</span>
+          <span style={{ fontSize:'.58rem', color:t.text4, letterSpacing:'.08em', textTransform:'uppercase' }}>Value</span>
+        </div>
+
+        {/* Conversion */}
+        <div className="sum-bar-item" style={{ display:'flex', alignItems:'center', gap:6, padding:'10px 18px', borderRight:`1px solid ${t.border}` }}>
+          <span style={{ fontSize:'.75rem', fontFamily:'ui-monospace,monospace', fontWeight:600, color:conversionPct>=50?t.green:t.orange }}>{conversionPct}%</span>
+          <span style={{ fontSize:'.58rem', color:t.text4, letterSpacing:'.08em', textTransform:'uppercase' }}>Conversion</span>
+        </div>
+
+        {/* Pending (only when > 0) */}
+        {pending > 0 && (
+          <div className="sum-bar-item" style={{ display:'flex', alignItems:'center', gap:6, padding:'10px 18px', borderRight:`1px solid ${t.border}` }}>
+            <span style={{ fontSize:'.75rem', fontFamily:'ui-monospace,monospace', fontWeight:600, color:t.orange }}>{fmtNum(pending)}</span>
+            <span style={{ fontSize:'.58rem', color:t.text4, letterSpacing:'.08em', textTransform:'uppercase' }}>Pending</span>
+          </div>
+        )}
+
+        {/* KYC Blocked (only when > 0) */}
+        {kycBlacklistedCnt > 0 && (
+          <div className="sum-bar-item" style={{ display:'flex', alignItems:'center', gap:6, padding:'10px 18px', borderRight:`1px solid ${t.border}` }}>
+            <span style={{ fontSize:'.75rem', fontFamily:'ui-monospace,monospace', fontWeight:600, color:t.purple }}>{fmtNum(kycBlacklistedCnt)}</span>
+            <span style={{ fontSize:'.58rem', color:t.text4, letterSpacing:'.08em', textTransform:'uppercase' }}>KYC Blocked</span>
+          </div>
+        )}
         {topTxn && (
           <div className="sum-bar-item" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 18px', marginLeft: 'auto', borderLeft: `1px solid ${t.border}` }}>
             <span style={{ fontSize: '.52rem', color: t.text4, letterSpacing: '.08em', textTransform: 'uppercase' }}>Top sale</span>
