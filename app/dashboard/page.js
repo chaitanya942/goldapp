@@ -105,14 +105,18 @@ function DashboardShell() {
     if (activeNav !== 'dashboard' && !canSee(activeNav)) return <AccessDenied />
     switch (activeNav) {
       case 'dashboard': {
-        // Telesales-only → their dedicated rich dashboard (charts, filters, call log)
-        const telesalesOnly = canSee('inbound-bot')
-          && !canSee('purchase-data') && !canSee('purchase-reports')
-          && !canSee('consignment-overview') && !canSee('user-management')
-          && !canSee('branch-management') && !canSee('live-market-rates') && !canSee('cal-table')
-        if (telesalesOnly) return <TelesalesDashboard />
+        const hasPurchase  = canSee('purchase-data') || canSee('purchase-reports')
+        const hasTelesales = canSee('inbound-bot')
 
-        // Everyone else → fully dynamic dashboard assembled from their permissions
+        // Telesales-only → dedicated rich dashboard (charts, filters, call log)
+        if (hasTelesales && !hasPurchase) return <TelesalesDashboard />
+
+        // Purchase access → DashboardHome: full purchase overview accordion +
+        // module hub cards (telesales, consignment, admin, rates shown if permitted)
+        if (hasPurchase) return <DashboardHome />
+
+        // No purchase, no telesales → DynamicDashboard assembles from whatever they have
+        // (consignment-only, admin-only, rates-only, etc.)
         return <DynamicDashboard />
       }
       case 'purchase-data':     return <PurchaseHub />
