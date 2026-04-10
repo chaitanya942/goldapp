@@ -176,6 +176,20 @@ function buildAncestorMap(nodes, ancestorPageKeys = []) {
 }
 buildAncestorMap(PERM_TREE)
 
+// Map each page.* key → all non-page descendant keys (for auto-disable when last child removed)
+const PAGE_DESCENDANTS = {}
+function buildPageDescendants(nodes, currentPage = null) {
+  for (const node of nodes) {
+    const pg = node.key?.startsWith('page.') ? node.key : currentPage
+    if (node.key && pg && node.key !== pg) {
+      if (!PAGE_DESCENDANTS[pg]) PAGE_DESCENDANTS[pg] = []
+      PAGE_DESCENDANTS[pg].push(node.key)
+    }
+    if (node.children?.length) buildPageDescendants(node.children, pg)
+  }
+}
+buildPageDescendants(PERM_TREE)
+
 const ALL_TREE_KEYS = PERM_TREE.flatMap(getAllKeys)
 const TOTAL_PERMS   = ALL_TREE_KEYS.length
 
@@ -230,6 +244,19 @@ function searchTree(nodes, q, path = []) {
   })
   return results
 }
+
+// Collect all leaf nodes for filter mode (flat list)
+function collectLeaves(nodes, path = []) {
+  const results = []
+  nodes.forEach(node => {
+    const currentPath = [...path, node.label]
+    const isLeaf = !node.children || node.children.length === 0
+    if (isLeaf && node.key) results.push({ node, path: currentPath })
+    else if (node.children) results.push(...collectLeaves(node.children, currentPath))
+  })
+  return results
+}
+const ALL_LEAVES = collectLeaves(PERM_TREE)
 
 // ── Backward-compat export ────────────────────────────────────────────────────
 export const PERMISSION_REGISTRY = [
@@ -391,8 +418,9 @@ export default function RoleManagement() {
     return s
   })
 
-  const [search,  setSearch]  = useState('')
-  const [copyFrom, setCopyFrom] = useState('')
+  const [search,     setSearch]     = useState('')
+  const [permFilter, setPermFilter] = useState('all')  // 'all' | 'enabled' | 'disabled'
+  const [copyFrom,   setCopyFrom]   = useState('')
 
   const [showAdd,  setShowAdd]  = useState(false)
   const [newLabel, setNewLabel] = useState('')
@@ -458,10 +486,34 @@ export default function RoleManagement() {
   }, [users])
 
   const roleUsers     = useMemo(() => users.filter(u => u.role === selected), [users, selected])
+
+  // Validation warnings — shown when role has unsaved dirty changes
+  const saveWarnings  = useMemo(() => {
+    if (!isDirty) return []
+    const ws = []
+    const enabledPageCount = ALL_TREE_KEYS.filter(k => k.startsWith('page.') && selectedPerms.has(k)).length
+    if (selectedPerms.size === 0)
+      ws.push({ type: 'error', msg: 'No permissions selected — users with this role will see a blank screen' })
+    else if (enabledPageCount === 0)
+      ws.push({ type: 'warn', msg: 'No pages are enabled — users will have no sidebar navigation' })
+    if (roleUsers.length > 0)
+      ws.push({ type: 'info', msg: `${roleUsers.length} user${roleUsers.length > 1 ? 's' : ''} with this role will be affected immediately on save` })
+    return ws
+  }, [isDirty, selectedPerms, roleUsers])
+
   const searchResults = useMemo(() => {
     if (!search.trim()) return null
     return searchTree(PERM_TREE, search.toLowerCase())
   }, [search])
+
+  const filterResults = useMemo(() => {
+    if (permFilter === 'all') return null
+    return ALL_LEAVES.filter(({ node }) => {
+      const on = selectedPerms.has(node.key)
+      return permFilter === 'enabled' ? on : !on
+    })
+  }, [permFilter, selectedPerms])
+
   const visibleRows   = useMemo(() => flattenVisible(PERM_TREE, expanded), [expanded])
 
   /* ── Actions ──────────────────────────────────────────────────────────────── */
@@ -479,12 +531,19 @@ export default function RoleManagement() {
       keys.forEach(k => {
         if (forceOn) {
           next.add(k)
-          // Auto-enable ancestor page.* keys so sidebar always shows the parent page
           KEY_PAGE_ANCESTORS[k]?.forEach(pk => next.add(pk))
         } else {
           next.delete(k)
         }
       })
+      if (!forceOn) {
+        // Auto-disable any page.* key whose last descendant was just removed
+        const affectedPages = new Set(keys.flatMap(k => KEY_PAGE_ANCESTORS[k] || []))
+        affectedPages.forEach(pk => {
+          const descendants = PAGE_DESCENDANTS[pk] || []
+          if (!descendants.some(dk => next.has(dk))) next.delete(pk)
+        })
+      }
       return { ...prev, [selected]: next }
     })
     setDirty(prev => ({ ...prev, [selected]: true }))
@@ -705,6 +764,26 @@ export default function RoleManagement() {
             {rightTab === 'perms' && (
               <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
 
+                {/* ── Validation warnings ── */}
+                {saveWarnings.length > 0 && (
+                  <div style={{ flexShrink: 0, borderBottom: `1px solid ${t.border}` }}>
+                    {saveWarnings.map((w, i) => {
+                      const colors = {
+                        error: { bg: t.redDim,  border: t.red  + '40', icon: '⊘', text: t.red  },
+                        warn:  { bg: t.goldDim, border: t.gold + '40', icon: '⚠', text: t.gold },
+                        info:  { bg: t.card2,   border: t.border,      icon: 'ℹ', text: t.text3 },
+                      }
+                      const c = colors[w.type]
+                      return (
+                        <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 18px', background: c.bg, borderBottom: i < saveWarnings.length - 1 ? `1px solid ${c.border}` : 'none' }}>
+                          <span style={{ fontSize: '.72rem', color: c.text, flexShrink: 0 }}>{c.icon}</span>
+                          <span style={{ fontSize: '.63rem', color: c.text, lineHeight: 1.4 }}>{w.msg}</span>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+
                 {/* Toolbar */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 18px', borderBottom: `1px solid ${t.border}`, background: t.card2, flexShrink: 0, flexWrap: 'wrap' }}>
                   <div style={{ position: 'relative', flex: 1, minWidth: 160 }}>
@@ -724,7 +803,53 @@ export default function RoleManagement() {
                     onMouseLeave={e => { e.currentTarget.style.borderColor = t.border2; e.currentTarget.style.color = t.text3 }}>
                     ↺ Defaults
                   </button>
+
+                  {/* Filter pills */}
+                  <div style={{ display: 'flex', gap: 3, flexShrink: 0, background: t.card3, borderRadius: 8, padding: 3, border: `1px solid ${t.border}` }}>
+                    {[{ v: 'all', label: 'All' }, { v: 'enabled', label: 'On' }, { v: 'disabled', label: 'Off' }].map(f => (
+                      <button key={f.v} onClick={() => setPermFilter(f.v)} style={{
+                        padding: '4px 10px', borderRadius: 6, fontSize: '.6rem', fontWeight: permFilter === f.v ? 700 : 400,
+                        background: permFilter === f.v ? (f.v === 'enabled' ? t.greenDim : f.v === 'disabled' ? t.card2 : t.gold) : 'transparent',
+                        color: permFilter === f.v ? (f.v === 'enabled' ? t.green : f.v === 'disabled' ? t.text3 : '#000') : t.text4,
+                        border: 'none', cursor: 'pointer', transition: 'all .12s',
+                      }}>{f.label}</button>
+                    ))}
+                  </div>
                 </div>
+
+                {/* ── Filter results ── */}
+                {!searchResults && filterResults ? (
+                  <div style={{ flex: 1, overflowY: 'auto' }}>
+                    {filterResults.length === 0 ? (
+                      <div style={{ padding: 40, textAlign: 'center', color: t.text4, fontSize: '.72rem' }}>
+                        No {permFilter === 'enabled' ? 'enabled' : 'disabled'} permissions
+                      </div>
+                    ) : (
+                      <>
+                        <div style={{ padding: '10px 22px 6px', fontSize: '.58rem', color: t.text4, letterSpacing: '.08em' }}>
+                          {filterResults.length} permission{filterResults.length !== 1 ? 's' : ''} {permFilter}
+                        </div>
+                        {filterResults.map(({ node, path }) => {
+                          const on = selectedPerms.has(node.key)
+                          return (
+                            <div key={node.key} onClick={() => toggleKey(node.key)}
+                              style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '11px 22px', borderBottom: `1px solid ${t.border}20`, cursor: 'pointer', transition: 'background .1s' }}
+                              onMouseEnter={e => e.currentTarget.style.background = t.card2}
+                              onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                              <TriCheckbox state={on ? 'on' : 'off'} onClick={() => toggleKey(node.key)} t={t} />
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <span style={{ fontSize: '.74rem', color: on ? t.text1 : t.text3, fontWeight: on ? 500 : 400 }}>{node.label}</span>
+                                {node.desc && <div style={{ fontSize: '.6rem', color: t.text4, marginTop: 2 }}>{node.desc}</div>}
+                                <div style={{ fontSize: '.52rem', color: t.text4, opacity: .6, marginTop: 2 }}>{path.slice(0, -1).join(' › ')}</div>
+                              </div>
+                              <span style={{ fontSize: '.48rem', color: t.text4, fontFamily: 'ui-monospace,monospace', opacity: .6 }}>{node.key}</span>
+                            </div>
+                          )
+                        })}
+                      </>
+                    )}
+                  </div>
+                ) : null}
 
                 {/* ── Search results ── */}
                 {searchResults ? (
@@ -753,7 +878,7 @@ export default function RoleManagement() {
                       </>
                     )}
                   </div>
-                ) : (
+                ) : (!filterResults && (
                   /* ── Permission Tree ── */
                   <div style={{ flex: 1, overflowY: 'auto' }}>
                     {visibleRows.map(({ node, depth, id, isLeaf }, rowIndex) => {
@@ -804,6 +929,9 @@ export default function RoleManagement() {
 
                       /* ── DEPTH 1: Page / Submodule ── */
                       if (isPage) {
+                        // Page key is "auto-implied" if it's in selectedPerms but only because children were enabled,
+                        // not because the user clicked the full page (i.e. state is partial, not full 'on')
+                        const isAutoImplied = node.key?.startsWith('page.') && selectedPerms.has(node.key) && state === 'partial'
                         return (
                           <div key={id}
                             onClick={() => isLeaf ? toggleNode(node) : toggleExpand(id)}
@@ -825,6 +953,11 @@ export default function RoleManagement() {
                                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                                   <span style={{ fontSize: '.77rem', fontWeight: state !== 'off' ? 600 : 400, color: state !== 'off' ? t.text1 : t.text3 }}>{node.label}</span>
                                   {node.key && <span style={{ fontSize: '.49rem', color: t.text4, fontFamily: 'ui-monospace,monospace', background: t.card2, borderRadius: 3, padding: '1px 5px', border: `1px solid ${t.border}` }}>{node.key}</span>}
+                                  {isAutoImplied && (
+                                    <span title="Page is accessible because child permissions are enabled" style={{ fontSize: '.44rem', color: t.gold, background: t.goldDim, borderRadius: 3, padding: '1px 5px', border: `1px solid ${t.gold}35`, letterSpacing: '.04em', fontWeight: 600 }}>
+                                      partial access
+                                    </span>
+                                  )}
                                 </div>
                                 {node.desc && isLeaf && <div style={{ fontSize: '.6rem', color: t.text4, marginTop: 1 }}>{node.desc}</div>}
                               </div>
@@ -891,7 +1024,7 @@ export default function RoleManagement() {
                     })}
                     <div style={{ height: 28 }} />
                   </div>
-                )}
+                ))}
               </div>
             )}
 

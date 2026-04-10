@@ -145,8 +145,9 @@ function SyncButton({ syncing, onSync, t }) {
 
 // ─── View As Dropdown ────────────────────────────────────────────────────────
 function ViewAsDropdown({ previewRole, setPreviewRole, t }) {
-  const [open,  setOpen]  = useState(false)
-  const [roles, setRoles] = useState([])
+  const [open,      setOpen]      = useState(false)
+  const [roles,     setRoles]     = useState([])
+  const [switching, setSwitching] = useState(false)
   const ref = useRef(null)
 
   useEffect(() => {
@@ -162,30 +163,50 @@ function ViewAsDropdown({ previewRole, setPreviewRole, t }) {
     return () => document.removeEventListener('mousedown', handler)
   }, [open])
 
-  const activeRole = roles.find(r => r.name === previewRole)
+  const handleSelect = async (roleName) => {
+    setOpen(false)
+    setSwitching(true)
+    await setPreviewRole(roleName)
+    setSwitching(false)
+  }
 
-  if (previewRole) {
+  const handleExit = async () => {
+    setSwitching(true)
+    await setPreviewRole(null)
+    setSwitching(false)
+  }
+
+  const activeRole = roles.find(r => r.name === previewRole)
+  const color = activeRole?.color || '#c9a84c'
+
+  if (previewRole || switching) {
     return (
       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
         <div style={{
           height: 36, padding: '0 12px', borderRadius: 10,
-          background: `${activeRole?.color || '#c9a84c'}18`,
-          border: `1px solid ${activeRole?.color || '#c9a84c'}50`,
+          background: `${color}18`, border: `1px solid ${color}50`,
           display: 'flex', alignItems: 'center', gap: 8,
-          animation: 'previewPulse 2.5s ease-in-out infinite',
+          animation: switching ? 'none' : 'previewPulse 2.5s ease-in-out infinite',
+          opacity: switching ? 0.7 : 1, transition: 'opacity .2s',
         }}>
-          <span style={{ fontSize: 11, color: activeRole?.color || '#c9a84c' }}>👁</span>
-          <span style={{ fontSize: '.68rem', color: activeRole?.color || '#c9a84c', fontWeight: 600 }}>
-            {activeRole?.label || previewRole}
+          {switching ? (
+            <svg width="13" height="13" viewBox="0 0 32 32" style={{ animation: 'spin 0.9s linear infinite', flexShrink: 0 }}>
+              <circle cx="16" cy="16" r="11" fill="none" stroke={color} strokeWidth="2.5" strokeDasharray="16 52" strokeLinecap="round"/>
+            </svg>
+          ) : (
+            <span style={{ fontSize: 11, color }}>👁</span>
+          )}
+          <span style={{ fontSize: '.68rem', color, fontWeight: 600 }}>
+            {switching ? 'Switching…' : (activeRole?.label || previewRole)}
           </span>
         </div>
-        <button onClick={() => setPreviewRole(null)} style={{
+        <button onClick={handleExit} disabled={switching} style={{
           height: 36, width: 36, borderRadius: 10, border: `1px solid ${t.border}`,
-          background: t.pillBg, color: t.text3, cursor: 'pointer', fontSize: 14,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          transition: 'all .15s',
+          background: t.pillBg, color: t.text3, cursor: switching ? 'not-allowed' : 'pointer',
+          fontSize: 14, display: 'flex', alignItems: 'center', justifyContent: 'center',
+          transition: 'all .15s', opacity: switching ? 0.5 : 1,
         }}
-          onMouseEnter={e => { e.currentTarget.style.borderColor = '#e05555'; e.currentTarget.style.color = '#e05555' }}
+          onMouseEnter={e => { if (!switching) { e.currentTarget.style.borderColor = '#e05555'; e.currentTarget.style.color = '#e05555' } }}
           onMouseLeave={e => { e.currentTarget.style.borderColor = t.border; e.currentTarget.style.color = t.text3 }}
           title="Exit preview"
         >✕</button>
@@ -214,7 +235,7 @@ function ViewAsDropdown({ previewRole, setPreviewRole, t }) {
 
       {open && (
         <div style={{
-          position: 'absolute', top: 'calc(100% + 6px)', right: 0, minWidth: 200,
+          position: 'absolute', top: 'calc(100% + 6px)', right: 0, minWidth: 210,
           background: t.bg, border: `1px solid ${t.border}`, borderRadius: 12,
           boxShadow: '0 8px 32px rgba(0,0,0,.5)', overflow: 'hidden',
           animation: 'fadeSlideDown 0.14s ease both', zIndex: 100,
@@ -222,8 +243,11 @@ function ViewAsDropdown({ previewRole, setPreviewRole, t }) {
           <div style={{ padding: '10px 14px 6px', fontSize: '.55rem', color: t.text4, letterSpacing: '.14em', textTransform: 'uppercase', fontWeight: 700 }}>
             Preview as role
           </div>
+          {roles.length === 0 && (
+            <div style={{ padding: '12px 14px', fontSize: '.65rem', color: t.text4 }}>Loading roles…</div>
+          )}
           {roles.map(r => (
-            <button key={r.name} onClick={() => { setPreviewRole(r.name); setOpen(false) }} style={{
+            <button key={r.name} onClick={() => handleSelect(r.name)} style={{
               width: '100%', textAlign: 'left', padding: '9px 14px',
               border: 'none', background: 'transparent', cursor: 'pointer',
               display: 'flex', alignItems: 'center', gap: 10, transition: 'background .12s',
