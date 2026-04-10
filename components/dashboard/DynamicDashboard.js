@@ -24,7 +24,7 @@ const greeting = () => { const h = istNow().getHours(); return h < 12 ? 'Good mo
 
 // ── Shared shimmer skeleton ───────────────────────────────────────────────────
 const Shimmer = ({ h = 24, w = '60%', t }) => (
-  <div style={{ height: h, width: w, background: `linear-gradient(90deg,${t.border},${t.border2},${t.border})`, backgroundSize: '200% 100%', borderRadius: 6, animation: 'shimmer 1.5s infinite' }} />
+  <div style={{ height: h, width: w, background: `linear-gradient(90deg,${t.border2},${t.border},${t.border2})`, backgroundSize: '200% 100%', borderRadius: 6, animation: 'shimmer 1.5s infinite', opacity: .9 }} />
 )
 
 // ── KPI tile ─────────────────────────────────────────────────────────────────
@@ -88,18 +88,8 @@ function MiniBarRow({ label, value, max, color, sub, t }) {
   )
 }
 
-// ── No-widget placeholder ─────────────────────────────────────────────────────
-function NoWidgets({ t, label }) {
-  return (
-    <div style={{ padding: '14px 0', display: 'flex', alignItems: 'center', gap: 10 }}>
-      <div style={{ width: 6, height: 6, borderRadius: '50%', background: t.border2, flexShrink: 0 }} />
-      <div style={{ fontSize: 12, color: t.text4 }}>{label}</div>
-    </div>
-  )
-}
-
 // ══ PURCHASE SECTION ══════════════════════════════════════════════════════════
-// Element keys used:
+// Element keys — default to visible when no module-level element config exists:
 //   element.dashboard.kpi_cards    → today + MTD KPI grid
 //   element.reports.charts         → 14-day bill trend chart
 //   element.dashboard.top_branches → top branches by MTD weight
@@ -156,7 +146,7 @@ function PurchaseSection({ t, setActiveNav, canSee }) {
       ctaLabel={canSeeData ? 'Open Purchase Data' : 'Open Reports'}
     >
       {!hasWidgets ? (
-        <NoWidgets t={t} label="Purchase access granted — enable KPI Cards, Charts or Top Branches in Role Management to see insights here." />
+        <div style={{ padding: '10px 0', fontSize: 12, color: t.text4 }}>No dashboard widgets configured for this role.</div>
       ) : (
         <>
           {/* KPI grid */}
@@ -329,7 +319,7 @@ function ConsignmentSection({ t, setActiveNav, canSee }) {
       ctaLabel="Open Branch Stock"
     >
       {!hasWidgets ? (
-        <NoWidgets t={t} label="Consignment access granted — enable Region Cards or Branch Stock Table in Role Management to see insights here." />
+        <div style={{ padding: '10px 0', fontSize: 12, color: t.text4 }}>No dashboard widgets configured for this role.</div>
       ) : (
         <>
           {showKpis && (
