@@ -104,10 +104,31 @@ function DashboardShell() {
     if (activeNav !== 'dashboard' && !canSee(activeNav)) return <AccessDenied />
     switch (activeNav) {
       case 'dashboard': {
-        // Telesales-only roles get the full dedicated telesales dashboard
-        const hasPurchase = canSee('purchase-data') || canSee('purchase-reports')
-        const hasTelesales = canSee('inbound-bot')
-        if (hasTelesales && !hasPurchase) return <TelesalesDashboard />
+        const hasPurchaseData    = canSee('purchase-data')
+        const hasPurchaseReports = canSee('purchase-reports')
+        const hasTelesales       = canSee('inbound-bot')
+        const hasConsignment     = canSee('consignment-overview') || canSee('consignment-data') || canSee('consignment-report') || canSee('consignment-summary')
+        const hasSales           = canSee('cal-table') || canSee('live-market-rates')
+        const hasAdmin           = canSee('user-management') || canSee('branch-management') || canSee('company-settings') || canSee('branch-employees')
+
+        // Count distinct module groups the role has
+        const moduleGroups = [hasPurchaseData, hasPurchaseReports, hasTelesales, hasConsignment, hasSales, hasAdmin].filter(Boolean).length
+
+        // Single-module roles: drop them straight into that module's full UI as their home
+        if (moduleGroups === 1) {
+          if (hasTelesales)                    return <TelesalesDashboard />
+          if (hasPurchaseData)                 return <PurchaseHub />
+          if (hasPurchaseReports)              return <ReportsHub />
+          if (canSee('consignment-overview'))  return <ConsignmentOverview />
+          if (canSee('consignment-data'))      return <ConsignmentData />
+          if (canSee('live-market-rates'))     return <LiveMarketRates />
+          if (canSee('cal-table'))             return <CalTable />
+        }
+
+        // Telesales + no purchase → dedicated telesales home regardless of other small perms
+        if (hasTelesales && !hasPurchaseData && !hasPurchaseReports) return <TelesalesDashboard />
+
+        // Multi-module roles → DashboardHome (module cards grid + purchase overview)
         return <DashboardHome />
       }
       case 'purchase-data':     return <PurchaseHub />
