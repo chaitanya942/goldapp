@@ -360,7 +360,7 @@ function CoveragePill({ onCount, total, state, t }) {
                               MAIN COMPONENT
 ══════════════════════════════════════════════════════════════════════════════ */
 export default function RoleManagement() {
-  const { theme, loadPermissionsForRole, role: myRole } = useApp()
+  const { theme, loadPermissionsForRole, role: myRole, previewRole, setPreviewRole } = useApp()
   const t = THEMES[theme] || THEMES.dark
 
   const [roles,      setRoles]      = useState([])
@@ -504,6 +504,7 @@ export default function RoleManagement() {
       setDirty(prev => ({ ...prev, [selected]: false }))
       setSaveMsg('Saved'); setTimeout(() => setSaveMsg(null), 2200)
       if (myRole === selected) loadPermissionsForRole(selected)
+      if (previewRole === selected) setPreviewRole(selected)  // refresh preview snapshot
     } catch (e) { setSaveMsg('Error: ' + e.message) } finally { setSaving(false) }
   }
 
