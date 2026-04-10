@@ -54,7 +54,7 @@ const SORT_OPTIONS = [
 ]
 
 export default function ConsignmentOverview() {
-  const { theme, setActiveNav } = useApp()
+  const { theme, setActiveNav, canSee } = useApp()
   const t = THEMES[theme]
 
   const [data,         setData]         = useState([])
@@ -148,7 +148,7 @@ export default function ConsignmentOverview() {
       </div>
 
       {/* ── Region Flashcards ── */}
-      <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+      {canSee('element.consignment-overview.region_cards') && <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
         {/* All Regions card */}
         <div onClick={() => setActiveRegion(null)}
           style={{ ...card, padding: '12px 18px', cursor: 'pointer', minWidth: '130px', flexShrink: 0,
@@ -185,7 +185,7 @@ export default function ConsignmentOverview() {
             </div>
           )
         })}
-      </div>
+      </div>}
 
       {/* ── Summary KPIs ── */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '10px' }}>
@@ -217,23 +217,27 @@ export default function ConsignmentOverview() {
 
       {/* ── Search + Sort ── */}
       <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-        <div style={{ position: 'relative', flex: 1, maxWidth: '320px' }}>
-          <span style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: t.text4, fontSize: '12px', pointerEvents: 'none' }}>⌕</span>
-          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search branch..."
-            style={{ ...inp, paddingLeft: '28px', width: '100%' }} />
-        </div>
-        <div style={{ display: 'flex', gap: '4px', marginLeft: 'auto', flexWrap: 'wrap' }}>
-          {SORT_OPTIONS.map(o => (
-            <button key={o.key} onClick={() => setSortBy(o.key)}
-              style={{ background: sortBy === o.key ? `${t.gold}20` : 'transparent', border: `1px solid ${sortBy === o.key ? t.gold : t.border2}`, borderRadius: '6px', padding: '5px 10px', fontSize: '11px', color: sortBy === o.key ? t.gold : t.text3, cursor: 'pointer', transition: 'all .1s' }}>
-              {o.label}
-            </button>
-          ))}
-        </div>
+        {canSee('element.consignment-overview.search') && (
+          <div style={{ position: 'relative', flex: 1, maxWidth: '320px' }}>
+            <span style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: t.text4, fontSize: '12px', pointerEvents: 'none' }}>⌕</span>
+            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search branch..."
+              style={{ ...inp, paddingLeft: '28px', width: '100%' }} />
+          </div>
+        )}
+        {canSee('element.consignment-overview.sort') && (
+          <div style={{ display: 'flex', gap: '4px', marginLeft: 'auto', flexWrap: 'wrap' }}>
+            {SORT_OPTIONS.map(o => (
+              <button key={o.key} onClick={() => setSortBy(o.key)}
+                style={{ background: sortBy === o.key ? `${t.gold}20` : 'transparent', border: `1px solid ${sortBy === o.key ? t.gold : t.border2}`, borderRadius: '6px', padding: '5px 10px', fontSize: '11px', color: sortBy === o.key ? t.gold : t.text3, cursor: 'pointer', transition: 'all .1s' }}>
+                {o.label}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* ── Table ── */}
-      <div style={{ ...card, overflow: 'hidden' }}>
+      {canSee('element.consignment-overview.table') && <div style={{ ...card, overflow: 'hidden' }}>
         {loading ? (
           <div style={{ padding: '60px', display: 'flex', justifyContent: 'center' }}><GoldSpinner size={32} /></div>
         ) : filtered.length === 0 ? (
@@ -344,7 +348,7 @@ export default function ConsignmentOverview() {
             </table>
           </div>
         )}
-      </div>
+      </div>}
 
       {/* Ship Before note */}
       <div style={{ fontSize: '10px', color: t.text4, textAlign: 'right' }}>

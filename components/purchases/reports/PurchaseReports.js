@@ -179,8 +179,17 @@ function FilterChip({ label, onRemove, color }) {
 }
 
 // ── MAIN ──
+const SECTION_KEY_MAP = {
+  charts:       'element.reports.charts',
+  distribution: 'element.reports.distribution',
+  branches:     'element.reports.branch_table',
+  sameday:      'element.reports.same_day',
+  compare:      'element.reports.period_compare',
+  crm:          'element.reports.crm_insights',
+}
+
 export default function PurchaseReports() {
-  const { theme } = useApp()
+  const { theme, canSee } = useApp()
   const t = THEMES[theme] || THEMES.dark
   const s = getStyles(t)
 
@@ -351,8 +360,10 @@ export default function PurchaseReports() {
   const setQuickRange = (days) => { const to = istNow(); const fr = istNow(); fr.setDate(fr.getDate() - days); setToDate(istStr(to)); setFromDate(istStr(fr)) }
   const setThisMonth  = () => { const now = istNow(); setFromDate(`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-01`); setToDate(istStr(now)) }
 
-  const hasFilters  = fromDate || toDate || filterBranch || filterTxn || filterState
-  const showSection = (key) => !activeSection || activeSection === key
+  const hasFilters    = fromDate || toDate || filterBranch || filterTxn || filterState
+  const canSeeSection = (key) => canSee(SECTION_KEY_MAP[key] ?? key)
+  const showSection   = (key) => canSeeSection(key) && (!activeSection || activeSection === key)
+  const visibleSections = SECTIONS.filter(sec => canSeeSection(sec.key))
 
   const k = kpis
 
@@ -540,7 +551,7 @@ export default function PurchaseReports() {
         >
           All
         </button>
-        {SECTIONS.map(sec => (
+        {visibleSections.map(sec => (
           <button
             key={sec.key}
             onClick={() => setActiveSection(activeSection === sec.key ? null : sec.key)}

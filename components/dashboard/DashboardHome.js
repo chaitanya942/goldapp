@@ -99,7 +99,13 @@ export default function DashboardHome() {
   const { theme, userProfile, canSee } = useApp()
   const t = THEMES[theme]
 
-  const showPurchase = canSee('purchase-data') || canSee('purchase-reports')
+  const showPurchase       = canSee('purchase-data') || canSee('purchase-reports')
+  const showKpiCards       = canSee('element.dashboard.kpi_cards')
+  const showPeriodSelector = canSee('element.dashboard.period_selector')
+  const showStateTable     = canSee('element.dashboard.state_table')
+  const showTopBranches    = canSee('element.dashboard.top_branches')
+  const showRegionCards    = canSee('element.dashboard.region_cards')
+  const visiblePanels      = [showStateTable, showRegionCards, showTopBranches].filter(Boolean).length
 
   const COLOR_PALETTE = [t.gold, t.green, t.blue, t.purple, t.orange, t.red]
 
@@ -241,15 +247,15 @@ export default function DashboardHome() {
 
           {overviewOpen && <>
             {/* Period tabs — stop click from toggling collapse */}
-            <div onClick={e=>e.stopPropagation()} style={{ display:'flex', gap:3, padding:4, background:t.card, borderRadius:10, border:`1px solid ${t.border}`, boxShadow:'inset 0 1px 3px rgba(0,0,0,.3)' }}>
+            {showPeriodSelector && <div onClick={e=>e.stopPropagation()} style={{ display:'flex', gap:3, padding:4, background:t.card, borderRadius:10, border:`1px solid ${t.border}`, boxShadow:'inset 0 1px 3px rgba(0,0,0,.3)' }}>
               {PERIODS.map(({ key, label }) => (
                 <button key={key} onClick={()=>setPeriod(key)} style={{ padding:'6px 14px', borderRadius:7, border:'none', cursor:'pointer', background:period===key?`linear-gradient(135deg,${t.gold},${t.gold}cc)`:'transparent', color:period===key?'#0a0a0a':t.text3, fontSize:12, fontWeight:period===key?700:500, letterSpacing:'.03em', transition:'all .2s cubic-bezier(.34,1.56,.64,1)', boxShadow:period===key?`0 2px 8px ${t.gold}40`:'none', whiteSpace:'nowrap' }}>
                   {label}
                 </button>
               ))}
-            </div>
+            </div>}
 
-            <div style={{ fontSize:12, color:t.text3, fontStyle:'italic' }}>{!loading && dateLabel}</div>
+            {showPeriodSelector && <div style={{ fontSize:12, color:t.text3, fontStyle:'italic' }}>{!loading && dateLabel}</div>}
           </>}
 
           {/* Chevron */}
@@ -262,50 +268,53 @@ export default function DashboardHome() {
         <div className={`overview-body${overviewOpen ? '' : ' collapsed'}`}>
           <div style={{ padding: overviewOpen ? '24px 24px 28px' : '0' }}>
 
-            {/* KPI Row 1 */}
-            <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:14, marginBottom:14 }}>
-              <KpiCard t={t} delay={0}   label="Total Bills"          icon="🧾" color={t.gold}  loading={loading} value={hasData?Number(kpis.total_count).toLocaleString('en-IN'):'—'} sub={periodLabel}/>
-              <KpiCard t={t} delay={60}  label="Total Net Weight"     icon="⚖️" color={t.gold}  loading={loading} value={hasData?`${fmt(kpis.total_net)}g`:'—'} sub="Net weight purchased"/>
-              <KpiCard t={t} delay={120} label="Gross Purchase Value" icon="₹"  color={t.green} loading={loading} value={hasData?fmtCr(kpis.total_value):'—'} sub="Before service charges"/>
-              <KpiCard t={t} delay={180} label="Avg Rate / Gram"      icon="📈" color={t.green} loading={loading} value={hasData&&kpis.avg_rate_per_gram>0?`₹${Number(kpis.avg_rate_per_gram).toLocaleString('en-IN',{maximumFractionDigits:0})}/g`:'—'} sub="Gross value ÷ net weight"/>
-            </div>
+            {/* KPI Rows — gated by element.dashboard.kpi_cards */}
+            {showKpiCards && <>
+              {/* KPI Row 1 */}
+              <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:14, marginBottom:14 }}>
+                <KpiCard t={t} delay={0}   label="Total Bills"          icon="🧾" color={t.gold}  loading={loading} value={hasData?Number(kpis.total_count).toLocaleString('en-IN'):'—'} sub={periodLabel}/>
+                <KpiCard t={t} delay={60}  label="Total Net Weight"     icon="⚖️" color={t.gold}  loading={loading} value={hasData?`${fmt(kpis.total_net)}g`:'—'} sub="Net weight purchased"/>
+                <KpiCard t={t} delay={120} label="Gross Purchase Value" icon="₹"  color={t.green} loading={loading} value={hasData?fmtCr(kpis.total_value):'—'} sub="Before service charges"/>
+                <KpiCard t={t} delay={180} label="Avg Rate / Gram"      icon="📈" color={t.green} loading={loading} value={hasData&&kpis.avg_rate_per_gram>0?`₹${Number(kpis.avg_rate_per_gram).toLocaleString('en-IN',{maximumFractionDigits:0})}/g`:'—'} sub="Gross value ÷ net weight"/>
+              </div>
 
-            {/* KPI Row 2 */}
-            <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:14, marginBottom:22 }}>
-              <KpiCard t={t} delay={240} label="Avg Purity"         icon="✦" color={t.purple} loading={loading} value={hasData?fmtPct(kpis.avg_purity):'—'} sub="Weighted by net weight"/>
-              <KpiCard t={t} delay={300} label="Avg Wt / Bill"      icon="◈" color={t.text2}  loading={loading} value={hasData?`${fmt(kpis.avg_net_per_txn)}g`:'—'} sub="Net weight ÷ bills"/>
-              <KpiCard t={t} delay={360} label="Avg Service Charge" icon="%" color={t.red}    loading={loading} value={hasData?`${Number(kpis.avg_service_charge_pct||0).toFixed(2)}%`:'—'} sub="Service charge ÷ gross value"/>
-              <KpiCard t={t} delay={420} label="Active Branches"    icon="⬡" color={t.blue}   loading={loading} value={hasData?`${kpis.branch_count} / ${totalBranches}`:`— / ${totalBranches}`} sub={hasData?'branches purchased this period':'No purchases this period'}/>
-            </div>
+              {/* KPI Row 2 */}
+              <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:14, marginBottom:22 }}>
+                <KpiCard t={t} delay={240} label="Avg Purity"         icon="✦" color={t.purple} loading={loading} value={hasData?fmtPct(kpis.avg_purity):'—'} sub="Weighted by net weight"/>
+                <KpiCard t={t} delay={300} label="Avg Wt / Bill"      icon="◈" color={t.text2}  loading={loading} value={hasData?`${fmt(kpis.avg_net_per_txn)}g`:'—'} sub="Net weight ÷ bills"/>
+                <KpiCard t={t} delay={360} label="Avg Service Charge" icon="%" color={t.red}    loading={loading} value={hasData?`${Number(kpis.avg_service_charge_pct||0).toFixed(2)}%`:'—'} sub="Service charge ÷ gross value"/>
+                <KpiCard t={t} delay={420} label="Active Branches"    icon="⬡" color={t.blue}   loading={loading} value={hasData?`${kpis.branch_count} / ${totalBranches}`:`— / ${totalBranches}`} sub={hasData?'branches purchased this period':'No purchases this period'}/>
+              </div>
 
-            {/* Purchase Mix */}
-            {!loading && hasData && (
-              <div style={{ background:`linear-gradient(135deg,${t.card},${t.card2})`, border:`1px solid ${t.border}`, borderRadius:14, padding:'18px 22px', marginBottom:22 }}>
-                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:14 }}>
-                  <div style={{ fontSize:13, color:t.text2, letterSpacing:'.1em', textTransform:'uppercase', fontWeight:600 }}>Purchase Mix</div>
-                  <div style={{ display:'flex', gap:20 }}>
-                    {[{ color:t.gold, label:'Physical', pct:physPct, count:kpis.physical_count },{ color:'#e07820', label:'Takeover', pct:takePct, count:kpis.takeover_count }].map(item=>(
-                      <div key={item.label} style={{ display:'flex', alignItems:'center', gap:7 }}>
-                        <div style={{ width:10, height:10, borderRadius:3, background:item.color, boxShadow:`0 0 6px ${item.color}60` }}/>
-                        <span style={{ fontSize:13, color:t.text2, fontWeight:500 }}>{item.label}</span>
-                        <span style={{ fontSize:13, color:item.color, fontWeight:700 }}>{item.pct.toFixed(1)}%</span>
-                        <span style={{ fontSize:12, color:t.text4 }}>({Number(item.count||0).toLocaleString('en-IN')} bills)</span>
-                      </div>
-                    ))}
+              {/* Purchase Mix */}
+              {!loading && hasData && (
+                <div style={{ background:`linear-gradient(135deg,${t.card},${t.card2})`, border:`1px solid ${t.border}`, borderRadius:14, padding:'18px 22px', marginBottom:22 }}>
+                  <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:14 }}>
+                    <div style={{ fontSize:13, color:t.text2, letterSpacing:'.1em', textTransform:'uppercase', fontWeight:600 }}>Purchase Mix</div>
+                    <div style={{ display:'flex', gap:20 }}>
+                      {[{ color:t.gold, label:'Physical', pct:physPct, count:kpis.physical_count },{ color:'#e07820', label:'Takeover', pct:takePct, count:kpis.takeover_count }].map(item=>(
+                        <div key={item.label} style={{ display:'flex', alignItems:'center', gap:7 }}>
+                          <div style={{ width:10, height:10, borderRadius:3, background:item.color, boxShadow:`0 0 6px ${item.color}60` }}/>
+                          <span style={{ fontSize:13, color:t.text2, fontWeight:500 }}>{item.label}</span>
+                          <span style={{ fontSize:13, color:item.color, fontWeight:700 }}>{item.pct.toFixed(1)}%</span>
+                          <span style={{ fontSize:12, color:t.text4 }}>({Number(item.count||0).toLocaleString('en-IN')} bills)</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <div style={{ display:'flex', height:10, borderRadius:100, overflow:'hidden', gap:2, boxShadow:'inset 0 1px 3px rgba(0,0,0,.4)' }}>
+                    <div style={{ width:`${physPct}%`, background:`linear-gradient(90deg,${t.gold}aa,${t.gold})`, borderRadius:'100px 0 0 100px', transition:'width .8s cubic-bezier(.4,0,.2,1)', boxShadow:`0 0 10px ${t.gold}50` }}/>
+                    <div style={{ flex:1, background:'linear-gradient(90deg,#e07820,#c85010)', borderRadius:'0 100px 100px 0', boxShadow:'0 0 10px #e0782050' }}/>
                   </div>
                 </div>
-                <div style={{ display:'flex', height:10, borderRadius:100, overflow:'hidden', gap:2, boxShadow:'inset 0 1px 3px rgba(0,0,0,.4)' }}>
-                  <div style={{ width:`${physPct}%`, background:`linear-gradient(90deg,${t.gold}aa,${t.gold})`, borderRadius:'100px 0 0 100px', transition:'width .8s cubic-bezier(.4,0,.2,1)', boxShadow:`0 0 10px ${t.gold}50` }}/>
-                  <div style={{ flex:1, background:'linear-gradient(90deg,#e07820,#c85010)', borderRadius:'0 100px 100px 0', boxShadow:'0 0 10px #e0782050' }}/>
-                </div>
-              </div>
-            )}
+              )}
+            </>}
 
-            {/* Bottom 3-col grid */}
-            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:16 }}>
+            {/* Bottom panels grid — only visible panels */}
+            {visiblePanels > 0 && <div style={{ display:'grid', gridTemplateColumns:`repeat(${visiblePanels},1fr)`, gap:16 }}>
 
               {/* By Region */}
-              <div style={panel}>
+              {showStateTable && <div style={panel}>
                 <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16 }}>
                   <div style={panelTitle}>By Region</div>
                   <div style={panelMeta}>Net Weight</div>
@@ -327,7 +336,7 @@ export default function DashboardHome() {
               </div>
 
               {/* Active Branches */}
-              <div style={panel}>
+              {showRegionCards && <div style={panel}>
                 <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16 }}>
                   <div style={panelTitle}>Active Branches</div>
                   <div style={panelMeta}>Count</div>
@@ -355,10 +364,10 @@ export default function DashboardHome() {
                       </div>
                     </>
                 }
-              </div>
+              </div>}
 
               {/* Top Branches */}
-              <div style={panel}>
+              {showTopBranches && <div style={panel}>
                 <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16 }}>
                   <div style={panelTitle}>Top Branches</div>
                   <div style={panelMeta}>Net Weight</div>
@@ -380,9 +389,9 @@ export default function DashboardHome() {
                         )
                       })
                 }
-              </div>
+              </div>}
 
-            </div>
+            </div>}
           </div>
         </div>
       </div>}

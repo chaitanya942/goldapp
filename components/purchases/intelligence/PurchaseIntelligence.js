@@ -80,7 +80,7 @@ function MiniBar({ value, max, color, height = 4 }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // TAB: OVERVIEW
 // ─────────────────────────────────────────────────────────────────────────────
-function OverviewTab({ t }) {
+function OverviewTab({ t, canSeeAlerts = true }) {
   const [data, setData]   = useState(null)
   const [loading, setLoading] = useState(true)
 
@@ -111,7 +111,7 @@ function OverviewTab({ t }) {
   return (
     <div>
       {/* ALERTS */}
-      {(Number(ba.inactive) > 0 || Number(ba.dormant) > 0 || oldPending > 0 || highRejBranches?.length > 0) && (
+      {canSeeAlerts && (Number(ba.inactive) > 0 || Number(ba.dormant) > 0 || oldPending > 0 || highRejBranches?.length > 0) && (
         <div style={{ display:'flex', flexDirection:'column', gap:'8px', marginBottom:'24px' }}>
           {Number(ba.inactive) > 0 && (
             <AlertBanner icon="⊘" color={t.red} t={t}
@@ -760,10 +760,19 @@ function PipelineTab({ t }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // MAIN COMPONENT
 // ─────────────────────────────────────────────────────────────────────────────
+const INTEL_PERM_MAP = {
+  branches:  'element.intelligence.branch_health',
+  customers: 'element.intelligence.repeat_customers',
+}
+
 export default function PurchaseIntelligence() {
-  const { theme } = useApp()
+  const { theme, canSee } = useApp()
   const t = THEMES[theme] || THEMES.dark
   const [activeTab, setActiveTab] = useState('overview')
+
+  const visibleTabs = TABS.filter(tab => !(tab.id in INTEL_PERM_MAP) || canSee(INTEL_PERM_MAP[tab.id]))
+  // If active tab is now hidden, fall back to first visible
+  const resolvedTab = visibleTabs.some(t => t.id === activeTab) ? activeTab : (visibleTabs[0]?.id ?? 'overview')
 
   return (
     <div style={{ minHeight:'100vh', background:t.bg }}>
@@ -774,14 +783,14 @@ export default function PurchaseIntelligence() {
 
         {/* TAB BAR */}
         <div style={{ display:'flex', gap:'0' }}>
-          {TABS.map(tab => (
+          {visibleTabs.map(tab => (
             <button key={tab.id} onClick={() => setActiveTab(tab.id)}
               style={{
                 background:'transparent', border:'none',
-                borderBottom: activeTab===tab.id ? `2px solid ${t.gold}` : '2px solid transparent',
+                borderBottom: resolvedTab===tab.id ? `2px solid ${t.gold}` : '2px solid transparent',
                 padding:'10px 22px', cursor:'pointer', display:'flex', alignItems:'center', gap:'7px',
-                color: activeTab===tab.id ? t.gold : t.text3,
-                fontSize:'.72rem', fontWeight: activeTab===tab.id ? 500 : 400,
+                color: resolvedTab===tab.id ? t.gold : t.text3,
+                fontSize:'.72rem', fontWeight: resolvedTab===tab.id ? 500 : 400,
                 letterSpacing:'.03em', transition:'all .15s',
               }}>
               <span style={{ fontSize:'.85rem' }}>{tab.icon}</span>{tab.label}
@@ -792,11 +801,11 @@ export default function PurchaseIntelligence() {
 
       {/* TAB CONTENT */}
       <div style={{ padding:'28px 32px' }}>
-        {activeTab === 'overview'  && <OverviewTab          t={t} />}
-        {activeTab === 'branches'  && <BranchMatrixTab      t={t} />}
-        {activeTab === 'customers' && <RepeatCustomersTab   t={t} />}
-        {activeTab === 'pending'   && <PendingAgingTab      t={t} />}
-        {activeTab === 'pipeline'  && <PipelineTab          t={t} />}
+        {resolvedTab === 'overview'  && <OverviewTab          t={t} canSeeAlerts={canSee('element.intelligence.alerts')} />}
+        {resolvedTab === 'branches'  && <BranchMatrixTab      t={t} />}
+        {resolvedTab === 'customers' && <RepeatCustomersTab   t={t} />}
+        {resolvedTab === 'pending'   && <PendingAgingTab      t={t} />}
+        {resolvedTab === 'pipeline'  && <PipelineTab          t={t} />}
       </div>
     </div>
   )
