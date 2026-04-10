@@ -171,10 +171,10 @@ function PurchaseSection({ t, setActiveNav, canSee }) {
                       ? <ResponsiveContainer width="100%" height={110}>
                           <BarChart data={trend} barSize={9} margin={{ top: 2, right: 0, left: 0, bottom: 0 }}>
                             <CartesianGrid vertical={false} strokeDasharray="2 4" stroke={t.border} />
-                            <XAxis dataKey="purchase_date" tickFormatter={fmtDay} tick={{ fontSize: 9, fill: t.text4 }} axisLine={false} tickLine={false} interval={1} />
+                            <XAxis dataKey="day" tickFormatter={fmtDay} tick={{ fontSize: 9, fill: t.text4 }} axisLine={false} tickLine={false} interval={1} />
                             <YAxis hide />
                             <Tooltip contentStyle={{ background: t.card2, border: `1px solid ${t.border}`, borderRadius: 8, fontSize: 11 }} labelFormatter={fmtDay} formatter={v => [fmtN(v), 'Bills']} cursor={{ fill: `${t.gold}10` }} />
-                            <Bar dataKey="total_count" fill={t.gold} radius={[3, 3, 0, 0]} opacity={.85} />
+                            <Bar dataKey="txn_count" fill={t.gold} radius={[3, 3, 0, 0]} opacity={.85} />
                           </BarChart>
                         </ResponsiveContainer>
                       : <div style={{ height: 110, display: 'flex', alignItems: 'center', justifyContent: 'center', color: t.text4, fontSize: 12 }}>No data this period</div>
