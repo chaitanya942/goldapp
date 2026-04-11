@@ -794,26 +794,23 @@ function OldCrmTab({
 
       {/* ──────── 1b. WALK-IN DISPOSITION ──────── */}
       {canSee('livefeed.customer_journey') && totalWalkins > 0 && (() => {
-        // Cross-reference walk-ins with transactions by mobile number
-        // so this breakdown aligns with the bills panel above
-        const dispApproved = new Set(todayTxns.filter(t => t.trxn_status === 'approved').map(t => t.cust_mobile).filter(Boolean))
-        const dispBilled   = new Set(todayTxns.map(t => t.cust_mobile).filter(Boolean))
-        const dispPending  = new Set(todayTxns.filter(t => t.trxn_status === 'pending' && !dispApproved.has(t.cust_mobile)).map(t => t.cust_mobile).filter(Boolean))
-        const dispKyc      = new Set(kycRows.map(r => r.mob_num).filter(Boolean))
-
-        const wPurchased = todayWalkins.filter(w => w.cust_mobile && dispApproved.has(w.cust_mobile)).length
-        const wPending   = todayWalkins.filter(w => w.cust_mobile && dispPending.has(w.cust_mobile)).length
-        const wKyc       = todayWalkins.filter(w => w.cust_mobile && dispKyc.has(w.cust_mobile)).length
-        const wNoBill    = todayWalkins.filter(w => !dispBilled.has(w.cust_mobile) && !dispKyc.has(w.cust_mobile)).length
-        const accounted  = wPurchased + wPending + wKyc + wNoBill
-        const wOther     = Math.max(0, totalWalkins - accounted)
+        // Source: customer_walkin.walkin_status — what staff recorded in the CRM walk-in register
+        // This is independent of bills box (transac_tbl) — gaps between the two are the insight
+        const wSold     = walkinSummary?.sold             || 0   // walkin_status='sold'
+        const wNotSold  = walkinSummary?.visited_not_sold || 0   // walkin_status='visited not sold'
+        const wKyc      = kycBlacklistedCnt                      // in rejctd_tbl
+        const wNoUpdate = crmNotUpdatedCnt                       // billed but status not set
+        const wNoBill   = notBilledCnt                           // no bill + not KYC
+        const accounted = wSold + wNotSold + wKyc + wNoUpdate + wNoBill
+        const wOther    = Math.max(0, totalWalkins - accounted)
 
         const segments = [
-          { label: 'Purchased',         sublabel: 'Bill approved today',     count: wPurchased, color: t.green,  key: 'purchased'   },
-          { label: 'In pipeline',        sublabel: 'Pending bill, not approved', count: wPending, color: t.orange, key: 'pending'  },
-          { label: 'KYC blocked',       sublabel: 'Flagged at verification', count: wKyc,       color: t.purple, key: 'kyc_blocked' },
-          { label: 'Left without bill', sublabel: 'No transaction raised',   count: wNoBill,    color: t.text4,  key: 'unbilled'    },
-          ...(wOther > 0 ? [{ label: 'Other', sublabel: 'Unmatched records', count: wOther, color: t.border, key: null }] : []),
+          { label: 'Marked sold',         sublabel: 'Staff updated status in CRM',    count: wSold,     color: t.green,  key: 'walkin'          },
+          { label: 'Visited, not sold',   sublabel: 'Staff marked as not sold',       count: wNotSold,  color: t.orange, key: null              },
+          { label: 'KYC blocked',         sublabel: 'Flagged at KYC verification',    count: wKyc,      color: t.purple, key: 'kyc_blocked'     },
+          { label: 'Status not updated',  sublabel: 'Billed but CRM not updated',     count: wNoUpdate, color: t.red,    key: 'crm_not_updated' },
+          { label: 'Left without bill',   sublabel: 'No transaction raised',          count: wNoBill,   color: t.text4,  key: 'unbilled'        },
+          ...(wOther > 0 ? [{ label: 'Other', sublabel: '', count: wOther, color: t.border, key: null }] : []),
         ].filter(s => s.count > 0)
 
         return (
@@ -877,41 +874,38 @@ function OldCrmTab({
 
       {/* ──────── 1c. BRANCH PULSE — plain-English insights ──────── */}
       {canSee('livefeed.customer_journey') && totalWalkins > 0 && (() => {
-        const walkoutPct   = totalWalkins > 0 ? Math.round((notBilledCnt / totalWalkins) * 100) : 0
-        const closingRate  = totalBilled  > 0 ? Math.round((approved    / totalBilled)  * 100) : 0
+        const wSoldCRM   = walkinSummary?.sold || 0   // what staff marked as sold in CRM walk-in register
+        const crmGap     = approved - wSoldCRM         // approved bills vs staff-marked-sold gap
+        const walkoutPct = totalWalkins > 0 ? Math.round((notBilledCnt / totalWalkins) * 100) : 0
+        const closingRate = totalBilled > 0 ? Math.round((approved / totalBilled) * 100) : 0
         const insights = []
 
-        // 1 — CRM hygiene
-        if (crmNotUpdatedCnt > 0) insights.push({
+        // 1 — KEY INSIGHT: CRM register vs actual bills mismatch
+        if (crmGap > 0) insights.push({
           icon: '⚠', color: t.red,
-          headline: `${crmNotUpdatedCnt} CRM updates pending`,
-          detail: `${crmNotUpdatedCnt} customer${crmNotUpdatedCnt > 1 ? 's' : ''} were billed but walkin status wasn't updated — ask staff to mark these.`,
+          headline: `${crmGap} purchase${crmGap > 1 ? 's' : ''} not marked in walk-in register`,
+          detail: `Bills show ${approved} purchases today but staff only marked ${wSoldCRM} as "sold" in the CRM walk-in register. ${crmGap} customer${crmGap > 1 ? 's need' : ' needs'} their walk-in status updated.`,
         })
 
-        // 2 — Walk-out rate signal
-        if (walkoutPct >= 30) insights.push({
-          icon: '📉', color: t.orange,
-          headline: `${walkoutPct}% walk-out rate`,
-          detail: `${notBilledCnt} of ${totalWalkins} walk-ins left without a bill. ${walkoutPct > 45 ? 'This is high — review branch engagement.' : 'Follow up with pending customers.'}`,
-        })
-        else if (walkoutPct > 0) insights.push({
-          icon: '✓', color: t.green,
-          headline: `${walkoutPct}% walk-out rate`,
-          detail: `${notBilledCnt} of ${totalWalkins} customers left without billing — conversion is healthy.`,
-        })
-
-        // 3 — Pipeline / follow-up needed
+        // 2 — Pipeline / follow-up needed
         if (pending > 0) insights.push({
           icon: '🔄', color: t.orange,
           headline: `${pending} bill${pending > 1 ? 's' : ''} in pipeline`,
           detail: `${fmtWt(goldPending)} worth of gold pending approval. Follow up to close before end of day.`,
         })
 
+        // 3 — Walk-out rate signal
+        if (walkoutPct >= 40) insights.push({
+          icon: '📉', color: t.orange,
+          headline: `${walkoutPct}% walk-out rate`,
+          detail: `${notBilledCnt} of ${totalWalkins} walk-ins left without a bill. Review branch engagement.`,
+        })
+
         // 4 — KYC blocked
         if (kycBlacklistedCnt > 0) insights.push({
           icon: '🚫', color: t.purple,
           headline: `${kycBlacklistedCnt} customer${kycBlacklistedCnt > 1 ? 's' : ''} KYC flagged`,
-          detail: `${kycBlacklistedCnt} walk-in${kycBlacklistedCnt > 1 ? 's' : ''} blocked at KYC verification today (${fmtWt(kycBlacklistedWt)} held).`,
+          detail: `${kycBlacklistedCnt} walk-in${kycBlacklistedCnt > 1 ? 's' : ''} blocked at KYC today (${fmtWt(kycBlacklistedWt)} held).`,
         })
 
         // 5 — Strong closing rate
@@ -919,6 +913,13 @@ function OldCrmTab({
           icon: '💪', color: t.green,
           headline: `${closingRate}% bill-to-purchase rate`,
           detail: `Almost all billed customers are purchasing today — excellent branch performance.`,
+        })
+
+        // 6 — Walk-out low = good
+        if (walkoutPct < 40 && walkoutPct > 0) insights.push({
+          icon: '✓', color: t.green,
+          headline: `${walkoutPct}% walk-out rate`,
+          detail: `Only ${notBilledCnt} of ${totalWalkins} customers left without billing — conversion is healthy.`,
         })
 
         if (insights.length === 0) return null
