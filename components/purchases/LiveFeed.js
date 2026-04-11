@@ -655,10 +655,16 @@ function OldCrmTab({
         <SectionLabel t={t}>Customer Journey · from Walk-in to Outcome</SectionLabel>
 
         {/* ── Funnel progress bar ── */}
-        <div style={{ display:'flex', height:5, borderRadius:100, overflow:'hidden', marginBottom:14, gap:1 }}>
-          <div style={{ width:`${billedPct}%`, background:`linear-gradient(90deg,${t.blue},${t.gold})`, borderRadius:'100px 0 0 100px', transition:'width .8s ease', boxShadow:`0 0 8px ${t.gold}60` }}/>
-          <div style={{ width:`${Math.max(conversionPct - billedPct, 0)}%`, background:`linear-gradient(90deg,${t.gold},${t.green})`, transition:'width .8s ease' }}/>
-          <div style={{ flex:1, background:t.border, borderRadius:'0 100px 100px 0' }}/>
+        <div style={{ marginBottom:16 }}>
+          <div style={{ display:'flex', height:8, borderRadius:100, overflow:'hidden', gap:1, boxShadow:`0 2px 8px rgba(0,0,0,.12)` }}>
+            <div style={{ width:`${billedPct}%`, background:`linear-gradient(90deg,${t.blue},${t.gold})`, borderRadius:'100px 0 0 100px', transition:'width .8s ease', boxShadow:`0 0 12px ${t.gold}80`, minWidth: billedPct > 0 ? 4 : 0 }}/>
+            <div style={{ width:`${Math.max(conversionPct - billedPct, 0)}%`, background:`linear-gradient(90deg,${t.gold},${t.green})`, transition:'width .8s ease', minWidth: conversionPct > billedPct ? 4 : 0 }}/>
+            <div style={{ flex:1, background:t.border, borderRadius:'0 100px 100px 0', opacity:.5 }}/>
+          </div>
+          <div style={{ display:'flex', justifyContent:'space-between', marginTop:5, padding:'0 2px' }}>
+            <span style={{ fontSize:'.5rem', color:t.blue, fontWeight:700, letterSpacing:'.06em', textTransform:'uppercase' }}>Walk-in → Billed: {billedPct}%</span>
+            <span style={{ fontSize:'.5rem', color:t.green, fontWeight:700, letterSpacing:'.06em', textTransform:'uppercase' }}>Overall conversion: {conversionPct}%</span>
+          </div>
         </div>
 
         {/* ── Main hero panel ── */}
@@ -721,27 +727,47 @@ function OldCrmTab({
           </div>
 
           <FlowSep t={t} />
-          <HeroNum label="KYC Blocked" value={kycBlacklistedCnt} color={t.purple} t={t} small weight={kycBlacklistedWt} active={activeMetric==='kyc_blocked'} onClick={() => toggleMetric('kyc_blocked')} />
-          {kycOverriddenCnt > 0 && <FlowSep t={t} />}
-          {kycOverriddenCnt > 0 && <HeroNum label="KYC Cleared Later" value={kycOverriddenCnt} color={t.blue} t={t} small active={activeMetric==='kyc_cleared'} onClick={() => toggleMetric('kyc_cleared')} />}
-          <FlowSep t={t} />
-          <HeroNum label="Left Unbilled" value={notBilledCnt} color={t.text3} t={t} small muted weight={goldNotBilled} active={activeMetric==='unbilled'} onClick={() => toggleMetric('unbilled')} />
+          {/* ── Secondary outcomes box ── */}
+          <div style={{
+            position:'relative',
+            background:`linear-gradient(160deg, ${t.bg} 0%, ${t.card} 60%, ${t.bg} 100%)`,
+            border:`1px solid ${t.border2}`,
+            borderRadius:18,
+            boxShadow:`0 4px 20px rgba(0,0,0,.10), inset 0 1px 0 ${t.border}`,
+            padding:'18px 12px 10px',
+          }}>
+            <div style={{ position:'absolute', top:-11, left:'50%', transform:'translateX(-50%)', background:t.card2, border:`1px solid ${t.border2}`, borderRadius:20, padding:'3px 12px', whiteSpace:'nowrap' }}>
+              <span style={{ fontSize:'.46rem', letterSpacing:'.12em', textTransform:'uppercase', color:t.text4, fontWeight:700 }}>other outcomes</span>
+            </div>
+            <div style={{ display:'flex', alignItems:'center', gap:6 }}>
+              <HeroNum label="KYC Blocked" value={kycBlacklistedCnt} color={t.purple} t={t} small weight={kycBlacklistedWt} active={activeMetric==='kyc_blocked'} onClick={() => toggleMetric('kyc_blocked')} />
+              {kycOverriddenCnt > 0 && <FlowSep t={t} />}
+              {kycOverriddenCnt > 0 && <HeroNum label="KYC Cleared Later" value={kycOverriddenCnt} color={t.blue} t={t} small active={activeMetric==='kyc_cleared'} onClick={() => toggleMetric('kyc_cleared')} />}
+              <FlowSep t={t} />
+              <HeroNum label="Left Unbilled" value={notBilledCnt} color={t.text3} t={t} small muted weight={goldNotBilled} active={activeMetric==='unbilled'} onClick={() => toggleMetric('unbilled')} />
+            </div>
+          </div>
         </div>
 
         {/* ── Stats ribbon ── */}
-        <div style={{ display:'flex', gap:0, marginTop:10, background:t.card, border:`1px solid ${t.border}`, borderRadius:12, overflow:'hidden', flexWrap:'wrap' }}>
+        <div style={{ display:'flex', gap:0, marginTop:10, background:t.card, border:`1px solid ${t.border}`, borderRadius:14, overflow:'hidden', flexWrap:'wrap', boxShadow:`0 2px 8px rgba(0,0,0,.08)` }}>
           {[
-            { label:'Walk → Bill',     value:`${billedPct}%`,         color:t.gold,   bg:t.goldDim   },
-            { label:'Bill → Purchase', value:`${approvedPctBilled}%`, color:t.green,  bg:t.greenDim  },
-            { label:'Overall Conv.',   value:`${conversionPct}%`,     color:t.blue,   bg:t.blueDim   },
-            ...(wrongEntry > 0      ? [{ label:'Re-submitted',   value:wrongEntry,      color:t.orange, bg:t.orangeDim }] : []),
-            ...(crmNotUpdatedCnt > 0? [{ label:'CRM not updated',value:crmNotUpdatedCnt,color:t.text3,  bg:t.card2     }] : []),
-            ...(kycChecklistCnt > 0 ? [{ label:'KYC checklist',  value:kycChecklistCnt, color:t.purple, bg:t.card2     }] : []),
+            { label:'Walk → Bill',     value:`${billedPct}%`,         color:t.gold,   },
+            { label:'Bill → Purchase', value:`${approvedPctBilled}%`, color:t.green,  },
+            { label:'Overall Conv.',   value:`${conversionPct}%`,     color:t.blue,   },
+            ...(wrongEntry > 0      ? [{ label:'Re-submitted',    value:wrongEntry,       color:t.orange }] : []),
+            ...(crmNotUpdatedCnt > 0? [{ label:'CRM not updated', value:crmNotUpdatedCnt, color:t.text3  }] : []),
+            ...(kycChecklistCnt > 0 ? [{ label:'KYC checklist',   value:kycChecklistCnt,  color:t.purple }] : []),
           ].map((s, i) => (
-            <div key={i} style={{ display:'flex', flexDirection:'column', alignItems:'center', padding:'10px 20px', borderRight:`1px solid ${t.border}`, gap:3, minWidth:90 }}>
-              <span style={{ fontSize:'1.1rem', fontWeight:200, fontFamily:'ui-monospace,monospace', color:s.color, letterSpacing:'-.02em' }}>{s.value}</span>
-              <span style={{ fontSize:'.52rem', color:t.text4, letterSpacing:'.1em', textTransform:'uppercase', fontWeight:600 }}>{s.label}</span>
-              <div style={{ width:'100%', height:2, borderRadius:2, background:`linear-gradient(90deg,${s.color}60,${s.color}20)`, marginTop:2 }}/>
+            <div key={i} style={{
+              display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center',
+              padding:'14px 24px', borderRight:`1px solid ${t.border}`,
+              gap:4, minWidth:110, flex:1,
+              borderTop:`3px solid ${s.color}`,
+              background:`linear-gradient(180deg, ${s.color}08 0%, transparent 60%)`,
+            }}>
+              <span style={{ fontSize:'1.6rem', fontWeight:200, fontFamily:'ui-monospace,monospace', color:s.color, letterSpacing:'-.04em', lineHeight:1 }}>{s.value}</span>
+              <span style={{ fontSize:'.5rem', color:t.text4, letterSpacing:'.12em', textTransform:'uppercase', fontWeight:700, marginTop:2 }}>{s.label}</span>
             </div>
           ))}
           {activeMetric && (
