@@ -211,6 +211,7 @@ export default function LiveFeed() {
   const regions      = data?.allRegions   || []
   const goldPipeline = data?.goldPipeline || {}
   const kycRows      = data?.kycRows      || []
+  const takeoverRows = data?.takeoverRows || []
   const newCrmTxns   = data ? (data.newCrmTxns ?? null) : null  // null = offline
   const newCrmError  = data?.newCrmError || null
 
@@ -455,6 +456,7 @@ export default function LiveFeed() {
               todayTxns={rTxns} todayWalkins={rWalkins}
               allTxns={todayTxns} allWalkins={todayWalkins} allKycRows={kycRows} regions={regions}
               kycRows={regionFilter ? kycRows.filter(r => r.region === regionFilter) : kycRows}
+              takeoverRows={takeoverRows}
               regionFilter={regionFilter}
               filteredTimeline={filteredTimeline} isToday={isToday}
               viewDate={viewDate}
@@ -480,6 +482,7 @@ export default function LiveFeed() {
               todayTxns={rTxns} todayWalkins={rWalkins}
               allTxns={todayTxns} allWalkins={todayWalkins} allKycRows={kycRows} regions={regions}
               kycRows={regionFilter ? kycRows.filter(r => r.region === regionFilter) : kycRows}
+              takeoverRows={takeoverRows}
               regionFilter={regionFilter}
               filteredTimeline={filteredTimeline}
               /* New CRM props */
@@ -506,7 +509,7 @@ function CombinedCrmTab({
   notBilledCnt, notBilledWalkins, crmNotUpdatedCnt,
   goldPipeline,
   todayTxns, todayWalkins, allTxns, allWalkins, allKycRows, regions,
-  kycRows, regionFilter,
+  kycRows, takeoverRows, regionFilter,
   filteredTimeline,
   // New CRM
   stages, newCrmTxns, newCrmError,
@@ -570,7 +573,7 @@ function CombinedCrmTab({
           goldPipeline={goldPipeline}
           todayTxns={todayTxns} todayWalkins={todayWalkins}
           allTxns={allTxns} allWalkins={allWalkins} allKycRows={allKycRows} regions={regions}
-          kycRows={kycRows} regionFilter={regionFilter}
+          kycRows={kycRows} takeoverRows={takeoverRows} regionFilter={regionFilter}
           filteredTimeline={filteredTimeline} isToday={isToday} viewDate={viewDate}
           newEventCount={newEventCount} clearNewEvents={clearNewEvents} />
       </div>
@@ -606,7 +609,7 @@ function OldCrmTab({
   notBilledCnt, notBilledWalkins, crmNotUpdatedCnt,
   goldPipeline,
   todayTxns, todayWalkins, allTxns, allWalkins, allKycRows, regions,
-  kycRows, regionFilter,
+  kycRows, takeoverRows, regionFilter,
   filteredTimeline, isToday,
   newEventCount, clearNewEvents,
 }) {
@@ -635,6 +638,15 @@ function OldCrmTab({
   const conversionPct     = totalWalkins > 0 ? Math.round((approved   / totalWalkins) * 100) : 0
   const physicalApproved  = goldPipeline?.physical?.approved || 0
   const releaseApproved   = goldPipeline?.released?.approved || 0
+
+  // Ghost purchases: approved physical bills with NO walk-in entry for this customer today
+  const walkinMobiles  = new Set(todayWalkins.map(w => w.cust_mobile).filter(Boolean))
+  const ghostPurchases = todayTxns.filter(t =>
+    t.trxn_status === 'approved' &&
+    t.type_gold !== 'released' &&
+    t.cust_mobile && !walkinMobiles.has(t.cust_mobile)
+  )
+  const ghostCount = ghostPurchases.length
 
   const hasData = totalWalkins > 0 || totalBilled > 0
 
@@ -880,11 +892,18 @@ function OldCrmTab({
         const closingRate = totalBilled > 0 ? Math.round((approved / totalBilled) * 100) : 0
         const insights = []
 
-        // 1 — KEY INSIGHT: CRM register vs actual bills mismatch
+        // 1 — Ghost purchases: billed but not in walk-in register at all
+        if (ghostCount > 0) insights.push({
+          icon: '👻', color: t.red, metric: 'ghost_purchases',
+          headline: `${ghostCount} purchase${ghostCount > 1 ? 's' : ''} with no walk-in entry`,
+          detail: `${ghostCount} customer${ghostCount > 1 ? 's' : ''} bought gold today but never filled the walk-in register. Click to see who.`,
+        })
+
+        // 2 — KEY INSIGHT: CRM register vs actual bills mismatch (beyond ghost)
         if (crmGap > 0) insights.push({
-          icon: '⚠', color: t.red,
-          headline: `${crmGap} purchase${crmGap > 1 ? 's' : ''} not marked in walk-in register`,
-          detail: `Bills show ${approved} purchases today but staff only marked ${wSoldCRM} as "sold" in the CRM walk-in register. ${crmGap} customer${crmGap > 1 ? 's need' : ' needs'} their walk-in status updated.`,
+          icon: '⚠', color: t.orange,
+          headline: `${crmGap} walk-in status${crmGap > 1 ? 'es' : ''} not updated`,
+          detail: `Bills show ${approved} purchases but only ${wSoldCRM} walk-ins are marked "sold". ${crmGap} customer${crmGap > 1 ? 's' : ''} filled the register but status wasn't updated.`,
         })
 
         // 2 — Pipeline / follow-up needed
@@ -910,9 +929,9 @@ function OldCrmTab({
 
         // 5 — Takeover (multi-day) cases
         if (releaseApproved > 0) insights.push({
-          icon: '🔁', color: t.gold,
+          icon: '🔁', color: t.gold, metric: 'takeover_bills',
           headline: `${releaseApproved} takeover purchase${releaseApproved > 1 ? 's' : ''} completed today`,
-          detail: `${releaseApproved} bill${releaseApproved > 1 ? 's' : ''} marked as "released" (takeover flow) — customers who pledged gold on an earlier visit and completed final payment today. These may not appear in today's walk-in register.`,
+          detail: `${releaseApproved} bill${releaseApproved > 1 ? 's' : ''} marked as "released" — customers who pledged gold on an earlier visit and completed final payment today. Click to see original walk-in dates.`,
         })
 
         // 6 — Strong closing rate
@@ -935,15 +954,21 @@ function OldCrmTab({
             <span style={{ fontSize:'.48rem', color:t.text4, letterSpacing:'.12em', textTransform:'uppercase', fontWeight:700, padding:'0 2px' }}>Branch Pulse</span>
             <div style={{ display:'flex', flexWrap:'wrap', gap:8 }}>
               {insights.map((ins, i) => (
-                <div key={i} style={{
-                  flex:1, minWidth:200,
-                  background: t.card,
-                  border:`1px solid ${ins.color}30`,
-                  borderLeft:`3px solid ${ins.color}`,
-                  borderRadius:10,
-                  padding:'10px 14px',
-                  boxShadow:`0 2px 8px rgba(0,0,0,.08)`,
-                }}>
+                <div key={i}
+                  onClick={ins.metric ? () => toggleMetric(ins.metric) : undefined}
+                  style={{
+                    flex:1, minWidth:200,
+                    background: activeMetric === ins.metric ? `${ins.color}12` : t.card,
+                    border:`1px solid ${activeMetric === ins.metric ? ins.color + '60' : ins.color + '30'}`,
+                    borderLeft:`3px solid ${ins.color}`,
+                    borderRadius:10,
+                    padding:'10px 14px',
+                    boxShadow:`0 2px 8px rgba(0,0,0,.08)`,
+                    cursor: ins.metric ? 'pointer' : 'default',
+                    transition:'background .15s, border .15s',
+                    position:'relative',
+                  }}>
+                  {ins.metric && <span style={{ position:'absolute', top:6, right:8, fontSize:'.44rem', color:ins.color, opacity:.6 }}>{activeMetric === ins.metric ? '▲ active' : '▼ view'}</span>}
                   <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:4 }}>
                     <span style={{ fontSize:'.72rem' }}>{ins.icon}</span>
                     <span style={{ fontSize:'.62rem', fontWeight:700, color:ins.color }}>{ins.headline}</span>
@@ -1018,7 +1043,9 @@ function OldCrmTab({
         <LiveDetail t={t} activeMetric={activeMetric}
           todayTxns={todayTxns} todayWalkins={todayWalkins}
           kycRows={kycRows} notBilledWalkins={notBilledWalkins}
-          kycChecklistRows={kycChecklistRows} />
+          kycChecklistRows={kycChecklistRows}
+          ghostPurchases={ghostPurchases}
+          takeoverRows={takeoverRows} />
       )}
 
       {/* ──────── 5. LIVE TIMELINE (collapsed by default) ──────── */}
@@ -1147,7 +1174,7 @@ function HeroNum({ label, value, color, t, small, muted, onClick, active, weight
 }
 
 /* ── Live Detail Table ── */
-function LiveDetail({ t, activeMetric, todayTxns, todayWalkins, kycRows, notBilledWalkins, kycChecklistRows = [] }) {
+function LiveDetail({ t, activeMetric, todayTxns, todayWalkins, kycRows, notBilledWalkins, kycChecklistRows = [], ghostPurchases = [], takeoverRows = [] }) {
   const [search, setSearch] = useState('')
   const { canSee } = useApp()
 
@@ -1172,16 +1199,19 @@ function LiveDetail({ t, activeMetric, todayTxns, todayWalkins, kycRows, notBill
       type = 'walkin'; label = 'CRM Not Updated'
       break
     }
-    case 'kyc_checklist': rows = kycChecklistRows; type = 'checklist'; label = 'KYC Checklist'; break
+    case 'kyc_checklist':    rows = kycChecklistRows; type = 'checklist'; label = 'KYC Checklist'; break
+    case 'ghost_purchases':  rows = ghostPurchases;   type = 'txn';      label = 'Purchased — No Walk-in Entry'; break
+    case 'takeover_bills':   rows = takeoverRows;     type = 'takeover'; label = 'Multi-day Takeover Purchases'; break
     default:          rows = todayTxns.filter(t => t.trxn_status === 'approved'); type = 'txn'; label = `Purchased Today`
   }
 
   const q = search.toLowerCase()
   const filtered = q ? rows.filter(r => {
-    if (type === 'txn')       return (r.cust_name||'').toLowerCase().includes(q) || (r.cust_mobile||'').includes(q) || (r.bill_no||'').toLowerCase().includes(q) || (r.branch_name||'').toLowerCase().includes(q)
-    if (type === 'walkin')    return (r.cust_name||'').toLowerCase().includes(q) || (r.cust_mobile||'').includes(q) || (r.branch_name||'').toLowerCase().includes(q)
-    if (type === 'kyc')       return (r.name||'').toLowerCase().includes(q) || (r.mob_num||'').includes(q)
+    if (type === 'txn')      return (r.cust_name||'').toLowerCase().includes(q) || (r.cust_mobile||'').includes(q) || (r.bill_no||'').toLowerCase().includes(q) || (r.branch_name||'').toLowerCase().includes(q)
+    if (type === 'walkin')   return (r.cust_name||'').toLowerCase().includes(q) || (r.cust_mobile||'').includes(q) || (r.branch_name||'').toLowerCase().includes(q)
+    if (type === 'kyc')      return (r.name||'').toLowerCase().includes(q) || (r.mob_num||'').includes(q)
     if (type === 'checklist') return Object.values(r).some(v => String(v||'').toLowerCase().includes(q))
+    if (type === 'takeover') return (r.cust_name||'').toLowerCase().includes(q) || (r.cust_mobile||'').includes(q) || (r.bill_no||'').toLowerCase().includes(q) || (r.branch_name||'').toLowerCase().includes(q)
     return true
   }) : rows
 
@@ -1206,6 +1236,10 @@ function LiveDetail({ t, activeMetric, todayTxns, todayWalkins, kycRows, notBill
             else if (type === 'checklist') downloadCSV(`${label}.csv`,
               ['Time','Customer','Phone','Gold (g)','Reason for Selling'],
               filtered, r => [r.time, r.cust_name || '', r.cust_mobile || '', r.grms_sld || '', r.rsn_slgld || ''])
+            else if (type === 'takeover') downloadCSV(`${label}.csv`,
+              ['Bill No','Date','Time','Customer','Phone','Branch','Amount','Last Visit Date','Days Gap','Status','Remarks'],
+              filtered, r => [r.bill_no, fmtDate(r.txn_date), r.time, r.cust_name, r.cust_mobile, r.branch_name,
+                r.amount, fmtDate(r.last_walkin_date), r.days_gap ?? '', r.trxn_status, r.txn_rmrk || ''])
             else downloadCSV(`${label}.csv`,
               ['Time','Name','Phone','Branch','Grams','Reason'],
               filtered, r => [r.time, r.name, r.mob_num, r.branch_name, r.grams, r.rej_rsn])
@@ -1214,10 +1248,11 @@ function LiveDetail({ t, activeMetric, todayTxns, todayWalkins, kycRows, notBill
           </button>}
         </div>
       </div>
-      {type === 'txn'       && <TxnTable       rows={filtered} t={t} />}
-      {type === 'walkin'    && <WalkinTable    rows={filtered} t={t} />}
-      {type === 'kyc'       && <KycTable       rows={filtered} t={t} />}
+      {type === 'txn'      && <TxnTable       rows={filtered} t={t} />}
+      {type === 'walkin'   && <WalkinTable    rows={filtered} t={t} />}
+      {type === 'kyc'      && <KycTable       rows={filtered} t={t} />}
       {type === 'checklist' && <ChecklistTable rows={filtered} t={t} />}
+      {type === 'takeover' && <TakeoverTable  rows={filtered} t={t} />}
     </div>
   )
 }
@@ -1359,6 +1394,53 @@ function ChecklistTable({ rows, t }) {
             <span style={{ fontSize: '.65rem', color: t.text3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.rsn_slgld || '—'}</span>
           </div>
         ))}
+      </div>
+    </Card>
+  )
+}
+
+/* ── Takeover table ── */
+function TakeoverTable({ rows, t }) {
+  const cols = ['Bill No','Date','Time','Customer','Phone','Branch','Amount','Last Visit','Days Gap','Status','Remarks']
+  const widths = '100px 90px 70px 160px 110px 150px 96px 90px 70px 80px 1fr'
+  return (
+    <Card t={t} style={{ padding: 0, overflow: 'hidden' }}>
+      <div style={{ overflowX: 'auto' }}>
+        <div style={{ minWidth: 1200 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: widths, padding: '9px 16px', borderBottom: `1px solid ${t.border}`, gap: 8, background: t.card2, position: 'sticky', top: 0 }}>
+            {cols.map(h => <span key={h} style={{ fontSize: '.56rem', letterSpacing: '.1em', textTransform: 'uppercase', color: t.text3, fontWeight: 600 }}>{h}</span>)}
+          </div>
+          <div style={{ maxHeight: 480, overflowY: 'auto' }}>
+            {rows.length === 0 && <div style={{ padding: 32, textAlign: 'center', color: t.text4, fontSize: '.72rem' }}>No records</div>}
+            {rows.map((r, i) => {
+              const sc = { approved: t.green, pending: t.orange, rejected: t.red }[r.trxn_status] || t.text3
+              const gap = r.days_gap != null ? Number(r.days_gap) : null
+              const gapColor = gap == null ? t.text4 : gap === 0 ? t.text4 : gap <= 3 ? t.orange : t.red
+              const noVisit = !r.last_walkin_date
+              return (
+                <div key={r.txn_id || i} style={{ display: 'grid', gridTemplateColumns: widths, padding: '10px 16px', borderBottom: `1px solid ${t.border}18`, gap: 8, alignItems: 'center' }}
+                  onMouseEnter={e => e.currentTarget.style.background = t.card2}
+                  onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                  <span style={{ fontSize: '.68rem', color: t.gold, fontFamily: 'ui-monospace,monospace', fontWeight: 500 }}>{r.bill_no || '—'}</span>
+                  <span style={{ fontSize: '.65rem', color: t.text2 }}>{fmtDate(r.txn_date)}</span>
+                  <span style={{ fontSize: '.65rem', color: t.text2, fontFamily: 'ui-monospace,monospace' }}>{fmtTime(r.time)}</span>
+                  <span style={{ fontSize: '.72rem', color: t.text1, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.cust_name || '—'}</span>
+                  <span style={{ fontSize: '.65rem', color: t.text2, fontFamily: 'ui-monospace,monospace' }}>{r.cust_mobile || '—'}</span>
+                  <span style={{ fontSize: '.65rem', color: t.text2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.branch_name || '—'}</span>
+                  <span style={{ fontSize: '.68rem', color: t.gold, fontFamily: 'ui-monospace,monospace' }}>{r.amount > 0 ? fmtAmt(r.amount) : '—'}</span>
+                  <span style={{ fontSize: '.65rem', color: noVisit ? t.text4 : t.text2, fontStyle: noVisit ? 'italic' : 'normal' }}>
+                    {noVisit ? 'No prior visit' : fmtDate(r.last_walkin_date)}
+                  </span>
+                  <span style={{ fontSize: '.65rem', color: gapColor, fontFamily: 'ui-monospace,monospace', fontWeight: gap > 0 ? 600 : 400 }}>
+                    {gap == null ? '—' : gap === 0 ? 'Same day' : `+${gap}d`}
+                  </span>
+                  <span style={{ fontSize: '.58rem', padding: '2px 7px', borderRadius: 4, fontWeight: 600, background: `${sc}18`, color: sc, border: `1px solid ${sc}30`, whiteSpace: 'nowrap', textTransform: 'capitalize' }}>{r.trxn_status || '—'}</span>
+                  <span style={{ fontSize: '.62rem', color: r.txn_rmrk ? t.text3 : t.text4, fontStyle: r.txn_rmrk ? 'normal' : 'italic', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.txn_rmrk || '—'}</span>
+                </div>
+              )
+            })}
+          </div>
+        </div>
       </div>
     </Card>
   )

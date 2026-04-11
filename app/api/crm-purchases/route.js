@@ -260,6 +260,7 @@ export async function GET(req) {
         [todayWalkins],
         [kycRows],
         [chklistRows],
+        [takeoverRows],
       ] = await Promise.all([
 
         // 1. Walk-in summary
@@ -364,6 +365,33 @@ export async function GET(req) {
           WHERE DATE(c.date + INTERVAL 330 MINUTE) = ?
           ORDER BY c.date DESC
         `, [todayIST]),
+
+        // 9. Takeover bills today + original walk-in date from customer_walkin history
+        conn.execute(`
+          SELECT
+            t.id AS txn_id, t.bill_no, t.cust_name, t.cust_mobile,
+            DATE(t.date + INTERVAL 330 MINUTE) AS txn_date,
+            t.time, t.trxn_status, (t.finl_amnt+0) AS amount,
+            t.txn_rmrk, b.brnch_name AS branch_name,
+            prev.last_walkin_date,
+            DATEDIFF(DATE(t.date + INTERVAL 330 MINUTE), prev.last_walkin_date) AS days_gap,
+            prev.last_walkin_status, prev.last_walkin_item, prev.last_walkin_wt
+          FROM transac_tbl t
+          LEFT JOIN branch_tbl b ON b.brnch_id = t.branch_id
+          LEFT JOIN (
+            SELECT
+              cust_mobile,
+              DATE(MAX(date) + INTERVAL 330 MINUTE) AS last_walkin_date,
+              SUBSTRING_INDEX(GROUP_CONCAT(walkin_status ORDER BY date DESC SEPARATOR '|'), '|', 1) AS last_walkin_status,
+              SUBSTRING_INDEX(GROUP_CONCAT(COALESCE(item_type,'') ORDER BY date DESC SEPARATOR '|'), '|', 1) AS last_walkin_item,
+              SUBSTRING_INDEX(GROUP_CONCAT(COALESCE(CAST(gms_weight AS CHAR),'') ORDER BY date DESC SEPARATOR '|'), '|', 1) AS last_walkin_wt
+            FROM customer_walkin
+            GROUP BY cust_mobile
+          ) prev ON prev.cust_mobile = t.cust_mobile
+          WHERE DATE(t.date + INTERVAL 330 MINUTE) = ?
+            AND t.type_gold = 'released'
+          ORDER BY t.time DESC
+        `, [todayIST]).catch(() => [[]]),
       ])
 
       // Attach region from Supabase to MySQL rows
@@ -590,6 +618,7 @@ export async function GET(req) {
         todayTxns,
         todayWalkins,
         kycRows,
+        takeoverRows,
         allRegions,
         newCrmTxns,
         newCrmError,
