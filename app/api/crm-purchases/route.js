@@ -259,7 +259,7 @@ export async function GET(req) {
         [todayTxns],
         [todayWalkins],
         [kycRows],
-        [[chklistCount]],
+        [chklistRows],
       ] = await Promise.all([
 
         // 1. Walk-in summary
@@ -358,8 +358,9 @@ export async function GET(req) {
 
         // 8. KYC checklist filled today (chklist_tbl) — customers who went through KYC
         conn.execute(`
-          SELECT COUNT(*) AS cnt FROM chklist_tbl
+          SELECT * FROM chklist_tbl
           WHERE DATE(date + INTERVAL 330 MINUTE) = ?
+          ORDER BY date DESC
         `, [todayIST]),
       ])
 
@@ -480,7 +481,8 @@ export async function GET(req) {
         kyc_blacklisted_cnt: kycRows.length,
         kyc_blacklisted_wt:  parseFloat(kycRows.reduce((s, r) => s + (parseFloat(r.grams) || 0), 0).toFixed(2)),
         kyc_overridden_cnt:  kycOverriddenCount,
-        kyc_checklist_cnt:   Number(chklistCount.cnt) || 0,
+        kyc_checklist_cnt:   chklistRows.length,
+        kyc_checklist_rows:  chklistRows,
         physical: { approved: byType['physical']?.approved || 0, pending: byType['physical']?.pending || 0, rejected: byType['physical']?.rejected || 0 },
         released: { approved: byType['released']?.approved || 0, pending: byType['released']?.pending || 0, rejected: byType['released']?.rejected || 0 },
       }

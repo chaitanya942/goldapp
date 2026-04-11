@@ -753,10 +753,9 @@ function OldCrmTab({
         {/* ── Stats ribbon ── */}
         <div style={{ display:'flex', gap:0, marginTop:10, background:t.card, border:`1px solid ${t.border}`, borderRadius:14, overflow:'hidden', flexWrap:'wrap', boxShadow:`0 2px 8px rgba(0,0,0,.08)` }}>
           {[
-            { label:'Walk → Bill',     value:`${billedPct}%`,         color:t.gold,   key: null },
-            { label:'Bill → Purchase', value:`${approvedPctBilled}%`, color:t.green,  key: null },
-            { label:'Overall Conv.',   value:`${conversionPct}%`,     color:t.blue,   key: null },
-            ...(wrongEntry > 0      ? [{ label:'Re-submitted',    value:wrongEntry,       color:t.orange, key: null            }] : []),
+            { label:'Walk → Bill',          value:`${billedPct}%`,         color:t.gold,   key: null },
+            { label:'Bill → Purchase',      value:`${approvedPctBilled}%`, color:t.green,  key: null },
+            { label:'Walk-in → Purchase',   value:`${conversionPct}%`,     color:t.blue,   key: null },
             ...(crmNotUpdatedCnt > 0? [{ label:'CRM not updated', value:crmNotUpdatedCnt, color:t.red,    key:'crm_not_updated' }] : []),
             ...(kycChecklistCnt > 0 ? [{ label:'KYC checklist',   value:kycChecklistCnt,  color:t.purple, key:'kyc_checklist'   }] : []),
           ].map((s, i) => {
@@ -1018,7 +1017,7 @@ function LiveDetail({ t, activeMetric, todayTxns, todayWalkins, kycRows, notBill
     if (type === 'txn')       return (r.cust_name||'').toLowerCase().includes(q) || (r.cust_mobile||'').includes(q) || (r.bill_no||'').toLowerCase().includes(q) || (r.branch_name||'').toLowerCase().includes(q)
     if (type === 'walkin')    return (r.cust_name||'').toLowerCase().includes(q) || (r.cust_mobile||'').includes(q) || (r.branch_name||'').toLowerCase().includes(q)
     if (type === 'kyc')       return (r.name||'').toLowerCase().includes(q) || (r.mob_num||'').includes(q)
-    if (type === 'checklist') return (r.cust_name||'').toLowerCase().includes(q) || (r.mob_num||'').includes(q) || (r.branch_name||'').toLowerCase().includes(q)
+    if (type === 'checklist') return Object.values(r).some(v => String(v||'').toLowerCase().includes(q))
     return true
   }) : rows
 
@@ -1165,6 +1164,18 @@ function KycTable({ rows, t }) {
 
 /* ── KYC Checklist table ── */
 function ChecklistTable({ rows, t }) {
+  if (rows.length === 0) return (
+    <Card t={t} style={{ padding: 32, textAlign: 'center' }}>
+      <span style={{ fontSize: '.72rem', color: t.text4 }}>No records</span>
+    </Card>
+  )
+  // Sniff column names from first row
+  const sample = rows[0]
+  const nameCol   = ['cust_name','name','customer_name','custname'].find(k => k in sample)
+  const mobileCol = ['mob_num','mobile','cust_mobile','mobile_no','phone'].find(k => k in sample)
+  const timeCol   = ['time','entry_time','created_time'].find(k => k in sample)
+  const branchCol = ['branch_name','brnch_name','branch'].find(k => k in sample)
+
   const cols = ['Time', 'Customer', 'Phone', 'Branch']
   const widths = '80px 220px 130px 1fr'
   return (
@@ -1173,15 +1184,14 @@ function ChecklistTable({ rows, t }) {
         {cols.map(h => <span key={h} style={{ fontSize: '.56rem', letterSpacing: '.1em', textTransform: 'uppercase', color: t.text3, fontWeight: 600 }}>{h}</span>)}
       </div>
       <div style={{ maxHeight: 480, overflowY: 'auto' }}>
-        {rows.length === 0 && <div style={{ padding: 32, textAlign: 'center', color: t.text4, fontSize: '.72rem' }}>No records</div>}
         {rows.map((r, i) => (
           <div key={i} style={{ display: 'grid', gridTemplateColumns: widths, padding: '10px 16px', borderBottom: `1px solid ${t.border}18`, gap: 8, alignItems: 'center' }}
             onMouseEnter={e => e.currentTarget.style.background = t.card2}
             onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
-            <span style={{ fontSize: '.65rem', color: t.text2, fontFamily: 'ui-monospace,monospace' }}>{fmtTime(r.time)}</span>
-            <span style={{ fontSize: '.72rem', color: t.text1, fontWeight: 500 }}>{r.cust_name || '—'}</span>
-            <span style={{ fontSize: '.65rem', color: t.text2, fontFamily: 'ui-monospace,monospace' }}>{r.mob_num || '—'}</span>
-            <span style={{ fontSize: '.65rem', color: t.text2 }}>{r.branch_name || '—'}</span>
+            <span style={{ fontSize: '.65rem', color: t.text2, fontFamily: 'ui-monospace,monospace' }}>{timeCol ? fmtTime(r[timeCol]) : '—'}</span>
+            <span style={{ fontSize: '.72rem', color: t.text1, fontWeight: 500 }}>{nameCol ? (r[nameCol] || '—') : '—'}</span>
+            <span style={{ fontSize: '.65rem', color: t.text2, fontFamily: 'ui-monospace,monospace' }}>{mobileCol ? (r[mobileCol] || '—') : '—'}</span>
+            <span style={{ fontSize: '.65rem', color: t.text2 }}>{branchCol ? (r[branchCol] || '—') : '—'}</span>
           </div>
         ))}
       </div>
