@@ -651,19 +651,38 @@ function OldCrmTab({
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
 
       {/* ──────── 1. CUSTOMER JOURNEY ──────── */}
-      {canSee('livefeed.customer_journey') && <div>
+      {canSee('livefeed.customer_journey') && <div style={{ display:'flex', flexDirection:'column', gap:0 }}>
         <SectionLabel t={t}>Customer Journey · from Walk-in to Outcome</SectionLabel>
+
+        {/* ── Funnel progress bar ── */}
+        <div style={{ display:'flex', height:5, borderRadius:100, overflow:'hidden', marginBottom:14, gap:1 }}>
+          <div style={{ width:`${billedPct}%`, background:`linear-gradient(90deg,${t.blue},${t.gold})`, borderRadius:'100px 0 0 100px', transition:'width .8s ease', boxShadow:`0 0 8px ${t.gold}60` }}/>
+          <div style={{ width:`${Math.max(conversionPct - billedPct, 0)}%`, background:`linear-gradient(90deg,${t.gold},${t.green})`, transition:'width .8s ease' }}/>
+          <div style={{ flex:1, background:t.border, borderRadius:'0 100px 100px 0' }}/>
+        </div>
+
+        {/* ── Main hero panel ── */}
         <div className="lf-hero" style={{
+          position:'relative', overflow:'hidden',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
-          gap: 0, flexWrap: 'wrap', background: t.surface, borderRadius: 16,
-          border: `1px solid ${t.border}`, padding: '28px 16px',
-          boxShadow: `0 4px 20px rgba(0,0,0,.12), inset 0 1px 0 ${t.border}`,
-          backdropFilter: 'blur(4px)',
+          gap: 0, flexWrap: 'wrap',
+          background: `linear-gradient(160deg, ${t.surface} 0%, ${t.card} 50%, ${t.surface} 100%)`,
+          borderRadius: 20,
+          border: `1px solid ${t.border}`,
+          padding: '32px 20px 24px',
+          boxShadow: `0 8px 32px rgba(0,0,0,.10), 0 1px 0 ${t.border} inset`,
         }}>
+          {/* Subtle radial glow top-right */}
+          <div style={{ position:'absolute', top:-60, right:-60, width:260, height:260, borderRadius:'50%', background:`radial-gradient(circle, ${t.gold}0a 0%, transparent 70%)`, pointerEvents:'none' }}/>
+          {/* Bottom accent line */}
+          <div style={{ position:'absolute', bottom:0, left:'10%', right:'10%', height:1, background:`linear-gradient(90deg,transparent,${t.gold}30,transparent)` }}/>
+
           <HeroNum label="Walked In" value={totalWalkins} color={t.blue} t={t} weight={goldWalkedIn} active={activeMetric==='walkin'} onClick={() => toggleMetric('walkin')} />
           <FlowArrow t={t} pct={billedPct} />
           <HeroNum label="Bills Submitted" value={totalBilled} color={t.gold} t={t} weight={goldPurchased+goldPending+goldRejected} active={activeMetric==='billed'} onClick={() => toggleMetric('billed')} />
           <FlowArrow t={t} pct={approvedPctBilled} />
+
+          {/* ── Breakdown stage ── */}
           <div style={{
             position:'relative',
             background:`linear-gradient(160deg, ${t.bg} 0%, ${t.card} 60%, ${t.bg} 100%)`,
@@ -700,6 +719,7 @@ function OldCrmTab({
               ))}
             </div>
           </div>
+
           <FlowSep t={t} />
           <HeroNum label="KYC Blocked" value={kycBlacklistedCnt} color={t.purple} t={t} small weight={kycBlacklistedWt} active={activeMetric==='kyc_blocked'} onClick={() => toggleMetric('kyc_blocked')} />
           {kycOverriddenCnt > 0 && <FlowSep t={t} />}
@@ -707,17 +727,29 @@ function OldCrmTab({
           <FlowSep t={t} />
           <HeroNum label="Left Unbilled" value={notBilledCnt} color={t.text3} t={t} small muted weight={goldNotBilled} active={activeMetric==='unbilled'} onClick={() => toggleMetric('unbilled')} />
         </div>
-        <div style={{ display: 'flex', gap: 10, marginTop: 10, flexWrap: 'wrap' }}>
-          <Pill label="Walk→Bill" value={`${billedPct}%`} color={t.gold} bg={t.goldDim} />
-          <Pill label="Bill→Purchase" value={`${approvedPctBilled}%`} color={t.green} bg={t.greenDim} />
-          <Pill label="Overall conversion" value={`${conversionPct}%`} color={t.blue} bg={t.blueDim} />
-          {wrongEntry > 0 && <Pill label="Wrong entries resubmitted" value={wrongEntry} color={t.orange} bg={t.orangeDim} />}
-          {crmNotUpdatedCnt > 0 && <Pill label="CRM not updated" value={crmNotUpdatedCnt} color={t.text3} bg={t.card2} />}
-          {kycChecklistCnt > 0 && <Pill label="KYC checklist done" value={kycChecklistCnt} color={t.text3} bg={t.card2} />}
+
+        {/* ── Stats ribbon ── */}
+        <div style={{ display:'flex', gap:0, marginTop:10, background:t.card, border:`1px solid ${t.border}`, borderRadius:12, overflow:'hidden', flexWrap:'wrap' }}>
+          {[
+            { label:'Walk → Bill',     value:`${billedPct}%`,         color:t.gold,   bg:t.goldDim   },
+            { label:'Bill → Purchase', value:`${approvedPctBilled}%`, color:t.green,  bg:t.greenDim  },
+            { label:'Overall Conv.',   value:`${conversionPct}%`,     color:t.blue,   bg:t.blueDim   },
+            ...(wrongEntry > 0      ? [{ label:'Re-submitted',   value:wrongEntry,      color:t.orange, bg:t.orangeDim }] : []),
+            ...(crmNotUpdatedCnt > 0? [{ label:'CRM not updated',value:crmNotUpdatedCnt,color:t.text3,  bg:t.card2     }] : []),
+            ...(kycChecklistCnt > 0 ? [{ label:'KYC checklist',  value:kycChecklistCnt, color:t.purple, bg:t.card2     }] : []),
+          ].map((s, i) => (
+            <div key={i} style={{ display:'flex', flexDirection:'column', alignItems:'center', padding:'10px 20px', borderRight:`1px solid ${t.border}`, gap:3, minWidth:90 }}>
+              <span style={{ fontSize:'1.1rem', fontWeight:200, fontFamily:'ui-monospace,monospace', color:s.color, letterSpacing:'-.02em' }}>{s.value}</span>
+              <span style={{ fontSize:'.52rem', color:t.text4, letterSpacing:'.1em', textTransform:'uppercase', fontWeight:600 }}>{s.label}</span>
+              <div style={{ width:'100%', height:2, borderRadius:2, background:`linear-gradient(90deg,${s.color}60,${s.color}20)`, marginTop:2 }}/>
+            </div>
+          ))}
           {activeMetric && (
-            <button onClick={() => setActiveMetric(null)} style={{ marginLeft: 'auto', padding: '3px 10px', borderRadius: 20, fontSize: '.58rem', cursor: 'pointer', border: `1px solid ${t.border}`, background: t.card2, color: t.text3 }}>
-              Clear filter ✕
-            </button>
+            <div style={{ marginLeft:'auto', display:'flex', alignItems:'center', padding:'0 16px' }}>
+              <button onClick={() => setActiveMetric(null)} style={{ padding:'4px 12px', borderRadius:20, fontSize:'.58rem', cursor:'pointer', border:`1px solid ${t.border}`, background:t.card2, color:t.text3 }}>
+                Clear filter ✕
+              </button>
+            </div>
           )}
         </div>
       </div>}
