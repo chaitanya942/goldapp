@@ -628,6 +628,7 @@ function OldCrmTab({
   const kycBlacklistedWt  = parseFloat(goldPipeline?.kyc_blacklisted_wt) || 0
   const kycOverriddenCnt  = goldPipeline?.kyc_overridden_cnt             || 0
   const kycChecklistCnt   = goldPipeline?.kyc_checklist_cnt              || 0
+  const kycChecklistRows  = goldPipeline?.kyc_checklist_rows             || []
   const avgGrossWeight    = approved > 0 && goldPurchased > 0 ? goldPurchased / approved : 0
   const billedPct         = totalWalkins > 0 ? Math.round((totalBilled / totalWalkins) * 100) : 0
   const approvedPctBilled = totalBilled  > 0 ? Math.round((approved   / totalBilled)  * 100) : 0
@@ -752,24 +753,36 @@ function OldCrmTab({
         {/* ── Stats ribbon ── */}
         <div style={{ display:'flex', gap:0, marginTop:10, background:t.card, border:`1px solid ${t.border}`, borderRadius:14, overflow:'hidden', flexWrap:'wrap', boxShadow:`0 2px 8px rgba(0,0,0,.08)` }}>
           {[
-            { label:'Walk → Bill',     value:`${billedPct}%`,         color:t.gold,   },
-            { label:'Bill → Purchase', value:`${approvedPctBilled}%`, color:t.green,  },
-            { label:'Overall Conv.',   value:`${conversionPct}%`,     color:t.blue,   },
-            ...(wrongEntry > 0      ? [{ label:'Re-submitted',    value:wrongEntry,       color:t.orange }] : []),
-            ...(crmNotUpdatedCnt > 0? [{ label:'CRM not updated', value:crmNotUpdatedCnt, color:t.text3  }] : []),
-            ...(kycChecklistCnt > 0 ? [{ label:'KYC checklist',   value:kycChecklistCnt,  color:t.purple }] : []),
-          ].map((s, i) => (
-            <div key={i} style={{
-              display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center',
-              padding:'14px 24px', borderRight:`1px solid ${t.border}`,
-              gap:4, minWidth:110, flex:1,
-              borderTop:`3px solid ${s.color}`,
-              background:`linear-gradient(180deg, ${s.color}08 0%, transparent 60%)`,
-            }}>
-              <span style={{ fontSize:'1.6rem', fontWeight:200, fontFamily:'ui-monospace,monospace', color:s.color, letterSpacing:'-.04em', lineHeight:1 }}>{s.value}</span>
-              <span style={{ fontSize:'.5rem', color:t.text4, letterSpacing:'.12em', textTransform:'uppercase', fontWeight:700, marginTop:2 }}>{s.label}</span>
-            </div>
-          ))}
+            { label:'Walk → Bill',     value:`${billedPct}%`,         color:t.gold,   key: null },
+            { label:'Bill → Purchase', value:`${approvedPctBilled}%`, color:t.green,  key: null },
+            { label:'Overall Conv.',   value:`${conversionPct}%`,     color:t.blue,   key: null },
+            ...(wrongEntry > 0      ? [{ label:'Re-submitted',    value:wrongEntry,       color:t.orange, key: null            }] : []),
+            ...(crmNotUpdatedCnt > 0? [{ label:'CRM not updated', value:crmNotUpdatedCnt, color:t.red,    key:'crm_not_updated' }] : []),
+            ...(kycChecklistCnt > 0 ? [{ label:'KYC checklist',   value:kycChecklistCnt,  color:t.purple, key:'kyc_checklist'   }] : []),
+          ].map((s, i) => {
+            const isActive = activeMetric === s.key
+            const clickable = !!s.key
+            return (
+              <div key={i}
+                onClick={clickable ? () => toggleMetric(s.key) : undefined}
+                style={{
+                  display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center',
+                  padding:'14px 24px', borderRight:`1px solid ${t.border}`,
+                  gap:4, minWidth:110, flex:1,
+                  borderTop:`3px solid ${isActive ? s.color : s.color}`,
+                  background: isActive ? `${s.color}18` : `linear-gradient(180deg, ${s.color}08 0%, transparent 60%)`,
+                  cursor: clickable ? 'pointer' : 'default',
+                  transition: 'background .15s',
+                  outline: isActive ? `1.5px solid ${s.color}40` : 'none',
+                  outlineOffset: -1,
+                  position: 'relative',
+                }}>
+                {clickable && <span style={{ position:'absolute', top:5, right:8, fontSize:'.44rem', color:s.color, opacity:.6, letterSpacing:'.06em' }}>{isActive ? '▲ active' : '▼ click'}</span>}
+                <span style={{ fontSize:'1.6rem', fontWeight:200, fontFamily:'ui-monospace,monospace', color:s.color, letterSpacing:'-.04em', lineHeight:1 }}>{s.value}</span>
+                <span style={{ fontSize:'.5rem', color:t.text4, letterSpacing:'.12em', textTransform:'uppercase', fontWeight:700, marginTop:2 }}>{s.label}</span>
+              </div>
+            )
+          })}
           {activeMetric && (
             <div style={{ marginLeft:'auto', display:'flex', alignItems:'center', padding:'0 16px' }}>
               <button onClick={() => setActiveMetric(null)} style={{ padding:'4px 12px', borderRadius:20, fontSize:'.58rem', cursor:'pointer', border:`1px solid ${t.border}`, background:t.card2, color:t.text3 }}>
@@ -841,7 +854,8 @@ function OldCrmTab({
       {canSee('livefeed.detail_table') && activeMetric && (
         <LiveDetail t={t} activeMetric={activeMetric}
           todayTxns={todayTxns} todayWalkins={todayWalkins}
-          kycRows={kycRows} notBilledWalkins={notBilledWalkins} />
+          kycRows={kycRows} notBilledWalkins={notBilledWalkins}
+          kycChecklistRows={kycChecklistRows} />
       )}
 
       {/* ──────── 5. LIVE TIMELINE (collapsed by default) ──────── */}
@@ -970,7 +984,7 @@ function HeroNum({ label, value, color, t, small, muted, onClick, active, weight
 }
 
 /* ── Live Detail Table ── */
-function LiveDetail({ t, activeMetric, todayTxns, todayWalkins, kycRows, notBilledWalkins }) {
+function LiveDetail({ t, activeMetric, todayTxns, todayWalkins, kycRows, notBilledWalkins, kycChecklistRows = [] }) {
   const [search, setSearch] = useState('')
   const { canSee } = useApp()
 
@@ -989,14 +1003,22 @@ function LiveDetail({ t, activeMetric, todayTxns, todayWalkins, kycRows, notBill
     case 'kyc_blocked': rows = kycRows; type = 'kyc'; label = `KYC Blocked`; break
     case 'kyc_cleared': rows = kycRows.filter(r => approvedMobiles.has(r.mob_num)); type = 'kyc'; label = `KYC Cleared Later`; break
     case 'unbilled':  rows = notBilledWalkins; type = 'walkin'; label = `Left Unbilled`; break
+    case 'crm_not_updated': {
+      const billedMobiles = new Set(todayTxns.map(tx => tx.cust_mobile).filter(Boolean))
+      rows = todayWalkins.filter(w => (!w.walkin_status || w.walkin_status === '') && billedMobiles.has(w.cust_mobile))
+      type = 'walkin'; label = 'CRM Not Updated'
+      break
+    }
+    case 'kyc_checklist': rows = kycChecklistRows; type = 'checklist'; label = 'KYC Checklist'; break
     default:          rows = todayTxns.filter(t => t.trxn_status === 'approved'); type = 'txn'; label = `Purchased Today`
   }
 
   const q = search.toLowerCase()
   const filtered = q ? rows.filter(r => {
-    if (type === 'txn')    return (r.cust_name||'').toLowerCase().includes(q) || (r.cust_mobile||'').includes(q) || (r.bill_no||'').toLowerCase().includes(q) || (r.branch_name||'').toLowerCase().includes(q)
-    if (type === 'walkin') return (r.cust_name||'').toLowerCase().includes(q) || (r.cust_mobile||'').includes(q) || (r.branch_name||'').toLowerCase().includes(q)
-    if (type === 'kyc')    return (r.name||'').toLowerCase().includes(q) || (r.mob_num||'').includes(q)
+    if (type === 'txn')       return (r.cust_name||'').toLowerCase().includes(q) || (r.cust_mobile||'').includes(q) || (r.bill_no||'').toLowerCase().includes(q) || (r.branch_name||'').toLowerCase().includes(q)
+    if (type === 'walkin')    return (r.cust_name||'').toLowerCase().includes(q) || (r.cust_mobile||'').includes(q) || (r.branch_name||'').toLowerCase().includes(q)
+    if (type === 'kyc')       return (r.name||'').toLowerCase().includes(q) || (r.mob_num||'').includes(q)
+    if (type === 'checklist') return (r.cust_name||'').toLowerCase().includes(q) || (r.mob_num||'').includes(q) || (r.branch_name||'').toLowerCase().includes(q)
     return true
   }) : rows
 
@@ -1018,6 +1040,9 @@ function LiveDetail({ t, activeMetric, todayTxns, todayWalkins, kycRows, notBill
             else if (type === 'walkin') downloadCSV(`${label}.csv`,
               ['Time','Customer','Phone','Branch','Gold Wt','Item Type','Walk Reason','Status'],
               filtered, r => [r.time, r.cust_name, r.cust_mobile, r.branch_name, r.gms_weight, r.item_type, r.walk_reason, r.walkin_status])
+            else if (type === 'checklist') downloadCSV(`${label}.csv`,
+              ['Time','Customer','Phone','Branch'],
+              filtered, r => [r.time, r.cust_name, r.mob_num, r.branch_name])
             else downloadCSV(`${label}.csv`,
               ['Time','Name','Phone','Branch','Grams','Reason'],
               filtered, r => [r.time, r.name, r.mob_num, r.branch_name, r.grams, r.rej_rsn])
@@ -1026,9 +1051,10 @@ function LiveDetail({ t, activeMetric, todayTxns, todayWalkins, kycRows, notBill
           </button>}
         </div>
       </div>
-      {type === 'txn'    && <TxnTable    rows={filtered} t={t} />}
-      {type === 'walkin' && <WalkinTable rows={filtered} t={t} />}
-      {type === 'kyc'    && <KycTable    rows={filtered} t={t} />}
+      {type === 'txn'       && <TxnTable       rows={filtered} t={t} />}
+      {type === 'walkin'    && <WalkinTable    rows={filtered} t={t} />}
+      {type === 'kyc'       && <KycTable       rows={filtered} t={t} />}
+      {type === 'checklist' && <ChecklistTable rows={filtered} t={t} />}
     </div>
   )
 }
@@ -1130,6 +1156,32 @@ function KycTable({ rows, t }) {
             <span style={{ fontSize: '.65rem', color: t.text2 }}>{r.branch_name || '—'}</span>
             <span style={{ fontSize: '.68rem', color: t.purple, fontFamily: 'ui-monospace,monospace' }}>{r.grams > 0 ? `${Number(r.grams).toFixed(2)}g` : '—'}</span>
             <span style={{ fontSize: '.65rem', color: t.text3 }}>{r.rej_rsn || '—'}</span>
+          </div>
+        ))}
+      </div>
+    </Card>
+  )
+}
+
+/* ── KYC Checklist table ── */
+function ChecklistTable({ rows, t }) {
+  const cols = ['Time', 'Customer', 'Phone', 'Branch']
+  const widths = '80px 220px 130px 1fr'
+  return (
+    <Card t={t} style={{ padding: 0, overflow: 'hidden' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: widths, padding: '9px 16px', borderBottom: `1px solid ${t.border}`, gap: 8, background: t.card2 }}>
+        {cols.map(h => <span key={h} style={{ fontSize: '.56rem', letterSpacing: '.1em', textTransform: 'uppercase', color: t.text3, fontWeight: 600 }}>{h}</span>)}
+      </div>
+      <div style={{ maxHeight: 480, overflowY: 'auto' }}>
+        {rows.length === 0 && <div style={{ padding: 32, textAlign: 'center', color: t.text4, fontSize: '.72rem' }}>No records</div>}
+        {rows.map((r, i) => (
+          <div key={i} style={{ display: 'grid', gridTemplateColumns: widths, padding: '10px 16px', borderBottom: `1px solid ${t.border}18`, gap: 8, alignItems: 'center' }}
+            onMouseEnter={e => e.currentTarget.style.background = t.card2}
+            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+            <span style={{ fontSize: '.65rem', color: t.text2, fontFamily: 'ui-monospace,monospace' }}>{fmtTime(r.time)}</span>
+            <span style={{ fontSize: '.72rem', color: t.text1, fontWeight: 500 }}>{r.cust_name || '—'}</span>
+            <span style={{ fontSize: '.65rem', color: t.text2, fontFamily: 'ui-monospace,monospace' }}>{r.mob_num || '—'}</span>
+            <span style={{ fontSize: '.65rem', color: t.text2 }}>{r.branch_name || '—'}</span>
           </div>
         ))}
       </div>
