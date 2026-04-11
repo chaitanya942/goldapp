@@ -794,20 +794,26 @@ function OldCrmTab({
 
       {/* ──────── 1b. WALK-IN DISPOSITION ──────── */}
       {canSee('livefeed.customer_journey') && totalWalkins > 0 && (() => {
-        const wSold     = walkinSummary?.sold             || 0
-        const wNotSold  = walkinSummary?.visited_not_sold || 0
-        const wKyc      = kycBlacklistedCnt
-        const wCrmNoUpd = crmNotUpdatedCnt
-        const wNoBill   = notBilledCnt
-        const accounted = wSold + wNotSold + wKyc + wCrmNoUpd + wNoBill
-        const wOther    = Math.max(0, totalWalkins - accounted)
+        // Cross-reference walk-ins with transactions by mobile number
+        // so this breakdown aligns with the bills panel above
+        const dispApproved = new Set(todayTxns.filter(t => t.trxn_status === 'approved').map(t => t.cust_mobile).filter(Boolean))
+        const dispBilled   = new Set(todayTxns.map(t => t.cust_mobile).filter(Boolean))
+        const dispPending  = new Set(todayTxns.filter(t => t.trxn_status === 'pending' && !dispApproved.has(t.cust_mobile)).map(t => t.cust_mobile).filter(Boolean))
+        const dispKyc      = new Set(kycRows.map(r => r.mob_num).filter(Boolean))
+
+        const wPurchased = todayWalkins.filter(w => w.cust_mobile && dispApproved.has(w.cust_mobile)).length
+        const wPending   = todayWalkins.filter(w => w.cust_mobile && dispPending.has(w.cust_mobile)).length
+        const wKyc       = todayWalkins.filter(w => w.cust_mobile && dispKyc.has(w.cust_mobile)).length
+        const wNoBill    = todayWalkins.filter(w => !dispBilled.has(w.cust_mobile) && !dispKyc.has(w.cust_mobile)).length
+        const accounted  = wPurchased + wPending + wKyc + wNoBill
+        const wOther     = Math.max(0, totalWalkins - accounted)
+
         const segments = [
-          { label: 'Sold',              sublabel: 'Jewellery sold',          count: wSold,     color: t.green,  key: 'walkin'          },
-          { label: 'Visited, not sold', sublabel: 'Came, did not sell',      count: wNotSold,  color: t.orange, key: null              },
-          { label: 'KYC blocked',       sublabel: 'Flagged at verification', count: wKyc,      color: t.purple, key: 'kyc_blocked'     },
-          { label: 'CRM not updated',   sublabel: 'Billed, status not set',  count: wCrmNoUpd, color: t.red,    key: 'crm_not_updated' },
-          { label: 'Left without bill', sublabel: 'No transaction raised',   count: wNoBill,   color: t.text4,  key: 'unbilled'        },
-          ...(wOther > 0 ? [{ label: 'Other', sublabel: '', count: wOther, color: t.border, key: null }] : []),
+          { label: 'Purchased',         sublabel: 'Bill approved today',     count: wPurchased, color: t.green,  key: 'purchased'   },
+          { label: 'In pipeline',        sublabel: 'Pending bill, not approved', count: wPending, color: t.orange, key: 'pending'  },
+          { label: 'KYC blocked',       sublabel: 'Flagged at verification', count: wKyc,       color: t.purple, key: 'kyc_blocked' },
+          { label: 'Left without bill', sublabel: 'No transaction raised',   count: wNoBill,    color: t.text4,  key: 'unbilled'    },
+          ...(wOther > 0 ? [{ label: 'Other', sublabel: 'Unmatched records', count: wOther, color: t.border, key: null }] : []),
         ].filter(s => s.count > 0)
 
         return (
