@@ -875,6 +875,79 @@ function OldCrmTab({
         )
       })()}
 
+      {/* ──────── 1c. BRANCH PULSE — plain-English insights ──────── */}
+      {canSee('livefeed.customer_journey') && totalWalkins > 0 && (() => {
+        const walkoutPct   = totalWalkins > 0 ? Math.round((notBilledCnt / totalWalkins) * 100) : 0
+        const closingRate  = totalBilled  > 0 ? Math.round((approved    / totalBilled)  * 100) : 0
+        const insights = []
+
+        // 1 — CRM hygiene
+        if (crmNotUpdatedCnt > 0) insights.push({
+          icon: '⚠', color: t.red,
+          headline: `${crmNotUpdatedCnt} CRM updates pending`,
+          detail: `${crmNotUpdatedCnt} customer${crmNotUpdatedCnt > 1 ? 's' : ''} were billed but walkin status wasn't updated — ask staff to mark these.`,
+        })
+
+        // 2 — Walk-out rate signal
+        if (walkoutPct >= 30) insights.push({
+          icon: '📉', color: t.orange,
+          headline: `${walkoutPct}% walk-out rate`,
+          detail: `${notBilledCnt} of ${totalWalkins} walk-ins left without a bill. ${walkoutPct > 45 ? 'This is high — review branch engagement.' : 'Follow up with pending customers.'}`,
+        })
+        else if (walkoutPct > 0) insights.push({
+          icon: '✓', color: t.green,
+          headline: `${walkoutPct}% walk-out rate`,
+          detail: `${notBilledCnt} of ${totalWalkins} customers left without billing — conversion is healthy.`,
+        })
+
+        // 3 — Pipeline / follow-up needed
+        if (pending > 0) insights.push({
+          icon: '🔄', color: t.orange,
+          headline: `${pending} bill${pending > 1 ? 's' : ''} in pipeline`,
+          detail: `${fmtWt(goldPending)} worth of gold pending approval. Follow up to close before end of day.`,
+        })
+
+        // 4 — KYC blocked
+        if (kycBlacklistedCnt > 0) insights.push({
+          icon: '🚫', color: t.purple,
+          headline: `${kycBlacklistedCnt} customer${kycBlacklistedCnt > 1 ? 's' : ''} KYC flagged`,
+          detail: `${kycBlacklistedCnt} walk-in${kycBlacklistedCnt > 1 ? 's' : ''} blocked at KYC verification today (${fmtWt(kycBlacklistedWt)} held).`,
+        })
+
+        // 5 — Strong closing rate
+        if (closingRate >= 90) insights.push({
+          icon: '💪', color: t.green,
+          headline: `${closingRate}% bill-to-purchase rate`,
+          detail: `Almost all billed customers are purchasing today — excellent branch performance.`,
+        })
+
+        if (insights.length === 0) return null
+        return (
+          <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
+            <span style={{ fontSize:'.48rem', color:t.text4, letterSpacing:'.12em', textTransform:'uppercase', fontWeight:700, padding:'0 2px' }}>Branch Pulse</span>
+            <div style={{ display:'flex', flexWrap:'wrap', gap:8 }}>
+              {insights.map((ins, i) => (
+                <div key={i} style={{
+                  flex:1, minWidth:200,
+                  background: t.card,
+                  border:`1px solid ${ins.color}30`,
+                  borderLeft:`3px solid ${ins.color}`,
+                  borderRadius:10,
+                  padding:'10px 14px',
+                  boxShadow:`0 2px 8px rgba(0,0,0,.08)`,
+                }}>
+                  <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:4 }}>
+                    <span style={{ fontSize:'.72rem' }}>{ins.icon}</span>
+                    <span style={{ fontSize:'.62rem', fontWeight:700, color:ins.color }}>{ins.headline}</span>
+                  </div>
+                  <div style={{ fontSize:'.56rem', color:t.text3, lineHeight:1.6 }}>{ins.detail}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )
+      })()}
+
       {/* ──────── 2. GOLD WEIGHT STRIP + REGION TABLE ──────── */}
       {canSee('livefeed.weight_flow') && <div>
 
