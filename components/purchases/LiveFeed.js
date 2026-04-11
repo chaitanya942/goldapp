@@ -792,6 +792,51 @@ function OldCrmTab({
         </div>
       </div>}
 
+      {/* ──────── 1b. WALK-IN DISPOSITION ──────── */}
+      {canSee('livefeed.customer_journey') && totalWalkins > 0 && (() => {
+        const wSold      = walkinSummary?.sold             || 0
+        const wNotSold   = walkinSummary?.visited_not_sold || 0
+        const wNoUpdate  = walkinSummary?.no_update        || 0
+        const wKyc       = kycBlacklistedCnt
+        const wOther     = Math.max(0, totalWalkins - wSold - wNotSold - wNoUpdate - wKyc)
+        const segments = [
+          { label: 'Sold',           count: wSold,    color: t.green,  key: 'walkin' },
+          { label: 'Visited, not sold', count: wNotSold, color: t.orange, key: null },
+          { label: 'KYC blocked',    count: wKyc,     color: t.purple, key: 'kyc_blocked' },
+          { label: 'CRM not updated',count: wNoUpdate, color: t.red,   key: 'crm_not_updated' },
+          ...(wOther > 0 ? [{ label: 'Other', count: wOther, color: t.text3, key: null }] : []),
+        ].filter(s => s.count > 0)
+        return (
+          <div style={{ marginTop: -6 }}>
+            <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:6, padding:'0 2px' }}>
+              <span style={{ fontSize:'.5rem', color:t.text4, letterSpacing:'.1em', textTransform:'uppercase', fontWeight:700 }}>Where did the {totalWalkins} walk-ins go?</span>
+            </div>
+            {/* Proportion bar */}
+            <div style={{ display:'flex', height:6, borderRadius:100, overflow:'hidden', gap:1, marginBottom:8 }}>
+              {segments.map((s, i) => (
+                <div key={i} onClick={s.key ? () => toggleMetric(s.key) : undefined} style={{
+                  width: `${(s.count / totalWalkins) * 100}%`, background: s.color,
+                  cursor: s.key ? 'pointer' : 'default', opacity: activeMetric && activeMetric !== s.key ? .35 : 1,
+                  transition: 'opacity .2s', minWidth: 2,
+                }} title={`${s.label}: ${s.count}`} />
+              ))}
+            </div>
+            {/* Legend */}
+            <div style={{ display:'flex', flexWrap:'wrap', gap:'6px 16px' }}>
+              {segments.map((s, i) => (
+                <div key={i} onClick={s.key ? () => toggleMetric(s.key) : undefined} style={{ display:'flex', alignItems:'center', gap:5, cursor: s.key ? 'pointer' : 'default' }}>
+                  <div style={{ width:8, height:8, borderRadius:2, background:s.color, opacity: activeMetric && activeMetric !== s.key ? .3 : 1 }}/>
+                  <span style={{ fontSize:'.56rem', color: activeMetric === s.key ? s.color : t.text3, fontWeight: activeMetric === s.key ? 700 : 400 }}>
+                    <strong style={{ color: s.color, fontFamily:'ui-monospace,monospace' }}>{s.count}</strong> {s.label}
+                    {' '}({Math.round((s.count / totalWalkins) * 100)}%)
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )
+      })()}
+
       {/* ──────── 2. GOLD WEIGHT STRIP + REGION TABLE ──────── */}
       {canSee('livefeed.weight_flow') && <div>
 
