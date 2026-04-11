@@ -1194,18 +1194,18 @@ function LiveDetail({ t, activeMetric, todayTxns, todayWalkins, kycRows, notBill
             style={{ background: t.card2, border: `1px solid ${t.border}`, borderRadius: 6, padding: '4px 10px', fontSize: '.62rem', color: t.text2, outline: 'none', width: 160, fontFamily: 'ui-monospace, monospace' }} />
           {canSee('livefeed.csv_export') && <button onClick={() => {
             if (type === 'txn') downloadCSV(`${label}.csv`,
-              ['Bill No','Date','Time','Customer','Phone','Branch','Gross Wt','Stone','Wastage','Net Wt','Purity','Gross Amt','Svc%','Status'],
+              ['Bill No','Date','Time','Customer','Phone','Branch','Gross Wt','Stone','Wastage','Net Wt','Purity','Gross Amt','Svc%','Status','Remarks'],
               filtered, r => [r.bill_no, fmtDate(r.txn_date), r.time, r.cust_name, r.cust_mobile, r.branch_name,
                 csvSum(r.grms_wet_csv).toFixed(2), csvSum(r.stnt_wet_csv).toFixed(2),
                 csvSum(r.wastag_csv).toFixed(2), csvSum(r.net_wet_csv).toFixed(2),
                 wtdAvgPurity(r.grms_wet_csv, r.purity_csv)?.toFixed(1) ?? '',
-                csvSum(r.grs_amnt_csv).toFixed(0), r.serv_chr, r.trxn_status])
+                csvSum(r.grs_amnt_csv).toFixed(0), r.serv_chr, r.trxn_status, r.txn_rmrk || ''])
             else if (type === 'walkin') downloadCSV(`${label}.csv`,
               ['Time','Customer','Phone','Branch','Gold Wt','Item Type','Walk Reason','Status'],
               filtered, r => [r.time, r.cust_name, r.cust_mobile, r.branch_name, r.gms_weight, r.item_type, r.walk_reason, r.walkin_status])
             else if (type === 'checklist') downloadCSV(`${label}.csv`,
-              ['Time','Customer','Phone','Branch'],
-              filtered, r => [r.time, r.cust_name, r.mob_num, r.branch_name])
+              ['Time','Customer','Phone','Gold (g)','Reason for Selling'],
+              filtered, r => [r.time, r.cust_name || '', r.cust_mobile || '', r.grms_sld || '', r.rsn_slgld || ''])
             else downloadCSV(`${label}.csv`,
               ['Time','Name','Phone','Branch','Grams','Reason'],
               filtered, r => [r.time, r.name, r.mob_num, r.branch_name, r.grams, r.rej_rsn])
@@ -1339,12 +1339,9 @@ function ChecklistTable({ rows, t }) {
   const nameCol    = ['cust_name','name','customer_name','custname'].find(k => k in sample)
   const mobileCol  = ['cust_mobile','mob_num','mobile','mobile_no','phone'].find(k => k in sample)
   const timeCol    = ['time','entry_time','created_time'].find(k => k in sample)
-  const branchCol  = ['branch_name','brnch_name','branch'].find(k => k in sample)
-  const reasonCol  = ['rsn_slgld','reason','remarks'].find(k => k in sample)
-  const gramsCol   = ['grms_sld','grams','weight'].find(k => k in sample)
 
-  const cols = ['Time', 'Customer', 'Phone', 'Gold (g)', 'Reason for Selling', 'Branch']
-  const widths = '80px 200px 120px 70px 1fr 160px'
+  const cols = ['Time', 'Customer', 'Phone', 'Gold (g)', 'Reason for Selling']
+  const widths = '80px 220px 130px 80px 1fr'
   return (
     <Card t={t} style={{ padding: 0, overflow: 'hidden' }}>
       <div style={{ display: 'grid', gridTemplateColumns: widths, padding: '9px 16px', borderBottom: `1px solid ${t.border}`, gap: 8, background: t.card2 }}>
@@ -1358,9 +1355,8 @@ function ChecklistTable({ rows, t }) {
             <span style={{ fontSize: '.65rem', color: t.text2, fontFamily: 'ui-monospace,monospace' }}>{timeCol ? fmtTime(r[timeCol]) : '—'}</span>
             <span style={{ fontSize: '.72rem', color: t.text1, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{nameCol ? (r[nameCol] || '—') : '—'}</span>
             <span style={{ fontSize: '.65rem', color: t.text2, fontFamily: 'ui-monospace,monospace' }}>{mobileCol ? (r[mobileCol] || '—') : '—'}</span>
-            <span style={{ fontSize: '.68rem', color: t.gold, fontFamily: 'ui-monospace,monospace' }}>{gramsCol && r[gramsCol] ? `${Number(r[gramsCol]).toFixed(2)}g` : '—'}</span>
-            <span style={{ fontSize: '.65rem', color: t.text3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{reasonCol ? (r[reasonCol] || '—') : '—'}</span>
-            <span style={{ fontSize: '.65rem', color: t.text2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{branchCol ? (r[branchCol] || '—') : '—'}</span>
+            <span style={{ fontSize: '.68rem', color: t.gold, fontFamily: 'ui-monospace,monospace' }}>{r.grms_sld ? `${Number(r.grms_sld).toFixed(2)}g` : '—'}</span>
+            <span style={{ fontSize: '.65rem', color: t.text3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.rsn_slgld || '—'}</span>
           </div>
         ))}
       </div>
