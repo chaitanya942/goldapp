@@ -617,9 +617,7 @@ function OldCrmTab({
   const [tlFilter, setTlFilter] = useState('all')
   const toggleMetric = key => setActiveMetric(prev => prev === key ? null : key)
 
-  const topTxn = todayTxns
-    .filter(tx => tx.trxn_status === 'approved')
-    .sort((a, b) => (Number(b.amount) || 0) - (Number(a.amount) || 0))[0]
+
   const approvedValue     = summary.approved_value || 0
   const goldWalkedIn      = parseFloat(goldPipeline?.walked_in_wt)      || parseFloat(walkinSummary.total_gold_wt) || 0
   const goldPurchased     = parseFloat(goldPipeline?.purchased_wt)      || 0
@@ -651,69 +649,6 @@ function OldCrmTab({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-
-      {/* ──────── 0. SUMMARY BAR ──────── */}
-      {canSee('livefeed.summary_bar') && <div style={{
-        display: 'flex', alignItems: 'center', gap: 0,
-        background: t.surface, border: `1px solid ${t.border}`, borderRadius: 12,
-        padding: '0', overflow: 'hidden', flexWrap: 'wrap',
-        boxShadow: '0 2px 8px rgba(0,0,0,.10)',
-      }}>
-
-        {/* Walked In */}
-        <div className="sum-bar-item" style={{ display:'flex', alignItems:'center', gap:6, padding:'10px 18px', borderRight:`1px solid ${t.border}`, borderLeft:`3px solid ${t.blue}` }}>
-          <span style={{ fontSize:'.75rem', fontFamily:'ui-monospace,monospace', fontWeight:600, color:t.blue }}>{fmtNum(totalWalkins)}</span>
-          <span style={{ fontSize:'.58rem', color:t.text4, letterSpacing:'.08em', textTransform:'uppercase' }}>Walked In</span>
-        </div>
-
-        {/* Billed */}
-        <div className="sum-bar-item" style={{ display:'flex', alignItems:'center', gap:6, padding:'10px 18px', borderRight:`1px solid ${t.border}`, borderLeft:`3px solid ${t.gold}` }}>
-          <span style={{ fontSize:'.75rem', fontFamily:'ui-monospace,monospace', fontWeight:600, color:t.gold }}>{fmtNum(totalBilled)}</span>
-          <span style={{ fontSize:'.58rem', color:t.text4, letterSpacing:'.08em', textTransform:'uppercase' }}>Billed</span>
-        </div>
-
-        {/* Purchased */}
-        <div className="sum-bar-item" style={{ display:'flex', alignItems:'center', gap:6, padding:'10px 18px', borderRight:`1px solid ${t.border}`, borderLeft:`3px solid ${t.green}` }}>
-          <span style={{ fontSize:'.75rem', fontFamily:'ui-monospace,monospace', fontWeight:600, color:t.green }}>{fmtNum(approved)}</span>
-          <span style={{ fontSize:'.58rem', color:t.text4, letterSpacing:'.08em', textTransform:'uppercase' }}>Purchased</span>
-        </div>
-
-        {/* Value */}
-        <div className="sum-bar-item" style={{ display:'flex', alignItems:'center', gap:6, padding:'10px 18px', borderRight:`1px solid ${t.border}`, borderLeft:`3px solid ${t.green}` }}>
-          <span style={{ fontSize:'.75rem', fontFamily:'ui-monospace,monospace', fontWeight:600, color:t.green }}>{fmtAmt(approvedValue)}</span>
-          <span style={{ fontSize:'.58rem', color:t.text4, letterSpacing:'.08em', textTransform:'uppercase' }}>Value</span>
-        </div>
-
-        {/* Conversion */}
-        <div className="sum-bar-item" style={{ display:'flex', alignItems:'center', gap:6, padding:'10px 18px', borderRight:`1px solid ${t.border}` }}>
-          <span style={{ fontSize:'.75rem', fontFamily:'ui-monospace,monospace', fontWeight:600, color:conversionPct>=50?t.green:t.orange }}>{conversionPct}%</span>
-          <span style={{ fontSize:'.58rem', color:t.text4, letterSpacing:'.08em', textTransform:'uppercase' }}>Conversion</span>
-        </div>
-
-        {/* Pending (only when > 0) */}
-        {pending > 0 && (
-          <div className="sum-bar-item" style={{ display:'flex', alignItems:'center', gap:6, padding:'10px 18px', borderRight:`1px solid ${t.border}` }}>
-            <span style={{ fontSize:'.75rem', fontFamily:'ui-monospace,monospace', fontWeight:600, color:t.orange }}>{fmtNum(pending)}</span>
-            <span style={{ fontSize:'.58rem', color:t.text4, letterSpacing:'.08em', textTransform:'uppercase' }}>Pending</span>
-          </div>
-        )}
-
-        {/* KYC Blocked (only when > 0) */}
-        {kycBlacklistedCnt > 0 && (
-          <div className="sum-bar-item" style={{ display:'flex', alignItems:'center', gap:6, padding:'10px 18px', borderRight:`1px solid ${t.border}` }}>
-            <span style={{ fontSize:'.75rem', fontFamily:'ui-monospace,monospace', fontWeight:600, color:t.purple }}>{fmtNum(kycBlacklistedCnt)}</span>
-            <span style={{ fontSize:'.58rem', color:t.text4, letterSpacing:'.08em', textTransform:'uppercase' }}>KYC Blocked</span>
-          </div>
-        )}
-        {topTxn && (
-          <div className="sum-bar-item" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 18px', marginLeft: 'auto', borderLeft: `1px solid ${t.border}` }}>
-            <span style={{ fontSize: '.52rem', color: t.text4, letterSpacing: '.08em', textTransform: 'uppercase' }}>Top sale</span>
-            <span style={{ fontSize: '.75rem', fontFamily: 'ui-monospace,monospace', fontWeight: 600, color: t.gold }}>{fmtAmt(topTxn.amount)}</span>
-            <span style={{ fontSize: '.62rem', color: t.text2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 120 }}>{topTxn.cust_name}</span>
-            <span style={{ fontSize: '.58rem', color: t.text4 }}>{topTxn.branch_name}</span>
-          </div>
-        )}
-      </div>}
 
       {/* ──────── 1. CUSTOMER JOURNEY ──────── */}
       {canSee('livefeed.customer_journey') && <div>
