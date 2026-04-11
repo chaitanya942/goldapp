@@ -908,14 +908,21 @@ function OldCrmTab({
           detail: `${kycBlacklistedCnt} walk-in${kycBlacklistedCnt > 1 ? 's' : ''} blocked at KYC today (${fmtWt(kycBlacklistedWt)} held).`,
         })
 
-        // 5 — Strong closing rate
+        // 5 — Takeover (multi-day) cases
+        if (releaseApproved > 0) insights.push({
+          icon: '🔁', color: t.gold,
+          headline: `${releaseApproved} takeover purchase${releaseApproved > 1 ? 's' : ''} completed today`,
+          detail: `${releaseApproved} bill${releaseApproved > 1 ? 's' : ''} marked as "released" (takeover flow) — customers who pledged gold on an earlier visit and completed final payment today. These may not appear in today's walk-in register.`,
+        })
+
+        // 6 — Strong closing rate
         if (closingRate >= 90) insights.push({
           icon: '💪', color: t.green,
           headline: `${closingRate}% bill-to-purchase rate`,
           detail: `Almost all billed customers are purchasing today — excellent branch performance.`,
         })
 
-        // 6 — Walk-out low = good
+        // 7 — Walk-out low = good
         if (walkoutPct < 40 && walkoutPct > 0) insights.push({
           icon: '✓', color: t.green,
           headline: `${walkoutPct}% walk-out rate`,
@@ -1217,12 +1224,12 @@ function LiveDetail({ t, activeMetric, todayTxns, todayWalkins, kycRows, notBill
 
 /* ── Transaction table (Purchase-Data style) ── */
 function TxnTable({ rows, t }) {
-  const cols = ['Bill No','Date','Time','Customer','Phone','Branch','Gross Wt','Stone','Wastage','Net Wt','Purity','Gross Amt','Svc%','Status']
-  const widths = '100px 90px 70px 160px 110px 160px 76px 60px 70px 70px 66px 96px 46px 80px'
+  const cols = ['Bill No','Date','Time','Customer','Phone','Branch','Gross Wt','Stone','Wastage','Net Wt','Purity','Gross Amt','Svc%','Status','Remarks']
+  const widths = '100px 90px 70px 160px 110px 150px 76px 60px 70px 70px 66px 96px 46px 80px 1fr'
   return (
     <Card t={t} style={{ padding: 0, overflow: 'hidden' }}>
       <div style={{ overflowX: 'auto' }}>
-        <div style={{ minWidth: 1260 }}>
+        <div style={{ minWidth: 1400 }}>
           <div style={{ display: 'grid', gridTemplateColumns: widths, padding: '9px 16px', borderBottom: `1px solid ${t.border}`, gap: 8, background: t.card2, position: 'sticky', top: 0 }}>
             {cols.map(h => <span key={h} style={{ fontSize: '.56rem', letterSpacing: '.1em', textTransform: 'uppercase', color: t.text3, fontWeight: 600 }}>{h}</span>)}
           </div>
@@ -1248,6 +1255,7 @@ function TxnTable({ rows, t }) {
                   <span style={{ fontSize: '.68rem', color: t.gold, fontFamily: 'ui-monospace,monospace' }}>{csvSum(r.grs_amnt_csv) > 0 ? `₹${Math.round(csvSum(r.grs_amnt_csv)).toLocaleString('en-IN')}` : '—'}</span>
                   <span style={{ fontSize: '.65rem', color: t.text3 }}>{r.serv_chr ? `${r.serv_chr}%` : '—'}</span>
                   <span style={{ fontSize: '.58rem', padding: '2px 7px', borderRadius: 4, fontWeight: 600, background: `${sc}18`, color: sc, border: `1px solid ${sc}30`, whiteSpace: 'nowrap', textTransform: 'capitalize' }}>{r.trxn_status || '—'}</span>
+                  <span style={{ fontSize: '.62rem', color: r.txn_rmrk ? t.text3 : t.text4, fontStyle: r.txn_rmrk ? 'normal' : 'italic', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.txn_rmrk || '—'}</span>
                 </div>
               )
             })}
@@ -1326,15 +1334,17 @@ function ChecklistTable({ rows, t }) {
       <span style={{ fontSize: '.72rem', color: t.text4 }}>No records</span>
     </Card>
   )
-  // Sniff column names from first row
+  // Column presence — chklist_tbl joined with customer_tbl gives cust_name + cust_mobile
   const sample = rows[0]
-  const nameCol   = ['cust_name','name','customer_name','custname'].find(k => k in sample)
-  const mobileCol = ['mob_num','mobile','cust_mobile','mobile_no','phone'].find(k => k in sample)
-  const timeCol   = ['time','entry_time','created_time'].find(k => k in sample)
-  const branchCol = ['branch_name','brnch_name','branch'].find(k => k in sample)
+  const nameCol    = ['cust_name','name','customer_name','custname'].find(k => k in sample)
+  const mobileCol  = ['cust_mobile','mob_num','mobile','mobile_no','phone'].find(k => k in sample)
+  const timeCol    = ['time','entry_time','created_time'].find(k => k in sample)
+  const branchCol  = ['branch_name','brnch_name','branch'].find(k => k in sample)
+  const reasonCol  = ['rsn_slgld','reason','remarks'].find(k => k in sample)
+  const gramsCol   = ['grms_sld','grams','weight'].find(k => k in sample)
 
-  const cols = ['Time', 'Customer', 'Phone', 'Branch']
-  const widths = '80px 220px 130px 1fr'
+  const cols = ['Time', 'Customer', 'Phone', 'Gold (g)', 'Reason for Selling', 'Branch']
+  const widths = '80px 200px 120px 70px 1fr 160px'
   return (
     <Card t={t} style={{ padding: 0, overflow: 'hidden' }}>
       <div style={{ display: 'grid', gridTemplateColumns: widths, padding: '9px 16px', borderBottom: `1px solid ${t.border}`, gap: 8, background: t.card2 }}>
@@ -1346,9 +1356,11 @@ function ChecklistTable({ rows, t }) {
             onMouseEnter={e => e.currentTarget.style.background = t.card2}
             onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
             <span style={{ fontSize: '.65rem', color: t.text2, fontFamily: 'ui-monospace,monospace' }}>{timeCol ? fmtTime(r[timeCol]) : '—'}</span>
-            <span style={{ fontSize: '.72rem', color: t.text1, fontWeight: 500 }}>{nameCol ? (r[nameCol] || '—') : '—'}</span>
+            <span style={{ fontSize: '.72rem', color: t.text1, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{nameCol ? (r[nameCol] || '—') : '—'}</span>
             <span style={{ fontSize: '.65rem', color: t.text2, fontFamily: 'ui-monospace,monospace' }}>{mobileCol ? (r[mobileCol] || '—') : '—'}</span>
-            <span style={{ fontSize: '.65rem', color: t.text2 }}>{branchCol ? (r[branchCol] || '—') : '—'}</span>
+            <span style={{ fontSize: '.68rem', color: t.gold, fontFamily: 'ui-monospace,monospace' }}>{gramsCol && r[gramsCol] ? `${Number(r[gramsCol]).toFixed(2)}g` : '—'}</span>
+            <span style={{ fontSize: '.65rem', color: t.text3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{reasonCol ? (r[reasonCol] || '—') : '—'}</span>
+            <span style={{ fontSize: '.65rem', color: t.text2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{branchCol ? (r[branchCol] || '—') : '—'}</span>
           </div>
         ))}
       </div>

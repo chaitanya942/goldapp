@@ -356,11 +356,13 @@ export async function GET(req) {
           WHERE DATE(r.date + INTERVAL 330 MINUTE) = ?
         `, [todayIST]),
 
-        // 8. KYC checklist filled today (chklist_tbl) — customers who went through KYC
+        // 8. KYC checklist filled today — join customer_tbl via kyc_id to get name + mobile
         conn.execute(`
-          SELECT * FROM chklist_tbl
-          WHERE DATE(date + INTERVAL 330 MINUTE) = ?
-          ORDER BY date DESC
+          SELECT c.*, ct.cust_name, ct.cust_mobile
+          FROM chklist_tbl c
+          LEFT JOIN customer_tbl ct ON ct.cust_id = c.kyc_id
+          WHERE DATE(c.date + INTERVAL 330 MINUTE) = ?
+          ORDER BY c.date DESC
         `, [todayIST]),
       ])
 
