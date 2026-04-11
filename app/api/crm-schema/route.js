@@ -10,7 +10,7 @@ export async function GET() {
       user:     process.env.CRM_DB_USER,
       password: process.env.CRM_DB_PASSWORD,
     })
-    const [rows] = await conn.execute(`DESCRIBE chklist_tbl`)
+    const [rows] = await conn.execute(`DESCRIBE transac_tbl`)
     return Response.json({ columns: rows })
   } catch (err) {
     return Response.json({ error: err.message }, { status: 500 })

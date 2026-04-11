@@ -794,17 +794,28 @@ function OldCrmTab({
 
       {/* ──────── 1b. WALK-IN DISPOSITION ──────── */}
       {canSee('livefeed.customer_journey') && totalWalkins > 0 && (() => {
+        // Non-overlapping segments — each walk-in counted exactly once:
+        // 1. Sold          = walkin_status='sold'                          (customer_walkin)
+        // 2. Visited, not sold = walkin_status='visited not sold'          (customer_walkin)
+        // 3. KYC blocked   = in rejctd_tbl today                          (separate table)
+        // 4. CRM not updated = billed but walkin_status still empty       (13 — stats ribbon)
+        // 5. Left without bill = no bill + not KYC                        (notBilledCnt)
+        // Note: walkinSummary.no_update includes KYC blocked walkins (their status is ''),
+        // so we use the already-computed crmNotUpdatedCnt + notBilledCnt instead.
         const wSold      = walkinSummary?.sold             || 0
         const wNotSold   = walkinSummary?.visited_not_sold || 0
-        const wNoUpdate  = walkinSummary?.no_update        || 0
-        const wKyc       = kycBlacklistedCnt
-        const wOther     = Math.max(0, totalWalkins - wSold - wNotSold - wNoUpdate - wKyc)
+        const wKyc       = kycBlacklistedCnt               // from rejctd_tbl
+        const wCrmNoUpd  = crmNotUpdatedCnt                // billed but walkin_status empty
+        const wNoBill    = notBilledCnt                    // no bill + not KYC
+        const accounted  = wSold + wNotSold + wKyc + wCrmNoUpd + wNoBill
+        const wOther     = Math.max(0, totalWalkins - accounted) // rounding/edge cases
         const segments = [
-          { label: 'Sold',           count: wSold,    color: t.green,  key: 'walkin' },
-          { label: 'Visited, not sold', count: wNotSold, color: t.orange, key: null },
-          { label: 'KYC blocked',    count: wKyc,     color: t.purple, key: 'kyc_blocked' },
-          { label: 'CRM not updated',count: wNoUpdate, color: t.red,   key: 'crm_not_updated' },
-          ...(wOther > 0 ? [{ label: 'Other', count: wOther, color: t.text3, key: null }] : []),
+          { label: 'Sold',                  count: wSold,     color: t.green,  key: 'walkin'          },
+          { label: 'Visited, not sold',     count: wNotSold,  color: t.orange, key: null              },
+          { label: 'KYC blocked',           count: wKyc,      color: t.purple, key: 'kyc_blocked'     },
+          { label: 'Billed, CRM not updated', count: wCrmNoUpd, color: t.red,  key: 'crm_not_updated' },
+          { label: 'Left without bill',     count: wNoBill,   color: t.text3,  key: 'unbilled'        },
+          ...(wOther > 0 ? [{ label: 'Other', count: wOther, color: t.border, key: null }] : []),
         ].filter(s => s.count > 0)
         return (
           <div style={{ marginTop: -6 }}>
