@@ -288,6 +288,7 @@ export async function GET(req) {
         // 3. Branch breakdown
         conn.execute(`
           SELECT
+            t.branch_id   AS branch_id,
             b.brnch_name  AS branch_name,
             COUNT(*)      AS bills,
             SUM(CASE WHEN t.trxn_status='approved' THEN 1 ELSE 0 END) AS approved,
@@ -340,7 +341,8 @@ export async function GET(req) {
         conn.execute(`
           SELECT cw.id, cw.cust_name, cw.cust_mobile, cw.time,
             cw.walkin_status, cw.item_type, cw.gms_weight,
-            cw.walk_reason, cw.source, cw.branch_id, b.brnch_name AS branch_name
+            cw.walk_reason, cw.source, cw.cust_rmrks,
+            cw.branch_id, b.brnch_name AS branch_name
           FROM customer_walkin cw
           LEFT JOIN branch_tbl b ON b.brnch_id = cw.branch_id
           WHERE DATE(cw.date + INTERVAL 330 MINUTE) = ?
