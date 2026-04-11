@@ -794,55 +794,76 @@ function OldCrmTab({
 
       {/* ──────── 1b. WALK-IN DISPOSITION ──────── */}
       {canSee('livefeed.customer_journey') && totalWalkins > 0 && (() => {
-        // Non-overlapping segments — each walk-in counted exactly once:
-        // 1. Sold          = walkin_status='sold'                          (customer_walkin)
-        // 2. Visited, not sold = walkin_status='visited not sold'          (customer_walkin)
-        // 3. KYC blocked   = in rejctd_tbl today                          (separate table)
-        // 4. CRM not updated = billed but walkin_status still empty       (13 — stats ribbon)
-        // 5. Left without bill = no bill + not KYC                        (notBilledCnt)
-        // Note: walkinSummary.no_update includes KYC blocked walkins (their status is ''),
-        // so we use the already-computed crmNotUpdatedCnt + notBilledCnt instead.
-        const wSold      = walkinSummary?.sold             || 0
-        const wNotSold   = walkinSummary?.visited_not_sold || 0
-        const wKyc       = kycBlacklistedCnt               // from rejctd_tbl
-        const wCrmNoUpd  = crmNotUpdatedCnt                // billed but walkin_status empty
-        const wNoBill    = notBilledCnt                    // no bill + not KYC
-        const accounted  = wSold + wNotSold + wKyc + wCrmNoUpd + wNoBill
-        const wOther     = Math.max(0, totalWalkins - accounted) // rounding/edge cases
+        const wSold     = walkinSummary?.sold             || 0
+        const wNotSold  = walkinSummary?.visited_not_sold || 0
+        const wKyc      = kycBlacklistedCnt
+        const wCrmNoUpd = crmNotUpdatedCnt
+        const wNoBill   = notBilledCnt
+        const accounted = wSold + wNotSold + wKyc + wCrmNoUpd + wNoBill
+        const wOther    = Math.max(0, totalWalkins - accounted)
         const segments = [
-          { label: 'Sold',                  count: wSold,     color: t.green,  key: 'walkin'          },
-          { label: 'Visited, not sold',     count: wNotSold,  color: t.orange, key: null              },
-          { label: 'KYC blocked',           count: wKyc,      color: t.purple, key: 'kyc_blocked'     },
-          { label: 'Billed, CRM not updated', count: wCrmNoUpd, color: t.red,  key: 'crm_not_updated' },
-          { label: 'Left without bill',     count: wNoBill,   color: t.text3,  key: 'unbilled'        },
-          ...(wOther > 0 ? [{ label: 'Other', count: wOther, color: t.border, key: null }] : []),
+          { label: 'Sold',              sublabel: 'Jewellery sold',          count: wSold,     color: t.green,  key: 'walkin'          },
+          { label: 'Visited, not sold', sublabel: 'Came, did not sell',      count: wNotSold,  color: t.orange, key: null              },
+          { label: 'KYC blocked',       sublabel: 'Flagged at verification', count: wKyc,      color: t.purple, key: 'kyc_blocked'     },
+          { label: 'CRM not updated',   sublabel: 'Billed, status not set',  count: wCrmNoUpd, color: t.red,    key: 'crm_not_updated' },
+          { label: 'Left without bill', sublabel: 'No transaction raised',   count: wNoBill,   color: t.text4,  key: 'unbilled'        },
+          ...(wOther > 0 ? [{ label: 'Other', sublabel: '', count: wOther, color: t.border, key: null }] : []),
         ].filter(s => s.count > 0)
+
         return (
-          <div style={{ marginTop: -6 }}>
-            <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:6, padding:'0 2px' }}>
-              <span style={{ fontSize:'.5rem', color:t.text4, letterSpacing:'.1em', textTransform:'uppercase', fontWeight:700 }}>Where did the {totalWalkins} walk-ins go?</span>
+          <div style={{ position:'relative', background:`linear-gradient(160deg, ${t.bg} 0%, ${t.card} 60%, ${t.bg} 100%)`, border:`1.5px solid ${t.border2}`, borderRadius:20, boxShadow:`0 4px 20px rgba(0,0,0,.10), inset 0 1px 0 ${t.border}`, padding:'22px 16px 16px', marginTop:2 }}>
+            {/* ambient glow */}
+            <div style={{ position:'absolute', inset:-1, borderRadius:20, background:`radial-gradient(ellipse at 50% 0%, ${t.border2}60 0%, transparent 65%)`, pointerEvents:'none' }}/>
+            {/* floating label */}
+            <div style={{ position:'absolute', top:-13, left:'50%', transform:'translateX(-50%)', background:t.card2, border:`1px solid ${t.border2}`, borderRadius:20, padding:'4px 16px', whiteSpace:'nowrap', boxShadow:`0 2px 8px rgba(0,0,0,.12)` }}>
+              <span style={{ fontSize:'.48rem', letterSpacing:'.14em', textTransform:'uppercase', color:t.text3, fontWeight:700 }}>breakdown of {fmtNum(totalWalkins)} walk-ins</span>
             </div>
+
             {/* Proportion bar */}
-            <div style={{ display:'flex', height:6, borderRadius:100, overflow:'hidden', gap:1, marginBottom:8 }}>
+            <div style={{ display:'flex', height:5, borderRadius:100, overflow:'hidden', gap:1, marginBottom:14, position:'relative' }}>
               {segments.map((s, i) => (
                 <div key={i} onClick={s.key ? () => toggleMetric(s.key) : undefined} style={{
-                  width: `${(s.count / totalWalkins) * 100}%`, background: s.color,
-                  cursor: s.key ? 'pointer' : 'default', opacity: activeMetric && activeMetric !== s.key ? .35 : 1,
-                  transition: 'opacity .2s', minWidth: 2,
-                }} title={`${s.label}: ${s.count}`} />
+                  width:`${(s.count / totalWalkins) * 100}%`, background:s.color, minWidth:2,
+                  cursor:s.key ? 'pointer' : 'default',
+                  opacity: activeMetric && activeMetric !== s.key ? .2 : 1,
+                  transition:'opacity .2s',
+                  borderRadius: i === 0 ? '100px 0 0 100px' : i === segments.length-1 ? '0 100px 100px 0' : 0,
+                }} />
               ))}
             </div>
-            {/* Legend */}
-            <div style={{ display:'flex', flexWrap:'wrap', gap:'6px 16px' }}>
-              {segments.map((s, i) => (
-                <div key={i} onClick={s.key ? () => toggleMetric(s.key) : undefined} style={{ display:'flex', alignItems:'center', gap:5, cursor: s.key ? 'pointer' : 'default' }}>
-                  <div style={{ width:8, height:8, borderRadius:2, background:s.color, opacity: activeMetric && activeMetric !== s.key ? .3 : 1 }}/>
-                  <span style={{ fontSize:'.56rem', color: activeMetric === s.key ? s.color : t.text3, fontWeight: activeMetric === s.key ? 700 : 400 }}>
-                    <strong style={{ color: s.color, fontFamily:'ui-monospace,monospace' }}>{s.count}</strong> {s.label}
-                    {' '}({Math.round((s.count / totalWalkins) * 100)}%)
-                  </span>
-                </div>
-              ))}
+
+            {/* Cards row */}
+            <div style={{ position:'relative', display:'flex', alignItems:'stretch', gap:8, flexWrap:'wrap' }}>
+              {segments.map((s, i) => {
+                const isActive = activeMetric === s.key
+                return (
+                  <div key={i}
+                    onClick={s.key ? () => toggleMetric(s.key) : undefined}
+                    style={{
+                      flex:1, minWidth:100,
+                      background:`linear-gradient(160deg, ${t.card2} 0%, ${t.card} 100%)`,
+                      border:`1px solid ${s.color}25`,
+                      borderTop:`2px solid ${isActive ? s.color : s.color + '80'}`,
+                      borderRadius:12,
+                      boxShadow: isActive
+                        ? `0 0 0 1.5px ${s.color}40, 0 8px 24px rgba(0,0,0,.14), inset 0 1px 0 ${s.color}20`
+                        : `0 4px 12px rgba(0,0,0,.10), inset 0 1px 0 ${s.color}10`,
+                      padding:'12px 14px 10px',
+                      cursor: s.key ? 'pointer' : 'default',
+                      transform: isActive ? 'translateY(-3px)' : 'translateY(0)',
+                      transition:'all .18s ease',
+                      background: isActive ? `linear-gradient(160deg, ${s.color}10 0%, ${t.card} 100%)` : `linear-gradient(160deg, ${t.card2} 0%, ${t.card} 100%)`,
+                    }}>
+                    <div style={{ fontSize:'1.4rem', fontWeight:200, fontFamily:'ui-monospace,monospace', color:s.color, lineHeight:1, letterSpacing:'-.03em' }}>{fmtNum(s.count)}</div>
+                    <div style={{ fontSize:'.6rem', fontWeight:600, color:s.color, marginTop:4, letterSpacing:'.02em' }}>{s.label}</div>
+                    <div style={{ fontSize:'.5rem', color:t.text4, marginTop:2, lineHeight:1.4 }}>{s.sublabel}</div>
+                    <div style={{ marginTop:8, height:2, borderRadius:2, background:t.border, overflow:'hidden' }}>
+                      <div style={{ height:'100%', width:`${Math.round((s.count/totalWalkins)*100)}%`, background:s.color, borderRadius:2, transition:'width .6s ease' }}/>
+                    </div>
+                    <div style={{ fontSize:'.44rem', color:t.text4, marginTop:3, textAlign:'right' }}>{Math.round((s.count/totalWalkins)*100)}%</div>
+                  </div>
+                )
+              })}
             </div>
           </div>
         )
