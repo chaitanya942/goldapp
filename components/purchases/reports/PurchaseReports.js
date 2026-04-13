@@ -239,9 +239,9 @@ export default function PurchaseReports() {
     setError(null)
     try {
       const isSingleDay = fromDate && toDate && fromDate === toDate
-      const p       = { p_from: fromDate || null, p_to: toDate || null, p_branch: filterBranch || null, p_txn_type: filterTxn || null, p_state: filterState || null }
-      const pBranch = { p_from: p.p_from, p_to: p.p_to, p_txn_type: p.p_txn_type, p_state: p.p_state }
-      const pState  = { p_from: p.p_from, p_to: p.p_to, p_txn_type: p.p_txn_type }
+      const p       = { p_from: fromDate || null, p_to: toDate || null, p_branch: filterBranch || null, p_txn_type: filterTxn || null, p_state: filterState || null, p_crm_status: 'approved' }
+      const pBranch = { p_from: p.p_from, p_to: p.p_to, p_txn_type: p.p_txn_type, p_state: p.p_state, p_crm_status: 'approved' }
+      const pState  = { p_from: p.p_from, p_to: p.p_to, p_txn_type: p.p_txn_type, p_crm_status: 'approved' }
 
       const [k, tr, br, st, mo, dow, pur, wt, reg, mh, tb] = await Promise.all([
       supabase.rpc('get_report_kpis', p),
