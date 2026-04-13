@@ -517,6 +517,7 @@ export async function GET(req) {
         kyc_overridden_cnt:  kycOverriddenCount,
         kyc_checklist_cnt:   chklistRows.length,
         kyc_checklist_rows:  chklistRows,
+        kyc_checklist_cols:  chklistRows.length > 0 ? Object.keys(chklistRows[0]) : [],
         physical: { approved: byType['physical']?.approved || 0, pending: byType['physical']?.pending || 0, rejected: byType['physical']?.rejected || 0 },
         released: { approved: byType['released']?.approved || 0, pending: byType['released']?.pending || 0, rejected: byType['released']?.rejected || 0 },
       }
