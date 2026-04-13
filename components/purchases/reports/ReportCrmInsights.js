@@ -9,7 +9,7 @@ export default function ReportCrmInsights({ t }) {
   const [walkReasons, setWalkReasons] = useState([])
   const [branchConv, setBranchConv] = useState([])
   const [loading, setLoading]       = useState(true)
-  const [approved, setApproved]     = useState(0)
+  const [approved, setApproved]     = useState(null)
 
   useEffect(() => {
     const fetchAll = async () => {
@@ -22,9 +22,7 @@ export default function ReportCrmInsights({ t }) {
         ])
         if (kpiRes) {
           setKpis(kpiRes)
-          // Approximate approved from Supabase (just for rejection rate)
-          const appTotal = (Number(kpiRes.rejected || 0) + Number(kpiRes.pending || 0))
-          // We don't have approved count here easily, just show ratio of what we have
+          setApproved(Number(kpiRes.approved || 0))
         }
         if (rejRes.topReasons) setRejReasons(rejRes.topReasons)
         if (walkRes.reasonDist) setWalkReasons(walkRes.reasonDist)
@@ -51,9 +49,10 @@ export default function ReportCrmInsights({ t }) {
   const walkin     = Number(kpis.walkin     || 0)
   const blacklisted = Number(kpis.blacklisted || 0)
 
-  // Rejection rate = rejected / (rejected + pending) as a signal of friction
-  const totalTxn   = rejected + pending
-  const rejRate    = totalTxn > 0 ? ((rejected / totalTxn) * 100).toFixed(1) : '—'
+  // Rejection rate = rejected / (rejected + pending + approved)
+  const approvedCnt = approved !== null ? approved : Number(kpis.approved || 0)
+  const totalTxn    = rejected + pending + approvedCnt
+  const rejRate     = totalTxn > 0 ? ((rejected / totalTxn) * 100).toFixed(1) : '—'
 
   // Bar chart helper
   const BarRow = ({ label, value, max, color }) => {

@@ -323,7 +323,7 @@ export default function PurchaseReports() {
       let allRows = [], from = 0
       const CHUNK = 1000
       while (true) {
-        let q = supabase.from('purchases').select('*')
+        let q = supabase.from('purchases').select('*').eq('is_deleted', false)
         if (fromDate)     q = q.gte('purchase_date', fromDate)
         if (toDate)       q = q.lte('purchase_date', toDate)
         if (filterBranch) q = q.eq('branch_name', filterBranch)

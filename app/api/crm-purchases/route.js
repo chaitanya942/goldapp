@@ -617,11 +617,12 @@ export async function GET(req) {
 
     // ── KPI COUNTS ───────────────────────────────────────────────────────────
     if (action === 'kpis') {
-      const [[{ rejected }]]   = await conn.execute(`SELECT COUNT(*) AS rejected FROM transac_tbl WHERE trxn_status = 'rejected'`)
-      const [[{ pending }]]    = await conn.execute(`SELECT COUNT(*) AS pending FROM transac_tbl WHERE trxn_status = 'pending'`)
-      const [[{ walkin }]]     = await conn.execute(`SELECT COUNT(*) AS walkin FROM customer_walkin WHERE walkin_status IN ('visited not sold','enquiry','planning to visit','call later')`)
+      const [[{ rejected }]]    = await conn.execute(`SELECT COUNT(*) AS rejected FROM transac_tbl WHERE trxn_status = 'rejected'`)
+      const [[{ pending }]]     = await conn.execute(`SELECT COUNT(*) AS pending FROM transac_tbl WHERE trxn_status = 'pending'`)
+      const [[{ approved }]]    = await conn.execute(`SELECT COUNT(*) AS approved FROM transac_tbl WHERE trxn_status = 'approved'`)
+      const [[{ walkin }]]      = await conn.execute(`SELECT COUNT(*) AS walkin FROM customer_walkin WHERE walkin_status IN ('visited not sold','enquiry','planning to visit','call later')`)
       const [[{ blacklisted }]] = await conn.execute(`SELECT COUNT(*) AS blacklisted FROM rejctd_tbl`)
-      return Response.json({ rejected, pending, walkin, blacklisted })
+      return Response.json({ rejected, pending, approved, walkin, blacklisted })
     }
 
   } catch (err) {

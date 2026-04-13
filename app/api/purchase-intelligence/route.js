@@ -41,10 +41,10 @@ export async function GET(req) {
           SUM(CASE WHEN trxn_status='pending'  THEN 1 ELSE 0 END)                       AS pending,
           ROUND(SUM(CASE WHEN trxn_status='rejected' THEN 1 ELSE 0 END)
             / NULLIF(COUNT(*), 0) * 100, 1)                                             AS overall_rejection_rate,
-          -- today
-          SUM(CASE WHEN trxn_status='approved' AND DATE(date) = CURDATE() THEN 1 ELSE 0 END) AS approved_today,
-          SUM(CASE WHEN trxn_status='approved' AND date >= DATE_FORMAT(CURDATE(),'%Y-%m-01') THEN 1 ELSE 0 END) AS approved_mtd,
-          SUM(CASE WHEN trxn_status='approved' AND date >= DATE_FORMAT(CURDATE(),'%Y-%m-01')
+          -- today/MTD in IST (server is UTC; add 330 min offset)
+          SUM(CASE WHEN trxn_status='approved' AND DATE(date + INTERVAL 330 MINUTE) = DATE(UTC_TIMESTAMP() + INTERVAL 330 MINUTE) THEN 1 ELSE 0 END) AS approved_today,
+          SUM(CASE WHEN trxn_status='approved' AND date + INTERVAL 330 MINUTE >= DATE_FORMAT(DATE(UTC_TIMESTAMP() + INTERVAL 330 MINUTE),'%Y-%m-01') THEN 1 ELSE 0 END) AS approved_mtd,
+          SUM(CASE WHEN trxn_status='approved' AND date + INTERVAL 330 MINUTE >= DATE_FORMAT(DATE(UTC_TIMESTAMP() + INTERVAL 330 MINUTE),'%Y-%m-01')
                 THEN (finl_amnt + 0) ELSE 0 END)                                       AS value_mtd
         FROM transac_tbl
       `)
@@ -132,25 +132,25 @@ export async function GET(req) {
           ROUND(
             SUM(CASE WHEN t.trxn_status='rejected' THEN 1 ELSE 0 END)
             / NULLIF(COUNT(t.id), 0) * 100, 1)                                                    AS rejection_rate,
-          -- MTD (this month approved)
+          -- MTD (this month approved, IST)
           SUM(CASE WHEN t.trxn_status='approved'
-                AND t.date >= DATE_FORMAT(CURDATE(),'%Y-%m-01') THEN 1 ELSE 0 END)                AS mtd_count,
+                AND t.date + INTERVAL 330 MINUTE >= DATE_FORMAT(DATE(UTC_TIMESTAMP() + INTERVAL 330 MINUTE),'%Y-%m-01') THEN 1 ELSE 0 END) AS mtd_count,
           SUM(CASE WHEN t.trxn_status='approved'
-                AND t.date >= DATE_FORMAT(CURDATE(),'%Y-%m-01')
+                AND t.date + INTERVAL 330 MINUTE >= DATE_FORMAT(DATE(UTC_TIMESTAMP() + INTERVAL 330 MINUTE),'%Y-%m-01')
                 THEN (t.finl_amnt + 0) ELSE 0 END)                                               AS mtd_value,
-          -- Last month approved
+          -- Last month approved (IST)
           SUM(CASE WHEN t.trxn_status='approved'
-                AND t.date >= DATE_FORMAT(DATE_SUB(CURDATE(), INTERVAL 1 MONTH),'%Y-%m-01')
-                AND t.date <  DATE_FORMAT(CURDATE(),'%Y-%m-01') THEN 1 ELSE 0 END)               AS lm_count,
+                AND t.date + INTERVAL 330 MINUTE >= DATE_FORMAT(DATE_SUB(DATE(UTC_TIMESTAMP() + INTERVAL 330 MINUTE), INTERVAL 1 MONTH),'%Y-%m-01')
+                AND t.date + INTERVAL 330 MINUTE <  DATE_FORMAT(DATE(UTC_TIMESTAMP() + INTERVAL 330 MINUTE),'%Y-%m-01') THEN 1 ELSE 0 END) AS lm_count,
           SUM(CASE WHEN t.trxn_status='approved'
-                AND t.date >= DATE_FORMAT(DATE_SUB(CURDATE(), INTERVAL 1 MONTH),'%Y-%m-01')
-                AND t.date <  DATE_FORMAT(CURDATE(),'%Y-%m-01')
+                AND t.date + INTERVAL 330 MINUTE >= DATE_FORMAT(DATE_SUB(DATE(UTC_TIMESTAMP() + INTERVAL 330 MINUTE), INTERVAL 1 MONTH),'%Y-%m-01')
+                AND t.date + INTERVAL 330 MINUTE <  DATE_FORMAT(DATE(UTC_TIMESTAMP() + INTERVAL 330 MINUTE),'%Y-%m-01')
                 THEN (t.finl_amnt + 0) ELSE 0 END)                                               AS lm_value,
-          -- Last 7 days
+          -- Last 7 days (IST)
           SUM(CASE WHEN t.trxn_status='approved'
-                AND t.date >= DATE_SUB(CURDATE(), INTERVAL 7 DAY) THEN 1 ELSE 0 END)             AS last7_count,
+                AND t.date + INTERVAL 330 MINUTE >= DATE_SUB(DATE(UTC_TIMESTAMP() + INTERVAL 330 MINUTE), INTERVAL 7 DAY) THEN 1 ELSE 0 END) AS last7_count,
           SUM(CASE WHEN t.trxn_status='approved'
-                AND t.date >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
+                AND t.date + INTERVAL 330 MINUTE >= DATE_SUB(DATE(UTC_TIMESTAMP() + INTERVAL 330 MINUTE), INTERVAL 7 DAY)
                 THEN (t.finl_amnt + 0) ELSE 0 END)                                               AS last7_value
         FROM branch_tbl b
         LEFT JOIN transac_tbl t ON t.branch_id = b.brnch_id
