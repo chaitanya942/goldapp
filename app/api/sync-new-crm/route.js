@@ -1,5 +1,6 @@
 import pg from 'pg'
 import { createClient } from '@supabase/supabase-js'
+import { NEW_CRM_LIVE_DATE } from '../../../lib/crmConfig'
 
 const { Client } = pg
 
@@ -40,6 +41,12 @@ function fmtTime(ts) {
 }
 
 export async function POST(request) {
+  // ── New CRM not live yet — wipe any test data and skip sync ────────────────
+  if (!NEW_CRM_LIVE_DATE) {
+    await supabaseAdmin.from('purchases').delete().eq('crm_source', 'new_crm')
+    return Response.json({ success: true, message: 'New CRM not live yet — test data cleared', synced: 0 })
+  }
+
   let client
   try {
     client = new Client({
@@ -62,14 +69,13 @@ export async function POST(request) {
       .limit(1)
       .single()
 
-    // 7-day buffer to catch bills approved days after creation; fall back to Apr 6 2026 (go-live date)
-    const GO_LIVE = '2026-04-06'
+    // 7-day buffer; never go before the official go-live date
     const cutoffDate = latestRow?.purchase_date
       ? new Date(Math.max(
           new Date(latestRow.purchase_date).getTime() - 7 * 86400000,
-          new Date(GO_LIVE).getTime()
+          new Date(NEW_CRM_LIVE_DATE).getTime()
         )).toISOString().split('T')[0]
-      : GO_LIVE
+      : NEW_CRM_LIVE_DATE
 
     // ── Pull only completed (FINAL_PAYMENT_COMPLETED) transactions ────────────
     const { rows } = await client.query(`
