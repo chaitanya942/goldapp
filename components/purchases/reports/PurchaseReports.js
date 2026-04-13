@@ -206,7 +206,7 @@ export default function PurchaseReports() {
   const [toDate,        setToDate]        = useState(istStr(_now))
   const [filterBranch,  setFilterBranch]  = useState('')
   const [filterTxn,     setFilterTxn]     = useState('')
-  const [filterState,   setFilterState]   = useState('')
+  const [filterRegion,  setFilterRegion]  = useState('')
   const [kpis,          setKpis]          = useState(null)
   const [trend,         setTrend]         = useState([])
   const [monthly,       setMonthly]       = useState([])
@@ -219,6 +219,7 @@ export default function PurchaseReports() {
   const [monthHalf,     setMonthHalf]     = useState([])
   const [topBills,      setTopBills]      = useState([])
   const [branches,      setBranches]      = useState([])
+  const [regions,       setRegions]       = useState([])
   const [loading,       setLoading]       = useState(true)
   const [activeSection, setActiveSection] = useState(null)
   const [exporting,     setExporting]     = useState(false)
@@ -227,12 +228,16 @@ export default function PurchaseReports() {
   const [error,         setError]         = useState(null)
 
   useEffect(() => {
-    supabase.from('branches').select('name').order('name').then(({ data }) => {
-      if (data) setBranches(data.map(b => b.name))
+    supabase.from('branches').select('name, region').order('name').then(({ data }) => {
+      if (data) {
+        setBranches(data.map(b => b.name))
+        const uniqueRegions = [...new Set(data.map(b => b.region).filter(Boolean))].sort()
+        setRegions(uniqueRegions)
+      }
     })
   }, [])
 
-  useEffect(() => { fetchAll() }, [fromDate, toDate, filterBranch, filterTxn, filterState, syncVersion])
+  useEffect(() => { fetchAll() }, [fromDate, toDate, filterBranch, filterTxn, filterRegion, syncVersion])
 
   const fetchAll = async () => {
     setLoading(true)
@@ -247,11 +252,11 @@ export default function PurchaseReports() {
       const branchMetaMap = {}
       ;(branchMeta || []).forEach(b => { branchMetaMap[b.name] = b })
 
-      // ── State filter → resolve to branch names ────────────
+      // ── Region filter → resolve to branch names ───────────
       let stateFilterBranches = null
-      if (filterState) {
+      if (filterRegion) {
         stateFilterBranches = (branchMeta || [])
-          .filter(b => b.state === filterState)
+          .filter(b => b.region === filterRegion)
           .map(b => b.name)
       }
 
@@ -299,11 +304,11 @@ export default function PurchaseReports() {
         const fa = parseFloat(r.final_amount_crm || 0)
         const pu = parseFloat(r.purity        || 0)
         const sp = parseFloat(r.service_charge_pct || 0)
-        totalGross     += gw
-        totalNet       += nw
-        totalValue     += fa
-        purityWt       += nw * pu
-        svcPctSum      += sp
+        totalGross      += gw
+        totalNet        += nw
+        totalValue      += fa
+        purityWt        += nw * pu
+        svcPctSum       += sp
         stoneWastageSum += sw + ww
         if (r.transaction_type === 'PHYSICAL') { physCount++; physNet  += nw }
         else                                   { takovCount++; takovNet += nw }
@@ -311,8 +316,8 @@ export default function PurchaseReports() {
         if (r.branch_name)   branchSet.add(r.branch_name)
       }
 
-      const n          = rows.length
-      const avgPurity  = totalNet > 0 ? purityWt / totalNet : 0
+      const n           = rows.length
+      const avgPurity   = totalNet > 0 ? purityWt / totalNet : 0
       const sortedDates = [...dateSet].sort()
 
       setKpis({
@@ -321,9 +326,10 @@ export default function PurchaseReports() {
         total_net:              totalNet,
         avg_purity:             avgPurity,
         total_value:            totalValue,
-        avg_net_per_txn:        n > 0 ? totalNet   / n : 0,
-        avg_service_charge_pct: n > 0 ? svcPctSum  / n : 0,
-        avg_rate_per_gram:      totalNet > 0 ? totalValue / totalNet : 0,
+        avg_net_per_txn:        n > 0 ? totalNet        / n : 0,
+        avg_service_charge_pct: n > 0 ? svcPctSum       / n : 0,
+        avg_rate_per_gram:      totalNet   > 0 ? totalValue      / totalNet   : 0,
+        stone_wastage_pct:      totalGross > 0 ? (stoneWastageSum / totalGross) * 100 : 0,
         branch_count:           branchSet.size,
         min_date:               sortedDates[0] || null,
         max_date:               sortedDates[sortedDates.length - 1] || null,
@@ -566,14 +572,22 @@ export default function PurchaseReports() {
   const handleExport = async () => {
     setExporting(true)
     try {
+      // Resolve region filter to branch names
+      let exportRegionBranches = null
+      if (filterRegion) {
+        const { data: bMeta } = await supabase.from('branches').select('name, region')
+        exportRegionBranches = (bMeta || []).filter(b => b.region === filterRegion).map(b => b.name)
+      }
+
       let allRows = [], from = 0
       const CHUNK = 1000
       while (true) {
         let q = supabase.from('purchases').select('*').eq('is_deleted', false).eq('crm_status', 'approved')
-        if (fromDate)     q = q.gte('purchase_date', fromDate)
-        if (toDate)       q = q.lte('purchase_date', toDate)
-        if (filterBranch) q = q.eq('branch_name', filterBranch)
-        if (filterTxn)    q = q.eq('transaction_type', filterTxn)
+        if (fromDate)             q = q.gte('purchase_date', fromDate)
+        if (toDate)               q = q.lte('purchase_date', toDate)
+        if (filterBranch)         q = q.eq('branch_name', filterBranch)
+        if (filterTxn)            q = q.eq('transaction_type', filterTxn)
+        if (exportRegionBranches) q = q.in('branch_name', exportRegionBranches)
         q = q.order('purchase_date', { ascending: true }).range(from, from + CHUNK - 1)
         const { data } = await q
         if (!data || data.length === 0) break
@@ -582,7 +596,7 @@ export default function PurchaseReports() {
         from += CHUNK
       }
       const ts       = new Date().toISOString().slice(0, 10)
-      const tag      = filterBranch ? `_${filterBranch}` : filterState ? `_${filterState}` : ''
+      const tag      = filterBranch ? `_${filterBranch}` : filterRegion ? `_${filterRegion}` : ''
       const filename = `purchase_report${tag}_${ts}.pdf`
       const meta = {
         dateRange: kpis?.min_date ? `${fmtDate(kpis.min_date)} — ${fmtDate(kpis.max_date)}` : 'All time',
@@ -606,7 +620,7 @@ export default function PurchaseReports() {
   const setQuickRange = (days) => { const to = istNow(); const fr = istNow(); fr.setDate(fr.getDate() - days); setToDate(istStr(to)); setFromDate(istStr(fr)) }
   const setThisMonth  = () => { const now = istNow(); setFromDate(`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-01`); setToDate(istStr(now)) }
 
-  const hasFilters    = fromDate || toDate || filterBranch || filterTxn || filterState
+  const hasFilters    = fromDate || toDate || filterBranch || filterTxn || filterRegion
   const canSeeSection = (key) => canSee(SECTION_KEY_MAP[key] ?? key)
   const showSection   = (key) => canSeeSection(key) && (!activeSection || activeSection === key)
   const visibleSections = SECTIONS.filter(sec => canSeeSection(sec.key))
@@ -661,7 +675,7 @@ export default function PurchaseReports() {
           </button>
           {hasFilters && (
             <button
-              onClick={() => { setFromDate(''); setToDate(''); setFilterBranch(''); setFilterTxn(''); setFilterState('') }}
+              onClick={() => { setFromDate(''); setToDate(''); setFilterBranch(''); setFilterTxn(''); setFilterRegion('') }}
               style={{ background: 'transparent', border: `1px solid ${t.border}`, borderRadius: '8px', padding: '8px 16px', color: t.text3, fontSize: '.7rem', cursor: 'pointer' }}
             >
               ✕ Clear All
@@ -698,9 +712,9 @@ export default function PurchaseReports() {
             <input type="date" style={inp} value={toDate} onChange={e => setToDate(e.target.value)} />
           </div>
           <div style={{ width: '1px', height: '24px', background: t.border, margin: '0 4px' }} />
-          <select style={inp} value={filterState} onChange={e => setFilterState(e.target.value)}>
-            <option value="">All States</option>
-            {STATES.map(st => <option key={st} value={st}>{st}</option>)}
+          <select style={inp} value={filterRegion} onChange={e => setFilterRegion(e.target.value)}>
+            <option value="">All Regions</option>
+            {regions.map(r => <option key={r} value={r}>{r}</option>)}
           </select>
           <select style={inp} value={filterBranch} onChange={e => setFilterBranch(e.target.value)}>
             <option value="">All Branches</option>
@@ -714,7 +728,7 @@ export default function PurchaseReports() {
         </div>
         {hasFilters && (
           <div style={{ display: 'flex', gap: '6px', marginTop: '10px', flexWrap: 'wrap' }}>
-            {filterState  && <FilterChip label={filterState}  onRemove={() => setFilterState('')}  color={t.blue}   />}
+            {filterRegion && <FilterChip label={filterRegion} onRemove={() => setFilterRegion('')} color={t.blue}   />}
             {filterBranch && <FilterChip label={filterBranch} onRemove={() => setFilterBranch('')} color={t.gold}   />}
             {filterTxn    && <FilterChip label={filterTxn}    onRemove={() => setFilterTxn('')}    color={t.purple} />}
             {(fromDate || toDate) && (
