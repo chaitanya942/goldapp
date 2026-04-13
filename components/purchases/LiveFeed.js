@@ -1036,7 +1036,6 @@ function OldCrmTab({
       {/* ──────── 3. BRANCH + REGION BREAKDOWN ──────── */}
       {canSee('livefeed.region_breakdown') && !regionFilter && (
         <div className="lf-region" style={{ display:'flex', flexDirection:'column', gap:16 }}>
-          {branchData.length > 0 && <BranchTable t={t} branchData={branchData} allWalkins={allWalkins} />}
           {regions && regions.length > 1 && <RegionTable t={t} regions={regions} allTxns={allTxns} allWalkins={allWalkins} allKycRows={allKycRows} />}
         </div>
       )}
