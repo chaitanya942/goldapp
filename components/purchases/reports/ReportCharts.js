@@ -374,7 +374,7 @@ export default function ReportCharts({ trend, monthly, dowData, hourlyTrend, isS
                 <div style={{ marginTop: '10px' }}>
                   <div style={{ fontSize: '.56rem', color: t.text4, letterSpacing: '.12em', marginBottom: '6px' }}>DAILY BILL COUNT</div>
                   <ResponsiveContainer width="100%" height={54}>
-                    <BarChart data={mergedData} margin={{ top: 0, right: 20, bottom: 0, left: 10 }}>
+                    <BarChart data={mergedData} margin={{ top: 0, right: 20, bottom: 0, left: 10 }} style={{ border: 'none', outline: 'none' }}>
                       <XAxis dataKey="day" tick={{ fill: t.text4, fontSize: 8 }} axisLine={false} tickLine={false}
                         tickFormatter={v => fmtShort(v)} interval="preserveStartEnd" />
                       <Tooltip

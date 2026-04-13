@@ -55,11 +55,15 @@ button { cursor: pointer; }
 /* Focus ring when SVG receives click focus */
 .recharts-surface:focus,
 .recharts-surface:focus-visible,
+.recharts-surface:focus-within,
 .recharts-wrapper:focus,
-.recharts-wrapper:focus-visible { outline: none !important; box-shadow: none !important; }
+.recharts-wrapper:focus-visible,
+.recharts-wrapper:focus-within,
+.recharts-wrapper svg:focus,
+.recharts-wrapper *:focus { outline: none !important; box-shadow: none !important; border: none !important; }
 
 /* Cursor rectangle on hover — recharts default is stroke:#ccc which draws a white box */
-.recharts-tooltip-cursor { stroke: none !important; }
+.recharts-tooltip-cursor { stroke: none !important; fill: transparent !important; }
 
 /* Bar background rectangles */
 .recharts-rectangle.recharts-bar-background-rectangle { fill: transparent !important; stroke: none !important; }
