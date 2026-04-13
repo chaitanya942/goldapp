@@ -239,72 +239,317 @@ export default function PurchaseReports() {
     setError(null)
     try {
       const isSingleDay = fromDate && toDate && fromDate === toDate
-      const p       = { p_from: fromDate || null, p_to: toDate || null, p_branch: filterBranch || null, p_txn_type: filterTxn || null, p_state: filterState || null, p_crm_status: 'approved' }
-      const pBranch = { p_from: p.p_from, p_to: p.p_to, p_txn_type: p.p_txn_type, p_state: p.p_state, p_crm_status: 'approved' }
-      const pState  = { p_from: p.p_from, p_to: p.p_to, p_txn_type: p.p_txn_type, p_crm_status: 'approved' }
 
-      const [k, tr, br, st, mo, dow, pur, wt, reg, mh, tb] = await Promise.all([
-      supabase.rpc('get_report_kpis', p),
-      supabase.rpc('get_daily_trend', p),
-      supabase.rpc('get_branch_summary', pBranch),
-      supabase.rpc('get_state_summary', pState),
-      supabase.rpc('get_monthly_summary', pBranch),
-      supabase.rpc('get_dow_summary', p),
-      supabase.rpc('get_purity_distribution', p),
-      supabase.rpc('get_weight_buckets', p),
-      supabase.rpc('get_region_txn_split', p),
-      supabase.rpc('get_month_half_split', p),
-      supabase.rpc('get_top_bills', p),
-    ])
+      // ── 1. Branch metadata ────────────────────────────────
+      const { data: branchMeta } = await supabase
+        .from('branches')
+        .select('name, region, state, cluster')
+      const branchMetaMap = {}
+      ;(branchMeta || []).forEach(b => { branchMetaMap[b.name] = b })
 
-    if (k.data)   setKpis(Array.isArray(k.data) ? k.data[0] : k.data)
-    if (tr.data)  setTrend(tr.data    || [])
-    if (br.data)  setBranchData(br.data || [])
-    if (st.data)  setStateData(st.data  || [])
-    if (mo.data)  setMonthly(mo.data    || [])
-    if (dow.data) setDowData(dow.data   || [])
-    if (pur.data) setPurityDist(pur.data || [])
-    if (wt.data)  setWeightBuckets(wt.data || [])
-    if (reg.data) setRegionSplit(reg.data || [])
-    if (mh.data)  setMonthHalf(mh.data   || [])
-    if (tb.data)  setTopBills(tb.data    || [])
-
-    // ── Hourly trend for single-day view ──────────────────
-    if (isSingleDay) {
-      let hq = supabase.from('purchases')
-        .select('transaction_time, net_weight, final_amount_crm')
-        .eq('purchase_date', fromDate)
-        .eq('is_deleted', false)
-        .eq('crm_status', 'approved')
-        .not('transaction_time', 'is', null)
-      if (filterBranch) hq = hq.eq('branch_name', filterBranch)
-      if (filterTxn)    hq = hq.eq('transaction_type', filterTxn)
-      const { data: rawRows } = await hq
-
-      const hmap = {}
-      for (const row of rawRows || []) {
-        const h = parseInt(String(row.transaction_time).split(':')[0])
-        if (isNaN(h) || h < 0 || h > 23) continue
-        if (!hmap[h]) hmap[h] = { net_wt: 0, value: 0, txn_count: 0 }
-        hmap[h].net_wt += parseFloat(row.net_weight || 0)
-        hmap[h].value  += parseFloat(row.final_amount_crm || 0)
-        hmap[h].txn_count++
+      // ── State filter → resolve to branch names ────────────
+      let stateFilterBranches = null
+      if (filterState) {
+        stateFilterBranches = (branchMeta || [])
+          .filter(b => b.state === filterState)
+          .map(b => b.name)
       }
 
-      const hours = Object.keys(hmap).map(Number)
-      const minH  = 10
-      const maxH  = hours.length > 0 ? Math.max(...hours) : 18
-      const hourlyData = []
-      for (let h = minH; h <= maxH; h++) {
-        const label = h < 12 ? `${h} AM` : h === 12 ? '12 PM' : `${h - 12} PM`
-        hourlyData.push({
-          day:       label,
-          net_wt:    parseFloat((hmap[h]?.net_wt || 0).toFixed(3)),
-          value:     Math.round(hmap[h]?.value || 0),
-          txn_count: hmap[h]?.txn_count || 0,
-          avg_purity: 0,
-        })
+      // ── 2. Fetch all approved purchases (chunked) ─────────
+      let rows = [], offset = 0
+      const CHUNK = 1000
+      while (true) {
+        let q = supabase.from('purchases')
+          .select('*')
+          .eq('crm_status', 'approved')
+          .eq('is_deleted', false)
+        if (fromDate)            q = q.gte('purchase_date', fromDate)
+        if (toDate)              q = q.lte('purchase_date', toDate)
+        if (filterBranch)        q = q.eq('branch_name', filterBranch)
+        if (filterTxn)           q = q.eq('transaction_type', filterTxn)
+        if (stateFilterBranches) q = q.in('branch_name', stateFilterBranches)
+        q = q.order('purchase_date', { ascending: true }).range(offset, offset + CHUNK - 1)
+        const { data: chunk } = await q
+        if (!chunk || chunk.length === 0) break
+        rows = rows.concat(chunk)
+        if (chunk.length < CHUNK) break
+        offset += CHUNK
       }
+
+      if (!rows.length) {
+        setKpis(null); setTrend([]); setBranchData([]); setStateData([])
+        setMonthly([]); setDowData([]); setPurityDist([]); setWeightBuckets([])
+        setRegionSplit([]); setMonthHalf([]); setTopBills([])
+        setHourlyTrend([])
+        setLoading(false)
+        return
+      }
+
+      // ── 3. KPIs ────────────────────────────────────────────
+      let totalGross = 0, totalNet = 0, totalValue = 0, purityWt = 0
+      let svcPctSum = 0, stoneWastageSum = 0
+      let physCount = 0, takovCount = 0, physNet = 0, takovNet = 0
+      const dateSet = new Set(), branchSet = new Set()
+
+      for (const r of rows) {
+        const nw = parseFloat(r.net_weight    || 0)
+        const gw = parseFloat(r.gross_weight  || 0)
+        const sw = parseFloat(r.stone_weight  || 0)
+        const ww = parseFloat(r.wastage       || 0)
+        const fa = parseFloat(r.final_amount_crm || 0)
+        const pu = parseFloat(r.purity        || 0)
+        const sp = parseFloat(r.service_charge_pct || 0)
+        totalGross     += gw
+        totalNet       += nw
+        totalValue     += fa
+        purityWt       += nw * pu
+        svcPctSum      += sp
+        stoneWastageSum += sw + ww
+        if (r.transaction_type === 'PHYSICAL') { physCount++; physNet  += nw }
+        else                                   { takovCount++; takovNet += nw }
+        if (r.purchase_date) dateSet.add(r.purchase_date)
+        if (r.branch_name)   branchSet.add(r.branch_name)
+      }
+
+      const n          = rows.length
+      const avgPurity  = totalNet > 0 ? purityWt / totalNet : 0
+      const sortedDates = [...dateSet].sort()
+
+      setKpis({
+        total_count:            n,
+        total_gross:            totalGross,
+        total_net:              totalNet,
+        avg_purity:             avgPurity,
+        total_value:            totalValue,
+        avg_net_per_txn:        n > 0 ? totalNet   / n : 0,
+        avg_service_charge_pct: n > 0 ? svcPctSum  / n : 0,
+        avg_rate_per_gram:      totalNet > 0 ? totalValue / totalNet : 0,
+        branch_count:           branchSet.size,
+        min_date:               sortedDates[0] || null,
+        max_date:               sortedDates[sortedDates.length - 1] || null,
+        business_days:          sortedDates.length,
+        physical_count:         physCount,
+        takeover_count:         takovCount,
+        physical_net:           physNet,
+        takeover_net:           takovNet,
+        avg_stone_wastage_bill: n > 0 ? stoneWastageSum / n : 0,
+      })
+
+      // ── 4. Daily trend ─────────────────────────────────────
+      const trendMap = {}
+      for (const r of rows) {
+        const d = r.purchase_date; if (!d) continue
+        if (!trendMap[d]) trendMap[d] = { net_wt: 0, value: 0, txn_count: 0, pw: 0 }
+        const nw = parseFloat(r.net_weight || 0)
+        trendMap[d].net_wt    += nw
+        trendMap[d].value     += parseFloat(r.final_amount_crm || 0)
+        trendMap[d].txn_count += 1
+        trendMap[d].pw        += nw * parseFloat(r.purity || 0)
+      }
+      setTrend(
+        Object.entries(trendMap).sort(([a], [b]) => a < b ? -1 : 1).map(([day, d]) => ({
+          day,
+          net_wt:    parseFloat(d.net_wt.toFixed(3)),
+          value:     Math.round(d.value),
+          txn_count: d.txn_count,
+          avg_purity: d.net_wt > 0 ? parseFloat((d.pw / d.net_wt).toFixed(2)) : 0,
+        }))
+      )
+
+      // ── 5. Monthly summary ─────────────────────────────────
+      const monthMap = {}
+      for (const r of rows) {
+        if (!r.purchase_date) continue
+        const m = r.purchase_date.slice(0, 7)
+        if (!monthMap[m]) monthMap[m] = { txn_count: 0, gw: 0, nw: 0, val: 0, pw: 0 }
+        const nw = parseFloat(r.net_weight || 0)
+        monthMap[m].txn_count += 1
+        monthMap[m].gw  += parseFloat(r.gross_weight || 0)
+        monthMap[m].nw  += nw
+        monthMap[m].val += parseFloat(r.final_amount_crm || 0)
+        monthMap[m].pw  += nw * parseFloat(r.purity || 0)
+      }
+      setMonthly(
+        Object.entries(monthMap).sort(([a], [b]) => a > b ? -1 : 1).map(([m, d]) => ({
+          month:       m,
+          month_label: new Date(m + '-01').toLocaleDateString('en-IN', { month: 'short', year: '2-digit' }),
+          txn_count:   d.txn_count,
+          total_gross: parseFloat(d.gw.toFixed(3)),
+          total_net:   parseFloat(d.nw.toFixed(3)),
+          total_value: Math.round(d.val),
+          avg_purity:  d.nw > 0 ? parseFloat((d.pw / d.nw).toFixed(2)) : 0,
+          avg_per_txn: d.txn_count > 0 ? parseFloat((d.nw / d.txn_count).toFixed(3)) : 0,
+        }))
+      )
+
+      // ── 6. Branch summary ──────────────────────────────────
+      const branchAgg = {}
+      for (const r of rows) {
+        const bn = r.branch_name || 'Unknown'
+        if (!branchAgg[bn]) {
+          const meta = branchMetaMap[bn] || {}
+          branchAgg[bn] = { branch_name: bn, region: meta.region || 'Unknown', state: meta.state || 'Unknown', cluster: meta.cluster || null, txn_count: 0, physical_count: 0, nw: 0, val: 0, pw: 0 }
+        }
+        const nw = parseFloat(r.net_weight || 0)
+        branchAgg[bn].txn_count     += 1
+        branchAgg[bn].nw            += nw
+        branchAgg[bn].val           += parseFloat(r.final_amount_crm || 0)
+        branchAgg[bn].pw            += nw * parseFloat(r.purity || 0)
+        if (r.transaction_type === 'PHYSICAL') branchAgg[bn].physical_count++
+      }
+      setBranchData(
+        Object.values(branchAgg).map(b => ({
+          branch_name:    b.branch_name,
+          region:         b.region,
+          state:          b.state,
+          cluster:        b.cluster,
+          txn_count:      b.txn_count,
+          physical_count: b.physical_count,
+          total_net:      parseFloat(b.nw.toFixed(3)),
+          total_value:    Math.round(b.val),
+          avg_purity:     b.nw > 0 ? parseFloat((b.pw / b.nw).toFixed(2)) : 0,
+        })).sort((a, b) => b.total_net - a.total_net)
+      )
+      setStateData([])  // derived from branchData in ReportBranches
+
+      // ── 7. Day of week ─────────────────────────────────────
+      const dowMap = {}
+      for (const r of rows) {
+        if (!r.purchase_date) continue
+        const dow = new Date(r.purchase_date + 'T12:00:00').getDay()
+        if (!dowMap[dow]) dowMap[dow] = { dow, net_wt: 0, txn_count: 0 }
+        dowMap[dow].net_wt    += parseFloat(r.net_weight || 0)
+        dowMap[dow].txn_count += 1
+      }
+      setDowData([0,1,2,3,4,5,6].filter(d => dowMap[d]).map(d => ({
+        dow:       d,
+        net_wt:    parseFloat(dowMap[d].net_wt.toFixed(3)),
+        txn_count: dowMap[d].txn_count,
+      })))
+
+      // ── 8. Purity distribution ─────────────────────────────
+      const PURITY_BUCKETS = [
+        { label: '< 70%',  min: 0,  max: 70  },
+        { label: '70–75%', min: 70, max: 75  },
+        { label: '75–80%', min: 75, max: 80  },
+        { label: '80–85%', min: 80, max: 85  },
+        { label: '85–90%', min: 85, max: 90  },
+        { label: '90–95%', min: 90, max: 95  },
+        { label: '≥ 95%',  min: 95, max: 1e9 },
+      ]
+      const pAgg = {}
+      PURITY_BUCKETS.forEach(b => { pAgg[b.label] = { count: 0, nw: 0, val: 0, spc: 0 } })
+      for (const r of rows) {
+        const pu  = parseFloat(r.purity || 0)
+        const bkt = PURITY_BUCKETS.find(b => pu >= b.min && pu < b.max) || PURITY_BUCKETS[PURITY_BUCKETS.length - 1]
+        pAgg[bkt.label].count += 1
+        pAgg[bkt.label].nw    += parseFloat(r.net_weight || 0)
+        pAgg[bkt.label].val   += parseFloat(r.final_amount_crm || 0)
+        pAgg[bkt.label].spc   += parseFloat(r.service_charge_pct || 0)
+      }
+      setPurityDist(
+        PURITY_BUCKETS.map(b => ({
+          bucket:             b.label,
+          count:              pAgg[b.label].count,
+          net_wt:             parseFloat(pAgg[b.label].nw.toFixed(3)),
+          total_value:        Math.round(pAgg[b.label].val),
+          avg_service_charge: pAgg[b.label].count > 0 ? parseFloat((pAgg[b.label].spc / pAgg[b.label].count).toFixed(2)) : 0,
+        })).filter(b => b.count > 0)
+      )
+
+      // ── 9. Weight buckets ──────────────────────────────────
+      const WT_BUCKETS = [
+        { label: '< 5g',    min: 0,   max: 5   },
+        { label: '5–10g',   min: 5,   max: 10  },
+        { label: '10–20g',  min: 10,  max: 20  },
+        { label: '20–30g',  min: 20,  max: 30  },
+        { label: '30–50g',  min: 30,  max: 50  },
+        { label: '50–100g', min: 50,  max: 100 },
+        { label: '≥ 100g',  min: 100, max: 1e9 },
+      ]
+      const wtAgg = {}
+      WT_BUCKETS.forEach(b => { wtAgg[b.label] = { count: 0, nw: 0, pw: 0, spc: 0 } })
+      for (const r of rows) {
+        const nw  = parseFloat(r.net_weight || 0)
+        const bkt = WT_BUCKETS.find(b => nw >= b.min && nw < b.max) || WT_BUCKETS[WT_BUCKETS.length - 1]
+        wtAgg[bkt.label].count += 1
+        wtAgg[bkt.label].nw   += nw
+        wtAgg[bkt.label].pw   += nw * parseFloat(r.purity || 0)
+        wtAgg[bkt.label].spc  += parseFloat(r.service_charge_pct || 0)
+      }
+      setWeightBuckets(
+        WT_BUCKETS.map(b => ({
+          bucket:             b.label,
+          count:              wtAgg[b.label].count,
+          avg_purity:         wtAgg[b.label].nw > 0 ? parseFloat((wtAgg[b.label].pw / wtAgg[b.label].nw).toFixed(2)) : 0,
+          avg_service_charge: wtAgg[b.label].count > 0 ? parseFloat((wtAgg[b.label].spc / wtAgg[b.label].count).toFixed(2)) : 0,
+        })).filter(b => b.count > 0)
+      )
+
+      // ── 10. Region split ───────────────────────────────────
+      const regAgg = {}
+      for (const r of rows) {
+        const reg = branchMetaMap[r.branch_name || '']?.region || 'Unknown'
+        if (!regAgg[reg]) regAgg[reg] = { region: reg, total_txns: 0, takeover_count: 0 }
+        regAgg[reg].total_txns++
+        if (r.transaction_type !== 'PHYSICAL') regAgg[reg].takeover_count++
+      }
+      setRegionSplit(Object.values(regAgg).sort((a, b) => b.total_txns - a.total_txns))
+
+      // ── 11. Month half ─────────────────────────────────────
+      let firstHalf = 0, secondHalf = 0
+      for (const r of rows) {
+        if (!r.purchase_date) continue
+        parseInt(r.purchase_date.slice(8, 10)) <= 15 ? firstHalf++ : secondHalf++
+      }
+      setMonthHalf([
+        { half: 'First Half',  txn_count: firstHalf  },
+        { half: 'Second Half', txn_count: secondHalf },
+      ])
+
+      // ── 12. Top 10 bills by net weight ─────────────────────
+      setTopBills(
+        [...rows]
+          .sort((a, b) => parseFloat(b.net_weight || 0) - parseFloat(a.net_weight || 0))
+          .slice(0, 10)
+          .map(r => ({
+            branch_name:      r.branch_name,
+            customer_name:    r.customer_name,
+            net_weight:       parseFloat(r.net_weight   || 0),
+            gross_weight:     parseFloat(r.gross_weight || 0),
+            purity:           parseFloat(r.purity       || 0),
+            total_amount:     parseFloat(r.final_amount_crm || 0),
+            transaction_type: r.transaction_type,
+            purchase_date:    r.purchase_date,
+          }))
+      )
+
+      // ── 13. Hourly trend (single-day only) ─────────────────
+      if (isSingleDay) {
+        const hmap = {}
+        for (const r of rows) {
+          if (!r.transaction_time) continue
+          const h = parseInt(String(r.transaction_time).split(':')[0])
+          if (isNaN(h) || h < 0 || h > 23) continue
+          if (!hmap[h]) hmap[h] = { net_wt: 0, value: 0, txn_count: 0 }
+          hmap[h].net_wt    += parseFloat(r.net_weight || 0)
+          hmap[h].value     += parseFloat(r.final_amount_crm || 0)
+          hmap[h].txn_count += 1
+        }
+        const hours = Object.keys(hmap).map(Number)
+        const minH  = 10
+        const maxH  = hours.length > 0 ? Math.max(...hours) : 18
+        const hourlyData = []
+        for (let h = minH; h <= maxH; h++) {
+          const label = h < 12 ? `${h} AM` : h === 12 ? '12 PM' : `${h - 12} PM`
+          hourlyData.push({
+            day:       label,
+            net_wt:    parseFloat((hmap[h]?.net_wt || 0).toFixed(3)),
+            value:     Math.round(hmap[h]?.value || 0),
+            txn_count: hmap[h]?.txn_count || 0,
+            avg_purity: 0,
+          })
+        }
         setHourlyTrend(hourlyData)
       } else {
         setHourlyTrend([])
@@ -313,7 +558,7 @@ export default function PurchaseReports() {
       setLoading(false)
     } catch (err) {
       console.error('Error fetching report data:', err)
-      setError(err.message || 'Failed to load report data. Some RPC functions may be missing.')
+      setError(err.message || 'Failed to load report data.')
       setLoading(false)
     }
   }
@@ -569,10 +814,7 @@ export default function PurchaseReports() {
           <div style={{ fontSize: '.9rem', color: t.red, fontWeight: 600, marginBottom: '8px' }}>⚠ Error Loading Reports</div>
           <div style={{ fontSize: '.75rem', color: t.text2, marginBottom: '12px' }}>{error}</div>
           <div style={{ fontSize: '.7rem', color: t.text3, lineHeight: 1.6 }}>
-            This usually means some database RPC functions are missing. Contact your admin or check Supabase for the following functions:
-            <div style={{ marginTop: '8px', fontFamily: 'monospace', fontSize: '.68rem', color: t.text4 }}>
-              get_report_kpis, get_daily_trend, get_branch_summary, get_state_summary, get_monthly_summary, get_dow_summary, get_purity_distribution, get_weight_buckets, get_region_txn_split, get_month_half_split, get_top_bills
-            </div>
+            Check your Supabase connection and environment variables. Refresh the page to retry.
           </div>
         </div>
       )}

@@ -157,7 +157,15 @@ function BranchBillsModal({ branch, branchInfo, color, t, fromDate, toDate, filt
   useEffect(() => {
     if (!branch) return
     setLoading(true)
-    supabase.rpc('get_branch_bills', { p_branch: branch, p_from: fromDate || null, p_to: toDate || null, p_txn_type: filterTxn || null })
+    let q = supabase.from('purchases')
+      .select('purchase_date, customer_name, phone_number, application_id, gross_weight, net_weight, purity, total_amount, transaction_type')
+      .eq('branch_name', branch)
+      .eq('crm_status', 'approved')
+      .eq('is_deleted', false)
+    if (fromDate)  q = q.gte('purchase_date', fromDate)
+    if (toDate)    q = q.lte('purchase_date', toDate)
+    if (filterTxn) q = q.eq('transaction_type', filterTxn)
+    q.order('purchase_date', { ascending: false })
       .then(({ data }) => { setBills(data || []); setLoading(false) })
   }, [branch])
 

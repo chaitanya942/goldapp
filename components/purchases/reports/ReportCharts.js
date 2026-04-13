@@ -89,10 +89,29 @@ export default function ReportCharts({ trend, monthly, dowData, hourlyTrend, isS
   // Branch-specific trend for overlay
   useEffect(() => {
     if (!drillBranch) { setBranchTrend([]); return }
-    supabase.rpc('get_daily_trend', {
-      p_from: fromDate || null, p_to: null,
-      p_branch: drillBranch, p_txn_type: filterTxn || null, p_state: null,
-    }).then(({ data }) => { if (data) setBranchTrend(data) })
+    let bq = supabase.from('purchases')
+      .select('purchase_date, net_weight, final_amount_crm, purity')
+      .eq('crm_status', 'approved')
+      .eq('is_deleted', false)
+      .eq('branch_name', drillBranch)
+    if (fromDate) bq = bq.gte('purchase_date', fromDate)
+    if (filterTxn) bq = bq.eq('transaction_type', filterTxn)
+    bq.then(({ data }) => {
+      if (!data) return
+      const m = {}
+      data.forEach(r => {
+        const d = r.purchase_date; if (!d) return
+        if (!m[d]) m[d] = { net_wt: 0, value: 0, txn_count: 0 }
+        m[d].net_wt    += parseFloat(r.net_weight || 0)
+        m[d].value     += parseFloat(r.final_amount_crm || 0)
+        m[d].txn_count += 1
+      })
+      setBranchTrend(
+        Object.entries(m).sort(([a],[b]) => a < b ? -1 : 1).map(([day, d]) => ({
+          day, net_wt: parseFloat(d.net_wt.toFixed(3)), value: Math.round(d.value), txn_count: d.txn_count,
+        }))
+      )
+    })
   }, [drillBranch, fromDate, filterTxn])
 
   // Individual bills for single-day scatter timeline
