@@ -313,6 +313,19 @@ export default function ReportCharts({ trend, monthly, dowData, hourlyTrend, isS
             <div style={{ height: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', color: t.text4, fontSize: '.72rem' }}>Not enough data for this period</div>
           ) : (
             <>
+              {/* Peak day stats strip */}
+              {(() => {
+                const peak = mergedData.reduce((best, d) => Number(d[trendMetric]) > Number(best[trendMetric] || 0) ? d : best, mergedData[0])
+                const avg  = mergedData.reduce((s, d) => s + Number(d[trendMetric] || 0), 0) / mergedData.length
+                return (
+                  <div style={{ display: 'flex', gap: '20px', marginBottom: '12px', fontSize: '.6rem', color: t.text3 }}>
+                    <span>Peak <span style={{ color: t.gold, fontWeight: 600 }}>{fmtShort(peak?.day)}</span> · {yFmt(peak?.[trendMetric])}</span>
+                    <span>Avg/day <span style={{ color: t.text2 }}>{yFmt(avg)}</span></span>
+                    <span>Days <span style={{ color: t.text2 }}>{mergedData.length}</span></span>
+                  </div>
+                )
+              })()}
+
               <ResponsiveContainer width="100%" height={200}>
                 <AreaChart data={mergedData} margin={{ top: 10, right: 20, bottom: 0, left: 10 }}>
                   <defs>
@@ -332,11 +345,12 @@ export default function ReportCharts({ trend, monthly, dowData, hourlyTrend, isS
                     tickFormatter={v => fmtShort(v)}
                     interval="preserveStartEnd"
                   />
-                  <YAxis
-                    tick={axisTick} axisLine={false} tickLine={false} width={44}
-                    tickFormatter={yFmt}
-                  />
+                  <YAxis tick={axisTick} axisLine={false} tickLine={false} width={44} tickFormatter={yFmt} />
                   <Tooltip content={<TrendTip />} />
+                  <ReferenceLine
+                    y={mergedData.reduce((s, d) => s + Number(d[trendMetric] || 0), 0) / mergedData.length}
+                    stroke={t.text4} strokeDasharray="4 3" strokeWidth={1}
+                  />
                   <Area
                     type="monotone" dataKey={trendMetric} stroke={t.gold} strokeWidth={2}
                     fill="url(#ga_all)" dot={false} activeDot={{ r: 5, fill: t.gold, strokeWidth: 0 }}
@@ -354,6 +368,25 @@ export default function ReportCharts({ trend, monthly, dowData, hourlyTrend, isS
                 </AreaChart>
               </ResponsiveContainer>
 
+              {/* Mini bill-count bar — mirrors single-day hourly totals pattern */}
+              {trendMetric !== 'txn_count' && (
+                <div style={{ marginTop: '10px' }}>
+                  <div style={{ fontSize: '.56rem', color: t.text4, letterSpacing: '.12em', marginBottom: '6px' }}>DAILY BILL COUNT</div>
+                  <ResponsiveContainer width="100%" height={54}>
+                    <BarChart data={mergedData} margin={{ top: 0, right: 20, bottom: 0, left: 10 }}>
+                      <XAxis dataKey="day" tick={{ fill: t.text4, fontSize: 8 }} axisLine={false} tickLine={false}
+                        tickFormatter={v => fmtShort(v)} interval="preserveStartEnd" />
+                      <Tooltip
+                        formatter={v => `${v} bills`}
+                        labelFormatter={v => fmtShort(v)}
+                        contentStyle={{ background: t.card2, border: `1px solid ${t.border}`, borderRadius: '8px', color: t.text2, fontSize: '.68rem' }}
+                      />
+                      <Bar dataKey="txn_count" fill={t.gold} fillOpacity={0.4} radius={[2, 2, 0, 0]} name="Bills" />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+
               {/* Legend */}
               {drillBranch && (
                 <div style={{ marginTop: '10px', display: 'flex', gap: '16px', fontSize: '.62rem' }}>
@@ -362,7 +395,7 @@ export default function ReportCharts({ trend, monthly, dowData, hourlyTrend, isS
                     All Branches
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '5px', color: t.text3 }}>
-                    <span style={{ width: 18, height: 2, background: t.blue, display: 'inline-block', borderRadius: 2, borderTop: '1px dashed ' + t.blue }} />
+                    <span style={{ width: 18, height: 2, background: t.blue, display: 'inline-block', borderRadius: 2 }} />
                     {drillBranch}
                   </div>
                 </div>
@@ -372,31 +405,6 @@ export default function ReportCharts({ trend, monthly, dowData, hourlyTrend, isS
         )}
       </div>
 
-      {/* ── PURITY TREND ──────────────────────────────────────────────────────── */}
-      {trendData.length > 1 && trendData.some(d => d.avg_purity > 0) && (
-        <div style={s.card}>
-          <div style={{ ...s.sTitle, marginBottom: '14px' }}>Purity Trend</div>
-          <ResponsiveContainer width="100%" height={130}>
-            <AreaChart data={trendData} margin={{ top: 10, right: 20, bottom: 0, left: 10 }}>
-              <defs>
-                <linearGradient id="ga_purity" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%"  stopColor={t.purple} stopOpacity={0.25} />
-                  <stop offset="95%" stopColor={t.purple} stopOpacity={0} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid {...gridProps} />
-              <XAxis dataKey="day" tick={axisTick} axisLine={{ stroke: t.border }} tickLine={false} tickFormatter={fmtShort} interval="preserveStartEnd" />
-              <YAxis tick={axisTick} axisLine={false} tickLine={false} width={44} tickFormatter={v => `${v}%`} />
-              <Tooltip
-                formatter={v => `${Number(v).toFixed(2)}%`}
-                labelFormatter={v => fmtShort(v)}
-                contentStyle={{ background: t.card2, border: `1px solid ${t.border}`, borderRadius: '8px', color: t.text2, fontSize: '.68rem' }}
-              />
-              <Area type="monotone" dataKey="avg_purity" stroke={t.purple} strokeWidth={2} fill="url(#ga_purity)" dot={false} activeDot={{ r: 4, fill: t.purple }} name="Avg Purity %" />
-            </AreaChart>
-          </ResponsiveContainer>
-        </div>
-      )}
 
       {/* ── MONTHLY SUMMARY ───────────────────────────────────────────────────── */}
       {monthly?.length > 0 && (

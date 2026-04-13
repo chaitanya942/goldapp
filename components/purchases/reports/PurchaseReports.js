@@ -367,24 +367,28 @@ export default function PurchaseReports() {
       for (const r of rows) {
         if (!r.purchase_date) continue
         const m = r.purchase_date.slice(0, 7)
-        if (!monthMap[m]) monthMap[m] = { txn_count: 0, gw: 0, nw: 0, val: 0, pw: 0 }
+        if (!monthMap[m]) monthMap[m] = { txn_count: 0, physical: 0, takeover: 0, gw: 0, nw: 0, val: 0, pw: 0 }
         const nw = parseFloat(r.net_weight || 0)
         monthMap[m].txn_count += 1
         monthMap[m].gw  += parseFloat(r.gross_weight || 0)
         monthMap[m].nw  += nw
         monthMap[m].val += parseFloat(r.total_amount || 0)
         monthMap[m].pw  += nw * parseFloat(r.purity || 0)
+        if (r.transaction_type === 'PHYSICAL') monthMap[m].physical++
+        else monthMap[m].takeover++
       }
       setMonthly(
         Object.entries(monthMap).sort(([a], [b]) => a > b ? -1 : 1).map(([m, d]) => ({
           month:       m,
           month_label: new Date(m + '-01').toLocaleDateString('en-IN', { month: 'short', year: '2-digit' }),
-          txn_count:   d.txn_count,
-          total_gross: parseFloat(d.gw.toFixed(3)),
-          total_net:   parseFloat(d.nw.toFixed(3)),
-          total_value: Math.round(d.val),
-          avg_purity:  d.nw > 0 ? parseFloat((d.pw / d.nw).toFixed(2)) : 0,
-          avg_per_txn: d.txn_count > 0 ? parseFloat((d.nw / d.txn_count).toFixed(3)) : 0,
+          txn_count:      d.txn_count,
+          physical_count: d.physical,
+          takeover_count: d.takeover,
+          total_gross:    parseFloat(d.gw.toFixed(3)),
+          total_net:      parseFloat(d.nw.toFixed(3)),
+          total_value:    Math.round(d.val),
+          avg_purity:     d.nw > 0 ? parseFloat((d.pw / d.nw).toFixed(2)) : 0,
+          avg_per_txn:    d.txn_count > 0 ? parseFloat((d.nw / d.txn_count).toFixed(3)) : 0,
         }))
       )
 
