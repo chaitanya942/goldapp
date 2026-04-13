@@ -891,14 +891,14 @@ function OldCrmTab({
         if (ghostCount > 0) insights.push({
           icon: '👻', color: t.red, metric: 'ghost_purchases',
           headline: `${ghostCount} purchase${ghostCount > 1 ? 's' : ''} with no walk-in entry`,
-          detail: `${ghostCount} customer${ghostCount > 1 ? 's' : ''} bought gold today but never filled the walk-in register. Click to see who.`,
+          detail: `Billed & approved but no walk-in entry exists — sale unregistered in CRM.`,
         })
 
         // 2 — KEY INSIGHT: CRM register vs actual bills mismatch (beyond ghost)
         if (crmGap > 0) insights.push({
           icon: '⚠', color: t.orange, metric: 'crm_not_updated',
           headline: `${crmGap} walk-in status${crmGap > 1 ? 'es' : ''} not updated`,
-          detail: `Bills show ${approved} purchases but only ${wSoldCRM} walk-ins are marked "sold". ${crmGap} customer${crmGap > 1 ? 's' : ''} filled the register but status wasn't updated.`,
+          detail: `Walk-in registered + billed & approved, but status never marked "sold" in CRM.`,
         })
 
         // 2 — Pipeline / follow-up needed
