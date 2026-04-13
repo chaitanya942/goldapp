@@ -212,8 +212,6 @@ export default function LiveFeed() {
   const goldPipeline = data?.goldPipeline || {}
   const kycRows      = data?.kycRows      || []
   const takeoverRows = data?.takeoverRows || []
-  const hourlyData   = data?.hourly       || []
-  const branchData   = data?.branches     || []
   const newCrmTxns   = data ? (data.newCrmTxns ?? null) : null  // null = offline
   const newCrmError  = data?.newCrmError || null
 
@@ -278,9 +276,6 @@ export default function LiveFeed() {
     kyc_blacklisted_cnt: rKycRows.length,
     kyc_blacklisted_wt:  parseFloat(rKycRows.reduce((s, r) => s + (parseFloat(r.grams) || 0), 0).toFixed(2)),
     kyc_overridden_cnt:  rKycRows.filter(r => rApprovedMobiles.has(r.mob_num)).length,
-    // not_billed already excludes KYC blocked (computed above via notBilledWalkins)
-    kyc_checklist_cnt:   (goldPipeline.kyc_checklist_rows || []).filter(r => r.region === regionFilter).length,
-    kyc_checklist_rows:  (goldPipeline.kyc_checklist_rows || []).filter(r => r.region === regionFilter),
     physical:  goldPipeline.physical  || {},
     released:  goldPipeline.released  || {},
   } : goldPipeline
@@ -459,7 +454,7 @@ export default function LiveFeed() {
               todayTxns={rTxns} todayWalkins={rWalkins}
               allTxns={todayTxns} allWalkins={todayWalkins} allKycRows={kycRows} regions={regions}
               kycRows={regionFilter ? kycRows.filter(r => r.region === regionFilter) : kycRows}
-              takeoverRows={takeoverRows} hourlyData={hourlyData} branchData={branchData}
+              takeoverRows={takeoverRows}
               regionFilter={regionFilter}
               filteredTimeline={filteredTimeline} isToday={isToday}
               viewDate={viewDate}
@@ -485,7 +480,7 @@ export default function LiveFeed() {
               todayTxns={rTxns} todayWalkins={rWalkins}
               allTxns={todayTxns} allWalkins={todayWalkins} allKycRows={kycRows} regions={regions}
               kycRows={regionFilter ? kycRows.filter(r => r.region === regionFilter) : kycRows}
-              takeoverRows={takeoverRows} hourlyData={hourlyData} branchData={branchData}
+              takeoverRows={takeoverRows}
               regionFilter={regionFilter}
               filteredTimeline={filteredTimeline}
               /* New CRM props */
@@ -512,7 +507,7 @@ function CombinedCrmTab({
   notBilledCnt, notBilledWalkins, crmNotUpdatedCnt,
   goldPipeline,
   todayTxns, todayWalkins, allTxns, allWalkins, allKycRows, regions,
-  kycRows, takeoverRows, hourlyData, branchData, regionFilter,
+  kycRows, takeoverRows, regionFilter,
   filteredTimeline,
   // New CRM
   stages, newCrmTxns, newCrmError,
@@ -576,7 +571,7 @@ function CombinedCrmTab({
           goldPipeline={goldPipeline}
           todayTxns={todayTxns} todayWalkins={todayWalkins}
           allTxns={allTxns} allWalkins={allWalkins} allKycRows={allKycRows} regions={regions}
-          kycRows={kycRows} takeoverRows={takeoverRows} hourlyData={hourlyData} branchData={branchData} regionFilter={regionFilter}
+          kycRows={kycRows} takeoverRows={takeoverRows} regionFilter={regionFilter}
           filteredTimeline={filteredTimeline} isToday={isToday} viewDate={viewDate}
           newEventCount={newEventCount} clearNewEvents={clearNewEvents} />
       </div>
@@ -612,7 +607,7 @@ function OldCrmTab({
   notBilledCnt, notBilledWalkins, crmNotUpdatedCnt,
   goldPipeline,
   todayTxns, todayWalkins, allTxns, allWalkins, allKycRows, regions,
-  kycRows, takeoverRows, hourlyData, branchData, regionFilter,
+  kycRows, takeoverRows, regionFilter,
   filteredTimeline, isToday,
   newEventCount, clearNewEvents,
 }) {
@@ -633,8 +628,6 @@ function OldCrmTab({
   const kycBlacklistedCnt = goldPipeline?.kyc_blacklisted_cnt            || 0
   const kycBlacklistedWt  = parseFloat(goldPipeline?.kyc_blacklisted_wt) || 0
   const kycOverriddenCnt  = goldPipeline?.kyc_overridden_cnt             || 0
-  const kycChecklistCnt   = goldPipeline?.kyc_checklist_cnt              || 0
-  const kycChecklistRows  = goldPipeline?.kyc_checklist_rows             || []
   const avgGrossWeight    = approved > 0 && goldPurchased > 0 ? goldPurchased / approved : 0
   const billedPct         = totalWalkins > 0 ? Math.round((totalBilled / totalWalkins) * 100) : 0
   const approvedPctBilled = totalBilled  > 0 ? Math.round((approved   / totalBilled)  * 100) : 0
@@ -772,7 +765,6 @@ function OldCrmTab({
             { label:'Bill → Purchase',      value:`${approvedPctBilled}%`, color:t.green,  key: null },
             { label:'Walk-in → Purchase',   value:`${conversionPct}%`,     color:t.blue,   key: null },
             ...(crmNotUpdatedCnt > 0? [{ label:'CRM not updated', value:crmNotUpdatedCnt, color:t.red,    key:'crm_not_updated' }] : []),
-            ...(kycChecklistCnt > 0 ? [{ label:'KYC checklist',   value:kycChecklistCnt,  color:t.purple, key:'kyc_checklist'   }] : []),
           ].map((s, i) => {
             const isActive = activeMetric === s.key
             const clickable = !!s.key
@@ -1046,7 +1038,6 @@ function OldCrmTab({
         <LiveDetail t={t} activeMetric={activeMetric}
           todayTxns={todayTxns} todayWalkins={todayWalkins}
           kycRows={kycRows} notBilledWalkins={notBilledWalkins}
-          kycChecklistRows={kycChecklistRows}
           ghostPurchases={ghostPurchases}
           takeoverRows={takeoverRows} />
       )}
@@ -1177,7 +1168,7 @@ function HeroNum({ label, value, color, t, small, muted, onClick, active, weight
 }
 
 /* ── Live Detail Table ── */
-function LiveDetail({ t, activeMetric, todayTxns, todayWalkins, kycRows, notBilledWalkins, kycChecklistRows = [], ghostPurchases = [], takeoverRows = [] }) {
+function LiveDetail({ t, activeMetric, todayTxns, todayWalkins, kycRows, notBilledWalkins, ghostPurchases = [], takeoverRows = [] }) {
   const [search, setSearch] = useState('')
   const { canSee } = useApp()
 
@@ -1202,7 +1193,6 @@ function LiveDetail({ t, activeMetric, todayTxns, todayWalkins, kycRows, notBill
       type = 'walkin'; label = 'CRM Not Updated'
       break
     }
-    case 'kyc_checklist':    rows = kycChecklistRows; type = 'checklist'; label = 'KYC Checklist'; break
     case 'ghost_purchases':  rows = ghostPurchases;   type = 'txn';      label = 'Purchased — No Walk-in Entry'; break
     case 'takeover_bills':   rows = takeoverRows;     type = 'takeover'; label = 'Multi-day Takeover Purchases'; break
     default:          rows = todayTxns.filter(t => t.trxn_status === 'approved'); type = 'txn'; label = `Purchased Today`
@@ -1254,7 +1244,6 @@ function LiveDetail({ t, activeMetric, todayTxns, todayWalkins, kycRows, notBill
       {type === 'txn'      && <TxnTable       rows={filtered} t={t} />}
       {type === 'walkin'   && <WalkinTable    rows={filtered} t={t} />}
       {type === 'kyc'      && <KycTable       rows={filtered} t={t} />}
-      {type === 'checklist' && <ChecklistTable rows={filtered} t={t} />}
       {type === 'takeover' && <TakeoverTable  rows={filtered} t={t} />}
     </div>
   )
@@ -1367,319 +1356,6 @@ function KycTable({ rows, t }) {
         ))}
       </div>
     </Card>
-  )
-}
-
-/* ── KYC Checklist table ── */
-function ChecklistTable({ rows, t }) {
-  if (rows.length === 0) return (
-    <Card t={t} style={{ padding: 32, textAlign: 'center' }}>
-      <span style={{ fontSize: '.72rem', color: t.text4 }}>No records</span>
-    </Card>
-  )
-  // Column presence — chklist_tbl joined with customer_tbl gives cust_name + cust_mobile
-  const sample = rows[0]
-  const nameCol    = ['cust_name','name','customer_name','custname','kyc_name','client_name'].find(k => k in sample)
-  const mobileCol  = ['cust_mobile','mob_num','mobile','mobile_no','phone','cust_mob','contact'].find(k => k in sample)
-  const timeCol    = ['time','entry_time','created_time'].find(k => k in sample)
-
-  const cols = ['Time', 'Customer', 'Phone', 'Gold (g)', 'Reason for Selling']
-  const widths = '80px 220px 130px 80px 1fr'
-  return (
-    <Card t={t} style={{ padding: 0, overflow: 'hidden' }}>
-      <div style={{ display: 'grid', gridTemplateColumns: widths, padding: '9px 16px', borderBottom: `1px solid ${t.border}`, gap: 8, background: t.card2 }}>
-        {cols.map(h => <span key={h} style={{ fontSize: '.56rem', letterSpacing: '.1em', textTransform: 'uppercase', color: t.text3, fontWeight: 600 }}>{h}</span>)}
-      </div>
-      <div style={{ maxHeight: 480, overflowY: 'auto' }}>
-        {rows.map((r, i) => (
-          <div key={i} style={{ display: 'grid', gridTemplateColumns: widths, padding: '10px 16px', borderBottom: `1px solid ${t.border}18`, gap: 8, alignItems: 'center' }}
-            onMouseEnter={e => e.currentTarget.style.background = t.card2}
-            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
-            <span style={{ fontSize: '.65rem', color: t.text2, fontFamily: 'ui-monospace,monospace' }}>{timeCol ? fmtTime(r[timeCol]) : '—'}</span>
-            <span style={{ fontSize: '.72rem', color: t.text1, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{nameCol ? (r[nameCol] || '—') : '—'}</span>
-            <span style={{ fontSize: '.65rem', color: t.text2, fontFamily: 'ui-monospace,monospace' }}>{mobileCol ? (r[mobileCol] || '—') : '—'}</span>
-            <span style={{ fontSize: '.68rem', color: t.gold, fontFamily: 'ui-monospace,monospace' }}>{r.grms_sld ? `${Number(r.grms_sld).toFixed(2)}g` : '—'}</span>
-            <span style={{ fontSize: '.65rem', color: t.text3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.rsn_slgld || '—'}</span>
-          </div>
-        ))}
-      </div>
-    </Card>
-  )
-}
-
-/* ── Hourly Activity Chart ── */
-function HourlyChart({ hourly, t, isToday }) {
-  const HOURS = Array.from({ length: 15 }, (_, i) => i + 7)  // 7am–9pm
-  const hourMap = {}
-  ;(hourly || []).forEach(h => { hourMap[Number(h.hour)] = h })
-
-  const data = HOURS.map(h => {
-    const d = hourMap[h] || {}
-    const bills    = Number(d.bills)    || 0
-    const approved = Number(d.approved) || 0
-    const rejected = Number(d.rejected) || 0
-    const pending  = Math.max(0, bills - approved - rejected)
-    return { hour: h, bills, approved, rejected, pending }
-  })
-
-  const maxBills  = Math.max(...data.map(d => d.bills), 1)
-  const totalToday = data.reduce((s, d) => s + d.bills, 0)
-  const peakHour  = data.reduce((best, d) => d.bills > (best?.bills || 0) ? d : best, null)
-  const nowHour   = isToday ? new Date(Date.now() + 5.5 * 60 * 60 * 1000).getHours() : -1
-  const fmtH      = h => `${h % 12 || 12}${h >= 12 ? 'p' : 'a'}`
-
-  return (
-    <div style={{
-      background: `linear-gradient(160deg,${t.surface} 0%,${t.card} 100%)`,
-      border: `1px solid ${t.border}`, borderRadius: 16,
-      padding: '18px 20px 14px',
-      boxShadow: '0 4px 16px rgba(0,0,0,.10)',
-    }}>
-      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:12 }}>
-        <SectionLabel t={t}>Hourly Activity</SectionLabel>
-        {peakHour?.bills > 0 && (
-          <span style={{ fontSize:'.56rem', color:t.text4 }}>
-            Peak <span style={{ color:t.gold, fontWeight:700 }}>{fmtH(peakHour.hour)}</span>
-            {' '}· <span style={{ color:t.green, fontFamily:'ui-monospace,monospace' }}>{peakHour.approved}</span> approved
-          </span>
-        )}
-      </div>
-
-      {/* Bar chart */}
-      <div style={{ display:'flex', alignItems:'flex-end', gap:3, height:100 }}>
-        {data.map(d => {
-          const isCur  = d.hour === nowHour
-          const isPeak = d.bills === maxBills && d.bills > 0
-          const pct    = (d.bills / maxBills) * 100
-
-          return (
-            <div key={d.hour} style={{ flex:1, display:'flex', flexDirection:'column', alignItems:'center', gap:2 }}>
-              {d.bills > 0 && (
-                <span style={{ fontSize:'.44rem', color: isCur ? t.gold : isPeak ? t.text2 : t.text4, fontFamily:'ui-monospace,monospace', lineHeight:1 }}>{d.bills}</span>
-              )}
-              <div style={{ width:'100%', flex:1, display:'flex', flexDirection:'column', justifyContent:'flex-end' }}>
-                <div style={{
-                  width:'100%', height:`${pct}%`, minHeight: d.bills > 0 ? 3 : 0,
-                  borderRadius:'3px 3px 0 0', overflow:'hidden',
-                  outline: isCur ? `1.5px solid ${t.gold}` : 'none',
-                  outlineOffset: 1,
-                  transition:'height .7s cubic-bezier(.4,0,.2,1)',
-                  display:'flex', flexDirection:'column',
-                }}>
-                  {d.rejected > 0 && <div style={{ flex: d.rejected, background: t.red }} />}
-                  {d.pending  > 0 && <div style={{ flex: d.pending,  background: t.orange }} />}
-                  {d.approved > 0 && <div style={{ flex: d.approved, background: d.bills === maxBills ? `linear-gradient(180deg,${t.green},${t.green}cc)` : t.green }} />}
-                  {d.bills === 0   && <div style={{ flex:1, background: t.border, opacity:.4 }} />}
-                </div>
-              </div>
-              <span style={{ fontSize:'.44rem', color: isCur ? t.gold : t.text4, fontWeight: isCur ? 700 : 400, lineHeight:1 }}>{fmtH(d.hour)}</span>
-            </div>
-          )
-        })}
-      </div>
-
-      {/* Legend */}
-      <div style={{ display:'flex', gap:14, marginTop:10, paddingTop:10, borderTop:`1px solid ${t.border}`, alignItems:'center' }}>
-        {[[t.green,'Approved'],[t.orange,'Pending'],[t.red,'Rejected']].map(([c,l]) => (
-          <span key={l} style={{ display:'flex', alignItems:'center', gap:4, fontSize:'.52rem', color:t.text4 }}>
-            <span style={{ width:8, height:8, borderRadius:2, background:c, display:'block' }} />{l}
-          </span>
-        ))}
-        {totalToday > 0 && <span style={{ marginLeft:'auto', fontSize:'.52rem', color:t.text4 }}>{totalToday} total bills today</span>}
-      </div>
-    </div>
-  )
-}
-
-/* ── Payment Mode Breakdown ── */
-function PaymentModeStrip({ txns, t }) {
-  const approved = (txns || []).filter(tx => tx.trxn_status === 'approved')
-  const total    = approved.length
-  if (total === 0) return (
-    <div style={{ background:`linear-gradient(160deg,${t.surface} 0%,${t.card} 100%)`, border:`1px solid ${t.border}`, borderRadius:16, padding:'18px 20px', boxShadow:'0 4px 16px rgba(0,0,0,.10)', display:'flex', alignItems:'center', justifyContent:'center' }}>
-      <span style={{ fontSize:'.72rem', color:t.text4 }}>No payments recorded yet</span>
-    </div>
-  )
-
-  const modeCounts = {}
-  approved.forEach(tx => {
-    const m = (tx.pymt_mde || 'Unknown').trim()
-    modeCounts[m] = (modeCounts[m] || 0) + 1
-  })
-
-  const palette = { cash:t.green, upi:t.blue, neft:t.gold, cheque:t.purple, card:t.orange, rtgs:t.text2, online:t.blue }
-  const modeColor = m => palette[m.toLowerCase()] || t.text3
-
-  const modes = Object.entries(modeCounts)
-    .sort((a,b) => b[1]-a[1])
-    .map(([mode,count]) => ({ mode, count, pct: Math.round(count/total*100) }))
-
-  return (
-    <div style={{
-      background:`linear-gradient(160deg,${t.surface} 0%,${t.card} 100%)`,
-      border:`1px solid ${t.border}`, borderRadius:16,
-      padding:'18px 20px 14px',
-      boxShadow:'0 4px 16px rgba(0,0,0,.10)',
-    }}>
-      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:12 }}>
-        <SectionLabel t={t}>Payment Modes</SectionLabel>
-        <span style={{ fontSize:'.56rem', color:t.text4 }}>{total} approved bills</span>
-      </div>
-
-      {/* Proportional bar */}
-      <div style={{ display:'flex', height:8, borderRadius:100, overflow:'hidden', gap:1, marginBottom:16, boxShadow:'inset 0 1px 3px rgba(0,0,0,.2)' }}>
-        {modes.map(m => (
-          <div key={m.mode} style={{ width:`${m.pct}%`, background:modeColor(m.mode), minWidth:3, transition:'width .7s ease' }} />
-        ))}
-      </div>
-
-      {/* Mode list */}
-      <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
-        {modes.map(m => (
-          <div key={m.mode} style={{ display:'flex', alignItems:'center', gap:10 }}>
-            <span style={{ width:8, height:8, borderRadius:2, background:modeColor(m.mode), flexShrink:0 }} />
-            <span style={{ fontSize:'.65rem', color:t.text2, textTransform:'capitalize', flex:1 }}>{m.mode}</span>
-            <span style={{ fontSize:'.7rem', fontFamily:'ui-monospace,monospace', fontWeight:600, color:modeColor(m.mode) }}>{m.count}</span>
-            <span style={{ fontSize:'.55rem', color:t.text4, width:30, textAlign:'right' }}>{m.pct}%</span>
-            <div style={{ width:56, height:4, borderRadius:2, background:t.border, overflow:'hidden' }}>
-              <div style={{ height:'100%', width:`${m.pct}%`, background:modeColor(m.mode), transition:'width .7s ease', borderRadius:2 }} />
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  )
-}
-
-/* ── Walk-in Intelligence (Source + Reason breakdown) ── */
-function WalkinIntelligence({ walkins, t }) {
-  const buildBreakdown = (arr, key) => {
-    const counts = {}
-    arr.forEach(w => { const v = w[key] || '(not set)'; counts[v] = (counts[v]||0)+1 })
-    return Object.entries(counts).sort((a,b)=>b[1]-a[1]).slice(0,8)
-  }
-  const total       = walkins.length
-  const sources     = buildBreakdown(walkins, 'source')
-  const reasons     = buildBreakdown(walkins, 'walk_reason')
-
-  if (sources.length === 0 && reasons.length === 0) return null
-
-  const sourceColors = ['#c9a84c','#4a9fdf','#3aaa6a','#e09830','#9a6adf','#e05555','#5abcdf','#df8a5a']
-
-  const MiniBar = ({ items, total: tot, colors }) => (
-    <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
-      {/* Proportional bar */}
-      <div style={{ display:'flex', height:6, borderRadius:100, overflow:'hidden', gap:1, marginBottom:4 }}>
-        {items.map(([k,v],i) => (
-          <div key={k} style={{ width:`${Math.round(v/tot*100)}%`, background:colors[i%colors.length], minWidth:3, transition:'width .7s ease' }} />
-        ))}
-      </div>
-      {items.map(([k,v],i) => (
-        <div key={k} style={{ display:'flex', alignItems:'center', gap:8 }}>
-          <span style={{ width:7, height:7, borderRadius:2, background:colors[i%colors.length], flexShrink:0 }} />
-          <span style={{ fontSize:'.62rem', color:t.text2, flex:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }} title={k}>{k}</span>
-          <span style={{ fontSize:'.65rem', fontFamily:'ui-monospace,monospace', fontWeight:600, color:colors[i%colors.length] }}>{v}</span>
-          <span style={{ fontSize:'.52rem', color:t.text4, width:28, textAlign:'right' }}>{Math.round(v/tot*100)}%</span>
-        </div>
-      ))}
-    </div>
-  )
-
-  return (
-    <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16 }}>
-      {sources.length > 0 && (
-        <div style={{ background:`linear-gradient(160deg,${t.surface} 0%,${t.card} 100%)`, border:`1px solid ${t.border}`, borderRadius:16, padding:'18px 20px 14px', boxShadow:'0 4px 16px rgba(0,0,0,.10)' }}>
-          <SectionLabel t={t}>Walk-in Source</SectionLabel>
-          <MiniBar items={sources} total={total} colors={sourceColors} />
-        </div>
-      )}
-      {reasons.length > 0 && (
-        <div style={{ background:`linear-gradient(160deg,${t.surface} 0%,${t.card} 100%)`, border:`1px solid ${t.border}`, borderRadius:16, padding:'18px 20px 14px', boxShadow:'0 4px 16px rgba(0,0,0,.10)' }}>
-          <SectionLabel t={t}>Walk-in Reason</SectionLabel>
-          <MiniBar items={reasons} total={total} colors={['#4a9fdf','#c9a84c','#3aaa6a','#9a6adf','#e09830','#e05555','#5abcdf','#df8a5a']} />
-        </div>
-      )}
-    </div>
-  )
-}
-
-/* ── Branch Performance Table ── */
-function BranchTable({ t, branchData, allWalkins }) {
-  // Walk-in counts per branch_id from today's walk-ins
-  const wkMap = {}
-  ;(allWalkins || []).forEach(w => {
-    if (w.branch_id) wkMap[String(w.branch_id)] = (wkMap[String(w.branch_id)] || 0) + 1
-  })
-
-  const rows = (branchData || [])
-    .map(b => ({
-      name:     b.branch_name || '—',
-      walkins:  wkMap[String(b.branch_id)] || 0,
-      bills:    Number(b.bills)    || 0,
-      approved: Number(b.approved) || 0,
-      pending:  Number(b.pending)  || 0,
-      rejected: Number(b.rejected) || 0,
-      value:    Number(b.value)    || 0,
-    }))
-    .sort((a,b) => b.approved - a.approved)
-
-  if (rows.length === 0) return null
-  const maxApproved = Math.max(...rows.map(r => r.approved), 1)
-
-  return (
-    <div>
-      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:12 }}>
-        <SectionLabel t={t}>Branch Performance Today</SectionLabel>
-        <button onClick={() => downloadCSV('branches.csv',
-          ['Branch','Walk-ins','Bills','Approved','Pending','Rejected','Value'],
-          rows, r => [r.name, r.walkins, r.bills, r.approved, r.pending, r.rejected, r.value])}
-          style={{ padding:'4px 12px', borderRadius:6, fontSize:'.58rem', cursor:'pointer', border:`1px solid ${t.border}`, background:t.card, color:t.text3, marginBottom:12 }}>
-          ↓ CSV
-        </button>
-      </div>
-      <Card t={t} style={{ padding:0, overflow:'hidden' }}>
-        <div style={{ overflowX:'auto' }}>
-          <div style={{ minWidth:700 }}>
-            <div style={{ display:'grid', gridTemplateColumns:'1fr 70px 70px 80px 70px 70px 110px 130px', gap:8, padding:'8px 16px', background:t.card2, borderBottom:`1px solid ${t.border}` }}>
-              {['Branch','Walk-ins','Bills','Approved','Pending','Rejected','Value','Conversion'].map(h => (
-                <span key={h} style={{ fontSize:'.56rem', color:t.text3, fontWeight:600, letterSpacing:'.1em', textTransform:'uppercase' }}>{h}</span>
-              ))}
-            </div>
-            {rows.map((r, i) => {
-              const conv = r.walkins > 0 ? Math.round(r.approved/r.walkins*100) : (r.bills > 0 ? Math.round(r.approved/r.bills*100) : 0)
-              const convColor = conv >= 60 ? t.green : conv >= 35 ? t.orange : t.red
-              return (
-                <div key={i} style={{ display:'grid', gridTemplateColumns:'1fr 70px 70px 80px 70px 70px 110px 130px', gap:8, padding:'11px 16px', borderBottom: i < rows.length-1 ? `1px solid ${t.border}18` : 'none', alignItems:'center' }}
-                  onMouseEnter={e => e.currentTarget.style.background = t.card2}
-                  onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
-                  <div style={{ display:'flex', alignItems:'center', gap:8, minWidth:0 }}>
-                    <div style={{ width:3, height:20, borderRadius:2, background:`linear-gradient(180deg,${t.gold},${t.gold}60)`, flexShrink:0 }} />
-                    <span style={{ fontSize:'.72rem', color:t.text1, fontWeight:600, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{r.name}</span>
-                  </div>
-                  <span style={{ fontSize:'.68rem', color:t.blue,   fontFamily:'ui-monospace,monospace' }}>{r.walkins || '—'}</span>
-                  <span style={{ fontSize:'.68rem', color:t.text2,  fontFamily:'ui-monospace,monospace' }}>{r.bills}</span>
-                  <div style={{ display:'flex', alignItems:'center', gap:6 }}>
-                    <div style={{ flex:1, height:4, borderRadius:2, background:t.border, overflow:'hidden' }}>
-                      <div style={{ height:'100%', width:`${Math.round(r.approved/maxApproved*100)}%`, background:t.green, borderRadius:2, transition:'width .6s ease' }} />
-                    </div>
-                    <span style={{ fontSize:'.68rem', color:t.green, fontFamily:'ui-monospace,monospace', fontWeight:600, minWidth:18, textAlign:'right' }}>{r.approved}</span>
-                  </div>
-                  <span style={{ fontSize:'.68rem', color:t.orange, fontFamily:'ui-monospace,monospace' }}>{r.pending || '—'}</span>
-                  <span style={{ fontSize:'.68rem', color:t.red,    fontFamily:'ui-monospace,monospace' }}>{r.rejected || '—'}</span>
-                  <span style={{ fontSize:'.68rem', color:t.gold,   fontFamily:'ui-monospace,monospace' }}>{r.value > 0 ? fmtAmt(r.value) : '—'}</span>
-                  <div style={{ display:'flex', alignItems:'center', gap:6 }}>
-                    <div style={{ flex:1, height:5, borderRadius:2, background:t.border, overflow:'hidden' }}>
-                      <div style={{ height:'100%', width:`${conv}%`, background:convColor, borderRadius:2, transition:'width .6s ease' }} />
-                    </div>
-                    <span style={{ fontSize:'.62rem', color:convColor, fontFamily:'ui-monospace,monospace', fontWeight:600, minWidth:30, textAlign:'right' }}>{conv}%</span>
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-        </div>
-      </Card>
-    </div>
   )
 }
 

@@ -259,7 +259,6 @@ export async function GET(req) {
         [todayTxns],
         [todayWalkins],
         [kycRows],
-        [chklistRows],
         [takeoverRows],
       ] = await Promise.all([
 
@@ -359,17 +358,7 @@ export async function GET(req) {
           WHERE DATE(r.date + INTERVAL 330 MINUTE) = ?
         `, [todayIST]),
 
-        // 8. KYC checklist filled today — chklist_tbl has customer info + branch_id directly
-        conn.execute(`
-          SELECT c.*,
-            b.brnch_name AS branch_name
-          FROM chklist_tbl c
-          LEFT JOIN branch_tbl b ON b.brnch_id = c.branch_id
-          WHERE DATE(c.date + INTERVAL 330 MINUTE) = ?
-          ORDER BY c.date DESC
-        `, [todayIST]),
-
-        // 9. Takeover bills today + original walk-in date from customer_walkin history
+        // 8. Takeover bills today + original walk-in date from customer_walkin history
         conn.execute(`
           SELECT
             t.id AS txn_id, t.bill_no, t.cust_name, t.cust_mobile,
@@ -402,7 +391,6 @@ export async function GET(req) {
       for (const tx of todayTxns)    tx.region = regionMap[String(tx.branch_id)] || ''
       for (const w  of todayWalkins) w.region  = regionMap[String(w.branch_id)]  || ''
       for (const k  of kycRows)      k.region  = regionMap[String(k.branh_id)]   || ''
-      for (const c  of chklistRows)  c.region  = regionMap[String(c.branch_id)]  || ''
 
       // grms_wet is CSV per row (e.g. "24.91,17.05,2.96") — must parse in JS
       const csvSum = str => String(str || '').split(',').reduce((s, v) => {
@@ -515,9 +503,6 @@ export async function GET(req) {
         kyc_blacklisted_cnt: kycRows.length,
         kyc_blacklisted_wt:  parseFloat(kycRows.reduce((s, r) => s + (parseFloat(r.grams) || 0), 0).toFixed(2)),
         kyc_overridden_cnt:  kycOverriddenCount,
-        kyc_checklist_cnt:   chklistRows.length,
-        kyc_checklist_rows:  chklistRows,
-        kyc_checklist_cols:  chklistRows.length > 0 ? Object.keys(chklistRows[0]) : [],
         physical: { approved: byType['physical']?.approved || 0, pending: byType['physical']?.pending || 0, rejected: byType['physical']?.rejected || 0 },
         released: { approved: byType['released']?.approved || 0, pending: byType['released']?.pending || 0, rejected: byType['released']?.rejected || 0 },
       }
