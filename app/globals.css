@@ -52,20 +52,16 @@ button { cursor: pointer; }
 .recharts-surface,
 .recharts-wrapper { background: transparent !important; --recharts-background-color: transparent; }
 
-/* Focus ring when SVG receives click focus */
-.recharts-surface:focus,
-.recharts-surface:focus-visible,
-.recharts-surface:focus-within,
-.recharts-wrapper:focus,
-.recharts-wrapper:focus-visible,
-.recharts-wrapper:focus-within,
-.recharts-wrapper svg:focus,
-.recharts-wrapper *:focus { outline: none !important; box-shadow: none !important; border: none !important; }
+/* Kill all focus rings on charts — SVG gets native focus on click, suppress unconditionally */
+svg { outline: none !important; }
+.recharts-wrapper,
+.recharts-surface,
+.recharts-wrapper * { outline: none !important; box-shadow: none !important; }
 
-/* Cursor rectangle on hover — recharts default is stroke:#ccc which draws a white box */
+/* Cursor rectangle on hover */
 .recharts-tooltip-cursor { stroke: none !important; fill: transparent !important; }
 
-/* Recharts v3 accessibilityLayer draws a black focus rect on click — hide it */
+/* Recharts v3 accessibilityLayer draws a black focus rect on click */
 .recharts-accessibility-layer { display: none !important; }
 
 /* Bar background rectangles */
