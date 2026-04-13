@@ -275,6 +275,7 @@ export default function PurchaseReports() {
         .select('transaction_time, net_weight, final_amount_crm')
         .eq('purchase_date', fromDate)
         .eq('is_deleted', false)
+        .eq('crm_status', 'approved')
         .not('transaction_time', 'is', null)
       if (filterBranch) hq = hq.eq('branch_name', filterBranch)
       if (filterTxn)    hq = hq.eq('transaction_type', filterTxn)
@@ -323,7 +324,7 @@ export default function PurchaseReports() {
       let allRows = [], from = 0
       const CHUNK = 1000
       while (true) {
-        let q = supabase.from('purchases').select('*').eq('is_deleted', false)
+        let q = supabase.from('purchases').select('*').eq('is_deleted', false).eq('crm_status', 'approved')
         if (fromDate)     q = q.gte('purchase_date', fromDate)
         if (toDate)       q = q.lte('purchase_date', toDate)
         if (filterBranch) q = q.eq('branch_name', filterBranch)

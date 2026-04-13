@@ -62,16 +62,23 @@ export async function POST(request) {
       .limit(1)
       .single()
 
-    // 2-day buffer to catch late approvals; fall back to Apr 6 2026 (go-live date)
+    // 7-day buffer to catch bills approved days after creation; fall back to Apr 6 2026 (go-live date)
     const GO_LIVE = '2026-04-06'
     const cutoffDate = latestRow?.purchase_date
       ? new Date(Math.max(
-          new Date(latestRow.purchase_date).getTime() - 2 * 86400000,
+          new Date(latestRow.purchase_date).getTime() - 7 * 86400000,
           new Date(GO_LIVE).getTime()
         )).toISOString().split('T')[0]
       : GO_LIVE
 
-    // ── Pull transactions from new CRM ─────────────────────────────────────
+    // ── Clean up non-approved new CRM records already in Supabase ────────────
+    await supabaseAdmin
+      .from('purchases')
+      .delete()
+      .eq('crm_source', 'new_crm')
+      .neq('crm_status', 'approved')
+
+    // ── Pull only completed (FINAL_PAYMENT_COMPLETED) transactions ────────────
     const { rows } = await client.query(`
       SELECT
         t.id,
@@ -103,7 +110,7 @@ export async function POST(request) {
       LEFT JOIN "Quotation" q ON q.transaction_id = t.id
       LEFT JOIN "Ornament"  o ON o.quotation_id = q.id
       WHERE t.created_at >= $1
-        AND t.status != 'WALKIN'
+        AND t.status = 'FINAL_PAYMENT_COMPLETED'
       GROUP BY t.id, t.code, t.status, t.transaction_type, t.created_at, t.branch_id,
                t.customer_id, c.first_name, c.last_name, c.mobile, b.name,
                q.service_charge, q.service_charge_amount, q.final_amount
@@ -158,49 +165,22 @@ export async function POST(request) {
       }
     })
 
-    // ── Get existing records from Supabase ────────────────────────────────
-    const appIds = allRecords.map(r => r.application_id)
-    const existingIds    = new Set()
-    const existingStatus = new Map()
+    // ── Get existing records from Supabase to avoid duplicate inserts ────────
+    const appIds     = allRecords.map(r => r.application_id)
+    const existingIds = new Set()
     const CHUNK = 500
     for (let i = 0; i < appIds.length; i += CHUNK) {
       const chunk = appIds.slice(i, i + CHUNK)
       const { data } = await supabaseAdmin
         .from('purchases')
-        .select('application_id, crm_status')
+        .select('application_id')
         .eq('crm_source', 'new_crm')
         .in('application_id', chunk)
-      ;(data || []).forEach(r => {
-        existingIds.add(r.application_id)
-        existingStatus.set(r.application_id, r.crm_status)
-      })
+      ;(data || []).forEach(r => existingIds.add(r.application_id))
     }
 
-    // Split new vs status-changed
-    const newRecords    = allRecords.filter(r => !existingIds.has(r.application_id))
-    const statusChanged = allRecords.filter(r =>
-      existingIds.has(r.application_id) &&
-      existingStatus.get(r.application_id) !== r.crm_status
-    )
-
-    // ── Update crm_status for changed records ─────────────────────────────
-    const STATUS_CONCURRENCY = 20
-    let statusUpdated = 0
-    for (let i = 0; i < statusChanged.length; i += STATUS_CONCURRENCY) {
-      const chunk = statusChanged.slice(i, i + STATUS_CONCURRENCY)
-      const results = await Promise.all(
-        chunk.map(r =>
-          supabaseAdmin.from('purchases')
-            .update({ crm_status: r.crm_status })
-            .eq('application_id', r.application_id)
-            .eq('crm_source', 'new_crm')
-        )
-      )
-      results.forEach(({ error }, idx) => {
-        if (error) console.error(`Status update failed for ${chunk[idx].application_id}:`, error.message)
-        else statusUpdated++
-      })
-    }
+    // ── Only insert records not already in Supabase ───────────────────────
+    const newRecords = allRecords.filter(r => !existingIds.has(r.application_id))
 
     // ── Insert new records in batches of 100 ─────────────────────────────
     const BATCH = 100
@@ -220,14 +200,13 @@ export async function POST(request) {
     }
 
     return Response.json({
-      success:       errors === 0,
-      total:         rows.length,
-      newCount:      newRecords.length,
+      success:   errors === 0,
+      total:     rows.length,
+      newCount:  newRecords.length,
       synced,
-      statusUpdated,
       errors,
-      lastError:     lastError ? lastError.message : null,
-      message:       `New CRM: ${newRecords.length} new, ${statusUpdated} status updates — synced ${synced} (${errors} errors)`,
+      lastError: lastError ? lastError.message : null,
+      message:   `New CRM: ${newRecords.length} new completed bills — synced ${synced} (${errors} errors)`,
     })
 
   } catch (err) {

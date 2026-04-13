@@ -89,13 +89,20 @@ export async function POST(request) {
       .limit(1)
       .single()
 
-    // Use latest synced date minus 2 days as buffer (to catch late CRM approvals)
-    // Fall back to 30 days ago if Supabase is empty
+    // 7-day buffer to catch bills approved days after creation; fall back to 30 days ago
     const cutoff = latestRow?.purchase_date
-      ? new Date(new Date(latestRow.purchase_date).getTime() - 2 * 86400000).toISOString().split('T')[0]
+      ? new Date(new Date(latestRow.purchase_date).getTime() - 7 * 86400000).toISOString().split('T')[0]
       : new Date(Date.now() - 30 * 86400000).toISOString().split('T')[0]
 
-    // ── Pull ALL records from CRM (all statuses) ─────────
+    // ── Clean up non-approved old CRM records already in Supabase ────────────
+    // purchases table is approved-only; any pending/rejected are stale data
+    await supabaseAdmin
+      .from('purchases')
+      .delete()
+      .eq('crm_source', 'old_crm')
+      .neq('crm_status', 'approved')
+
+    // ── Pull only approved records from CRM ──────────────────────────────────
     const [rows] = await conn.execute(`
       SELECT
         t.id                          AS txn_id,
@@ -117,7 +124,7 @@ export async function POST(request) {
         GROUP_CONCAT(o.grs_amnt   ORDER BY o.id) AS total_amount_str
       FROM transac_tbl t
       LEFT JOIN ornments_tbl o ON o.trnxnn_id = t.id
-      WHERE t.date >= ?
+      WHERE t.trxn_status = 'approved' AND t.date >= ?
       GROUP BY t.id
     `, [cutoff])
 
@@ -133,21 +140,17 @@ export async function POST(request) {
     // ── Build normalized application_ids from CRM ─────────
     const crmAppIds = rows.map(r => normalizeAppId(r.application_id))
 
-    // ── Get existing OLD CRM records from Supabase ───────────────────────────
-    const existingIds    = new Set()
-    const existingStatus = new Map()
+    // ── Get existing OLD CRM records from Supabase to avoid duplicate inserts ─
+    const existingIds = new Set()
     const CHUNK = 500
     for (let i = 0; i < crmAppIds.length; i += CHUNK) {
       const chunk = crmAppIds.slice(i, i + CHUNK)
       const { data } = await supabaseAdmin
         .from('purchases')
-        .select('application_id, crm_status')
+        .select('application_id')
         .eq('crm_source', 'old_crm')
         .in('application_id', chunk)
-      ;(data || []).forEach(r => {
-        existingIds.add(r.application_id)
-        existingStatus.set(r.application_id, r.crm_status)
-      })
+      ;(data || []).forEach(r => existingIds.add(r.application_id))
     }
 
     // ── Map CRM rows → Supabase records ───────────────────
@@ -210,36 +213,9 @@ export async function POST(request) {
       }
     })
 
-    // ── Smart dedup → split into new vs changed-status ────────────────────────
+    // ── Smart dedup → only insert records not already in Supabase ────────────
     const deduped    = smartDedup(allRecords).map(({ _txn_id, ...r }) => r)
     const newRecords = deduped.filter(r => !existingIds.has(r.application_id))
-
-    // Records already in Supabase whose crm_status changed in CRM
-    const statusChanged = deduped.filter(r =>
-      existingIds.has(r.application_id) &&
-      existingStatus.get(r.application_id) !== r.crm_status
-    )
-
-    // ── Update crm_status for records whose status changed in CRM ─────────────
-    // Use individual .update() per record — upsert can't partially update columns
-    // without violating NOT NULL constraints on unspecified fields
-    const STATUS_CONCURRENCY = 20
-    let statusUpdated = 0
-    for (let i = 0; i < statusChanged.length; i += STATUS_CONCURRENCY) {
-      const chunk = statusChanged.slice(i, i + STATUS_CONCURRENCY)
-      const results = await Promise.all(
-        chunk.map(r =>
-          supabaseAdmin.from('purchases')
-            .update({ crm_status: r.crm_status })
-            .eq('application_id', r.application_id)
-            .eq('crm_source', 'old_crm')
-        )
-      )
-      results.forEach(({ error }, idx) => {
-        if (error) console.error(`Status update failed for ${chunk[idx].application_id}:`, error.message)
-        else statusUpdated++
-      })
-    }
 
     // ── Insert new records in batches of 100 ──────────────────────────────────
     const BATCH = 100
@@ -259,13 +235,12 @@ export async function POST(request) {
       }
     }
 
-    if (!newRecords.length && !statusChanged.length) {
+    if (!newRecords.length) {
       return Response.json({
         success:  true,
         total:    rows.length,
         synced:   0,
         newCount: 0,
-        statusUpdated: 0,
         message:  'All records already synced — nothing new to add',
       })
     }
@@ -278,7 +253,7 @@ export async function POST(request) {
       statusUpdated,
       errors,
       lastError: lastError ? JSON.stringify(lastError) : null,
-      message:  `${newRecords.length} new, ${statusUpdated} status updates — synced ${synced} (${errors} errors)`,
+      message:  `${newRecords.length} new approved bills — synced ${synced} (${errors} errors)`,
     })
 
   } catch (err) {
