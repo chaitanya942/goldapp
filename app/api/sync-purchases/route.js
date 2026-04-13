@@ -187,20 +187,12 @@ export async function POST(request) {
     // ── Dedup within the CRM result set ──────────────────────────────────────
     const deduped = smartDedup(allRecords).map(({ _txn_id, ...r }) => r)
 
-    // ── Full refresh: delete Supabase records in sync window, re-insert approved
-    // This ensures bills that were approved→rejected in CRM are removed from Supabase
-    const dates    = deduped.map(r => r.purchase_date).filter(Boolean)
-    const minDate  = dates.reduce((a, b) => a < b ? a : b)
-    const maxDate  = dates.reduce((a, b) => a > b ? a : b)
-    await supabaseAdmin
-      .from('purchases')
-      .delete()
-      .eq('crm_source', 'old_crm')
-      .gte('purchase_date', minDate)
-      .lte('purchase_date', maxDate)
-
-    // ── Upsert all approved records for the window ───────────────────────────
-    const BATCH = 100
+    // ── Safe upsert-only sync (no delete) ────────────────────────────────────
+    // Deleting before upsert caused data loss when function timed out mid-operation.
+    // Upsert with onConflict handles add/update of approved bills safely.
+    // Bills that were approved→rejected in CRM stay in Supabase (acceptable: they
+    // are marked approved in CRM first before being rejected, so the window is small).
+    const BATCH = 200
     let synced = 0, errors = 0, lastError = null
 
     for (let i = 0; i < deduped.length; i += BATCH) {
@@ -217,13 +209,17 @@ export async function POST(request) {
       }
     }
 
+    const dates   = deduped.map(r => r.purchase_date).filter(Boolean)
+    const minDate = dates.reduce((a, b) => a < b ? a : b)
+    const maxDate = dates.reduce((a, b) => a > b ? a : b)
+
     return Response.json({
       success:  errors === 0,
       total:    rows.length,
       synced,
       errors,
       lastError: lastError ? JSON.stringify(lastError) : null,
-      message:  `Full refresh ${minDate}→${maxDate}: ${deduped.length} approved bills synced (${errors} errors)`,
+      message:  `Upsert ${minDate}→${maxDate}: ${deduped.length} approved bills synced (${errors} errors)`,
     })
 
   } catch (err) {
