@@ -246,9 +246,7 @@ export default function PurchaseReports() {
       const isSingleDay = fromDate && toDate && fromDate === toDate
 
       // ── 1. Branch metadata ────────────────────────────────
-      const { data: branchMeta } = await supabase
-        .from('branches')
-        .select('name, region, state, cluster')
+      const { data: branchMeta } = await supabase.from('branches').select('name, region, state, cluster')
       const branchMetaMap = {}
       ;(branchMeta || []).forEach(b => { branchMetaMap[b.name] = b })
 
@@ -260,12 +258,13 @@ export default function PurchaseReports() {
           .map(b => b.name)
       }
 
-      // ── 2. Fetch all approved purchases (chunked) ─────────
+      // ── 2. Fetch all approved purchases (chunked, minimal columns) ────────────
+      const SELECT_COLS = 'purchase_date,branch_name,transaction_type,net_weight,gross_weight,stone_weight,wastage,total_amount,purity,service_charge_pct,transaction_time,customer_name'
       let rows = [], offset = 0
-      const CHUNK = 1000
+      const CHUNK = 5000
       while (true) {
         let q = supabase.from('purchases')
-          .select('*')
+          .select(SELECT_COLS)
           .eq('crm_status', 'approved')
           .eq('is_deleted', false)
         if (fromDate)            q = q.gte('purchase_date', fromDate)
