@@ -745,17 +745,14 @@ export default function PurchaseReports() {
       {/* ROW 1 — Volume (4 cols) */}
       <div style={gridRow4}>
         <KpiCard label="Total Transactions"    color={t.gold}  loading={loading}
-          value={Number(k?.total_count || 0).toLocaleString('en-IN')}
-          onClick={branchData.length ? () => setSelectedKpi('Total Transactions') : null} />
+          value={Number(k?.total_count || 0).toLocaleString('en-IN')} />
         <KpiCard label="Gross Weight"          color={t.text1} loading={loading}
-          value={`${fmt(k?.total_gross)}g`}
-          onClick={branchData.length ? () => setSelectedKpi('Gross Weight') : null} />
+          value={`${fmt(k?.total_gross)}g`} />
         <KpiCard label="Avg Stone & Wastage / Bill" color={t.text2} loading={loading}
           value={`${fmt(k?.avg_stone_wastage_bill)}g`}
           sub="avg deduction per transaction" />
         <KpiCard label="Net Weight"            color={t.gold}  loading={loading}
-          value={`${fmt(k?.total_net)}g`}
-          onClick={branchData.length ? () => setSelectedKpi('Net Weight') : null} />
+          value={`${fmt(k?.total_net)}g`} />
       </div>
 
       {/* ROW 2 — Quality + Split (5 cols) */}
@@ -765,8 +762,7 @@ export default function PurchaseReports() {
           sub="of gross weight" />
         <KpiCard label="Avg Purity %" color={t.purple} loading={loading}
           value={`${Number(k?.avg_purity || 0).toFixed(2)}%`}
-          sub="weighted by net weight"
-          onClick={branchData.length ? () => setSelectedKpi('Avg Purity %') : null} />
+          sub="weighted by net weight" />
         <SplitCard
           title="Physical & Takeover — Bills"
           leftLabel="Physical"  leftValue={Number(k?.physical_count || 0).toLocaleString('en-IN')}  leftColor={t.gold}  leftSub={`Physical · ${phPct}%`}
@@ -780,22 +776,18 @@ export default function PurchaseReports() {
           loading={loading} t={t}
         />
         <KpiCard label="Avg Net Wt / Bill" color={t.blue} loading={loading}
-          value={`${fmt(k?.avg_net_per_txn)}g`}
-          onClick={branchData.length ? () => setSelectedKpi('Avg Net Wt / Bill') : null} />
+          value={`${fmt(k?.avg_net_per_txn)}g`} />
       </div>
 
       {/* ROW 3 — Value (5 cols) */}
       <div style={gridRow5b}>
         <KpiCard label="Avg Service Charge %" color={t.text2} loading={loading}
-          value={`${Number(k?.avg_service_charge_pct || 0).toFixed(2)}%`}
-          onClick={branchData.length ? () => setSelectedKpi('Avg Service Charge %') : null} />
+          value={`${Number(k?.avg_service_charge_pct || 0).toFixed(2)}%`} />
         <KpiCard label="Gross Purchase Value" color={t.green} loading={loading}
-          value={fmtVal(k?.total_value)}
-          onClick={branchData.length ? () => setSelectedKpi('Gross Purchase Value') : null} />
+          value={fmtVal(k?.total_value)} />
         <KpiCard label="Avg Rate / Gram" color={t.green} loading={loading}
           value={fmtVal(k?.avg_rate_per_gram)}
-          sub="gross value ÷ net weight"
-          onClick={branchData.length ? () => setSelectedKpi('Avg Rate / Gram') : null} />
+          sub="gross value ÷ net weight" />
         <KpiCard label="Transacted Branches" color={t.blue} loading={loading}
           value={Number(k?.branch_count || 0).toLocaleString('en-IN')} />
         <KpiCard label="Business Days" color={t.text2} loading={loading}
