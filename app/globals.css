@@ -65,6 +65,9 @@ button { cursor: pointer; }
 /* Cursor rectangle on hover — recharts default is stroke:#ccc which draws a white box */
 .recharts-tooltip-cursor { stroke: none !important; fill: transparent !important; }
 
+/* Recharts v3 accessibilityLayer draws a black focus rect on click — hide it */
+.recharts-accessibility-layer { display: none !important; }
+
 /* Bar background rectangles */
 .recharts-rectangle.recharts-bar-background-rectangle { fill: transparent !important; stroke: none !important; }
 
