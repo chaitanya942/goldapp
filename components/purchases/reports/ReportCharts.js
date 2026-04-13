@@ -250,7 +250,7 @@ export default function ReportCharts({ trend, monthly, dowData, hourlyTrend, isS
               </div>
 
               <ResponsiveContainer width="100%" height={200}>
-                <ScatterChart margin={{ top: 10, right: 20, bottom: 20, left: 10 }}>
+                <ScatterChart accessibilityLayer={false} margin={{ top: 10, right: 20, bottom: 20, left: 10 }}>
                   <CartesianGrid stroke={t.border} strokeOpacity={0.35} vertical={false} />
                   <XAxis
                     type="number" dataKey="timeMinutes"
@@ -293,7 +293,7 @@ export default function ReportCharts({ trend, monthly, dowData, hourlyTrend, isS
                 <div style={{ marginTop: '10px' }}>
                   <div style={{ fontSize: '.56rem', color: t.text4, letterSpacing: '.12em', marginBottom: '6px' }}>HOURLY TOTALS</div>
                   <ResponsiveContainer width="100%" height={54}>
-                    <BarChart data={hourlyTrend} margin={{ top: 0, right: 20, bottom: 0, left: 10 }}>
+                    <BarChart accessibilityLayer={false} data={hourlyTrend} margin={{ top: 0, right: 20, bottom: 0, left: 10 }}>
                       <XAxis dataKey="day" tick={{ fill: t.text4, fontSize: 8 }} axisLine={false} tickLine={false} />
                       <Tooltip
                         cursor={false}
@@ -328,7 +328,7 @@ export default function ReportCharts({ trend, monthly, dowData, hourlyTrend, isS
               })()}
 
               <ResponsiveContainer width="100%" height={200}>
-                <AreaChart data={mergedData} margin={{ top: 10, right: 20, bottom: 0, left: 10 }}>
+                <AreaChart accessibilityLayer={false} data={mergedData} margin={{ top: 10, right: 20, bottom: 0, left: 10 }}>
                   <defs>
                     <linearGradient id="ga_all" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="5%"  stopColor={t.gold} stopOpacity={0.28} />
@@ -374,7 +374,7 @@ export default function ReportCharts({ trend, monthly, dowData, hourlyTrend, isS
                 <div style={{ marginTop: '10px' }}>
                   <div style={{ fontSize: '.56rem', color: t.text4, letterSpacing: '.12em', marginBottom: '6px' }}>DAILY BILL COUNT</div>
                   <ResponsiveContainer width="100%" height={54}>
-                    <BarChart data={mergedData} margin={{ top: 0, right: 20, bottom: 0, left: 10 }} style={{ border: 'none', outline: 'none' }}>
+                    <BarChart accessibilityLayer={false} data={mergedData} margin={{ top: 0, right: 20, bottom: 0, left: 10 }} style={{ border: 'none', outline: 'none' }}>
                       <XAxis dataKey="day" tick={{ fill: t.text4, fontSize: 8 }} axisLine={false} tickLine={false}
                         tickFormatter={v => fmtShort(v)} interval="preserveStartEnd" />
                       <Tooltip
@@ -416,7 +416,7 @@ export default function ReportCharts({ trend, monthly, dowData, hourlyTrend, isS
           {monthly.length >= 2 && (
             <div style={{ marginBottom: '16px' }}>
               <ResponsiveContainer width="100%" height={100}>
-                <BarChart data={monthly} margin={{ top: 0, right: 20, bottom: 0, left: 10 }}>
+                <BarChart accessibilityLayer={false} data={monthly} margin={{ top: 0, right: 20, bottom: 0, left: 10 }}>
                   <CartesianGrid {...gridProps} />
                   <XAxis dataKey="month_label" tick={axisTick} axisLine={false} tickLine={false} />
                   <YAxis tick={axisTick} axisLine={false} tickLine={false} width={44} tickFormatter={v => `${v}g`} />
@@ -473,7 +473,7 @@ export default function ReportCharts({ trend, monthly, dowData, hourlyTrend, isS
             <div>
               <div style={{ fontSize: '.58rem', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', marginBottom: '10px' }}>Net Weight</div>
               <ResponsiveContainer width="100%" height={180}>
-                <BarChart
+                <BarChart accessibilityLayer={false}
                   data={dowData.map(d => ({ ...d, label: DAYS[d.dow] || d.dow, net_wt: Number(d.net_wt) }))}
                   layout="vertical"
                   margin={{ left: 0, right: 20, top: 0, bottom: 0 }}
@@ -492,7 +492,7 @@ export default function ReportCharts({ trend, monthly, dowData, hourlyTrend, isS
             <div>
               <div style={{ fontSize: '.58rem', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', marginBottom: '10px' }}>Transactions</div>
               <ResponsiveContainer width="100%" height={180}>
-                <BarChart
+                <BarChart accessibilityLayer={false}
                   data={dowData.map(d => ({ ...d, label: DAYS[d.dow] || d.dow, txn_count: Number(d.txn_count) }))}
                   layout="vertical"
                   margin={{ left: 0, right: 20, top: 0, bottom: 0 }}

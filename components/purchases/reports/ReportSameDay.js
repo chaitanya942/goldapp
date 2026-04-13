@@ -186,7 +186,7 @@ function OverallView({ data, t, dowName }) {
           <div key={key} style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: '12px', padding: '18px' }}>
             <div style={{ fontSize: '.52rem', color: t.text3, textTransform: 'uppercase', letterSpacing: '.18em', fontWeight: 500, marginBottom: '3px' }}>{label}</div>
             <div style={{ fontSize: '.6rem', color: t.text4, marginBottom: '12px' }}>Selected (bright) vs past 4 {dowName}s</div>
-            <BarChart data={data} valueKey={key} color={color} t={t} formatValue={fmtFn} />
+            <BarChart accessibilityLayer={false} data={data} valueKey={key} color={color} t={t} formatValue={fmtFn} />
           </div>
         ))}
       </div>
@@ -411,7 +411,7 @@ function BranchView({ rawData, t, dowName }) {
             ].map(({ key, label, color, fmtFn }) => (
               <div key={key} style={{ background: t.card2, borderRadius: '10px', padding: '16px', border: `1px solid ${t.border}` }}>
                 <div style={{ fontSize: '.52rem', color: t.text3, textTransform: 'uppercase', letterSpacing: '.15em', marginBottom: '12px' }}>{label}</div>
-                <BarChart data={selData} valueKey={key} color={color} t={t} formatValue={fmtFn} />
+                <BarChart accessibilityLayer={false} data={selData} valueKey={key} color={color} t={t} formatValue={fmtFn} />
               </div>
             ))}
           </div>

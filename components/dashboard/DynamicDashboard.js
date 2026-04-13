@@ -254,7 +254,7 @@ function PurchaseInline({ t, setActiveNav, canSee }) {
               : trend.length>0
                 ? <div style={{ borderRadius:8, overflow:'hidden' }}>
                     <ResponsiveContainer width="100%" height={120} style={{ outline:'none' }}>
-                      <BarChart data={trend} barSize={14} margin={{ top:4, right:2, left:2, bottom:0 }}>
+                      <BarChart accessibilityLayer={false} data={trend} barSize={14} margin={{ top:4, right:2, left:2, bottom:0 }}>
                         <defs>
                           <linearGradient id="barGrad" x1="0" y1="0" x2="0" y2="1">
                             <stop offset="0%" stopColor={t.gold} stopOpacity={0.95}/>
@@ -462,7 +462,7 @@ function TelesalesSection({ t, setActiveNav }) {
           {loading ? <Shimmer h={110} w="100%" t={t} />
             : <div style={{ borderRadius:8, overflow:'hidden' }}>
                 <ResponsiveContainer width="100%" height={110} style={{ outline:'none' }}>
-                  <BarChart data={chartData} barSize={13} margin={{top:4,right:2,left:2,bottom:0}}>
+                  <BarChart accessibilityLayer={false} data={chartData} barSize={13} margin={{top:4,right:2,left:2,bottom:0}}>
                     <defs>
                       <linearGradient id="callGrad" x1="0" y1="0" x2="0" y2="1">
                         <stop offset="0%" stopColor={t.purple} stopOpacity={0.9}/>
@@ -641,7 +641,7 @@ function RatesSection({ t, setActiveNav, canSeeRates, canSeeCalTable }) {
         <div style={panel}>
           <div style={{ fontSize:11, color:t.text4, letterSpacing:'.1em', textTransform:'uppercase', fontWeight:600, marginBottom:12 }}>Kalinga rate — last 2 hours</div>
           <ResponsiveContainer width="100%" height={80} style={{ outline:'none' }}>
-            <LineChart data={history} margin={{top:2,right:0,left:0,bottom:0}}>
+            <LineChart accessibilityLayer={false} data={history} margin={{top:2,right:0,left:0,bottom:0}}>
               <XAxis dataKey="time" tick={{fontSize:9,fill:t.text4}} axisLine={false} tickLine={false} interval="preserveStartEnd"/>
               <YAxis hide domain={['auto','auto']}/>
               <Tooltip contentStyle={{background:t.card,border:`1px solid ${t.border}`,borderRadius:10,fontSize:11}} formatter={v=>[`₹${Number(v).toLocaleString('en-IN',{maximumFractionDigits:0})}`,'Rate']}/>

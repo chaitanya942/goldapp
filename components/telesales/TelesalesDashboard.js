@@ -209,7 +209,7 @@ export default function TelesalesDashboard() {
           <span style={s.label}>Calls Per Day — Last 14 Days <span style={{ color: t.text4, fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>(click bar to filter)</span></span>
           {callsByDate.length > 0 ? (
             <ResponsiveContainer width="100%" height={185}>
-              <BarChart data={callsByDate} barSize={16}
+              <BarChart accessibilityLayer={false} data={callsByDate} barSize={16}
                 onClick={d => d?.activePayload && toggleFilter('date', d.activePayload[0]?.payload?.rawDate)}>
                 <CartesianGrid strokeDasharray="3 3" stroke={`${t.border2}60`} vertical={false} />
                 <XAxis dataKey="date" tick={{ fill: t.text4, fontSize: 10 }} axisLine={false} tickLine={false} />
@@ -230,7 +230,7 @@ export default function TelesalesDashboard() {
         <div style={s.card}>
           <span style={s.label}>Outcome Breakdown <span style={{ color: t.text4, fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>(click to filter)</span></span>
           <ResponsiveContainer width="100%" height={180}>
-            <PieChart>
+            <PieChart accessibilityLayer={false}>
               <Pie data={outcomeDist} cx="50%" cy="50%" innerRadius={50} outerRadius={78}
                 dataKey="value" paddingAngle={2} stroke="none"
                 activeIndex={activeSlice}
@@ -274,7 +274,7 @@ export default function TelesalesDashboard() {
         <div style={s.card}>
           <span style={s.label}>Peak Call Hours <span style={{ color: t.text4, fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>(click to filter)</span></span>
           <ResponsiveContainer width="100%" height={150}>
-            <BarChart data={callsByHour} barSize={8}
+            <BarChart accessibilityLayer={false} data={callsByHour} barSize={8}
               onClick={d => d?.activePayload && toggleFilter('hour', d.activePayload[0]?.payload?.h)}>
               <XAxis dataKey="hour" tick={{ fill: t.text4, fontSize: 9 }} axisLine={false} tickLine={false}
                 tickFormatter={v => v.slice(0,2)} interval={2} />
@@ -301,7 +301,7 @@ export default function TelesalesDashboard() {
           <span style={s.label}>Avg Duration / Day</span>
           {durationByDate.length > 0 ? (
             <ResponsiveContainer width="100%" height={150}>
-              <LineChart data={durationByDate}>
+              <LineChart accessibilityLayer={false} data={durationByDate}>
                 <CartesianGrid strokeDasharray="3 3" stroke={`${t.border2}60`} vertical={false} />
                 <XAxis dataKey="date" tick={{ fill: t.text4, fontSize: 10 }} axisLine={false} tickLine={false} />
                 <YAxis tick={{ fill: t.text4, fontSize: 10 }} axisLine={false} tickLine={false} tickFormatter={v => `${Math.floor(v/60)}m`} />
