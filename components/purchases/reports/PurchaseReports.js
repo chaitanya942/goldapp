@@ -301,7 +301,7 @@ export default function PurchaseReports() {
         const gw = parseFloat(r.gross_weight  || 0)
         const sw = parseFloat(r.stone_weight  || 0)
         const ww = parseFloat(r.wastage       || 0)
-        const fa = parseFloat(r.final_amount_crm || 0)
+        const fa = parseFloat(r.total_amount    || 0)   // gross value (before service charge)
         const pu = parseFloat(r.purity        || 0)
         const sp = parseFloat(r.service_charge_pct || 0)
         totalGross      += gw
@@ -348,7 +348,7 @@ export default function PurchaseReports() {
         if (!trendMap[d]) trendMap[d] = { net_wt: 0, value: 0, txn_count: 0, pw: 0 }
         const nw = parseFloat(r.net_weight || 0)
         trendMap[d].net_wt    += nw
-        trendMap[d].value     += parseFloat(r.final_amount_crm || 0)
+        trendMap[d].value     += parseFloat(r.total_amount || 0)
         trendMap[d].txn_count += 1
         trendMap[d].pw        += nw * parseFloat(r.purity || 0)
       }
@@ -372,7 +372,7 @@ export default function PurchaseReports() {
         monthMap[m].txn_count += 1
         monthMap[m].gw  += parseFloat(r.gross_weight || 0)
         monthMap[m].nw  += nw
-        monthMap[m].val += parseFloat(r.final_amount_crm || 0)
+        monthMap[m].val += parseFloat(r.total_amount || 0)
         monthMap[m].pw  += nw * parseFloat(r.purity || 0)
       }
       setMonthly(
@@ -399,7 +399,7 @@ export default function PurchaseReports() {
         const nw = parseFloat(r.net_weight || 0)
         branchAgg[bn].txn_count     += 1
         branchAgg[bn].nw            += nw
-        branchAgg[bn].val           += parseFloat(r.final_amount_crm || 0)
+        branchAgg[bn].val           += parseFloat(r.total_amount || 0)
         branchAgg[bn].pw            += nw * parseFloat(r.purity || 0)
         if (r.transaction_type === 'PHYSICAL') branchAgg[bn].physical_count++
       }
@@ -450,7 +450,7 @@ export default function PurchaseReports() {
         const bkt = PURITY_BUCKETS.find(b => pu >= b.min && pu < b.max) || PURITY_BUCKETS[PURITY_BUCKETS.length - 1]
         pAgg[bkt.label].count += 1
         pAgg[bkt.label].nw    += parseFloat(r.net_weight || 0)
-        pAgg[bkt.label].val   += parseFloat(r.final_amount_crm || 0)
+        pAgg[bkt.label].val   += parseFloat(r.total_amount || 0)
         pAgg[bkt.label].spc   += parseFloat(r.service_charge_pct || 0)
       }
       setPurityDist(
@@ -524,7 +524,7 @@ export default function PurchaseReports() {
             net_weight:       parseFloat(r.net_weight   || 0),
             gross_weight:     parseFloat(r.gross_weight || 0),
             purity:           parseFloat(r.purity       || 0),
-            total_amount:     parseFloat(r.final_amount_crm || 0),
+            total_amount:     parseFloat(r.total_amount || 0),
             transaction_type: r.transaction_type,
             purchase_date:    r.purchase_date,
           }))
@@ -539,7 +539,7 @@ export default function PurchaseReports() {
           if (isNaN(h) || h < 0 || h > 23) continue
           if (!hmap[h]) hmap[h] = { net_wt: 0, value: 0, txn_count: 0 }
           hmap[h].net_wt    += parseFloat(r.net_weight || 0)
-          hmap[h].value     += parseFloat(r.final_amount_crm || 0)
+          hmap[h].value     += parseFloat(r.total_amount || 0)
           hmap[h].txn_count += 1
         }
         const hours = Object.keys(hmap).map(Number)
