@@ -296,6 +296,7 @@ export default function ReportCharts({ trend, monthly, dowData, hourlyTrend, isS
                     <BarChart data={hourlyTrend} margin={{ top: 0, right: 20, bottom: 0, left: 10 }}>
                       <XAxis dataKey="day" tick={{ fill: t.text4, fontSize: 8 }} axisLine={false} tickLine={false} />
                       <Tooltip
+                        cursor={false}
                         formatter={v => trendMetric === 'value' ? fmtVal(v) : trendMetric === 'txn_count' ? v : `${fmt(v)}g`}
                         contentStyle={{ background: t.card2, border: `1px solid ${t.border}`, borderRadius: '8px', color: t.text2, fontSize: '.68rem' }}
                       />
@@ -377,6 +378,7 @@ export default function ReportCharts({ trend, monthly, dowData, hourlyTrend, isS
                       <XAxis dataKey="day" tick={{ fill: t.text4, fontSize: 8 }} axisLine={false} tickLine={false}
                         tickFormatter={v => fmtShort(v)} interval="preserveStartEnd" />
                       <Tooltip
+                        cursor={false}
                         formatter={v => `${v} bills`}
                         labelFormatter={v => fmtShort(v)}
                         contentStyle={{ background: t.card2, border: `1px solid ${t.border}`, borderRadius: '8px', color: t.text2, fontSize: '.68rem' }}
