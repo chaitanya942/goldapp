@@ -1784,18 +1784,137 @@ function NewCrmTab({ t, newCrmTxns, newCrmError, regionFilter, regions, isToday,
           <FlowSep t={t} />
           <HeroNum label="Walkout"      value={walkout}                color={t.red}    t={t} small weight={walkoutWt}  active={activeMetric==='walkout'}    onClick={() => toggleMetric('walkout')} />
         </div>
-        <div style={{ display: 'flex', gap: 10, marginTop: 10, flexWrap: 'wrap' }}>
-          <Pill label="Overall conversion" value={`${conversionPct}%`} color={t.green} bg={t.greenDim} />
-          {inProgress > 0 && <Pill label="In pipeline" value={fmtNum(inProgress)} color={t.orange} bg={t.orangeDim} />}
-          {walkout > 0 && <Pill label="Walkout rate" value={`${walkoutRate}%`} color={t.red} bg={t.redDim} />}
-          {avgWt > 0 && <Pill label="Avg wt/completed" value={fmtWt(avgWt)} color={t.gold} bg={t.goldDim} />}
+        {/* ── Stats ribbon ── */}
+        <div style={{ display:'flex', gap:0, marginTop:10, background:t.card, border:`1px solid ${t.border}`, borderRadius:14, overflow:'hidden', flexWrap:'wrap', boxShadow:`0 2px 8px rgba(0,0,0,.08)` }}>
+          {[
+            { label:'Total → Completed', value:`${conversionPct}%`,    color:t.green,  key: null },
+            { label:'In Pipeline',       value:fmtNum(inProgress),      color:t.orange, key:'inprogress' },
+            { label:'Walkout Rate',      value:`${walkoutRate}%`,        color:walkoutRate >= 40 ? t.red : t.text3, key: walkout > 0 ? 'walkout' : null },
+            ...(kycTxns.length > 0 ? [{ label:'KYC Pending', value:kycTxns.length, color:t.purple, key:'kyc' }] : []),
+          ].map((s, i) => {
+            const isActive = activeMetric === s.key
+            const clickable = !!s.key
+            return (
+              <div key={i} onClick={clickable ? () => toggleMetric(s.key) : undefined}
+                style={{
+                  display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center',
+                  padding:'14px 24px', borderRight:`1px solid ${t.border}`,
+                  gap:4, minWidth:110, flex:1,
+                  borderTop:`3px solid ${s.color}`,
+                  background: isActive ? `${s.color}18` : `linear-gradient(180deg, ${s.color}08 0%, transparent 60%)`,
+                  cursor: clickable ? 'pointer' : 'default',
+                  transition:'background .15s',
+                  outline: isActive ? `1.5px solid ${s.color}40` : 'none',
+                  outlineOffset: -1, position:'relative',
+                }}>
+                {clickable && <span style={{ position:'absolute', top:5, right:8, fontSize:'.44rem', color:s.color, opacity:.6 }}>{isActive ? '▲ active' : '▼ click'}</span>}
+                <span style={{ fontSize:'1.6rem', fontWeight:200, fontFamily:'ui-monospace,monospace', color:s.color, letterSpacing:'-.04em', lineHeight:1 }}>{s.value}</span>
+                <span style={{ fontSize:'.5rem', color:t.text4, letterSpacing:'.12em', textTransform:'uppercase', fontWeight:700, marginTop:2 }}>{s.label}</span>
+              </div>
+            )
+          })}
           {activeMetric && (
-            <button onClick={() => setActiveMetric(null)} style={{ marginLeft: 'auto', padding: '3px 10px', borderRadius: 20, fontSize: '.58rem', cursor: 'pointer', border: `1px solid ${t.border}`, background: t.card2, color: t.text3 }}>
-              Clear filter ✕
-            </button>
+            <div style={{ marginLeft:'auto', display:'flex', alignItems:'center', padding:'0 16px' }}>
+              <button onClick={() => setActiveMetric(null)} style={{ padding:'4px 12px', borderRadius:20, fontSize:'.58rem', cursor:'pointer', border:`1px solid ${t.border}`, background:t.card2, color:t.text3 }}>Clear filter ✕</button>
+            </div>
           )}
         </div>
       </div>
+
+      {/* ──────── 1b. TRANSACTION DISPOSITION ──────── */}
+      {(() => {
+        const segments = [
+          { label:'Completed',   sublabel:'Final payment received',          count:completed,         color:t.green,  key:'completed'  },
+          { label:'In Progress', sublabel:'In estimation / KYC / payment',   count:inProgress,        color:t.orange, key:'inprogress' },
+          { label:'Walkout',     sublabel:'Left without completing',         count:walkout,           color:t.red,    key:'walkout'    },
+          { label:'At Walk-in',  sublabel:'Registered, awaiting assessment', count:walkinTxns.length, color:t.blue,   key:'walkin'     },
+        ].filter(s => s.count > 0)
+        if (segments.length === 0) return null
+        return (
+          <div style={{ position:'relative', background:`linear-gradient(160deg,${t.bg} 0%,${t.card} 60%,${t.bg} 100%)`, border:`1.5px solid ${t.border2}`, borderRadius:20, boxShadow:`0 4px 20px rgba(0,0,0,.10), inset 0 1px 0 ${t.border}`, padding:'22px 16px 16px' }}>
+            <div style={{ position:'absolute', inset:-1, borderRadius:20, background:`radial-gradient(ellipse at 50% 0%,${t.border2}60 0%,transparent 65%)`, pointerEvents:'none' }}/>
+            <div style={{ position:'absolute', top:-13, left:'50%', transform:'translateX(-50%)', background:t.card2, border:`1px solid ${t.border2}`, borderRadius:20, padding:'4px 16px', whiteSpace:'nowrap', boxShadow:`0 2px 8px rgba(0,0,0,.12)` }}>
+              <span style={{ fontSize:'.48rem', letterSpacing:'.14em', textTransform:'uppercase', color:t.text3, fontWeight:700 }}>breakdown of {fmtNum(total)} transactions</span>
+            </div>
+            <div style={{ display:'flex', height:5, borderRadius:100, overflow:'hidden', gap:1, marginBottom:14 }}>
+              {segments.map((s, i) => (
+                <div key={i} onClick={() => toggleMetric(s.key)} style={{ width:`${(s.count/total)*100}%`, background:s.color, minWidth:2, cursor:'pointer', opacity:activeMetric && activeMetric !== s.key ? .2 : 1, transition:'opacity .2s', borderRadius:i===0?'100px 0 0 100px':i===segments.length-1?'0 100px 100px 0':0 }} />
+              ))}
+            </div>
+            <div style={{ display:'flex', alignItems:'stretch', gap:8, flexWrap:'wrap' }}>
+              {segments.map((s) => {
+                const isActive = activeMetric === s.key
+                return (
+                  <div key={s.key} onClick={() => toggleMetric(s.key)}
+                    style={{ flex:1, minWidth:100, border:`1px solid ${s.color}25`, borderTop:`2px solid ${isActive?s.color:s.color+'80'}`, borderRadius:12, padding:'12px 14px 10px', cursor:'pointer', transform:isActive?'translateY(-3px)':'translateY(0)', transition:'all .18s ease', background:isActive?`linear-gradient(160deg,${s.color}10 0%,${t.card} 100%)`:`linear-gradient(160deg,${t.card2} 0%,${t.card} 100%)`, boxShadow:isActive?`0 0 0 1.5px ${s.color}40,0 8px 24px rgba(0,0,0,.14)`:`0 4px 12px rgba(0,0,0,.10)` }}>
+                    <div style={{ fontSize:'1.4rem', fontWeight:200, fontFamily:'ui-monospace,monospace', color:s.color, lineHeight:1, letterSpacing:'-.03em' }}>{fmtNum(s.count)}</div>
+                    <div style={{ fontSize:'.6rem', fontWeight:600, color:s.color, marginTop:4 }}>{s.label}</div>
+                    <div style={{ fontSize:'.5rem', color:t.text4, marginTop:2, lineHeight:1.4 }}>{s.sublabel}</div>
+                    <div style={{ marginTop:8, height:2, borderRadius:2, background:t.border, overflow:'hidden' }}>
+                      <div style={{ height:'100%', width:`${Math.round((s.count/total)*100)}%`, background:s.color, borderRadius:2, transition:'width .6s ease' }}/>
+                    </div>
+                    <div style={{ fontSize:'.44rem', color:t.text4, marginTop:3, textAlign:'right' }}>{Math.round((s.count/total)*100)}%</div>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )
+      })()}
+
+      {/* ──────── 1c. BRANCH PULSE ──────── */}
+      {(() => {
+        const insights = []
+        if (inProgress > 0) insights.push({
+          icon:'🔄', color:t.orange, metric:'inprogress',
+          headline:`${inProgress} transaction${inProgress>1?'s':''} in pipeline`,
+          detail:`${fmtWt(inProgressWt)} gold pending completion. Follow up to close before end of day.`,
+        })
+        if (walkoutRate >= 40) insights.push({
+          icon:'📉', color:t.red, metric:'walkout',
+          headline:`${walkoutRate}% walkout rate`,
+          detail:`${walkout} of ${total} customers left without completing. Review branch engagement.`,
+        })
+        if (kycTxns.length > 0) insights.push({
+          icon:'🚫', color:t.purple, metric:'kyc',
+          headline:`${kycTxns.length} customer${kycTxns.length>1?'s':''} at KYC stage`,
+          detail:`${kycTxns.length} transaction${kycTxns.length>1?'s':''} pending KYC verification — follow up to unblock.`,
+        })
+        if (paymentTxns.length > 0) insights.push({
+          icon:'💰', color:t.gold, metric:'payment',
+          headline:`${paymentTxns.length} awaiting final payment`,
+          detail:`${paymentTxns.length} customer${paymentTxns.length>1?'s':''} ready for disbursement — payment pending.`,
+        })
+        if (conversionPct >= 80 && completed > 0) insights.push({
+          icon:'💪', color:t.green,
+          headline:`${conversionPct}% completion rate`,
+          detail:`Excellent — most customers completing their transactions today.`,
+        })
+        if (walkoutRate > 0 && walkoutRate < 20) insights.push({
+          icon:'✓', color:t.green,
+          headline:`${walkoutRate}% walkout rate`,
+          detail:`Only ${walkout} of ${total} customers walked out — healthy completion rate.`,
+        })
+        if (insights.length === 0) return null
+        return (
+          <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
+            <span style={{ fontSize:'.48rem', color:t.text4, letterSpacing:'.12em', textTransform:'uppercase', fontWeight:700, padding:'0 2px' }}>Branch Pulse</span>
+            <div style={{ display:'flex', flexWrap:'wrap', gap:8 }}>
+              {insights.map((ins, i) => (
+                <div key={i} onClick={ins.metric ? () => toggleMetric(ins.metric) : undefined}
+                  style={{ flex:1, minWidth:200, background:activeMetric===ins.metric?`${ins.color}12`:t.card, border:`1px solid ${activeMetric===ins.metric?ins.color+'60':ins.color+'30'}`, borderLeft:`3px solid ${ins.color}`, borderRadius:10, padding:'12px 16px', cursor:ins.metric?'pointer':'default', transition:'all .15s' }}>
+                  <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:6 }}>
+                    <span style={{ fontSize:'1rem' }}>{ins.icon}</span>
+                    <span style={{ fontSize:'.7rem', fontWeight:600, color:ins.color }}>{ins.headline}</span>
+                    {ins.metric && <span style={{ marginLeft:'auto', fontSize:'.48rem', color:ins.color, opacity:.7 }}>▼ view</span>}
+                  </div>
+                  <div style={{ fontSize:'.6rem', color:t.text3, lineHeight:1.5 }}>{ins.detail}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )
+      })()}
 
       {/* ──────── 2. GOLD WEIGHT FLOW ──────── */}
       <div>
