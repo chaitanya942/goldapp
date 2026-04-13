@@ -71,13 +71,6 @@ export async function POST(request) {
         )).toISOString().split('T')[0]
       : GO_LIVE
 
-    // ── Clean up non-approved new CRM records already in Supabase ────────────
-    await supabaseAdmin
-      .from('purchases')
-      .delete()
-      .eq('crm_source', 'new_crm')
-      .neq('crm_status', 'approved')
-
     // ── Pull only completed (FINAL_PAYMENT_COMPLETED) transactions ────────────
     const { rows } = await client.query(`
       SELECT
@@ -165,31 +158,25 @@ export async function POST(request) {
       }
     })
 
-    // ── Get existing records from Supabase to avoid duplicate inserts ────────
-    const appIds     = allRecords.map(r => r.application_id)
-    const existingIds = new Set()
-    const CHUNK = 500
-    for (let i = 0; i < appIds.length; i += CHUNK) {
-      const chunk = appIds.slice(i, i + CHUNK)
-      const { data } = await supabaseAdmin
-        .from('purchases')
-        .select('application_id')
-        .eq('crm_source', 'new_crm')
-        .in('application_id', chunk)
-      ;(data || []).forEach(r => existingIds.add(r.application_id))
-    }
+    // ── Full refresh: delete Supabase records in sync window, re-insert completed
+    const dates   = allRecords.map(r => r.purchase_date).filter(Boolean)
+    const minDate = dates.reduce((a, b) => a < b ? a : b)
+    const maxDate = dates.reduce((a, b) => a > b ? a : b)
+    await supabaseAdmin
+      .from('purchases')
+      .delete()
+      .eq('crm_source', 'new_crm')
+      .gte('purchase_date', minDate)
+      .lte('purchase_date', maxDate)
 
-    // ── Only insert records not already in Supabase ───────────────────────
-    const newRecords = allRecords.filter(r => !existingIds.has(r.application_id))
-
-    // ── Insert new records in batches of 100 ─────────────────────────────
+    // ── Upsert all completed records for the window ──────────────────────────
     const BATCH = 100
     let synced = 0, errors = 0, lastError = null
-    for (let i = 0; i < newRecords.length; i += BATCH) {
-      const batch = newRecords.slice(i, i + BATCH)
+    for (let i = 0; i < allRecords.length; i += BATCH) {
+      const batch = allRecords.slice(i, i + BATCH)
       const { error } = await supabaseAdmin
         .from('purchases')
-        .upsert(batch, { onConflict: 'application_id,crm_source', ignoreDuplicates: true })
+        .upsert(batch, { onConflict: 'application_id,crm_source', ignoreDuplicates: false })
       if (error) {
         console.error('New CRM upsert error:', error.message)
         lastError = error
@@ -202,11 +189,10 @@ export async function POST(request) {
     return Response.json({
       success:   errors === 0,
       total:     rows.length,
-      newCount:  newRecords.length,
       synced,
       errors,
       lastError: lastError ? lastError.message : null,
-      message:   `New CRM: ${newRecords.length} new completed bills — synced ${synced} (${errors} errors)`,
+      message:   `New CRM full refresh ${minDate}→${maxDate}: ${allRecords.length} completed bills (${errors} errors)`,
     })
 
   } catch (err) {

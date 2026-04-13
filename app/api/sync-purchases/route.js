@@ -94,14 +94,6 @@ export async function POST(request) {
       ? new Date(new Date(latestRow.purchase_date).getTime() - 7 * 86400000).toISOString().split('T')[0]
       : new Date(Date.now() - 30 * 86400000).toISOString().split('T')[0]
 
-    // ── Clean up non-approved old CRM records already in Supabase ────────────
-    // purchases table is approved-only; any pending/rejected are stale data
-    await supabaseAdmin
-      .from('purchases')
-      .delete()
-      .eq('crm_source', 'old_crm')
-      .neq('crm_status', 'approved')
-
     // ── Pull only approved records from CRM ──────────────────────────────────
     const [rows] = await conn.execute(`
       SELECT
@@ -129,29 +121,13 @@ export async function POST(request) {
     `, [cutoff])
 
     if (!rows.length) {
-      return Response.json({ success: true, message: 'No records in CRM', synced: 0, newCount: 0 })
+      return Response.json({ success: true, message: 'No approved records in CRM window', synced: 0, newCount: 0 })
     }
 
     // ── Branch lookup ──────────────────────────────────────
     const [branches] = await conn.execute(`SELECT brnch_id, brnch_name FROM branch_tbl`)
     const branchMap  = {}
     branches.forEach(b => { branchMap[b.brnch_id] = b.brnch_name?.trim() })
-
-    // ── Build normalized application_ids from CRM ─────────
-    const crmAppIds = rows.map(r => normalizeAppId(r.application_id))
-
-    // ── Get existing OLD CRM records from Supabase to avoid duplicate inserts ─
-    const existingIds = new Set()
-    const CHUNK = 500
-    for (let i = 0; i < crmAppIds.length; i += CHUNK) {
-      const chunk = crmAppIds.slice(i, i + CHUNK)
-      const { data } = await supabaseAdmin
-        .from('purchases')
-        .select('application_id')
-        .eq('crm_source', 'old_crm')
-        .in('application_id', chunk)
-      ;(data || []).forEach(r => existingIds.add(r.application_id))
-    }
 
     // ── Map CRM rows → Supabase records ───────────────────
     const allRecords = rows.map(r => {
@@ -213,19 +189,30 @@ export async function POST(request) {
       }
     })
 
-    // ── Smart dedup → only insert records not already in Supabase ────────────
-    const deduped    = smartDedup(allRecords).map(({ _txn_id, ...r }) => r)
-    const newRecords = deduped.filter(r => !existingIds.has(r.application_id))
+    // ── Dedup within the CRM result set ──────────────────────────────────────
+    const deduped = smartDedup(allRecords).map(({ _txn_id, ...r }) => r)
 
-    // ── Insert new records in batches of 100 ──────────────────────────────────
+    // ── Full refresh: delete Supabase records in sync window, re-insert approved
+    // This ensures bills that were approved→rejected in CRM are removed from Supabase
+    const dates    = deduped.map(r => r.purchase_date).filter(Boolean)
+    const minDate  = dates.reduce((a, b) => a < b ? a : b)
+    const maxDate  = dates.reduce((a, b) => a > b ? a : b)
+    await supabaseAdmin
+      .from('purchases')
+      .delete()
+      .eq('crm_source', 'old_crm')
+      .gte('purchase_date', minDate)
+      .lte('purchase_date', maxDate)
+
+    // ── Upsert all approved records for the window ───────────────────────────
     const BATCH = 100
     let synced = 0, errors = 0, lastError = null
 
-    for (let i = 0; i < newRecords.length; i += BATCH) {
-      const batch = newRecords.slice(i, i + BATCH)
+    for (let i = 0; i < deduped.length; i += BATCH) {
+      const batch = deduped.slice(i, i + BATCH)
       const { error } = await supabaseAdmin
         .from('purchases')
-        .upsert(batch, { onConflict: 'application_id,crm_source', ignoreDuplicates: true })
+        .upsert(batch, { onConflict: 'application_id,crm_source', ignoreDuplicates: false })
       if (error) {
         console.error('Upsert error:', JSON.stringify(error, null, 2))
         lastError = error
@@ -235,25 +222,13 @@ export async function POST(request) {
       }
     }
 
-    if (!newRecords.length) {
-      return Response.json({
-        success:  true,
-        total:    rows.length,
-        synced:   0,
-        newCount: 0,
-        message:  'All records already synced — nothing new to add',
-      })
-    }
-
     return Response.json({
       success:  errors === 0,
       total:    rows.length,
-      newCount: newRecords.length,
       synced,
-      statusUpdated,
       errors,
       lastError: lastError ? JSON.stringify(lastError) : null,
-      message:  `${newRecords.length} new approved bills — synced ${synced} (${errors} errors)`,
+      message:  `Full refresh ${minDate}→${maxDate}: ${deduped.length} approved bills synced (${errors} errors)`,
     })
 
   } catch (err) {
