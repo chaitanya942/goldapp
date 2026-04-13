@@ -71,6 +71,11 @@ function smartDedup(records) {
 }
 
 export async function POST(request) {
+  // ── days param: how far back to sync. Default 2 for fast manual/background syncs.
+  // Cron (GET) always uses 7 to catch late-approved bills.
+  const url = new URL(request.url)
+  const daysBack = parseInt(url.searchParams.get('days') || '2')
+
   let conn
   try {
     conn = await mysql.createConnection({
@@ -81,18 +86,8 @@ export async function POST(request) {
       password: process.env.CRM_DB_PASSWORD,
     })
 
-    // ── Find latest synced date in Supabase ───────────────
-    const { data: latestRow } = await supabaseAdmin
-      .from('purchases')
-      .select('purchase_date')
-      .order('purchase_date', { ascending: false })
-      .limit(1)
-      .single()
-
-    // 7-day buffer to catch bills approved days after creation; fall back to 30 days ago
-    const cutoff = latestRow?.purchase_date
-      ? new Date(new Date(latestRow.purchase_date).getTime() - 7 * 86400000).toISOString().split('T')[0]
-      : new Date(Date.now() - 30 * 86400000).toISOString().split('T')[0]
+    // ── Cutoff = daysBack days ago (or 30 days ago as absolute fallback) ─────
+    const cutoff = new Date(Date.now() - daysBack * 86400000).toISOString().split('T')[0]
 
     // ── Pull only approved records from CRM ──────────────────────────────────
     const [rows] = await conn.execute(`
@@ -239,11 +234,14 @@ export async function POST(request) {
   }
 }
 
-// ── GET handler for Vercel cron (midnight auto-sync) ─────────────────────────
+// ── GET handler for Vercel cron (midnight auto-sync) — always 7-day window ───
 export async function GET(req) {
   const authHeader = req.headers.get('authorization')
   if (process.env.CRON_SECRET && authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
     return Response.json({ error: 'Unauthorized' }, { status: 401 })
   }
-  return POST(req)
+  // Force 7-day buffer for cron to catch bills approved days after creation
+  const url = new URL(req.url)
+  url.searchParams.set('days', '7')
+  return POST(new Request(url.toString(), req))
 }

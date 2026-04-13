@@ -269,7 +269,7 @@ function ViewAsDropdown({ previewRole, setPreviewRole, t }) {
 
 // ─── Main Topbar ──────────────────────────────────────────────────────────────
 export default function Topbar() {
-  const { theme, setTheme, activeNav, user, role, previewRole, setPreviewRole } = useApp()
+  const { theme, setTheme, activeNav, user, role, previewRole, setPreviewRole, bumpSync } = useApp()
   const t = THEMES[theme] || THEMES.dark
   const router = useRouter()
 
@@ -285,12 +285,17 @@ export default function Topbar() {
   const handleSync = async () => {
     setSyncing(true)
     try {
-      const res  = await fetch('/api/sync-purchases', { method: 'POST' })
+      // days=2: sync last 2 days only — fast enough for Vercel free plan (< 5s vs 18s for 7 days)
+      const res  = await fetch('/api/sync-purchases?days=2', { method: 'POST' })
       const data = await res.json()
-      if (data.success) setToast({ msg: `${data.synced} records synced`, type: 'success' })
-      else              setToast({ msg: data.error || 'Sync failed', type: 'error' })
+      if (data.success) {
+        setToast({ msg: `${data.synced} records synced`, type: 'success' })
+        bumpSync?.()
+      } else {
+        setToast({ msg: data.error || 'Sync failed', type: 'error' })
+      }
     } catch {
-      setToast({ msg: 'Network error', type: 'error' })
+      setToast({ msg: 'Sync timed out — data updates automatically every 5 min', type: 'error' })
     } finally {
       setSyncing(false)
     }

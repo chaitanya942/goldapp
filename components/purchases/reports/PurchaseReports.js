@@ -189,7 +189,7 @@ const SECTION_KEY_MAP = {
 }
 
 export default function PurchaseReports() {
-  const { theme, canSee } = useApp()
+  const { theme, canSee, syncVersion } = useApp()
   const t = THEMES[theme] || THEMES.dark
   const s = getStyles(t)
 
@@ -232,7 +232,7 @@ export default function PurchaseReports() {
     })
   }, [])
 
-  useEffect(() => { fetchAll() }, [fromDate, toDate, filterBranch, filterTxn, filterState])
+  useEffect(() => { fetchAll() }, [fromDate, toDate, filterBranch, filterTxn, filterState, syncVersion])
 
   const fetchAll = async () => {
     setLoading(true)
