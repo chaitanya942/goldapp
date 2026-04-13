@@ -896,7 +896,7 @@ function OldCrmTab({
 
         // 2 — KEY INSIGHT: CRM register vs actual bills mismatch (beyond ghost)
         if (crmGap > 0) insights.push({
-          icon: '⚠', color: t.orange,
+          icon: '⚠', color: t.orange, metric: 'crm_not_updated',
           headline: `${crmGap} walk-in status${crmGap > 1 ? 'es' : ''} not updated`,
           detail: `Bills show ${approved} purchases but only ${wSoldCRM} walk-ins are marked "sold". ${crmGap} customer${crmGap > 1 ? 's' : ''} filled the register but status wasn't updated.`,
         })
