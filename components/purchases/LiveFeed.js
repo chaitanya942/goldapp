@@ -1629,9 +1629,9 @@ function NewCrmTab({ t, newCrmTxns, newCrmError, regionFilter, regions, isToday,
 
   // Derived counts
   const walkinTxns     = txns.filter(tx => tx.status === 'WALKIN')
-  const estimationTxns = txns.filter(tx => tx.status === 'ESTIMATION_PENDING')
-  const kycTxns        = txns.filter(tx => tx.status === 'KYC_PENDING')
-  const paymentTxns    = txns.filter(tx => tx.status === 'FINAL_PAYMENT_PENDING')
+  const estimationTxns = txns.filter(tx => ['ESTIMATION_PENDING','PLEDGE_ESTIMATION_PENDING','REVALUATION_PENDING','SALES_NEGOTIATION_PENDING','QUOTATION_PENDING'].includes(tx.status))
+  const kycTxns        = txns.filter(tx => ['KYC_PENDING','BRANCH_KYC_PENDING','PLEDGE_APPROVAL_PENDING'].includes(tx.status))
+  const paymentTxns    = txns.filter(tx => ['FINAL_PAYMENT_PENDING','PENNY_DROP_PENDING','RELEASE_PENDING','RELEASE_AGREEMENT_PENDING'].includes(tx.status))
   const completedTxns  = txns.filter(tx => tx.status === 'FINAL_PAYMENT_COMPLETED')
   const walkoutTxns    = txns.filter(tx => tx.status === 'WALKOUT')
   const inProgressTxns = txns.filter(tx => IN_PROGRESS_STATUSES.includes(tx.status))
@@ -1653,7 +1653,6 @@ function NewCrmTab({ t, newCrmTxns, newCrmError, regionFilter, regions, isToday,
   const progressedPct       = total > 0 ? Math.round((inProgress + completed) / total * 100) : 0
   const completedOfProgPct  = (inProgress + completed) > 0 ? Math.round(completed / (inProgress + completed) * 100) : 0
   const avgWt               = completed > 0 && completedWt > 0 ? completedWt / completed : 0
-  const topTxn              = [...completedTxns].sort((a, b) => (Number(b.amount) || 0) - (Number(a.amount) || 0))[0]
 
   if (!total) {
     return (
@@ -1667,71 +1666,6 @@ function NewCrmTab({ t, newCrmTxns, newCrmError, regionFilter, regions, isToday,
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-
-      {/* ──────── 0. SUMMARY BAR ──────── */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 0, background: t.surface, border: `1px solid ${t.border}`, borderRadius: 12, padding: '0', overflow: 'hidden', flexWrap: 'wrap', boxShadow: '0 2px 8px rgba(0,0,0,.10)' }}>
-
-        {/* Total — grouped breakdown */}
-        <div className="sum-bar-item" style={{ display:'flex', flexDirection:'column', gap:6, padding:'8px 18px', borderRight:`1px solid ${t.border}`, borderLeft:`3px solid ${t.blue}` }}>
-          <div style={{ display:'flex', alignItems:'center', gap:6 }}>
-            <span style={{ fontSize:'.75rem', fontFamily:'ui-monospace,monospace', fontWeight:600, color:t.blue }}>{fmtNum(total)}</span>
-            <span style={{ fontSize:'.58rem', color:t.text4, letterSpacing:'.08em', textTransform:'uppercase' }}>Total</span>
-          </div>
-          <div style={{ display:'flex', alignItems:'center', gap:6, padding:'4px 8px', background:t.card2, border:`1px solid ${t.border}`, borderRadius:6 }}>
-            <span style={{ fontSize:'.6rem', color:t.green,  fontFamily:'ui-monospace,monospace', fontWeight:700 }}>{completed}</span>
-            <span style={{ fontSize:'.5rem', color:t.text4 }}>done</span>
-            <span style={{ color:t.border2, fontSize:'.5rem' }}>|</span>
-            <span style={{ fontSize:'.6rem', color:t.orange, fontFamily:'ui-monospace,monospace', fontWeight:700 }}>{inProgress}</span>
-            <span style={{ fontSize:'.5rem', color:t.text4 }}>in-prog</span>
-            {walkout > 0 && <>
-              <span style={{ color:t.border2, fontSize:'.5rem' }}>|</span>
-              <span style={{ fontSize:'.6rem', color:t.red, fontFamily:'ui-monospace,monospace', fontWeight:700 }}>{walkout}</span>
-              <span style={{ fontSize:'.5rem', color:t.text4 }}>walkout</span>
-            </>}
-          </div>
-        </div>
-
-        {/* In Progress */}
-        <div className="sum-bar-item" style={{ display:'flex', alignItems:'center', gap:6, padding:'10px 18px', borderRight:`1px solid ${t.border}`, borderLeft:`3px solid ${t.orange}` }}>
-          <span style={{ fontSize:'.75rem', fontFamily:'ui-monospace,monospace', fontWeight:600, color:t.orange }}>{fmtNum(inProgress)}</span>
-          <span style={{ fontSize:'.58rem', color:t.text4, letterSpacing:'.08em', textTransform:'uppercase' }}>In Progress</span>
-        </div>
-
-        {/* Completed */}
-        <div className="sum-bar-item" style={{ display:'flex', alignItems:'center', gap:6, padding:'10px 18px', borderRight:`1px solid ${t.border}`, borderLeft:`3px solid ${t.green}` }}>
-          <span style={{ fontSize:'.75rem', fontFamily:'ui-monospace,monospace', fontWeight:600, color:t.green }}>{fmtNum(completed)}</span>
-          <span style={{ fontSize:'.58rem', color:t.text4, letterSpacing:'.08em', textTransform:'uppercase' }}>Completed</span>
-        </div>
-
-        {/* Value */}
-        <div className="sum-bar-item" style={{ display:'flex', alignItems:'center', gap:6, padding:'10px 18px', borderRight:`1px solid ${t.border}`, borderLeft:`3px solid ${t.green}` }}>
-          <span style={{ fontSize:'.75rem', fontFamily:'ui-monospace,monospace', fontWeight:600, color:t.green }}>{fmtAmt(completedValue)}</span>
-          <span style={{ fontSize:'.58rem', color:t.text4, letterSpacing:'.08em', textTransform:'uppercase' }}>Value</span>
-        </div>
-
-        {/* Conversion */}
-        <div className="sum-bar-item" style={{ display:'flex', alignItems:'center', gap:6, padding:'10px 18px', borderRight:`1px solid ${t.border}` }}>
-          <span style={{ fontSize:'.75rem', fontFamily:'ui-monospace,monospace', fontWeight:600, color:conversionPct>=50?t.green:t.orange }}>{conversionPct}%</span>
-          <span style={{ fontSize:'.58rem', color:t.text4, letterSpacing:'.08em', textTransform:'uppercase' }}>Conversion</span>
-        </div>
-
-        {/* Walkout (only when > 0) */}
-        {walkout > 0 && (
-          <div className="sum-bar-item" style={{ display:'flex', alignItems:'center', gap:6, padding:'10px 18px', borderRight:`1px solid ${t.border}` }}>
-            <span style={{ fontSize:'.75rem', fontFamily:'ui-monospace,monospace', fontWeight:600, color:t.red }}>{fmtNum(walkout)}</span>
-            <span style={{ fontSize:'.58rem', color:t.text4, letterSpacing:'.08em', textTransform:'uppercase' }}>Walkout</span>
-          </div>
-        )}
-
-        {topTxn && (
-          <div className="sum-bar-item" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 18px', marginLeft: 'auto', borderLeft: `1px solid ${t.border}` }}>
-            <span style={{ fontSize: '.52rem', color: t.text4, letterSpacing: '.08em', textTransform: 'uppercase' }}>Top sale</span>
-            <span style={{ fontSize: '.75rem', fontFamily: 'ui-monospace,monospace', fontWeight: 600, color: t.gold }}>{fmtAmt(topTxn.amount)}</span>
-            <span style={{ fontSize: '.62rem', color: t.text2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 120 }}>{topTxn.cust_name}</span>
-            <span style={{ fontSize: '.58rem', color: t.text4 }}>{topTxn.branch_name}</span>
-          </div>
-        )}
-      </div>
 
       {/* ──────── 1. CUSTOMER JOURNEY ──────── */}
       <div>
