@@ -617,444 +617,182 @@ function OldCrmTab({
 }) {
   const { canSee } = useApp()
   const [activeMetric, setActiveMetric] = useState(null)
-  const [tlOpen, setTlOpen] = useState(false)
-  const [tlSearch, setTlSearch] = useState('')
-  const [tlFilter, setTlFilter] = useState('all')
+  const [tlSearch, setTlSearch]         = useState('')
+  const [tlFilter, setTlFilter]         = useState('all')
   const toggleMetric = key => setActiveMetric(prev => prev === key ? null : key)
 
-
   const approvedValue     = summary.approved_value || 0
-  const goldWalkedIn      = parseFloat(goldPipeline?.walked_in_wt)      || parseFloat(walkinSummary.total_gold_wt) || 0
-  const goldPurchased     = parseFloat(goldPipeline?.purchased_wt)      || 0
   const goldPending       = parseFloat(goldPipeline?.pending_wt)        || 0
-  const goldRejected      = parseFloat(goldPipeline?.rejected_wt)       || 0
-  const goldNotBilled     = parseFloat(goldPipeline?.not_billed_wt)     || 0
   const kycBlacklistedCnt = goldPipeline?.kyc_blacklisted_cnt            || 0
   const kycBlacklistedWt  = parseFloat(goldPipeline?.kyc_blacklisted_wt) || 0
-  const kycOverriddenCnt  = goldPipeline?.kyc_overridden_cnt             || 0
-  const kycChecklistCnt   = goldPipeline?.kyc_checklist_cnt              || 0
   const kycChecklistRows  = goldPipeline?.kyc_checklist_rows             || []
-  const avgGrossWeight    = approved > 0 && goldPurchased > 0 ? goldPurchased / approved : 0
-  const billedPct         = totalWalkins > 0 ? Math.round((totalBilled / totalWalkins) * 100) : 0
-  const approvedPctBilled = totalBilled  > 0 ? Math.round((approved   / totalBilled)  * 100) : 0
-  const conversionPct     = totalWalkins > 0 ? Math.round((approved   / totalWalkins) * 100) : 0
-  const physicalApproved  = goldPipeline?.physical?.approved || 0
-  const releaseApproved   = goldPipeline?.released?.approved || 0
+  const releaseApproved   = goldPipeline?.released?.approved             || 0
 
-  // Ghost purchases: approved physical bills with NO walk-in entry for this customer today
+  const conversionPct  = totalWalkins > 0 ? Math.round(approved  / totalWalkins * 100) : 0
+  const billedPct      = totalWalkins > 0 ? Math.round(totalBilled / totalWalkins * 100) : 0
+  const approvedPct    = totalBilled  > 0 ? Math.round(approved  / totalBilled  * 100) : 0
+
+  // Ghost purchases: approved physical bills with no walk-in entry
   const walkinMobiles  = new Set(todayWalkins.map(w => w.cust_mobile).filter(Boolean))
-  const ghostPurchases = todayTxns.filter(t =>
-    t.trxn_status === 'approved' &&
-    t.type_gold !== 'released' &&
-    t.cust_mobile && !walkinMobiles.has(t.cust_mobile)
+  const ghostPurchases = todayTxns.filter(tx =>
+    tx.trxn_status === 'approved' && tx.type_gold !== 'released' &&
+    tx.cust_mobile && !walkinMobiles.has(tx.cust_mobile)
   )
   const ghostCount = ghostPurchases.length
 
   const hasData = totalWalkins > 0 || totalBilled > 0
+  if (!hasData) return (
+    <div style={{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', minHeight:300, gap:12 }}>
+      <span style={{ fontSize:'2rem', opacity:.3 }}>~</span>
+      <span style={{ fontSize:'.82rem', color:t.text3 }}>No activity recorded yet</span>
+      <span style={{ fontSize:'.62rem', color:t.text4 }}>Data will appear as walk-ins and transactions come in</span>
+    </div>
+  )
 
-  if (!hasData) {
-    return (
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: 300, gap: 12 }}>
-        <span style={{ fontSize: '2rem', opacity: .3 }}>~</span>
-        <span style={{ fontSize: '.82rem', color: t.text3 }}>No activity recorded yet</span>
-        <span style={{ fontSize: '.62rem', color: t.text4 }}>Data will appear as walk-ins and transactions come in</span>
-      </div>
-    )
-  }
+  // Exceptions — only actionable, attention-needed items
+  const exceptions = []
+  if (ghostCount > 0) exceptions.push({
+    key:'ghost_purchases', icon:'👻', color:t.red, urgent:true,
+    headline:`${ghostCount} purchase${ghostCount>1?'s':''} with no walk-in entry`,
+    sub:`Customers bought gold but never filled the walk-in register`,
+  })
+  if (pending > 0) exceptions.push({
+    key:'pending', icon:'⏳', color:t.orange, urgent:pending>=5,
+    headline:`${pending} bill${pending>1?'s':''} pending closure`,
+    sub:`${fmtWt(goldPending)} in pipeline — needs follow-up before end of day`,
+  })
+  if (crmNotUpdatedCnt > 0) exceptions.push({
+    key:'crm_not_updated', icon:'⚠', color:t.orange, urgent:false,
+    headline:`${crmNotUpdatedCnt} walk-in status${crmNotUpdatedCnt>1?'es':''} not updated`,
+    sub:`Customers were billed but the CRM register status was not set`,
+  })
+  if (kycBlacklistedCnt > 0) exceptions.push({
+    key:'kyc_blocked', icon:'🚫', color:'#8c5ac8', urgent:false,
+    headline:`${kycBlacklistedCnt} customer${kycBlacklistedCnt>1?'s':''} KYC flagged`,
+    sub:`${fmtWt(kycBlacklistedWt)} held at KYC verification today`,
+  })
+  if (notBilledCnt >= 3) exceptions.push({
+    key:'unbilled', icon:'🚶', color:t.text3, urgent:false,
+    headline:`${notBilledCnt} walk-ins left without billing`,
+    sub:`Customers who came in but no transaction was raised`,
+  })
+  if (releaseApproved > 0) exceptions.push({
+    key:'takeover_bills', icon:'🔁', color:t.gold, urgent:false,
+    headline:`${releaseApproved} takeover${releaseApproved>1?'s':''} completed today`,
+    sub:`Multi-day gold pledges that completed final payment today — click to see original visit dates`,
+  })
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+    <div style={{ display:'flex', flexDirection:'column', gap:20 }}>
 
-      {/* ──────── 1. CUSTOMER JOURNEY ──────── */}
-      {canSee('livefeed.customer_journey') && <div style={{ display:'flex', flexDirection:'column', gap:0 }}>
-        <SectionLabel t={t}>Customer Journey · from Walk-in to Outcome</SectionLabel>
-
-        {/* ── Funnel progress bar ── */}
-        <div style={{ marginBottom:16 }}>
-          <div style={{ display:'flex', height:8, borderRadius:100, overflow:'hidden', gap:1, boxShadow:`0 2px 8px rgba(0,0,0,.12)` }}>
-            <div style={{ width:`${billedPct}%`, background:`linear-gradient(90deg,${t.blue},${t.gold})`, borderRadius:'100px 0 0 100px', transition:'width .8s ease', boxShadow:`0 0 12px ${t.gold}80`, minWidth: billedPct > 0 ? 4 : 0 }}/>
-            <div style={{ width:`${Math.max(conversionPct - billedPct, 0)}%`, background:`linear-gradient(90deg,${t.gold},${t.green})`, transition:'width .8s ease', minWidth: conversionPct > billedPct ? 4 : 0 }}/>
-            <div style={{ flex:1, background:t.border, borderRadius:'0 100px 100px 0', opacity:.5 }}/>
+      {/* ── 1. TODAY'S PULSE ── */}
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(5,1fr) auto', gap:8, alignItems:'stretch' }}>
+        {[
+          { label:'Walk-ins',  value:totalWalkins, color:t.blue,   sub:null,                               key:'walkin'    },
+          { label:'Bills',     value:totalBilled,  color:t.gold,   sub:null,                               key:'billed'    },
+          { label:'Approved',  value:approved,     color:t.green,  sub:fmtAmt(approvedValue),              key:'purchased' },
+          { label:'Pending',   value:pending,      color:t.orange, sub:goldPending>0?fmtWt(goldPending):null, key:'pending' },
+          { label:'Rejected',  value:trueRejected, color:t.red,    sub:null,                               key:'rejected'  },
+        ].map(item => (
+          <div key={item.key} onClick={() => toggleMetric(item.key)} style={{
+            background:activeMetric===item.key?`${item.color}12`:t.card,
+            border:`1px solid ${activeMetric===item.key?item.color+'50':t.border}`,
+            borderTop:`3px solid ${item.color}`,
+            borderRadius:10, padding:'14px 16px', cursor:'pointer',
+            transition:'all .15s', display:'flex', flexDirection:'column', gap:4,
+          }}
+            onMouseEnter={e => { if (activeMetric!==item.key) e.currentTarget.style.background=t.card2 }}
+            onMouseLeave={e => { if (activeMetric!==item.key) e.currentTarget.style.background=t.card }}>
+            <span style={{ fontSize:'1.8rem', fontFamily:'ui-monospace,monospace', fontWeight:200, color:item.color, lineHeight:1, letterSpacing:'-.03em' }}>{fmtNum(item.value)}</span>
+            <span style={{ fontSize:'.52rem', color:t.text4, letterSpacing:'.12em', textTransform:'uppercase', fontWeight:700 }}>{item.label}</span>
+            {item.sub && <span style={{ fontSize:'.6rem', color:item.color, fontFamily:'ui-monospace,monospace', opacity:.8 }}>{item.sub}</span>}
           </div>
-          <div style={{ display:'flex', justifyContent:'space-between', marginTop:5, padding:'0 2px' }}>
-            <span style={{ fontSize:'.5rem', color:t.blue, fontWeight:700, letterSpacing:'.06em', textTransform:'uppercase' }}>Walk-in → Billed: {billedPct}%</span>
-            <span style={{ fontSize:'.5rem', color:t.green, fontWeight:700, letterSpacing:'.06em', textTransform:'uppercase' }}>Overall conversion: {conversionPct}%</span>
-          </div>
+        ))}
+        {/* Conversion % */}
+        <div style={{ background:t.card, border:`1px solid ${t.border}`, borderTop:`3px solid ${conversionPct>=50?t.green:t.orange}`, borderRadius:10, padding:'14px 16px', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', minWidth:84, gap:4 }}>
+          <span style={{ fontSize:'1.8rem', fontFamily:'ui-monospace,monospace', fontWeight:200, color:conversionPct>=50?t.green:t.orange, lineHeight:1 }}>{conversionPct}%</span>
+          <span style={{ fontSize:'.52rem', color:t.text4, letterSpacing:'.12em', textTransform:'uppercase', fontWeight:700, textAlign:'center' }}>Conversion</span>
+          <span style={{ fontSize:'.48rem', color:t.text4 }}>{billedPct}% billed</span>
         </div>
+      </div>
 
-        {/* ── Main hero panel ── */}
-        <div className="lf-hero" style={{
-          position:'relative', overflow:'hidden',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          gap: 0, flexWrap: 'wrap',
-          background: `linear-gradient(160deg, ${t.surface} 0%, ${t.card} 50%, ${t.surface} 100%)`,
-          borderRadius: 20,
-          border: `1px solid ${t.border}`,
-          padding: '32px 20px 24px',
-          boxShadow: `0 8px 32px rgba(0,0,0,.10), 0 1px 0 ${t.border} inset`,
-        }}>
-          {/* Subtle radial glow top-right */}
-          <div style={{ position:'absolute', top:-60, right:-60, width:260, height:260, borderRadius:'50%', background:`radial-gradient(circle, ${t.gold}0a 0%, transparent 70%)`, pointerEvents:'none' }}/>
-          {/* Bottom accent line */}
-          <div style={{ position:'absolute', bottom:0, left:'10%', right:'10%', height:1, background:`linear-gradient(90deg,transparent,${t.gold}30,transparent)` }}/>
-
-          <HeroNum label="Walked In" value={totalWalkins} color={t.blue} t={t} weight={goldWalkedIn} active={activeMetric==='walkin'} onClick={() => toggleMetric('walkin')} />
-          <FlowArrow t={t} pct={billedPct} />
-          <HeroNum label="Bills Submitted" value={totalBilled} color={t.gold} t={t} weight={goldPurchased+goldPending+goldRejected} active={activeMetric==='billed'} onClick={() => toggleMetric('billed')} />
-          <FlowArrow t={t} pct={approvedPctBilled} />
-
-          {/* ── Breakdown stage ── */}
-          <div style={{
-            position:'relative',
-            background:`linear-gradient(160deg, ${t.bg} 0%, ${t.card} 60%, ${t.bg} 100%)`,
-            border:`1.5px solid ${t.gold}55`,
-            borderRadius:22,
-            boxShadow:`0 0 0 1px ${t.gold}12, 0 16px 48px ${t.gold}20, 0 4px 16px rgba(0,0,0,.16), inset 0 0 60px ${t.gold}08, inset 0 1px 0 ${t.gold}35`,
-            padding:'22px 14px 14px',
-          }}>
-            <div style={{ position:'absolute', inset:-1, borderRadius:22, background:`radial-gradient(ellipse at 50% 0%, ${t.gold}18 0%, transparent 65%)`, pointerEvents:'none' }}/>
-            <div style={{ position:'absolute', inset:0, borderRadius:22, backgroundImage:`radial-gradient(${t.gold}18 1px, transparent 1px)`, backgroundSize:'18px 18px', pointerEvents:'none', opacity:.6 }}/>
-            <div style={{ position:'absolute', top:-14, left:'50%', transform:'translateX(-50%)', background:`linear-gradient(90deg,${t.gold}ee,${t.gold}bb)`, borderRadius:20, padding:'4px 14px', boxShadow:`0 4px 14px ${t.gold}55, 0 0 0 1px ${t.gold}30`, whiteSpace:'nowrap' }}>
-              <span style={{ fontSize:'.52rem', letterSpacing:'.14em', textTransform:'uppercase', color:'#0a0a0a', fontWeight:900 }}>breakdown of {fmtNum(totalBilled)}</span>
-            </div>
-            <div style={{ position:'relative', display:'flex', alignItems:'center', gap:8 }}>
-              {[
-                { node: <HeroNum label="Purchased" value={approved} color={t.green} t={t} weight={goldPurchased} active={activeMetric==='purchased'} onClick={() => toggleMetric('purchased')} />, color: t.green },
-                { node: <HeroNum label="In Pipeline" value={pending} color={t.orange} t={t} small weight={goldPending} active={activeMetric==='pending'} onClick={() => toggleMetric('pending')} />, color: t.orange },
-                { node: <HeroNum label="Bill Rejected" value={trueRejected} color={t.red} t={t} small weight={goldRejected} active={activeMetric==='rejected'} onClick={() => toggleMetric('rejected')} />, color: t.red },
-                { node: <HeroNum label="Re-billed & Approved" value={wrongEntry} color={t.orange} t={t} small active={activeMetric==='rebilled'} onClick={() => toggleMetric('rebilled')} />, color: t.orange },
-              ].map((item, i) => (
-                <div key={i} style={{ display:'flex', alignItems:'center', gap:8 }}>
-                  {i > 0 && <FlowSep t={t} />}
-                  <div style={{
-                    background:`linear-gradient(160deg, ${t.card2} 0%, ${t.card} 100%)`,
-                    border:`1px solid ${item.color}30`,
-                    borderTop:`2px solid ${item.color}70`,
-                    borderRadius:14,
-                    boxShadow:`0 8px 24px rgba(0,0,0,.14), 0 2px 6px rgba(0,0,0,.10), inset 0 1px 0 ${item.color}18`,
-                    transform:'translateY(-5px)',
-                  }}>
-                    {item.node}
-                  </div>
+      {/* ── 2. EXCEPTIONS (Needs Attention) ── */}
+      {exceptions.length > 0 && (
+        <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
+          <span style={{ fontSize:'.48rem', color:t.text4, letterSpacing:'.14em', textTransform:'uppercase', fontWeight:700 }}>Needs Attention</span>
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(220px,1fr))', gap:8 }}>
+            {exceptions.map(ex => (
+              <div key={ex.key} onClick={() => toggleMetric(ex.key)} style={{
+                background:activeMetric===ex.key?`${ex.color}10`:t.card,
+                border:`1px solid ${activeMetric===ex.key?ex.color+'50':ex.color+'25'}`,
+                borderLeft:`3px solid ${ex.color}`,
+                borderRadius:9, padding:'10px 14px', cursor:'pointer', transition:'all .15s', position:'relative',
+              }}>
+                {ex.urgent && <div style={{ position:'absolute', top:8, right:10, width:6, height:6, borderRadius:'50%', background:ex.color, boxShadow:`0 0 6px ${ex.color}` }} />}
+                <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:3 }}>
+                  <span style={{ fontSize:'.7rem' }}>{ex.icon}</span>
+                  <span style={{ fontSize:'.63rem', fontWeight:700, color:ex.color, lineHeight:1.3 }}>{ex.headline}</span>
                 </div>
-              ))}
-            </div>
-          </div>
-
-          <FlowSep t={t} />
-          {/* ── Secondary outcomes box ── */}
-          <div style={{
-            position:'relative',
-            background:`linear-gradient(160deg, ${t.bg} 0%, ${t.card} 60%, ${t.bg} 100%)`,
-            border:`1px solid ${t.border2}`,
-            borderRadius:18,
-            boxShadow:`0 4px 20px rgba(0,0,0,.10), inset 0 1px 0 ${t.border}`,
-            padding:'18px 12px 10px',
-          }}>
-            <div style={{ position:'absolute', top:-11, left:'50%', transform:'translateX(-50%)', background:t.card2, border:`1px solid ${t.border2}`, borderRadius:20, padding:'3px 12px', whiteSpace:'nowrap' }}>
-              <span style={{ fontSize:'.46rem', letterSpacing:'.12em', textTransform:'uppercase', color:t.text4, fontWeight:700 }}>other outcomes</span>
-            </div>
-            <div style={{ display:'flex', alignItems:'center', gap:6 }}>
-              <HeroNum label="KYC Blocked" value={kycBlacklistedCnt} color={t.purple} t={t} small weight={kycBlacklistedWt} active={activeMetric==='kyc_blocked'} onClick={() => toggleMetric('kyc_blocked')} />
-              {kycOverriddenCnt > 0 && <FlowSep t={t} />}
-              {kycOverriddenCnt > 0 && <HeroNum label="KYC Cleared Later" value={kycOverriddenCnt} color={t.blue} t={t} small active={activeMetric==='kyc_cleared'} onClick={() => toggleMetric('kyc_cleared')} />}
-              <FlowSep t={t} />
-              <HeroNum label="Left Unbilled" value={notBilledCnt} color={t.text3} t={t} small muted weight={goldNotBilled} active={activeMetric==='unbilled'} onClick={() => toggleMetric('unbilled')} />
-            </div>
+                <div style={{ fontSize:'.55rem', color:t.text4, lineHeight:1.5 }}>{ex.sub}</div>
+                <div style={{ fontSize:'.48rem', color:ex.color, marginTop:4, opacity:.7 }}>{activeMetric===ex.key?'▲ showing':'▼ click to see'}</div>
+              </div>
+            ))}
           </div>
         </div>
+      )}
 
-        {/* ── Stats ribbon ── */}
-        <div style={{ display:'flex', gap:0, marginTop:10, background:t.card, border:`1px solid ${t.border}`, borderRadius:14, overflow:'hidden', flexWrap:'wrap', boxShadow:`0 2px 8px rgba(0,0,0,.08)` }}>
-          {[
-            { label:'Walk → Bill',          value:`${billedPct}%`,         color:t.gold,   key: null },
-            { label:'Bill → Purchase',      value:`${approvedPctBilled}%`, color:t.green,  key: null },
-            { label:'Walk-in → Purchase',   value:`${conversionPct}%`,     color:t.blue,   key: null },
-            ...(crmNotUpdatedCnt > 0? [{ label:'CRM not updated', value:crmNotUpdatedCnt, color:t.red,    key:'crm_not_updated' }] : []),
-            ...(kycChecklistCnt > 0 ? [{ label:'KYC checklist',   value:kycChecklistCnt,  color:t.purple, key:'kyc_checklist'   }] : []),
-          ].map((s, i) => {
-            const isActive = activeMetric === s.key
-            const clickable = !!s.key
-            return (
-              <div key={i}
-                onClick={clickable ? () => toggleMetric(s.key) : undefined}
-                style={{
-                  display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center',
-                  padding:'14px 24px', borderRight:`1px solid ${t.border}`,
-                  gap:4, minWidth:110, flex:1,
-                  borderTop:`3px solid ${isActive ? s.color : s.color}`,
-                  background: isActive ? `${s.color}18` : `linear-gradient(180deg, ${s.color}08 0%, transparent 60%)`,
-                  cursor: clickable ? 'pointer' : 'default',
-                  transition: 'background .15s',
-                  outline: isActive ? `1.5px solid ${s.color}40` : 'none',
-                  outlineOffset: -1,
-                  position: 'relative',
-                }}>
-                {clickable && <span style={{ position:'absolute', top:5, right:8, fontSize:'.44rem', color:s.color, opacity:.6, letterSpacing:'.06em' }}>{isActive ? '▲ active' : '▼ click'}</span>}
-                <span style={{ fontSize:'1.6rem', fontWeight:200, fontFamily:'ui-monospace,monospace', color:s.color, letterSpacing:'-.04em', lineHeight:1 }}>{s.value}</span>
-                <span style={{ fontSize:'.5rem', color:t.text4, letterSpacing:'.12em', textTransform:'uppercase', fontWeight:700, marginTop:2 }}>{s.label}</span>
-              </div>
-            )
-          })}
+      {/* ── 3. FUNNEL ── */}
+      {canSee('livefeed.customer_journey') && (
+        <div style={{ background:t.card, border:`1px solid ${t.border}`, borderRadius:12, padding:'20px 24px' }}>
+          <div style={{ display:'flex', alignItems:'center', justifyContent:'center', gap:0, flexWrap:'wrap' }}>
+            {/* Walk-in */}
+            <div onClick={() => toggleMetric('walkin')} style={{ cursor:'pointer', display:'flex', flexDirection:'column', alignItems:'center', gap:6, padding:'8px 20px', borderRadius:12, background:activeMetric==='walkin'?`${t.blue}12`:'transparent', border:`1px solid ${activeMetric==='walkin'?t.blue+'50':'transparent'}`, transition:'all .15s' }}>
+              <span style={{ fontSize:'2rem', fontFamily:'ui-monospace,monospace', fontWeight:200, color:t.blue, lineHeight:1 }}>{fmtNum(totalWalkins)}</span>
+              <span style={{ fontSize:'.55rem', color:t.text4, letterSpacing:'.1em', textTransform:'uppercase' }}>Walked In</span>
+            </div>
+            <div style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:2, padding:'0 10px' }}>
+              <span style={{ fontSize:'.5rem', color:t.text4 }}>{billedPct}%</span>
+              <div style={{ width:36, height:1, background:`linear-gradient(90deg,${t.blue},${t.gold})` }} />
+            </div>
+            {/* Billed */}
+            <div onClick={() => toggleMetric('billed')} style={{ cursor:'pointer', display:'flex', flexDirection:'column', alignItems:'center', gap:6, padding:'8px 20px', borderRadius:12, background:activeMetric==='billed'?`${t.gold}12`:'transparent', border:`1px solid ${activeMetric==='billed'?t.gold+'50':'transparent'}`, transition:'all .15s' }}>
+              <span style={{ fontSize:'2rem', fontFamily:'ui-monospace,monospace', fontWeight:200, color:t.gold, lineHeight:1 }}>{fmtNum(totalBilled)}</span>
+              <span style={{ fontSize:'.55rem', color:t.text4, letterSpacing:'.1em', textTransform:'uppercase' }}>Bills Submitted</span>
+            </div>
+            <div style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:2, padding:'0 10px' }}>
+              <span style={{ fontSize:'.5rem', color:t.text4 }}>{approvedPct}%</span>
+              <div style={{ width:36, height:1, background:`linear-gradient(90deg,${t.gold},${t.green})` }} />
+            </div>
+            {/* Approved */}
+            <div onClick={() => toggleMetric('purchased')} style={{ cursor:'pointer', display:'flex', flexDirection:'column', alignItems:'center', gap:6, padding:'8px 20px', borderRadius:12, background:activeMetric==='purchased'?`${t.green}12`:'transparent', border:`1px solid ${activeMetric==='purchased'?t.green+'50':'transparent'}`, transition:'all .15s' }}>
+              <span style={{ fontSize:'2rem', fontFamily:'ui-monospace,monospace', fontWeight:200, color:t.green, lineHeight:1 }}>{fmtNum(approved)}</span>
+              <span style={{ fontSize:'.55rem', color:t.text4, letterSpacing:'.1em', textTransform:'uppercase' }}>Approved</span>
+              {approvedValue > 0 && <span style={{ fontSize:'.6rem', color:t.gold, fontFamily:'ui-monospace,monospace' }}>{fmtAmt(approvedValue)}</span>}
+            </div>
+            {/* Divider */}
+            <div style={{ width:1, height:40, background:t.border, margin:'0 16px' }} />
+            {/* Pending */}
+            <div onClick={() => toggleMetric('pending')} style={{ cursor:'pointer', display:'flex', flexDirection:'column', alignItems:'center', gap:4, padding:'8px 14px', borderRadius:10, background:activeMetric==='pending'?`${t.orange}12`:'transparent', border:`1px solid ${activeMetric==='pending'?t.orange+'50':'transparent'}`, transition:'all .15s' }}>
+              <span style={{ fontSize:'1.4rem', fontFamily:'ui-monospace,monospace', fontWeight:200, color:t.orange, lineHeight:1 }}>{fmtNum(pending)}</span>
+              <span style={{ fontSize:'.52rem', color:t.text4, letterSpacing:'.08em', textTransform:'uppercase' }}>Pending</span>
+            </div>
+            {/* Rejected */}
+            <div onClick={() => toggleMetric('rejected')} style={{ cursor:'pointer', display:'flex', flexDirection:'column', alignItems:'center', gap:4, padding:'8px 14px', borderRadius:10, background:activeMetric==='rejected'?`${t.red}12`:'transparent', border:`1px solid ${activeMetric==='rejected'?t.red+'50':'transparent'}`, transition:'all .15s' }}>
+              <span style={{ fontSize:'1.4rem', fontFamily:'ui-monospace,monospace', fontWeight:200, color:t.red, lineHeight:1 }}>{fmtNum(trueRejected)}</span>
+              <span style={{ fontSize:'.52rem', color:t.text4, letterSpacing:'.08em', textTransform:'uppercase' }}>Rejected</span>
+            </div>
+          </div>
           {activeMetric && (
-            <div style={{ marginLeft:'auto', display:'flex', alignItems:'center', padding:'0 16px' }}>
-              <button onClick={() => setActiveMetric(null)} style={{ padding:'4px 12px', borderRadius:20, fontSize:'.58rem', cursor:'pointer', border:`1px solid ${t.border}`, background:t.card2, color:t.text3 }}>
-                Clear filter ✕
+            <div style={{ display:'flex', justifyContent:'center', marginTop:12 }}>
+              <button onClick={() => setActiveMetric(null)} style={{ padding:'3px 12px', borderRadius:20, fontSize:'.58rem', cursor:'pointer', border:`1px solid ${t.border}`, background:t.card2, color:t.text3 }}>
+                Clear ✕
               </button>
             </div>
           )}
         </div>
-      </div>}
-
-      {/* ──────── 1b. WALK-IN DISPOSITION ──────── */}
-      {canSee('livefeed.customer_journey') && totalWalkins > 0 && (() => {
-        // Source: customer_walkin.walkin_status — what staff recorded in the CRM walk-in register
-        // This is independent of bills box (transac_tbl) — gaps between the two are the insight
-        const wSold     = walkinSummary?.sold             || 0   // walkin_status='sold'
-        const wNotSold  = walkinSummary?.visited_not_sold || 0   // walkin_status='visited not sold'
-        const wKyc      = kycBlacklistedCnt                      // in rejctd_tbl
-        const wNoUpdate = crmNotUpdatedCnt                       // billed but status not set
-        const wNoBill   = notBilledCnt                           // no bill + not KYC
-        const accounted = wSold + wNotSold + wKyc + wNoUpdate + wNoBill
-        const wOther    = Math.max(0, totalWalkins - accounted)
-
-        const segments = [
-          { label: 'Marked sold',         sublabel: 'Staff updated status in CRM',    count: wSold,     color: t.green,  key: 'walkin'          },
-          { label: 'Visited, not sold',   sublabel: 'Staff marked as not sold',       count: wNotSold,  color: t.orange, key: null              },
-          { label: 'KYC blocked',         sublabel: 'Flagged at KYC verification',    count: wKyc,      color: t.purple, key: 'kyc_blocked'     },
-          { label: 'Status not updated',  sublabel: 'Billed but CRM not updated',     count: wNoUpdate, color: t.red,    key: 'crm_not_updated' },
-          { label: 'Left without bill',   sublabel: 'No transaction raised',          count: wNoBill,   color: t.text4,  key: 'unbilled'        },
-          ...(wOther > 0 ? [{ label: 'Other', sublabel: '', count: wOther, color: t.border, key: null }] : []),
-        ].filter(s => s.count > 0)
-
-        return (
-          <div style={{ position:'relative', background:`linear-gradient(160deg, ${t.bg} 0%, ${t.card} 60%, ${t.bg} 100%)`, border:`1.5px solid ${t.border2}`, borderRadius:20, boxShadow:`0 4px 20px rgba(0,0,0,.10), inset 0 1px 0 ${t.border}`, padding:'22px 16px 16px', marginTop:2 }}>
-            {/* ambient glow */}
-            <div style={{ position:'absolute', inset:-1, borderRadius:20, background:`radial-gradient(ellipse at 50% 0%, ${t.border2}60 0%, transparent 65%)`, pointerEvents:'none' }}/>
-            {/* floating label */}
-            <div style={{ position:'absolute', top:-13, left:'50%', transform:'translateX(-50%)', background:t.card2, border:`1px solid ${t.border2}`, borderRadius:20, padding:'4px 16px', whiteSpace:'nowrap', boxShadow:`0 2px 8px rgba(0,0,0,.12)` }}>
-              <span style={{ fontSize:'.48rem', letterSpacing:'.14em', textTransform:'uppercase', color:t.text3, fontWeight:700 }}>breakdown of {fmtNum(totalWalkins)} walk-ins</span>
-            </div>
-
-            {/* Proportion bar */}
-            <div style={{ display:'flex', height:5, borderRadius:100, overflow:'hidden', gap:1, marginBottom:14, position:'relative' }}>
-              {segments.map((s, i) => (
-                <div key={i} onClick={s.key ? () => toggleMetric(s.key) : undefined} style={{
-                  width:`${(s.count / totalWalkins) * 100}%`, background:s.color, minWidth:2,
-                  cursor:s.key ? 'pointer' : 'default',
-                  opacity: activeMetric && activeMetric !== s.key ? .2 : 1,
-                  transition:'opacity .2s',
-                  borderRadius: i === 0 ? '100px 0 0 100px' : i === segments.length-1 ? '0 100px 100px 0' : 0,
-                }} />
-              ))}
-            </div>
-
-            {/* Cards row */}
-            <div style={{ position:'relative', display:'flex', alignItems:'stretch', gap:8, flexWrap:'wrap' }}>
-              {segments.map((s, i) => {
-                const isActive = activeMetric === s.key
-                return (
-                  <div key={i}
-                    onClick={s.key ? () => toggleMetric(s.key) : undefined}
-                    style={{
-                      flex:1, minWidth:100,
-                      background:`linear-gradient(160deg, ${t.card2} 0%, ${t.card} 100%)`,
-                      border:`1px solid ${s.color}25`,
-                      borderTop:`2px solid ${isActive ? s.color : s.color + '80'}`,
-                      borderRadius:12,
-                      boxShadow: isActive
-                        ? `0 0 0 1.5px ${s.color}40, 0 8px 24px rgba(0,0,0,.14), inset 0 1px 0 ${s.color}20`
-                        : `0 4px 12px rgba(0,0,0,.10), inset 0 1px 0 ${s.color}10`,
-                      padding:'12px 14px 10px',
-                      cursor: s.key ? 'pointer' : 'default',
-                      transform: isActive ? 'translateY(-3px)' : 'translateY(0)',
-                      transition:'all .18s ease',
-                      background: isActive ? `linear-gradient(160deg, ${s.color}10 0%, ${t.card} 100%)` : `linear-gradient(160deg, ${t.card2} 0%, ${t.card} 100%)`,
-                    }}>
-                    <div style={{ fontSize:'1.4rem', fontWeight:200, fontFamily:'ui-monospace,monospace', color:s.color, lineHeight:1, letterSpacing:'-.03em' }}>{fmtNum(s.count)}</div>
-                    <div style={{ fontSize:'.6rem', fontWeight:600, color:s.color, marginTop:4, letterSpacing:'.02em' }}>{s.label}</div>
-                    <div style={{ fontSize:'.5rem', color:t.text4, marginTop:2, lineHeight:1.4 }}>{s.sublabel}</div>
-                    <div style={{ marginTop:8, height:2, borderRadius:2, background:t.border, overflow:'hidden' }}>
-                      <div style={{ height:'100%', width:`${Math.round((s.count/totalWalkins)*100)}%`, background:s.color, borderRadius:2, transition:'width .6s ease' }}/>
-                    </div>
-                    <div style={{ fontSize:'.44rem', color:t.text4, marginTop:3, textAlign:'right' }}>{Math.round((s.count/totalWalkins)*100)}%</div>
-                  </div>
-                )
-              })}
-            </div>
-          </div>
-        )
-      })()}
-
-      {/* ──────── 1c. BRANCH PULSE — plain-English insights ──────── */}
-      {canSee('livefeed.customer_journey') && totalWalkins > 0 && (() => {
-        const wSoldCRM   = walkinSummary?.sold || 0   // what staff marked as sold in CRM walk-in register
-        const crmGap     = approved - wSoldCRM         // approved bills vs staff-marked-sold gap
-        const walkoutPct = totalWalkins > 0 ? Math.round((notBilledCnt / totalWalkins) * 100) : 0
-        const closingRate = totalBilled > 0 ? Math.round((approved / totalBilled) * 100) : 0
-        const insights = []
-
-        // 1 — Ghost purchases: billed but not in walk-in register at all
-        if (ghostCount > 0) insights.push({
-          icon: '👻', color: t.red, metric: 'ghost_purchases',
-          headline: `${ghostCount} purchase${ghostCount > 1 ? 's' : ''} with no walk-in entry`,
-          detail: `${ghostCount} customer${ghostCount > 1 ? 's' : ''} bought gold today but never filled the walk-in register. Click to see who.`,
-        })
-
-        // 2 — KEY INSIGHT: CRM register vs actual bills mismatch (beyond ghost)
-        if (crmGap > 0) insights.push({
-          icon: '⚠', color: t.orange,
-          headline: `${crmGap} walk-in status${crmGap > 1 ? 'es' : ''} not updated`,
-          detail: `Bills show ${approved} purchases but only ${wSoldCRM} walk-ins are marked "sold". ${crmGap} customer${crmGap > 1 ? 's' : ''} filled the register but status wasn't updated.`,
-        })
-
-        // 2 — Pipeline / follow-up needed
-        if (pending > 0) insights.push({
-          icon: '🔄', color: t.orange,
-          headline: `${pending} bill${pending > 1 ? 's' : ''} in pipeline`,
-          detail: `${fmtWt(goldPending)} worth of gold pending approval. Follow up to close before end of day.`,
-        })
-
-        // 3 — Walk-out rate signal
-        if (walkoutPct >= 40) insights.push({
-          icon: '📉', color: t.orange,
-          headline: `${walkoutPct}% walk-out rate`,
-          detail: `${notBilledCnt} of ${totalWalkins} walk-ins left without a bill. Review branch engagement.`,
-        })
-
-        // 4 — KYC blocked
-        if (kycBlacklistedCnt > 0) insights.push({
-          icon: '🚫', color: t.purple,
-          headline: `${kycBlacklistedCnt} customer${kycBlacklistedCnt > 1 ? 's' : ''} KYC flagged`,
-          detail: `${kycBlacklistedCnt} walk-in${kycBlacklistedCnt > 1 ? 's' : ''} blocked at KYC today (${fmtWt(kycBlacklistedWt)} held).`,
-        })
-
-        // 5 — Takeover (multi-day) cases
-        if (releaseApproved > 0) insights.push({
-          icon: '🔁', color: t.gold, metric: 'takeover_bills',
-          headline: `${releaseApproved} takeover purchase${releaseApproved > 1 ? 's' : ''} completed today`,
-          detail: `${releaseApproved} bill${releaseApproved > 1 ? 's' : ''} marked as "released" — customers who pledged gold on an earlier visit and completed final payment today. Click to see original walk-in dates.`,
-        })
-
-        // 6 — Strong closing rate
-        if (closingRate >= 90) insights.push({
-          icon: '💪', color: t.green,
-          headline: `${closingRate}% bill-to-purchase rate`,
-          detail: `Almost all billed customers are purchasing today — excellent branch performance.`,
-        })
-
-        // 7 — Walk-out low = good
-        if (walkoutPct < 40 && walkoutPct > 0) insights.push({
-          icon: '✓', color: t.green,
-          headline: `${walkoutPct}% walk-out rate`,
-          detail: `Only ${notBilledCnt} of ${totalWalkins} customers left without billing — conversion is healthy.`,
-        })
-
-        if (insights.length === 0) return null
-        return (
-          <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
-            <span style={{ fontSize:'.48rem', color:t.text4, letterSpacing:'.12em', textTransform:'uppercase', fontWeight:700, padding:'0 2px' }}>Branch Pulse</span>
-            <div style={{ display:'flex', flexWrap:'wrap', gap:8 }}>
-              {insights.map((ins, i) => (
-                <div key={i}
-                  onClick={ins.metric ? () => toggleMetric(ins.metric) : undefined}
-                  style={{
-                    flex:1, minWidth:200,
-                    background: activeMetric === ins.metric ? `${ins.color}12` : t.card,
-                    border:`1px solid ${activeMetric === ins.metric ? ins.color + '60' : ins.color + '30'}`,
-                    borderLeft:`3px solid ${ins.color}`,
-                    borderRadius:10,
-                    padding:'10px 14px',
-                    boxShadow:`0 2px 8px rgba(0,0,0,.08)`,
-                    cursor: ins.metric ? 'pointer' : 'default',
-                    transition:'background .15s, border .15s',
-                    position:'relative',
-                  }}>
-                  {ins.metric && <span style={{ position:'absolute', top:6, right:8, fontSize:'.44rem', color:ins.color, opacity:.6 }}>{activeMetric === ins.metric ? '▲ active' : '▼ view'}</span>}
-                  <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:4 }}>
-                    <span style={{ fontSize:'.72rem' }}>{ins.icon}</span>
-                    <span style={{ fontSize:'.62rem', fontWeight:700, color:ins.color }}>{ins.headline}</span>
-                  </div>
-                  <div style={{ fontSize:'.56rem', color:t.text3, lineHeight:1.6 }}>{ins.detail}</div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )
-      })()}
-
-      {/* ──────── 1d. ACTIVITY INTELLIGENCE ──────── */}
-      {canSee('livefeed.customer_journey') && (hourlyData.length > 0 || todayTxns.length > 0) && (
-        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16 }}>
-          <HourlyChart hourly={hourlyData} t={t} isToday={isToday} />
-          <PaymentModeStrip txns={todayTxns} t={t} />
-        </div>
       )}
 
-      {/* ──────── 1e. WALK-IN INTELLIGENCE ──────── */}
-      {canSee('livefeed.customer_journey') && todayWalkins.length > 0 && (
-        <WalkinIntelligence walkins={todayWalkins} t={t} />
-      )}
-
-      {/* ──────── 2. GOLD WEIGHT STRIP + REGION TABLE ──────── */}
-      {canSee('livefeed.weight_flow') && <div>
-
-        <SectionLabel t={t}>Gold Weight Flow</SectionLabel>
-        {/* Compact proportion strip */}
-        <div style={{ display: 'flex', flexWrap: 'wrap', background: t.card, border: `1px solid ${t.border}`, borderRadius: 12, overflow: 'hidden', boxShadow: '0 2px 8px rgba(0,0,0,.10)' }}>
-          {[
-            { key: 'walkin',    label: 'Walked In',    wt: goldWalkedIn,      color: t.blue,   pct: 100 },
-            { key: 'purchased', label: 'Purchased',    wt: goldPurchased,     color: t.green,  pct: goldWalkedIn > 0 ? goldPurchased / goldWalkedIn * 100 : 0 },
-            { key: 'pending',   label: 'In Pipeline',  wt: goldPending,       color: t.orange, pct: goldWalkedIn > 0 ? goldPending / goldWalkedIn * 100 : 0 },
-            { key: 'rejected',  label: 'Rejected Wt',  wt: goldRejected,      color: t.red,    pct: goldWalkedIn > 0 ? goldRejected / goldWalkedIn * 100 : 0 },
-            { key: 'kyc_blocked', label: 'KYC Blocked', wt: kycBlacklistedWt, color: t.purple, pct: goldWalkedIn > 0 ? kycBlacklistedWt / goldWalkedIn * 100 : 0 },
-            { key: 'unbilled',  label: 'Left Unbilled', wt: goldNotBilled,    color: t.text3,  pct: goldWalkedIn > 0 ? goldNotBilled / goldWalkedIn * 100 : 0 },
-          ].map((item, i, arr) => (
-            <div key={item.key}
-              className="ws-item"
-              onClick={() => toggleMetric(item.key)}
-              onMouseEnter={e => e.currentTarget.style.background = t.card2}
-              onMouseLeave={e => e.currentTarget.style.background = activeMetric === item.key ? `${item.color}0c` : 'transparent'}
-              style={{
-                flex: 1, minWidth: 'calc(16.667% - 1px)', padding: '12px 14px', cursor: 'pointer',
-                borderRight: i < arr.length - 1 ? `1px solid ${t.border}` : 'none',
-                borderTop: activeMetric === item.key ? `3px solid ${item.color}` : `3px solid transparent`,
-                background: activeMetric === item.key ? `${item.color}0c` : 'transparent',
-                transition: 'background .15s, border-top .15s',
-              }}>
-              <div style={{ fontSize: '.55rem', color: item.color, textTransform: 'uppercase', letterSpacing: '.1em', fontWeight: 700 }}>{item.label}</div>
-              <div style={{ fontSize: '.95rem', fontFamily: 'ui-monospace,monospace', color: t.text1, fontWeight: 300, marginTop: 4 }}>
-                {item.wt > 0 ? fmtWt(item.wt) : '—'}
-              </div>
-              <div style={{ marginTop: 7, height: 3, borderRadius: 2, background: t.border, overflow: 'hidden' }}>
-                <div style={{ height: '100%', width: `${Math.min(100, item.pct)}%`, background: item.color, borderRadius: 2, transition: 'width .6s ease' }} />
-              </div>
-              <div style={{ fontSize: '.5rem', color: t.text4, marginTop: 3 }}>
-                {item.pct > 0 ? `${item.pct.toFixed(0)}% of walked-in` : ''}
-              </div>
-            </div>
-          ))}
-        </div>
-
-        {/* Stats + data quality */}
-        <div style={{ display: 'flex', gap: 20, marginTop: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-          <span style={{ fontSize: '.6rem', color: t.text3 }}>Avg wt/purchase: <strong style={{ color: t.text1, fontFamily: 'ui-monospace,monospace' }}>{avgGrossWeight > 0 ? fmtWt(avgGrossWeight) : '—'}</strong></span>
-          <span style={{ fontSize: '.6rem', color: t.text3 }}>Approved value: <strong style={{ color: t.gold, fontFamily: 'ui-monospace,monospace' }}>{fmtAmt(approvedValue)}</strong></span>
-          {physicalApproved > 0 && <span style={{ fontSize: '.6rem', color: t.text3 }}>Physical: <strong style={{ color: t.text2 }}>{physicalApproved}</strong></span>}
-          {releaseApproved > 0  && <span style={{ fontSize: '.6rem', color: t.text3 }}>Takeover: <strong style={{ color: t.text2 }}>{releaseApproved}</strong></span>}
-          <span style={{ fontSize: '.56rem', color: t.text4, marginLeft: 'auto' }}>ⓘ Weights are gross as declared at walk-in · KYC weight excluded from Unbilled</span>
-        </div>
-      </div>}
-
-      {/* ──────── 3. BRANCH + REGION BREAKDOWN ──────── */}
-      {canSee('livefeed.region_breakdown') && !regionFilter && (
-        <div className="lf-region" style={{ display:'flex', flexDirection:'column', gap:16 }}>
-          {branchData.length > 0 && <BranchTable t={t} branchData={branchData} allWalkins={allWalkins} />}
-          {regions && regions.length > 1 && <RegionTable t={t} regions={regions} allTxns={allTxns} allWalkins={allWalkins} allKycRows={allKycRows} />}
-        </div>
-      )}
-
-      {/* ──────── 4. DETAIL TABLE (shown only when a hero is clicked) ──────── */}
+      {/* ── 4. DETAIL TABLE ── */}
       {canSee('livefeed.detail_table') && activeMetric && (
         <LiveDetail t={t} activeMetric={activeMetric}
           todayTxns={todayTxns} todayWalkins={todayWalkins}
@@ -1064,72 +802,58 @@ function OldCrmTab({
           takeoverRows={takeoverRows} />
       )}
 
-      {/* ──────── 5. LIVE TIMELINE (collapsed by default) ──────── */}
-      {canSee('livefeed.timeline') && <div>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: tlOpen ? 10 : 0 }}>
-          <SectionLabel t={t}>{isToday ? 'Live Timeline' : 'Timeline'}</SectionLabel>
-          <button onClick={() => { setTlOpen(o => !o); clearNewEvents() }} style={{
-            padding: '4px 12px', borderRadius: 6, fontSize: '.6rem', cursor: 'pointer',
-            border: `1px solid ${newEventCount > 0 ? t.green : t.border}`,
-            background: newEventCount > 0 ? `${t.green}14` : t.card,
-            color: newEventCount > 0 ? t.green : t.text3,
-            marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6,
-            transition: 'all .2s',
-          }}>
-            {newEventCount > 0 && (
-              <span style={{
-                background: t.green, color: '#000', borderRadius: 8,
-                fontSize: '.52rem', fontWeight: 700, padding: '1px 5px', lineHeight: 1.4,
-              }}>+{newEventCount}</span>
-            )}
-            {tlOpen ? 'Collapse ▲' : 'Expand ▼'}
-          </button>
-        </div>
-        {tlOpen && (
-          <Card t={t} style={{ padding: 0, overflow: 'hidden' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 16px', borderBottom: `1px solid ${t.border}`, flexWrap: 'wrap' }}>
-              {/* Type filter tabs */}
-              <div style={{ display: 'flex', background: t.card2, borderRadius: 6, border: `1px solid ${t.border}`, overflow: 'hidden' }}>
-                {[['all','All'],['txn','Bills'],['walkin','Walk-ins']].map(([val, lbl]) => (
+      {/* ── 5. LIVE TIMELINE (always open) ── */}
+      {canSee('livefeed.timeline') && (
+        <div>
+          <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:10 }}>
+            <SectionLabel t={t}>{isToday?'Live Timeline':'Timeline'}</SectionLabel>
+            <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+              {newEventCount > 0 && (
+                <span onClick={clearNewEvents} style={{ background:t.green, color:'#000', borderRadius:10, fontSize:'.52rem', fontWeight:700, padding:'2px 8px', lineHeight:1.5, cursor:'pointer' }}>
+                  +{newEventCount} new
+                </span>
+              )}
+              <div style={{ display:'flex', background:t.card2, borderRadius:6, border:`1px solid ${t.border}`, overflow:'hidden' }}>
+                {[['all','All'],['txn','Bills'],['walkin','Walk-ins']].map(([val,lbl]) => (
                   <button key={val} onClick={() => setTlFilter(val)} style={{
-                    padding: '4px 10px', fontSize: '.58rem', cursor: 'pointer', border: 'none',
-                    background: tlFilter === val ? t.gold : 'transparent',
-                    color: tlFilter === val ? '#000' : t.text3,
-                    fontWeight: tlFilter === val ? 600 : 400, transition: 'all .15s',
+                    padding:'4px 10px', fontSize:'.58rem', cursor:'pointer', border:'none',
+                    background:tlFilter===val?t.gold:'transparent', color:tlFilter===val?'#000':t.text3,
+                    fontWeight:tlFilter===val?600:400, transition:'all .15s',
                   }}>{lbl}</button>
                 ))}
               </div>
-              <input
-                type="text" placeholder="Search name, mobile, branch..."
-                value={tlSearch} onChange={e => setTlSearch(e.target.value)}
-                style={{ background: t.card2, border: `1px solid ${t.border}`, borderRadius: 6, padding: '5px 10px', fontSize: '.62rem', color: t.text2, outline: 'none', width: 180, fontFamily: 'ui-monospace, monospace' }}
-              />
-              <span style={{ fontSize: '.6rem', color: t.text4, marginLeft: 4 }}>{filteredTimeline.filter(item => tlFilter === 'txn' ? item.type === 'txn' : tlFilter === 'walkin' ? item.type === 'walkin' : true).length} events</span>
+              <input type="text" placeholder="Search name, mobile, branch..." value={tlSearch} onChange={e => setTlSearch(e.target.value)}
+                style={{ background:t.card2, border:`1px solid ${t.border}`, borderRadius:6, padding:'5px 10px', fontSize:'.62rem', color:t.text2, outline:'none', width:180, fontFamily:'ui-monospace,monospace' }} />
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '70px 28px 1fr 110px 120px', gap: '0 12px', padding: '8px 20px', background: t.card2, borderBottom: `1px solid ${t.border}` }}>
-              {['Time', '', 'Customer / Branch', 'Weight', 'Amount'].map((h, i) => (
-                <span key={i} style={{ fontSize: '.57rem', color: t.text3, fontWeight: 600, letterSpacing: '.1em', textTransform: 'uppercase', textAlign: i >= 3 ? 'right' : i === 0 ? 'right' : 'left' }}>{h}</span>
+          </div>
+          <Card t={t} style={{ padding:0, overflow:'hidden' }}>
+            <div style={{ display:'grid', gridTemplateColumns:'70px 28px 1fr 110px 120px', gap:'0 12px', padding:'8px 20px', background:t.card2, borderBottom:`1px solid ${t.border}` }}>
+              {['Time','','Customer / Branch','Weight','Amount'].map((h,i) => (
+                <span key={i} style={{ fontSize:'.57rem', color:t.text3, fontWeight:600, letterSpacing:'.1em', textTransform:'uppercase', textAlign:i>=3?'right':i===0?'right':'left' }}>{h}</span>
               ))}
             </div>
-            <div style={{ maxHeight: 480, overflowY: 'auto' }}>
+            <div style={{ maxHeight:520, overflowY:'auto' }}>
               {filteredTimeline.filter(item => {
-                if (tlFilter === 'txn'    && item.type !== 'txn')    return false
-                if (tlFilter === 'walkin' && item.type !== 'walkin') return false
+                if (tlFilter==='txn'    && item.type!=='txn')    return false
+                if (tlFilter==='walkin' && item.type!=='walkin') return false
                 if (tlSearch) {
                   const s = tlSearch.toLowerCase()
-                  return (item.name||'').toLowerCase().includes(s) || (item.mobile||'').includes(s) || (item.branch||'').toLowerCase().includes(s)
+                  return (item.name||'').toLowerCase().includes(s)||(item.mobile||'').includes(s)||(item.branch||'').toLowerCase().includes(s)
                 }
                 return true
-              }).map((item, i, arr) => (
-                <TimelineRow key={item.id} item={item} t={t} isLast={i === arr.length - 1} />
+              }).map((item,i,arr) => (
+                <TimelineRow key={item.id} item={item} t={t} isLast={i===arr.length-1} />
               ))}
+              {filteredTimeline.length===0 && <div style={{ padding:32, textAlign:'center', color:t.text4, fontSize:'.72rem' }}>No events yet</div>}
             </div>
           </Card>
-        )}
-      </div>}
+        </div>
+      )}
+
     </div>
   )
 }
+
 
 /* ════════════════════════════════════════════════════════════════ */
 /*                      SUB-COMPONENTS                           */
@@ -1938,299 +1662,232 @@ const IN_PROGRESS_STATUSES = [
 
 function NewCrmTab({ t, newCrmTxns, newCrmError, regionFilter, regions, isToday, newEventCount, clearNewEvents }) {
   const [activeMetric, setActiveMetric] = useState(null)
-  const [tlOpen, setTlOpen] = useState(false)
-  const [tlSearch, setTlSearch] = useState('')
+  const [tlSearch, setTlSearch]         = useState('')
   const toggleMetric = key => setActiveMetric(prev => prev === key ? null : key)
 
-  // Offline state (connection failed)
+  // Offline state
   if (newCrmTxns === null || newCrmTxns === undefined) {
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: 360, gap: 16 }}>
-        <div style={{ width: 64, height: 64, borderRadius: 16, background: t.card, border: `1px solid ${t.border}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.6rem', color: t.text4 }}>~</div>
-        <span style={{ fontSize: '.88rem', color: t.text2, fontWeight: 300 }}>New CRM Offline</span>
+      <div style={{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', minHeight:360, gap:16 }}>
+        <div style={{ width:64, height:64, borderRadius:16, background:t.card, border:`1px solid ${t.border}`, display:'flex', alignItems:'center', justifyContent:'center', fontSize:'1.6rem', color:t.text4 }}>~</div>
+        <span style={{ fontSize:'.88rem', color:t.text2, fontWeight:300 }}>New CRM Offline</span>
         {newCrmError && (
-          <div style={{ background: `${t.red}12`, border: `1px solid ${t.red}30`, borderRadius: 8, padding: '8px 16px', maxWidth: 480, fontFamily: 'ui-monospace,monospace', fontSize: '.62rem', color: t.red, wordBreak: 'break-all', textAlign: 'center' }}>
+          <div style={{ background:`${t.red}12`, border:`1px solid ${t.red}30`, borderRadius:8, padding:'8px 16px', maxWidth:480, fontFamily:'ui-monospace,monospace', fontSize:'.62rem', color:t.red, wordBreak:'break-all', textAlign:'center' }}>
             {newCrmError}
           </div>
         )}
-        <span style={{ fontSize: '.62rem', color: t.text4, maxWidth: 320, textAlign: 'center', lineHeight: 1.6 }}>
+        <span style={{ fontSize:'.62rem', color:t.text4, maxWidth:320, textAlign:'center', lineHeight:1.6 }}>
           The new PostgreSQL-based CRM is not reporting data at this time.
         </span>
       </div>
     )
   }
 
-  // Region filter
-  const txns    = regionFilter ? newCrmTxns.filter(tx => tx.region === regionFilter) : newCrmTxns
-  const allTxns = newCrmTxns
+  const txns = regionFilter ? newCrmTxns.filter(tx => tx.region === regionFilter) : newCrmTxns
 
-  // Derived counts
-  const walkinTxns     = txns.filter(tx => tx.status === 'WALKIN')
-  const estimationTxns = txns.filter(tx => tx.status === 'ESTIMATION_PENDING')
-  const kycTxns        = txns.filter(tx => tx.status === 'KYC_PENDING')
-  const paymentTxns    = txns.filter(tx => tx.status === 'FINAL_PAYMENT_PENDING')
-  const completedTxns  = txns.filter(tx => tx.status === 'FINAL_PAYMENT_COMPLETED')
-  const walkoutTxns    = txns.filter(tx => tx.status === 'WALKOUT')
-  const inProgressTxns = txns.filter(tx => IN_PROGRESS_STATUSES.includes(tx.status))
+  const completedTxns   = txns.filter(tx => tx.status === 'FINAL_PAYMENT_COMPLETED')
+  const walkoutTxns     = txns.filter(tx => tx.status === 'WALKOUT')
+  const inProgressTxns  = txns.filter(tx => IN_PROGRESS_STATUSES.includes(tx.status))
+  const walkinStageTxns = txns.filter(tx => tx.status === 'WALKIN')
+  const estimationTxns  = txns.filter(tx => ['ESTIMATION_PENDING','PLEDGE_ESTIMATION_PENDING','REVALUATION_PENDING','SALES_NEGOTIATION_PENDING','QUOTATION_PENDING'].includes(tx.status))
+  const kycPendingTxns  = txns.filter(tx => ['KYC_PENDING','BRANCH_KYC_PENDING','PLEDGE_APPROVAL_PENDING'].includes(tx.status))
+  const paymentDueTxns  = txns.filter(tx => ['FINAL_PAYMENT_PENDING','PENNY_DROP_PENDING','RELEASE_PENDING','RELEASE_AGREEMENT_PENDING'].includes(tx.status))
 
-  const total      = txns.length
-  const inProgress = inProgressTxns.length
-  const completed  = completedTxns.length
-  const walkout    = walkoutTxns.length
-
+  const total          = txns.length
+  const completed      = completedTxns.length
+  const inProgress     = inProgressTxns.length
+  const walkout        = walkoutTxns.length
   const completedValue = completedTxns.reduce((s, tx) => s + (Number(tx.amount) || 0), 0)
-  const totalWt        = txns.reduce((s, tx) => s + (Number(tx.gross_weight) || 0), 0)
-  const completedWt    = completedTxns.reduce((s, tx) => s + (Number(tx.gross_weight) || 0), 0)
-  const inProgressWt   = inProgressTxns.reduce((s, tx) => s + (Number(tx.gross_weight) || 0), 0)
-  const walkoutWt      = walkoutTxns.reduce((s, tx) => s + (Number(tx.gross_weight) || 0), 0)
-  const walkinWt       = walkinTxns.reduce((s, tx) => s + (Number(tx.gross_weight) || 0), 0)
+  const walkoutValue   = walkoutTxns.reduce((s,  tx) => s + (Number(tx.amount) || 0), 0)
+  const conversionPct  = total > 0 ? Math.round(completed / total * 100) : 0
 
-  const conversionPct       = total > 0 ? Math.round(completed / total * 100) : 0
-  const walkoutRate         = total > 0 ? Math.round(walkout / total * 100) : 0
-  const progressedPct       = total > 0 ? Math.round((inProgress + completed) / total * 100) : 0
-  const completedOfProgPct  = (inProgress + completed) > 0 ? Math.round(completed / (inProgress + completed) * 100) : 0
-  const avgWt               = completed > 0 && completedWt > 0 ? completedWt / completed : 0
-  const topTxn              = [...completedTxns].sort((a, b) => (Number(b.amount) || 0) - (Number(a.amount) || 0))[0]
+  if (!total) return (
+    <div style={{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', minHeight:300, gap:12 }}>
+      <span style={{ fontSize:'2rem', opacity:.3 }}>~</span>
+      <span style={{ fontSize:'.82rem', color:t.text3 }}>No activity recorded yet</span>
+      <span style={{ fontSize:'.62rem', color:t.text4 }}>Data will appear as transactions come in</span>
+    </div>
+  )
 
-  if (!total) {
-    return (
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: 300, gap: 12 }}>
-        <span style={{ fontSize: '2rem', opacity: .3 }}>~</span>
-        <span style={{ fontSize: '.82rem', color: t.text3 }}>No activity recorded yet</span>
-        <span style={{ fontSize: '.62rem', color: t.text4 }}>Data will appear as transactions come in</span>
-      </div>
-    )
-  }
+  // Exceptions — actionable only
+  const exceptions = []
+  if (paymentDueTxns.length > 0) exceptions.push({
+    key:'payment', icon:'💳', color:t.gold, urgent:true,
+    headline:`${paymentDueTxns.length} customer${paymentDueTxns.length>1?'s':''} ready to pay`,
+    sub:`Final payment pending — follow up to close before end of day`,
+  })
+  if (walkinStageTxns.length > 0) exceptions.push({
+    key:'walkin', icon:'🪑', color:t.blue, urgent:false,
+    headline:`${walkinStageTxns.length} still at walk-in stage`,
+    sub:`Not yet progressed to estimation`,
+  })
+  if (walkout > 0) exceptions.push({
+    key:'walkout', icon:'🚶', color:t.red, urgent:walkoutValue>50000,
+    headline:`${walkout} walkout${walkout>1?'s':''}${walkoutValue>0?` · ${fmtAmt(walkoutValue)} lost`:''}`,
+    sub:`Customers who left without completing the transaction`,
+  })
+  if (kycPendingTxns.length > 0) exceptions.push({
+    key:'kyc', icon:'📋', color:'#8c5ac8', urgent:false,
+    headline:`${kycPendingTxns.length} waiting for KYC clearance`,
+    sub:`KYC verification in progress`,
+  })
+
+  // Pipeline stages
+  const PIPELINE = [
+    { key:'walkin',     label:'Walk-in',     count:walkinStageTxns.length,  color:t.blue    },
+    { key:'estimation', label:'Estimation',  count:estimationTxns.length,   color:t.orange  },
+    { key:'kyc',        label:'KYC',         count:kycPendingTxns.length,   color:'#8c5ac8' },
+    { key:'payment',    label:'Payment Due', count:paymentDueTxns.length,   color:t.gold    },
+    { key:'completed',  label:'Completed',   count:completed,               color:t.green   },
+  ]
+
+  const sorted = [...txns].sort((a, b) => (b.txn_time || '').localeCompare(a.txn_time || ''))
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+    <div style={{ display:'flex', flexDirection:'column', gap:20 }}>
 
-      {/* ──────── 0. SUMMARY BAR ──────── */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 0, background: t.surface, border: `1px solid ${t.border}`, borderRadius: 12, padding: '0', overflow: 'hidden', flexWrap: 'wrap', boxShadow: '0 2px 8px rgba(0,0,0,.10)' }}>
-
-        {/* Total — grouped breakdown */}
-        <div className="sum-bar-item" style={{ display:'flex', flexDirection:'column', gap:6, padding:'8px 18px', borderRight:`1px solid ${t.border}`, borderLeft:`3px solid ${t.blue}` }}>
-          <div style={{ display:'flex', alignItems:'center', gap:6 }}>
-            <span style={{ fontSize:'.75rem', fontFamily:'ui-monospace,monospace', fontWeight:600, color:t.blue }}>{fmtNum(total)}</span>
-            <span style={{ fontSize:'.58rem', color:t.text4, letterSpacing:'.08em', textTransform:'uppercase' }}>Total</span>
+      {/* ── 1. TODAY'S PULSE ── */}
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr) auto', gap:8, alignItems:'stretch' }}>
+        {[
+          { label:'Total',       value:total,     color:t.blue,   sub:null,                                        key:'total'      },
+          { label:'In Progress', value:inProgress, color:t.orange, sub:null,                                       key:'inprogress' },
+          { label:'Completed',   value:completed,  color:t.green,  sub:fmtAmt(completedValue),                    key:'completed'  },
+          { label:'Walkout',     value:walkout,    color:t.red,    sub:walkoutValue>0?fmtAmt(walkoutValue):null,   key:'walkout'    },
+        ].map(item => (
+          <div key={item.key} onClick={() => toggleMetric(item.key)} style={{
+            background:activeMetric===item.key?`${item.color}12`:t.card,
+            border:`1px solid ${activeMetric===item.key?item.color+'50':t.border}`,
+            borderTop:`3px solid ${item.color}`,
+            borderRadius:10, padding:'14px 16px', cursor:'pointer',
+            transition:'all .15s', display:'flex', flexDirection:'column', gap:4,
+          }}
+            onMouseEnter={e => { if (activeMetric!==item.key) e.currentTarget.style.background=t.card2 }}
+            onMouseLeave={e => { if (activeMetric!==item.key) e.currentTarget.style.background=t.card }}>
+            <span style={{ fontSize:'1.8rem', fontFamily:'ui-monospace,monospace', fontWeight:200, color:item.color, lineHeight:1, letterSpacing:'-.03em' }}>{fmtNum(item.value)}</span>
+            <span style={{ fontSize:'.52rem', color:t.text4, letterSpacing:'.12em', textTransform:'uppercase', fontWeight:700 }}>{item.label}</span>
+            {item.sub && <span style={{ fontSize:'.6rem', color:item.color, fontFamily:'ui-monospace,monospace', opacity:.8 }}>{item.sub}</span>}
           </div>
-          <div style={{ display:'flex', alignItems:'center', gap:6, padding:'4px 8px', background:t.card2, border:`1px solid ${t.border}`, borderRadius:6 }}>
-            <span style={{ fontSize:'.6rem', color:t.green,  fontFamily:'ui-monospace,monospace', fontWeight:700 }}>{completed}</span>
-            <span style={{ fontSize:'.5rem', color:t.text4 }}>done</span>
-            <span style={{ color:t.border2, fontSize:'.5rem' }}>|</span>
-            <span style={{ fontSize:'.6rem', color:t.orange, fontFamily:'ui-monospace,monospace', fontWeight:700 }}>{inProgress}</span>
-            <span style={{ fontSize:'.5rem', color:t.text4 }}>in-prog</span>
-            {walkout > 0 && <>
-              <span style={{ color:t.border2, fontSize:'.5rem' }}>|</span>
-              <span style={{ fontSize:'.6rem', color:t.red, fontFamily:'ui-monospace,monospace', fontWeight:700 }}>{walkout}</span>
-              <span style={{ fontSize:'.5rem', color:t.text4 }}>walkout</span>
-            </>}
-          </div>
-        </div>
-
-        {/* In Progress */}
-        <div className="sum-bar-item" style={{ display:'flex', alignItems:'center', gap:6, padding:'10px 18px', borderRight:`1px solid ${t.border}`, borderLeft:`3px solid ${t.orange}` }}>
-          <span style={{ fontSize:'.75rem', fontFamily:'ui-monospace,monospace', fontWeight:600, color:t.orange }}>{fmtNum(inProgress)}</span>
-          <span style={{ fontSize:'.58rem', color:t.text4, letterSpacing:'.08em', textTransform:'uppercase' }}>In Progress</span>
-        </div>
-
-        {/* Completed */}
-        <div className="sum-bar-item" style={{ display:'flex', alignItems:'center', gap:6, padding:'10px 18px', borderRight:`1px solid ${t.border}`, borderLeft:`3px solid ${t.green}` }}>
-          <span style={{ fontSize:'.75rem', fontFamily:'ui-monospace,monospace', fontWeight:600, color:t.green }}>{fmtNum(completed)}</span>
-          <span style={{ fontSize:'.58rem', color:t.text4, letterSpacing:'.08em', textTransform:'uppercase' }}>Completed</span>
-        </div>
-
-        {/* Value */}
-        <div className="sum-bar-item" style={{ display:'flex', alignItems:'center', gap:6, padding:'10px 18px', borderRight:`1px solid ${t.border}`, borderLeft:`3px solid ${t.green}` }}>
-          <span style={{ fontSize:'.75rem', fontFamily:'ui-monospace,monospace', fontWeight:600, color:t.green }}>{fmtAmt(completedValue)}</span>
-          <span style={{ fontSize:'.58rem', color:t.text4, letterSpacing:'.08em', textTransform:'uppercase' }}>Value</span>
-        </div>
-
+        ))}
         {/* Conversion */}
-        <div className="sum-bar-item" style={{ display:'flex', alignItems:'center', gap:6, padding:'10px 18px', borderRight:`1px solid ${t.border}` }}>
-          <span style={{ fontSize:'.75rem', fontFamily:'ui-monospace,monospace', fontWeight:600, color:conversionPct>=50?t.green:t.orange }}>{conversionPct}%</span>
-          <span style={{ fontSize:'.58rem', color:t.text4, letterSpacing:'.08em', textTransform:'uppercase' }}>Conversion</span>
+        <div style={{ background:t.card, border:`1px solid ${t.border}`, borderTop:`3px solid ${conversionPct>=50?t.green:t.orange}`, borderRadius:10, padding:'14px 16px', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', minWidth:84, gap:4 }}>
+          <span style={{ fontSize:'1.8rem', fontFamily:'ui-monospace,monospace', fontWeight:200, color:conversionPct>=50?t.green:t.orange, lineHeight:1 }}>{conversionPct}%</span>
+          <span style={{ fontSize:'.52rem', color:t.text4, letterSpacing:'.12em', textTransform:'uppercase', fontWeight:700, textAlign:'center' }}>Conversion</span>
         </div>
-
-        {/* Walkout (only when > 0) */}
-        {walkout > 0 && (
-          <div className="sum-bar-item" style={{ display:'flex', alignItems:'center', gap:6, padding:'10px 18px', borderRight:`1px solid ${t.border}` }}>
-            <span style={{ fontSize:'.75rem', fontFamily:'ui-monospace,monospace', fontWeight:600, color:t.red }}>{fmtNum(walkout)}</span>
-            <span style={{ fontSize:'.58rem', color:t.text4, letterSpacing:'.08em', textTransform:'uppercase' }}>Walkout</span>
-          </div>
-        )}
-
-        {topTxn && (
-          <div className="sum-bar-item" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 18px', marginLeft: 'auto', borderLeft: `1px solid ${t.border}` }}>
-            <span style={{ fontSize: '.52rem', color: t.text4, letterSpacing: '.08em', textTransform: 'uppercase' }}>Top sale</span>
-            <span style={{ fontSize: '.75rem', fontFamily: 'ui-monospace,monospace', fontWeight: 600, color: t.gold }}>{fmtAmt(topTxn.amount)}</span>
-            <span style={{ fontSize: '.62rem', color: t.text2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 120 }}>{topTxn.cust_name}</span>
-            <span style={{ fontSize: '.58rem', color: t.text4 }}>{topTxn.branch_name}</span>
-          </div>
-        )}
       </div>
 
-      {/* ──────── 1. CUSTOMER JOURNEY ──────── */}
-      <div>
-        <SectionLabel t={t}>Customer Journey · New CRM</SectionLabel>
-        <div className="lf-hero" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0, flexWrap: 'wrap', background: t.surface, borderRadius: 16, border: `1px solid ${t.border}`, padding: '28px 16px', boxShadow: `0 4px 20px rgba(0,0,0,.12), inset 0 1px 0 ${t.border}`, backdropFilter: 'blur(4px)' }}>
-          <HeroNum label="Total Today"  value={total}      color={t.blue}   t={t} weight={totalWt}      active={activeMetric==='total'}      onClick={() => toggleMetric('total')} />
-          <FlowArrow t={t} pct={progressedPct || null} />
-          <div style={{
-            position:'relative',
-            background:`linear-gradient(160deg, ${t.bg} 0%, ${t.card} 60%, ${t.bg} 100%)`,
-            border:`1.5px solid ${t.blue}55`,
-            borderRadius:22,
-            boxShadow:`0 0 0 1px ${t.blue}12, 0 16px 48px ${t.blue}20, 0 4px 16px rgba(0,0,0,.16), inset 0 0 60px ${t.blue}08, inset 0 1px 0 ${t.blue}35`,
-            padding:'22px 14px 14px',
-          }}>
-            <div style={{ position:'absolute', inset:-1, borderRadius:22, background:`radial-gradient(ellipse at 50% 0%, ${t.blue}18 0%, transparent 65%)`, pointerEvents:'none' }}/>
-            <div style={{ position:'absolute', inset:0, borderRadius:22, backgroundImage:`radial-gradient(${t.blue}18 1px, transparent 1px)`, backgroundSize:'18px 18px', pointerEvents:'none', opacity:.6 }}/>
-            <div style={{ position:'absolute', top:-14, left:'50%', transform:'translateX(-50%)', background:`linear-gradient(90deg,${t.blue}ee,${t.blue}bb)`, borderRadius:20, padding:'4px 14px', boxShadow:`0 4px 14px ${t.blue}55, 0 0 0 1px ${t.blue}30`, whiteSpace:'nowrap' }}>
-              <span style={{ fontSize:'.52rem', letterSpacing:'.14em', textTransform:'uppercase', color:'#fff', fontWeight:900 }}>breakdown of {fmtNum(total)}</span>
-            </div>
-            <div style={{ position:'relative', display:'flex', alignItems:'center', gap:8 }}>
-              {[
-                { node: <HeroNum label="In Progress" value={inProgress} color={t.orange} t={t} weight={inProgressWt} active={activeMetric==='inprogress'} onClick={() => toggleMetric('inprogress')} />, color: t.orange },
-                { node: <HeroNum label="Completed"   value={completed}  color={t.green}  t={t} weight={completedWt}  active={activeMetric==='completed'}  onClick={() => toggleMetric('completed')}  />, color: t.green  },
-              ].map((item, i) => (
-                <div key={i} style={{ display:'flex', alignItems:'center', gap:8 }}>
-                  {i > 0 && <FlowArrow t={t} pct={completedOfProgPct || null} />}
-                  <div style={{
-                    background:`linear-gradient(160deg, ${t.card2} 0%, ${t.card} 100%)`,
-                    border:`1px solid ${item.color}30`,
-                    borderTop:`2px solid ${item.color}70`,
-                    borderRadius:14,
-                    boxShadow:`0 8px 24px rgba(0,0,0,.14), 0 2px 6px rgba(0,0,0,.10), inset 0 1px 0 ${item.color}18`,
-                    transform:'translateY(-5px)',
-                  }}>
-                    {item.node}
-                  </div>
+      {/* ── 2. EXCEPTIONS ── */}
+      {exceptions.length > 0 && (
+        <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
+          <span style={{ fontSize:'.48rem', color:t.text4, letterSpacing:'.14em', textTransform:'uppercase', fontWeight:700 }}>Needs Attention</span>
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(200px,1fr))', gap:8 }}>
+            {exceptions.map(ex => (
+              <div key={ex.key} onClick={() => toggleMetric(ex.key)} style={{
+                background:activeMetric===ex.key?`${ex.color}10`:t.card,
+                border:`1px solid ${activeMetric===ex.key?ex.color+'50':ex.color+'25'}`,
+                borderLeft:`3px solid ${ex.color}`,
+                borderRadius:9, padding:'10px 14px', cursor:'pointer', transition:'all .15s', position:'relative',
+              }}>
+                {ex.urgent && <div style={{ position:'absolute', top:8, right:10, width:6, height:6, borderRadius:'50%', background:ex.color, boxShadow:`0 0 6px ${ex.color}` }} />}
+                <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:3 }}>
+                  <span style={{ fontSize:'.7rem' }}>{ex.icon}</span>
+                  <span style={{ fontSize:'.63rem', fontWeight:700, color:ex.color, lineHeight:1.3 }}>{ex.headline}</span>
                 </div>
-              ))}
-            </div>
-          </div>
-          <FlowSep t={t} />
-          <HeroNum label="At Walk-in"   value={walkinTxns.length}     color={t.blue}   t={t} small weight={walkinWt}   active={activeMetric==='walkin'}     onClick={() => toggleMetric('walkin')} />
-          <FlowSep t={t} />
-          <HeroNum label="Estimation"   value={estimationTxns.length} color={t.orange} t={t} small                    active={activeMetric==='estimation'} onClick={() => toggleMetric('estimation')} />
-          <FlowSep t={t} />
-          <HeroNum label="KYC"          value={kycTxns.length}        color={t.purple} t={t} small                    active={activeMetric==='kyc'}        onClick={() => toggleMetric('kyc')} />
-          <FlowSep t={t} />
-          <HeroNum label="Payment Due"  value={paymentTxns.length}    color={t.gold}   t={t} small                    active={activeMetric==='payment'}    onClick={() => toggleMetric('payment')} />
-          <FlowSep t={t} />
-          <HeroNum label="Walkout"      value={walkout}                color={t.red}    t={t} small weight={walkoutWt}  active={activeMetric==='walkout'}    onClick={() => toggleMetric('walkout')} />
-        </div>
-        <div style={{ display: 'flex', gap: 10, marginTop: 10, flexWrap: 'wrap' }}>
-          <Pill label="Overall conversion" value={`${conversionPct}%`} color={t.green} bg={t.greenDim} />
-          {inProgress > 0 && <Pill label="In pipeline" value={fmtNum(inProgress)} color={t.orange} bg={t.orangeDim} />}
-          {walkout > 0 && <Pill label="Walkout rate" value={`${walkoutRate}%`} color={t.red} bg={t.redDim} />}
-          {avgWt > 0 && <Pill label="Avg wt/completed" value={fmtWt(avgWt)} color={t.gold} bg={t.goldDim} />}
-          {activeMetric && (
-            <button onClick={() => setActiveMetric(null)} style={{ marginLeft: 'auto', padding: '3px 10px', borderRadius: 20, fontSize: '.58rem', cursor: 'pointer', border: `1px solid ${t.border}`, background: t.card2, color: t.text3 }}>
-              Clear filter ✕
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* ──────── 2. GOLD WEIGHT FLOW ──────── */}
-      <div>
-        <SectionLabel t={t}>Gold Weight Flow</SectionLabel>
-        <div style={{ display: 'flex', flexWrap: 'wrap', background: t.card, border: `1px solid ${t.border}`, borderRadius: 12, overflow: 'hidden', boxShadow: '0 2px 8px rgba(0,0,0,.10)' }}>
-          {[
-            { key: 'total',      label: 'Total',       wt: totalWt,      color: t.blue,   pct: 100 },
-            { key: 'completed',  label: 'Completed',   wt: completedWt,  color: t.green,  pct: totalWt > 0 ? completedWt / totalWt * 100 : 0 },
-            { key: 'inprogress', label: 'In Pipeline', wt: inProgressWt, color: t.orange, pct: totalWt > 0 ? inProgressWt / totalWt * 100 : 0 },
-            { key: 'walkin',     label: 'At Walk-in',  wt: walkinWt,     color: t.blue,   pct: totalWt > 0 ? walkinWt / totalWt * 100 : 0 },
-            { key: 'walkout',    label: 'Walkout',     wt: walkoutWt,    color: t.red,    pct: totalWt > 0 ? walkoutWt / totalWt * 100 : 0 },
-          ].map((item, i, arr) => (
-            <div key={item.key}
-              className="ws-item"
-              onClick={() => toggleMetric(item.key)}
-              onMouseEnter={e => e.currentTarget.style.background = t.card2}
-              onMouseLeave={e => e.currentTarget.style.background = activeMetric === item.key ? `${item.color}0c` : 'transparent'}
-              style={{ flex: 1, minWidth: 'calc(20% - 1px)', padding: '12px 14px', cursor: 'pointer', borderRight: i < arr.length - 1 ? `1px solid ${t.border}` : 'none', borderTop: activeMetric === item.key ? `3px solid ${item.color}` : `3px solid transparent`, background: activeMetric === item.key ? `${item.color}0c` : 'transparent', transition: 'background .15s, border-top .15s' }}>
-              <div style={{ fontSize: '.55rem', color: item.color, textTransform: 'uppercase', letterSpacing: '.1em', fontWeight: 700 }}>{item.label}</div>
-              <div style={{ fontSize: '.95rem', fontFamily: 'ui-monospace,monospace', color: t.text1, fontWeight: 300, marginTop: 4 }}>{item.wt > 0 ? fmtWt(item.wt) : '—'}</div>
-              <div style={{ marginTop: 7, height: 3, borderRadius: 2, background: t.border, overflow: 'hidden' }}>
-                <div style={{ height: '100%', width: `${Math.min(100, item.pct)}%`, background: item.color, borderRadius: 2, transition: 'width .6s ease' }} />
+                <div style={{ fontSize:'.55rem', color:t.text4, lineHeight:1.5 }}>{ex.sub}</div>
+                <div style={{ fontSize:'.48rem', color:ex.color, marginTop:4, opacity:.7 }}>{activeMetric===ex.key?'▲ showing':'▼ click to see'}</div>
               </div>
-              <div style={{ fontSize: '.5rem', color: t.text4, marginTop: 3 }}>{item.pct > 0 ? `${item.pct.toFixed(0)}% of total` : ''}</div>
-            </div>
-          ))}
-        </div>
-        <div style={{ display: 'flex', gap: 20, marginTop: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-          <span style={{ fontSize: '.6rem', color: t.text3 }}>Avg wt/completed: <strong style={{ color: t.text1, fontFamily: 'ui-monospace,monospace' }}>{avgWt > 0 ? fmtWt(avgWt) : '—'}</strong></span>
-          <span style={{ fontSize: '.6rem', color: t.text3 }}>Completed value: <strong style={{ color: t.gold, fontFamily: 'ui-monospace,monospace' }}>{fmtAmt(completedValue)}</strong></span>
-        </div>
-      </div>
-
-      {/* ──────── 2b. ACTIVITY INTELLIGENCE ──────── */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-        <NewCrmHourlyChart txns={txns} t={t} isToday={isToday} />
-        <NewCrmTxnTypeStrip txns={txns} t={t} />
-      </div>
-
-      {/* ──────── 2c. STAGE PIPELINE ──────── */}
-      <NewCrmStagePipeline txns={txns} t={t} toggleMetric={toggleMetric} activeMetric={activeMetric} />
-
-      {/* ──────── 2d. BRANCH PERFORMANCE ──────── */}
-      <NewCrmBranchTable txns={txns} t={t} />
-
-      {/* ──────── 3. REGION BREAKDOWN ──────── */}
-      {regions && regions.length > 1 && !regionFilter && (
-        <div className="lf-region">
-          <NewCrmRegionTable t={t} regions={regions} allTxns={allTxns} />
+            ))}
+          </div>
         </div>
       )}
 
-      {/* ──────── 4. DETAIL TABLE ──────── */}
+      {/* ── 3. PIPELINE ── */}
+      <div style={{ background:t.card, border:`1px solid ${t.border}`, borderRadius:12, padding:'20px 24px' }}>
+        <div style={{ display:'flex', alignItems:'center', justifyContent:'center', gap:0, flexWrap:'wrap' }}>
+          {PIPELINE.map((stage, i) => (
+            <div key={stage.key} style={{ display:'flex', alignItems:'center', gap:0 }}>
+              <div onClick={() => toggleMetric(stage.key)} style={{
+                cursor:'pointer', display:'flex', flexDirection:'column', alignItems:'center', gap:6,
+                padding:'8px 16px', borderRadius:12, transition:'all .15s',
+                background:activeMetric===stage.key?`${stage.color}12`:'transparent',
+                border:`1px solid ${activeMetric===stage.key?stage.color+'50':'transparent'}`,
+                opacity:stage.count===0?.35:1,
+              }}>
+                <span style={{ fontSize:'1.8rem', fontFamily:'ui-monospace,monospace', fontWeight:200, color:stage.color, lineHeight:1 }}>{stage.count}</span>
+                <span style={{ fontSize:'.52rem', color:t.text4, letterSpacing:'.08em', textTransform:'uppercase', whiteSpace:'nowrap' }}>{stage.label}</span>
+              </div>
+              {i < PIPELINE.length-1 && (
+                <div style={{ padding:'0 4px' }}>
+                  <div style={{ width:28, height:1, background:`linear-gradient(90deg,${stage.color}50,${PIPELINE[i+1].color}50)` }} />
+                </div>
+              )}
+            </div>
+          ))}
+          {walkout > 0 && (
+            <>
+              <div style={{ width:1, height:36, background:t.border, margin:'0 14px' }} />
+              <div onClick={() => toggleMetric('walkout')} style={{
+                cursor:'pointer', display:'flex', flexDirection:'column', alignItems:'center', gap:4,
+                padding:'8px 14px', borderRadius:10, transition:'all .15s',
+                background:activeMetric==='walkout'?`${t.red}12`:t.card2,
+                border:`1px dashed ${t.red}40`,
+              }}>
+                <span style={{ fontSize:'1.4rem', fontFamily:'ui-monospace,monospace', fontWeight:200, color:t.red, lineHeight:1 }}>{walkout}</span>
+                <span style={{ fontSize:'.5rem', color:t.red, letterSpacing:'.08em', textTransform:'uppercase' }}>Walkout</span>
+              </div>
+            </>
+          )}
+        </div>
+        {activeMetric && (
+          <div style={{ display:'flex', justifyContent:'center', marginTop:12 }}>
+            <button onClick={() => setActiveMetric(null)} style={{ padding:'3px 12px', borderRadius:20, fontSize:'.58rem', cursor:'pointer', border:`1px solid ${t.border}`, background:t.card2, color:t.text3 }}>
+              Clear ✕
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* ── 4. DETAIL TABLE ── */}
       {activeMetric && (
         <NewCrmDetail t={t} activeMetric={activeMetric} txns={txns} />
       )}
 
-      {/* ──────── 5. LIVE TIMELINE ──────── */}
+      {/* ── 5. LIVE TIMELINE (always open) ── */}
       <div>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: tlOpen ? 10 : 0 }}>
-          <SectionLabel t={t}>{isToday ? 'Live Timeline' : 'Timeline'} · New CRM</SectionLabel>
-          <button onClick={() => { setTlOpen(o => !o); clearNewEvents() }} style={{ padding: '4px 12px', borderRadius: 6, fontSize: '.6rem', cursor: 'pointer', border: `1px solid ${newEventCount > 0 ? t.green : t.border}`, background: newEventCount > 0 ? `${t.green}14` : t.card, color: newEventCount > 0 ? t.green : t.text3, marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6, transition: 'all .2s' }}>
-            {newEventCount > 0 && <span style={{ background: t.green, color: '#000', borderRadius: 8, fontSize: '.52rem', fontWeight: 700, padding: '1px 5px', lineHeight: 1.4 }}>+{newEventCount}</span>}
-            {tlOpen ? 'Collapse ▲' : 'Expand ▼'}
-          </button>
+        <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:10 }}>
+          <SectionLabel t={t}>{isToday?'Live Timeline':'Timeline'} · New CRM</SectionLabel>
+          <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+            {newEventCount > 0 && (
+              <span onClick={clearNewEvents} style={{ background:t.green, color:'#000', borderRadius:10, fontSize:'.52rem', fontWeight:700, padding:'2px 8px', lineHeight:1.5, cursor:'pointer' }}>
+                +{newEventCount} new
+              </span>
+            )}
+            <input type="text" placeholder="Search..." value={tlSearch} onChange={e => setTlSearch(e.target.value)}
+              style={{ background:t.card2, border:`1px solid ${t.border}`, borderRadius:6, padding:'5px 10px', fontSize:'.62rem', color:t.text2, outline:'none', width:180, fontFamily:'ui-monospace,monospace' }} />
+          </div>
         </div>
-        {tlOpen && (
-          <Card t={t} style={{ padding: 0, overflow: 'hidden' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 16px', borderBottom: `1px solid ${t.border}`, flexWrap: 'wrap' }}>
-              <input type="text" placeholder="Search name, mobile, branch..." value={tlSearch} onChange={e => setTlSearch(e.target.value)}
-                style={{ background: t.card2, border: `1px solid ${t.border}`, borderRadius: 6, padding: '5px 10px', fontSize: '.62rem', color: t.text2, outline: 'none', width: 220, fontFamily: 'ui-monospace, monospace' }} />
-              <span style={{ fontSize: '.6rem', color: t.text4, marginLeft: 4 }}>{tlSearch ? txns.filter(tx => { const s = tlSearch.toLowerCase(); return (tx.cust_name||'').toLowerCase().includes(s) || (tx.cust_mobile||'').includes(s) || (tx.branch_name||'').toLowerCase().includes(s) }).length : txns.length} events</span>
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '70px 28px 1fr 110px 120px', gap: '0 12px', padding: '8px 20px', background: t.card2, borderBottom: `1px solid ${t.border}` }}>
-              {['Time', '', 'Customer / Branch', 'Weight', 'Amount'].map((h, i) => (
-                <span key={i} style={{ fontSize: '.57rem', color: t.text3, fontWeight: 600, letterSpacing: '.1em', textTransform: 'uppercase', textAlign: i >= 3 ? 'right' : i === 0 ? 'right' : 'left' }}>{h}</span>
-              ))}
-            </div>
-            <div style={{ maxHeight: 480, overflowY: 'auto' }}>
-              {(() => {
-                const sorted = [...txns].sort((a, b) => (b.txn_time || '').localeCompare(a.txn_time || ''))
-                const visible = tlSearch
-                  ? sorted.filter(tx => {
-                      const s = tlSearch.toLowerCase()
-                      return (tx.cust_name||'').toLowerCase().includes(s) || (tx.cust_mobile||'').includes(s) || (tx.branch_name||'').toLowerCase().includes(s)
-                    })
-                  : sorted
-                return visible.map((tx, i, arr) => (
-                  <NewCrmTimelineRow key={tx.id} item={tx} t={t} isLast={i === arr.length - 1} />
-                ))
-              })()}
-            </div>
-          </Card>
-        )}
+        <Card t={t} style={{ padding:0, overflow:'hidden' }}>
+          <div style={{ display:'grid', gridTemplateColumns:'70px 28px 1fr 110px 120px', gap:'0 12px', padding:'8px 20px', background:t.card2, borderBottom:`1px solid ${t.border}` }}>
+            {['Time','','Customer / Branch','Weight','Amount'].map((h,i) => (
+              <span key={i} style={{ fontSize:'.57rem', color:t.text3, fontWeight:600, letterSpacing:'.1em', textTransform:'uppercase', textAlign:i>=3?'right':i===0?'right':'left' }}>{h}</span>
+            ))}
+          </div>
+          <div style={{ maxHeight:520, overflowY:'auto' }}>
+            {sorted.filter(tx => {
+              if (!tlSearch) return true
+              const s = tlSearch.toLowerCase()
+              return (tx.cust_name||'').toLowerCase().includes(s)||(tx.cust_mobile||'').includes(s)||(tx.branch_name||'').toLowerCase().includes(s)
+            }).map((tx,i,arr) => (
+              <NewCrmTimelineRow key={tx.id} item={tx} t={t} isLast={i===arr.length-1} />
+            ))}
+            {sorted.length===0 && <div style={{ padding:32, textAlign:'center', color:t.text4, fontSize:'.72rem' }}>No events yet</div>}
+          </div>
+        </Card>
       </div>
+
     </div>
   )
 }
+
 
 /* ── New CRM Detail Table ── */
 function NewCrmDetail({ t, activeMetric, txns }) {
