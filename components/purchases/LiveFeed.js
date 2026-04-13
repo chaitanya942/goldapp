@@ -983,19 +983,6 @@ function OldCrmTab({
         )
       })()}
 
-      {/* ──────── 1d. ACTIVITY INTELLIGENCE ──────── */}
-      {canSee('livefeed.customer_journey') && (hourlyData.length > 0 || todayTxns.length > 0) && (
-        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16 }}>
-          <HourlyChart hourly={hourlyData} t={t} isToday={isToday} />
-          <PaymentModeStrip txns={todayTxns} t={t} />
-        </div>
-      )}
-
-      {/* ──────── 1e. WALK-IN INTELLIGENCE ──────── */}
-      {canSee('livefeed.customer_journey') && todayWalkins.length > 0 && (
-        <WalkinIntelligence walkins={todayWalkins} t={t} />
-      )}
-
       {/* ──────── 2. GOLD WEIGHT STRIP + REGION TABLE ──────── */}
       {canSee('livefeed.weight_flow') && <div>
 
