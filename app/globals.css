@@ -52,11 +52,16 @@ button { cursor: pointer; }
 .recharts-surface,
 .recharts-wrapper { background: transparent !important; --recharts-background-color: transparent; }
 
-/* Kill all focus rings on charts — SVG gets native focus on click, suppress unconditionally */
+/* Kill all focus rings on charts */
 svg { outline: none !important; }
 .recharts-wrapper,
 .recharts-surface,
 .recharts-wrapper * { outline: none !important; box-shadow: none !important; }
+
+/* SVG is transparent to pointer events — mouse events land on wrapper div instead,
+   so tooltips still work but the SVG can never receive click-focus */
+svg.recharts-surface { pointer-events: none !important; }
+.recharts-wrapper { pointer-events: auto !important; }
 
 /* Cursor rectangle on hover */
 .recharts-tooltip-cursor { stroke: none !important; fill: transparent !important; }
