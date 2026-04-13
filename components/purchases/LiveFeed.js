@@ -1379,8 +1379,8 @@ function ChecklistTable({ rows, t }) {
   )
   // Column presence — chklist_tbl joined with customer_tbl gives cust_name + cust_mobile
   const sample = rows[0]
-  const nameCol    = ['cust_name','name','customer_name','custname'].find(k => k in sample)
-  const mobileCol  = ['cust_mobile','mob_num','mobile','mobile_no','phone'].find(k => k in sample)
+  const nameCol    = ['cust_name','name','customer_name','custname','kyc_name','client_name'].find(k => k in sample)
+  const mobileCol  = ['cust_mobile','mob_num','mobile','mobile_no','phone','cust_mob','contact'].find(k => k in sample)
   const timeCol    = ['time','entry_time','created_time'].find(k => k in sample)
 
   const cols = ['Time', 'Customer', 'Phone', 'Gold (g)', 'Reason for Selling']
