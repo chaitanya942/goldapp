@@ -359,22 +359,16 @@ export async function GET(req) {
           WHERE DATE(r.date + INTERVAL 330 MINUTE) = ?
         `, [todayIST]),
 
-        // 8. KYC checklist filled today — join customer_tbl for name/mobile, walk-in for branch
+        // 8. KYC checklist filled today — chklist_tbl has branch_id directly
         conn.execute(`
           SELECT c.*, ct.cust_name, ct.cust_mobile,
-            cw.branch_id, b.brnch_name AS branch_name
+            b.brnch_name AS branch_name
           FROM chklist_tbl c
           LEFT JOIN customer_tbl ct ON ct.cust_id = c.kyc_id
-          LEFT JOIN (
-            SELECT cust_mobile, branch_id
-            FROM customer_walkin
-            WHERE DATE(date + INTERVAL 330 MINUTE) = ?
-            GROUP BY cust_mobile, branch_id
-          ) cw ON cw.cust_mobile = ct.cust_mobile
-          LEFT JOIN branch_tbl b ON b.brnch_id = cw.branch_id
+          LEFT JOIN branch_tbl b ON b.brnch_id = c.branch_id
           WHERE DATE(c.date + INTERVAL 330 MINUTE) = ?
           ORDER BY c.date DESC
-        `, [todayIST, todayIST]),
+        `, [todayIST]),
 
         // 9. Takeover bills today + original walk-in date from customer_walkin history
         conn.execute(`
