@@ -359,14 +359,22 @@ export async function GET(req) {
           WHERE DATE(r.date + INTERVAL 330 MINUTE) = ?
         `, [todayIST]),
 
-        // 8. KYC checklist filled today — join customer_tbl via kyc_id to get name + mobile
+        // 8. KYC checklist filled today — join customer_tbl for name/mobile, walk-in for branch
         conn.execute(`
-          SELECT c.*, ct.cust_name, ct.cust_mobile
+          SELECT c.*, ct.cust_name, ct.cust_mobile,
+            cw.branch_id, b.brnch_name AS branch_name
           FROM chklist_tbl c
           LEFT JOIN customer_tbl ct ON ct.cust_id = c.kyc_id
+          LEFT JOIN (
+            SELECT cust_mobile, branch_id
+            FROM customer_walkin
+            WHERE DATE(date + INTERVAL 330 MINUTE) = ?
+            GROUP BY cust_mobile, branch_id
+          ) cw ON cw.cust_mobile = ct.cust_mobile
+          LEFT JOIN branch_tbl b ON b.brnch_id = cw.branch_id
           WHERE DATE(c.date + INTERVAL 330 MINUTE) = ?
           ORDER BY c.date DESC
-        `, [todayIST]),
+        `, [todayIST, todayIST]),
 
         // 9. Takeover bills today + original walk-in date from customer_walkin history
         conn.execute(`
@@ -401,6 +409,7 @@ export async function GET(req) {
       for (const tx of todayTxns)    tx.region = regionMap[String(tx.branch_id)] || ''
       for (const w  of todayWalkins) w.region  = regionMap[String(w.branch_id)]  || ''
       for (const k  of kycRows)      k.region  = regionMap[String(k.branh_id)]   || ''
+      for (const c  of chklistRows)  c.region  = regionMap[String(c.branch_id)]  || ''
 
       // grms_wet is CSV per row (e.g. "24.91,17.05,2.96") — must parse in JS
       const csvSum = str => String(str || '').split(',').reduce((s, v) => {

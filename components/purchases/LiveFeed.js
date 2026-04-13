@@ -279,7 +279,8 @@ export default function LiveFeed() {
     kyc_blacklisted_wt:  parseFloat(rKycRows.reduce((s, r) => s + (parseFloat(r.grams) || 0), 0).toFixed(2)),
     kyc_overridden_cnt:  rKycRows.filter(r => rApprovedMobiles.has(r.mob_num)).length,
     // not_billed already excludes KYC blocked (computed above via notBilledWalkins)
-    kyc_checklist_cnt:   goldPipeline.kyc_checklist_cnt || 0,
+    kyc_checklist_cnt:   (goldPipeline.kyc_checklist_rows || []).filter(r => r.region === regionFilter).length,
+    kyc_checklist_rows:  (goldPipeline.kyc_checklist_rows || []).filter(r => r.region === regionFilter),
     physical:  goldPipeline.physical  || {},
     released:  goldPipeline.released  || {},
   } : goldPipeline
