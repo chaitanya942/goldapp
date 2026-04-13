@@ -1829,17 +1829,8 @@ function NewCrmTab({ t, newCrmTxns, newCrmError, regionFilter, regions, isToday,
         </div>
       </div>
 
-      {/* ──────── 2b. ACTIVITY INTELLIGENCE ──────── */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-        <NewCrmHourlyChart txns={txns} t={t} isToday={isToday} />
-        <NewCrmTxnTypeStrip txns={txns} t={t} />
-      </div>
-
-      {/* ──────── 2c. STAGE PIPELINE ──────── */}
+      {/* ──────── 2b. STAGE PIPELINE ──────── */}
       <NewCrmStagePipeline txns={txns} t={t} toggleMetric={toggleMetric} activeMetric={activeMetric} />
-
-      {/* ──────── 2d. BRANCH PERFORMANCE ──────── */}
-      <NewCrmBranchTable txns={txns} t={t} />
 
       {/* ──────── 3. REGION BREAKDOWN ──────── */}
       {regions && regions.length > 1 && !regionFilter && (
@@ -1981,116 +1972,6 @@ function NewCrmTxnTable({ rows, t }) {
   )
 }
 
-/* ── New CRM Hourly Chart ── */
-function NewCrmHourlyChart({ txns, t, isToday }) {
-  const hours = {}
-  for (let h = 7; h <= 21; h++) hours[h] = { completed: 0, inprogress: 0, walkout: 0 }
-  for (const tx of txns) {
-    const h = parseInt((tx.txn_time || '00:00:00').split(':')[0])
-    const key = Math.min(Math.max(h, 7), 21)
-    if (tx.status === 'FINAL_PAYMENT_COMPLETED') hours[key].completed++
-    else if (tx.status === 'WALKOUT') hours[key].walkout++
-    else hours[key].inprogress++
-  }
-  const hArr = Object.entries(hours).map(([h, v]) => ({ h: parseInt(h), ...v, total: v.completed + v.inprogress + v.walkout }))
-  const maxVal = Math.max(...hArr.map(h => h.total), 1)
-  const peakH  = hArr.reduce((b, h) => h.total > b.total ? h : b, hArr[0])
-  const nowHour = new Date(Date.now() + 5.5 * 60 * 60 * 1000).getUTCHours()
-  const hLabel = h => h > 12 ? `${h - 12}p` : h === 12 ? '12p' : `${h}a`
-  return (
-    <div style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: 12, padding: '16px 14px', display: 'flex', flexDirection: 'column', gap: 8 }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <span style={{ fontSize: '.6rem', color: t.text3, fontWeight: 700, letterSpacing: '.1em', textTransform: 'uppercase' }}>Hourly Activity</span>
-        {peakH.total > 0 && <span style={{ fontSize: '.58rem', color: t.text4 }}>peak <strong style={{ color: t.gold }}>{hLabel(peakH.h)}</strong> · {peakH.total}</span>}
-      </div>
-      <div style={{ display: 'flex', alignItems: 'flex-end', gap: 3, height: 64 }}>
-        {hArr.map(({ h, completed, inprogress, walkout, total }) => {
-          const barH = maxVal > 0 ? Math.max(total / maxVal * 56, total > 0 ? 4 : 0) : 0
-          const isCurrent = isToday && h === nowHour
-          return (
-            <div key={h} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
-              {total > 0 && <span style={{ fontSize: '.42rem', color: isCurrent ? t.gold : t.text4, fontFamily: 'ui-monospace,monospace', lineHeight: 1 }}>{total}</span>}
-              <div style={{ width: '100%', height: barH, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', borderRadius: '3px 3px 0 0', overflow: 'hidden', outline: isCurrent ? `1.5px solid ${t.gold}` : 'none', outlineOffset: 1 }}>
-                {walkout > 0   && <div style={{ width: '100%', flex: walkout,    background: t.red }} />}
-                {inprogress > 0 && <div style={{ width: '100%', flex: inprogress, background: t.orange }} />}
-                {completed > 0  && <div style={{ width: '100%', flex: completed,  background: t.green }} />}
-                {total === 0    && <div style={{ width: '100%', height: 2, background: t.border, borderRadius: 2 }} />}
-              </div>
-            </div>
-          )
-        })}
-      </div>
-      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 3 }}>
-        {hArr.map(({ h }) => (
-          <div key={h} style={{ flex: 1, textAlign: 'center' }}>
-            <span style={{ fontSize: '.38rem', color: isToday && h === nowHour ? t.gold : t.text4 }}>{hLabel(h)}</span>
-          </div>
-        ))}
-      </div>
-      <div style={{ display: 'flex', gap: 10, marginTop: 2 }}>
-        {[['Completed', t.green], ['In Progress', t.orange], ['Walkout', t.red]].map(([l, c]) => (
-          <div key={l} style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
-            <div style={{ width: 6, height: 6, borderRadius: 1, background: c }} />
-            <span style={{ fontSize: '.48rem', color: t.text4 }}>{l}</span>
-          </div>
-        ))}
-      </div>
-    </div>
-  )
-}
-
-/* ── New CRM Transaction Type Strip ── */
-function NewCrmTxnTypeStrip({ txns, t }) {
-  const physical  = txns.filter(tx => !(tx.transaction_type || '').toUpperCase().includes('RELEASE'))
-  const takeover  = txns.filter(tx =>  (tx.transaction_type || '').toUpperCase().includes('RELEASE'))
-  const physDone  = physical.filter(tx => tx.status === 'FINAL_PAYMENT_COMPLETED')
-  const tkoDone   = takeover.filter(tx => tx.status === 'FINAL_PAYMENT_COMPLETED')
-  const physVal   = physDone.reduce((s, tx) => s + (Number(tx.amount) || 0), 0)
-  const tkoVal    = tkoDone.reduce((s,  tx) => s + (Number(tx.amount) || 0), 0)
-  const physConv  = physical.length > 0 ? Math.round(physDone.length / physical.length * 100) : 0
-  const tkoConv   = takeover.length > 0 ? Math.round(tkoDone.length  / takeover.length  * 100) : 0
-  const total     = txns.length
-  const physPct   = total > 0 ? Math.round(physical.length / total * 100) : 0
-  const tkoPct    = total > 0 ? Math.round(takeover.length / total * 100) : 0
-
-  const items = [
-    { label: 'Physical',  count: physical.length, done: physDone.length, value: physVal, conv: physConv, pct: physPct, color: t.blue },
-    { label: 'Takeover',  count: takeover.length, done: tkoDone.length,  value: tkoVal,  conv: tkoConv,  pct: tkoPct,  color: t.gold },
-  ]
-  return (
-    <div style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: 12, padding: '16px 14px', display: 'flex', flexDirection: 'column', gap: 10 }}>
-      <span style={{ fontSize: '.6rem', color: t.text3, fontWeight: 700, letterSpacing: '.1em', textTransform: 'uppercase' }}>Transaction Type</span>
-      <div style={{ display: 'flex', height: 8, borderRadius: 4, overflow: 'hidden', gap: 1 }}>
-        {items.map(item => item.count > 0 && (
-          <div key={item.label} style={{ flex: item.count, background: item.color, opacity: .75 }} />
-        ))}
-      </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 4 }}>
-        {items.map(item => (
-          <div key={item.label} style={{ display: 'flex', alignItems: 'center', gap: 8, opacity: item.count === 0 ? .35 : 1 }}>
-            <div style={{ width: 8, height: 8, borderRadius: 2, background: item.color, flexShrink: 0 }} />
-            <span style={{ fontSize: '.65rem', color: t.text2, flex: 1 }}>{item.label}</span>
-            <span style={{ fontSize: '.6rem', fontFamily: 'ui-monospace,monospace', color: item.color, fontWeight: 600, minWidth: 24, textAlign: 'right' }}>{item.count}</span>
-            <span style={{ fontSize: '.55rem', color: t.text4, minWidth: 28, textAlign: 'right' }}>{item.pct}%</span>
-            <div style={{ width: 40, height: 3, borderRadius: 2, background: t.border, overflow: 'hidden', flexShrink: 0 }}>
-              <div style={{ height: '100%', width: `${item.conv}%`, background: item.conv >= 50 ? t.green : t.orange, borderRadius: 2 }} />
-            </div>
-            <span style={{ fontSize: '.55rem', color: t.text4, minWidth: 28, textAlign: 'right' }}>{item.conv}%</span>
-          </div>
-        ))}
-      </div>
-      <div style={{ marginTop: 2, display: 'flex', flexDirection: 'column', gap: 2 }}>
-        {items.filter(i => i.value > 0).map(item => (
-          <div key={item.label} style={{ display: 'flex', justifyContent: 'space-between' }}>
-            <span style={{ fontSize: '.55rem', color: t.text4 }}>{item.label} value</span>
-            <span style={{ fontSize: '.6rem', color: t.gold, fontFamily: 'ui-monospace,monospace', fontWeight: 600 }}>{fmtAmt(item.value)}</span>
-          </div>
-        ))}
-      </div>
-    </div>
-  )
-}
-
 /* ── New CRM Stage Pipeline ── */
 function NewCrmStagePipeline({ txns, t, toggleMetric, activeMetric }) {
   const STAGE_DEFS = [
@@ -2147,68 +2028,6 @@ function NewCrmStagePipeline({ txns, t, toggleMetric, activeMetric }) {
   )
 }
 
-/* ── New CRM Branch Performance Table ── */
-function NewCrmBranchTable({ txns, t }) {
-  const map = {}
-  for (const tx of txns) {
-    const b = (tx.branch_name || 'Unknown').trim()
-    if (!map[b]) map[b] = { name: b, total: 0, completed: 0, inprogress: 0, walkout: 0, value: 0 }
-    map[b].total++
-    if (tx.status === 'FINAL_PAYMENT_COMPLETED') { map[b].completed++; map[b].value += Number(tx.amount) || 0 }
-    else if (tx.status === 'WALKOUT') map[b].walkout++
-    else if (IN_PROGRESS_STATUSES.includes(tx.status)) map[b].inprogress++
-  }
-  const rows = Object.values(map).sort((a, b) => b.completed - a.completed)
-  if (!rows.length) return null
-  const maxComp = Math.max(...rows.map(r => r.completed), 1)
-  const cols = ['Branch', 'Total', 'In Prog', 'Completed', 'Walkout', 'Value', 'Conv %']
-  return (
-    <div>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-        <SectionLabel t={t}>Branch Performance · New CRM</SectionLabel>
-        <button onClick={() => downloadCSV('new-crm-branches.csv', cols, rows, r => [r.name, r.total, r.inprogress, r.completed, r.walkout, r.value.toFixed(0), `${r.total > 0 ? Math.round(r.completed/r.total*100) : 0}%`])}
-          style={{ padding: '4px 12px', borderRadius: 6, fontSize: '.58rem', cursor: 'pointer', border: `1px solid ${t.border}`, background: t.card, color: t.text3 }}>
-          ↓ CSV
-        </button>
-      </div>
-      <Card t={t} style={{ padding: 0, overflow: 'hidden' }}>
-        <div style={{ overflowX: 'auto' }}>
-          <div style={{ minWidth: 640 }}>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 60px 70px 110px 70px 110px 80px', gap: 8, padding: '8px 16px', background: t.card2, borderBottom: `1px solid ${t.border}` }}>
-              {cols.map(h => <span key={h} style={{ fontSize: '.56rem', color: t.text3, fontWeight: 600, letterSpacing: '.1em', textTransform: 'uppercase' }}>{h}</span>)}
-            </div>
-            {rows.map((r, i) => {
-              const conv = r.total > 0 ? Math.round(r.completed / r.total * 100) : 0
-              return (
-                <div key={r.name} style={{ display: 'grid', gridTemplateColumns: '1fr 60px 70px 110px 70px 110px 80px', gap: 8, padding: '10px 16px', borderBottom: i < rows.length - 1 ? `1px solid ${t.border}18` : 'none', alignItems: 'center' }}
-                  onMouseEnter={e => e.currentTarget.style.background = t.card2}
-                  onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
-                  <span style={{ fontSize: '.72rem', color: t.text1, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.name}</span>
-                  <span style={{ fontSize: '.68rem', color: t.blue, fontFamily: 'ui-monospace,monospace' }}>{r.total}</span>
-                  <span style={{ fontSize: '.68rem', color: t.orange, fontFamily: 'ui-monospace,monospace' }}>{r.inprogress || '—'}</span>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <span style={{ fontSize: '.68rem', color: t.green, fontFamily: 'ui-monospace,monospace', fontWeight: 600, minWidth: 20 }}>{r.completed}</span>
-                    <div style={{ flex: 1, height: 3, borderRadius: 2, background: t.border, overflow: 'hidden' }}>
-                      <div style={{ height: '100%', width: `${r.completed / maxComp * 100}%`, background: t.green, borderRadius: 2 }} />
-                    </div>
-                  </div>
-                  <span style={{ fontSize: '.68rem', color: t.red, fontFamily: 'ui-monospace,monospace' }}>{r.walkout || '—'}</span>
-                  <span style={{ fontSize: '.68rem', color: t.gold, fontFamily: 'ui-monospace,monospace' }}>{r.value > 0 ? fmtAmt(r.value) : '—'}</span>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                    <div style={{ flex: 1, height: 4, borderRadius: 2, background: t.border, overflow: 'hidden' }}>
-                      <div style={{ height: '100%', width: `${conv}%`, background: conv >= 50 ? t.green : conv >= 30 ? t.orange : t.red, borderRadius: 2 }} />
-                    </div>
-                    <span style={{ fontSize: '.6rem', color: t.text3, fontFamily: 'ui-monospace,monospace', whiteSpace: 'nowrap' }}>{conv}%</span>
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-        </div>
-      </Card>
-    </div>
-  )
-}
 
 /* ── New CRM Region Table ── */
 function NewCrmRegionTable({ t, regions, allTxns }) {
