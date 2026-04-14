@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { createPortal } from 'react-dom'
 import { fmt, fmtVal, pct, getStyles, HeatmapRow } from './reportUtils'
 
 // ─────────────────────────────────────────────
@@ -8,6 +9,9 @@ import { fmt, fmtVal, pct, getStyles, HeatmapRow } from './reportUtils'
 // ─────────────────────────────────────────────
 function Panel({ id, expanded, onExpand, onClose, t, cardStyle = {}, noExpand = false, children }) {
   const isExp = !noExpand && expanded === id
+  const [mounted, setMounted] = useState(false)
+
+  useEffect(() => { setMounted(true) }, [])
 
   useEffect(() => {
     if (!isExp) return
@@ -16,59 +20,54 @@ function Panel({ id, expanded, onExpand, onClose, t, cardStyle = {}, noExpand = 
     return () => window.removeEventListener('keydown', fn)
   }, [isExp, onClose])
 
+  const modal = isExp && mounted ? createPortal(
+    <>
+      <style>{`@keyframes panelPop { from { opacity:0; transform:translate(-50%,-47%) scale(.94); } to { opacity:1; transform:translate(-50%,-50%) scale(1); } }`}</style>
+      <div
+        onClick={onClose}
+        style={{
+          position: 'fixed', inset: 0, zIndex: 9998,
+          background: 'rgba(0,0,0,0.72)',
+          backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)',
+          cursor: 'pointer',
+        }}
+      />
+      <div style={{
+        ...cardStyle,
+        position: 'fixed',
+        top: '50%', left: '50%',
+        transform: 'translate(-50%, -50%)',
+        width: 'min(1100px, 96vw)',
+        maxHeight: '90vh', overflowY: 'auto',
+        zIndex: 9999,
+        cursor: 'default',
+        boxShadow: '0 32px 80px rgba(0,0,0,0.9)',
+        animation: 'panelPop .22s cubic-bezier(.34,1.3,.64,1)',
+      }}>
+        <button
+          onClick={onClose}
+          style={{
+            position: 'sticky', top: 0, float: 'right',
+            background: 'transparent', border: 'none',
+            color: t.text3, fontSize: '1.1rem', cursor: 'pointer',
+            padding: '0 0 8px 12px', lineHeight: 1, zIndex: 2,
+          }}
+        >✕</button>
+        {children}
+      </div>
+    </>,
+    document.body
+  ) : null
+
   return (
     <>
-      {/* ── Card always stays in its normal flow position ── */}
       <div
         onClick={() => !noExpand && !isExp && onExpand(id)}
-        style={{
-          ...cardStyle,
-          cursor: noExpand ? 'default' : 'pointer',
-        }}
+        style={{ ...cardStyle, cursor: noExpand ? 'default' : 'pointer' }}
       >
         {children}
       </div>
-
-      {/* ── Separate modal overlay — rendered outside card so charts size correctly ── */}
-      {isExp && (
-        <>
-          <style>{`@keyframes panelPop { from { opacity:0; transform:translate(-50%,-48%) scale(.95); } to { opacity:1; transform:translate(-50%,-50%) scale(1); } }`}</style>
-          {/* Backdrop */}
-          <div
-            onClick={onClose}
-            style={{
-              position: 'fixed', inset: 0, zIndex: 9998,
-              background: 'rgba(0,0,0,0.72)',
-              backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)',
-              cursor: 'pointer',
-            }}
-          />
-          {/* Modal card */}
-          <div style={{
-            ...cardStyle,
-            position: 'fixed',
-            top: '50%', left: '50%',
-            transform: 'translate(-50%, -50%)',
-            width: 'min(1100px, 96vw)',
-            maxHeight: '90vh', overflowY: 'auto',
-            zIndex: 9999,
-            cursor: 'default',
-            boxShadow: '0 32px 80px rgba(0,0,0,0.9)',
-            animation: 'panelPop .2s cubic-bezier(.34,1.3,.64,1)',
-          }}>
-            <button
-              onClick={onClose}
-              style={{
-                position: 'sticky', top: 0, float: 'right',
-                background: 'transparent', border: 'none',
-                color: t.text3, fontSize: '1.1rem', cursor: 'pointer',
-                padding: '0 0 8px 12px', lineHeight: 1, zIndex: 2,
-              }}
-            >✕</button>
-            {children}
-          </div>
-        </>
-      )}
+      {modal}
     </>
   )
 }
