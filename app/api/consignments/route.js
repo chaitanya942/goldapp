@@ -35,44 +35,47 @@ export async function GET(req) {
 
     if (pErr) return Response.json({ data: [], error: pErr.message })
 
-    // Fetch branch metadata for region lookup (all active branches, filter in JS)
+    // Fetch branch metadata — filter outside_bangalore by model_type
     const { data: branches, error: bErr } = await supabase
       .from('branches')
-      .select('name, region, state')
+      .select('name, region, state, model_type, pickup_time')
       .eq('is_active', true)
 
     if (bErr) return Response.json({ data: [], error: bErr.message })
 
     const branchMeta = {}
     for (const b of branches || []) {
-      branchMeta[b.name] = { region: b.region || 'Unknown', state: b.state }
+      branchMeta[b.name] = { region: b.region || 'Unknown', state: b.state, model_type: b.model_type, pickup_time: b.pickup_time || null }
     }
 
-    // Bangalore branch names to exclude
-    const bangaloreBranches = new Set(
-      (branches || []).filter(b => b.region === 'Bangalore').map(b => b.name)
+    // Only outside_bangalore branches
+    const outsideBranches = new Set(
+      (branches || []).filter(b => b.model_type === 'outside_bangalore').map(b => b.name)
     )
 
     const summary = {}
     for (const row of purchases || []) {
       const key  = row.branch_name
-      // Skip Bangalore branches
-      if (bangaloreBranches.has(key)) continue
-      const meta = branchMeta[key] || { region: 'Unknown', state: null }
+      // Skip non-outside branches
+      if (!outsideBranches.has(key)) continue
+      const meta = branchMeta[key] || { region: 'Unknown', state: null, pickup_time: null }
       if (!summary[key]) {
         summary[key] = {
-          branch_name: key, region: meta.region,
+          branch_name: key, region: meta.region, pickup_time: meta.pickup_time,
           ship_before: null,
           total_bills: 0, today_bills: 0, older_bills: 0,
+          today_net_wt: 0, older_net_wt: 0,
           total_gross_wt: 0, total_net_wt: 0, oldest_date: null,
         }
       }
-      const s = summary[key]
+      const s   = summary[key]
+      const nw  = parseFloat(row.net_weight   || 0)
+      const gw  = parseFloat(row.gross_weight || 0)
       s.total_bills++
-      if (row.purchase_date === todayIST) s.today_bills++
-      else s.older_bills++
-      s.total_gross_wt += parseFloat(row.gross_weight || 0)
-      s.total_net_wt   += parseFloat(row.net_weight   || 0)
+      s.total_gross_wt += gw
+      s.total_net_wt   += nw
+      if (row.purchase_date === todayIST) { s.today_bills++; s.today_net_wt += nw }
+      else                                { s.older_bills++; s.older_net_wt += nw }
       if (!s.oldest_date || row.purchase_date < s.oldest_date) s.oldest_date = row.purchase_date
     }
 

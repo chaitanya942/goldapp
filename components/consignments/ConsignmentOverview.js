@@ -190,11 +190,11 @@ export default function ConsignmentOverview() {
       {/* ── Summary KPIs ── */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '10px' }}>
         {[
-          { label: 'Branches with Stock', value: filtered.length,          color: t.text1  },
-          { label: 'Total Bills',          value: fmtNum(grandBills),      color: t.gold   },
-          { label: 'Older Stock (Bills)',   value: fmtNum(grandOlder),     color: t.orange },
-          { label: 'Today\'s Additions',   value: fmtNum(grandToday),     color: t.blue   },
-          { label: 'Total Gross Weight',   value: `${fmt(grandGross, 2)}g`, color: t.green  },
+          { label: 'Branches with Stock',  value: filtered.length,                                                             color: t.text1  },
+          { label: 'Today\'s Bills',        value: fmtNum(grandToday),                                                          color: t.blue   },
+          { label: 'Today\'s Net Wt',       value: `${fmt(filtered.reduce((s,b)=>s+(b.today_net_wt||0),0),2)}g`,               color: t.blue   },
+          { label: 'Pending Bills',         value: fmtNum(grandOlder),                                                          color: t.orange },
+          { label: 'Pending Net Wt',        value: `${fmt(filtered.reduce((s,b)=>s+(b.older_net_wt||0),0),2)}g`,               color: t.orange },
         ].map(k => (
           <div key={k.label} style={{ ...card, padding: '12px 16px' }}>
             <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.08em', textTransform: 'uppercase', marginBottom: '5px' }}>{k.label}</div>
@@ -251,12 +251,11 @@ export default function ConsignmentOverview() {
                 <tr>
                   <th style={{ ...th, width: '32px', textAlign: 'center' }}>#</th>
                   <th style={th}>Branch</th>
-                  <th style={th}>Ship Before <span style={{ color: t.text4, fontWeight: 400, letterSpacing: 0, textTransform: 'none' }}>(est.)</span></th>
-                  <th style={{ ...th, textAlign: 'right' }}>Total Bills</th>
-                  <th style={{ ...th, textAlign: 'right' }}>Today's</th>
-                  <th style={{ ...th, textAlign: 'right' }}>Older Stock</th>
-                  <th style={{ ...th, textAlign: 'right' }}>Gross Weight</th>
-                  <th style={{ ...th, textAlign: 'right' }}>Net Weight</th>
+                  <th style={{ ...th, textAlign: 'center' }}>Pickup Time</th>
+                  <th style={{ ...th, textAlign: 'right' }}>Today's Bills</th>
+                  <th style={{ ...th, textAlign: 'right' }}>Today's Net Wt</th>
+                  <th style={{ ...th, textAlign: 'right' }}>Pending Bills</th>
+                  <th style={{ ...th, textAlign: 'right' }}>Pending Net Wt</th>
                   <th style={{ ...th, textAlign: 'center' }}>Oldest Bill</th>
                   <th style={{ ...th, textAlign: 'center' }}>Action</th>
                 </tr>
@@ -281,38 +280,36 @@ export default function ConsignmentOverview() {
                         <span style={{ fontSize: '10px', color: rColor, background: `${rColor}15`, borderRadius: '4px', padding: '1px 6px', marginTop: '3px', display: 'inline-block' }}>{b.region}</span>
                       </td>
 
-                      {/* Ship Before */}
-                      <td style={{ padding: '10px 14px' }}>
-                        <ShipBadge date={b.ship_before} t={t} />
-                      </td>
-
-                      {/* Total Bills */}
-                      <td style={{ padding: '10px 14px', textAlign: 'right', fontSize: '15px', fontWeight: 300, color: t.gold, fontFamily: 'monospace' }}>{b.total_bills}</td>
-
-                      {/* Today's */}
-                      <td style={{ padding: '10px 14px', textAlign: 'right' }}>
-                        {b.today_bills > 0
-                          ? <span style={{ fontSize: '13px', color: t.blue, fontFamily: 'monospace', fontWeight: 500 }}>+{b.today_bills}</span>
+                      {/* Pickup Time */}
+                      <td style={{ padding: '10px 14px', textAlign: 'center' }}>
+                        {b.pickup_time
+                          ? <span style={{ fontSize: '12px', color: t.blue, background: `${t.blue}15`, borderRadius: '5px', padding: '2px 8px', fontWeight: 600 }}>{b.pickup_time}</span>
                           : <span style={{ fontSize: '11px', color: t.text4 }}>—</span>}
                       </td>
 
-                      {/* Older Stock */}
+                      {/* Today's Bills */}
+                      <td style={{ padding: '10px 14px', textAlign: 'right' }}>
+                        {b.today_bills > 0
+                          ? <span style={{ fontSize: '13px', color: t.blue, fontFamily: 'monospace', fontWeight: 600 }}>{b.today_bills}</span>
+                          : <span style={{ fontSize: '11px', color: t.text4 }}>—</span>}
+                      </td>
+
+                      {/* Today's Net Wt */}
+                      <td style={{ padding: '10px 14px', textAlign: 'right', fontSize: '12px', color: b.today_net_wt > 0 ? t.blue : t.text4, fontFamily: 'monospace' }}>
+                        {b.today_net_wt > 0 ? `${fmt(b.today_net_wt, 2)}g` : '—'}
+                      </td>
+
+                      {/* Pending Bills */}
                       <td style={{ padding: '10px 14px', textAlign: 'right' }}>
                         <span style={{ fontSize: '13px', color: b.older_bills > 0 ? t.orange : t.text4, fontFamily: 'monospace', fontWeight: b.older_bills > 0 ? 600 : 400 }}>
                           {b.older_bills > 0 ? b.older_bills : '—'}
                         </span>
-                        {b.older_bills > 0 && b.total_bills > 0 && (
-                          <div style={{ height: '3px', background: t.border2, borderRadius: '2px', marginTop: '4px', overflow: 'hidden' }}>
-                            <div style={{ height: '100%', width: `${(b.older_bills / b.total_bills) * 100}%`, background: t.orange, borderRadius: '2px' }} />
-                          </div>
-                        )}
                       </td>
 
-                      {/* Gross Weight */}
-                      <td style={{ padding: '10px 14px', textAlign: 'right', fontSize: '13px', color: t.text1, fontFamily: 'monospace', fontWeight: 600 }}>{fmt(b.total_gross_wt, 3)}g</td>
-
-                      {/* Net Weight */}
-                      <td style={{ padding: '10px 14px', textAlign: 'right', fontSize: '12px', color: t.text2, fontFamily: 'monospace' }}>{fmt(b.total_net_wt, 3)}g</td>
+                      {/* Pending Net Wt */}
+                      <td style={{ padding: '10px 14px', textAlign: 'right', fontSize: '12px', color: b.older_net_wt > 0 ? t.orange : t.text4, fontFamily: 'monospace', fontWeight: b.older_net_wt > 0 ? 600 : 400 }}>
+                        {b.older_net_wt > 0 ? `${fmt(b.older_net_wt, 2)}g` : '—'}
+                      </td>
 
                       {/* Oldest Bill Age */}
                       <td style={{ padding: '10px 14px', textAlign: 'center' }}>
@@ -338,11 +335,11 @@ export default function ConsignmentOverview() {
                     TOTAL — {filtered.length} branch{filtered.length !== 1 ? 'es' : ''}
                   </td>
                   <td style={{ padding: '10px 14px' }} />
-                  <td style={{ padding: '10px 14px', textAlign: 'right', fontSize: '14px', fontWeight: 700, color: t.gold, fontFamily: 'monospace' }}>{grandBills}</td>
-                  <td style={{ padding: '10px 14px', textAlign: 'right', fontSize: '13px', color: t.blue, fontFamily: 'monospace', fontWeight: 600 }}>{grandToday > 0 ? `+${grandToday}` : '—'}</td>
-                  <td style={{ padding: '10px 14px', textAlign: 'right', fontSize: '13px', color: t.orange, fontFamily: 'monospace', fontWeight: 600 }}>{grandOlder || '—'}</td>
-                  <td style={{ padding: '10px 14px', textAlign: 'right', fontSize: '13px', color: t.text1, fontFamily: 'monospace', fontWeight: 700 }}>{fmt(grandGross, 3)}g</td>
-                  <td colSpan={3} style={{ padding: '10px 14px' }} />
+                  <td style={{ padding: '10px 14px', textAlign: 'right', fontSize: '13px', color: t.blue, fontFamily: 'monospace', fontWeight: 700 }}>{grandToday || '—'}</td>
+                  <td style={{ padding: '10px 14px', textAlign: 'right', fontSize: '13px', color: t.blue, fontFamily: 'monospace', fontWeight: 600 }}>{fmt(filtered.reduce((s,b)=>s+(b.today_net_wt||0),0),2)}g</td>
+                  <td style={{ padding: '10px 14px', textAlign: 'right', fontSize: '13px', color: t.orange, fontFamily: 'monospace', fontWeight: 700 }}>{grandOlder || '—'}</td>
+                  <td style={{ padding: '10px 14px', textAlign: 'right', fontSize: '13px', color: t.orange, fontFamily: 'monospace', fontWeight: 600 }}>{fmt(filtered.reduce((s,b)=>s+(b.older_net_wt||0),0),2)}g</td>
+                  <td colSpan={2} style={{ padding: '10px 14px' }} />
                 </tr>
               </tbody>
             </table>
@@ -352,7 +349,7 @@ export default function ConsignmentOverview() {
 
       {/* Ship Before note */}
       <div style={{ fontSize: '10px', color: t.text4, textAlign: 'right' }}>
-        * Ship Before is estimated as Oldest Bill Date + 21 days. Set <code style={{ background: t.card2, padding: '1px 4px', borderRadius: '3px', color: t.text3 }}>ship_before</code> per branch in Branch Management to override.
+        * Pending = purchases with stock_status <code style={{ background: t.card2, padding: '1px 4px', borderRadius: '3px', color: t.text3 }}>at_branch</code> from before today · Pickup time editable per branch in Branch Management
       </div>
 
     </div>
