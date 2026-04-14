@@ -402,14 +402,17 @@ export default function PurchaseReports() {
         const bn = r.branch_name || 'Unknown'
         if (!branchAgg[bn]) {
           const meta = branchMetaMap[bn] || {}
-          branchAgg[bn] = { branch_name: bn, region: meta.region || 'Unknown', state: meta.state || 'Unknown', cluster: meta.cluster || null, txn_count: 0, physical_count: 0, nw: 0, val: 0, pw: 0 }
+          branchAgg[bn] = { branch_name: bn, region: meta.region || 'Unknown', state: meta.state || 'Unknown', cluster: meta.cluster || null, txn_count: 0, physical_count: 0, takeover_count: 0, nw: 0, gw: 0, val: 0, pw: 0 }
         }
         const nw = parseFloat(r.net_weight || 0)
+        const gw = parseFloat(r.gross_weight || 0)
         branchAgg[bn].txn_count     += 1
         branchAgg[bn].nw            += nw
+        branchAgg[bn].gw            += gw
         branchAgg[bn].val           += parseFloat(r.total_amount || 0)
         branchAgg[bn].pw            += nw * parseFloat(r.purity || 0)
         if (r.transaction_type === 'PHYSICAL') branchAgg[bn].physical_count++
+        else branchAgg[bn].takeover_count++
       }
       setBranchData(
         Object.values(branchAgg).map(b => ({
@@ -419,6 +422,8 @@ export default function PurchaseReports() {
           cluster:        b.cluster,
           txn_count:      b.txn_count,
           physical_count: b.physical_count,
+          takeover_count: b.takeover_count,
+          total_gross:    parseFloat(b.gw.toFixed(3)),
           total_net:      parseFloat(b.nw.toFixed(3)),
           total_value:    Math.round(b.val),
           avg_purity:     b.nw > 0 ? parseFloat((b.pw / b.nw).toFixed(2)) : 0,

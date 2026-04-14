@@ -563,26 +563,50 @@ export default function ReportBranches({ branchData, allBranchMeta, stateData, t
   if (!t) return null
   const P = (id, extra = {}) => ({ id, expanded, onExpand: openPanel, onClose: closePanel, t, cardStyle: { ...s.card, marginBottom: 0, ...extra } })
 
-  // ── DRILLDOWN: derive state summaries directly from branchData ──
-  // This avoids the stateData bug where get_state_summary groups by REGION not state
+  // ── DRILLDOWN: derive state + region summaries from branchData ──
   const stateMap = {}
   ;(branchData || []).forEach(b => {
     const st = b.state || 'Unknown'
-    if (!stateMap[st]) stateMap[st] = { state: st, total_net: 0, total_value: 0, txn_count: 0, branch_names: new Set() }
-    stateMap[st].total_net   += Number(b.total_net   || 0)
-    stateMap[st].total_value += Number(b.total_value || 0)
-    stateMap[st].txn_count   += Number(b.txn_count   || 0)
+    if (!stateMap[st]) stateMap[st] = { state: st, total_net: 0, total_gross: 0, total_value: 0, txn_count: 0, physical_count: 0, takeover_count: 0, branch_names: new Set() }
+    stateMap[st].total_net      += Number(b.total_net    || 0)
+    stateMap[st].total_gross    += Number(b.total_gross  || 0)
+    stateMap[st].total_value    += Number(b.total_value  || 0)
+    stateMap[st].txn_count      += Number(b.txn_count    || 0)
+    stateMap[st].physical_count += Number(b.physical_count  || 0)
+    stateMap[st].takeover_count += Number(b.takeover_count  || 0)
     stateMap[st].branch_names.add(b.branch_name)
   })
   const derivedStates = Object.values(stateMap)
     .map(s2 => ({ ...s2, branch_count: s2.branch_names.size }))
     .sort((a, b) => b.total_net - a.total_net)
 
-  // Filtered branches for table
+  // Region summaries for selected state
+  const regionMap = {}
+  ;(branchData || []).filter(b => !drillState || b.state === drillState).forEach(b => {
+    const rg = b.region || 'Unknown'
+    if (!regionMap[rg]) regionMap[rg] = { region: rg, total_net: 0, total_gross: 0, total_value: 0, txn_count: 0, physical_count: 0, takeover_count: 0, branch_names: new Set() }
+    regionMap[rg].total_net      += Number(b.total_net    || 0)
+    regionMap[rg].total_gross    += Number(b.total_gross  || 0)
+    regionMap[rg].total_value    += Number(b.total_value  || 0)
+    regionMap[rg].txn_count      += Number(b.txn_count    || 0)
+    regionMap[rg].physical_count += Number(b.physical_count  || 0)
+    regionMap[rg].takeover_count += Number(b.takeover_count  || 0)
+    regionMap[rg].branch_names.add(b.branch_name)
+  })
+  const derivedRegions = Object.values(regionMap)
+    .map(r2 => ({ ...r2, branch_count: r2.branch_names.size }))
+    .sort((a, b) => b.total_net - a.total_net)
+
+  // Cluster options for selected region
+  const clusters = [...new Set(
+    (branchData || []).filter(b => drillRegion ? b.region === drillRegion : true).map(b => b.cluster).filter(Boolean)
+  )]
+
+  // Filtered branches for table (shown only when region is selected)
   const drillBranches = (branchData || []).filter(b => {
-    if (drillCluster) return b.cluster  === drillCluster
-    if (drillRegion)  return b.region   === drillRegion
-    if (drillState)   return b.state    === drillState
+    if (drillCluster) return b.cluster === drillCluster && b.region === drillRegion
+    if (drillRegion)  return b.region  === drillRegion
+    if (drillState)   return b.state   === drillState
     return true
   })
   const sortedBranches = [...drillBranches].sort((a, b) => b[branchSort] - a[branchSort])
@@ -788,96 +812,126 @@ export default function ReportBranches({ branchData, allBranchMeta, stateData, t
 
       {/* ── DRILLDOWN ── */}
       <Panel {...P('drilldown')}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
+        {/* Breadcrumb + sort */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '10px' }}>
           <div>
-            <div style={{ fontSize: '.55rem', color: t.text3, letterSpacing: '.2em', textTransform: 'uppercase', fontWeight: 500, marginBottom: '8px' }}>Drilldown — State → Region → Cluster → Branch</div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <div style={{ fontSize: '.5rem', color: t.text4, letterSpacing: '.2em', textTransform: 'uppercase', marginBottom: '8px' }}>Drilldown — State → Region → Branch</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
               <button style={s.drillBtn(!drillState)} onClick={(e) => { e.stopPropagation(); setDrillState(null); setDrillRegion(null); setDrillCluster(null) }}>All States</button>
-              {drillState   && <><span style={{ color: t.text4 }}>›</span><button style={s.drillBtn(!drillRegion)}  onClick={(e) => { e.stopPropagation(); setDrillRegion(null); setDrillCluster(null) }}>{drillState}</button></>}
-              {drillRegion  && <><span style={{ color: t.text4 }}>›</span><button style={s.drillBtn(!drillCluster)} onClick={(e) => { e.stopPropagation(); setDrillCluster(null) }}>{drillRegion}</button></>}
-              {drillCluster && <><span style={{ color: t.text4 }}>›</span><button style={s.drillBtn(true)}>{drillCluster}</button></>}
+              {drillState  && <><span style={{ color: t.text4, fontSize: '.8rem' }}>›</span><button style={s.drillBtn(!!drillState && !drillRegion)} onClick={(e) => { e.stopPropagation(); setDrillRegion(null); setDrillCluster(null) }}>{drillState}</button></>}
+              {drillRegion && <><span style={{ color: t.text4, fontSize: '.8rem' }}>›</span><button style={s.drillBtn(!!drillRegion && !drillCluster)} onClick={(e) => { e.stopPropagation(); setDrillCluster(null) }}>{drillRegion}</button></>}
+              {drillCluster && <><span style={{ color: t.text4, fontSize: '.8rem' }}>›</span><button style={s.drillBtn(true)}>{drillCluster}</button></>}
             </div>
           </div>
-          <div style={{ display: 'flex', gap: '6px' }}>
-            {[['Net Wt', 'total_net'], ['Value', 'total_value'], ['Txns', 'txn_count']].map(([l, v]) => (
-              <button key={v} style={pill(branchSort === v)} onClick={(e) => { e.stopPropagation(); setBranchSort(v) }}>{l}</button>
-            ))}
-          </div>
+          {drillRegion && (
+            <div style={{ display: 'flex', gap: '6px' }}>
+              {[['Net Wt', 'total_net'], ['Value', 'total_value'], ['Txns', 'txn_count']].map(([l, v]) => (
+                <button key={v} style={pill(branchSort === v)} onClick={(e) => { e.stopPropagation(); setBranchSort(v) }}>{l}</button>
+              ))}
+            </div>
+          )}
         </div>
 
-        {/* State cards — derived from branchData (not stateData) */}
+        {/* LEVEL 1 — State cards */}
         {!drillState && (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '10px', marginBottom: '16px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: '12px' }}>
             {derivedStates.map((s2, i) => (
               <div key={i} onClick={(e) => { e.stopPropagation(); setDrillState(s2.state) }}
-                style={{ ...s.card2, cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', transition: 'border-color .2s' }}
-                onMouseEnter={e => e.currentTarget.style.borderColor = t.gold}
-                onMouseLeave={e => e.currentTarget.style.borderColor = t.border}>
-                <div>
-                  <div style={{ fontSize: '.82rem', fontWeight: 400, color: t.text1 }}>{s2.state}</div>
-                  <div style={{ fontSize: '.62rem', color: t.text3, marginTop: '3px' }}>{s2.branch_count} branches · {Number(s2.txn_count).toLocaleString('en-IN')} txns</div>
+                style={{ ...s.card2, cursor: 'pointer', transition: 'border-color .2s, transform .15s' }}
+                onMouseEnter={e => { e.currentTarget.style.borderColor = t.gold; e.currentTarget.style.transform = 'translateY(-2px)' }}
+                onMouseLeave={e => { e.currentTarget.style.borderColor = t.border; e.currentTarget.style.transform = 'none' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '12px' }}>
+                  <div style={{ fontSize: '.88rem', fontWeight: 500, color: t.text1 }}>{s2.state}</div>
+                  <span style={{ fontSize: '.55rem', color: t.text4, background: t.border, padding: '2px 6px', borderRadius: '4px' }}>{s2.branch_count} branches</span>
                 </div>
-                <div style={{ textAlign: 'right' }}>
-                  <div style={{ fontSize: '.9rem', color: t.gold }}>{fmt(s2.total_net)}g</div>
-                  <div style={{ fontSize: '.62rem', color: t.green }}>{fmtVal(s2.total_value)}</div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                  <div><div style={{ fontSize: '.9rem', color: t.gold, fontWeight: 500 }}>{fmt(s2.total_net)}g</div><div style={{ fontSize: '.55rem', color: t.text4, marginTop: '2px' }}>Net Wt</div></div>
+                  <div><div style={{ fontSize: '.9rem', color: t.green, fontWeight: 500 }}>{fmtVal(s2.total_value)}</div><div style={{ fontSize: '.55rem', color: t.text4, marginTop: '2px' }}>Value</div></div>
+                  <div><div style={{ fontSize: '.78rem', color: t.text2 }}>{Number(s2.txn_count).toLocaleString('en-IN')}</div><div style={{ fontSize: '.55rem', color: t.text4, marginTop: '2px' }}>Txns</div></div>
+                  <div><div style={{ fontSize: '.78rem', color: t.blue }}>{Number(s2.physical_count).toLocaleString('en-IN')} / {Number(s2.takeover_count).toLocaleString('en-IN')}</div><div style={{ fontSize: '.55rem', color: t.text4, marginTop: '2px' }}>Phy / Tko</div></div>
                 </div>
+                <div style={{ marginTop: '10px', fontSize: '.6rem', color: t.text4, textAlign: 'right' }}>tap to drill into regions →</div>
               </div>
             ))}
           </div>
         )}
 
-        {/* Region buttons */}
-        {drillState && !drillRegion && regions.length > 0 && (
-          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '16px' }}>
-            {regions.map(r => (
-              <button key={r} style={{ ...s.drillBtn(false), fontSize: '.72rem' }} onClick={(e) => { e.stopPropagation(); setDrillRegion(r) }}>{r} →</button>
-            ))}
+        {/* LEVEL 2 — Region cards for selected state */}
+        {drillState && !drillRegion && (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '12px' }}>
+            {derivedRegions.map((r2, i) => {
+              const rc = buildRegionColors(derivedRegions.map(x => x.region))[r2.region] || t.gold
+              return (
+                <div key={i} onClick={(e) => { e.stopPropagation(); setDrillRegion(r2.region) }}
+                  style={{ ...s.card2, cursor: 'pointer', borderColor: `${rc}30`, transition: 'border-color .2s, transform .15s' }}
+                  onMouseEnter={e => { e.currentTarget.style.borderColor = rc; e.currentTarget.style.transform = 'translateY(-2px)' }}
+                  onMouseLeave={e => { e.currentTarget.style.borderColor = `${rc}30`; e.currentTarget.style.transform = 'none' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '12px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '7px' }}>
+                      <div style={{ width: '8px', height: '8px', borderRadius: '2px', background: rc, flexShrink: 0 }} />
+                      <div style={{ fontSize: '.82rem', fontWeight: 500, color: t.text1 }}>{r2.region}</div>
+                    </div>
+                    <span style={{ fontSize: '.55rem', color: t.text4, background: t.border, padding: '2px 6px', borderRadius: '4px' }}>{r2.branch_count} branches</span>
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                    <div><div style={{ fontSize: '.88rem', color: rc, fontWeight: 500 }}>{fmt(r2.total_net)}g</div><div style={{ fontSize: '.55rem', color: t.text4, marginTop: '2px' }}>Net Wt</div></div>
+                    <div><div style={{ fontSize: '.88rem', color: t.green, fontWeight: 500 }}>{fmtVal(r2.total_value)}</div><div style={{ fontSize: '.55rem', color: t.text4, marginTop: '2px' }}>Value</div></div>
+                    <div><div style={{ fontSize: '.75rem', color: t.text2 }}>{Number(r2.txn_count).toLocaleString('en-IN')}</div><div style={{ fontSize: '.55rem', color: t.text4, marginTop: '2px' }}>Txns</div></div>
+                    <div><div style={{ fontSize: '.75rem', color: t.blue }}>{Number(r2.physical_count).toLocaleString('en-IN')} / {Number(r2.takeover_count).toLocaleString('en-IN')}</div><div style={{ fontSize: '.55rem', color: t.text4, marginTop: '2px' }}>Phy / Tko</div></div>
+                  </div>
+                  <div style={{ marginTop: '10px', fontSize: '.6rem', color: t.text4, textAlign: 'right' }}>tap for branches →</div>
+                </div>
+              )
+            })}
           </div>
         )}
 
-        {/* Cluster buttons */}
-        {drillRegion && !drillCluster && clusters.length > 0 && (
-          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '16px' }}>
-            {clusters.map(c => (
-              <button key={c} style={{ ...s.drillBtn(false), fontSize: '.72rem' }} onClick={(e) => { e.stopPropagation(); setDrillCluster(c) }}>{c} →</button>
-            ))}
-          </div>
-        )}
-
-        {/* Branch table */}
-        <div style={{ overflowX: 'auto', borderRadius: '8px', border: `1px solid ${t.border}` }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead>
-              <tr>
-                {['#', 'Branch', 'State', 'Region', 'Cluster', 'Txns', 'Gross Wt', 'Net Wt', 'Avg Purity', 'Value', 'Physical', 'Takeover', 'Avg / Txn'].map(h => (
-                  <th key={h} style={s.th}>{h}</th>
+        {/* LEVEL 3 — Branch table for selected region */}
+        {drillRegion && (
+          <>
+            {/* Cluster filter pills */}
+            {clusters.length > 1 && (
+              <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '12px' }}>
+                <span style={{ fontSize: '.6rem', color: t.text4, alignSelf: 'center' }}>Cluster:</span>
+                <button style={pill(!drillCluster)} onClick={(e) => { e.stopPropagation(); setDrillCluster(null) }}>All</button>
+                {clusters.map(c => (
+                  <button key={c} style={pill(drillCluster === c)} onClick={(e) => { e.stopPropagation(); setDrillCluster(c) }}>{c}</button>
                 ))}
-              </tr>
-            </thead>
-            <tbody>
-              {sortedBranches.map((b, i) => (
-                <tr key={i} style={{ background: i % 2 === 0 ? 'transparent' : `${t.border}20` }}>
-                  <td style={{ ...s.td, color: t.text4 }}>{i + 1}</td>
-                  <td style={{ ...s.td, color: t.gold, fontWeight: 500 }}>{b.branch_name}</td>
-                  <td style={{ ...s.td, color: t.text3 }}>{b.state || '—'}</td>
-                  <td style={{ ...s.td, color: t.text3 }}>{b.region || '—'}</td>
-                  <td style={{ ...s.td, color: t.text3 }}>{b.cluster || '—'}</td>
-                  <td style={s.td}>{Number(b.txn_count).toLocaleString('en-IN')}</td>
-                  <td style={s.td}>{fmt(b.total_gross)}g</td>
-                  <td style={{ ...s.td, color: t.gold }}>{fmt(b.total_net)}g</td>
-                  <td style={s.td}>{Number(b.avg_purity).toFixed(1)}%</td>
-                  <td style={{ ...s.td, color: t.green }}>{fmtVal(b.total_value)}</td>
-                  <td style={{ ...s.td, color: t.gold }}>{Number(b.physical_count).toLocaleString('en-IN')}</td>
-                  <td style={{ ...s.td, color: t.blue }}>{Number(b.takeover_count).toLocaleString('en-IN')}</td>
-                  <td style={s.td}>{fmt(b.total_net / (b.txn_count || 1))}g</td>
-                </tr>
-              ))}
-              {sortedBranches.length === 0 && (
-                <tr><td colSpan={13} style={{ ...s.td, textAlign: 'center', color: t.text4, padding: '40px' }}>No branch data</td></tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+              </div>
+            )}
+            <div style={{ overflowX: 'auto', borderRadius: '8px', border: `1px solid ${t.border}` }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr>
+                    {['#', 'Branch', 'Cluster', 'Txns', 'Gross Wt', 'Net Wt', 'Avg Purity', 'Value', 'Physical', 'Takeover', 'Avg / Txn'].map(h => (
+                      <th key={h} style={s.th}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {sortedBranches.map((b, i) => (
+                    <tr key={i} style={{ background: i % 2 === 0 ? 'transparent' : `${t.border}20` }}>
+                      <td style={{ ...s.td, color: t.text4 }}>{i + 1}</td>
+                      <td style={{ ...s.td, color: t.gold, fontWeight: 500 }}>{b.branch_name}</td>
+                      <td style={{ ...s.td, color: t.text3 }}>{b.cluster || '—'}</td>
+                      <td style={s.td}>{Number(b.txn_count).toLocaleString('en-IN')}</td>
+                      <td style={s.td}>{fmt(b.total_gross)}g</td>
+                      <td style={{ ...s.td, color: t.gold }}>{fmt(b.total_net)}g</td>
+                      <td style={s.td}>{Number(b.avg_purity).toFixed(1)}%</td>
+                      <td style={{ ...s.td, color: t.green }}>{fmtVal(b.total_value)}</td>
+                      <td style={{ ...s.td, color: t.gold }}>{Number(b.physical_count).toLocaleString('en-IN')}</td>
+                      <td style={{ ...s.td, color: t.blue }}>{Number(b.takeover_count).toLocaleString('en-IN')}</td>
+                      <td style={s.td}>{fmt(b.total_net / (b.txn_count || 1))}g</td>
+                    </tr>
+                  ))}
+                  {sortedBranches.length === 0 && (
+                    <tr><td colSpan={11} style={{ ...s.td, textAlign: 'center', color: t.text4, padding: '40px' }}>No branches found</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
       </Panel>
 
     </div>
