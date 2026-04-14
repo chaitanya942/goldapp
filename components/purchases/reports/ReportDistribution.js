@@ -109,12 +109,79 @@ function Divider({ t }) {
   return <div style={{ height: '1px', background: t.border, margin: '12px 0' }} />
 }
 
-function InsightChip({ icon, text, color, t }) {
+function InsightChip({ icon, text, color, t, onClick }) {
   return (
-    <div style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', background: `${color}0d`, borderLeft: `3px solid ${color}`, borderRadius: '0 6px 6px 0', padding: '8px 12px' }}>
-      <span style={{ fontSize: '.8rem', lineHeight: 1.2, flexShrink: 0 }}>{icon}</span>
-      <span style={{ fontSize: '.64rem', color: t.text2, lineHeight: 1.6 }}>{text}</span>
+    <div
+      onClick={onClick}
+      style={{
+        display: 'flex', alignItems: 'flex-start', gap: '10px',
+        background: `${color}0d`, borderLeft: `3px solid ${color}`,
+        borderRadius: '0 8px 8px 0', padding: '10px 14px',
+        cursor: 'pointer', transition: 'transform .15s ease, box-shadow .15s ease, background .15s ease',
+      }}
+      onMouseEnter={e => {
+        e.currentTarget.style.transform = 'translateY(-1px) scale(1.01)'
+        e.currentTarget.style.boxShadow = `0 4px 16px ${color}25`
+        e.currentTarget.style.background = `${color}18`
+      }}
+      onMouseLeave={e => {
+        e.currentTarget.style.transform = ''
+        e.currentTarget.style.boxShadow = ''
+        e.currentTarget.style.background = `${color}0d`
+      }}
+    >
+      <span style={{ fontSize: '.85rem', lineHeight: 1.2, flexShrink: 0 }}>{icon}</span>
+      <span style={{ fontSize: '.65rem', color: t.text2, lineHeight: 1.6 }}>{text}</span>
     </div>
+  )
+}
+
+function InsightModal({ insight, t, onClose }) {
+  useEffect(() => {
+    const fn = (e) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', fn)
+    return () => window.removeEventListener('keydown', fn)
+  }, [onClose])
+
+  return (
+    <>
+      {/* Blurred backdrop */}
+      <div
+        onClick={onClose}
+        style={{
+          position: 'fixed', inset: 0, zIndex: 9998,
+          background: 'rgba(0,0,0,0.6)',
+          backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)',
+          cursor: 'pointer',
+        }}
+      />
+      {/* 3D floating card */}
+      <div style={{
+        position: 'fixed', top: '50%', left: '50%',
+        transform: 'translate(-50%, -50%)',
+        zIndex: 9999,
+        width: 'min(480px, 90vw)',
+        background: t.card,
+        border: `1px solid ${insight.color}40`,
+        borderLeft: `4px solid ${insight.color}`,
+        borderRadius: '16px',
+        padding: '36px 32px',
+        boxShadow: `0 32px 80px rgba(0,0,0,0.7), 0 0 0 1px ${insight.color}20, 0 0 60px ${insight.color}15`,
+        animation: 'insightPop .2s cubic-bezier(.34,1.56,.64,1)',
+      }}>
+        <style>{`@keyframes insightPop { from { opacity:0; transform:translate(-50%,-48%) scale(.92); } to { opacity:1; transform:translate(-50%,-50%) scale(1); } }`}</style>
+        <div style={{ fontSize: '2.4rem', marginBottom: '20px', lineHeight: 1 }}>{insight.icon}</div>
+        <div style={{ fontSize: '1rem', color: t.text1, lineHeight: 1.7, fontWeight: 300, marginBottom: '28px' }}>{insight.text}</div>
+        <button
+          onClick={onClose}
+          style={{
+            background: `${insight.color}15`, border: `1px solid ${insight.color}40`,
+            color: insight.color, borderRadius: '8px', padding: '8px 20px',
+            fontSize: '.7rem', cursor: 'pointer', letterSpacing: '.06em',
+          }}
+        >Got it</button>
+      </div>
+    </>
   )
 }
 
@@ -178,7 +245,8 @@ const val = (w, color, size = '.68rem') => ({ width: w, flexShrink: 0, textAlign
 
 export default function ReportDistribution({ kpis, purityDist, weightBuckets, regionSplit, monthHalf, t }) {
   const s = getStyles(t)
-  const [expanded, setExpanded] = useState(null)
+  const [expanded,       setExpanded]       = useState(null)
+  const [selectedInsight, setSelectedInsight] = useState(null)
   const openPanel  = (id) => setExpanded(id)
   const closePanel = () => setExpanded(null)
 
@@ -245,14 +313,22 @@ export default function ReportDistribution({ kpis, purityDist, weightBuckets, re
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
 
+      {/* ── KEY INSIGHTS MODAL ── */}
+      {selectedInsight && (
+        <InsightModal insight={selectedInsight} t={t} onClose={() => setSelectedInsight(null)} />
+      )}
+
       {/* ── KEY INSIGHTS ── */}
       {insights.length > 0 && (
-        <Panel {...P('key-insights')}>
+        <div style={{ ...s.card, marginBottom: 0 }}>
           <SectionTitle title="Key Insights" t={t} badge={`${insights.length} findings`} />
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '8px' }}>
-            {insights.map((ins, i) => <InsightChip key={i} icon={ins.icon} text={ins.text} color={ins.color} t={t} />)}
+            {insights.map((ins, i) => (
+              <InsightChip key={i} icon={ins.icon} text={ins.text} color={ins.color} t={t}
+                onClick={() => setSelectedInsight(ins)} />
+            ))}
           </div>
-        </Panel>
+        </div>
       )}
 
       {/* ══ ROW 1 — Transaction Split · Purity Distribution ══ */}
