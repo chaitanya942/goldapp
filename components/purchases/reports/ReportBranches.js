@@ -597,11 +597,6 @@ export default function ReportBranches({ branchData, allBranchMeta, stateData, t
     .map(r2 => ({ ...r2, branch_count: r2.branch_names.size }))
     .sort((a, b) => b.total_net - a.total_net)
 
-  // Cluster options for selected region
-  const clusters = [...new Set(
-    (branchData || []).filter(b => drillRegion ? b.region === drillRegion : true).map(b => b.cluster).filter(Boolean)
-  )]
-
   // Filtered branches for table (shown only when region is selected)
   const drillBranches = (branchData || []).filter(b => {
     if (drillCluster) return b.cluster === drillCluster && b.region === drillRegion
