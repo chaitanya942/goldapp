@@ -125,6 +125,7 @@ export default function ConsignmentOverview() {
       if (sortKey === 'older_bills')  { av = a.older_bills  || 0; bv = b.older_bills  || 0 }
       if (sortKey === 'older_net_wt') { av = a.older_net_wt || 0; bv = b.older_net_wt || 0 }
       if (sortKey === 'oldest_age')   { av = a.oldest_age_days || 0; bv = b.oldest_age_days || 0 }
+      if (sortKey === 'total_net_wt') { av = (a.today_net_wt || 0) + (a.older_net_wt || 0); bv = (b.today_net_wt || 0) + (b.older_net_wt || 0) }
       return (av - bv) * sortDir
     })
 
@@ -298,6 +299,10 @@ export default function ConsignmentOverview() {
                   <tr>
                     <th style={{ ...thBase, width: '36px', textAlign: 'center' }}>#</th>
                     <th style={{ ...thBase }}>Branch</th>
+                    <th style={{ ...thBase, textAlign: 'right', cursor: 'pointer', color: sortKey === 'total_net_wt' ? t.gold : t.text4 }}
+                        onClick={() => handleSort('total_net_wt')}>
+                      Total Net Wt <SortIcon col="total_net_wt" />
+                    </th>
                     <th style={{ ...thBase, textAlign: 'center' }}>Pickup</th>
 
                     {/* Sortable: Today */}
@@ -354,6 +359,18 @@ export default function ConsignmentOverview() {
                             </div>
                           </div>
                         </td>
+
+                        {/* Total Net Wt */}
+                        {(() => {
+                          const total = (b.today_net_wt || 0) + (b.older_net_wt || 0)
+                          return (
+                            <td style={{ padding: '11px 14px', textAlign: 'right' }}>
+                              <span style={{ fontSize: '13px', color: t.gold, fontFamily: 'monospace', fontWeight: 600 }}>
+                                {fmt(total, 2)}<span style={{ fontSize: '10px', marginLeft: '2px' }}>g</span>
+                              </span>
+                            </td>
+                          )
+                        })()}
 
                         {/* Pickup Time */}
                         <td style={{ padding: '11px 14px', textAlign: 'center' }}>
@@ -418,6 +435,9 @@ export default function ConsignmentOverview() {
                   <tr style={{ background: `${t.gold}08`, borderTop: `2px solid ${t.border}` }}>
                     <td colSpan={2} style={{ padding: '11px 14px', fontSize: '11px', color: t.text3, fontWeight: 700, letterSpacing: '.04em' }}>
                       TOTAL · {filtered.length} branch{filtered.length !== 1 ? 'es' : ''}
+                    </td>
+                    <td style={{ padding: '11px 14px', textAlign: 'right', fontSize: '13px', color: t.gold, fontFamily: 'monospace', fontWeight: 700 }}>
+                      {fmt(grandTodayWt + grandOlderWt, 2)}<span style={{ fontSize: '10px', marginLeft: '2px' }}>g</span>
                     </td>
                     <td style={{ padding: '11px 14px' }} />
                     <td style={{ padding: '11px 14px', textAlign: 'right', fontSize: '14px', color: t.blue, fontFamily: 'monospace', fontWeight: 700 }}>{grandToday || '—'}</td>
