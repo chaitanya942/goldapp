@@ -16,41 +16,46 @@ const REGION_COLORS = {
   'Kerala':            '#3aaa6a',
 }
 
-const fmt    = (n, d = 3) => n != null ? Number(n).toFixed(d) : '—'
-const fmtNum = (n) => n != null ? Number(n).toLocaleString('en-IN') : '—'
+const REGION_ICONS = {
+  'Rest of Karnataka': '🏛',
+  'Andhra Pradesh':    '🌊',
+  'Telangana':         '🌆',
+  'Kerala':            '🌴',
+}
+
+const fmt     = (n, d = 3) => n != null ? Number(n).toFixed(d) : '—'
+const fmtNum  = (n) => n != null ? Number(n).toLocaleString('en-IN') : '—'
 const fmtDate = (d) => {
   if (!d) return '—'
   const [y, m, day] = d.split('-')
   const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-  return `${day} ${months[+m - 1]} ${y.slice(2)}`
+  return `${day} ${months[+m - 1]}`
 }
 const daysFromNow = (d) => {
   if (!d) return null
   return Math.floor((new Date(d).getTime() - Date.now()) / 86400000)
 }
-
-function ShipBadge({ date, t }) {
-  if (!date) return <span style={{ color: t.text4, fontSize: '11px' }}>—</span>
-  const days = daysFromNow(date)
-  const label = fmtDate(date)
-  if (days < 0)  return <span style={{ fontSize: '11px', color: t.red,    background: `${t.red}18`,    borderRadius: '5px', padding: '2px 8px', fontWeight: 700 }}>⚠ Overdue · {label}</span>
-  if (days <= 3) return <span style={{ fontSize: '11px', color: t.red,    background: `${t.red}15`,    borderRadius: '5px', padding: '2px 8px', fontWeight: 600 }}>🔴 {label} ({days}d)</span>
-  if (days <= 7) return <span style={{ fontSize: '11px', color: t.orange,  background: `${t.orange}15`, borderRadius: '5px', padding: '2px 8px', fontWeight: 600 }}>🟠 {label} ({days}d)</span>
-  return              <span style={{ fontSize: '11px', color: t.green,  background: `${t.green}12`,  borderRadius: '5px', padding: '2px 8px' }}>{label} ({days}d)</span>
+const ageDaysFromDate = (d) => {
+  if (!d) return null
+  return Math.floor((Date.now() - new Date(d).getTime()) / 86400000)
 }
 
 function AgeBadge({ days, t }) {
   if (!days && days !== 0) return <span style={{ color: t.text4 }}>—</span>
   const color = days > 14 ? t.red : days > 7 ? t.orange : t.green
-  return <span style={{ fontSize: '11px', color, background: `${color}18`, borderRadius: '5px', padding: '2px 8px', fontWeight: 700 }}>{days}d</span>
+  return (
+    <span style={{ fontSize: '11px', color, background: `${color}18`, borderRadius: '5px', padding: '2px 8px', fontWeight: 700 }}>
+      {days}d
+    </span>
+  )
 }
 
-const SORT_OPTIONS = [
-  { key: 'gross_wt', label: 'Gross Weight ↓' },
-  { key: 'bills',    label: 'Total Bills ↓'  },
-  { key: 'older',    label: 'Older Stock ↓'  },
-  { key: 'age',      label: 'Oldest Age ↓'   },
-  { key: 'urgent',   label: 'Most Urgent'    },
+const SORT_COLS = [
+  { key: 'today_bills',   label: "Today's Bills",   align: 'right'  },
+  { key: 'today_net_wt',  label: "Today's Net Wt",  align: 'right'  },
+  { key: 'older_bills',   label: 'Pending Bills',   align: 'right'  },
+  { key: 'older_net_wt',  label: 'Pending Net Wt',  align: 'right'  },
+  { key: 'oldest_age',    label: 'Oldest Bill',     align: 'center' },
 ]
 
 export default function ConsignmentOverview() {
@@ -61,8 +66,10 @@ export default function ConsignmentOverview() {
   const [loading,      setLoading]      = useState(true)
   const [search,       setSearch]       = useState('')
   const [activeRegion, setActiveRegion] = useState(null)
-  const [sortBy,       setSortBy]       = useState('gross_wt')
+  const [sortKey,      setSortKey]      = useState('older_net_wt')
+  const [sortDir,      setSortDir]      = useState(-1)   // -1 = desc, 1 = asc
   const [lastRefresh,  setLastRefresh]  = useState(null)
+  const [tick,         setTick]         = useState(0)   // for live clock
 
   const fetchData = useCallback(async () => {
     setLoading(true)
@@ -75,19 +82,33 @@ export default function ConsignmentOverview() {
 
   useEffect(() => {
     fetchData()
-    const interval = setInterval(fetchData, 3 * 60 * 1000) // auto-refresh every 3 min
+    const interval = setInterval(fetchData, 3 * 60 * 1000)
     return () => clearInterval(interval)
   }, [fetchData])
 
-  // ── Region summary for flashcards ─────────────────────────────────────────
+  // Live "X min ago" clock
+  useEffect(() => {
+    const t = setInterval(() => setTick(x => x + 1), 30000)
+    return () => clearInterval(t)
+  }, [])
+
+  const minsAgo = lastRefresh ? Math.floor((Date.now() - lastRefresh.getTime()) / 60000) : null
+
+  // ── Column sort toggle ────────────────────────────────────────────────────
+  function handleSort(key) {
+    if (sortKey === key) setSortDir(d => d * -1)
+    else { setSortKey(key); setSortDir(-1) }
+  }
+
+  // ── Region summary ────────────────────────────────────────────────────────
   const regions = [...new Set(data.map(b => b.region).filter(Boolean))].sort()
   const regionStats = regions.reduce((acc, r) => {
     const bs = data.filter(b => b.region === r)
     acc[r] = {
-      branches: bs.length,
-      bills:    bs.reduce((s, b) => s + b.total_bills, 0),
-      gross_wt: bs.reduce((s, b) => s + b.total_gross_wt, 0),
-      urgent:   bs.filter(b => daysFromNow(b.ship_before) !== null && daysFromNow(b.ship_before) <= 3).length,
+      branches:    bs.length,
+      today_bills: bs.reduce((s, b) => s + (b.today_bills || 0), 0),
+      older_bills: bs.reduce((s, b) => s + (b.older_bills || 0), 0),
+      gross_wt:    bs.reduce((s, b) => s + b.total_gross_wt, 0),
     }
     return acc
   }, {})
@@ -96,266 +117,331 @@ export default function ConsignmentOverview() {
   const filtered = data
     .filter(b => !activeRegion || b.region === activeRegion)
     .filter(b => !search || b.branch_name.toLowerCase().includes(search.toLowerCase()))
+    .slice()
     .sort((a, b) => {
-      if (sortBy === 'gross_wt') return b.total_gross_wt   - a.total_gross_wt
-      if (sortBy === 'bills')    return b.total_bills       - a.total_bills
-      if (sortBy === 'older')    return b.older_bills       - a.older_bills
-      if (sortBy === 'age')      return b.oldest_age_days   - a.oldest_age_days
-      if (sortBy === 'urgent') {
-        const da = daysFromNow(a.ship_before) ?? 999
-        const db = daysFromNow(b.ship_before) ?? 999
-        return da - db
-      }
-      return 0
+      let av = 0, bv = 0
+      if (sortKey === 'today_bills')  { av = a.today_bills  || 0; bv = b.today_bills  || 0 }
+      if (sortKey === 'today_net_wt') { av = a.today_net_wt || 0; bv = b.today_net_wt || 0 }
+      if (sortKey === 'older_bills')  { av = a.older_bills  || 0; bv = b.older_bills  || 0 }
+      if (sortKey === 'older_net_wt') { av = a.older_net_wt || 0; bv = b.older_net_wt || 0 }
+      if (sortKey === 'oldest_age')   { av = a.oldest_age_days || 0; bv = b.oldest_age_days || 0 }
+      return (av - bv) * sortDir
     })
 
   // ── Grand totals ──────────────────────────────────────────────────────────
-  const grandBills    = filtered.reduce((s, b) => s + b.total_bills,     0)
-  const grandGross    = filtered.reduce((s, b) => s + b.total_gross_wt,  0)
-  const grandOlder    = filtered.reduce((s, b) => s + b.older_bills,     0)
-  const grandToday    = filtered.reduce((s, b) => s + b.today_bills,     0)
-  const maxAge        = filtered.reduce((m, b) => Math.max(m, b.oldest_age_days), 0)
-  const urgentBranches = filtered.filter(b => {
-    const d = daysFromNow(b.ship_before)
-    return d !== null && d <= 3
-  }).length
+  const grandToday    = filtered.reduce((s, b) => s + (b.today_bills   || 0), 0)
+  const grandTodayWt  = filtered.reduce((s, b) => s + (b.today_net_wt  || 0), 0)
+  const grandOlder    = filtered.reduce((s, b) => s + (b.older_bills   || 0), 0)
+  const grandOlderWt  = filtered.reduce((s, b) => s + (b.older_net_wt  || 0), 0)
 
-  const card    = { background: t.card, border: `1px solid ${t.border}`, borderRadius: '10px' }
-  const inp     = { background: t.card2, border: `1px solid ${t.border2}`, borderRadius: '7px', padding: '7px 12px', fontSize: '12px', color: t.text1, outline: 'none' }
+  // ── Styles ────────────────────────────────────────────────────────────────
+  const card = { background: t.card, border: `1px solid ${t.border}`, borderRadius: '12px' }
 
-  const th = { padding: '9px 14px', fontSize: '10px', color: t.text4, letterSpacing: '.08em', textTransform: 'uppercase', textAlign: 'left', background: t.card2, borderBottom: `1px solid ${t.border}`, whiteSpace: 'nowrap', fontWeight: 600, userSelect: 'none' }
+  function SortIcon({ col }) {
+    if (sortKey !== col) return <span style={{ color: t.text4, fontSize: '10px', marginLeft: '4px' }}>⇅</span>
+    return <span style={{ color: t.gold, fontSize: '10px', marginLeft: '4px' }}>{sortDir === -1 ? '↓' : '↑'}</span>
+  }
+
+  const thBase = {
+    padding: '10px 14px', fontSize: '10px', color: t.text4,
+    letterSpacing: '.08em', textTransform: 'uppercase',
+    background: t.card2, borderBottom: `1px solid ${t.border}`,
+    whiteSpace: 'nowrap', fontWeight: 600, userSelect: 'none',
+  }
 
   return (
-    <div style={{ padding: '22px 28px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+    <div style={{ padding: '22px 28px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
 
       {/* ── Header ── */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
         <div>
-          <div style={{ fontSize: '1.35rem', fontWeight: 300, color: t.text1, letterSpacing: '.03em' }}>Branch Stock Overview</div>
-          <div style={{ fontSize: '11px', color: t.text3, marginTop: '3px' }}>
-            Live stock at all outside-Bangalore branches
-            {lastRefresh && <span style={{ color: t.text4 }}> · Refreshed {lastRefresh.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</span>}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <div style={{ fontSize: '1.4rem', fontWeight: 300, color: t.text1, letterSpacing: '.03em' }}>Branch Stock Overview</div>
+            <span style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '10px', color: t.green, background: `${t.green}15`, borderRadius: '20px', padding: '3px 10px', fontWeight: 600 }}>
+              <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: t.green, display: 'inline-block', animation: 'pulse 2s infinite' }} />
+              LIVE
+            </span>
+          </div>
+          <div style={{ fontSize: '11px', color: t.text3, marginTop: '4px' }}>
+            Outside-Bangalore branches ·
+            {lastRefresh && (
+              <span style={{ color: minsAgo === 0 ? t.green : t.text4, marginLeft: '4px' }}>
+                {minsAgo === 0 ? 'just refreshed' : `${minsAgo}m ago`} · {lastRefresh.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}
+              </span>
+            )}
           </div>
         </div>
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
           {(activeRegion || search) && (
             <button onClick={() => { setActiveRegion(null); setSearch('') }}
-              style={{ background: 'transparent', border: `1px solid ${t.border2}`, borderRadius: '7px', padding: '6px 12px', fontSize: '11px', color: t.text3, cursor: 'pointer' }}>
-              ✕ Clear Filters
+              style={{ background: 'transparent', border: `1px solid ${t.border2}`, borderRadius: '8px', padding: '7px 13px', fontSize: '11px', color: t.text3, cursor: 'pointer' }}>
+              ✕ Clear
             </button>
           )}
           <button onClick={fetchData} disabled={loading}
-            style={{ background: 'transparent', border: `1px solid ${t.border}`, borderRadius: '7px', padding: '6px 14px', fontSize: '12px', color: t.text3, cursor: 'pointer', opacity: loading ? 0.5 : 1 }}>
-            {loading ? '⟳' : '⟳ Refresh'}
+            style={{ background: loading ? t.card2 : `${t.gold}15`, border: `1px solid ${loading ? t.border : t.gold}40`, borderRadius: '8px', padding: '7px 16px', fontSize: '12px', color: loading ? t.text4 : t.gold, cursor: loading ? 'default' : 'pointer', fontWeight: 600, transition: 'all .15s', display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <span style={{ display: 'inline-block', animation: loading ? 'spin 1s linear infinite' : 'none', fontSize: '13px' }}>⟳</span>
+            {loading ? 'Refreshing…' : 'Refresh'}
           </button>
         </div>
       </div>
 
       {/* ── Region Flashcards ── */}
-      {canSee('element.consignment-overview.region_cards') && <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-        {/* All Regions card */}
-        <div onClick={() => setActiveRegion(null)}
-          style={{ ...card, padding: '12px 18px', cursor: 'pointer', minWidth: '130px', flexShrink: 0,
-            borderColor: !activeRegion ? t.gold : t.border,
-            background:  !activeRegion ? `${t.gold}10` : t.card,
-            transition: 'all .15s' }}
-          onMouseEnter={e => { if (activeRegion) e.currentTarget.style.borderColor = `${t.gold}60` }}
-          onMouseLeave={e => { if (activeRegion) e.currentTarget.style.borderColor = t.border }}>
-          <div style={{ fontSize: '10px', color: t.text4, letterSpacing: '.08em', textTransform: 'uppercase', marginBottom: '5px' }}>All Regions</div>
-          <div style={{ fontSize: '20px', fontWeight: 300, color: !activeRegion ? t.gold : t.text1 }}>{data.length}</div>
-          <div style={{ fontSize: '10px', color: t.text4, marginTop: '3px' }}>branches</div>
-        </div>
+      {canSee('element.consignment-overview.region_cards') && (
+        <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
 
-        {regions.map(r => {
-          const stats  = regionStats[r] || {}
-          const color  = REGION_COLORS[r] || t.text3
-          const active = activeRegion === r
-          return (
-            <div key={r} onClick={() => setActiveRegion(active ? null : r)}
-              style={{ ...card, padding: '12px 18px', cursor: 'pointer', minWidth: '155px', flexShrink: 0,
-                borderColor: active ? color : t.border,
-                background:  active ? `${color}12` : t.card,
-                transition: 'all .15s' }}
-              onMouseEnter={e => { if (!active) e.currentTarget.style.borderColor = `${color}60` }}
-              onMouseLeave={e => { if (!active) e.currentTarget.style.borderColor = t.border }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '5px' }}>
-                <div style={{ fontSize: '10px', color: active ? color : t.text4, letterSpacing: '.08em', textTransform: 'uppercase', fontWeight: active ? 700 : 400 }}>{r}</div>
-                {stats.urgent > 0 && <span style={{ fontSize: '9px', background: `${t.red}20`, color: t.red, borderRadius: '4px', padding: '1px 5px', fontWeight: 700 }}>{stats.urgent} urgent</span>}
-              </div>
-              <div style={{ fontSize: '20px', fontWeight: 300, color: active ? color : t.text1 }}>{stats.bills ?? 0}</div>
-              <div style={{ fontSize: '10px', color: t.text4, marginTop: '3px' }}>
-                {stats.branches} branch{stats.branches !== 1 ? 'es' : ''} · {fmt(stats.gross_wt, 2)}g
-              </div>
-            </div>
-          )
-        })}
-      </div>}
-
-      {/* ── Summary KPIs ── */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '10px' }}>
-        {[
-          { label: 'Branches with Stock',  value: filtered.length,                                                             color: t.text1  },
-          { label: 'Today\'s Bills',        value: fmtNum(grandToday),                                                          color: t.blue   },
-          { label: 'Today\'s Net Wt',       value: `${fmt(filtered.reduce((s,b)=>s+(b.today_net_wt||0),0),2)}g`,               color: t.blue   },
-          { label: 'Pending Bills',         value: fmtNum(grandOlder),                                                          color: t.orange },
-          { label: 'Pending Net Wt',        value: `${fmt(filtered.reduce((s,b)=>s+(b.older_net_wt||0),0),2)}g`,               color: t.orange },
-        ].map(k => (
-          <div key={k.label} style={{ ...card, padding: '12px 16px' }}>
-            <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.08em', textTransform: 'uppercase', marginBottom: '5px' }}>{k.label}</div>
-            <div style={{ fontSize: '20px', fontWeight: 300, color: k.color, fontFamily: 'monospace' }}>{k.value}</div>
+          {/* All Regions */}
+          <div onClick={() => setActiveRegion(null)}
+            style={{ ...card, padding: '14px 18px', cursor: 'pointer', minWidth: '130px', flexShrink: 0,
+              borderColor: !activeRegion ? t.gold : t.border,
+              background:  !activeRegion ? `${t.gold}10` : t.card,
+              borderLeft: !activeRegion ? `3px solid ${t.gold}` : `3px solid transparent`,
+              transition: 'all .15s' }}>
+            <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: '8px' }}>All Regions</div>
+            <div style={{ fontSize: '26px', fontWeight: 200, color: !activeRegion ? t.gold : t.text1, lineHeight: 1 }}>{data.length}</div>
+            <div style={{ fontSize: '10px', color: t.text4, marginTop: '4px' }}>branches</div>
           </div>
-        ))}
-      </div>
 
-      {/* ── Urgent banner ── */}
-      {urgentBranches > 0 && (
-        <div style={{ background: `${t.red}12`, border: `1px solid ${t.red}30`, borderRadius: '8px', padding: '10px 16px', display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <span style={{ fontSize: '16px' }}>⚠</span>
-          <div>
-            <span style={{ fontSize: '12px', color: t.red, fontWeight: 600 }}>{urgentBranches} branch{urgentBranches !== 1 ? 'es' : ''} must ship within 3 days or are overdue</span>
-            <span style={{ fontSize: '11px', color: t.text3, marginLeft: '8px' }}>Sort by "Most Urgent" to prioritize</span>
-          </div>
-          <button onClick={() => setSortBy('urgent')} style={{ marginLeft: 'auto', background: t.red, color: '#fff', border: 'none', borderRadius: '6px', padding: '5px 12px', fontSize: '11px', cursor: 'pointer', fontWeight: 600 }}>Prioritize</button>
+          {regions.map(r => {
+            const stats = regionStats[r] || {}
+            const color = REGION_COLORS[r] || t.text3
+            const icon  = REGION_ICONS[r] || '📍'
+            const active = activeRegion === r
+            return (
+              <div key={r} onClick={() => setActiveRegion(active ? null : r)}
+                style={{ ...card, padding: '14px 18px', cursor: 'pointer', minWidth: '170px', flexShrink: 0,
+                  borderColor: active ? color : t.border,
+                  background:  active ? `${color}10` : t.card,
+                  borderLeft: `3px solid ${active ? color : 'transparent'}`,
+                  transition: 'all .15s' }}
+                onMouseEnter={e => { if (!active) { e.currentTarget.style.borderColor = `${color}50`; e.currentTarget.style.borderLeftColor = `${color}80` } }}
+                onMouseLeave={e => { if (!active) { e.currentTarget.style.borderColor = t.border; e.currentTarget.style.borderLeftColor = 'transparent' } }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                  <div style={{ fontSize: '9px', color: active ? color : t.text4, letterSpacing: '.08em', textTransform: 'uppercase', fontWeight: active ? 700 : 400 }}>{r}</div>
+                  <span style={{ fontSize: '14px' }}>{icon}</span>
+                </div>
+                <div style={{ fontSize: '26px', fontWeight: 200, color: active ? color : t.text1, lineHeight: 1 }}>{stats.older_bills ?? 0}</div>
+                <div style={{ fontSize: '10px', color: t.text4, marginTop: '4px', display: 'flex', gap: '8px' }}>
+                  <span>{stats.branches} branches</span>
+                  {stats.today_bills > 0 && <span style={{ color, fontWeight: 600 }}>+{stats.today_bills} today</span>}
+                </div>
+              </div>
+            )
+          })}
         </div>
       )}
 
-      {/* ── Search + Sort ── */}
+      {/* ── KPI Strip ── */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr 1fr', gap: '10px' }}>
+
+        {/* Branches */}
+        <div style={{ ...card, padding: '14px 18px' }}>
+          <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: '8px' }}>Branches</div>
+          <div style={{ fontSize: '26px', fontWeight: 200, color: t.text1, fontFamily: 'monospace', lineHeight: 1 }}>{filtered.length}</div>
+          <div style={{ fontSize: '10px', color: t.text4, marginTop: '4px' }}>of {data.length} total</div>
+        </div>
+
+        {/* Today group */}
+        <div style={{ ...card, padding: '14px 18px', borderLeft: `3px solid ${t.blue}`, background: `${t.blue}08` }}>
+          <div style={{ fontSize: '9px', color: t.blue, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: '8px', fontWeight: 600 }}>Today's Bills</div>
+          <div style={{ fontSize: '26px', fontWeight: 200, color: t.blue, fontFamily: 'monospace', lineHeight: 1 }}>{fmtNum(grandToday)}</div>
+          <div style={{ fontSize: '10px', color: `${t.blue}80`, marginTop: '4px' }}>purchased today</div>
+        </div>
+
+        <div style={{ ...card, padding: '14px 18px', borderLeft: `3px solid ${t.blue}`, background: `${t.blue}08` }}>
+          <div style={{ fontSize: '9px', color: t.blue, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: '8px', fontWeight: 600 }}>Today's Net Wt</div>
+          <div style={{ fontSize: '26px', fontWeight: 200, color: t.blue, fontFamily: 'monospace', lineHeight: 1 }}>{fmt(grandTodayWt, 2)}<span style={{ fontSize: '13px', marginLeft: '3px' }}>g</span></div>
+          <div style={{ fontSize: '10px', color: `${t.blue}80`, marginTop: '4px' }}>net gold today</div>
+        </div>
+
+        {/* Pending group */}
+        <div style={{ ...card, padding: '14px 18px', borderLeft: `3px solid ${t.orange}`, background: `${t.orange}08` }}>
+          <div style={{ fontSize: '9px', color: t.orange, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: '8px', fontWeight: 600 }}>Pending Bills</div>
+          <div style={{ fontSize: '26px', fontWeight: 200, color: t.orange, fontFamily: 'monospace', lineHeight: 1 }}>{fmtNum(grandOlder)}</div>
+          <div style={{ fontSize: '10px', color: `${t.orange}80`, marginTop: '4px' }}>at_branch, pre-today</div>
+        </div>
+
+        <div style={{ ...card, padding: '14px 18px', borderLeft: `3px solid ${t.orange}`, background: `${t.orange}08` }}>
+          <div style={{ fontSize: '9px', color: t.orange, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: '8px', fontWeight: 600 }}>Pending Net Wt</div>
+          <div style={{ fontSize: '26px', fontWeight: 200, color: t.orange, fontFamily: 'monospace', lineHeight: 1 }}>{fmt(grandOlderWt, 2)}<span style={{ fontSize: '13px', marginLeft: '3px' }}>g</span></div>
+          <div style={{ fontSize: '10px', color: `${t.orange}80`, marginTop: '4px' }}>closing stock</div>
+        </div>
+      </div>
+
+      {/* ── Search ── */}
       <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
         {canSee('element.consignment-overview.search') && (
-          <div style={{ position: 'relative', flex: 1, maxWidth: '320px' }}>
-            <span style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: t.text4, fontSize: '12px', pointerEvents: 'none' }}>⌕</span>
-            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search branch..."
-              style={{ ...inp, paddingLeft: '28px', width: '100%' }} />
+          <div style={{ position: 'relative', maxWidth: '280px', flex: 1 }}>
+            <span style={{ position: 'absolute', left: '11px', top: '50%', transform: 'translateY(-50%)', color: t.text4, fontSize: '13px', pointerEvents: 'none' }}>⌕</span>
+            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search branch…"
+              style={{ width: '100%', background: t.card2, border: `1px solid ${t.border2}`, borderRadius: '8px', padding: '8px 12px 8px 30px', fontSize: '12px', color: t.text1, outline: 'none', boxSizing: 'border-box' }} />
           </div>
         )}
-        {canSee('element.consignment-overview.sort') && (
-          <div style={{ display: 'flex', gap: '4px', marginLeft: 'auto', flexWrap: 'wrap' }}>
-            {SORT_OPTIONS.map(o => (
-              <button key={o.key} onClick={() => setSortBy(o.key)}
-                style={{ background: sortBy === o.key ? `${t.gold}20` : 'transparent', border: `1px solid ${sortBy === o.key ? t.gold : t.border2}`, borderRadius: '6px', padding: '5px 10px', fontSize: '11px', color: sortBy === o.key ? t.gold : t.text3, cursor: 'pointer', transition: 'all .1s' }}>
-                {o.label}
-              </button>
-            ))}
-          </div>
-        )}
+        <div style={{ marginLeft: 'auto', fontSize: '11px', color: t.text4 }}>
+          {filtered.length} of {data.length} branches · click column headers to sort
+        </div>
       </div>
 
       {/* ── Table ── */}
-      {canSee('element.consignment-overview.table') && <div style={{ ...card, overflow: 'hidden' }}>
-        {loading ? (
-          <div style={{ padding: '60px', display: 'flex', justifyContent: 'center' }}><GoldSpinner size={32} /></div>
-        ) : filtered.length === 0 ? (
-          <div style={{ padding: '60px', textAlign: 'center', color: t.text4, fontSize: '13px' }}>
-            {search || activeRegion ? 'No branches match your filter' : 'No stock at any branch'}
-          </div>
-        ) : (
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '900px' }}>
-              <thead style={{ position: 'sticky', top: 0, zIndex: 1 }}>
-                <tr>
-                  <th style={{ ...th, width: '32px', textAlign: 'center' }}>#</th>
-                  <th style={th}>Branch</th>
-                  <th style={{ ...th, textAlign: 'center' }}>Pickup Time</th>
-                  <th style={{ ...th, textAlign: 'right' }}>Today's Bills</th>
-                  <th style={{ ...th, textAlign: 'right' }}>Today's Net Wt</th>
-                  <th style={{ ...th, textAlign: 'right' }}>Pending Bills</th>
-                  <th style={{ ...th, textAlign: 'right' }}>Pending Net Wt</th>
-                  <th style={{ ...th, textAlign: 'center' }}>Oldest Bill</th>
-                  <th style={{ ...th, textAlign: 'center' }}>Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map((b, i) => {
-                  const rColor  = REGION_COLORS[b.region] || t.text3
-                  const shipDays = daysFromNow(b.ship_before)
-                  const rowUrgent = shipDays !== null && shipDays <= 3
-                  return (
-                    <tr key={b.branch_name}
-                      style={{ borderBottom: `1px solid ${t.border}20`, background: rowUrgent ? `${t.red}05` : 'transparent', transition: 'background .1s' }}
-                      onMouseEnter={e => e.currentTarget.style.background = rowUrgent ? `${t.red}10` : `${t.gold}05`}
-                      onMouseLeave={e => e.currentTarget.style.background = rowUrgent ? `${t.red}05` : 'transparent'}>
+      {canSee('element.consignment-overview.table') && (
+        <div style={{ ...card, overflow: 'hidden' }}>
+          {loading ? (
+            <div style={{ padding: '80px', display: 'flex', justifyContent: 'center' }}><GoldSpinner size={32} /></div>
+          ) : filtered.length === 0 ? (
+            <div style={{ padding: '80px', textAlign: 'center', color: t.text4, fontSize: '13px' }}>
+              {search || activeRegion ? 'No branches match your filter' : 'No stock at any branch'}
+            </div>
+          ) : (
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '860px' }}>
+                <thead style={{ position: 'sticky', top: 0, zIndex: 1 }}>
+                  <tr>
+                    <th style={{ ...thBase, width: '36px', textAlign: 'center' }}>#</th>
+                    <th style={{ ...thBase }}>Branch</th>
+                    <th style={{ ...thBase, textAlign: 'center' }}>Pickup</th>
 
-                      {/* Rank */}
-                      <td style={{ padding: '10px 14px', fontSize: '11px', color: t.text4, textAlign: 'center' }}>{i + 1}</td>
+                    {/* Sortable: Today */}
+                    <th style={{ ...thBase, textAlign: 'right', cursor: 'pointer', color: sortKey === 'today_bills' ? t.blue : t.text4 }}
+                        onClick={() => handleSort('today_bills')}>
+                      Today's Bills <SortIcon col="today_bills" />
+                    </th>
+                    <th style={{ ...thBase, textAlign: 'right', cursor: 'pointer', color: sortKey === 'today_net_wt' ? t.blue : t.text4 }}
+                        onClick={() => handleSort('today_net_wt')}>
+                      Today's Net Wt <SortIcon col="today_net_wt" />
+                    </th>
 
-                      {/* Branch */}
-                      <td style={{ padding: '10px 14px' }}>
-                        <div style={{ fontSize: '13px', fontWeight: 600, color: t.text1 }}>{b.branch_name}</div>
-                        <span style={{ fontSize: '10px', color: rColor, background: `${rColor}15`, borderRadius: '4px', padding: '1px 6px', marginTop: '3px', display: 'inline-block' }}>{b.region}</span>
-                      </td>
+                    {/* Sortable: Pending */}
+                    <th style={{ ...thBase, textAlign: 'right', cursor: 'pointer', color: sortKey === 'older_bills' ? t.orange : t.text4 }}
+                        onClick={() => handleSort('older_bills')}>
+                      Pending Bills <SortIcon col="older_bills" />
+                    </th>
+                    <th style={{ ...thBase, textAlign: 'right', cursor: 'pointer', color: sortKey === 'older_net_wt' ? t.orange : t.text4 }}
+                        onClick={() => handleSort('older_net_wt')}>
+                      Pending Net Wt <SortIcon col="older_net_wt" />
+                    </th>
 
-                      {/* Pickup Time */}
-                      <td style={{ padding: '10px 14px', textAlign: 'center' }}>
-                        {b.pickup_time
-                          ? <span style={{ fontSize: '12px', color: t.blue, background: `${t.blue}15`, borderRadius: '5px', padding: '2px 8px', fontWeight: 600 }}>{b.pickup_time}</span>
-                          : <span style={{ fontSize: '11px', color: t.text4 }}>—</span>}
-                      </td>
+                    {/* Sortable: Age */}
+                    <th style={{ ...thBase, textAlign: 'center', cursor: 'pointer', color: sortKey === 'oldest_age' ? t.red : t.text4 }}
+                        onClick={() => handleSort('oldest_age')}>
+                      Oldest Bill <SortIcon col="oldest_age" />
+                    </th>
 
-                      {/* Today's Bills */}
-                      <td style={{ padding: '10px 14px', textAlign: 'right' }}>
-                        {b.today_bills > 0
-                          ? <span style={{ fontSize: '13px', color: t.blue, fontFamily: 'monospace', fontWeight: 600 }}>{b.today_bills}</span>
-                          : <span style={{ fontSize: '11px', color: t.text4 }}>—</span>}
-                      </td>
+                    <th style={{ ...thBase, textAlign: 'center' }}>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.map((b, i) => {
+                    const rColor  = REGION_COLORS[b.region] || t.text3
+                    const hasToday  = (b.today_bills  || 0) > 0
+                    const hasPending = (b.older_bills || 0) > 0
 
-                      {/* Today's Net Wt */}
-                      <td style={{ padding: '10px 14px', textAlign: 'right', fontSize: '12px', color: b.today_net_wt > 0 ? t.blue : t.text4, fontFamily: 'monospace' }}>
-                        {b.today_net_wt > 0 ? `${fmt(b.today_net_wt, 2)}g` : '—'}
-                      </td>
+                    return (
+                      <tr key={b.branch_name}
+                        style={{ borderBottom: `1px solid ${t.border}20`, transition: 'background .1s' }}
+                        onMouseEnter={e => e.currentTarget.style.background = `${t.gold}06`}
+                        onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
 
-                      {/* Pending Bills */}
-                      <td style={{ padding: '10px 14px', textAlign: 'right' }}>
-                        <span style={{ fontSize: '13px', color: b.older_bills > 0 ? t.orange : t.text4, fontFamily: 'monospace', fontWeight: b.older_bills > 0 ? 600 : 400 }}>
-                          {b.older_bills > 0 ? b.older_bills : '—'}
-                        </span>
-                      </td>
+                        {/* Rank */}
+                        <td style={{ padding: '11px 14px', fontSize: '11px', color: t.text4, textAlign: 'center', fontFamily: 'monospace' }}>{i + 1}</td>
 
-                      {/* Pending Net Wt */}
-                      <td style={{ padding: '10px 14px', textAlign: 'right', fontSize: '12px', color: b.older_net_wt > 0 ? t.orange : t.text4, fontFamily: 'monospace', fontWeight: b.older_net_wt > 0 ? 600 : 400 }}>
-                        {b.older_net_wt > 0 ? `${fmt(b.older_net_wt, 2)}g` : '—'}
-                      </td>
+                        {/* Branch */}
+                        <td style={{ padding: '11px 14px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <div style={{ width: '3px', height: '32px', borderRadius: '2px', background: rColor, flexShrink: 0 }} />
+                            <div>
+                              <div style={{ fontSize: '13px', fontWeight: 600, color: t.text1 }}>{b.branch_name}</div>
+                              <div style={{ fontSize: '10px', color: rColor, marginTop: '2px' }}>{b.region}</div>
+                            </div>
+                          </div>
+                        </td>
 
-                      {/* Oldest Bill Age */}
-                      <td style={{ padding: '10px 14px', textAlign: 'center' }}>
-                        <AgeBadge days={b.oldest_age_days} t={t} />
-                        {b.oldest_date && <div style={{ fontSize: '9px', color: t.text4, marginTop: '3px' }}>{fmtDate(b.oldest_date)}</div>}
-                      </td>
+                        {/* Pickup Time */}
+                        <td style={{ padding: '11px 14px', textAlign: 'center' }}>
+                          {b.pickup_time
+                            ? <span style={{ fontSize: '12px', color: t.blue, background: `${t.blue}15`, borderRadius: '5px', padding: '3px 9px', fontWeight: 600 }}>{b.pickup_time}</span>
+                            : <span style={{ fontSize: '11px', color: t.text4 }}>—</span>}
+                        </td>
 
-                      {/* Action */}
-                      <td style={{ padding: '10px 14px', textAlign: 'center' }}>
-                        <button
-                          onClick={() => setActiveNav('consignment-data')}
-                          style={{ background: `${t.gold}15`, border: `1px solid ${t.gold}40`, borderRadius: '6px', padding: '4px 10px', fontSize: '11px', color: t.gold, cursor: 'pointer', fontWeight: 600, whiteSpace: 'nowrap' }}>
-                          Move →
-                        </button>
-                      </td>
-                    </tr>
-                  )
-                })}
+                        {/* Today's Bills */}
+                        <td style={{ padding: '11px 14px', textAlign: 'right' }}>
+                          {hasToday
+                            ? <span style={{ fontSize: '14px', color: t.blue, fontFamily: 'monospace', fontWeight: 700 }}>{b.today_bills}</span>
+                            : <span style={{ fontSize: '11px', color: t.text4 }}>—</span>}
+                        </td>
 
-                {/* Totals row */}
-                <tr style={{ background: t.card2, borderTop: `2px solid ${t.border}` }}>
-                  <td colSpan={2} style={{ padding: '10px 14px', fontSize: '11px', color: t.text3, fontWeight: 600 }}>
-                    TOTAL — {filtered.length} branch{filtered.length !== 1 ? 'es' : ''}
-                  </td>
-                  <td style={{ padding: '10px 14px' }} />
-                  <td style={{ padding: '10px 14px', textAlign: 'right', fontSize: '13px', color: t.blue, fontFamily: 'monospace', fontWeight: 700 }}>{grandToday || '—'}</td>
-                  <td style={{ padding: '10px 14px', textAlign: 'right', fontSize: '13px', color: t.blue, fontFamily: 'monospace', fontWeight: 600 }}>{fmt(filtered.reduce((s,b)=>s+(b.today_net_wt||0),0),2)}g</td>
-                  <td style={{ padding: '10px 14px', textAlign: 'right', fontSize: '13px', color: t.orange, fontFamily: 'monospace', fontWeight: 700 }}>{grandOlder || '—'}</td>
-                  <td style={{ padding: '10px 14px', textAlign: 'right', fontSize: '13px', color: t.orange, fontFamily: 'monospace', fontWeight: 600 }}>{fmt(filtered.reduce((s,b)=>s+(b.older_net_wt||0),0),2)}g</td>
-                  <td colSpan={2} style={{ padding: '10px 14px' }} />
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>}
+                        {/* Today's Net Wt */}
+                        <td style={{ padding: '11px 14px', textAlign: 'right' }}>
+                          {hasToday
+                            ? <span style={{ fontSize: '13px', color: t.blue, fontFamily: 'monospace' }}>{fmt(b.today_net_wt, 2)}<span style={{ fontSize: '10px', marginLeft: '2px' }}>g</span></span>
+                            : <span style={{ fontSize: '11px', color: t.text4 }}>—</span>}
+                        </td>
 
-      {/* Ship Before note */}
+                        {/* Pending Bills */}
+                        <td style={{ padding: '11px 14px', textAlign: 'right' }}>
+                          {hasPending
+                            ? <span style={{ fontSize: '14px', color: t.orange, fontFamily: 'monospace', fontWeight: 700 }}>{b.older_bills}</span>
+                            : <span style={{ fontSize: '11px', color: t.text4 }}>—</span>}
+                        </td>
+
+                        {/* Pending Net Wt */}
+                        <td style={{ padding: '11px 14px', textAlign: 'right' }}>
+                          {hasPending
+                            ? <span style={{ fontSize: '13px', color: t.orange, fontFamily: 'monospace' }}>{fmt(b.older_net_wt, 2)}<span style={{ fontSize: '10px', marginLeft: '2px' }}>g</span></span>
+                            : <span style={{ fontSize: '11px', color: t.text4 }}>—</span>}
+                        </td>
+
+                        {/* Oldest Bill */}
+                        <td style={{ padding: '11px 14px', textAlign: 'center' }}>
+                          <AgeBadge days={b.oldest_age_days} t={t} />
+                          {b.oldest_date && (
+                            <div style={{ fontSize: '10px', color: t.text4, marginTop: '3px' }}>{fmtDate(b.oldest_date)}</div>
+                          )}
+                        </td>
+
+                        {/* Action */}
+                        <td style={{ padding: '11px 14px', textAlign: 'center' }}>
+                          <button
+                            onClick={() => setActiveNav('consignment-data')}
+                            style={{ background: `${t.gold}18`, border: `1px solid ${t.gold}50`, borderRadius: '7px', padding: '5px 12px', fontSize: '11px', color: t.gold, cursor: 'pointer', fontWeight: 600, whiteSpace: 'nowrap', transition: 'all .1s' }}
+                            onMouseEnter={e => { e.currentTarget.style.background = `${t.gold}30`; e.currentTarget.style.borderColor = t.gold }}
+                            onMouseLeave={e => { e.currentTarget.style.background = `${t.gold}18`; e.currentTarget.style.borderColor = `${t.gold}50` }}>
+                            Move →
+                          </button>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+
+                {/* Totals footer */}
+                <tfoot>
+                  <tr style={{ background: `${t.gold}08`, borderTop: `2px solid ${t.border}` }}>
+                    <td colSpan={2} style={{ padding: '11px 14px', fontSize: '11px', color: t.text3, fontWeight: 700, letterSpacing: '.04em' }}>
+                      TOTAL · {filtered.length} branch{filtered.length !== 1 ? 'es' : ''}
+                    </td>
+                    <td style={{ padding: '11px 14px' }} />
+                    <td style={{ padding: '11px 14px', textAlign: 'right', fontSize: '14px', color: t.blue, fontFamily: 'monospace', fontWeight: 700 }}>{grandToday || '—'}</td>
+                    <td style={{ padding: '11px 14px', textAlign: 'right', fontSize: '13px', color: t.blue, fontFamily: 'monospace' }}>{fmt(grandTodayWt, 2)}<span style={{ fontSize: '10px', marginLeft: '2px' }}>g</span></td>
+                    <td style={{ padding: '11px 14px', textAlign: 'right', fontSize: '14px', color: t.orange, fontFamily: 'monospace', fontWeight: 700 }}>{grandOlder || '—'}</td>
+                    <td style={{ padding: '11px 14px', textAlign: 'right', fontSize: '13px', color: t.orange, fontFamily: 'monospace' }}>{fmt(grandOlderWt, 2)}<span style={{ fontSize: '10px', marginLeft: '2px' }}>g</span></td>
+                    <td colSpan={2} style={{ padding: '11px 14px' }} />
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Footer note */}
       <div style={{ fontSize: '10px', color: t.text4, textAlign: 'right' }}>
-        * Pending = purchases with stock_status <code style={{ background: t.card2, padding: '1px 4px', borderRadius: '3px', color: t.text3 }}>at_branch</code> from before today · Pickup time editable per branch in Branch Management
+        Pending = <code style={{ background: t.card2, padding: '1px 4px', borderRadius: '3px', color: t.text3 }}>stock_status = at_branch</code> before today · Pickup time editable in Branch Management
       </div>
 
+      <style>{`
+        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+        @keyframes spin  { to{transform:rotate(360deg)} }
+      `}</style>
     </div>
   )
 }
