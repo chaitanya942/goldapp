@@ -220,6 +220,7 @@ export default function PurchaseReports() {
   const [timeOfDay,     setTimeOfDay]     = useState([])
   const [topBills,      setTopBills]      = useState([])
   const [branches,      setBranches]      = useState([])
+  const [allBranchMeta, setAllBranchMeta] = useState([])
   const [regions,       setRegions]       = useState([])
   const [loading,       setLoading]       = useState(true)
   const [activeSection, setActiveSection] = useState(null)
@@ -250,6 +251,7 @@ export default function PurchaseReports() {
       const { data: branchMeta } = await supabase.from('branches').select('name, region, state, cluster')
       const branchMetaMap = {}
       ;(branchMeta || []).forEach(b => { branchMetaMap[b.name] = b })
+      setAllBranchMeta(branchMeta || [])
 
       // ── Region filter → resolve to branch names ───────────
       let stateFilterBranches = null
@@ -914,7 +916,7 @@ export default function PurchaseReports() {
         <>
           {showSection('charts')       && <ReportCharts       trend={trend} monthly={monthly} dowData={dowData} hourlyTrend={hourlyTrend} isSingleDay={fromDate && toDate && fromDate === toDate} t={t} fromDate={fromDate} filterBranch={filterBranch} filterTxn={filterTxn} />}
           {showSection('distribution') && <ReportDistribution kpis={kpis} purityDist={purityDist} weightBuckets={weightBuckets} regionSplit={regionSplit} monthHalf={monthHalf} timeOfDay={timeOfDay} t={t} />}
-          {showSection('branches')     && <ReportBranches     branchData={branchData} stateData={stateData} topBills={topBills} fromDate={fromDate} toDate={toDate} filterTxn={filterTxn} t={t} />}
+          {showSection('branches')     && <ReportBranches     branchData={branchData} allBranchMeta={allBranchMeta} stateData={stateData} topBills={topBills} fromDate={fromDate} toDate={toDate} filterTxn={filterTxn} t={t} />}
           {showSection('sameday')      && <ReportSameDay      t={t} />}
           {showSection('compare')      && <ReportCompare      t={t} />}
           {showSection('crm')          && <ReportCrmInsights  t={t} />}

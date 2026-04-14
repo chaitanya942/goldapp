@@ -164,6 +164,8 @@ function RegionDonut({ branchData, t }) {
 function BranchBillsModal({ branch, branchInfo, color, t, fromDate, toDate, filterTxn, onClose }) {
   const [bills, setBills]     = useState([])
   const [loading, setLoading] = useState(true)
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => { setMounted(true) }, [])
 
   useEffect(() => {
     if (!branch) return
@@ -189,10 +191,11 @@ function BranchBillsModal({ branch, branchInfo, color, t, fromDate, toDate, filt
   const totalNet = bills.reduce((s, b) => s + Number(b.net_weight || 0), 0)
   const totalVal = bills.reduce((s, b) => s + Number(b.total_amount || 0), 0)
 
-  return (
+  if (!mounted) return null
+  return createPortal(
     <>
-      <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(6px)', WebkitBackdropFilter: 'blur(6px)', cursor: 'pointer' }} />
-      <div style={{ position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', zIndex: 1001, width: 'min(1400px, 98vw)', maxHeight: '92vh', display: 'flex', flexDirection: 'column', background: t.card, border: `1px solid ${color}40`, borderRadius: '16px', boxShadow: `0 32px 80px rgba(0,0,0,0.8), 0 0 0 1px ${color}20` }}>
+      <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 9998, background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(6px)', WebkitBackdropFilter: 'blur(6px)', cursor: 'pointer' }} />
+      <div style={{ position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', zIndex: 9999, width: 'min(1400px, 98vw)', maxHeight: '92vh', display: 'flex', flexDirection: 'column', background: t.card, border: `1px solid ${color}40`, borderRadius: '16px', boxShadow: `0 32px 80px rgba(0,0,0,0.8), 0 0 0 1px ${color}20` }}>
         <div style={{ padding: '20px 24px 16px', borderBottom: `1px solid ${t.border}`, flexShrink: 0 }}>
           <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
             <div>
@@ -265,23 +268,32 @@ function BranchBillsModal({ branch, branchInfo, color, t, fromDate, toDate, filt
           )}
         </div>
       </div>
-    </>
+    </>,
+    document.body
   )
 }
 
 // ─────────────────────────────────────────────
 // BRANCH HEATMAP GRID
 // ─────────────────────────────────────────────
-function BranchHeatmap({ branchData, metric, t, fromDate, toDate, filterTxn }) {
+function BranchHeatmap({ branchData, allBranchMeta, metric, t, fromDate, toDate, filterTxn }) {
   const [hovered,        setHovered]        = useState(null)
   const [selectedBranch, setSelectedBranch] = useState(null)
 
-  const regions = [...new Set((branchData || []).map(b => b.region || 'Unknown'))]
+  // Merge transaction data with full branch list so zero-txn branches appear
+  const branchDataMap = {}
+  ;(branchData || []).forEach(b => { branchDataMap[b.branch_name] = b })
+  const zeroBranches = (allBranchMeta || [])
+    .filter(m => !branchDataMap[m.name])
+    .map(m => ({ branch_name: m.name, region: m.region || 'Unknown', state: m.state || 'Unknown', cluster: m.cluster || null, txn_count: 0, physical_count: 0, total_net: 0, total_value: 0, avg_purity: 0 }))
+
+  const regions = [...new Set([...(branchData || []), ...zeroBranches].map(b => b.region || 'Unknown'))]
   const regionColors = buildRegionColors(regions)
 
-  const sorted = [...(branchData || [])]
-    .filter(b => Number(b[metric] || 0) > 0)
-    .sort((a, b) => Number(b[metric]) - Number(a[metric]))
+  const sorted = [
+    ...[...(branchData || [])].sort((a, b) => Number(b[metric]) - Number(a[metric])),
+    ...zeroBranches.sort((a, b) => a.branch_name.localeCompare(b.branch_name)),
+  ]
 
   const maxVal = Number(sorted[0]?.[metric] || 1)
 
@@ -331,28 +343,31 @@ function BranchHeatmap({ branchData, metric, t, fromDate, toDate, filterTxn }) {
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))', gap: '6px' }}>
         {sorted.map((b, i) => {
-          const color   = regionColors[b.region || 'Unknown']
-          const pct     = maxVal > 0 ? Number(b[metric]) / maxVal : 0
-          const isHov   = hovered === b.branch_name
-          const phPct   = (b.txn_count > 0) ? (b.physical_count / b.txn_count) * 100 : 0
-          const opacity = 0.25 + pct * 0.75
+          const color    = regionColors[b.region || 'Unknown']
+          const hasData  = b.txn_count > 0
+          const pct      = hasData && maxVal > 0 ? Number(b[metric]) / maxVal : 0
+          const isHov    = hovered === b.branch_name
+          const phPct    = hasData ? (b.physical_count / b.txn_count) * 100 : 0
+          const opacity  = hasData ? 0.25 + pct * 0.75 : 0
           return (
             <div key={i}
               onMouseEnter={() => setHovered(b.branch_name)}
               onMouseLeave={() => setHovered(null)}
               onClick={() => setSelectedBranch(b.branch_name)}
               style={{
-                background: `${color}${Math.round(opacity * 255).toString(16).padStart(2,'0')}`,
-                border: `1px solid ${isHov ? color : color + '30'}`,
+                background: hasData
+                  ? `${color}${Math.round(opacity * 255).toString(16).padStart(2,'0')}`
+                  : t.border2,
+                border: `1px solid ${isHov ? color : hasData ? color + '30' : t.border}`,
                 borderRadius: '6px', padding: '8px 7px',
                 cursor: 'pointer', transition: 'border-color .15s, transform .15s',
                 transform: isHov ? 'translateY(-2px)' : 'none',
               }}>
-              <div style={{ fontSize: '.55rem', color: 'rgba(255,255,255,0.85)', fontWeight: 700, marginBottom: '3px' }}>#{i + 1}</div>
-              <div style={{ fontSize: '.65rem', color: '#ffffff', fontWeight: 700, lineHeight: 1.2, marginBottom: '4px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', textShadow: '0 1px 3px rgba(0,0,0,0.5)' }}>{b.branch_name}</div>
-              <div style={{ fontSize: '.7rem', color: '#ffffff', fontWeight: 500, marginBottom: '5px', textShadow: '0 1px 3px rgba(0,0,0,0.5)' }}>{metricLabel(b)}</div>
+              {hasData && <div style={{ fontSize: '.55rem', color: 'rgba(255,255,255,0.85)', fontWeight: 700, marginBottom: '3px' }}>#{i + 1}</div>}
+              <div style={{ fontSize: '.65rem', color: hasData ? '#ffffff' : t.text4, fontWeight: hasData ? 700 : 400, lineHeight: 1.2, marginBottom: '4px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', textShadow: hasData ? '0 1px 3px rgba(0,0,0,0.5)' : 'none' }}>{b.branch_name}</div>
+              <div style={{ fontSize: '.65rem', color: hasData ? '#ffffff' : t.text4, fontWeight: 500, marginBottom: '5px', textShadow: hasData ? '0 1px 3px rgba(0,0,0,0.5)' : 'none' }}>{hasData ? metricLabel(b) : 'No txns'}</div>
               <div style={{ height: '3px', borderRadius: '2px', background: 'rgba(255,255,255,0.15)', overflow: 'hidden' }}>
-                <div style={{ height: '100%', width: `${phPct}%`, background: 'rgba(255,255,255,0.7)', borderRadius: '2px' }} />
+                {hasData && <div style={{ height: '100%', width: `${phPct}%`, background: 'rgba(255,255,255,0.7)', borderRadius: '2px' }} />}
               </div>
             </div>
           )
@@ -480,7 +495,7 @@ function SectionTitle({ title, t, badge, noMargin }) {
 // ─────────────────────────────────────────────
 // MAIN
 // ─────────────────────────────────────────────
-export default function ReportBranches({ branchData, stateData, topBills, t, fromDate, toDate, filterTxn }) {
+export default function ReportBranches({ branchData, allBranchMeta, stateData, topBills, t, fromDate, toDate, filterTxn }) {
   const [topMetric,        setTopMetric]        = useState('total_net')
   const [branchSort,       setBranchSort]        = useState('total_net')
   const [treemetric,       setTreeMetric]        = useState('total_net')
@@ -710,7 +725,7 @@ export default function ReportBranches({ branchData, stateData, topBills, t, fro
             ))}
           </div>
         </div>
-        <BranchHeatmap branchData={branchData} metric={treemetric} t={t} fromDate={fromDate} toDate={toDate} filterTxn={filterTxn} />
+        <BranchHeatmap branchData={branchData} allBranchMeta={allBranchMeta} metric={treemetric} t={t} fromDate={fromDate} toDate={toDate} filterTxn={filterTxn} />
       </Panel>
 
       {/* ── SCATTER ── */}
