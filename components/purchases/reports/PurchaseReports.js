@@ -261,7 +261,7 @@ export default function PurchaseReports() {
       // ── 2. Fetch all approved purchases (chunked, minimal columns) ────────────
       const SELECT_COLS = 'purchase_date,branch_name,transaction_type,net_weight,gross_weight,stone_weight,wastage,total_amount,purity,service_charge_pct,transaction_time,customer_name'
       let rows = [], offset = 0
-      const CHUNK = 5000
+      const CHUNK = 1000
       while (true) {
         let q = supabase.from('purchases')
           .select(SELECT_COLS)
