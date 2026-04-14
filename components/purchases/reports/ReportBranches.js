@@ -615,6 +615,7 @@ export default function ReportBranches({ branchData, stateData, topBills, t, fro
       {/* ── TOP 10 BY METRIC ── */}
       {(() => {
         const allRegionsTop = [...new Set((branchData || []).map(b => b.region).filter(Boolean))].sort()
+        const top10RegionColors = buildRegionColors(allRegionsTop)
         const [top10Region, setTop10Region] = [drillRegion, setDrillRegion]
         const filteredTop10 = top10Region
           ? [...(branchData || [])].filter(b => b.region === top10Region).sort((a, b) => b[topMetric] - a[topMetric]).slice(0, 10)
@@ -655,7 +656,7 @@ export default function ReportBranches({ branchData, stateData, topBills, t, fro
                 {filteredTop10.map((b, i) => {
                   const max         = filteredTop10[0]?.[topMetric] || 1
                   const w           = (b[topMetric] / max) * 100
-                  const barColor    = regionColors[b.region] || t.gold
+                  const barColor    = top10RegionColors[b.region] || t.gold
                   const metricLabel = topMetric === 'total_net'   ? `${fmt(b[topMetric])}g`
                                     : topMetric === 'total_value' ? fmtVal(b[topMetric])
                                     : Number(b[topMetric]).toLocaleString('en-IN')
