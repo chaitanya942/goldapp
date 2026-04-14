@@ -577,18 +577,6 @@ export default function ReportDistribution({ kpis, purityDist, weightBuckets, re
               })
             : <div style={{ color: t.text4, fontSize: '.72rem', textAlign: 'center', padding: '30px' }}>No data</div>
           }
-          {regionSplit?.length > 0 && (
-            <>
-              <Divider t={t} />
-              <div style={{ fontSize: '.52rem', color: t.text3, textTransform: 'uppercase', letterSpacing: '.1em', marginBottom: '6px' }}>Region ranking</div>
-              {sortedRegions.slice(0, 3).map((r, i) => (
-                <RankRow key={i} rank={i + 1} label={r.region}
-                  value={Number(r.total_txns).toLocaleString('en-IN')}
-                  sub={`${r.total_txns > 0 ? Math.round((r.physical_count / r.total_txns) * 100) : 0}% physical`}
-                  color={t.gold} t={t} isTop={i === 0} />
-              ))}
-            </>
-          )}
         </Panel>
 
         {/* MONTH HALF */}
