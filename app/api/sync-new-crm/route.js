@@ -158,7 +158,8 @@ export async function POST(request) {
         net_weight_mismatch:        false,
         service_charge_mismatch:    false,
         final_amount_mismatch:      false,
-        stock_status:               'at_branch',
+        // stock_status intentionally omitted — DB default 'at_branch' applies on INSERT,
+        // existing rows keep their current status (in_consignment, at_ho, etc.)
         is_duplicate:               false,
         is_deleted:                 false,
       }
