@@ -502,21 +502,49 @@ export default function PurchaseReports() {
       const regAgg = {}
       for (const r of rows) {
         const reg = branchMetaMap[r.branch_name || '']?.region || 'Unknown'
-        if (!regAgg[reg]) regAgg[reg] = { region: reg, total_txns: 0, takeover_count: 0 }
+        if (!regAgg[reg]) regAgg[reg] = { region: reg, total_txns: 0, physical_count: 0, takeover_count: 0, total_net: 0, svc_sum: 0 }
         regAgg[reg].total_txns++
-        if (r.transaction_type !== 'PHYSICAL') regAgg[reg].takeover_count++
+        regAgg[reg].total_net += parseFloat(r.net_weight || 0)
+        regAgg[reg].svc_sum   += parseFloat(r.service_charge_pct || 0)
+        if (r.transaction_type === 'PHYSICAL') regAgg[reg].physical_count++
+        else regAgg[reg].takeover_count++
       }
-      setRegionSplit(Object.values(regAgg).sort((a, b) => b.total_txns - a.total_txns))
+      setRegionSplit(
+        Object.values(regAgg)
+          .sort((a, b) => b.total_txns - a.total_txns)
+          .map(r => ({
+            ...r,
+            total_net:          parseFloat(r.total_net.toFixed(3)),
+            avg_service_charge: r.total_txns > 0 ? parseFloat((r.svc_sum / r.total_txns).toFixed(2)) : 0,
+          }))
+      )
 
       // ── 11. Month half ─────────────────────────────────────
-      let firstHalf = 0, secondHalf = 0
+      const halfAgg = {
+        first:  { txn_count: 0, total_net: 0, svc_sum: 0 },
+        second: { txn_count: 0, total_net: 0, svc_sum: 0 },
+      }
       for (const r of rows) {
         if (!r.purchase_date) continue
-        parseInt(r.purchase_date.slice(8, 10)) <= 15 ? firstHalf++ : secondHalf++
+        const day = parseInt(r.purchase_date.slice(8, 10))
+        const h   = day <= 15 ? 'first' : 'second'
+        halfAgg[h].txn_count++
+        halfAgg[h].total_net += parseFloat(r.net_weight || 0)
+        halfAgg[h].svc_sum   += parseFloat(r.service_charge_pct || 0)
       }
       setMonthHalf([
-        { half: 'First Half',  txn_count: firstHalf  },
-        { half: 'Second Half', txn_count: secondHalf },
+        {
+          half:               'First Half',
+          txn_count:          halfAgg.first.txn_count,
+          total_net:          parseFloat(halfAgg.first.total_net.toFixed(3)),
+          avg_service_charge: halfAgg.first.txn_count > 0 ? parseFloat((halfAgg.first.svc_sum / halfAgg.first.txn_count).toFixed(2)) : 0,
+        },
+        {
+          half:               'Second Half',
+          txn_count:          halfAgg.second.txn_count,
+          total_net:          parseFloat(halfAgg.second.total_net.toFixed(3)),
+          avg_service_charge: halfAgg.second.txn_count > 0 ? parseFloat((halfAgg.second.svc_sum / halfAgg.second.txn_count).toFixed(2)) : 0,
+        },
       ])
 
       // ── 12. Top 10 bills by net weight ─────────────────────
