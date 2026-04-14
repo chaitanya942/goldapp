@@ -31,30 +31,31 @@ function Panel({ id, expanded, onExpand, onClose, t, cardStyle = {}, noExpand = 
         style={{
           ...cardStyle,
           position: isExp ? 'fixed' : 'relative',
+          transition: 'box-shadow .15s ease',
           ...(isExp ? {
             top: '50%', left: '50%',
             transform: 'translate(-50%, -50%)',
-            width: 'min(1200px, 96vw)',
-            maxHeight: '92vh', overflowY: 'auto',
+            width: 'min(1100px, 96vw)',
+            maxHeight: '90vh', overflowY: 'auto',
             zIndex: 1000,
-            boxShadow: '0 28px 72px rgba(0,0,0,0.85)',
+            boxShadow: '0 32px 80px rgba(0,0,0,0.9), 0 0 0 1px rgba(255,255,255,0.06)',
             cursor: 'default',
+            animation: 'panelPop .2s cubic-bezier(.34,1.3,.64,1)',
           } : {
             cursor: noExpand ? 'default' : 'pointer',
           }),
         }}
       >
+        <style>{`@keyframes panelPop { from { opacity:0; transform:translate(-50%,-48%) scale(.95); } to { opacity:1; transform:translate(-50%,-50%) scale(1); } }`}</style>
         {isExp && (
           <button onClick={(e) => { e.stopPropagation(); onClose() }} style={{
             position: 'sticky', top: 0, float: 'right',
             background: 'transparent', border: 'none',
-            color: t.text3, fontSize: '1rem', cursor: 'pointer',
+            color: t.text3, fontSize: '1.1rem', cursor: 'pointer',
             padding: '0 0 8px 12px', lineHeight: 1, zIndex: 2,
           }}>✕</button>
         )}
-        <div style={{ zoom: isExp ? 1.35 : 1 }}>
-          {children}
-        </div>
+        {children}
       </div>
     </>
   )
