@@ -217,6 +217,7 @@ export default function PurchaseReports() {
   const [weightBuckets, setWeightBuckets] = useState([])
   const [regionSplit,   setRegionSplit]   = useState([])
   const [monthHalf,     setMonthHalf]     = useState([])
+  const [timeOfDay,     setTimeOfDay]     = useState([])
   const [topBills,      setTopBills]      = useState([])
   const [branches,      setBranches]      = useState([])
   const [regions,       setRegions]       = useState([])
@@ -283,7 +284,7 @@ export default function PurchaseReports() {
       if (!rows.length) {
         setKpis(null); setTrend([]); setBranchData([]); setStateData([])
         setMonthly([]); setDowData([]); setPurityDist([]); setWeightBuckets([])
-        setRegionSplit([]); setMonthHalf([]); setTopBills([])
+        setRegionSplit([]); setMonthHalf([]); setTimeOfDay([]); setTopBills([])
         setHourlyTrend([])
         setLoading(false)
         return
@@ -547,7 +548,56 @@ export default function PurchaseReports() {
         },
       ])
 
-      // ── 12. Top 10 bills by net weight ─────────────────────
+      // ── 12. Time of day ────────────────────────────────────
+      const todSlots = {
+        morning:   { label: 'Morning',   range: '9 AM – 12 PM', minH: 9,  maxH: 11, txn_count: 0, total_net: 0, total_val: 0, purity_wt: 0, svc_sum: 0 },
+        afternoon: { label: 'Afternoon', range: '12 PM – 5 PM', minH: 12, maxH: 16, txn_count: 0, total_net: 0, total_val: 0, purity_wt: 0, svc_sum: 0 },
+        evening:   { label: 'Evening',   range: '5 PM – close', minH: 17, maxH: 23, txn_count: 0, total_net: 0, total_val: 0, purity_wt: 0, svc_sum: 0 },
+        unknown:   { label: 'Unknown',   range: 'No time data', minH: -1, maxH: -1, txn_count: 0, total_net: 0, total_val: 0, purity_wt: 0, svc_sum: 0 },
+      }
+      for (const r of rows) {
+        const nw = parseFloat(r.net_weight || 0)
+        const fa = parseFloat(r.total_amount || 0)
+        const pu = parseFloat(r.purity || 0)
+        const sp = parseFloat(r.service_charge_pct || 0)
+        let slot = todSlots.unknown
+        if (r.transaction_time) {
+          const h = parseInt(String(r.transaction_time).split(':')[0])
+          if (!isNaN(h)) {
+            if      (h >= 9  && h <= 11) slot = todSlots.morning
+            else if (h >= 12 && h <= 16) slot = todSlots.afternoon
+            else if (h >= 17 && h <= 23) slot = todSlots.evening
+            else slot = todSlots.unknown
+          }
+        }
+        slot.txn_count++
+        slot.total_net  += nw
+        slot.total_val  += fa
+        slot.purity_wt  += nw * pu
+        slot.svc_sum    += sp
+      }
+      const todTotal = Object.values(todSlots).reduce((s, sl) => s + sl.txn_count, 0)
+      setTimeOfDay(
+        ['morning', 'afternoon', 'evening', 'unknown']
+          .map(key => {
+            const sl = todSlots[key]
+            return {
+              key,
+              label:              sl.label,
+              range:              sl.range,
+              txn_count:          sl.txn_count,
+              total_net:          parseFloat(sl.total_net.toFixed(3)),
+              total_val:          Math.round(sl.total_val),
+              avg_net:            sl.txn_count > 0 ? parseFloat((sl.total_net / sl.txn_count).toFixed(2)) : 0,
+              avg_purity:         sl.total_net > 0 ? parseFloat((sl.purity_wt / sl.total_net).toFixed(2)) : 0,
+              avg_service_charge: sl.txn_count > 0 ? parseFloat((sl.svc_sum / sl.txn_count).toFixed(2)) : 0,
+              pct:                todTotal > 0 ? parseFloat(((sl.txn_count / todTotal) * 100).toFixed(1)) : 0,
+            }
+          })
+          .filter(sl => sl.txn_count > 0)
+      )
+
+      // ── 13. Top 10 bills by net weight ─────────────────────
       setTopBills(
         [...rows]
           .sort((a, b) => parseFloat(b.net_weight || 0) - parseFloat(a.net_weight || 0))
@@ -863,7 +913,7 @@ export default function PurchaseReports() {
       {!loading && !error && (
         <>
           {showSection('charts')       && <ReportCharts       trend={trend} monthly={monthly} dowData={dowData} hourlyTrend={hourlyTrend} isSingleDay={fromDate && toDate && fromDate === toDate} t={t} fromDate={fromDate} filterBranch={filterBranch} filterTxn={filterTxn} />}
-          {showSection('distribution') && <ReportDistribution kpis={kpis} purityDist={purityDist} weightBuckets={weightBuckets} regionSplit={regionSplit} monthHalf={monthHalf} t={t} />}
+          {showSection('distribution') && <ReportDistribution kpis={kpis} purityDist={purityDist} weightBuckets={weightBuckets} regionSplit={regionSplit} monthHalf={monthHalf} timeOfDay={timeOfDay} t={t} />}
           {showSection('branches')     && <ReportBranches     branchData={branchData} stateData={stateData} topBills={topBills} fromDate={fromDate} toDate={toDate} filterTxn={filterTxn} t={t} />}
           {showSection('sameday')      && <ReportSameDay      t={t} />}
           {showSection('compare')      && <ReportCompare      t={t} />}

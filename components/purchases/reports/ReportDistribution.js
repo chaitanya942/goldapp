@@ -205,7 +205,7 @@ const val = (w, color, size = '.68rem') => ({ width: w, flexShrink: 0, textAlign
 // MAIN COMPONENT
 // ─────────────────────────────────────────────
 
-export default function ReportDistribution({ kpis, purityDist, weightBuckets, regionSplit, monthHalf, t }) {
+export default function ReportDistribution({ kpis, purityDist, weightBuckets, regionSplit, monthHalf, timeOfDay, t }) {
   const s = getStyles(t)
   const [expanded, setExpanded] = useState(null)
   const openPanel  = (id) => setExpanded(id)
@@ -626,17 +626,94 @@ export default function ReportDistribution({ kpis, purityDist, weightBuckets, re
         </Panel>
       </div>
 
-      {/* ── COMING SOON — noExpand so it's not clickable ── */}
-      <Panel {...P('coming-soon', { opacity: 0.45 }, true)}>
-        <SectionTitle title="Time of Day Analysis — Morning vs Afternoon" t={t} />
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '32px', gap: '10px' }}>
-          <div style={{ fontSize: '1.4rem', opacity: .4 }}>&#x23F1;</div>
-          <div style={{ fontSize: '.8rem', color: t.text2, fontWeight: 400 }}>Coming Soon</div>
-          <div style={{ fontSize: '.68rem', color: t.text3, textAlign: 'center', maxWidth: '360px' }}>
-            Time-of-day breakdown requires transaction timestamps. Currently the CRM exports purchase dates only — once time data is available this panel will show morning vs afternoon split by volume, value, and purity.
-          </div>
-        </div>
-      </Panel>
+      {/* ── TIME OF DAY ── */}
+      {timeOfDay?.length > 0 && (() => {
+        const slotColors  = { morning: t.gold, afternoon: t.blue, evening: t.purple, unknown: t.text4 }
+        const slotIcons   = { morning: '🌅', afternoon: '☀️', evening: '🌆', unknown: '—' }
+        const peakSlot    = timeOfDay.filter(s => s.key !== 'unknown').reduce((a, b) => b.txn_count > a.txn_count ? b : a, timeOfDay[0])
+        const maxTxns     = Math.max(...timeOfDay.map(s => s.txn_count))
+        const withTime    = timeOfDay.filter(s => s.key !== 'unknown')
+        const unknownSlot = timeOfDay.find(s => s.key === 'unknown')
+        const timePct     = timeOfDay.reduce((s, sl) => s + (sl.key !== 'unknown' ? sl.txn_count : 0), 0)
+        const totalTxns   = timeOfDay.reduce((s, sl) => s + sl.txn_count, 0)
+
+        return (
+          <Panel {...P('time-of-day')}>
+            <SectionTitle title="Time of Day Analysis" t={t} />
+
+            {/* Peak insight strip */}
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: '10px',
+              background: `${slotColors[peakSlot.key]}0d`,
+              borderLeft: `3px solid ${slotColors[peakSlot.key]}`,
+              borderRadius: '0 8px 8px 0', padding: '8px 14px', marginBottom: '18px',
+            }}>
+              <span style={{ fontSize: '1rem' }}>{slotIcons[peakSlot.key]}</span>
+              <span style={{ fontSize: '.65rem', color: t.text2, lineHeight: 1.6 }}>
+                Peak activity: <span style={{ color: slotColors[peakSlot.key], fontWeight: 600 }}>{peakSlot.label}</span>
+                {' · '}{peakSlot.pct}% of daily volume · avg bill <span style={{ color: t.text1 }}>{peakSlot.avg_net}g</span>
+                {' · '} avg purity <span style={{ color: t.purple }}>{peakSlot.avg_purity}%</span>
+              </span>
+            </div>
+
+            {/* Slot rows */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', marginBottom: '18px' }}>
+              {withTime.map(sl => {
+                const color  = slotColors[sl.key]
+                const barPct = maxTxns > 0 ? (sl.txn_count / maxTxns) * 100 : 0
+                return (
+                  <div key={sl.key}>
+                    {/* Header */}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '5px', alignItems: 'center' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '7px' }}>
+                        <span style={{ fontSize: '.85rem' }}>{slotIcons[sl.key]}</span>
+                        <div>
+                          <span style={{ fontSize: '.72rem', color: t.text1, fontWeight: 500 }}>{sl.label}</span>
+                          <span style={{ fontSize: '.55rem', color: t.text4, marginLeft: '6px' }}>{sl.range}</span>
+                        </div>
+                      </div>
+                      <span style={{ fontSize: '.65rem', color, fontWeight: 500 }}>{sl.pct}%</span>
+                    </div>
+                    {/* Bar */}
+                    <div style={{ height: '6px', background: t.border, borderRadius: '3px', marginBottom: '8px' }}>
+                      <div style={{ width: `${barPct}%`, height: '100%', background: color, borderRadius: '3px', transition: 'width .5s ease' }} />
+                    </div>
+                    {/* Stats grid */}
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '4px' }}>
+                      {[
+                        { label: 'Bills',      value: sl.txn_count.toLocaleString('en-IN'), color: t.text1 },
+                        { label: 'Net Wt',     value: `${fmt(sl.total_net)}g`,              color },
+                        { label: 'Avg/Bill',   value: `${sl.avg_net}g`,                     color: t.text2 },
+                        { label: 'Avg Purity', value: `${sl.avg_purity}%`,                  color: t.purple },
+                        { label: 'Avg Svc %',  value: `${sl.avg_service_charge}%`,          color: t.orange },
+                      ].map(({ label, value, color: vc }) => (
+                        <div key={label} style={{ background: `${vc}08`, border: `1px solid ${vc}18`, borderRadius: '6px', padding: '5px 8px', textAlign: 'center' }}>
+                          <div style={{ fontSize: '.68rem', color: vc, fontWeight: 400 }}>{value}</div>
+                          <div style={{ fontSize: '.48rem', color: t.text4, textTransform: 'uppercase', letterSpacing: '.08em', marginTop: '2px' }}>{label}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+
+            {/* Coverage + unknown note */}
+            <Divider t={t} />
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+              <span style={{ fontSize: '.6rem', color: t.text4 }}>
+                Time data available for <span style={{ color: t.text2 }}>{timePct}</span> of <span style={{ color: t.text2 }}>{totalTxns}</span> transactions
+                {' '}({totalTxns > 0 ? Math.round((timePct / totalTxns) * 100) : 0}% coverage)
+              </span>
+              {unknownSlot && (
+                <span style={{ fontSize: '.58rem', color: t.text4 }}>
+                  {unknownSlot.txn_count} bills have no timestamp
+                </span>
+              )}
+            </div>
+          </Panel>
+        )
+      })()}
 
     </div>
   )
