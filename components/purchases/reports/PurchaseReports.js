@@ -601,10 +601,10 @@ export default function PurchaseReports() {
       setTopBills(
         [...rows]
           .sort((a, b) => parseFloat(b.net_weight || 0) - parseFloat(a.net_weight || 0))
-          .slice(0, 10)
           .map(r => ({
             branch_name:      r.branch_name,
             customer_name:    r.customer_name,
+            region:           branchMetaMap[r.branch_name || '']?.region || null,
             net_weight:       parseFloat(r.net_weight   || 0),
             gross_weight:     parseFloat(r.gross_weight || 0),
             purity:           parseFloat(r.purity       || 0),

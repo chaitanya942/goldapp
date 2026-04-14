@@ -1,31 +1,42 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { createPortal } from 'react-dom'
 import { fmt, fmtVal, getStyles } from './reportUtils'
 import { supabase } from '../../../lib/supabase'
 
 // ─────────────────────────────────────────────
-// EXPAND PANEL
+// EXPAND PANEL — portal-based so fixed positioning works correctly
 // ─────────────────────────────────────────────
 function Panel({ id, expanded, onExpand, onClose, t, cardStyle = {}, noExpand = false, children }) {
   const isExp = !noExpand && expanded === id
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => { setMounted(true) }, [])
   useEffect(() => {
     if (!isExp) return
     const fn = (e) => { if (e.key === 'Escape') onClose() }
     window.addEventListener('keydown', fn)
     return () => window.removeEventListener('keydown', fn)
   }, [isExp, onClose])
+
+  const modal = isExp && mounted ? createPortal(
+    <>
+      <style>{`@keyframes panelPop{from{opacity:0;transform:translate(-50%,-47%) scale(.94)}to{opacity:1;transform:translate(-50%,-50%) scale(1)}}`}</style>
+      <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 9998, background: 'rgba(0,0,0,0.72)', backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)', cursor: 'pointer' }} />
+      <div style={{ ...cardStyle, position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', width: 'min(1200px,96vw)', maxHeight: '90vh', overflowY: 'auto', zIndex: 9999, cursor: 'default', boxShadow: '0 32px 80px rgba(0,0,0,0.9)', animation: 'panelPop .22s cubic-bezier(.34,1.3,.64,1)' }}>
+        <button onClick={onClose} style={{ position: 'sticky', top: 0, float: 'right', background: 'transparent', border: 'none', color: t.text3, fontSize: '1.1rem', cursor: 'pointer', padding: '0 0 8px 12px', lineHeight: 1, zIndex: 2 }}>✕</button>
+        {children}
+      </div>
+    </>,
+    document.body
+  ) : null
+
   return (
     <>
-      {isExp && <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 999, background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(7px)', WebkitBackdropFilter: 'blur(7px)', cursor: 'pointer' }} />}
-      <div onClick={() => !noExpand && !isExp && onExpand(id)} style={{
-        ...cardStyle,
-        position: isExp ? 'fixed' : 'relative',
-        ...(isExp ? { top: '50%', left: '50%', transform: 'translate(-50%,-50%)', width: 'min(1200px,96vw)', maxHeight: '92vh', overflowY: 'auto', zIndex: 1000, boxShadow: '0 28px 72px rgba(0,0,0,0.85)', cursor: 'default' } : { cursor: noExpand ? 'default' : 'pointer' }),
-      }}>
-        {isExp && <button onClick={(e) => { e.stopPropagation(); onClose() }} style={{ position: 'sticky', top: 0, float: 'right', background: 'transparent', border: 'none', color: t.text3, fontSize: '1rem', cursor: 'pointer', padding: '0 0 8px 12px', lineHeight: 1, zIndex: 2 }}>✕</button>}
-        <div style={{ zoom: isExp ? 1.25 : 1 }}>{children}</div>
+      <div onClick={() => !noExpand && !isExp && onExpand(id)} style={{ ...cardStyle, cursor: noExpand ? 'default' : 'pointer' }}>
+        {children}
       </div>
+      {modal}
     </>
   )
 }
@@ -457,9 +468,9 @@ function ScatterChart({ branchData, t }) {
 // ─────────────────────────────────────────────
 // SECTION TITLE
 // ─────────────────────────────────────────────
-function SectionTitle({ title, t, badge }) {
+function SectionTitle({ title, t, badge, noMargin }) {
   return (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: noMargin ? 0 : '14px' }}>
       <div style={{ fontSize: '.55rem', color: t.text3, letterSpacing: '.2em', textTransform: 'uppercase', fontWeight: 500 }}>{title}</div>
       {badge && <div style={{ fontSize: '.48rem', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', background: t.border, padding: '2px 6px', borderRadius: '4px' }}>{badge}</div>}
     </div>
@@ -470,13 +481,14 @@ function SectionTitle({ title, t, badge }) {
 // MAIN
 // ─────────────────────────────────────────────
 export default function ReportBranches({ branchData, stateData, topBills, t, fromDate, toDate, filterTxn }) {
-  const [topMetric,   setTopMetric]   = useState('total_net')
-  const [branchSort,  setBranchSort]  = useState('total_net')
-  const [treemetric,  setTreeMetric]  = useState('total_net')
-  const [drillState,  setDrillState]  = useState(null)
-  const [drillRegion, setDrillRegion] = useState(null)
-  const [drillCluster,setDrillCluster]= useState(null)
-  const [expanded,    setExpanded]    = useState(null)
+  const [topMetric,        setTopMetric]        = useState('total_net')
+  const [branchSort,       setBranchSort]        = useState('total_net')
+  const [treemetric,       setTreeMetric]        = useState('total_net')
+  const [drillState,       setDrillState]        = useState(null)
+  const [drillRegion,      setDrillRegion]       = useState(null)
+  const [drillCluster,     setDrillCluster]      = useState(null)
+  const [topBillsRegion,   setTopBillsRegion]    = useState('')
+  const [expanded,         setExpanded]          = useState(null)
   const openPanel  = (id) => setExpanded(id)
   const closePanel = () => setExpanded(null)
 
@@ -542,34 +554,61 @@ export default function ReportBranches({ branchData, stateData, topBills, t, fro
         </Panel>
 
         <Panel {...P('top-bills')}>
-          <SectionTitle title="Top 10 Bills" t={t} badge="by net weight" />
-          {(topBills || []).length > 0 ? (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0' }}>
-              <div style={{ display: 'grid', gridTemplateColumns: '20px 1fr 90px 70px 55px 65px 60px', gap: '0 8px', padding: '0 0 8px 0', borderBottom: `1px solid ${t.border}`, marginBottom: '2px' }}>
-                {['#', 'Branch · Customer', 'Gross Value', 'Net Wt', 'Purity', 'Type', 'Date'].map(h => (
-                  <div key={h} style={{ fontSize: '.55rem', color: t.text2, textTransform: 'uppercase', letterSpacing: '.08em', textAlign: ['Gross Value','Net Wt','Purity','Type','Date'].includes(h) ? 'right' : 'left' }}>{h}</div>
-                ))}
-              </div>
-              {(topBills || []).map((b, i) => (
-                <div key={i} style={{ display: 'grid', gridTemplateColumns: '20px 1fr 90px 70px 55px 65px 60px', gap: '0 8px', padding: '9px 0', borderBottom: i < topBills.length - 1 ? `1px solid ${t.border}40` : 'none', alignItems: 'center' }}>
-                  <div style={{ fontSize: '.68rem', color: t.text3, fontWeight: 500 }}>{i + 1}</div>
-                  <div>
-                    <div style={{ fontSize: '.75rem', color: t.gold, fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{b.branch_name}</div>
-                    <div style={{ fontSize: '.65rem', color: t.text2, marginTop: '2px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{b.customer_name || '—'}</div>
-                  </div>
-                  <div style={{ fontSize: '.72rem', color: t.green, textAlign: 'right', fontWeight: 500 }}>{fmtVal(b.total_amount)}</div>
-                  <div style={{ fontSize: '.75rem', color: t.gold, textAlign: 'right', fontWeight: 500 }}>{Number(b.net_weight || 0).toFixed(2)}g</div>
-                  <div style={{ fontSize: '.72rem', color: t.purple, textAlign: 'right', fontWeight: 400 }}>{Number(b.purity || 0).toFixed(1)}%</div>
-                  <div style={{ textAlign: 'right' }}>
-                    <span style={{ fontSize: '.6rem', padding: '3px 7px', borderRadius: '4px', fontWeight: 600, background: b.transaction_type === 'PHYSICAL' ? `${t.gold}25` : `${t.blue}25`, color: b.transaction_type === 'PHYSICAL' ? t.gold : t.blue }}>
-                      {b.transaction_type === 'PHYSICAL' ? 'PHY' : 'TKO'}
-                    </span>
-                  </div>
-                  <div style={{ fontSize: '.65rem', color: t.text2, textAlign: 'right' }}>{b.purchase_date ? new Date(b.purchase_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) : '—'}</div>
+          {(() => {
+            const allRegions   = [...new Set((topBills || []).map(b => b.region).filter(Boolean))].sort()
+            const filtered     = (topBills || []).filter(b => !topBillsRegion || b.region === topBillsRegion).slice(0, 10)
+            return (
+              <>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', gap: '10px', flexWrap: 'wrap' }}>
+                  <SectionTitle title="Top 10 Bills" t={t} badge="by net weight" noMargin />
+                  {allRegions.length > 0 && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <span style={{ fontSize: '.58rem', color: t.text4 }}>Region</span>
+                      <select
+                        value={topBillsRegion}
+                        onChange={e => setTopBillsRegion(e.target.value)}
+                        onClick={e => e.stopPropagation()}
+                        style={{ background: t.card2 || t.card, border: `1px solid ${topBillsRegion ? t.gold + '80' : t.border}`, borderRadius: '7px', padding: '4px 10px', color: topBillsRegion ? t.gold : t.text3, fontSize: '.62rem', cursor: 'pointer', outline: 'none' }}
+                      >
+                        <option value="">All Regions</option>
+                        {allRegions.map(r => <option key={r} value={r}>{r}</option>)}
+                      </select>
+                      {topBillsRegion && (
+                        <button onClick={e => { e.stopPropagation(); setTopBillsRegion('') }} style={{ background: 'none', border: 'none', color: t.text4, fontSize: '.72rem', cursor: 'pointer', padding: '0 2px' }}>✕</button>
+                      )}
+                    </div>
+                  )}
                 </div>
-              ))}
-            </div>
-          ) : <div style={{ textAlign: 'center', color: t.text4, padding: '40px', fontSize: '.75rem' }}>No data</div>}
+                {filtered.length > 0 ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: '20px 1fr 90px 70px 55px 65px 60px', gap: '0 8px', padding: '0 0 8px 0', borderBottom: `1px solid ${t.border}`, marginBottom: '2px' }}>
+                      {['#', 'Branch · Customer', 'Gross Value', 'Net Wt', 'Purity', 'Type', 'Date'].map(h => (
+                        <div key={h} style={{ fontSize: '.55rem', color: t.text2, textTransform: 'uppercase', letterSpacing: '.08em', textAlign: ['Gross Value','Net Wt','Purity','Type','Date'].includes(h) ? 'right' : 'left' }}>{h}</div>
+                      ))}
+                    </div>
+                    {filtered.map((b, i) => (
+                      <div key={i} style={{ display: 'grid', gridTemplateColumns: '20px 1fr 90px 70px 55px 65px 60px', gap: '0 8px', padding: '9px 0', borderBottom: i < filtered.length - 1 ? `1px solid ${t.border}40` : 'none', alignItems: 'center' }}>
+                        <div style={{ fontSize: '.68rem', color: t.text3, fontWeight: 500 }}>{i + 1}</div>
+                        <div>
+                          <div style={{ fontSize: '.75rem', color: t.gold, fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{b.branch_name}</div>
+                          <div style={{ fontSize: '.65rem', color: t.text2, marginTop: '2px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{b.customer_name || '—'}</div>
+                        </div>
+                        <div style={{ fontSize: '.72rem', color: t.green, textAlign: 'right', fontWeight: 500 }}>{fmtVal(b.total_amount)}</div>
+                        <div style={{ fontSize: '.75rem', color: t.gold, textAlign: 'right', fontWeight: 500 }}>{Number(b.net_weight || 0).toFixed(2)}g</div>
+                        <div style={{ fontSize: '.72rem', color: t.purple, textAlign: 'right', fontWeight: 400 }}>{Number(b.purity || 0).toFixed(1)}%</div>
+                        <div style={{ textAlign: 'right' }}>
+                          <span style={{ fontSize: '.6rem', padding: '3px 7px', borderRadius: '4px', fontWeight: 600, background: b.transaction_type === 'PHYSICAL' ? `${t.gold}25` : `${t.blue}25`, color: b.transaction_type === 'PHYSICAL' ? t.gold : t.blue }}>
+                            {b.transaction_type === 'PHYSICAL' ? 'PHY' : 'TKO'}
+                          </span>
+                        </div>
+                        <div style={{ fontSize: '.65rem', color: t.text2, textAlign: 'right' }}>{b.purchase_date ? new Date(b.purchase_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) : '—'}</div>
+                      </div>
+                    ))}
+                  </div>
+                ) : <div style={{ textAlign: 'center', color: t.text4, padding: '40px', fontSize: '.75rem' }}>No data for selected region</div>}
+              </>
+            )
+          })()}
         </Panel>
       </div>
 
