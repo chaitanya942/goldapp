@@ -111,11 +111,24 @@ function Divider({ t }) {
 
 function InsightChip({ icon, text, color, t }) {
   return (
-    <div style={{
-      display: 'flex', alignItems: 'flex-start', gap: '10px',
-      background: `${color}0d`, borderLeft: `3px solid ${color}`,
-      borderRadius: '0 8px 8px 0', padding: '10px 14px',
-    }}>
+    <div
+      style={{
+        display: 'flex', alignItems: 'flex-start', gap: '10px',
+        background: `${color}0d`, borderLeft: `3px solid ${color}`,
+        borderRadius: '0 8px 8px 0', padding: '10px 14px',
+        transition: 'transform .15s ease, box-shadow .15s ease, background .15s ease',
+      }}
+      onMouseEnter={e => {
+        e.currentTarget.style.transform = 'translateY(-1px) scale(1.01)'
+        e.currentTarget.style.boxShadow = `0 4px 16px ${color}25`
+        e.currentTarget.style.background = `${color}18`
+      }}
+      onMouseLeave={e => {
+        e.currentTarget.style.transform = ''
+        e.currentTarget.style.boxShadow = ''
+        e.currentTarget.style.background = `${color}0d`
+      }}
+    >
       <span style={{ fontSize: '.85rem', lineHeight: 1.2, flexShrink: 0 }}>{icon}</span>
       <span style={{ fontSize: '.65rem', color: t.text2, lineHeight: 1.6 }}>{text}</span>
     </div>
