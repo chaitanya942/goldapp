@@ -567,35 +567,65 @@ export default function ReportBranches({ branchData, allBranchMeta, stateData, t
   const stateMap = {}
   ;(branchData || []).forEach(b => {
     const st = b.state || 'Unknown'
-    if (!stateMap[st]) stateMap[st] = { state: st, total_net: 0, total_gross: 0, total_value: 0, txn_count: 0, physical_count: 0, takeover_count: 0, branch_names: new Set() }
-    stateMap[st].total_net      += Number(b.total_net    || 0)
+    if (!stateMap[st]) stateMap[st] = { state: st, total_net: 0, total_gross: 0, total_value: 0, txn_count: 0, physical_count: 0, takeover_count: 0, pw: 0, branch_names: new Set() }
+    const nw = Number(b.total_net || 0)
+    stateMap[st].total_net      += nw
     stateMap[st].total_gross    += Number(b.total_gross  || 0)
     stateMap[st].total_value    += Number(b.total_value  || 0)
     stateMap[st].txn_count      += Number(b.txn_count    || 0)
     stateMap[st].physical_count += Number(b.physical_count  || 0)
     stateMap[st].takeover_count += Number(b.takeover_count  || 0)
+    stateMap[st].pw             += nw * Number(b.avg_purity || 0)
     stateMap[st].branch_names.add(b.branch_name)
   })
   const derivedStates = Object.values(stateMap)
-    .map(s2 => ({ ...s2, branch_count: s2.branch_names.size }))
+    .map(s2 => ({ ...s2, branch_count: s2.branch_names.size, avg_purity: s2.total_net > 0 ? s2.pw / s2.total_net : 0 }))
     .sort((a, b) => b.total_net - a.total_net)
+
+  // Grand total row
+  const grandTotal = derivedStates.reduce((acc, s2) => ({
+    total_net:      acc.total_net      + s2.total_net,
+    total_gross:    acc.total_gross    + s2.total_gross,
+    total_value:    acc.total_value    + s2.total_value,
+    txn_count:      acc.txn_count      + s2.txn_count,
+    physical_count: acc.physical_count + s2.physical_count,
+    takeover_count: acc.takeover_count + s2.takeover_count,
+    branch_count:   acc.branch_count   + s2.branch_count,
+    pw:             acc.pw             + s2.pw,
+  }), { total_net: 0, total_gross: 0, total_value: 0, txn_count: 0, physical_count: 0, takeover_count: 0, branch_count: 0, pw: 0 })
+  grandTotal.avg_purity = grandTotal.total_net > 0 ? grandTotal.pw / grandTotal.total_net : 0
 
   // Region summaries for selected state
   const regionMap = {}
   ;(branchData || []).filter(b => !drillState || b.state === drillState).forEach(b => {
     const rg = b.region || 'Unknown'
-    if (!regionMap[rg]) regionMap[rg] = { region: rg, total_net: 0, total_gross: 0, total_value: 0, txn_count: 0, physical_count: 0, takeover_count: 0, branch_names: new Set() }
-    regionMap[rg].total_net      += Number(b.total_net    || 0)
+    if (!regionMap[rg]) regionMap[rg] = { region: rg, total_net: 0, total_gross: 0, total_value: 0, txn_count: 0, physical_count: 0, takeover_count: 0, pw: 0, branch_names: new Set() }
+    const nw = Number(b.total_net || 0)
+    regionMap[rg].total_net      += nw
     regionMap[rg].total_gross    += Number(b.total_gross  || 0)
     regionMap[rg].total_value    += Number(b.total_value  || 0)
     regionMap[rg].txn_count      += Number(b.txn_count    || 0)
     regionMap[rg].physical_count += Number(b.physical_count  || 0)
     regionMap[rg].takeover_count += Number(b.takeover_count  || 0)
+    regionMap[rg].pw             += nw * Number(b.avg_purity || 0)
     regionMap[rg].branch_names.add(b.branch_name)
   })
   const derivedRegions = Object.values(regionMap)
-    .map(r2 => ({ ...r2, branch_count: r2.branch_names.size }))
+    .map(r2 => ({ ...r2, branch_count: r2.branch_names.size, avg_purity: r2.total_net > 0 ? r2.pw / r2.total_net : 0 }))
     .sort((a, b) => b.total_net - a.total_net)
+
+  // Region grand total
+  const regionTotal = derivedRegions.reduce((acc, r2) => ({
+    total_net:      acc.total_net      + r2.total_net,
+    total_gross:    acc.total_gross    + r2.total_gross,
+    total_value:    acc.total_value    + r2.total_value,
+    txn_count:      acc.txn_count      + r2.txn_count,
+    physical_count: acc.physical_count + r2.physical_count,
+    takeover_count: acc.takeover_count + r2.takeover_count,
+    branch_count:   acc.branch_count   + r2.branch_count,
+    pw:             acc.pw             + r2.pw,
+  }), { total_net: 0, total_gross: 0, total_value: 0, txn_count: 0, physical_count: 0, takeover_count: 0, branch_count: 0, pw: 0 })
+  regionTotal.avg_purity = regionTotal.total_net > 0 ? regionTotal.pw / regionTotal.total_net : 0
 
   // Filtered branches for table (shown only when region is selected)
   const drillBranches = (branchData || []).filter(b => {
@@ -851,7 +881,7 @@ export default function ReportBranches({ branchData, allBranchMeta, stateData, t
                     <td style={s.td}>{Number(s2.txn_count).toLocaleString('en-IN')}</td>
                     <td style={s.td}>{fmt(s2.total_gross)}g</td>
                     <td style={{ ...s.td, color: t.gold, fontWeight: 500 }}>{fmt(s2.total_net)}g</td>
-                    <td style={s.td}>—</td>
+                    <td style={s.td}>{s2.avg_purity > 0 ? `${s2.avg_purity.toFixed(1)}%` : '—'}</td>
                     <td style={{ ...s.td, color: t.green }}>{fmtVal(s2.total_value)}</td>
                     <td style={{ ...s.td, color: t.gold }}>{Number(s2.physical_count).toLocaleString('en-IN')}</td>
                     <td style={{ ...s.td, color: t.blue }}>{Number(s2.takeover_count).toLocaleString('en-IN')}</td>
@@ -859,6 +889,21 @@ export default function ReportBranches({ branchData, allBranchMeta, stateData, t
                   </tr>
                 ))}
               </tbody>
+              <tfoot>
+                <tr style={{ background: `${t.gold}10`, borderTop: `2px solid ${t.gold}40` }}>
+                  <td style={{ ...s.td, color: t.text4, fontWeight: 600 }} />
+                  <td style={{ ...s.td, color: t.text1, fontWeight: 700 }}>Total</td>
+                  <td style={{ ...s.td, color: t.text3, fontWeight: 600 }}>{grandTotal.branch_count}</td>
+                  <td style={{ ...s.td, fontWeight: 600 }}>{Number(grandTotal.txn_count).toLocaleString('en-IN')}</td>
+                  <td style={{ ...s.td, fontWeight: 600 }}>{fmt(grandTotal.total_gross)}g</td>
+                  <td style={{ ...s.td, color: t.gold, fontWeight: 700 }}>{fmt(grandTotal.total_net)}g</td>
+                  <td style={{ ...s.td, fontWeight: 600 }}>{grandTotal.avg_purity > 0 ? `${grandTotal.avg_purity.toFixed(1)}%` : '—'}</td>
+                  <td style={{ ...s.td, color: t.green, fontWeight: 700 }}>{fmtVal(grandTotal.total_value)}</td>
+                  <td style={{ ...s.td, color: t.gold, fontWeight: 600 }}>{Number(grandTotal.physical_count).toLocaleString('en-IN')}</td>
+                  <td style={{ ...s.td, color: t.blue, fontWeight: 600 }}>{Number(grandTotal.takeover_count).toLocaleString('en-IN')}</td>
+                  <td style={{ ...s.td, fontWeight: 600 }}>{fmt(grandTotal.total_net / (grandTotal.txn_count || 1))}g</td>
+                </tr>
+              </tfoot>
             </table>
           </div>
         )}
@@ -871,7 +916,7 @@ export default function ReportBranches({ branchData, allBranchMeta, stateData, t
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead>
                   <tr>
-                    {['#', 'Region', 'Branches', 'Txns', 'Gross Wt', 'Net Wt', 'Value', 'Physical', 'Takeover', 'Avg / Txn'].map(h => (
+                    {['#', 'Region', 'Branches', 'Txns', 'Gross Wt', 'Net Wt', 'Avg Purity', 'Value', 'Physical', 'Takeover', 'Avg / Txn'].map(h => (
                       <th key={h} style={s.th}>{h}</th>
                     ))}
                   </tr>
@@ -896,6 +941,7 @@ export default function ReportBranches({ branchData, allBranchMeta, stateData, t
                         <td style={s.td}>{Number(r2.txn_count).toLocaleString('en-IN')}</td>
                         <td style={s.td}>{fmt(r2.total_gross)}g</td>
                         <td style={{ ...s.td, color: rc, fontWeight: 500 }}>{fmt(r2.total_net)}g</td>
+                        <td style={s.td}>{r2.avg_purity > 0 ? `${r2.avg_purity.toFixed(1)}%` : '—'}</td>
                         <td style={{ ...s.td, color: t.green }}>{fmtVal(r2.total_value)}</td>
                         <td style={{ ...s.td, color: t.gold }}>{Number(r2.physical_count).toLocaleString('en-IN')}</td>
                         <td style={{ ...s.td, color: t.blue }}>{Number(r2.takeover_count).toLocaleString('en-IN')}</td>
@@ -904,6 +950,21 @@ export default function ReportBranches({ branchData, allBranchMeta, stateData, t
                     )
                   })}
                 </tbody>
+                <tfoot>
+                  <tr style={{ background: `${t.gold}10`, borderTop: `2px solid ${t.gold}40` }}>
+                    <td style={{ ...s.td, color: t.text4, fontWeight: 600 }} />
+                    <td style={{ ...s.td, color: t.text1, fontWeight: 700 }}>Total</td>
+                    <td style={{ ...s.td, color: t.text3, fontWeight: 600 }}>{regionTotal.branch_count}</td>
+                    <td style={{ ...s.td, fontWeight: 600 }}>{Number(regionTotal.txn_count).toLocaleString('en-IN')}</td>
+                    <td style={{ ...s.td, fontWeight: 600 }}>{fmt(regionTotal.total_gross)}g</td>
+                    <td style={{ ...s.td, color: t.gold, fontWeight: 700 }}>{fmt(regionTotal.total_net)}g</td>
+                    <td style={{ ...s.td, fontWeight: 600 }}>{regionTotal.avg_purity > 0 ? `${regionTotal.avg_purity.toFixed(1)}%` : '—'}</td>
+                    <td style={{ ...s.td, color: t.green, fontWeight: 700 }}>{fmtVal(regionTotal.total_value)}</td>
+                    <td style={{ ...s.td, color: t.gold, fontWeight: 600 }}>{Number(regionTotal.physical_count).toLocaleString('en-IN')}</td>
+                    <td style={{ ...s.td, color: t.blue, fontWeight: 600 }}>{Number(regionTotal.takeover_count).toLocaleString('en-IN')}</td>
+                    <td style={{ ...s.td, fontWeight: 600 }}>{fmt(regionTotal.total_net / (regionTotal.txn_count || 1))}g</td>
+                  </tr>
+                </tfoot>
               </table>
             </div>
           )
@@ -951,6 +1012,35 @@ export default function ReportBranches({ branchData, allBranchMeta, stateData, t
                     <tr><td colSpan={11} style={{ ...s.td, textAlign: 'center', color: t.text4, padding: '40px' }}>No branches found</td></tr>
                   )}
                 </tbody>
+                {sortedBranches.length > 0 && (() => {
+                  const bt = sortedBranches.reduce((acc, b) => ({
+                    txn_count: acc.txn_count + Number(b.txn_count || 0),
+                    total_gross: acc.total_gross + Number(b.total_gross || 0),
+                    total_net: acc.total_net + Number(b.total_net || 0),
+                    total_value: acc.total_value + Number(b.total_value || 0),
+                    physical_count: acc.physical_count + Number(b.physical_count || 0),
+                    takeover_count: acc.takeover_count + Number(b.takeover_count || 0),
+                    pw: acc.pw + Number(b.total_net || 0) * Number(b.avg_purity || 0),
+                  }), { txn_count: 0, total_gross: 0, total_net: 0, total_value: 0, physical_count: 0, takeover_count: 0, pw: 0 })
+                  const avgPur = bt.total_net > 0 ? bt.pw / bt.total_net : 0
+                  return (
+                    <tfoot>
+                      <tr style={{ background: `${t.gold}10`, borderTop: `2px solid ${t.gold}40` }}>
+                        <td style={{ ...s.td, fontWeight: 600 }} />
+                        <td style={{ ...s.td, color: t.text1, fontWeight: 700 }}>Total</td>
+                        <td style={{ ...s.td, color: t.text3, fontWeight: 600 }}>—</td>
+                        <td style={{ ...s.td, fontWeight: 600 }}>{Number(bt.txn_count).toLocaleString('en-IN')}</td>
+                        <td style={{ ...s.td, fontWeight: 600 }}>{fmt(bt.total_gross)}g</td>
+                        <td style={{ ...s.td, color: t.gold, fontWeight: 700 }}>{fmt(bt.total_net)}g</td>
+                        <td style={{ ...s.td, fontWeight: 600 }}>{avgPur > 0 ? `${avgPur.toFixed(1)}%` : '—'}</td>
+                        <td style={{ ...s.td, color: t.green, fontWeight: 700 }}>{fmtVal(bt.total_value)}</td>
+                        <td style={{ ...s.td, color: t.gold, fontWeight: 600 }}>{Number(bt.physical_count).toLocaleString('en-IN')}</td>
+                        <td style={{ ...s.td, color: t.blue, fontWeight: 600 }}>{Number(bt.takeover_count).toLocaleString('en-IN')}</td>
+                        <td style={{ ...s.td, fontWeight: 600 }}>{fmt(bt.total_net / (bt.txn_count || 1))}g</td>
+                      </tr>
+                    </tfoot>
+                  )
+                })()}
               </table>
             </div>
           </>
