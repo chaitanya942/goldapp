@@ -619,7 +619,6 @@ export default function ReportBranches({ branchData, stateData, topBills, t, fro
         const filteredTop10 = top10Region
           ? [...(branchData || [])].filter(b => b.region === top10Region).sort((a, b) => b[topMetric] - a[topMetric]).slice(0, 10)
           : top10
-        const RANK_COLORS = ['#FFD700', '#C0C0C0', '#CD7F32']
         const subMetric = topMetric === 'total_net' ? 'txn_count' : topMetric === 'total_value' ? 'total_net' : 'total_net'
         const subLabel  = topMetric === 'total_net' ? 'txns' : topMetric === 'total_value' ? 'net wt' : 'net wt'
         return (
@@ -656,39 +655,40 @@ export default function ReportBranches({ branchData, stateData, topBills, t, fro
                 {filteredTop10.map((b, i) => {
                   const max         = filteredTop10[0]?.[topMetric] || 1
                   const w           = (b[topMetric] / max) * 100
-                  const rankColor   = i < 3 ? RANK_COLORS[i] : null
-                  const barColor    = rankColor || t.gold
+                  const barColor    = regionColors[b.region] || t.gold
                   const metricLabel = topMetric === 'total_net'   ? `${fmt(b[topMetric])}g`
                                     : topMetric === 'total_value' ? fmtVal(b[topMetric])
                                     : Number(b[topMetric]).toLocaleString('en-IN')
                   const subVal      = subMetric === 'txn_count'
                                     ? `${Number(b.txn_count).toLocaleString('en-IN')} ${subLabel}`
                                     : `${fmt(b.total_net)}g ${subLabel}`
+                  const isTop3      = i < 3
                   return (
                     <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                       {/* Rank badge */}
                       <div style={{
                         width: '22px', height: '22px', borderRadius: '50%', flexShrink: 0,
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        background: rankColor ? `${rankColor}22` : `${t.border}`,
-                        border: rankColor ? `1px solid ${rankColor}60` : 'none',
+                        background: isTop3 ? `${barColor}25` : t.border2,
+                        border: isTop3 ? `1px solid ${barColor}70` : 'none',
                         fontSize: '.58rem', fontWeight: 700,
-                        color: rankColor || t.text4,
+                        color: isTop3 ? barColor : t.text4,
                       }}>{i + 1}</div>
 
                       {/* Branch name + sub */}
                       <div style={{ width: '150px', flexShrink: 0 }}>
-                        <div style={{ fontSize: '.72rem', color: rankColor || t.text1, fontWeight: rankColor ? 600 : 400, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.branch_name}</div>
+                        <div style={{ fontSize: '.72rem', color: t.text1, fontWeight: isTop3 ? 600 : 400, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.branch_name}</div>
                         <div style={{ fontSize: '.55rem', color: t.text4, marginTop: '1px' }}>{b.region || b.state || '—'} · {subVal}</div>
                       </div>
 
-                      {/* Bar with inline value at end */}
-                      <div style={{ flex: 1, position: 'relative', height: '22px' }}>
-                        <div style={{ position: 'absolute', inset: 0, background: t.border, borderRadius: '4px' }} />
-                        <div style={{ position: 'absolute', top: 0, left: 0, height: '100%', width: `${w}%`, background: `linear-gradient(90deg, ${barColor}99, ${barColor})`, borderRadius: '4px', transition: 'width .5s ease' }} />
-                        <div style={{ position: 'absolute', top: '50%', transform: 'translateY(-50%)', right: '8px', fontSize: '.65rem', color: w > 50 ? '#fff' : barColor, fontWeight: 600, mixBlendMode: w > 50 ? 'overlay' : 'normal', pointerEvents: 'none' }}>
-                          {metricLabel}
-                        </div>
+                      {/* Bar track */}
+                      <div style={{ flex: 1, position: 'relative', height: '20px', background: t.border2, borderRadius: '4px', overflow: 'hidden' }}>
+                        <div style={{ position: 'absolute', top: 0, left: 0, height: '100%', width: `${w}%`, background: `linear-gradient(90deg, ${barColor}55, ${barColor}cc)`, borderRadius: '4px', transition: 'width .5s ease' }} />
+                      </div>
+
+                      {/* Value label — always visible outside bar */}
+                      <div style={{ width: '72px', flexShrink: 0, textAlign: 'right', fontSize: '.68rem', color: t.text1, fontWeight: 600 }}>
+                        {metricLabel}
                       </div>
                     </div>
                   )
