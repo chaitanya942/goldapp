@@ -73,7 +73,11 @@ export default function ConsignmentOverview() {
     setLoading(false)
   }, [])
 
-  useEffect(() => { fetchData() }, [fetchData])
+  useEffect(() => {
+    fetchData()
+    const interval = setInterval(fetchData, 3 * 60 * 1000) // auto-refresh every 3 min
+    return () => clearInterval(interval)
+  }, [fetchData])
 
   // ── Region summary for flashcards ─────────────────────────────────────────
   const regions = [...new Set(data.map(b => b.region).filter(Boolean))].sort()
