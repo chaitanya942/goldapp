@@ -827,59 +827,87 @@ export default function ReportBranches({ branchData, allBranchMeta, stateData, t
           )}
         </div>
 
-        {/* LEVEL 1 — State cards */}
+        {/* LEVEL 1 — State rows */}
         {!drillState && (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: '12px' }}>
-            {derivedStates.map((s2, i) => (
-              <div key={i} onClick={(e) => { e.stopPropagation(); setDrillState(s2.state) }}
-                style={{ ...s.card2, cursor: 'pointer', transition: 'border-color .2s, transform .15s' }}
-                onMouseEnter={e => { e.currentTarget.style.borderColor = t.gold; e.currentTarget.style.transform = 'translateY(-2px)' }}
-                onMouseLeave={e => { e.currentTarget.style.borderColor = t.border; e.currentTarget.style.transform = 'none' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '12px' }}>
-                  <div style={{ fontSize: '.88rem', fontWeight: 500, color: t.text1 }}>{s2.state}</div>
-                  <span style={{ fontSize: '.55rem', color: t.text4, background: t.border, padding: '2px 6px', borderRadius: '4px' }}>{s2.branch_count} branches</span>
-                </div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-                  <div><div style={{ fontSize: '.9rem', color: t.gold, fontWeight: 500 }}>{fmt(s2.total_net)}g</div><div style={{ fontSize: '.55rem', color: t.text4, marginTop: '2px' }}>Net Wt</div></div>
-                  <div><div style={{ fontSize: '.9rem', color: t.green, fontWeight: 500 }}>{fmtVal(s2.total_value)}</div><div style={{ fontSize: '.55rem', color: t.text4, marginTop: '2px' }}>Value</div></div>
-                  <div><div style={{ fontSize: '.78rem', color: t.text2 }}>{Number(s2.txn_count).toLocaleString('en-IN')}</div><div style={{ fontSize: '.55rem', color: t.text4, marginTop: '2px' }}>Txns</div></div>
-                  <div><div style={{ fontSize: '.78rem', color: t.blue }}>{Number(s2.physical_count).toLocaleString('en-IN')} / {Number(s2.takeover_count).toLocaleString('en-IN')}</div><div style={{ fontSize: '.55rem', color: t.text4, marginTop: '2px' }}>Phy / Tko</div></div>
-                </div>
-                <div style={{ marginTop: '10px', fontSize: '.6rem', color: t.text4, textAlign: 'right' }}>tap to drill into regions →</div>
-              </div>
-            ))}
+          <div style={{ overflowX: 'auto', borderRadius: '8px', border: `1px solid ${t.border}` }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead>
+                <tr>
+                  {['#', 'State', 'Branches', 'Txns', 'Gross Wt', 'Net Wt', 'Avg Purity', 'Value', 'Physical', 'Takeover', 'Avg / Txn'].map(h => (
+                    <th key={h} style={s.th}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {derivedStates.map((s2, i) => (
+                  <tr key={i}
+                    onClick={(e) => { e.stopPropagation(); setDrillState(s2.state) }}
+                    style={{ background: i % 2 === 0 ? 'transparent' : `${t.border}20`, cursor: 'pointer' }}
+                    onMouseEnter={e => e.currentTarget.style.background = `${t.gold}10`}
+                    onMouseLeave={e => e.currentTarget.style.background = i % 2 === 0 ? 'transparent' : `${t.border}20`}>
+                    <td style={{ ...s.td, color: t.text4 }}>{i + 1}</td>
+                    <td style={{ ...s.td, color: t.text1, fontWeight: 500 }}>{s2.state}</td>
+                    <td style={{ ...s.td, color: t.text3 }}>{s2.branch_count}</td>
+                    <td style={s.td}>{Number(s2.txn_count).toLocaleString('en-IN')}</td>
+                    <td style={s.td}>{fmt(s2.total_gross)}g</td>
+                    <td style={{ ...s.td, color: t.gold, fontWeight: 500 }}>{fmt(s2.total_net)}g</td>
+                    <td style={s.td}>—</td>
+                    <td style={{ ...s.td, color: t.green }}>{fmtVal(s2.total_value)}</td>
+                    <td style={{ ...s.td, color: t.gold }}>{Number(s2.physical_count).toLocaleString('en-IN')}</td>
+                    <td style={{ ...s.td, color: t.blue }}>{Number(s2.takeover_count).toLocaleString('en-IN')}</td>
+                    <td style={s.td}>{fmt(s2.total_net / (s2.txn_count || 1))}g</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
 
-        {/* LEVEL 2 — Region cards for selected state */}
-        {drillState && !drillRegion && (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '12px' }}>
-            {derivedRegions.map((r2, i) => {
-              const rc = buildRegionColors(derivedRegions.map(x => x.region))[r2.region] || t.gold
-              return (
-                <div key={i} onClick={(e) => { e.stopPropagation(); setDrillRegion(r2.region) }}
-                  style={{ ...s.card2, cursor: 'pointer', borderColor: `${rc}30`, transition: 'border-color .2s, transform .15s' }}
-                  onMouseEnter={e => { e.currentTarget.style.borderColor = rc; e.currentTarget.style.transform = 'translateY(-2px)' }}
-                  onMouseLeave={e => { e.currentTarget.style.borderColor = `${rc}30`; e.currentTarget.style.transform = 'none' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '12px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '7px' }}>
-                      <div style={{ width: '8px', height: '8px', borderRadius: '2px', background: rc, flexShrink: 0 }} />
-                      <div style={{ fontSize: '.82rem', fontWeight: 500, color: t.text1 }}>{r2.region}</div>
-                    </div>
-                    <span style={{ fontSize: '.55rem', color: t.text4, background: t.border, padding: '2px 6px', borderRadius: '4px' }}>{r2.branch_count} branches</span>
-                  </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-                    <div><div style={{ fontSize: '.88rem', color: rc, fontWeight: 500 }}>{fmt(r2.total_net)}g</div><div style={{ fontSize: '.55rem', color: t.text4, marginTop: '2px' }}>Net Wt</div></div>
-                    <div><div style={{ fontSize: '.88rem', color: t.green, fontWeight: 500 }}>{fmtVal(r2.total_value)}</div><div style={{ fontSize: '.55rem', color: t.text4, marginTop: '2px' }}>Value</div></div>
-                    <div><div style={{ fontSize: '.75rem', color: t.text2 }}>{Number(r2.txn_count).toLocaleString('en-IN')}</div><div style={{ fontSize: '.55rem', color: t.text4, marginTop: '2px' }}>Txns</div></div>
-                    <div><div style={{ fontSize: '.75rem', color: t.blue }}>{Number(r2.physical_count).toLocaleString('en-IN')} / {Number(r2.takeover_count).toLocaleString('en-IN')}</div><div style={{ fontSize: '.55rem', color: t.text4, marginTop: '2px' }}>Phy / Tko</div></div>
-                  </div>
-                  <div style={{ marginTop: '10px', fontSize: '.6rem', color: t.text4, textAlign: 'right' }}>tap for branches →</div>
-                </div>
-              )
-            })}
-          </div>
-        )}
+        {/* LEVEL 2 — Region rows for selected state */}
+        {drillState && !drillRegion && (() => {
+          const regColors = buildRegionColors(derivedRegions.map(x => x.region))
+          return (
+            <div style={{ overflowX: 'auto', borderRadius: '8px', border: `1px solid ${t.border}` }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr>
+                    {['#', 'Region', 'Branches', 'Txns', 'Gross Wt', 'Net Wt', 'Value', 'Physical', 'Takeover', 'Avg / Txn'].map(h => (
+                      <th key={h} style={s.th}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {derivedRegions.map((r2, i) => {
+                    const rc = regColors[r2.region] || t.gold
+                    return (
+                      <tr key={i}
+                        onClick={(e) => { e.stopPropagation(); setDrillRegion(r2.region) }}
+                        style={{ background: i % 2 === 0 ? 'transparent' : `${t.border}20`, cursor: 'pointer' }}
+                        onMouseEnter={e => e.currentTarget.style.background = `${rc}12`}
+                        onMouseLeave={e => e.currentTarget.style.background = i % 2 === 0 ? 'transparent' : `${t.border}20`}>
+                        <td style={{ ...s.td, color: t.text4 }}>{i + 1}</td>
+                        <td style={{ ...s.td, fontWeight: 500 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '7px' }}>
+                            <div style={{ width: '8px', height: '8px', borderRadius: '2px', background: rc, flexShrink: 0 }} />
+                            <span style={{ color: rc }}>{r2.region}</span>
+                          </div>
+                        </td>
+                        <td style={{ ...s.td, color: t.text3 }}>{r2.branch_count}</td>
+                        <td style={s.td}>{Number(r2.txn_count).toLocaleString('en-IN')}</td>
+                        <td style={s.td}>{fmt(r2.total_gross)}g</td>
+                        <td style={{ ...s.td, color: rc, fontWeight: 500 }}>{fmt(r2.total_net)}g</td>
+                        <td style={{ ...s.td, color: t.green }}>{fmtVal(r2.total_value)}</td>
+                        <td style={{ ...s.td, color: t.gold }}>{Number(r2.physical_count).toLocaleString('en-IN')}</td>
+                        <td style={{ ...s.td, color: t.blue }}>{Number(r2.takeover_count).toLocaleString('en-IN')}</td>
+                        <td style={s.td}>{fmt(r2.total_net / (r2.txn_count || 1))}g</td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )
+        })()}
 
         {/* LEVEL 3 — Branch table for selected region */}
         {drillRegion && (
