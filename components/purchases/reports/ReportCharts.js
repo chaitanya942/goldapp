@@ -71,28 +71,34 @@ function BillTip({ active, payload, t }) {
 
 // ─── Main ──────────────────────────────────────────────────────────────────────
 export default function ReportCharts({ trend, monthly, dowData, hourlyTrend, isSingleDay, t, fromDate, filterBranch, filterTxn }) {
-  const [trendMetric, setTrendMetric] = useState('net_wt')
-  const [drillBranch, setDrillBranch]   = useState(null)
-  const [branches,    setBranches]      = useState([])
-  const [branchTrend, setBranchTrend]   = useState([])
-  const [bills,       setBills]         = useState([])
+  const [trendMetric,  setTrendMetric]  = useState('net_wt')
+  const [drillBranch,  setDrillBranch]  = useState(null)
+  const [drillRegion,  setDrillRegion]  = useState(null)
+  const [branches,     setBranches]     = useState([])
+  const [regionList,   setRegionList]   = useState([])
+  const [branchTrend,  setBranchTrend]  = useState([])
+  const [regionTrend,  setRegionTrend]  = useState([])
+  const [bills,        setBills]        = useState([])
   const [billsLoading, setBillsLoading] = useState(false)
   const s = getStyles(t)
 
-  // Fetch branch list for drilldown picker
+  // Fetch branch + region list for drilldown picker
   useEffect(() => {
-    supabase.from('branches').select('name').order('name').then(({ data }) => {
-      if (data) setBranches(data.map(b => b.name))
+    supabase.from('branches').select('name, region').order('name').then(({ data }) => {
+      if (data) {
+        setBranches(data.map(b => b.name))
+        const regions = [...new Set(data.map(b => b.region).filter(Boolean))].sort()
+        setRegionList(regions)
+      }
     })
   }, [])
 
-  // Branch-specific trend for overlay
+  // Branch-specific trend
   useEffect(() => {
     if (!drillBranch) { setBranchTrend([]); return }
     let bq = supabase.from('purchases')
-      .select('purchase_date, net_weight, final_amount_crm, purity')
-      .eq('crm_status', 'approved')
-      .eq('is_deleted', false)
+      .select('purchase_date, net_weight, final_amount_crm')
+      .eq('crm_status', 'approved').eq('is_deleted', false)
       .eq('branch_name', drillBranch)
     if (fromDate) bq = bq.gte('purchase_date', fromDate)
     if (filterTxn) bq = bq.eq('transaction_type', filterTxn)
@@ -113,6 +119,37 @@ export default function ReportCharts({ trend, monthly, dowData, hourlyTrend, isS
       )
     })
   }, [drillBranch, fromDate, filterTxn])
+
+  // Region-specific trend
+  useEffect(() => {
+    if (!drillRegion) { setRegionTrend([]); return }
+    supabase.from('branches').select('name').eq('region', drillRegion).then(({ data: bData }) => {
+      if (!bData?.length) return
+      const branchNames = bData.map(b => b.name)
+      let rq = supabase.from('purchases')
+        .select('purchase_date, net_weight, final_amount_crm')
+        .eq('crm_status', 'approved').eq('is_deleted', false)
+        .in('branch_name', branchNames)
+      if (fromDate) rq = rq.gte('purchase_date', fromDate)
+      if (filterTxn) rq = rq.eq('transaction_type', filterTxn)
+      rq.then(({ data }) => {
+        if (!data) return
+        const m = {}
+        data.forEach(r => {
+          const d = r.purchase_date; if (!d) return
+          if (!m[d]) m[d] = { net_wt: 0, value: 0, txn_count: 0 }
+          m[d].net_wt    += parseFloat(r.net_weight || 0)
+          m[d].value     += parseFloat(r.final_amount_crm || 0)
+          m[d].txn_count += 1
+        })
+        setRegionTrend(
+          Object.entries(m).sort(([a],[b]) => a < b ? -1 : 1).map(([day, d]) => ({
+            day, net_wt: parseFloat(d.net_wt.toFixed(3)), value: Math.round(d.value), txn_count: d.txn_count,
+          }))
+        )
+      })
+    })
+  }, [drillRegion, fromDate, filterTxn])
 
   // Individual bills for single-day scatter timeline
   useEffect(() => {
@@ -149,7 +186,7 @@ export default function ReportCharts({ trend, monthly, dowData, hourlyTrend, isS
     })
   }, [isSingleDay, fromDate, filterBranch, filterTxn])
 
-  // ── Build merged trend data for overlay ──────────────────────────────────────
+  // ── Build base trend data ────────────────────────────────────────────────────
   const trendData = (trend || []).map(d => ({
     ...d,
     net_wt:    Number(d.net_wt || 0),
@@ -158,18 +195,13 @@ export default function ReportCharts({ trend, monthly, dowData, hourlyTrend, isS
     avg_purity: Number(d.avg_purity || 0),
   }))
 
-  const mergedData = trendData.map(d => {
-    const b = branchTrend.find(r => r.day === d.day)
-    return {
-      ...d,
-      branch_net_wt:    b ? Number(b.net_wt)    : undefined,
-      branch_value:     b ? Number(b.value)      : undefined,
-      branch_txn_count: b ? Number(b.txn_count)  : undefined,
-    }
-  })
-
-  const branchMetricKey = `branch_${trendMetric}`
-  const metricLabel = trendMetric === 'value' ? 'Value' : trendMetric === 'txn_count' ? 'Bills' : 'Net Wt'
+  // ── Active drill: branch or region overrides all-branches view ───────────────
+  const activeDrill    = drillBranch || drillRegion
+  const activeLabel    = drillBranch || (drillRegion ? `${drillRegion} Region` : null)
+  const activeTrend    = drillBranch ? branchTrend : drillRegion ? regionTrend : null
+  const chartData      = activeTrend?.length ? activeTrend : trendData
+  const chartColor     = drillBranch ? t.blue : drillRegion ? '#10b981' : t.gold
+  const gradientId     = drillBranch ? 'ga_branch' : drillRegion ? 'ga_region' : 'ga_all'
 
   const yFmt = (v) =>
     trendMetric === 'value' ? `₹${(v / 1000).toFixed(0)}k`
@@ -206,15 +238,40 @@ export default function ReportCharts({ trend, monthly, dowData, hourlyTrend, isS
             </div>
             {!isSingleDay && (
               <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <span style={{ fontSize: '.6rem', color: t.text4 }}>Branch</span>
+                <span style={{ fontSize: '.6rem', color: t.text4 }}>View</span>
                 <select
-                  value={drillBranch || ''}
-                  onChange={e => setDrillBranch(e.target.value || null)}
-                  style={{ background: t.card2, border: `1px solid ${t.border}`, borderRadius: '7px', padding: '4px 10px', color: drillBranch ? t.gold : t.text3, fontSize: '.62rem', cursor: 'pointer', outline: 'none' }}
+                  value={drillBranch ? `b:${drillBranch}` : drillRegion ? `r:${drillRegion}` : ''}
+                  onChange={e => {
+                    const v = e.target.value
+                    if (!v) { setDrillBranch(null); setDrillRegion(null) }
+                    else if (v.startsWith('r:')) { setDrillRegion(v.slice(2)); setDrillBranch(null) }
+                    else { setDrillBranch(v.slice(2)); setDrillRegion(null) }
+                  }}
+                  style={{
+                    background: t.card2, border: `1px solid ${activeDrill ? chartColor + '80' : t.border}`,
+                    borderRadius: '7px', padding: '4px 10px',
+                    color: activeDrill ? chartColor : t.text3,
+                    fontSize: '.62rem', cursor: 'pointer', outline: 'none',
+                    minWidth: '130px',
+                  }}
                 >
                   <option value="">All Branches</option>
-                  {branches.map(b => <option key={b} value={b}>{b}</option>)}
+                  {regionList.length > 0 && (
+                    <optgroup label="── Regions ──">
+                      {regionList.map(r => <option key={r} value={`r:${r}`}>{r}</option>)}
+                    </optgroup>
+                  )}
+                  <optgroup label="── Branches ──">
+                    {branches.map(b => <option key={b} value={`b:${b}`}>{b}</option>)}
+                  </optgroup>
                 </select>
+                {activeDrill && (
+                  <button
+                    onClick={() => { setDrillBranch(null); setDrillRegion(null) }}
+                    style={{ background: 'none', border: 'none', color: t.text4, fontSize: '.72rem', cursor: 'pointer', padding: '0 2px', lineHeight: 1 }}
+                    title="Clear"
+                  >✕</button>
+                )}
               </div>
             )}
           </div>
@@ -309,26 +366,42 @@ export default function ReportCharts({ trend, monthly, dowData, hourlyTrend, isS
           )
 
         ) : (
-          /* Multi-day: area chart with optional branch overlay */
-          mergedData.length < 2 ? (
+          /* Multi-day: area chart */
+          chartData.length < 2 ? (
             <div style={{ height: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', color: t.text4, fontSize: '.72rem' }}>Not enough data for this period</div>
           ) : (
             <>
-              {/* Peak day stats strip */}
+              {/* Stats strip */}
               {(() => {
-                const peak = mergedData.reduce((best, d) => Number(d[trendMetric]) > Number(best[trendMetric] || 0) ? d : best, mergedData[0])
-                const avg  = mergedData.reduce((s, d) => s + Number(d[trendMetric] || 0), 0) / mergedData.length
+                const peak   = chartData.reduce((best, d) => Number(d[trendMetric]) > Number(best[trendMetric] || 0) ? d : best, chartData[0])
+                const avg    = chartData.reduce((s, d) => s + Number(d[trendMetric] || 0), 0) / chartData.length
+                const avgFmt = trendMetric === 'value' ? fmtVal(avg)
+                  : trendMetric === 'txn_count' ? avg.toFixed(2)
+                  : `${avg.toFixed(2)}g`
                 return (
-                  <div style={{ display: 'flex', gap: '20px', marginBottom: '12px', fontSize: '.6rem', color: t.text3 }}>
-                    <span>Peak <span style={{ color: t.gold, fontWeight: 600 }}>{fmtShort(peak?.day)}</span> · {yFmt(peak?.[trendMetric])}</span>
-                    <span>Avg/day <span style={{ color: t.text2 }}>{yFmt(avg)}</span></span>
-                    <span>Days <span style={{ color: t.text2 }}>{mergedData.length}</span></span>
+                  <div style={{ display: 'flex', gap: '6px', marginBottom: '14px', flexWrap: 'wrap' }}>
+                    {[
+                      { label: 'Peak', value: fmtShort(peak?.day), sub: yFmt(peak?.[trendMetric]), color: chartColor },
+                      { label: 'Avg/day', value: avgFmt, color: t.text2 },
+                      { label: 'Days', value: chartData.length, color: t.text2 },
+                      activeDrill && { label: 'Viewing', value: activeLabel, color: chartColor },
+                    ].filter(Boolean).map(({ label, value, sub, color }) => (
+                      <div key={label} style={{
+                        background: `${color}0d`, border: `1px solid ${color}25`,
+                        borderRadius: '8px', padding: '5px 12px', fontSize: '.6rem',
+                        color: t.text3, display: 'flex', gap: '5px', alignItems: 'baseline',
+                      }}>
+                        {label}
+                        <span style={{ color, fontWeight: 600, fontSize: '.68rem' }}>{value}</span>
+                        {sub && <span style={{ color: t.text4 }}>· {sub}</span>}
+                      </div>
+                    ))}
                   </div>
                 )
               })()}
 
               <ResponsiveContainer width="100%" height={200}>
-                <AreaChart accessibilityLayer={false} data={mergedData} margin={{ top: 10, right: 20, bottom: 0, left: 10 }}>
+                <AreaChart accessibilityLayer={false} data={chartData} margin={{ top: 10, right: 20, bottom: 0, left: 10 }}>
                   <defs>
                     <linearGradient id="ga_all" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="5%"  stopColor={t.gold} stopOpacity={0.28} />
@@ -337,6 +410,10 @@ export default function ReportCharts({ trend, monthly, dowData, hourlyTrend, isS
                     <linearGradient id="ga_branch" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="5%"  stopColor={t.blue} stopOpacity={0.22} />
                       <stop offset="95%" stopColor={t.blue} stopOpacity={0} />
+                    </linearGradient>
+                    <linearGradient id="ga_region" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%"  stopColor="#10b981" stopOpacity={0.22} />
+                      <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
                     </linearGradient>
                   </defs>
                   <CartesianGrid {...gridProps} />
@@ -349,32 +426,24 @@ export default function ReportCharts({ trend, monthly, dowData, hourlyTrend, isS
                   <YAxis tick={axisTick} axisLine={false} tickLine={false} width={44} tickFormatter={yFmt} />
                   <Tooltip content={<TrendTip />} />
                   <ReferenceLine
-                    y={mergedData.reduce((s, d) => s + Number(d[trendMetric] || 0), 0) / mergedData.length}
+                    y={chartData.reduce((s, d) => s + Number(d[trendMetric] || 0), 0) / chartData.length}
                     stroke={t.text4} strokeDasharray="4 3" strokeWidth={1}
                   />
                   <Area
-                    type="monotone" dataKey={trendMetric} stroke={t.gold} strokeWidth={2}
-                    fill="url(#ga_all)" dot={false} activeDot={{ r: 5, fill: t.gold, strokeWidth: 0 }}
-                    name="All Branches"
+                    type="monotone" dataKey={trendMetric} stroke={chartColor} strokeWidth={2}
+                    fill={`url(#${gradientId})`} dot={false}
+                    activeDot={{ r: 5, fill: chartColor, strokeWidth: 0 }}
+                    name={activeLabel || 'All Branches'}
                   />
-                  {drillBranch && branchTrend.length > 0 && (
-                    <Area
-                      type="monotone" dataKey={branchMetricKey} stroke={t.blue} strokeWidth={2}
-                      strokeDasharray="5 3" fill="url(#ga_branch)"
-                      dot={false} activeDot={{ r: 4, fill: t.blue, strokeWidth: 0 }}
-                      name={drillBranch}
-                      connectNulls={false}
-                    />
-                  )}
                 </AreaChart>
               </ResponsiveContainer>
 
-              {/* Mini bill-count bar — mirrors single-day hourly totals pattern */}
+              {/* Mini bill-count bar */}
               {trendMetric !== 'txn_count' && (
                 <div style={{ marginTop: '10px' }}>
                   <div style={{ fontSize: '.56rem', color: t.text4, letterSpacing: '.12em', marginBottom: '6px' }}>DAILY BILL COUNT</div>
                   <ResponsiveContainer width="100%" height={54}>
-                    <BarChart accessibilityLayer={false} data={mergedData} margin={{ top: 0, right: 20, bottom: 0, left: 10 }} style={{ border: 'none', outline: 'none' }}>
+                    <BarChart accessibilityLayer={false} data={chartData} margin={{ top: 0, right: 20, bottom: 0, left: 10 }}>
                       <XAxis dataKey="day" tick={{ fill: t.text4, fontSize: 8 }} axisLine={false} tickLine={false}
                         tickFormatter={v => fmtShort(v)} interval="preserveStartEnd" />
                       <Tooltip
@@ -383,23 +452,9 @@ export default function ReportCharts({ trend, monthly, dowData, hourlyTrend, isS
                         labelFormatter={v => fmtShort(v)}
                         contentStyle={{ background: t.card2, border: `1px solid ${t.border}`, borderRadius: '8px', color: t.text2, fontSize: '.68rem' }}
                       />
-                      <Bar dataKey="txn_count" fill={t.gold} fillOpacity={0.4} radius={[2, 2, 0, 0]} name="Bills" />
+                      <Bar dataKey="txn_count" fill={chartColor} fillOpacity={0.4} radius={[2, 2, 0, 0]} name="Bills" />
                     </BarChart>
                   </ResponsiveContainer>
-                </div>
-              )}
-
-              {/* Legend */}
-              {drillBranch && (
-                <div style={{ marginTop: '10px', display: 'flex', gap: '16px', fontSize: '.62rem' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '5px', color: t.text3 }}>
-                    <span style={{ width: 18, height: 2, background: t.gold, display: 'inline-block', borderRadius: 2 }} />
-                    All Branches
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '5px', color: t.text3 }}>
-                    <span style={{ width: 18, height: 2, background: t.blue, display: 'inline-block', borderRadius: 2 }} />
-                    {drillBranch}
-                  </div>
                 </div>
               )}
             </>
