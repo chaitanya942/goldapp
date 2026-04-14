@@ -292,7 +292,7 @@ export default function PurchaseReports() {
       // ── 3. KPIs ────────────────────────────────────────────
       let totalGross = 0, totalNet = 0, totalValue = 0, purityWt = 0
       let svcPctSum = 0, stoneWastageSum = 0
-      let physCount = 0, takovCount = 0, physNet = 0, takovNet = 0
+      let physCount = 0, takovCount = 0, physNet = 0, takovNet = 0, physVal = 0, takovVal = 0
       const dateSet = new Set(), branchSet = new Set()
 
       for (const r of rows) {
@@ -309,8 +309,8 @@ export default function PurchaseReports() {
         purityWt        += nw * pu
         svcPctSum       += sp
         stoneWastageSum += sw + ww
-        if (r.transaction_type === 'PHYSICAL') { physCount++; physNet  += nw }
-        else                                   { takovCount++; takovNet += nw }
+        if (r.transaction_type === 'PHYSICAL') { physCount++; physNet += nw; physVal  += fa }
+        else                                   { takovCount++; takovNet += nw; takovVal += fa }
         if (r.purchase_date) dateSet.add(r.purchase_date)
         if (r.branch_name)   branchSet.add(r.branch_name)
       }
@@ -337,6 +337,8 @@ export default function PurchaseReports() {
         takeover_count:         takovCount,
         physical_net:           physNet,
         takeover_net:           takovNet,
+        physical_value:         physVal,
+        takeover_value:         takovVal,
         avg_stone_wastage_bill: n > 0 ? stoneWastageSum / n : 0,
       })
 
@@ -490,6 +492,7 @@ export default function PurchaseReports() {
         WT_BUCKETS.map(b => ({
           bucket:             b.label,
           count:              wtAgg[b.label].count,
+          total_net:          parseFloat(wtAgg[b.label].nw.toFixed(3)),
           avg_purity:         wtAgg[b.label].nw > 0 ? parseFloat((wtAgg[b.label].pw / wtAgg[b.label].nw).toFixed(2)) : 0,
           avg_service_charge: wtAgg[b.label].count > 0 ? parseFloat((wtAgg[b.label].spc / wtAgg[b.label].count).toFixed(2)) : 0,
         })).filter(b => b.count > 0)
