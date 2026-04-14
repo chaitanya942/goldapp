@@ -25,15 +25,28 @@ export async function GET(req) {
     const now      = new Date(new Date().getTime() + 5.5 * 60 * 60 * 1000)
     const todayIST = `${now.getUTCFullYear()}-${String(now.getUTCMonth()+1).padStart(2,'0')}-${String(now.getUTCDate()).padStart(2,'0')}`
 
-    // Fetch all purchases at_branch (approved, not deleted)
-    const { data: purchases, error: pErr } = await supabase
+    // Fetch today's purchases (all approved, any stock_status) — separate from pending
+    const { data: todayPurchases, error: tErr } = await supabase
+      .from('purchases')
+      .select('branch_name, purchase_date, gross_weight, net_weight')
+      .eq('crm_status', 'approved')
+      .eq('is_deleted', false)
+      .eq('purchase_date', todayIST)
+
+    if (tErr) return Response.json({ data: [], error: tErr.message })
+
+    // Fetch pending stock = at_branch from before today
+    const { data: pendingPurchases, error: pErr } = await supabase
       .from('purchases')
       .select('branch_name, purchase_date, gross_weight, net_weight')
       .eq('stock_status', 'at_branch')
       .eq('crm_status', 'approved')
       .eq('is_deleted', false)
+      .lt('purchase_date', todayIST)
 
     if (pErr) return Response.json({ data: [], error: pErr.message })
+
+    const purchases = [...(todayPurchases || []), ...(pendingPurchases || [])]
 
     // Fetch branch metadata — filter outside_bangalore by model_type
     const { data: branches, error: bErr } = await supabase
@@ -68,15 +81,15 @@ export async function GET(req) {
           total_gross_wt: 0, total_net_wt: 0, oldest_date: null,
         }
       }
-      const s   = summary[key]
-      const nw  = parseFloat(row.net_weight   || 0)
-      const gw  = parseFloat(row.gross_weight || 0)
+      const s      = summary[key]
+      const nw     = parseFloat(row.net_weight   || 0)
+      const gw     = parseFloat(row.gross_weight || 0)
+      const isToday = row.purchase_date === todayIST
       s.total_bills++
       s.total_gross_wt += gw
       s.total_net_wt   += nw
-      if (row.purchase_date === todayIST) { s.today_bills++; s.today_net_wt += nw }
-      else                                { s.older_bills++; s.older_net_wt += nw }
-      if (!s.oldest_date || row.purchase_date < s.oldest_date) s.oldest_date = row.purchase_date
+      if (isToday) { s.today_bills++; s.today_net_wt += nw }
+      else         { s.older_bills++; s.older_net_wt += nw; if (!s.oldest_date || row.purchase_date < s.oldest_date) s.oldest_date = row.purchase_date }
     }
 
     // Compute oldest_age_days; ship_before is null until set manually per branch
