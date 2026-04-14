@@ -613,38 +613,91 @@ export default function ReportBranches({ branchData, stateData, topBills, t, fro
       </div>
 
       {/* ── TOP 10 BY METRIC ── */}
-      <Panel {...P('top10')}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
-          <div style={{ fontSize: '.55rem', color: t.text3, letterSpacing: '.2em', textTransform: 'uppercase', fontWeight: 500 }}>Top 10 Branches</div>
-          <div style={{ display: 'flex', gap: '6px' }}>
-            {[['Net Wt', 'total_net'], ['Value', 'total_value'], ['Txns', 'txn_count']].map(([l, v]) => (
-              <button key={v} style={pill(topMetric === v)} onClick={(e) => { e.stopPropagation(); setTopMetric(v) }}>{l}</button>
-            ))}
-          </div>
-        </div>
-        {top10.length > 0 ? (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            {top10.map((b, i) => {
-              const max = top10[0]?.[topMetric] || 1
-              const w   = (b[topMetric] / max) * 100
-              const metricLabel = topMetric === 'total_net'   ? `${fmt(b[topMetric])}g`
-                                : topMetric === 'total_value' ? fmtVal(b[topMetric])
-                                : Number(b[topMetric]).toLocaleString('en-IN')
-              return (
-                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                  <div style={{ width: '18px', fontSize: '.62rem', color: t.text4, textAlign: 'right', flexShrink: 0 }}>{i + 1}</div>
-                  <div style={{ width: '160px', fontSize: '.72rem', color: t.text1, flexShrink: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.branch_name}</div>
-                  <div style={{ flex: 1, height: '22px', background: t.border, borderRadius: '4px', overflow: 'hidden' }}>
-                    <div style={{ height: '100%', width: `${w}%`, background: t.gold, borderRadius: '4px', opacity: .8 }} />
+      {(() => {
+        const allRegionsTop = [...new Set((branchData || []).map(b => b.region).filter(Boolean))].sort()
+        const [top10Region, setTop10Region] = [drillRegion, setDrillRegion]
+        const filteredTop10 = top10Region
+          ? [...(branchData || [])].filter(b => b.region === top10Region).sort((a, b) => b[topMetric] - a[topMetric]).slice(0, 10)
+          : top10
+        const RANK_COLORS = ['#FFD700', '#C0C0C0', '#CD7F32']
+        const subMetric = topMetric === 'total_net' ? 'txn_count' : topMetric === 'total_value' ? 'total_net' : 'total_net'
+        const subLabel  = topMetric === 'total_net' ? 'txns' : topMetric === 'total_value' ? 'net wt' : 'net wt'
+        return (
+          <Panel {...P('top10')}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', gap: '10px', flexWrap: 'wrap' }}>
+              <div style={{ fontSize: '.55rem', color: t.text3, letterSpacing: '.2em', textTransform: 'uppercase', fontWeight: 500 }}>Top 10 Branches</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                {allRegionsTop.length > 0 && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span style={{ fontSize: '.58rem', color: t.text4 }}>Region</span>
+                    <select
+                      value={top10Region || ''}
+                      onChange={e => { e.stopPropagation(); setTop10Region(e.target.value || null) }}
+                      onClick={e => e.stopPropagation()}
+                      style={{ background: t.card2 || t.card, border: `1px solid ${top10Region ? t.gold + '80' : t.border}`, borderRadius: '7px', padding: '4px 10px', color: top10Region ? t.gold : t.text3, fontSize: '.62rem', cursor: 'pointer', outline: 'none' }}
+                    >
+                      <option value="">All Regions</option>
+                      {allRegionsTop.map(r => <option key={r} value={r}>{r}</option>)}
+                    </select>
+                    {top10Region && (
+                      <button onClick={e => { e.stopPropagation(); setTop10Region(null) }} style={{ background: 'none', border: 'none', color: t.text4, fontSize: '.72rem', cursor: 'pointer', padding: '0 2px' }}>✕</button>
+                    )}
                   </div>
-                  <div style={{ width: '110px', fontSize: '.72rem', color: t.gold, textAlign: 'right', flexShrink: 0 }}>{metricLabel}</div>
-                  <div style={{ width: '80px', fontSize: '.6rem', color: t.text3, textAlign: 'right', flexShrink: 0 }}>{b.state || '—'}</div>
+                )}
+                <div style={{ display: 'flex', gap: '6px' }}>
+                  {[['Net Wt', 'total_net'], ['Value', 'total_value'], ['Txns', 'txn_count']].map(([l, v]) => (
+                    <button key={v} style={pill(topMetric === v)} onClick={(e) => { e.stopPropagation(); setTopMetric(v) }}>{l}</button>
+                  ))}
                 </div>
-              )
-            })}
-          </div>
-        ) : <div style={{ textAlign: 'center', color: t.text4, padding: '40px', fontSize: '.75rem' }}>No data</div>}
-      </Panel>
+              </div>
+            </div>
+            {filteredTop10.length > 0 ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                {filteredTop10.map((b, i) => {
+                  const max         = filteredTop10[0]?.[topMetric] || 1
+                  const w           = (b[topMetric] / max) * 100
+                  const rankColor   = i < 3 ? RANK_COLORS[i] : null
+                  const barColor    = rankColor || t.gold
+                  const metricLabel = topMetric === 'total_net'   ? `${fmt(b[topMetric])}g`
+                                    : topMetric === 'total_value' ? fmtVal(b[topMetric])
+                                    : Number(b[topMetric]).toLocaleString('en-IN')
+                  const subVal      = subMetric === 'txn_count'
+                                    ? `${Number(b.txn_count).toLocaleString('en-IN')} ${subLabel}`
+                                    : `${fmt(b.total_net)}g ${subLabel}`
+                  return (
+                    <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      {/* Rank badge */}
+                      <div style={{
+                        width: '22px', height: '22px', borderRadius: '50%', flexShrink: 0,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        background: rankColor ? `${rankColor}22` : `${t.border}`,
+                        border: rankColor ? `1px solid ${rankColor}60` : 'none',
+                        fontSize: '.58rem', fontWeight: 700,
+                        color: rankColor || t.text4,
+                      }}>{i + 1}</div>
+
+                      {/* Branch name + sub */}
+                      <div style={{ width: '150px', flexShrink: 0 }}>
+                        <div style={{ fontSize: '.72rem', color: rankColor || t.text1, fontWeight: rankColor ? 600 : 400, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.branch_name}</div>
+                        <div style={{ fontSize: '.55rem', color: t.text4, marginTop: '1px' }}>{b.region || b.state || '—'} · {subVal}</div>
+                      </div>
+
+                      {/* Bar with inline value at end */}
+                      <div style={{ flex: 1, position: 'relative', height: '22px' }}>
+                        <div style={{ position: 'absolute', inset: 0, background: t.border, borderRadius: '4px' }} />
+                        <div style={{ position: 'absolute', top: 0, left: 0, height: '100%', width: `${w}%`, background: `linear-gradient(90deg, ${barColor}99, ${barColor})`, borderRadius: '4px', transition: 'width .5s ease' }} />
+                        <div style={{ position: 'absolute', top: '50%', transform: 'translateY(-50%)', right: '8px', fontSize: '.65rem', color: w > 50 ? '#fff' : barColor, fontWeight: 600, mixBlendMode: w > 50 ? 'overlay' : 'normal', pointerEvents: 'none' }}>
+                          {metricLabel}
+                        </div>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            ) : <div style={{ textAlign: 'center', color: t.text4, padding: '40px', fontSize: '.75rem' }}>No data</div>}
+          </Panel>
+        )
+      })()}
 
       {/* ── BRANCH HEATMAP ── */}
       <Panel {...P('treemap')} noExpand={true}>
