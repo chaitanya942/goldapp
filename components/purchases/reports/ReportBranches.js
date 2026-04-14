@@ -390,91 +390,143 @@ function BranchHeatmap({ branchData, allBranchMeta, metric, t, fromDate, toDate,
 // ─────────────────────────────────────────────
 // SCATTER CHART
 // ─────────────────────────────────────────────
-function ScatterChart({ branchData, t }) {
-  const [hovered, setHovered] = useState(null)
-  const W = 700, H = 300, PL = 56, PR = 60, PT = 20, PB = 40
+function ScatterChart({ branchData, t, fromDate, toDate, filterTxn }) {
+  const [hovered,        setHovered]        = useState(null)
+  const [activeRegion,   setActiveRegion]   = useState(null)
+  const [selectedBranch, setSelectedBranch] = useState(null)
+  const W = 740, H = 320, PL = 58, PR = 24, PT = 20, PB = 44
 
-  const regions = [...new Set((branchData || []).map(b => b.region || 'Unknown'))]
+  const regions      = [...new Set((branchData || []).map(b => b.region || 'Unknown'))]
   const regionColors = buildRegionColors(regions)
 
-  const points    = (branchData || []).filter(b => b.total_net > 0 && b.avg_purity > 0)
-  const maxNet    = Math.max(...points.map(b => Number(b.total_net)))
+  const points  = (branchData || []).filter(b => b.total_net > 0 && b.avg_purity > 0)
+  const maxTxns = Math.max(...points.map(b => Number(b.txn_count)))
+
   const minPurity = Math.min(...points.map(b => Number(b.avg_purity)))
   const maxPurity = Math.max(...points.map(b => Number(b.avg_purity)))
-  const maxTxns   = Math.max(...points.map(b => Number(b.txn_count)))
+
+  // Log scale for X to spread the dense cluster
+  const nets    = points.map(b => Number(b.total_net))
+  const logMin  = Math.log10(Math.max(1, Math.min(...nets)))
+  const logMax  = Math.log10(Math.max(1, Math.max(...nets)))
 
   const chartW = W - PL - PR
   const chartH = H - PT - PB
 
-  const bx = (b) => PL + (Number(b.total_net) / maxNet) * chartW
+  const bx = (b) => PL + ((Math.log10(Math.max(1, Number(b.total_net))) - logMin) / ((logMax - logMin) || 1)) * chartW
   const by = (b) => PT + chartH - ((Number(b.avg_purity) - minPurity) / ((maxPurity - minPurity) || 1)) * chartH
-  const br = (b) => Math.max(5, Math.min(18, (Number(b.txn_count) / maxTxns) * 16 + 5))
+  const br = (b) => Math.max(5, Math.min(20, (Number(b.txn_count) / maxTxns) * 17 + 5))
 
-  const yTicks = 5, xTicks = 5
+  // Y ticks
+  const yTicks = 5
   const yRange = maxPurity - minPurity || 1
+
+  // X ticks — log-spaced
+  const xTickVals = Array.from({ length: 6 }, (_, i) => Math.pow(10, logMin + (i / 5) * (logMax - logMin)))
+
+  const hovBranch = hovered ? points.find(b => b.branch_name === hovered) : null
+  const selColor  = selectedBranch ? (regionColors[(points.find(b => b.branch_name === selectedBranch)?.region) || 'Unknown'] || t.gold) : t.gold
 
   return (
     <div style={{ width: '100%' }}>
+      {selectedBranch && (
+        <BranchBillsModal
+          branch={selectedBranch}
+          branchInfo={points.find(b => b.branch_name === selectedBranch)}
+          color={selColor}
+          t={t}
+          fromDate={fromDate}
+          toDate={toDate}
+          filterTxn={filterTxn}
+          onClose={() => setSelectedBranch(null)}
+        />
+      )}
+
       <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{ display: 'block', overflow: 'visible' }}>
+        {/* Y grid + labels */}
         {Array.from({ length: yTicks + 1 }, (_, i) => {
           const val = minPurity + (yRange / yTicks) * i
           const y   = PT + chartH - (i / yTicks) * chartH
           return (
             <g key={i}>
-              <line x1={PL} y1={y} x2={W - PR} y2={y} stroke={t.border} strokeWidth="1" strokeDasharray="3 3" />
+              <line x1={PL} y1={y} x2={W - PR} y2={y} stroke={t.border} strokeWidth="1" strokeDasharray="3 4" />
               <text x={PL - 6} y={y + 4} textAnchor="end" fontSize="9" fill={t.text3}>{val.toFixed(1)}%</text>
             </g>
           )
         })}
-        {Array.from({ length: xTicks + 1 }, (_, i) => {
-          const val = (maxNet / xTicks) * i
-          const x   = PL + (i / xTicks) * chartW
+
+        {/* X grid + labels (log-spaced) */}
+        {xTickVals.map((val, i) => {
+          const x = PL + ((Math.log10(Math.max(1, val)) - logMin) / ((logMax - logMin) || 1)) * chartW
           return (
             <g key={i}>
-              <line x1={x} y1={PT} x2={x} y2={PT + chartH} stroke={t.border} strokeWidth="1" strokeDasharray="3 3" />
+              <line x1={x} y1={PT} x2={x} y2={PT + chartH} stroke={t.border} strokeWidth="1" strokeDasharray="3 4" />
               <text x={x} y={PT + chartH + 14} textAnchor="middle" fontSize="9" fill={t.text3}>{Math.round(val)}g</text>
             </g>
           )
         })}
-        <line x1={PL} y1={PT} x2={PL} y2={PT + chartH} stroke={t.border2} strokeWidth="1" />
-        <line x1={PL} y1={PT + chartH} x2={W - PR} y2={PT + chartH} stroke={t.border2} strokeWidth="1" />
-        <text x={PL + chartW / 2} y={H - 4} textAnchor="middle" fontSize="9" fill={t.text4}>Net Weight (g)</text>
-        <text x={12} y={PT + chartH / 2} textAnchor="middle" fontSize="9" fill={t.text4} transform={`rotate(-90 12 ${PT + chartH / 2})`}>Avg Purity %</text>
 
+        {/* Axes */}
+        <line x1={PL} y1={PT} x2={PL} y2={PT + chartH} stroke={t.border2} strokeWidth="1.5" />
+        <line x1={PL} y1={PT + chartH} x2={W - PR} y2={PT + chartH} stroke={t.border2} strokeWidth="1.5" />
+        <text x={PL + chartW / 2} y={H - 6} textAnchor="middle" fontSize="9" fill={t.text4}>Net Weight (g) — log scale</text>
+        <text x={11} y={PT + chartH / 2} textAnchor="middle" fontSize="9" fill={t.text4} transform={`rotate(-90 11 ${PT + chartH / 2})`}>Avg Purity %</text>
+
+        {/* Bubbles — hovered on top */}
         {[...points.filter(b => b.branch_name !== hovered), ...points.filter(b => b.branch_name === hovered)].map((b) => {
-          const x      = bx(b), y = by(b), radius = br(b)
-          const color  = regionColors[b.region || 'Unknown']
-          const isHov  = hovered === b.branch_name
-          const tipW = 150, tipH = 44
-          const tipX = x + radius + 6 + tipW > W ? x - radius - 6 - tipW : x + radius + 6
+          const x       = bx(b), y = by(b), radius = br(b)
+          const color   = regionColors[b.region || 'Unknown']
+          const isHov   = hovered === b.branch_name
+          const dimmed  = (activeRegion && b.region !== activeRegion) || (hovered && !isHov)
+          const tipW = 190, tipH = 62
+          const tipX = x + radius + 8 + tipW > W ? x - radius - 8 - tipW : x + radius + 8
           const tipY = Math.max(PT, Math.min(PT + chartH - tipH, y - tipH / 2))
           return (
-            <g key={b.branch_name} onMouseEnter={() => setHovered(b.branch_name)} onMouseLeave={() => setHovered(null)} style={{ cursor: 'pointer' }}>
-              <circle cx={x} cy={y} r={isHov ? radius + 2 : radius} fill={color}
-                opacity={hovered && !isHov ? 0.15 : isHov ? 1 : 0.7}
-                stroke={isHov ? '#fff' : 'none'} strokeWidth="1.5"
-                style={{ transition: 'opacity .15s, r .1s' }} />
+            <g key={b.branch_name}
+              onMouseEnter={() => setHovered(b.branch_name)}
+              onMouseLeave={() => setHovered(null)}
+              onClick={() => setSelectedBranch(b.branch_name)}
+              style={{ cursor: 'pointer' }}>
+              <circle cx={x} cy={y}
+                r={isHov ? radius + 3 : radius}
+                fill={color}
+                opacity={dimmed ? 0.1 : isHov ? 1 : 0.72}
+                stroke={isHov ? '#fff' : color}
+                strokeWidth={isHov ? 2 : 0.8}
+                strokeOpacity={dimmed ? 0 : 0.5}
+                style={{ transition: 'opacity .15s' }} />
               {isHov && (
                 <g>
-                  <rect x={tipX} y={tipY} width={tipW} height={tipH} rx="5"
-                    fill={t.card2} stroke={color} strokeWidth="1.5"
-                    style={{ filter: 'drop-shadow(0 4px 12px rgba(0,0,0,0.6))' }} />
-                  <text x={tipX + 10} y={tipY + 16} fontSize="10" fill={t.text1} fontWeight="600">{b.branch_name}</text>
-                  <text x={tipX + 10} y={tipY + 30} fontSize="9" fill={t.text3}>{fmt(b.total_net)}g · {Number(b.avg_purity).toFixed(1)}% · {b.txn_count} txns</text>
+                  <rect x={tipX} y={tipY} width={tipW} height={tipH} rx="6"
+                    fill={t.card} stroke={color} strokeWidth="1.5"
+                    style={{ filter: 'drop-shadow(0 6px 18px rgba(0,0,0,0.5))' }} />
+                  <text x={tipX + 10} y={tipY + 17} fontSize="10.5" fill={t.text1} fontWeight="700">{b.branch_name}</text>
+                  <text x={tipX + 10} y={tipY + 32} fontSize="9" fill={color}>{b.region}</text>
+                  <text x={tipX + 10} y={tipY + 47} fontSize="9" fill={t.text3}>
+                    {fmt(b.total_net)}g net · {Number(b.avg_purity).toFixed(1)}% purity · {b.txn_count} txns
+                  </text>
+                  <text x={tipX + 10} y={tipY + 58} fontSize="8" fill={t.text4}>click to view bills</text>
                 </g>
               )}
             </g>
           )
         })}
       </svg>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', marginTop: '8px' }}>
-        {regions.map(r => (
-          <div key={r} style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-            <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: regionColors[r] }} />
-            <span style={{ fontSize: '.65rem', color: t.text3 }}>{r}</span>
-          </div>
-        ))}
-        <span style={{ fontSize: '.62rem', color: t.text4, marginLeft: '8px' }}>● bubble size = txn count</span>
+
+      {/* Interactive legend */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginTop: '10px', alignItems: 'center' }}>
+        {regions.map(r => {
+          const active = activeRegion === r
+          return (
+            <div key={r}
+              onClick={() => setActiveRegion(active ? null : r)}
+              style={{ display: 'flex', alignItems: 'center', gap: '5px', cursor: 'pointer', padding: '3px 8px', borderRadius: '20px', border: `1px solid ${active ? regionColors[r] : 'transparent'}`, background: active ? `${regionColors[r]}18` : 'transparent', opacity: activeRegion && !active ? 0.4 : 1, transition: 'all .15s' }}>
+              <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: regionColors[r] }} />
+              <span style={{ fontSize: '.65rem', color: active ? regionColors[r] : t.text3, fontWeight: active ? 600 : 400 }}>{r}</span>
+            </div>
+          )
+        })}
+        <span style={{ fontSize: '.6rem', color: t.text4, marginLeft: '4px' }}>● size = txn count · click region to highlight</span>
       </div>
     </div>
   )
@@ -731,9 +783,7 @@ export default function ReportBranches({ branchData, allBranchMeta, stateData, t
       {/* ── SCATTER ── */}
       <Panel {...P('scatter')}>
         <SectionTitle title="Branch Performance — Net Weight vs Avg Purity" t={t} badge="bubble = txn count" />
-        <div style={{ maxWidth: '700px', margin: '0 auto' }}>
-          <ScatterChart branchData={branchData} t={t} />
-        </div>
+        <ScatterChart branchData={branchData} t={t} fromDate={fromDate} toDate={toDate} filterTxn={filterTxn} />
       </Panel>
 
       {/* ── DRILLDOWN ── */}
