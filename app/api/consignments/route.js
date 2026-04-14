@@ -38,14 +38,14 @@ export async function GET(req) {
     // Fetch branch metadata — filter outside_bangalore by model_type
     const { data: branches, error: bErr } = await supabase
       .from('branches')
-      .select('name, region, state, model_type, pickup_time')
+      .select('name, region, state, model_type')
       .eq('is_active', true)
 
     if (bErr) return Response.json({ data: [], error: bErr.message })
 
     const branchMeta = {}
     for (const b of branches || []) {
-      branchMeta[b.name] = { region: b.region || 'Unknown', state: b.state, model_type: b.model_type, pickup_time: b.pickup_time || null }
+      branchMeta[b.name] = { region: b.region || 'Unknown', state: b.state, model_type: b.model_type, pickup_time: null }
     }
 
     // Only outside_bangalore branches
