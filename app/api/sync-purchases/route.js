@@ -237,7 +237,7 @@ export async function POST(request) {
           .from('purchases')
           .select('application_id, branch_name, purchase_date, customer_name, net_weight, final_amount_crm')
           .eq('crm_source', 'old_crm')
-          .eq('is_deleted', false)
+          .eq('crm_status', 'approved')
           .gte('purchase_date', minDate)
           .lte('purchase_date', maxDate)
           .range(offset, offset + CHUNK - 1)
@@ -258,7 +258,7 @@ export async function POST(request) {
       if (ghostIds.length > 0) {
         await supabaseAdmin
           .from('purchases')
-          .update({ is_deleted: true })
+          .update({ crm_status: 'deleted' })
           .in('application_id', ghostIds)
           .eq('crm_source', 'old_crm')
         ghostsMarked = ghostIds.length
