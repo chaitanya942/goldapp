@@ -32,7 +32,7 @@ function getRange(key) {
   return { from: null, to: null, label: 'All Time' }
 }
 
-function KpiCard({ label, value, sub, color, icon, loading, t, delay=0 }) {
+function KpiCard({ label, value, sub, color, icon, loading, t, delay=0, compact=false }) {
   const [hov, setHov] = useState(false)
   const [vis, setVis] = useState(false)
   useEffect(() => { const id = setTimeout(()=>setVis(true), delay); return ()=>clearTimeout(id) }, [delay])
@@ -40,7 +40,7 @@ function KpiCard({ label, value, sub, color, icon, loading, t, delay=0 }) {
     <div onMouseEnter={()=>setHov(true)} onMouseLeave={()=>setHov(false)} style={{
       background: `linear-gradient(145deg,${t.card},${t.card2})`,
       border: `1px solid ${hov?color+'55':t.border}`,
-      borderRadius: 16, padding: '20px 22px',
+      borderRadius: compact ? 12 : 16, padding: compact ? '12px 14px' : '20px 22px',
       position: 'relative', overflow: 'hidden',
       boxShadow: hov ? `${t.shadow},0 0 0 1px ${color}25` : t.shadow,
       transform: hov ? 'translateY(-2px)' : vis ? 'translateY(0)' : 'translateY(10px)',
@@ -49,15 +49,15 @@ function KpiCard({ label, value, sub, color, icon, loading, t, delay=0 }) {
       <div style={{ position:'absolute', top:0, left:16, right:16, height:1, background:`linear-gradient(90deg,transparent,${color}80,transparent)` }}/>
       <div style={{ position:'absolute', top:-30, right:-30, width:100, height:100, borderRadius:'50%', background:`radial-gradient(circle,${color}${hov?'18':'08'} 0%,transparent 70%)`, pointerEvents:'none' }}/>
       <div style={{ position:'absolute', right:12, bottom:8, fontSize:'3rem', opacity:hov?.08:.04, userSelect:'none' }}>{icon}</div>
-      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:14 }}>
-        <div style={{ fontSize:11, color:t.text3, letterSpacing:'.1em', textTransform:'uppercase', fontWeight:600 }}>{label}</div>
-        <div style={{ width:32, height:32, borderRadius:9, background:`linear-gradient(135deg,${color}22,${color}10)`, border:`1px solid ${color}28`, display:'flex', alignItems:'center', justifyContent:'center', fontSize:'1rem', flexShrink:0 }}>{icon}</div>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom: compact ? 8 : 14 }}>
+        <div style={{ fontSize: compact ? 10 : 11, color:t.text3, letterSpacing:'.1em', textTransform:'uppercase', fontWeight:600 }}>{label}</div>
+        {!compact && <div style={{ width:32, height:32, borderRadius:9, background:`linear-gradient(135deg,${color}22,${color}10)`, border:`1px solid ${color}28`, display:'flex', alignItems:'center', justifyContent:'center', fontSize:'1rem', flexShrink:0 }}>{icon}</div>}
       </div>
       {loading
-        ? <div style={{ height:32, background:`linear-gradient(90deg,${t.border},${t.border2},${t.border})`, backgroundSize:'200% 100%', borderRadius:8, width:'60%', animation:'shimmer 1.5s infinite' }}/>
-        : <div style={{ fontSize:28, fontWeight:200, color, letterSpacing:'-.02em', lineHeight:1, fontVariantNumeric:'tabular-nums', animation:'countUp 0.5s ease' }}>{value ?? '—'}</div>
+        ? <div style={{ height: compact ? 24 : 32, background:`linear-gradient(90deg,${t.border},${t.border2},${t.border})`, backgroundSize:'200% 100%', borderRadius:8, width:'60%', animation:'shimmer 1.5s infinite' }}/>
+        : <div style={{ fontSize: compact ? 22 : 28, fontWeight:200, color, letterSpacing:'-.02em', lineHeight:1, fontVariantNumeric:'tabular-nums', animation:'countUp 0.5s ease' }}>{value ?? '—'}</div>
       }
-      {sub && !loading && <div style={{ fontSize:12, color:t.text4, marginTop:9, lineHeight:1.4 }}>{sub}</div>}
+      {sub && !loading && !compact && <div style={{ fontSize:12, color:t.text4, marginTop:9, lineHeight:1.4 }}>{sub}</div>}
     </div>
   )
 }
@@ -147,9 +147,21 @@ function ModuleCard({ icon, label, color, metrics, cta, onClick, loading, t, del
   )
 }
 
+function useMobile() {
+  const [m, setM] = useState(false)
+  useEffect(() => {
+    const check = () => setM(window.innerWidth < 768)
+    check()
+    window.addEventListener('resize', check)
+    return () => window.removeEventListener('resize', check)
+  }, [])
+  return m
+}
+
 export default function DashboardHome() {
   const { theme, userProfile, canSee, setActiveNav } = useApp()
   const t = THEMES[theme]
+  const isMobile = useMobile()
 
   const showPurchase       = canSee('purchase-data') || canSee('purchase-reports')
   const showKpiCards       = canSee('element.dashboard.kpi_cards')
@@ -295,7 +307,7 @@ export default function DashboardHome() {
   const panelMeta  = { fontSize:12, color:t.text4 }
 
   return (
-    <div style={{ padding:'28px 32px' }}>
+    <div style={{ padding: isMobile ? '16px' : '28px 32px' }}>
       <style>{`
         @keyframes shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
         @keyframes pglow{0%,100%{opacity:.5;transform:scale(1)}50%{opacity:1;transform:scale(1.25)}}
@@ -313,7 +325,7 @@ export default function DashboardHome() {
       `}</style>
 
       {/* ── HERO ── */}
-      <div style={{ background:`linear-gradient(135deg,${t.card},${t.card2} 60%,${t.card})`, border:`1px solid ${t.border}`, borderRadius:20, padding:'28px 44px', marginBottom:20, position:'relative', overflow:'hidden', boxShadow:`${t.shadow},inset 0 1px 0 rgba(255,255,255,.04)`, opacity:heroVis?1:0, transform:heroVis?'translateY(0)':'translateY(16px)', transition:'all .6s cubic-bezier(.34,1.2,.64,1)' }}>
+      <div style={{ background:`linear-gradient(135deg,${t.card},${t.card2} 60%,${t.card})`, border:`1px solid ${t.border}`, borderRadius:20, padding: isMobile ? '18px 16px' : '28px 44px', marginBottom:20, position:'relative', overflow:'hidden', boxShadow:`${t.shadow},inset 0 1px 0 rgba(255,255,255,.04)`, opacity:heroVis?1:0, transform:heroVis?'translateY(0)':'translateY(16px)', transition:'all .6s cubic-bezier(.34,1.2,.64,1)' }}>
         <div style={{ position:'absolute', right:-80, top:-80, width:320, height:320, borderRadius:'50%', background:`radial-gradient(circle,${t.gold}12 0%,transparent 65%)`, pointerEvents:'none' }}/>
         <div style={{ position:'absolute', inset:0, backgroundImage:`radial-gradient(${t.gold}08 1px,transparent 1px)`, backgroundSize:'28px 28px', pointerEvents:'none' }}/>
         <div style={{ position:'absolute', bottom:0, left:'10%', right:'10%', height:1, background:`linear-gradient(90deg,transparent,${t.gold}40,transparent)` }}/>
@@ -404,7 +416,7 @@ export default function DashboardHome() {
           </div>
         )
 
-        const cols = cards.length === 1 ? 1 : cards.length === 2 ? 2 : cards.length <= 4 ? 2 : 3
+        const cols = isMobile ? (cards.length === 1 ? 1 : 2) : (cards.length === 1 ? 1 : cards.length === 2 ? 2 : cards.length <= 4 ? 2 : 3)
         return (
           <div style={{ marginTop: 8, marginBottom: 4 }}>
             <div style={{ fontSize: 11, color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 600, marginBottom: 12 }}>Your Modules</div>
@@ -431,7 +443,7 @@ export default function DashboardHome() {
         {/* ── Clickable Header ── */}
         <div
           onClick={() => setOverviewOpen(o => !o)}
-          style={{ display:'flex', alignItems:'center', gap:14, padding: overviewOpen ? '20px 24px' : '12px 24px', flexWrap:'wrap', position:'relative', zIndex:1, cursor:'pointer', userSelect:'none', borderBottom: overviewOpen ? `1px solid ${t.border}` : 'none', transition:'border .35s ease' }}
+          style={{ display:'flex', alignItems:'center', gap: isMobile ? 8 : 14, padding: overviewOpen ? (isMobile ? '14px 16px' : '20px 24px') : (isMobile ? '10px 16px' : '12px 24px'), flexWrap:'wrap', position:'relative', zIndex:1, cursor:'pointer', userSelect:'none', borderBottom: overviewOpen ? `1px solid ${t.border}` : 'none', transition:'border .35s ease' }}
         >
           <div style={{ display:'flex', alignItems:'center', gap:10 }}>
             <div style={{ width:3, height:20, borderRadius:2, background:`linear-gradient(180deg,${t.gold},${t.gold}40)`, boxShadow:`0 0 8px ${t.gold}60` }}/>
@@ -440,7 +452,7 @@ export default function DashboardHome() {
 
           {overviewOpen && <>
             {/* Period tabs — stop click from toggling collapse */}
-            {showPeriodSelector && <div onClick={e=>e.stopPropagation()} style={{ display:'flex', gap:3, padding:4, background:t.card, borderRadius:10, border:`1px solid ${t.border}`, boxShadow:'inset 0 1px 3px rgba(0,0,0,.3)' }}>
+            {showPeriodSelector && <div onClick={e=>e.stopPropagation()} style={{ display:'flex', gap:3, padding:4, background:t.card, borderRadius:10, border:`1px solid ${t.border}`, boxShadow:'inset 0 1px 3px rgba(0,0,0,.3)', overflowX:'auto', scrollbarWidth:'none', maxWidth: isMobile ? '100%' : 'none', flexShrink: isMobile ? 1 : 0 }}>
               {PERIODS.map(({ key, label }) => (
                 <button key={key} onClick={()=>setPeriod(key)} style={{ padding:'6px 14px', borderRadius:7, border:'none', cursor:'pointer', background:period===key?`linear-gradient(135deg,${t.gold},${t.gold}cc)`:'transparent', color:period===key?'#0a0a0a':t.text3, fontSize:12, fontWeight:period===key?700:500, letterSpacing:'.03em', transition:'all .2s cubic-bezier(.34,1.56,.64,1)', boxShadow:period===key?`0 2px 8px ${t.gold}40`:'none', whiteSpace:'nowrap' }}>
                   {label}
@@ -459,24 +471,24 @@ export default function DashboardHome() {
 
         {/* ── Collapsible body ── */}
         <div className={`overview-body${overviewOpen ? '' : ' collapsed'}`}>
-          <div style={{ padding: overviewOpen ? '24px 24px 28px' : '0' }}>
+          <div style={{ padding: overviewOpen ? (isMobile ? '16px 14px 20px' : '24px 24px 28px') : '0' }}>
 
             {/* KPI Rows — gated by element.dashboard.kpi_cards */}
             {showKpiCards && <>
               {/* KPI Row 1 */}
-              <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:14, marginBottom:14 }}>
-                <KpiCard t={t} delay={0}   label="Total Bills"          icon="🧾" color={t.gold}  loading={loading} value={hasData?Number(kpis.total_count).toLocaleString('en-IN'):'—'} sub={periodLabel}/>
-                <KpiCard t={t} delay={60}  label="Total Net Weight"     icon="⚖️" color={t.gold}  loading={loading} value={hasData?`${fmt(kpis.total_net)}g`:'—'} sub="Net weight purchased"/>
-                <KpiCard t={t} delay={120} label="Gross Purchase Value" icon="₹"  color={t.green} loading={loading} value={hasData?fmtCr(kpis.total_value):'—'} sub="Before service charges"/>
-                <KpiCard t={t} delay={180} label="Avg Rate / Gram"      icon="📈" color={t.green} loading={loading} value={hasData&&kpis.avg_rate_per_gram>0?`₹${Number(kpis.avg_rate_per_gram).toLocaleString('en-IN',{maximumFractionDigits:0})}/g`:'—'} sub="Gross value ÷ net weight"/>
+              <div style={{ display:'grid', gridTemplateColumns: isMobile ? 'repeat(2,1fr)' : 'repeat(4,1fr)', gap: isMobile ? 10 : 14, marginBottom: isMobile ? 10 : 14 }}>
+                <KpiCard t={t} delay={0}   label="Total Bills"          icon="🧾" color={t.gold}  loading={loading} value={hasData?Number(kpis.total_count).toLocaleString('en-IN'):'—'} sub={periodLabel} compact={isMobile}/>
+                <KpiCard t={t} delay={60}  label="Total Net Weight"     icon="⚖️" color={t.gold}  loading={loading} value={hasData?`${fmt(kpis.total_net)}g`:'—'} sub="Net weight purchased" compact={isMobile}/>
+                <KpiCard t={t} delay={120} label="Gross Purchase Value" icon="₹"  color={t.green} loading={loading} value={hasData?fmtCr(kpis.total_value):'—'} sub="Before service charges" compact={isMobile}/>
+                <KpiCard t={t} delay={180} label="Avg Rate / Gram"      icon="📈" color={t.green} loading={loading} value={hasData&&kpis.avg_rate_per_gram>0?`₹${Number(kpis.avg_rate_per_gram).toLocaleString('en-IN',{maximumFractionDigits:0})}/g`:'—'} sub="Gross value ÷ net weight" compact={isMobile}/>
               </div>
 
               {/* KPI Row 2 */}
-              <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:14, marginBottom:22 }}>
-                <KpiCard t={t} delay={240} label="Avg Purity"         icon="✦" color={t.purple} loading={loading} value={hasData?fmtPct(kpis.avg_purity):'—'} sub="Weighted by net weight"/>
-                <KpiCard t={t} delay={300} label="Avg Wt / Bill"      icon="◈" color={t.text2}  loading={loading} value={hasData?`${fmt(kpis.avg_net_per_txn)}g`:'—'} sub="Net weight ÷ bills"/>
-                <KpiCard t={t} delay={360} label="Avg Service Charge" icon="%" color={t.red}    loading={loading} value={hasData?`${Number(kpis.avg_service_charge_pct||0).toFixed(2)}%`:'—'} sub="Service charge ÷ gross value"/>
-                <KpiCard t={t} delay={420} label="Active Branches"    icon="⬡" color={t.blue}   loading={loading} value={hasData?`${kpis.branch_count} / ${totalBranches}`:`— / ${totalBranches}`} sub={hasData?'branches purchased this period':'No purchases this period'}/>
+              <div style={{ display:'grid', gridTemplateColumns: isMobile ? 'repeat(2,1fr)' : 'repeat(4,1fr)', gap: isMobile ? 10 : 14, marginBottom: isMobile ? 14 : 22 }}>
+                <KpiCard t={t} delay={240} label="Avg Purity"         icon="✦" color={t.purple} loading={loading} value={hasData?fmtPct(kpis.avg_purity):'—'} sub="Weighted by net weight" compact={isMobile}/>
+                <KpiCard t={t} delay={300} label="Avg Wt / Bill"      icon="◈" color={t.text2}  loading={loading} value={hasData?`${fmt(kpis.avg_net_per_txn)}g`:'—'} sub="Net weight ÷ bills" compact={isMobile}/>
+                <KpiCard t={t} delay={360} label="Avg Service Charge" icon="%" color={t.red}    loading={loading} value={hasData?`${Number(kpis.avg_service_charge_pct||0).toFixed(2)}%`:'—'} sub="Service charge ÷ gross value" compact={isMobile}/>
+                <KpiCard t={t} delay={420} label="Active Branches"    icon="⬡" color={t.blue}   loading={loading} value={hasData?`${kpis.branch_count} / ${totalBranches}`:`— / ${totalBranches}`} sub={hasData?'branches purchased this period':'No purchases this period'} compact={isMobile}/>
               </div>
 
               {/* Purchase Mix */}
@@ -504,7 +516,7 @@ export default function DashboardHome() {
             </>}
 
             {/* Bottom panels grid — only visible panels */}
-            {visiblePanels > 0 && <div style={{ display:'grid', gridTemplateColumns:`repeat(${visiblePanels},1fr)`, gap:16 }}>
+            {visiblePanels > 0 && <div style={{ display:'grid', gridTemplateColumns: isMobile ? '1fr' : `repeat(${visiblePanels},1fr)`, gap:16 }}>
 
               {/* By Region */}
               {showStateTable && <div style={panel}>
