@@ -50,23 +50,35 @@ const Shimmer = ({ h=24, w='60%', t }) => (
   <div style={{ height:h, width:w, background:`linear-gradient(90deg,${t.border2},${t.border},${t.border2})`, backgroundSize:'200% 100%', borderRadius:6, animation:'shimmer 1.5s infinite', opacity:.9 }} />
 )
 
+// ── Shared mobile hook ────────────────────────────────────────────────────────
+function useMobile() {
+  const [m, setM] = useState(false)
+  useEffect(() => {
+    const check = () => setM(window.innerWidth < 768)
+    check()
+    window.addEventListener('resize', check)
+    return () => window.removeEventListener('resize', check)
+  }, [])
+  return m
+}
+
 // ── KPI card (purchase overview style) ───────────────────────────────────────
-function KpiCard({ label, value, sub, color, icon, loading, t, delay=0 }) {
+function KpiCard({ label, value, sub, color, icon, loading, t, delay=0, compact=false }) {
   const [vis, setVis] = useState(false)
   useEffect(() => { const id = setTimeout(()=>setVis(true),delay); return ()=>clearTimeout(id) }, [delay])
   return (
-    <div style={{ background:`linear-gradient(145deg,${t.card},${t.card2})`, border:`1px solid ${t.border}`, borderRadius:16, padding:'20px 22px', position:'relative', overflow:'hidden', opacity:vis?1:0, transform:vis?'translateY(0)':'translateY(10px)', transition:'all .25s cubic-bezier(.34,1.56,.64,1)' }}>
+    <div style={{ background:`linear-gradient(145deg,${t.card},${t.card2})`, border:`1px solid ${t.border}`, borderRadius:16, padding: compact ? '14px 16px' : '20px 22px', position:'relative', overflow:'hidden', opacity:vis?1:0, transform:vis?'translateY(0)':'translateY(10px)', transition:'all .25s cubic-bezier(.34,1.56,.64,1)' }}>
       <div style={{ position:'absolute', top:0, left:16, right:16, height:1, background:`linear-gradient(90deg,transparent,${color}80,transparent)` }}/>
       <div style={{ position:'absolute', top:-30, right:-30, width:100, height:100, borderRadius:'50%', background:`radial-gradient(circle,${color}08 0%,transparent 70%)`, pointerEvents:'none' }}/>
-      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:14 }}>
-        <div style={{ fontSize:11, color:t.text3, letterSpacing:'.1em', textTransform:'uppercase', fontWeight:600 }}>{label}</div>
-        <div style={{ width:30, height:30, borderRadius:8, background:`${color}18`, border:`1px solid ${color}25`, display:'flex', alignItems:'center', justifyContent:'center', fontSize:'.9rem', flexShrink:0 }}>{icon}</div>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom: compact ? 10 : 14 }}>
+        <div style={{ fontSize: compact ? 10 : 11, color:t.text3, letterSpacing:'.08em', textTransform:'uppercase', fontWeight:600, lineHeight:1.3 }}>{label}</div>
+        <div style={{ width: compact ? 26 : 30, height: compact ? 26 : 30, borderRadius:8, background:`${color}18`, border:`1px solid ${color}25`, display:'flex', alignItems:'center', justifyContent:'center', fontSize: compact ? '.75rem' : '.9rem', flexShrink:0 }}>{icon}</div>
       </div>
       {loading
-        ? <Shimmer h={30} w="60%" t={t} />
-        : <div style={{ fontSize:28, fontWeight:200, color, letterSpacing:'-.02em', lineHeight:1, fontVariantNumeric:'tabular-nums' }}>{value ?? '—'}</div>
+        ? <Shimmer h={compact ? 24 : 30} w="60%" t={t} />
+        : <div style={{ fontSize: compact ? 22 : 28, fontWeight:200, color, letterSpacing:'-.02em', lineHeight:1, fontVariantNumeric:'tabular-nums' }}>{value ?? '—'}</div>
       }
-      {sub && !loading && <div style={{ fontSize:12, color:t.text4, marginTop:8, lineHeight:1.4 }}>{sub}</div>}
+      {sub && !loading && <div style={{ fontSize: compact ? 10 : 12, color:t.text4, marginTop: compact ? 5 : 8, lineHeight:1.4 }}>{sub}</div>}
     </div>
   )
 }
@@ -112,6 +124,7 @@ function PurchaseInline({ t, setActiveNav, canSee }) {
   const showChart          = canSee('element.reports.charts')
   const visiblePanels      = [showStateTable, showRegionCards, showTopBranches].filter(Boolean).length
 
+  const isMobile = useMobile()
   const [period,       setPeriod]       = useState('mtd')
   const [loading,      setLoading]      = useState(true)
   const [trendLoading, setTrendLoading] = useState(true)
@@ -197,22 +210,24 @@ function PurchaseInline({ t, setActiveNav, canSee }) {
 
       {/* Period selector row */}
       {showPeriodSelector && (
-        <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', flexWrap:'wrap', gap:10 }}>
-          <div style={{ display:'flex', gap:3, padding:4, background:t.card, borderRadius:12, border:`1px solid ${t.border}` }}>
+        <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+          <div style={{ display:'flex', gap:3, padding:4, background:t.card, borderRadius:12, border:`1px solid ${t.border}`, overflowX:'auto', scrollbarWidth:'none' }}>
             {PERIODS.map(({ key, label }) => (
-              <button key={key} onClick={()=>setPeriod(key)} style={{ padding:'7px 16px', borderRadius:9, border:'none', cursor:'pointer', background:period===key?`linear-gradient(135deg,${t.gold},${t.gold}cc)`:'transparent', color:period===key?'#0a0a0a':t.text3, fontSize:12, fontWeight:period===key?700:500, transition:'all .2s', boxShadow:period===key?`0 2px 8px ${t.gold}40`:'none', whiteSpace:'nowrap' }}>
+              <button key={key} onClick={()=>setPeriod(key)} style={{ padding: isMobile ? '7px 12px' : '7px 16px', borderRadius:9, border:'none', cursor:'pointer', background:period===key?`linear-gradient(135deg,${t.gold},${t.gold}cc)`:'transparent', color:period===key?'#0a0a0a':t.text3, fontSize: isMobile ? 11 : 12, fontWeight:period===key?700:500, transition:'all .2s', boxShadow:period===key?`0 2px 8px ${t.gold}40`:'none', whiteSpace:'nowrap', flexShrink:0 }}>
                 {label}
               </button>
             ))}
           </div>
-          <div style={{ display:'flex', alignItems:'center', gap:12 }}>
-            {!loading && dateLabel && <div style={{ fontSize:12, color:t.text3, fontStyle:'italic' }}>{dateLabel}</div>}
-            {openTarget && (
-              <button onClick={()=>setActiveNav(openTarget)} style={{ padding:'7px 16px', borderRadius:9, background:`${t.gold}15`, border:`1px solid ${t.gold}35`, color:t.gold, fontSize:11, fontWeight:600, cursor:'pointer' }}>
-                {canSeeData ? 'Open Purchase Data' : 'Open Reports'} →
-              </button>
-            )}
-          </div>
+          {(!loading && dateLabel || openTarget) && (
+            <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:10 }}>
+              {!loading && dateLabel && <div style={{ fontSize:11, color:t.text3, fontStyle:'italic' }}>{dateLabel}</div>}
+              {openTarget && (
+                <button onClick={()=>setActiveNav(openTarget)} style={{ padding:'6px 14px', borderRadius:9, background:`${t.gold}15`, border:`1px solid ${t.gold}35`, color:t.gold, fontSize:11, fontWeight:600, cursor:'pointer', marginLeft:'auto' }}>
+                  {canSeeData ? 'Purchase Data' : 'Reports'} →
+                </button>
+              )}
+            </div>
+          )}
         </div>
       )}
 
@@ -225,24 +240,24 @@ function PurchaseInline({ t, setActiveNav, canSee }) {
               <div style={{ fontSize:12, color:t.text3 }}>No purchases recorded for <span style={{ color:t.text2, fontWeight:600 }}>{periodLabel}</span>. Try a different period or check back later.</div>
             </div>
           )}
-          <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:14 }}>
-            <KpiCard t={t} delay={0}   label="Total Bills"          icon="🧾" color={t.gold}   loading={loading} value={hasData?Number(kpis.total_count).toLocaleString('en-IN'):'—'} sub={periodLabel}/>
-            <KpiCard t={t} delay={60}  label="Total Net Weight"     icon="⚖️" color={t.gold}   loading={loading} value={hasData?`${fmt(kpis.total_net)}g`:'—'} sub="Net weight purchased"/>
-            <KpiCard t={t} delay={120} label="Gross Purchase Value" icon="₹"  color={t.green}  loading={loading} value={hasData?fmtCr(kpis.total_value):'—'} sub="Before service charges"/>
-            <KpiCard t={t} delay={180} label="Avg Rate / Gram"      icon="📈" color={t.green}  loading={loading} value={hasData&&kpis.avg_rate_per_gram>0?`₹${Number(kpis.avg_rate_per_gram).toLocaleString('en-IN',{maximumFractionDigits:0})}/g`:'—'} sub="Gross value ÷ net weight"/>
+          <div style={{ display:'grid', gridTemplateColumns: isMobile ? 'repeat(2,1fr)' : 'repeat(4,1fr)', gap: isMobile ? 10 : 14 }}>
+            <KpiCard t={t} delay={0}   label="Total Bills"          icon="🧾" color={t.gold}   loading={loading} compact={isMobile} value={hasData?Number(kpis.total_count).toLocaleString('en-IN'):'—'} sub={periodLabel}/>
+            <KpiCard t={t} delay={60}  label="Total Net Weight"     icon="⚖️" color={t.gold}   loading={loading} compact={isMobile} value={hasData?`${fmt(kpis.total_net)}g`:'—'} sub="Net weight purchased"/>
+            <KpiCard t={t} delay={120} label="Gross Purchase Value" icon="₹"  color={t.green}  loading={loading} compact={isMobile} value={hasData?fmtCr(kpis.total_value):'—'} sub="Before service charges"/>
+            <KpiCard t={t} delay={180} label="Avg Rate / Gram"      icon="📈" color={t.green}  loading={loading} compact={isMobile} value={hasData&&kpis.avg_rate_per_gram>0?`₹${Number(kpis.avg_rate_per_gram).toLocaleString('en-IN',{maximumFractionDigits:0})}/g`:'—'} sub="Gross value ÷ net weight"/>
           </div>
-          <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:14 }}>
-            <KpiCard t={t} delay={240} label="Avg Purity"         icon="✦"  color={t.purple} loading={loading} value={hasData?fmtPct(kpis.avg_purity):'—'} sub="Weighted by net weight"/>
-            <KpiCard t={t} delay={300} label="Avg Wt / Bill"      icon="◈"  color={t.text2}  loading={loading} value={hasData?`${fmt(kpis.avg_net_per_txn)}g`:'—'} sub="Net weight ÷ bills"/>
-            <KpiCard t={t} delay={360} label="Avg Service Charge" icon="%"  color={t.red}    loading={loading} value={hasData?`${Number(kpis.avg_service_charge_pct||0).toFixed(2)}%`:'—'} sub="Service charge ÷ gross value"/>
-            <KpiCard t={t} delay={420} label="Active Branches"    icon="⬡"  color={t.blue}   loading={loading} value={hasData?`${kpis.branch_count} / ${totalBranches}`:`— / ${totalBranches}`} sub={hasData?'branches purchased':'No purchases this period'}/>
+          <div style={{ display:'grid', gridTemplateColumns: isMobile ? 'repeat(2,1fr)' : 'repeat(4,1fr)', gap: isMobile ? 10 : 14 }}>
+            <KpiCard t={t} delay={240} label="Avg Purity"         icon="✦"  color={t.purple} loading={loading} compact={isMobile} value={hasData?fmtPct(kpis.avg_purity):'—'} sub="Weighted by net weight"/>
+            <KpiCard t={t} delay={300} label="Avg Wt / Bill"      icon="◈"  color={t.text2}  loading={loading} compact={isMobile} value={hasData?`${fmt(kpis.avg_net_per_txn)}g`:'—'} sub="Net weight ÷ bills"/>
+            <KpiCard t={t} delay={360} label="Avg Service Charge" icon="%"  color={t.red}    loading={loading} compact={isMobile} value={hasData?`${Number(kpis.avg_service_charge_pct||0).toFixed(2)}%`:'—'} sub="Service charge ÷ gross value"/>
+            <KpiCard t={t} delay={420} label="Active Branches"    icon="⬡"  color={t.blue}   loading={loading} compact={isMobile} value={hasData?`${kpis.branch_count} / ${totalBranches}`:`— / ${totalBranches}`} sub={hasData?'branches purchased':'No purchases this period'}/>
           </div>
         </>
       )}
 
       {/* Today strip + trend chart */}
       {showChart && (
-        <div style={{ display:'grid', gridTemplateColumns: showKpiCards ? '1fr 260px' : '1fr', gap:16 }}>
+        <div style={{ display:'grid', gridTemplateColumns: isMobile ? '1fr' : (showKpiCards ? '1fr 260px' : '1fr'), gap:16 }}>
           {/* Trend chart */}
           <div style={{ background:`linear-gradient(135deg,${t.card},${t.card2})`, border:`1px solid ${t.border}`, borderRadius:16, padding:'18px 22px' }}>
             <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:14 }}>
@@ -324,7 +339,7 @@ function PurchaseInline({ t, setActiveNav, canSee }) {
 
       {/* Bottom panels: By Region · Active Branches · Top Branches */}
       {visiblePanels > 0 && (
-        <div style={{ display:'grid', gridTemplateColumns:`repeat(${visiblePanels},1fr)`, gap:16 }}>
+        <div style={{ display:'grid', gridTemplateColumns: isMobile ? '1fr' : `repeat(${visiblePanels},1fr)`, gap:16 }}>
 
           {showStateTable && (
             <div style={panel}>
@@ -417,6 +432,7 @@ function PurchaseInline({ t, setActiveNav, canSee }) {
 
 // ══ TELESALES SECTION ════════════════════════════════════════════════════════
 function TelesalesSection({ t, setActiveNav }) {
+  const isMobile = useMobile()
   const [calls,   setCalls]   = useState([])
   const [loading, setLoading] = useState(true)
 
@@ -450,13 +466,13 @@ function TelesalesSection({ t, setActiveNav }) {
 
   return (
     <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
-      <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:14 }}>
-        <KpiCard label="Today's Calls" icon="◑" color={t.purple} loading={loading} t={t} value={String(todayCalls)} delay={0}/>
-        <KpiCard label="This Week"     icon="📅" color={t.blue}   loading={loading} t={t} value={String(thisWeek)}   delay={60}/>
-        <KpiCard label="Engage Rate"   icon="📊" color={t.green}  loading={loading} t={t} value={`${engageRate}%`}   delay={120}/>
-        <KpiCard label="Interested"    icon="⭐" color="#4ade80"  loading={loading} t={t} value={String(interested)}  delay={180}/>
+      <div style={{ display:'grid', gridTemplateColumns: isMobile ? 'repeat(2,1fr)' : 'repeat(4,1fr)', gap: isMobile ? 10 : 14 }}>
+        <KpiCard label="Today's Calls" icon="◑" color={t.purple} loading={loading} t={t} compact={isMobile} value={String(todayCalls)} delay={0}/>
+        <KpiCard label="This Week"     icon="📅" color={t.blue}   loading={loading} t={t} compact={isMobile} value={String(thisWeek)}   delay={60}/>
+        <KpiCard label="Engage Rate"   icon="📊" color={t.green}  loading={loading} t={t} compact={isMobile} value={`${engageRate}%`}   delay={120}/>
+        <KpiCard label="Interested"    icon="⭐" color="#4ade80"  loading={loading} t={t} compact={isMobile} value={String(interested)}  delay={180}/>
       </div>
-      <div style={{ display:'grid', gridTemplateColumns:'1fr 240px', gap:14 }}>
+      <div style={{ display:'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 240px', gap: isMobile ? 10 : 14 }}>
         <div style={panel}>
           <div style={{ fontSize:11, color:t.text4, letterSpacing:'.1em', textTransform:'uppercase', fontWeight:600, marginBottom:12 }}>14-day call volume</div>
           {loading ? <Shimmer h={110} w="100%" t={t} />
@@ -496,6 +512,7 @@ function TelesalesSection({ t, setActiveNav }) {
 
 // ══ CONSIGNMENT SECTION ═══════════════════════════════════════════════════════
 function ConsignmentSection({ t, setActiveNav, canSee }) {
+  const isMobile = useMobile()
   const canSeeOverview = canSee('consignment-overview')
   const showRegion     = canSee('element.consignment-overview.region_cards')
   const showTable      = canSee('element.consignment-overview.table') || canSee('element.consignment-overview.region_cards')
@@ -521,10 +538,10 @@ function ConsignmentSection({ t, setActiveNav, canSee }) {
   return (
     <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
       {showTable && (
-        <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:14 }}>
-          <KpiCard label="Branches with Stock" icon="📦" color={t.orange} loading={loading} t={t} value={String(data.length)} delay={0}/>
-          <KpiCard label="Total Gross Weight"  icon="⚖️" color={t.gold}   loading={loading} t={t} value={loading?'—':`${fmt(totalWeight,0)}g`} delay={60}/>
-          <KpiCard label="Urgent Alerts (≤3d)" icon="⚠️" color={urgent>0?t.red:t.green} loading={loading} t={t} value={String(urgent)} delay={120}/>
+        <div style={{ display:'grid', gridTemplateColumns: isMobile ? 'repeat(2,1fr)' : 'repeat(3,1fr)', gap: isMobile ? 10 : 14 }}>
+          <KpiCard label="Branches with Stock" icon="📦" color={t.orange} loading={loading} t={t} compact={isMobile} value={String(data.length)} delay={0}/>
+          <KpiCard label="Total Gross Weight"  icon="⚖️" color={t.gold}   loading={loading} t={t} compact={isMobile} value={loading?'—':`${fmt(totalWeight,0)}g`} delay={60}/>
+          <KpiCard label="Urgent Alerts (≤3d)" icon="⚠️" color={urgent>0?t.red:t.green} loading={loading} t={t} compact={isMobile} value={String(urgent)} delay={120}/>
         </div>
       )}
       {showRegion && (
@@ -555,6 +572,7 @@ function ConsignmentSection({ t, setActiveNav, canSee }) {
 
 // ══ ADMIN SECTION ═════════════════════════════════════════════════════════════
 function AdminSection({ t, setActiveNav, canSeeUsers, canSeeBranches }) {
+  const isMobile = useMobile()
   const [stats,         setStats]        = useState(null)
   const [roleBreakdown, setRoleBreakdown] = useState([])
   const [loading,       setLoading]      = useState(true)
@@ -579,9 +597,9 @@ function AdminSection({ t, setActiveNav, canSeeUsers, canSeeBranches }) {
 
   return (
     <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
-      <div style={{ display:'grid', gridTemplateColumns:`repeat(${[canSeeUsers,canSeeBranches].filter(Boolean).length},1fr)`, gap:14 }}>
-        {canSeeUsers    && <KpiCard label="Active Users"    icon="👤" color={t.blue}  loading={loading} t={t} value={stats?String(stats.userCount):'—'}   delay={0}/>}
-        {canSeeBranches && <KpiCard label="Active Branches" icon="⬡"  color={t.green} loading={loading} t={t} value={stats?String(stats.branchCount):'—'} delay={60}/>}
+      <div style={{ display:'grid', gridTemplateColumns:`repeat(${[canSeeUsers,canSeeBranches].filter(Boolean).length},1fr)`, gap: isMobile ? 10 : 14 }}>
+        {canSeeUsers    && <KpiCard label="Active Users"    icon="👤" color={t.blue}  loading={loading} t={t} compact={isMobile} value={stats?String(stats.userCount):'—'}   delay={0}/>}
+        {canSeeBranches && <KpiCard label="Active Branches" icon="⬡"  color={t.green} loading={loading} t={t} compact={isMobile} value={stats?String(stats.branchCount):'—'} delay={60}/>}
       </div>
       {canSeeUsers && (
         <div style={panel}>
@@ -603,6 +621,7 @@ function AdminSection({ t, setActiveNav, canSeeUsers, canSeeBranches }) {
 
 // ══ RATES SECTION ════════════════════════════════════════════════════════════
 function RatesSection({ t, setActiveNav, canSeeRates, canSeeCalTable }) {
+  const isMobile = useMobile()
   const [rate,    setRate]    = useState(null)
   const [history, setHistory] = useState([])
   const [loading, setLoading] = useState(true)
@@ -629,7 +648,7 @@ function RatesSection({ t, setActiveNav, canSeeRates, canSeeCalTable }) {
 
   return (
     <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
-      <div style={{ display:'grid', gridTemplateColumns:`repeat(${Math.max(rateRows.length,1)},1fr)`, gap:14 }}>
+      <div style={{ display:'grid', gridTemplateColumns: isMobile ? 'repeat(2,1fr)' : `repeat(${Math.max(rateRows.length,1)},1fr)`, gap: isMobile ? 10 : 14 }}>
         {loading
           ? [0,1,2].map(i=><KpiCard key={i} label="—" icon="◎" color={t.text3} loading t={t} delay={i*60}/>)
           : rateRows.length>0
@@ -674,6 +693,7 @@ function SectionLabel({ icon, label, color, t }) {
 export default function DynamicDashboard() {
   const { theme, userProfile, canSee, setActiveNav } = useApp()
   const t = THEMES[theme]
+  const isMobile = useMobile()
   const [heroVis, setHeroVis] = useState(false)
   useEffect(() => { setTimeout(()=>setHeroVis(true), 40) }, [])
 
@@ -687,7 +707,7 @@ export default function DynamicDashboard() {
   const hasAnything    = hasPurchase || hasTelesales || hasConsignment || hasAdmin || hasRates
 
   return (
-    <div style={{ padding:'28px 32px', display:'flex', flexDirection:'column', gap:20 }}>
+    <div style={{ padding: isMobile ? '16px' : '28px 32px', display:'flex', flexDirection:'column', gap: isMobile ? 14 : 20 }}>
       <style>{`
         @keyframes shimmer { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
       `}</style>
@@ -695,7 +715,7 @@ export default function DynamicDashboard() {
       {/* ── Hero greeting ── */}
       <div style={{
         background:`linear-gradient(135deg,${t.card},${t.card2})`,
-        border:`1px solid ${t.border}`, borderRadius:20, padding:'22px 32px',
+        border:`1px solid ${t.border}`, borderRadius:20, padding: isMobile ? '18px 16px' : '22px 32px',
         position:'relative', overflow:'hidden',
         opacity:heroVis?1:0, transform:heroVis?'translateY(0)':'translateY(12px)',
         transition:'all .5s cubic-bezier(.34,1.2,.64,1)',
