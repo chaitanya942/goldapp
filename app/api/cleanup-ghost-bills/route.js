@@ -27,6 +27,8 @@ function fp(b) {
   return `${b.branch_name}|${fmtDate(b.purchase_date)||b.purchase_date}|${(b.customer_name||'').toLowerCase().trim()}|${Math.round((b.net_weight||0)*100)}|${Math.round(b.final_amount_crm||0)}`
 }
 
+export async function GET(request) { return POST(request) }
+
 // POST: run the cleanup (accepts ?days=90&dry_run=true)
 export async function POST(request) {
   const url     = new URL(request.url)
