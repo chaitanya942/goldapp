@@ -37,8 +37,9 @@ export default function PurchaseHub() {
       {/* TAB BAR */}
       <div style={{
         background: t.card, borderBottom: `1px solid ${t.border}`,
-        padding: '0 32px', display: 'flex', overflowX: 'auto',
+        padding: '0 16px', display: 'flex', overflowX: 'auto',
         position: 'sticky', top: 0, zIndex: 50,
+        scrollbarWidth: 'none',
       }}>
         {visibleTabs.map(tab => {
           const accent  = tab.accentFn(t)
@@ -47,7 +48,7 @@ export default function PurchaseHub() {
             <button key={tab.id} onClick={() => setActiveTab(tab.id)} style={{
               background: 'transparent', border: 'none',
               borderBottom: isActive ? `2px solid ${accent}` : '2px solid transparent',
-              padding: '14px 20px', cursor: 'pointer',
+              padding: '14px 14px', cursor: 'pointer',
               display: 'flex', alignItems: 'center', gap: '7px',
               color: isActive ? accent : t.text3,
               fontSize: '.72rem', fontWeight: isActive ? 500 : 400,
@@ -70,7 +71,7 @@ export default function PurchaseHub() {
       </div>
 
       {/* CONTENT */}
-      <div style={{ padding: '28px 32px' }}>
+      <div className="hub-content" style={{ padding: '24px 24px' }}>
         {active === 'live'        && <LiveFeed />}
         {active === 'approved'    && <PurchaseData />}
         {active === 'walkin'      && <WalkinPipeline />}

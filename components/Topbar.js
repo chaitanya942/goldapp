@@ -268,7 +268,7 @@ function ViewAsDropdown({ previewRole, setPreviewRole, t }) {
 }
 
 // ─── Main Topbar ──────────────────────────────────────────────────────────────
-export default function Topbar() {
+export default function Topbar({ onMenuToggle, isMobile }) {
   const { theme, setTheme, activeNav, user, role, previewRole, setPreviewRole, bumpSync } = useApp()
   const t = THEMES[theme] || THEMES.dark
   const router = useRouter()
@@ -327,37 +327,56 @@ export default function Topbar() {
     }}>
 
       {/* ── Main row ── */}
-      <div style={{ height: 56, display: 'flex', alignItems: 'center', padding: '0 20px 0 24px', gap: '10px' }}>
+      <div style={{ height: 56, display: 'flex', alignItems: 'center', padding: '0 16px 0 16px', gap: '10px' }}>
+
+      {/* ── Hamburger (mobile only) ── */}
+      {isMobile && (
+        <button onClick={onMenuToggle} style={{
+          width: 36, height: 36, borderRadius: 10, border: `1px solid ${t.border}`,
+          background: t.pillBg, display: 'flex', flexDirection: 'column', alignItems: 'center',
+          justifyContent: 'center', gap: '5px', cursor: 'pointer', flexShrink: 0, padding: 0,
+        }}>
+          <span style={{ display: 'block', width: 14, height: 1.5, background: t.text3, borderRadius: 2 }} />
+          <span style={{ display: 'block', width: 14, height: 1.5, background: t.text3, borderRadius: 2 }} />
+          <span style={{ display: 'block', width: 14, height: 1.5, background: t.text3, borderRadius: 2 }} />
+        </button>
+      )}
 
       {/* ── Breadcrumb ── */}
       <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0 }}>
-        <span style={{ fontSize: '.65rem', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 500, flexShrink: 0 }}>
+        {!isMobile && <span style={{ fontSize: '.65rem', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 500, flexShrink: 0 }}>
           White Gold
-        </span>
-        {section && (
+        </span>}
+        {!isMobile && section && (
           <>
             <span style={{ color: t.text4, fontSize: '.65rem', flexShrink: 0 }}>/</span>
             <span style={{ fontSize: '.65rem', color: t.text3, letterSpacing: '.08em', textTransform: 'uppercase', fontWeight: 500, flexShrink: 0 }}>{section}</span>
           </>
         )}
-        <span style={{ color: t.text4, fontSize: '.65rem', flexShrink: 0 }}>/</span>
-        <span style={{ fontSize: '.8rem', color: t.text1, fontWeight: 600, letterSpacing: '-.01em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        {!isMobile && <span style={{ color: t.text4, fontSize: '.65rem', flexShrink: 0 }}>/</span>}
+        <span style={{ fontSize: isMobile ? '.85rem' : '.8rem', color: t.text1, fontWeight: 600, letterSpacing: '-.01em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {pageTitle}
         </span>
       </div>
 
       {/* ── Right actions ── */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: isMobile ? '6px' : '8px', flexShrink: 0 }}>
 
-        {/* View As (super_admin only) */}
-        {role === 'super_admin' && <ViewAsDropdown previewRole={previewRole} setPreviewRole={setPreviewRole} t={t} />}
-        {role === 'super_admin' && <div style={{ width: '1px', height: '22px', background: t.border, flexShrink: 0 }} />}
+        {/* View As (super_admin only) — hidden on mobile */}
+        {!isMobile && role === 'super_admin' && <ViewAsDropdown previewRole={previewRole} setPreviewRole={setPreviewRole} t={t} />}
+        {!isMobile && role === 'super_admin' && <div style={{ width: '1px', height: '22px', background: t.border, flexShrink: 0 }} />}
 
-        {/* Sync CRM */}
-        {canSync && !previewRole && <SyncButton syncing={syncing} onSync={handleSync} t={t} />}
+        {/* Sync CRM — icon only on mobile */}
+        {canSync && !previewRole && (isMobile ? (
+          <button onClick={handleSync} disabled={syncing} style={{ width: 36, height: 36, borderRadius: 10, border: `1px solid ${t.syncBorder}`, background: t.syncBg, color: t.gold, fontSize: 16, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: syncing ? 'not-allowed' : 'pointer', opacity: syncing ? 0.7 : 1, flexShrink: 0 }}>
+            <span style={{ display: 'inline-block', animation: syncing ? 'spin 0.9s linear infinite' : 'none' }}>⟳</span>
+          </button>
+        ) : (
+          <SyncButton syncing={syncing} onSync={handleSync} t={t} />
+        ))}
 
         {/* Divider */}
-        {canSync && !previewRole && <div style={{ width: '1px', height: '22px', background: t.border, flexShrink: 0 }} />}
+        {!isMobile && canSync && !previewRole && <div style={{ width: '1px', height: '22px', background: t.border, flexShrink: 0 }} />}
 
         {/* Theme toggle */}
         <ThemeToggle theme={theme} setTheme={setTheme} t={t} />
@@ -372,7 +391,7 @@ export default function Topbar() {
         >
           <div style={{
             height: '36px',
-            padding: '0 12px 0 6px',
+            padding: isMobile ? '0 6px' : '0 12px 0 6px',
             borderRadius: '10px',
             border: `1px solid ${t.border}`,
             background: t.pillBg,
@@ -393,19 +412,19 @@ export default function Topbar() {
             }}>
               {initial}
             </div>
-            {/* Email (truncated) */}
-            <span style={{
+            {/* Email (hidden on mobile) */}
+            {!isMobile && <span style={{
               fontSize: '.7rem', color: t.text2, fontWeight: 500,
               maxWidth: '140px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
               letterSpacing: '-.01em',
             }}>
               {user?.email?.split('@')[0]}
-            </span>
-            {/* Chevron */}
-            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke={t.text4} strokeWidth="2.5" strokeLinecap="round"
+            </span>}
+            {/* Chevron (hidden on mobile) */}
+            {!isMobile && <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke={t.text4} strokeWidth="2.5" strokeLinecap="round"
               style={{ transform: userMenuOpen ? 'rotate(180deg)' : 'none', transition: 'transform .18s', flexShrink: 0 }}>
               <path d="M6 9l6 6 6-6" />
-            </svg>
+            </svg>}
           </div>
 
           {/* Dropdown menu */}

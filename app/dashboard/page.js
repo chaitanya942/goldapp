@@ -76,7 +76,19 @@ function DashboardShell() {
   const t = THEMES[theme]
   const router = useRouter()
   const [sidebarOpen, setSidebarOpen] = useState(true)
+  const [isMobile, setIsMobile] = useState(false)
   const [checking, setChecking] = useState(true)
+
+  useEffect(() => {
+    const check = () => {
+      const mobile = window.innerWidth < 768
+      setIsMobile(mobile)
+      if (mobile) setSidebarOpen(false)
+    }
+    check()
+    window.addEventListener('resize', check)
+    return () => window.removeEventListener('resize', check)
+  }, [])
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -143,10 +155,10 @@ function DashboardShell() {
 
   return (
     <div style={{ display: 'flex', height: '100vh', background: t.bg, overflow: 'hidden' }}>
-      <Sidebar sidebarOpen={sidebarOpen} setSidebarOpen={setSidebarOpen} />
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-        <Topbar />
-        <main style={{ flex: 1, overflowY: 'auto' }}>
+      <Sidebar sidebarOpen={sidebarOpen} setSidebarOpen={setSidebarOpen} isMobile={isMobile} />
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0 }}>
+        <Topbar onMenuToggle={() => setSidebarOpen(o => !o)} isMobile={isMobile} />
+        <main style={{ flex: 1, overflowY: 'auto', overflowX: 'auto' }}>
           <div key={activeNav} className="page-enter">{renderPage()}</div>
         </main>
       </div>

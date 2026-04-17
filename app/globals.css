@@ -77,6 +77,58 @@ svg.recharts-surface { pointer-events: none !important; }
 .recharts-surface > rect { fill: transparent !important; stroke: none !important; }
 .recharts-surface > g > rect:first-of-type { fill: transparent !important; stroke: none !important; }
 
+/* ── Mobile responsive utilities ─────────────────────────────────── */
+
+/* LiveFeed hero: wrap on mobile */
+.lf-hero {
+  flex-wrap: wrap !important;
+}
+
+@media (max-width: 767px) {
+  /* Tables scroll horizontally */
+  .table-scroll {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* KPI grids: 2 columns on mobile */
+  .kpi-grid {
+    grid-template-columns: repeat(2, 1fr) !important;
+  }
+
+  /* Charts stack on mobile */
+  .chart-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* Reduce page padding */
+  .page-pad {
+    padding: 16px !important;
+  }
+
+  /* Filter bars wrap */
+  .filter-bar {
+    flex-wrap: wrap !important;
+    gap: 8px !important;
+  }
+
+  /* Hide desktop-only elements */
+  .desktop-only {
+    display: none !important;
+  }
+
+  /* Full width on mobile */
+  .mobile-full {
+    width: 100% !important;
+    min-width: unset !important;
+  }
+
+  /* Hub content padding */
+  .hub-content {
+    padding: 16px !important;
+  }
+}
+
 /* Native date/select inputs match theme */
 input[type="date"],
 input[type="text"],

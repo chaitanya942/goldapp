@@ -80,7 +80,7 @@ function NavIcon({ path, size = 16, color }) {
   )
 }
 
-export default function Sidebar({ sidebarOpen, setSidebarOpen }) {
+export default function Sidebar({ sidebarOpen, setSidebarOpen, isMobile }) {
   const { theme, activeNav, setActiveNav, expandedNav, setExpandedNav, canSee } = useApp()
   const t = T[theme]
 
@@ -93,6 +93,7 @@ export default function Sidebar({ sidebarOpen, setSidebarOpen }) {
       if (!sidebarOpen) setSidebarOpen(true)
     } else {
       setActiveNav(item.id)
+      if (isMobile) setSidebarOpen(false)
     }
   }
 
@@ -155,7 +156,7 @@ export default function Sidebar({ sidebarOpen, setSidebarOpen }) {
         {item.children && expanded && sidebarOpen && (
           <div style={{ marginLeft: '24px', paddingLeft: '16px', borderLeft: `1px solid ${t.goldBdr}`, marginTop: '2px', marginBottom: '4px' }}>
             {item.children.map(child => (
-              <div key={child.id} onClick={() => setActiveNav(child.id)}
+              <div key={child.id} onClick={() => { setActiveNav(child.id); if (isMobile) setSidebarOpen(false) }}
                 style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '7px 10px', borderRadius: '6px', cursor: 'pointer', marginBottom: '1px', background: isActive(child.id) ? `${child.dot || t.gold}18` : 'transparent', transition: 'background .15s' }}
                 onMouseEnter={e => { if (!isActive(child.id)) e.currentTarget.style.background = t.hov }}
                 onMouseLeave={e => { if (!isActive(child.id)) e.currentTarget.style.background = 'transparent' }}>
@@ -169,14 +170,38 @@ export default function Sidebar({ sidebarOpen, setSidebarOpen }) {
     )
   }
 
+  const sidebarWidth = isMobile ? '280px' : (sidebarOpen ? '232px' : '52px')
+
   return (
-    <div style={{ width: sidebarOpen ? '232px' : '52px', flexShrink: 0, background: t.side, borderRight: `1px solid ${t.border}`, display: 'flex', flexDirection: 'column', transition: 'width .22s cubic-bezier(.4,0,.2,1)', overflow: 'hidden', height: '100vh', position: 'relative' }}>
+    <>
+      {isMobile && sidebarOpen && (
+        <div
+          onClick={() => setSidebarOpen(false)}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.65)', zIndex: 49 }}
+        />
+      )}
+    <div style={{
+      width: sidebarWidth,
+      flexShrink: 0,
+      background: t.side,
+      borderRight: `1px solid ${t.border}`,
+      display: 'flex',
+      flexDirection: 'column',
+      transition: isMobile ? 'transform .25s ease' : 'width .22s cubic-bezier(.4,0,.2,1)',
+      overflow: 'hidden',
+      height: '100vh',
+      position: isMobile ? 'fixed' : 'relative',
+      top: isMobile ? 0 : undefined,
+      left: isMobile ? 0 : undefined,
+      zIndex: isMobile ? 50 : undefined,
+      transform: isMobile && !sidebarOpen ? 'translateX(-100%)' : 'translateX(0)',
+    }}>
       <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '120px', background: t.topGlow, pointerEvents: 'none', zIndex: 0 }} />
       <div style={{ padding: sidebarOpen ? '18px 16px 16px' : '18px 0 16px', display: 'flex', alignItems: 'center', gap: '10px', justifyContent: sidebarOpen ? 'flex-start' : 'center', borderBottom: `1px solid ${t.border}`, flexShrink: 0, position: 'relative', zIndex: 1 }}>
         <div style={{ width: '34px', height: '34px', flexShrink: 0, borderRadius: '9px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(201,168,76,0.07)', border: `1px solid rgba(201,168,76,0.2)`, boxShadow: '0 2px 12px rgba(201,168,76,0.15)' }}>
           <img src="/emblem.svg" alt="W" style={{ width: '24px', height: '24px' }} />
         </div>
-        {sidebarOpen && (
+        {(sidebarOpen || isMobile) && (
           <div>
             <div style={{ fontSize: '.82rem', fontWeight: 700, color: t.text1, letterSpacing: '.06em', lineHeight: 1.2 }}>White Gold</div>
             <div style={{ fontSize: '.52rem', color: t.gold, letterSpacing: '.18em', textTransform: 'uppercase', marginTop: '2px', opacity: .75 }}>Operations</div>
@@ -196,17 +221,20 @@ export default function Sidebar({ sidebarOpen, setSidebarOpen }) {
         )}
       </div>
 
-      <div onClick={() => setSidebarOpen(o => !o)}
-        style={{ padding: sidebarOpen ? '12px 16px' : '12px 0', borderTop: `1px solid ${t.border}`, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: sidebarOpen ? 'flex-start' : 'center', gap: '10px', flexShrink: 0, transition: 'background .15s', position: 'relative', zIndex: 1 }}
-        onMouseEnter={e => e.currentTarget.style.background = t.hov}
-        onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
-        <div style={{ width: '24px', height: '24px', borderRadius: '6px', border: `1px solid ${t.border2}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={t.text3} strokeWidth="2.5" strokeLinecap="round" style={{ transform: sidebarOpen ? 'none' : 'rotate(180deg)', transition: 'transform .22s' }}>
-            <path d="M15 18l-6-6 6-6" />
-          </svg>
+      {!isMobile && (
+        <div onClick={() => setSidebarOpen(o => !o)}
+          style={{ padding: sidebarOpen ? '12px 16px' : '12px 0', borderTop: `1px solid ${t.border}`, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: sidebarOpen ? 'flex-start' : 'center', gap: '10px', flexShrink: 0, transition: 'background .15s', position: 'relative', zIndex: 1 }}
+          onMouseEnter={e => e.currentTarget.style.background = t.hov}
+          onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+          <div style={{ width: '24px', height: '24px', borderRadius: '6px', border: `1px solid ${t.border2}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={t.text3} strokeWidth="2.5" strokeLinecap="round" style={{ transform: sidebarOpen ? 'none' : 'rotate(180deg)', transition: 'transform .22s' }}>
+              <path d="M15 18l-6-6 6-6" />
+            </svg>
+          </div>
+          {sidebarOpen && <span style={{ fontSize: '.65rem', color: t.text3, letterSpacing: '.04em' }}>Collapse</span>}
         </div>
-        {sidebarOpen && <span style={{ fontSize: '.65rem', color: t.text3, letterSpacing: '.04em' }}>Collapse</span>}
-      </div>
+      )}
     </div>
+    </>
   )
 }
