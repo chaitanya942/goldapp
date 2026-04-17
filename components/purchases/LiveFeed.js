@@ -139,9 +139,21 @@ function Pill({ label, value, color, bg }) {
 /* ════════════════════════════════════════════════════ */
 /*                  MAIN COMPONENT                    */
 /* ════════════════════════════════════════════════════ */
+function useMobile() {
+  const [m, setM] = useState(false)
+  useEffect(() => {
+    const check = () => setM(window.innerWidth < 768)
+    check()
+    window.addEventListener('resize', check)
+    return () => window.removeEventListener('resize', check)
+  }, [])
+  return m
+}
+
 export default function LiveFeed() {
   const { theme: appTheme, canSee } = useApp()
   const t = THEMES[appTheme] || THEMES.dark
+  const isMobile = useMobile()
 
   const todayIST = new Date(Date.now() + 5.5 * 60 * 60 * 1000).toISOString().split('T')[0]
 
@@ -325,63 +337,89 @@ export default function LiveFeed() {
         backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)',
         borderBottom: isToday ? `1px solid ${t.border}` : `1px solid ${t.orange}50`,
         boxShadow: isToday ? '0 2px 12px rgba(0,0,0,.15)' : `0 2px 12px ${t.orange}18`,
-        padding: '11px 24px', display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap',
       }}>
-        {/* Live indicator */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          {isToday && (
-            <span style={{ position: 'relative', width: 8, height: 8 }}>
-              <span style={{
-                position: 'absolute', inset: 0, borderRadius: '50%', background: t.green,
-                animation: 'ping 1.5s cubic-bezier(0,0,.2,1) infinite', opacity: .6,
-              }} />
-              <span style={{ position: 'absolute', inset: 0, borderRadius: '50%', background: t.green }} />
+        {/* Row 1: label + tabs + date + refresh */}
+        <div style={{ padding: isMobile ? '10px 14px' : '11px 24px', display: 'flex', alignItems: 'center', gap: isMobile ? 10 : 16 }}>
+          {/* Live indicator */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            {isToday && (
+              <span style={{ position: 'relative', width: 8, height: 8, flexShrink: 0 }}>
+                <span style={{ position: 'absolute', inset: 0, borderRadius: '50%', background: t.green, animation: 'ping 1.5s cubic-bezier(0,0,.2,1) infinite', opacity: .6 }} />
+                <span style={{ position: 'absolute', inset: 0, borderRadius: '50%', background: t.green }} />
+              </span>
+            )}
+            <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: isMobile ? '.72rem' : '.82rem', fontWeight: 600, color: t.text1 }}>
+              {isMobile ? 'LIVE' : 'LIVE FEED'}
             </span>
+          </div>
+
+          {/* CRM tabs */}
+          {(canSee('livefeed.old_crm_tab') || canSee('livefeed.new_crm_tab') || canSee('livefeed.combined_tab')) && (
+            <div style={{ display: 'flex', background: t.card, borderRadius: 8, border: `1px solid ${t.border}`, overflow: 'hidden' }}>
+              {[['old', isMobile ? 'Old' : 'Old CRM'], ['new', isMobile ? 'New' : 'New CRM'], ['combined', 'Both']].filter(([key]) => {
+                if (key === 'old')      return canSee('livefeed.old_crm_tab')
+                if (key === 'new')      return canSee('livefeed.new_crm_tab')
+                if (key === 'combined') return canSee('livefeed.combined_tab')
+                return false
+              }).map(([key, label]) => (
+                <button key={key} onClick={() => { setCrmTab(key); setNewEventCount(0) }} style={{
+                  padding: isMobile ? '6px 10px' : '6px 16px', fontSize: '.62rem', letterSpacing: '.06em', textTransform: 'uppercase',
+                  fontWeight: crmTab === key ? 600 : 400, cursor: 'pointer', border: 'none',
+                  background: crmTab === key ? t.gold : 'transparent',
+                  color: crmTab === key ? '#000' : t.text3, transition: 'all .2s',
+                }}>
+                  {label}
+                </button>
+              ))}
+            </div>
           )}
-          <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: '.82rem', fontWeight: 600, color: t.text1 }}>
-            LIVE FEED
-          </span>
+
+          <div style={{ flex: 1 }} />
+
+          {/* Date picker */}
+          {canSee('livefeed.date_picker') && (
+            <input type="date" value={viewDate}
+              onChange={e => { setViewDate(e.target.value); setRegionFilter(''); setNewEventCount(0); load(e.target.value) }}
+              style={{ background: t.card, color: t.text2, border: `1px solid ${t.border}`, borderRadius: 6, padding: '5px 8px', fontSize: '.68rem', fontFamily: 'ui-monospace, monospace', outline: 'none', cursor: 'pointer', maxWidth: isMobile ? 130 : 'none' }}
+            />
+          )}
+
+          {/* Refresh */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            {lastUpdated && !isMobile && (
+              <span style={{ fontSize: '.58rem', color: t.text4, fontFamily: 'ui-monospace, monospace' }}>
+                {isToday ? `${countdown}s` : 'historical'}
+              </span>
+            )}
+            <button onClick={() => { load(); setCountdown(REFRESH_SECS) }} style={{
+              background: t.card, border: `1px solid ${t.border}`, borderRadius: 6,
+              padding: isMobile ? '5px 8px' : '5px 10px', fontSize: '.6rem', color: t.text3, cursor: 'pointer',
+            }}>
+              {isMobile ? '↻' : 'Refresh'}
+            </button>
+          </div>
         </div>
 
-        {/* Date picker */}
-        {canSee('livefeed.date_picker') && (
-          <input
-            type="date"
-            value={viewDate}
-            onChange={e => { setViewDate(e.target.value); setRegionFilter(''); setNewEventCount(0); load(e.target.value) }}
-            style={{
-              background: t.card, color: t.text2, border: `1px solid ${t.border}`, borderRadius: 6,
-              padding: '5px 10px', fontSize: '.72rem', fontFamily: 'ui-monospace, monospace',
-              outline: 'none', cursor: 'pointer',
-            }}
-          />
-        )}
-
-        {/* CRM tabs */}
-        {(canSee('livefeed.old_crm_tab') || canSee('livefeed.new_crm_tab') || canSee('livefeed.combined_tab')) && (
-          <div style={{ display: 'flex', background: t.card, borderRadius: 8, border: `1px solid ${t.border}`, overflow: 'hidden' }}>
-            {[['old', 'Old CRM'], ['new', 'New CRM'], ['combined', 'Both']].filter(([key]) => {
-              if (key === 'old')      return canSee('livefeed.old_crm_tab')
-              if (key === 'new')      return canSee('livefeed.new_crm_tab')
-              if (key === 'combined') return canSee('livefeed.combined_tab')
-              return false
-            }).map(([key, label]) => (
-              <button key={key} onClick={() => { setCrmTab(key); setNewEventCount(0) }} style={{
-                padding: '6px 16px', fontSize: '.62rem', letterSpacing: '.08em', textTransform: 'uppercase',
-                fontWeight: crmTab === key ? 600 : 400, cursor: 'pointer', border: 'none',
-                background: crmTab === key ? t.gold : 'transparent',
-                color: crmTab === key ? '#000' : t.text3,
-                transition: 'all .2s',
+        {/* Row 2 (mobile only): Region filter as scrollable pills */}
+        {isMobile && canSee('livefeed.region_filter') && regions.length > 1 && (
+          <div style={{ display: 'flex', gap: 6, padding: '0 14px 10px', overflowX: 'auto', scrollbarWidth: 'none', WebkitOverflowScrolling: 'touch' }}>
+            {['', ...regions].map(r => (
+              <button key={r || 'all'} onClick={() => setRegionFilter(r)} style={{
+                padding: '4px 12px', borderRadius: 20, fontSize: '.62rem', cursor: 'pointer', flexShrink: 0,
+                border: `1px solid ${regionFilter === r ? t.gold : t.border}`,
+                background: regionFilter === r ? `${t.gold}18` : 'transparent',
+                color: regionFilter === r ? t.gold : t.text3,
+                fontWeight: regionFilter === r ? 600 : 400, transition: 'all .15s', whiteSpace: 'nowrap',
               }}>
-                {label}
+                {r || 'All'}
               </button>
             ))}
           </div>
         )}
 
-        {/* Region filter */}
-        {canSee('livefeed.region_filter') && regions.length > 1 && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        {/* Row 2 (desktop): Region filter inline */}
+        {!isMobile && canSee('livefeed.region_filter') && regions.length > 1 && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '0 24px 10px' }}>
             <span style={{ fontSize: '.58rem', color: t.text4, letterSpacing: '.08em' }}>REGION</span>
             <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
               {['', ...regions].map(r => (
@@ -390,8 +428,7 @@ export default function LiveFeed() {
                   border: `1px solid ${regionFilter === r ? t.gold : t.border}`,
                   background: regionFilter === r ? `${t.gold}18` : 'transparent',
                   color: regionFilter === r ? t.gold : t.text3,
-                  fontWeight: regionFilter === r ? 600 : 400,
-                  transition: 'all .15s',
+                  fontWeight: regionFilter === r ? 600 : 400, transition: 'all .15s',
                 }}>
                   {r || 'All'}
                 </button>
@@ -399,23 +436,6 @@ export default function LiveFeed() {
             </div>
           </div>
         )}
-
-        <div style={{ flex: 1 }} />
-
-        {/* Refresh info */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          {lastUpdated && (
-            <span style={{ fontSize: '.58rem', color: t.text4, fontFamily: 'ui-monospace, monospace' }}>
-              {isToday ? `${countdown}s` : 'historical'}
-            </span>
-          )}
-          <button onClick={() => { load(); setCountdown(REFRESH_SECS) }} style={{
-            background: t.card, border: `1px solid ${t.border}`, borderRadius: 6,
-            padding: '5px 10px', fontSize: '.6rem', color: t.text3, cursor: 'pointer',
-          }}>
-            Refresh
-          </button>
-        </div>
       </div>
 
       {/* ── HISTORICAL BANNER ── */}
@@ -433,7 +453,7 @@ export default function LiveFeed() {
       )}
 
       {/* ── BODY ── */}
-      <div style={{ padding: '24px 28px' }}>
+      <div style={{ padding: isMobile ? '12px' : '24px 28px' }}>
         {loadError && (
           <div style={{ background: `${t.red}15`, border: `1px solid ${t.red}40`, borderRadius: 8, padding: '12px 16px', marginBottom: 20, fontSize: '.72rem', color: t.red, fontFamily: 'ui-monospace, monospace' }}>
             API error: {loadError}
@@ -446,7 +466,7 @@ export default function LiveFeed() {
           </div>
         ) : crmTab === 'old' ? (
           <div style={{ opacity: loading && data ? 0.6 : 1, transition: 'opacity .3s' }}>
-            <OldCrmTab t={t} summary={effectiveSummary} walkinSummary={effectiveWalkinSummary}
+            <OldCrmTab t={t} isMobile={isMobile} summary={effectiveSummary} walkinSummary={effectiveWalkinSummary}
               totalWalkins={totalWalkins} totalBilled={totalBilled} approved={approved} pending={pending}
               trueRejected={trueRejected} wrongEntry={wrongEntry}
               notBilledCnt={notBilledCnt} notBilledWalkins={notBilledWalkins} crmNotUpdatedCnt={crmNotUpdatedCnt}
@@ -601,7 +621,7 @@ function CombinedCrmTab({
 /*                        OLD CRM TAB                            */
 /* ════════════════════════════════════════════════════════════════ */
 function OldCrmTab({
-  t, summary, walkinSummary,
+  t, isMobile, summary, walkinSummary,
   totalWalkins, totalBilled, approved, pending,
   trueRejected, wrongEntry,
   notBilledCnt, notBilledWalkins, crmNotUpdatedCnt,
@@ -679,12 +699,13 @@ function OldCrmTab({
         {/* ── Main hero panel ── */}
         <div className="lf-hero" style={{
           position:'relative', overflow:'hidden',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          gap: 0, flexWrap: 'wrap',
+          display: 'flex', alignItems: isMobile ? 'stretch' : 'center', justifyContent: 'center',
+          flexDirection: isMobile ? 'column' : 'row',
+          gap: isMobile ? 12 : 0, flexWrap: isMobile ? undefined : 'wrap',
           background: `linear-gradient(160deg, ${t.surface} 0%, ${t.card} 50%, ${t.surface} 100%)`,
-          borderRadius: 20,
+          borderRadius: 16,
           border: `1px solid ${t.border}`,
-          padding: '32px 20px 24px',
+          padding: isMobile ? '16px' : '32px 20px 24px',
           boxShadow: `0 8px 32px rgba(0,0,0,.10), 0 1px 0 ${t.border} inset`,
         }}>
           {/* Subtle radial glow top-right */}
@@ -693,9 +714,9 @@ function OldCrmTab({
           <div style={{ position:'absolute', bottom:0, left:'10%', right:'10%', height:1, background:`linear-gradient(90deg,transparent,${t.gold}30,transparent)` }}/>
 
           <HeroNum label="Walked In" value={totalWalkins} color={t.blue} t={t} weight={goldWalkedIn} active={activeMetric==='walkin'} onClick={() => toggleMetric('walkin')} />
-          <FlowArrow t={t} pct={billedPct} />
+          {!isMobile && <FlowArrow t={t} pct={billedPct} />}
           <HeroNum label="Bills Submitted" value={totalBilled} color={t.gold} t={t} weight={goldPurchased+goldPending+goldRejected} active={activeMetric==='billed'} onClick={() => toggleMetric('billed')} />
-          <FlowArrow t={t} pct={approvedPctBilled} />
+          {!isMobile && <FlowArrow t={t} pct={approvedPctBilled} />}
 
           {/* ── Breakdown stage ── */}
           <div style={{
@@ -711,7 +732,7 @@ function OldCrmTab({
             <div style={{ position:'absolute', top:-14, left:'50%', transform:'translateX(-50%)', background:`linear-gradient(90deg,${t.gold}ee,${t.gold}bb)`, borderRadius:20, padding:'4px 14px', boxShadow:`0 4px 14px ${t.gold}55, 0 0 0 1px ${t.gold}30`, whiteSpace:'nowrap' }}>
               <span style={{ fontSize:'.52rem', letterSpacing:'.14em', textTransform:'uppercase', color:'#0a0a0a', fontWeight:900 }}>breakdown of {fmtNum(totalBilled)}</span>
             </div>
-            <div style={{ position:'relative', display:'flex', alignItems:'center', gap:8 }}>
+            <div style={{ position:'relative', display: isMobile ? 'grid' : 'flex', gridTemplateColumns: isMobile ? '1fr 1fr' : undefined, alignItems: isMobile ? undefined : 'center', gap: isMobile ? 8 : 8 }}>
               {[
                 { node: <HeroNum label="Purchased" value={approved} color={t.green} t={t} weight={goldPurchased} active={activeMetric==='purchased'} onClick={() => toggleMetric('purchased')} />, color: t.green },
                 { node: <HeroNum label="In Pipeline" value={pending} color={t.orange} t={t} small weight={goldPending} active={activeMetric==='pending'} onClick={() => toggleMetric('pending')} />, color: t.orange },
@@ -719,14 +740,15 @@ function OldCrmTab({
                 { node: <HeroNum label="Re-billed & Approved" value={wrongEntry} color={t.orange} t={t} small active={activeMetric==='rebilled'} onClick={() => toggleMetric('rebilled')} />, color: t.orange },
               ].map((item, i) => (
                 <div key={i} style={{ display:'flex', alignItems:'center', gap:8 }}>
-                  {i > 0 && <FlowSep t={t} />}
+                  {!isMobile && i > 0 && <FlowSep t={t} />}
                   <div style={{
                     background:`linear-gradient(160deg, ${t.card2} 0%, ${t.card} 100%)`,
                     border:`1px solid ${item.color}30`,
                     borderTop:`2px solid ${item.color}70`,
                     borderRadius:14,
                     boxShadow:`0 8px 24px rgba(0,0,0,.14), 0 2px 6px rgba(0,0,0,.10), inset 0 1px 0 ${item.color}18`,
-                    transform:'translateY(-5px)',
+                    transform: isMobile ? 'none' : 'translateY(-5px)',
+                    width: isMobile ? '100%' : undefined,
                   }}>
                     {item.node}
                   </div>
