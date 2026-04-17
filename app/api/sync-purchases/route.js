@@ -214,28 +214,20 @@ export async function POST(request) {
     const minDate = dates.reduce((a, b) => a < b ? a : b)
     const maxDate = dates.reduce((a, b) => a > b ? a : b)
 
-    // ── Ghost-bill detection: delete+recreate in CRM leaves orphan in Supabase ─
-    // After upserting, find Supabase bills (in the synced window) whose application_id
-    // is NOT in this CRM batch but whose fingerprint IS — meaning the employee deleted
-    // the original bill and created a new one with a new ID.
+    // ── Full reconcile: mark ANY Supabase bill in sync window missing from CRM ──
+    // Catches both delete+recreate AND pure deletes. Since we have the full CRM
+    // approved ID set for the synced date range, anything in Supabase but not in
+    // CRM was deleted from CRM and should be marked accordingly.
     let ghostsMarked = 0
     try {
       const crmIds = new Set(deduped.map(r => r.application_id))
 
-      // Fingerprint: branch + date + customer + net_weight (rounded to 2dp) + final_amount (rounded)
-      const crmFingerprints = new Set(
-        deduped.map(r =>
-          `${r.branch_name}|${r.purchase_date}|${(r.customer_name||'').toLowerCase()}|${Math.round((r.net_weight||0)*100)}|${Math.round(r.final_amount_crm||0)}`
-        )
-      )
-
-      // Pull Supabase bills for the same date window that aren't already marked deleted
       const CHUNK = 1000
       let offset = 0, supaRows = []
       while (true) {
         const { data } = await supabaseAdmin
           .from('purchases')
-          .select('application_id, branch_name, purchase_date, customer_name, net_weight, final_amount_crm')
+          .select('application_id')
           .eq('crm_source', 'old_crm')
           .eq('crm_status', 'approved')
           .gte('purchase_date', minDate)
@@ -247,25 +239,21 @@ export async function POST(request) {
         offset += CHUNK
       }
 
-      const ghostIds = supaRows
-        .filter(b => !crmIds.has(b.application_id))
-        .filter(b => {
-          const fp = `${b.branch_name}|${b.purchase_date}|${(b.customer_name||'').toLowerCase()}|${Math.round((b.net_weight||0)*100)}|${Math.round(b.final_amount_crm||0)}`
-          return crmFingerprints.has(fp)
-        })
+      const deletedIds = supaRows
         .map(b => b.application_id)
+        .filter(id => !crmIds.has(id))
 
-      if (ghostIds.length > 0) {
+      if (deletedIds.length > 0) {
         await supabaseAdmin
           .from('purchases')
           .update({ crm_status: 'deleted' })
-          .in('application_id', ghostIds)
+          .in('application_id', deletedIds)
           .eq('crm_source', 'old_crm')
-        ghostsMarked = ghostIds.length
-        console.log(`Ghost-bill detection: marked ${ghostIds.length} deleted-and-recreated bills`, ghostIds)
+        ghostsMarked = deletedIds.length
+        console.log(`Reconcile: marked ${deletedIds.length} CRM-deleted bills`, deletedIds)
       }
     } catch (ghostErr) {
-      console.error('Ghost detection error (non-fatal):', ghostErr.message)
+      console.error('Reconcile error (non-fatal):', ghostErr.message)
     }
 
     return Response.json({
