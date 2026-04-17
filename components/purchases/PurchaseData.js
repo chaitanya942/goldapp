@@ -152,7 +152,7 @@ export default function PurchaseData() {
     let q = forExport
       ? supabase.from('purchases').select('*')
       : supabase.from('purchases').select('*', { count: 'exact' })
-    q = q.eq('is_deleted', false)
+    q = q.eq('is_deleted', false).neq('crm_status', 'deleted')
     if (search)            q = q.or(`customer_name.ilike.%${search}%,application_id.ilike.%${search}%,branch_name.ilike.%${search}%`)
     if (filterCrmStatus)   q = q.eq('crm_status', filterCrmStatus)
     if (filterCrmSource)   q = q.eq('crm_source', filterCrmSource)
@@ -182,6 +182,7 @@ export default function PurchaseData() {
           .select('application_id')
           .in('application_id', ids)
           .eq('is_deleted', false)
+          .neq('crm_status', 'deleted')
         if (both) {
           const counts = {}
           both.forEach(r => { counts[r.application_id] = (counts[r.application_id] || 0) + 1 })
