@@ -16,6 +16,8 @@ import ImportLogs from '../../components/admin/ImportLogs'
 import RoleManagement from '../../components/admin/RoleManagement'
 import DynamicDashboard from '../../components/dashboard/DynamicDashboard'
 import PurchaseHub   from '../../components/purchases/PurchaseHub'
+import BottomNav from '../../components/BottomNav'
+import MobileMenu from '../../components/MobileMenu'
 import ReportsHub    from '../../components/purchases/ReportsHub'
 import ConsignmentOverview from '../../components/consignments/ConsignmentOverview'
 import ConsignmentData from '../../components/consignments/ConsignmentData'
@@ -77,6 +79,7 @@ function DashboardShell() {
   const router = useRouter()
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [isMobile, setIsMobile] = useState(false)
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [checking, setChecking] = useState(true)
 
   useEffect(() => {
@@ -155,13 +158,19 @@ function DashboardShell() {
 
   return (
     <div style={{ display: 'flex', height: '100vh', background: t.bg, overflow: 'hidden' }}>
-      <Sidebar sidebarOpen={sidebarOpen} setSidebarOpen={setSidebarOpen} isMobile={isMobile} />
+      {/* Sidebar — desktop only */}
+      {!isMobile && <Sidebar sidebarOpen={sidebarOpen} setSidebarOpen={setSidebarOpen} isMobile={false} />}
+
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0 }}>
         <Topbar onMenuToggle={() => setSidebarOpen(o => !o)} isMobile={isMobile} />
-        <main style={{ flex: 1, overflowY: 'auto', overflowX: 'auto' }}>
+        <main style={{ flex: 1, overflowY: 'auto', overflowX: 'auto', paddingBottom: isMobile ? 60 : 0 }}>
           <div key={activeNav} className="page-enter">{renderPage()}</div>
         </main>
       </div>
+
+      {/* Bottom nav — mobile only */}
+      {isMobile && <BottomNav onMenuOpen={() => setMobileMenuOpen(true)} />}
+      {isMobile && mobileMenuOpen && <MobileMenu onClose={() => setMobileMenuOpen(false)} />}
     </div>
   )
 }

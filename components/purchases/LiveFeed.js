@@ -1505,7 +1505,7 @@ function TimelineRow({ item, t, isLast }) {
   const wt = isTxn ? item.weight : (item.weight ? Number(item.weight) : 0)
 
   return (
-    <div style={{
+    <div className="event-row" style={{
       display: 'grid',
       gridTemplateColumns: '70px 28px 1fr 110px 120px',
       gap: '0 12px',
@@ -1519,21 +1519,21 @@ function TimelineRow({ item, t, isLast }) {
       onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
     >
       {/* Time */}
-      <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: '.66rem', color: t.text3, textAlign: 'right', lineHeight: 1 }}>
+      <span className="er-time" style={{ fontFamily: 'ui-monospace, monospace', fontSize: '.66rem', color: t.text3, textAlign: 'right', lineHeight: 1 }}>
         {fmtTime(item.time)}
       </span>
       {/* Type icon + dot */}
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}>
+      <div className="er-icon" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}>
         <span style={{ fontSize: '.75rem', lineHeight: 1 }}>{typeIcon}</span>
         <span style={{ width: 6, height: 6, borderRadius: '50%', background: accentColor, display: 'block', boxShadow: `0 0 5px ${accentColor}60` }} />
       </div>
       {/* Main info */}
-      <div style={{ minWidth: 0 }}>
+      <div className="er-main" style={{ minWidth: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-          <span style={{ fontSize: '.78rem', color: t.text1, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 180 }}>
+          <span style={{ fontSize: '.78rem', color: t.text1, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 200 }}>
             {item.name || 'Unknown'}
           </span>
-          <span style={{
+          <span className="er-status-badge" style={{
             fontSize: '.56rem', padding: '2px 7px', borderRadius: 4,
             background: `${accentColor}18`, color: accentColor, border: `1px solid ${accentColor}35`,
             fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase', whiteSpace: 'nowrap',
@@ -1559,11 +1559,11 @@ function TimelineRow({ item, t, isLast }) {
         </div>
       </div>
       {/* Weight */}
-      <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: '.72rem', color: wt > 0 ? t.text1 : t.text4, textAlign: 'right', fontWeight: wt > 0 ? 500 : 400 }}>
+      <span className="er-wt" style={{ fontFamily: 'ui-monospace, monospace', fontSize: '.72rem', color: wt > 0 ? t.text1 : t.text4, textAlign: 'right', fontWeight: wt > 0 ? 500 : 400 }}>
         {wt > 0 ? fmtWt(wt) : '—'}
       </span>
       {/* Amount */}
-      <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: '.74rem', color: isTxn && item.amount ? t.gold : t.text4, textAlign: 'right', fontWeight: isTxn && item.amount ? 600 : 400 }}>
+      <span className="er-amt" style={{ fontFamily: 'ui-monospace, monospace', fontSize: '.74rem', color: isTxn && item.amount ? t.gold : t.text4, textAlign: 'right', fontWeight: isTxn && item.amount ? 600 : 400 }}>
         {isTxn && item.amount != null ? fmtAmt(item.amount) : '—'}
       </span>
     </div>

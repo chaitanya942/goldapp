@@ -77,54 +77,69 @@ svg.recharts-surface { pointer-events: none !important; }
 .recharts-surface > rect { fill: transparent !important; stroke: none !important; }
 .recharts-surface > g > rect:first-of-type { fill: transparent !important; stroke: none !important; }
 
-/* ── Mobile responsive utilities ─────────────────────────────────── */
+/* ── Mobile responsive ─────────────────────────────────────────── */
 
-/* LiveFeed hero: wrap on mobile */
+/* LiveFeed hero: always wrap */
 .lf-hero {
   flex-wrap: wrap !important;
 }
 
 @media (max-width: 767px) {
-  /* Tables scroll horizontally */
-  .table-scroll {
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
+  /* ── LiveFeed: TimelineRow → card layout ── */
+  .event-row {
+    display: grid !important;
+    grid-template-columns: 1fr auto !important;
+    grid-template-rows: auto auto !important;
+    grid-template-areas:
+      "main time"
+      "main wt"
+      "amt  amt" !important;
+    gap: 0 10px !important;
+    padding: 12px 14px !important;
+    align-items: start !important;
+  }
+  .er-time {
+    grid-area: time !important;
+    text-align: right !important;
+    font-size: .62rem !important;
+    margin-top: 1px;
+  }
+  .er-icon { display: none !important; }
+  .er-main {
+    grid-area: main !important;
+    padding-right: 8px;
+  }
+  .er-wt {
+    grid-area: wt !important;
+    text-align: right !important;
+    font-size: .66rem !important;
+    margin-top: 4px;
+  }
+  .er-amt {
+    grid-area: amt !important;
+    text-align: right !important;
+    font-size: .82rem !important;
+    font-weight: 700 !important;
+    padding-top: 4px;
+    margin-top: 2px;
+    border-top: 1px solid rgba(128,128,128,.1);
   }
 
-  /* KPI grids: 2 columns on mobile */
-  .kpi-grid {
-    grid-template-columns: repeat(2, 1fr) !important;
-  }
-
-  /* Charts stack on mobile */
-  .chart-grid {
-    grid-template-columns: 1fr !important;
-  }
-
-  /* Reduce page padding */
-  .page-pad {
-    padding: 16px !important;
-  }
-
-  /* Filter bars wrap */
-  .filter-bar {
-    flex-wrap: wrap !important;
-    gap: 8px !important;
-  }
-
-  /* Hide desktop-only elements */
-  .desktop-only {
-    display: none !important;
-  }
-
-  /* Full width on mobile */
-  .mobile-full {
-    width: 100% !important;
-    min-width: unset !important;
-  }
-
-  /* Hub content padding */
+  /* ── Hub content & tab bar ── */
   .hub-content {
+    padding: 14px !important;
+  }
+
+  /* ── Utility classes ── */
+  .kpi-grid  { grid-template-columns: repeat(2, 1fr) !important; }
+  .chart-grid { grid-template-columns: 1fr !important; }
+  .desktop-only { display: none !important; }
+  .mobile-full { width: 100% !important; min-width: unset !important; }
+
+  /* ── Reduce large padding on page wrappers ── */
+  [style*="padding: 32px"],
+  [style*="padding: 40px"],
+  [style*="padding: 48px"] {
     padding: 16px !important;
   }
 }

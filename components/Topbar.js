@@ -316,6 +316,62 @@ export default function Topbar({ onMenuToggle, isMobile }) {
 
   const previewRoleData = previewRole ? null : null  // resolved in ViewAsDropdown
 
+  /* ── Mobile topbar ── */
+  if (isMobile) {
+    return (
+      <header style={{
+        height: 52, background: t.bg,
+        borderBottom: `1px solid ${t.border}`,
+        display: 'flex', alignItems: 'center',
+        padding: '0 16px', gap: 12, flexShrink: 0, zIndex: 40,
+      }}>
+        {/* Logo */}
+        <div style={{ width: 30, height: 30, borderRadius: 8, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(201,168,76,0.07)', border: '1px solid rgba(201,168,76,0.2)' }}>
+          <img src="/emblem.svg" alt="WG" style={{ width: 20, height: 20 }} />
+        </div>
+
+        {/* Page title */}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: '.88rem', fontWeight: 700, color: t.text1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', letterSpacing: '-.01em' }}>
+            {pageTitle}
+          </div>
+          {section && <div style={{ fontSize: '.55rem', color: t.text3, letterSpacing: '.1em', textTransform: 'uppercase' }}>{section}</div>}
+        </div>
+
+        {/* Sync icon (admin only) */}
+        {canSync && !previewRole && (
+          <button onClick={handleSync} disabled={syncing} style={{ width: 34, height: 34, borderRadius: 9, border: `1px solid ${t.syncBorder}`, background: t.syncBg, color: t.gold, fontSize: 17, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: syncing ? 'not-allowed' : 'pointer', opacity: syncing ? 0.6 : 1, flexShrink: 0 }}>
+            <span style={{ display: 'inline-block', animation: syncing ? 'spin 0.9s linear infinite' : 'none', lineHeight: 1 }}>⟳</span>
+          </button>
+        )}
+
+        {/* Avatar */}
+        <div onClick={e => { e.stopPropagation(); setUserMenuOpen(o => !o) }} style={{ position: 'relative' }}>
+          <div style={{ width: 34, height: 34, borderRadius: 9, background: t.avatarBg, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '.75rem', fontWeight: 700, color: '#fff', cursor: 'pointer', flexShrink: 0 }}>
+            {initial}
+          </div>
+          {userMenuOpen && (
+            <div style={{ position: 'absolute', top: 'calc(100% + 6px)', right: 0, minWidth: 200, background: t.bg, border: `1px solid ${t.border}`, borderRadius: 12, boxShadow: '0 8px 32px rgba(0,0,0,.5)', overflow: 'hidden', animation: 'fadeSlideDown 0.16s ease both', zIndex: 100 }}>
+              <div style={{ padding: '14px 16px', borderBottom: `1px solid ${t.border}` }}>
+                <div style={{ fontSize: '.72rem', color: t.text1, fontWeight: 600, marginBottom: 2 }}>{user?.email?.split('@')[0]}</div>
+                <div style={{ fontSize: '.62rem', color: t.text3 }}>{user?.email}</div>
+              </div>
+              <div style={{ padding: 6 }}>
+                <button onClick={signOut} style={{ width: '100%', textAlign: 'left', padding: '9px 12px', borderRadius: 8, border: 'none', background: 'transparent', color: t.red, fontSize: '.72rem', fontWeight: 500, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8 }}
+                  onMouseEnter={e => e.currentTarget.style.background = `${t.red}12`}
+                  onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={t.red} strokeWidth="2" strokeLinecap="round"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9" /></svg>
+                  Sign Out
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+        {toast && <Toast msg={toast.msg} type={toast.type} onDone={() => setToast(null)} />}
+      </header>
+    )
+  }
+
   return (
     <header style={{
       height: previewRole ? '92px' : '56px',
@@ -327,56 +383,37 @@ export default function Topbar({ onMenuToggle, isMobile }) {
     }}>
 
       {/* ── Main row ── */}
-      <div style={{ height: 56, display: 'flex', alignItems: 'center', padding: '0 16px 0 16px', gap: '10px' }}>
-
-      {/* ── Hamburger (mobile only) ── */}
-      {isMobile && (
-        <button onClick={onMenuToggle} style={{
-          width: 36, height: 36, borderRadius: 10, border: `1px solid ${t.border}`,
-          background: t.pillBg, display: 'flex', flexDirection: 'column', alignItems: 'center',
-          justifyContent: 'center', gap: '5px', cursor: 'pointer', flexShrink: 0, padding: 0,
-        }}>
-          <span style={{ display: 'block', width: 14, height: 1.5, background: t.text3, borderRadius: 2 }} />
-          <span style={{ display: 'block', width: 14, height: 1.5, background: t.text3, borderRadius: 2 }} />
-          <span style={{ display: 'block', width: 14, height: 1.5, background: t.text3, borderRadius: 2 }} />
-        </button>
-      )}
+      <div style={{ height: 56, display: 'flex', alignItems: 'center', padding: '0 20px 0 24px', gap: '10px' }}>
 
       {/* ── Breadcrumb ── */}
       <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0 }}>
-        {!isMobile && <span style={{ fontSize: '.65rem', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 500, flexShrink: 0 }}>
+        <span style={{ fontSize: '.65rem', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 500, flexShrink: 0 }}>
           White Gold
-        </span>}
-        {!isMobile && section && (
+        </span>
+        {section && (
           <>
             <span style={{ color: t.text4, fontSize: '.65rem', flexShrink: 0 }}>/</span>
             <span style={{ fontSize: '.65rem', color: t.text3, letterSpacing: '.08em', textTransform: 'uppercase', fontWeight: 500, flexShrink: 0 }}>{section}</span>
           </>
         )}
-        {!isMobile && <span style={{ color: t.text4, fontSize: '.65rem', flexShrink: 0 }}>/</span>}
-        <span style={{ fontSize: isMobile ? '.85rem' : '.8rem', color: t.text1, fontWeight: 600, letterSpacing: '-.01em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        <span style={{ color: t.text4, fontSize: '.65rem', flexShrink: 0 }}>/</span>
+        <span style={{ fontSize: '.8rem', color: t.text1, fontWeight: 600, letterSpacing: '-.01em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {pageTitle}
         </span>
       </div>
 
       {/* ── Right actions ── */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: isMobile ? '6px' : '8px', flexShrink: 0 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
 
-        {/* View As (super_admin only) — hidden on mobile */}
-        {!isMobile && role === 'super_admin' && <ViewAsDropdown previewRole={previewRole} setPreviewRole={setPreviewRole} t={t} />}
-        {!isMobile && role === 'super_admin' && <div style={{ width: '1px', height: '22px', background: t.border, flexShrink: 0 }} />}
+        {/* View As (super_admin only) */}
+        {role === 'super_admin' && <ViewAsDropdown previewRole={previewRole} setPreviewRole={setPreviewRole} t={t} />}
+        {role === 'super_admin' && <div style={{ width: '1px', height: '22px', background: t.border, flexShrink: 0 }} />}
 
-        {/* Sync CRM — icon only on mobile */}
-        {canSync && !previewRole && (isMobile ? (
-          <button onClick={handleSync} disabled={syncing} style={{ width: 36, height: 36, borderRadius: 10, border: `1px solid ${t.syncBorder}`, background: t.syncBg, color: t.gold, fontSize: 16, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: syncing ? 'not-allowed' : 'pointer', opacity: syncing ? 0.7 : 1, flexShrink: 0 }}>
-            <span style={{ display: 'inline-block', animation: syncing ? 'spin 0.9s linear infinite' : 'none' }}>⟳</span>
-          </button>
-        ) : (
-          <SyncButton syncing={syncing} onSync={handleSync} t={t} />
-        ))}
+        {/* Sync CRM */}
+        {canSync && !previewRole && <SyncButton syncing={syncing} onSync={handleSync} t={t} />}
 
         {/* Divider */}
-        {!isMobile && canSync && !previewRole && <div style={{ width: '1px', height: '22px', background: t.border, flexShrink: 0 }} />}
+        {canSync && !previewRole && <div style={{ width: '1px', height: '22px', background: t.border, flexShrink: 0 }} />}
 
         {/* Theme toggle */}
         <ThemeToggle theme={theme} setTheme={setTheme} t={t} />
