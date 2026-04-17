@@ -12,14 +12,21 @@ const supabase = createClient(
 
 const ALLOWED_ACTIONS = new Set(['rejected', 'pending', 'walkin', 'blacklisted', 'branches', 'kpis', 'live'])
 
+let _pool
 function createConn() {
-  return mysql.createConnection({
-    host:     process.env.CRM_DB_HOST,
-    port:     parseInt(process.env.CRM_DB_PORT || '3306'),
-    database: process.env.CRM_DB_NAME,
-    user:     process.env.CRM_DB_USER,
-    password: process.env.CRM_DB_PASSWORD,
-  })
+  if (!_pool) {
+    _pool = mysql.createPool({
+      host:             process.env.CRM_DB_HOST,
+      port:             parseInt(process.env.CRM_DB_PORT || '3306'),
+      database:         process.env.CRM_DB_NAME,
+      user:             process.env.CRM_DB_USER,
+      password:         process.env.CRM_DB_PASSWORD,
+      waitForConnections: true,
+      connectionLimit:    3,
+      queueLimit:         0,
+    })
+  }
+  return _pool.getConnection()
 }
 
 export async function GET(req) {
@@ -233,25 +240,9 @@ export async function GET(req) {
       // Allow explicit date override via ?date=; default to today IST
       const todayIST = searchParams.get('date') || defaultIST
 
-      // Fetch region mapping from Supabase branch management
-      const { data: sbBranches } = await supabase
-        .from('branches')
-        .select('crm_branch_id, name, region')
-        .not('region', 'is', null)
-      const regionMap     = {}  // old CRM: crm_branch_id → region
-      const nameRegionMap = {}  // new CRM: lowercase branch name → region
-      const allRegionsSet = new Set()
-      for (const b of sbBranches || []) {
-        const region = b.region || ''
-        if (!region) continue
-        if (b.crm_branch_id) regionMap[String(b.crm_branch_id)] = region
-        if (b.name) nameRegionMap[b.name.trim().toLowerCase()] = region
-        allRegionsSet.add(region)
-      }
-      const allRegions = Array.from(allRegionsSet).sort()
-
-      // All old-CRM queries in parallel
+      // Supabase branches + all old-CRM queries run in parallel
       const [
+        { data: sbBranches },
         [[walkinSummary]],
         [ornmentRows],
         [branches],
@@ -261,6 +252,7 @@ export async function GET(req) {
         [kycRows],
         [takeoverRows],
       ] = await Promise.all([
+        supabase.from('branches').select('crm_branch_id, name, region').not('region', 'is', null),
 
         // 1. Walk-in summary
         conn.execute(`
@@ -385,6 +377,19 @@ export async function GET(req) {
           ORDER BY t.time DESC
         `, [todayIST]).catch(() => [[]]),
       ])
+
+      // Build region maps from parallel-fetched Supabase data
+      const regionMap     = {}
+      const nameRegionMap = {}
+      const allRegionsSet = new Set()
+      for (const b of sbBranches || []) {
+        const region = b.region || ''
+        if (!region) continue
+        if (b.crm_branch_id) regionMap[String(b.crm_branch_id)] = region
+        if (b.name) nameRegionMap[b.name.trim().toLowerCase()] = region
+        allRegionsSet.add(region)
+      }
+      const allRegions = Array.from(allRegionsSet).sort()
 
       // Attach region from Supabase to MySQL rows
       for (const b  of branches)     b.region  = regionMap[String(b.branch_id)]  || ''
@@ -523,7 +528,7 @@ export async function GET(req) {
           username: process.env.NEW_CRM_DB_USER,
           password: process.env.NEW_CRM_DB_PASSWORD,
           ssl:      sslOptions,
-          connect_timeout: 8,
+          connect_timeout: 3,
           max:      1,
         })
 
@@ -629,6 +634,6 @@ export async function GET(req) {
     console.error('CRM purchases error:', err)
     return Response.json({ error: err.message }, { status: 500 })
   } finally {
-    if (conn) await conn.end()
+    if (conn) conn.release()
   }
 }
