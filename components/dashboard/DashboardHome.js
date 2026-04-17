@@ -96,7 +96,7 @@ const EmptyPanel = ({ t }) => (
 )
 
 // ── Module summary card ────────────────────────────────────────────────────────
-function ModuleCard({ icon, label, color, metrics, cta, onClick, loading, t, delay = 0 }) {
+function ModuleCard({ icon, label, color, metrics, cta, onClick, loading, t, delay = 0, compact = false }) {
   const [vis, setVis] = useState(false)
   const [hov, setHov] = useState(false)
   useEffect(() => { const id = setTimeout(() => setVis(true), delay); return () => clearTimeout(id) }, [delay])
@@ -108,7 +108,7 @@ function ModuleCard({ icon, label, color, metrics, cta, onClick, loading, t, del
       style={{
         background: `linear-gradient(145deg,${t.card},${t.card2})`,
         border: `1px solid ${hov ? color + '60' : t.border}`,
-        borderRadius: 16, padding: '18px 20px', cursor: 'pointer',
+        borderRadius: compact ? 12 : 16, padding: compact ? '14px 14px' : '18px 20px', cursor: 'pointer',
         position: 'relative', overflow: 'hidden',
         boxShadow: hov ? `0 4px 20px ${color}20, inset 0 1px 0 rgba(255,255,255,.04)` : '0 2px 8px rgba(0,0,0,.3), inset 0 1px 0 rgba(255,255,255,.03)',
         transform: hov ? 'translateY(-2px)' : vis ? 'translateY(0)' : 'translateY(12px)',
@@ -118,27 +118,27 @@ function ModuleCard({ icon, label, color, metrics, cta, onClick, loading, t, del
       <div style={{ position: 'absolute', top: -24, right: -24, width: 80, height: 80, borderRadius: '50%', background: `radial-gradient(circle,${color}${hov ? '18' : '08'} 0%,transparent 70%)`, pointerEvents: 'none', transition: 'all .3s' }} />
       <div style={{ position: 'absolute', top: 0, left: 16, right: 16, height: 1, background: `linear-gradient(90deg,transparent,${color}60,transparent)` }} />
       {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
-        <div style={{ width: 32, height: 32, borderRadius: 9, background: `${color}18`, border: `1px solid ${color}30`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1rem', flexShrink: 0 }}>{icon}</div>
-        <div style={{ fontSize: 12, color: t.text3, letterSpacing: '.08em', textTransform: 'uppercase', fontWeight: 600, flex: 1 }}>{label}</div>
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={hov ? color : t.text4} strokeWidth="2" strokeLinecap="round" style={{ transition: 'stroke .2s', transform: hov ? 'translateX(2px)' : 'none' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: compact ? 10 : 14 }}>
+        <div style={{ width: compact ? 26 : 32, height: compact ? 26 : 32, borderRadius: 8, background: `${color}18`, border: `1px solid ${color}30`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: compact ? '.85rem' : '1rem', flexShrink: 0 }}>{icon}</div>
+        <div style={{ fontSize: compact ? 11 : 12, color: t.text3, letterSpacing: '.06em', textTransform: 'uppercase', fontWeight: 600, flex: 1, lineHeight: 1.2 }}>{label}</div>
+        {!compact && <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={hov ? color : t.text4} strokeWidth="2" strokeLinecap="round" style={{ transition: 'stroke .2s', transform: hov ? 'translateX(2px)' : 'none' }}>
           <path d="M5 12h14M12 5l7 7-7 7" />
-        </svg>
+        </svg>}
       </div>
       {/* Metrics */}
-      <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+      <div style={{ display: 'flex', gap: compact ? 10 : 16, flexWrap: 'wrap' }}>
         {metrics.map((m, i) => (
-          <div key={i} style={{ minWidth: 64 }}>
+          <div key={i} style={{ minWidth: compact ? 48 : 64 }}>
             {loading
-              ? <div style={{ height: 22, width: 56, background: `linear-gradient(90deg,${t.border},${t.border2},${t.border})`, backgroundSize: '200% 100%', borderRadius: 6, animation: 'shimmer 1.5s infinite' }} />
-              : <div style={{ fontSize: 20, fontWeight: 200, color, letterSpacing: '-.01em', lineHeight: 1, fontVariantNumeric: 'tabular-nums' }}>{m.value ?? '—'}</div>
+              ? <div style={{ height: compact ? 18 : 22, width: compact ? 44 : 56, background: `linear-gradient(90deg,${t.border},${t.border2},${t.border})`, backgroundSize: '200% 100%', borderRadius: 6, animation: 'shimmer 1.5s infinite' }} />
+              : <div style={{ fontSize: compact ? 17 : 20, fontWeight: 200, color, letterSpacing: '-.01em', lineHeight: 1, fontVariantNumeric: 'tabular-nums' }}>{m.value ?? '—'}</div>
             }
-            <div style={{ fontSize: 11, color: t.text4, marginTop: 4, lineHeight: 1.3 }}>{m.label}</div>
+            <div style={{ fontSize: compact ? 10 : 11, color: t.text4, marginTop: 3, lineHeight: 1.3 }}>{m.label}</div>
           </div>
         ))}
       </div>
       {/* CTA */}
-      {cta && (
+      {cta && !compact && (
         <div style={{ marginTop: 14, fontSize: 12, color: hov ? color : t.text4, fontWeight: hov ? 600 : 400, transition: 'all .2s', letterSpacing: '.02em' }}>
           {cta} →
         </div>
@@ -428,7 +428,7 @@ export default function DashboardHome() {
                   metrics={card.metrics} cta={card.cta}
                   onClick={() => setActiveNav(card.id)}
                   loading={hubLoading}
-                  t={t} delay={i * 60}
+                  t={t} delay={i * 60} compact={isMobile}
                 />
               ))}
             </div>
@@ -450,16 +450,15 @@ export default function DashboardHome() {
             <div style={{ fontSize:14, color:t.text2, letterSpacing:'.12em', textTransform:'uppercase', fontWeight:700 }}>Purchase Overview</div>
           </div>
 
-          {overviewOpen && <>
-            {/* Period tabs — stop click from toggling collapse */}
-            {showPeriodSelector && <div onClick={e=>e.stopPropagation()} style={{ display:'flex', gap:3, padding:4, background:t.card, borderRadius:10, border:`1px solid ${t.border}`, boxShadow:'inset 0 1px 3px rgba(0,0,0,.3)', overflowX:'auto', scrollbarWidth:'none', maxWidth: isMobile ? '100%' : 'none', flexShrink: isMobile ? 1 : 0 }}>
+          {overviewOpen && !isMobile && <>
+            {/* Period tabs — desktop only in header */}
+            {showPeriodSelector && <div onClick={e=>e.stopPropagation()} style={{ display:'flex', gap:3, padding:4, background:t.card, borderRadius:10, border:`1px solid ${t.border}`, boxShadow:'inset 0 1px 3px rgba(0,0,0,.3)' }}>
               {PERIODS.map(({ key, label }) => (
                 <button key={key} onClick={()=>setPeriod(key)} style={{ padding:'6px 14px', borderRadius:7, border:'none', cursor:'pointer', background:period===key?`linear-gradient(135deg,${t.gold},${t.gold}cc)`:'transparent', color:period===key?'#0a0a0a':t.text3, fontSize:12, fontWeight:period===key?700:500, letterSpacing:'.03em', transition:'all .2s cubic-bezier(.34,1.56,.64,1)', boxShadow:period===key?`0 2px 8px ${t.gold}40`:'none', whiteSpace:'nowrap' }}>
                   {label}
                 </button>
               ))}
             </div>}
-
             {showPeriodSelector && <div style={{ fontSize:12, color:t.text3, fontStyle:'italic' }}>{!loading && dateLabel}</div>}
           </>}
 
@@ -472,6 +471,17 @@ export default function DashboardHome() {
         {/* ── Collapsible body ── */}
         <div className={`overview-body${overviewOpen ? '' : ' collapsed'}`}>
           <div style={{ padding: overviewOpen ? (isMobile ? '16px 14px 20px' : '24px 24px 28px') : '0' }}>
+
+            {/* Period selector — mobile only, own scrollable row */}
+            {isMobile && showPeriodSelector && overviewOpen && (
+              <div onClick={e=>e.stopPropagation()} style={{ display:'flex', gap:3, padding:4, background:t.card, borderRadius:10, border:`1px solid ${t.border}`, boxShadow:'inset 0 1px 3px rgba(0,0,0,.3)', overflowX:'auto', scrollbarWidth:'none', marginBottom:14, WebkitOverflowScrolling:'touch' }}>
+                {PERIODS.map(({ key, label }) => (
+                  <button key={key} onClick={()=>setPeriod(key)} style={{ padding:'6px 12px', borderRadius:7, border:'none', cursor:'pointer', background:period===key?`linear-gradient(135deg,${t.gold},${t.gold}cc)`:'transparent', color:period===key?'#0a0a0a':t.text3, fontSize:12, fontWeight:period===key?700:500, letterSpacing:'.03em', transition:'all .2s cubic-bezier(.34,1.56,.64,1)', boxShadow:period===key?`0 2px 8px ${t.gold}40`:'none', whiteSpace:'nowrap', flexShrink:0 }}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+            )}
 
             {/* KPI Rows — gated by element.dashboard.kpi_cards */}
             {showKpiCards && <>
