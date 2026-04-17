@@ -28,6 +28,7 @@ export default function UserManagement() {
   const [users,      setUsers]      = useState([])
   const [loading,    setLoading]    = useState(false)
   const [savingId,   setSavingId]   = useState(null)
+  const [confirmDelete, setConfirmDelete] = useState(null) // { id, name }
 
   // Invite form
   const [showInvite, setShowInvite] = useState(false)
@@ -101,6 +102,25 @@ export default function UserManagement() {
     setSavingId(id)
     await supabase.from('user_profiles').update({ role }).eq('id', id)
     await load()
+    setSavingId(null)
+  }
+
+  // ── DELETE USER ──────────────────────────────────────────
+  const deleteUser = async (id) => {
+    setSavingId(id)
+    setConfirmDelete(null)
+    try {
+      const res = await fetch('/api/delete-user', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: id }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error)
+      await load()
+    } catch (err) {
+      alert(err.message)
+    }
     setSavingId(null)
   }
 
@@ -293,7 +313,7 @@ export default function UserManagement() {
         <div style={{ borderRadius: '12px', border: `1px solid ${t.border}`, overflow: 'hidden' }}>
 
           {/* Header row */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1.8fr 1fr 0.7fr 0.9fr', background: t.card }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1.8fr 1fr 0.7fr 1.4fr', background: t.card }}>
             {['Name', 'Email', 'Role', 'Status', 'Action'].map(h => (
               <div key={h} style={{ padding: '10px 16px', fontSize: '.58rem', color: t.text3, letterSpacing: '.1em', textTransform: 'uppercase', borderBottom: `1px solid ${t.border}` }}>
                 {h}
@@ -313,7 +333,7 @@ export default function UserManagement() {
             return (
               <div
                 key={u.id}
-                style={{ display: 'grid', gridTemplateColumns: '1.4fr 1.8fr 1fr 0.7fr 0.9fr', alignItems: 'center', borderBottom: last ? 'none' : `1px solid ${t.border}20`, transition: 'background .15s' }}
+                style={{ display: 'grid', gridTemplateColumns: '1.4fr 1.8fr 1fr 0.7fr 1.4fr', alignItems: 'center', borderBottom: last ? 'none' : `1px solid ${t.border}20`, transition: 'background .15s' }}
                 onMouseEnter={e => e.currentTarget.style.background = `${t.gold}06`}
                 onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
 
@@ -363,8 +383,8 @@ export default function UserManagement() {
                 </div>
 
                 {/* Action */}
-                <div style={{ padding: '13px 16px' }}>
-                  {canDo('edit') && (
+                <div style={{ padding: '13px 16px', display: 'flex', gap: '8px', alignItems: 'center' }}>
+                  {canDo('edit') && (<>
                     <button
                       disabled={busy}
                       onClick={() => toggleActive(u.id, active)}
@@ -382,12 +402,50 @@ export default function UserManagement() {
                       }}>
                       {busy ? '…' : active ? 'Deactivate' : 'Activate'}
                     </button>
-                  )}
+                    <button
+                      disabled={busy}
+                      onClick={() => setConfirmDelete({ id: u.id, name: u.full_name || u.email })}
+                      style={{
+                        background: 'transparent',
+                        border: `1px solid ${t.red}40`,
+                        color: t.red,
+                        borderRadius: '6px',
+                        padding: '4px 10px',
+                        fontSize: '.62rem',
+                        cursor: busy ? 'not-allowed' : 'pointer',
+                        opacity: busy ? .5 : 1,
+                        transition: 'all .15s',
+                      }}>
+                      🗑
+                    </button>
+                  </>)}
                 </div>
 
               </div>
             )
           })}
+        </div>
+      )}
+
+      {/* ── Delete Confirmation Modal ── */}
+      {confirmDelete && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ background: t.card, border: `1px solid ${t.red}40`, borderRadius: '14px', padding: '28px 32px', maxWidth: '400px', width: '90%' }}>
+            <div style={{ fontSize: '1rem', fontWeight: 600, color: t.text1, marginBottom: '8px' }}>Delete User?</div>
+            <div style={{ fontSize: '.75rem', color: t.text3, lineHeight: 1.6, marginBottom: '20px' }}>
+              This will permanently delete <strong style={{ color: t.text1 }}>{confirmDelete.name}</strong> from both GoldApp and Supabase Auth. They will lose all access immediately and cannot be recovered.
+            </div>
+            <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+              <button onClick={() => setConfirmDelete(null)}
+                style={{ background: 'transparent', border: `1px solid ${t.border2}`, borderRadius: '7px', padding: '7px 18px', fontSize: '.72rem', color: t.text3, cursor: 'pointer' }}>
+                Cancel
+              </button>
+              <button onClick={() => deleteUser(confirmDelete.id)}
+                style={{ background: t.red, border: 'none', borderRadius: '7px', padding: '7px 18px', fontSize: '.72rem', color: '#fff', fontWeight: 700, cursor: 'pointer' }}>
+                Yes, Delete
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
