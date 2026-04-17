@@ -29,11 +29,73 @@ function fp(b) {
 
 export async function GET(request) { return POST(request) }
 
-// POST: run the cleanup (accepts ?days=90&dry_run=true)
+// POST: run the cleanup (accepts ?days=90&dry_run=true or ?reconcile_date=2026-04-16&dry_run=true)
 export async function POST(request) {
   const url     = new URL(request.url)
   const days    = parseInt(url.searchParams.get('days') || '90')
   const dryRun  = url.searchParams.get('dry_run') === 'true'
+  const reconcileDate = url.searchParams.get('reconcile_date') || null
+
+  // ── RECONCILE MODE: exact date — mark ALL Supabase bills missing from CRM ──
+  if (reconcileDate) {
+    let conn
+    try {
+      conn = await mysql.createConnection({
+        host:     process.env.CRM_DB_HOST,
+        port:     parseInt(process.env.CRM_DB_PORT || '3306'),
+        database: process.env.CRM_DB_NAME,
+        user:     process.env.CRM_DB_USER,
+        password: process.env.CRM_DB_PASSWORD,
+      })
+
+      const [rows] = await conn.execute(
+        `SELECT bill_no FROM transac_tbl WHERE trxn_status = 'approved' AND DATE(date) = ?`,
+        [reconcileDate]
+      )
+      const crmIds = new Set(rows.map(r => normalizeAppId(r.bill_no)))
+
+      // Fetch all Supabase approved bills for that date
+      const { data: supaRows } = await supabaseAdmin
+        .from('purchases')
+        .select('application_id')
+        .eq('crm_source', 'old_crm')
+        .eq('crm_status', 'approved')
+        .eq('is_deleted', false)
+        .eq('purchase_date', reconcileDate)
+
+      const missing = (supaRows || [])
+        .map(b => b.application_id)
+        .filter(id => !crmIds.has(id))
+
+      if (!dryRun && missing.length > 0) {
+        await supabaseAdmin
+          .from('purchases')
+          .update({ is_deleted: true })
+          .in('application_id', missing)
+          .eq('crm_source', 'old_crm')
+      }
+
+      return Response.json({
+        success: true,
+        dry_run: dryRun,
+        mode: 'reconcile_date',
+        date: reconcileDate,
+        crm_approved: crmIds.size,
+        supabase_approved: (supaRows || []).length,
+        missing_from_crm: missing.length,
+        marked_deleted: dryRun ? 0 : missing.length,
+        missing_ids: missing,
+        message: dryRun
+          ? `DRY RUN: ${missing.length} Supabase bills not in CRM for ${reconcileDate}`
+          : `Marked ${missing.length} bills as deleted for ${reconcileDate}`,
+      })
+    } catch (err) {
+      return Response.json({ success: false, error: err.message }, { status: 500 })
+    } finally {
+      if (conn) await conn.end()
+    }
+  }
+
   const cutoff  = new Date(Date.now() - days * 86400000).toISOString().split('T')[0]
 
   let conn
