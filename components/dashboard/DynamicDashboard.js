@@ -122,7 +122,7 @@ function PurchaseInline({ t, setActiveNav, canSee }) {
   const showTopBranches    = canSee('element.dashboard.top_branches')
   const showRegionCards    = canSee('element.dashboard.region_cards')
   const showChart          = canSee('element.reports.charts')
-  const visiblePanels      = [showStateTable, showRegionCards, showTopBranches].filter(Boolean).length
+  const visiblePanels      = [showStateTable, showTopBranches].filter(Boolean).length
 
   const isMobile = useMobile()
   const [period,       setPeriod]       = useState('mtd')
@@ -218,16 +218,20 @@ function PurchaseInline({ t, setActiveNav, canSee }) {
               </button>
             ))}
           </div>
-          {(!loading && dateLabel || openTarget) && (
-            <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:10 }}>
+          <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:10, flexWrap:'wrap' }}>
+            <div style={{ display:'flex', alignItems:'center', gap:12, flexWrap:'wrap' }}>
               {!loading && dateLabel && <div style={{ fontSize:11, color:t.text3, fontStyle:'italic' }}>{dateLabel}</div>}
-              {openTarget && (
-                <button onClick={()=>setActiveNav(openTarget)} style={{ padding:'6px 14px', borderRadius:9, background:`${t.gold}15`, border:`1px solid ${t.gold}35`, color:t.gold, fontSize:11, fontWeight:600, cursor:'pointer', marginLeft:'auto' }}>
-                  {canSeeData ? 'Purchase Data' : 'Reports'} →
-                </button>
-              )}
+              {totalBranches > 0 && <div style={{ fontSize:11, color:t.text4, display:'flex', alignItems:'center', gap:5 }}>
+                <span style={{ width:6, height:6, borderRadius:'50%', background:t.green, display:'inline-block', boxShadow:`0 0 5px ${t.green}80` }}/>
+                {totalBranches} active branches · {Object.keys(regionCounts).length} regions
+              </div>}
             </div>
-          )}
+            {openTarget && (
+              <button onClick={()=>setActiveNav(openTarget)} style={{ padding:'6px 14px', borderRadius:9, background:`${t.gold}15`, border:`1px solid ${t.gold}35`, color:t.gold, fontSize:11, fontWeight:600, cursor:'pointer', marginLeft:'auto' }}>
+                {canSeeData ? 'Purchase Data' : 'Reports'} →
+              </button>
+            )}
+          </div>
         </div>
       )}
 
@@ -393,38 +397,6 @@ function PurchaseInline({ t, setActiveNav, canSee }) {
                         bar={Number(s.total_net||0)} barMax={maxStateNet}/>
                     ))
               }
-            </div>
-          )}
-
-          {showRegionCards && (
-            <div style={panel}>
-              <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16 }}>
-                <div style={panelTitle}>Active Branches</div>
-                <div style={panelMeta}>Count</div>
-              </div>
-              {loading
-                ? [0,1,2,3].map(i=><div key={i} style={{ height:30, background:`linear-gradient(90deg,${t.border},${t.border2},${t.border})`, backgroundSize:'200% 100%', borderRadius:6, marginBottom:6, animation:'shimmer 1.5s infinite' }}/>)
-                : Object.entries(regionCounts).map(([region,count]) => {
-                    const color = regionColorMap[region]||t.text2
-                    const pct   = totalBranches>0?(count/totalBranches)*100:0
-                    return (
-                      <div key={region} style={{ display:'flex', alignItems:'center', gap:10, padding:'10px 0', borderBottom:`1px solid ${t.border}25` }}>
-                        <div style={{ width:9, height:9, borderRadius:'50%', background:color, boxShadow:`0 0 7px ${color}90`, flexShrink:0 }}/>
-                        <div style={{ flex:1, fontSize:13, color:t.text2, fontWeight:500 }}>{region}</div>
-                        <div style={{ width:52, height:4, background:t.border2, borderRadius:2, overflow:'hidden' }}>
-                          <div style={{ width:`${pct}%`, height:'100%', background:`linear-gradient(90deg,${color}80,${color})`, borderRadius:2 }}/>
-                        </div>
-                        <div style={{ fontSize:14, fontWeight:700, color, minWidth:24, textAlign:'right' }}>{count}</div>
-                      </div>
-                    )
-                  })
-              }
-              {!loading && (
-                <div style={{ marginTop:12, paddingTop:12, borderTop:`1px solid ${t.border}`, display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-                  <div style={{ fontSize:12, color:t.text4, letterSpacing:'.1em', textTransform:'uppercase' }}>Total</div>
-                  <div style={{ fontSize:22, fontWeight:200, color:t.blue }}>{totalBranches}</div>
-                </div>
-              )}
             </div>
           )}
 
