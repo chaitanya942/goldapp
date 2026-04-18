@@ -5,6 +5,16 @@ import { createPortal } from 'react-dom'
 import { fmt, fmtVal, getStyles } from './reportUtils'
 import { supabase } from '../../../lib/supabase'
 
+function useMobile() {
+  const [m, setM] = useState(false)
+  useEffect(() => {
+    const check = () => setM(window.innerWidth < 768)
+    check(); window.addEventListener('resize', check)
+    return () => window.removeEventListener('resize', check)
+  }, [])
+  return m
+}
+
 // ─────────────────────────────────────────────
 // EXPAND PANEL — portal-based so fixed positioning works correctly
 // ─────────────────────────────────────────────
@@ -548,6 +558,7 @@ function SectionTitle({ title, t, badge, noMargin }) {
 // MAIN
 // ─────────────────────────────────────────────
 export default function ReportBranches({ branchData, allBranchMeta, stateData, topBills, t, fromDate, toDate, filterTxn }) {
+  const isMobile = useMobile()
   const [topMetric,        setTopMetric]        = useState('total_net')
   const [branchSort,       setBranchSort]        = useState('total_net')
   const [treemetric,       setTreeMetric]        = useState('total_net')
@@ -662,7 +673,7 @@ export default function ReportBranches({ branchData, allBranchMeta, stateData, t
     <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
 
       {/* ── ROW 1: DONUT + TOP 10 BILLS ── */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '16px' }}>
 
         <Panel {...P('region-donut')}>
           <SectionTitle title="Region-wise Net Weight Split" t={t} />
@@ -793,9 +804,9 @@ export default function ReportBranches({ branchData, allBranchMeta, stateData, t
                       }}>{i + 1}</div>
 
                       {/* Branch name + sub */}
-                      <div style={{ width: '150px', flexShrink: 0 }}>
+                      <div style={{ width: isMobile ? '110px' : '150px', flexShrink: 0 }}>
                         <div style={{ fontSize: '.72rem', color: t.text1, fontWeight: isTop3 ? 600 : 400, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.branch_name}</div>
-                        <div style={{ fontSize: '.55rem', color: t.text4, marginTop: '1px' }}>{b.region || b.state || '—'} · {subVal}</div>
+                        <div style={{ fontSize: '.55rem', color: t.text4, marginTop: '1px' }}>{isMobile ? subVal : `${b.region || b.state || '—'} · ${subVal}`}</div>
                       </div>
 
                       {/* Bar track */}
@@ -829,11 +840,13 @@ export default function ReportBranches({ branchData, allBranchMeta, stateData, t
         <BranchHeatmap branchData={branchData} allBranchMeta={allBranchMeta} metric={treemetric} t={t} fromDate={fromDate} toDate={toDate} filterTxn={filterTxn} />
       </Panel>
 
-      {/* ── SCATTER ── */}
-      <Panel {...P('scatter')}>
-        <SectionTitle title="Branch Performance — Net Weight vs Avg Purity" t={t} badge="bubble = txn count" />
-        <ScatterChart branchData={branchData} t={t} fromDate={fromDate} toDate={toDate} filterTxn={filterTxn} />
-      </Panel>
+      {/* ── SCATTER — desktop only (fixed-width SVG) ── */}
+      {!isMobile && (
+        <Panel {...P('scatter')}>
+          <SectionTitle title="Branch Performance — Net Weight vs Avg Purity" t={t} badge="bubble = txn count" />
+          <ScatterChart branchData={branchData} t={t} fromDate={fromDate} toDate={toDate} filterTxn={filterTxn} />
+        </Panel>
+      )}
 
       {/* ── DRILLDOWN ── */}
       <Panel {...P('drilldown')}>

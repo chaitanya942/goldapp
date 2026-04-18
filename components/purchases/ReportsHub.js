@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useApp } from '../../lib/context'
 import PurchaseReports      from './reports/PurchaseReports'
 import PurchaseIntelligence from './intelligence/PurchaseIntelligence'
@@ -19,6 +19,12 @@ export default function ReportsHub() {
   const { theme, canSee } = useApp()
   const t = THEMES[theme] || THEMES.dark
   const [activeTab, setActiveTab] = useState('analytics')
+  const [isMobile, setIsMobile] = useState(false)
+  useEffect(() => {
+    const check = () => setIsMobile(window.innerWidth < 768)
+    check(); window.addEventListener('resize', check)
+    return () => window.removeEventListener('resize', check)
+  }, [])
 
   const visibleTabs = TABS.filter(tab => canSee(`tab.purchase-reports.${tab.id}`))
   const active = visibleTabs.some(t => t.id === activeTab) ? activeTab : (visibleTabs[0]?.id ?? 'analytics')
@@ -28,8 +34,8 @@ export default function ReportsHub() {
       {/* TAB BAR */}
       <div style={{
         background: t.card, borderBottom: `1px solid ${t.border}`,
-        padding: '0 32px', display: 'flex', overflowX: 'auto',
-        position: 'sticky', top: 0, zIndex: 50,
+        padding: isMobile ? '0 8px' : '0 32px', display: 'flex', overflowX: 'auto',
+        scrollbarWidth: 'none', position: 'sticky', top: 0, zIndex: 50,
       }}>
         {visibleTabs.map(tab => {
           const isActive = active === tab.id
@@ -38,16 +44,16 @@ export default function ReportsHub() {
             <button key={tab.id} onClick={() => setActiveTab(tab.id)} style={{
               background: 'transparent', border: 'none',
               borderBottom: isActive ? `2px solid ${accent}` : '2px solid transparent',
-              padding: '14px 24px', cursor: 'pointer',
+              padding: isMobile ? '12px 14px' : '14px 24px', cursor: 'pointer',
               display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '2px',
               color: isActive ? accent : t.text3,
-              transition: 'all .15s',
+              transition: 'all .15s', flexShrink: 0,
             }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '7px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                 <span style={{ fontSize: '.75rem' }}>{tab.icon}</span>
                 <span style={{ fontSize: '.72rem', fontWeight: isActive ? 500 : 400, letterSpacing: '.03em' }}>{tab.label}</span>
               </div>
-              <span style={{ fontSize: '.58rem', color: t.text3, opacity: .7 }}>{tab.desc}</span>
+              {!isMobile && <span style={{ fontSize: '.58rem', color: t.text3, opacity: .7 }}>{tab.desc}</span>}
             </button>
           )
         })}

@@ -228,6 +228,13 @@ export default function PurchaseReports() {
   const [selectedKpi,   setSelectedKpi]   = useState(null)
   const [hourlyTrend,   setHourlyTrend]   = useState([])
   const [error,         setError]         = useState(null)
+  const [isMobile,      setIsMobile]      = useState(false)
+
+  useEffect(() => {
+    const check = () => setIsMobile(window.innerWidth < 768)
+    check(); window.addEventListener('resize', check)
+    return () => window.removeEventListener('resize', check)
+  }, [])
 
   useEffect(() => {
     supabase.from('branches').select('name, region').order('name').then(({ data }) => {
@@ -378,12 +385,12 @@ export default function PurchaseReports() {
     cursor: 'pointer', transition: 'all .15s',
   }
 
-  const gridRow4 = { display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px', marginBottom: '12px', alignItems: 'stretch' }
-  const gridRow5 = { display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '12px', marginBottom: '12px', alignItems: 'stretch' }
-  const gridRow5b = { display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '12px', marginBottom: '28px', alignItems: 'stretch' }
+  const gridRow4  = { display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(4, 1fr)', gap: '10px', marginBottom: '10px', alignItems: 'stretch' }
+  const gridRow5  = { display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(5, 1fr)', gap: '10px', marginBottom: '10px', alignItems: 'stretch' }
+  const gridRow5b = { display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(5, 1fr)', gap: '10px', marginBottom: isMobile ? '16px' : '28px', alignItems: 'stretch' }
 
   return (
-    <div style={{ padding: '28px 32px', maxWidth: '100%', ...cssVars }}>
+    <div style={{ padding: isMobile ? '14px 12px' : '28px 32px', maxWidth: '100%', ...cssVars }}>
       <style>{`
         @keyframes shimmer { 0%{opacity:.4} 50%{opacity:.8} 100%{opacity:.4} }
         .pr-pill:hover { border-color: var(--gold) !important; color: var(--gold) !important; }
@@ -391,11 +398,11 @@ export default function PurchaseReports() {
       `}</style>
 
       {/* PAGE HEADER */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '24px' }}>
+      <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', justifyContent: 'space-between', alignItems: isMobile ? 'flex-start' : 'flex-end', gap: '12px', marginBottom: isMobile ? '14px' : '24px' }}>
         <div>
-          <div style={{ fontSize: '.58rem', color: t.text4, letterSpacing: '.2em', textTransform: 'uppercase', marginBottom: '6px' }}>Analytics</div>
-          <div style={{ fontSize: '1.7rem', fontWeight: 200, color: t.text1, letterSpacing: '.02em', lineHeight: 1 }}>Purchase Reports</div>
-          <div style={{ fontSize: '.7rem', color: t.text3, marginTop: '6px' }}>
+          {!isMobile && <div style={{ fontSize: '.58rem', color: t.text4, letterSpacing: '.2em', textTransform: 'uppercase', marginBottom: '6px' }}>Analytics</div>}
+          <div style={{ fontSize: isMobile ? '1.2rem' : '1.7rem', fontWeight: 200, color: t.text1, letterSpacing: '.02em', lineHeight: 1 }}>Purchase Reports</div>
+          <div style={{ fontSize: '.65rem', color: t.text3, marginTop: '5px' }}>
             {k?.min_date ? `${fmtDate(k.min_date)} — ${fmtDate(k.max_date)}` : 'All time data'}
           </div>
         </div>
@@ -415,24 +422,25 @@ export default function PurchaseReports() {
       </div>
 
       {/* FILTER BAR */}
-      <div style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: '14px', padding: '16px 20px', marginBottom: '24px', boxShadow: t.shadow }}>
+      <div style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: '14px', padding: isMobile ? '12px 14px' : '16px 20px', marginBottom: isMobile ? '14px' : '24px', boxShadow: t.shadow }}>
+        {/* Quick range pills — horizontal scroll on mobile */}
+        <div style={{ display: 'flex', gap: '5px', overflowX: 'auto', scrollbarWidth: 'none', marginBottom: '10px', paddingBottom: '2px' }}>
+          {[
+            ['Today',      setToday],
+            ['Yesterday',  setYesterday],
+            ['7D',         () => setQuickRange(7)],
+            ['30D',        () => setQuickRange(30)],
+            ['90D',        () => setQuickRange(90)],
+            ['This Month', setThisMonth],
+          ].map(([lbl, fn]) => (
+            <button key={lbl} onClick={fn} className="pr-pill"
+              style={{ padding: '5px 12px', borderRadius: '100px', border: `1px solid ${t.border}`, background: 'transparent', color: t.text3, fontSize: '.63rem', cursor: 'pointer', transition: 'all .15s', letterSpacing: '.04em', flexShrink: 0 }}>
+              {lbl}
+            </button>
+          ))}
+        </div>
+        {/* Date + select controls */}
         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
-          <div style={{ display: 'flex', gap: '5px', marginRight: '4px' }}>
-            {[
-              ['Today',      setToday],
-              ['Yesterday',  setYesterday],
-              ['7D',         () => setQuickRange(7)],
-              ['30D',        () => setQuickRange(30)],
-              ['90D',        () => setQuickRange(90)],
-              ['This Month', setThisMonth],
-            ].map(([lbl, fn]) => (
-              <button key={lbl} onClick={fn} className="pr-pill"
-                style={{ padding: '5px 12px', borderRadius: '100px', border: `1px solid ${t.border}`, background: 'transparent', color: t.text3, fontSize: '.63rem', cursor: 'pointer', transition: 'all .15s', letterSpacing: '.04em' }}>
-                {lbl}
-              </button>
-            ))}
-          </div>
-          <div style={{ width: '1px', height: '24px', background: t.border, margin: '0 4px' }} />
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
             <span style={{ fontSize: '.6rem', color: t.text4 }}>From</span>
             <input type="date" style={inp} value={fromDate} onChange={e => setFromDate(e.target.value)} />
@@ -441,7 +449,6 @@ export default function PurchaseReports() {
             <span style={{ fontSize: '.6rem', color: t.text4 }}>To</span>
             <input type="date" style={inp} value={toDate} onChange={e => setToDate(e.target.value)} />
           </div>
-          <div style={{ width: '1px', height: '24px', background: t.border, margin: '0 4px' }} />
           <select style={inp} value={filterRegion} onChange={e => setFilterRegion(e.target.value)}>
             <option value="">All Regions</option>
             {regions.map(r => <option key={r} value={r}>{r}</option>)}
@@ -526,10 +533,10 @@ export default function PurchaseReports() {
       </div>
 
       {/* SECTION NAV */}
-      <div style={{ display: 'flex', gap: '6px', marginBottom: '24px', padding: '5px', background: t.card, borderRadius: '12px', border: `1px solid ${t.border}`, width: 'fit-content', boxShadow: '0 1px 3px rgba(0,0,0,.3)' }}>
+      <div style={{ display: 'flex', gap: '4px', marginBottom: isMobile ? '14px' : '24px', padding: '5px', background: t.card, borderRadius: '12px', border: `1px solid ${t.border}`, width: isMobile ? '100%' : 'fit-content', overflowX: 'auto', scrollbarWidth: 'none', boxShadow: '0 1px 3px rgba(0,0,0,.3)' }}>
         <button
           onClick={() => setActiveSection(null)}
-          style={{ padding: '7px 18px', borderRadius: '8px', border: 'none', cursor: 'pointer', background: !activeSection ? t.gold : 'transparent', color: !activeSection ? '#0a0a0a' : t.text3, fontSize: '.68rem', fontWeight: !activeSection ? 600 : 400, letterSpacing: '.04em', transition: 'all .2s ease' }}
+          style={{ padding: isMobile ? '6px 12px' : '7px 18px', borderRadius: '8px', border: 'none', cursor: 'pointer', background: !activeSection ? t.gold : 'transparent', color: !activeSection ? '#0a0a0a' : t.text3, fontSize: '.65rem', fontWeight: !activeSection ? 600 : 400, letterSpacing: '.03em', transition: 'all .2s ease', flexShrink: 0 }}
         >
           All
         </button>
@@ -537,9 +544,9 @@ export default function PurchaseReports() {
           <button
             key={sec.key}
             onClick={() => setActiveSection(activeSection === sec.key ? null : sec.key)}
-            style={{ padding: '7px 18px', borderRadius: '8px', border: 'none', cursor: 'pointer', background: activeSection === sec.key ? t.gold : 'transparent', color: activeSection === sec.key ? '#0a0a0a' : t.text3, fontSize: '.68rem', fontWeight: activeSection === sec.key ? 600 : 400, letterSpacing: '.04em', transition: 'all .2s ease', display: 'flex', alignItems: 'center', gap: '5px' }}
+            style={{ padding: isMobile ? '6px 12px' : '7px 18px', borderRadius: '8px', border: 'none', cursor: 'pointer', background: activeSection === sec.key ? t.gold : 'transparent', color: activeSection === sec.key ? '#0a0a0a' : t.text3, fontSize: '.65rem', fontWeight: activeSection === sec.key ? 600 : 400, letterSpacing: '.03em', transition: 'all .2s ease', display: 'flex', alignItems: 'center', gap: '4px', flexShrink: 0 }}
           >
-            <span style={{ fontSize: '.75rem' }}>{sec.icon}</span>{sec.label}
+            <span style={{ fontSize: '.72rem' }}>{sec.icon}</span>{sec.label}
           </button>
         ))}
       </div>

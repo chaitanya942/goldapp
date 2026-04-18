@@ -71,7 +71,14 @@ function BillTip({ active, payload, t }) {
 
 // ─── Main ──────────────────────────────────────────────────────────────────────
 export default function ReportCharts({ trend, monthly, dowData, hourlyTrend, isSingleDay, t, fromDate, filterBranch, filterTxn }) {
+  const [isMobile,     setIsMobile]     = useState(false)
   const [trendMetric,  setTrendMetric]  = useState('net_wt')
+
+  useEffect(() => {
+    const check = () => setIsMobile(window.innerWidth < 768)
+    check(); window.addEventListener('resize', check)
+    return () => window.removeEventListener('resize', check)
+  }, [])
   const [drillBranch,  setDrillBranch]  = useState(null)
   const [drillRegion,  setDrillRegion]  = useState(null)
   const [branches,     setBranches]     = useState([])
@@ -523,7 +530,7 @@ export default function ReportCharts({ trend, monthly, dowData, hourlyTrend, isS
       {dowData?.length > 0 && (
         <div style={s.card}>
           <div style={{ ...s.sTitle, marginBottom: '14px' }}>Day of Week Analysis</div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '16px' }}>
 
             <div>
               <div style={{ fontSize: '.58rem', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', marginBottom: '10px' }}>Net Weight</div>
