@@ -158,7 +158,8 @@ export default function LoginPage() {
       })
       const result = await verifyRes.json()
       if (!verifyRes.ok) throw new Error(result.error || 'Authentication failed')
-      await supabase.auth.setSession(result.session)
+      const { error: otpErr } = await supabase.auth.verifyOtp({ token_hash: result.token_hash, type: 'magiclink' })
+      if (otpErr) throw new Error(otpErr.message)
       window.location.href = '/dashboard'
     } catch (err) {
       setPasskeyError(err.message || 'Biometric login failed')

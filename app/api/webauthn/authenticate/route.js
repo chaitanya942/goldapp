@@ -56,22 +56,26 @@ export async function POST(request) {
       .update({ counter: authenticationInfo.newCounter })
       .eq('credential_id', authnResponse.id)
 
-    const { data: sessionData, error: sessionErr } = await adminSupabase.auth.admin.signInAsUser({
-      id: profile.id,
+    // Get user email for magic link generation
+    const { data: { user }, error: userErr } = await adminSupabase.auth.admin.getUserById(profile.id)
+    if (userErr || !user) return Response.json({ error: 'Failed to load user' }, { status: 500 })
+
+    // Generate a one-time magic link token — client will exchange it for a session via verifyOtp
+    const { data: linkData, error: linkErr } = await adminSupabase.auth.admin.generateLink({
+      type: 'magiclink',
+      email: user.email,
     })
 
-    if (sessionErr || !sessionData?.session) {
-      return Response.json({ error: 'Failed to create session' }, { status: 500 })
+    if (linkErr || !linkData?.properties?.hashed_token) {
+      return Response.json({ error: 'Failed to generate session token' }, { status: 500 })
     }
 
     cookieStore.delete('wg_webauthn_challenge')
 
     return Response.json({
       success: true,
-      session: {
-        access_token: sessionData.session.access_token,
-        refresh_token: sessionData.session.refresh_token,
-      },
+      token_hash: linkData.properties.hashed_token,
+      email: user.email,
     })
   } catch (err) {
     return Response.json({ error: err.message }, { status: 500 })
