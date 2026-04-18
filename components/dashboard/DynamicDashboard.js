@@ -135,6 +135,8 @@ function PurchaseInline({ t, setActiveNav, canSee }) {
   const [branchMeta,   setBranchMeta]   = useState([])
   const [regionCounts, setRegionCounts] = useState({})
   const [trend,        setTrend]        = useState([])
+  const [selectedRegion, setSelectedRegion] = useState(null)
+  const [selectedState,  setSelectedState]  = useState(null)
 
   // Branch meta (for region color mapping)
   useEffect(() => {
@@ -164,26 +166,64 @@ function PurchaseInline({ t, setActiveNav, canSee }) {
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Period-dependent data
-  useEffect(() => { fetchPeriod() }, [period]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { fetchPeriod() }, [period, selectedState, selectedRegion]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const fetchPeriod = async () => {
     setLoading(true)
     const { from, to } = getRange(period)
-    const p = { p_from:from, p_to:to, p_branch:null, p_txn_type:null, p_state:null }
-    const [all, states, branches] = await Promise.all([
-      supabase.rpc('get_report_kpis', p),
-      supabase.rpc('get_state_summary', { p_from:from, p_to:to, p_txn_type:null }),
-      supabase.rpc('get_branch_summary', { p_from:from, p_to:to, p_txn_type:null, p_state:null }),
-    ])
-    if (all.data)      setKpis(Array.isArray(all.data)?all.data[0]:all.data)
-    if (states.data)   setStateData(states.data||[])
-    if (branches.data) setTopBranches((branches.data||[]).sort((a,b)=>Number(b.total_net||0)-Number(a.total_net||0)).slice(0,7))
+
+    if (selectedRegion) {
+      const statesInRegion = [...new Set(branchMeta.filter(b => b.region === selectedRegion).map(b => b.state).filter(Boolean))]
+      const [stateResults, allStates, branches] = await Promise.all([
+        Promise.all(statesInRegion.map(s =>
+          supabase.rpc('get_report_kpis', { p_from:from, p_to:to, p_branch:null, p_txn_type:null, p_state:s })
+            .then(({data}) => Array.isArray(data) ? data[0] : data)
+        )),
+        supabase.rpc('get_state_summary', { p_from:from, p_to:to, p_txn_type:null }),
+        supabase.rpc('get_branch_summary', { p_from:from, p_to:to, p_txn_type:null, p_state:null }),
+      ])
+      const valid    = stateResults.filter(Boolean)
+      const totalNet = valid.reduce((s,r) => s + Number(r.total_net||0), 0)
+      const totalCnt = valid.reduce((s,r) => s + Number(r.total_count||0), 0)
+      setKpis({
+        total_count:            totalCnt,
+        total_net:              totalNet,
+        total_value:            valid.reduce((s,r) => s + Number(r.total_value||0), 0),
+        physical_count:         valid.reduce((s,r) => s + Number(r.physical_count||0), 0),
+        takeover_count:         valid.reduce((s,r) => s + Number(r.takeover_count||0), 0),
+        avg_rate_per_gram:      totalNet > 0 ? valid.reduce((s,r) => s + Number(r.total_value||0), 0) / totalNet : 0,
+        avg_purity:             totalNet > 0 ? valid.reduce((s,r) => s + Number(r.avg_purity||0)*Number(r.total_net||0), 0) / totalNet : 0,
+        avg_net_per_txn:        totalCnt > 0 ? totalNet / totalCnt : 0,
+        avg_service_charge_pct: totalNet > 0 ? valid.reduce((s,r) => s + Number(r.avg_service_charge_pct||0)*Number(r.total_net||0), 0) / totalNet : 0,
+        branch_count:           valid.filter(r => Number(r.total_count||0) > 0).length,
+      })
+      const statesInReg = statesInRegion
+      const filteredStates = (allStates.data||[]).filter(s => statesInReg.includes(s.state))
+      const branchNamesInRegion = branchMeta.filter(b => b.region === selectedRegion).map(b => b.name)
+      setStateData(filteredStates)
+      setTopBranches((branches.data||[]).filter(b => branchNamesInRegion.includes(b.branch)).sort((a,b)=>Number(b.total_net||0)-Number(a.total_net||0)).slice(0,7))
+    } else {
+      const p = { p_from:from, p_to:to, p_branch:null, p_txn_type:null, p_state: selectedState || null }
+      const [all, states, branches] = await Promise.all([
+        supabase.rpc('get_report_kpis', p),
+        supabase.rpc('get_state_summary', { p_from:from, p_to:to, p_txn_type:null }),
+        supabase.rpc('get_branch_summary', { p_from:from, p_to:to, p_txn_type:null, p_state: selectedState || null }),
+      ])
+      if (all.data) setKpis(Array.isArray(all.data)?all.data[0]:all.data)
+      const allStateRows = states.data || []
+      setStateData(selectedState ? allStateRows.filter(s => s.state === selectedState) : allStateRows)
+      if (branches.data) setTopBranches((branches.data||[]).sort((a,b)=>Number(b.total_net||0)-Number(a.total_net||0)).slice(0,7))
+    }
     setLoading(false)
   }
 
   // Derived
   const branchRegionMap = {}
   branchMeta.forEach(b => { if (b.name&&b.region) branchRegionMap[b.name]=b.region })
+  const availableRegions = [...new Set(branchMeta.map(b => b.region).filter(Boolean))].sort()
+  const availableStates  = selectedRegion
+    ? [...new Set(branchMeta.filter(b => b.region === selectedRegion).map(b => b.state).filter(Boolean))].sort()
+    : [...new Set(branchMeta.map(b => b.state).filter(Boolean))].sort()
   const orderedRegions = [...new Set([...stateData.filter(s=>s.state).map(s=>s.state), ...Object.keys(regionCounts)])]
   const regionColorMap = {}
   orderedRegions.forEach((r,i) => { regionColorMap[r]=COLOR_PALETTE[i%COLOR_PALETTE.length] })
@@ -232,6 +272,40 @@ function PurchaseInline({ t, setActiveNav, canSee }) {
               </button>
             )}
           </div>
+        </div>
+      )}
+
+      {/* Region + State filter pills */}
+      {(availableRegions.length > 0 || availableStates.length > 0) && (
+        <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
+          {availableRegions.length > 0 && (
+            <div style={{ display:'flex', alignItems:'center', gap:6, overflowX:'auto', scrollbarWidth:'none', WebkitOverflowScrolling:'touch' }}>
+              <div style={{ fontSize:9, color:t.text4, letterSpacing:'.1em', textTransform:'uppercase', flexShrink:0, fontWeight:600 }}>Region</div>
+              {[null, ...availableRegions].map(r => {
+                const active = r === null ? (!selectedRegion && !selectedState) : selectedRegion === r
+                return (
+                  <button key={r||'all'} onClick={() => { setSelectedRegion(r); setSelectedState(null) }}
+                    style={{ padding:'4px 10px', borderRadius:20, border:`1px solid ${active ? t.gold+'66' : t.border}`, background: active ? `${t.gold}18` : 'transparent', color: active ? t.gold : t.text4, fontSize:11, fontWeight: active ? 700 : 500, cursor:'pointer', whiteSpace:'nowrap', flexShrink:0, transition:'all .18s' }}>
+                    {r || 'All'}
+                  </button>
+                )
+              })}
+            </div>
+          )}
+          {availableStates.length > 0 && (
+            <div style={{ display:'flex', alignItems:'center', gap:6, overflowX:'auto', scrollbarWidth:'none', WebkitOverflowScrolling:'touch' }}>
+              <div style={{ fontSize:9, color:t.text4, letterSpacing:'.1em', textTransform:'uppercase', flexShrink:0, fontWeight:600 }}>State</div>
+              {[null, ...availableStates].map(s => {
+                const active = s === null ? !selectedState : selectedState === s
+                return (
+                  <button key={s||'all'} onClick={() => { setSelectedState(s); if (s) setSelectedRegion(null) }}
+                    style={{ padding:'4px 10px', borderRadius:20, border:`1px solid ${active ? t.blue+'66' : t.border}`, background: active ? `${t.blue}18` : 'transparent', color: active ? t.blue : t.text4, fontSize:11, fontWeight: active ? 700 : 500, cursor:'pointer', whiteSpace:'nowrap', flexShrink:0, transition:'all .18s' }}>
+                    {s || 'All'}
+                  </button>
+                )
+              })}
+            </div>
+          )}
         </div>
       )}
 
