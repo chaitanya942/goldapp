@@ -175,8 +175,8 @@ export default function DashboardHome() {
 
   const [period,        setPeriod]        = useState('mtd')
   const [overviewOpen,  setOverviewOpen]  = useState(false)
-  const [selectedRegion, setSelectedRegion] = useState(null)
-  const [selectedState,  setSelectedState]  = useState(null)
+  const [filterType,  setFilterType]  = useState(null)   // null | 'region' | 'state' | 'cluster' | 'branch'
+  const [filterValue, setFilterValue] = useState(null)  // the selected value
   const [loading,       setLoading]       = useState(true)
   const [kpis,          setKpis]          = useState(null)
   const [stateData,     setStateData]     = useState([])
@@ -251,7 +251,7 @@ export default function DashboardHome() {
 
   useEffect(() => {
     if (!showPurchase) return
-    supabase.from('branches').select('name, region, state').eq('is_active', true).then(({ data }) => {
+    supabase.from('branches').select('name, region, state, cluster').eq('is_active', true).then(({ data }) => {
       if (!data) return
       setBranchMeta(data)
       const rc = {}
@@ -262,7 +262,25 @@ export default function DashboardHome() {
     })
   }, [showPurchase])
 
-  useEffect(() => { if (showPurchase) fetchAll() }, [period, showPurchase, selectedState, selectedRegion]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (showPurchase) fetchAll() }, [period, showPurchase, filterType, filterValue]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const aggregateKpis = (rows) => {
+    const valid = rows.filter(Boolean)
+    const totalNet = valid.reduce((s,r) => s + Number(r.total_net||0), 0)
+    const totalCnt = valid.reduce((s,r) => s + Number(r.total_count||0), 0)
+    return {
+      total_count:            totalCnt,
+      total_net:              totalNet,
+      total_value:            valid.reduce((s,r) => s + Number(r.total_value||0), 0),
+      physical_count:         valid.reduce((s,r) => s + Number(r.physical_count||0), 0),
+      takeover_count:         valid.reduce((s,r) => s + Number(r.takeover_count||0), 0),
+      avg_rate_per_gram:      totalNet > 0 ? valid.reduce((s,r) => s + Number(r.total_value||0), 0) / totalNet : 0,
+      avg_purity:             totalNet > 0 ? valid.reduce((s,r) => s + Number(r.avg_purity||0)*Number(r.total_net||0), 0) / totalNet : 0,
+      avg_net_per_txn:        totalCnt > 0 ? totalNet / totalCnt : 0,
+      avg_service_charge_pct: totalNet > 0 ? valid.reduce((s,r) => s + Number(r.avg_service_charge_pct||0)*Number(r.total_net||0), 0) / totalNet : 0,
+      branch_count:           valid.filter(r => Number(r.total_count||0) > 0).length,
+    }
+  }
 
   const fetchAll = async () => {
     setLoading(true)
@@ -270,8 +288,9 @@ export default function DashboardHome() {
     setTopBranches([])
     const { from, to } = getRange(period)
 
-    if (selectedRegion) {
-      const statesInRegion = [...new Set(branchMeta.filter(b => b.region === selectedRegion).map(b => b.state).filter(Boolean))]
+    if (filterType === 'region' && filterValue) {
+      const statesInRegion = [...new Set(branchMeta.filter(b => b.region === filterValue).map(b => b.state).filter(Boolean))]
+      const branchNamesInRegion = branchMeta.filter(b => b.region === filterValue).map(b => b.name)
       const [stateResults, allStates, branches] = await Promise.all([
         Promise.all(statesInRegion.map(s =>
           supabase.rpc('get_report_kpis', { p_from:from, p_to:to, p_branch:null, p_txn_type:null, p_state:s })
@@ -280,35 +299,46 @@ export default function DashboardHome() {
         supabase.rpc('get_state_summary', { p_from:from, p_to:to, p_txn_type:null }),
         supabase.rpc('get_branch_summary', { p_from:from, p_to:to, p_txn_type:null, p_state:null }),
       ])
-      const valid    = stateResults.filter(Boolean)
-      const totalNet = valid.reduce((s,r) => s + Number(r.total_net||0), 0)
-      const totalCnt = valid.reduce((s,r) => s + Number(r.total_count||0), 0)
-      setKpis({
-        total_count:            totalCnt,
-        total_net:              totalNet,
-        total_value:            valid.reduce((s,r) => s + Number(r.total_value||0), 0),
-        physical_count:         valid.reduce((s,r) => s + Number(r.physical_count||0), 0),
-        takeover_count:         valid.reduce((s,r) => s + Number(r.takeover_count||0), 0),
-        avg_rate_per_gram:      totalNet > 0 ? valid.reduce((s,r) => s + Number(r.total_value||0), 0) / totalNet : 0,
-        avg_purity:             totalNet > 0 ? valid.reduce((s,r) => s + Number(r.avg_purity||0)*Number(r.total_net||0), 0) / totalNet : 0,
-        avg_net_per_txn:        totalCnt > 0 ? totalNet / totalCnt : 0,
-        avg_service_charge_pct: totalNet > 0 ? valid.reduce((s,r) => s + Number(r.avg_service_charge_pct||0)*Number(r.total_net||0), 0) / totalNet : 0,
-        branch_count:           valid.filter(r => Number(r.total_count||0) > 0).length,
-      })
-      const filteredStates = (allStates.data||[]).filter(s => statesInRegion.includes(s.state))
-      const branchNamesInRegion = branchMeta.filter(b => b.region === selectedRegion).map(b => b.name)
-      setStateData(filteredStates)
+      setKpis(aggregateKpis(stateResults))
+      setStateData((allStates.data||[]).filter(s => statesInRegion.includes(s.state)))
       setTopBranches((branches.data||[]).filter(b => branchNamesInRegion.includes(b.branch)).sort((a,b)=>Number(b.total_net||0)-Number(a.total_net||0)).slice(0,7))
-    } else {
-      const p = { p_from:from, p_to:to, p_branch:null, p_txn_type:null, p_state: selectedState || null }
-      const [all, states, branches] = await Promise.all([
-        supabase.rpc('get_report_kpis', p),
+
+    } else if (filterType === 'cluster' && filterValue) {
+      const branchNamesInCluster = branchMeta.filter(b => b.cluster === filterValue).map(b => b.name)
+      const statesInCluster = [...new Set(branchMeta.filter(b => b.cluster === filterValue).map(b => b.state).filter(Boolean))]
+      const [branchResults, allStates, branches] = await Promise.all([
+        Promise.all(branchNamesInCluster.map(name =>
+          supabase.rpc('get_report_kpis', { p_from:from, p_to:to, p_branch:name, p_txn_type:null, p_state:null })
+            .then(({data}) => Array.isArray(data) ? data[0] : data)
+        )),
         supabase.rpc('get_state_summary', { p_from:from, p_to:to, p_txn_type:null }),
-        supabase.rpc('get_branch_summary', { p_from:from, p_to:to, p_txn_type:null, p_state: selectedState || null }),
+        supabase.rpc('get_branch_summary', { p_from:from, p_to:to, p_txn_type:null, p_state:null }),
+      ])
+      setKpis(aggregateKpis(branchResults))
+      setStateData((allStates.data||[]).filter(s => statesInCluster.includes(s.state)))
+      setTopBranches((branches.data||[]).filter(b => branchNamesInCluster.includes(b.branch)).sort((a,b)=>Number(b.total_net||0)-Number(a.total_net||0)).slice(0,7))
+
+    } else if (filterType === 'branch' && filterValue) {
+      const [all, allStates, branches] = await Promise.all([
+        supabase.rpc('get_report_kpis', { p_from:from, p_to:to, p_branch:filterValue, p_txn_type:null, p_state:null }),
+        supabase.rpc('get_state_summary', { p_from:from, p_to:to, p_txn_type:null }),
+        supabase.rpc('get_branch_summary', { p_from:from, p_to:to, p_txn_type:null, p_state:null }),
+      ])
+      if (all.data) setKpis(Array.isArray(all.data)?all.data[0]:all.data)
+      const branchState = branchMeta.find(b => b.name === filterValue)?.state
+      setStateData((allStates.data||[]).filter(s => s.state === branchState))
+      setTopBranches((branches.data||[]).filter(b => b.branch === filterValue))
+
+    } else {
+      const p_state = filterType === 'state' ? filterValue : null
+      const [all, states, branches] = await Promise.all([
+        supabase.rpc('get_report_kpis', { p_from:from, p_to:to, p_branch:null, p_txn_type:null, p_state }),
+        supabase.rpc('get_state_summary', { p_from:from, p_to:to, p_txn_type:null }),
+        supabase.rpc('get_branch_summary', { p_from:from, p_to:to, p_txn_type:null, p_state }),
       ])
       if (all.data) setKpis(Array.isArray(all.data)?all.data[0]:all.data)
       const allStateRows = states.data || []
-      setStateData(selectedState ? allStateRows.filter(s => s.state === selectedState) : allStateRows)
+      setStateData(p_state ? allStateRows.filter(s => s.state === p_state) : allStateRows)
       if (branches.data) setTopBranches((branches.data||[]).sort((a,b)=>Number(b.total_net||0)-Number(a.total_net||0)).slice(0,7))
     }
     setLoading(false)
@@ -326,10 +356,22 @@ export default function DashboardHome() {
   const branchRegionMap = {}
   branchMeta.forEach(b => { if (b.name && b.region) branchRegionMap[b.name] = b.region })
 
-  const availableRegions = [...new Set(branchMeta.map(b => b.region).filter(Boolean))].sort()
-  const availableStates  = selectedRegion
-    ? [...new Set(branchMeta.filter(b => b.region === selectedRegion).map(b => b.state).filter(Boolean))].sort()
-    : [...new Set(branchMeta.map(b => b.state).filter(Boolean))].sort()
+  const filterTypeOptions = [
+    { key: null,      label: 'All Data' },
+    { key: 'region',  label: 'Region'   },
+    { key: 'state',   label: 'State'    },
+    { key: 'cluster', label: 'Cluster'  },
+    { key: 'branch',  label: 'Branch'   },
+  ]
+  const filterValueOptions = filterType === 'region'
+    ? [...new Set(branchMeta.map(b => b.region).filter(Boolean))].sort()
+    : filterType === 'state'
+    ? [...new Set(branchMeta.map(b => b.state).filter(Boolean))].sort()
+    : filterType === 'cluster'
+    ? [...new Set(branchMeta.map(b => b.cluster).filter(Boolean))].sort()
+    : filterType === 'branch'
+    ? [...new Set(branchMeta.map(b => b.name).filter(Boolean))].sort()
+    : []
 
   const maxStateNet  = Math.max(...stateData.map(s=>Number(s.total_net||0)), 1)
   const hasData      = kpis?.total_count > 0
@@ -527,32 +569,32 @@ export default function DashboardHome() {
               </div>
             )}
 
-            {/* Region + State filter pills */}
-            {overviewOpen && (availableRegions.length > 0 || availableStates.length > 0) && (
+            {/* Hierarchical filter — Row 1: type, Row 2: value */}
+            {overviewOpen && branchMeta.length > 0 && (
               <div style={{ display:'flex', flexDirection:'column', gap:6, marginBottom:14 }}>
-                {availableRegions.length > 0 && (
-                  <div style={{ display:'flex', alignItems:'center', gap:6, overflowX:'auto', scrollbarWidth:'none', WebkitOverflowScrolling:'touch' }}>
-                    <div style={{ fontSize:9, color:t.text4, letterSpacing:'.1em', textTransform:'uppercase', flexShrink:0, fontWeight:600 }}>Region</div>
-                    {[null, ...availableRegions].map(r => {
-                      const active = r === null ? (!selectedRegion && !selectedState) : selectedRegion === r
+                {/* Row 1: type selector */}
+                <div style={{ display:'flex', gap:5, overflowX:'auto', scrollbarWidth:'none', WebkitOverflowScrolling:'touch' }}>
+                  {filterTypeOptions.map(opt => {
+                    const active = opt.key === filterType
+                    return (
+                      <button key={opt.key||'all'}
+                        onClick={() => { setFilterType(opt.key); setFilterValue(null) }}
+                        style={{ padding:'4px 12px', borderRadius:20, border:`1px solid ${active ? t.gold+'80' : t.border}`, background: active ? `${t.gold}20` : 'transparent', color: active ? t.gold : t.text4, fontSize:11, fontWeight: active ? 700 : 500, cursor:'pointer', whiteSpace:'nowrap', flexShrink:0, transition:'all .18s' }}>
+                        {opt.label}
+                      </button>
+                    )
+                  })}
+                </div>
+                {/* Row 2: value selector — only when a type is chosen */}
+                {filterType && filterValueOptions.length > 0 && (
+                  <div style={{ display:'flex', gap:5, overflowX:'auto', scrollbarWidth:'none', WebkitOverflowScrolling:'touch', paddingLeft:2 }}>
+                    {filterValueOptions.map(v => {
+                      const active = v === filterValue
                       return (
-                        <button key={r||'all'} onClick={() => { setSelectedRegion(r); setSelectedState(null) }}
-                          style={{ padding:'4px 10px', borderRadius:20, border:`1px solid ${active ? t.gold+'66' : t.border}`, background: active ? `${t.gold}18` : 'transparent', color: active ? t.gold : t.text4, fontSize:11, fontWeight: active ? 700 : 500, cursor:'pointer', whiteSpace:'nowrap', flexShrink:0, transition:'all .18s' }}>
-                          {r || 'All'}
-                        </button>
-                      )
-                    })}
-                  </div>
-                )}
-                {availableStates.length > 0 && (
-                  <div style={{ display:'flex', alignItems:'center', gap:6, overflowX:'auto', scrollbarWidth:'none', WebkitOverflowScrolling:'touch' }}>
-                    <div style={{ fontSize:9, color:t.text4, letterSpacing:'.1em', textTransform:'uppercase', flexShrink:0, fontWeight:600 }}>State</div>
-                    {[null, ...availableStates].map(s => {
-                      const active = s === null ? !selectedState : selectedState === s
-                      return (
-                        <button key={s||'all'} onClick={() => { setSelectedState(s); if (s) setSelectedRegion(null) }}
-                          style={{ padding:'4px 10px', borderRadius:20, border:`1px solid ${active ? t.blue+'66' : t.border}`, background: active ? `${t.blue}18` : 'transparent', color: active ? t.blue : t.text4, fontSize:11, fontWeight: active ? 700 : 500, cursor:'pointer', whiteSpace:'nowrap', flexShrink:0, transition:'all .18s' }}>
-                          {s || 'All'}
+                        <button key={v}
+                          onClick={() => setFilterValue(active ? null : v)}
+                          style={{ padding:'3px 10px', borderRadius:20, border:`1px solid ${active ? t.blue+'80' : t.border}`, background: active ? `${t.blue}20` : 'transparent', color: active ? t.blue : t.text4, fontSize:10, fontWeight: active ? 700 : 400, cursor:'pointer', whiteSpace:'nowrap', flexShrink:0, transition:'all .18s' }}>
+                          {v}
                         </button>
                       )
                     })}
