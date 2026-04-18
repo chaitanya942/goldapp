@@ -173,6 +173,11 @@ export default function LoginPage() {
       if (otpErr) throw new Error(otpErr.message)
       window.location.href = '/dashboard'
     } catch (err) {
+      // User dismissed the prompt (back button / cancel / timeout) — silently fall back to form
+      if (err.name === 'NotAllowedError' || err.message?.includes('timed out') || err.message?.includes('not allowed')) {
+        setBiometricLoading(false)
+        return
+      }
       setPasskeyError(err.message || 'Biometric login failed')
       setBiometricLoading(false)
     }
