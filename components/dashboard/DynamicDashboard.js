@@ -125,7 +125,7 @@ function PurchaseInline({ t, setActiveNav, canSee }) {
   const visiblePanels      = [showStateTable, showTopBranches].filter(Boolean).length
 
   const isMobile = useMobile()
-  const [period,       setPeriod]       = useState('mtd')
+  const [period,       setPeriod]       = useState('today')
   const [loading,      setLoading]      = useState(true)
   const [trendLoading, setTrendLoading] = useState(true)
   const [kpis,         setKpis]         = useState(null)
@@ -343,7 +343,7 @@ function PurchaseInline({ t, setActiveNav, canSee }) {
                   {branchDropOpen && (
                     <div ref={branchDropRef}
                       style={{ position:'absolute', top:'calc(100% + 4px)', left:0, right:0, background:t.card, border:`1px solid ${t.border}`, borderRadius:8, zIndex:200, maxHeight:200, overflowY:'auto', boxShadow:'0 8px 24px rgba(0,0,0,.5)' }}>
-                      {filterValueOptions.filter(v => !branchSearch || v.toLowerCase().includes(branchSearch.toLowerCase())).slice(0,20).map(v => (
+                      {filterValueOptions.filter(v => !branchSearch || v.toLowerCase().includes(branchSearch.toLowerCase())).map(v => (
                         <button key={v}
                           onMouseDown={e => { e.preventDefault(); setFilterValue(v); setBranchSearch(''); setBranchDropOpen(false) }}
                           style={{ display:'block', width:'100%', textAlign:'left', padding:'8px 12px', background:'none', border:'none', color:t.text2, fontSize:12, cursor:'pointer', borderBottom:`1px solid ${t.border}30` }}
