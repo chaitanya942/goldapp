@@ -69,7 +69,7 @@ function StatRow({ label, value, sub, color, t, bar, barMax, delay=0 }) {
   return (
     <div style={{ display:'flex', alignItems:'center', gap:10, padding:'9px 0', borderBottom:`1px solid ${t.border}25`, opacity:vis?1:0, transform:vis?'translateX(0)':'translateX(-8px)', transition:'all .3s ease' }}>
       <div style={{ flex:1, minWidth:0 }}>
-        <div style={{ fontSize:13, color:t.text2, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', fontWeight:500 }}>{label}</div>
+        <div style={{ fontSize:13, color:t.text2, fontWeight:500, lineHeight:1.3 }}>{label}</div>
         {sub && <div style={{ fontSize:12, color:t.text4, marginTop:2, lineHeight:1.3 }}>{sub}</div>}
       </div>
       {bar!=null && barMax>0 && (
