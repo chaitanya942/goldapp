@@ -221,8 +221,8 @@ export default function DashboardHome() {
 
     if (canSee('purchase-data') || canSee('purchase-reports')) {
       ps.push(
-        supabase.rpc('get_report_kpis', { p_from: todayStr, p_to: todayStr, p_branch: null, p_txn_type: null, p_state: null })
-          .then(({ data }) => setTodayKpis(Array.isArray(data) ? data[0] : data))
+        supabase.rpc('get_purchase_aggregates', { p_from_date: todayStr, p_to_date: todayStr, p_branch: null, p_txn_type: null, p_region_branches: null, p_single_day: true })
+          .then(({ data }) => setTodayKpis(data?.kpis || null))
           .catch(() => {})
       )
     }
@@ -283,83 +283,47 @@ export default function DashboardHome() {
 
   useEffect(() => { if (showPurchase) fetchAll() }, [period, showPurchase, filterType, filterValue]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const aggregateKpis = (rows) => {
-    const valid = rows.filter(Boolean)
-    const totalNet = valid.reduce((s,r) => s + Number(r.total_net||0), 0)
-    const totalCnt = valid.reduce((s,r) => s + Number(r.total_count||0), 0)
-    return {
-      total_count:            totalCnt,
-      total_net:              totalNet,
-      total_value:            valid.reduce((s,r) => s + Number(r.total_value||0), 0),
-      physical_count:         valid.reduce((s,r) => s + Number(r.physical_count||0), 0),
-      takeover_count:         valid.reduce((s,r) => s + Number(r.takeover_count||0), 0),
-      avg_rate_per_gram:      totalNet > 0 ? valid.reduce((s,r) => s + Number(r.total_value||0), 0) / totalNet : 0,
-      avg_purity:             totalNet > 0 ? valid.reduce((s,r) => s + Number(r.avg_purity||0)*Number(r.total_net||0), 0) / totalNet : 0,
-      avg_net_per_txn:        totalCnt > 0 ? totalNet / totalCnt : 0,
-      avg_service_charge_pct: totalNet > 0 ? valid.reduce((s,r) => s + Number(r.avg_service_charge_pct||0)*Number(r.total_net||0), 0) / totalNet : 0,
-      branch_count:           valid.filter(r => Number(r.total_count||0) > 0).length,
-    }
-  }
-
   const fetchAll = async () => {
     setLoading(true)
     setStateData([])
     setTopBranches([])
     const { from, to } = getRange(period)
 
-    if (filterType === 'region' && filterValue) {
-      const statesInRegion = [...new Set(branchMeta.filter(b => b.region === filterValue).map(b => b.state).filter(Boolean))]
-      const branchNamesInRegion = branchMeta.filter(b => b.region === filterValue).map(b => b.name)
-      const [stateResults, allStates, branches] = await Promise.all([
-        Promise.all(statesInRegion.map(s =>
-          supabase.rpc('get_report_kpis', { p_from:from, p_to:to, p_branch:null, p_txn_type:null, p_state:s })
-            .then(({data}) => Array.isArray(data) ? data[0] : data)
-        )),
-        supabase.rpc('get_state_summary', { p_from:from, p_to:to, p_txn_type:null }),
-        supabase.rpc('get_branch_summary', { p_from:from, p_to:to, p_txn_type:null, p_state:null }),
-      ])
-      setKpis(aggregateKpis(stateResults))
-      setStateData((allStates.data||[]).filter(s => statesInRegion.includes(s.state)))
-      setTopBranches((branches.data||[]).filter(b => branchNamesInRegion.includes(b.branch)).sort((a,b)=>Number(b.total_net||0)-Number(a.total_net||0)).slice(0,7))
-
+    // Build filter params — all routes use get_purchase_aggregates for consistent data
+    let p_branch = null
+    let p_region_branches = null
+    if (filterType === 'branch' && filterValue) {
+      p_branch = filterValue
+    } else if (filterType === 'region' && filterValue) {
+      p_region_branches = branchMeta.filter(b => b.region === filterValue).map(b => b.name)
+    } else if (filterType === 'state' && filterValue) {
+      p_region_branches = branchMeta.filter(b => b.state === filterValue).map(b => b.name)
     } else if (filterType === 'cluster' && filterValue) {
-      const branchNamesInCluster = branchMeta.filter(b => b.cluster === filterValue).map(b => b.name)
-      const statesInCluster = [...new Set(branchMeta.filter(b => b.cluster === filterValue).map(b => b.state).filter(Boolean))]
-      const [branchResults, allStates, branches] = await Promise.all([
-        Promise.all(branchNamesInCluster.map(name =>
-          supabase.rpc('get_report_kpis', { p_from:from, p_to:to, p_branch:name, p_txn_type:null, p_state:null })
-            .then(({data}) => Array.isArray(data) ? data[0] : data)
-        )),
-        supabase.rpc('get_state_summary', { p_from:from, p_to:to, p_txn_type:null }),
-        supabase.rpc('get_branch_summary', { p_from:from, p_to:to, p_txn_type:null, p_state:null }),
-      ])
-      setKpis(aggregateKpis(branchResults))
-      setStateData((allStates.data||[]).filter(s => statesInCluster.includes(s.state)))
-      setTopBranches((branches.data||[]).filter(b => branchNamesInCluster.includes(b.branch)).sort((a,b)=>Number(b.total_net||0)-Number(a.total_net||0)).slice(0,7))
-
-    } else if (filterType === 'branch' && filterValue) {
-      const [all, allStates, branches] = await Promise.all([
-        supabase.rpc('get_report_kpis', { p_from:from, p_to:to, p_branch:filterValue, p_txn_type:null, p_state:null }),
-        supabase.rpc('get_state_summary', { p_from:from, p_to:to, p_txn_type:null }),
-        supabase.rpc('get_branch_summary', { p_from:from, p_to:to, p_txn_type:null, p_state:null }),
-      ])
-      if (all.data) setKpis(Array.isArray(all.data)?all.data[0]:all.data)
-      const branchState = branchMeta.find(b => b.name === filterValue)?.state
-      setStateData((allStates.data||[]).filter(s => s.state === branchState))
-      setTopBranches((branches.data||[]).filter(b => b.branch === filterValue))
-
-    } else {
-      const p_state = filterType === 'state' ? filterValue : null
-      const [all, states, branches] = await Promise.all([
-        supabase.rpc('get_report_kpis', { p_from:from, p_to:to, p_branch:null, p_txn_type:null, p_state }),
-        supabase.rpc('get_state_summary', { p_from:from, p_to:to, p_txn_type:null }),
-        supabase.rpc('get_branch_summary', { p_from:from, p_to:to, p_txn_type:null, p_state }),
-      ])
-      if (all.data) setKpis(Array.isArray(all.data)?all.data[0]:all.data)
-      const allStateRows = states.data || []
-      setStateData(p_state ? allStateRows.filter(s => s.state === p_state) : allStateRows)
-      if (branches.data) setTopBranches((branches.data||[]).sort((a,b)=>Number(b.total_net||0)-Number(a.total_net||0)).slice(0,7))
+      p_region_branches = branchMeta.filter(b => b.cluster === filterValue).map(b => b.name)
     }
+
+    const { data } = await supabase.rpc('get_purchase_aggregates', {
+      p_from_date: from, p_to_date: to,
+      p_branch, p_txn_type: null,
+      p_region_branches: p_region_branches || null,
+      p_single_day: from === to,
+    })
+
+    if (!data) { setLoading(false); return }
+    setKpis(data.kpis || null)
+
+    // Derive state breakdown from branches (already filtered correctly)
+    const branchRows = data.branches || []
+    const stateMap = {}
+    branchRows.forEach(b => {
+      const state = b.state || 'Unknown'
+      if (!stateMap[state]) stateMap[state] = { state, total_net: 0, txn_count: 0, branch_count: 0 }
+      stateMap[state].total_net += Number(b.total_net || 0)
+      stateMap[state].txn_count += Number(b.txn_count || 0)
+      stateMap[state].branch_count++
+    })
+    setStateData(Object.values(stateMap).sort((a, b) => b.total_net - a.total_net))
+    setTopBranches(branchRows.slice(0, 7))
     setLoading(false)
   }
 
