@@ -214,15 +214,17 @@ function PurchaseInline({ t, setActiveNav, canSee }) {
     setKpis(data.kpis || null)
 
     const branchRows = data.branches || []
-    const stateMap = {}
+    const groupByState = filterType === 'region' || filterType === 'state'
+    const groupKey = groupByState ? 'state' : 'region'
+    const groupMap = {}
     branchRows.forEach(b => {
-      const state = b.state || 'Unknown'
-      if (!stateMap[state]) stateMap[state] = { state, total_net: 0, txn_count: 0, branch_count: 0 }
-      stateMap[state].total_net += Number(b.total_net || 0)
-      stateMap[state].txn_count += Number(b.txn_count || 0)
-      stateMap[state].branch_count++
+      const key = b[groupKey] || 'Unknown'
+      if (!groupMap[key]) groupMap[key] = { state: key, total_net: 0, txn_count: 0, branch_count: 0 }
+      groupMap[key].total_net += Number(b.total_net || 0)
+      groupMap[key].txn_count += Number(b.txn_count || 0)
+      groupMap[key].branch_count++
     })
-    setStateData(Object.values(stateMap).sort((a, b) => b.total_net - a.total_net))
+    setStateData(Object.values(groupMap).sort((a, b) => b.total_net - a.total_net))
     setTopBranches(branchRows.slice(0, 7))
 
     setLoading(false)
@@ -533,7 +535,7 @@ function PurchaseInline({ t, setActiveNav, canSee }) {
                 : !hasStateData ? <EmptyPanel t={t} />
                   : stateData.filter(s=>s.state&&Number(s.total_net||0)>0).map((s,i)=>(
                       <StatRow key={s.state||i} delay={i*60} label={s.state}
-                        sub={`${regionCounts[s.state]||0} branches · ${Number(s.txn_count||s.total_count||0).toLocaleString('en-IN')} bills`}
+                        sub={`${s.branch_count||0} branches · ${Number(s.txn_count||s.total_count||0).toLocaleString('en-IN')} bills`}
                         value={`${fmt(s.total_net,1)}g`}
                         color={regionColorMap[s.state]||COLOR_PALETTE[i%COLOR_PALETTE.length]} t={t}
                         bar={Number(s.total_net||0)} barMax={maxStateNet}/>
