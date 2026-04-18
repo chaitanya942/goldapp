@@ -147,7 +147,8 @@ export default function LoginPage() {
     // Offer passkey registration if device supports it and not already saved for this email
     const savedData    = JSON.parse(localStorage.getItem('wg_passkey_data') || 'null')
     const alreadySaved = savedData?.email === email || localStorage.getItem('wg_passkey_email') === email
-    if (!alreadySaved && window.PublicKeyCredential) {
+    const isMobile     = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
+    if (!alreadySaved && isMobile && window.PublicKeyCredential) {
       setLoading(false)
       setStep('passkey-prompt')
       return
@@ -209,6 +210,10 @@ export default function LoginPage() {
       localStorage.removeItem('wg_passkey_email')
       window.location.href = '/dashboard'
     } catch (err) {
+      if (err.name === 'NotAllowedError' || err.message?.includes('timed out') || err.message?.includes('not allowed')) {
+        window.location.href = '/dashboard'
+        return
+      }
       setPasskeyError(err.message || 'Failed to save biometric login')
       setBiometricLoading(false)
     }
