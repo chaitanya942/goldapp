@@ -701,7 +701,12 @@ export default function LoginPage() {
                         </>
                       )}
                     </button>
-                    {passkeyError && <div className="errmsg" style={{ marginBottom: 12 }}><div className="errdot" />{passkeyError}</div>}
+                    {passkeyError && <div className="errmsg" style={{ marginBottom: 4 }}><div className="errdot" />{passkeyError}</div>}
+                    <div style={{ textAlign:'right', marginBottom: 14, marginTop: 4 }}>
+                      <button type="button" onClick={() => { localStorage.removeItem('wg_passkey_email'); setHasSavedPasskey(false); setSavedPasskeyEmail(''); setPasskeyError('') }} style={{ background:'none', border:'none', fontSize:'.58rem', color:'rgba(255,255,255,0.2)', cursor:'pointer', letterSpacing:'.08em', textTransform:'uppercase' }}>
+                        Remove passkey
+                      </button>
+                    </div>
                     <div className="divider">or continue with email</div>
                   </>
                 )}
