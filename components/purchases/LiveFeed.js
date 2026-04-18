@@ -88,6 +88,7 @@ const PING_CSS = `
 @media(max-width:900px){.ws-item{flex:0 0 33.334%!important;border-bottom:1px solid #2a2a2a}}
 @media(max-width:600px){.ws-item{flex:0 0 50%!important}}
 @media(max-width:700px){.lf-hero{padding:16px 8px!important}.sum-bar-item{padding:8px 10px!important}.lf-region{overflow-x:auto}}
+@media(max-width:600px){.tl-row{grid-template-columns:70px 28px 1fr!important}.tl-wt,.tl-amt,.tl-hdr-wt,.tl-hdr-amt{display:none!important}}
 `
 
 /* ── Tiny reusable components ── */
@@ -770,7 +771,7 @@ function OldCrmTab({
             <div style={{ position:'absolute', top:-11, left:'50%', transform:'translateX(-50%)', background:t.card2, border:`1px solid ${t.border2}`, borderRadius:20, padding:'3px 12px', whiteSpace:'nowrap' }}>
               <span style={{ fontSize:'.46rem', letterSpacing:'.12em', textTransform:'uppercase', color:t.text4, fontWeight:700 }}>other outcomes</span>
             </div>
-            <div style={{ display:'flex', alignItems:'center', gap:6 }}>
+            <div style={{ display:'flex', alignItems:'center', gap:6, flexWrap:'wrap' }}>
               <HeroNum label="KYC Blocked" value={kycBlacklistedCnt} color={t.purple} t={t} small weight={kycBlacklistedWt} active={activeMetric==='kyc_blocked'} onClick={() => toggleMetric('kyc_blocked')} />
               {kycOverriddenCnt > 0 && <FlowSep t={t} />}
               {kycOverriddenCnt > 0 && <HeroNum label="KYC Cleared Later" value={kycOverriddenCnt} color={t.blue} t={t} small active={activeMetric==='kyc_cleared'} onClick={() => toggleMetric('kyc_cleared')} />}
@@ -1106,9 +1107,9 @@ function OldCrmTab({
               />
               <span style={{ fontSize: '.6rem', color: t.text4, marginLeft: 4 }}>{filteredTimeline.filter(item => tlFilter === 'txn' ? item.type === 'txn' : tlFilter === 'walkin' ? item.type === 'walkin' : true).length} events</span>
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '70px 28px 1fr 110px 120px', gap: '0 12px', padding: '8px 20px', background: t.card2, borderBottom: `1px solid ${t.border}` }}>
+            <div className="tl-row" style={{ display: 'grid', gridTemplateColumns: '70px 28px 1fr 110px 120px', gap: '0 12px', padding: '8px 20px', background: t.card2, borderBottom: `1px solid ${t.border}` }}>
               {['Time', '', 'Customer / Branch', 'Weight', 'Amount'].map((h, i) => (
-                <span key={i} style={{ fontSize: '.57rem', color: t.text3, fontWeight: 600, letterSpacing: '.1em', textTransform: 'uppercase', textAlign: i >= 3 ? 'right' : i === 0 ? 'right' : 'left' }}>{h}</span>
+                <span key={i} className={i === 3 ? 'tl-hdr-wt' : i === 4 ? 'tl-hdr-amt' : ''} style={{ fontSize: '.57rem', color: t.text3, fontWeight: 600, letterSpacing: '.1em', textTransform: 'uppercase', textAlign: i >= 3 ? 'right' : i === 0 ? 'right' : 'left' }}>{h}</span>
               ))}
             </div>
             <div style={{ maxHeight: 480, overflowY: 'auto' }}>
@@ -1359,23 +1360,27 @@ function KycTable({ rows, t }) {
   const widths = '70px 180px 120px 160px 76px 1fr'
   return (
     <Card t={t} style={{ padding: 0, overflow: 'hidden' }}>
-      <div style={{ display: 'grid', gridTemplateColumns: widths, padding: '9px 16px', borderBottom: `1px solid ${t.border}`, gap: 8, background: t.card2 }}>
-        {cols.map(h => <span key={h} style={{ fontSize: '.56rem', letterSpacing: '.1em', textTransform: 'uppercase', color: t.text3, fontWeight: 600 }}>{h}</span>)}
-      </div>
-      <div style={{ maxHeight: 480, overflowY: 'auto' }}>
-        {rows.length === 0 && <div style={{ padding: 32, textAlign: 'center', color: t.text4, fontSize: '.72rem' }}>No records</div>}
-        {rows.map((r, i) => (
-          <div key={i} style={{ display: 'grid', gridTemplateColumns: widths, padding: '10px 16px', borderBottom: `1px solid ${t.border}18`, gap: 8, alignItems: 'center' }}
-            onMouseEnter={e => e.currentTarget.style.background = t.card2}
-            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
-            <span style={{ fontSize: '.65rem', color: t.text2, fontFamily: 'ui-monospace,monospace' }}>{fmtTime(r.time)}</span>
-            <span style={{ fontSize: '.72rem', color: t.text1, fontWeight: 500 }}>{r.name || '—'}</span>
-            <span style={{ fontSize: '.65rem', color: t.text2, fontFamily: 'ui-monospace,monospace' }}>{r.mob_num || '—'}</span>
-            <span style={{ fontSize: '.65rem', color: t.text2 }}>{r.branch_name || '—'}</span>
-            <span style={{ fontSize: '.68rem', color: t.purple, fontFamily: 'ui-monospace,monospace' }}>{r.grams > 0 ? `${Number(r.grams).toFixed(2)}g` : '—'}</span>
-            <span style={{ fontSize: '.65rem', color: t.text3 }}>{r.rej_rsn || '—'}</span>
+      <div style={{ overflowX: 'auto' }}>
+        <div style={{ minWidth: 600 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: widths, padding: '9px 16px', borderBottom: `1px solid ${t.border}`, gap: 8, background: t.card2 }}>
+            {cols.map(h => <span key={h} style={{ fontSize: '.56rem', letterSpacing: '.1em', textTransform: 'uppercase', color: t.text3, fontWeight: 600 }}>{h}</span>)}
           </div>
-        ))}
+          <div style={{ maxHeight: 480, overflowY: 'auto' }}>
+            {rows.length === 0 && <div style={{ padding: 32, textAlign: 'center', color: t.text4, fontSize: '.72rem' }}>No records</div>}
+            {rows.map((r, i) => (
+              <div key={i} style={{ display: 'grid', gridTemplateColumns: widths, padding: '10px 16px', borderBottom: `1px solid ${t.border}18`, gap: 8, alignItems: 'center' }}
+                onMouseEnter={e => e.currentTarget.style.background = t.card2}
+                onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                <span style={{ fontSize: '.65rem', color: t.text2, fontFamily: 'ui-monospace,monospace' }}>{fmtTime(r.time)}</span>
+                <span style={{ fontSize: '.72rem', color: t.text1, fontWeight: 500 }}>{r.name || '—'}</span>
+                <span style={{ fontSize: '.65rem', color: t.text2, fontFamily: 'ui-monospace,monospace' }}>{r.mob_num || '—'}</span>
+                <span style={{ fontSize: '.65rem', color: t.text2 }}>{r.branch_name || '—'}</span>
+                <span style={{ fontSize: '.68rem', color: t.purple, fontFamily: 'ui-monospace,monospace' }}>{r.grams > 0 ? `${Number(r.grams).toFixed(2)}g` : '—'}</span>
+                <span style={{ fontSize: '.65rem', color: t.text3 }}>{r.rej_rsn || '—'}</span>
+              </div>
+            ))}
+          </div>
+        </div>
       </div>
     </Card>
   )
@@ -1466,31 +1471,35 @@ function RegionTable({ t, regions, allTxns, allWalkins, allKycRows }) {
         </button>
       </div>
       <Card t={t} style={{ padding: 0, overflow: 'hidden' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 80px 80px 90px 80px 90px 110px 90px', gap: 8, padding: '8px 16px', background: t.card2, borderBottom: `1px solid ${t.border}` }}>
-          {cols.map(h => <span key={h} style={{ fontSize: '.56rem', color: t.text3, fontWeight: 600, letterSpacing: '.1em', textTransform: 'uppercase' }}>{h}</span>)}
-        </div>
-        {rows.map((r, i) => (
-          <div key={r.region} style={{
-            display: 'grid', gridTemplateColumns: '1fr 80px 80px 90px 80px 90px 110px 90px',
-            gap: 8, padding: '11px 16px', borderBottom: i < rows.length - 1 ? `1px solid ${t.border}18` : 'none', alignItems: 'center',
-          }}
-            onMouseEnter={e => e.currentTarget.style.background = t.card2}
-            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
-            <span style={{ fontSize: '.75rem', color: t.text1, fontWeight: 600 }}>{r.region}</span>
-            <span style={{ fontSize: '.68rem', color: t.blue,   fontFamily: 'ui-monospace,monospace' }}>{r.walkins}</span>
-            <span style={{ fontSize: '.68rem', color: t.gold,   fontFamily: 'ui-monospace,monospace' }}>{r.billed}</span>
-            <span style={{ fontSize: '.68rem', color: t.green,  fontFamily: 'ui-monospace,monospace', fontWeight: 600 }}>{r.purchased}</span>
-            <span style={{ fontSize: '.68rem', color: t.orange, fontFamily: 'ui-monospace,monospace' }}>{r.pending}</span>
-            <span style={{ fontSize: '.68rem', color: t.purple, fontFamily: 'ui-monospace,monospace' }}>{r.kyc || '—'}</span>
-            <span style={{ fontSize: '.68rem', color: t.gold,   fontFamily: 'ui-monospace,monospace' }}>{r.value > 0 ? fmtAmt(r.value) : '—'}</span>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <div style={{ flex: 1, height: 4, borderRadius: 2, background: t.border, overflow: 'hidden' }}>
-                <div style={{ height: '100%', width: `${r.conv}%`, background: r.conv >= 50 ? t.green : r.conv >= 30 ? t.orange : t.red, borderRadius: 2 }} />
-              </div>
-              <span style={{ fontSize: '.6rem', color: t.text3, fontFamily: 'ui-monospace,monospace', whiteSpace: 'nowrap' }}>{r.conv}%</span>
+        <div style={{ overflowX: 'auto' }}>
+          <div style={{ minWidth: 700 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 80px 80px 90px 80px 90px 110px 90px', gap: 8, padding: '8px 16px', background: t.card2, borderBottom: `1px solid ${t.border}` }}>
+              {cols.map(h => <span key={h} style={{ fontSize: '.56rem', color: t.text3, fontWeight: 600, letterSpacing: '.1em', textTransform: 'uppercase' }}>{h}</span>)}
             </div>
+            {rows.map((r, i) => (
+              <div key={r.region} style={{
+                display: 'grid', gridTemplateColumns: '1fr 80px 80px 90px 80px 90px 110px 90px',
+                gap: 8, padding: '11px 16px', borderBottom: i < rows.length - 1 ? `1px solid ${t.border}18` : 'none', alignItems: 'center',
+              }}
+                onMouseEnter={e => e.currentTarget.style.background = t.card2}
+                onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                <span style={{ fontSize: '.75rem', color: t.text1, fontWeight: 600 }}>{r.region}</span>
+                <span style={{ fontSize: '.68rem', color: t.blue,   fontFamily: 'ui-monospace,monospace' }}>{r.walkins}</span>
+                <span style={{ fontSize: '.68rem', color: t.gold,   fontFamily: 'ui-monospace,monospace' }}>{r.billed}</span>
+                <span style={{ fontSize: '.68rem', color: t.green,  fontFamily: 'ui-monospace,monospace', fontWeight: 600 }}>{r.purchased}</span>
+                <span style={{ fontSize: '.68rem', color: t.orange, fontFamily: 'ui-monospace,monospace' }}>{r.pending}</span>
+                <span style={{ fontSize: '.68rem', color: t.purple, fontFamily: 'ui-monospace,monospace' }}>{r.kyc || '—'}</span>
+                <span style={{ fontSize: '.68rem', color: t.gold,   fontFamily: 'ui-monospace,monospace' }}>{r.value > 0 ? fmtAmt(r.value) : '—'}</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <div style={{ flex: 1, height: 4, borderRadius: 2, background: t.border, overflow: 'hidden' }}>
+                    <div style={{ height: '100%', width: `${r.conv}%`, background: r.conv >= 50 ? t.green : r.conv >= 30 ? t.orange : t.red, borderRadius: 2 }} />
+                  </div>
+                  <span style={{ fontSize: '.6rem', color: t.text3, fontFamily: 'ui-monospace,monospace', whiteSpace: 'nowrap' }}>{r.conv}%</span>
+                </div>
+              </div>
+            ))}
           </div>
-        ))}
+        </div>
       </Card>
     </div>
   )
@@ -1527,7 +1536,7 @@ function TimelineRow({ item, t, isLast }) {
   const wt = isTxn ? item.weight : (item.weight ? Number(item.weight) : 0)
 
   return (
-    <div className="event-row" style={{
+    <div className="event-row tl-row" style={{
       display: 'grid',
       gridTemplateColumns: '70px 28px 1fr 110px 120px',
       gap: '0 12px',
@@ -1581,11 +1590,11 @@ function TimelineRow({ item, t, isLast }) {
         </div>
       </div>
       {/* Weight */}
-      <span className="er-wt" style={{ fontFamily: 'ui-monospace, monospace', fontSize: '.72rem', color: wt > 0 ? t.text1 : t.text4, textAlign: 'right', fontWeight: wt > 0 ? 500 : 400 }}>
+      <span className="er-wt tl-wt" style={{ fontFamily: 'ui-monospace, monospace', fontSize: '.72rem', color: wt > 0 ? t.text1 : t.text4, textAlign: 'right', fontWeight: wt > 0 ? 500 : 400 }}>
         {wt > 0 ? fmtWt(wt) : '—'}
       </span>
       {/* Amount */}
-      <span className="er-amt" style={{ fontFamily: 'ui-monospace, monospace', fontSize: '.74rem', color: isTxn && item.amount ? t.gold : t.text4, textAlign: 'right', fontWeight: isTxn && item.amount ? 600 : 400 }}>
+      <span className="er-amt tl-amt" style={{ fontFamily: 'ui-monospace, monospace', fontSize: '.74rem', color: isTxn && item.amount ? t.gold : t.text4, textAlign: 'right', fontWeight: isTxn && item.amount ? 600 : 400 }}>
         {isTxn && item.amount != null ? fmtAmt(item.amount) : '—'}
       </span>
     </div>
@@ -1935,9 +1944,9 @@ function NewCrmTab({ t, newCrmTxns, newCrmError, regionFilter, regions, isToday,
                 style={{ background: t.card2, border: `1px solid ${t.border}`, borderRadius: 6, padding: '5px 10px', fontSize: '.62rem', color: t.text2, outline: 'none', width: 220, fontFamily: 'ui-monospace, monospace' }} />
               <span style={{ fontSize: '.6rem', color: t.text4, marginLeft: 4 }}>{tlSearch ? txns.filter(tx => { const s = tlSearch.toLowerCase(); return (tx.cust_name||'').toLowerCase().includes(s) || (tx.cust_mobile||'').includes(s) || (tx.branch_name||'').toLowerCase().includes(s) }).length : txns.length} events</span>
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '70px 28px 1fr 110px 120px', gap: '0 12px', padding: '8px 20px', background: t.card2, borderBottom: `1px solid ${t.border}` }}>
+            <div className="tl-row" style={{ display: 'grid', gridTemplateColumns: '70px 28px 1fr 110px 120px', gap: '0 12px', padding: '8px 20px', background: t.card2, borderBottom: `1px solid ${t.border}` }}>
               {['Time', '', 'Customer / Branch', 'Weight', 'Amount'].map((h, i) => (
-                <span key={i} style={{ fontSize: '.57rem', color: t.text3, fontWeight: 600, letterSpacing: '.1em', textTransform: 'uppercase', textAlign: i >= 3 ? 'right' : i === 0 ? 'right' : 'left' }}>{h}</span>
+                <span key={i} className={i === 3 ? 'tl-hdr-wt' : i === 4 ? 'tl-hdr-amt' : ''} style={{ fontSize: '.57rem', color: t.text3, fontWeight: 600, letterSpacing: '.1em', textTransform: 'uppercase', textAlign: i >= 3 ? 'right' : i === 0 ? 'right' : 'left' }}>{h}</span>
               ))}
             </div>
             <div style={{ maxHeight: 480, overflowY: 'auto' }}>
@@ -2128,27 +2137,31 @@ function NewCrmRegionTable({ t, regions, allTxns }) {
         </button>
       </div>
       <Card t={t} style={{ padding: 0, overflow: 'hidden' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 70px 100px 90px 80px 110px 90px', gap: 8, padding: '8px 16px', background: t.card2, borderBottom: `1px solid ${t.border}` }}>
-          {cols.map(h => <span key={h} style={{ fontSize: '.56rem', color: t.text3, fontWeight: 600, letterSpacing: '.1em', textTransform: 'uppercase' }}>{h}</span>)}
-        </div>
-        {rows.map((r, i) => (
-          <div key={r.region} style={{ display: 'grid', gridTemplateColumns: '1fr 70px 100px 90px 80px 110px 90px', gap: 8, padding: '11px 16px', borderBottom: i < rows.length - 1 ? `1px solid ${t.border}18` : 'none', alignItems: 'center' }}
-            onMouseEnter={e => e.currentTarget.style.background = t.card2}
-            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
-            <span style={{ fontSize: '.75rem', color: t.text1, fontWeight: 600 }}>{r.region}</span>
-            <span style={{ fontSize: '.68rem', color: t.blue,   fontFamily: 'ui-monospace,monospace' }}>{r.total}</span>
-            <span style={{ fontSize: '.68rem', color: t.orange, fontFamily: 'ui-monospace,monospace' }}>{r.inProgress || '—'}</span>
-            <span style={{ fontSize: '.68rem', color: t.green,  fontFamily: 'ui-monospace,monospace', fontWeight: 600 }}>{r.completed}</span>
-            <span style={{ fontSize: '.68rem', color: t.red,    fontFamily: 'ui-monospace,monospace' }}>{r.walkout || '—'}</span>
-            <span style={{ fontSize: '.68rem', color: t.gold,   fontFamily: 'ui-monospace,monospace' }}>{r.value > 0 ? fmtAmt(r.value) : '—'}</span>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <div style={{ flex: 1, height: 4, borderRadius: 2, background: t.border, overflow: 'hidden' }}>
-                <div style={{ height: '100%', width: `${r.conv}%`, background: r.conv >= 50 ? t.green : r.conv >= 30 ? t.orange : t.red, borderRadius: 2 }} />
-              </div>
-              <span style={{ fontSize: '.6rem', color: t.text3, fontFamily: 'ui-monospace,monospace', whiteSpace: 'nowrap' }}>{r.conv}%</span>
+        <div style={{ overflowX: 'auto' }}>
+          <div style={{ minWidth: 640 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 70px 100px 90px 80px 110px 90px', gap: 8, padding: '8px 16px', background: t.card2, borderBottom: `1px solid ${t.border}` }}>
+              {cols.map(h => <span key={h} style={{ fontSize: '.56rem', color: t.text3, fontWeight: 600, letterSpacing: '.1em', textTransform: 'uppercase' }}>{h}</span>)}
             </div>
+            {rows.map((r, i) => (
+              <div key={r.region} style={{ display: 'grid', gridTemplateColumns: '1fr 70px 100px 90px 80px 110px 90px', gap: 8, padding: '11px 16px', borderBottom: i < rows.length - 1 ? `1px solid ${t.border}18` : 'none', alignItems: 'center' }}
+                onMouseEnter={e => e.currentTarget.style.background = t.card2}
+                onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                <span style={{ fontSize: '.75rem', color: t.text1, fontWeight: 600 }}>{r.region}</span>
+                <span style={{ fontSize: '.68rem', color: t.blue,   fontFamily: 'ui-monospace,monospace' }}>{r.total}</span>
+                <span style={{ fontSize: '.68rem', color: t.orange, fontFamily: 'ui-monospace,monospace' }}>{r.inProgress || '—'}</span>
+                <span style={{ fontSize: '.68rem', color: t.green,  fontFamily: 'ui-monospace,monospace', fontWeight: 600 }}>{r.completed}</span>
+                <span style={{ fontSize: '.68rem', color: t.red,    fontFamily: 'ui-monospace,monospace' }}>{r.walkout || '—'}</span>
+                <span style={{ fontSize: '.68rem', color: t.gold,   fontFamily: 'ui-monospace,monospace' }}>{r.value > 0 ? fmtAmt(r.value) : '—'}</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <div style={{ flex: 1, height: 4, borderRadius: 2, background: t.border, overflow: 'hidden' }}>
+                    <div style={{ height: '100%', width: `${r.conv}%`, background: r.conv >= 50 ? t.green : r.conv >= 30 ? t.orange : t.red, borderRadius: 2 }} />
+                  </div>
+                  <span style={{ fontSize: '.6rem', color: t.text3, fontFamily: 'ui-monospace,monospace', whiteSpace: 'nowrap' }}>{r.conv}%</span>
+                </div>
+              </div>
+            ))}
           </div>
-        ))}
+        </div>
       </Card>
     </div>
   )
@@ -2162,7 +2175,7 @@ function NewCrmTimelineRow({ item, t, isLast }) {
   const isTakeover = (item.transaction_type || '').toUpperCase().includes('RELEASE')
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '70px 28px 1fr 110px 120px', gap: '0 12px', padding: '12px 20px', borderBottom: isLast ? 'none' : `1px solid ${t.border}18`, alignItems: 'center', borderLeft: `3px solid ${accentColor}40`, transition: 'background .12s' }}
+    <div className="tl-row" style={{ display: 'grid', gridTemplateColumns: '70px 28px 1fr 110px 120px', gap: '0 12px', padding: '12px 20px', borderBottom: isLast ? 'none' : `1px solid ${t.border}18`, alignItems: 'center', borderLeft: `3px solid ${accentColor}40`, transition: 'background .12s' }}
       onMouseEnter={e => e.currentTarget.style.background = t.card2}
       onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
       <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: '.66rem', color: t.text3, textAlign: 'right', lineHeight: 1 }}>{fmtTime(item.txn_time)}</span>
@@ -2182,8 +2195,8 @@ function NewCrmTimelineRow({ item, t, isLast }) {
           {item.bill_no && <span style={{ fontSize: '.58rem', color: t.gold, fontFamily: 'ui-monospace, monospace', opacity: .7 }}>#{item.bill_no}</span>}
         </div>
       </div>
-      <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: '.72rem', color: wt > 0 ? t.text1 : t.text4, textAlign: 'right', fontWeight: wt > 0 ? 500 : 400 }}>{wt > 0 ? fmtWt(wt) : '—'}</span>
-      <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: '.74rem', color: item.status === 'FINAL_PAYMENT_COMPLETED' && item.amount ? t.gold : t.text4, textAlign: 'right', fontWeight: item.status === 'FINAL_PAYMENT_COMPLETED' && item.amount ? 600 : 400 }}>{item.amount ? fmtAmt(item.amount) : '—'}</span>
+      <span className="tl-wt" style={{ fontFamily: 'ui-monospace, monospace', fontSize: '.72rem', color: wt > 0 ? t.text1 : t.text4, textAlign: 'right', fontWeight: wt > 0 ? 500 : 400 }}>{wt > 0 ? fmtWt(wt) : '—'}</span>
+      <span className="tl-amt" style={{ fontFamily: 'ui-monospace, monospace', fontSize: '.74rem', color: item.status === 'FINAL_PAYMENT_COMPLETED' && item.amount ? t.gold : t.text4, textAlign: 'right', fontWeight: item.status === 'FINAL_PAYMENT_COMPLETED' && item.amount ? 600 : 400 }}>{item.amount ? fmtAmt(item.amount) : '—'}</span>
     </div>
   )
 }
