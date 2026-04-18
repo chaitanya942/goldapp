@@ -578,7 +578,7 @@ function PurchaseInline({ t, setActiveNav, canSee }) {
                       return (
                         <div key={b.branch_name} style={{ display:'flex', alignItems:'center', gap:8 }}>
                           <div style={{ width:18, fontSize:10, fontWeight:700, color:rankColor, textAlign:'center', flexShrink:0, fontVariantNumeric:'tabular-nums' }}>{i+1}</div>
-                          <div style={{ flex:1 }}>
+                          <div style={{ flex:1, minWidth:0 }}>
                             <StatRow delay={i*50}
                               label={b.branch_name} value={`${fmt(b.total_net,1)}g`}
                               color={color} t={t}
