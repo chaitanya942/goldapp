@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase'
+import { startAuthentication, startRegistration } from '@simplewebauthn/browser'
 
 export default function LoginPage() {
   const [email,             setEmail]             = useState('')
@@ -34,7 +35,7 @@ export default function LoginPage() {
   useEffect(() => {
     if (!hasSavedPasskey) return
     if (typeof window === 'undefined' || !window.PublicKeyCredential) return
-    const t = setTimeout(handleBiometricLogin, 400)
+    const t = setTimeout(handleBiometricLogin, 100)
     return () => clearTimeout(t)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasSavedPasskey])
@@ -153,7 +154,6 @@ export default function LoginPage() {
   const handleBiometricLogin = async () => {
     setBiometricLoading(true); setPasskeyError('')
     try {
-      const { startAuthentication } = await import('@simplewebauthn/browser')
       const optRes = await fetch('/api/webauthn/auth-options', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -181,7 +181,6 @@ export default function LoginPage() {
   const handleSavePasskey = async () => {
     setBiometricLoading(true); setPasskeyError('')
     try {
-      const { startRegistration } = await import('@simplewebauthn/browser')
       const token = accessTokenRef.current
       const optRes = await fetch('/api/webauthn/register-options', {
         method: 'POST',
