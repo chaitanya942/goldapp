@@ -1472,18 +1472,18 @@ function RegionTable({ t, regions, allTxns, allWalkins, allKycRows }) {
       </div>
       <Card t={t} style={{ padding: 0, overflow: 'hidden' }}>
         <div style={{ overflowX: 'auto' }}>
-          <div style={{ minWidth: 700 }}>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 80px 80px 90px 80px 90px 110px 90px', gap: 8, padding: '8px 16px', background: t.card2, borderBottom: `1px solid ${t.border}` }}>
+          <div style={{ minWidth: 820 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '140px 80px 80px 90px 80px 90px 110px 90px', gap: 8, padding: '8px 16px', background: t.card2, borderBottom: `1px solid ${t.border}` }}>
               {cols.map(h => <span key={h} style={{ fontSize: '.56rem', color: t.text3, fontWeight: 600, letterSpacing: '.1em', textTransform: 'uppercase' }}>{h}</span>)}
             </div>
             {rows.map((r, i) => (
               <div key={r.region} style={{
-                display: 'grid', gridTemplateColumns: '1fr 80px 80px 90px 80px 90px 110px 90px',
+                display: 'grid', gridTemplateColumns: '140px 80px 80px 90px 80px 90px 110px 90px',
                 gap: 8, padding: '11px 16px', borderBottom: i < rows.length - 1 ? `1px solid ${t.border}18` : 'none', alignItems: 'center',
               }}
                 onMouseEnter={e => e.currentTarget.style.background = t.card2}
                 onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
-                <span style={{ fontSize: '.75rem', color: t.text1, fontWeight: 600 }}>{r.region}</span>
+                <span style={{ fontSize: '.75rem', color: t.text1, fontWeight: 600, whiteSpace: 'nowrap' }}>{r.region}</span>
                 <span style={{ fontSize: '.68rem', color: t.blue,   fontFamily: 'ui-monospace,monospace' }}>{r.walkins}</span>
                 <span style={{ fontSize: '.68rem', color: t.gold,   fontFamily: 'ui-monospace,monospace' }}>{r.billed}</span>
                 <span style={{ fontSize: '.68rem', color: t.green,  fontFamily: 'ui-monospace,monospace', fontWeight: 600 }}>{r.purchased}</span>
@@ -2138,15 +2138,15 @@ function NewCrmRegionTable({ t, regions, allTxns }) {
       </div>
       <Card t={t} style={{ padding: 0, overflow: 'hidden' }}>
         <div style={{ overflowX: 'auto' }}>
-          <div style={{ minWidth: 640 }}>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 70px 100px 90px 80px 110px 90px', gap: 8, padding: '8px 16px', background: t.card2, borderBottom: `1px solid ${t.border}` }}>
+          <div style={{ minWidth: 760 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '140px 70px 100px 90px 80px 110px 90px', gap: 8, padding: '8px 16px', background: t.card2, borderBottom: `1px solid ${t.border}` }}>
               {cols.map(h => <span key={h} style={{ fontSize: '.56rem', color: t.text3, fontWeight: 600, letterSpacing: '.1em', textTransform: 'uppercase' }}>{h}</span>)}
             </div>
             {rows.map((r, i) => (
-              <div key={r.region} style={{ display: 'grid', gridTemplateColumns: '1fr 70px 100px 90px 80px 110px 90px', gap: 8, padding: '11px 16px', borderBottom: i < rows.length - 1 ? `1px solid ${t.border}18` : 'none', alignItems: 'center' }}
+              <div key={r.region} style={{ display: 'grid', gridTemplateColumns: '140px 70px 100px 90px 80px 110px 90px', gap: 8, padding: '11px 16px', borderBottom: i < rows.length - 1 ? `1px solid ${t.border}18` : 'none', alignItems: 'center' }}
                 onMouseEnter={e => e.currentTarget.style.background = t.card2}
                 onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
-                <span style={{ fontSize: '.75rem', color: t.text1, fontWeight: 600 }}>{r.region}</span>
+                <span style={{ fontSize: '.75rem', color: t.text1, fontWeight: 600, whiteSpace: 'nowrap' }}>{r.region}</span>
                 <span style={{ fontSize: '.68rem', color: t.blue,   fontFamily: 'ui-monospace,monospace' }}>{r.total}</span>
                 <span style={{ fontSize: '.68rem', color: t.orange, fontFamily: 'ui-monospace,monospace' }}>{r.inProgress || '—'}</span>
                 <span style={{ fontSize: '.68rem', color: t.green,  fontFamily: 'ui-monospace,monospace', fontWeight: 600 }}>{r.completed}</span>
