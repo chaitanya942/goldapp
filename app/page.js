@@ -35,7 +35,7 @@ export default function LoginPage() {
   useEffect(() => {
     if (!hasSavedPasskey) return
     if (typeof window === 'undefined' || !window.PublicKeyCredential) return
-    const t = setTimeout(handleBiometricLogin, 100)
+    handleBiometricLogin()
     return () => clearTimeout(t)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasSavedPasskey])
@@ -674,8 +674,8 @@ export default function LoginPage() {
             <div className="card-cb card-bl" />
             <div className="card-cb card-br" />
 
-            <div className="card-title">{step === 'passkey-prompt' ? 'Faster Sign‑In' : 'Sign In'}</div>
-            <div className="card-sub">{step === 'passkey-prompt' ? 'Skip the password next time' : 'Enter your credentials to access the portal'}</div>
+            <div className="card-title">{step === 'passkey-prompt' ? 'Faster Sign‑In' : biometricLoading && hasSavedPasskey ? 'Signing In' : 'Sign In'}</div>
+            <div className="card-sub">{step === 'passkey-prompt' ? 'Skip the password next time' : biometricLoading && hasSavedPasskey ? 'Preparing biometric prompt…' : 'Enter your credentials to access the portal'}</div>
 
             {step === 'passkey-prompt' ? (
               <div className="passkey-prompt">
@@ -698,19 +698,25 @@ export default function LoginPage() {
               </div>
             ) : (
               <form onSubmit={handleLogin} autoComplete="off">
-                {hasSavedPasskey && (
+                {hasSavedPasskey && biometricLoading ? (
+                  <div style={{ textAlign:'center', padding:'24px 0 20px' }}>
+                    <div style={{ width:52, height:52, borderRadius:'50%', background:'rgba(201,168,76,0.07)', border:'1px solid rgba(201,168,76,0.18)', display:'flex', alignItems:'center', justifyContent:'center', margin:'0 auto 18px' }}>
+                      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="rgba(201,168,76,0.8)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M7.864 4.243A7.5 7.5 0 0119.5 10.5c0 2.92-.556 5.709-1.568 8.268M5.742 6.364A7.465 7.465 0 004.5 10.5a7.464 7.464 0 01-1.15 3.993m1.989 3.559A11.209 11.209 0 008.25 10.5a3.75 3.75 0 117.5 0c0 .527-.021 1.049-.064 1.565M12 10.5a14.94 14.94 0 01-3.6 9.75m6.633-4.596a18.666 18.666 0 01-2.485 5.33"/>
+                      </svg>
+                    </div>
+                    <div style={{ width:28, height:28, border:'2px solid rgba(201,168,76,0.15)', borderTopColor:'rgba(201,168,76,0.7)', borderRadius:'50%', animation:'spin .8s linear infinite', margin:'0 auto 14px' }} />
+                    <div style={{ fontSize:'.68rem', color:'rgba(255,255,255,0.28)', letterSpacing:'.08em' }}>
+                      Use email instead? <button type="button" onClick={() => { setBiometricLoading(false) }} style={{ background:'none', border:'none', color:'rgba(201,168,76,0.5)', cursor:'pointer', fontSize:'.68rem', letterSpacing:'.08em', textDecoration:'underline' }}>Sign in with email</button>
+                    </div>
+                  </div>
+                ) : hasSavedPasskey ? (
                   <>
                     <button type="button" className="bio-btn" onClick={handleBiometricLogin} disabled={biometricLoading}>
-                      {biometricLoading ? (
-                        <><div className="spinner" style={{ borderColor:'rgba(201,168,76,0.2)', borderTopColor:'rgba(201,168,76,0.7)' }} /> Authenticating…</>
-                      ) : (
-                        <>
-                          <svg className="bio-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="M7.864 4.243A7.5 7.5 0 0119.5 10.5c0 2.92-.556 5.709-1.568 8.268M5.742 6.364A7.465 7.465 0 004.5 10.5a7.464 7.464 0 01-1.15 3.993m1.989 3.559A11.209 11.209 0 008.25 10.5a3.75 3.75 0 117.5 0c0 .527-.021 1.049-.064 1.565M12 10.5a14.94 14.94 0 01-3.6 9.75m6.633-4.596a18.666 18.666 0 01-2.485 5.33"/>
-                          </svg>
-                          Sign In with Biometrics
-                        </>
-                      )}
+                      <svg className="bio-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M7.864 4.243A7.5 7.5 0 0119.5 10.5c0 2.92-.556 5.709-1.568 8.268M5.742 6.364A7.465 7.465 0 004.5 10.5a7.464 7.464 0 01-1.15 3.993m1.989 3.559A11.209 11.209 0 008.25 10.5a3.75 3.75 0 117.5 0c0 .527-.021 1.049-.064 1.565M12 10.5a14.94 14.94 0 01-3.6 9.75m6.633-4.596a18.666 18.666 0 01-2.485 5.33"/>
+                      </svg>
+                      Sign In with Biometrics
                     </button>
                     {passkeyError && <div className="errmsg" style={{ marginBottom: 4 }}><div className="errdot" />{passkeyError}</div>}
                     <div style={{ textAlign:'right', marginBottom: 14, marginTop: 4 }}>
@@ -720,8 +726,9 @@ export default function LoginPage() {
                     </div>
                     <div className="divider">or continue with email</div>
                   </>
-                )}
+                ) : null}
 
+                {!(hasSavedPasskey && biometricLoading) && <>
                 <div className="field">
                   <label className="flbl">Email</label>
                   <div className="inp-wrap">
@@ -772,6 +779,7 @@ export default function LoginPage() {
                     </div>
                   </button>
                 </div>
+                </>}
               </form>
             )}
           </div>
