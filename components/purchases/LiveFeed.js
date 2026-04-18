@@ -1103,9 +1103,9 @@ function OldCrmTab({
               <input
                 type="text" placeholder="Search name, mobile, branch..."
                 value={tlSearch} onChange={e => setTlSearch(e.target.value)}
-                style={{ background: t.card2, border: `1px solid ${t.border}`, borderRadius: 6, padding: '5px 10px', fontSize: '.62rem', color: t.text2, outline: 'none', width: 180, fontFamily: 'ui-monospace, monospace' }}
+                style={{ background: t.card2, border: `1px solid ${t.border}`, borderRadius: 6, padding: '5px 10px', fontSize: '.62rem', color: t.text2, outline: 'none', flex: 1, minWidth: 0, fontFamily: 'ui-monospace, monospace' }}
               />
-              <span style={{ fontSize: '.6rem', color: t.text4, marginLeft: 4 }}>{filteredTimeline.filter(item => tlFilter === 'txn' ? item.type === 'txn' : tlFilter === 'walkin' ? item.type === 'walkin' : true).length} events</span>
+              <span style={{ fontSize: '.6rem', color: t.text4, whiteSpace: 'nowrap' }}>{filteredTimeline.filter(item => tlFilter === 'txn' ? item.type === 'txn' : tlFilter === 'walkin' ? item.type === 'walkin' : true).length} events</span>
             </div>
             <div className="tl-row" style={{ display: 'grid', gridTemplateColumns: '70px 28px 1fr 110px 120px', gap: '0 12px', padding: '8px 20px', background: t.card2, borderBottom: `1px solid ${t.border}` }}>
               {['Time', '', 'Customer / Branch', 'Weight', 'Amount'].map((h, i) => (
@@ -1274,8 +1274,40 @@ function LiveDetail({ t, activeMetric, todayTxns, todayWalkins, kycRows, notBill
 
 /* ── Transaction table (Purchase-Data style) ── */
 function TxnTable({ rows, t }) {
+  const isMobile = useMobile()
   const cols = ['Bill No','Date','Time','Customer','Phone','Branch','Gross Wt','Stone','Wastage','Net Wt','Purity','Gross Amt','Svc%','Status','Remarks']
   const widths = '100px 90px 70px 160px 110px 150px 76px 60px 70px 70px 66px 96px 46px 80px 1fr'
+  if (rows.length === 0) return <Card t={t}><div style={{ textAlign: 'center', color: t.text4, fontSize: '.72rem', padding: 16 }}>No records</div></Card>
+  if (isMobile) {
+    return (
+      <Card t={t} style={{ padding: 0, overflow: 'hidden' }}>
+        <div style={{ maxHeight: 520, overflowY: 'auto' }}>
+          {rows.map((r, i) => {
+            const sc = { approved: t.green, pending: t.orange, rejected: t.red }[r.trxn_status] || t.text3
+            const netWt = csvSum(r.net_wet_csv)
+            const grossAmt = csvSum(r.grs_amnt_csv)
+            return (
+              <div key={r.id || i} style={{ padding: '11px 14px', borderBottom: i < rows.length - 1 ? `1px solid ${t.border}18` : 'none', borderLeft: `3px solid ${sc}40` }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                  <span style={{ fontSize: '.76rem', color: t.text1, fontWeight: 600, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.cust_name || '—'}</span>
+                  <span style={{ fontSize: '.56rem', padding: '2px 7px', borderRadius: 4, fontWeight: 700, background: `${sc}18`, color: sc, border: `1px solid ${sc}30`, textTransform: 'capitalize', whiteSpace: 'nowrap' }}>{r.trxn_status || '—'}</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: '.62rem', color: t.text3, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.branch_name || '—'}</span>
+                  {netWt > 0 && <span style={{ fontSize: '.62rem', color: t.text2, fontFamily: 'ui-monospace,monospace' }}>{netWt.toFixed(2)}g net</span>}
+                  {grossAmt > 0 && <span style={{ fontSize: '.64rem', color: t.gold, fontFamily: 'ui-monospace,monospace', fontWeight: 600 }}>₹{Math.round(grossAmt).toLocaleString('en-IN')}</span>}
+                </div>
+                <div style={{ fontSize: '.58rem', color: t.text4, marginTop: 3, fontFamily: 'ui-monospace,monospace' }}>
+                  {r.bill_no || '—'} · {fmtDate(r.txn_date)} {fmtTime(r.time)}
+                  {r.txn_rmrk ? <span style={{ color: t.text3 }}> · {r.txn_rmrk}</span> : null}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      </Card>
+    )
+  }
   return (
     <Card t={t} style={{ padding: 0, overflow: 'hidden' }}>
       <div style={{ overflowX: 'auto' }}>
@@ -1284,7 +1316,6 @@ function TxnTable({ rows, t }) {
             {cols.map(h => <span key={h} style={{ fontSize: '.56rem', letterSpacing: '.1em', textTransform: 'uppercase', color: t.text3, fontWeight: 600 }}>{h}</span>)}
           </div>
           <div style={{ maxHeight: 480, overflowY: 'auto' }}>
-            {rows.length === 0 && <div style={{ padding: 32, textAlign: 'center', color: t.text4, fontSize: '.72rem' }}>No records</div>}
             {rows.map((r, i) => {
               const sc = { approved: t.green, pending: t.orange, rejected: t.red }[r.trxn_status] || t.text3
               return (
@@ -1318,8 +1349,39 @@ function TxnTable({ rows, t }) {
 
 /* ── Walk-in table ── */
 function WalkinTable({ rows, t }) {
+  const isMobile = useMobile()
   const cols = ['Time','Customer','Phone','Branch','Gold Wt','Item Type','Walk Reason','Status','Staff Remarks']
   const widths = '70px 160px 110px 140px 70px 100px 140px 100px 1fr'
+  if (rows.length === 0) return <Card t={t}><div style={{ textAlign: 'center', color: t.text4, fontSize: '.72rem', padding: 16 }}>No records</div></Card>
+  if (isMobile) {
+    return (
+      <Card t={t} style={{ padding: 0, overflow: 'hidden' }}>
+        <div style={{ maxHeight: 520, overflowY: 'auto' }}>
+          {rows.map((r, i) => {
+            const sc = { sold: t.green, 'visited not sold': t.red, enquiry: t.blue, 'planning to visit': t.orange, 'call later': t.purple }[r.walkin_status] || t.text3
+            return (
+              <div key={r.id || i} style={{ padding: '11px 14px', borderBottom: i < rows.length - 1 ? `1px solid ${t.border}18` : 'none', borderLeft: `3px solid ${sc}40` }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                  <span style={{ fontSize: '.76rem', color: t.text1, fontWeight: 600, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.cust_name || '—'}</span>
+                  <span style={{ fontSize: '.56rem', padding: '2px 7px', borderRadius: 4, fontWeight: 700, background: `${sc}18`, color: sc, border: `1px solid ${sc}30`, textTransform: 'capitalize', whiteSpace: 'nowrap' }}>{r.walkin_status || 'unknown'}</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: '.62rem', color: t.text3, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.branch_name || '—'}</span>
+                  {r.gms_weight > 0 && <span style={{ fontSize: '.62rem', color: t.gold, fontFamily: 'ui-monospace,monospace' }}>{Number(r.gms_weight).toFixed(2)}g</span>}
+                  <span style={{ fontSize: '.6rem', color: t.text4, fontFamily: 'ui-monospace,monospace' }}>{fmtTime(r.time)}</span>
+                </div>
+                {(r.walk_reason || r.item_type) && (
+                  <div style={{ fontSize: '.58rem', color: t.text4, marginTop: 3 }}>
+                    {[r.item_type, r.walk_reason].filter(Boolean).join(' · ')}
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      </Card>
+    )
+  }
   return (
     <Card t={t} style={{ padding: 0, overflow: 'hidden' }}>
       <div style={{ overflowX: 'auto' }}>
@@ -1328,7 +1390,6 @@ function WalkinTable({ rows, t }) {
             {cols.map(h => <span key={h} style={{ fontSize: '.56rem', letterSpacing: '.1em', textTransform: 'uppercase', color: t.text3, fontWeight: 600 }}>{h}</span>)}
           </div>
           <div style={{ maxHeight: 480, overflowY: 'auto' }}>
-            {rows.length === 0 && <div style={{ padding: 32, textAlign: 'center', color: t.text4, fontSize: '.72rem' }}>No records</div>}
             {rows.map((r, i) => {
               const sc = { sold: t.green, 'visited not sold': t.red, enquiry: t.blue, 'planning to visit': t.orange, 'call later': t.purple }[r.walkin_status] || t.text3
               return (
@@ -1526,77 +1587,79 @@ function FlowSep({ t }) {
 
 /* ── Timeline Row ── */
 function TimelineRow({ item, t, isLast }) {
+  const isMobile = useMobile()
   const isTxn = item.type === 'txn'
   const statusStyle = isTxn ? (STATUS_STYLE[item.status] || {}) : {}
   const accentColor = isTxn ? (statusStyle.color || t.gold) : t.blue
-  const typeIcon = isTxn ? '📋' : '🚶'
   const goldTypeBadge = isTxn && item.goldType
     ? ({ physical: 'Physical', released: 'Takeover' }[item.goldType] || item.goldType)
     : null
   const wt = isTxn ? item.weight : (item.weight ? Number(item.weight) : 0)
+  const statusLabel = isTxn ? (statusStyle.label || item.status) : (item.walkinStatus || 'Walk-in')
+
+  const rowBase = {
+    padding: isMobile ? '10px 14px' : '12px 20px',
+    borderBottom: isLast ? 'none' : `1px solid ${t.border}18`,
+    borderLeft: `3px solid ${accentColor}40`,
+    transition: 'background .12s',
+  }
+
+  if (isMobile) {
+    return (
+      <div style={rowBase}
+        onMouseEnter={e => e.currentTarget.style.background = t.card2}
+        onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+        {/* Row 1: name + time + status */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+          <span style={{ fontSize: '.76rem', color: t.text1, fontWeight: 600, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {item.name || 'Unknown'}
+          </span>
+          <span style={{ fontSize: '.56rem', padding: '2px 7px', borderRadius: 4, background: `${accentColor}18`, color: accentColor, border: `1px solid ${accentColor}35`, fontWeight: 700, textTransform: 'uppercase', whiteSpace: 'nowrap', flexShrink: 0 }}>
+            {statusLabel}
+          </span>
+        </div>
+        {/* Row 2: branch + time · weight/amount */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: '.6rem', color: t.text3, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {item.branch || '—'}
+            {goldTypeBadge ? ` · ${goldTypeBadge}` : ''}
+            {isTxn && item.bill ? ` · #${item.bill}` : ''}
+          </span>
+          <span style={{ fontSize: '.6rem', color: t.text4, fontFamily: 'ui-monospace,monospace', flexShrink: 0 }}>{fmtTime(item.time)}</span>
+          {wt > 0 && <span style={{ fontSize: '.6rem', color: t.text2, fontFamily: 'ui-monospace,monospace', flexShrink: 0 }}>{fmtWt(wt)}</span>}
+          {isTxn && item.amount != null && <span style={{ fontSize: '.62rem', color: t.gold, fontFamily: 'ui-monospace,monospace', fontWeight: 600, flexShrink: 0 }}>{fmtAmt(item.amount)}</span>}
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="event-row tl-row" style={{
-      display: 'grid',
-      gridTemplateColumns: '70px 28px 1fr 110px 120px',
-      gap: '0 12px',
-      padding: '12px 20px',
-      borderBottom: isLast ? 'none' : `1px solid ${t.border}18`,
-      alignItems: 'center',
-      borderLeft: `3px solid ${accentColor}40`,
-      transition: 'background .12s',
+      display: 'grid', gridTemplateColumns: '70px 28px 1fr 110px 120px',
+      gap: '0 12px', ...rowBase, alignItems: 'center',
     }}
       onMouseEnter={e => e.currentTarget.style.background = t.card2}
       onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
     >
-      {/* Time */}
-      <span className="er-time" style={{ fontFamily: 'ui-monospace, monospace', fontSize: '.66rem', color: t.text3, textAlign: 'right', lineHeight: 1 }}>
-        {fmtTime(item.time)}
-      </span>
-      {/* Type icon + dot */}
-      <div className="er-icon" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}>
-        <span style={{ fontSize: '.75rem', lineHeight: 1 }}>{typeIcon}</span>
+      <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: '.66rem', color: t.text3, textAlign: 'right', lineHeight: 1 }}>{fmtTime(item.time)}</span>
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}>
+        <span style={{ fontSize: '.75rem', lineHeight: 1 }}>{isTxn ? '📋' : '🚶'}</span>
         <span style={{ width: 6, height: 6, borderRadius: '50%', background: accentColor, display: 'block', boxShadow: `0 0 5px ${accentColor}60` }} />
       </div>
-      {/* Main info */}
-      <div className="er-main" style={{ minWidth: 0 }}>
+      <div style={{ minWidth: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-          <span style={{ fontSize: '.78rem', color: t.text1, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 200 }}>
-            {item.name || 'Unknown'}
-          </span>
-          <span className="er-status-badge" style={{
-            fontSize: '.56rem', padding: '2px 7px', borderRadius: 4,
-            background: `${accentColor}18`, color: accentColor, border: `1px solid ${accentColor}35`,
-            fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase', whiteSpace: 'nowrap',
-          }}>
-            {isTxn ? (statusStyle.label || item.status) : (item.walkinStatus || 'walk-in')}
-          </span>
-          {goldTypeBadge && (
-            <span style={{
-              fontSize: '.52rem', padding: '2px 6px', borderRadius: 4,
-              background: `${t.gold}12`, color: t.gold, border: `1px solid ${t.gold}25`,
-              fontWeight: 600, whiteSpace: 'nowrap',
-            }}>
-              {goldTypeBadge}
-            </span>
-          )}
+          <span style={{ fontSize: '.78rem', color: t.text1, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 200 }}>{item.name || 'Unknown'}</span>
+          <span style={{ fontSize: '.56rem', padding: '2px 7px', borderRadius: 4, background: `${accentColor}18`, color: accentColor, border: `1px solid ${accentColor}35`, fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>{statusLabel}</span>
+          {goldTypeBadge && <span style={{ fontSize: '.52rem', padding: '2px 6px', borderRadius: 4, background: `${t.gold}12`, color: t.gold, border: `1px solid ${t.gold}25`, fontWeight: 600, whiteSpace: 'nowrap' }}>{goldTypeBadge}</span>}
         </div>
         <div style={{ display: 'flex', gap: 10, marginTop: 3, alignItems: 'center', flexWrap: 'wrap' }}>
           {item.branch && <span style={{ fontSize: '.62rem', color: t.text3 }}>{item.branch}</span>}
           {item.mobile && <span style={{ fontSize: '.6rem', color: t.text4, fontFamily: 'ui-monospace, monospace' }}>{item.mobile}</span>}
-          {isTxn && item.bill && (
-            <span style={{ fontSize: '.58rem', color: t.gold, fontFamily: 'ui-monospace, monospace', opacity: .7 }}>#{item.bill}</span>
-          )}
+          {isTxn && item.bill && <span style={{ fontSize: '.58rem', color: t.gold, fontFamily: 'ui-monospace, monospace', opacity: .7 }}>#{item.bill}</span>}
         </div>
       </div>
-      {/* Weight */}
-      <span className="er-wt tl-wt" style={{ fontFamily: 'ui-monospace, monospace', fontSize: '.72rem', color: wt > 0 ? t.text1 : t.text4, textAlign: 'right', fontWeight: wt > 0 ? 500 : 400 }}>
-        {wt > 0 ? fmtWt(wt) : '—'}
-      </span>
-      {/* Amount */}
-      <span className="er-amt tl-amt" style={{ fontFamily: 'ui-monospace, monospace', fontSize: '.74rem', color: isTxn && item.amount ? t.gold : t.text4, textAlign: 'right', fontWeight: isTxn && item.amount ? 600 : 400 }}>
-        {isTxn && item.amount != null ? fmtAmt(item.amount) : '—'}
-      </span>
+      <span className="tl-wt" style={{ fontFamily: 'ui-monospace, monospace', fontSize: '.72rem', color: wt > 0 ? t.text1 : t.text4, textAlign: 'right', fontWeight: wt > 0 ? 500 : 400 }}>{wt > 0 ? fmtWt(wt) : '—'}</span>
+      <span className="tl-amt" style={{ fontFamily: 'ui-monospace, monospace', fontSize: '.74rem', color: isTxn && item.amount ? t.gold : t.text4, textAlign: 'right', fontWeight: isTxn && item.amount ? 600 : 400 }}>{isTxn && item.amount != null ? fmtAmt(item.amount) : '—'}</span>
     </div>
   )
 }
@@ -2169,13 +2232,42 @@ function NewCrmRegionTable({ t, regions, allTxns }) {
 
 /* ── New CRM Timeline Row ── */
 function NewCrmTimelineRow({ item, t, isLast }) {
+  const isMobile = useMobile()
   const statusStyle = NEW_CRM_STATUS[item.status] || { label: item.status, color: t.text3 }
   const accentColor = statusStyle.color
   const wt = Number(item.gross_weight) || 0
   const isTakeover = (item.transaction_type || '').toUpperCase().includes('RELEASE')
 
+  const rowBase = {
+    padding: isMobile ? '10px 14px' : '12px 20px',
+    borderBottom: isLast ? 'none' : `1px solid ${t.border}18`,
+    borderLeft: `3px solid ${accentColor}40`,
+    transition: 'background .12s',
+  }
+
+  if (isMobile) {
+    return (
+      <div style={rowBase}
+        onMouseEnter={e => e.currentTarget.style.background = t.card2}
+        onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+          <span style={{ fontSize: '.76rem', color: t.text1, fontWeight: 600, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.cust_name || 'Unknown'}</span>
+          <span style={{ fontSize: '.56rem', padding: '2px 7px', borderRadius: 4, background: `${accentColor}18`, color: accentColor, border: `1px solid ${accentColor}35`, fontWeight: 700, textTransform: 'uppercase', whiteSpace: 'nowrap', flexShrink: 0 }}>{statusStyle.label}</span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: '.6rem', color: t.text3, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {item.branch_name || '—'}{isTakeover ? ' · Takeover' : ''}{item.bill_no ? ` · #${item.bill_no}` : ''}
+          </span>
+          <span style={{ fontSize: '.6rem', color: t.text4, fontFamily: 'ui-monospace,monospace', flexShrink: 0 }}>{fmtTime(item.txn_time)}</span>
+          {wt > 0 && <span style={{ fontSize: '.6rem', color: t.text2, fontFamily: 'ui-monospace,monospace', flexShrink: 0 }}>{fmtWt(wt)}</span>}
+          {item.amount && <span style={{ fontSize: '.62rem', color: t.gold, fontFamily: 'ui-monospace,monospace', fontWeight: 600, flexShrink: 0 }}>{fmtAmt(item.amount)}</span>}
+        </div>
+      </div>
+    )
+  }
+
   return (
-    <div className="tl-row" style={{ display: 'grid', gridTemplateColumns: '70px 28px 1fr 110px 120px', gap: '0 12px', padding: '12px 20px', borderBottom: isLast ? 'none' : `1px solid ${t.border}18`, alignItems: 'center', borderLeft: `3px solid ${accentColor}40`, transition: 'background .12s' }}
+    <div className="tl-row" style={{ display: 'grid', gridTemplateColumns: '70px 28px 1fr 110px 120px', gap: '0 12px', ...rowBase, alignItems: 'center' }}
       onMouseEnter={e => e.currentTarget.style.background = t.card2}
       onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
       <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: '.66rem', color: t.text3, textAlign: 'right', lineHeight: 1 }}>{fmtTime(item.txn_time)}</span>
