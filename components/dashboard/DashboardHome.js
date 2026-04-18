@@ -383,7 +383,7 @@ export default function DashboardHome() {
   const panelMeta  = { fontSize:12, color:t.text4 }
 
   return (
-    <div style={{ padding: isMobile ? '16px' : '28px 32px' }}>
+    <div style={{ padding: isMobile ? '16px' : '28px 32px', maxWidth: '100%', boxSizing: 'border-box' }}>
       <style>{`
         @keyframes shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
         @keyframes pglow{0%,100%{opacity:.5;transform:scale(1)}50%{opacity:1;transform:scale(1.25)}}

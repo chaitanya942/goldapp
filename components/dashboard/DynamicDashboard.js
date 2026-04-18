@@ -875,7 +875,7 @@ export default function DynamicDashboard() {
   const hasAnything    = hasPurchase || hasTelesales || hasConsignment || hasAdmin || hasRates
 
   return (
-    <div style={{ padding: isMobile ? '16px' : '28px 32px', display:'flex', flexDirection:'column', gap: isMobile ? 14 : 20 }}>
+    <div style={{ padding: isMobile ? '16px' : '28px 32px', display:'flex', flexDirection:'column', gap: isMobile ? 14 : 20, maxWidth: '100%', boxSizing: 'border-box' }}>
       <style>{`
         @keyframes shimmer { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
       `}</style>
