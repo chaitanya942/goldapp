@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../../lib/supabase'
 import { useApp } from '../../lib/context'
 import {
@@ -135,8 +135,27 @@ function PurchaseInline({ t, setActiveNav, canSee }) {
   const [branchMeta,   setBranchMeta]   = useState([])
   const [regionCounts, setRegionCounts] = useState({})
   const [trend,        setTrend]        = useState([])
-  const [filterType,  setFilterType]  = useState(null)   // null | 'region' | 'state' | 'cluster' | 'branch'
-  const [filterValue, setFilterValue] = useState(null)
+  const [filterType,      setFilterType]      = useState(null)
+  const [filterValue,     setFilterValue]     = useState(null)
+  const [branchSearch,    setBranchSearch]    = useState('')
+  const [branchDropOpen,  setBranchDropOpen]  = useState(false)
+  const branchInputRef = useRef(null)
+  const branchDropRef  = useRef(null)
+
+  useEffect(() => {
+    if (filterType !== 'branch') { setBranchSearch(''); setBranchDropOpen(false) }
+  }, [filterType])
+
+  useEffect(() => {
+    const handler = (e) => {
+      if (branchDropRef.current && !branchDropRef.current.contains(e.target) &&
+          branchInputRef.current && !branchInputRef.current.contains(e.target)) {
+        setBranchDropOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
 
   // Branch meta (for region color mapping)
   useEffect(() => {
@@ -317,9 +336,10 @@ function PurchaseInline({ t, setActiveNav, canSee }) {
         </div>
       )}
 
-      {/* Hierarchical filter — Row 1: type, Row 2: value */}
+      {/* Hierarchical filter */}
       {branchMeta.length > 0 && (
         <div style={{ display:'flex', flexDirection:'column', gap:6, marginBottom:4 }}>
+          {/* Row 1: type selector */}
           <div style={{ display:'flex', gap:5, overflowX:'auto', scrollbarWidth:'none', WebkitOverflowScrolling:'touch' }}>
             {filterTypeOptions.map(opt => {
               const active = opt.key === filterType
@@ -332,7 +352,52 @@ function PurchaseInline({ t, setActiveNav, canSee }) {
               )
             })}
           </div>
-          {filterType && filterValueOptions.length > 0 && (
+          {/* Row 2: pill list for region/state/cluster; search dropdown for branch */}
+          {filterType === 'branch' ? (
+            <div style={{ position:'relative' }}>
+              {filterValue ? (
+                <div style={{ display:'flex', alignItems:'center', gap:6 }}>
+                  <div style={{ display:'flex', alignItems:'center', gap:6, padding:'5px 10px 5px 12px', borderRadius:20, background:`${t.blue}20`, border:`1px solid ${t.blue}60` }}>
+                    <span style={{ fontSize:11, color:t.blue, fontWeight:600 }}>{filterValue}</span>
+                    <button onClick={() => { setFilterValue(null); setBranchSearch('') }}
+                      style={{ background:'none', border:'none', color:t.blue, cursor:'pointer', fontSize:12, lineHeight:1, padding:'0 0 0 2px', opacity:.7 }}>✕</button>
+                  </div>
+                  <button onClick={() => { setFilterValue(null); setBranchSearch(''); setBranchDropOpen(true); setTimeout(()=>branchInputRef.current?.focus(),50) }}
+                    style={{ fontSize:10, color:t.text4, background:'none', border:'none', cursor:'pointer', textDecoration:'underline', padding:0 }}>
+                    Change
+                  </button>
+                </div>
+              ) : (
+                <div style={{ position:'relative', maxWidth:280 }}>
+                  <input
+                    ref={branchInputRef}
+                    value={branchSearch}
+                    onChange={e => { setBranchSearch(e.target.value); setBranchDropOpen(true) }}
+                    onFocus={() => setBranchDropOpen(true)}
+                    placeholder="Search branch…"
+                    style={{ width:'100%', boxSizing:'border-box', background:t.card, border:`1px solid ${branchDropOpen ? t.blue+'80' : t.border}`, borderRadius:8, padding:'6px 12px', color:t.text1, fontSize:12, outline:'none', transition:'border .15s' }}
+                  />
+                  {branchDropOpen && (
+                    <div ref={branchDropRef}
+                      style={{ position:'absolute', top:'calc(100% + 4px)', left:0, right:0, background:t.card, border:`1px solid ${t.border}`, borderRadius:8, zIndex:200, maxHeight:200, overflowY:'auto', boxShadow:'0 8px 24px rgba(0,0,0,.5)' }}>
+                      {filterValueOptions.filter(v => !branchSearch || v.toLowerCase().includes(branchSearch.toLowerCase())).slice(0,20).map(v => (
+                        <button key={v}
+                          onMouseDown={e => { e.preventDefault(); setFilterValue(v); setBranchSearch(''); setBranchDropOpen(false) }}
+                          style={{ display:'block', width:'100%', textAlign:'left', padding:'8px 12px', background:'none', border:'none', color:t.text2, fontSize:12, cursor:'pointer', borderBottom:`1px solid ${t.border}30` }}
+                          onMouseEnter={e => e.currentTarget.style.background = `${t.gold}12`}
+                          onMouseLeave={e => e.currentTarget.style.background = 'none'}>
+                          {v}
+                        </button>
+                      ))}
+                      {filterValueOptions.filter(v => !branchSearch || v.toLowerCase().includes(branchSearch.toLowerCase())).length === 0 && (
+                        <div style={{ padding:'10px 12px', fontSize:11, color:t.text4 }}>No branches match</div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          ) : filterType && filterValueOptions.length > 0 ? (
             <div style={{ display:'flex', gap:5, overflowX:'auto', scrollbarWidth:'none', WebkitOverflowScrolling:'touch', paddingLeft:2 }}>
               {filterValueOptions.map(v => {
                 const active = v === filterValue
@@ -345,7 +410,7 @@ function PurchaseInline({ t, setActiveNav, canSee }) {
                 )
               })}
             </div>
-          )}
+          ) : null}
         </div>
       )}
 
