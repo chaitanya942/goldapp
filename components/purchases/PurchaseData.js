@@ -106,6 +106,13 @@ export default function PurchaseData() {
   const { theme, userProfile } = useApp()
   const t = THEMES[theme] || THEMES.dark
   const isSuperAdmin = userProfile?.role === 'super_admin'
+  const [isMobile, setIsMobile] = useState(false)
+  useEffect(() => {
+    const check = () => setIsMobile(window.innerWidth < 768)
+    check()
+    window.addEventListener('resize', check)
+    return () => window.removeEventListener('resize', check)
+  }, [])
 
   const [purchases, setPurchases]     = useState([])
   const [allBranches, setAllBranches] = useState([])
@@ -268,8 +275,8 @@ export default function PurchaseData() {
   const allPageSelected     = purchases.length > 0 && purchases.every(p => selectedIds.has(p.id))
 
   const s = {
-    wrap:           { padding: '32px', maxWidth: '100%' },
-    header:         { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '24px' },
+    wrap:           { padding: isMobile ? '16px' : '32px', maxWidth: '100%' },
+    header:         { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '24px', flexWrap: 'wrap', gap: '10px' },
     title:          { fontSize: '1.6rem', fontWeight: 300, color: t.text1, letterSpacing: '.04em' },
     sub:            { fontSize: '.72rem', color: t.text3, marginTop: '4px' },
     btnGold:        { background: t.gold, color: '#1a0a00', border: 'none', borderRadius: '7px', padding: '9px 20px', fontSize: '.72rem', fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase', cursor: 'pointer' },
@@ -282,7 +289,7 @@ export default function PurchaseData() {
     th:             { padding: '10px 14px', fontSize: '.58rem', color: t.text3, letterSpacing: '.1em', textTransform: 'uppercase', textAlign: 'left', borderBottom: `1px solid ${t.border}`, background: t.card, fontWeight: 400, whiteSpace: 'nowrap' },
     td:             { padding: '10px 14px', fontSize: '.72rem', color: t.text1, borderBottom: `1px solid ${t.border}20`, whiteSpace: 'nowrap' },
     select:         { background: t.card, border: `1px solid ${t.border}`, borderRadius: '6px', padding: '7px 10px', color: t.text1, fontSize: '.72rem', cursor: 'pointer' },
-    input:          { background: t.card, border: `1px solid ${t.border}`, borderRadius: '7px', padding: '8px 14px', color: t.text1, fontSize: '.75rem', outline: 'none', width: '240px' },
+    input:          { background: t.card, border: `1px solid ${t.border}`, borderRadius: '7px', padding: '8px 14px', color: t.text1, fontSize: '.75rem', outline: 'none', width: isMobile ? '100%' : '240px' },
     checkbox:       { width: '15px', height: '15px', accentColor: t.gold, cursor: 'pointer' },
   }
 
@@ -357,7 +364,7 @@ export default function PurchaseData() {
           { label: 'Takeover',       value: Number(kpis.takeover_count).toLocaleString('en-IN'),                                                  color: '#c9981f', size: '1.8rem' },
         ]
         return (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '14px', marginBottom: '28px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(4, 1fr)', gap: '14px', marginBottom: '28px' }}>
             {cards.map(c => (
               <div key={c.label} style={{ ...s.card, textAlign: 'center', padding: '20px 16px', marginBottom: 0 }}>
                 <div style={{ fontSize: c.size, fontWeight: 200, color: c.color, lineHeight: 1.15 }}>{c.value}</div>
@@ -505,9 +512,50 @@ export default function PurchaseData() {
         </span>
       </div>
 
-      {/* TABLE */}
+      {/* TABLE / CARDS */}
       {loading ? (
         <div style={{ display: 'flex', justifyContent: 'center', padding: '48px' }}><GoldSpinner size={32} /></div>
+      ) : isMobile ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+          {purchases.length === 0 ? (
+            <div style={{ textAlign: 'center', color: t.text4, padding: '48px', fontSize: '.75rem' }}>
+              {(search || filterStatus || filterBranch || filterCrmStatus || filterTxn || fromDate || toDate) ? 'No records match your filters' : 'No purchase data yet — auto-syncing from CRM'}
+            </div>
+          ) : purchases.map((p) => {
+            const status = STATUS_COLORS[p.stock_status] || { color: t.text3, label: p.stock_status }
+            const cs = CRM_STATUS[p.crm_status?.toLowerCase()] || { label: p.crm_status || 'approved', color: 'green' }
+            return (
+              <div key={p.id} style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: '10px', padding: '14px 16px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '10px' }}>
+                  <div>
+                    <div style={{ fontSize: '.78rem', fontWeight: 600, color: t.gold }}>{p.application_id}</div>
+                    <div style={{ fontSize: '.68rem', color: t.text3, marginTop: '2px' }}>{fmtDate(p.purchase_date)} · {fmtTime(p.transaction_time)}</div>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
+                    <span style={{ fontSize: '.6rem', padding: '2px 8px', borderRadius: '100px', background: `${status.color}20`, color: status.color, border: `1px solid ${status.color}40` }}>{status.label}</span>
+                    <span style={{ fontSize: '.6rem', padding: '2px 8px', borderRadius: '100px', background: p.transaction_type === 'TAKEOVER' ? `${t.purple}20` : `${t.gold}20`, color: p.transaction_type === 'TAKEOVER' ? t.purple : t.gold, border: `1px solid ${p.transaction_type === 'TAKEOVER' ? t.purple : t.gold}40` }}>{p.transaction_type}</span>
+                  </div>
+                </div>
+                <div style={{ fontSize: '.75rem', color: t.text1, marginBottom: '4px' }}>{p.customer_name}</div>
+                <div style={{ fontSize: '.68rem', color: t.text3, marginBottom: '10px' }}>{p.branch_name}{p.phone_number ? ` · ${p.phone_number}` : ''}</div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px', fontSize: '.68rem' }}>
+                  <div>
+                    <div style={{ color: t.text4, fontSize: '.58rem', textTransform: 'uppercase', letterSpacing: '.08em' }}>Net Wt</div>
+                    <div style={{ color: t.text1, fontWeight: 500 }}>{p.net_weight}g</div>
+                  </div>
+                  <div>
+                    <div style={{ color: t.text4, fontSize: '.58rem', textTransform: 'uppercase', letterSpacing: '.08em' }}>Purity</div>
+                    <div style={{ color: t.text2 }}>{p.purity}%</div>
+                  </div>
+                  <div>
+                    <div style={{ color: t.text4, fontSize: '.58rem', textTransform: 'uppercase', letterSpacing: '.08em' }}>Final Amt</div>
+                    <div style={{ color: t.green, fontWeight: 600 }}>₹{fmt(p.final_amount_crm)}</div>
+                  </div>
+                </div>
+              </div>
+            )
+          })}
+        </div>
       ) : (
         <div style={s.tblWrap}>
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>

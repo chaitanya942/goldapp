@@ -26,6 +26,13 @@ export default function PurchasesPage() {
   const t = THEMES[theme] || THEMES.dark
   const [activeTab, setActiveTab] = useState('approved')
   const [kpis, setKpis] = useState(null)
+  const [isMobile, setIsMobile] = useState(false)
+  useEffect(() => {
+    const check = () => setIsMobile(window.innerWidth < 768)
+    check()
+    window.addEventListener('resize', check)
+    return () => window.removeEventListener('resize', check)
+  }, [])
 
   useEffect(() => {
     fetch('/api/crm-purchases?action=kpis')
@@ -46,18 +53,19 @@ export default function PurchasesPage() {
       <div style={{
         background: t.card,
         borderBottom: `1px solid ${t.border}`,
-        padding: '0 32px',
+        padding: isMobile ? '0 8px' : '0 32px',
         display: 'flex',
         gap: '0',
         overflowX: 'auto',
         position: 'sticky',
         top: 0,
         zIndex: 100,
+        scrollbarWidth: 'none',
       }}>
         {TABS.map(tab => {
           const isActive = activeTab === tab.id
           const count    = getCount(tab.id)
-          const labelColor = tab.color === 'red' ? t.red : tab.color === 'orange' ? t.orange : t.gold
+          const accent   = tab.color === 'red' ? t.red : tab.color === 'orange' ? t.orange : t.gold
           return (
             <button
               key={tab.id}
@@ -65,45 +73,47 @@ export default function PurchasesPage() {
               style={{
                 background: 'transparent',
                 border: 'none',
-                borderBottom: isActive ? `2px solid ${isActive && tab.color === 'red' ? t.red : isActive && tab.color === 'orange' ? t.orange : t.gold}` : '2px solid transparent',
-                padding: '16px 20px',
+                borderBottom: isActive ? `2px solid ${accent}` : '2px solid transparent',
+                padding: isMobile ? '12px 10px' : '16px 20px',
                 cursor: 'pointer',
                 display: 'flex',
                 flexDirection: 'column',
-                alignItems: 'flex-start',
+                alignItems: 'center',
                 gap: '2px',
-                minWidth: '140px',
+                minWidth: isMobile ? '64px' : '140px',
                 transition: 'all .15s',
-                opacity: isActive ? 1 : 0.65,
+                opacity: isActive ? 1 : 0.6,
+                flexShrink: 0,
               }}
             >
-              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <span style={{ fontSize: '.75rem', color: isActive ? (tab.color === 'red' ? t.red : tab.color === 'orange' ? t.orange : t.gold) : t.text3 }}>
-                  {tab.icon}
-                </span>
-                <span style={{
-                  fontSize: '.72rem',
-                  fontWeight: isActive ? 500 : 400,
-                  letterSpacing: '.04em',
-                  color: isActive ? (tab.color === 'red' ? t.red : tab.color === 'orange' ? t.orange : t.text1) : t.text3,
-                  whiteSpace: 'nowrap',
-                }}>
-                  {tab.label}
-                </span>
-                {count !== null && (
-                  <span style={{
-                    fontSize: '.58rem',
-                    background: isActive ? (tab.color === 'red' ? `${t.red}20` : tab.color === 'orange' ? `${t.orange}20` : `${t.gold}20`) : `${t.border}`,
-                    color: isActive ? (tab.color === 'red' ? t.red : tab.color === 'orange' ? t.orange : t.gold) : t.text4,
-                    padding: '1px 6px',
-                    borderRadius: '10px',
-                    fontWeight: 500,
-                  }}>
-                    {Number(count).toLocaleString('en-IN')}
+              {isMobile ? (
+                <>
+                  <span style={{ fontSize: '1rem' }}>{tab.icon}</span>
+                  <span style={{ fontSize: '.55rem', color: isActive ? accent : t.text3, whiteSpace: 'nowrap', fontWeight: isActive ? 600 : 400 }}>
+                    {tab.label.split(' ')[0]}
                   </span>
-                )}
-              </div>
-              <span style={{ fontSize: '.6rem', color: t.text4, letterSpacing: '.02em' }}>{tab.desc}</span>
+                  {count !== null && (
+                    <span style={{ fontSize: '.5rem', background: isActive ? `${accent}20` : t.border, color: isActive ? accent : t.text4, padding: '1px 5px', borderRadius: '10px', fontWeight: 500 }}>
+                      {Number(count).toLocaleString('en-IN')}
+                    </span>
+                  )}
+                </>
+              ) : (
+                <>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span style={{ fontSize: '.75rem', color: isActive ? accent : t.text3 }}>{tab.icon}</span>
+                    <span style={{ fontSize: '.72rem', fontWeight: isActive ? 500 : 400, letterSpacing: '.04em', color: isActive ? (tab.color ? accent : t.text1) : t.text3, whiteSpace: 'nowrap' }}>
+                      {tab.label}
+                    </span>
+                    {count !== null && (
+                      <span style={{ fontSize: '.58rem', background: isActive ? `${accent}20` : t.border, color: isActive ? accent : t.text4, padding: '1px 6px', borderRadius: '10px', fontWeight: 500 }}>
+                        {Number(count).toLocaleString('en-IN')}
+                      </span>
+                    )}
+                  </div>
+                  <span style={{ fontSize: '.6rem', color: t.text4, letterSpacing: '.02em' }}>{tab.desc}</span>
+                </>
+              )}
             </button>
           )
         })}
