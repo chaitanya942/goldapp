@@ -670,7 +670,7 @@ export default function ReportBranches({ branchData, allBranchMeta, stateData, t
   })
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', overflowX: 'hidden' }}>
 
       {/* ── ROW 1: DONUT + TOP 10 BILLS ── */}
       <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '16px' }}>
@@ -707,7 +707,7 @@ export default function ReportBranches({ branchData, allBranchMeta, stateData, t
                   )}
                 </div>
                 {filtered.length > 0 ? (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0' }}>
+                  <div style={{ overflowX: 'auto' }}><div style={{ display: 'flex', flexDirection: 'column', gap: '0', minWidth: '420px' }}>
                     <div style={{ display: 'grid', gridTemplateColumns: '20px 1fr 90px 70px 55px 65px 60px', gap: '0 8px', padding: '0 0 8px 0', borderBottom: `1px solid ${t.border}`, marginBottom: '2px' }}>
                       {['#', 'Branch · Customer', 'Gross Value', 'Net Wt', 'Purity', 'Type', 'Date'].map(h => (
                         <div key={h} style={{ fontSize: '.55rem', color: t.text2, textTransform: 'uppercase', letterSpacing: '.08em', textAlign: ['Gross Value','Net Wt','Purity','Type','Date'].includes(h) ? 'right' : 'left' }}>{h}</div>
@@ -731,7 +731,7 @@ export default function ReportBranches({ branchData, allBranchMeta, stateData, t
                         <div style={{ fontSize: '.65rem', color: t.text2, textAlign: 'right' }}>{b.purchase_date ? new Date(b.purchase_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) : '—'}</div>
                       </div>
                     ))}
-                  </div>
+                  </div></div>
                 ) : <div style={{ textAlign: 'center', color: t.text4, padding: '40px', fontSize: '.75rem' }}>No data for selected region</div>}
               </>
             )

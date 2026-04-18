@@ -390,7 +390,7 @@ export default function PurchaseReports() {
   const gridRow5b = { display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(5, 1fr)', gap: '10px', marginBottom: isMobile ? '16px' : '28px', alignItems: 'stretch' }
 
   return (
-    <div style={{ padding: isMobile ? '14px 12px' : '28px 32px', maxWidth: '100%', ...cssVars }}>
+    <div style={{ padding: isMobile ? '14px 12px' : '28px 32px', maxWidth: '100%', overflowX: 'hidden', ...cssVars }}>
       <style>{`
         @keyframes shimmer { 0%{opacity:.4} 50%{opacity:.8} 100%{opacity:.4} }
         .pr-pill:hover { border-color: var(--gold) !important; color: var(--gold) !important; }

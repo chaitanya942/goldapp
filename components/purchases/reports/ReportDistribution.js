@@ -205,7 +205,18 @@ const val = (w, color, size = '.68rem') => ({ width: w, flexShrink: 0, textAlign
 // MAIN COMPONENT
 // ─────────────────────────────────────────────
 
+function useMobile() {
+  const [m, setM] = useState(false)
+  useEffect(() => {
+    const check = () => setM(window.innerWidth < 768)
+    check(); window.addEventListener('resize', check)
+    return () => window.removeEventListener('resize', check)
+  }, [])
+  return m
+}
+
 export default function ReportDistribution({ kpis, purityDist, weightBuckets, regionSplit, monthHalf, timeOfDay, t }) {
+  const isMobile = useMobile()
   const s = getStyles(t)
   const [expanded, setExpanded] = useState(null)
   const openPanel  = (id) => setExpanded(id)
@@ -272,13 +283,13 @@ export default function ReportDistribution({ kpis, purityDist, weightBuckets, re
   const P = (id, extra = {}, noExp = false) => ({ id, expanded, onExpand: openPanel, onClose: closePanel, t, noExpand: noExp, cardStyle: { ...s.card, marginBottom: 0, ...extra } })
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', overflowX: 'hidden' }}>
 
       {/* ── KEY INSIGHTS ── */}
       {insights.length > 0 && (
         <div style={{ ...s.card, marginBottom: 0 }}>
           <SectionTitle title="Key Insights" t={t} badge={`${insights.length} findings`} />
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '8px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(2, 1fr)', gap: '8px' }}>
             {insights.map((ins, i) => (
               <InsightChip key={i} icon={ins.icon} text={ins.text} color={ins.color} t={t} />
             ))}
@@ -287,7 +298,7 @@ export default function ReportDistribution({ kpis, purityDist, weightBuckets, re
       )}
 
       {/* ══ ROW 1 — Transaction Split · Purity Distribution ══ */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '16px' }}>
 
         {/* TXN SPLIT */}
         <Panel {...P('txn-split')}>
@@ -327,7 +338,7 @@ export default function ReportDistribution({ kpis, purityDist, weightBuckets, re
             const gVal    = (color, size = '.68rem') => ({ fontSize: size, color, fontWeight: 400, textAlign: 'right' })
             const bdr     = { borderBottom: `1px solid ${t.border}` }
             return (
-              <div style={{ display: 'grid', gridTemplateColumns: gCols, gap: '0 8px', width: '100%' }}>
+              <div style={{ overflowX: 'auto' }}><div style={{ display: 'grid', gridTemplateColumns: gCols, gap: '0 8px', minWidth: '360px' }}>
                 <div /><div style={gHdr()}>Bills</div><div style={gHdr()}>Net Wt</div><div style={gHdr()}>Gross Value</div><div style={gHdr()}>Avg/Bill</div>
                 <div style={{ display:'flex',alignItems:'center',gap:'5px',padding:'7px 0',...bdr }}><div style={{width:'7px',height:'7px',borderRadius:'50%',background:t.gold,flexShrink:0}}/><span style={{fontSize:'.65rem',color:t.text2}}>Physical</span></div>
                 <div style={{...gVal(t.gold),padding:'7px 0',...bdr}}>{physical.toLocaleString('en-IN')}</div>
@@ -344,7 +355,7 @@ export default function ReportDistribution({ kpis, purityDist, weightBuckets, re
                 <div style={{...gVal(t.text1,'.74rem'),paddingTop:'8px'}}>{fmt(totNet)}g</div>
                 <div style={{...gVal(t.green,'.74rem'),paddingTop:'8px'}}>{fmtVal(totalVal)}</div>
                 <div style={{...gVal(t.text2,'.68rem'),paddingTop:'8px'}}>{fmt(avgNet)}g</div>
-              </div>
+              </div></div>
             )
           })()}
         </Panel>
@@ -404,7 +415,7 @@ export default function ReportDistribution({ kpis, purityDist, weightBuckets, re
       </div>
 
       {/* ══ ROW 2 — Weight Buckets · Svc Charge by Weight ══ */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '16px' }}>
 
         {/* WEIGHT BUCKETS */}
         <Panel {...P('weight-buckets')}>
@@ -486,7 +497,7 @@ export default function ReportDistribution({ kpis, purityDist, weightBuckets, re
       </div>
 
       {/* ══ ROW 3 — Avg Purity by Weight · Svc Charge by Purity ══ */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '16px' }}>
 
         {/* AVG PURITY BY WEIGHT — FIX: guard Math.min/max on empty purities array */}
         <Panel {...P('purity-weight')}>
@@ -545,7 +556,7 @@ export default function ReportDistribution({ kpis, purityDist, weightBuckets, re
       </div>
 
       {/* ══ ROW 4 — Region Split · Month Half ══ */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '16px' }}>
 
         {/* REGION SPLIT */}
         <Panel {...P('region-split')}>
@@ -599,7 +610,7 @@ export default function ReportDistribution({ kpis, purityDist, weightBuckets, re
                     <div style={{ height: '6px', borderRadius: '3px', background: t.border, marginBottom: '9px' }}>
                       <div style={{ height: '100%', width: `${txnPct}%`, background: color, borderRadius: '3px', transition: 'width .5s' }} />
                     </div>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '5px' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '5px' }}>
                       <StatBox label="Txns"      value={Number(data?.txn_count || 0).toLocaleString('en-IN')}   color={color}    t={t} />
                       <StatBox label="Net Wt"    value={`${fmt(data?.total_net)}g`}                             color={t.text2}  t={t} />
                       <StatBox label="Avg Svc %" value={`${Number(data?.avg_service_charge || 0).toFixed(2)}%`} color={t.orange} t={t} />
@@ -679,7 +690,7 @@ export default function ReportDistribution({ kpis, purityDist, weightBuckets, re
                       <div style={{ width: `${barPct}%`, height: '100%', background: color, borderRadius: '3px', transition: 'width .5s ease' }} />
                     </div>
                     {/* Stats grid */}
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '4px' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(5, 1fr)', gap: '4px' }}>
                       {[
                         { label: 'Bills',      value: sl.txn_count.toLocaleString('en-IN'), color: t.text1 },
                         { label: 'Net Wt',     value: `${fmt(sl.total_net)}g`,              color },

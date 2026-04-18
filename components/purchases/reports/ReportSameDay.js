@@ -4,7 +4,19 @@ import { useState, useEffect } from 'react'
 import { supabase } from '../../../lib/supabase'
 import { fmt, fmtVal, getStyles } from './reportUtils'
 
+import { useState, useEffect } from 'react'
+
 const DOW_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+
+function useMobile() {
+  const [m, setM] = useState(false)
+  useEffect(() => {
+    const check = () => setM(window.innerWidth < 768)
+    check(); window.addEventListener('resize', check)
+    return () => window.removeEventListener('resize', check)
+  }, [])
+  return m
+}
 
 // IST today string
 const istToday = () => {
@@ -137,7 +149,7 @@ function ChangeBadge({ today, avg, t, formatValue }) {
 // ── STAT BOX ──────────────────────────────────────────────────────
 function StatBox({ label, value, badge, color, t }) {
   return (
-    <div style={{ flex: 1, minWidth: '140px', background: t.card2, borderRadius: '10px', padding: '14px 16px', border: `1px solid ${t.border}` }}>
+    <div style={{ flex: 1, minWidth: '120px', background: t.card2, borderRadius: '10px', padding: '12px 14px', border: `1px solid ${t.border}` }}>
       <div style={{ fontSize: '.48rem', color: t.text4, textTransform: 'uppercase', letterSpacing: '.12em', marginBottom: '7px' }}>{label}</div>
       <div style={{ fontSize: '1.05rem', color, fontWeight: 500, marginBottom: badge ? '8px' : 0 }}>{value}</div>
       {badge}
@@ -146,7 +158,7 @@ function StatBox({ label, value, badge, color, t }) {
 }
 
 // ── OVERALL VIEW ──────────────────────────────────────────────────
-function OverallView({ data, t, dowName }) {
+function OverallView({ data, t, dowName, isMobile }) {
   const selRow   = data.find(d => d.week_label === 'Selected')
   const pastDays = data.filter(d => d.week_label !== 'Selected')
   const avg      = (key) => pastDays.length > 0
@@ -181,7 +193,7 @@ function OverallView({ data, t, dowName }) {
       </div>
 
       {/* Bar charts */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '14px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, 1fr)', gap: '14px' }}>
         {METRICS.map(({ key, label, color, fmt: fmtFn }) => (
           <div key={key} style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: '12px', padding: '18px' }}>
             <div style={{ fontSize: '.52rem', color: t.text3, textTransform: 'uppercase', letterSpacing: '.18em', fontWeight: 500, marginBottom: '3px' }}>{label}</div>
@@ -192,7 +204,7 @@ function OverallView({ data, t, dowName }) {
       </div>
 
       {/* Trend lines */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '14px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, 1fr)', gap: '14px' }}>
         {METRICS.map(({ key, label, color, fmt: fmtFn }) => (
           <div key={key} style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: '12px', padding: '18px' }}>
             <div style={{ fontSize: '.52rem', color: t.text3, textTransform: 'uppercase', letterSpacing: '.18em', fontWeight: 500, marginBottom: '3px' }}>{label} — Trend</div>
@@ -205,7 +217,7 @@ function OverallView({ data, t, dowName }) {
       {/* Detail table */}
       <div style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: '12px', padding: '20px' }}>
         <div style={{ fontSize: '.52rem', color: t.text3, textTransform: 'uppercase', letterSpacing: '.18em', fontWeight: 500, marginBottom: '14px' }}>All {dowName}s — Detail</div>
-        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+        <div style={{ overflowX: 'auto' }}><table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '560px' }}>
           <thead>
             <tr>
               {[
@@ -263,14 +275,14 @@ function OverallView({ data, t, dowName }) {
               </tr>
             )}
           </tbody>
-        </table>
+        </table></div>
       </div>
     </div>
   )
 }
 
 // ── BRANCH VIEW ───────────────────────────────────────────────────
-function BranchView({ rawData, t, dowName }) {
+function BranchView({ rawData, t, dowName, isMobile }) {
   const [search,         setSearch]         = useState('')
   const [sortKey,        setSortKey]        = useState('today_net')
   const [sortDir,        setSortDir]        = useState('desc')
@@ -332,12 +344,12 @@ function BranchView({ rawData, t, dowName }) {
           placeholder="Search branch…"
           value={search}
           onChange={e => setSearch(e.target.value)}
-          style={{ background: t.card2, border: `1px solid ${t.border}`, borderRadius: '8px', padding: '7px 12px', color: t.text1, fontSize: '.72rem', outline: 'none', width: '200px' }}
+          style={{ background: t.card2, border: `1px solid ${t.border}`, borderRadius: '8px', padding: '7px 12px', color: t.text1, fontSize: '.72rem', outline: 'none', flex: 1, minWidth: 0, maxWidth: '200px' }}
         />
         <div style={{ fontSize: '.65rem', color: t.text3 }}>
-          {sorted.length} branches · {sorted.filter(b => b.today_net > 0).length} active today
+          {sorted.length} branches · {sorted.filter(b => b.today_net > 0).length} active
         </div>
-        <div style={{ marginLeft: 'auto', fontSize: '.62rem', color: t.text4 }}>Click a row to see branch trend detail</div>
+        {!isMobile && <div style={{ marginLeft: 'auto', fontSize: '.62rem', color: t.text4 }}>Click a row to see branch trend detail</div>}
       </div>
 
       <div style={{ overflowX: 'auto', borderRadius: '10px', border: `1px solid ${t.border}` }}>
@@ -404,7 +416,7 @@ function BranchView({ rawData, t, dowName }) {
             </div>
             <button onClick={() => setSelectedBranch(null)} style={{ background: 'transparent', border: 'none', color: t.text3, cursor: 'pointer', fontSize: '.8rem' }}>✕</button>
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '16px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '16px', marginBottom: '16px' }}>
             {[
               { key: 'net_weight',  label: 'Net Weight',  color: t.gold,  fmtFn: (v) => `${fmt(v)}g` },
               { key: 'gross_value', label: 'Gross Value', color: t.green, fmtFn: fmtVal },
@@ -415,7 +427,7 @@ function BranchView({ rawData, t, dowName }) {
               </div>
             ))}
           </div>
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <div style={{ overflowX: 'auto' }}><table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '480px' }}>
             <thead>
               <tr>
                 {['Week', 'Date', 'Net Wt', 'vs Avg', 'Value', 'vs Avg ', 'Rate/g', 'Txns'].map(h => (
@@ -447,7 +459,7 @@ function BranchView({ rawData, t, dowName }) {
                 )
               })}
             </tbody>
-          </table>
+          </table></div>
         </div>
       )}
     </div>
@@ -456,6 +468,7 @@ function BranchView({ rawData, t, dowName }) {
 
 // ── MAIN ──────────────────────────────────────────────────────────
 export default function ReportSameDay({ t }) {
+  const isMobile = useMobile()
   const [selectedDate, setSelectedDate] = useState(istToday())
   const [view,         setView]         = useState('overall')
   const [overallData,  setOverallData]  = useState([])
@@ -493,11 +506,11 @@ export default function ReportSameDay({ t }) {
   })
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', overflowX: 'hidden' }}>
 
       {/* Header */}
       <div style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: '12px', padding: '18px 22px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px' }}>
+        <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', alignItems: isMobile ? 'flex-start' : 'center', justifyContent: 'space-between', gap: '12px' }}>
           <div>
             <div style={{ fontSize: '.52rem', color: t.text3, letterSpacing: '.2em', textTransform: 'uppercase', fontWeight: 500, marginBottom: '6px' }}>Same-Day Comparison</div>
             <div style={{ fontSize: '1rem', color: t.text1, fontWeight: 400 }}>
@@ -509,9 +522,9 @@ export default function ReportSameDay({ t }) {
             }
           </div>
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', alignItems: 'flex-end' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', alignItems: isMobile ? 'flex-start' : 'flex-end' }}>
             {/* Date picker */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
               <span style={{ fontSize: '.6rem', color: t.text4, letterSpacing: '.08em', textTransform: 'uppercase' }}>Select Date</span>
               <input
                 type="date"
@@ -543,11 +556,11 @@ export default function ReportSameDay({ t }) {
       )}
 
       {!loading && overallData.length > 0 && view === 'overall' && (
-        <OverallView data={overallData} t={t} dowName={dowName} />
+        <OverallView data={overallData} t={t} dowName={dowName} isMobile={isMobile} />
       )}
 
       {!loading && overallData.length > 0 && view === 'branches' && (
-        <BranchView rawData={branchData} t={t} dowName={dowName} />
+        <BranchView rawData={branchData} t={t} dowName={dowName} isMobile={isMobile} />
       )}
 
     </div>
