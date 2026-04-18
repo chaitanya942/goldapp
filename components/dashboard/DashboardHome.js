@@ -204,6 +204,8 @@ export default function DashboardHome() {
   const [regionCounts,  setRegionCounts]  = useState({})
   const [stateCount,    setStateCount]    = useState(0)
   const [heroVis,       setHeroVis]       = useState(false)
+  const [lastRefresh,   setLastRefresh]   = useState(null)
+  const refreshRef = useRef(null)
 
   // ── Module hub data ──────────────────────────────────────────────────────────
   const [hubLoading,     setHubLoading]     = useState(true)
@@ -281,7 +283,14 @@ export default function DashboardHome() {
     })
   }, [showPurchase])
 
-  useEffect(() => { if (showPurchase) fetchAll() }, [period, showPurchase, filterType, filterValue]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (showPurchase) { fetchAll(); setLastRefresh(new Date()) } }, [period, showPurchase, filterType, filterValue]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Auto-refresh every 3 minutes when viewing Today
+  useEffect(() => {
+    if (!showPurchase || period !== 'today') { clearInterval(refreshRef.current); return }
+    refreshRef.current = setInterval(() => { fetchAll(); setLastRefresh(new Date()) }, 3 * 60 * 1000)
+    return () => clearInterval(refreshRef.current)
+  }, [showPurchase, period, filterType, filterValue]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const fetchAll = async () => {
     setLoading(true)
@@ -527,6 +536,10 @@ export default function DashboardHome() {
               ))}
             </div>}
             {showPeriodSelector && <div style={{ fontSize:12, color:t.text3, fontStyle:'italic' }}>{!loading && dateLabel}</div>}
+            <button onClick={e => { e.stopPropagation(); fetchAll(); setLastRefresh(new Date()) }}
+              style={{ padding:'5px 10px', borderRadius:7, border:`1px solid ${t.border}`, background:t.card, color:t.text3, fontSize:12, cursor:'pointer', display:'flex', alignItems:'center', gap:5, whiteSpace:'nowrap' }}>
+              ↻{lastRefresh && <span style={{ fontSize:10, color:t.text4 }}>{lastRefresh.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'})}</span>}
+            </button>
             {totalBranches > 0 && <div style={{ fontSize:11, color:t.text4, display:'flex', alignItems:'center', gap:5 }}>
               <span style={{ width:6, height:6, borderRadius:'50%', background:t.green, display:'inline-block', boxShadow:`0 0 5px ${t.green}80` }}/>
               {totalBranches} active branches · {Object.keys(regionCounts).length} regions
@@ -545,12 +558,18 @@ export default function DashboardHome() {
 
             {/* Period selector — mobile only, own scrollable row */}
             {isMobile && showPeriodSelector && overviewOpen && (
-              <div onClick={e=>e.stopPropagation()} style={{ display:'flex', gap:3, padding:4, background:t.card, borderRadius:10, border:`1px solid ${t.border}`, boxShadow:'inset 0 1px 3px rgba(0,0,0,.3)', overflowX:'auto', scrollbarWidth:'none', marginBottom:14, WebkitOverflowScrolling:'touch' }}>
-                {PERIODS.map(({ key, label }) => (
-                  <button key={key} onClick={()=>setPeriod(key)} style={{ padding:'6px 12px', borderRadius:7, border:'none', cursor:'pointer', background:period===key?`linear-gradient(135deg,${t.gold},${t.gold}cc)`:'transparent', color:period===key?'#0a0a0a':t.text3, fontSize:12, fontWeight:period===key?700:500, letterSpacing:'.03em', transition:'all .2s cubic-bezier(.34,1.56,.64,1)', boxShadow:period===key?`0 2px 8px ${t.gold}40`:'none', whiteSpace:'nowrap', flexShrink:0 }}>
-                    {label}
-                  </button>
-                ))}
+              <div onClick={e=>e.stopPropagation()} style={{ display:'flex', alignItems:'center', gap:6, marginBottom:14 }}>
+                <div style={{ display:'flex', gap:3, padding:4, background:t.card, borderRadius:10, border:`1px solid ${t.border}`, boxShadow:'inset 0 1px 3px rgba(0,0,0,.3)', overflowX:'auto', scrollbarWidth:'none', flex:1, WebkitOverflowScrolling:'touch' }}>
+                  {PERIODS.map(({ key, label }) => (
+                    <button key={key} onClick={()=>setPeriod(key)} style={{ padding:'6px 12px', borderRadius:7, border:'none', cursor:'pointer', background:period===key?`linear-gradient(135deg,${t.gold},${t.gold}cc)`:'transparent', color:period===key?'#0a0a0a':t.text3, fontSize:12, fontWeight:period===key?700:500, letterSpacing:'.03em', transition:'all .2s cubic-bezier(.34,1.56,.64,1)', boxShadow:period===key?`0 2px 8px ${t.gold}40`:'none', whiteSpace:'nowrap', flexShrink:0 }}>
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                <button onClick={() => { fetchAll(); setLastRefresh(new Date()) }}
+                  style={{ padding:'6px 10px', borderRadius:8, border:`1px solid ${t.border}`, background:t.card, color:loading?t.gold:t.text3, fontSize:14, cursor:'pointer', flexShrink:0, transition:'color .2s' }}>
+                  ↻
+                </button>
               </div>
             )}
 

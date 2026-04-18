@@ -139,8 +139,10 @@ function PurchaseInline({ t, setActiveNav, canSee }) {
   const [filterValue,     setFilterValue]     = useState(null)
   const [branchSearch,    setBranchSearch]    = useState('')
   const [branchDropOpen,  setBranchDropOpen]  = useState(false)
+  const [lastRefresh,     setLastRefresh]     = useState(null)
   const branchInputRef = useRef(null)
   const branchDropRef  = useRef(null)
+  const refreshRef     = useRef(null)
 
   useEffect(() => {
     if (filterType !== 'branch') { setBranchSearch(''); setBranchDropOpen(false) }
@@ -185,7 +187,14 @@ function PurchaseInline({ t, setActiveNav, canSee }) {
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Period-dependent data
-  useEffect(() => { fetchPeriod() }, [period, filterType, filterValue]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { fetchPeriod(); setLastRefresh(new Date()) }, [period, filterType, filterValue]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Auto-refresh every 3 minutes when viewing Today
+  useEffect(() => {
+    if (period !== 'today') { clearInterval(refreshRef.current); return }
+    refreshRef.current = setInterval(() => { fetchPeriod(); setLastRefresh(new Date()) }, 3 * 60 * 1000)
+    return () => clearInterval(refreshRef.current)
+  }, [period, filterType, filterValue]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const fetchPeriod = async () => {
     setLoading(true)
@@ -277,16 +286,24 @@ function PurchaseInline({ t, setActiveNav, canSee }) {
       {/* Period selector row */}
       {showPeriodSelector && (
         <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
-          <div style={{ display:'flex', gap:3, padding:4, background:t.card, borderRadius:12, border:`1px solid ${t.border}`, overflowX:'auto', scrollbarWidth:'none' }}>
-            {PERIODS.map(({ key, label }) => (
-              <button key={key} onClick={()=>setPeriod(key)} style={{ padding: isMobile ? '7px 12px' : '7px 16px', borderRadius:9, border:'none', cursor:'pointer', background:period===key?`linear-gradient(135deg,${t.gold},${t.gold}cc)`:'transparent', color:period===key?'#0a0a0a':t.text3, fontSize: isMobile ? 11 : 12, fontWeight:period===key?700:500, transition:'all .2s', boxShadow:period===key?`0 2px 8px ${t.gold}40`:'none', whiteSpace:'nowrap', flexShrink:0 }}>
-                {label}
-              </button>
-            ))}
+          <div style={{ display:'flex', gap:6, alignItems:'center' }}>
+            <div style={{ display:'flex', gap:3, padding:4, background:t.card, borderRadius:12, border:`1px solid ${t.border}`, overflowX:'auto', scrollbarWidth:'none', flex:1 }}>
+              {PERIODS.map(({ key, label }) => (
+                <button key={key} onClick={()=>setPeriod(key)} style={{ padding: isMobile ? '7px 12px' : '7px 16px', borderRadius:9, border:'none', cursor:'pointer', background:period===key?`linear-gradient(135deg,${t.gold},${t.gold}cc)`:'transparent', color:period===key?'#0a0a0a':t.text3, fontSize: isMobile ? 11 : 12, fontWeight:period===key?700:500, transition:'all .2s', boxShadow:period===key?`0 2px 8px ${t.gold}40`:'none', whiteSpace:'nowrap', flexShrink:0 }}>
+                  {label}
+                </button>
+              ))}
+            </div>
+            <button onClick={() => { fetchPeriod(); setLastRefresh(new Date()) }}
+              title="Refresh data"
+              style={{ padding:'7px 10px', borderRadius:9, border:`1px solid ${t.border}`, background:t.card, color:loading?t.gold:t.text3, fontSize:15, cursor:'pointer', flexShrink:0, transition:'color .2s' }}>
+              ↻
+            </button>
           </div>
           <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:10, flexWrap:'wrap' }}>
             <div style={{ display:'flex', alignItems:'center', gap:12, flexWrap:'wrap' }}>
               {!loading && dateLabel && <div style={{ fontSize:11, color:t.text3, fontStyle:'italic' }}>{dateLabel}</div>}
+              {lastRefresh && <div style={{ fontSize:10, color:t.text4 }}>Updated {lastRefresh.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'})}</div>}
               {totalBranches > 0 && <div style={{ fontSize:11, color:t.text4, display:'flex', alignItems:'center', gap:5 }}>
                 <span style={{ width:6, height:6, borderRadius:'50%', background:t.green, display:'inline-block', boxShadow:`0 0 5px ${t.green}80` }}/>
                 {totalBranches} active branches · {Object.keys(regionCounts).length} regions
