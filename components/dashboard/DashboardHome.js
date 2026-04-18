@@ -672,19 +672,36 @@ export default function DashboardHome() {
               {/* Purchase Mix */}
               {!loading && hasData && (
                 <div style={{ background:`linear-gradient(135deg,${t.card},${t.card2})`, border:`1px solid ${t.border}`, borderRadius:14, padding:'18px 22px', marginBottom:22 }}>
-                  <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:14 }}>
-                    <div style={{ fontSize:13, color:t.text2, letterSpacing:'.1em', textTransform:'uppercase', fontWeight:600 }}>Purchase Mix</div>
-                    <div style={{ display:'flex', gap:20 }}>
-                      {[{ color:t.gold, label:'Physical', pct:physPct, count:kpis.physical_count },{ color:'#e07820', label:'Takeover', pct:takePct, count:kpis.takeover_count }].map(item=>(
-                        <div key={item.label} style={{ display:'flex', alignItems:'center', gap:7 }}>
-                          <div style={{ width:10, height:10, borderRadius:3, background:item.color, boxShadow:`0 0 6px ${item.color}60` }}/>
-                          <span style={{ fontSize:13, color:t.text2, fontWeight:500 }}>{item.label}</span>
-                          <span style={{ fontSize:13, color:item.color, fontWeight:700 }}>{item.pct.toFixed(1)}%</span>
-                          <span style={{ fontSize:12, color:t.text4 }}>({Number(item.count||0).toLocaleString('en-IN')} bills)</span>
+                  {isMobile
+                    ? <div style={{ marginBottom:14 }}>
+                        <div style={{ fontSize:13, color:t.text2, letterSpacing:'.1em', textTransform:'uppercase', fontWeight:600, marginBottom:10 }}>Purchase Mix</div>
+                        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
+                          {[{ color:t.gold, label:'Physical', pct:physPct, count:kpis.physical_count },{ color:'#e07820', label:'Takeover', pct:takePct, count:kpis.takeover_count }].map(item=>(
+                            <div key={item.label} style={{ display:'flex', alignItems:'center', gap:8, padding:'10px 12px', background:`${item.color}0a`, border:`1px solid ${item.color}25`, borderRadius:10 }}>
+                              <div style={{ width:10, height:10, borderRadius:3, background:item.color, boxShadow:`0 0 6px ${item.color}60`, flexShrink:0 }}/>
+                              <div>
+                                <div style={{ fontSize:12, color:t.text3, fontWeight:500 }}>{item.label}</div>
+                                <div style={{ fontSize:18, fontWeight:200, color:item.color, lineHeight:1.1, fontVariantNumeric:'tabular-nums' }}>{item.pct.toFixed(1)}%</div>
+                                <div style={{ fontSize:11, color:t.text4 }}>{Number(item.count||0).toLocaleString('en-IN')} bills</div>
+                              </div>
+                            </div>
+                          ))}
                         </div>
-                      ))}
-                    </div>
-                  </div>
+                      </div>
+                    : <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:14 }}>
+                        <div style={{ fontSize:13, color:t.text2, letterSpacing:'.1em', textTransform:'uppercase', fontWeight:600 }}>Purchase Mix</div>
+                        <div style={{ display:'flex', gap:20 }}>
+                          {[{ color:t.gold, label:'Physical', pct:physPct, count:kpis.physical_count },{ color:'#e07820', label:'Takeover', pct:takePct, count:kpis.takeover_count }].map(item=>(
+                            <div key={item.label} style={{ display:'flex', alignItems:'center', gap:7 }}>
+                              <div style={{ width:10, height:10, borderRadius:3, background:item.color, boxShadow:`0 0 6px ${item.color}60` }}/>
+                              <span style={{ fontSize:13, color:t.text2, fontWeight:500 }}>{item.label}</span>
+                              <span style={{ fontSize:13, color:item.color, fontWeight:700 }}>{item.pct.toFixed(1)}%</span>
+                              <span style={{ fontSize:12, color:t.text4 }}>({Number(item.count||0).toLocaleString('en-IN')} bills)</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                  }
                   <div style={{ display:'flex', height:10, borderRadius:100, overflow:'hidden', gap:2, boxShadow:'inset 0 1px 3px rgba(0,0,0,.4)' }}>
                     <div style={{ width:`${physPct}%`, background:`linear-gradient(90deg,${t.gold}aa,${t.gold})`, borderRadius:'100px 0 0 100px', transition:'width .8s cubic-bezier(.4,0,.2,1)', boxShadow:`0 0 10px ${t.gold}50` }}/>
                     <div style={{ flex:1, background:'linear-gradient(90deg,#e07820,#c85010)', borderRadius:'0 100px 100px 0', boxShadow:'0 0 10px #e0782050' }}/>
