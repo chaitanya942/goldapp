@@ -13,6 +13,7 @@ export default function LoginPage() {
   const [step,              setStep]              = useState('login')       // 'login' | 'passkey-prompt'
   const [hasSavedPasskey,   setHasSavedPasskey]   = useState(false)
   const [savedPasskeyEmail, setSavedPasskeyEmail] = useState('')
+  const [savedCredentialId, setSavedCredentialId] = useState(null)
   const [biometricLoading,  setBiometricLoading]  = useState(false)
   const [passkeyError,      setPasskeyError]      = useState('')
   const accessTokenRef = useRef(null)
@@ -25,10 +26,12 @@ export default function LoginPage() {
 
   // ── Check for saved passkey & auto-trigger biometric prompt ─
   useEffect(() => {
-    const saved = localStorage.getItem('wg_passkey_email')
-    if (saved) {
+    const data  = JSON.parse(localStorage.getItem('wg_passkey_data') || 'null')
+    const email = data?.email || localStorage.getItem('wg_passkey_email')
+    if (email) {
       setHasSavedPasskey(true)
-      setSavedPasskeyEmail(saved)
+      setSavedPasskeyEmail(email)
+      setSavedCredentialId(data?.credentialId || null)
     }
   }, [])
 
@@ -142,7 +145,8 @@ export default function LoginPage() {
     if (err) { setError(err.message); setLoading(false); return }
     accessTokenRef.current = data.session?.access_token
     // Offer passkey registration if device supports it and not already saved for this email
-    const alreadySaved = localStorage.getItem('wg_passkey_email') === email
+    const savedData    = JSON.parse(localStorage.getItem('wg_passkey_data') || 'null')
+    const alreadySaved = savedData?.email === email || localStorage.getItem('wg_passkey_email') === email
     if (!alreadySaved && window.PublicKeyCredential) {
       setLoading(false)
       setStep('passkey-prompt')
@@ -157,7 +161,7 @@ export default function LoginPage() {
       const optRes = await fetch('/api/webauthn/auth-options', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: savedPasskeyEmail }),
+        body: JSON.stringify({ email: savedPasskeyEmail, credentialId: savedCredentialId }),
       })
       const options = await optRes.json()
       if (!optRes.ok) throw new Error(options.error || 'Failed to get options')
@@ -201,7 +205,8 @@ export default function LoginPage() {
       })
       const result = await verifyRes.json()
       if (!verifyRes.ok) throw new Error(result.error || 'Registration failed')
-      localStorage.setItem('wg_passkey_email', email)
+      localStorage.setItem('wg_passkey_data', JSON.stringify({ email, credentialId: regResponse.id }))
+      localStorage.removeItem('wg_passkey_email')
       window.location.href = '/dashboard'
     } catch (err) {
       setPasskeyError(err.message || 'Failed to save biometric login')
@@ -711,8 +716,13 @@ export default function LoginPage() {
                       </svg>
                     </div>
                     <div style={{ width:28, height:28, border:'2px solid rgba(201,168,76,0.15)', borderTopColor:'rgba(201,168,76,0.7)', borderRadius:'50%', animation:'spin .8s linear infinite', margin:'0 auto 14px' }} />
-                    <div style={{ fontSize:'.68rem', color:'rgba(255,255,255,0.28)', letterSpacing:'.08em' }}>
-                      Use email instead? <button type="button" onClick={() => { setBiometricLoading(false) }} style={{ background:'none', border:'none', color:'rgba(201,168,76,0.5)', cursor:'pointer', fontSize:'.68rem', letterSpacing:'.08em', textDecoration:'underline' }}>Sign in with email</button>
+                    <div style={{ fontSize:'.72rem', color:'rgba(255,255,255,0.35)', marginBottom:6 }}>Signing in as</div>
+                    <div style={{ fontSize:'.85rem', color:'rgba(201,168,76,0.75)', fontWeight:500, marginBottom:16, letterSpacing:'.01em' }}>{savedPasskeyEmail}</div>
+                    <div style={{ fontSize:'.62rem', color:'rgba(255,255,255,0.22)', letterSpacing:'.06em' }}>
+                      Not you?{' '}
+                      <button type="button" onClick={() => setBiometricLoading(false)} style={{ background:'none', border:'none', color:'rgba(255,255,255,0.45)', cursor:'pointer', fontSize:'.62rem', letterSpacing:'.06em', textDecoration:'underline' }}>
+                        Use a different account
+                      </button>
                     </div>
                   </div>
                 ) : hasSavedPasskey ? (
@@ -725,7 +735,7 @@ export default function LoginPage() {
                     </button>
                     {passkeyError && <div className="errmsg" style={{ marginBottom: 4 }}><div className="errdot" />{passkeyError}</div>}
                     <div style={{ textAlign:'right', marginBottom: 14, marginTop: 4 }}>
-                      <button type="button" onClick={() => { localStorage.removeItem('wg_passkey_email'); setHasSavedPasskey(false); setSavedPasskeyEmail(''); setPasskeyError('') }} style={{ background:'none', border:'none', fontSize:'.58rem', color:'rgba(255,255,255,0.2)', cursor:'pointer', letterSpacing:'.08em', textTransform:'uppercase' }}>
+                      <button type="button" onClick={() => { localStorage.removeItem('wg_passkey_data'); localStorage.removeItem('wg_passkey_email'); setHasSavedPasskey(false); setSavedPasskeyEmail(''); setSavedCredentialId(null); setPasskeyError('') }} style={{ background:'none', border:'none', fontSize:'.58rem', color:'rgba(255,255,255,0.2)', cursor:'pointer', letterSpacing:'.08em', textTransform:'uppercase' }}>
                         Remove passkey
                       </button>
                     </div>

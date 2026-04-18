@@ -11,7 +11,7 @@ const rpID = new URL(process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000'
 
 export async function POST(request) {
   try {
-    const { email } = await request.json()
+    const { email, credentialId } = await request.json()
     if (!email) return Response.json({ error: 'Email required' }, { status: 400 })
 
     const { data: profile } = await adminSupabase
@@ -22,10 +22,14 @@ export async function POST(request) {
 
     if (!profile) return Response.json({ error: 'No passkey found for this account' }, { status: 404 })
 
-    const { data: creds } = await adminSupabase
+    // If a specific credential ID is stored on this device, only request that one
+    const credQuery = adminSupabase
       .from('webauthn_credentials')
       .select('credential_id')
       .eq('user_id', profile.id)
+    const { data: creds } = credentialId
+      ? await credQuery.eq('credential_id', credentialId)
+      : await credQuery
 
     if (!creds?.length) {
       return Response.json({ error: 'No passkey found for this account' }, { status: 404 })
