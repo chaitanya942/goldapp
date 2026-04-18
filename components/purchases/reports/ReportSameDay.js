@@ -504,7 +504,7 @@ export default function ReportSameDay({ t }) {
   })
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', overflowX: 'hidden' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
 
       {/* Header */}
       <div style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: '12px', padding: '18px 22px' }}>

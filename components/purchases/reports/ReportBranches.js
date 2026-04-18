@@ -87,6 +87,7 @@ function buildRegionColors(names) {
 // ─────────────────────────────────────────────
 function RegionDonut({ branchData, t }) {
   const [hovered, setHovered] = useState(null)
+  const isMobile = useMobile()
 
   const regionMap = {}
   ;(branchData || []).forEach(b => {
@@ -97,7 +98,11 @@ function RegionDonut({ branchData, t }) {
   const total   = regions.reduce((s, [, v]) => s + v, 0)
   const colorMap = buildRegionColors(regions.map(([name]) => name))
 
-  const cx = 130, cy = 130, r = 100, sw = 32, circ = 2 * Math.PI * r
+  const size = isMobile ? 180 : 260
+  const cx = size / 2, cy = size / 2
+  const r  = isMobile ? 68 : 100
+  const sw = isMobile ? 24 : 32
+  const circ = 2 * Math.PI * r
   let offset = 0
   const slices = regions.map(([name, val]) => {
     const pct  = total > 0 ? val / total : 0
@@ -111,8 +116,8 @@ function RegionDonut({ branchData, t }) {
   const maxVal = slices[0]?.val || 1
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '20px' }}>
-      <svg width="260" height="260">
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '16px' }}>
+      <svg width={size} height={size}>
         <circle cx={cx} cy={cy} r={r} fill="none" stroke={t.border} strokeWidth={sw} />
         {[...slices].reverse().map((sl, ri) => {
           const i    = slices.length - 1 - ri
@@ -132,14 +137,14 @@ function RegionDonut({ branchData, t }) {
         })}
         {hov ? (
           <>
-            <text x={cx} y={cy - 14} textAnchor="middle" fill={hov.color} fontSize="22" fontWeight="700">{(hov.pct * 100).toFixed(1)}%</text>
-            <text x={cx} y={cy + 8}  textAnchor="middle" fill={t.text2} fontSize="11">{hov.name}</text>
-            <text x={cx} y={cy + 24} textAnchor="middle" fill={t.text3} fontSize="10">{fmt(hov.val)}g</text>
+            <text x={cx} y={cy - 10} textAnchor="middle" fill={hov.color} fontSize={isMobile ? 16 : 22} fontWeight="700">{(hov.pct * 100).toFixed(1)}%</text>
+            <text x={cx} y={cy + 7}  textAnchor="middle" fill={t.text2} fontSize={isMobile ? 9 : 11}>{hov.name}</text>
+            <text x={cx} y={cy + 20} textAnchor="middle" fill={t.text3} fontSize={isMobile ? 8 : 10}>{fmt(hov.val)}g</text>
           </>
         ) : (
           <>
-            <text x={cx} y={cy - 8}  textAnchor="middle" fill={t.text1} fontSize="18" fontWeight="600">{fmt(total)}g</text>
-            <text x={cx} y={cy + 12} textAnchor="middle" fill={t.text3} fontSize="10">Total Net Wt</text>
+            <text x={cx} y={cy - 5}  textAnchor="middle" fill={t.text1} fontSize={isMobile ? 14 : 18} fontWeight="600">{fmt(total)}g</text>
+            <text x={cx} y={cy + 10} textAnchor="middle" fill={t.text3} fontSize={isMobile ? 8 : 10}>Total Net Wt</text>
           </>
         )}
       </svg>
@@ -670,7 +675,7 @@ export default function ReportBranches({ branchData, allBranchMeta, stateData, t
   })
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', overflowX: 'hidden' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
 
       {/* ── ROW 1: DONUT + TOP 10 BILLS ── */}
       <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '16px' }}>

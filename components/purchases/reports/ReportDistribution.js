@@ -283,7 +283,7 @@ export default function ReportDistribution({ kpis, purityDist, weightBuckets, re
   const P = (id, extra = {}, noExp = false) => ({ id, expanded, onExpand: openPanel, onClose: closePanel, t, noExpand: noExp, cardStyle: { ...s.card, marginBottom: 0, ...extra } })
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', overflowX: 'hidden' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
 
       {/* ── KEY INSIGHTS ── */}
       {insights.length > 0 && (
