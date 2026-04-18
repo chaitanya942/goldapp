@@ -48,7 +48,7 @@ export default function PurchasesPage() {
   }
 
   return (
-    <div style={{ minHeight: '100vh', background: t.bg }}>
+    <div style={{ minHeight: '100vh', background: t.bg, overflowX: 'hidden' }}>
       {/* TAB BAR */}
       <div style={{
         background: t.card,
