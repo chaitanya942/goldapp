@@ -4,8 +4,6 @@ import { useState, useEffect } from 'react'
 import { supabase } from '../../../lib/supabase'
 import { fmt, fmtVal, getStyles } from './reportUtils'
 
-import { useState, useEffect } from 'react'
-
 const DOW_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
 
 function useMobile() {
