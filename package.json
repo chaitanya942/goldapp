@@ -14,6 +14,8 @@
     "@aws-sdk/s3-request-presigner": "^3.1015.0",
     "@fontsource/noto-sans": "^5.2.10",
     "@napi-rs/canvas": "^0.1.97",
+    "@simplewebauthn/browser": "^13.3.0",
+    "@simplewebauthn/server": "^13.3.0",
     "@supabase/supabase-js": "^2.98.0",
     "jspdf": "^4.2.1",
     "jspdf-autotable": "^5.0.7",

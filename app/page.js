@@ -4,17 +4,29 @@ import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 
 export default function LoginPage() {
-  const [email,        setEmail]        = useState('')
-  const [password,     setPassword]     = useState('')
-  const [loading,      setLoading]      = useState(false)
-  const [error,        setError]        = useState('')
-  const [showPassword, setShowPassword] = useState(false)
+  const [email,             setEmail]             = useState('')
+  const [password,          setPassword]          = useState('')
+  const [loading,           setLoading]           = useState(false)
+  const [error,             setError]             = useState('')
+  const [showPassword,      setShowPassword]      = useState(false)
+  const [step,              setStep]              = useState('login')       // 'login' | 'passkey-prompt'
+  const [hasSavedPasskey,   setHasSavedPasskey]   = useState(false)
+  const [savedPasskeyEmail, setSavedPasskeyEmail] = useState('')
+  const [biometricLoading,  setBiometricLoading]  = useState(false)
+  const [passkeyError,      setPasskeyError]      = useState('')
+  const accessTokenRef = useRef(null)
 
   const canvasRef   = useRef(null)
   const bgRef       = useRef(null)   // parallax background wrapper
   const mousePos    = useRef({ x: 0, y: 0 })
   const bgSmooth    = useRef({ x: 0, y: 0 })
   const rafRef      = useRef(null)
+
+  // ── Check for saved passkey ────────────────────────────────
+  useEffect(() => {
+    const saved = localStorage.getItem('wg_passkey_email')
+    if (saved) { setHasSavedPasskey(true); setSavedPasskeyEmail(saved) }
+  }, [])
 
   // ── Particles ──────────────────────────────────────────────
   useEffect(() => {
@@ -114,10 +126,74 @@ export default function LoginPage() {
   const handleLogin = async (e) => {
     e.preventDefault()
     setError(''); setLoading(true)
-    const { error: err } = await supabase.auth.signInWithPassword({ email, password })
+    const { data, error: err } = await supabase.auth.signInWithPassword({ email, password })
     if (err) { setError(err.message); setLoading(false); return }
+    accessTokenRef.current = data.session?.access_token
+    // Offer passkey registration if device supports it and not already saved for this email
+    const alreadySaved = localStorage.getItem('wg_passkey_email') === email
+    if (!alreadySaved && window.PublicKeyCredential) {
+      setLoading(false)
+      setStep('passkey-prompt')
+      return
+    }
     window.location.href = '/dashboard'
   }
+
+  const handleBiometricLogin = async () => {
+    setBiometricLoading(true); setPasskeyError('')
+    try {
+      const { startAuthentication } = await import('@simplewebauthn/browser')
+      const optRes = await fetch('/api/webauthn/auth-options', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: savedPasskeyEmail }),
+      })
+      const options = await optRes.json()
+      if (!optRes.ok) throw new Error(options.error || 'Failed to get options')
+      const authnResponse = await startAuthentication({ optionsJSON: options })
+      const verifyRes = await fetch('/api/webauthn/authenticate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: savedPasskeyEmail, response: authnResponse }),
+      })
+      const result = await verifyRes.json()
+      if (!verifyRes.ok) throw new Error(result.error || 'Authentication failed')
+      await supabase.auth.setSession(result.session)
+      window.location.href = '/dashboard'
+    } catch (err) {
+      setPasskeyError(err.message || 'Biometric login failed')
+      setBiometricLoading(false)
+    }
+  }
+
+  const handleSavePasskey = async () => {
+    setBiometricLoading(true); setPasskeyError('')
+    try {
+      const { startRegistration } = await import('@simplewebauthn/browser')
+      const token = accessTokenRef.current
+      const optRes = await fetch('/api/webauthn/register-options', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+      })
+      const options = await optRes.json()
+      if (!optRes.ok) throw new Error(options.error || 'Failed to get options')
+      const regResponse = await startRegistration({ optionsJSON: options })
+      const verifyRes = await fetch('/api/webauthn/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify(regResponse),
+      })
+      const result = await verifyRes.json()
+      if (!verifyRes.ok) throw new Error(result.error || 'Registration failed')
+      localStorage.setItem('wg_passkey_email', email)
+      window.location.href = '/dashboard'
+    } catch (err) {
+      setPasskeyError(err.message || 'Failed to save biometric login')
+      setBiometricLoading(false)
+    }
+  }
+
+  const handleSkipPasskey = () => { window.location.href = '/dashboard' }
 
   return (
     <>
@@ -452,6 +528,67 @@ export default function LoginPage() {
         @keyframes cardShimmer { from{left:-100%} to{left:120%} }
         @keyframes ripple      { to{transform:scale(1);opacity:0} }
 
+        /* ── BIOMETRIC BUTTON ── */
+        .bio-btn {
+          width: 100%; padding: 13px 20px; margin-bottom: 16px;
+          background: rgba(201,168,76,0.05);
+          border: 1px solid rgba(201,168,76,0.22);
+          border-radius: 9px;
+          display: flex; align-items: center; justify-content: center; gap: 10px;
+          font-family: inherit; font-size: .66rem; font-weight: 700;
+          letter-spacing: .18em; text-transform: uppercase;
+          color: rgba(201,168,76,0.8); cursor: pointer;
+          transition: all .22s; position: relative; overflow: hidden;
+        }
+        .bio-btn:hover {
+          background: rgba(201,168,76,0.1);
+          border-color: rgba(201,168,76,0.42);
+          color: rgba(201,168,76,1);
+          transform: translateY(-1px);
+          box-shadow: 0 6px 20px rgba(201,168,76,0.12);
+        }
+        .bio-btn:disabled { opacity: .38; cursor: not-allowed; transform: none; }
+        .bio-icon { width: 17px; height: 17px; flex-shrink: 0; }
+
+        .divider {
+          display: flex; align-items: center; gap: 10px; margin-bottom: 18px;
+          font-size: .56rem; font-weight: 500; letter-spacing: .12em; text-transform: uppercase;
+          color: rgba(255,255,255,0.15);
+        }
+        .divider::before, .divider::after { content:''; flex:1; height:1px; background: rgba(255,255,255,0.07); }
+
+        /* ── PASSKEY PROMPT ── */
+        .passkey-prompt { text-align: center; padding: 4px 0 8px; }
+        .passkey-icon-wrap {
+          width: 58px; height: 58px; border-radius: 50%;
+          background: rgba(201,168,76,0.07);
+          border: 1px solid rgba(201,168,76,0.18);
+          display: flex; align-items: center; justify-content: center;
+          margin: 0 auto 18px;
+        }
+        .passkey-title { font-size: 1rem; font-weight: 300; color: rgba(255,255,255,0.85); margin-bottom: 6px; }
+        .passkey-desc { font-size: .68rem; color: rgba(255,255,255,0.33); line-height: 1.7; margin-bottom: 24px; }
+        .passkey-actions { display: flex; gap: 10px; }
+        .passkey-save {
+          flex: 1; padding: 13px 16px;
+          background: linear-gradient(108deg, #9a6e18 0%, #c9a84c 40%, #edd870 60%, #9a6e18 100%);
+          background-size: 240% 100%;
+          border: none; border-radius: 9px; font-family: inherit;
+          font-size: .63rem; font-weight: 800; letter-spacing: .18em; text-transform: uppercase;
+          color: rgba(5,3,0,0.9); cursor: pointer;
+          animation: gold-slide 4s linear infinite; transition: transform .2s;
+        }
+        .passkey-save:hover { transform: translateY(-1px); }
+        .passkey-save:disabled { opacity: .38; cursor: not-allowed; transform: none; animation: none; }
+        .passkey-skip {
+          flex: 1; padding: 13px 16px;
+          background: transparent; border: 1px solid rgba(255,255,255,0.08);
+          border-radius: 9px; font-family: inherit;
+          font-size: .63rem; font-weight: 600; letter-spacing: .1em; text-transform: uppercase;
+          color: rgba(255,255,255,0.28); cursor: pointer; transition: all .2s;
+        }
+        .passkey-skip:hover { border-color: rgba(255,255,255,0.15); color: rgba(255,255,255,0.5); }
+
         @media (max-width:520px) {
           .stage { padding-top: 24px; }
           .content { padding: 0 16px; }
@@ -526,61 +663,101 @@ export default function LoginPage() {
             <div className="card-cb card-bl" />
             <div className="card-cb card-br" />
 
-            <div className="card-title">Sign In</div>
-            <div className="card-sub">Enter your credentials to access the portal</div>
+            <div className="card-title">{step === 'passkey-prompt' ? 'Faster Sign‑In' : 'Sign In'}</div>
+            <div className="card-sub">{step === 'passkey-prompt' ? 'Skip the password next time' : 'Enter your credentials to access the portal'}</div>
 
-            <form onSubmit={handleLogin} autoComplete="off">
-              <div className="field">
-                <label className="flbl">Email</label>
-                <div className="inp-wrap">
-                  <input
-                    type="email" className="inp"
-                    placeholder="you@whitegold.money"
-                    value={email} onChange={e => setEmail(e.target.value)}
-                    required autoComplete="off"
-                  />
+            {step === 'passkey-prompt' ? (
+              <div className="passkey-prompt">
+                <div className="passkey-icon-wrap">
+                  <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="rgba(201,168,76,0.85)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M7.864 4.243A7.5 7.5 0 0119.5 10.5c0 2.92-.556 5.709-1.568 8.268M5.742 6.364A7.465 7.465 0 004.5 10.5a7.464 7.464 0 01-1.15 3.993m1.989 3.559A11.209 11.209 0 008.25 10.5a3.75 3.75 0 117.5 0c0 .527-.021 1.049-.064 1.565M12 10.5a14.94 14.94 0 01-3.6 9.75m6.633-4.596a18.666 18.666 0 01-2.485 5.33"/>
+                  </svg>
                 </div>
-              </div>
-
-              <div className="field">
-                <label className="flbl">Password</label>
-                <div className="inp-wrap">
-                  <input
-                    type={showPassword ? 'text' : 'password'} className="inp pw"
-                    placeholder="Enter your password"
-                    value={password} onChange={e => setPassword(e.target.value)}
-                    required autoComplete="new-password"
-                  />
-                  <button type="button" className="eye-btn" onClick={() => setShowPassword(v => !v)}>
-                    {showPassword ? (
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94"/>
-                        <path d="M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19"/>
-                        <line x1="1" y1="1" x2="23" y2="23"/>
-                      </svg>
-                    ) : (
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
-                        <circle cx="12" cy="12" r="3"/>
-                      </svg>
-                    )}
+                <div className="passkey-title">Enable Biometric Login</div>
+                <div className="passkey-desc">Use Face ID, fingerprint, or your device PIN to sign in instantly — no password needed next time.</div>
+                {passkeyError && <div className="errmsg" style={{ marginBottom: 14 }}><div className="errdot" />{passkeyError}</div>}
+                <div className="passkey-actions">
+                  <button className="passkey-save" onClick={handleSavePasskey} disabled={biometricLoading}>
+                    {biometricLoading ? 'Saving…' : 'Enable Now'}
+                  </button>
+                  <button className="passkey-skip" onClick={handleSkipPasskey} disabled={biometricLoading}>
+                    Skip
                   </button>
                 </div>
               </div>
+            ) : (
+              <form onSubmit={handleLogin} autoComplete="off">
+                {hasSavedPasskey && (
+                  <>
+                    <button type="button" className="bio-btn" onClick={handleBiometricLogin} disabled={biometricLoading}>
+                      {biometricLoading ? (
+                        <><div className="spinner" style={{ borderColor:'rgba(201,168,76,0.2)', borderTopColor:'rgba(201,168,76,0.7)' }} /> Authenticating…</>
+                      ) : (
+                        <>
+                          <svg className="bio-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M7.864 4.243A7.5 7.5 0 0119.5 10.5c0 2.92-.556 5.709-1.568 8.268M5.742 6.364A7.465 7.465 0 004.5 10.5a7.464 7.464 0 01-1.15 3.993m1.989 3.559A11.209 11.209 0 008.25 10.5a3.75 3.75 0 117.5 0c0 .527-.021 1.049-.064 1.565M12 10.5a14.94 14.94 0 01-3.6 9.75m6.633-4.596a18.666 18.666 0 01-2.485 5.33"/>
+                          </svg>
+                          Use Biometric Login
+                        </>
+                      )}
+                    </button>
+                    {passkeyError && <div className="errmsg" style={{ marginBottom: 12 }}><div className="errdot" />{passkeyError}</div>}
+                    <div className="divider">or continue with email</div>
+                  </>
+                )}
 
-              {error && <div className="errmsg"><div className="errdot" />{error}</div>}
-
-              <div className="btn-wrap">
-                <button type="submit" className="btn" disabled={loading} onMouseDown={handleRipple}>
-                  <div className="btn-inner">
-                    {loading
-                      ? <><div className="spinner" /> Signing in…</>
-                      : <>Sign In <span className="arrow">→</span></>
-                    }
+                <div className="field">
+                  <label className="flbl">Email</label>
+                  <div className="inp-wrap">
+                    <input
+                      type="email" className="inp"
+                      placeholder="you@whitegold.money"
+                      value={email} onChange={e => setEmail(e.target.value)}
+                      required autoComplete="off"
+                    />
                   </div>
-                </button>
-              </div>
-            </form>
+                </div>
+
+                <div className="field">
+                  <label className="flbl">Password</label>
+                  <div className="inp-wrap">
+                    <input
+                      type={showPassword ? 'text' : 'password'} className="inp pw"
+                      placeholder="Enter your password"
+                      value={password} onChange={e => setPassword(e.target.value)}
+                      required autoComplete="new-password"
+                    />
+                    <button type="button" className="eye-btn" onClick={() => setShowPassword(v => !v)}>
+                      {showPassword ? (
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94"/>
+                          <path d="M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19"/>
+                          <line x1="1" y1="1" x2="23" y2="23"/>
+                        </svg>
+                      ) : (
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                          <circle cx="12" cy="12" r="3"/>
+                        </svg>
+                      )}
+                    </button>
+                  </div>
+                </div>
+
+                {error && <div className="errmsg"><div className="errdot" />{error}</div>}
+
+                <div className="btn-wrap">
+                  <button type="submit" className="btn" disabled={loading} onMouseDown={handleRipple}>
+                    <div className="btn-inner">
+                      {loading
+                        ? <><div className="spinner" /> Signing in…</>
+                        : <>Sign In <span className="arrow">→</span></>
+                      }
+                    </div>
+                  </button>
+                </div>
+              </form>
+            )}
           </div>
 
         </div>
