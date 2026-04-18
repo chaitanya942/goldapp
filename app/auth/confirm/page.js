@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '../../../lib/supabase'
+import { startRegistration } from '@simplewebauthn/browser'
 
 // ── Eye Icon ─────────────────────────────────────────────
 function Eye({ open }) {
@@ -24,93 +25,113 @@ function Eye({ open }) {
   )
 }
 
-// ── Password Input — defined OUTSIDE main component to prevent remount ────────
 function PasswordInput({ value, onChange, onKeyDown, show, onToggle, placeholder }) {
   return (
-    <div style={{
-      display: 'flex', alignItems: 'center',
-      background: '#161616',
-      border: '1px solid #2a2a2a',
-      borderRadius: '8px',
-      overflow: 'hidden',
-    }}>
+    <div style={{ display:'flex', alignItems:'center', background:'#161616', border:'1px solid #2a2a2a', borderRadius:'8px', overflow:'hidden' }}>
       <input
         type={show ? 'text' : 'password'}
         placeholder={placeholder}
         value={value}
         onChange={onChange}
         onKeyDown={onKeyDown}
-        style={{
-          flex: 1,
-          background: 'transparent',
-          border: 'none',
-          outline: 'none',
-          padding: '11px 14px',
-          color: '#f0e6c8',
-          fontSize: '.8rem',
-        }}
+        style={{ flex:1, background:'transparent', border:'none', outline:'none', padding:'11px 14px', color:'#f0e6c8', fontSize:'.8rem' }}
       />
-      <button
-        type="button"
-        onClick={onToggle}
-        tabIndex={-1}
-        style={{
-          padding: '0 14px',
-          background: 'transparent',
-          border: 'none',
-          color: '#7a6a4a',
-          cursor: 'pointer',
-          display: 'flex',
-          alignItems: 'center',
-          height: '100%',
-        }}>
+      <button type="button" onClick={onToggle} tabIndex={-1}
+        style={{ padding:'0 14px', background:'transparent', border:'none', color:'#7a6a4a', cursor:'pointer', display:'flex', alignItems:'center', height:'100%' }}>
         <Eye open={show} />
       </button>
     </div>
   )
 }
 
-// ── Main Page ─────────────────────────────────────────────
 export default function SetPasswordPage() {
   const router = useRouter()
-  const [password,  setPassword]  = useState('')
-  const [confirm,   setConfirm]   = useState('')
-  const [status,    setStatus]    = useState('idle')
-  const [message,   setMessage]   = useState('')
-  const [showPwd,   setShowPwd]   = useState(false)
-  const [showConf,  setShowConf]  = useState(false)
+  const [step,         setStep]         = useState('password')   // 'password' | 'biometric'
+  const [password,     setPassword]     = useState('')
+  const [confirm,      setConfirm]      = useState('')
+  const [status,       setStatus]       = useState('idle')
+  const [message,      setMessage]      = useState('')
+  const [showPwd,      setShowPwd]      = useState(false)
+  const [showConf,     setShowConf]     = useState(false)
+  const [bioLoading,   setBioLoading]   = useState(false)
+  const [bioError,     setBioError]     = useState('')
+  const [userEmail,    setUserEmail]    = useState('')
+  const [accessToken,  setAccessToken]  = useState('')
+
+  const gold  = '#c9a84c'
+  const text1 = '#f0e6c8'
+  const text3 = '#7a6a4a'
+  const green = '#3aaa6a'
+  const red   = '#e05555'
 
   useEffect(() => {
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_e, session) => {
-      // session is set automatically when user clicks invite link
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session?.user?.email) setUserEmail(session.user.email)
+      if (session?.access_token) setAccessToken(session.access_token)
     })
-    return () => subscription.unsubscribe()
   }, [])
 
   const handleSubmit = async () => {
     setMessage('')
-    if (!password)            return setMessage('Please enter a password.')
-    if (password.length < 8)  return setMessage('Password must be at least 8 characters.')
-    if (password !== confirm)  return setMessage('Passwords do not match.')
+    if (!password)           return setMessage('Please enter a password.')
+    if (password.length < 8) return setMessage('Password must be at least 8 characters.')
+    if (password !== confirm) return setMessage('Passwords do not match.')
 
     setStatus('loading')
     const { error } = await supabase.auth.updateUser({ password })
     if (error) {
       setStatus('error')
       setMessage(error.message || 'Failed to set password.')
+      return
+    }
+
+    // Refresh session token after password update
+    const { data: { session } } = await supabase.auth.getSession()
+    if (session?.access_token) setAccessToken(session.access_token)
+
+    const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
+    if (isMobile && window.PublicKeyCredential) {
+      setStatus('success')
+      setStep('biometric')
     } else {
       setStatus('success')
-      setMessage('Password set! Redirecting to your dashboard…')
-      setTimeout(() => router.push('/dashboard'), 2000)
+      setMessage('Password set! Redirecting…')
+      setTimeout(() => router.push('/dashboard'), 1500)
     }
   }
 
-  const gold   = '#c9a84c'
-  const text1  = '#f0e6c8'
-  const text3  = '#7a6a4a'
-  const green  = '#3aaa6a'
-  const red    = '#e05555'
-  const border = '#2a2a2a'
+  const handleEnableBiometric = async () => {
+    setBioLoading(true); setBioError('')
+    try {
+      const optRes = await fetch('/api/webauthn/register-options', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${accessToken}` },
+      })
+      const options = await optRes.json()
+      if (!optRes.ok) throw new Error(options.error || 'Failed to get options')
+
+      const regResponse = await startRegistration({ optionsJSON: options })
+
+      const verifyRes = await fetch('/api/webauthn/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${accessToken}` },
+        body: JSON.stringify(regResponse),
+      })
+      const result = await verifyRes.json()
+      if (!verifyRes.ok) throw new Error(result.error || 'Registration failed')
+
+      localStorage.setItem('wg_passkey_data', JSON.stringify({ email: userEmail, credentialId: regResponse.id }))
+      localStorage.removeItem('wg_passkey_email')
+      router.push('/dashboard')
+    } catch (err) {
+      if (err.name === 'NotAllowedError' || err.message?.includes('timed out') || err.message?.includes('not allowed')) {
+        router.push('/dashboard')
+        return
+      }
+      setBioError(err.message || 'Failed to enable biometric login')
+      setBioLoading(false)
+    }
+  }
 
   const checks = [
     { label: '8+ chars',        pass: password.length >= 8 },
@@ -120,95 +141,96 @@ export default function SetPasswordPage() {
   ]
 
   return (
-    <div style={{ minHeight: '100vh', background: '#0a0a0a', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px' }}>
-      <div style={{ width: '100%', maxWidth: '400px' }}>
+    <div style={{ minHeight:'100vh', background:'#0a0a0a', display:'flex', alignItems:'center', justifyContent:'center', padding:'24px' }}>
+      <div style={{ width:'100%', maxWidth:'400px' }}>
 
-        {/* Logo */}
-        <div style={{ textAlign: 'center', marginBottom: '36px' }}>
-          <div style={{ fontSize: '1.6rem', fontWeight: 300, color: gold, letterSpacing: '.12em' }}>GOLDAPP</div>
-          <div style={{ fontSize: '.65rem', color: text3, marginTop: '6px', letterSpacing: '.1em' }}>WHITE GOLD OPERATIONS</div>
+        <div style={{ textAlign:'center', marginBottom:'36px' }}>
+          <div style={{ fontSize:'1.6rem', fontWeight:300, color:gold, letterSpacing:'.12em' }}>GOLDAPP</div>
+          <div style={{ fontSize:'.65rem', color:text3, marginTop:'6px', letterSpacing:'.1em' }}>WHITE GOLD OPERATIONS</div>
         </div>
 
-        {/* Card */}
-        <div style={{ background: '#111111', border: '1px solid #2a2a2a', borderRadius: '14px', padding: '32px', position: 'relative', overflow: 'hidden' }}>
-          <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '2px', background: `linear-gradient(90deg,${gold},${gold}00)` }}/>
+        <div style={{ background:'#111111', border:'1px solid #2a2a2a', borderRadius:'14px', padding:'32px', position:'relative', overflow:'hidden' }}>
+          <div style={{ position:'absolute', top:0, left:0, right:0, height:'2px', background:`linear-gradient(90deg,${gold},${gold}00)` }}/>
 
-          <div style={{ fontSize: '1rem', color: text1, fontWeight: 500, marginBottom: '6px' }}>Set your password</div>
-          <div style={{ fontSize: '.7rem', color: text3, marginBottom: '28px', lineHeight: 1.6 }}>
-            Welcome to GoldApp. Create a secure password to activate your account.
-          </div>
+          {step === 'biometric' ? (
+            /* ── Biometric step ── */
+            <div style={{ textAlign:'center' }}>
+              <div style={{ width:58, height:58, borderRadius:'50%', background:'rgba(201,168,76,0.07)', border:'1px solid rgba(201,168,76,0.18)', display:'flex', alignItems:'center', justifyContent:'center', margin:'0 auto 18px' }}>
+                <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke={gold} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M7.864 4.243A7.5 7.5 0 0119.5 10.5c0 2.92-.556 5.709-1.568 8.268M5.742 6.364A7.465 7.465 0 004.5 10.5a7.464 7.464 0 01-1.15 3.993m1.989 3.559A11.209 11.209 0 008.25 10.5a3.75 3.75 0 117.5 0c0 .527-.021 1.049-.064 1.565M12 10.5a14.94 14.94 0 01-3.6 9.75m6.633-4.596a18.666 18.666 0 01-2.485 5.33"/>
+                </svg>
+              </div>
+              <div style={{ fontSize:'1rem', color:text1, fontWeight:500, marginBottom:8 }}>Enable Biometric Login</div>
+              <div style={{ fontSize:'.7rem', color:text3, lineHeight:1.7, marginBottom:24 }}>
+                Use fingerprint or Face ID to sign in instantly next time — no password needed.
+              </div>
 
-          {/* New Password */}
-          <div style={{ marginBottom: '14px' }}>
-            <div style={{ fontSize: '.58rem', color: text3, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: '6px' }}>New Password</div>
-            <PasswordInput
-              value={password}
-              onChange={e => setPassword(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && handleSubmit()}
-              show={showPwd}
-              onToggle={() => setShowPwd(v => !v)}
-              placeholder="Minimum 8 characters"
-            />
-          </div>
-
-          {/* Confirm Password */}
-          <div style={{ marginBottom: '24px' }}>
-            <div style={{ fontSize: '.58rem', color: text3, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: '6px' }}>Confirm Password</div>
-            <PasswordInput
-              value={confirm}
-              onChange={e => setConfirm(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && handleSubmit()}
-              show={showConf}
-              onToggle={() => setShowConf(v => !v)}
-              placeholder="Re-enter your password"
-            />
-          </div>
-
-          {/* Submit */}
-          <button
-            onClick={handleSubmit}
-            disabled={status === 'loading' || status === 'success'}
-            style={{
-              width: '100%', padding: '12px',
-              background: status === 'success' ? green : gold,
-              border: 'none', borderRadius: '8px',
-              color: '#0a0a0a', fontSize: '.8rem', fontWeight: 700,
-              cursor: status === 'loading' || status === 'success' ? 'not-allowed' : 'pointer',
-              opacity: status === 'loading' ? .7 : 1,
-              transition: 'all .2s',
-            }}>
-            {status === 'loading' ? 'Setting password…' : status === 'success' ? '✓ Password set!' : 'Set Password →'}
-          </button>
-
-          {/* Message */}
-          {message && (
-            <div style={{
-              marginTop: '14px', padding: '10px 12px', borderRadius: '7px',
-              background: status === 'success' ? `${green}18` : `${red}18`,
-              border: `1px solid ${status === 'success' ? green : red}40`,
-              fontSize: '.7rem', color: status === 'success' ? green : red, textAlign: 'center',
-            }}>
-              {message}
-            </div>
-          )}
-
-          {/* Strength indicators */}
-          {password.length > 0 && status !== 'success' && (
-            <div style={{ marginTop: '16px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-              {checks.map(c => (
-                <div key={c.label} style={{
-                  fontSize: '.58rem', padding: '2px 8px', borderRadius: '100px',
-                  background: c.pass ? `${green}20` : border,
-                  color: c.pass ? green : text3, transition: 'all .2s',
-                }}>
-                  {c.pass ? '✓' : '○'} {c.label}
+              {bioError && (
+                <div style={{ padding:'9px 12px', borderRadius:'7px', background:`${red}18`, border:`1px solid ${red}40`, fontSize:'.7rem', color:red, marginBottom:16 }}>
+                  {bioError}
                 </div>
-              ))}
+              )}
+
+              <div style={{ display:'flex', gap:10 }}>
+                <button
+                  onClick={handleEnableBiometric}
+                  disabled={bioLoading}
+                  style={{ flex:1, padding:'12px', background:gold, border:'none', borderRadius:'8px', color:'#0a0a0a', fontSize:'.78rem', fontWeight:700, cursor:bioLoading ? 'not-allowed' : 'pointer', opacity:bioLoading ? .6 : 1 }}>
+                  {bioLoading ? 'Saving…' : 'Enable Now'}
+                </button>
+                <button
+                  onClick={() => router.push('/dashboard')}
+                  disabled={bioLoading}
+                  style={{ flex:1, padding:'12px', background:'transparent', border:'1px solid #2a2a2a', borderRadius:'8px', color:text3, fontSize:'.78rem', fontWeight:600, cursor:'pointer' }}>
+                  Skip
+                </button>
+              </div>
             </div>
+          ) : (
+            /* ── Password step ── */
+            <>
+              <div style={{ fontSize:'1rem', color:text1, fontWeight:500, marginBottom:'6px' }}>Set your password</div>
+              <div style={{ fontSize:'.7rem', color:text3, marginBottom:'28px', lineHeight:1.6 }}>
+                Welcome to GoldApp. Create a secure password to activate your account.
+              </div>
+
+              <div style={{ marginBottom:'14px' }}>
+                <div style={{ fontSize:'.58rem', color:text3, letterSpacing:'.1em', textTransform:'uppercase', marginBottom:'6px' }}>New Password</div>
+                <PasswordInput value={password} onChange={e => setPassword(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleSubmit()} show={showPwd} onToggle={() => setShowPwd(v => !v)} placeholder="Minimum 8 characters"/>
+              </div>
+
+              <div style={{ marginBottom:'24px' }}>
+                <div style={{ fontSize:'.58rem', color:text3, letterSpacing:'.1em', textTransform:'uppercase', marginBottom:'6px' }}>Confirm Password</div>
+                <PasswordInput value={confirm} onChange={e => setConfirm(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleSubmit()} show={showConf} onToggle={() => setShowConf(v => !v)} placeholder="Re-enter your password"/>
+              </div>
+
+              <button
+                onClick={handleSubmit}
+                disabled={status === 'loading' || status === 'success'}
+                style={{ width:'100%', padding:'12px', background:gold, border:'none', borderRadius:'8px', color:'#0a0a0a', fontSize:'.8rem', fontWeight:700, cursor: status === 'loading' ? 'not-allowed' : 'pointer', opacity:status === 'loading' ? .7 : 1 }}>
+                {status === 'loading' ? 'Setting password…' : 'Set Password →'}
+              </button>
+
+              {message && (
+                <div style={{ marginTop:'14px', padding:'10px 12px', borderRadius:'7px', background:`${status === 'error' ? red : green}18`, border:`1px solid ${status === 'error' ? red : green}40`, fontSize:'.7rem', color:status === 'error' ? red : green, textAlign:'center' }}>
+                  {message}
+                </div>
+              )}
+
+              {password.length > 0 && status !== 'success' && (
+                <div style={{ marginTop:'16px', display:'flex', gap:'8px', flexWrap:'wrap' }}>
+                  {checks.map(c => (
+                    <div key={c.label} style={{ fontSize:'.58rem', padding:'2px 8px', borderRadius:'100px', background:c.pass ? `${green}20` : '#2a2a2a', color:c.pass ? green : text3, transition:'all .2s' }}>
+                      {c.pass ? '✓' : '○'} {c.label}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
           )}
         </div>
 
-        <div style={{ textAlign: 'center', marginTop: '20px', fontSize: '.62rem', color: text3 }}>
+        <div style={{ textAlign:'center', marginTop:'20px', fontSize:'.62rem', color:text3 }}>
           White Gold Operations · Confidential
         </div>
       </div>
