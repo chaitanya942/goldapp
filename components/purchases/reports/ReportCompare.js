@@ -739,7 +739,7 @@ export default function ReportCompare({t}) {
       {results&&(<>
 
         {/* ── SUMMARY BAR ── */}
-        <div style={{display:'flex',gap:'0',marginBottom:'16px',borderRadius:'12px',overflow:'hidden',border:`1px solid ${t.border}`}}>
+        <div style={{display:'flex',flexWrap:'wrap',gap:'0',marginBottom:'16px',borderRadius:'12px',overflow:'hidden',border:`1px solid ${t.border}`}}>
 
           {/* Base */}
           <div style={{flex:1,padding:'14px 18px',background:t.card,borderRight:`1px solid ${t.border}`}}>
@@ -812,6 +812,8 @@ export default function ReportCompare({t}) {
         {/* ── RANKED TABLE ── */}
         {innerTab==='Ranked'&&(
           <div style={{background:t.card,border:`1px solid ${t.border}`,borderRadius:'10px',overflow:'hidden'}}>
+          <div style={{overflowX:'auto'}}>
+          <div style={{minWidth:'560px'}}>
 
             {/* Header */}
             <div style={{display:'grid',gridTemplateColumns:'32px 1fr 120px 120px 60px 90px',alignItems:'center',padding:'8px 0',background:t.card2,borderBottom:`1px solid ${t.border}`}}>
@@ -870,6 +872,8 @@ export default function ReportCompare({t}) {
                 </div>
               </div>
             )}
+          </div>
+          </div>
           </div>
         )}
 

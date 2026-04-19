@@ -3,7 +3,18 @@
 import { useState, useEffect } from 'react'
 import GoldSpinner from '../../ui/GoldSpinner'
 
+function useMobile() {
+  const [m, setM] = useState(false)
+  useEffect(() => {
+    const check = () => setM(window.innerWidth < 768)
+    check(); window.addEventListener('resize', check)
+    return () => window.removeEventListener('resize', check)
+  }, [])
+  return m
+}
+
 export default function ReportCrmInsights({ t }) {
+  const isMobile = useMobile()
   const [kpis, setKpis]             = useState(null)
   const [rejReasons, setRejReasons] = useState([])
   const [walkReasons, setWalkReasons] = useState([])
@@ -91,7 +102,7 @@ export default function ReportCrmInsights({ t }) {
       <div style={{ fontSize: '1.1rem', fontWeight: 300, color: t.text1, marginBottom: '20px' }}>CRM Insights</div>
 
       {/* KPI ROW */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px', marginBottom: '24px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(4, 1fr)', gap: '12px', marginBottom: '24px' }}>
         {[
           { label: 'Rejected Bills',        value: rejected.toLocaleString('en-IN'),    color: t.red,    sub: 'Flagged & not approved' },
           { label: 'Pending Bills',          value: pending.toLocaleString('en-IN'),     color: t.orange, sub: 'Awaiting CRM approval' },
@@ -108,7 +119,7 @@ export default function ReportCrmInsights({ t }) {
       </div>
 
       {/* CHARTS ROW */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '20px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '16px', marginBottom: '20px' }}>
 
         {/* Rejection Reasons */}
         <div style={card}>

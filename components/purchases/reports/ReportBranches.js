@@ -223,7 +223,7 @@ function BranchBillsModal({ branch, branchInfo, color, t, fromDate, toDate, filt
             <button onClick={onClose} style={{ background: 'transparent', border: 'none', color: t.text3, fontSize: '1rem', cursor: 'pointer', padding: '4px 8px' }}>✕</button>
           </div>
           {!loading && (
-            <div style={{ display: 'flex', gap: '24px', marginTop: '14px' }}>
+            <div style={{ display: 'flex', gap: '24px', marginTop: '14px', flexWrap: 'wrap' }}>
               {[
                 { label: 'Total Bills',  value: bills.length.toLocaleString('en-IN'), color: t.text1 },
                 { label: 'Total Net Wt', value: `${fmt(totalNet)}g`,                   color: t.gold  },
@@ -240,13 +240,13 @@ function BranchBillsModal({ branch, branchInfo, color, t, fromDate, toDate, filt
             </div>
           )}
         </div>
-        <div style={{ overflowY: 'auto', flex: 1 }}>
+        <div style={{ overflowY: 'auto', overflowX: 'auto', flex: 1 }}>
           {loading ? (
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '200px', color: t.text4, fontSize: '.75rem' }}>Loading bills…</div>
           ) : bills.length === 0 ? (
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '200px', color: t.text4, fontSize: '.75rem' }}>No bills found</div>
           ) : (
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '900px' }}>
               <thead style={{ position: 'sticky', top: 0, background: t.card, zIndex: 1 }}>
                 <tr>
                   {['#', 'Date', 'Customer', 'Phone', 'App ID', 'Gross Wt', 'Net Wt', 'Purity', 'Gross Value', 'Svc %', 'Final Amt', 'Type', 'Status'].map(h => (
@@ -352,7 +352,7 @@ function BranchHeatmap({ branchData, allBranchMeta, metric, t, fromDate, toDate,
             <div style={{ fontSize: '.62rem', color: t.text3, borderLeft: `1px solid ${t.border}`, paddingLeft: '16px' }}>click to view bills</div>
           </>
         ) : (
-          <div style={{ fontSize: '.62rem', color: t.text3 }}>Hover a branch · click to view all bills</div>
+          <div style={{ fontSize: '.62rem', color: t.text3 }}>Tap a branch to view all bills</div>
         )}
       </div>
 
