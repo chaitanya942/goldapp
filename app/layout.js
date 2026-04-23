@@ -16,8 +16,13 @@ const dmMono = DM_Mono({
 });
 
 export const metadata = {
-  title: "GoldApp",
+  title: "WhiteGold Portal",
   description: "Gold Operations Platform",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: 'black-translucent',
+    title: 'WhiteGold',
+  },
 };
 
 export const viewport = {
