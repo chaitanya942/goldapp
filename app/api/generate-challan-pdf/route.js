@@ -6,8 +6,8 @@ import fs   from 'fs'
 import path from 'path'
 
 const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY
+  process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
+  process.env.SUPABASE_SERVICE_ROLE_KEY || 'placeholder'
 )
 
 // ── Structural defaults only — no hardcoded GSTINs, PANs, or addresses ───────
