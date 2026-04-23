@@ -33,19 +33,24 @@ export default function MigrationNotice() {
         <div style={{ fontSize: '.8rem', color: '#9a8a6a', lineHeight: 1.7, marginBottom: '24px' }}>
           WhiteGold has moved to a new server. For the best experience, remove the old app from your home screen and re-install it from the new link.
         </div>
-        <a
-          href="https://goldapp-production.up.railway.app"
+        <div style={{ fontSize: '.75rem', color: '#7a6a4a', marginBottom: '16px', lineHeight: 1.6 }}>
+          1. Remove the old app from home screen<br/>
+          2. Open this link in your browser<br/>
+          3. Add to Home Screen again
+        </div>
+        <button
+          onClick={dismiss}
           style={{
-            display: 'block', background: '#c9a84c', color: '#0a0a0a',
+            display: 'block', width: '100%', background: '#c9a84c', color: '#0a0a0a',
             borderRadius: '10px', padding: '12px', fontSize: '.82rem',
-            fontWeight: 700, textDecoration: 'none', marginBottom: '12px',
+            fontWeight: 700, border: 'none', cursor: 'pointer', marginBottom: '12px',
           }}>
-          Re-install App
-        </a>
+          Got it
+        </button>
         <button
           onClick={dismiss}
           style={{ background: 'none', border: 'none', color: '#6a5a3a', fontSize: '.75rem', cursor: 'pointer' }}>
-          I'll do it later
+          Dismiss
         </button>
       </div>
     </div>
