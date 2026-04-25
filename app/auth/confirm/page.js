@@ -65,10 +65,37 @@ export default function SetPasswordPage() {
   const red   = '#e05555'
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session?.user?.email) setUserEmail(session.user.email)
-      if (session?.access_token) setAccessToken(session.access_token)
-    })
+    const initSession = async () => {
+      // Supabase invite emails put tokens in the URL hash: #access_token=...&refresh_token=...&type=invite
+      const hash   = window.location.hash.substring(1)
+      const hParams = new URLSearchParams(hash)
+      const at     = hParams.get('access_token')
+      const rt     = hParams.get('refresh_token')
+
+      // PKCE flow: token arrives as ?code= query param
+      const code = new URLSearchParams(window.location.search).get('code')
+
+      if (at && rt) {
+        const { data: { session }, error } = await supabase.auth.setSession({ access_token: at, refresh_token: rt })
+        if (error || !session) { setMessage('Auth session missing!'); setStatus('error'); return }
+        if (session.user?.email) setUserEmail(session.user.email)
+        if (session.access_token) setAccessToken(session.access_token)
+        // Clean tokens from URL without reload
+        window.history.replaceState(null, '', window.location.pathname)
+      } else if (code) {
+        const { data: { session }, error } = await supabase.auth.exchangeCodeForSession(code)
+        if (error || !session) { setMessage('Auth session missing!'); setStatus('error'); return }
+        if (session.user?.email) setUserEmail(session.user.email)
+        if (session.access_token) setAccessToken(session.access_token)
+        window.history.replaceState(null, '', window.location.pathname)
+      } else {
+        const { data: { session } } = await supabase.auth.getSession()
+        if (!session) { setMessage('Auth session missing!'); setStatus('error'); return }
+        if (session.user?.email) setUserEmail(session.user.email)
+        if (session.access_token) setAccessToken(session.access_token)
+      }
+    }
+    initSession()
   }, [])
 
   const handleSubmit = async () => {
