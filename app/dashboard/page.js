@@ -99,7 +99,7 @@ function DashboardShell() {
       else setChecking(false)
     })
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      if (event === 'SIGNED_OUT' || !session) router.push('/')
+      if (event === 'SIGNED_OUT') router.push('/')
     })
     return () => subscription.unsubscribe()
   }, [])
