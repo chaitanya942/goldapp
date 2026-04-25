@@ -48,11 +48,12 @@ export default function LoginPage() {
   }, [])
 
   useEffect(() => {
+    if (sessionChecking) return  // wait until we know there's no existing session
     if (!hasSavedPasskey) return
     if (typeof window === 'undefined' || !window.PublicKeyCredential) return
     handleBiometricLogin()
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hasSavedPasskey])
+  }, [hasSavedPasskey, sessionChecking])
 
   // ── Particles ──────────────────────────────────────────────
   useEffect(() => {

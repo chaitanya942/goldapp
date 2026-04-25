@@ -1,6 +1,5 @@
 import { Plus_Jakarta_Sans, DM_Mono } from "next/font/google";
 import "./globals.css";
-import MigrationNotice from "../components/MigrationNotice";
 
 const plusJakarta = Plus_Jakarta_Sans({
   variable: "--font-jakarta",
@@ -37,7 +36,6 @@ export default function RootLayout({ children }) {
     <html lang="en">
       <body className={`${plusJakarta.variable} ${dmMono.variable} antialiased`}>
         {children}
-        <MigrationNotice />
       </body>
     </html>
   );
