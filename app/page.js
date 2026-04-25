@@ -16,6 +16,7 @@ export default function LoginPage() {
   const [savedCredentialId, setSavedCredentialId] = useState(null)
   const [biometricLoading,  setBiometricLoading]  = useState(false)
   const [passkeyError,      setPasskeyError]      = useState('')
+  const [sessionChecking,   setSessionChecking]   = useState(true)
   const accessTokenRef = useRef(null)
 
   const canvasRef   = useRef(null)
@@ -23,6 +24,17 @@ export default function LoginPage() {
   const mousePos    = useRef({ x: 0, y: 0 })
   const bgSmooth    = useRef({ x: 0, y: 0 })
   const rafRef      = useRef(null)
+
+  // ── Skip login if already authenticated ─────────────────────
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session) {
+        window.location.href = '/dashboard'
+      } else {
+        setSessionChecking(false)
+      }
+    })
+  }, [])
 
   // ── Check for saved passkey & auto-trigger biometric prompt ─
   useEffect(() => {
@@ -219,6 +231,16 @@ export default function LoginPage() {
   }
 
   const handleSkipPasskey = () => { window.location.href = '/dashboard' }
+
+  if (sessionChecking) return (
+    <div style={{ height:'100vh', background:'#060401', display:'flex', alignItems:'center', justifyContent:'center' }}>
+      <svg width="32" height="32" viewBox="0 0 32 32" style={{ animation:'spin .9s linear infinite' }}>
+        <circle cx="16" cy="16" r="12" fill="none" stroke="rgba(201,168,76,0.12)" strokeWidth="2"/>
+        <circle cx="16" cy="16" r="12" fill="none" stroke="#C9A84C" strokeWidth="2" strokeDasharray="18 56" strokeLinecap="round"/>
+      </svg>
+      <style>{`@keyframes spin { to { transform:rotate(360deg) } }`}</style>
+    </div>
+  )
 
   return (
     <>
@@ -797,6 +819,14 @@ export default function LoginPage() {
                       }
                     </div>
                   </button>
+                </div>
+
+                <div style={{ textAlign:'center', marginTop:16 }}>
+                  <a href="/auth/forgot-password" style={{ fontSize:'.62rem', color:'rgba(201,168,76,0.4)', textDecoration:'none', letterSpacing:'.06em', transition:'color .2s' }}
+                    onMouseEnter={e => e.target.style.color='rgba(201,168,76,0.75)'}
+                    onMouseLeave={e => e.target.style.color='rgba(201,168,76,0.4)'}>
+                    Forgot your password?
+                  </a>
                 </div>
                 </>}
               </form>
