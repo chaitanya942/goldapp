@@ -46,7 +46,7 @@ function PasswordInput({ value, onChange, onKeyDown, show, onToggle, placeholder
 
 export default function SetPasswordPage() {
   const router = useRouter()
-  const [step,         setStep]         = useState('password')   // 'password' | 'biometric'
+  const [step,         setStep]         = useState('loading')   // 'loading' | 'password' | 'biometric'
   const [password,     setPassword]     = useState('')
   const [confirm,      setConfirm]      = useState('')
   const [status,       setStatus]       = useState('idle')
@@ -70,6 +70,7 @@ export default function SetPasswordPage() {
         if (session.user?.email) setUserEmail(session.user.email)
         if (session.access_token) setAccessToken(session.access_token)
         window.history.replaceState(null, '', window.location.pathname)
+        setStep('password')
       }
 
       // 1. Existing session in cookies (already logged in or previously processed)
@@ -184,7 +185,13 @@ export default function SetPasswordPage() {
         <div style={{ background:'#111111', border:'1px solid #2a2a2a', borderRadius:'14px', padding:'32px', position:'relative', overflow:'hidden' }}>
           <div style={{ position:'absolute', top:0, left:0, right:0, height:'2px', background:`linear-gradient(90deg,${gold},${gold}00)` }}/>
 
-          {step === 'biometric' ? (
+          {step === 'loading' ? (
+            <div style={{ textAlign:'center', padding:'24px 0' }}>
+              <div style={{ width:28, height:28, border:`2px solid ${gold}20`, borderTopColor:gold, borderRadius:'50%', animation:'spin .8s linear infinite', margin:'0 auto 16px' }} />
+              <div style={{ fontSize:'.75rem', color:text3 }}>Verifying invite link…</div>
+              <style>{`@keyframes spin { to { transform:rotate(360deg) } }`}</style>
+            </div>
+          ) : step === 'biometric' ? (
             /* ── Biometric step ── */
             <div style={{ textAlign:'center' }}>
               <div style={{ width:58, height:58, borderRadius:'50%', background:'rgba(201,168,76,0.07)', border:'1px solid rgba(201,168,76,0.18)', display:'flex', alignItems:'center', justifyContent:'center', margin:'0 auto 18px' }}>
