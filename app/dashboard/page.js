@@ -98,6 +98,10 @@ function DashboardShell() {
       if (!session) router.push('/')
       else setChecking(false)
     })
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'SIGNED_OUT' || !session) router.push('/')
+    })
+    return () => subscription.unsubscribe()
   }, [])
 
   useEffect(() => {

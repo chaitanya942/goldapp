@@ -39,7 +39,6 @@ export default function LoginPage() {
     if (!hasSavedPasskey) return
     if (typeof window === 'undefined' || !window.PublicKeyCredential) return
     handleBiometricLogin()
-    return () => clearTimeout(t)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasSavedPasskey])
 
