@@ -73,33 +73,42 @@ export default function SetPasswordPage() {
         setStep('password')
       }
 
-      // 1. Existing session in cookies (already logged in or previously processed)
-      const { data: { session: existing } } = await supabase.auth.getSession()
-      if (existing) { applySession(existing); return }
-
-      // 2. Hash tokens — Supabase invite emails: #access_token=...&refresh_token=...
-      const hash    = window.location.hash.substring(1)
-      const hParams = new URLSearchParams(hash)
-      const at      = hParams.get('access_token')
-      const rt      = hParams.get('refresh_token')
-      if (at && rt) {
-        const { data: { session }, error } = await supabase.auth.setSession({ access_token: at, refresh_token: rt })
-        if (error || !session) { setMessage('Auth session missing!'); setStatus('error'); return }
-        applySession(session)
-        return
+      const showError = (msg) => {
+        setMessage(msg || 'Auth session missing!')
+        setStatus('error')
+        setStep('error')
       }
 
-      // 3. PKCE code — ?code= query param
-      const code = new URLSearchParams(window.location.search).get('code')
-      if (code) {
-        const { data: { session }, error } = await supabase.auth.exchangeCodeForSession(code)
-        if (error || !session) { setMessage('Auth session missing!'); setStatus('error'); return }
-        applySession(session)
-        return
-      }
+      try {
+        // 1. Existing session in cookies (already logged in or previously processed)
+        const { data: { session: existing } } = await supabase.auth.getSession()
+        if (existing) { applySession(existing); return }
 
-      setMessage('Auth session missing!')
-      setStatus('error')
+        // 2. Hash tokens — Supabase invite emails: #access_token=...&refresh_token=...
+        const hash    = window.location.hash.substring(1)
+        const hParams = new URLSearchParams(hash)
+        const at      = hParams.get('access_token')
+        const rt      = hParams.get('refresh_token')
+        if (at && rt) {
+          const { data: { session }, error } = await supabase.auth.setSession({ access_token: at, refresh_token: rt })
+          if (error || !session) { showError(error?.message || 'Invalid or expired invite link.'); return }
+          applySession(session)
+          return
+        }
+
+        // 3. PKCE code — ?code= query param
+        const code = new URLSearchParams(window.location.search).get('code')
+        if (code) {
+          const { data: { session }, error } = await supabase.auth.exchangeCodeForSession(code)
+          if (error || !session) { showError(error?.message || 'Invalid or expired invite link.'); return }
+          applySession(session)
+          return
+        }
+
+        showError('Invite link is missing or has expired. Ask your admin for a new invite.')
+      } catch (err) {
+        showError(err?.message || 'Something went wrong. Please try again.')
+      }
     }
     initSession()
   }, [])
@@ -190,6 +199,17 @@ export default function SetPasswordPage() {
               <div style={{ width:28, height:28, border:`2px solid ${gold}20`, borderTopColor:gold, borderRadius:'50%', animation:'spin .8s linear infinite', margin:'0 auto 16px' }} />
               <div style={{ fontSize:'.75rem', color:text3 }}>Verifying invite link…</div>
               <style>{`@keyframes spin { to { transform:rotate(360deg) } }`}</style>
+            </div>
+          ) : step === 'error' ? (
+            <div style={{ textAlign:'center' }}>
+              <div style={{ width:64, height:64, borderRadius:'50%', background:`${red}12`, border:`1px solid ${red}30`, display:'flex', alignItems:'center', justifyContent:'center', margin:'0 auto 20px' }}>
+                <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke={red} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+                </svg>
+              </div>
+              <div style={{ fontSize:'1rem', color:text1, fontWeight:500, marginBottom:8 }}>Invite link expired</div>
+              <div style={{ fontSize:'.72rem', color:text3, lineHeight:1.7, marginBottom:4 }}>{message}</div>
+              <div style={{ fontSize:'.68rem', color:text3, marginBottom:24 }}>Ask your admin to send a new invite.</div>
             </div>
           ) : step === 'biometric' ? (
             /* ── Biometric step ── */
