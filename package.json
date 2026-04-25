@@ -16,6 +16,7 @@
     "@napi-rs/canvas": "^0.1.97",
     "@simplewebauthn/browser": "^13.3.0",
     "@simplewebauthn/server": "^13.3.0",
+    "@supabase/ssr": "^0.10.2",
     "@supabase/supabase-js": "^2.98.0",
     "jspdf": "^4.2.1",
     "jspdf-autotable": "^5.0.7",

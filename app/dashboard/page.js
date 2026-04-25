@@ -1,8 +1,6 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { useRouter } from 'next/navigation'
-import { supabase } from '../../lib/supabase'
 import { AppProvider, useApp } from '../../lib/context'
 import Sidebar from '../../components/Sidebar'
 import Topbar from '../../components/Topbar'
@@ -76,11 +74,9 @@ export { ROLE_LABELS }
 function DashboardShell() {
   const { theme, activeNav, setActiveNav, role, canSee, profileLoaded, previewRole } = useApp()
   const t = THEMES[theme]
-  const router = useRouter()
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [isMobile, setIsMobile] = useState(false)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
-  const [checking, setChecking] = useState(true)
 
   useEffect(() => {
     const check = () => {
@@ -94,23 +90,12 @@ function DashboardShell() {
   }, [])
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (!session) router.push('/')
-      else setChecking(false)
-    })
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      if (event === 'SIGNED_OUT') router.push('/')
-    })
-    return () => subscription.unsubscribe()
-  }, [])
-
-  useEffect(() => {
-    if (!checking && role && activeNav !== 'dashboard' && !canSee(activeNav)) {
+    if (role && activeNav !== 'dashboard' && !canSee(activeNav)) {
       setActiveNav('dashboard')
     }
-  }, [role, activeNav, checking, previewRole])
+  }, [role, activeNav, previewRole])
 
-  if (checking || !profileLoaded) return (
+  if (!profileLoaded) return (
     <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: t.bg }}>
       <svg width="36" height="36" viewBox="0 0 32 32" style={{ animation: 'spin 1s linear infinite' }}>
         <circle cx="16" cy="16" r="12" fill="none" stroke="rgba(201,168,76,0.15)" strokeWidth="2" />
