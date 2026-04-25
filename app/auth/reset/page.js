@@ -65,37 +65,39 @@ export default function ResetPasswordPage() {
 
   useEffect(() => {
     const init = async () => {
-      // Supabase password reset emails send tokens in URL hash: #access_token=...&type=recovery
+      const applySession = (session) => {
+        if (session.user?.email) setUserEmail(session.user.email)
+        if (session.access_token) setAccessToken(session.access_token)
+        window.history.replaceState(null, '', window.location.pathname)
+        setStep('password')
+      }
+
+      // 1. Existing session in cookies
+      const { data: { session: existing } } = await supabase.auth.getSession()
+      if (existing) { applySession(existing); return }
+
+      // 2. Hash tokens — Supabase reset emails: #access_token=...&type=recovery
       const hash    = window.location.hash.substring(1)
       const hParams = new URLSearchParams(hash)
       const at      = hParams.get('access_token')
       const rt      = hParams.get('refresh_token')
-      const type    = hParams.get('type')
-
-      const code = new URLSearchParams(window.location.search).get('code')
-
       if (at && rt) {
         const { data: { session }, error } = await supabase.auth.setSession({ access_token: at, refresh_token: rt })
         if (error || !session) { setStep('invalid'); return }
-        if (session.user?.email) setUserEmail(session.user.email)
-        if (session.access_token) setAccessToken(session.access_token)
-        window.history.replaceState(null, '', window.location.pathname)
-        setStep('password')
-      } else if (code) {
+        applySession(session)
+        return
+      }
+
+      // 3. PKCE code — ?code= query param
+      const code = new URLSearchParams(window.location.search).get('code')
+      if (code) {
         const { data: { session }, error } = await supabase.auth.exchangeCodeForSession(code)
         if (error || !session) { setStep('invalid'); return }
-        if (session.user?.email) setUserEmail(session.user.email)
-        if (session.access_token) setAccessToken(session.access_token)
-        window.history.replaceState(null, '', window.location.pathname)
-        setStep('password')
-      } else {
-        // Check for existing recovery session
-        const { data: { session } } = await supabase.auth.getSession()
-        if (!session) { setStep('invalid'); return }
-        if (session.user?.email) setUserEmail(session.user.email)
-        if (session.access_token) setAccessToken(session.access_token)
-        setStep('password')
+        applySession(session)
+        return
       }
+
+      setStep('invalid')
     }
     init()
   }, [])

@@ -66,34 +66,39 @@ export default function SetPasswordPage() {
 
   useEffect(() => {
     const initSession = async () => {
-      // Supabase invite emails put tokens in the URL hash: #access_token=...&refresh_token=...&type=invite
-      const hash   = window.location.hash.substring(1)
+      const applySession = (session) => {
+        if (session.user?.email) setUserEmail(session.user.email)
+        if (session.access_token) setAccessToken(session.access_token)
+        window.history.replaceState(null, '', window.location.pathname)
+      }
+
+      // 1. Existing session in cookies (already logged in or previously processed)
+      const { data: { session: existing } } = await supabase.auth.getSession()
+      if (existing) { applySession(existing); return }
+
+      // 2. Hash tokens — Supabase invite emails: #access_token=...&refresh_token=...
+      const hash    = window.location.hash.substring(1)
       const hParams = new URLSearchParams(hash)
-      const at     = hParams.get('access_token')
-      const rt     = hParams.get('refresh_token')
-
-      // PKCE flow: token arrives as ?code= query param
-      const code = new URLSearchParams(window.location.search).get('code')
-
+      const at      = hParams.get('access_token')
+      const rt      = hParams.get('refresh_token')
       if (at && rt) {
         const { data: { session }, error } = await supabase.auth.setSession({ access_token: at, refresh_token: rt })
         if (error || !session) { setMessage('Auth session missing!'); setStatus('error'); return }
-        if (session.user?.email) setUserEmail(session.user.email)
-        if (session.access_token) setAccessToken(session.access_token)
-        // Clean tokens from URL without reload
-        window.history.replaceState(null, '', window.location.pathname)
-      } else if (code) {
+        applySession(session)
+        return
+      }
+
+      // 3. PKCE code — ?code= query param
+      const code = new URLSearchParams(window.location.search).get('code')
+      if (code) {
         const { data: { session }, error } = await supabase.auth.exchangeCodeForSession(code)
         if (error || !session) { setMessage('Auth session missing!'); setStatus('error'); return }
-        if (session.user?.email) setUserEmail(session.user.email)
-        if (session.access_token) setAccessToken(session.access_token)
-        window.history.replaceState(null, '', window.location.pathname)
-      } else {
-        const { data: { session } } = await supabase.auth.getSession()
-        if (!session) { setMessage('Auth session missing!'); setStatus('error'); return }
-        if (session.user?.email) setUserEmail(session.user.email)
-        if (session.access_token) setAccessToken(session.access_token)
+        applySession(session)
+        return
       }
+
+      setMessage('Auth session missing!')
+      setStatus('error')
     }
     initSession()
   }, [])
