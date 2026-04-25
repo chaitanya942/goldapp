@@ -18,14 +18,9 @@ async function triggerDownload(url, filename, onError) {
 }
 
 const THEMES = {
-  dark:  { bg: '#0a0a0a', card: '#111111', card2: '#161616', text1: '#f0e6c8', text2: '#c8b89a', text3: '#9a8a6a', text4: '#6a5a3a', gold: '#c9a84c', border: '#1e1e1e', border2: '#252525', green: '#3aaa6a', red: '#e05555', blue: '#3a8fbf', orange: '#c9981f', purple: '#8c5ac8' },
-  light: { bg: '#f5f0e8', card: '#faf7f2', card2: '#e0d9cc', text1: '#1a1208', text2: '#3a2a10', text3: '#7a6a4a', text4: '#9a8a6a', gold: '#9a7228', border: '#e0dace', border2: '#c5bca8', green: '#2a8a5a', red: '#c03030', blue: '#2a6a9a', orange: '#a07010', purple: '#6a3a9a' },
+  dark:  { bg: '#0a0a0a', card: '#111111', card2: '#161616', card3: '#1a1a1a', text1: '#f0e6c8', text2: '#c8b89a', text3: '#9a8a6a', text4: '#6a5a3a', gold: '#c9a84c', border: '#1e1e1e', border2: '#252525', green: '#3aaa6a', red: '#e05555', blue: '#3a8fbf', orange: '#c9981f', purple: '#8c5ac8' },
+  light: { bg: '#f5f0e8', card: '#faf7f2', card2: '#e0d9cc', card3: '#ede5d8', text1: '#1a1208', text2: '#3a2a10', text3: '#7a6a4a', text4: '#9a8a6a', gold: '#9a7228', border: '#e0dace', border2: '#c5bca8', green: '#2a8a5a', red: '#c03030', blue: '#2a6a9a', orange: '#a07010', purple: '#6a3a9a' },
 }
-
-const fmt       = (n) => n != null ? Number(n).toLocaleString('en-IN') : '—'
-const fmtWt     = (n) => n != null ? `${Number(n).toFixed(3)}g` : '—'
-const fmtDate   = (d) => d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: '2-digit' }) : '—'
-const daysSince = (d) => d ? Math.floor((Date.now() - new Date(d)) / 86400000) : 0
 
 const REGION_COLORS = {
   'Rest of Karnataka': '#c9a84c',
@@ -34,47 +29,45 @@ const REGION_COLORS = {
   'Kerala':            '#3aaa6a',
 }
 
-function AgeBadge({ days, t }) {
-  const color = days > 14 ? t.red : days > 7 ? t.orange : t.green
-  return <span style={{ fontSize: '10px', color, background: `${color}18`, borderRadius: '4px', padding: '2px 6px', fontWeight: 700 }}>{days}d</span>
-}
+const fmt     = (n) => n != null ? Number(n).toLocaleString('en-IN') : '—'
+const fmtWt   = (n) => n != null ? `${Number(n).toFixed(3)}g` : '—'
+const fmtDate = (d) => d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: '2-digit' }) : '—'
+const fmtTS   = (d) => d ? new Date(d).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—'
+const daysSince = (d) => d ? Math.floor((Date.now() - new Date(d)) / 86400000) : 0
 
-function Kpi({ icon, label, value, sub, color }) {
-  return (
-    <div style={{ flex: 1, minWidth: 0 }}>
-      <div style={{ fontSize: '10px', color: '#6a5a3a', letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: '6px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-        <span>{icon}</span>{label}
-      </div>
-      <div style={{ fontSize: '22px', fontWeight: 300, color, lineHeight: 1, fontFamily: 'monospace' }}>{value}</div>
-      {sub && <div style={{ fontSize: '11px', color: '#6a5a3a', marginTop: '4px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{sub}</div>}
-    </div>
-  )
+function AgeBadge({ days, t }) {
+  if (days === null || days === undefined) return null
+  const color = days > 7 ? t.red : days > 3 ? t.orange : t.green
+  return <span style={{ fontSize: '10px', color, background: `${color}18`, borderRadius: '5px', padding: '2px 7px', fontWeight: 700, letterSpacing: '.02em' }}>{days}d</span>
 }
 
 export default function ConsignmentData() {
   const { theme, consignmentDeepLink, setConsignmentDeepLink } = useApp()
   const t = THEMES[theme]
 
-  // Navigation stack: null = top, {type:'region', region} = region level, {type:'branch', branch} = branch level
-  const [nav,             setNav]             = useState(null)
-  const [tab,             setTab]             = useState('at_branch')
-  const [purchases,       setPurchases]       = useState([])
-  const [inConsignment,   setInConsignment]   = useState([])
-  const [branches,        setBranches]        = useState([])
-  const [branchSummary,   setBranchSummary]   = useState([])
-  const [unknownBranches, setUnknownBranches] = useState([])
-  const [loading,         setLoading]         = useState(true)
-  const [selected,        setSelected]        = useState(new Set())
-  const [sortBy,          setSortBy]          = useState('date_desc')
-  const [search,          setSearch]          = useState('')
-  const [creating,        setCreating]        = useState(false)
-  const [moveType,        setMoveType]        = useState('EXTERNAL')
-  const [showModal,       setShowModal]       = useState(false)
-  const [lastConsignment, setLastConsignment] = useState(null)
-  const [dismissWarning,  setDismissWarning]  = useState(false)
-  const [previewNumbers,  setPreviewNumbers]  = useState(null)
-  const [loadingPreview,  setLoadingPreview]  = useState(false)
-  const [toast,           setToast]           = useState(null)
+  const [nav,                  setNav]                  = useState(null)
+  const [tab,                  setTab]                  = useState('at_branch')
+  const [purchases,            setPurchases]            = useState([])
+  const [inConsignment,        setInConsignment]        = useState([])
+  const [branchConsignments,   setBranchConsignments]   = useState([])
+  const [loadingBranchCons,    setLoadingBranchCons]    = useState(false)
+  const [branches,             setBranches]             = useState([])
+  const [branchSummary,        setBranchSummary]        = useState([])
+  const [unknownBranches,      setUnknownBranches]      = useState([])
+  const [loading,              setLoading]              = useState(true)
+  const [selected,             setSelected]             = useState(new Set())
+  const [sortBy,               setSortBy]               = useState('date_desc')
+  const [search,               setSearch]               = useState('')
+  const [creating,             setCreating]             = useState(false)
+  const [moveType,             setMoveType]             = useState('EXTERNAL')
+  const [showModal,            setShowModal]            = useState(false)
+  const [lastConsignment,      setLastConsignment]      = useState(null)
+  const [dismissWarning,       setDismissWarning]       = useState(false)
+  const [previewNumbers,       setPreviewNumbers]       = useState(null)
+  const [loadingPreview,       setLoadingPreview]       = useState(false)
+  const [toast,                setToast]                = useState(null)
+  const [updatingConsignment,  setUpdatingConsignment]  = useState(null)
+  const [downloadingId,        setDownloadingId]        = useState(null)
 
   const fetchAll = useCallback(async () => {
     setLoading(true)
@@ -83,25 +76,43 @@ export default function ConsignmentData() {
       fetch('/api/consignments?action=branches').then(r => r.json()),
       fetch('/api/consignments?action=branch_summary').then(r => r.json()),
       fetch('/api/consignments?action=unknown_branches').then(r => r.json()),
-      fetch('/api/consignments?action=consignments&status=draft').then(r => r.json()),
+      fetch('/api/consignments?action=consignments').then(r => r.json()),
     ])
     setPurchases(p.data || [])
     setBranches(b.data || [])
     setBranchSummary(s.data || [])
     setUnknownBranches(u.data || [])
-    setInConsignment(ic.data || [])
+    setInConsignment((ic.data || []).filter(c => c.status !== 'received'))
     setLoading(false)
   }, [])
 
   useEffect(() => { fetchAll() }, [fetchAll])
 
-  // Apply deep-link from Branch Stock Overview ("Move →" button)
+  // Deep-link from Branch Stock Overview
   useEffect(() => {
     if (consignmentDeepLink) {
       setNav({ type: 'branch', branch: consignmentDeepLink.branch, fromRegion: consignmentDeepLink.region })
       setConsignmentDeepLink(null)
     }
   }, [consignmentDeepLink])
+
+  // Fetch branch-specific consignments when drilling into a branch on In Consignment tab
+  useEffect(() => {
+    if (tab === 'in_consignment' && nav?.type === 'branch') {
+      fetchBranchConsignments(nav.branch)
+    }
+  }, [tab, nav?.branch, nav?.type])
+
+  async function fetchBranchConsignments(branch) {
+    setLoadingBranchCons(true)
+    try {
+      const res = await fetch(`/api/consignments?action=consignments&branch=${encodeURIComponent(branch)}`)
+      const { data } = await res.json()
+      setBranchConsignments((data || []).filter(c => c.status !== 'received' && c.status !== 'seed'))
+    } finally {
+      setLoadingBranchCons(false)
+    }
+  }
 
   // ── Derived data ──────────────────────────────────────────────────────────
   const regionGroups = branchSummary.reduce((acc, b) => {
@@ -115,20 +126,18 @@ export default function ConsignmentData() {
   const totalInConsign = branchSummary.reduce((s, b) => s + b.in_consignment, 0)
   const totalAtBrWt    = branchSummary.reduce((s, b) => s + b.at_branch_wt, 0)
   const totalInConWt   = branchSummary.reduce((s, b) => s + b.in_consignment_wt, 0)
-
-  const oldestBill = purchases.reduce((o, p) => !o || new Date(p.purchase_date) < new Date(o.purchase_date) ? p : o, null)
+  const oldestBill     = purchases.reduce((o, p) => !o || new Date(p.purchase_date) < new Date(o.purchase_date) ? p : o, null)
   const heaviestBranch = branchSummary.reduce((h, b) => !h || b.at_branch_wt > h.at_branch_wt ? b : h, null)
+  const heaviestTransit = branchSummary.reduce((m, b) => !m || b.in_consignment_wt > m.in_consignment_wt ? b : m, null)
 
-  // ── Bills for current nav context ─────────────────────────────────────────
+  // ── Bills for current nav ─────────────────────────────────────────────────
   function getBillsForNav() {
     let bills = purchases
     if (nav?.type === 'region') {
       const branchesInRegion = branches.filter(b => b.region === nav.region).map(b => b.name)
       bills = bills.filter(p => branchesInRegion.includes(p.branch_name))
     }
-    if (nav?.type === 'branch') {
-      bills = bills.filter(p => p.branch_name === nav.branch)
-    }
+    if (nav?.type === 'branch') bills = bills.filter(p => p.branch_name === nav.branch)
     if (search) {
       const q = search.toLowerCase()
       bills = bills.filter(p =>
@@ -163,35 +172,57 @@ export default function ConsignmentData() {
     if (selectedBranches.length !== 1) return
     setLoadingPreview(true)
     try {
-      const res = await fetch(`/api/consignments-preview?branch=${encodeURIComponent(selectedBranches[0])}&movement_type=${moveType}`)
+      const res  = await fetch(`/api/consignments-preview?branch=${encodeURIComponent(selectedBranches[0])}&movement_type=${moveType}`)
       const data = await res.json()
       if (!data.error) setPreviewNumbers(data)
-    } catch (err) {
-      console.error('Preview error:', err)
-    } finally {
-      setLoadingPreview(false)
-    }
+    } catch {}
+    finally { setLoadingPreview(false) }
   }
 
   async function handleCreate() {
     if (!selected.size || selectedBranches.length !== 1) return
+    const branchName = selectedBranches[0]
+    const branchInfo = branchSummary.find(b => b.branch === branchName)
     setCreating(true)
     try {
       const res = await fetch('/api/consignments', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'create_consignment', purchase_ids: [...selected], branch_name: selectedBranches[0], movement_type: moveType })
+        body: JSON.stringify({ action: 'create_consignment', purchase_ids: [...selected], branch_name: branchName, movement_type: moveType })
       })
       const result = await res.json()
       if (result.error) { setToast({ msg: result.error, type: 'error' }); return }
       setLastConsignment(result.data)
       setSelected(new Set())
       setShowModal(false)
-      setNav(null)
       await fetchAll()
+      // Auto-navigate: switch to In Consignment tab at this branch
+      setTab('in_consignment')
+      setNav({ type: 'branch', branch: branchName, fromRegion: branchInfo?.region })
     } finally { setCreating(false) }
   }
 
-  // ── Nav helpers ───────────────────────────────────────────────────────────
+  async function updateConsignmentStatus(id, action) {
+    setUpdatingConsignment(id)
+    try {
+      const res  = await fetch('/api/consignments', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action, id }),
+      })
+      const data = await res.json()
+      if (data.error) { setToast({ msg: data.error, type: 'error' }); return }
+      setToast({ msg: `Marked as ${action === 'dispatch' ? 'dispatched' : 'received'}`, type: 'success' })
+      await fetchAll()
+      if (nav?.branch) await fetchBranchConsignments(nav.branch)
+    } finally { setUpdatingConsignment(null) }
+  }
+
+  async function downloadChallan(c) {
+    setDownloadingId(c.id)
+    await triggerDownload(`/api/generate-challan-pdf?id=${c.id}`, `${c.challan_no?.replace(/\//g, '-')}.pdf`, msg => setToast({ msg, type: 'error' }))
+    setDownloadingId(null)
+  }
+
+  // ── Navigation ────────────────────────────────────────────────────────────
   function drillRegion(region) { setNav({ type: 'region', region }); setSearch(''); setSelected(new Set()) }
   function drillBranch(branch, fromRegion) { setNav({ type: 'branch', branch, fromRegion }); setSearch(''); setSelected(new Set()) }
   function goBack() {
@@ -201,26 +232,24 @@ export default function ConsignmentData() {
     setSelected(new Set())
   }
 
-  const card    = { background: t.card, border: `1px solid ${t.border}`, borderRadius: '10px', overflow: 'hidden' }
-  const btnGold = { background: t.gold, color: '#1a0a00', border: 'none', borderRadius: '7px', padding: '6px 14px', fontSize: '12px', fontWeight: 700, cursor: 'pointer' }
-  const btnOut  = { background: 'transparent', border: `1px solid ${t.border}`, borderRadius: '7px', padding: '6px 12px', fontSize: '12px', color: t.text3, cursor: 'pointer' }
+  const isAtBranch = tab === 'at_branch'
+  const card    = { background: t.card, border: `1px solid ${t.border}`, borderRadius: '12px' }
+  const btnGold = { background: t.gold, color: '#1a0a00', border: 'none', borderRadius: '8px', padding: '7px 16px', fontSize: '12px', fontWeight: 700, cursor: 'pointer' }
+  const btnOut  = { background: 'transparent', border: `1px solid ${t.border2}`, borderRadius: '8px', padding: '7px 14px', fontSize: '12px', color: t.text3, cursor: 'pointer' }
 
   // ── Breadcrumb ─────────────────────────────────────────────────────────────
   const Breadcrumb = () => (
-    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px' }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '12px' }}>
       <span onClick={() => setNav(null)} style={{ color: nav ? t.text3 : t.text1, cursor: nav ? 'pointer' : 'default', fontWeight: nav ? 400 : 600 }}
         onMouseEnter={e => { if (nav) e.target.style.color = t.gold }}
-        onMouseLeave={e => { if (nav) e.target.style.color = t.text3 }}>
-        All Regions
-      </span>
-      {nav?.type === 'region' && <>
-        <span style={{ color: t.text4 }}>›</span>
-        <span style={{ color: t.text1, fontWeight: 600 }}>{nav.region}</span>
-      </>}
+        onMouseLeave={e => { if (nav) e.target.style.color = t.text3 }}>All Regions</span>
+      {nav?.type === 'region' && <><span style={{ color: t.text4 }}>›</span><span style={{ color: t.text1, fontWeight: 600 }}>{nav.region}</span></>}
       {nav?.type === 'branch' && <>
         <span style={{ color: t.text4 }}>›</span>
         <span onClick={() => nav.fromRegion && setNav({ type: 'region', region: nav.fromRegion })}
-          style={{ color: nav.fromRegion ? t.text3 : t.text4, cursor: nav.fromRegion ? 'pointer' : 'default' }}>
+          style={{ color: nav.fromRegion ? t.text3 : t.text4, cursor: nav.fromRegion ? 'pointer' : 'default' }}
+          onMouseEnter={e => { if (nav.fromRegion) e.target.style.color = t.gold }}
+          onMouseLeave={e => { if (nav.fromRegion) e.target.style.color = t.text3 }}>
           {nav.fromRegion || 'Region'}
         </span>
         <span style={{ color: t.text4 }}>›</span>
@@ -229,39 +258,39 @@ export default function ConsignmentData() {
     </div>
   )
 
-  // ── REGION LEVEL ──────────────────────────────────────────────────────────
+  // ── REGION LIST ───────────────────────────────────────────────────────────
   const RegionList = ({ statusKey, wtKey, color }) => (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
       {Object.entries(regionGroups).sort().map(([region, brs]) => {
-        const rColor   = REGION_COLORS[region] || t.text3
-        const rCount   = brs.reduce((s, b) => s + (b[statusKey] || 0), 0)
-        const rWt      = brs.reduce((s, b) => s + (b[wtKey] || 0), 0)
+        const rColor    = REGION_COLORS[region] || t.text3
+        const rCount    = brs.reduce((s, b) => s + (b[statusKey] || 0), 0)
+        const rWt       = brs.reduce((s, b) => s + (b[wtKey] || 0), 0)
         const activeBrs = brs.filter(b => (b[statusKey] || 0) > 0).length
         if (rCount === 0) return null
 
         return (
           <div key={region} onClick={() => drillRegion(region)}
-            style={{ ...card, cursor: 'pointer', transition: 'border-color .15s' }}
-            onMouseEnter={e => e.currentTarget.style.borderColor = rColor + '60'}
-            onMouseLeave={e => e.currentTarget.style.borderColor = t.border}>
-            <div style={{ padding: '16px 20px', display: 'flex', alignItems: 'center', gap: '16px' }}>
-              <div style={{ width: '36px', height: '36px', borderRadius: '50%', background: `${rColor}20`, border: `2px solid ${rColor}40`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                <div style={{ width: '10px', height: '10px', borderRadius: '50%', background: rColor }} />
+            style={{ ...card, cursor: 'pointer', transition: 'all .15s', padding: '18px 22px' }}
+            onMouseEnter={e => { e.currentTarget.style.borderColor = rColor + '50'; e.currentTarget.style.background = `${rColor}06` }}
+            onMouseLeave={e => { e.currentTarget.style.borderColor = t.border; e.currentTarget.style.background = t.card }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+              <div style={{ width: '42px', height: '42px', borderRadius: '12px', background: `${rColor}15`, border: `1px solid ${rColor}30`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <div style={{ width: '12px', height: '12px', borderRadius: '50%', background: rColor, boxShadow: `0 0 8px ${rColor}60` }} />
               </div>
               <div style={{ flex: 1 }}>
-                <div style={{ fontSize: '14px', fontWeight: 600, color: rColor }}>{region}</div>
-                <div style={{ fontSize: '11px', color: t.text4, marginTop: '2px' }}>{activeBrs} branch{activeBrs !== 1 ? 'es' : ''} with stock</div>
+                <div style={{ fontSize: '14px', fontWeight: 600, color: rColor, marginBottom: '3px' }}>{region}</div>
+                <div style={{ fontSize: '11px', color: t.text4 }}>{activeBrs} branch{activeBrs !== 1 ? 'es' : ''} with stock</div>
               </div>
-              <div style={{ display: 'flex', gap: '32px', alignItems: 'center' }}>
+              <div style={{ display: 'flex', gap: '36px', alignItems: 'center' }}>
                 <div style={{ textAlign: 'right' }}>
-                  <div style={{ fontSize: '10px', color: t.text4, marginBottom: '3px' }}>BILLS</div>
-                  <div style={{ fontSize: '22px', fontWeight: 300, color, fontFamily: 'monospace' }}>{rCount}</div>
+                  <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: '4px' }}>Bills</div>
+                  <div style={{ fontSize: '28px', fontWeight: 200, color, fontFamily: 'monospace', lineHeight: 1 }}>{rCount}</div>
                 </div>
                 <div style={{ textAlign: 'right' }}>
-                  <div style={{ fontSize: '10px', color: t.text4, marginBottom: '3px' }}>NET WEIGHT</div>
-                  <div style={{ fontSize: '15px', fontWeight: 500, color: t.text2, fontFamily: 'monospace' }}>{fmtWt(rWt)}</div>
+                  <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: '4px' }}>Net Weight</div>
+                  <div style={{ fontSize: '16px', fontWeight: 500, color: t.text2, fontFamily: 'monospace' }}>{fmtWt(rWt)}</div>
                 </div>
-                <div style={{ color: t.text4, fontSize: '18px' }}>›</div>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={t.text4} strokeWidth="2" strokeLinecap="round"><path d="M9 18l6-6-6-6"/></svg>
               </div>
             </div>
           </div>
@@ -270,7 +299,7 @@ export default function ConsignmentData() {
     </div>
   )
 
-  // ── BRANCH LEVEL ──────────────────────────────────────────────────────────
+  // ── BRANCH LIST ───────────────────────────────────────────────────────────
   const BranchList = ({ statusKey, wtKey, color }) => {
     const brs = nav?.region
       ? branchSummary.filter(b => b.region === nav.region && (b[statusKey] || 0) > 0)
@@ -279,56 +308,126 @@ export default function ConsignmentData() {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
         {brs.sort((a, b) => (b[statusKey] || 0) - (a[statusKey] || 0)).map(b => {
+          const rColor    = REGION_COLORS[b.region] || t.text3
           const billsHere = purchases.filter(p => p.branch_name === b.branch)
           const oldest    = billsHere.reduce((o, p) => !o || new Date(p.purchase_date) < new Date(o.purchase_date) ? p : o, null)
           const oldD      = oldest ? daysSince(oldest.purchase_date) : 0
-          const rColor    = REGION_COLORS[b.region] || t.text3
-          const consigns  = inConsignment.filter(c => c.branch_name === b.branch)
+          const consigns  = inConsignment.filter(c => c.branch_name === b.branch && c.status !== 'received')
 
           return (
             <div key={b.branch} onClick={() => drillBranch(b.branch, nav?.region)}
-              style={{ ...card, cursor: 'pointer', transition: 'border-color .15s' }}
-              onMouseEnter={e => e.currentTarget.style.borderColor = rColor + '60'}
-              onMouseLeave={e => e.currentTarget.style.borderColor = t.border}>
-              <div style={{ padding: '14px 20px', display: 'flex', alignItems: 'center', gap: '16px' }}>
-                <div style={{ flex: 1 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              style={{ ...card, cursor: 'pointer', transition: 'all .15s', padding: '16px 20px' }}
+              onMouseEnter={e => { e.currentTarget.style.borderColor = rColor + '50'; e.currentTarget.style.background = `${rColor}05` }}
+              onMouseLeave={e => { e.currentTarget.style.borderColor = t.border; e.currentTarget.style.background = t.card }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                <div style={{ width: '4px', alignSelf: 'stretch', borderRadius: '4px', background: rColor, flexShrink: 0 }} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '5px' }}>
                     <span style={{ fontSize: '14px', fontWeight: 600, color: t.text1 }}>{b.branch}</span>
-                    <span style={{ fontSize: '10px', color: rColor, background: `${rColor}15`, borderRadius: '4px', padding: '1px 6px' }}>{b.region}</span>
+                    <span style={{ fontSize: '10px', color: rColor, background: `${rColor}15`, borderRadius: '4px', padding: '1px 7px', fontWeight: 500 }}>{b.region}</span>
+                    {oldest && <AgeBadge days={oldD} t={t} />}
                   </div>
-                  <div style={{ fontSize: '11px', color: t.text4, marginTop: '4px', display: 'flex', gap: '10px', alignItems: 'center' }}>
-                    {oldest && <span>Oldest: {fmtDate(oldest.purchase_date)}</span>}
-                    <AgeBadge days={oldD} t={t} />
-                    {consigns.length > 0 && statusKey === 'in_consignment' && (
-                      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                        {consigns.map(c => (
-                          <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: '6px', background: `${t.blue}15`, borderRadius: '6px', padding: '3px 8px' }}>
-                            <span style={{ color: t.blue, fontSize: '11px', fontWeight: 600 }}>{c.tmp_prf_no}</span>
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                triggerDownload(`/api/generate-challan-pdf?id=${c.id}`, `${c.challan_no?.replace(/\//g,'-')}.pdf`, msg => setToast({ msg, type: 'error' }))
-                              }}
-                              style={{ background: t.gold, color: '#1a0a00', border: 'none', borderRadius: '4px', padding: '2px 8px', fontSize: '9px', fontWeight: 700, cursor: 'pointer', letterSpacing: '.03em' }}
-                            >
-                              PDF
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
+                  {statusKey === 'in_consignment' && consigns.length > 0 && (
+                    <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                      {consigns.map(c => (
+                        <span key={c.id} style={{ fontSize: '10px', color: t.blue, background: `${t.blue}12`, borderRadius: '4px', padding: '2px 8px', fontFamily: 'monospace', fontWeight: 500 }}>
+                          {c.tmp_prf_no} · {c.status}
+                        </span>
+                      ))}
+                    </div>
+                  )}
                 </div>
-                <div style={{ display: 'flex', gap: '28px', alignItems: 'center' }}>
+                <div style={{ display: 'flex', gap: '28px', alignItems: 'center', flexShrink: 0 }}>
                   <div style={{ textAlign: 'right' }}>
-                    <div style={{ fontSize: '10px', color: t.text4, marginBottom: '3px' }}>BILLS</div>
-                    <div style={{ fontSize: '22px', fontWeight: 300, color, fontFamily: 'monospace' }}>{b[statusKey]}</div>
+                    <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: '3px' }}>Bills</div>
+                    <div style={{ fontSize: '24px', fontWeight: 200, color, fontFamily: 'monospace', lineHeight: 1 }}>{b[statusKey]}</div>
                   </div>
                   <div style={{ textAlign: 'right' }}>
-                    <div style={{ fontSize: '10px', color: t.text4, marginBottom: '3px' }}>NET WEIGHT</div>
+                    <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: '3px' }}>Net Wt</div>
                     <div style={{ fontSize: '14px', fontWeight: 500, color: t.text2, fontFamily: 'monospace' }}>{fmtWt(b[wtKey])}</div>
                   </div>
-                  <div style={{ color: t.text4, fontSize: '18px' }}>›</div>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={t.text4} strokeWidth="2" strokeLinecap="round"><path d="M9 18l6-6-6-6"/></svg>
+                </div>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    )
+  }
+
+  // ── CONSIGNMENT LIST (In Consignment branch level) ────────────────────────
+  const ConsignmentList = () => {
+    if (loadingBranchCons) return <div style={{ padding: '48px', display: 'flex', justifyContent: 'center' }}><GoldSpinner size={28} /></div>
+    if (branchConsignments.length === 0) return (
+      <div style={{ ...card, padding: '48px', textAlign: 'center' }}>
+        <div style={{ fontSize: '28px', opacity: .15, marginBottom: '12px' }}>◈</div>
+        <div style={{ fontSize: '13px', color: t.text3 }}>No active consignments for this branch</div>
+        <button onClick={() => setTab('at_branch')} style={{ ...btnGold, marginTop: '16px', fontSize: '11px', padding: '7px 18px' }}>
+          View At Branch →
+        </button>
+      </div>
+    )
+
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+        {branchConsignments.map(c => {
+          const statusColor = c.status === 'dispatched' ? t.blue : t.orange
+          const isNew = lastConsignment?.id === c.id
+          const isUpdating = updatingConsignment === c.id
+          const isDownloading = downloadingId === c.id
+
+          return (
+            <div key={c.id} style={{ ...card, padding: '20px 24px', borderColor: isNew ? `${t.green}40` : t.border, background: isNew ? `${t.green}06` : t.card, transition: 'all .2s' }}>
+              {isNew && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '14px', fontSize: '11px', color: t.green, fontWeight: 600 }}>
+                  <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: t.green, display: 'inline-block' }} />
+                  Just created
+                </div>
+              )}
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: '16px' }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  {/* Numbers row */}
+                  <div style={{ display: 'flex', gap: '20px', marginBottom: '10px', flexWrap: 'wrap' }}>
+                    <div>
+                      <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: '2px' }}>TMP PRF</div>
+                      <div style={{ fontSize: '15px', fontWeight: 700, color: t.gold, fontFamily: 'monospace' }}>{c.tmp_prf_no}</div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: '2px' }}>Challan</div>
+                      <div style={{ fontSize: '12px', color: t.blue, fontFamily: 'monospace', fontWeight: 500 }}>{c.challan_no}</div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: '2px' }}>Status</div>
+                      <span style={{ fontSize: '11px', color: statusColor, background: `${statusColor}15`, borderRadius: '5px', padding: '2px 8px', fontWeight: 600, textTransform: 'capitalize' }}>{c.status}</span>
+                    </div>
+                  </div>
+                  {/* Stats row */}
+                  <div style={{ display: 'flex', gap: '24px', fontSize: '12px', color: t.text3 }}>
+                    <span><span style={{ color: t.text4 }}>Bills</span> <span style={{ color: t.text2, fontWeight: 600 }}>{c.total_bills}</span></span>
+                    <span><span style={{ color: t.text4 }}>Net Wt</span> <span style={{ color: t.gold, fontWeight: 600, fontFamily: 'monospace' }}>{fmtWt(c.total_net_wt)}</span></span>
+                    <span><span style={{ color: t.text4 }}>Amount</span> <span style={{ color: t.text2, fontFamily: 'monospace' }}>₹{fmt(Math.round(c.total_amount))}</span></span>
+                    <span><span style={{ color: t.text4 }}>Created</span> <span style={{ color: t.text3 }}>{fmtTS(c.created_at)}</span></span>
+                  </div>
+                </div>
+                {/* Actions */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '7px', flexShrink: 0 }}>
+                  <button onClick={() => downloadChallan(c)} disabled={isDownloading}
+                    style={{ ...btnGold, fontSize: '11px', padding: '6px 14px', opacity: isDownloading ? .6 : 1 }}>
+                    {isDownloading ? '⏳ PDF…' : '📄 Challan PDF'}
+                  </button>
+                  {c.status === 'draft' && (
+                    <button onClick={() => updateConsignmentStatus(c.id, 'dispatch')} disabled={isUpdating}
+                      style={{ background: t.blue, color: '#fff', border: 'none', borderRadius: '8px', padding: '6px 14px', fontSize: '11px', fontWeight: 600, cursor: isUpdating ? 'not-allowed' : 'pointer', opacity: isUpdating ? .6 : 1 }}>
+                      {isUpdating ? '…' : '↑ Mark Dispatched'}
+                    </button>
+                  )}
+                  {c.status === 'dispatched' && (
+                    <button onClick={() => updateConsignmentStatus(c.id, 'receive')} disabled={isUpdating}
+                      style={{ background: t.green, color: '#fff', border: 'none', borderRadius: '8px', padding: '6px 14px', fontSize: '11px', fontWeight: 600, cursor: isUpdating ? 'not-allowed' : 'pointer', opacity: isUpdating ? .6 : 1 }}>
+                      {isUpdating ? '…' : '✓ Mark Received'}
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
@@ -341,34 +440,41 @@ export default function ConsignmentData() {
   // ── BILL LIST ─────────────────────────────────────────────────────────────
   const BillList = () => (
     <>
-      {/* Controls bar */}
+      {/* Controls */}
       <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
-        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search customer, phone, app ID..."
-          style={{ flex: 1, minWidth: '200px', background: t.card, border: `1px solid ${t.border}`, borderRadius: '7px', padding: '7px 12px', fontSize: '12px', color: t.text1, outline: 'none' }} />
+        <div style={{ position: 'relative', flex: 1, minWidth: '220px' }}>
+          <span style={{ position: 'absolute', left: '11px', top: '50%', transform: 'translateY(-50%)', color: t.text4, fontSize: '13px', pointerEvents: 'none' }}>⌕</span>
+          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search customer, phone, app ID..."
+            style={{ width: '100%', background: t.card2, border: `1px solid ${t.border2}`, borderRadius: '8px', padding: '8px 12px 8px 30px', fontSize: '12px', color: t.text1, outline: 'none', boxSizing: 'border-box' }} />
+        </div>
         <select value={sortBy} onChange={e => setSortBy(e.target.value)}
-          style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: '7px', padding: '7px 10px', fontSize: '12px', color: t.text2, outline: 'none' }}>
+          style={{ background: t.card2, border: `1px solid ${t.border2}`, borderRadius: '8px', padding: '8px 10px', fontSize: '12px', color: t.text2, outline: 'none' }}>
           <option value="date_desc">Latest First</option>
           <option value="oldest">Oldest First</option>
           <option value="weight_desc">Heaviest First</option>
           <option value="amount_desc">Highest Amount</option>
         </select>
-        <div style={{ fontSize: '11px', color: t.text4 }}>{visibleBills.length} bills</div>
+        <div style={{ fontSize: '11px', color: t.text4, marginLeft: 'auto' }}>{visibleBills.length} bills</div>
       </div>
 
       {/* Selection bar */}
       {selected.size > 0 && (
-        <div style={{ ...card, padding: '10px 16px', background: `${t.gold}10`, border: `1px solid ${t.gold}35`, display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap' }}>
-          <div style={{ fontSize: '13px', color: t.gold, fontWeight: 600 }}>{selected.size} selected</div>
-          <div style={{ fontSize: '12px', color: t.text3 }}>{fmtWt(totalSelWt)} · ₹{fmt(Math.round(totalSelAmt))}</div>
-          {selectedBranches.length > 1 && <div style={{ fontSize: '12px', color: t.red }}>⚠ Select one branch only</div>}
-          <div style={{ marginLeft: 'auto', display: 'flex', gap: '8px' }}>
+        <div style={{ background: `${t.gold}0d`, border: `1px solid ${t.gold}30`, borderRadius: '10px', padding: '12px 18px', display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', align: 'center', gap: '10px', flex: 1 }}>
+            <span style={{ fontSize: '13px', color: t.gold, fontWeight: 700 }}>{selected.size} selected</span>
+            <span style={{ fontSize: '12px', color: t.text3 }}>{fmtWt(totalSelWt)}</span>
+            <span style={{ fontSize: '12px', color: t.text3 }}>₹{fmt(Math.round(totalSelAmt))}</span>
+            {selectedBranches.length > 1 && <span style={{ fontSize: '11px', color: t.red, fontWeight: 600 }}>⚠ Must select from one branch only</span>}
+          </div>
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
             <select value={moveType} onChange={e => setMoveType(e.target.value)}
-              style={{ background: t.card2, border: `1px solid ${t.border}`, borderRadius: '6px', padding: '5px 10px', fontSize: '11px', color: t.text2, outline: 'none' }}>
-              <option value="EXTERNAL">External (Branch → HO)</option>
-              <option value="INTERNAL">Internal (Branch → Hub)</option>
+              style={{ background: t.card2, border: `1px solid ${t.border2}`, borderRadius: '7px', padding: '6px 10px', fontSize: '11px', color: t.text2, outline: 'none' }}>
+              <option value="EXTERNAL">External — Branch → HO</option>
+              <option value="INTERNAL">Internal — Branch → Hub</option>
             </select>
-            <button onClick={() => { setShowModal(true); fetchPreviewNumbers() }} disabled={selectedBranches.length !== 1} style={{ ...btnGold, opacity: selectedBranches.length !== 1 ? .5 : 1 }}>
-              Create Consignment
+            <button onClick={() => { setShowModal(true); fetchPreviewNumbers() }} disabled={selectedBranches.length !== 1}
+              style={{ ...btnGold, opacity: selectedBranches.length !== 1 ? .5 : 1 }}>
+              Create Consignment →
             </button>
             <button onClick={() => setSelected(new Set())} style={btnOut}>Clear</button>
           </div>
@@ -376,16 +482,16 @@ export default function ConsignmentData() {
       )}
 
       {/* Table */}
-      <div style={{ ...card }}>
-        <div style={{ overflowX: 'auto', maxHeight: 'calc(100vh - 420px)', overflowY: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '800px' }}>
+      <div style={{ ...card, overflow: 'hidden' }}>
+        <div style={{ overflowX: 'auto', maxHeight: 'calc(100vh - 440px)', overflowY: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '780px' }}>
             <thead style={{ position: 'sticky', top: 0, zIndex: 1 }}>
               <tr>
                 <th style={{ padding: '10px 14px', background: t.card2, borderBottom: `1px solid ${t.border}`, width: '36px' }}>
                   <input type="checkbox" checked={allSelected} onChange={toggleAll} style={{ cursor: 'pointer', accentColor: t.gold }} />
                 </th>
                 {['Date','Branch','Customer','App ID','Net Wt','Amount','Age','Type'].map(h => (
-                  <th key={h} style={{ padding: '10px 14px', fontSize: '10px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', textAlign: 'left', background: t.card2, borderBottom: `1px solid ${t.border}`, whiteSpace: 'nowrap', fontWeight: 600 }}>{h}</th>
+                  <th key={h} style={{ padding: '10px 14px', fontSize: '10px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', textAlign: h === 'Net Wt' || h === 'Amount' ? 'right' : 'left', background: t.card2, borderBottom: `1px solid ${t.border}`, whiteSpace: 'nowrap', fontWeight: 600 }}>{h}</th>
                 ))}
               </tr>
             </thead>
@@ -393,7 +499,7 @@ export default function ConsignmentData() {
               {loading ? (
                 <tr><td colSpan={9} style={{ padding: '48px', textAlign: 'center' }}><div style={{ display: 'flex', justifyContent: 'center' }}><GoldSpinner size={28} /></div></td></tr>
               ) : visibleBills.length === 0 ? (
-                <tr><td colSpan={9} style={{ padding: '48px', textAlign: 'center', color: t.text4 }}>No bills found</td></tr>
+                <tr><td colSpan={9} style={{ padding: '48px', textAlign: 'center', color: t.text4, fontSize: '13px' }}>No bills found</td></tr>
               ) : visibleBills.map(row => {
                 const isSel  = selected.has(row.id)
                 const br     = branches.find(b => b.name === row.branch_name)
@@ -401,15 +507,15 @@ export default function ConsignmentData() {
                 const days   = daysSince(row.purchase_date)
                 return (
                   <tr key={row.id} onClick={() => toggleRow(row.id)}
-                    style={{ borderBottom: `1px solid ${t.border}15`, background: isSel ? `${t.gold}08` : 'transparent', cursor: 'pointer' }}
-                    onMouseEnter={e => { if (!isSel) e.currentTarget.style.background = `${t.gold}05` }}
+                    style={{ borderBottom: `1px solid ${t.border}15`, background: isSel ? `${t.gold}08` : 'transparent', cursor: 'pointer', transition: 'background .1s' }}
+                    onMouseEnter={e => { if (!isSel) e.currentTarget.style.background = `${t.gold}04` }}
                     onMouseLeave={e => { if (!isSel) e.currentTarget.style.background = 'transparent' }}>
                     <td style={{ padding: '10px 14px' }} onClick={e => e.stopPropagation()}>
                       <input type="checkbox" checked={isSel} onChange={() => toggleRow(row.id)} style={{ cursor: 'pointer', accentColor: t.gold }} />
                     </td>
                     <td style={{ padding: '10px 14px', fontSize: '12px', color: t.text3, whiteSpace: 'nowrap' }}>{fmtDate(row.purchase_date)}</td>
                     <td style={{ padding: '10px 14px' }}>
-                      <span style={{ background: `${rColor}18`, color: rColor, borderRadius: '5px', padding: '3px 8px', fontSize: '11px', fontWeight: 600, whiteSpace: 'nowrap' }}>{row.branch_name}</span>
+                      <span style={{ background: `${rColor}18`, color: rColor, borderRadius: '5px', padding: '2px 8px', fontSize: '11px', fontWeight: 600, whiteSpace: 'nowrap' }}>{row.branch_name}</span>
                     </td>
                     <td style={{ padding: '10px 14px', fontSize: '12px', color: t.text1, maxWidth: '140px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.customer_name}</td>
                     <td style={{ padding: '10px 14px', fontSize: '11px', color: t.text4, fontFamily: 'monospace' }}>{row.application_id}</td>
@@ -429,27 +535,52 @@ export default function ConsignmentData() {
     </>
   )
 
-  const isAtBranch = tab === 'at_branch'
+  // ── What to render in content area ────────────────────────────────────────
+  const renderContent = () => {
+    if (loading) return <div style={{ padding: '64px', display: 'flex', justifyContent: 'center' }}><GoldSpinner size={32} /></div>
+
+    if (nav?.type === 'branch') {
+      if (!isAtBranch) return <ConsignmentList />
+      return <BillList />
+    }
+    if (nav?.type === 'region') {
+      return <BranchList statusKey={isAtBranch ? 'at_branch' : 'in_consignment'} wtKey={isAtBranch ? 'at_branch_wt' : 'in_consignment_wt'} color={isAtBranch ? t.gold : t.orange} />
+    }
+    return <RegionList statusKey={isAtBranch ? 'at_branch' : 'in_consignment'} wtKey={isAtBranch ? 'at_branch_wt' : 'in_consignment_wt'} color={isAtBranch ? t.gold : t.orange} />
+  }
+
+  // ── KPIs ──────────────────────────────────────────────────────────────────
+  const kpis = isAtBranch ? [
+    { label: 'Bills At Branch',  value: totalAtBranch,    sub: fmtWt(totalAtBrWt),  color: t.gold },
+    { label: 'Active Branches',  value: branchSummary.filter(b => b.at_branch > 0).length, sub: 'branches with stock', color: t.blue },
+    { label: 'Oldest Bill',      value: `${daysSince(oldestBill?.purchase_date)}d`, sub: oldestBill ? `${oldestBill.branch_name} · ${fmtDate(oldestBill?.purchase_date)}` : '—', color: daysSince(oldestBill?.purchase_date) > 7 ? t.red : t.orange },
+    { label: 'Heaviest Branch',  value: heaviestBranch?.branch || '—', sub: fmtWt(heaviestBranch?.at_branch_wt), color: t.purple },
+  ] : [
+    { label: 'Bills In Transit', value: totalInConsign,   sub: fmtWt(totalInConWt), color: t.orange },
+    { label: 'Draft Consignments', value: inConsignment.filter(c => c.status === 'draft').length, sub: 'awaiting dispatch', color: t.blue },
+    { label: 'Dispatched',      value: inConsignment.filter(c => c.status === 'dispatched').length, sub: 'en route to HO', color: t.green },
+    { label: 'Heaviest Transit', value: heaviestTransit?.branch || '—', sub: fmtWt(heaviestTransit?.in_consignment_wt), color: t.gold },
+  ]
 
   return (
-    <div style={{ padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+    <div style={{ padding: '22px 28px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
 
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
         <div>
-          <div style={{ fontSize: '1.3rem', fontWeight: 300, color: t.text1, letterSpacing: '.03em' }}>Stock in Branch</div>
-          <div style={{ fontSize: '11px', color: t.text3, marginTop: '3px' }}>Outside Bangalore · {purchases.length} bills pending consignment</div>
+          <div style={{ fontSize: '1.35rem', fontWeight: 300, color: t.text1, letterSpacing: '.02em' }}>Stock in Branch</div>
+          <div style={{ fontSize: '11px', color: t.text3, marginTop: '4px' }}>Outside Bangalore · {purchases.length} bills pending consignment</div>
         </div>
         <button onClick={fetchAll} style={btnOut}>⟳ Refresh</button>
       </div>
 
       {/* Unknown branch warning */}
       {unknownBranches.length > 0 && !dismissWarning && (
-        <div style={{ padding: '11px 16px', background: `${t.red}10`, border: `1px solid ${t.red}35`, borderRadius: '10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div style={{ padding: '12px 16px', background: `${t.red}0c`, border: `1px solid ${t.red}30`, borderRadius: '10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-            <span>⚠️</span>
+            <span style={{ fontSize: '14px' }}>⚠️</span>
             <div>
-              <div style={{ fontSize: '12px', color: t.red, fontWeight: 600 }}>Unknown branches in purchase data — not in Branch Management</div>
+              <div style={{ fontSize: '12px', color: t.red, fontWeight: 600 }}>Unknown branches not in Branch Management</div>
               <div style={{ fontSize: '11px', color: t.text3, marginTop: '2px' }}>{unknownBranches.join(' · ')}</div>
             </div>
           </div>
@@ -457,135 +588,99 @@ export default function ConsignmentData() {
         </div>
       )}
 
-      {/* Success banner */}
-      {lastConsignment && (
-        <div style={{ padding: '11px 16px', background: `${t.green}10`, border: `1px solid ${t.green}35`, borderRadius: '10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <div>
-            <div style={{ fontSize: '12px', color: t.green, fontWeight: 600 }}>✓ Consignment Created Successfully</div>
-            <div style={{ fontSize: '11px', color: t.text3, marginTop: '2px', display: 'flex', gap: '16px' }}>
-              <span>TMP PRF: <strong style={{ color: t.gold, fontFamily: 'monospace' }}>{lastConsignment.tmp_prf_no}</strong></span>
-              <span>Challan: <strong style={{ color: t.blue, fontFamily: 'monospace' }}>{lastConsignment.challan_no}</strong></span>
-              <span>{lastConsignment.total_bills} bills · {fmtWt(lastConsignment.total_net_wt)}</span>
-            </div>
-          </div>
-          <button onClick={() => setLastConsignment(null)} style={{ ...btnOut, padding: '3px 8px', fontSize: '11px' }}>✕</button>
-        </div>
-      )}
-
       {/* Tabs */}
-      <div style={{ display: 'flex', gap: '0', background: t.card2, borderRadius: '10px', padding: '4px', border: `1px solid ${t.border}` }}>
+      <div style={{ display: 'flex', background: t.card2, borderRadius: '11px', padding: '4px', border: `1px solid ${t.border}`, gap: '4px' }}>
         {[
           { key: 'at_branch',      label: 'At Branch',      count: totalAtBranch,  color: t.gold },
           { key: 'in_consignment', label: 'In Consignment', count: totalInConsign, color: t.orange },
         ].map(tb => (
-          <button key={tb.key} onClick={() => { setTab(tb.key); setNav(null); setSelected(new Set()) }} style={{
-            flex: 1, padding: '9px 16px', border: 'none', borderRadius: '7px', cursor: 'pointer', transition: 'all .15s',
-            background: tab === tb.key ? t.card : 'transparent',
-            boxShadow: tab === tb.key ? `0 1px 6px rgba(0,0,0,.25)` : 'none',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
-          }}>
+          <button key={tb.key} onClick={() => { setTab(tb.key); setNav(null); setSelected(new Set()) }}
+            style={{ flex: 1, padding: '10px 16px', border: 'none', borderRadius: '8px', cursor: 'pointer', transition: 'all .15s',
+              background: tab === tb.key ? t.card : 'transparent',
+              boxShadow: tab === tb.key ? '0 1px 8px rgba(0,0,0,.2)' : 'none',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '9px' }}>
             <span style={{ fontSize: '13px', fontWeight: 600, color: tab === tb.key ? tb.color : t.text4 }}>{tb.label}</span>
-            <span style={{ fontSize: '11px', background: tab === tb.key ? `${tb.color}22` : 'transparent', color: tab === tb.key ? tb.color : t.text4, borderRadius: '20px', padding: '1px 9px', fontWeight: 700, border: `1px solid ${tab === tb.key ? tb.color + '40' : t.border}` }}>{tb.count}</span>
+            <span style={{ fontSize: '11px', background: tab === tb.key ? `${tb.color}22` : 'transparent', color: tab === tb.key ? tb.color : t.text4, borderRadius: '20px', padding: '1px 10px', fontWeight: 700, border: `1px solid ${tab === tb.key ? tb.color + '40' : t.border}`, transition: 'all .15s' }}>{tb.count}</span>
           </button>
         ))}
       </div>
 
-      {/* KPI strip */}
-      {(() => {
-        const heaviestTransit = branchSummary.reduce((m, b) => !m || b.in_consignment_wt > m.in_consignment_wt ? b : m, null)
-        const kpis = isAtBranch ? [
-          { icon: '📦', label: 'Bills At Branch',  value: totalAtBranch,    sub: fmtWt(totalAtBrWt),  color: t.gold },
-          { icon: '🏪', label: 'Active Branches',  value: branchSummary.filter(b => b.at_branch > 0).length, sub: 'branches with stock', color: t.blue },
-          { icon: '⏰', label: 'Oldest Bill',       value: `${daysSince(oldestBill?.purchase_date)}d`, sub: oldestBill ? `${oldestBill.branch_name} · ${fmtDate(oldestBill?.purchase_date)}` : '—', color: daysSince(oldestBill?.purchase_date) > 14 ? t.red : t.green },
-          { icon: '⚖️', label: 'Heaviest Branch',  value: heaviestBranch?.branch || '—', sub: fmtWt(heaviestBranch?.at_branch_wt), color: t.purple },
-        ] : [
-          { icon: '🚚', label: 'Bills In Transit', value: totalInConsign,   sub: fmtWt(totalInConWt), color: t.orange },
-          { icon: '📋', label: 'Consignments',     value: inConsignment.length, sub: 'draft / pending dispatch', color: t.blue },
-          { icon: '🗺️', label: 'Active Regions',  value: Object.keys(regionGroups).filter(r => regionGroups[r].some(b => b.in_consignment > 0)).length, sub: 'with in-transit stock', color: t.purple },
-          { icon: '⚖️', label: 'Heaviest Transit', value: heaviestTransit?.branch || '—', sub: fmtWt(heaviestTransit?.in_consignment_wt), color: t.gold },
-        ]
-        return (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1px', background: t.border, borderRadius: '10px', overflow: 'hidden', border: `1px solid ${t.border}` }}>
-            {kpis.map(k => (
-              <div key={k.label} style={{ background: t.card, padding: '14px 18px' }}>
-                <Kpi {...k} />
-              </div>
-            ))}
+      {/* KPI Strip */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1px', background: t.border, borderRadius: '11px', overflow: 'hidden', border: `1px solid ${t.border}` }}>
+        {kpis.map(k => (
+          <div key={k.label} style={{ background: t.card, padding: '15px 18px' }}>
+            <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: '7px', fontWeight: 600 }}>{k.label}</div>
+            <div style={{ fontSize: '22px', fontWeight: 300, color: k.color, lineHeight: 1, fontFamily: 'monospace' }}>{k.value}</div>
+            {k.sub && <div style={{ fontSize: '10px', color: t.text4, marginTop: '5px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{k.sub}</div>}
           </div>
-        )
-      })()}
+        ))}
+      </div>
 
       {/* Breadcrumb + Back */}
-      {nav && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+        {nav && (
           <button onClick={goBack} style={{ ...btnOut, padding: '5px 12px', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '5px' }}>
             ← Back
           </button>
-          <Breadcrumb />
-        </div>
-      )}
-      {!nav && <Breadcrumb />}
+        )}
+        <Breadcrumb />
+      </div>
 
       {/* Content */}
-      {loading ? (
-        <div style={{ padding: '48px', display: 'flex', justifyContent: 'center' }}><GoldSpinner size={32} /></div>
-      ) : nav?.type === 'branch' ? (
-        <BillList />
-      ) : nav?.type === 'region' ? (
-        <BranchList statusKey={isAtBranch ? 'at_branch' : 'in_consignment'} wtKey={isAtBranch ? 'at_branch_wt' : 'in_consignment_wt'} color={isAtBranch ? t.gold : t.orange} />
-      ) : (
-        <RegionList statusKey={isAtBranch ? 'at_branch' : 'in_consignment'} wtKey={isAtBranch ? 'at_branch_wt' : 'in_consignment_wt'} color={isAtBranch ? t.gold : t.orange} />
-      )}
+      {renderContent()}
 
       {/* Confirm modal */}
       {showModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.8)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: '14px', padding: '28px', width: '440px', maxWidth: '90vw' }}>
-            <div style={{ fontSize: '16px', fontWeight: 600, color: t.text1, marginBottom: '20px' }}>Confirm Consignment</div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '20px' }}>
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.75)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(4px)' }}>
+          <div style={{ background: t.card, border: `1px solid ${t.border2}`, borderRadius: '16px', padding: '28px', width: '460px', maxWidth: '92vw', boxShadow: '0 24px 64px rgba(0,0,0,.4)' }}>
+            <div style={{ fontSize: '16px', fontWeight: 600, color: t.text1, marginBottom: '6px' }}>Confirm Consignment</div>
+            <div style={{ fontSize: '12px', color: t.text3, marginBottom: '22px' }}>Review and confirm before creating.</div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '18px' }}>
               {[
-                ['Branch',       selectedBranches[0]],
-                ['Bills',        `${selected.size} bills`],
-                ['Net Weight',   fmtWt(totalSelWt)],
-                ['Amount',       `₹${fmt(Math.round(totalSelAmt))}`],
-                ['Movement',     moveType === 'EXTERNAL' ? 'External (Branch → HO)' : 'Internal (Branch → Hub)'],
+                ['Branch', selectedBranches[0]],
+                ['Bills', `${selected.size} bills`],
+                ['Net Weight', fmtWt(totalSelWt)],
+                ['Amount', `₹${fmt(Math.round(totalSelAmt))}`],
+                ['Movement', moveType === 'EXTERNAL' ? 'External — Branch → HO' : 'Internal — Branch → Hub'],
               ].map(([label, value]) => (
-                <div key={label} style={{ display: 'flex', justifyContent: 'space-between', padding: '9px 14px', background: t.card2, borderRadius: '7px' }}>
+                <div key={label} style={{ display: 'flex', justifyContent: 'space-between', padding: '9px 14px', background: t.card2, borderRadius: '8px' }}>
                   <span style={{ fontSize: '12px', color: t.text3 }}>{label}</span>
                   <span style={{ fontSize: '12px', color: t.text1, fontWeight: 600 }}>{value}</span>
                 </div>
               ))}
             </div>
-            {/* Preview Numbers */}
+
             {loadingPreview ? (
-              <div style={{ fontSize: '11px', color: t.text4, marginBottom: '18px', padding: '10px 14px', background: `${t.gold}08`, borderRadius: '7px', border: `1px solid ${t.gold}20`, textAlign: 'center' }}>
-                Loading preview...
-              </div>
+              <div style={{ fontSize: '11px', color: t.text4, marginBottom: '18px', padding: '11px 14px', background: `${t.gold}08`, borderRadius: '8px', border: `1px solid ${t.gold}20`, textAlign: 'center' }}>Generating preview numbers…</div>
             ) : previewNumbers ? (
-              <div style={{ marginBottom: '18px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '9px 14px', background: `${t.gold}10`, borderRadius: '7px', border: `1px solid ${t.gold}30` }}>
-                  <span style={{ fontSize: '11px', color: t.text3, fontWeight: 600 }}>TMP PRF No</span>
-                  <span style={{ fontSize: '12px', color: t.gold, fontWeight: 700, fontFamily: 'monospace' }}>{previewNumbers.tmp_prf_no}</span>
+              <div style={{ marginBottom: '18px', display: 'flex', gap: '8px' }}>
+                <div style={{ flex: 1, padding: '10px 14px', background: `${t.gold}10`, borderRadius: '8px', border: `1px solid ${t.gold}30` }}>
+                  <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: '3px' }}>TMP PRF No</div>
+                  <div style={{ fontSize: '13px', color: t.gold, fontWeight: 700, fontFamily: 'monospace' }}>{previewNumbers.tmp_prf_no}</div>
                 </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '9px 14px', background: `${t.blue}10`, borderRadius: '7px', border: `1px solid ${t.blue}30` }}>
-                  <span style={{ fontSize: '11px', color: t.text3, fontWeight: 600 }}>Challan No</span>
-                  <span style={{ fontSize: '11px', color: t.blue, fontWeight: 600, fontFamily: 'monospace' }}>{previewNumbers.challan_no}</span>
+                <div style={{ flex: 1, padding: '10px 14px', background: `${t.blue}10`, borderRadius: '8px', border: `1px solid ${t.blue}30` }}>
+                  <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: '3px' }}>Challan No</div>
+                  <div style={{ fontSize: '11px', color: t.blue, fontWeight: 600, fontFamily: 'monospace' }}>{previewNumbers.challan_no}</div>
                 </div>
               </div>
             ) : (
-              <div style={{ fontSize: '11px', color: t.text4, marginBottom: '18px', padding: '10px 14px', background: `${t.gold}08`, borderRadius: '7px', border: `1px solid ${t.gold}20` }}>
-                ℹ TMP PRF No and Challan No will be auto-generated
+              <div style={{ fontSize: '11px', color: t.text4, marginBottom: '18px', padding: '11px 14px', background: `${t.gold}08`, borderRadius: '8px', border: `1px solid ${t.gold}20` }}>
+                Numbers will be auto-generated on creation.
               </div>
             )}
+
             <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
               <button onClick={() => setShowModal(false)} style={btnOut}>Cancel</button>
-              <button onClick={handleCreate} disabled={creating} style={{ ...btnGold, padding: '8px 20px', opacity: creating ? .7 : 1 }}>
-                {creating ? 'Creating...' : 'Confirm & Create'}
+              <button onClick={handleCreate} disabled={creating}
+                style={{ ...btnGold, padding: '9px 22px', fontSize: '13px', opacity: creating ? .7 : 1 }}>
+                {creating ? 'Creating…' : 'Confirm & Create →'}
               </button>
             </div>
           </div>
         </div>
       )}
+
       {toast && <Toast msg={toast.msg} type={toast.type} onDone={() => setToast(null)} />}
     </div>
   )

@@ -127,7 +127,7 @@ function DashboardShell() {
       case 'consignment-overview': return <ConsignmentOverview />
       case 'consignment-data':    return <ConsignmentData />
       case 'consignment-report':  return <ConsignmentReport />
-      case 'consignment-summary': return <ConsignmentSummary />
+      case 'consignment-summary': return <ConsignmentReport />
       case 'melting':             return <ComingSoon title="Melting" />
       case 'sales':               return <ComingSoon title="Sales" />
       case 'cal-table':           return <CalTable />
