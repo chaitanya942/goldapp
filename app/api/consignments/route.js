@@ -66,10 +66,21 @@ export async function GET(req) {
       (branches || []).filter(b => b.model_type === 'outside_bangalore').map(b => b.name)
     )
 
+    // Pre-populate all outside-bangalore branches so zero-stock branches appear in the table
     const summary = {}
+    for (const branchName of outsideBranches) {
+      const meta = branchMeta[branchName] || { region: 'Unknown', pickup_time: null }
+      summary[branchName] = {
+        branch_name: branchName, region: meta.region, pickup_time: meta.pickup_time,
+        ship_before: null,
+        total_bills: 0, today_bills: 0, older_bills: 0,
+        today_net_wt: 0, older_net_wt: 0,
+        total_gross_wt: 0, total_net_wt: 0, oldest_date: null,
+      }
+    }
+
     for (const row of purchases || []) {
       const key  = row.branch_name
-      // Skip non-outside branches
       if (!outsideBranches.has(key)) continue
       const meta = branchMeta[key] || { region: 'Unknown', state: null, pickup_time: null }
       if (!summary[key]) {

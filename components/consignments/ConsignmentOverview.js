@@ -42,7 +42,7 @@ const ageDaysFromDate = (d) => {
 
 function AgeBadge({ days, t }) {
   if (!days && days !== 0) return <span style={{ color: t.text4 }}>—</span>
-  const color = days > 14 ? t.red : days > 7 ? t.orange : t.green
+  const color = days > 7 ? t.red : days > 3 ? t.orange : t.green
   return (
     <span style={{ fontSize: '11px', color, background: `${color}18`, borderRadius: '5px', padding: '2px 8px', fontWeight: 700 }}>
       {days}d
@@ -59,7 +59,7 @@ const SORT_COLS = [
 ]
 
 export default function ConsignmentOverview() {
-  const { theme, setActiveNav, canSee } = useApp()
+  const { theme, setActiveNav, canSee, setConsignmentDeepLink } = useApp()
   const t = THEMES[theme]
 
   const [data,         setData]         = useState([])
@@ -134,6 +134,7 @@ export default function ConsignmentOverview() {
   const grandTodayWt  = filtered.reduce((s, b) => s + (b.today_net_wt  || 0), 0)
   const grandOlder    = filtered.reduce((s, b) => s + (b.older_bills   || 0), 0)
   const grandOlderWt  = filtered.reduce((s, b) => s + (b.older_net_wt  || 0), 0)
+  const grandGrossWt  = filtered.reduce((s, b) => s + (b.total_gross_wt || 0), 0)
 
   // ── Styles ────────────────────────────────────────────────────────────────
   const card = { background: t.card, border: `1px solid ${t.border}`, borderRadius: '12px' }
@@ -221,7 +222,7 @@ export default function ConsignmentOverview() {
                   <div style={{ fontSize: '9px', color: active ? color : t.text4, letterSpacing: '.08em', textTransform: 'uppercase', fontWeight: active ? 700 : 400 }}>{r}</div>
                   <span style={{ fontSize: '14px' }}>{icon}</span>
                 </div>
-                <div style={{ fontSize: '26px', fontWeight: 200, color: active ? color : t.text1, lineHeight: 1 }}>{stats.older_bills ?? 0}</div>
+                <div style={{ fontSize: '26px', fontWeight: 200, color: active ? color : t.text1, lineHeight: 1 }}>{(stats.older_bills ?? 0) + (stats.today_bills ?? 0)}</div>
                 <div style={{ fontSize: '10px', color: t.text4, marginTop: '4px', display: 'flex', gap: '8px' }}>
                   <span>{stats.branches} branches</span>
                   {stats.today_bills > 0 && <span style={{ color, fontWeight: 600 }}>+{stats.today_bills} today</span>}
@@ -233,7 +234,7 @@ export default function ConsignmentOverview() {
       )}
 
       {/* ── KPI Strip ── */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr 1fr', gap: '10px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr 1fr 1fr', gap: '10px' }}>
 
         {/* Branches */}
         <div style={{ ...card, padding: '14px 18px' }}>
@@ -266,6 +267,12 @@ export default function ConsignmentOverview() {
           <div style={{ fontSize: '9px', color: t.orange, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: '8px', fontWeight: 600 }}>Pending Net Wt</div>
           <div style={{ fontSize: '26px', fontWeight: 200, color: t.orange, fontFamily: 'monospace', lineHeight: 1 }}>{fmt(grandOlderWt, 2)}<span style={{ fontSize: '13px', marginLeft: '3px' }}>g</span></div>
           <div style={{ fontSize: '10px', color: `${t.orange}80`, marginTop: '4px' }}>closing stock</div>
+        </div>
+
+        <div style={{ ...card, padding: '14px 18px', borderLeft: `3px solid ${t.gold}`, background: `${t.gold}06` }}>
+          <div style={{ fontSize: '9px', color: t.gold, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: '8px', fontWeight: 600 }}>Total Gross Wt</div>
+          <div style={{ fontSize: '26px', fontWeight: 200, color: t.gold, fontFamily: 'monospace', lineHeight: 1 }}>{fmt(grandGrossWt, 2)}<span style={{ fontSize: '13px', marginLeft: '3px' }}>g</span></div>
+          <div style={{ fontSize: '10px', color: `${t.gold}80`, marginTop: '4px' }}>all stock gross</div>
         </div>
       </div>
 
@@ -303,7 +310,6 @@ export default function ConsignmentOverview() {
                         onClick={() => handleSort('total_net_wt')}>
                       Total Net Wt <SortIcon col="total_net_wt" />
                     </th>
-                    <th style={{ ...thBase, textAlign: 'center' }}>Pickup</th>
 
                     {/* Sortable: Today */}
                     <th style={{ ...thBase, textAlign: 'right', cursor: 'pointer', color: sortKey === 'today_bills' ? t.blue : t.text4 }}
@@ -372,13 +378,6 @@ export default function ConsignmentOverview() {
                           )
                         })()}
 
-                        {/* Pickup Time */}
-                        <td style={{ padding: '11px 14px', textAlign: 'center' }}>
-                          {b.pickup_time
-                            ? <span style={{ fontSize: '12px', color: t.blue, background: `${t.blue}15`, borderRadius: '5px', padding: '3px 9px', fontWeight: 600 }}>{b.pickup_time}</span>
-                            : <span style={{ fontSize: '11px', color: t.text4 }}>—</span>}
-                        </td>
-
                         {/* Today's Bills */}
                         <td style={{ padding: '11px 14px', textAlign: 'right' }}>
                           {hasToday
@@ -418,7 +417,10 @@ export default function ConsignmentOverview() {
                         {/* Action */}
                         <td style={{ padding: '11px 14px', textAlign: 'center' }}>
                           <button
-                            onClick={() => setActiveNav('consignment-data')}
+                            onClick={() => {
+                              setConsignmentDeepLink({ branch: b.branch_name, region: b.region })
+                              setActiveNav('consignment-data')
+                            }}
                             style={{ background: `${t.gold}18`, border: `1px solid ${t.gold}50`, borderRadius: '7px', padding: '5px 12px', fontSize: '11px', color: t.gold, cursor: 'pointer', fontWeight: 600, whiteSpace: 'nowrap', transition: 'all .1s' }}
                             onMouseEnter={e => { e.currentTarget.style.background = `${t.gold}30`; e.currentTarget.style.borderColor = t.gold }}
                             onMouseLeave={e => { e.currentTarget.style.background = `${t.gold}18`; e.currentTarget.style.borderColor = `${t.gold}50` }}>
@@ -439,7 +441,6 @@ export default function ConsignmentOverview() {
                     <td style={{ padding: '11px 14px', textAlign: 'right', fontSize: '13px', color: t.gold, fontFamily: 'monospace', fontWeight: 700 }}>
                       {fmt(grandTodayWt + grandOlderWt, 2)}<span style={{ fontSize: '10px', marginLeft: '2px' }}>g</span>
                     </td>
-                    <td style={{ padding: '11px 14px' }} />
                     <td style={{ padding: '11px 14px', textAlign: 'right', fontSize: '14px', color: t.blue, fontFamily: 'monospace', fontWeight: 700 }}>{grandToday || '—'}</td>
                     <td style={{ padding: '11px 14px', textAlign: 'right', fontSize: '13px', color: t.blue, fontFamily: 'monospace' }}>{fmt(grandTodayWt, 2)}<span style={{ fontSize: '10px', marginLeft: '2px' }}>g</span></td>
                     <td style={{ padding: '11px 14px', textAlign: 'right', fontSize: '14px', color: t.orange, fontFamily: 'monospace', fontWeight: 700 }}>{grandOlder || '—'}</td>
@@ -455,7 +456,7 @@ export default function ConsignmentOverview() {
 
       {/* Footer note */}
       <div style={{ fontSize: '10px', color: t.text4, textAlign: 'right' }}>
-        Pending = <code style={{ background: t.card2, padding: '1px 4px', borderRadius: '3px', color: t.text3 }}>stock_status = at_branch</code> before today · Pickup time editable in Branch Management
+        Pending = <code style={{ background: t.card2, padding: '1px 4px', borderRadius: '3px', color: t.text3 }}>stock_status = at_branch</code> before today · Age alert: &gt;3d orange, &gt;7d red
       </div>
 
       <style>{`

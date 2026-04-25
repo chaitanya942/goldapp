@@ -52,7 +52,7 @@ function Kpi({ icon, label, value, sub, color }) {
 }
 
 export default function ConsignmentData() {
-  const { theme } = useApp()
+  const { theme, consignmentDeepLink, setConsignmentDeepLink } = useApp()
   const t = THEMES[theme]
 
   // Navigation stack: null = top, {type:'region', region} = region level, {type:'branch', branch} = branch level
@@ -94,6 +94,14 @@ export default function ConsignmentData() {
   }, [])
 
   useEffect(() => { fetchAll() }, [fetchAll])
+
+  // Apply deep-link from Branch Stock Overview ("Move →" button)
+  useEffect(() => {
+    if (consignmentDeepLink) {
+      setNav({ type: 'branch', branch: consignmentDeepLink.branch, fromRegion: consignmentDeepLink.region })
+      setConsignmentDeepLink(null)
+    }
+  }, [consignmentDeepLink])
 
   // ── Derived data ──────────────────────────────────────────────────────────
   const regionGroups = branchSummary.reduce((acc, b) => {
