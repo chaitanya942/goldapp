@@ -229,11 +229,29 @@ export default function PurchaseReports() {
   const [hourlyTrend,   setHourlyTrend]   = useState([])
   const [error,         setError]         = useState(null)
   const [isMobile,      setIsMobile]      = useState(false)
+  const [lastSyncAt,    setLastSyncAt]    = useState(null)
 
   useEffect(() => {
     const check = () => setIsMobile(window.innerWidth < 768)
     check(); window.addEventListener('resize', check)
     return () => window.removeEventListener('resize', check)
+  }, [])
+
+  // Fire-and-forget sync on mount so reports reflect latest CRM state.
+  // Then poll MAX(updated_at) every 30s to surface "Last synced" freshness.
+  useEffect(() => {
+    fetch('/api/sync-purchases?days=2', { method: 'POST' }).catch(() => null)
+    const fetchLastSync = async () => {
+      const { data } = await supabase
+        .from('purchases')
+        .select('updated_at')
+        .order('updated_at', { ascending: false })
+        .limit(1)
+      if (data?.[0]?.updated_at) setLastSyncAt(data[0].updated_at)
+    }
+    fetchLastSync()
+    const id = setInterval(fetchLastSync, 30 * 1000)
+    return () => clearInterval(id)
   }, [])
 
   useEffect(() => {
@@ -402,8 +420,23 @@ export default function PurchaseReports() {
         <div>
           {!isMobile && <div style={{ fontSize: '.58rem', color: t.text4, letterSpacing: '.2em', textTransform: 'uppercase', marginBottom: '6px' }}>Analytics</div>}
           <div style={{ fontSize: isMobile ? '1.2rem' : '1.7rem', fontWeight: 200, color: t.text1, letterSpacing: '.02em', lineHeight: 1 }}>Purchase Reports</div>
-          <div style={{ fontSize: '.65rem', color: t.text3, marginTop: '5px' }}>
-            {k?.min_date ? `${fmtDate(k.min_date)} — ${fmtDate(k.max_date)}` : 'All time data'}
+          <div style={{ fontSize: '.65rem', color: t.text3, marginTop: '5px', display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
+            <span>{k?.min_date ? `${fmtDate(k.min_date)} — ${fmtDate(k.max_date)}` : 'All time data'}</span>
+            {lastSyncAt && (() => {
+              const ageMs   = Date.now() - new Date(lastSyncAt).getTime()
+              const ageMin  = Math.floor(ageMs / 60000)
+              const ageSec  = Math.floor(ageMs / 1000)
+              const fresh   = ageMs < 5 * 60 * 1000
+              const stale   = ageMs > 15 * 60 * 1000
+              const color   = stale ? t.red : fresh ? t.green : t.text3
+              const label   = ageSec < 60 ? 'just now' : ageMin < 60 ? `${ageMin}m ago` : `${Math.floor(ageMin/60)}h ago`
+              return (
+                <span style={{ color, display: 'flex', alignItems: 'center', gap: '5px' }}>
+                  <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: color, boxShadow: fresh ? `0 0 6px ${color}` : 'none', animation: fresh ? 'pulse 2s infinite' : 'none' }} />
+                  Last synced {label}
+                </span>
+              )
+            })()}
           </div>
         </div>
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>

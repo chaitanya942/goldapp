@@ -181,10 +181,27 @@ export default function DashboardHome() {
   const [branchDropOpen, setBranchDropOpen] = useState(false)
   const branchInputRef = useRef(null)
   const branchDropRef  = useRef(null)
+  const [lastSyncAt,   setLastSyncAt]   = useState(null)
 
   useEffect(() => {
     if (filterType !== 'branch') { setBranchSearch(''); setBranchDropOpen(false) }
   }, [filterType])
+
+  // Fire-and-forget sync on mount + poll MAX(updated_at) for freshness display.
+  useEffect(() => {
+    fetch('/api/sync-purchases?days=2', { method: 'POST' }).catch(() => null)
+    const fetchLastSync = async () => {
+      const { data } = await supabase
+        .from('purchases')
+        .select('updated_at')
+        .order('updated_at', { ascending: false })
+        .limit(1)
+      if (data?.[0]?.updated_at) setLastSyncAt(data[0].updated_at)
+    }
+    fetchLastSync()
+    const id = setInterval(fetchLastSync, 30 * 1000)
+    return () => clearInterval(id)
+  }, [])
 
   useEffect(() => {
     const handler = (e) => {
@@ -406,9 +423,24 @@ export default function DashboardHome() {
         <div style={{ position:'absolute', inset:0, backgroundImage:`radial-gradient(${t.gold}08 1px,transparent 1px)`, backgroundSize:'28px 28px', pointerEvents:'none' }}/>
         <div style={{ position:'absolute', bottom:0, left:'10%', right:'10%', height:1, background:`linear-gradient(90deg,transparent,${t.gold}40,transparent)` }}/>
         <div style={{ position:'relative', zIndex:1 }}>
-          <div style={{ fontSize:12, color:t.text4, letterSpacing:'.12em', textTransform:'uppercase', marginBottom:12, display:'flex', alignItems:'center', gap:10 }}>
+          <div style={{ fontSize:12, color:t.text4, letterSpacing:'.12em', textTransform:'uppercase', marginBottom:12, display:'flex', alignItems:'center', gap:10, flexWrap:'wrap' }}>
             <span style={{ width:24, height:1, background:`linear-gradient(90deg,transparent,${t.gold})`, display:'inline-block' }}/>
             {getGreeting()}, {name}
+            {lastSyncAt && (() => {
+              const ageMs  = Date.now() - new Date(lastSyncAt).getTime()
+              const ageMin = Math.floor(ageMs / 60000)
+              const ageSec = Math.floor(ageMs / 1000)
+              const fresh  = ageMs < 5 * 60 * 1000
+              const stale  = ageMs > 15 * 60 * 1000
+              const color  = stale ? t.red : fresh ? t.green : t.text3
+              const label  = ageSec < 60 ? 'just now' : ageMin < 60 ? `${ageMin}m ago` : `${Math.floor(ageMin/60)}h ago`
+              return (
+                <span style={{ display:'flex', alignItems:'center', gap:5, color, textTransform:'none', letterSpacing:'.02em', fontSize:11 }}>
+                  <span style={{ width:6, height:6, borderRadius:'50%', background:color, boxShadow: fresh ? `0 0 6px ${color}` : 'none' }} />
+                  Synced {label}
+                </span>
+              )
+            })()}
           </div>
           <div style={{ fontSize:36, fontWeight:200, color:t.text1, lineHeight:1.15, marginBottom:24, letterSpacing:'-.02em' }}>
             Every gram.<br/>
