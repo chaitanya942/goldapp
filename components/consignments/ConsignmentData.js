@@ -66,6 +66,7 @@ export default function ConsignmentData() {
   const [previewNumbers,      setPreviewNumbers]     = useState(null)
   const [loadingPreview,      setLoadingPreview]     = useState(false)
   const [downloadingId,       setDownloadingId]      = useState(null)
+  const [ewbActionId,         setEwbActionId]        = useState(null)
   const [toast,               setToast]              = useState(null)
 
   // List filters
@@ -178,6 +179,43 @@ export default function ConsignmentData() {
       // Return to Active Consignments list with the new one highlighted
       setNav(null)
     } finally { setCreating(false) }
+  }
+
+  async function generateEwb(c) {
+    setEwbActionId(c.id + ':gen')
+    try {
+      const res  = await fetch('/api/eway-bill/generate', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ consignment_id: c.id }),
+      })
+      const data = await res.json()
+      if (!res.ok || data.error) { setToast({ msg: data.error || 'EWB generation failed', type: 'error' }); return }
+      setToast({ msg: `E-Way Bill generated: ${data.ewb_no}`, type: 'success' })
+      await fetchAll()
+    } catch (err) {
+      setToast({ msg: err.message || 'EWB generation failed', type: 'error' })
+    } finally { setEwbActionId(null) }
+  }
+
+  async function cancelEwb(c) {
+    if (!confirm(`Cancel E-Way Bill ${c.eway_bill_no}?\n\nThis must be done within 24h of generation.`)) return
+    setEwbActionId(c.id + ':cancel')
+    try {
+      const res  = await fetch('/api/eway-bill/cancel', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ consignment_id: c.id }),
+      })
+      const data = await res.json()
+      if (!res.ok || data.error) { setToast({ msg: data.error || 'EWB cancel failed', type: 'error' }); return }
+      setToast({ msg: 'E-Way Bill cancelled', type: 'success' })
+      await fetchAll()
+    } finally { setEwbActionId(null) }
+  }
+
+  async function downloadEwbPdf(c) {
+    setDownloadingId(c.id + ':ewb')
+    await triggerDownload(`/api/eway-bill/pdf?id=${c.id}`, `EWB_${c.eway_bill_no}.pdf`, msg => setToast({ msg, type: 'error' }))
+    setDownloadingId(null)
   }
 
   async function downloadDoc(c, kind) {
@@ -394,14 +432,14 @@ export default function ConsignmentData() {
           <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '900px' }}>
             <thead style={{ position: 'sticky', top: 0, zIndex: 1 }}>
               <tr>
-                {['TMP PRF', 'Type', 'Source → Destination', 'Bills', 'Net Wt', 'Value', 'Created', 'Document'].map(h => (
+                {['TMP PRF', 'Type', 'Source → Destination', 'Bills', 'Net Wt', 'Value', 'Created', 'Document', 'E-Way Bill'].map(h => (
                   <th key={h} style={{ padding: '10px 14px', fontSize: '10px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', textAlign: h === 'Bills' || h === 'Net Wt' || h === 'Value' ? 'right' : 'left', background: t.card2, borderBottom: `1px solid ${t.border}`, whiteSpace: 'nowrap', fontWeight: 600 }}>{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {filteredCons.length === 0 ? (
-                <tr><td colSpan={8} style={{ padding: '64px', textAlign: 'center', color: t.text4, fontSize: '13px' }}>
+                <tr><td colSpan={9} style={{ padding: '64px', textAlign: 'center', color: t.text4, fontSize: '13px' }}>
                   {consignments.length === 0
                     ? 'No active consignments. Use Branch Stock → Move to create one.'
                     : 'No consignments match the filters'}
@@ -439,6 +477,29 @@ export default function ConsignmentData() {
                         style={{ ...btnGold, padding: '4px 10px', fontSize: '10px' }}>
                         {downloadingId === c.id + ':' + (isType ? 'voucher' : 'challan') ? '⏳' : (isType ? '📄 Voucher' : '📄 Challan')}
                       </button>
+                    </td>
+                    <td style={{ padding: '11px 14px' }}>
+                      {isType ? (
+                        <span style={{ fontSize: '10px', color: t.text4 }}>n/a</span>
+                      ) : c.eway_bill_no ? (
+                        <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', alignItems: 'center' }}>
+                          <span style={{ fontSize: '10px', color: t.green, background: `${t.green}15`, borderRadius: '4px', padding: '2px 7px', fontWeight: 600, fontFamily: 'monospace' }}>{c.eway_bill_no}</span>
+                          <button onClick={() => downloadEwbPdf(c)} disabled={!!downloadingId}
+                            style={{ background: t.blue, color: '#fff', border: 'none', borderRadius: '5px', padding: '3px 8px', fontSize: '10px', fontWeight: 600, cursor: 'pointer', opacity: downloadingId === c.id + ':ewb' ? 0.6 : 1 }}>
+                            {downloadingId === c.id + ':ewb' ? '⏳' : '📄 PDF'}
+                          </button>
+                          <button onClick={() => cancelEwb(c)} disabled={!!ewbActionId}
+                            title="Cancel E-Way Bill (within 24h)"
+                            style={{ background: 'transparent', border: `1px solid ${t.red}40`, borderRadius: '5px', padding: '3px 8px', fontSize: '10px', color: t.red, cursor: 'pointer', opacity: ewbActionId === c.id + ':cancel' ? 0.6 : 1 }}>
+                            {ewbActionId === c.id + ':cancel' ? '…' : '✕'}
+                          </button>
+                        </div>
+                      ) : (
+                        <button onClick={() => generateEwb(c)} disabled={!!ewbActionId}
+                          style={{ background: 'transparent', border: `1px solid ${t.green}50`, borderRadius: '5px', padding: '4px 10px', fontSize: '10px', color: t.green, fontWeight: 600, cursor: 'pointer', opacity: ewbActionId === c.id + ':gen' ? 0.6 : 1 }}>
+                          {ewbActionId === c.id + ':gen' ? '⏳ Generating…' : '⚡ Generate EWB'}
+                        </button>
+                      )}
                     </td>
                   </tr>
                 )
