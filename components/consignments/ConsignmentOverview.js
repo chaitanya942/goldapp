@@ -25,6 +25,13 @@ const REGION_ICONS = {
 
 const fmt     = (n, d = 3) => n != null ? Number(n).toFixed(d) : '—'
 const fmtNum  = (n) => n != null ? Number(n).toLocaleString('en-IN') : '—'
+const fmtINR  = (n) => {
+  if (n == null) return '—'
+  const v = Number(n)
+  if (v >= 1e7) return `₹${(v / 1e7).toFixed(2)}Cr`
+  if (v >= 1e5) return `₹${(v / 1e5).toFixed(2)}L`
+  return `₹${Math.round(v).toLocaleString('en-IN')}`
+}
 const fmtDate = (d) => {
   if (!d) return '—'
   const [y, m, day] = d.split('-')
@@ -120,21 +127,26 @@ export default function ConsignmentOverview() {
     .slice()
     .sort((a, b) => {
       let av = 0, bv = 0
-      if (sortKey === 'today_bills')  { av = a.today_bills  || 0; bv = b.today_bills  || 0 }
-      if (sortKey === 'today_net_wt') { av = a.today_net_wt || 0; bv = b.today_net_wt || 0 }
-      if (sortKey === 'older_bills')  { av = a.older_bills  || 0; bv = b.older_bills  || 0 }
-      if (sortKey === 'older_net_wt') { av = a.older_net_wt || 0; bv = b.older_net_wt || 0 }
-      if (sortKey === 'oldest_age')   { av = a.oldest_age_days || 0; bv = b.oldest_age_days || 0 }
-      if (sortKey === 'total_net_wt') { av = (a.today_net_wt || 0) + (a.older_net_wt || 0); bv = (b.today_net_wt || 0) + (b.older_net_wt || 0) }
+      if (sortKey === 'today_bills')        { av = a.today_bills  || 0; bv = b.today_bills  || 0 }
+      if (sortKey === 'today_net_wt')       { av = a.today_net_wt || 0; bv = b.today_net_wt || 0 }
+      if (sortKey === 'today_gross_value')  { av = a.today_gross_value || 0; bv = b.today_gross_value || 0 }
+      if (sortKey === 'older_bills')        { av = a.older_bills  || 0; bv = b.older_bills  || 0 }
+      if (sortKey === 'older_net_wt')       { av = a.older_net_wt || 0; bv = b.older_net_wt || 0 }
+      if (sortKey === 'older_gross_value')  { av = a.older_gross_value || 0; bv = b.older_gross_value || 0 }
+      if (sortKey === 'oldest_age')         { av = a.oldest_age_days || 0; bv = b.oldest_age_days || 0 }
+      if (sortKey === 'last_moved_days_ago'){ av = a.last_moved_days_ago == null ? 99999 : a.last_moved_days_ago; bv = b.last_moved_days_ago == null ? 99999 : b.last_moved_days_ago }
+      if (sortKey === 'total_net_wt')       { av = (a.today_net_wt || 0) + (a.older_net_wt || 0); bv = (b.today_net_wt || 0) + (b.older_net_wt || 0) }
       return (av - bv) * sortDir
     })
 
   // ── Grand totals ──────────────────────────────────────────────────────────
-  const grandToday    = filtered.reduce((s, b) => s + (b.today_bills   || 0), 0)
-  const grandTodayWt  = filtered.reduce((s, b) => s + (b.today_net_wt  || 0), 0)
-  const grandOlder    = filtered.reduce((s, b) => s + (b.older_bills   || 0), 0)
-  const grandOlderWt  = filtered.reduce((s, b) => s + (b.older_net_wt  || 0), 0)
-  const grandGrossWt  = filtered.reduce((s, b) => s + (b.total_gross_wt || 0), 0)
+  const grandToday    = filtered.reduce((s, b) => s + (b.today_bills        || 0), 0)
+  const grandTodayWt  = filtered.reduce((s, b) => s + (b.today_net_wt       || 0), 0)
+  const grandTodayVal = filtered.reduce((s, b) => s + (b.today_gross_value  || 0), 0)
+  const grandOlder    = filtered.reduce((s, b) => s + (b.older_bills        || 0), 0)
+  const grandOlderWt  = filtered.reduce((s, b) => s + (b.older_net_wt       || 0), 0)
+  const grandOlderVal = filtered.reduce((s, b) => s + (b.older_gross_value  || 0), 0)
+  const grandGrossWt  = filtered.reduce((s, b) => s + (b.total_gross_wt     || 0), 0)
 
   // ── Styles ────────────────────────────────────────────────────────────────
   const card = { background: t.card, border: `1px solid ${t.border}`, borderRadius: '12px' }
@@ -320,6 +332,10 @@ export default function ConsignmentOverview() {
                         onClick={() => handleSort('today_net_wt')}>
                       Today's Net Wt <SortIcon col="today_net_wt" />
                     </th>
+                    <th style={{ ...thBase, textAlign: 'right', cursor: 'pointer', color: sortKey === 'today_gross_value' ? t.blue : t.text4 }}
+                        onClick={() => handleSort('today_gross_value')}>
+                      Today's Value <SortIcon col="today_gross_value" />
+                    </th>
 
                     {/* Sortable: Pending */}
                     <th style={{ ...thBase, textAlign: 'right', cursor: 'pointer', color: sortKey === 'older_bills' ? t.orange : t.text4 }}
@@ -330,12 +346,25 @@ export default function ConsignmentOverview() {
                         onClick={() => handleSort('older_net_wt')}>
                       Pending Net Wt <SortIcon col="older_net_wt" />
                     </th>
+                    <th style={{ ...thBase, textAlign: 'right', cursor: 'pointer', color: sortKey === 'older_gross_value' ? t.orange : t.text4 }}
+                        onClick={() => handleSort('older_gross_value')}>
+                      Pending Value <SortIcon col="older_gross_value" />
+                    </th>
 
                     {/* Sortable: Age */}
                     <th style={{ ...thBase, textAlign: 'center', cursor: 'pointer', color: sortKey === 'oldest_age' ? t.red : t.text4 }}
                         onClick={() => handleSort('oldest_age')}>
                       Oldest Bill <SortIcon col="oldest_age" />
                     </th>
+
+                    {/* Last Moved */}
+                    <th style={{ ...thBase, textAlign: 'center', cursor: 'pointer', color: sortKey === 'last_moved_days_ago' ? t.purple : t.text4 }}
+                        onClick={() => handleSort('last_moved_days_ago')}>
+                      Last Moved <SortIcon col="last_moved_days_ago" />
+                    </th>
+
+                    {/* Pickup */}
+                    <th style={{ ...thBase, textAlign: 'center' }}>Pickup</th>
 
                     <th style={{ ...thBase, textAlign: 'center' }}>Action</th>
                   </tr>
@@ -392,6 +421,13 @@ export default function ConsignmentOverview() {
                             : <span style={{ fontSize: '11px', color: t.text4 }}>—</span>}
                         </td>
 
+                        {/* Today's Value */}
+                        <td style={{ padding: '11px 14px', textAlign: 'right' }}>
+                          {hasToday
+                            ? <span style={{ fontSize: '12px', color: t.blue, fontFamily: 'monospace' }}>{fmtINR(b.today_gross_value)}</span>
+                            : <span style={{ fontSize: '11px', color: t.text4 }}>—</span>}
+                        </td>
+
                         {/* Pending Bills */}
                         <td style={{ padding: '11px 14px', textAlign: 'right' }}>
                           {hasPending
@@ -406,12 +442,33 @@ export default function ConsignmentOverview() {
                             : <span style={{ fontSize: '11px', color: t.text4 }}>—</span>}
                         </td>
 
+                        {/* Pending Value */}
+                        <td style={{ padding: '11px 14px', textAlign: 'right' }}>
+                          {hasPending
+                            ? <span style={{ fontSize: '12px', color: t.orange, fontFamily: 'monospace' }}>{fmtINR(b.older_gross_value)}</span>
+                            : <span style={{ fontSize: '11px', color: t.text4 }}>—</span>}
+                        </td>
+
                         {/* Oldest Bill */}
                         <td style={{ padding: '11px 14px', textAlign: 'center' }}>
                           <AgeBadge days={b.oldest_age_days} t={t} />
                           {b.oldest_date && (
                             <div style={{ fontSize: '10px', color: t.text4, marginTop: '3px' }}>{fmtDate(b.oldest_date)}</div>
                           )}
+                        </td>
+
+                        {/* Last Moved */}
+                        <td style={{ padding: '11px 14px', textAlign: 'center' }}>
+                          {b.last_moved_days_ago != null
+                            ? <span style={{ fontSize: '11px', color: t.purple, background: `${t.purple}15`, borderRadius: '5px', padding: '2px 8px', fontWeight: 600 }}>{b.last_moved_days_ago}d ago</span>
+                            : <span style={{ fontSize: '11px', color: t.text4 }}>never</span>}
+                        </td>
+
+                        {/* Pickup */}
+                        <td style={{ padding: '11px 14px', textAlign: 'center' }}>
+                          {b.pickup_time
+                            ? <span style={{ fontSize: '11px', color: t.text2, background: t.card2, borderRadius: '5px', padding: '2px 8px', whiteSpace: 'nowrap' }}>{b.pickup_time}</span>
+                            : <span style={{ fontSize: '11px', color: t.text4 }}>—</span>}
                         </td>
 
                         {/* Action */}
@@ -443,9 +500,11 @@ export default function ConsignmentOverview() {
                     </td>
                     <td style={{ padding: '11px 14px', textAlign: 'right', fontSize: '14px', color: t.blue, fontFamily: 'monospace', fontWeight: 700 }}>{grandToday || '—'}</td>
                     <td style={{ padding: '11px 14px', textAlign: 'right', fontSize: '13px', color: t.blue, fontFamily: 'monospace' }}>{fmt(grandTodayWt, 2)}<span style={{ fontSize: '10px', marginLeft: '2px' }}>g</span></td>
+                    <td style={{ padding: '11px 14px', textAlign: 'right', fontSize: '12px', color: t.blue, fontFamily: 'monospace', fontWeight: 700 }}>{grandTodayVal ? fmtINR(grandTodayVal) : '—'}</td>
                     <td style={{ padding: '11px 14px', textAlign: 'right', fontSize: '14px', color: t.orange, fontFamily: 'monospace', fontWeight: 700 }}>{grandOlder || '—'}</td>
                     <td style={{ padding: '11px 14px', textAlign: 'right', fontSize: '13px', color: t.orange, fontFamily: 'monospace' }}>{fmt(grandOlderWt, 2)}<span style={{ fontSize: '10px', marginLeft: '2px' }}>g</span></td>
-                    <td colSpan={2} style={{ padding: '11px 14px' }} />
+                    <td style={{ padding: '11px 14px', textAlign: 'right', fontSize: '12px', color: t.orange, fontFamily: 'monospace', fontWeight: 700 }}>{grandOlderVal ? fmtINR(grandOlderVal) : '—'}</td>
+                    <td colSpan={4} style={{ padding: '11px 14px' }} />
                   </tr>
                 </tfoot>
               </table>

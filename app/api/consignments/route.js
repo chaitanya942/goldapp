@@ -28,7 +28,7 @@ export async function GET(req) {
     // Fetch today's purchases (all approved, any stock_status) — separate from pending
     const { data: todayPurchases, error: tErr } = await supabase
       .from('purchases')
-      .select('branch_name, purchase_date, gross_weight, net_weight')
+      .select('branch_name, purchase_date, gross_weight, net_weight, total_amount')
       .eq('crm_status', 'approved')
       .eq('is_deleted', false)
       .eq('purchase_date', todayIST)
@@ -38,7 +38,7 @@ export async function GET(req) {
     // Fetch pending stock = at_branch from before today
     const { data: pendingPurchases, error: pErr } = await supabase
       .from('purchases')
-      .select('branch_name, purchase_date, gross_weight, net_weight')
+      .select('branch_name, purchase_date, gross_weight, net_weight, total_amount')
       .eq('stock_status', 'at_branch')
       .eq('crm_status', 'approved')
       .eq('is_deleted', false)
@@ -51,14 +51,14 @@ export async function GET(req) {
     // Fetch branch metadata — filter outside_bangalore by model_type
     const { data: branches, error: bErr } = await supabase
       .from('branches')
-      .select('name, region, state, model_type')
+      .select('name, region, state, model_type, pickup_time')
       .eq('is_active', true)
 
     if (bErr) return Response.json({ data: [], error: bErr.message })
 
     const branchMeta = {}
     for (const b of branches || []) {
-      branchMeta[b.name] = { region: b.region || 'Unknown', state: b.state, model_type: b.model_type, pickup_time: null }
+      branchMeta[b.name] = { region: b.region || 'Unknown', state: b.state, model_type: b.model_type, pickup_time: b.pickup_time || null }
     }
 
     // Only outside_bangalore branches
@@ -66,48 +66,63 @@ export async function GET(req) {
       (branches || []).filter(b => b.model_type === 'outside_bangalore').map(b => b.name)
     )
 
+    // Last moved consignment date per branch — most recent created_at across all consignments
+    const { data: lastMoved } = await supabase
+      .from('consignments')
+      .select('branch_name, created_at, status')
+      .neq('status', 'seed')
+      .order('created_at', { ascending: false })
+
+    const lastMovedByBranch = {}
+    for (const c of lastMoved || []) {
+      if (!lastMovedByBranch[c.branch_name]) lastMovedByBranch[c.branch_name] = c.created_at
+    }
+
     // Pre-populate all outside-bangalore branches so zero-stock branches appear in the table
     const summary = {}
     for (const branchName of outsideBranches) {
       const meta = branchMeta[branchName] || { region: 'Unknown', pickup_time: null }
       summary[branchName] = {
         branch_name: branchName, region: meta.region, pickup_time: meta.pickup_time,
-        ship_before: null,
+        last_moved_at: lastMovedByBranch[branchName] || null,
         total_bills: 0, today_bills: 0, older_bills: 0,
         today_net_wt: 0, older_net_wt: 0,
-        total_gross_wt: 0, total_net_wt: 0, oldest_date: null,
+        today_gross_value: 0, older_gross_value: 0,
+        total_gross_wt: 0, total_net_wt: 0, total_gross_value: 0,
+        oldest_date: null,
       }
     }
 
     for (const row of purchases || []) {
-      const key  = row.branch_name
+      const key = row.branch_name
       if (!outsideBranches.has(key)) continue
-      const meta = branchMeta[key] || { region: 'Unknown', state: null, pickup_time: null }
-      if (!summary[key]) {
-        summary[key] = {
-          branch_name: key, region: meta.region, pickup_time: meta.pickup_time,
-          ship_before: null,
-          total_bills: 0, today_bills: 0, older_bills: 0,
-          today_net_wt: 0, older_net_wt: 0,
-          total_gross_wt: 0, total_net_wt: 0, oldest_date: null,
-        }
-      }
-      const s      = summary[key]
-      const nw     = parseFloat(row.net_weight   || 0)
-      const gw     = parseFloat(row.gross_weight || 0)
+      const s = summary[key]
+      if (!s) continue
+      const nw = parseFloat(row.net_weight   || 0)
+      const gw = parseFloat(row.gross_weight || 0)
+      const ta = parseFloat(row.total_amount || 0)
       const isToday = row.purchase_date === todayIST
       s.total_bills++
-      s.total_gross_wt += gw
-      s.total_net_wt   += nw
-      if (isToday) { s.today_bills++; s.today_net_wt += nw }
-      else         { s.older_bills++; s.older_net_wt += nw; if (!s.oldest_date || row.purchase_date < s.oldest_date) s.oldest_date = row.purchase_date }
+      s.total_gross_wt    += gw
+      s.total_net_wt      += nw
+      s.total_gross_value += ta
+      if (isToday) {
+        s.today_bills++
+        s.today_net_wt      += nw
+        s.today_gross_value += ta
+      } else {
+        s.older_bills++
+        s.older_net_wt      += nw
+        s.older_gross_value += ta
+        if (!s.oldest_date || row.purchase_date < s.oldest_date) s.oldest_date = row.purchase_date
+      }
     }
 
-    // Compute oldest_age_days; ship_before is null until set manually per branch
     const result = Object.values(summary).map(s => {
       const oldestMs   = s.oldest_date ? new Date(s.oldest_date).getTime() : null
       const oldestDays = oldestMs ? Math.floor((Date.now() - oldestMs) / 86400000) : 0
-      return { ...s, oldest_age_days: oldestDays }
+      const lastMovedDays = s.last_moved_at ? Math.floor((Date.now() - new Date(s.last_moved_at).getTime()) / 86400000) : null
+      return { ...s, oldest_age_days: oldestDays, last_moved_days_ago: lastMovedDays }
     }).sort((a, b) => b.total_gross_wt - a.total_gross_wt)
 
     return Response.json({ data: result })

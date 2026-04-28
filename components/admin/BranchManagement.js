@@ -9,7 +9,7 @@ const THEMES = {
   light: { bg: '#f5f0e8', card: '#ede8dc', text1: '#1a1208', text3: '#8a7a5a', text4: '#b0a080', gold: '#9a7228', border: '#e0dace', green: '#2a8a5a' },
 }
 
-const EMPTY_FORM = { name: '', opening_date: '', state: '', region: '', cluster: '', model_type: 'outside_bangalore', branch_code: '', address: '', city: '', pin_code: '', branch_gstin: '', crm_branch_id: '' }
+const EMPTY_FORM = { name: '', opening_date: '', state: '', region: '', cluster: '', model_type: 'outside_bangalore', branch_code: '', address: '', city: '', pin_code: '', branch_gstin: '', crm_branch_id: '', pickup_time: '' }
 
 export default function BranchManagement() {
   const { theme, loadBranches } = useApp()
@@ -118,6 +118,7 @@ export default function BranchManagement() {
       city: form.city || null,
       pin_code: form.pin_code || null,
       branch_gstin: form.branch_gstin || null,
+      pickup_time: form.pickup_time || null,
     }
     const { error } = editId
       ? await supabase.from('branches').update(payload).eq('id', editId)
@@ -140,6 +141,7 @@ export default function BranchManagement() {
       pin_code: b.pin_code || '',
       branch_gstin: b.branch_gstin || '',
       crm_branch_id: b.crm_branch_id || '',
+      pickup_time: b.pickup_time || '',
     })
     setEditId(b.id); setFormOpen(true); setMsg('')
     window.scrollTo({ top: 0, behavior: 'smooth' })
@@ -385,6 +387,15 @@ export default function BranchManagement() {
               </select>
             </div>
           </div>
+
+          {form.model_type === 'outside_bangalore' && (
+            <div style={{ marginTop: '16px' }}>
+              <label style={s.label}>Logistics Pickup Time</label>
+              <input style={s.input} placeholder="e.g. Mon/Wed/Fri 4 PM"
+                value={form.pickup_time} onChange={e => setField('pickup_time', e.target.value)} />
+              <div style={{ fontSize: '.6rem', color: t.text4, marginTop: '4px' }}>Shown in Branch Stock Overview · free-form text</div>
+            </div>
+          )}
 
           {/* Address */}
           <div style={{ borderTop: `1px solid ${t.border}`, marginTop: '20px', paddingTop: '20px' }}>
