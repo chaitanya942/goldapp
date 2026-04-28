@@ -5,7 +5,7 @@ import {
   autoBranchCode,
   generateTmpPrfNo,
   generateExternalNo,
-  generateInternalNo,
+  generateIssueVoucherNo,
 } from '../../../lib/consignmentUtils'
 
 const supabase = createClient(
@@ -36,11 +36,19 @@ export async function GET(req) {
     const stateCode  = regionToStateCode(branchData.region)
     const branchCode = autoBranchCode(branchName)
 
-    const [tmpPrfNo, { extNo, challan }, internalNo] = await Promise.all([
-      generateTmpPrfNo(supabase, branchName),
-      generateExternalNo(supabase, branchCode, stateCode),
-      movementType === 'INTERNAL' ? generateInternalNo(supabase, branchCode) : Promise.resolve(null),
-    ])
+    // Mirror create_consignment logic exactly so preview == actual generated value.
+    const tmpPrfNo = await generateTmpPrfNo(supabase, branchName)
+
+    let extNo = null, internalNo = null, challan = null
+    if (movementType === 'INTERNAL') {
+      const { internalNo: seq, voucher } = await generateIssueVoucherNo(supabase, branchCode, stateCode)
+      internalNo = seq
+      challan    = voucher
+    } else {
+      const ext = await generateExternalNo(supabase, branchCode, stateCode)
+      extNo   = ext.extNo
+      challan = ext.challan
+    }
 
     return Response.json({
       tmp_prf_no:  tmpPrfNo,

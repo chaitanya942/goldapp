@@ -9,7 +9,7 @@ const THEMES = {
   light: { bg: '#f5f0e8', card: '#ede8dc', text1: '#1a1208', text3: '#8a7a5a', text4: '#b0a080', gold: '#9a7228', border: '#e0dace', green: '#2a8a5a' },
 }
 
-const EMPTY_FORM = { name: '', opening_date: '', state: '', region: '', cluster: '', model_type: 'outside_bangalore', branch_code: '', address: '', city: '', pin_code: '', branch_gstin: '', crm_branch_id: '', pickup_time: '', is_hub: false, hub_branch_name: '' }
+const EMPTY_FORM = { name: '', opening_date: '', state: '', region: '', cluster: '', model_type: 'outside_bangalore', branch_code: '', address: '', city: '', pin_code: '', branch_gstin: '', crm_branch_id: '', pickup_time: '' }
 
 export default function BranchManagement() {
   const { theme, loadBranches } = useApp()
@@ -142,8 +142,6 @@ export default function BranchManagement() {
       branch_gstin: b.branch_gstin || '',
       crm_branch_id: b.crm_branch_id || '',
       pickup_time: b.pickup_time || '',
-      is_hub: !!b.is_hub,
-      hub_branch_name: b.hub_branch_name || '',
     })
     setEditId(b.id); setFormOpen(true); setMsg('')
     window.scrollTo({ top: 0, behavior: 'smooth' })
