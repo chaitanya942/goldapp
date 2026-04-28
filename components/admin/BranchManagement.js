@@ -120,7 +120,6 @@ export default function BranchManagement() {
       branch_gstin: form.branch_gstin || null,
       pickup_time: form.pickup_time || null,
       is_hub: !!form.is_hub,
-      hub_branch_name: form.is_hub ? null : (form.hub_branch_name || null),
     }
     const { error } = editId
       ? await supabase.from('branches').update(payload).eq('id', editId)
@@ -401,29 +400,15 @@ export default function BranchManagement() {
                 <div style={{ fontSize: '.6rem', color: t.text4, marginTop: '4px' }}>Shown in Branch Stock Overview · free-form text</div>
               </div>
 
-              <div style={{ marginTop: '16px', display: 'grid', gridTemplateColumns: '1fr 2fr', gap: '16px', alignItems: 'flex-start' }}>
-                <div>
-                  <label style={s.label}>Acts as Hub?</label>
-                  <div style={{ display: 'flex', gap: '6px' }}>
-                    <button type="button" onClick={() => setField('is_hub', true)}
-                      style={{ ...s.input, cursor: 'pointer', textAlign: 'center', background: form.is_hub ? `${t.green}25` : t.card2, border: `1px solid ${form.is_hub ? t.green : t.border}`, color: form.is_hub ? t.green : t.text3, fontWeight: form.is_hub ? 700 : 400, padding: '8px 12px' }}>Yes — Hub</button>
-                    <button type="button" onClick={() => setField('is_hub', false)}
-                      style={{ ...s.input, cursor: 'pointer', textAlign: 'center', background: !form.is_hub ? `${t.gold}20` : t.card2, border: `1px solid ${!form.is_hub ? t.gold : t.border}`, color: !form.is_hub ? t.gold : t.text3, fontWeight: !form.is_hub ? 700 : 400, padding: '8px 12px' }}>No</button>
-                  </div>
-                  <div style={{ fontSize: '.6rem', color: t.text4, marginTop: '4px' }}>Hubs collect inventory from nearby branches before HO pickup</div>
+              <div style={{ marginTop: '16px' }}>
+                <label style={s.label}>Acts as Hub?</label>
+                <div style={{ display: 'flex', gap: '6px', maxWidth: '320px' }}>
+                  <button type="button" onClick={() => setField('is_hub', true)}
+                    style={{ ...s.input, cursor: 'pointer', textAlign: 'center', background: form.is_hub ? `${t.green}25` : t.card2, border: `1px solid ${form.is_hub ? t.green : t.border}`, color: form.is_hub ? t.green : t.text3, fontWeight: form.is_hub ? 700 : 400, padding: '8px 12px' }}>Yes — Hub</button>
+                  <button type="button" onClick={() => setField('is_hub', false)}
+                    style={{ ...s.input, cursor: 'pointer', textAlign: 'center', background: !form.is_hub ? `${t.gold}20` : t.card2, border: `1px solid ${!form.is_hub ? t.gold : t.border}`, color: !form.is_hub ? t.gold : t.text3, fontWeight: !form.is_hub ? 700 : 400, padding: '8px 12px' }}>No</button>
                 </div>
-                {!form.is_hub && (
-                  <div>
-                    <label style={s.label}>Ships Via Hub (optional)</label>
-                    <select style={s.input} value={form.hub_branch_name} onChange={e => setField('hub_branch_name', e.target.value)}>
-                      <option value="" style={{ background: t.card }}>— Direct to HO —</option>
-                      {branches
-                        .filter(b => b.is_hub && b.name !== form.name && b.region === form.region)
-                        .map(b => <option key={b.id} value={b.name} style={{ background: t.card }}>{b.name}</option>)}
-                    </select>
-                    <div style={{ fontSize: '.6rem', color: t.text4, marginTop: '4px' }}>If set, this branch transfers inventory to the chosen hub before HO. Showing hubs in same region.</div>
-                  </div>
-                )}
+                <div style={{ fontSize: '.6rem', color: t.text4, marginTop: '4px' }}>Hubs collect inventory from nearby branches before HO pickup. The destination hub is chosen at consignment creation time, not pre-assigned.</div>
               </div>
             </>
           )}

@@ -61,6 +61,8 @@ export default function ConsignmentData() {
   const [creating,             setCreating]             = useState(false)
   const [moveType,             setMoveType]             = useState('EXTERNAL')
   const [destBranch,           setDestBranch]           = useState('')
+  const [destSearch,           setDestSearch]           = useState('')
+  const [destOpen,             setDestOpen]             = useState(false)
   const [ewayBillNo,           setEwayBillNo]           = useState('')
   const [showModal,            setShowModal]            = useState(false)
   const [lastConsignment,      setLastConsignment]      = useState(null)
@@ -98,21 +100,15 @@ export default function ConsignmentData() {
     }
   }, [consignmentDeepLink])
 
-  // Auto-suggest hub & default move type whenever the selected source branch changes
+  // Default move type when source branch changes — hubs always go Direct → HO.
+  // For non-hubs we leave it as EXTERNAL by default; user picks hub manually if needed.
   useEffect(() => {
-    if (selectedBranches.length !== 1) return
+    if (selectedBranches.length !== 1) { setDestBranch(''); setDestSearch(''); return }
     const src = branches.find(b => b.name === selectedBranches[0])
-    if (!src) return
-    if (src.is_hub) {
-      // Hubs go directly to HO
+    if (src?.is_hub) {
       setMoveType('EXTERNAL')
       setDestBranch('')
-    } else if (src.hub_branch_name) {
-      setMoveType('INTERNAL')
-      setDestBranch(src.hub_branch_name)
-    } else {
-      setMoveType('EXTERNAL')
-      setDestBranch('')
+      setDestSearch('')
     }
   }, [selectedBranches[0], branches])
 
@@ -671,7 +667,12 @@ export default function ConsignmentData() {
             {(() => {
               const src      = branches.find(b => b.name === selectedBranches[0])
               const isHub    = !!src?.is_hub
-              const hubsInRegion = branches.filter(b => b.is_hub && b.name !== selectedBranches[0] && b.region === src?.region)
+              const allHubs  = branches.filter(b => b.is_hub && b.name !== selectedBranches[0])
+              const filteredHubs = destSearch
+                ? allHubs.filter(b =>
+                    b.name.toLowerCase().includes(destSearch.toLowerCase()) ||
+                    (b.region || '').toLowerCase().includes(destSearch.toLowerCase()))
+                : allHubs
 
               return (
                 <>
@@ -684,11 +685,11 @@ export default function ConsignmentData() {
                         boxShadow: moveType === 'EXTERNAL' ? '0 1px 4px rgba(0,0,0,.2)' : 'none' }}>
                       Direct → HO
                     </button>
-                    <button type="button" onClick={() => setMoveType('INTERNAL')} disabled={isHub || hubsInRegion.length === 0}
-                      title={isHub ? 'Hubs ship directly to HO' : hubsInRegion.length === 0 ? 'No hubs configured in this region' : ''}
+                    <button type="button" onClick={() => setMoveType('INTERNAL')} disabled={isHub || allHubs.length === 0}
+                      title={isHub ? 'Hubs ship directly to HO' : allHubs.length === 0 ? 'No hubs configured yet — mark a branch as hub in Branch Management' : ''}
                       style={{ flex: 1, padding: '8px', border: 'none', borderRadius: '7px',
-                        cursor: isHub || hubsInRegion.length === 0 ? 'not-allowed' : 'pointer',
-                        opacity: isHub || hubsInRegion.length === 0 ? 0.4 : 1,
+                        cursor: isHub || allHubs.length === 0 ? 'not-allowed' : 'pointer',
+                        opacity: isHub || allHubs.length === 0 ? 0.4 : 1,
                         background: moveType === 'INTERNAL' ? t.card : 'transparent',
                         color: moveType === 'INTERNAL' ? t.purple : t.text3, fontWeight: moveType === 'INTERNAL' ? 700 : 500, fontSize: '11px',
                         boxShadow: moveType === 'INTERNAL' ? '0 1px 4px rgba(0,0,0,.2)' : 'none' }}>
@@ -696,16 +697,33 @@ export default function ConsignmentData() {
                     </button>
                   </div>
 
-                  {/* Hub picker (INTERNAL only) */}
+                  {/* Hub typeahead (INTERNAL only) */}
                   {moveType === 'INTERNAL' && (
-                    <div style={{ marginBottom: '14px' }}>
+                    <div style={{ marginBottom: '14px', position: 'relative' }}>
                       <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: '5px', fontWeight: 600 }}>Destination Hub</div>
-                      <select value={destBranch} onChange={e => setDestBranch(e.target.value)}
-                        style={{ width: '100%', background: t.card2, border: `1px solid ${destBranch ? t.purple + '60' : t.border2}`, borderRadius: '8px', padding: '10px 12px', fontSize: '12px', color: t.text1, outline: 'none' }}>
-                        <option value="">— Select hub —</option>
-                        {hubsInRegion.map(b => <option key={b.id} value={b.name}>{b.name} ({b.region})</option>)}
-                      </select>
-                      <div style={{ fontSize: '10px', color: t.text4, marginTop: '4px' }}>Bills will move to this hub on receive. Issue Voucher will be generated.</div>
+                      <input
+                        value={destBranch && !destOpen ? destBranch : destSearch}
+                        onFocus={() => { setDestOpen(true); setDestSearch('') }}
+                        onChange={e => { setDestSearch(e.target.value); setDestBranch(''); setDestOpen(true) }}
+                        placeholder="Type to search hubs…"
+                        style={{ width: '100%', background: t.card2, border: `1px solid ${destBranch ? t.purple + '60' : t.border2}`, borderRadius: '8px', padding: '10px 12px', fontSize: '12px', color: t.text1, outline: 'none', boxSizing: 'border-box' }} />
+                      {destOpen && (
+                        <div style={{ position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0, background: t.card, border: `1px solid ${t.border2}`, borderRadius: '8px', maxHeight: '200px', overflowY: 'auto', zIndex: 10, boxShadow: '0 8px 24px rgba(0,0,0,.4)' }}>
+                          {filteredHubs.length === 0 ? (
+                            <div style={{ padding: '14px', fontSize: '12px', color: t.text4, textAlign: 'center' }}>No hubs match</div>
+                          ) : filteredHubs.map(b => (
+                            <div key={b.id}
+                              onClick={() => { setDestBranch(b.name); setDestSearch(''); setDestOpen(false) }}
+                              style={{ padding: '9px 12px', cursor: 'pointer', fontSize: '12px', color: t.text1, borderBottom: `1px solid ${t.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+                              onMouseEnter={e => e.currentTarget.style.background = `${t.purple}10`}
+                              onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                              <span style={{ fontWeight: 500 }}>{b.name}</span>
+                              <span style={{ fontSize: '10px', color: t.text4 }}>{b.region}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      <div style={{ fontSize: '10px', color: t.text4, marginTop: '4px' }}>Pick any hub. On receive, bills move to that hub. Issue Voucher will be generated.</div>
                     </div>
                   )}
 
