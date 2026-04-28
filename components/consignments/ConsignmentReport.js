@@ -95,7 +95,9 @@ export default function ConsignmentReport() {
 
   async function download(type, id, filename) {
     setDownloading(type)
-    const url = type === 'report' ? `/api/generate-consignee-report?id=${id}` : `/api/generate-challan-pdf?id=${id}`
+    const url = type === 'report'  ? `/api/generate-consignee-report?id=${id}`
+              : type === 'voucher' ? `/api/generate-issue-voucher-pdf?id=${id}`
+              :                      `/api/generate-challan-pdf?id=${id}`
     await triggerDownload(url, filename, msg => setToast({ msg, type: 'error' }))
     setDownloading(null)
   }
@@ -285,10 +287,17 @@ export default function ConsignmentReport() {
                     {updating ? '…' : detailMeta.nextLabel}
                   </button>
                 )}
-                <button disabled={!!downloading} onClick={() => download('challan', selected, `${detail?.challan_no?.replace(/\//g,'-')}.pdf`)}
-                  style={{ ...btnGold, padding: '5px 11px', fontSize: '11px', opacity: downloading === 'challan' ? .6 : 1 }}>
-                  {downloading === 'challan' ? '⏳…' : '📄 Challan'}
-                </button>
+                {detail?.movement_type === 'INTERNAL' ? (
+                  <button disabled={!!downloading} onClick={() => download('voucher', selected, `${(detail?.tmp_prf_no || 'voucher').replace(/\//g,'-')}_voucher.pdf`)}
+                    style={{ ...btnGold, padding: '5px 11px', fontSize: '11px', opacity: downloading === 'voucher' ? .6 : 1 }}>
+                    {downloading === 'voucher' ? '⏳…' : '📄 Issue Voucher'}
+                  </button>
+                ) : (
+                  <button disabled={!!downloading} onClick={() => download('challan', selected, `${detail?.challan_no?.replace(/\//g,'-')}.pdf`)}
+                    style={{ ...btnGold, padding: '5px 11px', fontSize: '11px', opacity: downloading === 'challan' ? .6 : 1 }}>
+                    {downloading === 'challan' ? '⏳…' : '📄 Challan'}
+                  </button>
+                )}
                 {detail?.status !== 'draft' && (
                   <button disabled={!!downloading} onClick={() => download('report', selected, `GoldConsigneeReport-${detail?.tmp_prf_no}.jpg`)}
                     style={{ ...btnOut, padding: '5px 11px', fontSize: '11px', opacity: downloading === 'report' ? .6 : 1 }}>

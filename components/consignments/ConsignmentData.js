@@ -206,10 +206,10 @@ export default function ConsignmentData() {
   async function downloadDoc(c, kind) {
     setDownloadingId(c.id + ':' + kind)
     const url      = kind === 'report'  ? `/api/generate-consignee-report?id=${c.id}`
-                   : kind === 'voucher' ? `/api/generate-challan-pdf?id=${c.id}`     // voucher reuses challan PDF
+                   : kind === 'voucher' ? `/api/generate-issue-voucher-pdf?id=${c.id}`
                    :                       `/api/generate-challan-pdf?id=${c.id}`
     const filename = kind === 'report'  ? `GoldConsigneeReport-${c.tmp_prf_no}.jpg`
-                   : kind === 'voucher' ? `${(c.challan_no || c.tmp_prf_no || 'voucher').replace(/\//g,'-')}.pdf`
+                   : kind === 'voucher' ? `${(c.tmp_prf_no || 'voucher').replace(/\//g,'-')}_voucher.pdf`
                    :                       `${(c.challan_no || c.tmp_prf_no || 'challan').replace(/\//g,'-')}.pdf`
     await triggerDownload(url, filename, msg => setToast({ msg, type: 'error' }))
     setDownloadingId(null)
@@ -244,6 +244,19 @@ export default function ConsignmentData() {
   const BillPicker = () => {
     const branchInfo = branches.find(b => b.name === nav.branch)
     const rColor     = REGION_COLORS[branchInfo?.region] || t.text3
+    const isHub      = !!branchInfo?.is_hub
+
+    // Hub consolidation: group bills by their original branch (transferred-in vs hub's own)
+    const sourceCounts = visibleBills.reduce((acc, p) => {
+      const origin = p.branch_name
+      if (!acc[origin]) acc[origin] = { count: 0, wt: 0 }
+      acc[origin].count++
+      acc[origin].wt += parseFloat(p.net_weight || 0)
+      return acc
+    }, {})
+    const sourceList = Object.entries(sourceCounts).sort((a, b) => b[1].count - a[1].count)
+    const transferredIn = isHub ? sourceList.filter(([n]) => n !== nav.branch) : []
+
     return (
       <>
         {/* Branch header */}
@@ -251,14 +264,38 @@ export default function ConsignmentData() {
           <button onClick={() => { setNav(null); setSelected(new Set()) }} style={btnOut}>← Back</button>
           <div style={{ width: '4px', height: '36px', background: rColor, borderRadius: '4px' }} />
           <div style={{ flex: 1 }}>
-            <div style={{ fontSize: '15px', fontWeight: 600, color: t.text1 }}>{nav.branch}</div>
-            <div style={{ fontSize: '11px', color: rColor, marginTop: '2px' }}>{branchInfo?.region}{branchInfo?.is_hub ? ' · HUB' : ''}</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span style={{ fontSize: '15px', fontWeight: 600, color: t.text1 }}>{nav.branch}</span>
+              {isHub && <span style={{ fontSize: '10px', color: t.green, background: `${t.green}18`, borderRadius: '5px', padding: '2px 8px', fontWeight: 700, letterSpacing: '.05em' }}>HUB</span>}
+            </div>
+            <div style={{ fontSize: '11px', color: rColor, marginTop: '2px' }}>{branchInfo?.region}</div>
           </div>
           <div style={{ display: 'flex', gap: '20px', fontSize: '11px', color: t.text3 }}>
             <span><span style={{ color: t.text4 }}>Bills:</span> <strong style={{ color: t.text1 }}>{visibleBills.length}</strong></span>
             <span><span style={{ color: t.text4 }}>Selected:</span> <strong style={{ color: t.gold }}>{selected.size}</strong></span>
           </div>
         </div>
+
+        {/* Hub consolidation summary — shows source breakdown */}
+        {isHub && transferredIn.length > 0 && (
+          <div style={{ ...card, padding: '12px 18px', borderLeft: `3px solid ${t.green}` }}>
+            <div style={{ fontSize: '10px', color: t.green, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: '8px', fontWeight: 700 }}>
+              Hub Consolidation · {visibleBills.length} bills from {sourceList.length} source{sourceList.length !== 1 ? 's' : ''}
+            </div>
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+              {sourceList.map(([origin, stats]) => {
+                const isOwn = origin === nav.branch
+                return (
+                  <div key={origin} style={{ background: isOwn ? `${t.gold}12` : `${t.purple}12`, border: `1px solid ${isOwn ? t.gold + '40' : t.purple + '40'}`, borderRadius: '7px', padding: '6px 10px', fontSize: '11px' }}>
+                    <span style={{ color: isOwn ? t.gold : t.purple, fontWeight: 600 }}>{origin}</span>
+                    {isOwn && <span style={{ color: t.text4, fontSize: '9px', marginLeft: '4px' }}>(own)</span>}
+                    <span style={{ color: t.text3, marginLeft: '8px' }}>{stats.count} bills · {fmtWt(stats.wt)}</span>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )}
 
         {/* Controls */}
         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
@@ -300,17 +337,18 @@ export default function ConsignmentData() {
                   <th style={{ padding: '10px 14px', background: t.card2, borderBottom: `1px solid ${t.border}`, width: '36px' }}>
                     <input type="checkbox" checked={allSelected} onChange={toggleAll} style={{ cursor: 'pointer', accentColor: t.gold }} />
                   </th>
-                  {['Date','Customer','App ID','Net Wt','Amount','Age','Type'].map(h => (
+                  {['Date', ...(isHub ? ['Origin'] : []), 'Customer','App ID','Net Wt','Amount','Age','Type'].map(h => (
                     <th key={h} style={{ padding: '10px 14px', fontSize: '10px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', textAlign: h === 'Net Wt' || h === 'Amount' ? 'right' : 'left', background: t.card2, borderBottom: `1px solid ${t.border}`, whiteSpace: 'nowrap', fontWeight: 600 }}>{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {visibleBills.length === 0 ? (
-                  <tr><td colSpan={8} style={{ padding: '48px', textAlign: 'center', color: t.text4, fontSize: '13px' }}>No bills available at this branch</td></tr>
+                  <tr><td colSpan={isHub ? 9 : 8} style={{ padding: '48px', textAlign: 'center', color: t.text4, fontSize: '13px' }}>No bills available at this branch</td></tr>
                 ) : visibleBills.map(row => {
-                  const isSel = selected.has(row.id)
-                  const days  = daysSince(row.purchase_date)
+                  const isSel    = selected.has(row.id)
+                  const days     = daysSince(row.purchase_date)
+                  const fromOther = isHub && row.branch_name !== nav.branch
                   return (
                     <tr key={row.id} onClick={() => toggleRow(row.id)}
                       style={{ borderBottom: `1px solid ${t.border}15`, background: isSel ? `${t.gold}08` : 'transparent', cursor: 'pointer' }}
@@ -320,6 +358,15 @@ export default function ConsignmentData() {
                         <input type="checkbox" checked={isSel} onChange={() => toggleRow(row.id)} style={{ cursor: 'pointer', accentColor: t.gold }} />
                       </td>
                       <td style={{ padding: '10px 14px', fontSize: '12px', color: t.text3, whiteSpace: 'nowrap' }}>{fmtDate(row.purchase_date)}</td>
+                      {isHub && (
+                        <td style={{ padding: '10px 14px' }}>
+                          {fromOther ? (
+                            <span title="Transferred in from this branch" style={{ background: `${t.purple}18`, color: t.purple, borderRadius: '5px', padding: '2px 8px', fontSize: '10px', fontWeight: 600, whiteSpace: 'nowrap' }}>↩ {row.branch_name}</span>
+                          ) : (
+                            <span style={{ color: t.text4, fontSize: '11px' }}>own</span>
+                          )}
+                        </td>
+                      )}
                       <td style={{ padding: '10px 14px', fontSize: '12px', color: t.text1, maxWidth: '160px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.customer_name}</td>
                       <td style={{ padding: '10px 14px', fontSize: '11px', color: t.text4, fontFamily: 'monospace' }}>{row.application_id}</td>
                       <td style={{ padding: '10px 14px', fontSize: '13px', color: t.gold, textAlign: 'right', fontWeight: 600, fontFamily: 'monospace' }}>{fmtWt(row.net_weight)}</td>
