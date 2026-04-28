@@ -27,10 +27,10 @@ const fmtWt   = (n) => n != null ? `${Number(n).toFixed(3)}g` : '—'
 const fmtDate = (d) => d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'
 const fmtTS   = (d) => d ? new Date(d).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—'
 
+// Status visualisation only — receive lives in the future Inventory Audit module.
 const STATUS_META = {
-  draft:      { color: '#c9981f', label: 'Draft',      next: 'dispatch',  nextLabel: '↑ Mark Dispatched', nextColor: '#3a8fbf' },
-  dispatched: { color: '#3a8fbf', label: 'Dispatched', next: 'receive',   nextLabel: '✓ Mark Received',   nextColor: '#3aaa6a' },
-  received:   { color: '#3aaa6a', label: 'Received',   next: null },
+  dispatched: { color: '#3a8fbf', label: 'In Transit' },
+  received:   { color: '#3aaa6a', label: 'Received at HO' },
 }
 
 export default function ConsignmentReport() {
@@ -49,7 +49,6 @@ export default function ConsignmentReport() {
   const [filterDateTo,    setFilterDateTo]    = useState('')
   const [search,          setSearch]          = useState('')
   const [downloading,     setDownloading]     = useState(null)
-  const [updating,        setUpdating]        = useState(false)
   const [toast,           setToast]           = useState(null)
 
   useEffect(() => { fetchConsignments() }, [])
@@ -76,22 +75,6 @@ export default function ConsignmentReport() {
   }
 
   function handleSelect(c) { setSelected(c.id); fetchDetail(c.id) }
-
-  async function updateStatus(action) {
-    if (!selected) return
-    setUpdating(true)
-    try {
-      const res  = await fetch('/api/consignments', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action, id: selected }),
-      })
-      const data = await res.json()
-      if (data.error) { setToast({ msg: data.error, type: 'error' }); return }
-      setToast({ msg: `Marked as ${action === 'dispatch' ? 'dispatched' : 'received'}`, type: 'success' })
-      await fetchConsignments()
-      await fetchDetail(selected)
-    } finally { setUpdating(false) }
-  }
 
   async function download(type, id, filename) {
     setDownloading(type)
@@ -136,8 +119,6 @@ export default function ConsignmentReport() {
   const btnOut  = { background: 'transparent', border: `1px solid ${t.border2}`, borderRadius: '8px', padding: '7px 14px', fontSize: '12px', color: t.text3, cursor: 'pointer' }
   const btnGold = { background: t.gold, color: '#1a0a00', border: 'none', borderRadius: '8px', padding: '7px 16px', fontSize: '12px', fontWeight: 700, cursor: 'pointer' }
 
-  const detailMeta = detail ? STATUS_META[detail.status] : null
-
   return (
     <div style={{ padding: '22px 28px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
 
@@ -175,7 +156,7 @@ export default function ConsignmentReport() {
               <div key={status} onClick={() => setFilterStatus(filterStatus === status ? '' : status)}
                 style={{ flex: 1, padding: '10px 12px', background: filterStatus === status ? `${meta.color}18` : t.card2, borderRadius: '8px', border: `1px solid ${filterStatus === status ? meta.color + '40' : t.border}`, cursor: 'pointer', textAlign: 'center', transition: 'all .15s' }}>
                 <div style={{ fontSize: '18px', fontWeight: 300, color: meta.color, fontFamily: 'monospace' }}>{byStatus[status] || 0}</div>
-                <div style={{ fontSize: '10px', color: t.text4, marginTop: '2px', textTransform: 'capitalize' }}>{status}</div>
+                <div style={{ fontSize: '10px', color: t.text4, marginTop: '2px' }}>{meta.label}</div>
               </div>
             ))}
           </div>
@@ -259,7 +240,7 @@ export default function ConsignmentReport() {
                       <td style={{ padding: '10px 12px', fontSize: '12px', color: t.text2, textAlign: 'right', fontFamily: 'monospace', whiteSpace: 'nowrap' }}>{fmtWt(c.total_net_wt)}</td>
                       <td style={{ padding: '10px 12px', fontSize: '12px', color: t.text2, textAlign: 'right', fontFamily: 'monospace', whiteSpace: 'nowrap' }}>₹{fmt(Math.round(c.total_amount))}</td>
                       <td style={{ padding: '10px 12px' }}>
-                        <span style={{ fontSize: '10px', color: sm.color, background: `${sm.color}18`, borderRadius: '5px', padding: '2px 8px', fontWeight: 600, textTransform: 'capitalize' }}>{c.status}</span>
+                        <span style={{ fontSize: '10px', color: sm.color || t.text4, background: `${sm.color || t.text4}18`, borderRadius: '5px', padding: '2px 8px', fontWeight: 600, whiteSpace: 'nowrap' }}>{sm.label || c.status}</span>
                       </td>
                       <td style={{ padding: '10px 12px', fontSize: '11px', color: t.text4, whiteSpace: 'nowrap' }}>{fmtTS(c.created_at)}</td>
                     </tr>
@@ -279,14 +260,8 @@ export default function ConsignmentReport() {
                 <div style={{ fontSize: '13px', fontWeight: 700, color: t.gold, fontFamily: 'monospace' }}>{detail?.tmp_prf_no || '…'}</div>
                 <button onClick={() => { setSelected(null); setDetail(null) }} style={{ background: 'transparent', border: 'none', color: t.text4, cursor: 'pointer', fontSize: '16px', lineHeight: 1 }}>×</button>
               </div>
-              {/* Action buttons */}
+              {/* Action buttons — receive flow lives in Inventory Audit module */}
               <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                {detailMeta?.next && (
-                  <button disabled={updating} onClick={() => updateStatus(detailMeta.next)}
-                    style={{ background: detailMeta.nextColor, color: '#fff', border: 'none', borderRadius: '7px', padding: '6px 12px', fontSize: '11px', fontWeight: 600, cursor: updating ? 'not-allowed' : 'pointer', opacity: updating ? .6 : 1 }}>
-                    {updating ? '…' : detailMeta.nextLabel}
-                  </button>
-                )}
                 {detail?.movement_type === 'INTERNAL' ? (
                   <button disabled={!!downloading} onClick={() => download('voucher', selected, `${(detail?.tmp_prf_no || 'voucher').replace(/\//g,'-')}_voucher.pdf`)}
                     style={{ ...btnGold, padding: '5px 11px', fontSize: '11px', opacity: downloading === 'voucher' ? .6 : 1 }}>

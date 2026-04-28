@@ -109,11 +109,12 @@ export default function ConsignmentAnalytics() {
     (new Date(c.received_at) - new Date(c.created_at)) / 86400000)
   const avgTransit = transitDays.length ? (transitDays.reduce((a, b) => a + b, 0) / transitDays.length) : 0
 
-  // Status counts
+  // Status counts — only In Transit (dispatched) and Received now;
+  // draft no longer used (creation = in transit), receive set by Inventory Audit module.
   const byStatus = consignments.reduce((acc, c) => {
     acc[c.status] = (acc[c.status] || 0) + 1
     return acc
-  }, { draft: 0, dispatched: 0, received: 0 })
+  }, { dispatched: 0, received: 0 })
 
   // Type split
   const byType = consignments.reduce((acc, c) => {
@@ -240,7 +241,7 @@ export default function ConsignmentAnalytics() {
               { label: 'At Branch (Now)',       value: fmt(stockNow.at_branch),       sub: fmtWt(stockNow.at_branch_wt),       color: t.gold,   bg: `${t.gold}06` },
               { label: 'In Consignment (Now)',  value: fmt(stockNow.in_consignment),  sub: fmtWt(stockNow.in_consignment_wt),  color: t.orange, bg: `${t.orange}06` },
               { label: 'Stock Value (At Branch)', value: fmtCr(stockNow.at_branch_val), sub: 'gross purchase value',          color: t.blue,   bg: `${t.blue}06` },
-              { label: 'Active Consignments',   value: fmt(byStatus.draft + byStatus.dispatched), sub: `${byStatus.draft} draft · ${byStatus.dispatched} en route`, color: t.green, bg: `${t.green}06` },
+              { label: 'Active Consignments',   value: fmt(byStatus.dispatched), sub: 'in transit to HO', color: t.green, bg: `${t.green}06` },
             ].map(k => (
               <div key={k.label} style={{ ...card, padding: '14px 18px', background: k.bg, borderLeft: `3px solid ${k.color}` }}>
                 <div style={{ fontSize: '9px', color: k.color, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: '6px', fontWeight: 600 }}>{k.label}</div>
@@ -321,9 +322,8 @@ export default function ConsignmentAnalytics() {
             <div style={{ ...card, padding: '18px 22px' }}>
               <div style={{ fontSize: '11px', color: t.text3, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 600, marginBottom: '14px' }}>Status Funnel</div>
               {[
-                { k: 'draft',      label: 'Draft',      color: t.orange },
-                { k: 'dispatched', label: 'Dispatched', color: t.blue },
-                { k: 'received',   label: 'Received',   color: t.green },
+                { k: 'dispatched', label: 'In Transit',     color: t.blue  },
+                { k: 'received',   label: 'Received at HO', color: t.green },
               ].map(s => {
                 const v   = byStatus[s.k] || 0
                 const max = Math.max(...Object.values(byStatus), 1)
