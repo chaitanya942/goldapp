@@ -12,9 +12,10 @@ const NAV_ITEMS = [
   },
   { id: 'consignments', label: 'Consignments', icon: 'M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4', desc: 'In transit',
     children: [
-      { id: 'consignment-overview', label: 'Branch Stock',       dot: '#3aaa6a' },
-      { id: 'consignment-data',    label: 'Consignment Data',   dot: '#c9a84c' },
-      { id: 'consignment-report',  label: 'Consignment Report', dot: '#3a8fbf' },
+      { id: 'consignment-overview',  label: 'Branch Stock',         dot: '#3aaa6a' },
+      { id: 'consignment-data',      label: 'Consignment Data',     dot: '#c9a84c' },
+      { id: 'consignment-report',    label: 'Consignment Report',   dot: '#3a8fbf' },
+      { id: 'consignment-analytics', label: 'Movement Analytics',   dot: '#8c5ac8' },
     ]
   },
   { id: 'melting', label: 'Melting', icon: 'M17.657 18.657A8 8 0 016.343 7.343S7 9 9 10c0-2 .5-5 2.986-7C14 5 16.09 5.777 17.656 7.343A7.975 7.975 0 0120 13a7.975 7.975 0 01-2.343 5.657z', desc: 'Processing' },
