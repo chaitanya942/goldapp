@@ -60,6 +60,8 @@ export default function ConsignmentData() {
   const [search,               setSearch]               = useState('')
   const [creating,             setCreating]             = useState(false)
   const [moveType,             setMoveType]             = useState('EXTERNAL')
+  const [destBranch,           setDestBranch]           = useState('')
+  const [ewayBillNo,           setEwayBillNo]           = useState('')
   const [showModal,            setShowModal]            = useState(false)
   const [lastConsignment,      setLastConsignment]      = useState(null)
   const [dismissWarning,       setDismissWarning]       = useState(false)
@@ -95,6 +97,24 @@ export default function ConsignmentData() {
       setConsignmentDeepLink(null)
     }
   }, [consignmentDeepLink])
+
+  // Auto-suggest hub & default move type whenever the selected source branch changes
+  useEffect(() => {
+    if (selectedBranches.length !== 1) return
+    const src = branches.find(b => b.name === selectedBranches[0])
+    if (!src) return
+    if (src.is_hub) {
+      // Hubs go directly to HO
+      setMoveType('EXTERNAL')
+      setDestBranch('')
+    } else if (src.hub_branch_name) {
+      setMoveType('INTERNAL')
+      setDestBranch(src.hub_branch_name)
+    } else {
+      setMoveType('EXTERNAL')
+      setDestBranch('')
+    }
+  }, [selectedBranches[0], branches])
 
   // Fetch branch-specific consignments when drilling into a branch on In Consignment tab
   useEffect(() => {
@@ -181,21 +201,33 @@ export default function ConsignmentData() {
 
   async function handleCreate() {
     if (!selected.size || selectedBranches.length !== 1) return
+    if (moveType === 'INTERNAL' && !destBranch) {
+      setToast({ msg: 'Select a destination hub before creating', type: 'error' })
+      return
+    }
     const branchName = selectedBranches[0]
     const branchInfo = branchSummary.find(b => b.branch === branchName)
     setCreating(true)
     try {
       const res = await fetch('/api/consignments', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'create_consignment', purchase_ids: [...selected], branch_name: branchName, movement_type: moveType })
+        body: JSON.stringify({
+          action: 'create_consignment',
+          purchase_ids: [...selected],
+          branch_name: branchName,
+          movement_type: moveType,
+          dest_branch: moveType === 'INTERNAL' ? destBranch : null,
+          eway_bill_no: ewayBillNo || null,
+        }),
       })
       const result = await res.json()
       if (result.error) { setToast({ msg: result.error, type: 'error' }); return }
       setLastConsignment(result.data)
       setSelected(new Set())
       setShowModal(false)
+      setDestBranch('')
+      setEwayBillNo('')
       await fetchAll()
-      // Auto-navigate: switch to In Consignment tab at this branch
       setTab('in_consignment')
       setNav({ type: 'branch', branch: branchName, fromRegion: branchInfo?.region })
     } finally { setCreating(false) }
@@ -636,20 +668,75 @@ export default function ConsignmentData() {
             <div style={{ fontSize: '16px', fontWeight: 600, color: t.text1, marginBottom: '6px' }}>Confirm Consignment</div>
             <div style={{ fontSize: '12px', color: t.text3, marginBottom: '22px' }}>Review and confirm before creating.</div>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '18px' }}>
-              {[
-                ['Branch', selectedBranches[0]],
-                ['Bills', `${selected.size} bills`],
-                ['Net Weight', fmtWt(totalSelWt)],
-                ['Amount', `₹${fmt(Math.round(totalSelAmt))}`],
-                ['Movement', moveType === 'EXTERNAL' ? 'External — Branch → HO' : 'Internal — Branch → Hub'],
-              ].map(([label, value]) => (
-                <div key={label} style={{ display: 'flex', justifyContent: 'space-between', padding: '9px 14px', background: t.card2, borderRadius: '8px' }}>
-                  <span style={{ fontSize: '12px', color: t.text3 }}>{label}</span>
-                  <span style={{ fontSize: '12px', color: t.text1, fontWeight: 600 }}>{value}</span>
-                </div>
-              ))}
-            </div>
+            {(() => {
+              const src      = branches.find(b => b.name === selectedBranches[0])
+              const isHub    = !!src?.is_hub
+              const hubsInRegion = branches.filter(b => b.is_hub && b.name !== selectedBranches[0] && b.region === src?.region)
+
+              return (
+                <>
+                  {/* Movement type selector — disabled when source is a hub */}
+                  <div style={{ display: 'flex', gap: '6px', marginBottom: '14px', padding: '4px', background: t.card2, borderRadius: '9px' }}>
+                    <button type="button" onClick={() => setMoveType('EXTERNAL')}
+                      style={{ flex: 1, padding: '8px', border: 'none', borderRadius: '7px', cursor: 'pointer',
+                        background: moveType === 'EXTERNAL' ? t.card : 'transparent',
+                        color: moveType === 'EXTERNAL' ? t.gold : t.text3, fontWeight: moveType === 'EXTERNAL' ? 700 : 500, fontSize: '11px',
+                        boxShadow: moveType === 'EXTERNAL' ? '0 1px 4px rgba(0,0,0,.2)' : 'none' }}>
+                      Direct → HO
+                    </button>
+                    <button type="button" onClick={() => setMoveType('INTERNAL')} disabled={isHub || hubsInRegion.length === 0}
+                      title={isHub ? 'Hubs ship directly to HO' : hubsInRegion.length === 0 ? 'No hubs configured in this region' : ''}
+                      style={{ flex: 1, padding: '8px', border: 'none', borderRadius: '7px',
+                        cursor: isHub || hubsInRegion.length === 0 ? 'not-allowed' : 'pointer',
+                        opacity: isHub || hubsInRegion.length === 0 ? 0.4 : 1,
+                        background: moveType === 'INTERNAL' ? t.card : 'transparent',
+                        color: moveType === 'INTERNAL' ? t.purple : t.text3, fontWeight: moveType === 'INTERNAL' ? 700 : 500, fontSize: '11px',
+                        boxShadow: moveType === 'INTERNAL' ? '0 1px 4px rgba(0,0,0,.2)' : 'none' }}>
+                      Via Hub → HO
+                    </button>
+                  </div>
+
+                  {/* Hub picker (INTERNAL only) */}
+                  {moveType === 'INTERNAL' && (
+                    <div style={{ marginBottom: '14px' }}>
+                      <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: '5px', fontWeight: 600 }}>Destination Hub</div>
+                      <select value={destBranch} onChange={e => setDestBranch(e.target.value)}
+                        style={{ width: '100%', background: t.card2, border: `1px solid ${destBranch ? t.purple + '60' : t.border2}`, borderRadius: '8px', padding: '10px 12px', fontSize: '12px', color: t.text1, outline: 'none' }}>
+                        <option value="">— Select hub —</option>
+                        {hubsInRegion.map(b => <option key={b.id} value={b.name}>{b.name} ({b.region})</option>)}
+                      </select>
+                      <div style={{ fontSize: '10px', color: t.text4, marginTop: '4px' }}>Bills will move to this hub on receive. Issue Voucher will be generated.</div>
+                    </div>
+                  )}
+
+                  {/* Summary rows */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '14px' }}>
+                    {[
+                      ['Source',       selectedBranches[0]],
+                      moveType === 'INTERNAL' ? ['Destination', destBranch || '— select above —'] : ['Destination', 'Head Office'],
+                      ['Bills',        `${selected.size}`],
+                      ['Net Weight',   fmtWt(totalSelWt)],
+                      ['Amount',       `₹${fmt(Math.round(totalSelAmt))}`],
+                      ['Document',     moveType === 'EXTERNAL' ? 'Delivery Challan' : 'Issue Voucher'],
+                    ].map(([label, value]) => (
+                      <div key={label} style={{ display: 'flex', justifyContent: 'space-between', padding: '9px 14px', background: t.card2, borderRadius: '8px' }}>
+                        <span style={{ fontSize: '12px', color: t.text3 }}>{label}</span>
+                        <span style={{ fontSize: '12px', color: t.text1, fontWeight: 600 }}>{value}</span>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* E-Way Bill (optional) — only for EXTERNAL */}
+                  {moveType === 'EXTERNAL' && (
+                    <div style={{ marginBottom: '14px' }}>
+                      <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: '5px', fontWeight: 600 }}>E-Way Bill No <span style={{ textTransform: 'none', fontWeight: 400 }}>(optional)</span></div>
+                      <input value={ewayBillNo} onChange={e => setEwayBillNo(e.target.value)} placeholder="Enter E-Way Bill number"
+                        style={{ width: '100%', background: t.card2, border: `1px solid ${t.border2}`, borderRadius: '8px', padding: '9px 12px', fontSize: '12px', color: t.text1, outline: 'none', boxSizing: 'border-box' }} />
+                    </div>
+                  )}
+                </>
+              )
+            })()}
 
             {loadingPreview ? (
               <div style={{ fontSize: '11px', color: t.text4, marginBottom: '18px', padding: '11px 14px', background: `${t.gold}08`, borderRadius: '8px', border: `1px solid ${t.gold}20`, textAlign: 'center' }}>Generating preview numbers…</div>

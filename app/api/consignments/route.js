@@ -7,6 +7,7 @@ import {
   generateTmpPrfNo,
   generateExternalNo,
   generateInternalNo,
+  generateIssueVoucherNo,
 } from '../../../lib/consignmentUtils'
 
 const supabase = createClient(
@@ -26,19 +27,20 @@ export async function GET(req) {
     const todayIST = `${now.getUTCFullYear()}-${String(now.getUTCMonth()+1).padStart(2,'0')}-${String(now.getUTCDate()).padStart(2,'0')}`
 
     // Fetch today's purchases (all approved, any stock_status) — separate from pending
+    // Use current_branch when set, fall back to branch_name (pre-Phase B rows)
     const { data: todayPurchases, error: tErr } = await supabase
       .from('purchases')
-      .select('branch_name, purchase_date, gross_weight, net_weight, total_amount')
+      .select('branch_name, current_branch, purchase_date, gross_weight, net_weight, total_amount')
       .eq('crm_status', 'approved')
       .eq('is_deleted', false)
       .eq('purchase_date', todayIST)
 
     if (tErr) return Response.json({ data: [], error: tErr.message })
 
-    // Fetch pending stock = at_branch from before today
+    // Pending stock = at_branch (incl. transferred-in at hub) before today
     const { data: pendingPurchases, error: pErr } = await supabase
       .from('purchases')
-      .select('branch_name, purchase_date, gross_weight, net_weight, total_amount')
+      .select('branch_name, current_branch, purchase_date, gross_weight, net_weight, total_amount')
       .eq('stock_status', 'at_branch')
       .eq('crm_status', 'approved')
       .eq('is_deleted', false)
@@ -94,7 +96,8 @@ export async function GET(req) {
     }
 
     for (const row of purchases || []) {
-      const key = row.branch_name
+      // Use current_branch (physical location) when set, fall back to branch_name
+      const key = row.current_branch || row.branch_name
       if (!outsideBranches.has(key)) continue
       const s = summary[key]
       if (!s) continue
@@ -132,7 +135,7 @@ export async function GET(req) {
   if (action === 'branches') {
     const { data, error } = await supabase
       .from('branches')
-      .select('id, name, state, region, cluster, model_type, address, city, pin_code, contact_person, contact_phone, branch_gstin')
+      .select('id, name, state, region, cluster, model_type, address, city, pin_code, contact_person, contact_phone, branch_gstin, is_hub, hub_branch_name, pickup_time')
       .eq('is_active', true)
       .neq('region', 'Bangalore')
       .order('region')
@@ -155,25 +158,29 @@ export async function GET(req) {
     const dateFrom = searchParams.get('date_from')
     const dateTo   = searchParams.get('date_to')
 
-    // Get outside-Bangalore branch names
     const { data: outsideBranches } = await supabase
       .from('branches')
       .select('name')
       .eq('is_active', true)
       .neq('region', 'Bangalore')
-
     const outsideNames = (outsideBranches || []).map(b => b.name)
 
+    // Filter by current_branch (physical location). For older rows where current_branch
+    // is null we fall back to branch_name. The OR captures both cases.
     let query = supabase
       .from('purchases')
       .select('*')
       .eq('stock_status', 'at_branch')
       .eq('crm_status', 'approved')
       .eq('is_deleted', false)
-      .in('branch_name', outsideNames)
       .order('purchase_date', { ascending: false })
 
-    if (branch)   query = query.eq('branch_name', branch)
+    if (branch) {
+      query = query.or(`current_branch.eq.${branch},and(current_branch.is.null,branch_name.eq.${branch})`)
+    } else {
+      // Limit to outside branches only — match on whichever location field is populated
+      query = query.or(`current_branch.in.(${outsideNames.map(n => `"${n}"`).join(',')}),and(current_branch.is.null,branch_name.in.(${outsideNames.map(n => `"${n}"`).join(',')}))`)
+    }
     if (dateFrom) query = query.gte('purchase_date', dateFrom)
     if (dateTo)   query = query.lte('purchase_date', dateTo)
 
@@ -223,14 +230,13 @@ export async function GET(req) {
 
     const { data: purchases } = await supabase
       .from('purchases')
-      .select('branch_name, stock_status, net_weight, total_amount')
+      .select('branch_name, current_branch, stock_status, net_weight, total_amount')
       .eq('is_deleted', false)
       .in('stock_status', ['at_branch', 'in_consignment'])
-      .in('branch_name', Object.keys(branchMeta))
 
     const summary = {}
     for (const row of purchases || []) {
-      const key  = row.branch_name
+      const key  = row.current_branch || row.branch_name
       const meta = branchMeta[key]
       if (!meta) continue
       if (!summary[key]) {
@@ -305,14 +311,22 @@ export async function POST(req) {
 
   // ── Create consignment ───────────────────────────────────────────────────
   if (action === 'create_consignment') {
-    const { purchase_ids, branch_name, movement_type, created_by } = body
+    const { purchase_ids, branch_name, movement_type, dest_branch, eway_bill_no, created_by } = body
     if (!purchase_ids?.length) return Response.json({ error: 'No purchases selected' }, { status: 400 })
     if (!branch_name)          return Response.json({ error: 'Branch name required' },  { status: 400 })
 
-    // Get branch meta from branches table
+    const isInternal = movement_type === 'INTERNAL'
+    if (isInternal && !dest_branch) {
+      return Response.json({ error: 'Destination hub is required for Branch → Hub movements' }, { status: 400 })
+    }
+    if (isInternal && dest_branch === branch_name) {
+      return Response.json({ error: 'Source and destination cannot be the same branch' }, { status: 400 })
+    }
+
+    // Source branch meta
     const { data: branchData, error: branchErr } = await supabase
       .from('branches')
-      .select('name, region, state')
+      .select('name, region, state, is_hub')
       .eq('name', branch_name)
       .single()
 
@@ -320,19 +334,32 @@ export async function POST(req) {
       return Response.json({ error: `Branch '${branch_name}' not found in branch master` }, { status: 400 })
     }
 
+    // Destination branch meta (for INTERNAL only)
+    let destData = null
+    if (isInternal) {
+      const { data, error } = await supabase
+        .from('branches')
+        .select('name, region, is_hub')
+        .eq('name', dest_branch)
+        .single()
+      if (error || !data) return Response.json({ error: `Destination branch '${dest_branch}' not found` }, { status: 400 })
+      if (!data.is_hub)  return Response.json({ error: `Destination '${dest_branch}' is not configured as a hub` }, { status: 400 })
+      destData = data
+    }
+
     const stateCode  = regionToStateCode(branchData.region)
     const branchCode = autoBranchCode(branch_name)
 
-    // Validate all selected purchases belong to this branch
+    // Validate selected purchases are currently at this branch (use current_branch with branch_name fallback)
     const { data: purchaseCheck } = await supabase
       .from('purchases')
-      .select('id, branch_name, stock_status')
+      .select('id, branch_name, current_branch, stock_status')
       .in('id', purchase_ids)
 
-    const wrongBranch = (purchaseCheck || []).filter(p => p.branch_name !== branch_name)
+    const wrongBranch = (purchaseCheck || []).filter(p => (p.current_branch || p.branch_name) !== branch_name)
     if (wrongBranch.length) {
       return Response.json({
-        error: `${wrongBranch.length} purchase(s) do not belong to branch '${branch_name}'. All items must be from the same branch.`,
+        error: `${wrongBranch.length} purchase(s) are not currently at '${branch_name}'.`,
       }, { status: 400 })
     }
 
@@ -343,11 +370,22 @@ export async function POST(req) {
       }, { status: 400 })
     }
 
-    const tmpPrfNo           = await generateTmpPrfNo(supabase, branch_name)
-    const { extNo, challan } = await generateExternalNo(supabase, branchCode, stateCode)
-    const internalNo         = movement_type === 'INTERNAL' ? await generateInternalNo(supabase, branchCode) : null
+    const tmpPrfNo = await generateTmpPrfNo(supabase, branch_name)
 
-    // Totals — reuse the already-fetched purchases
+    // Number generation depends on movement type:
+    //   EXTERNAL (Branch→HO or Hub→HO): challan_no
+    //   INTERNAL (Branch→Hub):           issue voucher (stored in internal_no, displayed via challan_no field as voucher)
+    let extNo = null, challan = null, internalNo = null
+    if (isInternal) {
+      const { internalNo: seq, voucher } = await generateIssueVoucherNo(supabase, branchCode, stateCode)
+      internalNo = seq
+      challan    = voucher  // reuse challan_no column to store the voucher identifier
+    } else {
+      const ext = await generateExternalNo(supabase, branchCode, stateCode)
+      extNo   = ext.extNo
+      challan = ext.challan
+    }
+
     const { data: purchaseTotals } = await supabase
       .from('purchases')
       .select('net_weight, total_amount')
@@ -359,7 +397,7 @@ export async function POST(req) {
     const { data: consignment, error: ce } = await supabase
       .from('consignments')
       .insert({
-        consignment_no: challan,          // legacy NOT NULL column — use challan as unique ID
+        consignment_no: challan,
         tmp_prf_no:    tmpPrfNo,
         external_no:   extNo,
         internal_no:   internalNo,
@@ -368,6 +406,8 @@ export async function POST(req) {
         branch_code:   branchCode,
         state_code:    stateCode,
         movement_type: movement_type || 'EXTERNAL',
+        dest_branch:   isInternal ? dest_branch : null,
+        eway_bill_no:  eway_bill_no || null,
         status:        'draft',
         total_bills:   purchase_ids.length,
         total_net_wt:  totalNetWt,
@@ -379,12 +419,10 @@ export async function POST(req) {
 
     if (ce) return Response.json({ error: ce.message }, { status: 500 })
 
-    // Link items
     await supabase.from('consignment_items').insert(
       purchase_ids.map(pid => ({ consignment_id: consignment.id, purchase_id: pid, added_by: created_by }))
     )
 
-    // Move purchases to in_consignment
     await supabase.from('purchases')
       .update({ stock_status: 'in_consignment', dispatched_at: new Date().toISOString() })
       .in('id', purchase_ids)
@@ -411,33 +449,37 @@ export async function POST(req) {
   if (action === 'receive') {
     const { id, received_by } = body
 
-    // Validate: must be in dispatched status to receive
-    const { data: current } = await supabase.from('consignments').select('status').eq('id', id).single()
+    const { data: current } = await supabase.from('consignments')
+      .select('status, movement_type, dest_branch')
+      .eq('id', id).single()
     if (current?.status !== 'dispatched') {
       return Response.json({ error: `Cannot receive — consignment is '${current?.status}', must be 'dispatched'` }, { status: 400 })
     }
 
-    // Get all purchase IDs in this consignment
     const { data: items } = await supabase
       .from('consignment_items')
       .select('purchase_id')
       .eq('consignment_id', id)
-
     const purchaseIds = (items || []).map(i => i.purchase_id)
 
-    // Update consignment status
     const { data, error } = await supabase
       .from('consignments')
       .update({ status: 'received', received_at: new Date().toISOString(), received_by })
       .eq('id', id).select().single()
-
     if (error) return Response.json({ error: error.message }, { status: 500 })
 
-    // Move purchases to at_ho
     if (purchaseIds.length) {
-      await supabase.from('purchases')
-        .update({ stock_status: 'at_ho' })
-        .in('id', purchaseIds)
+      // INTERNAL (Branch → Hub): bills now live at the hub. Reset to at_branch + update current_branch.
+      // EXTERNAL (Branch → HO or Hub → HO): bills land at HO.
+      if (current.movement_type === 'INTERNAL' && current.dest_branch) {
+        await supabase.from('purchases')
+          .update({ stock_status: 'at_branch', current_branch: current.dest_branch })
+          .in('id', purchaseIds)
+      } else {
+        await supabase.from('purchases')
+          .update({ stock_status: 'at_ho' })
+          .in('id', purchaseIds)
+      }
     }
 
     return Response.json({ data })

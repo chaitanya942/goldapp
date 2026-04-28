@@ -9,7 +9,7 @@ const THEMES = {
   light: { bg: '#f5f0e8', card: '#ede8dc', text1: '#1a1208', text3: '#8a7a5a', text4: '#b0a080', gold: '#9a7228', border: '#e0dace', green: '#2a8a5a' },
 }
 
-const EMPTY_FORM = { name: '', opening_date: '', state: '', region: '', cluster: '', model_type: 'outside_bangalore', branch_code: '', address: '', city: '', pin_code: '', branch_gstin: '', crm_branch_id: '', pickup_time: '' }
+const EMPTY_FORM = { name: '', opening_date: '', state: '', region: '', cluster: '', model_type: 'outside_bangalore', branch_code: '', address: '', city: '', pin_code: '', branch_gstin: '', crm_branch_id: '', pickup_time: '', is_hub: false, hub_branch_name: '' }
 
 export default function BranchManagement() {
   const { theme, loadBranches } = useApp()
@@ -119,6 +119,8 @@ export default function BranchManagement() {
       pin_code: form.pin_code || null,
       branch_gstin: form.branch_gstin || null,
       pickup_time: form.pickup_time || null,
+      is_hub: !!form.is_hub,
+      hub_branch_name: form.is_hub ? null : (form.hub_branch_name || null),
     }
     const { error } = editId
       ? await supabase.from('branches').update(payload).eq('id', editId)
@@ -142,6 +144,8 @@ export default function BranchManagement() {
       branch_gstin: b.branch_gstin || '',
       crm_branch_id: b.crm_branch_id || '',
       pickup_time: b.pickup_time || '',
+      is_hub: !!b.is_hub,
+      hub_branch_name: b.hub_branch_name || '',
     })
     setEditId(b.id); setFormOpen(true); setMsg('')
     window.scrollTo({ top: 0, behavior: 'smooth' })
@@ -389,12 +393,39 @@ export default function BranchManagement() {
           </div>
 
           {form.model_type === 'outside_bangalore' && (
-            <div style={{ marginTop: '16px' }}>
-              <label style={s.label}>Logistics Pickup Time</label>
-              <input style={s.input} placeholder="e.g. Mon/Wed/Fri 4 PM"
-                value={form.pickup_time} onChange={e => setField('pickup_time', e.target.value)} />
-              <div style={{ fontSize: '.6rem', color: t.text4, marginTop: '4px' }}>Shown in Branch Stock Overview · free-form text</div>
-            </div>
+            <>
+              <div style={{ marginTop: '16px' }}>
+                <label style={s.label}>Logistics Pickup Time</label>
+                <input style={s.input} placeholder="e.g. Mon/Wed/Fri 4 PM"
+                  value={form.pickup_time} onChange={e => setField('pickup_time', e.target.value)} />
+                <div style={{ fontSize: '.6rem', color: t.text4, marginTop: '4px' }}>Shown in Branch Stock Overview · free-form text</div>
+              </div>
+
+              <div style={{ marginTop: '16px', display: 'grid', gridTemplateColumns: '1fr 2fr', gap: '16px', alignItems: 'flex-start' }}>
+                <div>
+                  <label style={s.label}>Acts as Hub?</label>
+                  <div style={{ display: 'flex', gap: '6px' }}>
+                    <button type="button" onClick={() => setField('is_hub', true)}
+                      style={{ ...s.input, cursor: 'pointer', textAlign: 'center', background: form.is_hub ? `${t.green}25` : t.card2, border: `1px solid ${form.is_hub ? t.green : t.border}`, color: form.is_hub ? t.green : t.text3, fontWeight: form.is_hub ? 700 : 400, padding: '8px 12px' }}>Yes — Hub</button>
+                    <button type="button" onClick={() => setField('is_hub', false)}
+                      style={{ ...s.input, cursor: 'pointer', textAlign: 'center', background: !form.is_hub ? `${t.gold}20` : t.card2, border: `1px solid ${!form.is_hub ? t.gold : t.border}`, color: !form.is_hub ? t.gold : t.text3, fontWeight: !form.is_hub ? 700 : 400, padding: '8px 12px' }}>No</button>
+                  </div>
+                  <div style={{ fontSize: '.6rem', color: t.text4, marginTop: '4px' }}>Hubs collect inventory from nearby branches before HO pickup</div>
+                </div>
+                {!form.is_hub && (
+                  <div>
+                    <label style={s.label}>Ships Via Hub (optional)</label>
+                    <select style={s.input} value={form.hub_branch_name} onChange={e => setField('hub_branch_name', e.target.value)}>
+                      <option value="" style={{ background: t.card }}>— Direct to HO —</option>
+                      {branches
+                        .filter(b => b.is_hub && b.name !== form.name && b.region === form.region)
+                        .map(b => <option key={b.id} value={b.name} style={{ background: t.card }}>{b.name}</option>)}
+                    </select>
+                    <div style={{ fontSize: '.6rem', color: t.text4, marginTop: '4px' }}>If set, this branch transfers inventory to the chosen hub before HO. Showing hubs in same region.</div>
+                  </div>
+                )}
+              </div>
+            </>
           )}
 
           {/* Address */}
