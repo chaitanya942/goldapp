@@ -334,16 +334,16 @@ export async function POST(req) {
       return Response.json({ error: `Branch '${branch_name}' not found in branch master` }, { status: 400 })
     }
 
-    // Destination branch meta (for INTERNAL only)
+    // Destination branch meta (for INTERNAL only).
+    // Any branch can act as a hub for a given consignment — no pre-marking required.
     let destData = null
     if (isInternal) {
       const { data, error } = await supabase
         .from('branches')
-        .select('name, region, is_hub')
+        .select('name, region')
         .eq('name', dest_branch)
         .single()
       if (error || !data) return Response.json({ error: `Destination branch '${dest_branch}' not found` }, { status: 400 })
-      if (!data.is_hub)  return Response.json({ error: `Destination '${dest_branch}' is not configured as a hub` }, { status: 400 })
       destData = data
     }
 

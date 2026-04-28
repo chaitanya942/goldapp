@@ -119,7 +119,6 @@ export default function BranchManagement() {
       pin_code: form.pin_code || null,
       branch_gstin: form.branch_gstin || null,
       pickup_time: form.pickup_time || null,
-      is_hub: !!form.is_hub,
     }
     const { error } = editId
       ? await supabase.from('branches').update(payload).eq('id', editId)
@@ -392,25 +391,12 @@ export default function BranchManagement() {
           </div>
 
           {form.model_type === 'outside_bangalore' && (
-            <>
-              <div style={{ marginTop: '16px' }}>
-                <label style={s.label}>Logistics Pickup Time</label>
-                <input style={s.input} placeholder="e.g. Mon/Wed/Fri 4 PM"
-                  value={form.pickup_time} onChange={e => setField('pickup_time', e.target.value)} />
-                <div style={{ fontSize: '.6rem', color: t.text4, marginTop: '4px' }}>Shown in Branch Stock Overview · free-form text</div>
-              </div>
-
-              <div style={{ marginTop: '16px' }}>
-                <label style={s.label}>Acts as Hub?</label>
-                <div style={{ display: 'flex', gap: '6px', maxWidth: '320px' }}>
-                  <button type="button" onClick={() => setField('is_hub', true)}
-                    style={{ ...s.input, cursor: 'pointer', textAlign: 'center', background: form.is_hub ? `${t.green}25` : t.card2, border: `1px solid ${form.is_hub ? t.green : t.border}`, color: form.is_hub ? t.green : t.text3, fontWeight: form.is_hub ? 700 : 400, padding: '8px 12px' }}>Yes — Hub</button>
-                  <button type="button" onClick={() => setField('is_hub', false)}
-                    style={{ ...s.input, cursor: 'pointer', textAlign: 'center', background: !form.is_hub ? `${t.gold}20` : t.card2, border: `1px solid ${!form.is_hub ? t.gold : t.border}`, color: !form.is_hub ? t.gold : t.text3, fontWeight: !form.is_hub ? 700 : 400, padding: '8px 12px' }}>No</button>
-                </div>
-                <div style={{ fontSize: '.6rem', color: t.text4, marginTop: '4px' }}>Hubs collect inventory from nearby branches before HO pickup. The destination hub is chosen at consignment creation time, not pre-assigned.</div>
-              </div>
-            </>
+            <div style={{ marginTop: '16px' }}>
+              <label style={s.label}>Logistics Pickup Time</label>
+              <input style={s.input} placeholder="e.g. Mon/Wed/Fri 4 PM"
+                value={form.pickup_time} onChange={e => setField('pickup_time', e.target.value)} />
+              <div style={{ fontSize: '.6rem', color: t.text4, marginTop: '4px' }}>Shown in Branch Stock Overview · free-form text</div>
+            </div>
           )}
 
           {/* Address */}

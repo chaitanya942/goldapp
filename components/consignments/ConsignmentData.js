@@ -111,9 +111,8 @@ export default function ConsignmentData() {
   // Reset hub destination when source branch changes
   useEffect(() => {
     if (!nav?.branch) { setDestBranch(''); setDestSearch(''); return }
-    const src = branches.find(b => b.name === nav.branch)
-    if (src?.is_hub) { setMoveType('EXTERNAL'); setDestBranch(''); setDestSearch('') }
-  }, [nav?.branch, branches])
+    setDestBranch(''); setDestSearch('')
+  }, [nav?.branch])
 
   // ── Bill picker filtering / selection ─────────────────────────────────────
   function getBillsForBranch() {
@@ -550,12 +549,12 @@ export default function ConsignmentData() {
             <div style={{ fontSize: '12px', color: t.text3, marginBottom: '22px' }}>Review and confirm before creating.</div>
 
             {(() => {
-              const src      = branches.find(b => b.name === nav?.branch)
-              const isHub    = !!src?.is_hub
-              const allHubs  = branches.filter(b => b.is_hub && b.name !== nav?.branch)
-              const filteredHubs = destSearch
-                ? allHubs.filter(b => b.name.toLowerCase().includes(destSearch.toLowerCase()) || (b.region || '').toLowerCase().includes(destSearch.toLowerCase()))
-                : allHubs
+              // Any outside-Bangalore branch can act as a hub for this specific consignment.
+              // No pre-marking required — user picks freely each time.
+              const candidateHubs = branches.filter(b => b.name !== nav?.branch)
+              const filteredHubs  = destSearch
+                ? candidateHubs.filter(b => b.name.toLowerCase().includes(destSearch.toLowerCase()) || (b.region || '').toLowerCase().includes(destSearch.toLowerCase()))
+                : candidateHubs
 
               return (
                 <>
@@ -567,11 +566,11 @@ export default function ConsignmentData() {
                         boxShadow: moveType === 'EXTERNAL' ? '0 1px 4px rgba(0,0,0,.2)' : 'none' }}>
                       Direct → HO
                     </button>
-                    <button type="button" onClick={() => setMoveType('INTERNAL')} disabled={isHub || allHubs.length === 0}
-                      title={isHub ? 'Hubs ship directly to HO' : allHubs.length === 0 ? 'No hubs configured yet' : ''}
+                    <button type="button" onClick={() => setMoveType('INTERNAL')} disabled={candidateHubs.length === 0}
+                      title={candidateHubs.length === 0 ? 'No other branches available' : ''}
                       style={{ flex: 1, padding: '8px', border: 'none', borderRadius: '7px',
-                        cursor: isHub || allHubs.length === 0 ? 'not-allowed' : 'pointer',
-                        opacity: isHub || allHubs.length === 0 ? 0.4 : 1,
+                        cursor: candidateHubs.length === 0 ? 'not-allowed' : 'pointer',
+                        opacity: candidateHubs.length === 0 ? 0.4 : 1,
                         background: moveType === 'INTERNAL' ? t.card : 'transparent',
                         color: moveType === 'INTERNAL' ? t.purple : t.text3, fontWeight: moveType === 'INTERNAL' ? 700 : 500, fontSize: '11px',
                         boxShadow: moveType === 'INTERNAL' ? '0 1px 4px rgba(0,0,0,.2)' : 'none' }}>
@@ -586,12 +585,12 @@ export default function ConsignmentData() {
                         value={destBranch && !destOpen ? destBranch : destSearch}
                         onFocus={() => { setDestOpen(true); setDestSearch('') }}
                         onChange={e => { setDestSearch(e.target.value); setDestBranch(''); setDestOpen(true) }}
-                        placeholder="Type to search hubs…"
+                        placeholder="Type to search any branch…"
                         style={{ width: '100%', background: t.card2, border: `1px solid ${destBranch ? t.purple + '60' : t.border2}`, borderRadius: '8px', padding: '10px 12px', fontSize: '12px', color: t.text1, outline: 'none', boxSizing: 'border-box' }} />
                       {destOpen && (
-                        <div style={{ position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0, background: t.card, border: `1px solid ${t.border2}`, borderRadius: '8px', maxHeight: '200px', overflowY: 'auto', zIndex: 10, boxShadow: '0 8px 24px rgba(0,0,0,.4)' }}>
+                        <div style={{ position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0, background: t.card, border: `1px solid ${t.border2}`, borderRadius: '8px', maxHeight: '240px', overflowY: 'auto', zIndex: 10, boxShadow: '0 8px 24px rgba(0,0,0,.4)' }}>
                           {filteredHubs.length === 0 ? (
-                            <div style={{ padding: '14px', fontSize: '12px', color: t.text4, textAlign: 'center' }}>No hubs match</div>
+                            <div style={{ padding: '14px', fontSize: '12px', color: t.text4, textAlign: 'center' }}>No branches match</div>
                           ) : filteredHubs.map(b => (
                             <div key={b.id}
                               onClick={() => { setDestBranch(b.name); setDestSearch(''); setDestOpen(false) }}
