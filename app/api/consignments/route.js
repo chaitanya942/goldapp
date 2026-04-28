@@ -394,6 +394,10 @@ export async function POST(req) {
     const totalNetWt  = (purchaseTotals || []).reduce((s, p) => s + parseFloat(p.net_weight || 0), 0)
     const totalAmount = (purchaseTotals || []).reduce((s, p) => s + parseFloat(p.total_amount || 0), 0)
 
+    // Creation = consignment is in transit. Skip 'draft' state — the user mental
+    // model is "challan/voucher generated → it's moving". Receipt at HO is handled
+    // by a separate module.
+    const nowIso = new Date().toISOString()
     const { data: consignment, error: ce } = await supabase
       .from('consignments')
       .insert({
@@ -408,7 +412,8 @@ export async function POST(req) {
         movement_type: movement_type || 'EXTERNAL',
         dest_branch:   isInternal ? dest_branch : null,
         eway_bill_no:  eway_bill_no || null,
-        status:        'draft',
+        status:        'dispatched',
+        dispatched_at: nowIso,
         total_bills:   purchase_ids.length,
         total_net_wt:  totalNetWt,
         total_amount:  totalAmount,

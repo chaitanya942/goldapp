@@ -35,12 +35,6 @@ const fmtDate = (d) => d ? new Date(d).toLocaleDateString('en-IN', { day: '2-dig
 const fmtTS   = (d) => d ? new Date(d).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—'
 const daysSince = (d) => d ? Math.floor((Date.now() - new Date(d)) / 86400000) : 0
 
-const STATUS_META = {
-  draft:      { color: '#c9981f', label: 'Draft',      next: 'dispatch', nextLabel: '↑ Dispatch',  nextColor: '#3a8fbf' },
-  dispatched: { color: '#3a8fbf', label: 'Dispatched', next: 'receive',  nextLabel: '✓ Receive',   nextColor: '#3aaa6a' },
-  received:   { color: '#3aaa6a', label: 'Received',   next: null },
-}
-
 function AgeBadge({ days, t }) {
   if (days === null || days === undefined) return null
   const color = days > 7 ? t.red : days > 3 ? t.orange : t.green
@@ -71,12 +65,10 @@ export default function ConsignmentData() {
   const [lastConsignment,     setLastConsignment]    = useState(null)
   const [previewNumbers,      setPreviewNumbers]     = useState(null)
   const [loadingPreview,      setLoadingPreview]     = useState(false)
-  const [updatingId,          setUpdatingId]         = useState(null)
   const [downloadingId,       setDownloadingId]      = useState(null)
   const [toast,               setToast]              = useState(null)
 
   // List filters
-  const [filterStatus, setFilterStatus] = useState('')
   const [filterType,   setFilterType]   = useState('')
   const [filterRegion, setFilterRegion] = useState('')
 
@@ -188,20 +180,6 @@ export default function ConsignmentData() {
     } finally { setCreating(false) }
   }
 
-  async function updateStatus(id, action) {
-    setUpdatingId(id)
-    try {
-      const res  = await fetch('/api/consignments', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action, id }),
-      })
-      const data = await res.json()
-      if (data.error) { setToast({ msg: data.error, type: 'error' }); return }
-      setToast({ msg: `Marked as ${action === 'dispatch' ? 'dispatched' : 'received'}`, type: 'success' })
-      await fetchAll()
-    } finally { setUpdatingId(null) }
-  }
-
   async function downloadDoc(c, kind) {
     setDownloadingId(c.id + ':' + kind)
     const url      = kind === 'report'  ? `/api/generate-consignee-report?id=${c.id}`
@@ -216,7 +194,6 @@ export default function ConsignmentData() {
 
   // ── Active consignments filtering ─────────────────────────────────────────
   const filteredCons = consignments.filter(c => {
-    if (filterStatus && c.status        !== filterStatus) return false
     if (filterType   && c.movement_type !== filterType)   return false
     if (filterRegion) {
       const br = branches.find(b => b.name === c.branch_name)
@@ -230,10 +207,9 @@ export default function ConsignmentData() {
   })
 
   // KPIs
-  const kpiInTransit = consignments.reduce((s, c) => s + (c.total_bills || 0), 0)
-  const kpiNetWt     = consignments.reduce((s, c) => s + parseFloat(c.total_net_wt || 0), 0)
-  const kpiDraft     = consignments.filter(c => c.status === 'draft').length
-  const kpiDispatch  = consignments.filter(c => c.status === 'dispatched').length
+  const kpiBills    = filteredCons.reduce((s, c) => s + (c.total_bills || 0), 0)
+  const kpiNetWt    = filteredCons.reduce((s, c) => s + parseFloat(c.total_net_wt || 0), 0)
+  const kpiAmount   = filteredCons.reduce((s, c) => s + parseFloat(c.total_amount || 0), 0)
 
   const card    = { background: t.card, border: `1px solid ${t.border}`, borderRadius: '12px' }
   const btnGold = { background: t.gold, color: '#1a0a00', border: 'none', borderRadius: '8px', padding: '7px 16px', fontSize: '12px', fontWeight: 700, cursor: 'pointer' }
@@ -395,12 +371,6 @@ export default function ConsignmentData() {
           <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search TMP PRF, Challan, Branch…"
             style={{ width: '100%', background: t.card2, border: `1px solid ${t.border2}`, borderRadius: '7px', padding: '7px 10px 7px 28px', fontSize: '12px', color: t.text1, outline: 'none', boxSizing: 'border-box' }} />
         </div>
-        <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)}
-          style={{ background: t.card2, border: `1px solid ${t.border2}`, borderRadius: '7px', padding: '7px 10px', fontSize: '12px', color: t.text2, outline: 'none' }}>
-          <option value="">All Status</option>
-          <option value="draft">Draft</option>
-          <option value="dispatched">Dispatched</option>
-        </select>
         <select value={filterType} onChange={e => setFilterType(e.target.value)}
           style={{ background: t.card2, border: `1px solid ${t.border2}`, borderRadius: '7px', padding: '7px 10px', fontSize: '12px', color: t.text2, outline: 'none' }}>
           <option value="">All Types</option>
@@ -412,8 +382,8 @@ export default function ConsignmentData() {
           <option value="">All Regions</option>
           {[...new Set(branches.map(b => b.region).filter(Boolean))].sort().map(r => <option key={r} value={r}>{r}</option>)}
         </select>
-        {(filterStatus || filterType || filterRegion || search) && (
-          <button onClick={() => { setFilterStatus(''); setFilterType(''); setFilterRegion(''); setSearch('') }} style={btnOut}>Clear</button>
+        {(filterType || filterRegion || search) && (
+          <button onClick={() => { setFilterType(''); setFilterRegion(''); setSearch('') }} style={btnOut}>Clear</button>
         )}
         <div style={{ marginLeft: 'auto', fontSize: '11px', color: t.text4 }}>{filteredCons.length} of {consignments.length}</div>
       </div>
@@ -424,24 +394,22 @@ export default function ConsignmentData() {
           <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '900px' }}>
             <thead style={{ position: 'sticky', top: 0, zIndex: 1 }}>
               <tr>
-                {['TMP PRF', 'Type', 'Source → Destination', 'Bills', 'Net Wt', 'Value', 'Status', 'Created', 'Actions'].map(h => (
+                {['TMP PRF', 'Type', 'Source → Destination', 'Bills', 'Net Wt', 'Value', 'Created', 'Document'].map(h => (
                   <th key={h} style={{ padding: '10px 14px', fontSize: '10px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', textAlign: h === 'Bills' || h === 'Net Wt' || h === 'Value' ? 'right' : 'left', background: t.card2, borderBottom: `1px solid ${t.border}`, whiteSpace: 'nowrap', fontWeight: 600 }}>{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {filteredCons.length === 0 ? (
-                <tr><td colSpan={9} style={{ padding: '64px', textAlign: 'center', color: t.text4, fontSize: '13px' }}>
+                <tr><td colSpan={8} style={{ padding: '64px', textAlign: 'center', color: t.text4, fontSize: '13px' }}>
                   {consignments.length === 0
                     ? 'No active consignments. Use Branch Stock → Move to create one.'
                     : 'No consignments match the filters'}
                 </td></tr>
               ) : filteredCons.map(c => {
-                const sm     = STATUS_META[c.status] || {}
                 const isType = c.movement_type === 'INTERNAL'
                 const tColor = isType ? t.purple : t.orange
                 const isNew  = lastConsignment?.id === c.id
-                const isUpd  = updatingId === c.id
                 return (
                   <tr key={c.id}
                     style={{ borderBottom: `1px solid ${t.border}15`, background: isNew ? `${t.green}08` : 'transparent', transition: 'background .1s' }}
@@ -464,24 +432,13 @@ export default function ConsignmentData() {
                     <td style={{ padding: '11px 14px', fontSize: '12px', color: t.text2, textAlign: 'right' }}>{c.total_bills}</td>
                     <td style={{ padding: '11px 14px', fontSize: '12px', color: t.gold, textAlign: 'right', fontFamily: 'monospace', fontWeight: 600, whiteSpace: 'nowrap' }}>{fmtWt(c.total_net_wt)}</td>
                     <td style={{ padding: '11px 14px', fontSize: '12px', color: t.blue, textAlign: 'right', fontFamily: 'monospace', whiteSpace: 'nowrap' }}>₹{fmt(Math.round(c.total_amount))}</td>
-                    <td style={{ padding: '11px 14px' }}>
-                      <span style={{ fontSize: '10px', color: sm.color, background: `${sm.color}18`, borderRadius: '5px', padding: '2px 8px', fontWeight: 600, textTransform: 'capitalize' }}>{c.status}</span>
-                    </td>
                     <td style={{ padding: '11px 14px', fontSize: '11px', color: t.text4, whiteSpace: 'nowrap' }}>{fmtTS(c.created_at)}</td>
                     <td style={{ padding: '11px 14px' }}>
-                      <div style={{ display: 'flex', gap: '5px', flexWrap: 'wrap' }}>
-                        <button onClick={() => downloadDoc(c, isType ? 'voucher' : 'challan')} disabled={!!downloadingId}
-                          title={isType ? 'Issue Voucher' : 'Delivery Challan'}
-                          style={{ ...btnGold, padding: '4px 10px', fontSize: '10px' }}>
-                          {downloadingId === c.id + ':' + (isType ? 'voucher' : 'challan') ? '⏳' : (isType ? '📄 Voucher' : '📄 Challan')}
-                        </button>
-                        {sm.next && (
-                          <button onClick={() => updateStatus(c.id, sm.next)} disabled={isUpd}
-                            style={{ background: sm.nextColor, color: '#fff', border: 'none', borderRadius: '6px', padding: '4px 10px', fontSize: '10px', fontWeight: 600, cursor: isUpd ? 'not-allowed' : 'pointer', opacity: isUpd ? .6 : 1, whiteSpace: 'nowrap' }}>
-                            {isUpd ? '…' : sm.nextLabel}
-                          </button>
-                        )}
-                      </div>
+                      <button onClick={() => downloadDoc(c, isType ? 'voucher' : 'challan')} disabled={!!downloadingId}
+                        title={isType ? 'Issue Voucher' : 'Delivery Challan'}
+                        style={{ ...btnGold, padding: '4px 10px', fontSize: '10px' }}>
+                        {downloadingId === c.id + ':' + (isType ? 'voucher' : 'challan') ? '⏳' : (isType ? '📄 Voucher' : '📄 Challan')}
+                      </button>
                     </td>
                   </tr>
                 )
@@ -494,11 +451,18 @@ export default function ConsignmentData() {
   )
 
   // ── KPIs ──────────────────────────────────────────────────────────────────
+  const fmtINR = (n) => {
+    if (n == null) return '—'
+    const v = Number(n)
+    if (v >= 1e7) return `₹${(v / 1e7).toFixed(2)}Cr`
+    if (v >= 1e5) return `₹${(v / 1e5).toFixed(2)}L`
+    return `₹${Math.round(v).toLocaleString('en-IN')}`
+  }
   const kpis = [
-    { label: 'Bills In Transit',   value: kpiInTransit,   sub: fmtWt(kpiNetWt),       color: t.orange },
-    { label: 'Draft Consignments', value: kpiDraft,       sub: 'awaiting dispatch',   color: t.blue   },
-    { label: 'Dispatched',         value: kpiDispatch,    sub: 'en route',            color: t.green  },
-    { label: 'Total Active',       value: consignments.length, sub: 'not yet received', color: t.gold },
+    { label: 'Consignments In Transit', value: filteredCons.length, sub: 'in flight',          color: t.orange },
+    { label: 'Bills In Transit',        value: kpiBills,            sub: 'across consignments', color: t.gold   },
+    { label: 'Net Weight',              value: fmtWt(kpiNetWt),     sub: '',                    color: t.blue   },
+    { label: 'Total Value',             value: fmtINR(kpiAmount),   sub: '',                    color: t.green  },
   ]
 
   return (
