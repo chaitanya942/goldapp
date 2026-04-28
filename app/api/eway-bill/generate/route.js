@@ -35,17 +35,36 @@ export async function POST(req) {
 
     const result = await generateEWayBill({ consignment, branch, items: items || [] })
 
-    // ClearTax response shape: { govt_response: { ewbNo, ewbDate, validUpto, ... } }
-    const ewbNo   = result?.govt_response?.ewbNo || result?.ewbNo
-    const ewbDate = result?.govt_response?.ewbDate || result?.ewbDate
+    // Log full response so we can adjust extraction if ClearTax response shape changes
+    console.log('[EWB] ClearTax response:', JSON.stringify(result, null, 2))
 
-    if (ewbNo) {
-      await supabase.from('consignments')
-        .update({ eway_bill_no: String(ewbNo) })
-        .eq('id', consignment_id)
+    // ClearTax/GSTN response uses inconsistent casing — check every plausible path.
+    const sources = [result?.govt_response, result?.data, result?.response, result]
+    const pickFromSrc = (src, keys) => {
+      if (!src || typeof src !== 'object') return null
+      for (const k of keys) {
+        const v = src[k]
+        if (v != null && String(v).trim()) return String(v)
+      }
+      return null
+    }
+    const ewbNo = sources.map(s => pickFromSrc(s, ['ewbNo', 'EwbNo', 'EWB_NO', 'eway_bill_number', 'ewayBillNumber'])).find(Boolean)
+    const ewbDate = sources.map(s => pickFromSrc(s, ['ewbDate', 'EwbDate', 'eway_bill_date'])).find(Boolean)
+
+    if (!ewbNo) {
+      // Generation may have succeeded but we couldn't parse the number — surface raw for debugging
+      return Response.json({
+        success: false,
+        error: 'EWB generated but number could not be extracted from response — see server logs',
+        raw: result,
+      }, { status: 502 })
     }
 
-    return Response.json({ success: true, ewb_no: ewbNo, ewb_date: ewbDate, raw: result })
+    await supabase.from('consignments')
+      .update({ eway_bill_no: String(ewbNo) })
+      .eq('id', consignment_id)
+
+    return Response.json({ success: true, ewb_no: ewbNo, ewb_date: ewbDate })
   } catch (err) {
     console.error('E-Way Bill generate error:', err)
     return Response.json({ error: err.message || 'E-Way Bill generation failed' }, { status: 500 })

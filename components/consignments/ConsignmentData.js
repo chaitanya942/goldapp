@@ -190,8 +190,11 @@ export default function ConsignmentData() {
       })
       const data = await res.json()
       if (!res.ok || data.error) { setToast({ msg: data.error || 'EWB generation failed', type: 'error' }); return }
-      setToast({ msg: `E-Way Bill generated: ${data.ewb_no}`, type: 'success' })
+      setToast({ msg: `E-Way Bill ${data.ewb_no} generated — downloading PDF…`, type: 'success' })
       await fetchAll()
+      // Auto-download the EWB PDF immediately
+      await triggerDownload(`/api/eway-bill/pdf?id=${c.id}`, `EWB_${data.ewb_no}.pdf`,
+        msg => setToast({ msg, type: 'error' }))
     } catch (err) {
       setToast({ msg: err.message || 'EWB generation failed', type: 'error' })
     } finally { setEwbActionId(null) }
