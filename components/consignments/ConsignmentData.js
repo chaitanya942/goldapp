@@ -189,7 +189,16 @@ export default function ConsignmentData() {
         body: JSON.stringify({ consignment_id: c.id }),
       })
       const data = await res.json()
-      if (!res.ok || data.error) { setToast({ msg: data.error || 'E-Invoice generation failed', type: 'error' }); return }
+      if (!res.ok || data.error) {
+        // Dump full debug context to console so it's visible without Railway logs
+        console.group('[E-Invoice] Debug')
+        console.log('Error:', data.error)
+        console.log('ClearTax response:', data.cleartax_response)
+        console.log('Outgoing payload:', data.outgoing_payload)
+        console.groupEnd()
+        setToast({ msg: (data.error || 'E-Invoice failed') + ' — see browser console (F12) for full details', type: 'error' })
+        return
+      }
       setToast({ msg: `E-Invoice generated · IRN: ${String(data.irn).slice(0, 20)}…`, type: 'success' })
       await fetchAll()
     } catch (err) {
