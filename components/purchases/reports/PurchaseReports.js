@@ -11,14 +11,17 @@ import ReportCompare from './ReportCompare'
 import GoldModal from '../../ui/GoldModal'
 import ReportSameDay from './ReportSameDay'
 import ReportCrmInsights from './ReportCrmInsights'
+import ReportComparePeriods from './ReportComparePeriods'
+import ReportUnderperformers from './ReportUnderperformers'
 
 const SECTIONS = [
-  { key: 'charts',       label: 'Trends',       icon: '↗' },
-  { key: 'distribution', label: 'Distribution',  icon: '◎' },
-  { key: 'branches',     label: 'Branches',      icon: '⬡' },
-  { key: 'sameday',      label: 'Same Day',      icon: '⊙' },
-  { key: 'compare',      label: 'Compare',       icon: '⇄' },
-  { key: 'crm',          label: 'CRM Insights',  icon: '⚡' },
+  { key: 'charts',         label: 'Trends',         icon: '↗' },
+  { key: 'distribution',   label: 'Distribution',   icon: '◎' },
+  { key: 'branches',       label: 'Branches',       icon: '⬡' },
+  { key: 'underperformers',label: 'Underperformers',icon: '⚠' },
+  { key: 'sameday',        label: 'Same Day',       icon: '⊙' },
+  { key: 'compare',        label: 'Compare',        icon: '⇄' },
+  { key: 'crm',            label: 'CRM Insights',   icon: '⚡' },
 ]
 
 const istNow = () => new Date(Date.now() + 5.5 * 60 * 60 * 1000)
@@ -595,15 +598,23 @@ export default function PurchaseReports() {
         </div>
       )}
 
+      {/* GA-STYLE COMPARE — always visible at top of sections (skipped when drilling into a single section) */}
+      {!loading && !error && !activeSection && (
+        <div style={{ marginBottom: '14px' }}>
+          <ReportComparePeriods t={t} isMobile={isMobile} fromDate={fromDate} toDate={toDate} filterBranch={filterBranch} filterRegion={filterRegion} filterTxn={filterTxn} branches={allBranchMeta} />
+        </div>
+      )}
+
       {/* SECTIONS */}
       {!loading && !error && (
         <>
-          {showSection('charts')       && <ReportCharts       trend={trend} monthly={monthly} dowData={dowData} hourlyTrend={hourlyTrend} isSingleDay={fromDate && toDate && fromDate === toDate} t={t} fromDate={fromDate} filterBranch={filterBranch} filterTxn={filterTxn} />}
-          {showSection('distribution') && <ReportDistribution kpis={kpis} purityDist={purityDist} weightBuckets={weightBuckets} regionSplit={regionSplit} monthHalf={monthHalf} timeOfDay={timeOfDay} t={t} />}
-          {showSection('branches')     && <ReportBranches     branchData={branchData} allBranchMeta={allBranchMeta} stateData={stateData} topBills={topBills} fromDate={fromDate} toDate={toDate} filterTxn={filterTxn} t={t} />}
-          {showSection('sameday')      && <ReportSameDay      t={t} />}
-          {showSection('compare')      && <ReportCompare      t={t} />}
-          {showSection('crm')          && <ReportCrmInsights  t={t} />}
+          {showSection('charts')          && <ReportCharts          trend={trend} monthly={monthly} dowData={dowData} hourlyTrend={hourlyTrend} isSingleDay={fromDate && toDate && fromDate === toDate} t={t} fromDate={fromDate} filterBranch={filterBranch} filterTxn={filterTxn} />}
+          {showSection('distribution')    && <ReportDistribution    kpis={kpis} purityDist={purityDist} weightBuckets={weightBuckets} regionSplit={regionSplit} monthHalf={monthHalf} timeOfDay={timeOfDay} t={t} />}
+          {showSection('branches')        && <ReportBranches        branchData={branchData} allBranchMeta={allBranchMeta} stateData={stateData} topBills={topBills} fromDate={fromDate} toDate={toDate} filterTxn={filterTxn} t={t} />}
+          {showSection('underperformers') && <ReportUnderperformers t={t} isMobile={isMobile} filterRegion={filterRegion} branches={allBranchMeta} />}
+          {showSection('sameday')         && <ReportSameDay         t={t} />}
+          {showSection('compare')         && <ReportCompare         t={t} />}
+          {showSection('crm')             && <ReportCrmInsights     t={t} />}
         </>
       )}
 

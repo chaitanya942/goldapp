@@ -131,7 +131,8 @@ function PurchaseInline({ t, setActiveNav, canSee }) {
   const [kpis,         setKpis]         = useState(null)
   const [todayKpis,    setTodayKpis]    = useState(null)
   const [stateData,    setStateData]    = useState([])
-  const [topBranches,  setTopBranches]  = useState([])
+  const [topBranches,    setTopBranches]    = useState([])
+  const [bottomBranches, setBottomBranches] = useState([])
   const [branchMeta,   setBranchMeta]   = useState([])
   const [regionCounts, setRegionCounts] = useState({})
   const [trend,        setTrend]        = useState([])
@@ -170,21 +171,30 @@ function PurchaseInline({ t, setActiveNav, canSee }) {
     })
   }, [])
 
-  // Today KPIs + 14-day trend (static, not period-dependent)
+  // Today KPIs + 14-day trend — re-fetch when region/cluster/branch filter changes
   useEffect(() => {
     const todayStr  = istStr()
     const trendFrom = daysBack(13)
+
+    let p_branch = null
+    let p_region_branches = null
+    if (filterType === 'branch' && filterValue) p_branch = filterValue
+    else if (filterType === 'region'  && filterValue) p_region_branches = branchMeta.filter(b => b.region  === filterValue).map(b => b.name)
+    else if (filterType === 'state'   && filterValue) p_region_branches = branchMeta.filter(b => b.state   === filterValue).map(b => b.name)
+    else if (filterType === 'cluster' && filterValue) p_region_branches = branchMeta.filter(b => b.cluster === filterValue).map(b => b.name)
+
+    setTrendLoading(true)
     const ps = []
     if (showKpiCards) {
-      ps.push(supabase.rpc('get_purchase_aggregates', { p_from_date:todayStr, p_to_date:todayStr, p_branch:null, p_txn_type:null, p_region_branches:null, p_single_day:true })
+      ps.push(supabase.rpc('get_purchase_aggregates', { p_from_date:todayStr, p_to_date:todayStr, p_branch, p_txn_type:null, p_region_branches, p_single_day:true })
         .then(({data}) => setTodayKpis(data?.kpis || null)))
     }
     if (showChart) {
-      ps.push(supabase.rpc('get_purchase_aggregates', { p_from_date:trendFrom, p_to_date:todayStr, p_branch:null, p_txn_type:null, p_region_branches:null, p_single_day:false })
+      ps.push(supabase.rpc('get_purchase_aggregates', { p_from_date:trendFrom, p_to_date:todayStr, p_branch, p_txn_type:null, p_region_branches, p_single_day:false })
         .then(({data}) => setTrend(data?.trend || [])))
     }
     Promise.all(ps).catch(()=>{}).finally(()=>setTrendLoading(false))
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [filterType, filterValue, branchMeta]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Period-dependent data
   useEffect(() => { fetchPeriod(); setLastRefresh(new Date()) }, [period, filterType, filterValue]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -234,7 +244,10 @@ function PurchaseInline({ t, setActiveNav, canSee }) {
       groupMap[key].branch_count++
     })
     setStateData(Object.values(groupMap).sort((a, b) => b.total_net - a.total_net))
-    setTopBranches(branchRows.slice(0, 7))
+    const sortedDesc = [...branchRows].sort((a, b) => Number(b.total_net || 0) - Number(a.total_net || 0))
+    setTopBranches(sortedDesc.slice(0, 5))
+    const activeAsc = sortedDesc.filter(b => Number(b.txn_count || 0) > 0).reverse()
+    setBottomBranches(activeAsc.slice(0, 5))
 
     setLoading(false)
   }
@@ -564,11 +577,11 @@ function PurchaseInline({ t, setActiveNav, canSee }) {
           {showTopBranches && (
             <div style={panel}>
               <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16 }}>
-                <div style={panelTitle}>Top Branches</div>
+                <div style={panelTitle}>Top 5 Branches</div>
                 <div style={panelMeta}>Net Weight</div>
               </div>
               {loading
-                ? [0,1,2,3,4,5,6].map(i=><div key={i} style={{ height:26, background:`linear-gradient(90deg,${t.border},${t.border2},${t.border})`, backgroundSize:'200% 100%', borderRadius:4, marginBottom:6, animation:'shimmer 1.5s infinite' }}/>)
+                ? [0,1,2,3,4].map(i=><div key={i} style={{ height:26, background:`linear-gradient(90deg,${t.border},${t.border2},${t.border})`, backgroundSize:'200% 100%', borderRadius:4, marginBottom:6, animation:'shimmer 1.5s infinite' }}/>)
                 : !hasData ? <EmptyPanel t={t} />
                   : topBranches.map((b,i)=>{
                       const region = branchRegionMap[b.branch_name]
@@ -589,6 +602,27 @@ function PurchaseInline({ t, setActiveNav, canSee }) {
                       )
                     })
               }
+              {/* Bottom 5 — separator + list */}
+              {!loading && hasData && bottomBranches.length > 0 && (
+                <>
+                  <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', margin:'22px 0 14px', paddingTop:14, borderTop:`1px solid ${t.border}` }}>
+                    <div style={{ ...panelTitle, color:t.red }}>Bottom 5 Branches</div>
+                    <div style={panelMeta}>active only</div>
+                  </div>
+                  {bottomBranches.map((b,i)=>(
+                    <div key={b.branch_name} style={{ display:'flex', alignItems:'center', gap:8 }}>
+                      <div style={{ width:18, fontSize:10, fontWeight:700, color:t.red, textAlign:'center', flexShrink:0, fontVariantNumeric:'tabular-nums' }}>{i+1}</div>
+                      <div style={{ flex:1, minWidth:0 }}>
+                        <StatRow delay={i*50}
+                          label={b.branch_name} value={`${fmt(b.total_net,1)}g`}
+                          color={t.red} t={t}
+                          bar={Number(b.total_net||0)}
+                          barMax={Math.max(...topBranches.map(x=>Number(x.total_net||0)),1)}/>
+                      </div>
+                    </div>
+                  ))}
+                </>
+              )}
             </div>
           )}
         </div>

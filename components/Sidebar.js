@@ -197,14 +197,12 @@ export default function Sidebar({ sidebarOpen, setSidebarOpen, isMobile }) {
       transform: isMobile && !sidebarOpen ? 'translateX(-100%)' : 'translateX(0)',
     }}>
       <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '120px', background: t.topGlow, pointerEvents: 'none', zIndex: 0 }} />
-      <div style={{ padding: sidebarOpen ? '18px 16px 16px' : '18px 0 16px', display: 'flex', alignItems: 'center', gap: '10px', justifyContent: sidebarOpen ? 'flex-start' : 'center', borderBottom: `1px solid ${t.border}`, flexShrink: 0, position: 'relative', zIndex: 1 }}>
-        <div style={{ width: '34px', height: '34px', flexShrink: 0, borderRadius: '9px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(201,168,76,0.07)', border: `1px solid rgba(201,168,76,0.2)`, boxShadow: '0 2px 12px rgba(201,168,76,0.15)' }}>
-          <img src="/emblem.svg" alt="W" style={{ width: '24px', height: '24px' }} />
-        </div>
-        {(sidebarOpen || isMobile) && (
-          <div>
-            <div style={{ fontSize: '.82rem', fontWeight: 700, color: t.text1, letterSpacing: '.06em', lineHeight: 1.2 }}>White Gold</div>
-            <div style={{ fontSize: '.52rem', color: t.gold, letterSpacing: '.18em', textTransform: 'uppercase', marginTop: '2px', opacity: .75 }}>Operations</div>
+      <div style={{ padding: sidebarOpen ? '14px 14px 14px' : '18px 0 16px', display: 'flex', alignItems: 'center', gap: '10px', justifyContent: sidebarOpen ? 'flex-start' : 'center', borderBottom: `1px solid ${t.border}`, flexShrink: 0, position: 'relative', zIndex: 1 }}>
+        {(sidebarOpen || isMobile) ? (
+          <img src="/logo.png" alt="White Gold" style={{ height: '38px', width: 'auto', maxWidth: '100%', objectFit: 'contain', display: 'block' }} />
+        ) : (
+          <div style={{ width: '34px', height: '34px', flexShrink: 0, borderRadius: '9px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(201,168,76,0.07)', border: `1px solid rgba(201,168,76,0.2)`, boxShadow: '0 2px 12px rgba(201,168,76,0.15)' }}>
+            <img src="/emblem.svg" alt="W" style={{ width: '24px', height: '24px' }} />
           </div>
         )}
       </div>

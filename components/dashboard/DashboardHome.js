@@ -216,7 +216,8 @@ export default function DashboardHome() {
   const [loading,       setLoading]       = useState(true)
   const [kpis,          setKpis]          = useState(null)
   const [stateData,     setStateData]     = useState([])
-  const [topBranches,   setTopBranches]   = useState([])
+  const [topBranches,    setTopBranches]    = useState([])
+  const [bottomBranches, setBottomBranches] = useState([])
   const [branchMeta,    setBranchMeta]    = useState([])
   const [regionCounts,  setRegionCounts]  = useState({})
   const [stateCount,    setStateCount]    = useState(0)
@@ -313,6 +314,7 @@ export default function DashboardHome() {
     setLoading(true)
     setStateData([])
     setTopBranches([])
+    setBottomBranches([])
     const { from, to } = getRange(period)
 
     // Build filter params — all routes use get_purchase_aggregates for consistent data
@@ -351,7 +353,12 @@ export default function DashboardHome() {
       groupMap[key].branch_count++
     })
     setStateData(Object.values(groupMap).sort((a, b) => b.total_net - a.total_net))
-    setTopBranches(branchRows.slice(0, 7))
+    // Top 5 (descending net wt) + Bottom 5 (ascending net wt, only branches with at least 1 txn).
+    // Excluding zero-txn branches keeps "Bottom" meaningful — otherwise bottom is just inactive ones.
+    const sortedDesc = [...branchRows].sort((a, b) => Number(b.total_net || 0) - Number(a.total_net || 0))
+    setTopBranches(sortedDesc.slice(0, 5))
+    const activeAsc = sortedDesc.filter(b => Number(b.txn_count || 0) > 0).reverse()
+    setBottomBranches(activeAsc.slice(0, 5))
     setLoading(false)
   }
 
@@ -771,11 +778,11 @@ export default function DashboardHome() {
               {/* Top Branches */}
               {showTopBranches && <div style={panel}>
                 <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16 }}>
-                  <div style={panelTitle}>Top Branches</div>
+                  <div style={panelTitle}>Top 5 Branches</div>
                   <div style={panelMeta}>Net Weight</div>
                 </div>
                 {loading
-                  ? [0,1,2,3,4,5,6].map(i=><div key={i} style={{ height:26, background:`linear-gradient(90deg,${t.border},${t.border2},${t.border})`, backgroundSize:'200% 100%', borderRadius:4, marginBottom:6, animation:'shimmer 1.5s infinite' }}/>)
+                  ? [0,1,2,3,4].map(i=><div key={i} style={{ height:26, background:`linear-gradient(90deg,${t.border},${t.border2},${t.border})`, backgroundSize:'200% 100%', borderRadius:4, marginBottom:6, animation:'shimmer 1.5s infinite' }}/>)
                   : !hasData
                     ? <EmptyPanel t={t} />
                     : topBranches.map((b,i)=>{
@@ -791,6 +798,23 @@ export default function DashboardHome() {
                         )
                       })
                 }
+                {/* Bottom 5 — separator + list */}
+                {!loading && hasData && bottomBranches.length > 0 && (
+                  <>
+                    <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', margin:'22px 0 14px', paddingTop:14, borderTop:`1px solid ${t.border}` }}>
+                      <div style={{ ...panelTitle, color:t.red }}>Bottom 5 Branches</div>
+                      <div style={panelMeta}>active only</div>
+                    </div>
+                    {bottomBranches.map((b,i)=>(
+                      <StatRow key={b.branch_name} delay={i*50}
+                        label={b.branch_name}
+                        value={`${fmt(b.total_net)}g`}
+                        color={t.red} t={t}
+                        bar={Number(b.total_net||0)}
+                        barMax={Math.max(...topBranches.map(x=>Number(x.total_net||0)),1)}/>
+                    ))}
+                  </>
+                )}
               </div>}
 
             </div>}
