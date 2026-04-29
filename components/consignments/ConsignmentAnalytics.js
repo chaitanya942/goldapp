@@ -42,9 +42,20 @@ function getRange(key) {
   return { from: today, to: today, label: 'Today' }
 }
 
+function useMobile() {
+  const [m, setM] = useState(false)
+  useEffect(() => {
+    const check = () => setM(window.innerWidth < 768)
+    check(); window.addEventListener('resize', check)
+    return () => window.removeEventListener('resize', check)
+  }, [])
+  return m
+}
+
 export default function ConsignmentAnalytics() {
   const { theme } = useApp()
   const t = THEMES[theme]
+  const isMobile = useMobile()
 
   const [period,       setPeriod]       = useState('mtd')
   const [from,         setFrom]         = useState('')
@@ -236,7 +247,7 @@ export default function ConsignmentAnalytics() {
       ) : (
         <>
           {/* Stock-Now snapshot (current state, independent of period) */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '10px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(4, 1fr)', gap: '10px' }}>
             {[
               { label: 'At Branch (Now)',       value: fmt(stockNow.at_branch),       sub: fmtWt(stockNow.at_branch_wt),       color: t.gold,   bg: `${t.gold}06` },
               { label: 'In Consignment (Now)',  value: fmt(stockNow.in_consignment),  sub: fmtWt(stockNow.in_consignment_wt),  color: t.orange, bg: `${t.orange}06` },
@@ -252,7 +263,7 @@ export default function ConsignmentAnalytics() {
           </div>
 
           {/* Period KPIs */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '10px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(5, 1fr)', gap: '10px' }}>
             {[
               { label: 'Consignments', value: fmt(totalCons),                color: t.text1, sub: 'in this period' },
               { label: 'Bills Moved',  value: fmt(totalBills),               color: t.gold,  sub: '' },
@@ -296,7 +307,7 @@ export default function ConsignmentAnalytics() {
           )}
 
           {/* Two-column: Type breakdown + Status funnel */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '10px' }}>
             {/* Type */}
             <div style={{ ...card, padding: '18px 22px' }}>
               <div style={{ fontSize: '11px', color: t.text3, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 600, marginBottom: '14px' }}>Movement Type</div>
@@ -343,7 +354,7 @@ export default function ConsignmentAnalytics() {
           </div>
 
           {/* Two-column: Top branches + Regions */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '10px' }}>
             {/* Top branches */}
             <div style={{ ...card, padding: '18px 22px' }}>
               <div style={{ fontSize: '11px', color: t.text3, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 600, marginBottom: '14px' }}>Top Branches by Weight Moved</div>

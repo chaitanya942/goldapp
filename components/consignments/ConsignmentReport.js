@@ -33,9 +33,20 @@ const STATUS_META = {
   received:   { color: '#3aaa6a', label: 'Received at HO' },
 }
 
+function useMobile() {
+  const [m, setM] = useState(false)
+  useEffect(() => {
+    const check = () => setM(window.innerWidth < 768)
+    check(); window.addEventListener('resize', check)
+    return () => window.removeEventListener('resize', check)
+  }, [])
+  return m
+}
+
 export default function ConsignmentReport() {
   const { theme } = useApp()
   const t = THEMES[theme]
+  const isMobile = useMobile()
 
   const [consignments,    setConsignments]    = useState([])
   const [loading,         setLoading]         = useState(true)
@@ -132,7 +143,7 @@ export default function ConsignmentReport() {
       </div>
 
       {/* KPI row */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '10px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(4, 1fr)', gap: '10px' }}>
         {[
           { label: 'Total Consignments', value: filtered.length,         color: t.text1 },
           { label: 'Total Bills',        value: grandBills,              color: t.gold   },
@@ -147,7 +158,7 @@ export default function ConsignmentReport() {
       </div>
 
       {/* Status + Type breakdown */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '10px' }}>
         {/* Status breakdown */}
         <div style={{ ...card, padding: '14px 18px' }}>
           <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: '12px', fontWeight: 600 }}>Status Breakdown</div>
@@ -205,7 +216,7 @@ export default function ConsignmentReport() {
       </div>
 
       {/* Split view */}
-      <div style={{ display: 'grid', gridTemplateColumns: selected ? '1fr 420px' : '1fr', gap: '12px', alignItems: 'start' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: selected && !isMobile ? '1fr 420px' : '1fr', gap: '12px', alignItems: 'start' }}>
 
         {/* List */}
         <div style={{ ...card, overflow: 'hidden' }}>

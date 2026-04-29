@@ -41,9 +41,20 @@ function AgeBadge({ days, t }) {
   return <span style={{ fontSize: '10px', color, background: `${color}18`, borderRadius: '5px', padding: '2px 7px', fontWeight: 700, letterSpacing: '.02em' }}>{days}d</span>
 }
 
+function useMobile() {
+  const [m, setM] = useState(false)
+  useEffect(() => {
+    const check = () => setM(window.innerWidth < 768)
+    check(); window.addEventListener('resize', check)
+    return () => window.removeEventListener('resize', check)
+  }, [])
+  return m
+}
+
 export default function ConsignmentData() {
   const { theme, consignmentDeepLink, setConsignmentDeepLink } = useApp()
   const t = THEMES[theme]
+  const isMobile = useMobile()
 
   // Mode: null = Active Consignments list,  { type:'branch', branch, fromRegion } = bill picker
   const [nav,                 setNav]                = useState(null)
@@ -610,7 +621,7 @@ export default function ConsignmentData() {
 
       {/* KPIs (only on list view) */}
       {!nav && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1px', background: t.border, borderRadius: '11px', overflow: 'hidden', border: `1px solid ${t.border}` }}>
+        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(4, 1fr)', gap: '1px', background: t.border, borderRadius: '11px', overflow: 'hidden', border: `1px solid ${t.border}` }}>
           {kpis.map(k => (
             <div key={k.label} style={{ background: t.card, padding: '15px 18px' }}>
               <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: '7px', fontWeight: 600 }}>{k.label}</div>

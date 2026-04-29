@@ -65,9 +65,20 @@ const SORT_COLS = [
   { key: 'oldest_age',    label: 'Oldest Bill',     align: 'center' },
 ]
 
+function useMobile() {
+  const [m, setM] = useState(false)
+  useEffect(() => {
+    const check = () => setM(window.innerWidth < 768)
+    check(); window.addEventListener('resize', check)
+    return () => window.removeEventListener('resize', check)
+  }, [])
+  return m
+}
+
 export default function ConsignmentOverview() {
   const { theme, setActiveNav, canSee, setConsignmentDeepLink } = useApp()
   const t = THEMES[theme]
+  const isMobile = useMobile()
 
   const [data,         setData]         = useState([])
   const [loading,      setLoading]      = useState(true)
@@ -200,13 +211,22 @@ export default function ConsignmentOverview() {
         </div>
       </div>
 
-      {/* ── Region Flashcards ── */}
+      {/* ── Region Flashcards — horizontal scroll-snap on mobile ── */}
       {canSee('element.consignment-overview.region_cards') && (
-        <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+        <div style={{
+          display: 'flex', gap: '10px',
+          flexWrap: isMobile ? 'nowrap' : 'wrap',
+          overflowX: isMobile ? 'auto' : 'visible',
+          scrollSnapType: isMobile ? 'x mandatory' : 'none',
+          WebkitOverflowScrolling: 'touch',
+          scrollbarWidth: 'none',
+          margin: isMobile ? '0 -16px' : 0,
+          padding: isMobile ? '0 16px 4px' : 0,
+        }}>
 
           {/* All Regions */}
           <div onClick={() => setActiveRegion(null)}
-            style={{ ...card, padding: '14px 18px', cursor: 'pointer', minWidth: '130px', flexShrink: 0,
+            style={{ ...card, padding: '14px 18px', cursor: 'pointer', minWidth: '130px', flexShrink: 0, scrollSnapAlign: 'start',
               borderColor: !activeRegion ? t.gold : t.border,
               background:  !activeRegion ? `${t.gold}10` : t.card,
               borderLeft: !activeRegion ? `3px solid ${t.gold}` : `3px solid transparent`,
@@ -246,7 +266,7 @@ export default function ConsignmentOverview() {
       )}
 
       {/* ── KPI Strip ── */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr 1fr 1fr', gap: '10px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(6, 1fr)', gap: '10px' }}>
 
         {/* Branches */}
         <div style={{ ...card, padding: '14px 18px' }}>
@@ -289,16 +309,16 @@ export default function ConsignmentOverview() {
       </div>
 
       {/* ── Search ── */}
-      <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+      <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
         {canSee('element.consignment-overview.search') && (
-          <div style={{ position: 'relative', maxWidth: '280px', flex: 1 }}>
+          <div style={{ position: 'relative', maxWidth: isMobile ? '100%' : '280px', flex: 1, minWidth: isMobile ? '100%' : 'auto' }}>
             <span style={{ position: 'absolute', left: '11px', top: '50%', transform: 'translateY(-50%)', color: t.text4, fontSize: '13px', pointerEvents: 'none' }}>⌕</span>
             <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search branch…"
               style={{ width: '100%', background: t.card2, border: `1px solid ${t.border2}`, borderRadius: '8px', padding: '8px 12px 8px 30px', fontSize: '12px', color: t.text1, outline: 'none', boxSizing: 'border-box' }} />
           </div>
         )}
-        <div style={{ marginLeft: 'auto', fontSize: '11px', color: t.text4 }}>
-          {filtered.length} of {data.length} branches · click column headers to sort
+        <div style={{ marginLeft: isMobile ? 0 : 'auto', fontSize: '11px', color: t.text4 }}>
+          {filtered.length} of {data.length} branches{isMobile ? ' · swipe table to scroll' : ' · click column headers to sort'}
         </div>
       </div>
 
