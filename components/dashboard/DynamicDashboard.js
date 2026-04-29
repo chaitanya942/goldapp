@@ -324,7 +324,7 @@ function PurchaseInline({ t, setActiveNav, canSee }) {
             </div>
             {openTarget && (
               <button onClick={()=>setActiveNav(openTarget)} style={{ padding:'6px 14px', borderRadius:9, background:`${t.gold}15`, border:`1px solid ${t.gold}35`, color:t.gold, fontSize:11, fontWeight:600, cursor:'pointer', marginLeft:'auto' }}>
-                {canSeeData ? 'Purchase Data' : 'Reports'} →
+                {canSeeData ? 'Live Feed' : 'Reports'} →
               </button>
             )}
           </div>
