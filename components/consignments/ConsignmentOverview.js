@@ -164,7 +164,7 @@ export default function ConsignmentOverview() {
   }
 
   return (
-    <div style={{ padding: '22px 28px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+    <div style={{ padding: '18px 16px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
 
       {/* ── Header ── */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>

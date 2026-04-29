@@ -191,7 +191,7 @@ export default function ConsignmentAnalytics() {
   const trendMax = Math.max(...trend.map(d => d.wt), 1)
 
   return (
-    <div style={{ padding: '22px 28px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+    <div style={{ padding: '18px 16px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
 
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', flexWrap: 'wrap', gap: '12px' }}>

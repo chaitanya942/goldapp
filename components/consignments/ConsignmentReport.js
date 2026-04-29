@@ -120,7 +120,7 @@ export default function ConsignmentReport() {
   const btnGold = { background: t.gold, color: '#1a0a00', border: 'none', borderRadius: '8px', padding: '7px 16px', fontSize: '12px', fontWeight: 700, cursor: 'pointer' }
 
   return (
-    <div style={{ padding: '22px 28px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+    <div style={{ padding: '18px 16px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
 
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
