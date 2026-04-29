@@ -25,6 +25,20 @@ export async function POST(req) {
       .from('branches').select('*').eq('name', consignment.branch_name).single()
     if (!branch) return Response.json({ error: `Branch '${consignment.branch_name}' not found` }, { status: 404 })
 
+    // Pre-checks before hitting IRP
+    if (!branch.branch_gstin) {
+      return Response.json({ error: `Branch '${branch.name}' is missing GSTIN. Add it in Branch Management before generating E-Invoice.` }, { status: 400 })
+    }
+    const wgGstin = process.env.WG_GSTIN || ''
+    if (wgGstin && branch.branch_gstin === wgGstin) {
+      return Response.json({
+        error: `Cannot generate E-Invoice — branch GSTIN matches HO GSTIN (${wgGstin}). E-Invoice requires distinct seller and buyer GSTINs (interstate own-use transfer between separate state-wise registrations). Update '${branch.name}' Branch GSTIN in Branch Management to its actual state-wise GSTIN.`,
+      }, { status: 400 })
+    }
+    if (!branch.address || !branch.pin_code) {
+      return Response.json({ error: `Branch '${branch.name}' is missing address or PIN. Fill them in Branch Management.` }, { status: 400 })
+    }
+
     const { data: linkRows } = await supabase
       .from('consignment_items').select('purchase_id').eq('consignment_id', consignment_id)
     const purchaseIds = (linkRows || []).map(r => r.purchase_id)
