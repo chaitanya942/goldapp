@@ -181,6 +181,37 @@ export default function ConsignmentData() {
     } finally { setCreating(false) }
   }
 
+  async function generateEinv(c) {
+    setEwbActionId(c.id + ':einv')
+    try {
+      const res  = await fetch('/api/e-invoice/generate', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ consignment_id: c.id }),
+      })
+      const data = await res.json()
+      if (!res.ok || data.error) { setToast({ msg: data.error || 'E-Invoice generation failed', type: 'error' }); return }
+      setToast({ msg: `E-Invoice generated · IRN: ${String(data.irn).slice(0, 20)}…`, type: 'success' })
+      await fetchAll()
+    } catch (err) {
+      setToast({ msg: err.message || 'E-Invoice generation failed', type: 'error' })
+    } finally { setEwbActionId(null) }
+  }
+
+  async function cancelEinv(c) {
+    if (!confirm(`Cancel E-Invoice IRN?\n\nMust be done within 24h of generation.`)) return
+    setEwbActionId(c.id + ':einv-cancel')
+    try {
+      const res  = await fetch('/api/e-invoice/cancel', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ consignment_id: c.id }),
+      })
+      const data = await res.json()
+      if (!res.ok || data.error) { setToast({ msg: data.error || 'E-Invoice cancel failed', type: 'error' }); return }
+      setToast({ msg: 'E-Invoice cancelled', type: 'success' })
+      await fetchAll()
+    } finally { setEwbActionId(null) }
+  }
+
   async function generateEwb(c) {
     setEwbActionId(c.id + ':gen')
     try {
@@ -435,14 +466,14 @@ export default function ConsignmentData() {
           <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '900px' }}>
             <thead style={{ position: 'sticky', top: 0, zIndex: 1 }}>
               <tr>
-                {['TMP PRF', 'Type', 'Source → Destination', 'Bills', 'Net Wt', 'Value', 'Created', 'Document', 'E-Way Bill'].map(h => (
+                {['TMP PRF', 'Type', 'Source → Destination', 'Bills', 'Net Wt', 'Value', 'Created', 'Document', 'E-Way Bill', 'E-Invoice'].map(h => (
                   <th key={h} style={{ padding: '10px 14px', fontSize: '10px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', textAlign: h === 'Bills' || h === 'Net Wt' || h === 'Value' ? 'right' : 'left', background: t.card2, borderBottom: `1px solid ${t.border}`, whiteSpace: 'nowrap', fontWeight: 600 }}>{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {filteredCons.length === 0 ? (
-                <tr><td colSpan={9} style={{ padding: '64px', textAlign: 'center', color: t.text4, fontSize: '13px' }}>
+                <tr><td colSpan={10} style={{ padding: '64px', textAlign: 'center', color: t.text4, fontSize: '13px' }}>
                   {consignments.length === 0
                     ? 'No active consignments. Use Branch Stock → Move to create one.'
                     : 'No consignments match the filters'}
@@ -501,6 +532,27 @@ export default function ConsignmentData() {
                         <button onClick={() => generateEwb(c)} disabled={!!ewbActionId}
                           style={{ background: 'transparent', border: `1px solid ${t.green}50`, borderRadius: '5px', padding: '4px 10px', fontSize: '10px', color: t.green, fontWeight: 600, cursor: 'pointer', opacity: ewbActionId === c.id + ':gen' ? 0.6 : 1 }}>
                           {ewbActionId === c.id + ':gen' ? '⏳ Generating…' : '⚡ Generate EWB'}
+                        </button>
+                      )}
+                    </td>
+                    <td style={{ padding: '11px 14px' }}>
+                      {isType ? (
+                        <span style={{ fontSize: '10px', color: t.text4 }}>n/a</span>
+                      ) : c.irn ? (
+                        <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', alignItems: 'center' }}>
+                          <span title={c.irn} style={{ fontSize: '10px', color: t.purple, background: `${t.purple}15`, borderRadius: '4px', padding: '2px 7px', fontWeight: 600, fontFamily: 'monospace' }}>
+                            IRN: {String(c.irn).slice(0, 8)}…
+                          </span>
+                          <button onClick={() => cancelEinv(c)} disabled={!!ewbActionId}
+                            title="Cancel E-Invoice (within 24h)"
+                            style={{ background: 'transparent', border: `1px solid ${t.red}40`, borderRadius: '5px', padding: '3px 8px', fontSize: '10px', color: t.red, cursor: 'pointer', opacity: ewbActionId === c.id + ':einv-cancel' ? 0.6 : 1 }}>
+                            {ewbActionId === c.id + ':einv-cancel' ? '…' : '✕'}
+                          </button>
+                        </div>
+                      ) : (
+                        <button onClick={() => generateEinv(c)} disabled={!!ewbActionId}
+                          style={{ background: 'transparent', border: `1px solid ${t.purple}50`, borderRadius: '5px', padding: '4px 10px', fontSize: '10px', color: t.purple, fontWeight: 600, cursor: 'pointer', opacity: ewbActionId === c.id + ':einv' ? 0.6 : 1 }}>
+                          {ewbActionId === c.id + ':einv' ? '⏳ Generating…' : '⚡ Generate IRN'}
                         </button>
                       )}
                     </td>
