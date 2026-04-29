@@ -20,7 +20,9 @@ const fmt     = (n) => n != null ? Number(n).toLocaleString('en-IN', { maximumFr
 const fmtCr   = (n) => { if (n == null) return '—'; const cr = Number(n)/1e7; return cr >= 1 ? `₹${cr.toFixed(2)} Cr` : `₹${Number(n).toLocaleString('en-IN',{maximumFractionDigits:0})}` }
 const fmtPct  = (n) => n != null ? `${Number(n).toFixed(2)}%` : '—'
 
-function getGreeting() { const h = istNow().getHours(); return h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening' }
+// istNow() is pre-shifted by +5.5h, so use getUTCHours() to read the IST-aligned hour.
+// Using getHours() applies the local timezone offset on top — wrong on devices already in IST.
+function getGreeting() { const h = istNow().getUTCHours(); return h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening' }
 
 function getRange(key) {
   const now = istNow(), y = now.getFullYear(), m = now.getMonth(), today = istStr(now)
