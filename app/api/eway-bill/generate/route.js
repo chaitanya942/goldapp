@@ -33,7 +33,9 @@ export async function POST(req) {
     const purchaseIds = (linkRows || []).map(r => r.purchase_id)
     const { data: items } = await supabase.from('purchases').select('*').in('id', purchaseIds)
 
-    const result = await generateEWayBill({ consignment, branch, items: items || [] })
+    const { data: companySettings } = await supabase.from('company_settings').select('*').single()
+
+    const result = await generateEWayBill({ consignment, branch, items: items || [], companySettings: companySettings || {} })
 
     // Log full response so we can adjust extraction if ClearTax response shape changes
     console.log('[EWB] ClearTax response:', JSON.stringify(result, null, 2))

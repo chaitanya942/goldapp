@@ -25,14 +25,23 @@ export async function POST(req) {
       .from('branches').select('*').eq('name', consignment.branch_name).single()
     if (!branch) return Response.json({ error: `Branch '${consignment.branch_name}' not found` }, { status: 404 })
 
-    // Pre-checks before hitting IRP
-    if (!branch.branch_gstin) {
-      return Response.json({ error: `Branch '${branch.name}' is missing GSTIN. Add it in Branch Management before generating E-Invoice.` }, { status: 400 })
+    const { data: companySettings } = await supabase.from('company_settings').select('*').single()
+
+    // Resolve seller GSTIN from company_settings.gstin_<state> (preferred) → branch.branch_gstin → env
+    const stateCode = ({ 'Andhra Pradesh': 'AP', 'Kerala': 'KL', 'Telangana': 'TS', 'Tamil Nadu': 'TN', 'Rest of Karnataka': 'KA', 'Bangalore': 'KA' })[branch.region]
+    const stateGstinField = stateCode ? `gstin_${stateCode.toLowerCase()}` : null
+    const sellerGstin = (stateGstinField && companySettings?.[stateGstinField]) || branch.branch_gstin || process.env.WG_GSTIN
+    const buyerGstin  = companySettings?.gstin_ka || companySettings?.gstin || process.env.WG_GSTIN
+
+    if (!sellerGstin) {
+      return Response.json({ error: `No GSTIN found for ${branch.region}. Set 'GSTIN_${stateCode}' in Admin → Company Settings.` }, { status: 400 })
     }
-    const wgGstin = process.env.WG_GSTIN || ''
-    if (wgGstin && branch.branch_gstin === wgGstin) {
+    if (!buyerGstin) {
+      return Response.json({ error: `No HO GSTIN configured. Set 'GSTIN' or 'GSTIN_KA' in Admin → Company Settings.` }, { status: 400 })
+    }
+    if (sellerGstin === buyerGstin) {
       return Response.json({
-        error: `Cannot generate E-Invoice — branch GSTIN matches HO GSTIN (${wgGstin}). E-Invoice requires distinct seller and buyer GSTINs (interstate own-use transfer between separate state-wise registrations). Update '${branch.name}' Branch GSTIN in Branch Management to its actual state-wise GSTIN.`,
+        error: `Seller and buyer GSTINs are the same (${sellerGstin}). E-Invoice requires distinct GSTINs — this happens for intra-state Karnataka moves, which don't legally need an E-Invoice. Use only the E-Way Bill instead.`,
       }, { status: 400 })
     }
     if (!branch.address || !branch.pin_code) {
@@ -44,7 +53,7 @@ export async function POST(req) {
     const purchaseIds = (linkRows || []).map(r => r.purchase_id)
     const { data: items } = await supabase.from('purchases').select('*').in('id', purchaseIds)
 
-    const result = await generateEInvoice({ consignment, branch, items: items || [] })
+    const result = await generateEInvoice({ consignment, branch, items: items || [], companySettings: companySettings || {} })
     console.log('[E-Invoice] ClearTax response:', JSON.stringify(result, null, 2))
 
     // Robust extraction across response shapes
