@@ -5,6 +5,7 @@ import { supabase } from '../../lib/supabase'
 import { useApp } from '../../lib/context'
 import AnimatedNumber from '../ui/AnimatedNumber'
 import LiveTicker from '../ui/LiveTicker'
+import { getVisibleModules } from '../../lib/modules'
 
 const THEMES = {
   dark:  { bg: '#0a0a0a', card: '#111111', card2: '#161616', card3: '#1c1c1c', text1: '#f0e6c8', text2: '#c8b89a', text3: '#9a8a6a', text4: '#6a5a3a', gold: '#c9a84c', border: '#1e1e1e', border2: '#252525', green: '#3aaa6a', red: '#e05555', blue: '#3a8fbf', orange: '#c9981f', purple: '#8c5ac8', shadow: '0 2px 8px rgba(0,0,0,.5), inset 0 1px 0 rgba(255,255,255,.03)' },
@@ -159,7 +160,7 @@ function useMobile() {
 }
 
 export default function DashboardHome() {
-  const { theme, userProfile, canSee, setActiveNav } = useApp()
+  const { theme, userProfile, canSee, setActiveNav, openMobileMenuWithModule } = useApp()
   const t = THEMES[theme]
   const isMobile = useMobile()
 
@@ -459,8 +460,49 @@ export default function DashboardHome() {
       {/* ── LIVE RATES ── */}
       <LiveTicker />
 
-      {/* ── MODULE HUB ── */}
-      {(() => {
+      {/* ── MOBILE MODULE GRID — clean grouped-by-module view (role-aware) ── */}
+      {isMobile && (() => {
+        const visibleModules = getVisibleModules(canSee)
+        if (visibleModules.length === 0) return null
+        const tapModule = (m) => {
+          if (m.comingSoon) { openMobileMenuWithModule(m.id); return }
+          if (m.visibleTabs.length === 1) { setActiveNav(m.visibleTabs[0].id); return }
+          openMobileMenuWithModule(m.id)
+        }
+        return (
+          <div style={{ marginTop: 8, marginBottom: 16 }}>
+            <div style={{ fontSize: 11, color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 600, marginBottom: 10 }}>Your Modules</div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 10 }}>
+              {visibleModules.map((m, i) => (
+                <button key={m.id} onClick={() => tapModule(m)}
+                  style={{
+                    background: `linear-gradient(135deg, ${m.color}10, ${t.card2})`,
+                    border: `1px solid ${m.color}25`, borderRadius: 14, padding: '14px 14px',
+                    display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 8,
+                    cursor: 'pointer', textAlign: 'left',
+                    opacity: m.comingSoon ? 0.7 : 1,
+                    boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
+                    transition: 'transform .15s, border-color .15s',
+                  }}
+                  onTouchStart={e => e.currentTarget.style.transform = 'scale(0.98)'}
+                  onTouchEnd={e => e.currentTarget.style.transform = 'scale(1)'}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+                    <div style={{ width: 36, height: 36, borderRadius: 10, background: `${m.color}25`, border: `1px solid ${m.color}40`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16 }}>{m.icon}</div>
+                    {m.comingSoon && <div style={{ fontSize: 9, padding: '2px 6px', background: `${t.text4}25`, color: t.text3, borderRadius: 4, fontWeight: 600 }}>SOON</div>}
+                  </div>
+                  <div style={{ fontSize: 13, color: t.text1, fontWeight: 600, lineHeight: 1.2 }}>{m.label}</div>
+                  <div style={{ fontSize: 10, color: t.text3 }}>
+                    {m.comingSoon ? 'Coming soon' : `${m.visibleTabs.length} section${m.visibleTabs.length !== 1 ? 's' : ''}`}
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+        )
+      })()}
+
+      {/* ── DESKTOP MODULE HUB (per-page cards with stats) ── */}
+      {!isMobile && (() => {
         const cards = [
           canSee('purchase-data') && {
             id: 'purchase-data', icon: '◉', label: 'Purchase Data', color: t.gold,

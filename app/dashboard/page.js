@@ -72,11 +72,10 @@ const ROLE_LABELS = {
 export { ROLE_LABELS }
 
 function DashboardShell() {
-  const { theme, activeNav, setActiveNav, role, canSee, profileLoaded, previewRole } = useApp()
+  const { theme, activeNav, setActiveNav, role, canSee, profileLoaded, previewRole, mobileMenuOpen, setMobileMenuOpen, mobileMenuInitialModule, setMobileMenuInitialModule, openMobileMenuWithModule } = useApp()
   const t = THEMES[theme]
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [isMobile, setIsMobile] = useState(false)
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
 
   useEffect(() => {
     const check = () => {
@@ -159,8 +158,8 @@ function DashboardShell() {
       </div>
 
       {/* Bottom nav — mobile only */}
-      {isMobile && <BottomNav onMenuOpen={() => setMobileMenuOpen(true)} />}
-      {isMobile && mobileMenuOpen && <MobileMenu onClose={() => setMobileMenuOpen(false)} />}
+      {isMobile && <BottomNav onMenuOpen={() => openMobileMenuWithModule()} />}
+      {isMobile && mobileMenuOpen && <MobileMenu initialModuleId={mobileMenuInitialModule} onClose={() => { setMobileMenuOpen(false); setMobileMenuInitialModule(null) }} />}
     </div>
   )
 }
