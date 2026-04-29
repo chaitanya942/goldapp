@@ -20,7 +20,8 @@ const istStr   = (d = istNow()) => d.toISOString().split('T')[0]
 const daysBack = (n) => { const d = new Date(istNow().getTime() - n * 86400000); return istStr(d) }
 const fmtDay   = (d) => { if (!d) return ''; const [, m, day] = d.split('-'); return `${day}/${m}` }
 const fmtDate  = (iso) => { if (!iso) return ''; const [y,m,d] = iso.split('-'); return `${d}-${MONTHS[+m-1]}-${y}` }
-const greeting = () => { const h = istNow().getHours(); return h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening' }
+// istNow() is pre-shifted by +5.5h, so getUTCHours() returns the actual IST hour.
+const greeting = () => { const h = istNow().getUTCHours(); return h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening' }
 
 // ── Number formatters ─────────────────────────────────────────────────────────
 const fmt    = (n, dec=2) => n != null ? Number(n).toLocaleString('en-IN', { maximumFractionDigits: dec }) : '—'
