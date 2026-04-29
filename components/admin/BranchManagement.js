@@ -11,9 +11,20 @@ const THEMES = {
 
 const EMPTY_FORM = { name: '', opening_date: '', state: '', region: '', cluster: '', model_type: 'outside_bangalore', branch_code: '', address: '', city: '', pin_code: '', branch_gstin: '', crm_branch_id: '', pickup_time: '' }
 
+function useMobile() {
+  const [m, setM] = useState(false)
+  useEffect(() => {
+    const check = () => setM(window.innerWidth < 768)
+    check(); window.addEventListener('resize', check)
+    return () => window.removeEventListener('resize', check)
+  }, [])
+  return m
+}
+
 export default function BranchManagement() {
   const { theme, loadBranches } = useApp()
   const t = THEMES[theme]
+  const isMobile = useMobile()
 
   const [branches, setBranches] = useState([])
   const [loading, setLoading] = useState(false)
@@ -245,8 +256,8 @@ export default function BranchManagement() {
     card:       { background: t.card, border: `1px solid ${t.border}`, borderRadius: '10px', padding: '20px', marginBottom: '24px' },
     label:      { fontSize: '.62rem', color: t.text3, letterSpacing: '.08em', textTransform: 'uppercase', marginBottom: '5px', display: 'block' },
     input:      { width: '100%', background: t.card, border: `1px solid ${t.border}`, borderRadius: '6px', padding: '8px 10px', color: t.text1, fontSize: '.78rem', boxSizing: 'border-box' },
-    grid4:      { display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px' },
-    grid2:      { display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '16px', marginTop: '12px' },
+    grid4:      { display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(4, 1fr)', gap: isMobile ? '12px' : '16px' },
+    grid2:      { display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(2, 1fr)', gap: isMobile ? '12px' : '16px', marginTop: '12px' },
     row:        { display: 'flex', gap: '12px', alignItems: 'center', marginTop: '16px' },
     tblWrap:    { overflowX: 'auto', borderRadius: '10px', border: `1px solid ${t.border}` },
     th:         { padding: '10px 16px', fontSize: '.6rem', color: t.text3, letterSpacing: '.1em', textTransform: 'uppercase', textAlign: 'left', borderBottom: `1px solid ${t.border}`, background: t.card, fontWeight: 400 },
@@ -402,7 +413,7 @@ export default function BranchManagement() {
             <div style={{ fontSize: '.7rem', color: t.text3, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: '16px', fontWeight: 600 }}>
               Address (for Delivery Challan)
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr', gap: '16px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '2fr 1fr 1fr 1fr', gap: isMobile ? '12px' : '16px' }}>
               <div>
                 <label style={s.label}>Full Address</label>
                 <textarea style={{ ...s.input, minHeight: '64px', fontFamily: 'inherit', resize: 'vertical' }}

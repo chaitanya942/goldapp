@@ -88,9 +88,20 @@ function drawChart(canvas, data, fields, colors, theme) {
   }
 }
 
+function useMobile() {
+  const [m, setM] = useState(false)
+  useEffect(() => {
+    const check = () => setM(window.innerWidth < 768)
+    check(); window.addEventListener('resize', check)
+    return () => window.removeEventListener('resize', check)
+  }, [])
+  return m
+}
+
 export default function LiveMarketRates() {
   const { theme } = useApp()
   const t = THEMES[theme]
+  const isMobile = useMobile()
 
   const [rates,         setRates]         = useState([])
   const [todayRates,    setTodayRates]    = useState([])
@@ -288,7 +299,7 @@ export default function LiveMarketRates() {
           </div>
         )}
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', borderTop: `1px solid ${t.border}` }}>
+      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2,1fr)' : 'repeat(4,1fr)', borderTop: `1px solid ${t.border}` }}>
         {[
           { label: 'Open',   value: fmt(s.open),      color: t.text2 },
           { label: 'High',   value: fmt(s.high),      color: t.green },
@@ -368,7 +379,7 @@ export default function LiveMarketRates() {
       )}
 
       {/* Three Rate Cards */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(3, 1fr)', gap: '12px' }}>
         <RateCard label="Kalinga Kawad"       sub="GOLD 999 IMP WITH GST FOR REF" rate={latest?.kalinga_sell_rate} s={kStat} color={t.gold}   canvasRef={kRef} />
         <RateCard label="Ambicaa Sales Corpn" sub="IND-GOLD[999]-1KG today"       rate={latest?.ambica_sell_rate}  s={aStat} color={t.blue}   canvasRef={aRef} />
         <RateCard label="Aamlin Spot"         sub="Gold 999 IND"                  rate={liveAamlinRate}             s={mStat} color={t.purple} canvasRef={mRef}

@@ -20,9 +20,20 @@ const DEFAULT_ROLES = [
   { value: 'telesales',       label: 'Telesales',        color: '#e07840' },
 ]
 
+function useMobile() {
+  const [m, setM] = useState(false)
+  useEffect(() => {
+    const check = () => setM(window.innerWidth < 768)
+    check(); window.addEventListener('resize', check)
+    return () => window.removeEventListener('resize', check)
+  }, [])
+  return m
+}
+
 export default function UserManagement() {
   const { theme, canDo } = useApp()
   const t = THEMES[theme]
+  const isMobile = useMobile()
 
   const [roles,      setRoles]      = useState(DEFAULT_ROLES)
   const [users,      setUsers]      = useState([])
@@ -234,7 +245,7 @@ export default function UserManagement() {
           </div>
 
           {invTab === 'invite' ? (<>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '14px', marginBottom: '18px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr 1fr', gap: '14px', marginBottom: '18px' }}>
               <div>
                 <div style={{ fontSize: '.58rem', color: t.text3, marginBottom: '5px', letterSpacing: '.08em', textTransform: 'uppercase' }}>Full Name</div>
                 <input style={inp} placeholder="e.g. Rahul Sharma" value={invName} onChange={e => setInvName(e.target.value)} />
@@ -262,7 +273,7 @@ export default function UserManagement() {
             <div style={{ fontSize: '.65rem', color: t.text4, marginBottom: '14px', lineHeight: 1.6, background: `${t.blue}10`, border: `1px solid ${t.blue}25`, borderRadius: '6px', padding: '8px 12px' }}>
               Use this when a user was created directly in Supabase Auth dashboard. Copy their UUID from Authentication → Users and paste it below.
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1.6fr 1fr 1fr 0.8fr', gap: '14px', marginBottom: '18px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1.6fr 1fr 1fr 0.8fr', gap: '14px', marginBottom: '18px' }}>
               <div>
                 <div style={{ fontSize: '.58rem', color: t.text3, marginBottom: '5px', letterSpacing: '.08em', textTransform: 'uppercase' }}>User UUID</div>
                 <input style={inp} placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" value={exUuid} onChange={e => setExUuid(e.target.value)} />
@@ -310,7 +321,8 @@ export default function UserManagement() {
       {loading ? (
         <div style={{ textAlign: 'center', color: t.text3, padding: '48px', fontSize: '.8rem' }}>Loading users…</div>
       ) : (
-        <div style={{ borderRadius: '12px', border: `1px solid ${t.border}`, overflow: 'hidden' }}>
+        <div style={{ borderRadius: '12px', border: `1px solid ${t.border}`, overflow: isMobile ? 'auto' : 'hidden', WebkitOverflowScrolling: 'touch' }}>
+        <div style={{ minWidth: isMobile ? '720px' : 'auto' }}>
 
           {/* Header row */}
           <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1.8fr 1fr 0.7fr 1.4fr', background: t.card }}>
@@ -424,6 +436,7 @@ export default function UserManagement() {
               </div>
             )
           })}
+        </div>
         </div>
       )}
 

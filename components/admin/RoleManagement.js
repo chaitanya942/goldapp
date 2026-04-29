@@ -397,9 +397,20 @@ function CoveragePill({ onCount, total, state, t }) {
 /* ══════════════════════════════════════════════════════════════════════════════
                               MAIN COMPONENT
 ══════════════════════════════════════════════════════════════════════════════ */
+function useMobile() {
+  const [m, setM] = useState(false)
+  useEffect(() => {
+    const check = () => setM(window.innerWidth < 768)
+    check(); window.addEventListener('resize', check)
+    return () => window.removeEventListener('resize', check)
+  }, [])
+  return m
+}
+
 export default function RoleManagement() {
   const { theme, loadPermissionsForRole, role: myRole, previewRole, setPreviewRole } = useApp()
   const t = THEMES[theme] || THEMES.dark
+  const isMobile = useMobile()
 
   const [roles,      setRoles]      = useState([])
   const [rolePerms,  setRolePerms]  = useState({})
@@ -635,7 +646,7 @@ export default function RoleManagement() {
   const totalPct = Math.round(totalOnCount / TOTAL_PERMS * 100)
 
   return (
-    <div style={{ padding: '24px 28px', height: '100%', display: 'flex', flexDirection: 'column', gap: 20 }}>
+    <div style={{ padding: isMobile ? '16px 14px' : '24px 28px', height: '100%', display: 'flex', flexDirection: 'column', gap: isMobile ? 12 : 20 }}>
 
       {/* ── Header ── */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
@@ -650,11 +661,23 @@ export default function RoleManagement() {
         </button>
       </div>
 
-      {/* ── Two-panel layout ── */}
-      <div style={{ display: 'flex', gap: 18, flex: 1, minHeight: 0 }}>
+      {/* ── Two-panel layout (stacks vertically on mobile) ── */}
+      <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', gap: isMobile ? 12 : 18, flex: 1, minHeight: 0 }}>
 
-        {/* ══ LEFT: Role list ════════════════════════════════════════════════ */}
-        <div style={{ width: 220, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 4, overflowY: 'auto' }}>
+        {/* ══ LEFT: Role list — horizontal scroll-strip on mobile, vertical column on desktop ════ */}
+        <div style={{
+          width: isMobile ? '100%' : 220,
+          flexShrink: 0,
+          display: 'flex',
+          flexDirection: isMobile ? 'row' : 'column',
+          gap: isMobile ? 6 : 4,
+          overflowX: isMobile ? 'auto' : 'visible',
+          overflowY: isMobile ? 'visible' : 'auto',
+          scrollSnapType: isMobile ? 'x mandatory' : 'none',
+          WebkitOverflowScrolling: 'touch',
+          scrollbarWidth: 'none',
+          padding: isMobile ? '0 0 4px' : 0,
+        }}>
           <div style={{ fontSize: '.52rem', color: t.text4, letterSpacing: '.18em', textTransform: 'uppercase', fontWeight: 700, padding: '0 4px 10px' }}>Roles</div>
           {roles.length === 0 && (
             <div style={{ padding: '12px 8px', fontSize: '.65rem', color: t.red, lineHeight: 1.6 }}>
@@ -669,7 +692,7 @@ export default function RoleManagement() {
             return (
               <div key={r.name}
                 onClick={() => { setSelected(r.name); setRightTab('perms'); setSearch('') }}
-                style={{ padding: '11px 13px', borderRadius: 10, cursor: 'pointer', position: 'relative', transition: 'all .15s', border: `1px solid ${isSelected ? r.color + '50' : t.border}`, background: isSelected ? `${r.color}12` : t.card }}
+                style={{ padding: '11px 13px', borderRadius: 10, cursor: 'pointer', position: 'relative', transition: 'all .15s', border: `1px solid ${isSelected ? r.color + '50' : t.border}`, background: isSelected ? `${r.color}12` : t.card, flexShrink: isMobile ? 0 : undefined, scrollSnapAlign: isMobile ? 'start' : undefined, minWidth: isMobile ? 180 : undefined }}
                 onMouseEnter={e => { if (!isSelected) { e.currentTarget.style.borderColor = t.border2; e.currentTarget.style.background = t.card2 } }}
                 onMouseLeave={e => { if (!isSelected) { e.currentTarget.style.borderColor = t.border; e.currentTarget.style.background = t.card } }}>
                 {/* Left accent bar */}
