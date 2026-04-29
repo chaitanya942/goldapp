@@ -457,8 +457,15 @@ export default function PurchaseReports() {
         </div>
       </div>
 
-      {/* FILTER BAR */}
-      <div style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: '14px', padding: isMobile ? '12px 14px' : '16px 20px', marginBottom: isMobile ? '14px' : '24px', boxShadow: t.shadow }}>
+      {/* FILTER BAR — sticky on mobile so users can change filters without scrolling back */}
+      <div style={{
+        background: t.card, border: `1px solid ${t.border}`, borderRadius: '14px',
+        padding: isMobile ? '10px 12px' : '16px 20px',
+        marginBottom: isMobile ? '10px' : '24px', boxShadow: t.shadow,
+        position: isMobile ? 'sticky' : 'static', top: isMobile ? 0 : 'auto',
+        zIndex: isMobile ? 30 : 'auto',
+        backdropFilter: isMobile ? 'blur(8px)' : 'none',
+      }}>
         {/* Quick range pills — horizontal scroll on mobile */}
         <div style={{ display: 'flex', gap: '5px', overflowX: 'auto', scrollbarWidth: 'none', marginBottom: '10px', paddingBottom: '2px' }}>
           {[
@@ -568,8 +575,20 @@ export default function PurchaseReports() {
           sub="unique trading days" />
       </div>
 
-      {/* SECTION NAV */}
-      <div style={{ display: 'flex', gap: '4px', marginBottom: isMobile ? '14px' : '24px', padding: '5px', background: t.card, borderRadius: '12px', border: `1px solid ${t.border}`, width: isMobile ? '100%' : 'fit-content', overflowX: 'auto', scrollbarWidth: 'none', boxShadow: '0 1px 3px rgba(0,0,0,.3)' }}>
+      {/* SECTION NAV — sticky on mobile, horizontal scroll-snap */}
+      <div style={{
+        display: 'flex', gap: '4px',
+        marginBottom: isMobile ? '14px' : '24px',
+        padding: '5px', background: t.card, borderRadius: '12px', border: `1px solid ${t.border}`,
+        width: isMobile ? '100%' : 'fit-content',
+        overflowX: 'auto', scrollbarWidth: 'none',
+        scrollSnapType: isMobile ? 'x mandatory' : 'none',
+        WebkitOverflowScrolling: 'touch',
+        boxShadow: '0 1px 3px rgba(0,0,0,.3)',
+        position: isMobile ? 'sticky' : 'static',
+        top: isMobile ? '64px' : 'auto',
+        zIndex: isMobile ? 29 : 'auto',
+      }}>
         <button
           onClick={() => setActiveSection(null)}
           style={{ padding: isMobile ? '6px 12px' : '7px 18px', borderRadius: '8px', border: 'none', cursor: 'pointer', background: !activeSection ? t.gold : 'transparent', color: !activeSection ? '#0a0a0a' : t.text3, fontSize: '.65rem', fontWeight: !activeSection ? 600 : 400, letterSpacing: '.03em', transition: 'all .2s ease', flexShrink: 0 }}
@@ -580,9 +599,9 @@ export default function PurchaseReports() {
           <button
             key={sec.key}
             onClick={() => setActiveSection(activeSection === sec.key ? null : sec.key)}
-            style={{ padding: isMobile ? '6px 12px' : '7px 18px', borderRadius: '8px', border: 'none', cursor: 'pointer', background: activeSection === sec.key ? t.gold : 'transparent', color: activeSection === sec.key ? '#0a0a0a' : t.text3, fontSize: '.65rem', fontWeight: activeSection === sec.key ? 600 : 400, letterSpacing: '.03em', transition: 'all .2s ease', display: 'flex', alignItems: 'center', gap: '4px', flexShrink: 0 }}
+            style={{ padding: isMobile ? '7px 14px' : '7px 18px', borderRadius: '8px', border: 'none', cursor: 'pointer', background: activeSection === sec.key ? t.gold : 'transparent', color: activeSection === sec.key ? '#0a0a0a' : t.text3, fontSize: '.7rem', fontWeight: activeSection === sec.key ? 600 : 400, letterSpacing: '.03em', transition: 'all .2s ease', display: 'flex', alignItems: 'center', gap: '4px', flexShrink: 0, scrollSnapAlign: 'start' }}
           >
-            <span style={{ fontSize: '.72rem' }}>{sec.icon}</span>{sec.label}
+            <span style={{ fontSize: '.78rem' }}>{sec.icon}</span>{sec.label}
           </button>
         ))}
       </div>
