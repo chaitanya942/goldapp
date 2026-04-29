@@ -174,8 +174,10 @@ export default function DashboardHome() {
 
   const COLOR_PALETTE = [t.gold, t.green, t.blue, t.purple, t.orange, t.red]
 
-  const [period,        setPeriod]        = useState('today')
-  const [overviewOpen,  setOverviewOpen]  = useState(false)
+  const [period,         setPeriod]         = useState('today')
+  const [overviewOpen,   setOverviewOpen]   = useState(false)
+  const [consignOpen,    setConsignOpen]    = useState(false)
+  const [salesOpen,      setSalesOpen]      = useState(false)
   const [filterType,     setFilterType]     = useState(null)
   const [filterValue,    setFilterValue]    = useState(null)
   const [branchSearch,   setBranchSearch]   = useState('')
@@ -259,21 +261,22 @@ export default function DashboardHome() {
           }).catch(() => {})
       )
     }
-    if (canSee('consignment-overview')) {
+    if (canSee('consignment-overview') || canSee('consignment-data')) {
       ps.push(
-        fetch('/api/consignments?action=branch_overview')
-          .then(r => r.json())
-          .then(json => {
-            const rows = json.data || []
-            const totalBranches = rows.length
-            const totalWeight   = rows.reduce((s, b) => s + (b.total_gross_wt || 0), 0)
-            const urgent = rows.filter(b => {
-              if (!b.ship_before) return false
-              const days = Math.floor((new Date(b.ship_before).getTime() - Date.now()) / 86400000)
-              return days <= 3
-            }).length
-            setConsignStats({ totalBranches, totalWeight, urgent })
-          }).catch(() => {})
+        Promise.all([
+          fetch('/api/consignments?action=branch_overview').then(r => r.json()).catch(() => ({ data: [] })),
+          fetch('/api/consignments?action=consignments').then(r => r.json()).catch(() => ({ data: [] })),
+        ]).then(([overview, consignList]) => {
+          const rows = overview.data || []
+          const totalBranches = rows.filter(r => (r.older_bills || 0) + (r.today_bills || 0) > 0).length
+          const totalWeight   = rows.reduce((s, b) => s + (b.total_gross_wt || 0), 0)
+          const totalPending  = rows.reduce((s, b) => s + (b.older_bills || 0), 0)
+          // Bills with oldest age > 7d are urgent
+          const urgent = rows.filter(b => (b.oldest_age_days || 0) > 7).length
+          const cs = consignList.data || []
+          const inTransit = cs.filter(c => c.status !== 'received' && c.status !== 'seed').length
+          setConsignStats({ totalBranches, totalWeight, urgent, totalPending, inTransit })
+        }).catch(() => {})
       )
     }
     if (canSee('user-management') || canSee('branch-management')) {
@@ -863,6 +866,100 @@ export default function DashboardHome() {
           </div>
         </div>
       </div>}
+
+      {/* ── CONSIGNMENT OVERVIEW (collapsible) ── */}
+      {(canSee('consignment-overview') || canSee('consignment-data') || canSee('consignment-report') || canSee('consignment-analytics')) && (
+        <div style={{ marginTop: 12, border:`1px solid ${t.border2}`, borderRadius:20, background:`linear-gradient(160deg,${t.card2},${t.card3})`, boxShadow:`${t.shadow},inset 0 1px 0 rgba(255,255,255,.03)`, position:'relative', overflow:'hidden', transition:'all .35s ease' }}>
+          <div style={{ position:'absolute', top:0, left:0, width:160, height:160, background:`radial-gradient(circle at top left,${t.orange}08,transparent 70%)`, pointerEvents:'none' }}/>
+          <div onClick={() => setConsignOpen(o => !o)}
+            style={{ display:'flex', alignItems:'center', gap: isMobile ? 8 : 14, padding: consignOpen ? (isMobile ? '14px 16px' : '20px 24px') : (isMobile ? '10px 16px' : '12px 24px'), flexWrap:'wrap', position:'relative', zIndex:1, cursor:'pointer', userSelect:'none', borderBottom: consignOpen ? `1px solid ${t.border}` : 'none' }}>
+            <div style={{ display:'flex', alignItems:'center', gap:10 }}>
+              <div style={{ width:3, height:20, borderRadius:2, background:`linear-gradient(180deg,${t.orange},${t.orange}40)`, boxShadow:`0 0 8px ${t.orange}60` }}/>
+              <div style={{ fontSize:14, color:t.text2, letterSpacing:'.12em', textTransform:'uppercase', fontWeight:700 }}>Consignment Overview</div>
+            </div>
+            {!consignOpen && consignStats && (
+              <div style={{ display:'flex', gap: isMobile ? 12 : 22, alignItems:'center', fontSize: isMobile ? 11 : 12, color: t.text3, marginLeft: isMobile ? 0 : 14, flexWrap:'wrap' }}>
+                <span><strong style={{ color: t.orange, fontWeight: 700 }}>{consignStats.totalBranches || 0}</strong> branches with stock</span>
+                {consignStats.urgent > 0 && <span><strong style={{ color: t.red, fontWeight: 700 }}>{consignStats.urgent}</strong> urgent</span>}
+              </div>
+            )}
+            <div style={{ marginLeft:'auto', width:28, height:28, borderRadius:8, background:`${t.orange}12`, border:`1px solid ${t.orange}28`, display:'flex', alignItems:'center', justifyContent:'center', color:t.orange, fontSize:11, transition:'transform .35s cubic-bezier(.4,0,.2,1)', transform: consignOpen ? 'rotate(0deg)' : 'rotate(-90deg)' }}>▼</div>
+          </div>
+          {consignOpen && (
+            <div style={{ padding: isMobile ? '16px 14px 20px' : '24px 28px 28px' }}>
+              <div style={{ display:'grid', gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(4, 1fr)', gap: isMobile ? 10 : 14 }}>
+                <KpiCard t={t} delay={0} compact={isMobile} label="Branches with Stock" icon="🏬" color={t.orange} loading={!consignStats}
+                  value={consignStats ? String(consignStats.totalBranches || 0) : '—'} sub="Outside Bangalore" />
+                <KpiCard t={t} delay={60} compact={isMobile} label="Urgent Alerts" icon="⚠️" color={t.red} loading={!consignStats}
+                  value={consignStats ? String(consignStats.urgent || 0) : '—'} sub="Bills sitting > 7 days" />
+                <KpiCard t={t} delay={120} compact={isMobile} label="Pending Bills" icon="📦" color={t.gold} loading={!consignStats}
+                  value={consignStats ? String(consignStats.totalPending || 0) : '—'} sub="Awaiting consignment" />
+                <KpiCard t={t} delay={180} compact={isMobile} label="In Transit" icon="🚚" color={t.blue} loading={!consignStats}
+                  value={consignStats ? String(consignStats.inTransit || 0) : '—'} sub="Active consignments" />
+              </div>
+              <div style={{ marginTop: 14, display:'flex', gap:8, flexWrap:'wrap' }}>
+                {canSee('consignment-overview') && (
+                  <button onClick={() => setActiveNav('consignment-overview')}
+                    style={{ padding:'8px 16px', borderRadius:9, background:`${t.orange}15`, border:`1px solid ${t.orange}35`, color:t.orange, fontSize:11, fontWeight:600, cursor:'pointer' }}>
+                    Branch Stock →
+                  </button>
+                )}
+                {canSee('consignment-data') && (
+                  <button onClick={() => setActiveNav('consignment-data')}
+                    style={{ padding:'8px 16px', borderRadius:9, background:`${t.gold}15`, border:`1px solid ${t.gold}35`, color:t.gold, fontSize:11, fontWeight:600, cursor:'pointer' }}>
+                    Consignment Data →
+                  </button>
+                )}
+                {canSee('consignment-analytics') && (
+                  <button onClick={() => setActiveNav('consignment-analytics')}
+                    style={{ padding:'8px 16px', borderRadius:9, background:`${t.purple}15`, border:`1px solid ${t.purple}35`, color:t.purple, fontSize:11, fontWeight:600, cursor:'pointer' }}>
+                    Analytics →
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── SALES OVERVIEW (collapsible) ── */}
+      {(canSee('cal-table') || canSee('live-market-rates')) && (
+        <div style={{ marginTop: 12, border:`1px solid ${t.border2}`, borderRadius:20, background:`linear-gradient(160deg,${t.card2},${t.card3})`, boxShadow:`${t.shadow},inset 0 1px 0 rgba(255,255,255,.03)`, position:'relative', overflow:'hidden', transition:'all .35s ease' }}>
+          <div style={{ position:'absolute', top:0, left:0, width:160, height:160, background:`radial-gradient(circle at top left,${t.green}08,transparent 70%)`, pointerEvents:'none' }}/>
+          <div onClick={() => setSalesOpen(o => !o)}
+            style={{ display:'flex', alignItems:'center', gap: isMobile ? 8 : 14, padding: salesOpen ? (isMobile ? '14px 16px' : '20px 24px') : (isMobile ? '10px 16px' : '12px 24px'), flexWrap:'wrap', position:'relative', zIndex:1, cursor:'pointer', userSelect:'none', borderBottom: salesOpen ? `1px solid ${t.border}` : 'none' }}>
+            <div style={{ display:'flex', alignItems:'center', gap:10 }}>
+              <div style={{ width:3, height:20, borderRadius:2, background:`linear-gradient(180deg,${t.green},${t.green}40)`, boxShadow:`0 0 8px ${t.green}60` }}/>
+              <div style={{ fontSize:14, color:t.text2, letterSpacing:'.12em', textTransform:'uppercase', fontWeight:700 }}>Sales Overview</div>
+            </div>
+            {!salesOpen && (
+              <div style={{ fontSize: isMobile ? 11 : 12, color: t.text3, marginLeft: isMobile ? 0 : 14 }}>
+                Live gold rates · Cal Table
+              </div>
+            )}
+            <div style={{ marginLeft:'auto', width:28, height:28, borderRadius:8, background:`${t.green}12`, border:`1px solid ${t.green}28`, display:'flex', alignItems:'center', justifyContent:'center', color:t.green, fontSize:11, transition:'transform .35s cubic-bezier(.4,0,.2,1)', transform: salesOpen ? 'rotate(0deg)' : 'rotate(-90deg)' }}>▼</div>
+          </div>
+          {salesOpen && (
+            <div style={{ padding: isMobile ? '16px 14px 20px' : '24px 28px 28px' }}>
+              <LiveTicker />
+              <div style={{ marginTop: 14, display:'flex', gap:8, flexWrap:'wrap' }}>
+                {canSee('cal-table') && (
+                  <button onClick={() => setActiveNav('cal-table')}
+                    style={{ padding:'8px 16px', borderRadius:9, background:`${t.gold}15`, border:`1px solid ${t.gold}35`, color:t.gold, fontSize:11, fontWeight:600, cursor:'pointer' }}>
+                    Cal Table →
+                  </button>
+                )}
+                {canSee('live-market-rates') && (
+                  <button onClick={() => setActiveNav('live-market-rates')}
+                    style={{ padding:'8px 16px', borderRadius:9, background:`${t.green}15`, border:`1px solid ${t.green}35`, color:t.green, fontSize:11, fontWeight:600, cursor:'pointer' }}>
+                    Live Market Rates →
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* ── ROADMAP ── */}
       <div style={{ marginTop:20, background:`linear-gradient(135deg,${t.card},${t.card2})`, border:`1px solid ${t.border}`, borderRadius:16, padding:'20px 28px', boxShadow:t.shadow }}>
