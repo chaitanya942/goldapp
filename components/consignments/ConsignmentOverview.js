@@ -122,14 +122,27 @@ export default function ConsignmentOverview() {
   const regions = [...new Set(data.map(b => b.region).filter(Boolean))].sort()
   const regionStats = regions.reduce((acc, r) => {
     const bs = data.filter(b => b.region === r)
+    const today_bills  = bs.reduce((s, b) => s + (b.today_bills   || 0), 0)
+    const older_bills  = bs.reduce((s, b) => s + (b.older_bills   || 0), 0)
+    const today_net_wt = bs.reduce((s, b) => s + (b.today_net_wt  || 0), 0)
+    const older_net_wt = bs.reduce((s, b) => s + (b.older_net_wt  || 0), 0)
     acc[r] = {
-      branches:    bs.length,
-      today_bills: bs.reduce((s, b) => s + (b.today_bills || 0), 0),
-      older_bills: bs.reduce((s, b) => s + (b.older_bills || 0), 0),
-      gross_wt:    bs.reduce((s, b) => s + b.total_gross_wt, 0),
+      branches:     bs.length,
+      active_branches: bs.filter(b => (b.today_bills || 0) + (b.older_bills || 0) > 0).length,
+      today_bills, older_bills, today_net_wt, older_net_wt,
+      total_bills:  today_bills + older_bills,
+      total_net_wt: today_net_wt + older_net_wt,
+      gross_wt:     bs.reduce((s, b) => s + b.total_gross_wt, 0),
     }
     return acc
   }, {})
+
+  // Format weight: shows "1.23kg" if > 1000g else "987g" — cleaner card display
+  const fmtWtCard = (g) => {
+    const n = Number(g || 0)
+    if (n >= 1000) return { value: (n / 1000).toFixed(2), unit: 'kg' }
+    return { value: n.toFixed(0), unit: 'g' }
+  }
 
   // ── Filtered + sorted ─────────────────────────────────────────────────────
   const filtered = data
@@ -224,40 +237,78 @@ export default function ConsignmentOverview() {
           padding: isMobile ? '0 16px 4px' : 0,
         }}>
 
-          {/* All Regions */}
-          <div onClick={() => setActiveRegion(null)}
-            style={{ ...card, padding: '14px 18px', cursor: 'pointer', minWidth: '130px', flexShrink: 0, scrollSnapAlign: 'start',
-              borderColor: !activeRegion ? t.gold : t.border,
-              background:  !activeRegion ? `${t.gold}10` : t.card,
-              borderLeft: !activeRegion ? `3px solid ${t.gold}` : `3px solid transparent`,
-              transition: 'all .15s' }}>
-            <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: '8px' }}>All Regions</div>
-            <div style={{ fontSize: '26px', fontWeight: 200, color: !activeRegion ? t.gold : t.text1, lineHeight: 1 }}>{data.length}</div>
-            <div style={{ fontSize: '10px', color: t.text4, marginTop: '4px' }}>branches</div>
-          </div>
+          {/* All Regions — totals across the board */}
+          {(() => {
+            const allBills      = data.reduce((s, b) => s + (b.today_bills || 0) + (b.older_bills || 0), 0)
+            const allNetWt      = data.reduce((s, b) => s + (b.today_net_wt || 0) + (b.older_net_wt || 0), 0)
+            const allTodayBills = data.reduce((s, b) => s + (b.today_bills || 0), 0)
+            const w = fmtWtCard(allNetWt)
+            const isActive = !activeRegion
+            return (
+              <div onClick={() => setActiveRegion(null)}
+                style={{
+                  background: isActive ? `linear-gradient(145deg, ${t.gold}18, ${t.gold}06)` : `linear-gradient(145deg, ${t.card}, ${t.card2})`,
+                  border: `1px solid ${isActive ? t.gold + '60' : t.border}`,
+                  borderLeft: `4px solid ${isActive ? t.gold : t.text4 + '30'}`,
+                  borderRadius: '12px', padding: '16px 18px',
+                  cursor: 'pointer', minWidth: '180px',
+                  flexShrink: 0, scrollSnapAlign: 'start',
+                  transition: 'all .2s',
+                  boxShadow: isActive ? `0 4px 16px ${t.gold}20` : '0 1px 3px rgba(0,0,0,.2)',
+                }}
+                onMouseEnter={e => { if (!isActive) e.currentTarget.style.transform = 'translateY(-2px)' }}
+                onMouseLeave={e => { if (!isActive) e.currentTarget.style.transform = 'translateY(0)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                  <div style={{ fontSize: '9px', color: isActive ? t.gold : t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 700 }}>All Regions</div>
+                  <span style={{ fontSize: '15px', opacity: isActive ? 1 : 0.5 }}>🌐</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px', lineHeight: 1, marginBottom: '6px' }}>
+                  <span style={{ fontSize: '26px', fontWeight: 300, color: isActive ? t.gold : t.text1, fontFamily: 'monospace' }}>{w.value}</span>
+                  <span style={{ fontSize: '12px', fontWeight: 500, color: isActive ? t.gold : t.text3 }}>{w.unit}</span>
+                </div>
+                <div style={{ fontSize: '10px', color: t.text4, display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                  <span><strong style={{ color: t.text2 }}>{data.length}</strong> branches</span>
+                  <span style={{ color: t.border2 }}>·</span>
+                  <span><strong style={{ color: t.text2 }}>{allBills}</strong> bills</span>
+                  {allTodayBills > 0 && <><span style={{ color: t.border2 }}>·</span><span style={{ color: t.green, fontWeight: 600 }}>+{allTodayBills} today</span></>}
+                </div>
+              </div>
+            )
+          })()}
 
           {regions.map(r => {
-            const stats = regionStats[r] || {}
-            const color = REGION_COLORS[r] || t.text3
-            const icon  = REGION_ICONS[r] || '📍'
+            const stats  = regionStats[r] || {}
+            const color  = REGION_COLORS[r] || t.text3
+            const icon   = REGION_ICONS[r] || '📍'
             const active = activeRegion === r
+            const w      = fmtWtCard(stats.total_net_wt)
             return (
               <div key={r} onClick={() => setActiveRegion(active ? null : r)}
-                style={{ ...card, padding: '14px 18px', cursor: 'pointer', minWidth: '170px', flexShrink: 0,
-                  borderColor: active ? color : t.border,
-                  background:  active ? `${color}10` : t.card,
-                  borderLeft: `3px solid ${active ? color : 'transparent'}`,
-                  transition: 'all .15s' }}
-                onMouseEnter={e => { if (!active) { e.currentTarget.style.borderColor = `${color}50`; e.currentTarget.style.borderLeftColor = `${color}80` } }}
-                onMouseLeave={e => { if (!active) { e.currentTarget.style.borderColor = t.border; e.currentTarget.style.borderLeftColor = 'transparent' } }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                  <div style={{ fontSize: '9px', color: active ? color : t.text4, letterSpacing: '.08em', textTransform: 'uppercase', fontWeight: active ? 700 : 400 }}>{r}</div>
-                  <span style={{ fontSize: '14px' }}>{icon}</span>
+                style={{
+                  background: active ? `linear-gradient(145deg, ${color}18, ${color}06)` : `linear-gradient(145deg, ${t.card}, ${t.card2})`,
+                  border: `1px solid ${active ? color + '60' : t.border}`,
+                  borderLeft: `4px solid ${active ? color : color + '30'}`,
+                  borderRadius: '12px', padding: '16px 18px',
+                  cursor: 'pointer', minWidth: '210px',
+                  flexShrink: 0, scrollSnapAlign: 'start',
+                  transition: 'all .2s',
+                  boxShadow: active ? `0 4px 16px ${color}20` : '0 1px 3px rgba(0,0,0,.2)',
+                }}
+                onMouseEnter={e => { if (!active) e.currentTarget.style.transform = 'translateY(-2px)' }}
+                onMouseLeave={e => { if (!active) e.currentTarget.style.transform = 'translateY(0)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                  <div style={{ fontSize: '9px', color: active ? color : t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r}</div>
+                  <span style={{ fontSize: '15px', opacity: active ? 1 : 0.6, flexShrink: 0, marginLeft: '6px' }}>{icon}</span>
                 </div>
-                <div style={{ fontSize: '26px', fontWeight: 200, color: active ? color : t.text1, lineHeight: 1 }}>{(stats.older_bills ?? 0) + (stats.today_bills ?? 0)}</div>
-                <div style={{ fontSize: '10px', color: t.text4, marginTop: '4px', display: 'flex', gap: '8px' }}>
-                  <span>{stats.branches} branches</span>
-                  {stats.today_bills > 0 && <span style={{ color, fontWeight: 600 }}>+{stats.today_bills} today</span>}
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px', lineHeight: 1, marginBottom: '6px' }}>
+                  <span style={{ fontSize: '26px', fontWeight: 300, color: active ? color : t.text1, fontFamily: 'monospace' }}>{w.value}</span>
+                  <span style={{ fontSize: '12px', fontWeight: 500, color: active ? color : t.text3 }}>{w.unit}</span>
+                </div>
+                <div style={{ fontSize: '10px', color: t.text4, display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                  <span><strong style={{ color: t.text2 }}>{stats.active_branches || stats.branches}</strong> branches</span>
+                  <span style={{ color: t.border2 }}>·</span>
+                  <span><strong style={{ color: t.text2 }}>{stats.total_bills || 0}</strong> bills</span>
+                  {stats.today_bills > 0 && <><span style={{ color: t.border2 }}>·</span><span style={{ color: t.green, fontWeight: 600 }}>+{stats.today_bills} today</span></>}
                 </div>
               </div>
             )
