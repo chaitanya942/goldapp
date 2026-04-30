@@ -293,30 +293,44 @@ export default function ConsignmentData() {
     setDownloadingId(null)
   }
 
-  // One-click: download Consignee Report + Challan/Voucher + EWB PDF in sequence
+  // One-click: download all applicable documents per business rules
   async function downloadAll(c) {
     const isType = c.movement_type === 'INTERNAL'
+    const src = branches.find(b => b.name === c.branch_name)
+    const isKaSource = src?.region === 'Rest of Karnataka' || src?.region === 'Bangalore'
+    const showEwb = isType || isKaSource           // intrastate cases
+    const showEinv = !isType && !isKaSource         // interstate Hub→HO
+
     setDownloadingId(c.id + ':all')
-    setToast({ msg: 'Downloading all documents…', type: 'info' })
+    setToast({ msg: 'Downloading documents…', type: 'info' })
     try {
-      // 1. Consignee Report (JPG)
+      // 1. Consignee Report (always)
       await triggerDownload(`/api/generate-consignee-report?id=${c.id}`,
         `GoldConsigneeReport-${c.tmp_prf_no}.jpg`,
         msg => setToast({ msg, type: 'error' }))
-      // 2. Challan (EXTERNAL) or Voucher (INTERNAL)
+      // 2. Challan (EXTERNAL) or Voucher (INTERNAL) — always
       const docUrl  = isType ? `/api/generate-issue-voucher-pdf?id=${c.id}` : `/api/generate-challan-pdf?id=${c.id}`
       const docName = isType ? `${(c.tmp_prf_no || 'voucher').replace(/\//g,'-')}_voucher.pdf`
                              : `${(c.challan_no || c.tmp_prf_no || 'challan').replace(/\//g,'-')}.pdf`
       await triggerDownload(docUrl, docName, msg => setToast({ msg, type: 'error' }))
-      // 3. EWB PDF (only if EWB generated)
-      if (c.eway_bill_no) {
+      // 3. EWB PDF — only intrastate cases AND if generated
+      if (showEwb && c.eway_bill_no) {
         await triggerDownload(`/api/eway-bill/pdf?id=${c.id}`,
           `EWB_${c.eway_bill_no}.pdf`,
           msg => setToast({ msg, type: 'error' }))
-        setToast({ msg: 'All 3 documents downloaded', type: 'success' })
-      } else {
-        setToast({ msg: '2 documents downloaded · EWB not yet generated', type: 'info' })
       }
+      // 4. E-Invoice signed copy — only interstate Hub→HO if generated.
+      // (We don't have a separate IRP PDF endpoint yet — IRN is stored on the consignment.)
+      const summary = []
+      summary.push('Report')
+      summary.push(isType ? 'Voucher' : 'Challan')
+      if (showEwb && c.eway_bill_no) summary.push('EWB')
+      if (showEinv && c.irn)        summary.push(`IRN ${String(c.irn).slice(0, 8)}…`)
+      const missing = []
+      if (showEwb && !c.eway_bill_no) missing.push('EWB not generated')
+      if (showEinv && !c.irn)         missing.push('E-Invoice not generated')
+      const msg = `Downloaded: ${summary.join(' + ')}` + (missing.length ? ` · ${missing.join(', ')}` : '')
+      setToast({ msg, type: missing.length ? 'info' : 'success' })
     } finally { setDownloadingId(null) }
   }
 
@@ -538,6 +552,14 @@ export default function ConsignmentData() {
                 const isType = c.movement_type === 'INTERNAL'
                 const tColor = isType ? t.purple : t.orange
                 const isNew  = lastConsignment?.id === c.id
+                // Document applicability per business rules:
+                //   Intrastate KA Branch → HO       : EWB ✓ + Challan,  NO E-Invoice
+                //   Intrastate non-KA Branch → Hub  : EWB ✓ + Voucher,  NO E-Invoice
+                //   Interstate Hub → HO (non-KA src): NO EWB + Challan, E-Invoice ✓
+                const sourceBranchInfo = branches.find(b => b.name === c.branch_name)
+                const isKaSource       = sourceBranchInfo?.region === 'Rest of Karnataka' || sourceBranchInfo?.region === 'Bangalore'
+                const showEwb          = isType || isKaSource          // intrastate cases only
+                const showEinvoice     = !isType && !isKaSource        // interstate Hub → HO only
                 return (
                   <tr key={c.id}
                     style={{ borderBottom: `1px solid ${t.border}15`, background: isNew ? `${t.green}08` : 'transparent', transition: 'background .1s' }}
@@ -569,7 +591,9 @@ export default function ConsignmentData() {
                       </button>
                     </td>
                     <td style={{ padding: '11px 14px' }}>
-                      {c.eway_bill_no ? (
+                      {!showEwb ? (
+                        <span title="Interstate Hub→HO uses E-Invoice instead — no separate EWB needed" style={{ fontSize: '10px', color: t.text4 }}>n/a</span>
+                      ) : c.eway_bill_no ? (
                         <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', alignItems: 'center' }}>
                           <span style={{ fontSize: '10px', color: t.green, background: `${t.green}15`, borderRadius: '4px', padding: '2px 7px', fontWeight: 600, fontFamily: 'monospace' }}>{c.eway_bill_no}</span>
                           <button onClick={() => downloadEwbPdf(c)} disabled={!!downloadingId}
@@ -590,8 +614,8 @@ export default function ConsignmentData() {
                       )}
                     </td>
                     <td style={{ padding: '11px 14px' }}>
-                      {isType ? (
-                        <span style={{ fontSize: '10px', color: t.text4 }}>n/a</span>
+                      {!showEinvoice ? (
+                        <span title={isType ? 'Branch → Hub uses Issue Voucher only — no E-Invoice' : 'Intrastate KA Branch → HO uses EWB only — no E-Invoice'} style={{ fontSize: '10px', color: t.text4 }}>n/a</span>
                       ) : c.irn ? (
                         <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', alignItems: 'center' }}>
                           <span title={c.irn} style={{ fontSize: '10px', color: t.purple, background: `${t.purple}15`, borderRadius: '4px', padding: '2px 7px', fontWeight: 600, fontFamily: 'monospace' }}>
