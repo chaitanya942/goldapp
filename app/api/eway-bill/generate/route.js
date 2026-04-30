@@ -28,6 +28,13 @@ export async function POST(req) {
       .from('branches').select('*').eq('name', consignment.branch_name).single()
     if (!branch) return Response.json({ error: `Branch '${consignment.branch_name}' not found` }, { status: 404 })
 
+    // For Branch → Hub (INTERNAL) consignments, fetch the destination hub too
+    let destBranch = null
+    if (consignment.movement_type === 'INTERNAL' && consignment.dest_branch) {
+      const { data } = await supabase.from('branches').select('*').eq('name', consignment.dest_branch).single()
+      destBranch = data || null
+    }
+
     const { data: linkRows } = await supabase
       .from('consignment_items').select('purchase_id').eq('consignment_id', consignment_id)
     const purchaseIds = (linkRows || []).map(r => r.purchase_id)
@@ -35,7 +42,7 @@ export async function POST(req) {
 
     const { data: companySettings } = await supabase.from('company_settings').select('*').single()
 
-    const result = await generateEWayBill({ consignment, branch, items: items || [], companySettings: companySettings || {} })
+    const result = await generateEWayBill({ consignment, branch, destBranch, items: items || [], companySettings: companySettings || {} })
 
     // Log full response so we can adjust extraction if ClearTax response shape changes
     console.log('[EWB] ClearTax response:', JSON.stringify(result, null, 2))

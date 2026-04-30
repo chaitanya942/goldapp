@@ -284,6 +284,33 @@ export default function ConsignmentData() {
     setDownloadingId(null)
   }
 
+  // One-click: download Consignee Report + Challan/Voucher + EWB PDF in sequence
+  async function downloadAll(c) {
+    const isType = c.movement_type === 'INTERNAL'
+    setDownloadingId(c.id + ':all')
+    setToast({ msg: 'Downloading all documents…', type: 'info' })
+    try {
+      // 1. Consignee Report (JPG)
+      await triggerDownload(`/api/generate-consignee-report?id=${c.id}`,
+        `GoldConsigneeReport-${c.tmp_prf_no}.jpg`,
+        msg => setToast({ msg, type: 'error' }))
+      // 2. Challan (EXTERNAL) or Voucher (INTERNAL)
+      const docUrl  = isType ? `/api/generate-issue-voucher-pdf?id=${c.id}` : `/api/generate-challan-pdf?id=${c.id}`
+      const docName = isType ? `${(c.tmp_prf_no || 'voucher').replace(/\//g,'-')}_voucher.pdf`
+                             : `${(c.challan_no || c.tmp_prf_no || 'challan').replace(/\//g,'-')}.pdf`
+      await triggerDownload(docUrl, docName, msg => setToast({ msg, type: 'error' }))
+      // 3. EWB PDF (only if EWB generated)
+      if (c.eway_bill_no) {
+        await triggerDownload(`/api/eway-bill/pdf?id=${c.id}`,
+          `EWB_${c.eway_bill_no}.pdf`,
+          msg => setToast({ msg, type: 'error' }))
+        setToast({ msg: 'All 3 documents downloaded', type: 'success' })
+      } else {
+        setToast({ msg: '2 documents downloaded · EWB not yet generated', type: 'info' })
+      }
+    } finally { setDownloadingId(null) }
+  }
+
   // ── Active consignments filtering ─────────────────────────────────────────
   const filteredCons = consignments.filter(c => {
     if (filterType   && c.movement_type !== filterType)   return false
@@ -486,14 +513,14 @@ export default function ConsignmentData() {
           <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '900px' }}>
             <thead style={{ position: 'sticky', top: 0, zIndex: 1 }}>
               <tr>
-                {['TMP PRF', 'Type', 'Source → Destination', 'Bills', 'Net Wt', 'Value', 'Created', 'Document', 'E-Way Bill', 'E-Invoice'].map(h => (
+                {['TMP PRF', 'Type', 'Source → Destination', 'Bills', 'Net Wt', 'Value', 'Created', 'Document', 'E-Way Bill', 'E-Invoice', 'All'].map(h => (
                   <th key={h} style={{ padding: '10px 14px', fontSize: '10px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', textAlign: h === 'Bills' || h === 'Net Wt' || h === 'Value' ? 'right' : 'left', background: t.card2, borderBottom: `1px solid ${t.border}`, whiteSpace: 'nowrap', fontWeight: 600 }}>{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {filteredCons.length === 0 ? (
-                <tr><td colSpan={10} style={{ padding: '64px', textAlign: 'center', color: t.text4, fontSize: '13px' }}>
+                <tr><td colSpan={11} style={{ padding: '64px', textAlign: 'center', color: t.text4, fontSize: '13px' }}>
                   {consignments.length === 0
                     ? 'No active consignments. Use Branch Stock → Move to create one.'
                     : 'No consignments match the filters'}
@@ -533,9 +560,7 @@ export default function ConsignmentData() {
                       </button>
                     </td>
                     <td style={{ padding: '11px 14px' }}>
-                      {isType ? (
-                        <span style={{ fontSize: '10px', color: t.text4 }}>n/a</span>
-                      ) : c.eway_bill_no ? (
+                      {c.eway_bill_no ? (
                         <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', alignItems: 'center' }}>
                           <span style={{ fontSize: '10px', color: t.green, background: `${t.green}15`, borderRadius: '4px', padding: '2px 7px', fontWeight: 600, fontFamily: 'monospace' }}>{c.eway_bill_no}</span>
                           <button onClick={() => downloadEwbPdf(c)} disabled={!!downloadingId}
@@ -575,6 +600,13 @@ export default function ConsignmentData() {
                           {ewbActionId === c.id + ':einv' ? '⏳ Generating…' : '⚡ Generate IRN'}
                         </button>
                       )}
+                    </td>
+                    <td style={{ padding: '11px 14px' }}>
+                      <button onClick={() => downloadAll(c)} disabled={downloadingId === c.id + ':all'}
+                        title="Download Consignee Report + Document + EWB (if available) in one click"
+                        style={{ background: t.gold, color: '#1a0a00', border: 'none', borderRadius: '6px', padding: '5px 11px', fontSize: '10px', fontWeight: 700, cursor: downloadingId === c.id + ':all' ? 'not-allowed' : 'pointer', opacity: downloadingId === c.id + ':all' ? 0.6 : 1, whiteSpace: 'nowrap' }}>
+                        {downloadingId === c.id + ':all' ? '⏳…' : '📦 All'}
+                      </button>
                     </td>
                   </tr>
                 )
