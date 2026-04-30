@@ -76,6 +76,10 @@ export async function POST(req) {
     return Response.json({ success: true, ewb_no: ewbNo, ewb_date: ewbDate })
   } catch (err) {
     console.error('E-Way Bill generate error:', err)
-    return Response.json({ error: err.message || 'E-Way Bill generation failed' }, { status: 500 })
+    return Response.json({
+      error:             err.message || 'E-Way Bill generation failed',
+      cleartax_response: err.cleartaxResponse || null,
+      outgoing_payload:  err.outgoingPayload  || null,
+    }, { status: 500 })
   }
 }

@@ -240,7 +240,16 @@ export default function ConsignmentData() {
         body: JSON.stringify({ consignment_id: c.id }),
       })
       const data = await res.json()
-      if (!res.ok || data.error) { setToast({ msg: data.error || 'EWB generation failed', type: 'error' }); return }
+      if (!res.ok || data.error) {
+        // Dump full debug context to console for diagnosis
+        console.group('[EWB] Debug')
+        console.log('Error:', data.error)
+        console.log('ClearTax response:', data.cleartax_response)
+        console.log('Outgoing payload:', data.outgoing_payload)
+        console.groupEnd()
+        setToast({ msg: (data.error || 'EWB failed') + ' — open browser console (F12) for details', type: 'error' })
+        return
+      }
       setToast({ msg: `E-Way Bill ${data.ewb_no} generated — downloading PDF…`, type: 'success' })
       await fetchAll()
       // Auto-download the EWB PDF immediately
