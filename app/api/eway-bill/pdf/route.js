@@ -23,11 +23,21 @@ export async function GET(req) {
     }
 
     const { data: branch } = await supabase
-      .from('branches').select('branch_gstin').eq('name', consignment.branch_name).single()
+      .from('branches').select('branch_gstin, region').eq('name', consignment.branch_name).single()
+
+    // Use the SAME GSTIN that generated this EWB — must be the state-wise GSTIN
+    // from company_settings, not the legacy branch.branch_gstin (often the KA HO one).
+    // ClearTax error 900201 ("EWayBill not present") means we're querying with a
+    // different GSTIN's account context — it can't see EWBs created under another GSTIN.
+    const { data: companySettings } = await supabase.from('company_settings').select('*').single()
+    const REGION_TO_STATE_CODE = { 'Andhra Pradesh': 'AP', 'Kerala': 'KL', 'Telangana': 'TS', 'Tamil Nadu': 'TN', 'Rest of Karnataka': 'KA', 'Bangalore': 'KA' }
+    const stateCode    = REGION_TO_STATE_CODE[branch?.region]
+    const stateGstin   = stateCode ? companySettings?.[`gstin_${stateCode.toLowerCase()}`] : null
+    const gstinForPdf  = stateGstin || branch?.branch_gstin || process.env.WG_GSTIN
 
     const pdfBuffer = await fetchEWayBillPdf({
       ewbNumbers:    [consignment.eway_bill_no],
-      gstinOverride: branch?.branch_gstin,
+      gstinOverride: gstinForPdf,
     })
 
     const filename = `EWB_${consignment.eway_bill_no}_${(consignment.tmp_prf_no || consignmentId)}.pdf`.replace(/\//g, '-')

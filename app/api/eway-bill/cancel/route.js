@@ -23,13 +23,20 @@ export async function POST(req) {
     }
 
     const { data: branch } = await supabase
-      .from('branches').select('branch_gstin').eq('name', consignment.branch_name).single()
+      .from('branches').select('branch_gstin, region').eq('name', consignment.branch_name).single()
+
+    // Cancel must use the same GSTIN that generated the EWB (state-wise GSTIN, not legacy KA one)
+    const { data: companySettings } = await supabase.from('company_settings').select('*').single()
+    const REGION_TO_STATE_CODE = { 'Andhra Pradesh': 'AP', 'Kerala': 'KL', 'Telangana': 'TS', 'Tamil Nadu': 'TN', 'Rest of Karnataka': 'KA', 'Bangalore': 'KA' }
+    const stateCode  = REGION_TO_STATE_CODE[branch?.region]
+    const stateGstin = stateCode ? companySettings?.[`gstin_${stateCode.toLowerCase()}`] : null
+    const gstinFor   = stateGstin || branch?.branch_gstin || process.env.WG_GSTIN
 
     const result = await cancelEWayBill({
       ewbNumber:     consignment.eway_bill_no,
       reasonCode:    reason_code || 'DUPLICATE',
       remark:        remark      || 'Duplicate Entry',
-      gstinOverride: branch?.branch_gstin,
+      gstinOverride: gstinFor,
     })
 
     await supabase.from('consignments')
