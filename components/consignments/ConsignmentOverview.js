@@ -395,10 +395,6 @@ export default function ConsignmentOverview() {
                     </th>
 
                     {/* Sortable: Today */}
-                    <th style={{ ...thBase, textAlign: 'right', cursor: 'pointer', color: sortKey === 'today_bills' ? t.blue : t.text4 }}
-                        onClick={() => handleSort('today_bills')}>
-                      Today's Bills <SortIcon col="today_bills" />
-                    </th>
                     <th style={{ ...thBase, textAlign: 'right', cursor: 'pointer', color: sortKey === 'today_net_wt' ? t.blue : t.text4 }}
                         onClick={() => handleSort('today_net_wt')}>
                       Today's Net Wt <SortIcon col="today_net_wt" />
@@ -477,13 +473,6 @@ export default function ConsignmentOverview() {
                             </td>
                           )
                         })()}
-
-                        {/* Today's Bills */}
-                        <td style={{ padding: '11px 14px', textAlign: 'right' }}>
-                          {hasToday
-                            ? <span style={{ fontSize: '14px', color: t.blue, fontFamily: 'monospace', fontWeight: 700 }}>{b.today_bills}</span>
-                            : <span style={{ fontSize: '11px', color: t.text4 }}>—</span>}
-                        </td>
 
                         {/* Today's Net Wt */}
                         <td style={{ padding: '11px 14px', textAlign: 'right' }}>
@@ -569,7 +558,6 @@ export default function ConsignmentOverview() {
                     <td style={{ padding: '11px 14px', textAlign: 'right', fontSize: '13px', color: t.gold, fontFamily: 'monospace', fontWeight: 700 }}>
                       {fmt(grandTodayWt + grandOlderWt, 2)}<span style={{ fontSize: '10px', marginLeft: '2px' }}>g</span>
                     </td>
-                    <td style={{ padding: '11px 14px', textAlign: 'right', fontSize: '14px', color: t.blue, fontFamily: 'monospace', fontWeight: 700 }}>{grandToday || '—'}</td>
                     <td style={{ padding: '11px 14px', textAlign: 'right', fontSize: '13px', color: t.blue, fontFamily: 'monospace' }}>{fmt(grandTodayWt, 2)}<span style={{ fontSize: '10px', marginLeft: '2px' }}>g</span></td>
                     <td style={{ padding: '11px 14px', textAlign: 'right', fontSize: '12px', color: t.blue, fontFamily: 'monospace', fontWeight: 700 }}>{grandTodayVal ? fmtINR(grandTodayVal) : '—'}</td>
                     <td style={{ padding: '11px 14px', textAlign: 'right', fontSize: '14px', color: t.orange, fontFamily: 'monospace', fontWeight: 700 }}>{grandOlder || '—'}</td>
