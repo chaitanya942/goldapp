@@ -285,21 +285,6 @@ export default function ConsignmentData() {
     } finally { setEwbActionId(null) }
   }
 
-  async function receiveAtHub(c) {
-    if (!confirm(`Mark consignment ${c.tmp_prf_no} as received at ${c.dest_branch}?\n\nThis transfers the bills' current location to the hub. Only do this when the physical parcel has arrived.`)) return
-    setEwbActionId(c.id + ':receive')
-    try {
-      const res = await fetch('/api/consignments', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'receive', id: c.id }),
-      })
-      const data = await res.json()
-      if (!res.ok || data.error) { setToast({ msg: data.error || 'Receive failed', type: 'error' }); return }
-      setToast({ msg: `Bills now at ${c.dest_branch} — hub can include them in next Hub→HO consignment`, type: 'success' })
-      await fetchAll()
-    } finally { setEwbActionId(null) }
-  }
-
   async function downloadEwbPdf(c) {
     setDownloadingId(c.id + ':ewb')
     await triggerDownload(`/api/eway-bill/pdf?id=${c.id}`, `EWB_${c.eway_bill_no}.pdf`, msg => setToast({ msg, type: 'error' }))
@@ -566,14 +551,14 @@ export default function ConsignmentData() {
           <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '900px' }}>
             <thead style={{ position: 'sticky', top: 0, zIndex: 1 }}>
               <tr>
-                {['TMP PRF', 'Type', 'Source → Destination', 'Bills', 'Net Wt', 'Value', 'Created', 'Document', 'E-Way Bill', 'E-Invoice', 'Receive', 'All'].map(h => (
+                {['TMP PRF', 'Type', 'Source → Destination', 'Bills', 'Net Wt', 'Value', 'Created', 'Document', 'E-Way Bill', 'E-Invoice', 'All'].map(h => (
                   <th key={h} style={{ padding: '10px 14px', fontSize: '10px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', textAlign: h === 'Bills' || h === 'Net Wt' || h === 'Value' ? 'right' : 'left', background: t.card2, borderBottom: `1px solid ${t.border}`, whiteSpace: 'nowrap', fontWeight: 600 }}>{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {filteredCons.length === 0 ? (
-                <tr><td colSpan={12} style={{ padding: '64px', textAlign: 'center', color: t.text4, fontSize: '13px' }}>
+                <tr><td colSpan={11} style={{ padding: '64px', textAlign: 'center', color: t.text4, fontSize: '13px' }}>
                   {consignments.length === 0
                     ? 'No active consignments. Use Branch Stock → Move to create one.'
                     : 'No consignments match the filters'}
@@ -662,19 +647,6 @@ export default function ConsignmentData() {
                           style={{ background: 'transparent', border: `1px solid ${t.purple}50`, borderRadius: '5px', padding: '4px 10px', fontSize: '10px', color: t.purple, fontWeight: 600, cursor: 'pointer', opacity: ewbActionId === c.id + ':einv' ? 0.6 : 1 }}>
                           {ewbActionId === c.id + ':einv' ? '⏳ Generating…' : '⚡ Generate IRN'}
                         </button>
-                      )}
-                    </td>
-                    <td style={{ padding: '11px 14px' }}>
-                      {/* Receive button only for INTERNAL (Branch→Hub) movements that haven't been received yet.
-                         Hub→HO receives happen via Inventory Audit module (when built). */}
-                      {isType && c.status !== 'received' ? (
-                        <button onClick={() => receiveAtHub(c)} disabled={!!ewbActionId}
-                          title={`Mark as received at ${c.dest_branch} — moves bills' location to the hub so they can be included in next Hub→HO consignment`}
-                          style={{ background: t.green, color: '#fff', border: 'none', borderRadius: '6px', padding: '5px 11px', fontSize: '10px', fontWeight: 600, cursor: ewbActionId ? 'not-allowed' : 'pointer', opacity: ewbActionId === c.id + ':receive' ? 0.6 : 1, whiteSpace: 'nowrap' }}>
-                          {ewbActionId === c.id + ':receive' ? '⏳…' : '✓ Received'}
-                        </button>
-                      ) : (
-                        <span style={{ fontSize: '10px', color: t.text4 }}>—</span>
                       )}
                     </td>
                     <td style={{ padding: '11px 14px' }}>

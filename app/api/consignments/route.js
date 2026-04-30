@@ -448,9 +448,15 @@ export async function POST(req) {
     const totalNetWt  = (purchaseTotals || []).reduce((s, p) => s + parseFloat(p.net_weight || 0), 0)
     const totalAmount = (purchaseTotals || []).reduce((s, p) => s + parseFloat(p.total_amount || 0), 0)
 
-    // Creation = consignment is in transit. Skip 'draft' state — the user mental
-    // model is "challan/voucher generated → it's moving". Receipt at HO is handled
-    // by a separate module.
+    // Status & bill movement depends on movement type:
+    //   INTERNAL (Branch → Hub): instantaneous transfer. No receive workflow at hub.
+    //     - Consignment status = 'received' immediately
+    //     - Bills' current_branch flips to dest_branch (hub) right away
+    //     - Bills' stock_status stays 'at_branch' so they're available in hub's stock
+    //   EXTERNAL (Direct → HO or Hub → HO): in-transit until received at HO.
+    //     - Consignment status = 'dispatched'
+    //     - Bills' stock_status flips to 'in_consignment'
+    //     - Bills' current_branch unchanged until HO receive
     const nowIso = new Date().toISOString()
     const { data: consignment, error: ce } = await supabase
       .from('consignments')
@@ -466,8 +472,9 @@ export async function POST(req) {
         movement_type: movement_type || 'EXTERNAL',
         dest_branch:   isInternal ? dest_branch : null,
         eway_bill_no:  eway_bill_no || null,
-        status:        'dispatched',
+        status:        isInternal ? 'received'  : 'dispatched',
         dispatched_at: nowIso,
+        received_at:   isInternal ? nowIso      : null,
         total_bills:   purchase_ids.length,
         total_net_wt:  totalNetWt,
         total_amount:  totalAmount,
@@ -482,9 +489,21 @@ export async function POST(req) {
       purchase_ids.map(pid => ({ consignment_id: consignment.id, purchase_id: pid, added_by: created_by }))
     )
 
-    await supabase.from('purchases')
-      .update({ stock_status: 'in_consignment', dispatched_at: new Date().toISOString() })
-      .in('id', purchase_ids)
+    if (isInternal) {
+      // Branch → Hub: bills are immediately at the hub, available in hub's stock
+      await supabase.from('purchases')
+        .update({
+          stock_status:  'at_branch',
+          current_branch: dest_branch,
+          dispatched_at: nowIso,
+        })
+        .in('id', purchase_ids)
+    } else {
+      // Direct → HO / Hub → HO: bills go in-transit until HO receive
+      await supabase.from('purchases')
+        .update({ stock_status: 'in_consignment', dispatched_at: nowIso })
+        .in('id', purchase_ids)
+    }
 
     return Response.json({ data: consignment })
   }
