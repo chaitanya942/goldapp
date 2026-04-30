@@ -301,6 +301,60 @@ export async function GET(req) {
     return Response.json({ data: { ...consignment, items } })
   }
 
+  // ── Transfer history: for a list of purchase IDs (or a hub branch),
+  //    return the most recent INTERNAL (Branch→Hub) consignment that brought
+  //    each bill to its current location. Used to surface "via WG000010"
+  //    info in hub-level bill pickers and consolidated Hub→HO documents.
+  if (action === 'transfer_history') {
+    const branch       = searchParams.get('branch')             // hub name
+    const idsParam     = searchParams.get('purchase_ids')        // comma-separated
+    let purchaseIds = []
+
+    if (idsParam) {
+      purchaseIds = idsParam.split(',').filter(Boolean)
+    } else if (branch) {
+      // All bills currently at this hub (transferred-in OR own — we'll filter below)
+      const { data } = await supabase
+        .from('purchases')
+        .select('id')
+        .eq('current_branch', branch)
+        .eq('crm_status', 'approved')
+        .eq('is_deleted', false)
+      purchaseIds = (data || []).map(r => r.id)
+    } else {
+      return Response.json({ error: 'branch or purchase_ids required' }, { status: 400 })
+    }
+
+    if (!purchaseIds.length) return Response.json({ data: {} })
+
+    // Pull all INTERNAL consignment_items for these purchases + parent consignment
+    const { data: links } = await supabase
+      .from('consignment_items')
+      .select('purchase_id, consignment:consignment_id(id, tmp_prf_no, challan_no, internal_no, movement_type, status, branch_name, dest_branch, created_at, received_at)')
+      .in('purchase_id', purchaseIds)
+
+    // For each purchase, pick the most recent INTERNAL+received consignment
+    const map = {}
+    for (const link of links || []) {
+      const c = link.consignment
+      if (!c || c.movement_type !== 'INTERNAL' || c.status !== 'received') continue
+      const existing = map[link.purchase_id]
+      if (!existing || new Date(c.created_at) > new Date(existing.created_at)) {
+        map[link.purchase_id] = {
+          consignment_id: c.id,
+          tmp_prf_no:     c.tmp_prf_no,
+          internal_no:    c.internal_no,
+          challan_no:     c.challan_no,        // voucher no for INTERNAL
+          source_branch:  c.branch_name,
+          dest_branch:    c.dest_branch,
+          received_at:    c.received_at,
+          created_at:     c.created_at,
+        }
+      }
+    }
+    return Response.json({ data: map })
+  }
+
   return Response.json({ error: 'Invalid action' }, { status: 400 })
 }
 

@@ -78,6 +78,7 @@ export default function ConsignmentData() {
   const [loadingPreview,      setLoadingPreview]     = useState(false)
   const [downloadingId,       setDownloadingId]      = useState(null)
   const [ewbActionId,         setEwbActionId]        = useState(null)
+  const [transferHistory,     setTransferHistory]    = useState({}) // purchase_id → prior INTERNAL transfer info
   const [toast,               setToast]              = useState(null)
 
   // List filters
@@ -111,6 +112,15 @@ export default function ConsignmentData() {
       setConsignmentDeepLink(null)
     }
   }, [consignmentDeepLink])
+
+  // Fetch transfer history when entering a branch view (only useful for hubs)
+  useEffect(() => {
+    if (!nav?.branch) { setTransferHistory({}); return }
+    fetch(`/api/consignments?action=transfer_history&branch=${encodeURIComponent(nav.branch)}`)
+      .then(r => r.json())
+      .then(({ data }) => setTransferHistory(data || {}))
+      .catch(() => setTransferHistory({}))
+  }, [nav?.branch])
 
   // Reset hub destination when source branch changes
   useEffect(() => {
@@ -478,7 +488,12 @@ export default function ConsignmentData() {
                       {isHub && (
                         <td style={{ padding: '10px 14px' }}>
                           {fromOther ? (
-                            <span title="Transferred in from this branch" style={{ background: `${t.purple}18`, color: t.purple, borderRadius: '5px', padding: '2px 8px', fontSize: '10px', fontWeight: 600, whiteSpace: 'nowrap' }}>↩ {row.branch_name}</span>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                              <span title={`Transferred in from ${row.branch_name}`} style={{ background: `${t.purple}18`, color: t.purple, borderRadius: '5px', padding: '2px 8px', fontSize: '10px', fontWeight: 600, whiteSpace: 'nowrap', alignSelf: 'flex-start' }}>↩ {row.branch_name}</span>
+                              {transferHistory[row.id]?.tmp_prf_no && (
+                                <span title={`Came via consignment ${transferHistory[row.id].tmp_prf_no}`} style={{ fontSize: '9px', color: t.text4, fontFamily: 'monospace', alignSelf: 'flex-start' }}>via {transferHistory[row.id].tmp_prf_no}</span>
+                              )}
+                            </div>
                           ) : (
                             <span style={{ color: t.text4, fontSize: '11px' }}>own</span>
                           )}

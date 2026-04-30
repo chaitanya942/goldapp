@@ -41,11 +41,32 @@ export async function GET(req) {
 
     const { data: items, error: ie } = await supabase
       .from('purchases')
-      .select('id, purchase_date, customer_name, branch_name, gross_weight, stone_weight, wastage, net_weight, total_amount')
+      .select('id, purchase_date, customer_name, branch_name, current_branch, gross_weight, stone_weight, wastage, net_weight, total_amount')
       .in('id', purchaseIds)
       .order('purchase_date', { ascending: true })
 
     if (ie) return Response.json({ error: 'Failed to fetch purchase items' }, { status: 500 })
+
+    // For Hub→HO consolidations: look up the prior INTERNAL consignment (Branch→Hub)
+    // for each bill, so the report can show "via WG000010 from KL-EDAPPALLY".
+    const { data: priorLinks } = await supabase
+      .from('consignment_items')
+      .select('purchase_id, consignment:consignment_id(tmp_prf_no, movement_type, status, branch_name, dest_branch, created_at)')
+      .in('purchase_id', purchaseIds)
+    const transferHistory = {}
+    for (const link of priorLinks || []) {
+      const cn = link.consignment
+      if (!cn || cn.movement_type !== 'INTERNAL' || cn.status !== 'received') continue
+      const existing = transferHistory[link.purchase_id]
+      if (!existing || new Date(cn.created_at) > new Date(existing.created_at)) {
+        transferHistory[link.purchase_id] = {
+          tmp_prf_no:    cn.tmp_prf_no,
+          source_branch: cn.branch_name,
+          dest_branch:   cn.dest_branch,
+          created_at:    cn.created_at,
+        }
+      }
+    }
 
     // Fetch company settings so tax rates are dynamic (not hardcoded)
     const { data: companySettings } = await supabase.from('company_settings').select('*').single()
@@ -55,6 +76,7 @@ export async function GET(req) {
       consignment,
       items: items || [],
       companySettings: companySettings || {},
+      transferHistory,
     })
 
     const filename = `GoldConsigneeReport-${consignment.tmp_prf_no}.jpg`
