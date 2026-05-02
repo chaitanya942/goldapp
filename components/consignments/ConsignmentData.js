@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
+import JSZip from 'jszip'
 import { useApp } from '../../lib/context'
 import GoldSpinner from '../ui/GoldSpinner'
 import Badge from '../ui/Badge'
@@ -365,7 +366,9 @@ export default function ConsignmentData() {
     setDownloadingId(null)
   }
 
-  // One-click: download all applicable documents per business rules
+  // One-click: download all applicable documents into a real folder
+  // (File System Access API where supported — Chrome/Edge), else fall back to ZIP.
+  // Folder name format: {TMP_PRF}_{SOURCE}-to-{DEST}_{YYYY-MM-DD}
   async function downloadAll(c) {
     const isType = c.movement_type === 'INTERNAL'
     const src = branches.find(b => b.name === c.branch_name)
@@ -373,36 +376,105 @@ export default function ConsignmentData() {
     const showEwb = isType || isKaSource           // intrastate cases
     const showEinv = !isType && !isKaSource         // interstate Hub→HO
 
+    const sanitize = s => String(s || '').replace(/[^a-zA-Z0-9_-]/g, '-').replace(/-+/g, '-')
+    const dateStr  = new Date(c.created_at).toISOString().slice(0, 10)
+    const dest     = isType ? c.dest_branch : 'HO'
+    const folderName = `${sanitize(c.tmp_prf_no)}_${sanitize(c.branch_name)}-to-${sanitize(dest)}_${dateStr}`
+
+    // Build the list of files to fetch
+    const files = []
+    files.push({ url: `/api/generate-consignee-report?id=${c.id}`, name: 'Consignee_Report.jpg' })
+    files.push({
+      url:  isType ? `/api/generate-issue-voucher-pdf?id=${c.id}` : `/api/generate-challan-pdf?id=${c.id}`,
+      name: isType ? 'Issue_Voucher.pdf' : 'Delivery_Challan.pdf',
+    })
+    if (showEwb && c.eway_bill_no) {
+      files.push({ url: `/api/eway-bill/pdf?id=${c.id}`, name: `EWB_${sanitize(c.eway_bill_no)}.pdf` })
+    }
+
     setDownloadingId(c.id + ':all')
-    setToast({ msg: 'Downloading documents…', type: 'info' })
+
+    const fetchToBlob = async (url) => {
+      const res = await fetch(url)
+      if (!res.ok) throw new Error(`${url} → ${res.status}`)
+      return res.blob()
+    }
+
     try {
-      // 1. Consignee Report (always)
-      await triggerDownload(`/api/generate-consignee-report?id=${c.id}`,
-        `GoldConsigneeReport-${c.tmp_prf_no}.jpg`,
-        msg => setToast({ msg, type: 'error' }))
-      // 2. Challan (EXTERNAL) or Voucher (INTERNAL) — always
-      const docUrl  = isType ? `/api/generate-issue-voucher-pdf?id=${c.id}` : `/api/generate-challan-pdf?id=${c.id}`
-      const docName = isType ? `${(c.tmp_prf_no || 'voucher').replace(/\//g,'-')}_voucher.pdf`
-                             : `${(c.challan_no || c.tmp_prf_no || 'challan').replace(/\//g,'-')}.pdf`
-      await triggerDownload(docUrl, docName, msg => setToast({ msg, type: 'error' }))
-      // 3. EWB PDF — only intrastate cases AND if generated
-      if (showEwb && c.eway_bill_no) {
-        await triggerDownload(`/api/eway-bill/pdf?id=${c.id}`,
-          `EWB_${c.eway_bill_no}.pdf`,
-          msg => setToast({ msg, type: 'error' }))
+      // ── Path 1: File System Access API (Chrome/Edge) — creates a real folder ──
+      if (typeof window !== 'undefined' && 'showDirectoryPicker' in window) {
+        let parentDir
+        try {
+          parentDir = await window.showDirectoryPicker({ mode: 'readwrite', startIn: 'downloads' })
+        } catch (e) {
+          // User cancelled the picker — silent abort
+          if (e.name === 'AbortError') { setDownloadingId(null); return }
+          throw e
+        }
+        setToast({ msg: 'Saving documents to folder…', type: 'info' })
+        const subDir = await parentDir.getDirectoryHandle(folderName, { create: true })
+
+        const summary = []
+        for (const f of files) {
+          try {
+            const blob = await fetchToBlob(f.url)
+            const fileHandle = await subDir.getFileHandle(f.name, { create: true })
+            const writable = await fileHandle.createWritable()
+            await writable.write(blob)
+            await writable.close()
+            summary.push(f.name.split('.')[0].replace(/_/g, ' '))
+          } catch (e) { console.warn(`${f.name} failed:`, e.message) }
+        }
+        if (showEinv && c.irn) {
+          const txtHandle = await subDir.getFileHandle('E-Invoice_Details.txt', { create: true })
+          const w = await txtHandle.createWritable()
+          await w.write(`IRN: ${c.irn}\nAck No: ${c.ack_no || ''}\nAck Date: ${c.ack_dt || ''}\n`)
+          await w.close()
+          summary.push(`IRN ${String(c.irn).slice(0, 8)}…`)
+        }
+
+        const missing = []
+        if (showEwb && !c.eway_bill_no) missing.push('EWB not generated')
+        if (showEinv && !c.irn)         missing.push('E-Invoice not generated')
+        setToast({
+          msg: `Saved to ${folderName}/ — ${summary.join(' + ')}` + (missing.length ? ` · ${missing.join(', ')}` : ''),
+          type: missing.length ? 'info' : 'success',
+        })
+        return
       }
-      // 4. E-Invoice signed copy — only interstate Hub→HO if generated.
-      // (We don't have a separate IRP PDF endpoint yet — IRN is stored on the consignment.)
+
+      // ── Path 2: Fallback for Firefox/Safari — ZIP with the folder name inside ──
+      setToast({ msg: 'Bundling documents (your browser does not support folder save — using ZIP)…', type: 'info' })
+      const zip = new JSZip()
       const summary = []
-      summary.push('Report')
-      summary.push(isType ? 'Voucher' : 'Challan')
-      if (showEwb && c.eway_bill_no) summary.push('EWB')
-      if (showEinv && c.irn)        summary.push(`IRN ${String(c.irn).slice(0, 8)}…`)
+      for (const f of files) {
+        try {
+          const blob = await fetchToBlob(f.url)
+          zip.file(`${folderName}/${f.name}`, blob)
+          summary.push(f.name.split('.')[0].replace(/_/g, ' '))
+        } catch (e) { console.warn(`${f.name} failed:`, e.message) }
+      }
+      if (showEinv && c.irn) {
+        zip.file(`${folderName}/E-Invoice_Details.txt`,
+          `IRN: ${c.irn}\nAck No: ${c.ack_no || ''}\nAck Date: ${c.ack_dt || ''}\n`)
+        summary.push(`IRN ${String(c.irn).slice(0, 8)}…`)
+      }
+      const blob = await zip.generateAsync({ type: 'blob' })
+      const a = document.createElement('a')
+      a.href = URL.createObjectURL(blob)
+      a.download = `${folderName}.zip`
+      a.click()
+      URL.revokeObjectURL(a.href)
+
       const missing = []
       if (showEwb && !c.eway_bill_no) missing.push('EWB not generated')
       if (showEinv && !c.irn)         missing.push('E-Invoice not generated')
-      const msg = `Downloaded: ${summary.join(' + ')}` + (missing.length ? ` · ${missing.join(', ')}` : '')
-      setToast({ msg, type: missing.length ? 'info' : 'success' })
+      setToast({
+        msg: `Downloaded ${folderName}.zip — ${summary.join(' + ')}` + (missing.length ? ` · ${missing.join(', ')}` : ''),
+        type: missing.length ? 'info' : 'success',
+      })
+    } catch (err) {
+      setToast({ msg: err.message || 'Save failed', type: 'error' })
     } finally { setDownloadingId(null) }
   }
 
