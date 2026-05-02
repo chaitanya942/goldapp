@@ -42,24 +42,24 @@ function AgeBadge({ days, t }) {
   return <span style={{ fontSize: '10px', color, background: `${color}18`, borderRadius: '5px', padding: '2px 7px', fontWeight: 700, letterSpacing: '.02em' }}>{days}d</span>
 }
 
-// EWB cell with expiry colour-coding. Hoisted to module scope so it
-// doesn't remount on every parent render.
+// EWB cell — single-line layout. EWB number visible on wide screens,
+// hidden under a "✓ EWB" badge on narrow screens. Expiry shown as tooltip.
 function EwbCell({ c, t, downloadingId, ewbActionId, downloadEwbPdf, cancelEwb }) {
   const validUntil = c.ewb_valid_until ? new Date(c.ewb_valid_until) : null
-  const hoursLeft  = validUntil ? (validUntil - Date.now()) / 3600000 : null
-  const expiryColor = hoursLeft == null ? t.green
-    : hoursLeft < 0  ? t.red
-    : hoursLeft < 12 ? t.orange
-    : hoursLeft < 24 ? t.gold
-    : t.green
-  const expiryLabel = hoursLeft == null ? null
-    : hoursLeft < 0  ? `expired ${Math.round(-hoursLeft)}h ago`
-    : hoursLeft < 24 ? `expires in ${Math.round(hoursLeft)}h`
-    : `${Math.round(hoursLeft / 24)}d valid`
+  const tooltipText = validUntil
+    ? `EWB ${c.eway_bill_no} · valid till ${validUntil.toLocaleString()}`
+    : `EWB ${c.eway_bill_no}`
   return (
-    <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', alignItems: 'center' }}>
-      <span style={{ fontSize: '10px', color: expiryColor, background: `${expiryColor}15`, borderRadius: '4px', padding: '2px 7px', fontWeight: 600, fontFamily: 'monospace' }}>{c.eway_bill_no}</span>
-      {expiryLabel && <span title={validUntil?.toLocaleString()} style={{ fontSize: '9px', color: expiryColor, fontWeight: 600 }}>{expiryLabel}</span>}
+    <div style={{ display: 'flex', gap: '4px', flexWrap: 'nowrap', alignItems: 'center', whiteSpace: 'nowrap' }} title={tooltipText}>
+      {/* Wide screens: full EWB number; narrow: short "✓ EWB" badge. CSS-only swap. */}
+      <span className="ewb-num-full"
+        style={{ fontSize: '10px', color: t.green, background: `${t.green}15`, borderRadius: '4px', padding: '2px 7px', fontWeight: 600, fontFamily: 'monospace' }}>
+        {c.eway_bill_no}
+      </span>
+      <span className="ewb-num-short"
+        style={{ fontSize: '10px', color: t.green, background: `${t.green}15`, borderRadius: '4px', padding: '2px 7px', fontWeight: 600 }}>
+        ✓ EWB
+      </span>
       <button onClick={() => downloadEwbPdf(c)} disabled={!!downloadingId}
         style={{ background: t.blue, color: '#fff', border: 'none', borderRadius: '5px', padding: '3px 8px', fontSize: '10px', fontWeight: 600, cursor: 'pointer', opacity: downloadingId === c.id + ':ewb' ? 0.6 : 1 }}>
         {downloadingId === c.id + ':ewb' ? '⏳' : '📄 PDF'}
@@ -69,6 +69,13 @@ function EwbCell({ c, t, downloadingId, ewbActionId, downloadEwbPdf, cancelEwb }
         style={{ background: 'transparent', border: `1px solid ${t.red}40`, borderRadius: '5px', padding: '3px 8px', fontSize: '10px', color: t.red, cursor: 'pointer', opacity: ewbActionId === c.id + ':cancel' ? 0.6 : 1 }}>
         {ewbActionId === c.id + ':cancel' ? '…' : '✕'}
       </button>
+      <style>{`
+        .ewb-num-short { display: none; }
+        @media (max-width: 1280px) {
+          .ewb-num-full  { display: none; }
+          .ewb-num-short { display: inline-block; }
+        }
+      `}</style>
     </div>
   )
 }
@@ -905,7 +912,7 @@ export default function ConsignmentData() {
                     <td style={{ padding: '11px 14px', fontSize: '12px', color: t.blue, textAlign: 'right', fontFamily: 'monospace', whiteSpace: 'nowrap' }}>₹{fmt(Math.round(c.total_amount))}</td>
                     <td style={{ padding: '11px 14px', fontSize: '11px', color: t.text4, whiteSpace: 'nowrap' }}>{fmtTS(c.created_at)}</td>
                     <td style={{ padding: '11px 14px' }}>
-                      <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+                      <div style={{ display: 'flex', gap: '4px', flexWrap: 'nowrap', whiteSpace: 'nowrap' }}>
                         <button onClick={() => downloadDoc(c, isType ? 'voucher' : 'challan')} disabled={!!downloadingId}
                           title={isType ? 'Issue Voucher' : 'Delivery Challan'}
                           style={{ ...btnGold, padding: '4px 10px', fontSize: '10px' }}>
@@ -934,9 +941,12 @@ export default function ConsignmentData() {
                       {!showEinvoice ? (
                         <span title={isType ? 'Branch → Hub uses Issue Voucher only — no E-Invoice' : 'Intrastate KA Branch → HO uses EWB only — no E-Invoice'} style={{ fontSize: '10px', color: t.text4 }}>n/a</span>
                       ) : c.irn ? (
-                        <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', alignItems: 'center' }}>
-                          <span title={c.irn} style={{ fontSize: '10px', color: t.purple, background: `${t.purple}15`, borderRadius: '4px', padding: '2px 7px', fontWeight: 600, fontFamily: 'monospace' }}>
+                        <div style={{ display: 'flex', gap: '4px', flexWrap: 'nowrap', alignItems: 'center', whiteSpace: 'nowrap' }} title={`IRN: ${c.irn}`}>
+                          <span className="irn-full" style={{ fontSize: '10px', color: t.purple, background: `${t.purple}15`, borderRadius: '4px', padding: '2px 7px', fontWeight: 600, fontFamily: 'monospace' }}>
                             IRN: {String(c.irn).slice(0, 8)}…
+                          </span>
+                          <span className="irn-short" style={{ fontSize: '10px', color: t.purple, background: `${t.purple}15`, borderRadius: '4px', padding: '2px 7px', fontWeight: 600 }}>
+                            ✓ IRN
                           </span>
                           <button onClick={async () => {
                             setDownloadingId(c.id + ':einv')
@@ -954,6 +964,13 @@ export default function ConsignmentData() {
                             style={{ background: 'transparent', border: `1px solid ${t.red}40`, borderRadius: '5px', padding: '3px 8px', fontSize: '10px', color: t.red, cursor: 'pointer', opacity: ewbActionId === c.id + ':einv-cancel' ? 0.6 : 1 }}>
                             {ewbActionId === c.id + ':einv-cancel' ? '…' : '✕'}
                           </button>
+                          <style>{`
+                            .irn-short { display: none; }
+                            @media (max-width: 1280px) {
+                              .irn-full  { display: none; }
+                              .irn-short { display: inline-block; }
+                            }
+                          `}</style>
                         </div>
                       ) : (
                         <button onClick={() => generateEinv(c)} disabled={!!ewbActionId}
@@ -963,7 +980,7 @@ export default function ConsignmentData() {
                       )}
                     </td>
                     <td style={{ padding: '11px 14px' }}>
-                      <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+                      <div style={{ display: 'flex', gap: '4px', flexWrap: 'nowrap', whiteSpace: 'nowrap' }}>
                         <button onClick={() => downloadAll(c)} disabled={downloadingId === c.id + ':all'}
                           title="Download Consignee Report + Document + EWB (if available) in one click"
                           style={{ background: t.gold, color: '#1a0a00', border: 'none', borderRadius: '6px', padding: '5px 11px', fontSize: '10px', fontWeight: 700, cursor: downloadingId === c.id + ':all' ? 'not-allowed' : 'pointer', opacity: downloadingId === c.id + ':all' ? 0.6 : 1, whiteSpace: 'nowrap' }}>
