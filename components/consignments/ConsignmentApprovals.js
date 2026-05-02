@@ -1,7 +1,8 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useApp } from '../../lib/context'
+import { supabase as supabaseClient } from '../../lib/supabase'
 import GoldSpinner from '../ui/GoldSpinner'
 import Toast from '../ui/Toast'
 
@@ -13,6 +14,61 @@ const THEMES = {
 const fmt   = (n) => n != null ? Number(n).toLocaleString('en-IN') : '—'
 const fmtWt = (n) => n != null ? `${Number(n).toFixed(3)}g` : '—'
 const fmtTS = (d) => d ? new Date(d).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—'
+
+// "2h 14m" since timestamp
+function waitingFor(ts) {
+  if (!ts) return '—'
+  const ms = Date.now() - new Date(ts).getTime()
+  if (ms < 0) return 'just now'
+  const mins  = Math.floor(ms / 60000)
+  if (mins < 1) return 'just now'
+  if (mins < 60) return `${mins}m`
+  const hours = Math.floor(mins / 60)
+  const rmins = mins % 60
+  if (hours < 24) return `${hours}h ${rmins}m`
+  const days = Math.floor(hours / 24)
+  const rhrs = hours % 24
+  return `${days}d ${rhrs}h`
+}
+
+// Generate a short attention beep using Web Audio API (no asset file needed).
+function playApprovalBeep() {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)()
+    const beep = (freq, start, dur, gain = 0.15) => {
+      const osc = ctx.createOscillator()
+      const g   = ctx.createGain()
+      osc.type = 'sine'
+      osc.frequency.value = freq
+      g.gain.setValueAtTime(0, ctx.currentTime + start)
+      g.gain.linearRampToValueAtTime(gain, ctx.currentTime + start + 0.01)
+      g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + start + dur)
+      osc.connect(g); g.connect(ctx.destination)
+      osc.start(ctx.currentTime + start)
+      osc.stop(ctx.currentTime + start + dur + 0.05)
+    }
+    // Two-tone "ding" — A5 then E6 (pleasant, attention-getting, short)
+    beep(880, 0,    0.18)
+    beep(1320, 0.18, 0.22)
+    setTimeout(() => ctx.close(), 600)
+  } catch {}
+}
+
+function fireDesktopNotification(title, body) {
+  if (typeof window === 'undefined' || !('Notification' in window)) return
+  if (Notification.permission !== 'granted') return
+  try {
+    const n = new Notification(title, {
+      body,
+      icon: '/logo.png',
+      badge: '/logo.png',
+      tag:   'consignment-approval',     // collapses repeated alerts
+      requireInteraction: false,
+    })
+    n.onclick = () => { window.focus(); n.close() }
+    setTimeout(() => n.close(), 8000)
+  } catch {}
+}
 
 async function previewDoc(url, filename, onError) {
   // Approval-side preview: append ?preview=accounts so the gate lets it through
@@ -40,16 +96,89 @@ export default function ConsignmentApprovals() {
   const [loading, setLoading] = useState(true)
   const [actionId, setActionId] = useState(null)
   const [toast, setToast] = useState(null)
+  const [notifPermission, setNotifPermission] = useState(typeof window !== 'undefined' && 'Notification' in window ? Notification.permission : 'unsupported')
+  const [, forceTick] = useState(0)
+  const knownIds = useRef(new Set())
 
-  const fetchPending = useCallback(async () => {
-    setLoading(true)
+  const fetchPending = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true)
     const r = await fetch('/api/consignments?action=pending_approvals')
     const j = await r.json()
-    setPending(j.data || [])
+    const rows = j.data || []
+    setPending(rows)
+    if (!silent) {
+      // Initial load — seed knownIds without firing notifications
+      knownIds.current = new Set(rows.map(c => c.id))
+    }
     setLoading(false)
   }, [])
 
   useEffect(() => { fetchPending() }, [fetchPending])
+
+  // Tick every 30s so the "waiting for" timer stays fresh.
+  useEffect(() => {
+    const id = setInterval(() => forceTick(n => n + 1), 30000)
+    return () => clearInterval(id)
+  }, [])
+
+  // Realtime subscription: new pending consignments arrive instantly,
+  // approved/rejected ones disappear from the list instantly.
+  useEffect(() => {
+    const channel = supabaseClient
+      .channel('consignment-approvals')
+      .on('postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'consignments', filter: 'approval_status=eq.pending' },
+        (payload) => {
+          const row = payload.new
+          if (!row || knownIds.current.has(row.id)) return
+          knownIds.current.add(row.id)
+          setPending(prev => [row, ...prev])
+          // Notification + sound for new requests
+          fireDesktopNotification(
+            'New consignment awaiting approval',
+            `${row.tmp_prf_no || ''}: ${row.branch_name} → ${row.dest_branch || 'HO'} · ${row.total_bills || 0} bills · ${Number(row.total_net_wt || 0).toFixed(3)}g`
+          )
+          playApprovalBeep()
+        })
+      .on('postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'consignments' },
+        (payload) => {
+          const row = payload.new
+          if (!row) return
+          if (row.approval_status !== 'pending') {
+            // Approved or rejected — remove from list
+            knownIds.current.delete(row.id)
+            setPending(prev => prev.filter(c => c.id !== row.id))
+          } else if (!knownIds.current.has(row.id)) {
+            // New pending we haven't seen
+            knownIds.current.add(row.id)
+            setPending(prev => [row, ...prev])
+            fireDesktopNotification(
+              'New consignment awaiting approval',
+              `${row.tmp_prf_no || ''}: ${row.branch_name} → ${row.dest_branch || 'HO'}`
+            )
+            playApprovalBeep()
+          } else {
+            // Existing row updated — replace in list
+            setPending(prev => prev.map(c => c.id === row.id ? row : c))
+          }
+        })
+      .subscribe()
+    return () => { supabaseClient.removeChannel(channel) }
+  }, [])
+
+  async function requestNotifications() {
+    if (typeof window === 'undefined' || !('Notification' in window)) {
+      setToast({ msg: 'Desktop notifications not supported by this browser', type: 'error' })
+      return
+    }
+    const perm = await Notification.requestPermission()
+    setNotifPermission(perm)
+    if (perm === 'granted') {
+      setToast({ msg: 'Desktop notifications enabled — you\'ll be alerted on new requests', type: 'success' })
+      fireDesktopNotification('Notifications enabled', 'You will be notified when new consignments need approval.')
+    }
+  }
 
   async function approve(c) {
     if (!confirm(`Approve ${c.tmp_prf_no}? Operations team will be able to download all documents.`)) return
@@ -99,12 +228,27 @@ export default function ConsignmentApprovals() {
           </div>
           <div style={{ fontSize: '11px', color: t.text3, marginTop: '4px' }}>
             {pending.length === 0
-              ? 'No consignments awaiting approval'
-              : `${pending.length} consignment${pending.length !== 1 ? 's' : ''} waiting — review and approve or reject`}
+              ? 'No consignments awaiting approval — live updates enabled'
+              : `${pending.length} consignment${pending.length !== 1 ? 's' : ''} waiting · live updates enabled`}
           </div>
         </div>
-        <button onClick={fetchPending} style={btnOut}>⟳ Refresh</button>
+        <button onClick={() => fetchPending(false)} style={btnOut}>⟳ Refresh</button>
       </div>
+
+      {/* Enable notifications banner */}
+      {notifPermission === 'default' && (
+        <div style={{ background: `${t.gold}10`, border: `1px solid ${t.gold}40`, borderRadius: '8px', padding: '10px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
+          <div style={{ fontSize: '12px', color: t.gold }}>
+            🔔 Enable desktop notifications + sound to be alerted instantly when a new request arrives
+          </div>
+          <button onClick={requestNotifications} style={{ ...btnGold, fontSize: '11px', padding: '6px 14px' }}>Enable</button>
+        </div>
+      )}
+      {notifPermission === 'denied' && (
+        <div style={{ background: `${t.red}10`, border: `1px solid ${t.red}40`, borderRadius: '8px', padding: '8px 16px', fontSize: '11px', color: t.red }}>
+          Notifications are blocked. To enable, click the lock icon in your browser's address bar and allow notifications.
+        </div>
+      )}
 
       {pending.length === 0 ? (
         <div style={{ ...card, padding: '60px 20px', textAlign: 'center', color: t.text4 }}>
@@ -136,8 +280,11 @@ export default function ConsignmentApprovals() {
                       <span style={{ color: t.text4, margin: '0 6px' }}>→</span>
                       {isType ? c.dest_branch : 'Head Office'}
                     </div>
-                    <div style={{ fontSize: '11px', color: t.text4, marginTop: '4px' }}>
-                      Created {fmtTS(c.created_at)} · by {c.created_by || 'unknown'}
+                    <div style={{ fontSize: '11px', color: t.text4, marginTop: '4px', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                      <span>Created {fmtTS(c.created_at)} · by {c.created_by || 'unknown'}</span>
+                      <span style={{ fontSize: '10px', color: t.orange, background: `${t.orange}15`, borderRadius: '4px', padding: '1px 7px', fontWeight: 600 }}>
+                        ⏳ waiting {waitingFor(c.created_at)}
+                      </span>
                     </div>
                   </div>
                   <div style={{ display: 'flex', gap: '8px' }}>

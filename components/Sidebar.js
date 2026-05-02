@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useApp } from '../lib/context'
+import { supabase as supabaseClient } from '../lib/supabase'
 
 const NAV_ITEMS = [
   { id: 'dashboard',    label: 'Dashboard',    icon: 'M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6', desc: 'Overview' },
@@ -87,6 +88,8 @@ export default function Sidebar({ sidebarOpen, setSidebarOpen, isMobile }) {
   const t = T[theme]
 
   // Live counters fed into sidebar badges (e.g. pending approvals).
+  // Realtime listener keeps the count instantly accurate; the 60s polling
+  // is a fallback to recover if the realtime channel drops momentarily.
   const [badges, setBadges] = useState({})
   useEffect(() => {
     let cancelled = false
@@ -98,8 +101,14 @@ export default function Sidebar({ sidebarOpen, setSidebarOpen, isMobile }) {
       } catch {}
     }
     fetchBadges()
-    const id = setInterval(fetchBadges, 60000)  // refresh every 60s
-    return () => { cancelled = true; clearInterval(id) }
+    const id = setInterval(fetchBadges, 60000)
+    const channel = supabaseClient
+      .channel('sidebar-badge-pending-approvals')
+      .on('postgres_changes',
+        { event: '*', schema: 'public', table: 'consignments' },
+        () => { if (!cancelled) fetchBadges() })
+      .subscribe()
+    return () => { cancelled = true; clearInterval(id); supabaseClient.removeChannel(channel) }
   }, [])
 
   const isActive       = (id)   => activeNav === id

@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import JSZip from 'jszip'
 import { useApp } from '../../lib/context'
+import { supabase as supabaseClient } from '../../lib/supabase'
 import GoldSpinner from '../ui/GoldSpinner'
 import Badge from '../ui/Badge'
 import Toast from '../ui/Toast'
@@ -158,6 +159,28 @@ export default function ConsignmentData() {
   }, [])
 
   useEffect(() => { fetchAll() }, [fetchAll])
+
+  // Realtime: when accounts approves/rejects a consignment, the badge and
+  // download buttons in this view update without the user refreshing.
+  useEffect(() => {
+    const channel = supabaseClient
+      .channel('consignment-approval-updates')
+      .on('postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'consignments' },
+        (payload) => {
+          const row = payload.new
+          if (!row?.id) return
+          setConsignments(prev => prev.map(c => c.id === row.id ? { ...c, ...row } : c))
+          // Friendly notification for ops users
+          if (row.approval_status === 'approved') {
+            setToast({ msg: `${row.tmp_prf_no} approved — downloads unlocked`, type: 'success' })
+          } else if (row.approval_status === 'rejected') {
+            setToast({ msg: `${row.tmp_prf_no} rejected: ${row.rejection_reason || 'no reason'}`, type: 'error' })
+          }
+        })
+      .subscribe()
+    return () => { supabaseClient.removeChannel(channel) }
+  }, [])
 
   // Deep-link from Branch Stock Overview → enter bill-picker mode for that branch
   useEffect(() => {
