@@ -41,6 +41,37 @@ function AgeBadge({ days, t }) {
   return <span style={{ fontSize: '10px', color, background: `${color}18`, borderRadius: '5px', padding: '2px 7px', fontWeight: 700, letterSpacing: '.02em' }}>{days}d</span>
 }
 
+// EWB cell with expiry colour-coding. Hoisted to module scope so it
+// doesn't remount on every parent render.
+function EwbCell({ c, t, downloadingId, ewbActionId, downloadEwbPdf, cancelEwb }) {
+  const validUntil = c.ewb_valid_until ? new Date(c.ewb_valid_until) : null
+  const hoursLeft  = validUntil ? (validUntil - Date.now()) / 3600000 : null
+  const expiryColor = hoursLeft == null ? t.green
+    : hoursLeft < 0  ? t.red
+    : hoursLeft < 12 ? t.orange
+    : hoursLeft < 24 ? t.gold
+    : t.green
+  const expiryLabel = hoursLeft == null ? null
+    : hoursLeft < 0  ? `expired ${Math.round(-hoursLeft)}h ago`
+    : hoursLeft < 24 ? `expires in ${Math.round(hoursLeft)}h`
+    : `${Math.round(hoursLeft / 24)}d valid`
+  return (
+    <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', alignItems: 'center' }}>
+      <span style={{ fontSize: '10px', color: expiryColor, background: `${expiryColor}15`, borderRadius: '4px', padding: '2px 7px', fontWeight: 600, fontFamily: 'monospace' }}>{c.eway_bill_no}</span>
+      {expiryLabel && <span title={validUntil?.toLocaleString()} style={{ fontSize: '9px', color: expiryColor, fontWeight: 600 }}>{expiryLabel}</span>}
+      <button onClick={() => downloadEwbPdf(c)} disabled={!!downloadingId}
+        style={{ background: t.blue, color: '#fff', border: 'none', borderRadius: '5px', padding: '3px 8px', fontSize: '10px', fontWeight: 600, cursor: 'pointer', opacity: downloadingId === c.id + ':ewb' ? 0.6 : 1 }}>
+        {downloadingId === c.id + ':ewb' ? '⏳' : '📄 PDF'}
+      </button>
+      <button onClick={() => cancelEwb(c)} disabled={!!ewbActionId}
+        title="Cancel E-Way Bill (within 24h)"
+        style={{ background: 'transparent', border: `1px solid ${t.red}40`, borderRadius: '5px', padding: '3px 8px', fontSize: '10px', color: t.red, cursor: 'pointer', opacity: ewbActionId === c.id + ':cancel' ? 0.6 : 1 }}>
+        {ewbActionId === c.id + ':cancel' ? '…' : '✕'}
+      </button>
+    </div>
+  )
+}
+
 function useMobile() {
   const [m, setM] = useState(false)
   useEffect(() => {
@@ -52,7 +83,8 @@ function useMobile() {
 }
 
 export default function ConsignmentData() {
-  const { theme, consignmentDeepLink, setConsignmentDeepLink } = useApp()
+  const { theme, consignmentDeepLink, setConsignmentDeepLink, user, userProfile } = useApp()
+  const userEmail = user?.email || userProfile?.email || null
   const t = THEMES[theme]
   const isMobile = useMobile()
 
@@ -297,7 +329,7 @@ export default function ConsignmentData() {
     try {
       const res = await fetch('/api/consignments', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'cancel_consignment', id: c.id, reason, cancelled_by: nav?.userEmail }),
+        body: JSON.stringify({ action: 'cancel_consignment', id: c.id, reason, cancelled_by: userEmail }),
       })
       const data = await res.json()
       if (!res.ok || data.error) { setToast({ msg: data.error || 'Cancel failed', type: 'error' }); return }
@@ -484,17 +516,17 @@ export default function ConsignmentData() {
             <option value="weight_desc">Heaviest First</option>
             <option value="amount_desc">Highest Amount</option>
           </select>
-          {/* Quick-select shortcuts */}
+          {/* Quick-select shortcuts — replace current selection */}
           {[
-            { label: 'Last 1 day',  days: 1  },
-            { label: 'Last 3 days', days: 3  },
-            { label: 'Last 7 days', days: 7  },
-            { label: 'All',         days: null },
+            { label: 'Last 1d', days: 1  },
+            { label: 'Last 3d', days: 3  },
+            { label: 'Last 7d', days: 7  },
+            { label: 'All',     days: null },
           ].map(opt => (
             <button key={opt.label}
               onClick={() => {
                 const cutoff = opt.days != null ? Date.now() - opt.days * 86400000 : null
-                const n = new Set(selected)
+                const n = new Set()
                 visibleBills.forEach(p => {
                   if (cutoff == null || new Date(p.purchase_date).getTime() >= cutoff) n.add(p.id)
                 })
@@ -674,35 +706,8 @@ export default function ConsignmentData() {
                     <td style={{ padding: '11px 14px' }}>
                       {!showEwb ? (
                         <span title="Interstate Hub→HO uses E-Invoice instead — no separate EWB needed" style={{ fontSize: '10px', color: t.text4 }}>n/a</span>
-                      ) : c.eway_bill_no ? (() => {
-                        // EWB expiry colour coding: red if past, orange if <12h, gold if <24h, green otherwise
-                        const validUntil = c.ewb_valid_until ? new Date(c.ewb_valid_until) : null
-                        const hoursLeft  = validUntil ? (validUntil - Date.now()) / 3600000 : null
-                        const expiryColor = hoursLeft == null ? t.green
-                          : hoursLeft < 0  ? t.red
-                          : hoursLeft < 12 ? t.orange
-                          : hoursLeft < 24 ? t.gold
-                          : t.green
-                        const expiryLabel = hoursLeft == null ? null
-                          : hoursLeft < 0  ? `expired ${Math.round(-hoursLeft)}h ago`
-                          : hoursLeft < 24 ? `expires in ${Math.round(hoursLeft)}h`
-                          : `${Math.round(hoursLeft / 24)}d valid`
-                        return (
-                        <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', alignItems: 'center' }}>
-                          <span style={{ fontSize: '10px', color: expiryColor, background: `${expiryColor}15`, borderRadius: '4px', padding: '2px 7px', fontWeight: 600, fontFamily: 'monospace' }}>{c.eway_bill_no}</span>
-                          {expiryLabel && <span title={validUntil?.toLocaleString()} style={{ fontSize: '9px', color: expiryColor, fontWeight: 600 }}>{expiryLabel}</span>}
-                          <button onClick={() => downloadEwbPdf(c)} disabled={!!downloadingId}
-                            style={{ background: t.blue, color: '#fff', border: 'none', borderRadius: '5px', padding: '3px 8px', fontSize: '10px', fontWeight: 600, cursor: 'pointer', opacity: downloadingId === c.id + ':ewb' ? 0.6 : 1 }}>
-                            {downloadingId === c.id + ':ewb' ? '⏳' : '📄 PDF'}
-                          </button>
-                          <button onClick={() => cancelEwb(c)} disabled={!!ewbActionId}
-                            title="Cancel E-Way Bill (within 24h)"
-                            style={{ background: 'transparent', border: `1px solid ${t.red}40`, borderRadius: '5px', padding: '3px 8px', fontSize: '10px', color: t.red, cursor: 'pointer', opacity: ewbActionId === c.id + ':cancel' ? 0.6 : 1 }}>
-                            {ewbActionId === c.id + ':cancel' ? '…' : '✕'}
-                          </button>
-                        </div>
-                        )
-                      })()
+                      ) : c.eway_bill_no ? (
+                        <EwbCell c={c} t={t} downloadingId={downloadingId} ewbActionId={ewbActionId} downloadEwbPdf={downloadEwbPdf} cancelEwb={cancelEwb} />
                       ) : (
                         <button onClick={() => generateEwb(c)} disabled={!!ewbActionId}
                           style={{ background: 'transparent', border: `1px solid ${t.green}50`, borderRadius: '5px', padding: '4px 10px', fontSize: '10px', color: t.green, fontWeight: 600, cursor: 'pointer', opacity: ewbActionId === c.id + ':gen' ? 0.6 : 1 }}>

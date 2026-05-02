@@ -108,9 +108,15 @@ export async function POST(req) {
       return Response.json({ error: 'Another EWB generation is already in progress for this consignment — wait 30 seconds and retry' }, { status: 409 })
     }
 
+    // Helper: release the lock on every error path so user can retry immediately.
+    const releaseLock = () => supabase.from('consignments').update({ ewb_generation_started_at: null }).eq('id', consignment_id)
+
     const { data: branch } = await supabase
       .from('branches').select('*').eq('name', consignment.branch_name).single()
-    if (!branch) return Response.json({ error: `Branch '${consignment.branch_name}' not found` }, { status: 404 })
+    if (!branch) {
+      await releaseLock()
+      return Response.json({ error: `Branch '${consignment.branch_name}' not found` }, { status: 404 })
+    }
 
     // For Branch → Hub (INTERNAL) consignments, fetch the destination hub too
     let destBranch = null
@@ -129,6 +135,7 @@ export async function POST(req) {
     // Pre-flight validation — catch the common errors locally before burning a ClearTax API call.
     const validationErrors = preflightValidate({ consignment, branch, destBranch, items: items || [], companySettings: companySettings || {} })
     if (validationErrors.length) {
+      await releaseLock()
       return Response.json({
         error: 'Pre-flight validation failed — fix these before generating EWB:\n' + validationErrors.join('\n'),
         validation_errors: validationErrors,
@@ -155,6 +162,7 @@ export async function POST(req) {
 
     if (!ewbNo) {
       // Generation may have succeeded but we couldn't parse the number — surface raw for debugging
+      await releaseLock()
       return Response.json({
         success: false,
         error: 'EWB generated but number could not be extracted from response — see server logs',

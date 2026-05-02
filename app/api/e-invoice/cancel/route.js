@@ -22,18 +22,25 @@ export async function POST(req) {
     if (!consignment.irn) return Response.json({ error: 'No E-Invoice to cancel' }, { status: 400 })
 
     const { data: branch } = await supabase
-      .from('branches').select('branch_gstin').eq('name', consignment.branch_name).single()
+      .from('branches').select('branch_gstin, region').eq('name', consignment.branch_name).single()
+
+    // Mirror generate path — resolve state-wise GSTIN, fall back to branch-level, then env.
+    const { data: companySettings } = await supabase.from('company_settings').select('*').single()
+    const REGION_TO_STATE_CODE = { 'Andhra Pradesh': 'AP', 'Kerala': 'KL', 'Telangana': 'TS', 'Tamil Nadu': 'TN', 'Rest of Karnataka': 'KA', 'Bangalore': 'KA' }
+    const stateCode  = REGION_TO_STATE_CODE[branch?.region]
+    const stateGstin = stateCode ? companySettings?.[`gstin_${stateCode.toLowerCase()}`] : null
+    const gstinFor   = stateGstin || branch?.branch_gstin || process.env.WG_GSTIN
 
     const result = await cancelEInvoice({
       irn:           consignment.irn,
       reasonCode:    reason_code || '1',
       remark:        remark      || 'Duplicate',
-      gstinOverride: branch?.branch_gstin,
+      gstinOverride: gstinFor,
     })
 
     const cancelledIrn = consignment.irn
     await supabase.from('consignments')
-      .update({ irn: null, ack_no: null, ack_dt: null, signed_qr_code: null })
+      .update({ irn: null, ack_no: null, ack_dt: null, signed_qr_code: null, einvoice_generated_at: null })
       .eq('id', consignment_id)
 
     await logConsignmentEvent(supabase, {

@@ -42,7 +42,7 @@ export async function POST(req) {
 
     const cancelledEwb = consignment.eway_bill_no
     await supabase.from('consignments')
-      .update({ eway_bill_no: null, ewb_valid_until: null })
+      .update({ eway_bill_no: null, ewb_valid_until: null, ewb_generated_at: null })
       .eq('id', consignment_id)
 
     await logConsignmentEvent(supabase, {

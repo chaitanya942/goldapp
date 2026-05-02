@@ -262,10 +262,11 @@ export async function GET(req) {
     if (!id) return Response.json({ error: 'consignment id required' }, { status: 400 })
     const { data, error } = await supabase
       .from('consignments')
-      .select('id, tmp_prf_no, challan_no, branch_name, dest_branch, movement_type, eway_bill_no, ewb_generated_at, einvoice_irn, einvoice_generated_at, cleartax_response, created_at, received_at, status')
+      .select('id, tmp_prf_no, challan_no, branch_name, dest_branch, movement_type, eway_bill_no, ewb_generated_at, irn, ack_no, ack_dt, einvoice_generated_at, cleartax_response, created_at, received_at, status')
       .eq('id', id)
-      .single()
+      .maybeSingle()
     if (error) return Response.json({ error: error.message }, { status: 500 })
+    if (!data) return Response.json({ error: 'Consignment not found' }, { status: 404 })
     return Response.json({ data })
   }
 
@@ -654,7 +655,7 @@ export async function POST(req) {
 
   // ── Cancel consignment (reverse flow) ────────────────────────────────────
   // Voids a consignment that was created by mistake. Bills return to source.
-  // Only allowed if not yet received at HO (or partially received).
+  // Blocked if any bill has since been re-consigned in a later movement.
   if (action === 'cancel_consignment') {
     const { id, reason, cancelled_by } = body
     const { data: c } = await supabase.from('consignments').select('*').eq('id', id).single()
@@ -667,34 +668,78 @@ export async function POST(req) {
     const { data: links } = await supabase.from('consignment_items').select('purchase_id').eq('consignment_id', id)
     const pids = (links || []).map(l => l.purchase_id)
 
-    // Bills go back to their original branch
+    // For INTERNAL consignments that auto-marked received: check no bill is in a later
+    // consignment (e.g. Hub→HO) before reversing. Reversing under those bills would
+    // corrupt the later consignment's stock_status / current_branch.
+    if (pids.length && c.movement_type === 'INTERNAL') {
+      const { data: laterLinks } = await supabase
+        .from('consignment_items')
+        .select('purchase_id, consignment:consignment_id(id, status, created_at)')
+        .in('purchase_id', pids)
+        .neq('consignment_id', id)
+      const laterActive = (laterLinks || []).filter(l =>
+        l.consignment && l.consignment.status !== 'cancelled' && new Date(l.consignment.created_at) > new Date(c.created_at)
+      )
+      if (laterActive.length) {
+        return Response.json({
+          error: `Cannot void — ${laterActive.length} bill(s) are in a later consignment. Cancel that one first.`,
+        }, { status: 409 })
+      }
+    }
+
+    // Bills return to source branch
     if (pids.length) {
       await supabase.from('purchases')
         .update({ stock_status: 'at_branch', current_branch: c.branch_name, dispatched_at: null })
         .in('id', pids)
     }
 
+    // If EWB / E-Invoice still active, surface a warning in the activity log so the
+    // operator can also cancel them on the GST portal. We don't auto-cancel here
+    // because that requires user input (reason code).
+    const hadEwb = !!c.eway_bill_no
+    const hadIrn = !!c.irn
+
     const cancelIso = new Date().toISOString()
     await supabase.from('consignments')
-      .update({ status: 'cancelled', cancelled_at: cancelIso, cancel_reason: reason || null })
+      .update({
+        status:        'cancelled',
+        cancelled_at:  cancelIso,
+        cancel_reason: reason || null,
+        // Clear received_at — INTERNAL was auto-marked received, but cancellation undoes that
+        received_at:   null,
+      })
       .eq('id', id)
 
     await logConsignmentEvent(supabase, {
       consignment_id: id,
       event_type:     'cancelled',
       actor_email:    cancelled_by,
-      details:        { reason: reason || null, bills_returned: pids.length, returned_to: c.branch_name },
+      details:        {
+        reason: reason || null,
+        bills_returned: pids.length,
+        returned_to: c.branch_name,
+        active_ewb: hadEwb ? c.eway_bill_no : null,
+        active_irn: hadIrn ? c.irn : null,
+        warning: (hadEwb || hadIrn) ? 'EWB/IRN still active — cancel separately on GST portal' : null,
+      },
     })
 
-    return Response.json({ success: true })
+    return Response.json({
+      success: true,
+      warning: (hadEwb || hadIrn) ? 'EWB/IRN still active — cancel separately within 24h' : null,
+    })
   }
 
   // ── Partial receive — mark specific bills received, others as missing/short ──
   if (action === 'partial_receive') {
     const { id, received_purchase_ids, short_purchase_ids, short_reason, received_by } = body
     if (!id) return Response.json({ error: 'consignment id required' }, { status: 400 })
-    const { data: c } = await supabase.from('consignments').select('movement_type, dest_branch').eq('id', id).single()
+    const { data: c } = await supabase.from('consignments').select('status, movement_type, dest_branch').eq('id', id).single()
     if (!c) return Response.json({ error: 'Consignment not found' }, { status: 404 })
+    if (!['dispatched', 'partial_received'].includes(c.status)) {
+      return Response.json({ error: `Cannot receive — consignment is '${c.status}'` }, { status: 400 })
+    }
 
     const nowIso = new Date().toISOString()
     if ((received_purchase_ids || []).length) {
@@ -712,12 +757,15 @@ export async function POST(req) {
         .eq('consignment_id', id).in('purchase_id', short_purchase_ids)
     }
 
-    // Determine if all items now received → set consignment to received, else partial
+    // Closure rule: a consignment is fully resolved when every item is either
+    // received_at IS NOT NULL OR short_reason IS NOT NULL. Pure-pending count
+    // is what we check — receive_at null AND short_reason null.
     const { count: pendingCount } = await supabase
       .from('consignment_items')
       .select('purchase_id', { count: 'exact', head: true })
       .eq('consignment_id', id)
       .is('received_at', null)
+      .is('short_reason', null)
     const finalStatus = (pendingCount || 0) === 0 ? 'received' : 'partial_received'
     const upd = { status: finalStatus }
     if (finalStatus === 'received') upd.received_at = nowIso
@@ -725,7 +773,7 @@ export async function POST(req) {
 
     await logConsignmentEvent(supabase, {
       consignment_id: id,
-      event_type:     finalStatus === 'received' ? 'received' : 'partial_received',
+      event_type:     finalStatus === 'received' ? 'received_with_shortage' : 'partial_received',
       actor_email:    received_by,
       details:        { received: (received_purchase_ids || []).length, short: (short_purchase_ids || []).length, short_reason },
     })
