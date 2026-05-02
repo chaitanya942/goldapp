@@ -23,43 +23,45 @@ export async function GET(req) {
 
   // ── Branch Stock Overview (new landing view) ──────────────────────────────
   if (action === 'branch_overview') {
-    // Today in IST
+    // Today in IST (date string, no time)
     const now      = new Date(new Date().getTime() + 5.5 * 60 * 60 * 1000)
     const todayIST = `${now.getUTCFullYear()}-${String(now.getUTCMonth()+1).padStart(2,'0')}-${String(now.getUTCDate()).padStart(2,'0')}`
 
-    // Fetch today's purchases (all approved, any stock_status) — separate from pending
-    // Use current_branch when set, fall back to branch_name (pre-Phase B rows)
-    const { data: todayPurchases, error: tErr } = await supabase
-      .from('purchases')
-      .select('branch_name, current_branch, purchase_date, gross_weight, net_weight, total_amount')
-      .eq('crm_status', 'approved')
-      .eq('is_deleted', false)
-      .eq('purchase_date', todayIST)
+    // Fetch ALL at_branch bills (the picker's source of truth) and compute
+    // today vs pending in JS. We deliberately avoid `eq('purchase_date', date)`
+    // and `lt('purchase_date', date)` because purchase_date is a timestamp —
+    // bills purchased at non-midnight times silently fall out of those filters.
+    // Using paginated fetch so we don't hit Supabase's max_rows cap (1000).
+    const allBills = []
+    const CHUNK = 1000
+    let offset = 0
+    while (true) {
+      const { data, error } = await supabase
+        .from('purchases')
+        .select('branch_name, current_branch, purchase_date, gross_weight, net_weight, total_amount, crm_status')
+        .eq('stock_status', 'at_branch')
+        .eq('is_deleted', false)
+        .order('id', { ascending: true })
+        .range(offset, offset + CHUNK - 1)
+      if (error) return Response.json({ data: [], error: error.message })
+      if (!data || data.length === 0) break
+      allBills.push(...data)
+      if (data.length < CHUNK) break
+      offset += CHUNK
+    }
 
-    if (tErr) return Response.json({ data: [], error: tErr.message })
-
-    // Pending stock = at_branch (incl. transferred-in at hub) before today.
-    // Fetch ALL at_branch bills (no crm_status filter), then post-process:
+    // Apply the same own/transferred-in rule as the bill picker so totals match:
     //   - Own bills (current_branch null OR == branch_name): require crm_status=approved
     //   - Transferred-in bills (current_branch != branch_name): allow any crm_status
-    //     (the source branch validated approval pre-transfer)
-    // This must match the bill-picker logic so totals are consistent.
-    const { data: allPending, error: pErr } = await supabase
-      .from('purchases')
-      .select('branch_name, current_branch, purchase_date, gross_weight, net_weight, total_amount, crm_status')
-      .eq('stock_status', 'at_branch')
-      .eq('is_deleted', false)
-      .lt('purchase_date', todayIST)
-
-    if (pErr) return Response.json({ data: [], error: pErr.message })
-
-    const pendingPurchases = (allPending || []).filter(p => {
+    const filteredBills = allBills.filter(p => {
       const isTransferredIn = p.current_branch && p.current_branch !== p.branch_name
-      if (isTransferredIn) return true                          // include any status
-      return p.crm_status === 'approved'                        // own: must be approved
+      if (isTransferredIn) return true
+      return p.crm_status === 'approved'
     })
 
-    const purchases = [...(todayPurchases || []), ...(pendingPurchases || [])]
+    // Split into today vs pending using ::DATE comparison in JS.
+    const dateOf = (ts) => (ts || '').slice(0, 10)
+    const purchases = filteredBills    // unified list, classification done below
 
     // Fetch branch metadata — filter outside_bangalore by model_type
     const { data: branches, error: bErr } = await supabase
@@ -115,7 +117,8 @@ export async function GET(req) {
       const nw = parseFloat(row.net_weight   || 0)
       const gw = parseFloat(row.gross_weight || 0)
       const ta = parseFloat(row.total_amount || 0)
-      const isToday = row.purchase_date === todayIST
+      const rowDate = dateOf(row.purchase_date)
+      const isToday = rowDate === todayIST
       s.total_bills++
       s.total_gross_wt    += gw
       s.total_net_wt      += nw
@@ -128,7 +131,7 @@ export async function GET(req) {
         s.older_bills++
         s.older_net_wt      += nw
         s.older_gross_value += ta
-        if (!s.oldest_date || row.purchase_date < s.oldest_date) s.oldest_date = row.purchase_date
+        if (!s.oldest_date || rowDate < s.oldest_date) s.oldest_date = rowDate
       }
     }
 
@@ -249,6 +252,30 @@ export async function GET(req) {
     }
 
     return Response.json({ data: [...unknownSet].sort() })
+  }
+
+  // ── Debug: dump current state of all bills in a given consignment ──────
+  // Use to diagnose count mismatches: where did the bills actually end up?
+  if (action === 'debug_consignment_bills') {
+    const cid = searchParams.get('id')
+    if (!cid) return Response.json({ error: 'consignment id required' }, { status: 400 })
+    const { data: links } = await supabase.from('consignment_items').select('purchase_id').eq('consignment_id', cid)
+    const pids = (links || []).map(l => l.purchase_id)
+    if (!pids.length) return Response.json({ data: [] })
+    const { data: bills } = await supabase
+      .from('purchases')
+      .select('id, application_id, customer_name, branch_name, current_branch, stock_status, crm_status, is_deleted, purchase_date, net_weight, total_amount, dispatched_at')
+      .in('id', pids)
+    return Response.json({
+      data: bills || [],
+      summary: {
+        count: pids.length,
+        by_stock_status: (bills || []).reduce((a, b) => ({ ...a, [b.stock_status]: (a[b.stock_status] || 0) + 1 }), {}),
+        by_current_branch: (bills || []).reduce((a, b) => ({ ...a, [b.current_branch || 'null']: (a[b.current_branch || 'null'] || 0) + 1 }), {}),
+        by_crm_status: (bills || []).reduce((a, b) => ({ ...a, [b.crm_status]: (a[b.crm_status] || 0) + 1 }), {}),
+        deleted: (bills || []).filter(b => b.is_deleted).length,
+      },
+    })
   }
 
   // ── Bill journey: every consignment a bill has been part of ────────────
