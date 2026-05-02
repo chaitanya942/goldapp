@@ -3,6 +3,7 @@
 
 import { createClient } from '@supabase/supabase-js'
 import { generateIssueVoucher } from '../../../lib/generateIssueVoucher'
+import { checkApproval } from '../../../lib/approvalGate'
 import fs   from 'fs'
 import path from 'path'
 
@@ -23,6 +24,9 @@ export async function GET(req) {
   const { searchParams } = new URL(req.url)
   const consignmentId = searchParams.get('id')
   if (!consignmentId) return Response.json({ error: 'Consignment ID required' }, { status: 400 })
+
+  const gate = await checkApproval(supabase, consignmentId, req)
+  if (gate.blocked) return gate.response
 
   try {
     const { data: consignment, error: ce } = await supabase

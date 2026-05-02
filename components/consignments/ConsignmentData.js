@@ -896,6 +896,12 @@ export default function ConsignmentData() {
                     <td style={{ padding: '11px 14px', fontSize: '12px', color: t.gold, fontWeight: 700, fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
                       {c.tmp_prf_no}
                       {isNew && <span style={{ marginLeft: 6, fontSize: 9, color: t.green, background: `${t.green}20`, padding: '1px 6px', borderRadius: 4, fontWeight: 600 }}>NEW</span>}
+                      {c.approval_status === 'pending' && (
+                        <span title="Awaiting accounts team approval — downloads locked" style={{ marginLeft: 6, fontSize: 9, color: t.orange, background: `${t.orange}20`, padding: '1px 6px', borderRadius: 4, fontWeight: 600 }}>⏳ APPROVAL</span>
+                      )}
+                      {c.approval_status === 'rejected' && (
+                        <span title={c.rejection_reason || 'Rejected'} style={{ marginLeft: 6, fontSize: 9, color: t.red, background: `${t.red}20`, padding: '1px 6px', borderRadius: 4, fontWeight: 600 }}>✕ REJECTED</span>
+                      )}
                     </td>
                     <td style={{ padding: '11px 14px', whiteSpace: 'nowrap' }}>
                       <span style={{ fontSize: '10px', color: tColor, background: `${tColor}15`, borderRadius: '5px', padding: '2px 8px', fontWeight: 600, whiteSpace: 'nowrap', display: 'inline-block' }}>

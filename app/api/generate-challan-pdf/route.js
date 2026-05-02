@@ -2,6 +2,7 @@
 
 import { createClient } from '@supabase/supabase-js'
 import { generateDeliveryChallan } from '../../../lib/generateDeliveryChallan'
+import { checkApproval } from '../../../lib/approvalGate'
 import fs   from 'fs'
 import path from 'path'
 
@@ -53,6 +54,11 @@ export async function GET(req) {
   if (!consignmentId) {
     return Response.json({ error: 'Consignment ID required' }, { status: 400 })
   }
+
+  // Approval gate — block download unless accounts team has approved (or this
+  // is the accounts review preview, or super_admin bypass header is set).
+  const gate = await checkApproval(supabase, consignmentId, req)
+  if (gate.blocked) return gate.response
 
   try {
     // ── Fetch consignment ────────────────────────────────────────────────────

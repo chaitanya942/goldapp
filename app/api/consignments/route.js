@@ -242,6 +242,31 @@ export async function GET(req) {
     })
   }
 
+  // ── Pending approvals — accounts team queue ────────────────────────────
+  if (action === 'pending_approvals') {
+    const { data, error } = await supabase
+      .from('consignments')
+      .select('*')
+      .eq('approval_status', 'pending')
+      .neq('status', 'cancelled')
+      .neq('status', 'seed')
+      .order('created_at', { ascending: false })
+    if (error) return Response.json({ error: error.message }, { status: 500 })
+    return Response.json({ data: data || [] })
+  }
+
+  // ── Pending approvals count (for sidebar badge) ────────────────────────
+  if (action === 'pending_approvals_count') {
+    const { count, error } = await supabase
+      .from('consignments')
+      .select('id', { count: 'exact', head: true })
+      .eq('approval_status', 'pending')
+      .neq('status', 'cancelled')
+      .neq('status', 'seed')
+    if (error) return Response.json({ error: error.message }, { status: 500 })
+    return Response.json({ count: count || 0 })
+  }
+
   // ── Bill journey: every consignment a bill has been part of ────────────
   if (action === 'bill_journey') {
     const purchaseId = searchParams.get('purchase_id')
@@ -581,6 +606,7 @@ export async function POST(req) {
         total_net_wt:  totalNetWt,
         total_amount:  totalAmount,
         gst_rate_snapshot: gstSnapshot,
+        approval_status:   'pending',  // accounts team must approve before docs can be downloaded
         created_by,
       })
       .select()
@@ -683,6 +709,59 @@ export async function POST(req) {
     })
 
     return Response.json({ data })
+  }
+
+  // ── Accounts approval workflow ───────────────────────────────────────────
+  // Operations team generates EWB/IRN; accounts team approves before downloads
+  // unlock. The downstream document routes check consignment.approval_status.
+  if (action === 'approve_consignment') {
+    const { id, approver_email, note } = body
+    if (!id) return Response.json({ error: 'consignment id required' }, { status: 400 })
+    const nowIso = new Date().toISOString()
+    const { data, error } = await supabase
+      .from('consignments')
+      .update({
+        approval_status:   'approved',
+        approved_at:       nowIso,
+        approved_by:       approver_email || null,
+        rejection_reason:  null,
+      })
+      .eq('id', id)
+      .select()
+      .single()
+    if (error) return Response.json({ error: error.message }, { status: 500 })
+    await logConsignmentEvent(supabase, {
+      consignment_id: id,
+      event_type:     'approved_by_accounts',
+      actor_email:    approver_email,
+      details:        { note: note || null },
+    })
+    return Response.json({ success: true, data })
+  }
+
+  if (action === 'reject_approval') {
+    const { id, approver_email, reason } = body
+    if (!id) return Response.json({ error: 'consignment id required' }, { status: 400 })
+    if (!reason) return Response.json({ error: 'Rejection reason is required' }, { status: 400 })
+    const { data, error } = await supabase
+      .from('consignments')
+      .update({
+        approval_status:   'rejected',
+        approved_at:       null,
+        approved_by:       null,
+        rejection_reason:  reason,
+      })
+      .eq('id', id)
+      .select()
+      .single()
+    if (error) return Response.json({ error: error.message }, { status: 500 })
+    await logConsignmentEvent(supabase, {
+      consignment_id: id,
+      event_type:     'rejected_by_accounts',
+      actor_email:    approver_email,
+      details:        { reason },
+    })
+    return Response.json({ success: true, data })
   }
 
   // ── Cancel consignment (reverse flow) ────────────────────────────────────

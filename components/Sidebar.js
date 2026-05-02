@@ -1,5 +1,6 @@
 'use client'
 
+import { useState, useEffect } from 'react'
 import { useApp } from '../lib/context'
 
 const NAV_ITEMS = [
@@ -12,10 +13,11 @@ const NAV_ITEMS = [
   },
   { id: 'consignments', label: 'Consignments', icon: 'M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4', desc: 'In transit',
     children: [
-      { id: 'consignment-overview',  label: 'Branch Stock',         dot: '#3aaa6a' },
-      { id: 'consignment-data',      label: 'Consignment Data',     dot: '#c9a84c' },
-      { id: 'consignment-report',    label: 'Consignment Report',   dot: '#3a8fbf' },
-      { id: 'consignment-analytics', label: 'Movement Analytics',   dot: '#8c5ac8' },
+      { id: 'consignment-overview',   label: 'Branch Stock',          dot: '#3aaa6a' },
+      { id: 'consignment-data',       label: 'Consignment Data',      dot: '#c9a84c' },
+      { id: 'consignment-approvals',  label: 'Pending Approvals',     dot: '#e05555', badgeKey: 'pending_approvals' },
+      { id: 'consignment-report',     label: 'Consignment Report',    dot: '#3a8fbf' },
+      { id: 'consignment-analytics',  label: 'Movement Analytics',    dot: '#8c5ac8' },
     ]
   },
   { id: 'melting', label: 'Melting', icon: 'M17.657 18.657A8 8 0 016.343 7.343S7 9 9 10c0-2 .5-5 2.986-7C14 5 16.09 5.777 17.656 7.343A7.975 7.975 0 0120 13a7.975 7.975 0 01-2.343 5.657z', desc: 'Processing' },
@@ -83,6 +85,22 @@ function NavIcon({ path, size = 16, color }) {
 export default function Sidebar({ sidebarOpen, setSidebarOpen, isMobile }) {
   const { theme, activeNav, setActiveNav, expandedNav, setExpandedNav, canSee } = useApp()
   const t = T[theme]
+
+  // Live counters fed into sidebar badges (e.g. pending approvals).
+  const [badges, setBadges] = useState({})
+  useEffect(() => {
+    let cancelled = false
+    const fetchBadges = async () => {
+      try {
+        const r = await fetch('/api/consignments?action=pending_approvals_count')
+        const j = await r.json()
+        if (!cancelled) setBadges(b => ({ ...b, pending_approvals: j.count || 0 }))
+      } catch {}
+    }
+    fetchBadges()
+    const id = setInterval(fetchBadges, 60000)  // refresh every 60s
+    return () => { cancelled = true; clearInterval(id) }
+  }, [])
 
   const isActive       = (id)   => activeNav === id
   const hasActiveChild = (item) => item.children?.some(c => c.id === activeNav)
@@ -162,6 +180,11 @@ export default function Sidebar({ sidebarOpen, setSidebarOpen, isMobile }) {
                 onMouseLeave={e => { if (!isActive(child.id)) e.currentTarget.style.background = 'transparent' }}>
                 <div style={{ width: '5px', height: '5px', borderRadius: '50%', flexShrink: 0, background: isActive(child.id) ? (child.dot || t.gold) : t.text4, boxShadow: isActive(child.id) ? `0 0 6px ${child.dot || t.gold}` : 'none', transition: 'all .18s' }} />
                 <span style={{ fontSize: '.72rem', color: isActive(child.id) ? (child.dot || t.gold) : t.text3, fontWeight: isActive(child.id) ? 500 : 400, letterSpacing: '.02em', transition: 'color .15s' }}>{child.label}</span>
+                {child.badgeKey && badges[child.badgeKey] > 0 && (
+                  <span style={{ marginLeft: 'auto', fontSize: '.62rem', fontWeight: 700, background: '#e05555', color: '#fff', borderRadius: '10px', padding: '1px 6px', minWidth: '16px', textAlign: 'center' }}>
+                    {badges[child.badgeKey]}
+                  </span>
+                )}
               </div>
             ))}
           </div>

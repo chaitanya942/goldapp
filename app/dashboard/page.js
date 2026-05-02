@@ -21,6 +21,7 @@ import ConsignmentOverview from '../../components/consignments/ConsignmentOvervi
 import ConsignmentData from '../../components/consignments/ConsignmentData'
 import ConsignmentReport from '../../components/consignments/ConsignmentReport'
 import ConsignmentAnalytics from '../../components/consignments/ConsignmentAnalytics'
+import ConsignmentApprovals from '../../components/consignments/ConsignmentApprovals'
 import CalTable from '../../components/sales/CalTable'
 import LiveMarketRates from '../../components/sales/LiveMarketRates'
 import InboundBotTesting from '../../components/telesales/InboundBotTesting'
@@ -124,10 +125,11 @@ function DashboardShell() {
       case 'purchase-data':     return <PurchaseHub />
       case 'purchase-reports':  return <ReportsHub />
       case 'consignment-overview': return <ConsignmentOverview />
-      case 'consignment-data':    return <ConsignmentData />
-      case 'consignment-report':    return <ConsignmentReport />
-      case 'consignment-summary':   return <ConsignmentReport />
-      case 'consignment-analytics': return <ConsignmentAnalytics />
+      case 'consignment-data':       return <ConsignmentData />
+      case 'consignment-approvals':  return <ConsignmentApprovals />
+      case 'consignment-report':     return <ConsignmentReport />
+      case 'consignment-summary':    return <ConsignmentReport />
+      case 'consignment-analytics':  return <ConsignmentAnalytics />
       case 'melting':             return <ComingSoon title="Melting" />
       case 'sales':               return <ComingSoon title="Sales" />
       case 'cal-table':           return <CalTable />
