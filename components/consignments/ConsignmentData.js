@@ -159,27 +159,38 @@ export default function ConsignmentData() {
     }
   }, [consignmentDeepLink])
 
-  // Fetch transfer history when entering a branch view (only useful for hubs).
-  // Also auto-select all transferred-in bills — they MUST be included in the
-  // hub's onward consignment, so locking them prevents accidental orphaning.
+  // When entering a branch view, refetch stock_in_branch with the branch
+  // parameter so we get authoritative own + transferred-in bills (relaxed
+  // filter for transferred). Then auto-select transferred-in bills that
+  // are actually present in the picker (so the count never lies).
   useEffect(() => {
     if (!nav?.branch) { setTransferHistory({}); return }
-    fetch(`/api/consignments?action=transfer_history&branch=${encodeURIComponent(nav.branch)}`)
-      .then(r => r.json())
-      .then(({ data }) => {
-        const map = data || {}
-        setTransferHistory(map)
-        // Auto-add transferred-in bill IDs to the selection
-        const transferredIds = Object.keys(map)
-        if (transferredIds.length) {
-          setSelected(prev => {
-            const next = new Set(prev)
-            transferredIds.forEach(id => next.add(id))
-            return next
-          })
-        }
+    Promise.all([
+      fetch(`/api/consignments?action=stock_in_branch&branch=${encodeURIComponent(nav.branch)}`).then(r => r.json()),
+      fetch(`/api/consignments?action=transfer_history&branch=${encodeURIComponent(nav.branch)}`).then(r => r.json()),
+    ]).then(([s, h]) => {
+      const branchBills = s.data || []
+      const history     = h.data || {}
+      // Replace this branch's bills in the global purchases state
+      setPurchases(prev => {
+        const others = (prev || []).filter(p => (p.current_branch || p.branch_name) !== nav.branch)
+        return [...others, ...branchBills]
       })
-      .catch(() => setTransferHistory({}))
+      setTransferHistory(history)
+      // Only auto-select transferred-in bills that are actually visible
+      const visibleIds = new Set(branchBills.map(b => b.id))
+      const transferredIds = Object.keys(history).filter(id => visibleIds.has(id))
+      if (transferredIds.length) {
+        setSelected(prev => {
+          const next = new Set(prev)
+          transferredIds.forEach(id => next.add(id))
+          return next
+        })
+      }
+    }).catch(err => {
+      console.warn('Branch stock fetch failed:', err)
+      setTransferHistory({})
+    })
   }, [nav?.branch])
 
   // Reset hub destination when source branch changes

@@ -38,16 +38,26 @@ export async function GET(req) {
 
     if (tErr) return Response.json({ data: [], error: tErr.message })
 
-    // Pending stock = at_branch (incl. transferred-in at hub) before today
-    const { data: pendingPurchases, error: pErr } = await supabase
+    // Pending stock = at_branch (incl. transferred-in at hub) before today.
+    // Fetch ALL at_branch bills (no crm_status filter), then post-process:
+    //   - Own bills (current_branch null OR == branch_name): require crm_status=approved
+    //   - Transferred-in bills (current_branch != branch_name): allow any crm_status
+    //     (the source branch validated approval pre-transfer)
+    // This must match the bill-picker logic so totals are consistent.
+    const { data: allPending, error: pErr } = await supabase
       .from('purchases')
-      .select('branch_name, current_branch, purchase_date, gross_weight, net_weight, total_amount')
+      .select('branch_name, current_branch, purchase_date, gross_weight, net_weight, total_amount, crm_status')
       .eq('stock_status', 'at_branch')
-      .eq('crm_status', 'approved')
       .eq('is_deleted', false)
       .lt('purchase_date', todayIST)
 
     if (pErr) return Response.json({ data: [], error: pErr.message })
+
+    const pendingPurchases = (allPending || []).filter(p => {
+      const isTransferredIn = p.current_branch && p.current_branch !== p.branch_name
+      if (isTransferredIn) return true                          // include any status
+      return p.crm_status === 'approved'                        // own: must be approved
+    })
 
     const purchases = [...(todayPurchases || []), ...(pendingPurchases || [])]
 
