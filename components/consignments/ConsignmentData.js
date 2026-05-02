@@ -588,9 +588,8 @@ export default function ConsignmentData() {
   const BillPicker = () => {
     const branchInfo = branches.find(b => b.name === nav.branch)
     const rColor     = REGION_COLORS[branchInfo?.region] || t.text3
-    const isHub      = !!branchInfo?.is_hub
 
-    // Hub consolidation: group bills by their original branch (transferred-in vs hub's own)
+    // Hub consolidation: group bills by their original branch (transferred-in vs own)
     const sourceCounts = visibleBills.reduce((acc, p) => {
       const origin = p.branch_name
       if (!acc[origin]) acc[origin] = { count: 0, wt: 0 }
@@ -599,7 +598,10 @@ export default function ConsignmentData() {
       return acc
     }, {})
     const sourceList = Object.entries(sourceCounts).sort((a, b) => b[1].count - a[1].count)
-    const transferredIn = isHub ? sourceList.filter(([n]) => n !== nav.branch) : []
+    const transferredIn = sourceList.filter(([n]) => n !== nav.branch)
+    // Any branch acts as a hub when it currently holds bills from other branches.
+    // The is_hub flag is no longer required — we detect it dynamically.
+    const isHub = !!branchInfo?.is_hub || transferredIn.length > 0
 
     // Pickup-time reminder logic — show a banner if pickup is within 2 hours and bills are pending.
     const pickupReminder = (() => {
