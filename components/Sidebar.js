@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import { useApp } from '../lib/context'
 import { supabase as supabaseClient } from '../lib/supabase'
+import { authedFetch } from '../lib/authedFetch'
 
 const NAV_ITEMS = [
   { id: 'dashboard',    label: 'Dashboard',    icon: 'M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6', desc: 'Overview' },
@@ -95,18 +96,30 @@ export default function Sidebar({ sidebarOpen, setSidebarOpen, isMobile }) {
     let cancelled = false
     const fetchBadges = async () => {
       try {
-        const r = await fetch('/api/consignments?action=pending_approvals_count')
+        const r = await authedFetch('/api/consignments?action=pending_approvals_count')
+        if (!r.ok) return  // 401 on logout — silently skip until session is restored
         const j = await r.json()
         if (!cancelled) setBadges(b => ({ ...b, pending_approvals: j.count || 0 }))
       } catch {}
     }
     fetchBadges()
     const id = setInterval(fetchBadges, 60000)
+    // Filter realtime to approval_status changes only — every consignment UPDATE
+    // (status, dispatched_at, EWB writes) was previously triggering a full
+    // round-trip to the badge endpoint. Filtering server-side cuts that noise.
     const channel = supabaseClient
       .channel('sidebar-badge-pending-approvals')
       .on('postgres_changes',
-        { event: '*', schema: 'public', table: 'consignments' },
+        { event: 'INSERT', schema: 'public', table: 'consignments', filter: 'approval_status=eq.pending' },
         () => { if (!cancelled) fetchBadges() })
+      .on('postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'consignments' },
+        (payload) => {
+          // Refetch only if approval_status actually changed.
+          const oldStatus = payload.old?.approval_status
+          const newStatus = payload.new?.approval_status
+          if (oldStatus !== newStatus && !cancelled) fetchBadges()
+        })
       .subscribe()
     return () => { cancelled = true; clearInterval(id); supabaseClient.removeChannel(channel) }
   }, [])

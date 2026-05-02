@@ -3,6 +3,7 @@
 import { createClient } from '@supabase/supabase-js'
 import { generateConsigneeReport } from '../../../lib/generateConsigneeReport'
 import { checkApproval } from '../../../lib/approvalGate'
+import { requireAuth } from '../../../lib/apiAuth'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
@@ -10,6 +11,9 @@ const supabase = createClient(
 )
 
 export async function GET(req) {
+  const auth = await requireAuth(req, { requiredRoles: null })
+  if (!auth.ok) return auth.response
+
   const { searchParams } = new URL(req.url)
   const consignmentId = searchParams.get('id')
 
@@ -17,7 +21,7 @@ export async function GET(req) {
     return Response.json({ error: 'Consignment ID required' }, { status: 400 })
   }
 
-  const gate = await checkApproval(supabase, consignmentId, req)
+  const gate = await checkApproval(supabase, consignmentId, req, auth)
   if (gate.blocked) return gate.response
 
   try {

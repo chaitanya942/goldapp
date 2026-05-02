@@ -4,6 +4,7 @@
 import { createClient } from '@supabase/supabase-js'
 import { generateIssueVoucher } from '../../../lib/generateIssueVoucher'
 import { checkApproval } from '../../../lib/approvalGate'
+import { requireAuth } from '../../../lib/apiAuth'
 import fs   from 'fs'
 import path from 'path'
 
@@ -12,20 +13,25 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY || 'placeholder'
 )
 
-function loadLogo() {
+// Logo cache: read once at module load instead of fs.readFileSync per request.
+const _LOGO = (() => {
   try {
     const logoPath = path.join(process.cwd(), 'public', 'logo.png')
     if (fs.existsSync(logoPath)) return fs.readFileSync(logoPath).toString('base64')
   } catch {}
   return null
-}
+})()
+function loadLogo() { return _LOGO }
 
 export async function GET(req) {
+  const auth = await requireAuth(req, { requiredRoles: null })
+  if (!auth.ok) return auth.response
+
   const { searchParams } = new URL(req.url)
   const consignmentId = searchParams.get('id')
   if (!consignmentId) return Response.json({ error: 'Consignment ID required' }, { status: 400 })
 
-  const gate = await checkApproval(supabase, consignmentId, req)
+  const gate = await checkApproval(supabase, consignmentId, req, auth)
   if (gate.blocked) return gate.response
 
   try {

@@ -6,6 +6,8 @@
 import { createClient } from '@supabase/supabase-js'
 import { generateEInvoice } from '../../../../lib/clearTaxClient'
 import { logConsignmentEvent } from '../../../../lib/consignmentLog'
+import { requireAuth } from '../../../../lib/apiAuth'
+import { REGION_TO_STATE_CODE } from '../../../../lib/stateMap'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
@@ -13,6 +15,8 @@ const supabase = createClient(
 )
 
 export async function POST(req) {
+  const auth = await requireAuth(req, { requiredRoles: null })
+  if (!auth.ok) return auth.response
   try {
     const { consignment_id } = await req.json()
     if (!consignment_id) return Response.json({ error: 'consignment_id required' }, { status: 400 })
@@ -28,8 +32,10 @@ export async function POST(req) {
 
     const { data: companySettings } = await supabase.from('company_settings').select('*').single()
 
-    // Resolve seller GSTIN from company_settings.gstin_<state> (preferred) → branch.branch_gstin → env
-    const stateCode = ({ 'Andhra Pradesh': 'AP', 'Kerala': 'KL', 'Telangana': 'TS', 'Tamil Nadu': 'TN', 'Rest of Karnataka': 'KA', 'Bangalore': 'KA' })[branch.region]
+    // Resolve seller GSTIN from company_settings.gstin_<state> (preferred) → branch.branch_gstin → env.
+    // Use the shared region→state-code map so adding a new state in stateMap.js
+    // automatically propagates here (and avoids the previous drift bug).
+    const stateCode = REGION_TO_STATE_CODE[branch.region]
     const stateGstinField = stateCode ? `gstin_${stateCode.toLowerCase()}` : null
     const sellerGstin = (stateGstinField && companySettings?.[stateGstinField]) || branch.branch_gstin || process.env.WG_GSTIN
     const buyerGstin  = companySettings?.gstin_ka || companySettings?.gstin || process.env.WG_GSTIN
@@ -55,7 +61,7 @@ export async function POST(req) {
     const { data: items } = await supabase.from('purchases').select('*').in('id', purchaseIds)
 
     const result = await generateEInvoice({ consignment, branch, items: items || [], companySettings: companySettings || {} })
-    console.log('[E-Invoice] ClearTax response:', JSON.stringify(result, null, 2))
+    // Full response (with redaction) is logged by ctaxLog inside lib/clearTaxClient.js.
 
     // Robust extraction across response shapes
     const sources = [result?.govt_response, result?.data, result?.response, result]
@@ -75,10 +81,11 @@ export async function POST(req) {
     const signedQrCode = pick(['SignedQRCode', 'signedQRCode', 'signed_qr_code'])
 
     if (!irn) {
+      // Don't echo `result` to the client — it contains GSTINs / addresses /
+      // signed QR JWT. Server-side ctaxLog already captured a redacted copy.
       return Response.json({
         success: false,
         error:   'IRN not found in response — see server logs',
-        raw:     result,
       }, { status: 502 })
     }
 
@@ -88,8 +95,9 @@ export async function POST(req) {
 
     await logConsignmentEvent(supabase, {
       consignment_id,
-      event_type: 'einvoice_generated',
-      details:    { irn, ack_no: ackNo, ack_dt: ackDt },
+      event_type:  'einvoice_generated',
+      actor_email: auth.profile?.email || auth.user?.email || 'unknown',
+      details:     { irn, ack_no: ackNo, ack_dt: ackDt },
     })
 
     return Response.json({ success: true, irn, ack_no: ackNo, ack_dt: ackDt })

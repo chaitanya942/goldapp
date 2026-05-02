@@ -8,10 +8,15 @@ import GoldSpinner from '../ui/GoldSpinner'
 import Badge from '../ui/Badge'
 import Toast from '../ui/Toast'
 import { openConfirm, openPrompt } from '../ui/ConfirmDialog'
+import { authedFetch } from '../../lib/authedFetch'
 
 async function triggerDownload(url, filename, onError) {
-  const res  = await fetch(url)
-  if (!res.ok) { onError?.('Download failed: ' + (await res.text())); return }
+  const res  = await authedFetch(url)
+  if (!res.ok) {
+    let msg = `Download failed: ${res.status}`
+    try { const j = await res.json(); if (j.error) msg = j.error } catch { try { msg = await res.text() } catch {} }
+    onError?.(msg); return
+  }
   const blob = await res.blob()
   const a    = document.createElement('a')
   a.href     = URL.createObjectURL(blob)
@@ -133,10 +138,10 @@ export default function ConsignmentData() {
   const fetchAll = useCallback(async () => {
     setLoading(true)
     const [p, b, c, u] = await Promise.all([
-      fetch('/api/consignments?action=stock_in_branch').then(r => r.json()),
-      fetch('/api/consignments?action=branches').then(r => r.json()),
-      fetch('/api/consignments?action=consignments').then(r => r.json()),
-      fetch('/api/consignments?action=unknown_branches').then(r => r.json()),
+      authedFetch('/api/consignments?action=stock_in_branch').then(r => r.json()),
+      authedFetch('/api/consignments?action=branches').then(r => r.json()),
+      authedFetch('/api/consignments?action=consignments').then(r => r.json()),
+      authedFetch('/api/consignments?action=unknown_branches').then(r => r.json()),
     ])
     setPurchases(p.data || [])
     setBranches(b.data || [])
@@ -285,7 +290,7 @@ export default function ConsignmentData() {
     }
     setCreating(true)
     try {
-      const res = await fetch('/api/consignments', {
+      const res = await authedFetch('/api/consignments', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           action: 'create_consignment',
@@ -311,7 +316,7 @@ export default function ConsignmentData() {
   async function generateEinv(c) {
     setEwbActionId(c.id + ':einv')
     try {
-      const res  = await fetch('/api/e-invoice/generate', {
+      const res  = await authedFetch('/api/e-invoice/generate', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ consignment_id: c.id }),
       })
@@ -344,7 +349,7 @@ export default function ConsignmentData() {
     if (!ok) return
     setEwbActionId(c.id + ':einv-cancel')
     try {
-      const res  = await fetch('/api/e-invoice/cancel', {
+      const res  = await authedFetch('/api/e-invoice/cancel', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ consignment_id: c.id }),
       })
@@ -358,7 +363,7 @@ export default function ConsignmentData() {
   async function generateEwb(c) {
     setEwbActionId(c.id + ':gen')
     try {
-      const res  = await fetch('/api/eway-bill/generate', {
+      const res  = await authedFetch('/api/eway-bill/generate', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ consignment_id: c.id }),
       })
@@ -392,7 +397,7 @@ export default function ConsignmentData() {
     if (!ok) return
     setEwbActionId(c.id + ':cancel')
     try {
-      const res  = await fetch('/api/eway-bill/cancel', {
+      const res  = await authedFetch('/api/eway-bill/cancel', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ consignment_id: c.id }),
       })
@@ -423,7 +428,7 @@ export default function ConsignmentData() {
     })
     if (!reason) return
     try {
-      const res = await fetch('/api/consignments', {
+      const res = await authedFetch('/api/consignments', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'cancel_consignment', id: c.id, reason, cancelled_by: userEmail }),
       })
@@ -475,7 +480,7 @@ export default function ConsignmentData() {
     if (showEwb && !cur.eway_bill_no) {
       setToast({ msg: '⚡ Generating E-Way Bill (may take 20-30 seconds)…', type: 'info' })
       try {
-        const r = await fetch('/api/eway-bill/generate', {
+        const r = await authedFetch('/api/eway-bill/generate', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ consignment_id: cur.id }),
         })
@@ -494,7 +499,7 @@ export default function ConsignmentData() {
     if (showEinv && !cur.irn) {
       setToast({ msg: '⚡ Generating E-Invoice (may take 20-30 seconds)…', type: 'info' })
       try {
-        const r = await fetch('/api/e-invoice/generate', {
+        const r = await authedFetch('/api/e-invoice/generate', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ consignment_id: cur.id }),
         })

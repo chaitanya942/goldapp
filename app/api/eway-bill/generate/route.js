@@ -7,6 +7,7 @@ import { createClient } from '@supabase/supabase-js'
 import { generateEWayBill } from '../../../../lib/clearTaxClient'
 import { estimateDistanceKm } from '../../../../lib/distanceCalc'
 import { logConsignmentEvent } from '../../../../lib/consignmentLog'
+import { requireAuth } from '../../../../lib/apiAuth'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
@@ -78,6 +79,8 @@ function preflightValidate({ consignment, branch, destBranch, items, companySett
 }
 
 export async function POST(req) {
+  const auth = await requireAuth(req, { requiredRoles: null })
+  if (!auth.ok) return auth.response
   try {
     const { consignment_id } = await req.json()
     if (!consignment_id) return Response.json({ error: 'consignment_id required' }, { status: 400 })
@@ -140,9 +143,7 @@ export async function POST(req) {
     }
 
     const result = await generateEWayBill({ consignment, branch, destBranch, items: items || [], companySettings: companySettings || {} })
-
-    // Log full response so we can adjust extraction if ClearTax response shape changes
-    console.log('[EWB] ClearTax response:', JSON.stringify(result, null, 2))
+    // Redacted copy of the response is already logged by ctaxLog (lib/clearTaxClient.js).
 
     // ClearTax/GSTN response uses inconsistent casing — check every plausible path.
     const sources = [result?.govt_response, result?.data, result?.response, result]
@@ -158,12 +159,12 @@ export async function POST(req) {
     const ewbDate = sources.map(s => pickFromSrc(s, ['ewbDate', 'EwbDate', 'eway_bill_date'])).find(Boolean)
 
     if (!ewbNo) {
-      // Generation may have succeeded but we couldn't parse the number — surface raw for debugging
+      // Don't echo `result` — it contains GSTINs and goods/value details.
+      // Redacted copy is in server logs.
       await releaseLock()
       return Response.json({
         success: false,
         error: 'EWB generated but number could not be extracted from response — see server logs',
-        raw: result,
       }, { status: 502 })
     }
 
@@ -190,6 +191,7 @@ export async function POST(req) {
     await logConsignmentEvent(supabase, {
       consignment_id,
       event_type:  'ewb_generated',
+      actor_email: auth.profile?.email || auth.user?.email || 'unknown',
       details:     { ewb_no: String(ewbNo), ewb_date: ewbDate, valid_until: validUntil, distance_km: distKm },
     })
 

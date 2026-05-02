@@ -10,14 +10,27 @@ import {
   generateIssueVoucherNo,
 } from '../../../lib/consignmentUtils'
 import { logConsignmentEvent } from '../../../lib/consignmentLog'
+import { requireAuth, ROLE_GROUPS } from '../../../lib/apiAuth'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
   process.env.SUPABASE_SERVICE_ROLE_KEY || 'placeholder'
 )
 
+// Map POST actions to required role groups. Default is ANY authenticated user.
+const ACTION_ROLE_REQUIREMENTS = {
+  approve_consignment:  ROLE_GROUPS.ACCOUNTS,
+  reject_approval:      ROLE_GROUPS.ACCOUNTS,
+  cancel_consignment:   ROLE_GROUPS.ADMIN,
+}
+
 // ── GET handler ───────────────────────────────────────────────────────────────
 export async function GET(req) {
+  // Any authenticated user can read consignment data; specific actions can
+  // tighten further by checking auth.role inline.
+  const auth = await requireAuth(req, { requiredRoles: null })
+  if (!auth.ok) return auth.response
+
   const { searchParams } = new URL(req.url)
   const action = searchParams.get('action')
 
@@ -477,9 +490,20 @@ export async function POST(req) {
   const body   = await req.json()
   const { action } = body
 
+  // Role check based on action. requireAuth always validates the bearer token;
+  // requiredRoles narrows further for accounts/admin-only actions.
+  const requiredRoles = ACTION_ROLE_REQUIREMENTS[action] || null
+  const auth = await requireAuth(req, { requiredRoles })
+  if (!auth.ok) return auth.response
+
+  // Identity is now derived from the verified session — never from the body.
+  // Callers can no longer spoof created_by / approver_email / cancelled_by.
+  const actorEmail = auth.profile?.email || auth.user?.email || 'unknown'
+
   // ── Create consignment ───────────────────────────────────────────────────
   if (action === 'create_consignment') {
-    const { purchase_ids, branch_name, movement_type, dest_branch, eway_bill_no, created_by } = body
+    const { purchase_ids, branch_name, movement_type, dest_branch, eway_bill_no } = body
+    const created_by = actorEmail
     if (!purchase_ids?.length) return Response.json({ error: 'No purchases selected' }, { status: 400 })
     if (!branch_name)          return Response.json({ error: 'Branch name required' },  { status: 400 })
 
@@ -585,6 +609,46 @@ export async function POST(req) {
       captured_at: nowIso,
     }
 
+    // ── Atomic create via Postgres RPC ────────────────────────────────────
+    // Wraps consignments INSERT + consignment_items INSERT + purchases UPDATE
+    // in a single transaction. If any step fails, all changes roll back —
+    // previously a failure between steps left bills in `at_branch` while the
+    // consignment row claimed `dispatched`, requiring manual cleanup.
+    //
+    // If the RPC isn't deployed yet (sql/consignment_create_cancel_rpcs.sql),
+    // we fall back to the legacy multi-statement path so the route still works.
+    const { data: rpcConsignment, error: rpcErr } = await supabase.rpc('create_consignment_atomic', {
+      p_consignment_no: challan,
+      p_tmp_prf_no:    tmpPrfNo,
+      p_external_no:   extNo,
+      p_internal_no:   internalNo,
+      p_challan_no:    challan,
+      p_branch_name:   branch_name,
+      p_branch_code:   branchCode,
+      p_state_code:    stateCode,
+      p_movement_type: movement_type || 'EXTERNAL',
+      p_dest_branch:   isInternal ? dest_branch : null,
+      p_eway_bill_no:  eway_bill_no || null,
+      p_total_bills:   purchase_ids.length,
+      p_total_net_wt:  totalNetWt,
+      p_total_amount:  totalAmount,
+      p_gst_snapshot:  gstSnapshot,
+      p_created_by:    created_by,
+      p_purchase_ids:  purchase_ids,
+    })
+
+    if (!rpcErr && rpcConsignment) {
+      return Response.json({ data: rpcConsignment })
+    }
+
+    // Fallback path (RPC not deployed). Logs a warning so we know to apply the SQL.
+    if (rpcErr && rpcErr.code !== 'PGRST202' /* function not found */) {
+      // RPC exists and returned an error — surface it (this is a real failure,
+      // probably a check-violation from the duplicate-link guard).
+      return Response.json({ error: rpcErr.message }, { status: 500 })
+    }
+    console.warn('[consignments.create] create_consignment_atomic RPC missing — using non-atomic fallback. Apply sql/consignment_create_cancel_rpcs.sql.')
+
     const { data: consignment, error: ce } = await supabase
       .from('consignments')
       .insert({
@@ -646,7 +710,8 @@ export async function POST(req) {
 
   // ── Dispatch consignment ─────────────────────────────────────────────────
   if (action === 'dispatch') {
-    const { id, dispatched_by } = body
+    const { id } = body
+    const dispatched_by = actorEmail
     // Validate: must be in draft status to dispatch
     const { data: current } = await supabase.from('consignments').select('status').eq('id', id).single()
     if (current?.status !== 'draft') {
@@ -661,7 +726,8 @@ export async function POST(req) {
 
   // ── Receive consignment ───────────────────────────────────────────────────
   if (action === 'receive') {
-    const { id, received_by } = body
+    const { id } = body
+    const received_by = actorEmail
 
     const { data: current } = await supabase.from('consignments')
       .select('status, movement_type, dest_branch')
@@ -715,7 +781,8 @@ export async function POST(req) {
   // Operations team generates EWB/IRN; accounts team approves before downloads
   // unlock. The downstream document routes check consignment.approval_status.
   if (action === 'approve_consignment') {
-    const { id, approver_email, note } = body
+    const { id, note } = body
+    const approver_email = actorEmail
     if (!id) return Response.json({ error: 'consignment id required' }, { status: 400 })
     const nowIso = new Date().toISOString()
     const { data, error } = await supabase
@@ -740,7 +807,8 @@ export async function POST(req) {
   }
 
   if (action === 'reject_approval') {
-    const { id, approver_email, reason } = body
+    const { id, reason } = body
+    const approver_email = actorEmail
     if (!id) return Response.json({ error: 'consignment id required' }, { status: 400 })
     if (!reason) return Response.json({ error: 'Rejection reason is required' }, { status: 400 })
     const { data, error } = await supabase
@@ -768,7 +836,31 @@ export async function POST(req) {
   // Voids a consignment that was created by mistake. Bills return to source.
   // Blocked if any bill has since been re-consigned in a later movement.
   if (action === 'cancel_consignment') {
-    const { id, reason, cancelled_by } = body
+    const { id, reason } = body
+    const cancelled_by = actorEmail
+
+    // Atomic path via Postgres RPC. Returns bills, flips status, and writes the
+    // audit log in one transaction. Falls back to legacy multi-step path if the
+    // RPC isn't deployed.
+    const { data: rpcCancelled, error: rpcCancelErr } = await supabase.rpc('cancel_consignment_atomic', {
+      p_consignment_id: id,
+      p_reason:         reason || null,
+      p_cancelled_by:   cancelled_by,
+    })
+    if (!rpcCancelErr && rpcCancelled) {
+      // Surface a warning if EWB/IRN was still active, so the operator
+      // remembers to cancel them on the GST portal too.
+      const warnings = []
+      if (rpcCancelled.eway_bill_no) warnings.push(`E-Way Bill ${rpcCancelled.eway_bill_no} still active — cancel it on the GST portal too`)
+      if (rpcCancelled.irn)          warnings.push(`E-Invoice IRN still active — cancel it on the GST portal too`)
+      return Response.json({ data: rpcCancelled, warnings: warnings.length ? warnings : undefined })
+    }
+    if (rpcCancelErr && rpcCancelErr.code !== 'PGRST202') {
+      // RPC ran but business rule failed — surface the message verbatim.
+      return Response.json({ error: rpcCancelErr.message }, { status: 400 })
+    }
+    console.warn('[consignments.cancel] cancel_consignment_atomic RPC missing — using non-atomic fallback. Apply sql/consignment_create_cancel_rpcs.sql.')
+
     const { data: c } = await supabase.from('consignments').select('*').eq('id', id).single()
     if (!c) return Response.json({ error: 'Consignment not found' }, { status: 404 })
     if (c.status === 'cancelled') return Response.json({ error: 'Already cancelled' }, { status: 400 })
@@ -844,7 +936,8 @@ export async function POST(req) {
 
   // ── Partial receive — mark specific bills received, others as missing/short ──
   if (action === 'partial_receive') {
-    const { id, received_purchase_ids, short_purchase_ids, short_reason, received_by } = body
+    const { id, received_purchase_ids, short_purchase_ids, short_reason } = body
+    const received_by = actorEmail
     if (!id) return Response.json({ error: 'consignment id required' }, { status: 400 })
     const { data: c } = await supabase.from('consignments').select('status, movement_type, dest_branch').eq('id', id).single()
     if (!c) return Response.json({ error: 'Consignment not found' }, { status: 404 })

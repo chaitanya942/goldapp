@@ -1,11 +1,14 @@
 // app/api/e-invoice/cancel/route.js
 // Cancel an E-Invoice (must be done within 24 hours per IRP rules).
 // Body: { consignment_id, reason_code?, remark? }
+// Cancellation is destructive and irreversible at the IRP — restricted to
+// ADMIN role group.
 
 import { createClient } from '@supabase/supabase-js'
 import { cancelEInvoice } from '../../../../lib/clearTaxClient'
 import { logConsignmentEvent } from '../../../../lib/consignmentLog'
 import { REGION_TO_STATE_CODE } from '../../../../lib/stateMap'
+import { requireAuth, ROLE_GROUPS } from '../../../../lib/apiAuth'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
@@ -13,6 +16,8 @@ const supabase = createClient(
 )
 
 export async function POST(req) {
+  const auth = await requireAuth(req, { requiredRoles: ROLE_GROUPS.ADMIN })
+  if (!auth.ok) return auth.response
   try {
     const { consignment_id, reason_code, remark } = await req.json()
     if (!consignment_id) return Response.json({ error: 'consignment_id required' }, { status: 400 })
@@ -45,11 +50,12 @@ export async function POST(req) {
 
     await logConsignmentEvent(supabase, {
       consignment_id,
-      event_type: 'einvoice_cancelled',
-      details:    { irn: cancelledIrn, reason_code: reason_code || '1', remark: remark || 'Duplicate' },
+      event_type:  'einvoice_cancelled',
+      actor_email: auth.profile?.email || auth.user?.email || 'unknown',
+      details:     { irn: cancelledIrn, reason_code: reason_code || '1', remark: remark || 'Duplicate' },
     })
 
-    return Response.json({ success: true, raw: result })
+    return Response.json({ success: true })
   } catch (err) {
     console.error('E-Invoice cancel error:', err)
     return Response.json({ error: err.message || 'Failed to cancel E-Invoice' }, { status: 500 })

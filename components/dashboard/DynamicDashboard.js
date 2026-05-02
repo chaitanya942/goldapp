@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../../lib/supabase'
 import { useApp } from '../../lib/context'
+import { authedFetch } from '../../lib/authedFetch'
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
   LineChart, Line, CartesianGrid,
@@ -725,7 +726,7 @@ function ConsignmentSection({ t, setActiveNav, canSee }) {
 
   useEffect(() => {
     if (!canSeeOverview) { setLoading(false); return }
-    fetch('/api/consignments?action=branch_overview')
+    authedFetch('/api/consignments?action=branch_overview')
       .then(r=>r.json()).then(json=>{setData(json.data||[]);setLoading(false)}).catch(()=>setLoading(false))
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 

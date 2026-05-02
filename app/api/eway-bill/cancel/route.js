@@ -1,11 +1,13 @@
 // app/api/eway-bill/cancel/route.js
 // Cancel an E-Way Bill (must be done within 24 hours of generation per GSTN rules).
 // Body: { consignment_id, reason_code?, remark? }
+// Cancellation is destructive — restricted to ADMIN role group.
 
 import { createClient } from '@supabase/supabase-js'
 import { cancelEWayBill } from '../../../../lib/clearTaxClient'
 import { logConsignmentEvent } from '../../../../lib/consignmentLog'
 import { REGION_TO_STATE_CODE } from '../../../../lib/stateMap'
+import { requireAuth, ROLE_GROUPS } from '../../../../lib/apiAuth'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
@@ -13,6 +15,8 @@ const supabase = createClient(
 )
 
 export async function POST(req) {
+  const auth = await requireAuth(req, { requiredRoles: ROLE_GROUPS.ADMIN })
+  if (!auth.ok) return auth.response
   try {
     const { consignment_id, reason_code, remark } = await req.json()
     if (!consignment_id) return Response.json({ error: 'consignment_id required' }, { status: 400 })
@@ -33,25 +37,28 @@ export async function POST(req) {
     const stateGstin = stateCode ? companySettings?.[`gstin_${stateCode.toLowerCase()}`] : null
     const gstinFor   = stateGstin || branch?.branch_gstin || process.env.WG_GSTIN
 
+    // NIC EWB cancel reason codes: 1=Duplicate, 2=Order Cancelled,
+    // 3=Data Entry Mistake, 4=Others. Default to 1=Duplicate.
     const result = await cancelEWayBill({
       ewbNumber:     consignment.eway_bill_no,
-      reasonCode:    reason_code || 'DUPLICATE',
+      reasonCode:    reason_code || '1',
       remark:        remark      || 'Duplicate Entry',
       gstinOverride: gstinFor,
     })
 
     const cancelledEwb = consignment.eway_bill_no
     await supabase.from('consignments')
-      .update({ eway_bill_no: null, ewb_valid_until: null, ewb_generated_at: null })
+      .update({ eway_bill_no: null, ewb_valid_until: null, ewb_generated_at: null, ewb_generation_started_at: null })
       .eq('id', consignment_id)
 
     await logConsignmentEvent(supabase, {
       consignment_id,
-      event_type: 'ewb_cancelled',
-      details:    { ewb_no: cancelledEwb, reason_code: reason_code || 'DUPLICATE', remark: remark || 'Duplicate Entry' },
+      event_type:  'ewb_cancelled',
+      actor_email: auth.profile?.email || auth.user?.email || 'unknown',
+      details:     { ewb_no: cancelledEwb, reason_code: reason_code || '1', remark: remark || 'Duplicate Entry' },
     })
 
-    return Response.json({ success: true, raw: result })
+    return Response.json({ success: true })
   } catch (err) {
     console.error('E-Way Bill cancel error:', err)
     return Response.json({ error: err.message || 'Failed to cancel E-Way Bill' }, { status: 500 })

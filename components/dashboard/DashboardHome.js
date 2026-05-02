@@ -6,6 +6,7 @@ import { useApp } from '../../lib/context'
 import AnimatedNumber from '../ui/AnimatedNumber'
 import LiveTicker from '../ui/LiveTicker'
 import { getVisibleModules } from '../../lib/modules'
+import { authedFetch } from '../../lib/authedFetch'
 
 const THEMES = {
   dark:  { bg: '#0a0a0a', card: '#111111', card2: '#161616', card3: '#1c1c1c', text1: '#f0e6c8', text2: '#c8b89a', text3: '#9a8a6a', text4: '#6a5a3a', gold: '#c9a84c', border: '#1e1e1e', border2: '#252525', green: '#3aaa6a', red: '#e05555', blue: '#3a8fbf', orange: '#c9981f', purple: '#8c5ac8', shadow: '0 2px 8px rgba(0,0,0,.5), inset 0 1px 0 rgba(255,255,255,.03)' },
@@ -266,8 +267,8 @@ export default function DashboardHome() {
     if (canSee('consignment-overview') || canSee('consignment-data')) {
       ps.push(
         Promise.all([
-          fetch('/api/consignments?action=branch_overview').then(r => r.json()).catch(() => ({ data: [] })),
-          fetch('/api/consignments?action=consignments').then(r => r.json()).catch(() => ({ data: [] })),
+          authedFetch('/api/consignments?action=branch_overview').then(r => r.json()).catch(() => ({ data: [] })),
+          authedFetch('/api/consignments?action=consignments').then(r => r.json()).catch(() => ({ data: [] })),
         ]).then(([overview, consignList]) => {
           const rows = overview.data || []
           const totalBranches = rows.filter(r => (r.older_bills || 0) + (r.today_bills || 0) > 0).length

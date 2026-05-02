@@ -5,10 +5,15 @@ import { useApp } from '../../lib/context'
 import GoldSpinner from '../ui/GoldSpinner'
 import Badge from '../ui/Badge'
 import Toast from '../ui/Toast'
+import { authedFetch } from '../../lib/authedFetch'
 
 async function triggerDownload(url, filename, onError) {
-  const res  = await fetch(url)
-  if (!res.ok) { onError?.('Download failed: ' + (await res.text())); return }
+  const res  = await authedFetch(url)
+  if (!res.ok) {
+    let msg = `Download failed: ${res.status}`
+    try { const j = await res.json(); if (j.error) msg = j.error } catch { try { msg = await res.text() } catch {} }
+    onError?.(msg); return
+  }
   const blob = await res.blob()
   const a    = document.createElement('a')
   a.href     = URL.createObjectURL(blob)
@@ -71,7 +76,7 @@ export default function ConsignmentReport() {
     if (filterBranch)   params.set('branch',    filterBranch)
     if (filterDateFrom) params.set('date_from', filterDateFrom)
     if (filterDateTo)   params.set('date_to',   filterDateTo)
-    const res = await fetch(`/api/consignments?${params}`)
+    const res = await authedFetch(`/api/consignments?${params}`)
     const { data } = await res.json()
     setConsignments((data || []).filter(c => c.status !== 'seed'))
     setLoading(false)
@@ -79,7 +84,7 @@ export default function ConsignmentReport() {
 
   async function fetchDetail(id) {
     setLoadingDetail(true)
-    const res  = await fetch(`/api/consignments?action=consignment_detail&id=${id}`)
+    const res  = await authedFetch(`/api/consignments?action=consignment_detail&id=${id}`)
     const { data } = await res.json()
     setDetail(data)
     setLoadingDetail(false)

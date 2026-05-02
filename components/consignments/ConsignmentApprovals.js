@@ -6,6 +6,7 @@ import { supabase as supabaseClient } from '../../lib/supabase'
 import GoldSpinner from '../ui/GoldSpinner'
 import Toast from '../ui/Toast'
 import { openConfirm, openPrompt } from '../ui/ConfirmDialog'
+import { authedFetch } from '../../lib/authedFetch'
 
 const THEMES = {
   dark:  { bg: '#0a0a0a', card: '#111111', card2: '#161616', card3: '#1d1c19', text1: '#f0e6c8', text2: '#c8b89a', text3: '#9a8a6a', text4: '#6a5a3a', gold: '#c9a84c', border: '#1e1e1e', border2: '#252525', green: '#3aaa6a', red: '#e05555', blue: '#3a8fbf', orange: '#c9981f', purple: '#8c5ac8' },
@@ -100,7 +101,10 @@ function writeSoundPref(v) {
 
 async function previewDoc(url, filename, onError) {
   const sep = url.includes('?') ? '&' : '?'
-  const res = await fetch(`${url}${sep}preview=accounts`)
+  // Auth header required — server-side approvalGate verifies the role from the
+  // bearer token before honouring `?preview=accounts`. Without auth the request
+  // is rejected as 401 even if approval_status is pending.
+  const res = await authedFetch(`${url}${sep}preview=accounts`)
   if (!res.ok) {
     let msg = `Preview failed: ${res.status}`
     try { const j = await res.json(); if (j.error) msg = j.error } catch {}
@@ -139,7 +143,7 @@ export default function ConsignmentApprovals() {
 
   const fetchPending = useCallback(async (silent = false) => {
     if (!silent) setLoading(true)
-    const r = await fetch('/api/consignments?action=pending_approvals')
+    const r = await authedFetch('/api/consignments?action=pending_approvals')
     const j = await r.json()
     const rows = j.data || []
     setPending(rows)
@@ -254,7 +258,7 @@ export default function ConsignmentApprovals() {
     if (!ok) return
     setActionId(c.id + ':approve')
     try {
-      const r = await fetch('/api/consignments', {
+      const r = await authedFetch('/api/consignments', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'approve_consignment', id: c.id, approver_email: userEmail }),
       })
@@ -279,7 +283,7 @@ export default function ConsignmentApprovals() {
     if (!reason) return
     setActionId(c.id + ':reject')
     try {
-      const r = await fetch('/api/consignments', {
+      const r = await authedFetch('/api/consignments', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'reject_approval', id: c.id, approver_email: userEmail, reason }),
       })

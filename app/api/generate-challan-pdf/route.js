@@ -3,6 +3,7 @@
 import { createClient } from '@supabase/supabase-js'
 import { generateDeliveryChallan } from '../../../lib/generateDeliveryChallan'
 import { checkApproval } from '../../../lib/approvalGate'
+import { requireAuth } from '../../../lib/apiAuth'
 import fs   from 'fs'
 import path from 'path'
 
@@ -34,20 +35,23 @@ const DEFAULT_COMPANY = {
   value_uplift_pct:      7.5,
 }
 
-// ── Load company logo from public/logo.png ────────────────────────────────────
-function loadLogo() {
+// Logo loaded once at module load, not per request — fs.readFileSync on every
+// PDF call adds ~5ms latency for an asset that never changes.
+const _LOGO_BASE64 = (() => {
   try {
     const logoPath = path.join(process.cwd(), 'public', 'logo.png')
-    if (fs.existsSync(logoPath)) {
-      return fs.readFileSync(logoPath).toString('base64')
-    }
+    if (fs.existsSync(logoPath)) return fs.readFileSync(logoPath).toString('base64')
   } catch {
     // Logo not critical — PDF generation continues without it
   }
   return null
-}
+})()
+function loadLogo() { return _LOGO_BASE64 }
 
 export async function GET(req) {
+  const auth = await requireAuth(req, { requiredRoles: null })
+  if (!auth.ok) return auth.response
+
   const { searchParams } = new URL(req.url)
   const consignmentId = searchParams.get('id')
 
@@ -55,9 +59,9 @@ export async function GET(req) {
     return Response.json({ error: 'Consignment ID required' }, { status: 400 })
   }
 
-  // Approval gate — block download unless accounts team has approved (or this
-  // is the accounts review preview, or super_admin bypass header is set).
-  const gate = await checkApproval(supabase, consignmentId, req)
+  // Approval gate — blocks download unless accounts team has approved, or the
+  // caller is in ADMIN/ACCOUNTS group with the appropriate preview context.
+  const gate = await checkApproval(supabase, consignmentId, req, auth)
   if (gate.blocked) return gate.response
 
   try {

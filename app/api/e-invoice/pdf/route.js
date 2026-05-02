@@ -8,6 +8,7 @@
 import { createClient } from '@supabase/supabase-js'
 import { generateEInvoicePdf } from '../../../../lib/generateEInvoicePdf'
 import { checkApproval } from '../../../../lib/approvalGate'
+import { requireAuth } from '../../../../lib/apiAuth'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
@@ -15,12 +16,14 @@ const supabase = createClient(
 )
 
 export async function GET(req) {
+  const auth = await requireAuth(req, { requiredRoles: null })
+  if (!auth.ok) return auth.response
   try {
     const { searchParams } = new URL(req.url)
     const consignmentId    = searchParams.get('id')
     if (!consignmentId) return Response.json({ error: 'id required' }, { status: 400 })
 
-    const gate = await checkApproval(supabase, consignmentId, req)
+    const gate = await checkApproval(supabase, consignmentId, req, auth)
     if (gate.blocked) return gate.response
 
     const { data: consignment, error } = await supabase

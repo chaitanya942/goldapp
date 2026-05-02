@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useApp } from '../../lib/context'
 import GoldSpinner from '../ui/GoldSpinner'
+import { authedFetch } from '../../lib/authedFetch'
 
 const THEMES = {
   dark:  { bg: '#0a0a0a', card: '#111111', card2: '#161616', text1: '#f0e6c8', text2: '#c8b89a', text3: '#9a8a6a', text4: '#6a5a3a', gold: '#c9a84c', border: '#1e1e1e', border2: '#252525', green: '#3aaa6a', red: '#e05555', blue: '#3a8fbf', orange: '#c9981f', purple: '#8c5ac8' },
@@ -91,7 +92,7 @@ export default function ConsignmentOverview() {
 
   const fetchData = useCallback(async () => {
     setLoading(true)
-    const res  = await fetch('/api/consignments?action=branch_overview')
+    const res  = await authedFetch('/api/consignments?action=branch_overview')
     const json = await res.json()
     setData(json.data || [])
     setLastRefresh(new Date())
