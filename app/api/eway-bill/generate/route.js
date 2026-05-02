@@ -53,10 +53,8 @@ function preflightValidate({ consignment, branch, destBranch, items, companySett
   if (isInternal && recipient && !isValidPin(recipient.pin_code)) {
     errors.push(`Destination hub PIN '${recipient.pin_code || ''}' is invalid`)
   }
-  if (!isInternal) {
-    const hoPin = companySettings.ho_pin_code || companySettings.pin_code
-    if (!isValidPin(hoPin)) errors.push(`Head Office PIN '${hoPin || ''}' is invalid — set ho_pin_code in company_settings`)
-  }
+  // HO PIN check skipped — clearTaxClient uses HO_DEFAULTS (Bangalore 560095)
+  // baked in, so company_settings.ho_pin_code is not required for EWB generation.
 
   // Address
   if (!dispatcher?.address && !dispatcher?.city) errors.push('Source branch has no address')
@@ -170,9 +168,12 @@ export async function POST(req) {
     }
 
     // EWB validity: NIC rule is 1 day per 200 km (rounded up). Min 1 day.
+    // For Direct→HO and Hub→HO, HO is hardcoded as Bangalore (Koramangala 560095, KA)
+    // — same defaults clearTaxClient uses in its EWB payload.
     const fromPin   = branch?.pin_code
-    const toPin     = (consignment.movement_type === 'INTERNAL' ? destBranch?.pin_code : (companySettings?.ho_pin_code || companySettings?.pin_code))
-    const distKm    = estimateDistanceKm({ fromPin, toPin, fromState: branch?.state, toState: (consignment.movement_type === 'INTERNAL' ? destBranch?.state : companySettings?.ho_state) }) || 50
+    const toPin     = (consignment.movement_type === 'INTERNAL' ? destBranch?.pin_code : (companySettings?.ho_pin_code || '560095'))
+    const toState   = (consignment.movement_type === 'INTERNAL' ? destBranch?.state : 'KA')
+    const distKm    = estimateDistanceKm({ fromPin, toPin, fromState: branch?.state, toState }) || 50
     const validDays = Math.max(1, Math.ceil(distKm / 200))
     const validUntil = new Date(Date.now() + validDays * 86400000).toISOString()
 
