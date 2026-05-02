@@ -92,6 +92,9 @@ export default function ConsignmentData() {
   // Mode: null = Active Consignments list,  { type:'branch', branch, fromRegion } = bill picker
   const [nav,                 setNav]                = useState(null)
   const [purchases,           setPurchases]          = useState([])
+  // Branch-specific bill list, populated when entering a branch view.
+  // Decoupled from `purchases` so fetchAll (no-branch) can't race-overwrite.
+  const [branchBillsState,    setBranchBillsState]   = useState(null)
   const [consignments,        setConsignments]       = useState([])
   const [branches,            setBranches]           = useState([])
   const [unknownBranches,     setUnknownBranches]    = useState([])
@@ -159,23 +162,19 @@ export default function ConsignmentData() {
     }
   }, [consignmentDeepLink])
 
-  // When entering a branch view, refetch stock_in_branch with the branch
-  // parameter so we get authoritative own + transferred-in bills (relaxed
-  // filter for transferred). Then auto-select transferred-in bills that
-  // are actually present in the picker (so the count never lies).
+  // When entering a branch view, fetch authoritative own + transferred-in
+  // bills into a SEPARATE state. Decoupled from the global `purchases`
+  // (used by Branch Stock Overview) so fetchAll can't race-overwrite it.
   useEffect(() => {
-    if (!nav?.branch) { setTransferHistory({}); return }
+    if (!nav?.branch) { setTransferHistory({}); setBranchBillsState(null); return }
+    setBranchBillsState(null)  // show loading until fresh data arrives
     Promise.all([
       fetch(`/api/consignments?action=stock_in_branch&branch=${encodeURIComponent(nav.branch)}`).then(r => r.json()),
       fetch(`/api/consignments?action=transfer_history&branch=${encodeURIComponent(nav.branch)}`).then(r => r.json()),
     ]).then(([s, h]) => {
       const branchBills = s.data || []
       const history     = h.data || {}
-      // Replace this branch's bills in the global purchases state
-      setPurchases(prev => {
-        const others = (prev || []).filter(p => (p.current_branch || p.branch_name) !== nav.branch)
-        return [...others, ...branchBills]
-      })
+      setBranchBillsState(branchBills)
       setTransferHistory(history)
       // Only auto-select transferred-in bills that are actually visible
       const visibleIds = new Set(branchBills.map(b => b.id))
@@ -190,6 +189,7 @@ export default function ConsignmentData() {
     }).catch(err => {
       console.warn('Branch stock fetch failed:', err)
       setTransferHistory({})
+      setBranchBillsState([])
     })
   }, [nav?.branch])
 
@@ -200,9 +200,13 @@ export default function ConsignmentData() {
   }, [nav?.branch])
 
   // ── Bill picker filtering / selection ─────────────────────────────────────
+  // Source of truth when in branch view: branchBillsState (fresh, branch-scoped).
+  // Falls back to filtered global `purchases` if branch fetch hasn't completed.
   function getBillsForBranch() {
     if (!nav?.branch) return []
-    let bills = purchases.filter(p => (p.current_branch || p.branch_name) === nav.branch)
+    let bills = branchBillsState != null
+      ? branchBillsState
+      : purchases.filter(p => (p.current_branch || p.branch_name) === nav.branch)
     if (search) {
       const q = search.toLowerCase()
       bills = bills.filter(p =>
