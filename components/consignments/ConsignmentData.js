@@ -366,8 +366,9 @@ export default function ConsignmentData() {
     setDownloadingId(null)
   }
 
-  // One-click: download all applicable documents into a real folder
-  // (File System Access API where supported — Chrome/Edge), else fall back to ZIP.
+  // One-click: auto-generate any missing EWB / E-Invoice, then download all
+  // applicable documents into a real folder (File System Access API where
+  // supported — Chrome/Edge), else fall back to ZIP.
   // Folder name format: {TMP_PRF}_{SOURCE}-to-{DEST}_{YYYY-MM-DD}
   async function downloadAll(c) {
     const isType = c.movement_type === 'INTERNAL'
@@ -381,18 +382,68 @@ export default function ConsignmentData() {
     const dest     = isType ? c.dest_branch : 'HO'
     const folderName = `${sanitize(c.tmp_prf_no)}_${sanitize(c.branch_name)}-to-${sanitize(dest)}_${dateStr}`
 
-    // Build the list of files to fetch
-    const files = []
-    files.push({ url: `/api/generate-consignee-report?id=${c.id}`, name: 'Consignee_Report.jpg' })
-    files.push({
-      url:  isType ? `/api/generate-issue-voucher-pdf?id=${c.id}` : `/api/generate-challan-pdf?id=${c.id}`,
-      name: isType ? 'Issue_Voucher.pdf' : 'Delivery_Challan.pdf',
-    })
-    if (showEwb && c.eway_bill_no) {
-      files.push({ url: `/api/eway-bill/pdf?id=${c.id}`, name: `EWB_${sanitize(c.eway_bill_no)}.pdf` })
+    setDownloadingId(c.id + ':all')
+
+    // ── Step 0: auto-generate missing EWB / E-Invoice before bundling ──
+    // Use a mutable copy so the freshly-generated numbers are picked up below.
+    let cur = { ...c }
+
+    if (showEwb && !cur.eway_bill_no) {
+      setToast({ msg: '⚡ Generating E-Way Bill…', type: 'info' })
+      try {
+        const r = await fetch('/api/eway-bill/generate', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ consignment_id: cur.id }),
+        })
+        const j = await r.json()
+        if (!r.ok || j.error) {
+          setToast({ msg: 'EWB generation failed: ' + (j.error || `HTTP ${r.status}`), type: 'error' })
+          setDownloadingId(null); return
+        }
+        cur.eway_bill_no    = j.ewb_no
+        cur.ewb_valid_until = j.valid_until
+      } catch (err) {
+        setToast({ msg: 'EWB generation failed: ' + err.message, type: 'error' })
+        setDownloadingId(null); return
+      }
     }
 
-    setDownloadingId(c.id + ':all')
+    if (showEinv && !cur.irn) {
+      setToast({ msg: '⚡ Generating E-Invoice…', type: 'info' })
+      try {
+        const r = await fetch('/api/e-invoice/generate', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ consignment_id: cur.id }),
+        })
+        const j = await r.json()
+        if (!r.ok || j.error) {
+          setToast({ msg: 'E-Invoice generation failed: ' + (j.error || `HTTP ${r.status}`), type: 'error' })
+          setDownloadingId(null); return
+        }
+        cur.irn    = j.irn
+        cur.ack_no = j.ack_no
+        cur.ack_dt = j.ack_dt
+      } catch (err) {
+        setToast({ msg: 'E-Invoice generation failed: ' + err.message, type: 'error' })
+        setDownloadingId(null); return
+      }
+    }
+
+    // Refresh the parent list in the background so the row reflects the new EWB/IRN
+    fetchAll()
+
+    // Build the list of files to fetch (using the freshly-generated numbers)
+    const files = []
+    files.push({ url: `/api/generate-consignee-report?id=${cur.id}`, name: 'Consignee_Report.jpg' })
+    files.push({
+      url:  isType ? `/api/generate-issue-voucher-pdf?id=${cur.id}` : `/api/generate-challan-pdf?id=${cur.id}`,
+      name: isType ? 'Issue_Voucher.pdf' : 'Delivery_Challan.pdf',
+    })
+    if (showEwb && cur.eway_bill_no) {
+      files.push({ url: `/api/eway-bill/pdf?id=${cur.id}`, name: `EWB_${sanitize(cur.eway_bill_no)}.pdf` })
+    }
+    // Use the refreshed cur object below
+    c = cur
 
     // Fetch a URL → blob, surfacing JSON error bodies as readable messages.
     const fetchToBlob = async (url) => {
