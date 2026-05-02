@@ -4,6 +4,7 @@
 
 import { createClient } from '@supabase/supabase-js'
 import { cancelEWayBill } from '../../../../lib/clearTaxClient'
+import { logConsignmentEvent } from '../../../../lib/consignmentLog'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
@@ -39,9 +40,16 @@ export async function POST(req) {
       gstinOverride: gstinFor,
     })
 
+    const cancelledEwb = consignment.eway_bill_no
     await supabase.from('consignments')
-      .update({ eway_bill_no: null })
+      .update({ eway_bill_no: null, ewb_valid_until: null })
       .eq('id', consignment_id)
+
+    await logConsignmentEvent(supabase, {
+      consignment_id,
+      event_type: 'ewb_cancelled',
+      details:    { ewb_no: cancelledEwb, reason_code: reason_code || 'DUPLICATE', remark: remark || 'Duplicate Entry' },
+    })
 
     return Response.json({ success: true, raw: result })
   } catch (err) {

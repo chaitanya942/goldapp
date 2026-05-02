@@ -5,6 +5,7 @@
 
 import { createClient } from '@supabase/supabase-js'
 import { generateEInvoice } from '../../../../lib/clearTaxClient'
+import { logConsignmentEvent } from '../../../../lib/consignmentLog'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
@@ -82,8 +83,14 @@ export async function POST(req) {
     }
 
     await supabase.from('consignments')
-      .update({ irn, ack_no: ackNo, ack_dt: ackDt, signed_qr_code: signedQrCode })
+      .update({ irn, ack_no: ackNo, ack_dt: ackDt, signed_qr_code: signedQrCode, einvoice_generated_at: new Date().toISOString() })
       .eq('id', consignment_id)
+
+    await logConsignmentEvent(supabase, {
+      consignment_id,
+      event_type: 'einvoice_generated',
+      details:    { irn, ack_no: ackNo, ack_dt: ackDt },
+    })
 
     return Response.json({ success: true, irn, ack_no: ackNo, ack_dt: ackDt })
   } catch (err) {

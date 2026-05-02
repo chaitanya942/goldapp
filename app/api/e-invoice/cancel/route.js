@@ -4,6 +4,7 @@
 
 import { createClient } from '@supabase/supabase-js'
 import { cancelEInvoice } from '../../../../lib/clearTaxClient'
+import { logConsignmentEvent } from '../../../../lib/consignmentLog'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
@@ -30,9 +31,16 @@ export async function POST(req) {
       gstinOverride: branch?.branch_gstin,
     })
 
+    const cancelledIrn = consignment.irn
     await supabase.from('consignments')
       .update({ irn: null, ack_no: null, ack_dt: null, signed_qr_code: null })
       .eq('id', consignment_id)
+
+    await logConsignmentEvent(supabase, {
+      consignment_id,
+      event_type: 'einvoice_cancelled',
+      details:    { irn: cancelledIrn, reason_code: reason_code || '1', remark: remark || 'Duplicate' },
+    })
 
     return Response.json({ success: true, raw: result })
   } catch (err) {

@@ -291,6 +291,23 @@ export default function ConsignmentData() {
     setDownloadingId(null)
   }
 
+  async function cancelConsignment(c) {
+    const reason = prompt(`Void consignment ${c.tmp_prf_no}?\n\nBills will return to ${c.branch_name}. Enter a reason:`)
+    if (!reason) return
+    try {
+      const res = await fetch('/api/consignments', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'cancel_consignment', id: c.id, reason, cancelled_by: nav?.userEmail }),
+      })
+      const data = await res.json()
+      if (!res.ok || data.error) { setToast({ msg: data.error || 'Cancel failed', type: 'error' }); return }
+      setToast({ msg: 'Consignment voided — bills returned to source', type: 'success' })
+      await fetchAll()
+    } catch (err) {
+      setToast({ msg: err.message || 'Cancel failed', type: 'error' })
+    }
+  }
+
   async function downloadDoc(c, kind) {
     setDownloadingId(c.id + ':' + kind)
     const url      = kind === 'report'  ? `/api/generate-consignee-report?id=${c.id}`
@@ -384,8 +401,37 @@ export default function ConsignmentData() {
     const sourceList = Object.entries(sourceCounts).sort((a, b) => b[1].count - a[1].count)
     const transferredIn = isHub ? sourceList.filter(([n]) => n !== nav.branch) : []
 
+    // Pickup-time reminder logic — show a banner if pickup is within 2 hours and bills are pending.
+    const pickupReminder = (() => {
+      const pickupTime = branchInfo?.pickup_time  // 'HH:MM' format
+      if (!pickupTime || visibleBills.length === 0) return null
+      const [hh, mm] = String(pickupTime).split(':').map(Number)
+      if (isNaN(hh)) return null
+      const now = new Date()
+      const pickup = new Date(now); pickup.setHours(hh, mm || 0, 0, 0)
+      const minsUntil = Math.round((pickup - now) / 60000)
+      if (minsUntil < -30 || minsUntil > 240) return null   // outside ±0.5h–4h window
+      if (minsUntil < 0)  return { text: `Pickup time was ${Math.abs(minsUntil)} min ago — ${visibleBills.length} bills still pending`, urgent: true }
+      if (minsUntil < 60) return { text: `Pickup in ${minsUntil} min — ${visibleBills.length} bills pending`, urgent: true }
+      return { text: `Pickup at ${pickupTime} (in ${Math.floor(minsUntil/60)}h ${minsUntil%60}m) — ${visibleBills.length} bills pending`, urgent: false }
+    })()
+
     return (
       <>
+        {/* Pickup reminder banner */}
+        {pickupReminder && (
+          <div style={{
+            background: pickupReminder.urgent ? `${t.red}15` : `${t.gold}10`,
+            border: `1px solid ${pickupReminder.urgent ? t.red + '40' : t.gold + '40'}`,
+            borderRadius: '8px', padding: '10px 16px', fontSize: '12px',
+            color: pickupReminder.urgent ? t.red : t.gold, fontWeight: 600,
+            display: 'flex', alignItems: 'center', gap: '8px',
+          }}>
+            <span style={{ fontSize: '14px' }}>{pickupReminder.urgent ? '⏰' : '🕐'}</span>
+            {pickupReminder.text}
+          </div>
+        )}
+
         {/* Branch header */}
         <div style={{ ...card, padding: '16px 20px', display: 'flex', alignItems: 'center', gap: '14px' }}>
           <button onClick={() => { setNav(null); setSelected(new Set()) }} style={btnOut}>← Back</button>
@@ -438,6 +484,26 @@ export default function ConsignmentData() {
             <option value="weight_desc">Heaviest First</option>
             <option value="amount_desc">Highest Amount</option>
           </select>
+          {/* Quick-select shortcuts */}
+          {[
+            { label: 'Last 1 day',  days: 1  },
+            { label: 'Last 3 days', days: 3  },
+            { label: 'Last 7 days', days: 7  },
+            { label: 'All',         days: null },
+          ].map(opt => (
+            <button key={opt.label}
+              onClick={() => {
+                const cutoff = opt.days != null ? Date.now() - opt.days * 86400000 : null
+                const n = new Set(selected)
+                visibleBills.forEach(p => {
+                  if (cutoff == null || new Date(p.purchase_date).getTime() >= cutoff) n.add(p.id)
+                })
+                setSelected(n)
+              }}
+              style={{ background: t.card2, border: `1px solid ${t.border2}`, borderRadius: '8px', padding: '8px 10px', fontSize: '11px', color: t.text2, outline: 'none', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+              {opt.label}
+            </button>
+          ))}
         </div>
 
         {/* Selection bar */}
@@ -608,9 +674,23 @@ export default function ConsignmentData() {
                     <td style={{ padding: '11px 14px' }}>
                       {!showEwb ? (
                         <span title="Interstate Hub→HO uses E-Invoice instead — no separate EWB needed" style={{ fontSize: '10px', color: t.text4 }}>n/a</span>
-                      ) : c.eway_bill_no ? (
+                      ) : c.eway_bill_no ? (() => {
+                        // EWB expiry colour coding: red if past, orange if <12h, gold if <24h, green otherwise
+                        const validUntil = c.ewb_valid_until ? new Date(c.ewb_valid_until) : null
+                        const hoursLeft  = validUntil ? (validUntil - Date.now()) / 3600000 : null
+                        const expiryColor = hoursLeft == null ? t.green
+                          : hoursLeft < 0  ? t.red
+                          : hoursLeft < 12 ? t.orange
+                          : hoursLeft < 24 ? t.gold
+                          : t.green
+                        const expiryLabel = hoursLeft == null ? null
+                          : hoursLeft < 0  ? `expired ${Math.round(-hoursLeft)}h ago`
+                          : hoursLeft < 24 ? `expires in ${Math.round(hoursLeft)}h`
+                          : `${Math.round(hoursLeft / 24)}d valid`
+                        return (
                         <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', alignItems: 'center' }}>
-                          <span style={{ fontSize: '10px', color: t.green, background: `${t.green}15`, borderRadius: '4px', padding: '2px 7px', fontWeight: 600, fontFamily: 'monospace' }}>{c.eway_bill_no}</span>
+                          <span style={{ fontSize: '10px', color: expiryColor, background: `${expiryColor}15`, borderRadius: '4px', padding: '2px 7px', fontWeight: 600, fontFamily: 'monospace' }}>{c.eway_bill_no}</span>
+                          {expiryLabel && <span title={validUntil?.toLocaleString()} style={{ fontSize: '9px', color: expiryColor, fontWeight: 600 }}>{expiryLabel}</span>}
                           <button onClick={() => downloadEwbPdf(c)} disabled={!!downloadingId}
                             style={{ background: t.blue, color: '#fff', border: 'none', borderRadius: '5px', padding: '3px 8px', fontSize: '10px', fontWeight: 600, cursor: 'pointer', opacity: downloadingId === c.id + ':ewb' ? 0.6 : 1 }}>
                             {downloadingId === c.id + ':ewb' ? '⏳' : '📄 PDF'}
@@ -621,6 +701,8 @@ export default function ConsignmentData() {
                             {ewbActionId === c.id + ':cancel' ? '…' : '✕'}
                           </button>
                         </div>
+                        )
+                      })()
                       ) : (
                         <button onClick={() => generateEwb(c)} disabled={!!ewbActionId}
                           style={{ background: 'transparent', border: `1px solid ${t.green}50`, borderRadius: '5px', padding: '4px 10px', fontSize: '10px', color: t.green, fontWeight: 600, cursor: 'pointer', opacity: ewbActionId === c.id + ':gen' ? 0.6 : 1 }}>
@@ -650,11 +732,18 @@ export default function ConsignmentData() {
                       )}
                     </td>
                     <td style={{ padding: '11px 14px' }}>
-                      <button onClick={() => downloadAll(c)} disabled={downloadingId === c.id + ':all'}
-                        title="Download Consignee Report + Document + EWB (if available) in one click"
-                        style={{ background: t.gold, color: '#1a0a00', border: 'none', borderRadius: '6px', padding: '5px 11px', fontSize: '10px', fontWeight: 700, cursor: downloadingId === c.id + ':all' ? 'not-allowed' : 'pointer', opacity: downloadingId === c.id + ':all' ? 0.6 : 1, whiteSpace: 'nowrap' }}>
-                        {downloadingId === c.id + ':all' ? '⏳…' : '📦 All'}
-                      </button>
+                      <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+                        <button onClick={() => downloadAll(c)} disabled={downloadingId === c.id + ':all'}
+                          title="Download Consignee Report + Document + EWB (if available) in one click"
+                          style={{ background: t.gold, color: '#1a0a00', border: 'none', borderRadius: '6px', padding: '5px 11px', fontSize: '10px', fontWeight: 700, cursor: downloadingId === c.id + ':all' ? 'not-allowed' : 'pointer', opacity: downloadingId === c.id + ':all' ? 0.6 : 1, whiteSpace: 'nowrap' }}>
+                          {downloadingId === c.id + ':all' ? '⏳…' : '📦 All'}
+                        </button>
+                        <button onClick={() => cancelConsignment(c)}
+                          title="Cancel this consignment — bills return to source"
+                          style={{ background: 'transparent', border: `1px solid ${t.red}40`, borderRadius: '5px', padding: '5px 8px', fontSize: '10px', color: t.red, cursor: 'pointer' }}>
+                          ✕ Void
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 )

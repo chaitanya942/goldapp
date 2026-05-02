@@ -9,6 +9,7 @@ import {
   generateInternalNo,
   generateIssueVoucherNo,
 } from '../../../lib/consignmentUtils'
+import { logConsignmentEvent } from '../../../lib/consignmentLog'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
@@ -209,6 +210,63 @@ export async function GET(req) {
     }
 
     return Response.json({ data: [...unknownSet].sort() })
+  }
+
+  // ── Bill journey: every consignment a bill has been part of ────────────
+  if (action === 'bill_journey') {
+    const purchaseId = searchParams.get('purchase_id')
+    if (!purchaseId) return Response.json({ error: 'purchase_id required' }, { status: 400 })
+    const { data: links } = await supabase
+      .from('consignment_items')
+      .select('purchase_id, received_at, short_reason, consignment:consignment_id(id, tmp_prf_no, challan_no, movement_type, branch_name, dest_branch, status, created_at, received_at, cancelled_at, eway_bill_no, irn)')
+      .eq('purchase_id', purchaseId)
+    const journey = (links || [])
+      .map(l => ({
+        consignment_id:  l.consignment?.id,
+        tmp_prf_no:      l.consignment?.tmp_prf_no,
+        challan_no:      l.consignment?.challan_no,
+        movement_type:   l.consignment?.movement_type,
+        source:          l.consignment?.branch_name,
+        dest:            l.consignment?.movement_type === 'INTERNAL' ? l.consignment?.dest_branch : 'HO',
+        status:          l.consignment?.status,
+        eway_bill_no:    l.consignment?.eway_bill_no,
+        irn:             l.consignment?.irn,
+        created_at:      l.consignment?.created_at,
+        received_at:     l.consignment?.received_at,
+        cancelled_at:    l.consignment?.cancelled_at,
+        bill_received:   l.received_at,
+        short_reason:    l.short_reason,
+      }))
+      .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
+    return Response.json({ data: journey })
+  }
+
+  // ── Activity log for a consignment ──────────────────────────────────────
+  if (action === 'activity_log') {
+    const id = searchParams.get('id')
+    if (!id) return Response.json({ error: 'consignment id required' }, { status: 400 })
+    const { data, error } = await supabase
+      .from('consignment_activity_log')
+      .select('*')
+      .eq('consignment_id', id)
+      .order('created_at', { ascending: false })
+    if (error) return Response.json({ error: error.message }, { status: 500 })
+    return Response.json({ data })
+  }
+
+  // ── Audit log: ClearTax response history for a consignment ──────────────
+  // Returns the stored cleartax_response JSON + EWB/E-Invoice numbers + timestamps.
+  // Used for compliance audits and dispute resolution.
+  if (action === 'cleartax_audit') {
+    const id = searchParams.get('id')
+    if (!id) return Response.json({ error: 'consignment id required' }, { status: 400 })
+    const { data, error } = await supabase
+      .from('consignments')
+      .select('id, tmp_prf_no, challan_no, branch_name, dest_branch, movement_type, eway_bill_no, ewb_generated_at, einvoice_irn, einvoice_generated_at, cleartax_response, created_at, received_at, status')
+      .eq('id', id)
+      .single()
+    if (error) return Response.json({ error: error.message }, { status: 500 })
+    return Response.json({ data })
   }
 
   // ── Branch summary (state → branch → bills) ──────────────────────────────
@@ -458,6 +516,17 @@ export async function POST(req) {
     //     - Bills' stock_status flips to 'in_consignment'
     //     - Bills' current_branch unchanged until HO receive
     const nowIso = new Date().toISOString()
+
+    // Snapshot GST rates from company_settings — frozen against retroactive changes.
+    const { data: cs } = await supabase.from('company_settings').select('*').single()
+    const gstSnapshot = {
+      igst: cs?.igst_rate ?? 3,
+      cgst: cs?.cgst_rate ?? 1.5,
+      sgst: cs?.sgst_rate ?? 1.5,
+      hsn:  cs?.gold_hsn   ?? '7108',
+      captured_at: nowIso,
+    }
+
     const { data: consignment, error: ce } = await supabase
       .from('consignments')
       .insert({
@@ -478,12 +547,20 @@ export async function POST(req) {
         total_bills:   purchase_ids.length,
         total_net_wt:  totalNetWt,
         total_amount:  totalAmount,
+        gst_rate_snapshot: gstSnapshot,
         created_by,
       })
       .select()
       .single()
 
     if (ce) return Response.json({ error: ce.message }, { status: 500 })
+
+    await logConsignmentEvent(supabase, {
+      consignment_id: consignment.id,
+      event_type:     isInternal ? 'created_and_received' : 'created',
+      actor_email:    created_by,
+      details:        { movement_type: consignment.movement_type, source: branch_name, dest: isInternal ? dest_branch : 'HO', bills: purchase_ids.length, weight: totalNetWt },
+    })
 
     await supabase.from('consignment_items').insert(
       purchase_ids.map(pid => ({ consignment_id: consignment.id, purchase_id: pid, added_by: created_by }))
@@ -540,9 +617,10 @@ export async function POST(req) {
       .eq('consignment_id', id)
     const purchaseIds = (items || []).map(i => i.purchase_id)
 
+    const nowIsoR = new Date().toISOString()
     const { data, error } = await supabase
       .from('consignments')
-      .update({ status: 'received', received_at: new Date().toISOString(), received_by })
+      .update({ status: 'received', received_at: nowIsoR, received_by })
       .eq('id', id).select().single()
     if (error) return Response.json({ error: error.message }, { status: 500 })
 
@@ -558,9 +636,101 @@ export async function POST(req) {
           .update({ stock_status: 'at_ho' })
           .in('id', purchaseIds)
       }
+      // Mark each item as received by this user
+      await supabase.from('consignment_items')
+        .update({ received_at: nowIsoR, received_by_email: received_by })
+        .eq('consignment_id', id)
     }
 
+    await logConsignmentEvent(supabase, {
+      consignment_id: id,
+      event_type:     'received',
+      actor_email:    received_by,
+      details:        { bills: purchaseIds.length, dest: current.dest_branch || 'HO' },
+    })
+
     return Response.json({ data })
+  }
+
+  // ── Cancel consignment (reverse flow) ────────────────────────────────────
+  // Voids a consignment that was created by mistake. Bills return to source.
+  // Only allowed if not yet received at HO (or partially received).
+  if (action === 'cancel_consignment') {
+    const { id, reason, cancelled_by } = body
+    const { data: c } = await supabase.from('consignments').select('*').eq('id', id).single()
+    if (!c) return Response.json({ error: 'Consignment not found' }, { status: 404 })
+    if (c.status === 'cancelled') return Response.json({ error: 'Already cancelled' }, { status: 400 })
+    if (c.status === 'received' && c.movement_type !== 'INTERNAL') {
+      return Response.json({ error: 'Cannot cancel — already received at HO. Initiate a return instead.' }, { status: 400 })
+    }
+
+    const { data: links } = await supabase.from('consignment_items').select('purchase_id').eq('consignment_id', id)
+    const pids = (links || []).map(l => l.purchase_id)
+
+    // Bills go back to their original branch
+    if (pids.length) {
+      await supabase.from('purchases')
+        .update({ stock_status: 'at_branch', current_branch: c.branch_name, dispatched_at: null })
+        .in('id', pids)
+    }
+
+    const cancelIso = new Date().toISOString()
+    await supabase.from('consignments')
+      .update({ status: 'cancelled', cancelled_at: cancelIso, cancel_reason: reason || null })
+      .eq('id', id)
+
+    await logConsignmentEvent(supabase, {
+      consignment_id: id,
+      event_type:     'cancelled',
+      actor_email:    cancelled_by,
+      details:        { reason: reason || null, bills_returned: pids.length, returned_to: c.branch_name },
+    })
+
+    return Response.json({ success: true })
+  }
+
+  // ── Partial receive — mark specific bills received, others as missing/short ──
+  if (action === 'partial_receive') {
+    const { id, received_purchase_ids, short_purchase_ids, short_reason, received_by } = body
+    if (!id) return Response.json({ error: 'consignment id required' }, { status: 400 })
+    const { data: c } = await supabase.from('consignments').select('movement_type, dest_branch').eq('id', id).single()
+    if (!c) return Response.json({ error: 'Consignment not found' }, { status: 404 })
+
+    const nowIso = new Date().toISOString()
+    if ((received_purchase_ids || []).length) {
+      await supabase.from('consignment_items')
+        .update({ received_at: nowIso, received_by_email: received_by })
+        .eq('consignment_id', id).in('purchase_id', received_purchase_ids)
+      const newStatus = c.movement_type === 'INTERNAL' ? 'at_branch' : 'at_ho'
+      const updates = { stock_status: newStatus }
+      if (c.movement_type === 'INTERNAL' && c.dest_branch) updates.current_branch = c.dest_branch
+      await supabase.from('purchases').update(updates).in('id', received_purchase_ids)
+    }
+    if ((short_purchase_ids || []).length) {
+      await supabase.from('consignment_items')
+        .update({ short_reason: short_reason || 'short' })
+        .eq('consignment_id', id).in('purchase_id', short_purchase_ids)
+    }
+
+    // Determine if all items now received → set consignment to received, else partial
+    const { count: pendingCount } = await supabase
+      .from('consignment_items')
+      .select('purchase_id', { count: 'exact', head: true })
+      .eq('consignment_id', id)
+      .is('received_at', null)
+    const finalStatus = (pendingCount || 0) === 0 ? 'received' : 'partial_received'
+    const upd = { status: finalStatus }
+    if (finalStatus === 'received') upd.received_at = nowIso
+    await supabase.from('consignments').update(upd).eq('id', id)
+
+    await logConsignmentEvent(supabase, {
+      consignment_id: id,
+      event_type:     finalStatus === 'received' ? 'received' : 'partial_received',
+      actor_email:    received_by,
+      details:        { received: (received_purchase_ids || []).length, short: (short_purchase_ids || []).length, short_reason },
+    })
+
+    return Response.json({ success: true, status: finalStatus })
   }
 
   // ── Remove item from consignment ─────────────────────────────────────────

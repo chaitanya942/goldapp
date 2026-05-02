@@ -151,18 +151,29 @@ export default function ConsignmentAnalytics() {
   }
   const trend = Object.values(byDay).sort((a, b) => a.day.localeCompare(b.day))
 
-  // By source branch
+  // By source branch — also tracks transit time per branch to spot slow branches
   const branchMeta = Object.fromEntries(branches.map(b => [b.name, b]))
   const byBranch = {}
   for (const c of consignments) {
     const k = c.branch_name
-    if (!byBranch[k]) byBranch[k] = { branch: k, region: branchMeta[k]?.region || 'Unknown', count: 0, bills: 0, wt: 0, val: 0 }
+    if (!byBranch[k]) byBranch[k] = { branch: k, region: branchMeta[k]?.region || 'Unknown', count: 0, bills: 0, wt: 0, val: 0, transitSum: 0, transitCount: 0 }
     byBranch[k].count++
     byBranch[k].bills += c.total_bills || 0
     byBranch[k].wt    += parseFloat(c.total_net_wt || 0)
     byBranch[k].val   += parseFloat(c.total_amount || 0)
+    if (c.received_at) {
+      byBranch[k].transitSum   += (new Date(c.received_at) - new Date(c.created_at)) / 86400000
+      byBranch[k].transitCount += 1
+    }
+  }
+  for (const k of Object.keys(byBranch)) {
+    byBranch[k].avgTransit = byBranch[k].transitCount > 0 ? byBranch[k].transitSum / byBranch[k].transitCount : null
   }
   const topBranches = Object.values(byBranch).sort((a, b) => b.wt - a.wt).slice(0, 10)
+  const slowestBranches = Object.values(byBranch)
+    .filter(b => b.avgTransit != null && b.transitCount >= 2)
+    .sort((a, b) => b.avgTransit - a.avgTransit)
+    .slice(0, 5)
 
   // By region
   const byRegion = {}
@@ -362,10 +373,11 @@ export default function ConsignmentAnalytics() {
                 <div style={{ fontSize: '12px', color: t.text4, textAlign: 'center', padding: '20px' }}>No movements in this period</div>
               ) : topBranches.map((b, i) => {
                 const max = topBranches[0]?.wt || 1
+                const transitSub = b.avgTransit != null ? ` · ${b.avgTransit.toFixed(1)}d transit` : ''
                 return <Bar key={b.branch} value={b.wt} max={max}
                   color={REGION_COLORS[b.region] || t.gold}
                   label={`${i + 1}. ${b.branch}`}
-                  sub={`${fmtWt(b.wt)} · ${b.count}c · ${b.bills}b`} />
+                  sub={`${fmtWt(b.wt)} · ${b.count}c · ${b.bills}b${transitSub}`} />
               })}
             </div>
 
@@ -418,6 +430,22 @@ export default function ConsignmentAnalytics() {
                   })}
                 </tbody>
               </table>
+            </div>
+          )}
+
+          {/* Slowest branches by avg transit — spots branches with consistently slow delivery */}
+          {slowestBranches.length > 0 && (
+            <div style={{ ...card, padding: '18px 22px' }}>
+              <div style={{ fontSize: '11px', color: t.text3, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 600, marginBottom: '4px' }}>Branches by Avg Transit Time</div>
+              <div style={{ fontSize: '10px', color: t.text4, marginBottom: '14px' }}>Days from consignment creation to receive — high values indicate slow logistics or delayed receive marking</div>
+              {slowestBranches.map((b, i) => {
+                const max = slowestBranches[0]?.avgTransit || 1
+                const color = b.avgTransit > 3 ? t.red : b.avgTransit > 1.5 ? t.orange : t.green
+                return <Bar key={b.branch} value={b.avgTransit} max={max}
+                  color={color}
+                  label={`${i + 1}. ${b.branch}`}
+                  sub={`${b.avgTransit.toFixed(1)}d avg · ${b.transitCount} consignments`} />
+              })}
             </div>
           )}
         </>
