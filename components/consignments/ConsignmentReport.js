@@ -6,6 +6,7 @@ import GoldSpinner from '../ui/GoldSpinner'
 import Badge from '../ui/Badge'
 import Toast from '../ui/Toast'
 import { authedFetch } from '../../lib/authedFetch'
+import { CONSIGNMENT_THEMES as THEMES, useMobile } from '../../lib/consignmentTheme'
 
 async function triggerDownload(url, filename, onError) {
   const res  = await authedFetch(url)
@@ -22,11 +23,6 @@ async function triggerDownload(url, filename, onError) {
   URL.revokeObjectURL(a.href)
 }
 
-const THEMES = {
-  dark:  { bg: '#0a0a0a', card: '#111111', card2: '#161616', card3: '#1a1a1a', text1: '#f0e6c8', text2: '#c8b89a', text3: '#9a8a6a', text4: '#6a5a3a', gold: '#c9a84c', border: '#1e1e1e', border2: '#252525', green: '#3aaa6a', red: '#e05555', blue: '#3a8fbf', orange: '#c9981f', purple: '#8c5ac8' },
-  light: { bg: '#f5f0e8', card: '#faf7f2', card2: '#e0d9cc', card3: '#ede5d8', text1: '#1a1208', text2: '#3a2a10', text3: '#7a6a4a', text4: '#9a8a6a', gold: '#9a7228', border: '#e0dace', border2: '#c5bca8', green: '#2a8a5a', red: '#c03030', blue: '#2a6a9a', orange: '#a07010', purple: '#6a3a9a' },
-}
-
 const fmt     = (n) => n != null ? Number(n).toLocaleString('en-IN') : '—'
 const fmtWt   = (n) => n != null ? `${Number(n).toFixed(3)}g` : '—'
 const fmtDate = (d) => d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'
@@ -36,16 +32,6 @@ const fmtTS   = (d) => d ? new Date(d).toLocaleString('en-IN', { day: '2-digit',
 const STATUS_META = {
   dispatched: { color: '#3a8fbf', label: 'In Transit' },
   received:   { color: '#3aaa6a', label: 'Received at HO' },
-}
-
-function useMobile() {
-  const [m, setM] = useState(false)
-  useEffect(() => {
-    const check = () => setM(window.innerWidth < 768)
-    check(); window.addEventListener('resize', check)
-    return () => window.removeEventListener('resize', check)
-  }, [])
-  return m
 }
 
 export default function ConsignmentReport() {

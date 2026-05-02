@@ -203,7 +203,11 @@ export default function Sidebar({ sidebarOpen, setSidebarOpen, isMobile }) {
                 <div style={{ width: '5px', height: '5px', borderRadius: '50%', flexShrink: 0, background: isActive(child.id) ? (child.dot || t.gold) : t.text4, boxShadow: isActive(child.id) ? `0 0 6px ${child.dot || t.gold}` : 'none', transition: 'all .18s' }} />
                 <span style={{ fontSize: '.72rem', color: isActive(child.id) ? (child.dot || t.gold) : t.text3, fontWeight: isActive(child.id) ? 500 : 400, letterSpacing: '.02em', transition: 'color .15s' }}>{child.label}</span>
                 {child.badgeKey && badges[child.badgeKey] > 0 && (
-                  <span style={{ marginLeft: 'auto', fontSize: '.62rem', fontWeight: 700, background: '#e05555', color: '#fff', borderRadius: '10px', padding: '1px 6px', minWidth: '16px', textAlign: 'center' }}>
+                  // key on the count value so the span re-mounts when count changes,
+                  // triggering the pop animation. Subtle but draws the eye when a
+                  // new approval arrives.
+                  <span key={badges[child.badgeKey]}
+                    style={{ marginLeft: 'auto', fontSize: '.62rem', fontWeight: 700, background: '#e05555', color: '#fff', borderRadius: '10px', padding: '1px 6px', minWidth: '16px', textAlign: 'center', boxShadow: '0 0 8px rgba(224,85,85,0.45)', animation: 'sidebarBadgePop .35s ease' }}>
                     {badges[child.badgeKey]}
                   </span>
                 )}
@@ -278,6 +282,13 @@ export default function Sidebar({ sidebarOpen, setSidebarOpen, isMobile }) {
         </div>
       )}
     </div>
+    <style>{`
+      @keyframes sidebarBadgePop {
+        0%   { transform: scale(.55); opacity: 0 }
+        60%  { transform: scale(1.18); opacity: 1 }
+        100% { transform: scale(1); opacity: 1 }
+      }
+    `}</style>
     </>
   )
 }

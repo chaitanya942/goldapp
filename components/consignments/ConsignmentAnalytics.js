@@ -4,21 +4,18 @@ import { useState, useEffect } from 'react'
 import { supabase } from '../../lib/supabase'
 import { useApp } from '../../lib/context'
 import GoldSpinner from '../ui/GoldSpinner'
+import { CONSIGNMENT_THEMES as THEMES, REGION_COLORS, useMobile } from '../../lib/consignmentTheme'
 
-const THEMES = {
-  dark:  { bg: '#0a0a0a', card: '#111111', card2: '#161616', text1: '#f0e6c8', text2: '#c8b89a', text3: '#9a8a6a', text4: '#6a5a3a', gold: '#c9a84c', border: '#1e1e1e', border2: '#252525', green: '#3aaa6a', red: '#e05555', blue: '#3a8fbf', orange: '#c9981f', purple: '#8c5ac8' },
-  light: { bg: '#f5f0e8', card: '#faf7f2', card2: '#e0d9cc', text1: '#1a1208', text2: '#3a2a10', text3: '#7a6a4a', text4: '#9a8a6a', gold: '#9a7228', border: '#e0dace', border2: '#c5bca8', green: '#2a8a5a', red: '#c03030', blue: '#2a6a9a', orange: '#a07010', purple: '#6a3a9a' },
+// Pull date strings in IST regardless of host timezone. Uses Intl.DateTimeFormat
+// (timezone-correct) instead of the previous Date.now()+5.5h hack which lied for
+// users in non-IST timezones (offsets stack on hosts already in IST).
+function istStr(d = new Date()) {
+  const parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(d)
+  const get = (t) => parts.find(p => p.type === t)?.value
+  return `${get('year')}-${get('month')}-${get('day')}`
 }
-
-const REGION_COLORS = {
-  'Rest of Karnataka': '#c9a84c',
-  'Andhra Pradesh':    '#3a8fbf',
-  'Telangana':         '#8c5ac8',
-  'Kerala':            '#3aaa6a',
-}
-
-const istNow = () => new Date(Date.now() + 5.5 * 60 * 60 * 1000)
-const istStr = (d = istNow()) => d.toISOString().split('T')[0]
+// Used only for Date arithmetic. Date math doesn't care about display tz.
+const istNow = () => new Date()
 
 const fmt   = (n) => n != null ? Number(n).toLocaleString('en-IN') : '—'
 const fmtWt = (n) => n != null ? `${Number(n).toFixed(3)}g` : '—'
@@ -40,16 +37,6 @@ function getRange(key) {
   if (key === 'q')         { const q = Math.floor(m / 3); return { from: `${y}-${String(q * 3 + 1).padStart(2, '0')}-01`, to: today, label: 'This Quarter' } }
   if (key === 'ytd')       return { from: `${y}-01-01`, to: today, label: 'Year to Date' }
   return { from: today, to: today, label: 'Today' }
-}
-
-function useMobile() {
-  const [m, setM] = useState(false)
-  useEffect(() => {
-    const check = () => setM(window.innerWidth < 768)
-    check(); window.addEventListener('resize', check)
-    return () => window.removeEventListener('resize', check)
-  }, [])
-  return m
 }
 
 export default function ConsignmentAnalytics() {

@@ -9,6 +9,7 @@ import Badge from '../ui/Badge'
 import Toast from '../ui/Toast'
 import { openConfirm, openPrompt } from '../ui/ConfirmDialog'
 import { authedFetch } from '../../lib/authedFetch'
+import { CONSIGNMENT_THEMES as THEMES, REGION_COLORS, useMobile } from '../../lib/consignmentTheme'
 
 async function triggerDownload(url, filename, onError) {
   const res  = await authedFetch(url)
@@ -23,18 +24,6 @@ async function triggerDownload(url, filename, onError) {
   a.download = filename
   a.click()
   URL.revokeObjectURL(a.href)
-}
-
-const THEMES = {
-  dark:  { bg: '#0a0a0a', card: '#111111', card2: '#161616', card3: '#1a1a1a', text1: '#f0e6c8', text2: '#c8b89a', text3: '#9a8a6a', text4: '#6a5a3a', gold: '#c9a84c', border: '#1e1e1e', border2: '#252525', green: '#3aaa6a', red: '#e05555', blue: '#3a8fbf', orange: '#c9981f', purple: '#8c5ac8' },
-  light: { bg: '#f5f0e8', card: '#faf7f2', card2: '#e0d9cc', card3: '#ede5d8', text1: '#1a1208', text2: '#3a2a10', text3: '#7a6a4a', text4: '#9a8a6a', gold: '#9a7228', border: '#e0dace', border2: '#c5bca8', green: '#2a8a5a', red: '#c03030', blue: '#2a6a9a', orange: '#a07010', purple: '#6a3a9a' },
-}
-
-const REGION_COLORS = {
-  'Rest of Karnataka': '#c9a84c',
-  'Andhra Pradesh':    '#3a8fbf',
-  'Telangana':         '#8c5ac8',
-  'Kerala':            '#3aaa6a',
 }
 
 const fmt     = (n) => n != null ? Number(n).toLocaleString('en-IN') : '—'
@@ -85,16 +74,6 @@ function EwbCell({ c, t, downloadingId, ewbActionId, downloadEwbPdf, cancelEwb }
       `}</style>
     </div>
   )
-}
-
-function useMobile() {
-  const [m, setM] = useState(false)
-  useEffect(() => {
-    const check = () => setM(window.innerWidth < 768)
-    check(); window.addEventListener('resize', check)
-    return () => window.removeEventListener('resize', check)
-  }, [])
-  return m
 }
 
 export default function ConsignmentData() {
@@ -304,6 +283,10 @@ export default function ConsignmentData() {
       const result = await res.json()
       if (result.error) { setToast({ msg: result.error, type: 'error' }); return }
       setLastConsignment(result.data)
+      // Auto-clear the highlight after 30s so it doesn't linger forever.
+      // The user has already seen the "new" pulse; keeping it permanently
+      // pollutes the list on subsequent visits to this page.
+      setTimeout(() => setLastConsignment(prev => (prev?.id === result.data?.id ? null : prev)), 30000)
       setSelected(new Set())
       setShowModal(false)
       setDestBranch(''); setEwayBillNo('')
