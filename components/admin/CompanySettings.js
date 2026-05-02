@@ -99,9 +99,9 @@ export default function CompanySettings() {
   if (loading) return <div style={{ padding: '32px', textAlign: 'center', color: t.text3 }}>Loading...</div>
 
   return (
-    <div style={{ padding: '32px', maxWidth: '900px' }}>
+    <div style={{ padding: '24px 32px' }}>
 
-      <div style={{ marginBottom: '28px' }}>
+      <div style={{ marginBottom: '20px' }}>
         <div style={{ fontSize: '1.4rem', fontWeight: 300, color: t.text1, letterSpacing: '.03em' }}>Company Settings</div>
         <div style={{ fontSize: '.72rem', color: t.text3, marginTop: '4px' }}>All delivery challan data is pulled from here — no hardcoding</div>
       </div>
@@ -117,7 +117,8 @@ export default function CompanySettings() {
         </div>
       )}
 
-      <div style={{ display: 'grid', gap: '20px' }}>
+      {/* Two-column responsive grid — fills wide screens, stacks on mobile */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(420px, 1fr))', gap: '16px', alignItems: 'start' }}>
 
         {/* ── Company Core ─────────────────────────────────────────────────── */}
         <div style={s.section}>
@@ -131,14 +132,30 @@ export default function CompanySettings() {
           </div>
         </div>
 
-        {/* ── Head Office / Consignee ──────────────────────────────────────── */}
+        {/* ── Transport & Product ──────────────────────────────────────────── */}
         <div style={s.section}>
+          <div>
+            <div style={s.title}>Transporter & Product</div>
+            <div style={s.sub}>Carrier and HSN classification used in EWB</div>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+            <Field label="Transporter Name"    fieldKey="transporter_name"    placeholder="BVC LOGISTICS PVT. LTD." />
+            <Field label="Transportation Mode" fieldKey="transportation_mode"  placeholder="BY AIR & ROAD" />
+            <Field label="HSN Code" fieldKey="hsn_code" placeholder="711319" />
+            <Field label="Logo URL (optional)" fieldKey="logo_url" placeholder="https://..." />
+          </div>
+        </div>
+
+        {/* ── Head Office / Consignee — full row ──────────────────────────── */}
+        <div style={{ ...s.section, gridColumn: '1 / -1' }}>
           <div>
             <div style={s.title}>Head Office — Consignee (Right side of challan)</div>
             <div style={s.sub}>This is the receiving end — always White Gold HO, Bengaluru</div>
           </div>
-          <Field label="HO GSTIN (Karnataka — consignee side)" fieldKey="gstin" placeholder="29AAPCA3170M1Z5" />
-          <Field label="Building / Landmark Name" fieldKey="head_office_building" placeholder="HOUSE OF WHITE GOLD" />
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+            <Field label="HO GSTIN (Karnataka — consignee side)" fieldKey="gstin" placeholder="29AAPCA3170M1Z5" />
+            <Field label="Building / Landmark Name" fieldKey="head_office_building" placeholder="HOUSE OF WHITE GOLD" />
+          </div>
           <Field label="Street Address" fieldKey="head_office_address" placeholder="NO. 1, COMMERCIAL STREET" />
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '16px' }}>
             <Field label="City"     fieldKey="head_office_city"  placeholder="BENGALURU" />
@@ -147,13 +164,13 @@ export default function CompanySettings() {
           </div>
         </div>
 
-        {/* ── State-wise Branch GSTINs ────────────────────────────────────── */}
-        <div style={s.section}>
+        {/* ── State-wise Branch GSTINs — full row ─────────────────────────── */}
+        <div style={{ ...s.section, gridColumn: '1 / -1' }}>
           <div>
             <div style={s.title}>State-wise Branch GSTINs — Bill From (Left side of challan)</div>
             <div style={s.sub}>Used when a branch does not have a GSTIN stored individually. These are the company's registrations in each state.</div>
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '16px' }}>
             <div>
               <label style={s.label}>Karnataka (KA — 29)</label>
               <input type="text" style={s.input} value={form.gstin_ka ?? ''} onChange={e => sf('gstin_ka', e.target.value)} placeholder="29AAPCA3170M1Z5" />
@@ -180,21 +197,6 @@ export default function CompanySettings() {
           </div>
         </div>
 
-        {/* ── Transport & Product ──────────────────────────────────────────── */}
-        <div style={s.section}>
-          <div>
-            <div style={s.title}>Transporter & Product</div>
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
-            <Field label="Transporter Name"    fieldKey="transporter_name"    placeholder="BVC LOGISTICS PVT. LTD." />
-            <Field label="Transportation Mode" fieldKey="transportation_mode"  placeholder="BY AIR & ROAD" />
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: '16px' }}>
-            <Field label="HSN Code" fieldKey="hsn_code" placeholder="711319" />
-            <Field label="Logo URL (optional — leave blank to use /logo.png)" fieldKey="logo_url" placeholder="https://..." />
-          </div>
-        </div>
-
         {/* ── Tax Rates ────────────────────────────────────────────────────── */}
         <div style={s.section}>
           <div>
@@ -203,7 +205,7 @@ export default function CompanySettings() {
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
             <div>
-              <label style={s.label}>Value Uplift % (applied to invoice value before IGST)</label>
+              <label style={s.label}>Value Uplift %</label>
               <input type="number" step="0.01" style={s.input} value={form.value_uplift_pct ?? ''} onChange={e => sf('value_uplift_pct', e.target.value)} placeholder="7.5" />
             </div>
             <div>
@@ -212,7 +214,7 @@ export default function CompanySettings() {
             </div>
           </div>
           <div style={{ fontSize: '.68rem', color: t.text3, padding: '10px 12px', background: `${t.gold}10`, borderRadius: '6px', border: `1px solid ${t.gold}30` }}>
-            Formula: Value of Goods = Invoice Amount × (1 + Uplift%) &nbsp;|&nbsp; IGST = Value of Goods × IGST% &nbsp;|&nbsp; Grand Total = Value of Goods + IGST
+            Value = Invoice × (1 + Uplift%) | IGST = Value × IGST% | Total = Value + IGST
           </div>
         </div>
 
