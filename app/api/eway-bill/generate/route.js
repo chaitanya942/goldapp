@@ -72,10 +72,9 @@ function preflightValidate({ consignment, branch, destBranch, items, companySett
     // (some businesses generate anyway for documentation)
   }
 
-  // Vehicle info — ClearTax allows blank but NIC sometimes rejects depending on transport mode
-  if (!consignment.vehicle_no && !consignment.transporter_id) {
-    errors.push('Vehicle number or transporter ID is required for EWB')
-  }
+  // Vehicle info is NOT required at generation time — for gold, the vehicle
+  // is often decided at pickup. NIC/ClearTax accepts EWB without it (Part-A only).
+  // The vehicle number can be updated via the EWB update-vehicle API later.
 
   return errors
 }
