@@ -729,9 +729,18 @@ export default function ConsignmentData() {
             <div style={{ fontSize: '12px', color: t.text3, marginBottom: '22px' }}>Review and confirm before creating.</div>
 
             {(() => {
-              // Any outside-Bangalore branch can act as a hub for this specific consignment.
-              // No pre-marking required — user picks freely each time.
-              const candidateHubs = branches.filter(b => b.name !== nav?.branch)
+              // Hub must be in the same state as the source branch — interstate
+              // Branch→Hub transfers aren't supported (would need EWB + treated as
+              // separate movement). Falls back to region match if state is missing.
+              const srcBranch = branches.find(b => b.name === nav?.branch)
+              const srcState  = srcBranch?.state || null
+              const srcRegion = srcBranch?.region || null
+              const candidateHubs = branches.filter(b => {
+                if (b.name === nav?.branch) return false
+                if (srcState)  return b.state  === srcState
+                if (srcRegion) return b.region === srcRegion
+                return true
+              })
               const filteredHubs  = destSearch
                 ? candidateHubs.filter(b => b.name.toLowerCase().includes(destSearch.toLowerCase()) || (b.region || '').toLowerCase().includes(destSearch.toLowerCase()))
                 : candidateHubs
@@ -747,7 +756,7 @@ export default function ConsignmentData() {
                       Direct → HO
                     </button>
                     <button type="button" onClick={() => setMoveType('INTERNAL')} disabled={candidateHubs.length === 0}
-                      title={candidateHubs.length === 0 ? 'No other branches available' : ''}
+                      title={candidateHubs.length === 0 ? `No other branches in ${srcState || srcRegion || 'this state'}` : ''}
                       style={{ flex: 1, padding: '8px', border: 'none', borderRadius: '7px',
                         cursor: candidateHubs.length === 0 ? 'not-allowed' : 'pointer',
                         opacity: candidateHubs.length === 0 ? 0.4 : 1,
