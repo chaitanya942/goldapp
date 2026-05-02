@@ -385,11 +385,13 @@ export default function ConsignmentData() {
     setDownloadingId(c.id + ':all')
 
     // ── Step 0: auto-generate missing EWB / E-Invoice before bundling ──
-    // Use a mutable copy so the freshly-generated numbers are picked up below.
+    // If generation fails we DON'T abort — we bundle the remaining docs and
+    // surface the error in the final toast, so the user always gets something.
     let cur = { ...c }
+    const genFailures = []
 
     if (showEwb && !cur.eway_bill_no) {
-      setToast({ msg: '⚡ Generating E-Way Bill…', type: 'info' })
+      setToast({ msg: '⚡ Generating E-Way Bill (may take 20-30 seconds)…', type: 'info' })
       try {
         const r = await fetch('/api/eway-bill/generate', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -397,19 +399,18 @@ export default function ConsignmentData() {
         })
         const j = await r.json()
         if (!r.ok || j.error) {
-          setToast({ msg: 'EWB generation failed: ' + (j.error || `HTTP ${r.status}`), type: 'error' })
-          setDownloadingId(null); return
+          genFailures.push(`EWB: ${j.error || `HTTP ${r.status}`}`)
+        } else {
+          cur.eway_bill_no    = j.ewb_no
+          cur.ewb_valid_until = j.valid_until
         }
-        cur.eway_bill_no    = j.ewb_no
-        cur.ewb_valid_until = j.valid_until
       } catch (err) {
-        setToast({ msg: 'EWB generation failed: ' + err.message, type: 'error' })
-        setDownloadingId(null); return
+        genFailures.push(`EWB: ${err.message}`)
       }
     }
 
     if (showEinv && !cur.irn) {
-      setToast({ msg: '⚡ Generating E-Invoice…', type: 'info' })
+      setToast({ msg: '⚡ Generating E-Invoice (may take 20-30 seconds)…', type: 'info' })
       try {
         const r = await fetch('/api/e-invoice/generate', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -417,15 +418,14 @@ export default function ConsignmentData() {
         })
         const j = await r.json()
         if (!r.ok || j.error) {
-          setToast({ msg: 'E-Invoice generation failed: ' + (j.error || `HTTP ${r.status}`), type: 'error' })
-          setDownloadingId(null); return
+          genFailures.push(`E-Invoice: ${j.error || `HTTP ${r.status}`}`)
+        } else {
+          cur.irn    = j.irn
+          cur.ack_no = j.ack_no
+          cur.ack_dt = j.ack_dt
         }
-        cur.irn    = j.irn
-        cur.ack_no = j.ack_no
-        cur.ack_dt = j.ack_dt
       } catch (err) {
-        setToast({ msg: 'E-Invoice generation failed: ' + err.message, type: 'error' })
-        setDownloadingId(null); return
+        genFailures.push(`E-Invoice: ${err.message}`)
       }
     }
 
@@ -508,9 +508,10 @@ export default function ConsignmentData() {
         if (showEwb && !c.eway_bill_no) missing.push('EWB not generated')
         if (showEinv && !c.irn)         missing.push('E-Invoice not generated')
         const baseMsg = `Saved to ${folderName}/ — ${summary.join(' + ')}`
-        if (failures.length) {
+        const allFailures = [...genFailures, ...failures]
+        if (allFailures.length) {
           // Surface failures prominently — don't pretend success
-          setToast({ msg: `${baseMsg}  |  ✕ FAILED: ${failures.join(' · ')}`, type: 'error' })
+          setToast({ msg: `${baseMsg}  |  ✕ FAILED: ${allFailures.join(' · ')}`, type: 'error' })
         } else if (missing.length) {
           setToast({ msg: `${baseMsg} · ${missing.join(', ')}`, type: 'info' })
         } else {
@@ -547,8 +548,9 @@ export default function ConsignmentData() {
       if (showEwb && !c.eway_bill_no) missing.push('EWB not generated')
       if (showEinv && !c.irn)         missing.push('E-Invoice not generated')
       const baseMsg = `Downloaded ${folderName}.zip — ${summary.join(' + ')}`
-      if (failures.length) {
-        setToast({ msg: `${baseMsg}  |  ✕ FAILED: ${failures.join(' · ')}`, type: 'error' })
+      const allFailuresZip = [...genFailures, ...failures]
+      if (allFailuresZip.length) {
+        setToast({ msg: `${baseMsg}  |  ✕ FAILED: ${allFailuresZip.join(' · ')}`, type: 'error' })
       } else if (missing.length) {
         setToast({ msg: `${baseMsg} · ${missing.join(', ')}`, type: 'info' })
       } else {
