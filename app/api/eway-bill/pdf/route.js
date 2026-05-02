@@ -3,6 +3,7 @@
 
 import { createClient } from '@supabase/supabase-js'
 import { fetchEWayBillPdf } from '../../../../lib/clearTaxClient'
+import { REGION_TO_STATE_CODE } from '../../../../lib/stateMap'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
@@ -30,7 +31,6 @@ export async function GET(req) {
     // ClearTax error 900201 ("EWayBill not present") means we're querying with a
     // different GSTIN's account context — it can't see EWBs created under another GSTIN.
     const { data: companySettings } = await supabase.from('company_settings').select('*').single()
-    const REGION_TO_STATE_CODE = { 'Andhra Pradesh': 'AP', 'Kerala': 'KL', 'Telangana': 'TS', 'Tamil Nadu': 'TN', 'Rest of Karnataka': 'KA', 'Bangalore': 'KA' }
     const stateCode    = REGION_TO_STATE_CODE[branch?.region]
     const stateGstin   = stateCode ? companySettings?.[`gstin_${stateCode.toLowerCase()}`] : null
     const gstinForPdf  = stateGstin || branch?.branch_gstin || process.env.WG_GSTIN

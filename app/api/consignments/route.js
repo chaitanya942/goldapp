@@ -549,12 +549,14 @@ export async function POST(req) {
     const nowIso = new Date().toISOString()
 
     // Snapshot GST rates from company_settings — frozen against retroactive changes.
+    // Column names match what's exposed in the Company Settings admin UI.
     const { data: cs } = await supabase.from('company_settings').select('*').single()
+    const igstRate = parseFloat(cs?.igst_rate ?? 3) || 3
     const gstSnapshot = {
-      igst: cs?.igst_rate ?? 3,
-      cgst: cs?.cgst_rate ?? 1.5,
-      sgst: cs?.sgst_rate ?? 1.5,
-      hsn:  cs?.gold_hsn   ?? '7108',
+      igst: igstRate,
+      cgst: parseFloat(cs?.cgst_rate ?? (igstRate / 2)) || (igstRate / 2),
+      sgst: parseFloat(cs?.sgst_rate ?? (igstRate / 2)) || (igstRate / 2),
+      hsn:  cs?.hsn_code || '71131910',
       captured_at: nowIso,
     }
 

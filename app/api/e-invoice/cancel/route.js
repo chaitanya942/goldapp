@@ -5,6 +5,7 @@
 import { createClient } from '@supabase/supabase-js'
 import { cancelEInvoice } from '../../../../lib/clearTaxClient'
 import { logConsignmentEvent } from '../../../../lib/consignmentLog'
+import { REGION_TO_STATE_CODE } from '../../../../lib/stateMap'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
@@ -26,7 +27,6 @@ export async function POST(req) {
 
     // Mirror generate path — resolve state-wise GSTIN, fall back to branch-level, then env.
     const { data: companySettings } = await supabase.from('company_settings').select('*').single()
-    const REGION_TO_STATE_CODE = { 'Andhra Pradesh': 'AP', 'Kerala': 'KL', 'Telangana': 'TS', 'Tamil Nadu': 'TN', 'Rest of Karnataka': 'KA', 'Bangalore': 'KA' }
     const stateCode  = REGION_TO_STATE_CODE[branch?.region]
     const stateGstin = stateCode ? companySettings?.[`gstin_${stateCode.toLowerCase()}`] : null
     const gstinFor   = stateGstin || branch?.branch_gstin || process.env.WG_GSTIN

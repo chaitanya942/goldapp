@@ -168,11 +168,11 @@ export async function POST(req) {
     }
 
     // EWB validity: NIC rule is 1 day per 200 km (rounded up). Min 1 day.
-    // For Direct→HO and Hub→HO, HO is hardcoded as Bangalore (Koramangala 560095, KA)
-    // — same defaults clearTaxClient uses in its EWB payload.
+    // HO PIN/state read from company_settings (admin-editable). Final fallback
+    // is the same Bangalore HO that clearTaxClient uses for its EWB payload.
     const fromPin   = branch?.pin_code
-    const toPin     = (consignment.movement_type === 'INTERNAL' ? destBranch?.pin_code : (companySettings?.ho_pin_code || '560095'))
-    const toState   = (consignment.movement_type === 'INTERNAL' ? destBranch?.state : 'KA')
+    const toPin     = (consignment.movement_type === 'INTERNAL' ? destBranch?.pin_code : (companySettings?.head_office_pin || companySettings?.ho_pin_code || '560095'))
+    const toState   = (consignment.movement_type === 'INTERNAL' ? destBranch?.state : (companySettings?.head_office_state || 'KA'))
     const distKm    = estimateDistanceKm({ fromPin, toPin, fromState: branch?.state, toState }) || 50
     const validDays = Math.max(1, Math.ceil(distKm / 200))
     const validUntil = new Date(Date.now() + validDays * 86400000).toISOString()
