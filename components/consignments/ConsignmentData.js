@@ -128,7 +128,20 @@ export default function ConsignmentData() {
     setPurchases(p.data || [])
     setBranches(b.data || [])
     // Active = not received, not seed
-    setConsignments((c.data || []).filter(x => x.status !== 'received' && x.status !== 'seed'))
+    // Show all non-cancelled, non-seed consignments. INTERNAL Branch→Hub
+    // are auto-marked 'received' on creation but should still appear in the
+    // list so users can see/download docs and void if needed. Hide them after
+    // 24h to keep the active list lean.
+    setConsignments((c.data || []).filter(x => {
+      if (x.status === 'seed' || x.status === 'cancelled') return false
+      if (x.status === 'received' && x.movement_type !== 'INTERNAL') return false
+      // Auto-received INTERNAL: keep visible for 24h since creation
+      if (x.status === 'received' && x.movement_type === 'INTERNAL') {
+        const ageMs = Date.now() - new Date(x.created_at).getTime()
+        if (ageMs > 24 * 3600 * 1000) return false
+      }
+      return true
+    }))
     setUnknownBranches(u.data || [])
     setLoading(false)
   }, [])
