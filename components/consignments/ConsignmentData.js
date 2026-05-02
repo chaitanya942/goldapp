@@ -394,9 +394,24 @@ export default function ConsignmentData() {
 
     setDownloadingId(c.id + ':all')
 
+    // Fetch a URL → blob, surfacing JSON error bodies as readable messages.
     const fetchToBlob = async (url) => {
       const res = await fetch(url)
-      if (!res.ok) throw new Error(`${url} → ${res.status}`)
+      if (!res.ok) {
+        // Try to extract JSON error message from server
+        let detail = `HTTP ${res.status}`
+        try {
+          const ct = res.headers.get('content-type') || ''
+          if (ct.includes('json')) {
+            const j = await res.json()
+            if (j?.error) detail = j.error
+          } else {
+            const txt = await res.text()
+            if (txt) detail = txt.slice(0, 200)
+          }
+        } catch {}
+        throw new Error(detail)
+      }
       return res.blob()
     }
 
@@ -407,7 +422,6 @@ export default function ConsignmentData() {
         try {
           parentDir = await window.showDirectoryPicker({ mode: 'readwrite', startIn: 'downloads' })
         } catch (e) {
-          // User cancelled the picker — silent abort
           if (e.name === 'AbortError') { setDownloadingId(null); return }
           throw e
         }
@@ -415,6 +429,7 @@ export default function ConsignmentData() {
         const subDir = await parentDir.getDirectoryHandle(folderName, { create: true })
 
         const summary = []
+        const failures = []
         for (const f of files) {
           try {
             const blob = await fetchToBlob(f.url)
@@ -423,23 +438,33 @@ export default function ConsignmentData() {
             await writable.write(blob)
             await writable.close()
             summary.push(f.name.split('.')[0].replace(/_/g, ' '))
-          } catch (e) { console.warn(`${f.name} failed:`, e.message) }
+          } catch (e) {
+            console.error(`${f.name} failed:`, e.message)
+            failures.push(`${f.name}: ${e.message}`)
+          }
         }
         if (showEinv && c.irn) {
-          const txtHandle = await subDir.getFileHandle('E-Invoice_Details.txt', { create: true })
-          const w = await txtHandle.createWritable()
-          await w.write(`IRN: ${c.irn}\nAck No: ${c.ack_no || ''}\nAck Date: ${c.ack_dt || ''}\n`)
-          await w.close()
-          summary.push(`IRN ${String(c.irn).slice(0, 8)}…`)
+          try {
+            const txtHandle = await subDir.getFileHandle('E-Invoice_Details.txt', { create: true })
+            const w = await txtHandle.createWritable()
+            await w.write(`IRN: ${c.irn}\nAck No: ${c.ack_no || ''}\nAck Date: ${c.ack_dt || ''}\n`)
+            await w.close()
+            summary.push(`IRN ${String(c.irn).slice(0, 8)}…`)
+          } catch (e) { failures.push(`IRN: ${e.message}`) }
         }
 
         const missing = []
         if (showEwb && !c.eway_bill_no) missing.push('EWB not generated')
         if (showEinv && !c.irn)         missing.push('E-Invoice not generated')
-        setToast({
-          msg: `Saved to ${folderName}/ — ${summary.join(' + ')}` + (missing.length ? ` · ${missing.join(', ')}` : ''),
-          type: missing.length ? 'info' : 'success',
-        })
+        const baseMsg = `Saved to ${folderName}/ — ${summary.join(' + ')}`
+        if (failures.length) {
+          // Surface failures prominently — don't pretend success
+          setToast({ msg: `${baseMsg}  |  ✕ FAILED: ${failures.join(' · ')}`, type: 'error' })
+        } else if (missing.length) {
+          setToast({ msg: `${baseMsg} · ${missing.join(', ')}`, type: 'info' })
+        } else {
+          setToast({ msg: baseMsg, type: 'success' })
+        }
         return
       }
 
@@ -447,12 +472,13 @@ export default function ConsignmentData() {
       setToast({ msg: 'Bundling documents (your browser does not support folder save — using ZIP)…', type: 'info' })
       const zip = new JSZip()
       const summary = []
+      const failures = []
       for (const f of files) {
         try {
           const blob = await fetchToBlob(f.url)
           zip.file(`${folderName}/${f.name}`, blob)
           summary.push(f.name.split('.')[0].replace(/_/g, ' '))
-        } catch (e) { console.warn(`${f.name} failed:`, e.message) }
+        } catch (e) { failures.push(`${f.name}: ${e.message}`) }
       }
       if (showEinv && c.irn) {
         zip.file(`${folderName}/E-Invoice_Details.txt`,
@@ -469,10 +495,14 @@ export default function ConsignmentData() {
       const missing = []
       if (showEwb && !c.eway_bill_no) missing.push('EWB not generated')
       if (showEinv && !c.irn)         missing.push('E-Invoice not generated')
-      setToast({
-        msg: `Downloaded ${folderName}.zip — ${summary.join(' + ')}` + (missing.length ? ` · ${missing.join(', ')}` : ''),
-        type: missing.length ? 'info' : 'success',
-      })
+      const baseMsg = `Downloaded ${folderName}.zip — ${summary.join(' + ')}`
+      if (failures.length) {
+        setToast({ msg: `${baseMsg}  |  ✕ FAILED: ${failures.join(' · ')}`, type: 'error' })
+      } else if (missing.length) {
+        setToast({ msg: `${baseMsg} · ${missing.join(', ')}`, type: 'info' })
+      } else {
+        setToast({ msg: baseMsg, type: 'success' })
+      }
     } catch (err) {
       setToast({ msg: err.message || 'Save failed', type: 'error' })
     } finally { setDownloadingId(null) }
