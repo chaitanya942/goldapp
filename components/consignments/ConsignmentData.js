@@ -710,11 +710,18 @@ export default function ConsignmentData() {
                     <td style={{ padding: '11px 14px', fontSize: '12px', color: t.blue, textAlign: 'right', fontFamily: 'monospace', whiteSpace: 'nowrap' }}>₹{fmt(Math.round(c.total_amount))}</td>
                     <td style={{ padding: '11px 14px', fontSize: '11px', color: t.text4, whiteSpace: 'nowrap' }}>{fmtTS(c.created_at)}</td>
                     <td style={{ padding: '11px 14px' }}>
-                      <button onClick={() => downloadDoc(c, isType ? 'voucher' : 'challan')} disabled={!!downloadingId}
-                        title={isType ? 'Issue Voucher' : 'Delivery Challan'}
-                        style={{ ...btnGold, padding: '4px 10px', fontSize: '10px' }}>
-                        {downloadingId === c.id + ':' + (isType ? 'voucher' : 'challan') ? '⏳' : (isType ? '📄 Voucher' : '📄 Challan')}
-                      </button>
+                      <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+                        <button onClick={() => downloadDoc(c, isType ? 'voucher' : 'challan')} disabled={!!downloadingId}
+                          title={isType ? 'Issue Voucher' : 'Delivery Challan'}
+                          style={{ ...btnGold, padding: '4px 10px', fontSize: '10px' }}>
+                          {downloadingId === c.id + ':' + (isType ? 'voucher' : 'challan') ? '⏳' : (isType ? '📄 Voucher' : '📄 Challan')}
+                        </button>
+                        <button onClick={() => downloadDoc(c, 'report')} disabled={!!downloadingId}
+                          title="Consignee Report (item-wise summary)"
+                          style={{ background: 'transparent', border: `1px solid ${t.purple}50`, borderRadius: '5px', padding: '4px 10px', fontSize: '10px', color: t.purple, fontWeight: 600, cursor: 'pointer', opacity: downloadingId === c.id + ':report' ? 0.6 : 1 }}>
+                          {downloadingId === c.id + ':report' ? '⏳' : '📋 Report'}
+                        </button>
+                      </div>
                     </td>
                     <td style={{ padding: '11px 14px' }}>
                       {!showEwb ? (
