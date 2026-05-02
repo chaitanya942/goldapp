@@ -95,12 +95,9 @@ export async function POST(req) {
     return Response.json({ success: true, irn, ack_no: ackNo, ack_dt: ackDt })
   } catch (err) {
     console.error('E-Invoice generate error:', err)
+    // Debug payloads stay server-side only (see ctaxLog in lib/clearTaxClient.js).
     return Response.json({
-      error:    err.message || 'E-Invoice generation failed',
-      // Surface the actual payload + ClearTax response so the user can see what was rejected
-      // without needing to dig through Railway logs.
-      cleartax_response: err.cleartaxResponse || null,
-      outgoing_payload:  err.outgoingPayload  || null,
+      error: err.message || 'E-Invoice generation failed',
     }, { status: 500 })
   }
 }

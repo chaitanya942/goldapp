@@ -196,12 +196,13 @@ export async function POST(req) {
     return Response.json({ success: true, ewb_no: ewbNo, ewb_date: ewbDate, valid_until: validUntil })
   } catch (err) {
     console.error('E-Way Bill generate error:', err)
-    // Release lock so user can retry
-    await supabase.from('consignments').update({ ewb_generation_started_at: null }).eq('id', consignment_id)
+    // Always release the lock (success or failure) so user can retry.
+    try { await supabase.from('consignments').update({ ewb_generation_started_at: null }).eq('id', consignment_id) } catch {}
+    // Debug payloads (cleartax_response / outgoing_payload) are intentionally NOT echoed
+    // to the browser — they contain GSTINs, addresses and item totals. Server-side logs
+    // (lib/clearTaxClient.js#ctaxLog, redacted) are the source of truth for diagnosis.
     return Response.json({
-      error:             err.message || 'E-Way Bill generation failed',
-      cleartax_response: err.cleartaxResponse || null,
-      outgoing_payload:  err.outgoingPayload  || null,
+      error: err.message || 'E-Way Bill generation failed',
     }, { status: 500 })
   }
 }

@@ -7,6 +7,7 @@ import { supabase as supabaseClient } from '../../lib/supabase'
 import GoldSpinner from '../ui/GoldSpinner'
 import Badge from '../ui/Badge'
 import Toast from '../ui/Toast'
+import { openConfirm, openPrompt } from '../ui/ConfirmDialog'
 
 async function triggerDownload(url, filename, onError) {
   const res  = await fetch(url)
@@ -333,7 +334,14 @@ export default function ConsignmentData() {
   }
 
   async function cancelEinv(c) {
-    if (!confirm(`Cancel E-Invoice IRN?\n\nMust be done within 24h of generation.`)) return
+    const ok = await openConfirm({
+      icon: '⚠',
+      title: `Cancel E-Invoice for ${c.tmp_prf_no}?`,
+      message: `IRN: ${String(c.irn || '').slice(0, 20)}…\nRoute: ${c.branch_name} → ${c.dest_branch || 'Head Office'}\n\nIRP allows cancellation only within 24 hours of generation. After that the IRN is locked and you'll need to issue a credit note instead.`,
+      confirmLabel: 'Cancel IRN',
+      danger: true,
+    })
+    if (!ok) return
     setEwbActionId(c.id + ':einv-cancel')
     try {
       const res  = await fetch('/api/e-invoice/cancel', {
@@ -356,13 +364,11 @@ export default function ConsignmentData() {
       })
       const data = await res.json()
       if (!res.ok || data.error) {
-        // Dump full debug context to console for diagnosis
-        console.group('[EWB] Debug')
-        console.log('Error:', data.error)
-        console.log('ClearTax response:', data.cleartax_response)
-        console.log('Outgoing payload:', data.outgoing_payload)
-        console.groupEnd()
-        setToast({ msg: (data.error || 'EWB failed') + ' — open browser console (F12) for details', type: 'error' })
+        // Debug payloads are no longer echoed to the client (data leak risk).
+        // The human-readable error message from ClearTax is surfaced as-is;
+        // full payload + response live in the server logs (lib/clearTaxClient.js
+        // ctaxLog, redacted).
+        setToast({ msg: data.error || 'EWB generation failed', type: 'error' })
         return
       }
       setToast({ msg: `E-Way Bill ${data.ewb_no} generated — downloading PDF…`, type: 'success' })
@@ -376,7 +382,14 @@ export default function ConsignmentData() {
   }
 
   async function cancelEwb(c) {
-    if (!confirm(`Cancel E-Way Bill ${c.eway_bill_no}?\n\nThis must be done within 24h of generation.`)) return
+    const ok = await openConfirm({
+      icon: '⚠',
+      title: `Cancel E-Way Bill ${c.eway_bill_no}?`,
+      message: `${c.tmp_prf_no} · ${c.branch_name} → ${c.dest_branch || 'Head Office'}\n\nNIC allows cancellation only within 24 hours of generation. After that the EWB is locked and the goods cannot move under it.`,
+      confirmLabel: 'Cancel EWB',
+      danger: true,
+    })
+    if (!ok) return
     setEwbActionId(c.id + ':cancel')
     try {
       const res  = await fetch('/api/eway-bill/cancel', {
@@ -397,7 +410,17 @@ export default function ConsignmentData() {
   }
 
   async function cancelConsignment(c) {
-    const reason = prompt(`Void consignment ${c.tmp_prf_no}?\n\nBills will return to ${c.branch_name}. Enter a reason:`)
+    const reason = await openPrompt({
+      icon: '✕',
+      title: `Void ${c.tmp_prf_no}?`,
+      message: `${c.total_bills || 0} bill${c.total_bills === 1 ? '' : 's'} (${fmtWt(c.total_net_wt)}) will return to ${c.branch_name}. EWB/IRN must be cancelled separately if already generated.\n\nEnter a reason — it goes into the audit log.`,
+      placeholder: 'e.g. Created on wrong branch, vehicle cancelled, customer return…',
+      minLength: 8,
+      maxLength: 280,
+      rows: 3,
+      confirmLabel: 'Void',
+      danger: true,
+    })
     if (!reason) return
     try {
       const res = await fetch('/api/consignments', {
@@ -648,7 +671,13 @@ export default function ConsignmentData() {
   const btnOut  = { background: 'transparent', border: `1px solid ${t.border2}`, borderRadius: '8px', padding: '7px 14px', fontSize: '12px', color: t.text3, cursor: 'pointer' }
 
   // ── BILL PICKER MODE (deep-linked from Branch Stock) ──────────────────────
-  const BillPicker = () => {
+  // Defined as a render-helper function (not a JSX component) so React doesn't
+  // unmount/remount the entire subtree on every parent re-render. Previously a
+  // toast or realtime tick caused the search input to lose focus mid-typing
+  // and the table scroll position to reset because <BillPicker /> was a fresh
+  // component identity each render. Calling renderBillPicker() inlines the
+  // returned JSX into the parent's tree directly — same output, stable identity.
+  const renderBillPicker = () => {
     const branchInfo = branches.find(b => b.name === nav.branch)
     const rColor     = REGION_COLORS[branchInfo?.region] || t.text3
 
@@ -855,7 +884,8 @@ export default function ConsignmentData() {
   }
 
   // ── ACTIVE CONSIGNMENTS LIST ─────────────────────────────────────────────
-  const ConsignmentsList = () => (
+  // Same render-helper pattern as renderBillPicker — see comment there.
+  const renderConsignmentsList = () => (
     <>
       {/* Filters */}
       <div style={{ ...card, padding: '10px 14px', display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
@@ -1082,9 +1112,9 @@ export default function ConsignmentData() {
       {loading ? (
         <div style={{ padding: '64px', display: 'flex', justifyContent: 'center' }}><GoldSpinner size={32} /></div>
       ) : nav?.branch ? (
-        <BillPicker />
+        renderBillPicker()
       ) : (
-        <ConsignmentsList />
+        renderConsignmentsList()
       )}
 
       {/* Confirm modal */}

@@ -5,6 +5,7 @@ import { useApp } from '../../lib/context'
 import { supabase as supabaseClient } from '../../lib/supabase'
 import GoldSpinner from '../ui/GoldSpinner'
 import Toast from '../ui/Toast'
+import { openConfirm, openPrompt } from '../ui/ConfirmDialog'
 
 const THEMES = {
   dark:  { bg: '#0a0a0a', card: '#111111', card2: '#161616', card3: '#1d1c19', text1: '#f0e6c8', text2: '#c8b89a', text3: '#9a8a6a', text4: '#6a5a3a', gold: '#c9a84c', border: '#1e1e1e', border2: '#252525', green: '#3aaa6a', red: '#e05555', blue: '#3a8fbf', orange: '#c9981f', purple: '#8c5ac8' },
@@ -39,9 +40,25 @@ function waitingBadge(ts, t) {
   return { label, color, bg: `${color}18` }
 }
 
+// Lazy-create one shared AudioContext for the lifetime of the page. Browsers
+// cap concurrent live AudioContexts; new'ing one per beep leaks them when
+// approvals arrive in bursts. We resume() before each beep so autoplay-block
+// recovers automatically once the user has interacted with the page.
+let _sharedAudioCtx = null
+function getAudioContext() {
+  if (typeof window === 'undefined') return null
+  if (!_sharedAudioCtx) {
+    try { _sharedAudioCtx = new (window.AudioContext || window.webkitAudioContext)() }
+    catch { return null }
+  }
+  return _sharedAudioCtx
+}
+
 function playApprovalBeep() {
+  const ctx = getAudioContext()
+  if (!ctx) return
+  if (ctx.state === 'suspended') ctx.resume().catch(() => {})
   try {
-    const ctx = new (window.AudioContext || window.webkitAudioContext)()
     const beep = (freq, start, dur, gain = 0.15) => {
       const osc = ctx.createOscillator()
       const g   = ctx.createGain()
@@ -56,7 +73,6 @@ function playApprovalBeep() {
     }
     beep(880, 0,    0.18)
     beep(1320, 0.18, 0.22)
-    setTimeout(() => ctx.close(), 600)
   } catch {}
 }
 
@@ -71,6 +87,15 @@ function fireDesktopNotification(title, body) {
     n.onclick = () => { window.focus(); n.close() }
     setTimeout(() => n.close(), 8000)
   } catch {}
+}
+
+const SOUND_PREF_KEY = 'wg-approval-sound-enabled'
+function readSoundPref() {
+  if (typeof window === 'undefined') return true
+  try { const v = localStorage.getItem(SOUND_PREF_KEY); return v == null ? true : v === '1' } catch { return true }
+}
+function writeSoundPref(v) {
+  try { localStorage.setItem(SOUND_PREF_KEY, v ? '1' : '0') } catch {}
 }
 
 async function previewDoc(url, filename, onError) {
@@ -99,8 +124,14 @@ export default function ConsignmentApprovals() {
   const [actionId, setActionId] = useState(null)
   const [toast, setToast] = useState(null)
   const [notifPermission, setNotifPermission] = useState(typeof window !== 'undefined' && 'Notification' in window ? Notification.permission : 'unsupported')
+  const [soundEnabled, setSoundEnabled] = useState(true)
+  useEffect(() => { setSoundEnabled(readSoundPref()) }, [])
   const [, forceTick] = useState(0)
   const knownIds = useRef(new Set())
+  // Burst-debounce arriving approvals so 10 simultaneous inserts yield ONE
+  // notification + ONE beep (not 10 of each). Buffer holds row summaries.
+  const arrivalBuffer = useRef([])
+  const arrivalTimer  = useRef(null)
 
   const showToast = useCallback((msg, type = 'info') => {
     setToast({ msg, type, key: Date.now() })
@@ -112,7 +143,9 @@ export default function ConsignmentApprovals() {
     const j = await r.json()
     const rows = j.data || []
     setPending(rows)
-    knownIds.current = new Set(rows.map(c => c.id))
+    // Merge IDs (don't replace) so realtime arrivals between request and response
+    // aren't clobbered.
+    rows.forEach(c => knownIds.current.add(c.id))
     setLoading(false)
   }, [])
 
@@ -124,7 +157,32 @@ export default function ConsignmentApprovals() {
     return () => clearInterval(id)
   }, [])
 
-  // Realtime: instant arrival/dismissal
+  // Burst handler — flushes the arrival buffer 1.2s after the last arrival.
+  const flushArrivals = useCallback(() => {
+    const items = arrivalBuffer.current
+    arrivalBuffer.current = []
+    arrivalTimer.current = null
+    if (!items.length) return
+    if (items.length === 1) {
+      const r = items[0]
+      fireDesktopNotification('New consignment awaiting approval',
+        `${r.tmp_prf_no || ''}: ${r.branch_name} → ${r.dest_branch || 'HO'} · ${r.total_bills || 0} bills · ${Number(r.total_net_wt || 0).toFixed(3)}g`)
+    } else {
+      fireDesktopNotification(`${items.length} new consignments awaiting approval`,
+        items.slice(0, 3).map(r => `${r.tmp_prf_no || ''} (${r.branch_name})`).join(', ') + (items.length > 3 ? '…' : ''))
+    }
+    if (readSoundPref()) playApprovalBeep()
+  }, [])
+
+  const queueArrival = useCallback((row) => {
+    arrivalBuffer.current.push(row)
+    if (arrivalTimer.current) clearTimeout(arrivalTimer.current)
+    arrivalTimer.current = setTimeout(flushArrivals, 1200)
+  }, [flushArrivals])
+
+  // Realtime: instant arrival/dismissal. Always refetch enriched rows from the
+  // API instead of trusting payload.new — joined fields like total_bills and
+  // total_net_wt aren't present on the raw row.
   useEffect(() => {
     const channel = supabaseClient
       .channel('consignment-approvals')
@@ -134,12 +192,11 @@ export default function ConsignmentApprovals() {
           const row = payload.new
           if (!row || knownIds.current.has(row.id)) return
           knownIds.current.add(row.id)
+          // Optimistically insert the raw row so the list reflects the change instantly,
+          // then refetch to fill in the joined fields. Queue arrival for debounced notify.
           setPending(prev => [row, ...prev])
-          fireDesktopNotification(
-            'New consignment awaiting approval',
-            `${row.tmp_prf_no || ''}: ${row.branch_name} → ${row.dest_branch || 'HO'} · ${row.total_bills || 0} bills · ${Number(row.total_net_wt || 0).toFixed(3)}g`
-          )
-          playApprovalBeep()
+          queueArrival(row)
+          fetchPending(true)
         })
       .on('postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'consignments' },
@@ -152,16 +209,27 @@ export default function ConsignmentApprovals() {
           } else if (!knownIds.current.has(row.id)) {
             knownIds.current.add(row.id)
             setPending(prev => [row, ...prev])
-            fireDesktopNotification('New consignment awaiting approval',
-              `${row.tmp_prf_no || ''}: ${row.branch_name} → ${row.dest_branch || 'HO'}`)
-            playApprovalBeep()
+            queueArrival(row)
+            fetchPending(true)
           } else {
-            setPending(prev => prev.map(c => c.id === row.id ? row : c))
+            // Existing row mutated (e.g. EWB/IRN written) — refetch so joined
+            // fields stay in sync; no notification, no beep.
+            fetchPending(true)
           }
         })
       .subscribe()
-    return () => { supabaseClient.removeChannel(channel) }
-  }, [])
+    return () => {
+      supabaseClient.removeChannel(channel)
+      if (arrivalTimer.current) { clearTimeout(arrivalTimer.current); arrivalTimer.current = null }
+    }
+  }, [queueArrival, fetchPending])
+
+  function toggleSound() {
+    const next = !soundEnabled
+    setSoundEnabled(next)
+    writeSoundPref(next)
+    if (next) playApprovalBeep()  // give immediate audible feedback that sound is on
+  }
 
   async function requestNotifications() {
     if (typeof window === 'undefined' || !('Notification' in window)) {
@@ -176,7 +244,14 @@ export default function ConsignmentApprovals() {
   }
 
   async function approve(c) {
-    if (!confirm(`Approve ${c.tmp_prf_no}?\n\nOperations team will be able to download all documents (Voucher/Challan, Report, EWB PDF, E-Invoice PDF).`)) return
+    const ok = await openConfirm({
+      icon: '✓',
+      title: `Approve ${c.tmp_prf_no}?`,
+      message: `${c.branch_name} → ${c.dest_branch || 'Head Office'}\n${c.total_bills || 0} bills · ${Number(c.total_net_wt || 0).toFixed(3)}g · ₹${fmt(Math.round(c.total_amount || 0))}\n\nOnce approved, the operations team can download all documents (Voucher/Challan, Report, EWB PDF, E-Invoice PDF).`,
+      confirmLabel: 'Approve',
+      primaryColor: 'green',
+    })
+    if (!ok) return
     setActionId(c.id + ':approve')
     try {
       const r = await fetch('/api/consignments', {
@@ -190,13 +265,23 @@ export default function ConsignmentApprovals() {
   }
 
   async function reject(c) {
-    const reason = prompt(`Reject ${c.tmp_prf_no}?\n\nEnter a reason (operator will see this):`)
-    if (!reason || !reason.trim()) return
+    const reason = await openPrompt({
+      icon: '✕',
+      title: `Reject ${c.tmp_prf_no}?`,
+      message: `${c.branch_name} → ${c.dest_branch || 'Head Office'}\n\nEnter a reason — the operator will see this so they can fix the underlying issue.`,
+      placeholder: 'e.g. Wrong destination branch, value mismatch with EWB, missing customer KYC…',
+      minLength: 8,
+      maxLength: 280,
+      rows: 3,
+      confirmLabel: 'Reject',
+      danger: true,
+    })
+    if (!reason) return
     setActionId(c.id + ':reject')
     try {
       const r = await fetch('/api/consignments', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'reject_approval', id: c.id, approver_email: userEmail, reason: reason.trim() }),
+        body: JSON.stringify({ action: 'reject_approval', id: c.id, approver_email: userEmail, reason }),
       })
       const j = await r.json()
       if (!r.ok || j.error) { showToast(j.error || 'Rejection failed', 'error'); return }
@@ -251,6 +336,11 @@ export default function ConsignmentApprovals() {
               Oldest: <strong style={{ color: oldestBadge.color }}>{oldestBadge.label}</strong>
             </div>
           )}
+          <button onClick={toggleSound} title={soundEnabled ? 'Sound on for new approvals — click to mute' : 'Sound muted — click to enable'}
+            aria-label={soundEnabled ? 'Mute approval sound' : 'Unmute approval sound'}
+            style={{ ...btnOut, padding: '7px 12px', color: soundEnabled ? t.gold : t.text4, borderColor: soundEnabled ? `${t.gold}50` : t.border2 }}>
+            {soundEnabled ? '🔔' : '🔕'}
+          </button>
           <button onClick={() => fetchPending(false)} style={btnOut}>⟳ Refresh</button>
         </div>
       </div>

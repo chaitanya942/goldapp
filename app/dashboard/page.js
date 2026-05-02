@@ -26,6 +26,7 @@ import CalTable from '../../components/sales/CalTable'
 import LiveMarketRates from '../../components/sales/LiveMarketRates'
 import InboundBotTesting from '../../components/telesales/InboundBotTesting'
 import TelesalesDashboard from '../../components/telesales/TelesalesDashboard'
+import DialogHost from '../../components/ui/ConfirmDialog'
 
 const THEMES = {
   dark:  { bg: '#0a0a0a', card: '#111111', text1: '#f0e6c8', text2: '#c8b89a', text3: '#7a6a4a', text4: '#4a3a2a', gold: '#c9a84c', border: '#1e1e1e', red: '#e05555' },
@@ -162,6 +163,9 @@ function DashboardShell() {
       {/* Bottom nav — mobile only */}
       {isMobile && <BottomNav onMenuOpen={() => openMobileMenuWithModule()} />}
       {isMobile && mobileMenuOpen && <MobileMenu initialModuleId={mobileMenuInitialModule} onClose={() => { setMobileMenuOpen(false); setMobileMenuInitialModule(null) }} />}
+
+      {/* Global themed dialog host — replaces native window.confirm() / window.prompt() */}
+      <DialogHost />
     </div>
   )
 }
