@@ -883,15 +883,15 @@ export default function ConsignmentData() {
                 const showEinvoice     = !isType && !isKaSource        // interstate Hub → HO only
                 return (
                   <tr key={c.id}
-                    style={{ borderBottom: `1px solid ${t.border}15`, background: isNew ? `${t.green}08` : 'transparent', transition: 'background .1s' }}
+                    style={{ borderBottom: `1px solid ${t.border}15`, background: isNew ? `${t.green}08` : 'transparent', transition: 'background .1s', verticalAlign: 'middle' }}
                     onMouseEnter={e => { if (!isNew) e.currentTarget.style.background = `${t.gold}04` }}
                     onMouseLeave={e => { if (!isNew) e.currentTarget.style.background = 'transparent' }}>
                     <td style={{ padding: '11px 14px', fontSize: '12px', color: t.gold, fontWeight: 700, fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
                       {c.tmp_prf_no}
                       {isNew && <span style={{ marginLeft: 6, fontSize: 9, color: t.green, background: `${t.green}20`, padding: '1px 6px', borderRadius: 4, fontWeight: 600 }}>NEW</span>}
                     </td>
-                    <td style={{ padding: '11px 14px' }}>
-                      <span style={{ fontSize: '10px', color: tColor, background: `${tColor}15`, borderRadius: '5px', padding: '2px 8px', fontWeight: 600 }}>
+                    <td style={{ padding: '11px 14px', whiteSpace: 'nowrap' }}>
+                      <span style={{ fontSize: '10px', color: tColor, background: `${tColor}15`, borderRadius: '5px', padding: '2px 8px', fontWeight: 600, whiteSpace: 'nowrap', display: 'inline-block' }}>
                         {isType ? 'Via Hub' : 'Direct → HO'}
                       </span>
                     </td>
