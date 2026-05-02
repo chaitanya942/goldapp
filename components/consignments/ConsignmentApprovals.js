@@ -223,55 +223,37 @@ export default function ConsignmentApprovals() {
   const btnOut  = { background: 'transparent', border: `1px solid ${t.border2}`, borderRadius: '8px', padding: '7px 14px', fontSize: '12px', color: t.text3, cursor: 'pointer' }
 
   return (
-    <div style={{ padding: '20px 18px', display: 'flex', flexDirection: 'column', gap: '14px', maxWidth: '1300px', margin: '0 auto' }}>
+    <div style={{ padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: '10px', maxWidth: '1400px', margin: '0 auto' }}>
       {toast && <Toast key={toast.key} msg={toast.msg} type={toast.type} onDone={() => setToast(null)} />}
 
-      {/* ── Header with KPI strip ───────────────────────────────────────── */}
+      {/* ── Header — single row with title + inline stats + actions ────── */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
-        <div>
-          <div style={{ fontSize: '1.5rem', fontWeight: 300, color: t.text1, letterSpacing: '.02em' }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: '14px', flexWrap: 'wrap' }}>
+          <div style={{ fontSize: '1.35rem', fontWeight: 300, color: t.text1, letterSpacing: '.02em' }}>
             Pending Approvals
           </div>
-          <div style={{ fontSize: '11px', color: t.text3, marginTop: '4px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span style={{ display: 'inline-block', width: '6px', height: '6px', borderRadius: '50%', background: t.green, boxShadow: `0 0 6px ${t.green}` }} />
-            Live updates active
+          <div style={{ fontSize: '11px', color: t.text3, display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <span style={{ display: 'inline-block', width: '5px', height: '5px', borderRadius: '50%', background: t.green, boxShadow: `0 0 6px ${t.green}` }} />
+            Live updates
           </div>
+          {pending.length > 0 && (
+            <div style={{ fontSize: '11px', color: t.text3, display: 'flex', gap: '12px', alignItems: 'baseline' }}>
+              <span><strong style={{ color: t.orange, fontSize: '13px' }}>{pending.length}</strong> waiting</span>
+              <span><strong style={{ color: t.gold }}>{totalBills}</strong> bills</span>
+              <span><strong style={{ color: t.blue, fontFamily: 'monospace' }}>{fmtWt(totalNetWt)}</strong></span>
+              <span><strong style={{ color: t.green }}>₹{fmt(Math.round(totalValue))}</strong></span>
+            </div>
+          )}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           {pending.length > 0 && oldestBadge && (
-            <div style={{ fontSize: '11px', color: t.text3, padding: '6px 12px', background: oldestBadge.bg, borderRadius: '8px', border: `1px solid ${oldestBadge.color}30` }}>
-              Oldest pending: <strong style={{ color: oldestBadge.color }}>{oldestBadge.label}</strong>
+            <div style={{ fontSize: '10px', color: t.text3, padding: '5px 10px', background: oldestBadge.bg, borderRadius: '6px', border: `1px solid ${oldestBadge.color}30` }}>
+              Oldest: <strong style={{ color: oldestBadge.color }}>{oldestBadge.label}</strong>
             </div>
           )}
           <button onClick={() => fetchPending(false)} style={btnOut}>⟳ Refresh</button>
         </div>
       </div>
-
-      {/* ── KPI cards ──────────────────────────────────────────────────── */}
-      {pending.length > 0 && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '10px' }}>
-          <div style={{ ...card, padding: '14px 18px' }}>
-            <div style={{ fontSize: '10px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 600 }}>Awaiting Review</div>
-            <div style={{ fontSize: '1.6rem', color: t.orange, fontWeight: 300, marginTop: '4px' }}>{pending.length}</div>
-            <div style={{ fontSize: '11px', color: t.text4, marginTop: '2px' }}>consignment{pending.length !== 1 ? 's' : ''}</div>
-          </div>
-          <div style={{ ...card, padding: '14px 18px' }}>
-            <div style={{ fontSize: '10px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 600 }}>Total Bills</div>
-            <div style={{ fontSize: '1.6rem', color: t.gold, fontWeight: 300, marginTop: '4px' }}>{totalBills}</div>
-            <div style={{ fontSize: '11px', color: t.text4, marginTop: '2px' }}>across all pending</div>
-          </div>
-          <div style={{ ...card, padding: '14px 18px' }}>
-            <div style={{ fontSize: '10px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 600 }}>Net Weight</div>
-            <div style={{ fontSize: '1.6rem', color: t.blue, fontWeight: 300, marginTop: '4px', fontFamily: 'monospace' }}>{fmtWt(totalNetWt)}</div>
-            <div style={{ fontSize: '11px', color: t.text4, marginTop: '2px' }}>gold in transit</div>
-          </div>
-          <div style={{ ...card, padding: '14px 18px' }}>
-            <div style={{ fontSize: '10px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 600 }}>Total Value</div>
-            <div style={{ fontSize: '1.6rem', color: t.green, fontWeight: 300, marginTop: '4px' }}>₹{fmt(Math.round(totalValue))}</div>
-            <div style={{ fontSize: '11px', color: t.text4, marginTop: '2px' }}>indicative</div>
-          </div>
-        </div>
-      )}
 
       {/* ── Notifications banner ─────────────────────────────────────────── */}
       {notifPermission === 'default' && (
@@ -321,80 +303,80 @@ export default function ConsignmentApprovals() {
             if (c.irn)          stats.push(['IRN', String(c.irn).slice(0, 12) + '…',                 t.purple])
 
             return (
-              <div key={c.id} style={{ ...card, padding: 0, overflow: 'hidden', borderLeft: `4px solid ${wb.color}` }}>
-                {/* Top row: identity + actions */}
-                <div style={{ padding: '16px 22px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '16px', flexWrap: 'wrap' }}>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-                      <span style={{ fontSize: '17px', color: t.gold, fontWeight: 700, fontFamily: 'monospace', letterSpacing: '.02em' }}>{c.tmp_prf_no}</span>
-                      <span style={{ fontSize: '10px', color: isType ? t.purple : t.orange, background: `${isType ? t.purple : t.orange}15`, borderRadius: '5px', padding: '3px 9px', fontWeight: 600, letterSpacing: '.02em' }}>
-                        {isType ? 'VIA HUB' : 'DIRECT → HO'}
-                      </span>
-                      <span style={{ fontSize: '10px', color: wb.color, background: wb.bg, borderRadius: '5px', padding: '3px 9px', fontWeight: 600, letterSpacing: '.02em' }}>
-                        ⏱ {wb.label}
-                      </span>
+              <div key={c.id} style={{ ...card, padding: '12px 16px 12px 18px', borderLeft: `3px solid ${wb.color}`, display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', gap: '14px', alignItems: 'center' }}>
+                {/* Left side: identity + route + inline stats */}
+                <div style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  {/* Row 1: PRF + badges */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: '14px', color: t.gold, fontWeight: 700, fontFamily: 'monospace', letterSpacing: '.02em' }}>{c.tmp_prf_no}</span>
+                    <span style={{ fontSize: '9px', color: isType ? t.purple : t.orange, background: `${isType ? t.purple : t.orange}15`, borderRadius: '4px', padding: '2px 7px', fontWeight: 600, letterSpacing: '.04em' }}>
+                      {isType ? 'VIA HUB' : 'DIRECT → HO'}
+                    </span>
+                    <span style={{ fontSize: '9px', color: wb.color, background: wb.bg, borderRadius: '4px', padding: '2px 7px', fontWeight: 600, letterSpacing: '.04em' }}>
+                      ⏱ {wb.label}
+                    </span>
+                    {c.eway_bill_no && <span style={{ fontSize: '9px', color: t.green, background: `${t.green}15`, borderRadius: '4px', padding: '2px 7px', fontWeight: 600, letterSpacing: '.04em' }}>EWB ✓</span>}
+                    {c.irn         && <span style={{ fontSize: '9px', color: t.purple, background: `${t.purple}15`, borderRadius: '4px', padding: '2px 7px', fontWeight: 600, letterSpacing: '.04em' }}>IRN ✓</span>}
+                  </div>
+                  {/* Row 2: Source → Destination + stats inline */}
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: '14px', flexWrap: 'wrap' }}>
+                    <div style={{ fontSize: '13px', color: t.text1, fontWeight: 600 }}>
+                      {c.branch_name}
+                      <span style={{ color: t.text4, margin: '0 8px', fontWeight: 400 }}>→</span>
+                      {dest}
                     </div>
-                    <div style={{ fontSize: '15px', color: t.text1, marginTop: '8px', fontWeight: 500 }}>
-                      <strong style={{ color: t.text1 }}>{c.branch_name}</strong>
-                      <span style={{ color: t.text4, margin: '0 10px' }}>→</span>
-                      <strong style={{ color: t.text1 }}>{dest}</strong>
-                    </div>
-                    <div style={{ fontSize: '11px', color: t.text4, marginTop: '4px' }}>
-                      Created {fmtTS(c.created_at)}
-                      {c.created_by && c.created_by !== 'unknown' && <span> · by {c.created_by}</span>}
+                    <div style={{ fontSize: '11px', color: t.text3, display: 'flex', gap: '12px', fontFamily: 'monospace' }}>
+                      <span>{c.total_bills} bills</span>
+                      <span style={{ color: t.gold }}>{fmtWt(c.total_net_wt)}</span>
+                      <span style={{ color: t.blue }}>₹{fmt(Math.round(c.total_amount))}</span>
                     </div>
                   </div>
-                  <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-start' }}>
-                    <button onClick={() => reject(c)} disabled={!!actionId}
-                      style={{ background: 'transparent', border: `1px solid ${t.red}`, borderRadius: '8px', padding: '8px 18px', fontSize: '12px', color: t.red, fontWeight: 600, cursor: actionId ? 'not-allowed' : 'pointer', opacity: isRejectBusy ? 0.6 : 1, whiteSpace: 'nowrap' }}>
-                      {isRejectBusy ? '…' : '✕ Reject'}
+                  {/* Row 3: timestamp + preview links */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap', marginTop: '2px' }}>
+                    <span style={{ fontSize: '10px', color: t.text4 }}>
+                      {fmtTS(c.created_at)}{c.created_by && c.created_by !== 'unknown' ? ` · ${c.created_by}` : ''}
+                    </span>
+                    <span style={{ color: t.text4, fontSize: '10px' }}>·</span>
+                    <button onClick={() => previewDoc(`/api/generate-consignee-report?id=${c.id}`, `Report-${c.tmp_prf_no}.jpg`, msg => showToast(msg, 'error'))}
+                      title="Preview Consignee Report"
+                      style={{ background: 'transparent', border: 'none', padding: 0, fontSize: '10px', color: t.purple, fontWeight: 600, cursor: 'pointer', textDecoration: 'underline' }}>
+                      📋 Report
                     </button>
-                    <button onClick={() => approve(c)} disabled={!!actionId}
-                      style={{ background: t.green, color: '#fff', border: 'none', borderRadius: '8px', padding: '8px 22px', fontSize: '12px', fontWeight: 700, cursor: actionId ? 'not-allowed' : 'pointer', opacity: isApproveBusy ? 0.6 : 1, whiteSpace: 'nowrap', boxShadow: `0 2px 8px ${t.green}40` }}>
-                      {isApproveBusy ? '…' : '✓ Approve'}
+                    <button onClick={() => previewDoc(
+                        isType ? `/api/generate-issue-voucher-pdf?id=${c.id}` : `/api/generate-challan-pdf?id=${c.id}`,
+                        `${isType ? 'Voucher' : 'Challan'}-${c.tmp_prf_no}.pdf`,
+                        msg => showToast(msg, 'error'))}
+                      title={isType ? 'Preview Issue Voucher' : 'Preview Delivery Challan'}
+                      style={{ background: 'transparent', border: 'none', padding: 0, fontSize: '10px', color: t.gold, fontWeight: 600, cursor: 'pointer', textDecoration: 'underline' }}>
+                      📄 {isType ? 'Voucher' : 'Challan'}
                     </button>
+                    {c.eway_bill_no && (
+                      <button onClick={() => previewDoc(`/api/eway-bill/pdf?id=${c.id}`, `EWB-${c.eway_bill_no}.pdf`, msg => showToast(msg, 'error'))}
+                        title={`Preview E-Way Bill ${c.eway_bill_no}`}
+                        style={{ background: 'transparent', border: 'none', padding: 0, fontSize: '10px', color: t.green, fontWeight: 600, cursor: 'pointer', textDecoration: 'underline' }}>
+                        ⚡ EWB
+                      </button>
+                    )}
+                    {c.irn && (
+                      <button onClick={() => previewDoc(`/api/e-invoice/pdf?id=${c.id}`, `EInvoice-${c.tmp_prf_no}.pdf`, msg => showToast(msg, 'error'))}
+                        title="Preview E-Invoice PDF"
+                        style={{ background: 'transparent', border: 'none', padding: 0, fontSize: '10px', color: t.purple, fontWeight: 600, cursor: 'pointer', textDecoration: 'underline' }}>
+                        ⚡ E-Invoice
+                      </button>
+                    )}
                   </div>
                 </div>
 
-                {/* Stats grid — only populated columns shown */}
-                <div style={{ padding: '0 22px 14px', display: 'grid', gridTemplateColumns: `repeat(${stats.length}, 1fr)`, gap: '8px' }}>
-                  {stats.map(([label, val, color]) => (
-                    <div key={label} style={{ background: t.card2, borderRadius: '8px', padding: '10px 14px' }}>
-                      <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 600 }}>{label}</div>
-                      <div style={{ fontSize: '13px', color, fontWeight: 600, fontFamily: 'monospace', marginTop: '3px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{val}</div>
-                    </div>
-                  ))}
-                </div>
-
-                {/* Document preview footer */}
-                <div style={{ padding: '12px 22px', borderTop: `1px solid ${t.border}`, background: t.card2, display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
-                  <span style={{ fontSize: '11px', color: t.text3, fontWeight: 500, letterSpacing: '.05em', textTransform: 'uppercase' }}>Review:</span>
-                  <button onClick={() => previewDoc(`/api/generate-consignee-report?id=${c.id}`, `Report-${c.tmp_prf_no}.jpg`, msg => showToast(msg, 'error'))}
-                    style={{ background: t.card, border: `1px solid ${t.purple}50`, borderRadius: '6px', padding: '5px 12px', fontSize: '11px', color: t.purple, fontWeight: 600, cursor: 'pointer' }}>
-                    📋 Consignee Report
+                {/* Right side: Reject + Approve */}
+                <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                  <button onClick={() => reject(c)} disabled={!!actionId}
+                    style={{ background: 'transparent', border: `1px solid ${t.red}`, borderRadius: '7px', padding: '7px 14px', fontSize: '11px', color: t.red, fontWeight: 600, cursor: actionId ? 'not-allowed' : 'pointer', opacity: isRejectBusy ? 0.6 : 1, whiteSpace: 'nowrap' }}>
+                    {isRejectBusy ? '…' : '✕ Reject'}
                   </button>
-                  <button onClick={() => previewDoc(
-                      isType ? `/api/generate-issue-voucher-pdf?id=${c.id}` : `/api/generate-challan-pdf?id=${c.id}`,
-                      `${isType ? 'Voucher' : 'Challan'}-${c.tmp_prf_no}.pdf`,
-                      msg => showToast(msg, 'error'))}
-                    style={{ background: t.card, border: `1px solid ${t.gold}80`, borderRadius: '6px', padding: '5px 12px', fontSize: '11px', color: t.gold, fontWeight: 600, cursor: 'pointer' }}>
-                    📄 {isType ? 'Issue Voucher' : 'Delivery Challan'}
+                  <button onClick={() => approve(c)} disabled={!!actionId}
+                    style={{ background: t.green, color: '#fff', border: 'none', borderRadius: '7px', padding: '7px 18px', fontSize: '11px', fontWeight: 700, cursor: actionId ? 'not-allowed' : 'pointer', opacity: isApproveBusy ? 0.6 : 1, whiteSpace: 'nowrap', boxShadow: `0 2px 8px ${t.green}40` }}>
+                    {isApproveBusy ? '…' : '✓ Approve'}
                   </button>
-                  {c.eway_bill_no && (
-                    <button onClick={() => previewDoc(`/api/eway-bill/pdf?id=${c.id}`, `EWB-${c.eway_bill_no}.pdf`, msg => showToast(msg, 'error'))}
-                      style={{ background: t.card, border: `1px solid ${t.green}80`, borderRadius: '6px', padding: '5px 12px', fontSize: '11px', color: t.green, fontWeight: 600, cursor: 'pointer' }}>
-                      ⚡ E-Way Bill
-                    </button>
-                  )}
-                  {c.irn && (
-                    <button onClick={() => previewDoc(`/api/e-invoice/pdf?id=${c.id}`, `EInvoice-${c.tmp_prf_no}.pdf`, msg => showToast(msg, 'error'))}
-                      style={{ background: t.card, border: `1px solid ${t.purple}80`, borderRadius: '6px', padding: '5px 12px', fontSize: '11px', color: t.purple, fontWeight: 600, cursor: 'pointer' }}>
-                      ⚡ E-Invoice
-                    </button>
-                  )}
-                  <span style={{ marginLeft: 'auto', fontSize: '10px', color: t.text4, fontStyle: 'italic' }}>
-                    Click to download a preview before approving
-                  </span>
                 </div>
               </div>
             )
