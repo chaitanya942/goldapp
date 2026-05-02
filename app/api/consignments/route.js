@@ -166,8 +166,43 @@ export async function GET(req) {
       .neq('region', 'Bangalore')
     const outsideNames = (outsideBranches || []).map(b => b.name)
 
-    // Filter by current_branch (physical location). For older rows where current_branch
-    // is null we fall back to branch_name. The OR captures both cases.
+    // Two queries merged client-side:
+    //   1. OWN bills — strict filter (approved, not deleted, at_branch)
+    //   2. TRANSFERRED-IN bills — relaxed filter (just at_branch + not deleted)
+    //      because the source branch already validated approval before transfer.
+    //      Without this, bills that were legitimately moved disappear from the
+    //      hub picker if their crm_status changed (e.g. amendments) post-move.
+    if (branch) {
+      let ownQ = supabase
+        .from('purchases')
+        .select('*')
+        .eq('stock_status', 'at_branch')
+        .eq('crm_status', 'approved')
+        .eq('is_deleted', false)
+        .eq('branch_name', branch)
+        .or(`current_branch.eq.${branch},current_branch.is.null`)
+
+      let transferredQ = supabase
+        .from('purchases')
+        .select('*')
+        .eq('stock_status', 'at_branch')
+        .eq('is_deleted', false)
+        .neq('branch_name', branch)
+        .eq('current_branch', branch)
+
+      if (dateFrom) { ownQ = ownQ.gte('purchase_date', dateFrom); transferredQ = transferredQ.gte('purchase_date', dateFrom) }
+      if (dateTo)   { ownQ = ownQ.lte('purchase_date', dateTo);   transferredQ = transferredQ.lte('purchase_date', dateTo) }
+
+      const [{ data: ownData, error: ownErr }, { data: trData, error: trErr }] =
+        await Promise.all([ownQ, transferredQ])
+      if (ownErr || trErr) return Response.json({ data: [], error: (ownErr || trErr).message })
+
+      const merged = [...(ownData || []), ...(trData || [])]
+        .sort((a, b) => new Date(b.purchase_date) - new Date(a.purchase_date))
+      return Response.json({ data: merged })
+    }
+
+    // Branch-overview path (no specific branch) — keep original strict filter.
     let query = supabase
       .from('purchases')
       .select('*')
@@ -175,13 +210,7 @@ export async function GET(req) {
       .eq('crm_status', 'approved')
       .eq('is_deleted', false)
       .order('purchase_date', { ascending: false })
-
-    if (branch) {
-      query = query.or(`current_branch.eq.${branch},and(current_branch.is.null,branch_name.eq.${branch})`)
-    } else {
-      // Limit to outside branches only — match on whichever location field is populated
-      query = query.or(`current_branch.in.(${outsideNames.map(n => `"${n}"`).join(',')}),and(current_branch.is.null,branch_name.in.(${outsideNames.map(n => `"${n}"`).join(',')}))`)
-    }
+      .or(`current_branch.in.(${outsideNames.map(n => `"${n}"`).join(',')}),and(current_branch.is.null,branch_name.in.(${outsideNames.map(n => `"${n}"`).join(',')}))`)
     if (dateFrom) query = query.gte('purchase_date', dateFrom)
     if (dateTo)   query = query.lte('purchase_date', dateTo)
 

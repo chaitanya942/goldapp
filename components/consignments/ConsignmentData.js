@@ -159,12 +159,26 @@ export default function ConsignmentData() {
     }
   }, [consignmentDeepLink])
 
-  // Fetch transfer history when entering a branch view (only useful for hubs)
+  // Fetch transfer history when entering a branch view (only useful for hubs).
+  // Also auto-select all transferred-in bills — they MUST be included in the
+  // hub's onward consignment, so locking them prevents accidental orphaning.
   useEffect(() => {
     if (!nav?.branch) { setTransferHistory({}); return }
     fetch(`/api/consignments?action=transfer_history&branch=${encodeURIComponent(nav.branch)}`)
       .then(r => r.json())
-      .then(({ data }) => setTransferHistory(data || {}))
+      .then(({ data }) => {
+        const map = data || {}
+        setTransferHistory(map)
+        // Auto-add transferred-in bill IDs to the selection
+        const transferredIds = Object.keys(map)
+        if (transferredIds.length) {
+          setSelected(prev => {
+            const next = new Set(prev)
+            transferredIds.forEach(id => next.add(id))
+            return next
+          })
+        }
+      })
       .catch(() => setTransferHistory({}))
   }, [nav?.branch])
 
@@ -745,12 +759,17 @@ export default function ConsignmentData() {
                   const days     = daysSince(row.purchase_date)
                   const fromOther = isHub && row.branch_name !== nav.branch
                   return (
-                    <tr key={row.id} onClick={() => toggleRow(row.id)}
-                      style={{ borderBottom: `1px solid ${t.border}15`, background: isSel ? `${t.gold}08` : 'transparent', cursor: 'pointer' }}
-                      onMouseEnter={e => { if (!isSel) e.currentTarget.style.background = `${t.gold}04` }}
-                      onMouseLeave={e => { if (!isSel) e.currentTarget.style.background = 'transparent' }}>
+                    <tr key={row.id} onClick={() => { if (!fromOther) toggleRow(row.id) }}
+                      style={{ borderBottom: `1px solid ${t.border}15`, background: fromOther ? `${t.purple}06` : (isSel ? `${t.gold}08` : 'transparent'), cursor: fromOther ? 'not-allowed' : 'pointer' }}
+                      onMouseEnter={e => { if (!fromOther && !isSel) e.currentTarget.style.background = `${t.gold}04` }}
+                      onMouseLeave={e => { if (!fromOther && !isSel) e.currentTarget.style.background = 'transparent' }}>
                       <td style={{ padding: '10px 14px' }} onClick={e => e.stopPropagation()}>
-                        <input type="checkbox" checked={isSel} onChange={() => toggleRow(row.id)} style={{ cursor: 'pointer', accentColor: t.gold }} />
+                        <input type="checkbox"
+                          checked={fromOther ? true : isSel}
+                          disabled={fromOther}
+                          onChange={() => { if (!fromOther) toggleRow(row.id) }}
+                          title={fromOther ? `Locked — transferred in from ${row.branch_name}, must be included in this hub's onward consignment` : ''}
+                          style={{ cursor: fromOther ? 'not-allowed' : 'pointer', accentColor: fromOther ? t.purple : t.gold }} />
                       </td>
                       <td style={{ padding: '10px 14px', fontSize: '12px', color: t.text3, whiteSpace: 'nowrap' }}>{fmtDate(row.purchase_date)}</td>
                       {isHub && (
