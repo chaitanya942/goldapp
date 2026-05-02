@@ -471,6 +471,9 @@ export default function ConsignmentData() {
     if (showEwb && cur.eway_bill_no) {
       files.push({ url: `/api/eway-bill/pdf?id=${cur.id}`, name: `EWB_${sanitize(cur.eway_bill_no)}.pdf` })
     }
+    if (showEinv && cur.irn) {
+      files.push({ url: `/api/e-invoice/pdf?id=${cur.id}`, name: `EInvoice_${sanitize(cur.tmp_prf_no || 'IRN')}.pdf` })
+    }
     // Use the refreshed cur object below
     c = cur
 
@@ -523,14 +526,15 @@ export default function ConsignmentData() {
             failures.push(`${f.name}: ${e.message}`)
           }
         }
+        // Always write a small details file with IRN/AckNo for quick reference
+        // alongside the signed PDF (which is now in `files`).
         if (showEinv && c.irn) {
           try {
             const txtHandle = await subDir.getFileHandle('E-Invoice_Details.txt', { create: true })
             const w = await txtHandle.createWritable()
             await w.write(`IRN: ${c.irn}\nAck No: ${c.ack_no || ''}\nAck Date: ${c.ack_dt || ''}\n`)
             await w.close()
-            summary.push(`IRN ${String(c.irn).slice(0, 8)}…`)
-          } catch (e) { failures.push(`IRN: ${e.message}`) }
+          } catch (e) { /* non-critical, PDF is the authoritative copy */ }
         }
 
         const missing = []
@@ -561,10 +565,10 @@ export default function ConsignmentData() {
           summary.push(f.name.split('.')[0].replace(/_/g, ' '))
         } catch (e) { failures.push(`${f.name}: ${e.message}`) }
       }
+      // Reference text file alongside the signed PDF
       if (showEinv && c.irn) {
         zip.file(`${folderName}/E-Invoice_Details.txt`,
           `IRN: ${c.irn}\nAck No: ${c.ack_no || ''}\nAck Date: ${c.ack_dt || ''}\n`)
-        summary.push(`IRN ${String(c.irn).slice(0, 8)}…`)
       }
       const blob = await zip.generateAsync({ type: 'blob' })
       const a = document.createElement('a')
@@ -934,6 +938,17 @@ export default function ConsignmentData() {
                           <span title={c.irn} style={{ fontSize: '10px', color: t.purple, background: `${t.purple}15`, borderRadius: '4px', padding: '2px 7px', fontWeight: 600, fontFamily: 'monospace' }}>
                             IRN: {String(c.irn).slice(0, 8)}…
                           </span>
+                          <button onClick={async () => {
+                            setDownloadingId(c.id + ':einv')
+                            await triggerDownload(`/api/e-invoice/pdf?id=${c.id}`,
+                              `EInvoice_${c.tmp_prf_no || c.id}.pdf`,
+                              msg => setToast({ msg, type: 'error' }))
+                            setDownloadingId(null)
+                          }} disabled={!!downloadingId}
+                            title="Download signed E-Invoice PDF (with QR code)"
+                            style={{ background: t.purple, color: '#fff', border: 'none', borderRadius: '5px', padding: '3px 8px', fontSize: '10px', fontWeight: 600, cursor: 'pointer', opacity: downloadingId === c.id + ':einv' ? 0.6 : 1 }}>
+                            {downloadingId === c.id + ':einv' ? '⏳' : '📄 PDF'}
+                          </button>
                           <button onClick={() => cancelEinv(c)} disabled={!!ewbActionId}
                             title="Cancel E-Invoice (within 24h)"
                             style={{ background: 'transparent', border: `1px solid ${t.red}40`, borderRadius: '5px', padding: '3px 8px', fontSize: '10px', color: t.red, cursor: 'pointer', opacity: ewbActionId === c.id + ':einv-cancel' ? 0.6 : 1 }}>
