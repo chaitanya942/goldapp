@@ -1,8 +1,13 @@
 // app/api/transcribe-call/route.js
-// Step 1: Groq Whisper large-v3 — FREE, auto language detect
-// Step 2: Claude Haiku — diarization (~₹0.0001/call)
+// Step 1: Groq Whisper large-v3 — free tier, auto language detect.
+// Step 2: Claude Haiku — diarization (~₹0.0001/call).
+// Costs LLM credits; restrict to ADMIN.
+
+import { requireAuth, ROLE_GROUPS } from '../../../lib/apiAuth'
 
 export async function POST(req) {
+  const auth = await requireAuth(req, { requiredRoles: ROLE_GROUPS.ADMIN })
+  if (!auth.ok) return auth.response
   try {
     const { callId, recordingUrl } = await req.json()
     if (!recordingUrl) return Response.json({ error: 'Missing recordingUrl' }, { status: 400 })

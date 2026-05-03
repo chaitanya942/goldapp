@@ -3,11 +3,9 @@
   import { useState, useEffect, useRef } from 'react'
   import { supabase } from '../../lib/supabase'
   import { useApp } from '../../lib/context'
-
-  const THEMES = {
-    dark:  { bg: '#0a0a0a', card: '#111111', card2: '#161616', text1: '#f0e6c8', text2: '#c8b89a', text3: '#9a8a6a', text4: '#6a5a3a', gold: '#c9a84c', border: '#1e1e1e', border2: '#252525', green: '#3aaa6a', red: '#e05555', blue: '#3a8fbf', orange: '#c9981f', purple: '#8c5ac8' },
-    light: { bg: '#f5f0e8', card: '#faf7f2', card2: '#e0d9cc', text1: '#1a1208', text2: '#3a2a10', text3: '#7a6a4a', text4: '#9a8a6a', gold: '#9a7228', border: '#e0dace', border2: '#c5bca8', green: '#2a8a5a', red: '#c03030', blue: '#2a6a9a', orange: '#a07010', purple: '#6a3a9a' },
-  }
+  import { authedFetch } from '../../lib/authedFetch'
+  import { CONSIGNMENT_THEMES as THEMES } from '../../lib/consignmentTheme'
+  import { openAlert } from '../ui/ConfirmDialog'
 
   const OUTCOMES = [
     { value: '',               label: 'All Outcomes',   color: '' },
@@ -135,7 +133,7 @@
     async function handleSync() {
       setSyncing(true); setSyncResult(null)
       try {
-        const res  = await fetch('/api/sync-gnani', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) })
+        const res  = await authedFetch('/api/sync-gnani', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) })
         const data = await res.json()
         setSyncResult(data); setLastSynced(new Date())
         if (data.inserted > 0) await fetchCalls()
@@ -161,7 +159,7 @@
       if (call.s3_key) {
         setLoadingAudio(true)
         try {
-          const res  = await fetch('/api/presign-recording', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ s3_key: call.s3_key }) })
+          const res  = await authedFetch('/api/presign-recording', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ s3_key: call.s3_key }) })
           const data = await res.json()
           if (data.url) setPresignedUrl(data.url)
         } catch (err) { console.error('Presign error:', err) }
@@ -214,7 +212,7 @@
       if (!ids.length) return
       setBulkDownloading(true)
       try {
-        const res  = await fetch('/api/bulk-download-recordings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids }) })
+        const res  = await authedFetch('/api/bulk-download-recordings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids }) })
         if (!res.ok) throw new Error(`Download failed (${res.status})`)
         const blob = await res.blob()
         const url  = URL.createObjectURL(blob)
@@ -229,10 +227,10 @@
 
 
     async function handleTranscribe() {
-      if (!presignedUrl) { alert('Audio not loaded yet.'); return }
+      if (!presignedUrl) { openAlert({ title: 'Audio not loaded', message: 'Please wait a moment and try again.' }); return }
       setTranscribing(true)
       try {
-        const res  = await fetch('/api/transcribe-call', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ callId: selectedCall.id, recordingUrl: presignedUrl }) })
+        const res  = await authedFetch('/api/transcribe-call', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ callId: selectedCall.id, recordingUrl: presignedUrl }) })
         const data = await res.json()
         if (data.error) throw new Error(data.error)
         if (data.transcript) {
@@ -240,21 +238,21 @@
           setCalls(updated)
           setSelectedCall(prev => ({ ...prev, transcript: data.transcript, language: data.language || prev.language, duration_seconds: data.duration_seconds || prev.duration_seconds }))
         }
-      } catch (err) { alert('Transcription failed: ' + err.message) }
+      } catch (err) { openAlert({ title: 'Transcription failed', message: err.message }) }
       finally { setTranscribing(false) }
     }
 
     async function handleTranscribeAll() {
       const pending = calls.filter(c => !c.transcript && c.s3_key)
-      if (!pending.length) { alert('All calls already transcribed.'); return }
+      if (!pending.length) { openAlert({ title: 'Nothing to transcribe', message: 'Every call in this list already has a transcript.' }); return }
       setTranscribeAllProgress({ done: 0, total: pending.length })
       for (let i = 0; i < pending.length; i++) {
         const call = pending[i]
         try {
-          const presignRes  = await fetch('/api/presign-recording', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ s3_key: call.s3_key }) })
+          const presignRes  = await authedFetch('/api/presign-recording', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ s3_key: call.s3_key }) })
           const presignData = await presignRes.json()
           if (!presignData.url) continue
-          const res  = await fetch('/api/transcribe-call', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ callId: call.id, recordingUrl: presignData.url }) })
+          const res  = await authedFetch('/api/transcribe-call', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ callId: call.id, recordingUrl: presignData.url }) })
           const data = await res.json()
           if (data.transcript) {
             setCalls(prev => prev.map(c => c.id === call.id ? { ...c, transcript: data.transcript, language: data.language || c.language, duration_seconds: data.duration_seconds || c.duration_seconds } : c))
@@ -268,10 +266,10 @@
 
     async function handleSummarize() {
       const turns = parseTranscript(selectedCall.transcript)
-      if (!turns.length) { alert('Transcribe the call first.'); return }
+      if (!turns.length) { openAlert({ title: 'No transcript', message: 'Transcribe the call before running this action.' }); return }
       setSummarizing(true)
       try {
-        const res  = await fetch('/api/summarize-call', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ callId: selectedCall.id, transcript: selectedCall.transcript }) })
+        const res  = await authedFetch('/api/summarize-call', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ callId: selectedCall.id, transcript: selectedCall.transcript }) })
         const data = await res.json()
         if (data.error) throw new Error(data.error)
         if (data.summary) {
@@ -279,20 +277,20 @@
           setCalls(updated)
           setSelectedCall(prev => ({ ...prev, summary: data.summary }))
         }
-      } catch (err) { alert('Summary failed: ' + err.message) }
+      } catch (err) { openAlert({ title: 'Summary failed', message: err.message }) }
       finally { setSummarizing(false) }
     }
 
     async function handleTranslate() {
       const turns = parseTranscript(selectedCall.transcript)
-      if (!turns.length) { alert('Transcribe the call first.'); return }
+      if (!turns.length) { openAlert({ title: 'No transcript', message: 'Transcribe the call before running this action.' }); return }
       setTranslating(true); setTranslated(null)
       try {
-        const res  = await fetch('/api/translate-transcript', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ turns, callId: selectedCall.id }) })
+        const res  = await authedFetch('/api/translate-transcript', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ turns, callId: selectedCall.id }) })
         const data = await res.json()
         if (data.error) throw new Error(data.error)
         if (data.turns) setTranslated(data.turns)
-      } catch (err) { alert('Translation failed: ' + err.message) }
+      } catch (err) { openAlert({ title: 'Translation failed', message: err.message }) }
       finally { setTranslating(false) }
     }
 
@@ -305,7 +303,7 @@
         const disposition = safeName(selectedCall.call_disposition)
         const nameParts   = [selectedCall.call_date, time, selectedCall.customer_number, customer, disposition].filter(Boolean)
         const filename    = `${nameParts.join('_')}.mp3`
-        const res  = await fetch('/api/download-recording', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ s3_key: selectedCall.s3_key, filename }) })
+        const res  = await authedFetch('/api/download-recording', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ s3_key: selectedCall.s3_key, filename }) })
         if (!res.ok) throw new Error('Download failed')
         const blob = await res.blob()
         const url  = URL.createObjectURL(blob)
@@ -313,7 +311,7 @@
         a.href = url; a.download = filename
         document.body.appendChild(a); a.click(); document.body.removeChild(a)
         URL.revokeObjectURL(url)
-      } catch (err) { alert('Download failed: ' + err.message) }
+      } catch (err) { openAlert({ title: 'Download failed', message: err.message }) }
     }
 
     async function handleSaveOutcome() {

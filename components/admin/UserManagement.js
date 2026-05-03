@@ -3,11 +3,10 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../../lib/supabase'
 import { useApp } from '../../lib/context'
+import { authedFetch } from '../../lib/authedFetch'
+import { openAlert, openConfirm } from '../ui/ConfirmDialog'
 
-const THEMES = {
-  dark:  { bg: '#0e0e0e', card: '#141414', card2: '#1a1a1a', text1: '#f0e6c8', text2: '#c8b89a', text3: '#7a6a4a', text4: '#4a3a2a', gold: '#c9a84c', border: '#2a2a2a', border2: '#333333', green: '#3aaa6a', red: '#e05555', blue: '#3a8fbf' },
-  light: { bg: '#f5f0e8', card: '#ede8dc', card2: '#e4dfd3', text1: '#1a1208', text2: '#3a2a10', text3: '#8a7a5a', text4: '#b0a080', gold: '#9a7228', border: '#e0dace', border2: '#c8c0b0', green: '#2a8a5a', red: '#cc3333', blue: '#2a6fa0' },
-}
+import { CONSIGNMENT_THEMES as THEMES } from '../../lib/consignmentTheme'
 
 // Fallback used only before API loads
 const DEFAULT_ROLES = [
@@ -63,7 +62,7 @@ export default function UserManagement() {
     setLoading(true)
     const [{ data }, rbacRes] = await Promise.all([
       supabase.from('user_profiles').select('*').order('full_name'),
-      fetch('/api/rbac?action=all').then(r => r.json()).catch(() => null),
+      authedFetch('/api/rbac?action=all').then(r => r.json()).catch(() => null),
     ])
     if (data) setUsers(data)
     if (rbacRes?.roles?.length) {
@@ -81,8 +80,9 @@ export default function UserManagement() {
     setInvMsg(null)
 
     try {
-      // Call server-side API route (uses service role key securely)
-      const res = await fetch('/api/invite-user', {
+      // Server-side route uses the service role key. authedFetch injects the
+      // caller's session token so the route can verify the caller is admin.
+      const res = await authedFetch('/api/invite-user', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -121,7 +121,7 @@ export default function UserManagement() {
     setSavingId(id)
     setConfirmDelete(null)
     try {
-      const res = await fetch('/api/delete-user', {
+      const res = await authedFetch('/api/delete-user', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userId: id }),
@@ -130,7 +130,7 @@ export default function UserManagement() {
       if (!res.ok) throw new Error(data.error)
       await load()
     } catch (err) {
-      alert(err.message)
+      openAlert({ title: 'Delete failed', message: err.message })
     }
     setSavingId(null)
   }
@@ -149,13 +149,10 @@ export default function UserManagement() {
     setExSaving(true)
     setInvMsg(null)
     try {
-      const { data: { session } } = await supabase.auth.getSession()
-      const res = await fetch('/api/add-user-profile', {
+      // authedFetch handles bearer injection — no need to manually pull session.
+      const res = await authedFetch('/api/add-user-profile', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${session?.access_token}`,
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           id:        exUuid.trim(),
           email:     exEmail.trim(),

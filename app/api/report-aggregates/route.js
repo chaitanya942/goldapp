@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js'
+import { requireAuth } from '../../../lib/apiAuth'
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
@@ -13,6 +14,12 @@ const TOD_META = {
 }
 
 export async function GET(request) {
+  // Aggregations include branch revenue + daily transaction counts. Any
+  // authenticated user can view, since the reports module is gated by role
+  // already in the UI.
+  const auth = await requireAuth(request, { requiredRoles: null })
+  if (!auth.ok) return auth.response
+
   const url            = new URL(request.url)
   const fromDate       = url.searchParams.get('from')             || ''
   const toDate         = url.searchParams.get('to')               || ''

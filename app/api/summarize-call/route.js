@@ -1,7 +1,12 @@
 // app/api/summarize-call/route.js
-// Claude Haiku — generates 2-line call summary (~₹0.0001/call)
+// Claude Haiku generates a 2-line call summary (~₹0.0001/call). LLM-cost
+// endpoint; restrict to ADMIN.
+
+import { requireAuth, ROLE_GROUPS } from '../../../lib/apiAuth'
 
 export async function POST(req) {
+  const auth = await requireAuth(req, { requiredRoles: ROLE_GROUPS.ADMIN })
+  if (!auth.ok) return auth.response
   try {
     const { callId, transcript } = await req.json()
     if (!transcript) return Response.json({ error: 'No transcript' }, { status: 400 })

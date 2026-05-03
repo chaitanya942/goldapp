@@ -38,6 +38,12 @@ export function openPrompt(opts) {
   })
 }
 
+// Themed replacement for window.alert() — single OK button, no cancel.
+// Useful for "this failed, here's why" error toasts that need acknowledgement.
+export function openAlert(opts) {
+  return openConfirm({ ...opts, hideCancel: true, confirmLabel: opts.confirmLabel || 'OK' })
+}
+
 export default function DialogHost() {
   const { theme } = useApp()
   const t = T[theme || 'dark']
@@ -135,10 +141,12 @@ export default function DialogHost() {
           </>
         )}
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '16px' }}>
-          <button ref={cancelRef} onClick={() => close(state.kind === 'prompt' ? '' : false)}
-            style={{ background: 'transparent', border: `1px solid ${t.border}`, borderRadius: '7px', padding: '8px 16px', fontSize: '12px', color: t.text3, cursor: 'pointer', fontWeight: 500 }}>
-            {cancelLabel}
-          </button>
+          {!state.hideCancel && (
+            <button ref={cancelRef} onClick={() => close(state.kind === 'prompt' ? '' : false)}
+              style={{ background: 'transparent', border: `1px solid ${t.border}`, borderRadius: '7px', padding: '8px 16px', fontSize: '12px', color: t.text3, cursor: 'pointer', fontWeight: 500 }}>
+              {cancelLabel}
+            </button>
+          )}
           <button onClick={submit} disabled={!minOk}
             style={{ background: primaryColor, color: '#fff', border: 'none', borderRadius: '7px', padding: '8px 22px', fontSize: '12px', fontWeight: 700, cursor: minOk ? 'pointer' : 'not-allowed', opacity: minOk ? 1 : 0.4 }}>
             {primaryLabel}

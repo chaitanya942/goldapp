@@ -1,14 +1,19 @@
 // app/api/company-settings/route.js
 
 import { createClient } from '@supabase/supabase-js'
+import { requireAuth, ROLE_GROUPS } from '../../../lib/apiAuth'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
   process.env.SUPABASE_SERVICE_ROLE_KEY || 'placeholder'
 )
 
-// GET - Fetch company settings
-export async function GET() {
+// Read company settings — any authenticated user (consumed by branch staff
+// for HSN, tax rates, GSTIN lookups in their own UI).
+export async function GET(req) {
+  const auth = await requireAuth(req, { requiredRoles: null })
+  if (!auth.ok) return auth.response
+
   const { data, error } = await supabase
     .from('company_settings')
     .select('*')
@@ -18,8 +23,12 @@ export async function GET() {
   return Response.json({ data })
 }
 
-// POST - Update company settings
+// Update company settings — admin only. Mistakes here propagate into every
+// EWB / E-Invoice / PDF.
 export async function POST(req) {
+  const auth = await requireAuth(req, { requiredRoles: ROLE_GROUPS.ADMIN })
+  if (!auth.ok) return auth.response
+
   const body = await req.json()
 
   // Check if settings exist

@@ -1,7 +1,12 @@
 // app/api/translate-transcript/route.js
-// Translates diarized transcript turns to English using Claude Haiku (fast + cheap)
+// Translates diarized transcript turns to English using Claude Haiku.
+// LLM-cost endpoint; restrict to ADMIN.
+
+import { requireAuth, ROLE_GROUPS } from '../../../lib/apiAuth'
 
 export async function POST(req) {
+  const auth = await requireAuth(req, { requiredRoles: ROLE_GROUPS.ADMIN })
+  if (!auth.ok) return auth.response
   try {
     const { turns, callId } = await req.json()
     if (!turns?.length) return Response.json({ error: 'No turns to translate' }, { status: 400 })

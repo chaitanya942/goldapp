@@ -1,7 +1,9 @@
 // app/api/download-recording/route.js
-// Proxies S3 audio through our server so browser can download directly
+// Proxies S3 audio through our server so the browser can save with a
+// branded filename. Audio is customer PII — ADMIN only.
 
 import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3'
+import { requireAuth, ROLE_GROUPS } from '../../../lib/apiAuth'
 
 const s3 = new S3Client({
   region: 'ap-south-1',
@@ -12,6 +14,8 @@ const s3 = new S3Client({
 })
 
 export async function POST(req) {
+  const auth = await requireAuth(req, { requiredRoles: ROLE_GROUPS.ADMIN })
+  if (!auth.ok) return auth.response
   try {
     const { s3_key, filename } = await req.json()
     if (!s3_key) return new Response('Missing s3_key', { status: 400 })

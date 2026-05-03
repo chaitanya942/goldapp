@@ -1,8 +1,10 @@
 // app/api/bulk-download-recordings/route.js
-// Downloads multiple MP3s from S3 and returns a ZIP
+// Downloads multiple call MP3s from S3 and returns a ZIP. PII-heavy and
+// expensive (egress + memory); restrict to ADMIN.
 
 import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3'
 import { createClient } from '@supabase/supabase-js'
+import { requireAuth, ROLE_GROUPS } from '../../../lib/apiAuth'
 
 const s3 = new S3Client({
   region: 'ap-south-1',
@@ -128,6 +130,8 @@ function safe(str) {
 }
 
 export async function POST(req) {
+  const auth = await requireAuth(req, { requiredRoles: ROLE_GROUPS.ADMIN })
+  if (!auth.ok) return auth.response
   try {
     const { ids } = await req.json()
     if (!ids?.length) return new Response('No IDs provided', { status: 400 })

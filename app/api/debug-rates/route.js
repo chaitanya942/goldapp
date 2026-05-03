@@ -1,6 +1,14 @@
 // app/api/debug-rates/route.js
+// Diagnostic endpoint that hits external rate-provider sites. Admin-only:
+// it makes outbound calls + returns raw HTML lengths/snippets that fingerprint
+// our infra, and there's no rate limit.
 
-export async function GET() {
+import { requireAuth, ROLE_GROUPS } from '../../../lib/apiAuth'
+
+export async function GET(req) {
+  const auth = await requireAuth(req, { requiredRoles: ROLE_GROUPS.ADMIN })
+  if (!auth.ok) return auth.response
+
   const results = {}
 
   // Test 1: Ambicaa liverate page

@@ -1,13 +1,18 @@
-// API to set/get initial seed values for consignment number generation
+// API to set/get initial seed values for consignment number generation.
+// Reads are admin-only (used by Admin > Consignment Seeds page); writes
+// change the next-issued PRF/voucher numbers and are also admin-only.
 import { createClient } from '@supabase/supabase-js'
+import { requireAuth, ROLE_GROUPS } from '../../../lib/apiAuth'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
   process.env.SUPABASE_SERVICE_ROLE_KEY || 'placeholder'
 )
 
-// GET: Fetch current seed values — 3 queries total (was 140+)
+// GET: Fetch current seed values (3 parallel queries instead of 140+).
 export async function GET(req) {
+  const auth = await requireAuth(req, { requiredRoles: ROLE_GROUPS.ADMIN })
+  if (!auth.ok) return auth.response
   try {
     // Run all 3 fetches in parallel
     const [branchesRes, consignmentsRes, globalExtRes] = await Promise.all([
@@ -70,8 +75,11 @@ export async function GET(req) {
   }
 }
 
-// POST: Manually set seed consignment for a branch
+// POST: Manually set seed consignment for a branch — changes the next
+// number issued, so admin only.
 export async function POST(req) {
+  const auth = await requireAuth(req, { requiredRoles: ROLE_GROUPS.ADMIN })
+  if (!auth.ok) return auth.response
   try {
     const body = await req.json()
     const { branch_name, tmp_prf_no, external_no, challan_no, state_code, branch_code } = body

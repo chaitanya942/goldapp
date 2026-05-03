@@ -3,6 +3,8 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useApp } from '../../lib/context'
 import { supabase } from '../../lib/supabase'
+import { authedFetch } from '../../lib/authedFetch'
+import { openAlert } from '../ui/ConfirmDialog'
 
 // ── Local role defaults ────────────────────────────────────────────────────────
 const _ROLE_PAGES = {
@@ -453,7 +455,7 @@ export default function RoleManagement() {
     setLoading(true); setLoadErr(null)
     try {
       const [rbacRes, { data: userRows }] = await Promise.all([
-        fetch('/api/rbac?action=all').then(r => r.json()),
+        authedFetch('/api/rbac?action=all').then(r => r.json()),
         supabase.from('user_profiles').select('id, full_name, email, role, is_active').order('full_name'),
       ])
       if (rbacRes.error) throw new Error(rbacRes.error)
@@ -587,7 +589,7 @@ export default function RoleManagement() {
     setSaving(true); setSaveMsg(null)
     try {
       const permissions = ALL_TREE_KEYS.map(key => ({ key, enabled: selectedPerms.has(key) }))
-      const res  = await fetch('/api/rbac', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'save_permissions', role_name: selected, permissions }) })
+      const res  = await authedFetch('/api/rbac', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'save_permissions', role_name: selected, permissions }) })
       const json = await res.json()
       if (!json.success) throw new Error(json.error)
       setDirty(prev => ({ ...prev, [selected]: false }))
@@ -602,7 +604,7 @@ export default function RoleManagement() {
     if (!newLabel.trim()) return
     setAdding(true); setAddErr(null)
     try {
-      const res  = await fetch('/api/rbac', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'create_role', name: newName || newLabel.toLowerCase().replace(/\s+/g, '_'), label: newLabel, color: newColor }) })
+      const res  = await authedFetch('/api/rbac', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'create_role', name: newName || newLabel.toLowerCase().replace(/\s+/g, '_'), label: newLabel, color: newColor }) })
       const json = await res.json()
       if (!json.success) throw new Error(json.error)
       setShowAdd(false); setNewLabel(''); setNewName(''); setNewColor('#3aaa6a')
@@ -617,7 +619,7 @@ export default function RoleManagement() {
     if (!editLabel.trim()) return
     setEditing(true); setEditErr(null)
     try {
-      const res  = await fetch('/api/rbac', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'update_role', name: selected, label: editLabel.trim(), color: editColor }) })
+      const res  = await authedFetch('/api/rbac', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'update_role', name: selected, label: editLabel.trim(), color: editColor }) })
       const json = await res.json()
       if (!json.success) throw new Error(json.error)
       setShowEdit(false); await load()
@@ -625,9 +627,9 @@ export default function RoleManagement() {
   }
   const confirmAndDelete = async () => {
     const name = confirmDelete; setConfirmDelete(null)
-    const res  = await fetch('/api/rbac', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'delete_role', name }) })
+    const res  = await authedFetch('/api/rbac', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'delete_role', name }) })
     const json = await res.json()
-    if (!json.success) { alert(json.error); return }
+    if (!json.success) { openAlert({ title: 'Delete role failed', message: json.error }); return }
     await load(); setSelected(null)
   }
 

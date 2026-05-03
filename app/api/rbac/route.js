@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js'
+import { requireAuth, ROLE_GROUPS } from '../../../lib/apiAuth'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
@@ -6,6 +7,11 @@ const supabase = createClient(
 )
 
 export async function GET(req) {
+  // Reads — every authenticated user. UI components rely on this for menu
+  // gating; making it ADMIN-only would lock everyone out of the dashboard.
+  const auth = await requireAuth(req, { requiredRoles: null })
+  if (!auth.ok) return auth.response
+
   const { searchParams } = new URL(req.url)
   const action = searchParams.get('action')
 
@@ -44,6 +50,10 @@ export async function GET(req) {
 }
 
 export async function POST(req) {
+  // Writes — admin only. Anyone with this could grant themselves super_admin.
+  const auth = await requireAuth(req, { requiredRoles: ROLE_GROUPS.ADMIN })
+  if (!auth.ok) return auth.response
+
   try {
     const body = await req.json()
     const { action } = body

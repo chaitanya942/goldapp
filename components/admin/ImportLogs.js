@@ -3,11 +3,7 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../../lib/supabase'
 import { useApp } from '../../lib/context'
-
-const THEMES = {
-  dark:  { card: '#141414', text1: '#f0e6c8', text3: '#7a6a4a', text4: '#4a3a2a', gold: '#c9a84c', border: '#2a2a2a', green: '#3aaa6a' },
-  light: { card: '#ede8dc', text1: '#1a1208', text3: '#8a7a5a', text4: '#b0a080', gold: '#9a7228', border: '#e0dace', green: '#2a8a5a' },
-}
+import { CONSIGNMENT_THEMES as THEMES } from '../../lib/consignmentTheme'
 
 export default function ImportLogs() {
   const { theme } = useApp()

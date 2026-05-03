@@ -2,11 +2,10 @@
 
 import React, { useState, useEffect } from 'react'
 import { useApp } from '../../lib/context'
+import { authedFetch } from '../../lib/authedFetch'
+import { openPrompt } from '../ui/ConfirmDialog'
 
-const THEMES = {
-  dark:  { bg: '#0a0a0a', card: '#111111', card2: '#161616', text1: '#f0e6c8', text2: '#c8b89a', text3: '#9a8a6a', text4: '#6a5a3a', gold: '#c9a84c', border: '#1e1e1e', green: '#3aaa6a', red: '#e05555', blue: '#3a8fbf' },
-  light: { bg: '#f5f0e8', card: '#faf7f2', card2: '#e0d9cc', text1: '#1a1208', text2: '#3a2a10', text3: '#7a6a4a', text4: '#9a8a6a', gold: '#9a7228', border: '#e0dace', green: '#2a8a5a', red: '#c03030', blue: '#2a6a9a' },
-}
+import { CONSIGNMENT_THEMES as THEMES } from '../../lib/consignmentTheme'
 
 function nextNo(no) {
   return String((parseInt(no) || 0) + 1).padStart(6, '0')
@@ -27,7 +26,7 @@ export default function ConsignmentSeeds() {
 
   async function fetchSeeds() {
     setLoading(true)
-    const res  = await fetch('/api/consignment-seed')
+    const res  = await authedFetch('/api/consignment-seed')
     const data = await res.json()
     setLastExtNo(data.last_external_no || '000000')
     setBranches(data.branches || [])
@@ -35,13 +34,29 @@ export default function ConsignmentSeeds() {
   }
 
   async function setSeed(branch) {
-    const newExtNo = prompt(`Enter last used External No for ${branch.branch_name}:`, branch.last_external_no)
+    const newExtNo = await openPrompt({
+      title: `Seed external number for ${branch.branch_name}`,
+      message: 'Enter the last used External No. The next consignment from this branch will increment from this value.',
+      defaultValue: branch.last_external_no || '',
+      placeholder: 'e.g. 000123',
+      rows: 1,
+      maxLength: 20,
+      confirmLabel: 'Next',
+    })
     if (!newExtNo) return
-    const newTmpPrf = prompt('Enter last used TMP PRF No for this branch:', branch.last_tmp_prf_no === '—' ? 'WG000000' : branch.last_tmp_prf_no)
+    const newTmpPrf = await openPrompt({
+      title: `Seed TMP PRF for ${branch.branch_name}`,
+      message: 'Enter the last used TMP PRF No (8 chars, e.g. WG000045). The next PRF will increment from this value.',
+      defaultValue: branch.last_tmp_prf_no === '—' ? 'WG000000' : branch.last_tmp_prf_no,
+      placeholder: 'WG000000',
+      rows: 1,
+      maxLength: 20,
+      confirmLabel: 'Save seed',
+    })
     if (!newTmpPrf) return
 
     setLoading(true)
-    const res = await fetch('/api/consignment-seed', {
+    const res = await authedFetch('/api/consignment-seed', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
