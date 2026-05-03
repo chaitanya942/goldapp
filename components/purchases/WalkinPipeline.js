@@ -4,11 +4,8 @@ import { useState, useEffect, useCallback } from 'react'
 import { useApp } from '../../lib/context'
 import GoldSpinner from '../ui/GoldSpinner'
 import Badge from '../ui/Badge'
-
-const THEMES = {
-  dark:  { bg: '#0a0a0a', card: '#111111', card2: '#161616', text1: '#f0e6c8', text2: '#c8b89a', text3: '#9a8a6a', text4: '#6a5a3a', gold: '#c9a84c', border: '#1e1e1e', border2: '#252525', green: '#3aaa6a', red: '#e05555', blue: '#3a8fbf', orange: '#c9981f', purple: '#8c5ac8' },
-  light: { bg: '#f5f0e8', card: '#faf7f2', card2: '#e0d9cc', text1: '#1a1208', text2: '#3a2a10', text3: '#7a6a4a', text4: '#9a8a6a', gold: '#9a7228', border: '#e0dace', border2: '#c5bca8', green: '#2a8a5a', red: '#c03030', blue: '#2a6a9a', orange: '#a07010', purple: '#6a3a9a' },
-}
+import { CONSIGNMENT_THEMES as THEMES } from '../../lib/consignmentTheme'
+import { authedFetch } from '../../lib/authedFetch'
 
 const STATUS_COLORS = {
   'visited not sold':  'red',
@@ -39,7 +36,7 @@ export default function WalkinPipeline() {
   const [toDate, setToDate]           = useState('')
 
   useEffect(() => {
-    fetch('/api/crm-purchases?action=branches')
+    authedFetch('/api/crm-purchases?action=branches')
       .then(r => r.json())
       .then(d => { if (d.branches) setBranches(d.branches) })
   }, [])
@@ -57,7 +54,7 @@ export default function WalkinPipeline() {
     if (toDate)       params.set('to', toDate)
 
     try {
-      const res = await fetch(`/api/crm-purchases?${params}`)
+      const res = await authedFetch(`/api/crm-purchases?${params}`)
       const d   = await res.json()
       const filteredRows = filterStatus
         ? (d.rows || []).filter(r => r.walkin_status === filterStatus)

@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import GoldSpinner from '../../ui/GoldSpinner'
+import { authedFetch } from '../../../lib/authedFetch'
 
 function useMobile() {
   const [m, setM] = useState(false)
@@ -27,9 +28,9 @@ export default function ReportCrmInsights({ t }) {
       setLoading(true)
       try {
         const [kpiRes, rejRes, walkRes] = await Promise.all([
-          fetch('/api/crm-purchases?action=kpis').then(r => r.json()),
-          fetch('/api/crm-purchases?action=rejected&page=0&pageSize=1').then(r => r.json()),
-          fetch('/api/crm-purchases?action=walkin&page=0&pageSize=1').then(r => r.json()),
+          authedFetch('/api/crm-purchases?action=kpis').then(r => r.json()),
+          authedFetch('/api/crm-purchases?action=rejected&page=0&pageSize=1').then(r => r.json()),
+          authedFetch('/api/crm-purchases?action=walkin&page=0&pageSize=1').then(r => r.json()),
         ])
         if (kpiRes) {
           setKpis(kpiRes)

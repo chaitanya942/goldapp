@@ -3,11 +3,8 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useApp } from '../../../lib/context'
 import GoldSpinner from '../../ui/GoldSpinner'
-
-const THEMES = {
-  dark:  { bg: '#0a0a0a', card: '#111111', card2: '#161616', text1: '#f0e6c8', text2: '#c8b89a', text3: '#9a8a6a', text4: '#4a3a2a', gold: '#c9a84c', border: '#1e1e1e', border2: '#252525', green: '#3aaa6a', red: '#e05555', blue: '#3a8fbf', orange: '#c9981f', purple: '#8c5ac8' },
-  light: { bg: '#f5f0e8', card: '#faf7f2', card2: '#e0d9cc', text1: '#1a1208', text2: '#3a2a10', text3: '#7a6a4a', text4: '#9a8a6a', gold: '#9a7228', border: '#e0dace', border2: '#c5bca8', green: '#2a8a5a', red: '#c03030', blue: '#2a6a9a', orange: '#a07010', purple: '#6a3a9a' },
-}
+import { CONSIGNMENT_THEMES as THEMES } from '../../../lib/consignmentTheme'
+import { authedFetch } from '../../../lib/authedFetch'
 
 const TABS = [
   { id: 'overview',   label: 'Overview',         icon: '◈' },
@@ -85,7 +82,7 @@ function OverviewTab({ t, canSeeAlerts = true }) {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    fetch('/api/purchase-intelligence?action=overview')
+    authedFetch('/api/purchase-intelligence?action=overview')
       .then(r => r.json()).then(d => { setData(d); setLoading(false) })
       .catch(() => setLoading(false))
   }, [])
@@ -269,7 +266,7 @@ function BranchMatrixTab({ t }) {
   const [filterStatus, setFilterStatus] = useState('')
 
   useEffect(() => {
-    fetch('/api/purchase-intelligence?action=branch-matrix')
+    authedFetch('/api/purchase-intelligence?action=branch-matrix')
       .then(r => r.json())
       .then(d => { setBranches(d.branches || []); setLoading(false) })
       .catch(() => setLoading(false))
@@ -416,7 +413,7 @@ function RepeatCustomersTab({ t }) {
     const params = new URLSearchParams({ action:'repeat-customers', minVisits:String(minVisits), page:String(p), pageSize:String(PAGE_SIZE) })
     if (search) params.set('search', search)
     try {
-      const d = await fetch(`/api/purchase-intelligence?${params}`).then(r => r.json())
+      const d = await authedFetch(`/api/purchase-intelligence?${params}`).then(r => r.json())
       setData({ rows: d.rows||[], total: d.total||0, stats: d.stats||null })
     } catch(e) { console.error(e) } finally { setLoading(false) }
   }, [minVisits, search])
@@ -528,7 +525,7 @@ function PendingAgingTab({ t }) {
   const [minDays, setMinDays] = useState(0)
 
   useEffect(() => {
-    fetch('/api/purchase-intelligence?action=pending-aging')
+    authedFetch('/api/purchase-intelligence?action=pending-aging')
       .then(r => r.json()).then(d => { setData(d); setLoading(false) })
       .catch(() => setLoading(false))
   }, [])
@@ -633,7 +630,7 @@ function PipelineTab({ t }) {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    fetch('/api/purchase-intelligence?action=pipeline-intel')
+    authedFetch('/api/purchase-intelligence?action=pipeline-intel')
       .then(r => r.json()).then(d => { setData(d); setLoading(false) })
       .catch(() => setLoading(false))
   }, [])

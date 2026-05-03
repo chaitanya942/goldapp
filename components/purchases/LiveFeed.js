@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useApp } from '../../lib/context'
 import GoldSpinner from '../ui/GoldSpinner'
+import { authedFetch } from '../../lib/authedFetch'
 
 const REFRESH_SECS = 60
 
@@ -179,7 +180,7 @@ export default function LiveFeed() {
     try {
       setLoading(true)
       setLoadError(null)
-      const res = await fetch(`/api/crm-purchases?action=live&date=${d}`)
+      const res = await authedFetch(`/api/crm-purchases?action=live&date=${d}`)
       const json = await res.json()
       if (json.error) throw new Error(json.error)
       setData(json)

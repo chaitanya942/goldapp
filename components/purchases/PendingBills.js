@@ -5,6 +5,7 @@ import { useApp } from '../../lib/context'
 import GoldSpinner from '../ui/GoldSpinner'
 import Badge from '../ui/Badge'
 import { CONSIGNMENT_THEMES as THEMES } from '../../lib/consignmentTheme'
+import { authedFetch } from '../../lib/authedFetch'
 
 const PMT_COLORS = { bank: 'blue', cheque: 'orange', cash: 'green', upi: 'purple' }
 const PAGE_SIZE = 100
@@ -26,7 +27,7 @@ export default function PendingBills() {
   const [toDate, setToDate]           = useState('')
 
   useEffect(() => {
-    fetch('/api/crm-purchases?action=branches')
+    authedFetch('/api/crm-purchases?action=branches')
       .then(r => r.json())
       .then(d => { if (d.branches) setBranches(d.branches) })
   }, [])
@@ -44,7 +45,7 @@ export default function PendingBills() {
     if (toDate)       params.set('to', toDate)
 
     try {
-      const res = await fetch(`/api/crm-purchases?${params}`)
+      const res = await authedFetch(`/api/crm-purchases?${params}`)
       const d   = await res.json()
       const filteredRows = filterPmt
         ? (d.rows || []).filter(r => (r.pymt_mde || '').toLowerCase() === filterPmt)

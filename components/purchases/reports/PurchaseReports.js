@@ -13,6 +13,7 @@ import ReportSameDay from './ReportSameDay'
 import ReportCrmInsights from './ReportCrmInsights'
 import ReportComparePeriods from './ReportComparePeriods'
 import ReportUnderperformers from './ReportUnderperformers'
+import { authedFetch } from '../../../lib/authedFetch'
 
 const SECTIONS = [
   { key: 'charts',         label: 'Trends',         icon: '↗' },
@@ -243,7 +244,7 @@ export default function PurchaseReports() {
   // Fire-and-forget sync on mount so reports reflect latest CRM state.
   // Then poll MAX(updated_at) every 30s to surface "Last synced" freshness.
   useEffect(() => {
-    fetch('/api/sync-purchases?days=2', { method: 'POST' }).catch(() => null)
+    authedFetch('/api/sync-purchases?days=2', { method: 'POST' }).catch(() => null)
     const fetchLastSync = async () => {
       const { data } = await supabase
         .from('purchases')
@@ -292,7 +293,7 @@ export default function PurchaseReports() {
       if (regionBranchNames) params.set('region_branches', regionBranchNames.join(','))
       if (isSingleDay)       params.set('single_day', 'true')
 
-      const res = await fetch(`/api/report-aggregates?${params}`)
+      const res = await authedFetch(`/api/report-aggregates?${params}`)
       if (!res.ok) throw new Error(`Aggregates API error: ${res.status}`)
       const agg = await res.json()
       if (agg.error) throw new Error(agg.error)
