@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useApp } from '../../lib/context'
+import { authedFetch } from '../../lib/authedFetch'
 import PurchaseData        from '../../components/purchases/PurchaseData'
 import RejectedBills       from '../../components/purchases/RejectedBills'
 import PendingBills        from '../../components/purchases/PendingBills'
@@ -35,7 +36,7 @@ export default function PurchasesPage() {
   }, [])
 
   useEffect(() => {
-    fetch('/api/crm-purchases?action=kpis')
+    authedFetch('/api/crm-purchases?action=kpis')
       .then(r => r.json())
       .then(d => setKpis(d))
       .catch(() => {})

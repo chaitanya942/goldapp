@@ -1,5 +1,6 @@
 import mysql from 'mysql2/promise'
 import { createClient } from '@supabase/supabase-js'
+import { requireAuth, ROLE_GROUPS } from '../../../lib/apiAuth'
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
@@ -38,6 +39,10 @@ export async function GET(request) { return POST(request) }
 //   ?reconcile_date=YYYY-MM-DD      → full reconcile for one specific date
 //   ?reconcile_range=true&days=90   → full reconcile for entire date range (catches all deletes)
 export async function POST(request) {
+  // Destructive cleanup: marks ghost-bill rows as deleted in Supabase. Admin-only.
+  const auth = await requireAuth(request, { requiredRoles: ROLE_GROUPS.ADMIN })
+  if (!auth.ok) return auth.response
+
   const url           = new URL(request.url)
   const days          = parseInt(url.searchParams.get('days') || '90')
   const dryRun        = url.searchParams.get('dry_run') === 'true'
