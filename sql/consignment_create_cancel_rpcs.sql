@@ -62,15 +62,25 @@ DECLARE
   v_received_at   TIMESTAMPTZ := CASE WHEN v_is_internal THEN v_now ELSE NULL END;
   v_already_in    INT;
 BEGIN
-  -- Pre-flight: any of the requested purchases already in a non-cancelled
-  -- consignment? Prevents double-consigning under race conditions.
+  -- Pre-flight: are any of the requested purchases already tied up in an
+  -- IN-FLIGHT consignment (draft or dispatched)? Those can't be moved into
+  -- a new consignment because they aren't physically free yet.
+  --
+  -- Status 'received' is OK to ignore — the prior consignment is closed and
+  -- the bills are at their new location, available for the next leg. This
+  -- is the hub-consolidation flow: WG000001 (Branch→Hub) marks bills
+  -- 'received' on creation (INTERNAL auto-receive), so when the hub
+  -- forwards those bills onward via WG000002 (Hub→HO), the same bills
+  -- legitimately need to appear in BOTH consignments.
+  --
+  -- Status 'cancelled' is also ignored (the link is dead).
   SELECT COUNT(*) INTO v_already_in
   FROM consignment_items ci
   JOIN consignments c ON c.id = ci.consignment_id
   WHERE ci.purchase_id = ANY(p_purchase_ids)
-    AND c.status != 'cancelled';
+    AND c.status NOT IN ('cancelled', 'received');
   IF v_already_in > 0 THEN
-    RAISE EXCEPTION 'create_consignment_atomic: % bill(s) already linked to a non-cancelled consignment', v_already_in
+    RAISE EXCEPTION 'create_consignment_atomic: % bill(s) already in an in-flight consignment', v_already_in
       USING ERRCODE = 'check_violation';
   END IF;
 
