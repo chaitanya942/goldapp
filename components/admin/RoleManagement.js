@@ -504,9 +504,9 @@ export default function RoleManagement() {
     const ws = []
     const enabledPageCount = ALL_TREE_KEYS.filter(k => k.startsWith('page.') && selectedPerms.has(k)).length
     if (selectedPerms.size === 0)
-      ws.push({ type: 'error', msg: 'No permissions selected — users with this role will see a blank screen' })
+      ws.push({ type: 'error', msg: 'No permissions selected. Users with this role will see a blank screen.' })
     else if (enabledPageCount === 0)
-      ws.push({ type: 'warn', msg: 'No pages are enabled — users will have no sidebar navigation' })
+      ws.push({ type: 'warn', msg: 'No pages are enabled. Users will have no sidebar navigation.' })
     if (roleUsers.length > 0)
       ws.push({ type: 'info', msg: `${roleUsers.length} user${roleUsers.length > 1 ? 's' : ''} with this role will be affected immediately on save` })
     return ws

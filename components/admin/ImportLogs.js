@@ -76,7 +76,7 @@ export default function ImportLogs() {
                       fontSize: '.62rem', letterSpacing: '.08em', textTransform: 'uppercase',
                       color: log.status === 'success' ? t.green : '#e05555',
                     }}>
-                      {log.status === 'success' ? '✓ Success' : '✕ Rejected'}
+                      {log.status === 'success' ? 'Success' : 'Rejected'}
                     </span>
                   </td>
                 </tr>

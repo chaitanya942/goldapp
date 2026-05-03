@@ -153,7 +153,7 @@ export default function CompanySettings() {
             <div style={s.sub}>This is the receiving end — always White Gold HO, Bengaluru</div>
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
-            <Field label="HO GSTIN (Karnataka — consignee side)" fieldKey="gstin" placeholder="29AAPCA3170M1Z5" />
+            <Field label="HO GSTIN (Karnataka, consignee side)" fieldKey="gstin" placeholder="29AAPCA3170M1Z5" />
             <Field label="Building / Landmark Name" fieldKey="head_office_building" placeholder="HOUSE OF WHITE GOLD" />
           </div>
           <Field label="Street Address" fieldKey="head_office_address" placeholder="NO. 1, COMMERCIAL STREET" />

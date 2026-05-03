@@ -193,7 +193,7 @@ export default function ConsignmentOverview() {
           {(activeRegion || search) && (
             <button onClick={() => { setActiveRegion(null); setSearch('') }}
               style={{ background: 'transparent', border: `1px solid ${t.border2}`, borderRadius: '8px', padding: '7px 13px', fontSize: '11px', color: t.text3, cursor: 'pointer' }}>
-              ✕ Clear
+              Clear
             </button>
           )}
           <button onClick={fetchData} disabled={loading}

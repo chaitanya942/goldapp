@@ -64,7 +64,7 @@ function preflightValidate({ consignment, branch, destBranch, items, companySett
   // Items + weight + value
   if (!items || items.length === 0) errors.push('Consignment has no items')
   const totalWeight = (items || []).reduce((s, i) => s + Number(i.net_weight || 0), 0)
-  if (totalWeight <= 0) errors.push('Total net weight is 0 — cannot generate EWB')
+  if (totalWeight <= 0) errors.push('Total net weight is 0; cannot generate an E-Way Bill.')
   const totalValue = (items || []).reduce((s, i) => s + Number(i.total_amount || 0), 0)
   if (totalValue < 50000) {
     // Below 50k threshold EWB isn't legally required — warn, don't block
@@ -105,7 +105,7 @@ export async function POST(req) {
       .maybeSingle()
     if (lockErr) console.warn('[EWB] lock acquire warning:', lockErr.message)
     if (!lockRow) {
-      return Response.json({ error: 'Another EWB generation is already in progress for this consignment — wait 30 seconds and retry' }, { status: 409 })
+      return Response.json({ error: 'Another E-Way Bill generation is already in progress for this consignment. Wait 30 seconds and retry.' }, { status: 409 })
     }
 
     // Helper: release the lock on every error path so user can retry immediately.
@@ -137,7 +137,7 @@ export async function POST(req) {
     if (validationErrors.length) {
       await releaseLock()
       return Response.json({
-        error: 'Pre-flight validation failed — fix these before generating EWB:\n' + validationErrors.join('\n'),
+        error: 'Pre-flight validation failed. Fix these before generating the E-Way Bill:\n' + validationErrors.join('\n'),
         validation_errors: validationErrors,
       }, { status: 400 })
     }
@@ -164,7 +164,7 @@ export async function POST(req) {
       await releaseLock()
       return Response.json({
         success: false,
-        error: 'EWB generated but number could not be extracted from response — see server logs',
+        error: 'E-Way Bill was generated but the number could not be extracted from the response. See server logs for details.',
       }, { status: 502 })
     }
 

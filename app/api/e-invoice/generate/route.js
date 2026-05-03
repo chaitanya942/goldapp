@@ -48,7 +48,7 @@ export async function POST(req) {
     }
     if (sellerGstin === buyerGstin) {
       return Response.json({
-        error: `Seller and buyer GSTINs are the same (${sellerGstin}). E-Invoice requires distinct GSTINs — this happens for intra-state Karnataka moves, which don't legally need an E-Invoice. Use only the E-Way Bill instead.`,
+        error: `Seller and buyer GSTINs are the same (${sellerGstin}). E-Invoice requires distinct GSTINs. This typically means an intra-state Karnataka move, which does not legally need an E-Invoice. Use only the E-Way Bill instead.`,
       }, { status: 400 })
     }
     if (!branch.address || !branch.pin_code) {
@@ -85,7 +85,7 @@ export async function POST(req) {
       // signed QR JWT. Server-side ctaxLog already captured a redacted copy.
       return Response.json({
         success: false,
-        error:   'IRN not found in response — see server logs',
+        error:   'IRN not found in response. See server logs for details.',
       }, { status: 502 })
     }
 

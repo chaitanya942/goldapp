@@ -214,11 +214,11 @@ function Insights({rows,totB,totC,bLabel,cLabel,metric,t}) {
 
   const list=[
     totalPct!==null&&{c:totalDelta>=0?t.green:t.red,
-      text:`Overall ${metric.toLowerCase()} ${totalDelta>=0?'grew':'fell'} ${Math.abs(totalPct).toFixed(1)}% in ${bLabel} vs ${cLabel} — net ${totalDelta>=0?'gain':'loss'} of ${fmtM(Math.abs(totalDelta),metric)}`},
+      text:`Overall ${metric.toLowerCase()} ${totalDelta>=0?'grew':'fell'} ${Math.abs(totalPct).toFixed(1)}% in ${bLabel} vs ${cLabel}. Net ${totalDelta>=0?'gain':'loss'} of ${fmtM(Math.abs(totalDelta),metric)}.`},
     imp>0&&top&&{c:t.green,
-      text:`${imp} of ${rows.length} entities improved — best: ${top.name} at +${(top.growthVal*100).toFixed(1)}%`},
+      text:`${imp} of ${rows.length} entities improved. Best: ${top.name} at +${(top.growthVal*100).toFixed(1)}%.`},
     dec>0&&bot&&{c:t.red,
-      text:`${dec} entities declined — worst: ${bot.name} at ${(bot.growthVal*100).toFixed(1)}%`},
+      text:`${dec} entities declined. Worst: ${bot.name} at ${(bot.growthVal*100).toFixed(1)}%.`},
     biggest&&{c:t.gold,
       text:`${biggest.name} led base period with ${fmtM(biggest.bV,metric)} (${(biggest.bShare*100).toFixed(1)}% share)`},
     anomalies.length>0&&{c:t.orange,
@@ -793,7 +793,7 @@ export default function ReportCompare({t}) {
                 <button onClick={()=>drillToLvl(i)} style={{background:'none',border:'none',padding:0,color:i===drillChain.length-1?t.gold:t.text3,fontSize:'.63rem',cursor:'pointer',fontWeight:i===drillChain.length-1?500:400}}>{d.label}</button>
               </span>
             ))}
-            <button onClick={resetDrill} style={{marginLeft:'auto',background:'none',border:`1px solid ${t.border}`,borderRadius:'4px',padding:'2px 8px',color:t.text3,fontSize:'.6rem',cursor:'pointer'}}>✕ Reset</button>
+            <button onClick={resetDrill} style={{marginLeft:'auto',background:'none',border:`1px solid ${t.border}`,borderRadius:'4px',padding:'2px 8px',color:t.text3,fontSize:'.6rem',cursor:'pointer'}}>Reset</button>
           </div>
         )}
 

@@ -21,7 +21,7 @@ export async function POST(request) {
 
     const cookieStore = await cookies()
     const challenge = cookieStore.get('wg_webauthn_challenge')?.value
-    if (!challenge) return Response.json({ error: 'Challenge expired — please try again' }, { status: 400 })
+    if (!challenge) return Response.json({ error: 'Challenge expired. Please try again.' }, { status: 400 })
 
     const body = await request.json()
     const origin = process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000'

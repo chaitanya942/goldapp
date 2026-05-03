@@ -213,7 +213,7 @@ export default function UserManagement() {
               cursor: 'pointer',
               transition: 'all .2s',
             }}>
-            {showInvite ? '✕  Cancel' : '+ Add User'}
+            {showInvite ? 'Cancel' : 'Add user'}
           </button>
         )}
       </div>
@@ -311,7 +311,7 @@ export default function UserManagement() {
               color: invMsg.type === 'success' ? t.green : t.red,
               lineHeight: 1.6,
             }}>
-              {invMsg.type === 'success' ? '✓  ' : '✕  '}{invMsg.text}
+              {invMsg.text}
             </div>
           )}
         </div>

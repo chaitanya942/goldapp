@@ -451,7 +451,7 @@ export default function PurchaseReports() {
               onClick={() => { setFromDate(''); setToDate(''); setFilterBranch(''); setFilterTxn(''); setFilterRegion('') }}
               style={{ background: 'transparent', border: `1px solid ${t.border}`, borderRadius: '8px', padding: '8px 16px', color: t.text3, fontSize: '.7rem', cursor: 'pointer' }}
             >
-              ✕ Clear All
+              Clear all
             </button>
           )}
         </div>
@@ -544,13 +544,13 @@ export default function PurchaseReports() {
           value={`${Number(k?.avg_purity || 0).toFixed(2)}%`}
           sub="weighted by net weight" />
         <SplitCard
-          title="Physical & Takeover — Bills"
+          title="Physical and Takeover (Bills)"
           leftLabel="Physical"  leftValue={Number(k?.physical_count || 0).toLocaleString('en-IN')}  leftColor={t.gold}  leftSub={`Physical · ${phPct}%`}
           rightLabel="Takeover" rightValue={Number(k?.takeover_count || 0).toLocaleString('en-IN')} rightColor={t.blue} rightSub={`Takeover · ${tkPct}%`}
           loading={loading} t={t}
         />
         <SplitCard
-          title="Physical & Takeover — Net Wt"
+          title="Physical and Takeover (Net Weight)"
           leftLabel="Physical"  leftValue={`${fmt(k?.physical_net)}g`}  leftColor={t.gold}  leftSub={`Physical · ${phNwPct}%`}
           rightLabel="Takeover" rightValue={`${fmt(k?.takeover_net)}g`} rightColor={t.blue} rightSub={`Takeover · ${tkNwPct}%`}
           loading={loading} t={t}

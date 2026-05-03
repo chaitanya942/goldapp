@@ -62,10 +62,10 @@ export default function BranchEmployees() {
       const data = await res.json()
       if (data.success) {
         const s = data.summary
-        setSyncMsg(`✓ Synced ${s.inserted} employees — ${s.managers} managers, ${s.active} active, ${s.unmatched} unmatched branch`)
+        setSyncMsg(`Synced ${s.inserted} employees: ${s.managers} managers, ${s.active} active, ${s.unmatched} unmatched branch.`)
         await load()
       } else {
-        setSyncMsg(`Error: ${data.error}${data.details ? ` — ${data.details}` : ''}`)
+        setSyncMsg(`Error: ${data.error}${data.details ? `. ${data.details}` : ''}`)
       }
     } catch (e) {
       setSyncMsg(`Error: ${e.message}`)
@@ -199,7 +199,7 @@ export default function BranchEmployees() {
             style={{ ...s.stat, border: `1px solid ${filterUnmatched ? t.red : t.red + '55'}`, background: filterUnmatched ? `${t.red}18` : t.card, cursor: 'pointer', flexShrink: 0 }}
           >
             <div style={{ ...s.statVal, color: t.red }}>{stats.unmatched}</div>
-            <div style={{ ...s.statLbl, color: t.red }}>{filterUnmatched ? '✕ Unmatched' : '⚠ Unmatched'}</div>
+            <div style={{ ...s.statLbl, color: t.red }}>Unmatched</div>
           </div>
         )}
       </div>
@@ -231,7 +231,7 @@ export default function BranchEmployees() {
             onClick={clearFilters}
             style={{ background: 'none', border: `1px solid ${t.border}`, borderRadius: '6px', padding: '6px 12px', color: t.text3, fontSize: '.7rem', cursor: 'pointer', whiteSpace: 'nowrap' }}
           >
-            ✕ Clear Filters
+            Clear filters
           </button>
         )}
         <span style={{ fontSize: '.68rem', color: t.text3, whiteSpace: 'nowrap' }}>{filtered.length} records</span>

@@ -46,7 +46,7 @@ async function runSync(request) {
   // ── New CRM not live yet — wipe any test data and skip sync ────────────────
   if (!NEW_CRM_LIVE_DATE) {
     await supabaseAdmin.from('purchases').delete().eq('crm_source', 'new_crm')
-    return Response.json({ success: true, message: 'New CRM not live yet — test data cleared', synced: 0 })
+    return Response.json({ success: true, message: 'New CRM is not live yet. Test data has been cleared.', synced: 0 })
   }
 
   let client

@@ -263,7 +263,7 @@ export default function ReportDistribution({ kpis, purityDist, weightBuckets, re
   const insights = []
   if (topPurityByTxn) {
     const p = totalPurityTxns > 0 ? Math.round((Number(topPurityByTxn.count) / totalPurityTxns) * 100) : 0
-    insights.push({ icon: '💎', color: t.purple, text: `${topPurityByTxn.bucket} purity dominates — ${p}% of all transactions.` })
+    insights.push({ icon: '💎', color: t.purple, text: `${topPurityByTxn.bucket} purity dominates: ${p}% of all transactions.` })
   }
   if (topWtBucket)
     insights.push({ icon: '⚖️', color: t.blue, text: `${topWtBucket.bucket} is the most common weight bucket at ${topWtPct}% of transactions.` })
@@ -277,7 +277,7 @@ export default function ReportDistribution({ kpis, purityDist, weightBuckets, re
   }
   if (highTakeoverRegion && regionSplit?.length > 0) {
     const tkP = Math.round((highTakeoverRegion.takeover_count / highTakeoverRegion.total_txns) * 100)
-    if (tkP > 15) insights.push({ icon: '⚠️', color: t.red, text: `${highTakeoverRegion.region} has the highest takeover ratio at ${tkP}% — consider retention focus.` })
+    if (tkP > 15) insights.push({ icon: '⚠️', color: t.red, text: `${highTakeoverRegion.region} has the highest takeover ratio at ${tkP}%. Consider a retention focus.` })
   }
 
   const P = (id, extra = {}, noExp = false) => ({ id, expanded, onExpand: openPanel, onClose: closePanel, t, noExpand: noExp, cardStyle: { ...s.card, marginBottom: 0, ...extra } })
@@ -419,7 +419,7 @@ export default function ReportDistribution({ kpis, purityDist, weightBuckets, re
 
         {/* WEIGHT BUCKETS */}
         <Panel {...P('weight-buckets')}>
-          <SectionTitle title="Weight Buckets — Net Weight" t={t} />
+          <SectionTitle title="Weight Buckets: Net Weight" t={t} />
           {weightBuckets?.length > 0 ? (() => {
             const maxNet  = Math.max(...weightBuckets.map(d => Number(d.total_net) || 0))
             const totTxns = weightBuckets.reduce((s, d) => s + (Number(d.count) || 0), 0)

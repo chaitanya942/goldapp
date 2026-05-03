@@ -475,7 +475,7 @@
                         </button>
                         <button style={{ ...s.btnOut, fontSize: '11px', padding: '5px 10px', color: translating ? t.text4 : t.green, borderColor: `${t.green}50` }}
                           onClick={() => { if (translated) setTranslated(null); else handleTranslate() }} disabled={translating}>
-                          {translating ? '⟳ ...' : translated ? '✕ Original' : '🌐 EN'}
+                          {translating ? '…' : translated ? 'Original' : 'EN'}
                         </button>
                       </>
                     )}
@@ -605,7 +605,7 @@
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
             {syncResult && (
               <div style={{ fontSize: '12px', color: syncResult.success ? t.green : t.red, background: syncResult.success ? `${t.green}15` : `${t.red}15`, border: `1px solid ${syncResult.success ? t.green : t.red}40`, borderRadius: '8px', padding: '6px 12px' }}>
-                {syncResult.success ? `✓ ${syncResult.message}` : `✗ ${syncResult.error}`}
+                {syncResult.success ? syncResult.message : syncResult.error}
               </div>
             )}
             {transcribeAllProgress && (
@@ -728,7 +728,7 @@
                 <tbody>
                   {paginated.length === 0 ? (
                     <tr><td colSpan={10} style={{ ...s.td, textAlign: 'center', color: t.text4, padding: '48px' }}>
-                      {calls.length === 0 ? 'No calls yet — click "Sync Recordings" to load from S3' : 'No calls match filters'}
+                      {calls.length === 0 ? 'No calls yet. Click Sync Recordings to load from S3.' : 'No calls match filters'}
                     </td></tr>
                   ) : paginated.map(call => {
                     const meta    = OUTCOME_META[call.outcome]
@@ -756,7 +756,7 @@
                         </td>
                         <td style={s.td}>
                           {call.transcript
-                            ? <span style={{ fontSize: '11px', color: t.green, background: `${t.green}12`, border: `1px solid ${t.green}30`, borderRadius: '4px', padding: '2px 8px' }}>✓ Done</span>
+                            ? <span style={{ fontSize: '11px', color: t.green, background: `${t.green}12`, border: `1px solid ${t.green}30`, borderRadius: '4px', padding: '2px 8px' }}>Done</span>
                             : <span style={{ fontSize: '11px', color: t.text4 }}>—</span>}
                         </td>
                         <td style={s.td}>

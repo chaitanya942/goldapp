@@ -157,7 +157,8 @@ export default function ConsignmentApprovals() {
     return () => clearInterval(id)
   }, [])
 
-  // Burst handler — flushes the arrival buffer 1.2s after the last arrival.
+  // Flushes the arrival buffer 1.2s after the last arrival so a burst of 10 inserts
+  // becomes one notification + one beep, not ten of each.
   const flushArrivals = useCallback(() => {
     const items = arrivalBuffer.current
     arrivalBuffer.current = []
@@ -165,10 +166,10 @@ export default function ConsignmentApprovals() {
     if (!items.length) return
     if (items.length === 1) {
       const r = items[0]
-      fireDesktopNotification('New consignment awaiting approval',
-        `${r.tmp_prf_no || ''}: ${r.branch_name} → ${r.dest_branch || 'HO'} · ${r.total_bills || 0} bills · ${Number(r.total_net_wt || 0).toFixed(3)}g`)
+      fireDesktopNotification('Consignment awaiting approval',
+        `${r.tmp_prf_no || ''}: ${r.branch_name} to ${r.dest_branch || 'Head Office'}. ${r.total_bills || 0} bills, ${Number(r.total_net_wt || 0).toFixed(3)}g.`)
     } else {
-      fireDesktopNotification(`${items.length} new consignments awaiting approval`,
+      fireDesktopNotification(`${items.length} consignments awaiting approval`,
         items.slice(0, 3).map(r => `${r.tmp_prf_no || ''} (${r.branch_name})`).join(', ') + (items.length > 3 ? '…' : ''))
     }
     if (readSoundPref()) playApprovalBeep()
@@ -238,16 +239,15 @@ export default function ConsignmentApprovals() {
     const perm = await Notification.requestPermission()
     setNotifPermission(perm)
     if (perm === 'granted') {
-      showToast('Notifications enabled — you\'ll be alerted on new requests', 'success')
-      fireDesktopNotification('Notifications enabled', 'You will be notified when new consignments need approval.')
+      showToast('Notifications enabled', 'success')
+      fireDesktopNotification('Notifications enabled', 'You will be notified when a new consignment needs approval.')
     }
   }
 
   async function approve(c) {
     const ok = await openConfirm({
-      icon: '✓',
       title: `Approve ${c.tmp_prf_no}?`,
-      message: `${c.branch_name} → ${c.dest_branch || 'Head Office'}\n${c.total_bills || 0} bills · ${Number(c.total_net_wt || 0).toFixed(3)}g · ₹${fmt(Math.round(c.total_amount || 0))}\n\nOnce approved, the operations team can download all documents (Voucher/Challan, Report, EWB PDF, E-Invoice PDF).`,
+      message: `${c.branch_name} to ${c.dest_branch || 'Head Office'}\n${c.total_bills || 0} bills, ${Number(c.total_net_wt || 0).toFixed(3)}g, ₹${fmt(Math.round(c.total_amount || 0))}.\n\nOps will be able to download all documents once approved.`,
       confirmLabel: 'Approve',
       primaryColor: 'green',
     })
@@ -260,16 +260,15 @@ export default function ConsignmentApprovals() {
       })
       const j = await r.json()
       if (!r.ok || j.error) { showToast(j.error || 'Approval failed', 'error'); return }
-      showToast(`✓ Approved ${c.tmp_prf_no} — ops can now download`, 'success')
+      showToast(`${c.tmp_prf_no} approved`, 'success')
     } finally { setActionId(null) }
   }
 
   async function reject(c) {
     const reason = await openPrompt({
-      icon: '✕',
       title: `Reject ${c.tmp_prf_no}?`,
-      message: `${c.branch_name} → ${c.dest_branch || 'Head Office'}\n\nEnter a reason — the operator will see this so they can fix the underlying issue.`,
-      placeholder: 'e.g. Wrong destination branch, value mismatch with EWB, missing customer KYC…',
+      message: `${c.branch_name} to ${c.dest_branch || 'Head Office'}.\n\nEnter a reason. The operator will see this when they reopen the consignment.`,
+      placeholder: 'e.g. Destination branch is wrong, value differs from EWB, KYC missing.',
       minLength: 8,
       maxLength: 280,
       rows: 3,
@@ -285,7 +284,7 @@ export default function ConsignmentApprovals() {
       })
       const j = await r.json()
       if (!r.ok || j.error) { showToast(j.error || 'Rejection failed', 'error'); return }
-      showToast(`✕ Rejected ${c.tmp_prf_no}`, 'warning')
+      showToast(`${c.tmp_prf_no} rejected`, 'warning')
     } finally { setActionId(null) }
   }
 
@@ -318,8 +317,8 @@ export default function ConsignmentApprovals() {
             Pending Approvals
           </div>
           <div style={{ fontSize: '11px', color: t.text3, display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <span style={{ display: 'inline-block', width: '5px', height: '5px', borderRadius: '50%', background: t.green, boxShadow: `0 0 6px ${t.green}` }} />
-            Live updates
+            <span style={{ display: 'inline-block', width: '6px', height: '6px', borderRadius: '50%', background: t.green }} />
+            Live
           </div>
           {pending.length > 0 && (
             <div style={{ fontSize: '11px', color: t.text3, display: 'flex', gap: '12px', alignItems: 'baseline' }}>
@@ -336,21 +335,21 @@ export default function ConsignmentApprovals() {
               Oldest: <strong style={{ color: oldestBadge.color }}>{oldestBadge.label}</strong>
             </div>
           )}
-          <button onClick={toggleSound} title={soundEnabled ? 'Sound on for new approvals — click to mute' : 'Sound muted — click to enable'}
+          <button onClick={toggleSound}
+            title={soundEnabled ? 'Sound on. Click to mute.' : 'Sound off. Click to enable.'}
             aria-label={soundEnabled ? 'Mute approval sound' : 'Unmute approval sound'}
-            style={{ ...btnOut, padding: '7px 12px', color: soundEnabled ? t.gold : t.text4, borderColor: soundEnabled ? `${t.gold}50` : t.border2 }}>
-            {soundEnabled ? '🔔' : '🔕'}
+            style={{ ...btnOut, padding: '7px 14px', color: soundEnabled ? t.text2 : t.text4, borderColor: soundEnabled ? `${t.gold}50` : t.border2 }}>
+            {soundEnabled ? 'Sound on' : 'Sound off'}
           </button>
-          <button onClick={() => fetchPending(false)} style={btnOut}>⟳ Refresh</button>
+          <button onClick={() => fetchPending(false)} style={btnOut}>Refresh</button>
         </div>
       </div>
 
-      {/* ── Notifications banner ─────────────────────────────────────────── */}
+      {/* Notifications banner */}
       {notifPermission === 'default' && (
         <div style={{ background: `${t.gold}10`, border: `1px solid ${t.gold}40`, borderRadius: '10px', padding: '12px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
-          <div style={{ fontSize: '12px', color: t.gold, display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span style={{ fontSize: '16px' }}>🔔</span>
-            <span>Enable desktop notifications + sound to be alerted instantly when a new request arrives</span>
+          <div style={{ fontSize: '12px', color: t.gold }}>
+            Enable desktop notifications to be alerted when a new request arrives.
           </div>
           <button onClick={requestNotifications}
             style={{ background: t.gold, color: '#1a0a00', border: 'none', borderRadius: '8px', padding: '7px 16px', fontSize: '11px', fontWeight: 700, cursor: 'pointer' }}>
@@ -360,17 +359,16 @@ export default function ConsignmentApprovals() {
       )}
       {notifPermission === 'denied' && (
         <div style={{ background: `${t.red}10`, border: `1px solid ${t.red}40`, borderRadius: '10px', padding: '10px 16px', fontSize: '11px', color: t.red }}>
-          Notifications blocked. To enable, click the lock icon in your browser address bar and allow notifications for this site.
+          Notifications are blocked. Click the lock icon in the browser address bar to allow them.
         </div>
       )}
 
-      {/* ── Empty state ──────────────────────────────────────────────────── */}
+      {/* Empty state */}
       {pending.length === 0 ? (
-        <div style={{ ...card, padding: '70px 20px', textAlign: 'center' }}>
-          <div style={{ fontSize: '52px', marginBottom: '12px', opacity: 0.6 }}>✓</div>
-          <div style={{ fontSize: '16px', color: t.text1, fontWeight: 500 }}>All caught up</div>
+        <div style={{ ...card, padding: '60px 20px', textAlign: 'center' }}>
+          <div style={{ fontSize: '15px', color: t.text1, fontWeight: 500 }}>No pending approvals</div>
           <div style={{ fontSize: '12px', color: t.text4, marginTop: '6px' }}>
-            No consignments waiting for approval. New requests will appear here instantly.
+            New requests will appear here as they arrive.
           </div>
         </div>
       ) : (
@@ -403,10 +401,10 @@ export default function ConsignmentApprovals() {
                       {isType ? 'VIA HUB' : 'DIRECT → HO'}
                     </span>
                     <span style={{ fontSize: '9px', color: wb.color, background: wb.bg, borderRadius: '4px', padding: '2px 7px', fontWeight: 600, letterSpacing: '.04em' }}>
-                      ⏱ {wb.label}
+                      {wb.label}
                     </span>
-                    {c.eway_bill_no && <span style={{ fontSize: '9px', color: t.green, background: `${t.green}15`, borderRadius: '4px', padding: '2px 7px', fontWeight: 600, letterSpacing: '.04em' }}>EWB ✓</span>}
-                    {c.irn         && <span style={{ fontSize: '9px', color: t.purple, background: `${t.purple}15`, borderRadius: '4px', padding: '2px 7px', fontWeight: 600, letterSpacing: '.04em' }}>IRN ✓</span>}
+                    {c.eway_bill_no && <span style={{ fontSize: '9px', color: t.green, background: `${t.green}15`, borderRadius: '4px', padding: '2px 7px', fontWeight: 600, letterSpacing: '.04em' }}>EWB</span>}
+                    {c.irn         && <span style={{ fontSize: '9px', color: t.purple, background: `${t.purple}15`, borderRadius: '4px', padding: '2px 7px', fontWeight: 600, letterSpacing: '.04em' }}>IRN</span>}
                   </div>
                   {/* Row 2: Source → Destination + stats inline */}
                   <div style={{ display: 'flex', alignItems: 'baseline', gap: '14px', flexWrap: 'wrap' }}>
@@ -430,7 +428,7 @@ export default function ConsignmentApprovals() {
                     <button onClick={() => previewDoc(`/api/generate-consignee-report?id=${c.id}`, `Report-${c.tmp_prf_no}.jpg`, msg => showToast(msg, 'error'))}
                       title="Preview Consignee Report"
                       style={{ background: 'transparent', border: 'none', padding: 0, fontSize: '10px', color: t.purple, fontWeight: 600, cursor: 'pointer', textDecoration: 'underline' }}>
-                      📋 Report
+                      Report
                     </button>
                     <button onClick={() => previewDoc(
                         isType ? `/api/generate-issue-voucher-pdf?id=${c.id}` : `/api/generate-challan-pdf?id=${c.id}`,
@@ -438,20 +436,20 @@ export default function ConsignmentApprovals() {
                         msg => showToast(msg, 'error'))}
                       title={isType ? 'Preview Issue Voucher' : 'Preview Delivery Challan'}
                       style={{ background: 'transparent', border: 'none', padding: 0, fontSize: '10px', color: t.gold, fontWeight: 600, cursor: 'pointer', textDecoration: 'underline' }}>
-                      📄 {isType ? 'Voucher' : 'Challan'}
+                      {isType ? 'Voucher' : 'Challan'}
                     </button>
                     {c.eway_bill_no && (
                       <button onClick={() => previewDoc(`/api/eway-bill/pdf?id=${c.id}`, `EWB-${c.eway_bill_no}.pdf`, msg => showToast(msg, 'error'))}
                         title={`Preview E-Way Bill ${c.eway_bill_no}`}
                         style={{ background: 'transparent', border: 'none', padding: 0, fontSize: '10px', color: t.green, fontWeight: 600, cursor: 'pointer', textDecoration: 'underline' }}>
-                        ⚡ EWB
+                        E-Way Bill
                       </button>
                     )}
                     {c.irn && (
                       <button onClick={() => previewDoc(`/api/e-invoice/pdf?id=${c.id}`, `EInvoice-${c.tmp_prf_no}.pdf`, msg => showToast(msg, 'error'))}
                         title="Preview E-Invoice PDF"
                         style={{ background: 'transparent', border: 'none', padding: 0, fontSize: '10px', color: t.purple, fontWeight: 600, cursor: 'pointer', textDecoration: 'underline' }}>
-                        ⚡ E-Invoice
+                        E-Invoice
                       </button>
                     )}
                   </div>
@@ -460,12 +458,12 @@ export default function ConsignmentApprovals() {
                 {/* Right side: Reject + Approve */}
                 <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
                   <button onClick={() => reject(c)} disabled={!!actionId}
-                    style={{ background: 'transparent', border: `1px solid ${t.red}`, borderRadius: '7px', padding: '7px 14px', fontSize: '11px', color: t.red, fontWeight: 600, cursor: actionId ? 'not-allowed' : 'pointer', opacity: isRejectBusy ? 0.6 : 1, whiteSpace: 'nowrap' }}>
-                    {isRejectBusy ? '…' : '✕ Reject'}
+                    style={{ background: 'transparent', border: `1px solid ${t.red}`, borderRadius: '7px', padding: '7px 16px', fontSize: '11px', color: t.red, fontWeight: 600, cursor: actionId ? 'not-allowed' : 'pointer', opacity: isRejectBusy ? 0.6 : 1, whiteSpace: 'nowrap' }}>
+                    {isRejectBusy ? 'Rejecting…' : 'Reject'}
                   </button>
                   <button onClick={() => approve(c)} disabled={!!actionId}
-                    style={{ background: t.green, color: '#fff', border: 'none', borderRadius: '7px', padding: '7px 18px', fontSize: '11px', fontWeight: 700, cursor: actionId ? 'not-allowed' : 'pointer', opacity: isApproveBusy ? 0.6 : 1, whiteSpace: 'nowrap', boxShadow: `0 2px 8px ${t.green}40` }}>
-                    {isApproveBusy ? '…' : '✓ Approve'}
+                    style={{ background: t.green, color: '#fff', border: 'none', borderRadius: '7px', padding: '7px 20px', fontSize: '11px', fontWeight: 700, cursor: actionId ? 'not-allowed' : 'pointer', opacity: isApproveBusy ? 0.6 : 1, whiteSpace: 'nowrap' }}>
+                    {isApproveBusy ? 'Approving…' : 'Approve'}
                   </button>
                 </div>
               </div>

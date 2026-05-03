@@ -13,7 +13,7 @@ export async function POST(request) {
   try {
     const cookieStore = await cookies()
     const challenge = cookieStore.get('wg_webauthn_challenge')?.value
-    if (!challenge) return Response.json({ error: 'Challenge expired — please try again' }, { status: 400 })
+    if (!challenge) return Response.json({ error: 'Challenge expired. Please try again.' }, { status: 400 })
 
     const { email, response: authnResponse } = await request.json()
     if (!email || !authnResponse) return Response.json({ error: 'Missing fields' }, { status: 400 })

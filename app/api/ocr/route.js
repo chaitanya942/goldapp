@@ -17,7 +17,7 @@ export async function POST(req) {
       return Response.json({ success: false, error: 'image (base64) required' }, { status: 400 })
     }
     if (image.length > MAX_IMAGE_B64_CHARS) {
-      return Response.json({ success: false, error: 'Image too large — please compress to under 8 MB' }, { status: 413 })
+      return Response.json({ success: false, error: 'Image too large. Please compress it to under 8 MB.' }, { status: 413 })
     }
 
     const client = new Anthropic()

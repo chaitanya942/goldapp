@@ -42,7 +42,7 @@ export async function GET(req) {
 
     if (rpcErr) {
       console.warn('[branch_overview] RPC failed, falling back to pagination:', rpcErr.message)
-      return Response.json({ data: [], error: 'branch_stock_summary RPC missing — apply sql/branch_stock_summary_rpc.sql' })
+      return Response.json({ data: [], error: 'branch_stock_summary RPC missing. Apply sql/branch_stock_summary_rpc.sql.' })
     }
 
     // Fetch branch metadata to filter outside_bangalore + attach region/pickup
@@ -715,7 +715,7 @@ export async function POST(req) {
     // Validate: must be in draft status to dispatch
     const { data: current } = await supabase.from('consignments').select('status').eq('id', id).single()
     if (current?.status !== 'draft') {
-      return Response.json({ error: `Cannot dispatch — consignment is '${current?.status}', must be 'draft'` }, { status: 400 })
+      return Response.json({ error: `Cannot dispatch. Consignment is '${current?.status}'; must be 'draft'.` }, { status: 400 })
     }
     const { data, error } = await supabase
       .from('consignments')
@@ -733,7 +733,7 @@ export async function POST(req) {
       .select('status, movement_type, dest_branch')
       .eq('id', id).single()
     if (current?.status !== 'dispatched') {
-      return Response.json({ error: `Cannot receive — consignment is '${current?.status}', must be 'dispatched'` }, { status: 400 })
+      return Response.json({ error: `Cannot receive. Consignment is '${current?.status}'; must be 'dispatched'.` }, { status: 400 })
     }
 
     const { data: items } = await supabase
@@ -851,8 +851,8 @@ export async function POST(req) {
       // Surface a warning if EWB/IRN was still active, so the operator
       // remembers to cancel them on the GST portal too.
       const warnings = []
-      if (rpcCancelled.eway_bill_no) warnings.push(`E-Way Bill ${rpcCancelled.eway_bill_no} still active — cancel it on the GST portal too`)
-      if (rpcCancelled.irn)          warnings.push(`E-Invoice IRN still active — cancel it on the GST portal too`)
+      if (rpcCancelled.eway_bill_no) warnings.push(`E-Way Bill ${rpcCancelled.eway_bill_no} is still active. Cancel it on the GST portal as well.`)
+      if (rpcCancelled.irn)          warnings.push('The E-Invoice IRN is still active. Cancel it on the GST portal as well.')
       return Response.json({ data: rpcCancelled, warnings: warnings.length ? warnings : undefined })
     }
     if (rpcCancelErr && rpcCancelErr.code !== 'PGRST202') {
@@ -865,7 +865,7 @@ export async function POST(req) {
     if (!c) return Response.json({ error: 'Consignment not found' }, { status: 404 })
     if (c.status === 'cancelled') return Response.json({ error: 'Already cancelled' }, { status: 400 })
     if (c.status === 'received' && c.movement_type !== 'INTERNAL') {
-      return Response.json({ error: 'Cannot cancel — already received at HO. Initiate a return instead.' }, { status: 400 })
+      return Response.json({ error: 'Cannot cancel. The consignment has already been received at Head Office; initiate a return instead.' }, { status: 400 })
     }
 
     const { data: links } = await supabase.from('consignment_items').select('purchase_id').eq('consignment_id', id)
@@ -885,7 +885,7 @@ export async function POST(req) {
       )
       if (laterActive.length) {
         return Response.json({
-          error: `Cannot void — ${laterActive.length} bill(s) are in a later consignment. Cancel that one first.`,
+          error: `Cannot void. ${laterActive.length} bill(s) are in a later consignment; cancel that one first.`,
         }, { status: 409 })
       }
     }
@@ -924,13 +924,13 @@ export async function POST(req) {
         returned_to: c.branch_name,
         active_ewb: hadEwb ? c.eway_bill_no : null,
         active_irn: hadIrn ? c.irn : null,
-        warning: (hadEwb || hadIrn) ? 'EWB/IRN still active — cancel separately on GST portal' : null,
+        warning: (hadEwb || hadIrn) ? 'E-Way Bill or IRN is still active. Cancel it separately on the GST portal.' : null,
       },
     })
 
     return Response.json({
       success: true,
-      warning: (hadEwb || hadIrn) ? 'EWB/IRN still active — cancel separately within 24h' : null,
+      warning: (hadEwb || hadIrn) ? 'E-Way Bill or IRN is still active. Cancel it separately within 24 hours.' : null,
     })
   }
 
@@ -942,7 +942,7 @@ export async function POST(req) {
     const { data: c } = await supabase.from('consignments').select('status, movement_type, dest_branch').eq('id', id).single()
     if (!c) return Response.json({ error: 'Consignment not found' }, { status: 404 })
     if (!['dispatched', 'partial_received'].includes(c.status)) {
-      return Response.json({ error: `Cannot receive — consignment is '${c.status}'` }, { status: 400 })
+      return Response.json({ error: `Cannot receive. Consignment is '${c.status}'.` }, { status: 400 })
     }
 
     const nowIso = new Date().toISOString()

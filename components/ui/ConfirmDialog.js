@@ -112,10 +112,9 @@ export default function DialogHost() {
       onClick={() => close(state.kind === 'prompt' ? '' : false)}
       style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(6px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, animation: 'cdFade .15s ease' }}>
       <div onClick={e => e.stopPropagation()}
-        style={{ width: 'min(480px, calc(100vw - 32px))', background: t.bg, border: `1px solid ${t.border}`, borderRadius: '12px', boxShadow: '0 20px 60px rgba(0,0,0,0.5)', padding: '20px 22px', animation: 'cdPop .18s ease' }}>
+        style={{ width: 'min(480px, calc(100vw - 32px))', background: t.bg, border: `1px solid ${t.border}`, borderRadius: '12px', boxShadow: '0 20px 60px rgba(0,0,0,0.5)', padding: '20px 22px', animation: 'cdEnter .18s ease' }}>
         {state.title && (
-          <div id="confirm-title" style={{ fontSize: '15px', fontWeight: 600, color: t.text1, marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-            {state.icon && <span style={{ fontSize: '18px' }}>{state.icon}</span>}
+          <div id="confirm-title" style={{ fontSize: '15px', fontWeight: 600, color: t.text1, marginBottom: '8px' }}>
             {state.title}
           </div>
         )}
@@ -130,7 +129,7 @@ export default function DialogHost() {
               placeholder={state.placeholder || ''} maxLength={state.maxLength || 500}
               style={{ width: '100%', boxSizing: 'border-box', background: t.input, color: t.text1, border: `1px solid ${t.border}`, borderRadius: '8px', padding: '10px 12px', fontSize: '13px', fontFamily: 'inherit', resize: 'vertical', outline: 'none' }} />
             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', color: t.text4, marginTop: '4px' }}>
-              <span>{state.minLength ? (remaining > 0 ? `${remaining} more character${remaining === 1 ? '' : 's'} required` : 'Looks good') : ''}</span>
+              <span>{state.minLength ? (remaining > 0 ? `${remaining} more character${remaining === 1 ? '' : 's'} required` : '') : ''}</span>
               <span>{value.length}{state.maxLength ? `/${state.maxLength}` : ''}</span>
             </div>
           </>
@@ -141,14 +140,14 @@ export default function DialogHost() {
             {cancelLabel}
           </button>
           <button onClick={submit} disabled={!minOk}
-            style={{ background: primaryColor, color: '#fff', border: 'none', borderRadius: '7px', padding: '8px 20px', fontSize: '12px', fontWeight: 700, cursor: minOk ? 'pointer' : 'not-allowed', opacity: minOk ? 1 : 0.4, boxShadow: minOk ? `0 2px 10px ${primaryColor}40` : 'none' }}>
+            style={{ background: primaryColor, color: '#fff', border: 'none', borderRadius: '7px', padding: '8px 22px', fontSize: '12px', fontWeight: 700, cursor: minOk ? 'pointer' : 'not-allowed', opacity: minOk ? 1 : 0.4 }}>
             {primaryLabel}
           </button>
         </div>
       </div>
       <style>{`
-        @keyframes cdFade { from { opacity: 0 } to { opacity: 1 } }
-        @keyframes cdPop  { from { opacity: 0; transform: translateY(-8px) scale(.98) } to { opacity: 1; transform: none } }
+        @keyframes cdFade  { from { opacity: 0 } to { opacity: 1 } }
+        @keyframes cdEnter { from { opacity: 0; transform: translateY(-4px) } to { opacity: 1; transform: none } }
       `}</style>
     </div>
   )

@@ -134,7 +134,7 @@ export default function PendingBills() {
         </div>
         {hasFilters && (
           <button onClick={clearFilters} style={{ padding: '5px 12px', borderRadius: '100px', border: `1px solid ${t.red}40`, background: 'transparent', color: t.red, fontSize: '.65rem', cursor: 'pointer' }}>
-            ✕ Clear All
+            Clear all
           </button>
         )}
       </div>

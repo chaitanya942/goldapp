@@ -452,7 +452,7 @@ export default function PurchaseData() {
         {(fromDate || toDate || filterBranch || filterStatus || filterTxn || search || filterCrmStatus || filterCrmSource) && (
           <button onClick={clearFilters}
             style={{ padding: '5px 12px', borderRadius: '100px', border: `1px solid ${t.red}40`, background: 'transparent', color: t.red, fontSize: '.65rem', cursor: 'pointer', marginLeft: '8px' }}>
-            ✕ Clear All
+            Clear all
           </button>
         )}
       </div>
@@ -515,7 +515,7 @@ export default function PurchaseData() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
           {purchases.length === 0 ? (
             <div style={{ textAlign: 'center', color: t.text4, padding: '48px', fontSize: '.75rem' }}>
-              {(search || filterStatus || filterBranch || filterCrmStatus || filterTxn || fromDate || toDate) ? 'No records match your filters' : 'No purchase data yet — auto-syncing from CRM'}
+              {(search || filterStatus || filterBranch || filterCrmStatus || filterTxn || fromDate || toDate) ? 'No records match your filters' : 'No purchase data yet. Syncing from CRM in the background.'}
             </div>
           ) : purchases.map((p) => {
             const status = STATUS_COLORS[p.stock_status] || { color: t.text3, label: p.stock_status }
@@ -659,7 +659,7 @@ export default function PurchaseData() {
               })}
               {purchases.length === 0 && (
                 <tr><td colSpan={isSuperAdmin ? 19 : 18} style={{ ...s.td, textAlign: 'center', color: t.text4, padding: '48px' }}>
-                  {(search || filterStatus || filterBranch || filterCrmStatus || filterTxn || fromDate || toDate) ? 'No records match your filters' : 'No purchase data yet — auto-syncing from CRM'}
+                  {(search || filterStatus || filterBranch || filterCrmStatus || filterTxn || fromDate || toDate) ? 'No records match your filters' : 'No purchase data yet. Syncing from CRM in the background.'}
                 </td></tr>
               )}
             </tbody>

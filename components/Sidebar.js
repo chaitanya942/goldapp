@@ -204,10 +204,9 @@ export default function Sidebar({ sidebarOpen, setSidebarOpen, isMobile }) {
                 <span style={{ fontSize: '.72rem', color: isActive(child.id) ? (child.dot || t.gold) : t.text3, fontWeight: isActive(child.id) ? 500 : 400, letterSpacing: '.02em', transition: 'color .15s' }}>{child.label}</span>
                 {child.badgeKey && badges[child.badgeKey] > 0 && (
                   // key on the count value so the span re-mounts when count changes,
-                  // triggering the pop animation. Subtle but draws the eye when a
-                  // new approval arrives.
+                  // triggering a subtle fade. No overshoot, no glow — quiet feedback.
                   <span key={badges[child.badgeKey]}
-                    style={{ marginLeft: 'auto', fontSize: '.62rem', fontWeight: 700, background: '#e05555', color: '#fff', borderRadius: '10px', padding: '1px 6px', minWidth: '16px', textAlign: 'center', boxShadow: '0 0 8px rgba(224,85,85,0.45)', animation: 'sidebarBadgePop .35s ease' }}>
+                    style={{ marginLeft: 'auto', fontSize: '.62rem', fontWeight: 700, background: '#e05555', color: '#fff', borderRadius: '10px', padding: '1px 6px', minWidth: '16px', textAlign: 'center', animation: 'sidebarBadgeFade .25s ease' }}>
                     {badges[child.badgeKey]}
                   </span>
                 )}
@@ -283,10 +282,9 @@ export default function Sidebar({ sidebarOpen, setSidebarOpen, isMobile }) {
       )}
     </div>
     <style>{`
-      @keyframes sidebarBadgePop {
-        0%   { transform: scale(.55); opacity: 0 }
-        60%  { transform: scale(1.18); opacity: 1 }
-        100% { transform: scale(1); opacity: 1 }
+      @keyframes sidebarBadgeFade {
+        0%   { opacity: 0; transform: translateY(-2px) }
+        100% { opacity: 1; transform: none }
       }
     `}</style>
     </>

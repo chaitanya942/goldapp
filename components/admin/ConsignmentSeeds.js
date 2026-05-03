@@ -170,7 +170,7 @@ export default function ConsignmentSeeds() {
                             <span style={{ fontSize: '10px', color: t.gold }}>{isCollapsed ? '▶' : '▼'}</span>
                             <span style={{ fontSize: '11px', fontWeight: 700, color: t.gold, letterSpacing: '.1em', textTransform: 'uppercase' }}>{region}</span>
                             <span style={{ fontSize: '10px', color: t.text4 }}>{regionBranches.length} branches</span>
-                            <span style={{ fontSize: '10px', color: t.green }}>✓ {seededCount} seeded</span>
+                            <span style={{ fontSize: '10px', color: t.green }}>{seededCount} seeded</span>
                             {seededCount < regionBranches.length && (
                               <span style={{ fontSize: '10px', color: t.red }}>⚠ {regionBranches.length - seededCount} pending</span>
                             )}

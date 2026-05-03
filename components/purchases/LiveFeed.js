@@ -914,7 +914,7 @@ function OldCrmTab({
         if (ghostCount > 0) insights.push({
           icon: '👻', color: t.red, metric: 'ghost_purchases',
           headline: `${ghostCount} purchase${ghostCount > 1 ? 's' : ''} with no walk-in entry`,
-          detail: `Billed & approved but no walk-in entry exists — sale unregistered in CRM.`,
+          detail: `Billed and approved, but no walk-in entry exists. Sale is unregistered in CRM.`,
         })
 
         // 2 — KEY INSIGHT: CRM register vs actual bills mismatch (beyond ghost)
@@ -956,14 +956,14 @@ function OldCrmTab({
         if (closingRate >= 90) insights.push({
           icon: '💪', color: t.green,
           headline: `${closingRate}% bill-to-purchase rate`,
-          detail: `Almost all billed customers are purchasing today — excellent branch performance.`,
+          detail: `Almost all billed customers are purchasing today. Excellent branch performance.`,
         })
 
         // 7 — Walk-out low = good
         if (walkoutPct < 40 && walkoutPct > 0) insights.push({
           icon: '✓', color: t.green,
           headline: `${walkoutPct}% walk-out rate`,
-          detail: `Only ${notBilledCnt} of ${totalWalkins} customers left without billing — conversion is healthy.`,
+          detail: `Only ${notBilledCnt} of ${totalWalkins} customers left without billing. Conversion is healthy.`,
         })
 
         if (insights.length === 0) return null
@@ -1216,7 +1216,7 @@ function LiveDetail({ t, activeMetric, todayTxns, todayWalkins, kycRows, notBill
       type = 'walkin'; label = 'CRM Not Updated'
       break
     }
-    case 'ghost_purchases':  rows = ghostPurchases;   type = 'txn';      label = 'Purchased — No Walk-in Entry'; break
+    case 'ghost_purchases':  rows = ghostPurchases;   type = 'txn';      label = 'Purchased without Walk-in Entry'; break
     case 'takeover_bills':   rows = takeoverRows;     type = 'takeover'; label = 'Multi-day Takeover Purchases'; break
     default:          rows = todayTxns.filter(t => t.trxn_status === 'approved'); type = 'txn'; label = `Purchased Today`
   }
@@ -1916,12 +1916,12 @@ function NewCrmTab({ t, newCrmTxns, newCrmError, regionFilter, regions, isToday,
         if (conversionPct >= 80 && completed > 0) insights.push({
           icon:'💪', color:t.green,
           headline:`${conversionPct}% completion rate`,
-          detail:`Excellent — most customers completing their transactions today.`,
+          detail:`Most customers are completing their transactions today.`,
         })
         if (walkoutRate > 0 && walkoutRate < 20) insights.push({
           icon:'✓', color:t.green,
           headline:`${walkoutRate}% walkout rate`,
-          detail:`Only ${walkout} of ${total} customers walked out — healthy completion rate.`,
+          detail:`Only ${walkout} of ${total} customers walked out. Healthy completion rate.`,
         })
         if (insights.length === 0) return null
         return (

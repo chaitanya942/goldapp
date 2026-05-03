@@ -173,7 +173,7 @@ export default function BranchManagement() {
         const s = data.summary
         const parts = [`${s.new_branches_added} new added`, `${s.crm_id_stamped || 0} linked`, `${s.already_existed} unchanged`]
         if (s.errors) parts.push(`${s.errors} errors`)
-        let msg = `✓ ${parts.join(', ')}`
+        let msg = parts.join(', ')
         if (data.errors?.length) {
           msg += '\nFailed: ' + data.errors.map(e => `${e.name} (${e.error})`).join(' | ')
         }
@@ -183,7 +183,7 @@ export default function BranchManagement() {
         setSyncMsg(msg)
         if (s.new_branches_added > 0) load()
       } else {
-        setSyncMsg(`Error: ${data.error}${data.details ? ` — ${data.details}` : ''}`)
+        setSyncMsg(`Error: ${data.error}${data.details ? `. ${data.details}` : ''}`)
       }
     } catch (e) { setSyncMsg(`Error: ${e.message}`) }
     setSyncing(false)
@@ -304,10 +304,10 @@ export default function BranchManagement() {
         </div>
         <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
           <button onClick={syncFromCRM} disabled={syncing} style={{ ...s.btnOutline, opacity: syncing ? .6 : 1 }}>
-            {syncing ? 'Syncing…' : '↻ Sync CRM'}
+            {syncing ? 'Syncing…' : 'Sync CRM'}
           </button>
           <button style={s.btnGold} onClick={() => formOpen ? cancelForm() : setFormOpen(true)}>
-            {formOpen ? '✕ Cancel' : '+ Add Branch'}
+            {formOpen ? 'Cancel' : 'Add branch'}
           </button>
         </div>
       </div>
@@ -323,8 +323,8 @@ export default function BranchManagement() {
           onClick={() => setFilterIncomplete(f => !f)}
           style={{ background: filterIncomplete ? '#c9a84c18' : '#c9a84c0a', border: `1px solid ${filterIncomplete ? t.gold : t.gold + '44'}`, borderRadius: '6px', padding: '8px 14px', fontSize: '.72rem', color: t.gold, marginBottom: '16px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
         >
-          <span>⚠ {incompleteBranches.length} {incompleteBranches.length === 1 ? 'branch has' : 'branches have'} incomplete data — missing state / region / cluster. Click to {filterIncomplete ? 'show all' : 'view them'}.</span>
-          {filterIncomplete && <span style={{ fontSize: '.68rem', opacity: .7 }}>✕ Clear filter</span>}
+          <span>{incompleteBranches.length} {incompleteBranches.length === 1 ? 'branch has' : 'branches have'} incomplete data: missing state, region, or cluster. Click to {filterIncomplete ? 'show all' : 'view them'}.</span>
+          {filterIncomplete && <span style={{ fontSize: '.68rem', opacity: .7 }}>Clear filter</span>}
         </div>
       )}
 
@@ -333,7 +333,7 @@ export default function BranchManagement() {
         <div style={s.card}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
             <span style={{ fontSize: '.65rem', color: t.text3, letterSpacing: '.1em', textTransform: 'uppercase' }}>
-              {editId ? `Editing — ${form.name}` : 'New Branch'}
+              {editId ? `Editing: ${form.name}` : 'New Branch'}
             </span>
             {form.crm_branch_id && (
               <span style={{ fontSize: '.65rem', color: t.text3, fontFamily: 'monospace' }}>CRM ID: <span style={{ color: t.gold }}>{form.crm_branch_id}</span></span>

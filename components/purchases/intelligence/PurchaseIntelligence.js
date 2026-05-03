@@ -116,7 +116,7 @@ function OverviewTab({ t, canSeeAlerts = true }) {
           {Number(ba.inactive) > 0 && (
             <AlertBanner icon="⊘" color={t.red} t={t}
               title={`${ba.inactive} branch${Number(ba.inactive)>1?'es':''} inactive for 30+ days`}
-              desc="No approved purchases in over a month — check branch activity and CRM records" />
+              desc="No approved purchases in over a month. Check branch activity and CRM records." />
           )}
           {Number(ba.dormant) > 0 && (
             <AlertBanner icon="◌" color={t.orange} t={t}
@@ -126,7 +126,7 @@ function OverviewTab({ t, canSeeAlerts = true }) {
           {oldPending > 0 && (
             <AlertBanner icon="⏳" color={t.red} t={t}
               title={`${oldPending} pending bill${oldPending>1?'s':''} older than 90 days`}
-              desc="Some bills have been sitting in pending status for months — review immediately" />
+              desc="Some bills have been sitting in pending status for months. Review immediately." />
           )}
           {highRejBranches?.length > 0 && (
             <AlertBanner icon="!" color={t.orange} t={t}

@@ -486,7 +486,7 @@ function PurchaseInline({ t, setActiveNav, canSee }) {
             )}
           </div>
 
-          {/* Today's snapshot — desktop only */}
+          {/* Today's snapshot (desktop only) */}
           {showKpiCards && !isMobile && (
             <div style={{ background:`linear-gradient(135deg,${t.card},${t.card2})`, border:`1px solid ${t.border}`, borderRadius:16, padding:'18px 22px', display:'flex', flexDirection:'column', gap:12 }}>
               <div style={{ fontSize:11, color:t.text4, letterSpacing:'.1em', textTransform:'uppercase', fontWeight:600 }}>Today's activity</div>

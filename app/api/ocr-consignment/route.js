@@ -22,7 +22,7 @@ export async function POST(request) {
     const file     = formData.get('image')
     if (!file) return Response.json({ success: false, error: 'No image provided' }, { status: 400 })
     if (file.size && file.size > MAX_FILE_BYTES) {
-      return Response.json({ success: false, error: `Image too large (${Math.round(file.size / 1024 / 1024)} MB) — limit is 8 MB` }, { status: 413 })
+      return Response.json({ success: false, error: `Image too large (${Math.round(file.size / 1024 / 1024)} MB). The limit is 8 MB.` }, { status: 413 })
     }
 
     const bytes  = await file.arrayBuffer()

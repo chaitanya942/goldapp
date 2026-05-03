@@ -206,8 +206,8 @@ function ActionBtn({ icon, title, onClick, color, t }) {
 function PasteModal({ type, date, onClose, onImport, t }) {
   const [text, setText] = useState('')
   const hint = type === 'quotas'
-    ? 'Party, Weight(g), Rate(₹)  — one row per line, tab or comma separated\nOr with date: Date, Party, Weight, Rate, KL'
-    : 'Batch, Weight(g), Purity(%)  — one row per line, tab or comma separated\nOr with date: Date, Batch, Weight, Purity, State'
+    ? 'Party, Weight(g), Rate(₹). One row per line, tab or comma separated.\nOr with date: Date, Party, Weight, Rate, KL'
+    : 'Batch, Weight(g), Purity(%). One row per line, tab or comma separated.\nOr with date: Date, Batch, Weight, Purity, State'
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.7)', backdropFilter: 'blur(8px)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
       <div style={{ background: t.card, border: `1px solid ${t.border2}`, borderRadius: '14px', padding: '28px', width: '100%', maxWidth: '520px', boxShadow: '0 32px 80px rgba(0,0,0,.4)' }}>
@@ -324,11 +324,11 @@ export default function CalTable() {
     if (qEditId) {
       await supabase.from('cal_quotas').update(payload).eq('id', qEditId)
       setQuotas(p => p.map(r => r.id === qEditId ? { ...r, ...payload, _id: r._id, _new: false } : r))
-      setQEditId(null); showToast('✓ Quota updated')
+      setQEditId(null); showToast('Quota updated')
     } else {
       const { data } = await supabase.from('cal_quotas').insert(payload).select().single()
       if (data) setQuotas(p => [...p, { ...data, _id: data.id, _new: false }])
-      showToast('✓ Quota added')
+      showToast('Quota added')
     }
     setQForm({ party: '', weight: '', rate: '', is_kl: false })
   }
@@ -339,11 +339,11 @@ export default function CalTable() {
     if (bEditId) {
       await supabase.from('cal_bars').update(payload).eq('id', bEditId)
       setBars(p => p.map(r => r.id === bEditId ? { ...r, ...payload, _id: r._id, _new: false } : r))
-      setBEditId(null); showToast('✓ Bar updated')
+      setBEditId(null); showToast('Bar updated')
     } else {
       const { data } = await supabase.from('cal_bars').insert(payload).select().single()
       if (data) setBars(p => [...p, { ...data, _id: data.id, _new: false }])
-      showToast('✓ Bar added')
+      showToast('Bar added')
     }
     setBForm(f => ({ batch: nextBatchName([...bars, { batch: bForm.batch, _new: false }]), market_weight: '', purity: '', state: f.state || 'KA' }))
     setOcrWeight({ loading: false, preview: null, status: '' })
@@ -403,23 +403,23 @@ export default function CalTable() {
       if (type === 'weight') {
         if (parsed.weight != null) {
           setBForm(f => ({ ...f, market_weight: String(parsed.weight) }))
-          set(s => ({ ...s, loading: false, status: `✓ ${parsed.weight} g` }))
-          showToast(`✓ Weight: ${parsed.weight}g`)
+          set(s => ({ ...s, loading: false, status: `${parsed.weight} g` }))
+          showToast(`Weight: ${parsed.weight}g`)
         } else {
-          set(s => ({ ...s, loading: false, status: 'Could not read — enter manually' }))
+          set(s => ({ ...s, loading: false, status: 'Could not read. Enter manually.' }))
         }
       } else {
         if (parsed.purity != null) {
           setBForm(f => ({ ...f, purity: String(parsed.purity) }))
-          set(s => ({ ...s, loading: false, status: `✓ ${parsed.purity}%` }))
-          showToast(`✓ Purity: ${parsed.purity}%`)
+          set(s => ({ ...s, loading: false, status: `${parsed.purity}%` }))
+          showToast(`Purity: ${parsed.purity}%`)
         } else {
-          set(s => ({ ...s, loading: false, status: 'Could not read — enter manually' }))
+          set(s => ({ ...s, loading: false, status: 'Could not read. Enter manually.' }))
         }
       }
     } catch (err) {
       console.error('OCR error:', err)
-      set(s => ({ ...s, loading: false, status: 'Scan failed — enter manually' }))
+      set(s => ({ ...s, loading: false, status: 'Scan failed. Enter manually.' }))
     }
   }
 
@@ -443,7 +443,7 @@ export default function CalTable() {
     const table = pasteModal === 'quotas' ? 'cal_quotas' : 'cal_bars'
     for (const row of rows) { const { data } = await supabase.from(table).insert({ ...row, created_by: user?.id }).select().single(); if (data) inserted.push({ ...data, _id: data.id, _new: false }) }
     if (pasteModal === 'quotas') setQuotas(p => [...p, ...inserted]); else setBars(p => [...p, ...inserted])
-    showToast(`✓ ${inserted.length} rows imported${skipped.length ? `, ${skipped.length} skipped` : ''}`)
+    showToast(`${inserted.length} rows imported${skipped.length ? `, ${skipped.length} skipped` : ''}`)
     setPasteModal(null)
   }
 
@@ -477,7 +477,7 @@ export default function CalTable() {
     await supabase.from('cal_results').delete().eq('date', date)
     if (output.length) await supabase.from('cal_results').insert(output.map(r => ({ date: r.date, party: r.party, batch: r.batch, rate: r.rate, allocated_weight: r.allocated_weight, purity: r.purity, net_gold: r.net_gold, sale_value: r.sale_value, state: r.state })))
     await loadResults(); setTab('output'); setRunning(false)
-    showToast(`✓ ${output.length} allocation rows generated`)
+    showToast(`${output.length} allocation rows generated`)
   }
 
   const printReport = () => {
@@ -1368,15 +1368,15 @@ function BarCard({ gen, index, t, date, user, onNameChange, onSaved, onRemove, s
       const parsed = result.data
       if (type === 'weight' && parsed.weight != null) {
         setWeight(String(parsed.weight))
-        setWOcr(s => ({ ...s, loading: false, status: `✓ ${parsed.weight} g` }))
+        setWOcr(s => ({ ...s, loading: false, status: `${parsed.weight} g` }))
       } else if (type === 'purity' && parsed.purity != null) {
         setPurity(String(parsed.purity))
-        setPOcr(s => ({ ...s, loading: false, status: `✓ ${parsed.purity}%` }))
+        setPOcr(s => ({ ...s, loading: false, status: `${parsed.purity}%` }))
       } else {
-        set(s => ({ ...s, loading: false, status: 'Could not read — type manually' }))
+        set(s => ({ ...s, loading: false, status: 'Could not read. Type manually.' }))
       }
     } catch (err) {
-      set(s => ({ ...s, loading: false, status: 'Scan failed — type manually' }))
+      set(s => ({ ...s, loading: false, status: 'Scan failed. Type manually.' }))
     }
   }
 
@@ -1385,7 +1385,7 @@ function BarCard({ gen, index, t, date, user, onNameChange, onSaved, onRemove, s
     setSaving(true)
     const payload = { date, batch: name.trim(), market_weight: parseFloat(weight), purity: purity ? parseFloat(purity) : null, state, created_by: user?.id }
     const { data } = await supabase.from('cal_bars').insert(payload).select().single()
-    if (data) { onSaved(data); showToast(`✓ ${name} saved`) }
+    if (data) { onSaved(data); showToast(`${name} saved`) }
     setSaving(false)
   }
 
@@ -1471,9 +1471,9 @@ function SavedBarCard({ row, t, date, user, onUpdate, onDelete, showToast }) {
       if (!result.success) throw new Error(result.error)
       if (result.data.purity != null) {
         setPurity(String(result.data.purity))
-        setPOcr(s => ({ ...s, loading: false, status: `✓ ${result.data.purity}%` }))
+        setPOcr(s => ({ ...s, loading: false, status: `${result.data.purity}%` }))
       } else {
-        setPOcr(s => ({ ...s, loading: false, status: 'Could not read — type manually' }))
+        setPOcr(s => ({ ...s, loading: false, status: 'Could not read. Type manually.' }))
       }
     } catch { setPOcr(s => ({ ...s, loading: false, status: 'Scan failed' })) }
   }
@@ -1483,7 +1483,7 @@ function SavedBarCard({ row, t, date, user, onUpdate, onDelete, showToast }) {
     setSaving(true)
     await supabase.from('cal_bars').update({ purity: parseFloat(purity) }).eq('id', row.id)
     onUpdate({ ...row, purity: parseFloat(purity) })
-    showToast(`✓ ${row.batch} purity saved`)
+    showToast(`${row.batch} purity saved`)
     setEditing(false); setSaving(false)
     setPOcr({ loading: false, preview: null, status: '' })
   }
@@ -1512,7 +1512,7 @@ function SavedBarCard({ row, t, date, user, onUpdate, onDelete, showToast }) {
           <div style={{ fontSize: '0.65rem', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: '2px' }}>Weight</div>
           <span style={{ fontSize: '1.1rem', fontWeight: 700, color: t.gold, fontFamily: 'monospace' }}>{Number(row.market_weight).toLocaleString('en-IN', { maximumFractionDigits: 4, minimumFractionDigits: 0 })}g</span>
         </div>
-        <span style={{ fontSize: '0.72rem', color: t.green }}>✓ saved</span>
+        <span style={{ fontSize: '0.72rem', color: t.green }}>saved</span>
       </div>
 
       {/* Purity */}
@@ -1533,7 +1533,7 @@ function SavedBarCard({ row, t, date, user, onUpdate, onDelete, showToast }) {
             {pOcr.status && <div style={{ fontSize: '0.72rem', color: pOcr.status.startsWith('✓') ? t.green : t.text3, fontFamily: 'monospace', marginBottom: '8px' }}>{pOcr.status}</div>}
             <button onClick={savePurity} disabled={!purity || saving}
               style={{ width: '100%', background: purity ? t.green : t.border, color: purity ? '#fff' : t.text4, border: 'none', borderRadius: '8px', padding: '9px', fontSize: '0.85rem', fontWeight: 700, cursor: purity ? 'pointer' : 'not-allowed', fontFamily: 'inherit' }}>
-              {saving ? '⟳ Saving...' : '✓ Save Purity'}
+              {saving ? 'Saving…' : 'Save purity'}
             </button>
           </div>
         ) : (

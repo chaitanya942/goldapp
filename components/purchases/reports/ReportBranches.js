@@ -848,7 +848,7 @@ export default function ReportBranches({ branchData, allBranchMeta, stateData, t
       {/* ── SCATTER — desktop only (fixed-width SVG) ── */}
       {!isMobile && (
         <Panel {...P('scatter')}>
-          <SectionTitle title="Branch Performance — Net Weight vs Avg Purity" t={t} badge="bubble = txn count" />
+          <SectionTitle title="Branch Performance: Net Weight vs Avg Purity" t={t} badge="bubble = txn count" />
           <ScatterChart branchData={branchData} t={t} fromDate={fromDate} toDate={toDate} filterTxn={filterTxn} />
         </Panel>
       )}

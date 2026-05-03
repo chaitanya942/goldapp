@@ -38,32 +38,31 @@ function AgeBadge({ days, t }) {
   return <span style={{ fontSize: '10px', color, background: `${color}18`, borderRadius: '5px', padding: '2px 7px', fontWeight: 700, letterSpacing: '.02em' }}>{days}d</span>
 }
 
-// EWB cell — single-line layout. EWB number visible on wide screens,
-// hidden under a "✓ EWB" badge on narrow screens. Expiry shown as tooltip.
+// EWB cell — single-line layout. EWB number visible on wide screens, short
+// "EWB" badge on narrow screens. Expiry shown as tooltip.
 function EwbCell({ c, t, downloadingId, ewbActionId, downloadEwbPdf, cancelEwb }) {
   const validUntil = c.ewb_valid_until ? new Date(c.ewb_valid_until) : null
   const tooltipText = validUntil
-    ? `EWB ${c.eway_bill_no} · valid till ${validUntil.toLocaleString()}`
+    ? `EWB ${c.eway_bill_no}. Valid till ${validUntil.toLocaleString()}.`
     : `EWB ${c.eway_bill_no}`
   return (
     <div style={{ display: 'flex', gap: '4px', flexWrap: 'nowrap', alignItems: 'center', whiteSpace: 'nowrap' }} title={tooltipText}>
-      {/* Wide screens: full EWB number; narrow: short "✓ EWB" badge. CSS-only swap. */}
       <span className="ewb-num-full"
         style={{ fontSize: '10px', color: t.green, background: `${t.green}15`, borderRadius: '4px', padding: '2px 7px', fontWeight: 600, fontFamily: 'monospace' }}>
         {c.eway_bill_no}
       </span>
       <span className="ewb-num-short"
         style={{ fontSize: '10px', color: t.green, background: `${t.green}15`, borderRadius: '4px', padding: '2px 7px', fontWeight: 600 }}>
-        ✓ EWB
+        EWB
       </span>
       <button onClick={() => downloadEwbPdf(c)} disabled={!!downloadingId}
-        style={{ background: t.blue, color: '#fff', border: 'none', borderRadius: '5px', padding: '3px 8px', fontSize: '10px', fontWeight: 600, cursor: 'pointer', opacity: downloadingId === c.id + ':ewb' ? 0.6 : 1 }}>
-        {downloadingId === c.id + ':ewb' ? '⏳' : '📄 PDF'}
+        style={{ background: t.blue, color: '#fff', border: 'none', borderRadius: '5px', padding: '3px 10px', fontSize: '10px', fontWeight: 600, cursor: 'pointer', opacity: downloadingId === c.id + ':ewb' ? 0.6 : 1 }}>
+        {downloadingId === c.id + ':ewb' ? '…' : 'PDF'}
       </button>
       <button onClick={() => cancelEwb(c)} disabled={!!ewbActionId}
         title="Cancel E-Way Bill (within 24h)"
-        style={{ background: 'transparent', border: `1px solid ${t.red}40`, borderRadius: '5px', padding: '3px 8px', fontSize: '10px', color: t.red, cursor: 'pointer', opacity: ewbActionId === c.id + ':cancel' ? 0.6 : 1 }}>
-        {ewbActionId === c.id + ':cancel' ? '…' : '✕'}
+        style={{ background: 'transparent', border: `1px solid ${t.red}40`, borderRadius: '5px', padding: '3px 10px', fontSize: '10px', color: t.red, cursor: 'pointer', opacity: ewbActionId === c.id + ':cancel' ? 0.6 : 1 }}>
+        {ewbActionId === c.id + ':cancel' ? '…' : 'Cancel'}
       </button>
       <style>{`
         .ewb-num-short { display: none; }
@@ -156,11 +155,11 @@ export default function ConsignmentData() {
           const row = payload.new
           if (!row?.id) return
           setConsignments(prev => prev.map(c => c.id === row.id ? { ...c, ...row } : c))
-          // Friendly notification for ops users
+          // Notify ops when accounts changes status.
           if (row.approval_status === 'approved') {
-            setToast({ msg: `${row.tmp_prf_no} approved — downloads unlocked`, type: 'success' })
+            setToast({ msg: `${row.tmp_prf_no} approved. Documents are now available.`, type: 'success' })
           } else if (row.approval_status === 'rejected') {
-            setToast({ msg: `${row.tmp_prf_no} rejected: ${row.rejection_reason || 'no reason'}`, type: 'error' })
+            setToast({ msg: `${row.tmp_prf_no} rejected: ${row.rejection_reason || 'no reason given'}`, type: 'error' })
           }
         })
       .subscribe()
@@ -264,7 +263,7 @@ export default function ConsignmentData() {
   async function handleCreate() {
     if (!selected.size || !nav?.branch) return
     if (moveType === 'INTERNAL' && !destBranch) {
-      setToast({ msg: 'Pick a destination hub before creating', type: 'error' })
+      setToast({ msg: 'Select a destination hub before creating.', type: 'error' })
       return
     }
     setCreating(true)
@@ -311,10 +310,10 @@ export default function ConsignmentData() {
         console.log('ClearTax response:', data.cleartax_response)
         console.log('Outgoing payload:', data.outgoing_payload)
         console.groupEnd()
-        setToast({ msg: (data.error || 'E-Invoice failed') + ' — see browser console (F12) for full details', type: 'error' })
+        setToast({ msg: data.error || 'E-Invoice generation failed.', type: 'error' })
         return
       }
-      setToast({ msg: `E-Invoice generated · IRN: ${String(data.irn).slice(0, 20)}…`, type: 'success' })
+      setToast({ msg: 'E-Invoice generated.', type: 'success' })
       await fetchAll()
     } catch (err) {
       setToast({ msg: err.message || 'E-Invoice generation failed', type: 'error' })
@@ -323,10 +322,9 @@ export default function ConsignmentData() {
 
   async function cancelEinv(c) {
     const ok = await openConfirm({
-      icon: '⚠',
       title: `Cancel E-Invoice for ${c.tmp_prf_no}?`,
-      message: `IRN: ${String(c.irn || '').slice(0, 20)}…\nRoute: ${c.branch_name} → ${c.dest_branch || 'Head Office'}\n\nIRP allows cancellation only within 24 hours of generation. After that the IRN is locked and you'll need to issue a credit note instead.`,
-      confirmLabel: 'Cancel IRN',
+      message: `IRN ${String(c.irn || '').slice(0, 20)}…\n${c.branch_name} to ${c.dest_branch || 'Head Office'}.\n\nThe IRP only accepts cancellation within 24 hours of generation. After that, the IRN is locked and a credit note is required instead.`,
+      confirmLabel: 'Cancel E-Invoice',
       danger: true,
     })
     if (!ok) return
@@ -359,7 +357,7 @@ export default function ConsignmentData() {
         setToast({ msg: data.error || 'EWB generation failed', type: 'error' })
         return
       }
-      setToast({ msg: `E-Way Bill ${data.ewb_no} generated — downloading PDF…`, type: 'success' })
+      setToast({ msg: `E-Way Bill ${data.ewb_no} generated. Downloading PDF.`, type: 'success' })
       await fetchAll()
       // Auto-download the EWB PDF immediately
       await triggerDownload(`/api/eway-bill/pdf?id=${c.id}`, `EWB_${data.ewb_no}.pdf`,
@@ -371,10 +369,9 @@ export default function ConsignmentData() {
 
   async function cancelEwb(c) {
     const ok = await openConfirm({
-      icon: '⚠',
       title: `Cancel E-Way Bill ${c.eway_bill_no}?`,
-      message: `${c.tmp_prf_no} · ${c.branch_name} → ${c.dest_branch || 'Head Office'}\n\nNIC allows cancellation only within 24 hours of generation. After that the EWB is locked and the goods cannot move under it.`,
-      confirmLabel: 'Cancel EWB',
+      message: `${c.tmp_prf_no}, ${c.branch_name} to ${c.dest_branch || 'Head Office'}.\n\nNIC only accepts cancellation within 24 hours of generation. After that the EWB is locked and the goods cannot move under it.`,
+      confirmLabel: 'Cancel E-Way Bill',
       danger: true,
     })
     if (!ok) return
@@ -399,10 +396,9 @@ export default function ConsignmentData() {
 
   async function cancelConsignment(c) {
     const reason = await openPrompt({
-      icon: '✕',
       title: `Void ${c.tmp_prf_no}?`,
-      message: `${c.total_bills || 0} bill${c.total_bills === 1 ? '' : 's'} (${fmtWt(c.total_net_wt)}) will return to ${c.branch_name}. EWB/IRN must be cancelled separately if already generated.\n\nEnter a reason — it goes into the audit log.`,
-      placeholder: 'e.g. Created on wrong branch, vehicle cancelled, customer return…',
+      message: `${c.total_bills || 0} bill${c.total_bills === 1 ? '' : 's'} (${fmtWt(c.total_net_wt)}) will return to ${c.branch_name}. If the E-Way Bill or E-Invoice has been generated, cancel them separately on the GST portal.\n\nEnter a reason. It will be saved in the audit log.`,
+      placeholder: 'For example: created on the wrong branch, vehicle cancelled, customer return.',
       minLength: 8,
       maxLength: 280,
       rows: 3,
@@ -417,7 +413,7 @@ export default function ConsignmentData() {
       })
       const data = await res.json()
       if (!res.ok || data.error) { setToast({ msg: data.error || 'Cancel failed', type: 'error' }); return }
-      setToast({ msg: 'Consignment voided — bills returned to source', type: 'success' })
+      setToast({ msg: 'Consignment voided. Bills have been returned to the source branch.', type: 'success' })
       await fetchAll()
     } catch (err) {
       setToast({ msg: err.message || 'Cancel failed', type: 'error' })
@@ -461,7 +457,7 @@ export default function ConsignmentData() {
     const genFailures = []
 
     if (showEwb && !cur.eway_bill_no) {
-      setToast({ msg: '⚡ Generating E-Way Bill (may take 20-30 seconds)…', type: 'info' })
+      setToast({ msg: 'Generating E-Way Bill. This can take up to 30 seconds.', type: 'info' })
       try {
         const r = await authedFetch('/api/eway-bill/generate', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -480,7 +476,7 @@ export default function ConsignmentData() {
     }
 
     if (showEinv && !cur.irn) {
-      setToast({ msg: '⚡ Generating E-Invoice (may take 20-30 seconds)…', type: 'info' })
+      setToast({ msg: 'Generating E-Invoice. This can take up to 30 seconds.', type: 'info' })
       try {
         const r = await authedFetch('/api/e-invoice/generate', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -549,7 +545,7 @@ export default function ConsignmentData() {
           if (e.name === 'AbortError') { setDownloadingId(null); return }
           throw e
         }
-        setToast({ msg: 'Saving documents to folder…', type: 'info' })
+        setToast({ msg: 'Saving documents to folder.', type: 'info' })
         const subDir = await parentDir.getDirectoryHandle(folderName, { create: true })
 
         const summary = []
@@ -579,23 +575,23 @@ export default function ConsignmentData() {
         }
 
         const missing = []
-        if (showEwb && !c.eway_bill_no) missing.push('EWB not generated')
+        if (showEwb && !c.eway_bill_no) missing.push('E-Way Bill not generated')
         if (showEinv && !c.irn)         missing.push('E-Invoice not generated')
-        const baseMsg = `Saved to ${folderName}/ — ${summary.join(' + ')}`
+        const baseMsg = `Saved to ${folderName}: ${summary.join(', ')}`
         const allFailures = [...genFailures, ...failures]
         if (allFailures.length) {
-          // Surface failures prominently — don't pretend success
-          setToast({ msg: `${baseMsg}  |  ✕ FAILED: ${allFailures.join(' · ')}`, type: 'error' })
+          // Surface failures prominently — don't pretend success.
+          setToast({ msg: `${baseMsg}. Failed: ${allFailures.join('; ')}.`, type: 'error' })
         } else if (missing.length) {
-          setToast({ msg: `${baseMsg} · ${missing.join(', ')}`, type: 'info' })
+          setToast({ msg: `${baseMsg}. ${missing.join(', ')}.`, type: 'info' })
         } else {
           setToast({ msg: baseMsg, type: 'success' })
         }
         return
       }
 
-      // ── Path 2: Fallback for Firefox/Safari — ZIP with the folder name inside ──
-      setToast({ msg: 'Bundling documents (your browser does not support folder save — using ZIP)…', type: 'info' })
+      // Path 2: Fallback for Firefox/Safari — pack into a ZIP.
+      setToast({ msg: 'Bundling documents into a ZIP.', type: 'info' })
       const zip = new JSZip()
       const summary = []
       const failures = []
@@ -619,14 +615,14 @@ export default function ConsignmentData() {
       URL.revokeObjectURL(a.href)
 
       const missing = []
-      if (showEwb && !c.eway_bill_no) missing.push('EWB not generated')
+      if (showEwb && !c.eway_bill_no) missing.push('E-Way Bill not generated')
       if (showEinv && !c.irn)         missing.push('E-Invoice not generated')
-      const baseMsg = `Downloaded ${folderName}.zip — ${summary.join(' + ')}`
+      const baseMsg = `Downloaded ${folderName}.zip: ${summary.join(', ')}`
       const allFailuresZip = [...genFailures, ...failures]
       if (allFailuresZip.length) {
-        setToast({ msg: `${baseMsg}  |  ✕ FAILED: ${allFailuresZip.join(' · ')}`, type: 'error' })
+        setToast({ msg: `${baseMsg}. Failed: ${allFailuresZip.join('; ')}.`, type: 'error' })
       } else if (missing.length) {
-        setToast({ msg: `${baseMsg} · ${missing.join(', ')}`, type: 'info' })
+        setToast({ msg: `${baseMsg}. ${missing.join(', ')}.`, type: 'info' })
       } else {
         setToast({ msg: baseMsg, type: 'success' })
       }
@@ -693,9 +689,9 @@ export default function ConsignmentData() {
       const pickup = new Date(now); pickup.setHours(hh, mm || 0, 0, 0)
       const minsUntil = Math.round((pickup - now) / 60000)
       if (minsUntil < -30 || minsUntil > 240) return null   // outside ±0.5h–4h window
-      if (minsUntil < 0)  return { text: `Pickup time was ${Math.abs(minsUntil)} min ago — ${visibleBills.length} bills still pending`, urgent: true }
-      if (minsUntil < 60) return { text: `Pickup in ${minsUntil} min — ${visibleBills.length} bills pending`, urgent: true }
-      return { text: `Pickup at ${pickupTime} (in ${Math.floor(minsUntil/60)}h ${minsUntil%60}m) — ${visibleBills.length} bills pending`, urgent: false }
+      if (minsUntil < 0)  return { text: `Pickup time was ${Math.abs(minsUntil)} min ago. ${visibleBills.length} bills still pending.`, urgent: true }
+      if (minsUntil < 60) return { text: `Pickup in ${minsUntil} min. ${visibleBills.length} bills pending.`, urgent: true }
+      return { text: `Pickup at ${pickupTime} (in ${Math.floor(minsUntil/60)}h ${minsUntil%60}m). ${visibleBills.length} bills pending.`, urgent: false }
     })()
 
     return (
@@ -709,7 +705,7 @@ export default function ConsignmentData() {
             color: pickupReminder.urgent ? t.red : t.gold, fontWeight: 600,
             display: 'flex', alignItems: 'center', gap: '8px',
           }}>
-            <span style={{ fontSize: '14px' }}>{pickupReminder.urgent ? '⏰' : '🕐'}</span>
+            <span style={{ display: 'inline-block', width: '6px', height: '6px', borderRadius: '50%', background: pickupReminder.urgent ? t.red : t.gold }} />
             {pickupReminder.text}
           </div>
         )}
@@ -834,7 +830,7 @@ export default function ConsignmentData() {
                           checked={fromOther ? true : isSel}
                           disabled={fromOther}
                           onChange={() => { if (!fromOther) toggleRow(row.id) }}
-                          title={fromOther ? `Locked — transferred in from ${row.branch_name}, must be included in this hub's onward consignment` : ''}
+                          title={fromOther ? `Locked. Transferred in from ${row.branch_name}; must be included in this hub's onward consignment.` : ''}
                           style={{ cursor: fromOther ? 'not-allowed' : 'pointer', accentColor: fromOther ? t.purple : t.gold }} />
                       </td>
                       <td style={{ padding: '10px 14px', fontSize: '12px', color: t.text3, whiteSpace: 'nowrap' }}>{fmtDate(row.purchase_date)}</td>
@@ -938,10 +934,10 @@ export default function ConsignmentData() {
                       {c.tmp_prf_no}
                       {isNew && <span style={{ marginLeft: 6, fontSize: 9, color: t.green, background: `${t.green}20`, padding: '1px 6px', borderRadius: 4, fontWeight: 600 }}>NEW</span>}
                       {c.approval_status === 'pending' && (
-                        <span title="Awaiting accounts team approval — downloads locked" style={{ marginLeft: 6, fontSize: 9, color: t.orange, background: `${t.orange}20`, padding: '1px 6px', borderRadius: 4, fontWeight: 600 }}>⏳ APPROVAL</span>
+                        <span title="Awaiting accounts team approval. Downloads are locked." style={{ marginLeft: 6, fontSize: 9, color: t.orange, background: `${t.orange}20`, padding: '1px 6px', borderRadius: 4, fontWeight: 600 }}>APPROVAL</span>
                       )}
                       {c.approval_status === 'rejected' && (
-                        <span title={c.rejection_reason || 'Rejected'} style={{ marginLeft: 6, fontSize: 9, color: t.red, background: `${t.red}20`, padding: '1px 6px', borderRadius: 4, fontWeight: 600 }}>✕ REJECTED</span>
+                        <span title={c.rejection_reason || 'Rejected'} style={{ marginLeft: 6, fontSize: 9, color: t.red, background: `${t.red}20`, padding: '1px 6px', borderRadius: 4, fontWeight: 600 }}>REJECTED</span>
                       )}
                     </td>
                     <td style={{ padding: '11px 14px', whiteSpace: 'nowrap' }}>
@@ -974,26 +970,26 @@ export default function ConsignmentData() {
                     </td>
                     <td style={{ padding: '11px 14px' }}>
                       {!showEwb ? (
-                        <span title="Interstate Hub→HO uses E-Invoice instead — no separate EWB needed" style={{ fontSize: '10px', color: t.text4 }}>n/a</span>
+                        <span title="Interstate Hub-to-HO uses E-Invoice instead. No separate EWB needed." style={{ fontSize: '10px', color: t.text4 }}>n/a</span>
                       ) : c.eway_bill_no ? (
                         <EwbCell c={c} t={t} downloadingId={downloadingId} ewbActionId={ewbActionId} downloadEwbPdf={downloadEwbPdf} cancelEwb={cancelEwb} />
                       ) : (
                         <button onClick={() => generateEwb(c)} disabled={!!ewbActionId}
-                          style={{ background: 'transparent', border: `1px solid ${t.green}50`, borderRadius: '5px', padding: '4px 10px', fontSize: '10px', color: t.green, fontWeight: 600, cursor: 'pointer', opacity: ewbActionId === c.id + ':gen' ? 0.6 : 1 }}>
-                          {ewbActionId === c.id + ':gen' ? '⏳ Generating…' : '⚡ Generate EWB'}
+                          style={{ background: 'transparent', border: `1px solid ${t.green}50`, borderRadius: '5px', padding: '4px 12px', fontSize: '10px', color: t.green, fontWeight: 600, cursor: 'pointer', opacity: ewbActionId === c.id + ':gen' ? 0.6 : 1 }}>
+                          {ewbActionId === c.id + ':gen' ? 'Generating…' : 'Generate'}
                         </button>
                       )}
                     </td>
                     <td style={{ padding: '11px 14px' }}>
                       {!showEinvoice ? (
-                        <span title={isType ? 'Branch → Hub uses Issue Voucher only — no E-Invoice' : 'Intrastate KA Branch → HO uses EWB only — no E-Invoice'} style={{ fontSize: '10px', color: t.text4 }}>n/a</span>
+                        <span title={isType ? 'Branch-to-Hub uses Issue Voucher only. No E-Invoice required.' : 'Intrastate Karnataka Branch-to-HO uses EWB only. No E-Invoice required.'} style={{ fontSize: '10px', color: t.text4 }}>n/a</span>
                       ) : c.irn ? (
                         <div style={{ display: 'flex', gap: '4px', flexWrap: 'nowrap', alignItems: 'center', whiteSpace: 'nowrap' }} title={`IRN: ${c.irn}`}>
                           <span className="irn-full" style={{ fontSize: '10px', color: t.purple, background: `${t.purple}15`, borderRadius: '4px', padding: '2px 7px', fontWeight: 600, fontFamily: 'monospace' }}>
-                            IRN: {String(c.irn).slice(0, 8)}…
+                            IRN {String(c.irn).slice(0, 8)}…
                           </span>
                           <span className="irn-short" style={{ fontSize: '10px', color: t.purple, background: `${t.purple}15`, borderRadius: '4px', padding: '2px 7px', fontWeight: 600 }}>
-                            ✓ IRN
+                            IRN
                           </span>
                           <button onClick={async () => {
                             setDownloadingId(c.id + ':einv')
@@ -1002,14 +998,14 @@ export default function ConsignmentData() {
                               msg => setToast({ msg, type: 'error' }))
                             setDownloadingId(null)
                           }} disabled={!!downloadingId}
-                            title="Download signed E-Invoice PDF (with QR code)"
-                            style={{ background: t.purple, color: '#fff', border: 'none', borderRadius: '5px', padding: '3px 8px', fontSize: '10px', fontWeight: 600, cursor: 'pointer', opacity: downloadingId === c.id + ':einv' ? 0.6 : 1 }}>
-                            {downloadingId === c.id + ':einv' ? '⏳' : '📄 PDF'}
+                            title="Download signed E-Invoice PDF with QR code"
+                            style={{ background: t.purple, color: '#fff', border: 'none', borderRadius: '5px', padding: '3px 10px', fontSize: '10px', fontWeight: 600, cursor: 'pointer', opacity: downloadingId === c.id + ':einv' ? 0.6 : 1 }}>
+                            {downloadingId === c.id + ':einv' ? '…' : 'PDF'}
                           </button>
                           <button onClick={() => cancelEinv(c)} disabled={!!ewbActionId}
                             title="Cancel E-Invoice (within 24h)"
-                            style={{ background: 'transparent', border: `1px solid ${t.red}40`, borderRadius: '5px', padding: '3px 8px', fontSize: '10px', color: t.red, cursor: 'pointer', opacity: ewbActionId === c.id + ':einv-cancel' ? 0.6 : 1 }}>
-                            {ewbActionId === c.id + ':einv-cancel' ? '…' : '✕'}
+                            style={{ background: 'transparent', border: `1px solid ${t.red}40`, borderRadius: '5px', padding: '3px 10px', fontSize: '10px', color: t.red, cursor: 'pointer', opacity: ewbActionId === c.id + ':einv-cancel' ? 0.6 : 1 }}>
+                            {ewbActionId === c.id + ':einv-cancel' ? '…' : 'Cancel'}
                           </button>
                           <style>{`
                             .irn-short { display: none; }
@@ -1021,22 +1017,22 @@ export default function ConsignmentData() {
                         </div>
                       ) : (
                         <button onClick={() => generateEinv(c)} disabled={!!ewbActionId}
-                          style={{ background: 'transparent', border: `1px solid ${t.purple}50`, borderRadius: '5px', padding: '4px 10px', fontSize: '10px', color: t.purple, fontWeight: 600, cursor: 'pointer', opacity: ewbActionId === c.id + ':einv' ? 0.6 : 1 }}>
-                          {ewbActionId === c.id + ':einv' ? '⏳ Generating…' : '⚡ Generate IRN'}
+                          style={{ background: 'transparent', border: `1px solid ${t.purple}50`, borderRadius: '5px', padding: '4px 12px', fontSize: '10px', color: t.purple, fontWeight: 600, cursor: 'pointer', opacity: ewbActionId === c.id + ':einv' ? 0.6 : 1 }}>
+                          {ewbActionId === c.id + ':einv' ? 'Generating…' : 'Generate'}
                         </button>
                       )}
                     </td>
                     <td style={{ padding: '11px 14px' }}>
                       <div style={{ display: 'flex', gap: '4px', flexWrap: 'nowrap', whiteSpace: 'nowrap' }}>
                         <button onClick={() => downloadAll(c)} disabled={downloadingId === c.id + ':all'}
-                          title="Download Consignee Report + Document + EWB (if available) in one click"
-                          style={{ background: t.gold, color: '#1a0a00', border: 'none', borderRadius: '6px', padding: '5px 11px', fontSize: '10px', fontWeight: 700, cursor: downloadingId === c.id + ':all' ? 'not-allowed' : 'pointer', opacity: downloadingId === c.id + ':all' ? 0.6 : 1, whiteSpace: 'nowrap' }}>
-                          {downloadingId === c.id + ':all' ? '⏳…' : '📦 All'}
+                          title="Download Consignee Report, Voucher or Challan, and the E-Way Bill in one click"
+                          style={{ background: t.gold, color: '#1a0a00', border: 'none', borderRadius: '6px', padding: '5px 14px', fontSize: '10px', fontWeight: 700, cursor: downloadingId === c.id + ':all' ? 'not-allowed' : 'pointer', opacity: downloadingId === c.id + ':all' ? 0.6 : 1, whiteSpace: 'nowrap' }}>
+                          {downloadingId === c.id + ':all' ? '…' : 'Download all'}
                         </button>
                         <button onClick={() => cancelConsignment(c)}
-                          title="Cancel this consignment — bills return to source"
-                          style={{ background: 'transparent', border: `1px solid ${t.red}40`, borderRadius: '5px', padding: '5px 8px', fontSize: '10px', color: t.red, cursor: 'pointer' }}>
-                          ✕ Void
+                          title="Void this consignment. Bills return to the source branch."
+                          style={{ background: 'transparent', border: `1px solid ${t.red}40`, borderRadius: '5px', padding: '5px 12px', fontSize: '10px', color: t.red, cursor: 'pointer' }}>
+                          Void
                         </button>
                       </div>
                     </td>

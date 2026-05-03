@@ -295,7 +295,7 @@ export default function Topbar({ onMenuToggle, isMobile }) {
         setToast({ msg: data.error || 'Sync failed', type: 'error' })
       }
     } catch {
-      setToast({ msg: 'Sync timed out — data updates automatically every 5 min', type: 'error' })
+      setToast({ msg: 'Sync timed out. Data updates automatically every 5 minutes.', type: 'error' })
     } finally {
       setSyncing(false)
     }
