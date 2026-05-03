@@ -907,13 +907,36 @@ export async function POST(req) {
     const approver_email = actorEmail
     if (!id) return Response.json({ error: 'consignment id required' }, { status: 400 })
     if (!reason) return Response.json({ error: 'Rejection reason is required' }, { status: 400 })
+
+    // Rejection auto-voids the consignment row.
+    //
+    // Why: there's no "edit and resubmit" UI — once rejected, the only path
+    // forward is to create a new consignment with the same (or corrected)
+    // bills. If we left the row alive, the bills would stay locked to it
+    // (the duplicate-link guard sees status='dispatched' and blocks them
+    // from any new consignment). That forced the operator to click Void
+    // every single time. So we collapse rejection + void into one action.
+    //
+    // Audit trail is fully preserved:
+    //   - approval_status = 'rejected'  (visible on the Rejected tab)
+    //   - rejection_reason = reason     (shown on the row)
+    //   - status = 'cancelled'          (row is voided, bills are free)
+    //   - cancel_reason = 'Rejected: ...' (cross-references the rejection)
+    //   - approved_at = nowIso          (decision timestamp, used for SLA pill)
+    //   - approved_by = approver_email  (auditable who decided)
+    // Bills don't need reverting — under the new deferred-movement model
+    // they never moved on creation.
+    const nowIso = new Date().toISOString()
     const { data, error } = await supabase
       .from('consignments')
       .update({
         approval_status:   'rejected',
-        approved_at:       null,
-        approved_by:       null,
+        approved_at:       nowIso,                       // when accounts decided (used for SLA timer)
+        approved_by:       approver_email || null,
         rejection_reason:  reason,
+        status:            'cancelled',
+        cancelled_at:      nowIso,
+        cancel_reason:     `Rejected by accounts: ${reason}`,
       })
       .eq('id', id)
       .select()
@@ -923,7 +946,7 @@ export async function POST(req) {
       consignment_id: id,
       event_type:     'rejected_by_accounts',
       actor_email:    approver_email,
-      details:        { reason },
+      details:        { reason, auto_voided: true },
     })
     return Response.json({ success: true, data })
   }

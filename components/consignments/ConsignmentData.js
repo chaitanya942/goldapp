@@ -690,6 +690,11 @@ export default function ConsignmentData() {
 
   // ── Active consignments filtering ─────────────────────────────────────────
   const filteredCons = consignments.filter(c => {
+    // This page is "branch movements in flight" — cancelled rows belong on
+    // the Rejected/Cancelled audit views, not here. Auto-voided rejections
+    // (where reject_approval flips status='cancelled') also drop out here
+    // and only show on the Approvals → Rejected tab.
+    if (c.status === 'cancelled') return false
     if (filterType   && c.movement_type !== filterType)   return false
     if (filterRegion) {
       const br = branches.find(b => b.name === c.branch_name)
