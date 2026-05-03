@@ -173,6 +173,12 @@ export async function GET(req) {
       //      after a sync that populates current_branch)
       //   2. OWN bills with current_branch IS NULL (legacy rows pre-current_branch)
       //   3. TRANSFERRED-IN bills (different branch_name, current here)
+      // Explicit column list — the picker only renders these 10 fields.
+      // Trimming select('*') cut payload ~70% on branches with 200+ bills
+      // (purchases has wide JSON columns like cleartax_response and full
+      // address blocks the picker never touches).
+      const PICKER_COLS = 'id,branch_name,current_branch,customer_name,application_id,purchase_date,net_weight,total_amount,final_amount_crm,transaction_type'
+
       const baseFilter = (q) => {
         let r = q.eq('stock_status', 'at_branch').eq('is_deleted', false)
         if (dateFrom) r = r.gte('purchase_date', dateFrom)
@@ -180,17 +186,17 @@ export async function GET(req) {
         return r
       }
 
-      const ownCurrentQ = baseFilter(supabase.from('purchases').select('*'))
+      const ownCurrentQ = baseFilter(supabase.from('purchases').select(PICKER_COLS))
         .eq('crm_status', 'approved')
         .eq('branch_name', branch)
         .eq('current_branch', branch)
 
-      const ownNullCurrentQ = baseFilter(supabase.from('purchases').select('*'))
+      const ownNullCurrentQ = baseFilter(supabase.from('purchases').select(PICKER_COLS))
         .eq('crm_status', 'approved')
         .eq('branch_name', branch)
         .is('current_branch', null)
 
-      const transferredQ = baseFilter(supabase.from('purchases').select('*'))
+      const transferredQ = baseFilter(supabase.from('purchases').select(PICKER_COLS))
         .neq('branch_name', branch)
         .eq('current_branch', branch)
 

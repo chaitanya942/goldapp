@@ -696,6 +696,7 @@ export default function ConsignmentData() {
 
     return (
       <>
+        <style>{`@keyframes shimmerRow { 0% { background-position: 200% 0 } 100% { background-position: -200% 0 } }`}</style>
         {/* Pickup reminder banner */}
         {pickupReminder && (
           <div style={{
@@ -814,7 +815,20 @@ export default function ConsignmentData() {
                 </tr>
               </thead>
               <tbody>
-                {visibleBills.length === 0 ? (
+                {branchBillsState === null ? (
+                  // Skeleton rows while the branch fetch is in flight. Same row
+                  // height as a real row so the table doesn't jump when data
+                  // arrives. shimmer keyframe is defined further down.
+                  Array.from({ length: 8 }).map((_, i) => (
+                    <tr key={`sk-${i}`} style={{ borderBottom: `1px solid ${t.border}15` }}>
+                      {Array.from({ length: isHub ? 9 : 8 }).map((__, j) => (
+                        <td key={j} style={{ padding: '10px 14px' }}>
+                          <span style={{ display: 'block', height: '12px', width: `${30 + ((i + j) * 7) % 50}%`, borderRadius: '3px', background: `linear-gradient(90deg, ${t.border}40 0%, ${t.border}80 50%, ${t.border}40 100%)`, backgroundSize: '200% 100%', animation: 'shimmerRow 1.4s ease-in-out infinite' }} />
+                        </td>
+                      ))}
+                    </tr>
+                  ))
+                ) : visibleBills.length === 0 ? (
                   <tr><td colSpan={isHub ? 9 : 8} style={{ padding: '48px', textAlign: 'center', color: t.text4, fontSize: '13px' }}>No bills available at this branch</td></tr>
                 ) : visibleBills.map(row => {
                   const isSel    = selected.has(row.id)
