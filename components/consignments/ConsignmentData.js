@@ -30,6 +30,32 @@ const fmt     = (n) => n != null ? Number(n).toLocaleString('en-IN') : '—'
 const fmtWt   = (n) => n != null ? `${Number(n).toFixed(3)}g` : '—'
 const fmtDate = (d) => d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: '2-digit' }) : '—'
 const fmtTS   = (d) => d ? new Date(d).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—'
+
+// Waiting-time helper for the approval pending pill in the ALL column.
+// Mirrors ConsignmentApprovals.waitingBadge but returns just label + color
+// urgency band so callers can style their own pill.
+function approvalWaiting(ts, t) {
+  if (!ts) return { label: '—', color: t.text4 }
+  const ms = Date.now() - new Date(ts).getTime()
+  if (ms < 0) return { label: 'just now', color: t.green }
+  const mins = Math.floor(ms / 60000)
+  let label
+  if (mins < 1)        label = 'just now'
+  else if (mins < 60)  label = `${mins}m`
+  else if (mins < 1440) {
+    const h = Math.floor(mins / 60); const m = mins % 60
+    label = m ? `${h}h ${m}m` : `${h}h`
+  } else {
+    const d = Math.floor(mins / 1440); const h = Math.floor((mins % 1440) / 60)
+    label = h ? `${d}d ${h}h` : `${d}d`
+  }
+  // Urgency colour ramp: <1h green, <4h gold, <24h orange, >24h red.
+  const color = mins < 60   ? t.green
+              : mins < 240  ? t.gold
+              : mins < 1440 ? t.orange
+              : t.red
+  return { label, color }
+}
 const daysSince = (d) => d ? Math.floor((Date.now() - new Date(d)) / 86400000) : 0
 
 function AgeBadge({ days, t }) {
@@ -40,11 +66,16 @@ function AgeBadge({ days, t }) {
 
 // EWB cell — single-line layout. EWB number visible on wide screens, short
 // "EWB" badge on narrow screens. Expiry shown as tooltip.
+// PDF download is hidden until accounts approves; EWB itself is generated
+// during create, but the legally binding PDF stays gated. Cancel and the
+// number badge remain visible so ops can see the EWB exists and roll it
+// back if needed within the 24h NIC window.
 function EwbCell({ c, t, downloadingId, ewbActionId, downloadEwbPdf, cancelEwb }) {
   const validUntil = c.ewb_valid_until ? new Date(c.ewb_valid_until) : null
   const tooltipText = validUntil
     ? `EWB ${c.eway_bill_no}. Valid till ${validUntil.toLocaleString()}.`
     : `EWB ${c.eway_bill_no}`
+  const isApproved = c.approval_status === 'approved'
   return (
     <div style={{ display: 'flex', gap: '4px', flexWrap: 'nowrap', alignItems: 'center', whiteSpace: 'nowrap' }} title={tooltipText}>
       <span className="ewb-num-full"
@@ -55,10 +86,17 @@ function EwbCell({ c, t, downloadingId, ewbActionId, downloadEwbPdf, cancelEwb }
         style={{ fontSize: '10px', color: t.green, background: `${t.green}15`, borderRadius: '4px', padding: '2px 7px', fontWeight: 600 }}>
         EWB
       </span>
-      <button onClick={() => downloadEwbPdf(c)} disabled={!!downloadingId}
-        style={{ background: t.blue, color: '#fff', border: 'none', borderRadius: '5px', padding: '3px 10px', fontSize: '10px', fontWeight: 600, cursor: 'pointer', opacity: downloadingId === c.id + ':ewb' ? 0.6 : 1 }}>
-        {downloadingId === c.id + ':ewb' ? '…' : 'PDF'}
-      </button>
+      {isApproved ? (
+        <button onClick={() => downloadEwbPdf(c)} disabled={!!downloadingId}
+          style={{ background: t.blue, color: '#fff', border: 'none', borderRadius: '5px', padding: '3px 10px', fontSize: '10px', fontWeight: 600, cursor: 'pointer', opacity: downloadingId === c.id + ':ewb' ? 0.6 : 1 }}>
+          {downloadingId === c.id + ':ewb' ? '…' : 'PDF'}
+        </button>
+      ) : (
+        <span title="PDF unlocks once accounts approves the consignment."
+          style={{ fontSize: '10px', color: t.text4, padding: '3px 8px', fontStyle: 'italic' }}>
+          locked
+        </span>
+      )}
       <button onClick={() => cancelEwb(c)} disabled={!!ewbActionId}
         title="Cancel E-Way Bill (within 24h)"
         style={{ background: 'transparent', border: `1px solid ${t.red}40`, borderRadius: '5px', padding: '3px 10px', fontSize: '10px', color: t.red, cursor: 'pointer', opacity: ewbActionId === c.id + ':cancel' ? 0.6 : 1 }}>
@@ -102,6 +140,14 @@ export default function ConsignmentData() {
   const [ewayBillNo,          setEwayBillNo]         = useState('')
   const [showModal,           setShowModal]          = useState(false)
   const [lastConsignment,     setLastConsignment]    = useState(null)
+  // Re-render every 60s so the "approval pending · 5m" timer in the ALL
+  // column ticks live without needing a network round trip. Cheap — only
+  // re-renders the active consignments list (typically <30 rows).
+  const [, _bumpTick] = useState(0)
+  useEffect(() => {
+    const id = setInterval(() => _bumpTick(n => n + 1), 60000)
+    return () => clearInterval(id)
+  }, [])
   const [previewNumbers,      setPreviewNumbers]     = useState(null)
   const [loadingPreview,      setLoadingPreview]     = useState(false)
   const [downloadingId,       setDownloadingId]      = useState(null)
@@ -983,13 +1029,13 @@ export default function ConsignmentData() {
                       <div style={{ display: 'flex', gap: '4px', flexWrap: 'nowrap', whiteSpace: 'nowrap' }}>
                         <button onClick={() => downloadDoc(c, isType ? 'voucher' : 'challan')} disabled={!!downloadingId}
                           title={isType ? 'Issue Voucher' : 'Delivery Challan'}
-                          style={{ ...btnGold, padding: '4px 10px', fontSize: '10px' }}>
-                          {downloadingId === c.id + ':' + (isType ? 'voucher' : 'challan') ? '⏳' : (isType ? '📄 Voucher' : '📄 Challan')}
+                          style={{ ...btnGold, padding: '4px 12px', fontSize: '10px' }}>
+                          {downloadingId === c.id + ':' + (isType ? 'voucher' : 'challan') ? '…' : (isType ? 'Voucher' : 'Challan')}
                         </button>
                         <button onClick={() => downloadDoc(c, 'report')} disabled={!!downloadingId}
                           title="Consignee Report (item-wise summary)"
-                          style={{ background: 'transparent', border: `1px solid ${t.purple}50`, borderRadius: '5px', padding: '4px 10px', fontSize: '10px', color: t.purple, fontWeight: 600, cursor: 'pointer', opacity: downloadingId === c.id + ':report' ? 0.6 : 1 }}>
-                          {downloadingId === c.id + ':report' ? '⏳' : '📋 Report'}
+                          style={{ background: 'transparent', border: `1px solid ${t.purple}50`, borderRadius: '5px', padding: '4px 12px', fontSize: '10px', color: t.purple, fontWeight: 600, cursor: 'pointer', opacity: downloadingId === c.id + ':report' ? 0.6 : 1 }}>
+                          {downloadingId === c.id + ':report' ? '…' : 'Report'}
                         </button>
                       </div>
                     </td>
@@ -1016,17 +1062,24 @@ export default function ConsignmentData() {
                           <span className="irn-short" style={{ fontSize: '10px', color: t.purple, background: `${t.purple}15`, borderRadius: '4px', padding: '2px 7px', fontWeight: 600 }}>
                             IRN
                           </span>
-                          <button onClick={async () => {
-                            setDownloadingId(c.id + ':einv')
-                            await triggerDownload(`/api/e-invoice/pdf?id=${c.id}`,
-                              `EInvoice_${c.tmp_prf_no || c.id}.pdf`,
-                              msg => setToast({ msg, type: 'error' }))
-                            setDownloadingId(null)
-                          }} disabled={!!downloadingId}
-                            title="Download signed E-Invoice PDF with QR code"
-                            style={{ background: t.purple, color: '#fff', border: 'none', borderRadius: '5px', padding: '3px 10px', fontSize: '10px', fontWeight: 600, cursor: 'pointer', opacity: downloadingId === c.id + ':einv' ? 0.6 : 1 }}>
-                            {downloadingId === c.id + ':einv' ? '…' : 'PDF'}
-                          </button>
+                          {c.approval_status === 'approved' ? (
+                            <button onClick={async () => {
+                              setDownloadingId(c.id + ':einv')
+                              await triggerDownload(`/api/e-invoice/pdf?id=${c.id}`,
+                                `EInvoice_${c.tmp_prf_no || c.id}.pdf`,
+                                msg => setToast({ msg, type: 'error' }))
+                              setDownloadingId(null)
+                            }} disabled={!!downloadingId}
+                              title="Download signed E-Invoice PDF with QR code"
+                              style={{ background: t.purple, color: '#fff', border: 'none', borderRadius: '5px', padding: '3px 10px', fontSize: '10px', fontWeight: 600, cursor: 'pointer', opacity: downloadingId === c.id + ':einv' ? 0.6 : 1 }}>
+                              {downloadingId === c.id + ':einv' ? '…' : 'PDF'}
+                            </button>
+                          ) : (
+                            <span title="PDF unlocks once accounts approves the consignment."
+                              style={{ fontSize: '10px', color: t.text4, padding: '3px 8px', fontStyle: 'italic' }}>
+                              locked
+                            </span>
+                          )}
                           <button onClick={() => cancelEinv(c)} disabled={!!ewbActionId}
                             title="Cancel E-Invoice (within 24h)"
                             style={{ background: 'transparent', border: `1px solid ${t.red}40`, borderRadius: '5px', padding: '3px 10px', fontSize: '10px', color: t.red, cursor: 'pointer', opacity: ewbActionId === c.id + ':einv-cancel' ? 0.6 : 1 }}>
@@ -1048,12 +1101,32 @@ export default function ConsignmentData() {
                       )}
                     </td>
                     <td style={{ padding: '11px 14px' }}>
-                      <div style={{ display: 'flex', gap: '4px', flexWrap: 'nowrap', whiteSpace: 'nowrap' }}>
-                        <button onClick={() => downloadAll(c)} disabled={downloadingId === c.id + ':all'}
-                          title="Download Consignee Report, Voucher or Challan, and the E-Way Bill in one click"
-                          style={{ background: t.gold, color: '#1a0a00', border: 'none', borderRadius: '6px', padding: '5px 14px', fontSize: '10px', fontWeight: 700, cursor: downloadingId === c.id + ':all' ? 'not-allowed' : 'pointer', opacity: downloadingId === c.id + ':all' ? 0.6 : 1, whiteSpace: 'nowrap' }}>
-                          {downloadingId === c.id + ':all' ? '…' : 'Download all'}
-                        </button>
+                      <div style={{ display: 'flex', gap: '4px', flexWrap: 'nowrap', whiteSpace: 'nowrap', alignItems: 'center' }}>
+                        {c.approval_status === 'pending' ? (() => {
+                          // Pending: show a status pill instead of "Download all".
+                          // The bundle would skip EWB / E-Invoice anyway, so a
+                          // disabled pill is honest about what's blocked. Timer
+                          // shows accounts how long they've kept ops waiting.
+                          const wait = approvalWaiting(c.created_at, t)
+                          return (
+                            <span title={`Awaiting accounts approval. Voucher / Challan / Report can be downloaded individually from the Document column. EWB and E-Invoice unlock on approval.`}
+                              style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', background: `${t.orange}10`, border: `1px solid ${t.orange}40`, borderRadius: '6px', padding: '5px 12px', fontSize: '10px', color: t.orange, fontWeight: 600 }}>
+                              <span>EWB &amp; E-Invoice approval pending</span>
+                              <span style={{ color: wait.color, fontWeight: 700 }}>· {wait.label}</span>
+                            </span>
+                          )
+                        })() : c.approval_status === 'rejected' ? (
+                          <span title={c.rejection_reason ? `Rejected: ${c.rejection_reason}` : 'Rejected by accounts'}
+                            style={{ background: `${t.red}10`, border: `1px solid ${t.red}40`, borderRadius: '6px', padding: '5px 12px', fontSize: '10px', color: t.red, fontWeight: 600 }}>
+                            Approval rejected
+                          </span>
+                        ) : (
+                          <button onClick={() => downloadAll(c)} disabled={downloadingId === c.id + ':all'}
+                            title="Download Consignee Report, Voucher or Challan, EWB, and E-Invoice in one click"
+                            style={{ background: t.gold, color: '#1a0a00', border: 'none', borderRadius: '6px', padding: '5px 14px', fontSize: '10px', fontWeight: 700, cursor: downloadingId === c.id + ':all' ? 'not-allowed' : 'pointer', opacity: downloadingId === c.id + ':all' ? 0.6 : 1, whiteSpace: 'nowrap' }}>
+                            {downloadingId === c.id + ':all' ? '…' : 'Download all'}
+                          </button>
+                        )}
                         <button onClick={() => cancelConsignment(c)}
                           title="Void this consignment. Bills return to the source branch."
                           style={{ background: 'transparent', border: `1px solid ${t.red}40`, borderRadius: '5px', padding: '5px 12px', fontSize: '10px', color: t.red, cursor: 'pointer' }}>
