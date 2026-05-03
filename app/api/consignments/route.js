@@ -200,16 +200,35 @@ export async function GET(req) {
         .neq('branch_name', branch)
         .eq('current_branch', branch)
 
-      const [own1, own2, tr] = await Promise.all([ownCurrentQ, ownNullCurrentQ, transferredQ])
-      const firstErr = own1.error || own2.error || tr.error
+      // Fourth query: which purchase IDs are already linked to a
+      // non-cancelled, non-received consignment? With the new "bills don't
+      // move until approval" flow, those bills still have stock_status
+      // 'at_branch' and would otherwise show up here as pickable — even
+      // though the duplicate-link guard would reject them at create time.
+      // Exclude them from the picker to avoid the false-affordance.
+      const committedQ = supabase
+        .from('consignment_items')
+        .select('purchase_id, consignments!inner(status)')
+        .not('consignments.status', 'in', '("cancelled","received")')
+
+      const [own1, own2, tr, committed] = await Promise.all([ownCurrentQ, ownNullCurrentQ, transferredQ, committedQ])
+      const firstErr = own1.error || own2.error || tr.error || committed.error
       if (firstErr) return Response.json({ data: [], error: firstErr.message })
 
-      // De-dup defensively (a row should only fall in one bucket, but guard anyway).
+      const committedIds = new Set((committed.data || []).map(r => r.purchase_id))
+
+      // De-dup defensively (a row should only fall in one bucket) and drop
+      // any bill already committed to an active consignment.
       const seen = new Set()
       const merged = [...(own1.data || []), ...(own2.data || []), ...(tr.data || [])]
-        .filter(r => seen.has(r.id) ? false : (seen.add(r.id), true))
+        .filter(r => {
+          if (committedIds.has(r.id)) return false
+          if (seen.has(r.id)) return false
+          seen.add(r.id)
+          return true
+        })
         .sort((a, b) => new Date(b.purchase_date) - new Date(a.purchase_date))
-      return Response.json({ data: merged })
+      return Response.json({ data: merged, committed_count: committedIds.size })
     }
 
     // Branch-overview path (no specific branch) — keep original strict filter.
@@ -741,21 +760,10 @@ export async function POST(req) {
       }))
     )
 
-    if (isInternal) {
-      // Branch → Hub: bills are immediately at the hub, available in hub's stock
-      await supabase.from('purchases')
-        .update({
-          stock_status:  'at_branch',
-          current_branch: dest_branch,
-          dispatched_at: nowIso,
-        })
-        .in('id', purchase_ids)
-    } else {
-      // Direct → HO / Hub → HO: bills go in-transit until HO receive
-      await supabase.from('purchases')
-        .update({ stock_status: 'in_consignment', dispatched_at: nowIso })
-        .in('id', purchase_ids)
-    }
+    // NOTE: bills' stock_status / current_branch are NOT flipped here.
+    // Bills stay at_branch (in the source branch's stock) until accounts
+    // approves the consignment. The flip happens in the approve_consignment
+    // action below. Mirrors the same change in create_consignment_atomic.
 
     return Response.json({ data: consignment })
   }
@@ -837,6 +845,15 @@ export async function POST(req) {
     const approver_email = actorEmail
     if (!id) return Response.json({ error: 'consignment id required' }, { status: 400 })
     const nowIso = new Date().toISOString()
+
+    // Approval is the moment bills physically leave the source branch.
+    // Until accounts approves, purchases.stock_status stays 'at_branch' and
+    // the bills appear in the source branch's stock. On approve we flip:
+    //   - INTERNAL (Branch → Hub): stock_status stays 'at_branch' but
+    //     current_branch flips to dest_branch (so the bills appear in the
+    //     hub's stock for onward consolidation).
+    //   - EXTERNAL (Direct → HO / Hub → HO): stock_status flips to
+    //     'in_consignment' (removed from branch stock, in transit to HO).
     const { data, error } = await supabase
       .from('consignments')
       .update({
@@ -849,11 +866,38 @@ export async function POST(req) {
       .select()
       .single()
     if (error) return Response.json({ error: error.message }, { status: 500 })
+
+    // Look up linked purchases and flip their state.
+    const { data: links } = await supabase
+      .from('consignment_items').select('purchase_id').eq('consignment_id', id)
+    const purchaseIds = (links || []).map(l => l.purchase_id)
+
+    if (purchaseIds.length) {
+      const isInternal = data.movement_type === 'INTERNAL'
+      const dispatchedAt = data.dispatched_at || nowIso  // stamp first-leg time
+      if (isInternal) {
+        await supabase.from('purchases')
+          .update({
+            stock_status:   'at_branch',
+            current_branch: data.dest_branch,
+            dispatched_at:  dispatchedAt,
+          })
+          .in('id', purchaseIds)
+      } else {
+        await supabase.from('purchases')
+          .update({
+            stock_status:   'in_consignment',
+            dispatched_at:  dispatchedAt,
+          })
+          .in('id', purchaseIds)
+      }
+    }
+
     await logConsignmentEvent(supabase, {
       consignment_id: id,
       event_type:     'approved_by_accounts',
       actor_email:    approver_email,
-      details:        { note: note || null },
+      details:        { note: note || null, bills_moved: purchaseIds.length },
     })
     return Response.json({ success: true, data })
   }
@@ -942,8 +986,10 @@ export async function POST(req) {
       }
     }
 
-    // Bills return to source branch
-    if (pids.length) {
+    // Bills return to source branch — only if they were actually moved
+    // (i.e. accounts had approved at some point). Pre-approval consignments
+    // never flipped purchase state; nothing to reverse.
+    if (pids.length && c.approval_status === 'approved') {
       await supabase.from('purchases')
         .update({ stock_status: 'at_branch', current_branch: c.branch_name, dispatched_at: null })
         .in('id', pids)

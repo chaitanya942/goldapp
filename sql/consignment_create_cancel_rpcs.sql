@@ -108,20 +108,16 @@ BEGIN
   INSERT INTO consignment_items (consignment_id, purchase_id, added_by)
   SELECT v_consignment.id, pid, p_added_by FROM unnest(p_purchase_ids) AS pid;
 
-  -- Flip purchases state. INTERNAL = instant transfer to hub (still at_branch
-  -- there). EXTERNAL = in_consignment until HO receive.
-  IF v_is_internal THEN
-    UPDATE purchases
-    SET stock_status   = 'at_branch',
-        current_branch = p_dest_branch,
-        dispatched_at  = v_now
-    WHERE id = ANY(p_purchase_ids);
-  ELSE
-    UPDATE purchases
-    SET stock_status   = 'in_consignment',
-        dispatched_at  = v_now
-    WHERE id = ANY(p_purchase_ids);
-  END IF;
+  -- IMPORTANT: do NOT flip purchases.stock_status / current_branch here.
+  -- Bills stay at_branch (in the branch's stock) until the accounts team
+  -- approves the consignment. Approval is what triggers the physical
+  -- movement; until then this row is a planning document. The actual
+  -- stock-state flip lives in the approve_consignment action in
+  -- app/api/consignments/route.js.
+  --
+  -- The duplicate-link guard above (status NOT IN cancelled, received)
+  -- still blocks operators from creating a second consignment for the
+  -- same bills, even before approval, because the consignment row exists.
 
   -- Audit log (best-effort — table may not exist in older deployments)
   BEGIN
@@ -201,8 +197,12 @@ BEGIN
     END IF;
   END IF;
 
-  -- Return bills to source branch (if any linked)
-  IF v_purchase_ids IS NOT NULL AND array_length(v_purchase_ids, 1) > 0 THEN
+  -- Return bills to the source branch — but only if they were actually
+  -- moved (i.e. the consignment was approved at some point). Pre-approval
+  -- consignments never flipped purchase state, so there's nothing to
+  -- reverse. Approved consignments did flip state, so reverse it.
+  IF v_purchase_ids IS NOT NULL AND array_length(v_purchase_ids, 1) > 0
+     AND v_c.approval_status = 'approved' THEN
     UPDATE purchases
     SET stock_status   = 'at_branch',
         current_branch = v_c.branch_name,
