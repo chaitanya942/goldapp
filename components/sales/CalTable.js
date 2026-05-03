@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { supabase } from '../../lib/supabase'
 import { useApp } from '../../lib/context'
+import { authedFetch } from '../../lib/authedFetch'
 
 const T = {
   dark: {
@@ -387,7 +388,7 @@ export default function CalTable() {
     })
 
     try {
-      const response = await fetch('/api/ocr', {
+      const response = await authedFetch('/api/ocr', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1359,7 +1360,7 @@ function BarCard({ gen, index, t, date, user, onNameChange, onSaved, onRemove, s
       const r = new FileReader(); r.onload = () => res(r.result.split(',')[1]); r.onerror = rej; r.readAsDataURL(file)
     })
     try {
-      const resp = await fetch('/api/ocr', {
+      const resp = await authedFetch('/api/ocr', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ image: base64, mediaType: file.type || 'image/jpeg', type })
       })
@@ -1463,7 +1464,7 @@ function SavedBarCard({ row, t, date, user, onUpdate, onDelete, showToast }) {
       const r = new FileReader(); r.onload = () => res(r.result.split(',')[1]); r.onerror = rej; r.readAsDataURL(file)
     })
     try {
-      const resp = await fetch('/api/ocr', {
+      const resp = await authedFetch('/api/ocr', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ image: base64, mediaType: file.type || 'image/jpeg', type: 'purity' })
       })

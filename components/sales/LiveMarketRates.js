@@ -216,8 +216,10 @@ export default function LiveMarketRates() {
   }, [])
 
   const handleRefresh = useCallback(async () => {
+    // /api/fetch-gold-rates is CRON_SECRET-gated (server-to-server only) — the
+    // cron writes a fresh row every minute. Manual "Refresh" simply re-reads
+    // the latest row from Supabase; no need for the browser to trigger a write.
     setFetching(true)
-    try { await fetch('/api/fetch-gold-rates') } catch {}
     await fetchRates()
     setCountdown(60)
   }, [fetchRates])

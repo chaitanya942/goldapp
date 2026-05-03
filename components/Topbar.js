@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { supabase } from '../lib/supabase'
 import { useApp } from '../lib/context'
 import Toast from './ui/Toast'
+import { authedFetch } from '../lib/authedFetch'
 
 const THEMES = {
   dark: {
@@ -151,7 +152,7 @@ function ViewAsDropdown({ previewRole, setPreviewRole, t }) {
   const ref = useRef(null)
 
   useEffect(() => {
-    fetch('/api/rbac?action=roles').then(r => r.json()).then(d => {
+    authedFetch('/api/rbac?action=roles').then(r => r.json()).then(d => {
       if (d.roles) setRoles(d.roles.filter(r => r.name !== 'super_admin'))
     }).catch(() => {})
   }, [])
@@ -286,7 +287,7 @@ export default function Topbar({ onMenuToggle, isMobile }) {
     setSyncing(true)
     try {
       // days=2: sync last 2 days only — fast enough for Vercel free plan (< 5s vs 18s for 7 days)
-      const res  = await fetch('/api/sync-purchases?days=2', { method: 'POST' })
+      const res  = await authedFetch('/api/sync-purchases?days=2', { method: 'POST' })
       const data = await res.json()
       if (data.success) {
         setToast({ msg: `${data.synced} records synced`, type: 'success' })

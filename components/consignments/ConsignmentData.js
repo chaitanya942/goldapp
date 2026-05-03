@@ -183,8 +183,8 @@ export default function ConsignmentData() {
     if (!nav?.branch) { setTransferHistory({}); setBranchBillsState(null); return }
     setBranchBillsState(null)  // show loading until fresh data arrives
     Promise.all([
-      fetch(`/api/consignments?action=stock_in_branch&branch=${encodeURIComponent(nav.branch)}`).then(r => r.json()),
-      fetch(`/api/consignments?action=transfer_history&branch=${encodeURIComponent(nav.branch)}`).then(r => r.json()),
+      authedFetch(`/api/consignments?action=stock_in_branch&branch=${encodeURIComponent(nav.branch)}`).then(r => r.json()),
+      authedFetch(`/api/consignments?action=transfer_history&branch=${encodeURIComponent(nav.branch)}`).then(r => r.json()),
     ]).then(([s, h]) => {
       const branchBills = s.data || []
       const history     = h.data || {}
@@ -253,7 +253,7 @@ export default function ConsignmentData() {
     if (!nav?.branch) return
     setLoadingPreview(true)
     try {
-      const res  = await fetch(`/api/consignments-preview?branch=${encodeURIComponent(nav.branch)}&movement_type=${moveType}`)
+      const res  = await authedFetch(`/api/consignments-preview?branch=${encodeURIComponent(nav.branch)}&movement_type=${moveType}`)
       const data = await res.json()
       if (!data.error) setPreviewNumbers(data)
     } catch {}
