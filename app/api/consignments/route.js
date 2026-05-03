@@ -163,31 +163,45 @@ export async function GET(req) {
     //      Without this, bills that were legitimately moved disappear from the
     //      hub picker if their crm_status changed (e.g. amendments) post-move.
     if (branch) {
-      let ownQ = supabase
-        .from('purchases')
-        .select('*')
-        .eq('stock_status', 'at_branch')
-        .eq('crm_status', 'approved')
-        .eq('is_deleted', false)
-        .eq('branch_name', branch)
-        .or(`current_branch.eq.${branch},current_branch.is.null`)
+      // Split into THREE queries instead of an OR-chain so PostgREST never
+      // has to parse a value with a dash (e.g. "TS-KUKATPALLY") inside an
+      // or() expression — that mis-parsing was returning 0 rows even when
+      // the data clearly matched (Branch Stock Overview's RPC saw 243 bills
+      // for the same branch while this query saw 0).
+      //
+      //   1. OWN bills with current_branch == branch_name (the common case
+      //      after a sync that populates current_branch)
+      //   2. OWN bills with current_branch IS NULL (legacy rows pre-current_branch)
+      //   3. TRANSFERRED-IN bills (different branch_name, current here)
+      const baseFilter = (q) => {
+        let r = q.eq('stock_status', 'at_branch').eq('is_deleted', false)
+        if (dateFrom) r = r.gte('purchase_date', dateFrom)
+        if (dateTo)   r = r.lte('purchase_date', dateTo)
+        return r
+      }
 
-      let transferredQ = supabase
-        .from('purchases')
-        .select('*')
-        .eq('stock_status', 'at_branch')
-        .eq('is_deleted', false)
+      const ownCurrentQ = baseFilter(supabase.from('purchases').select('*'))
+        .eq('crm_status', 'approved')
+        .eq('branch_name', branch)
+        .eq('current_branch', branch)
+
+      const ownNullCurrentQ = baseFilter(supabase.from('purchases').select('*'))
+        .eq('crm_status', 'approved')
+        .eq('branch_name', branch)
+        .is('current_branch', null)
+
+      const transferredQ = baseFilter(supabase.from('purchases').select('*'))
         .neq('branch_name', branch)
         .eq('current_branch', branch)
 
-      if (dateFrom) { ownQ = ownQ.gte('purchase_date', dateFrom); transferredQ = transferredQ.gte('purchase_date', dateFrom) }
-      if (dateTo)   { ownQ = ownQ.lte('purchase_date', dateTo);   transferredQ = transferredQ.lte('purchase_date', dateTo) }
+      const [own1, own2, tr] = await Promise.all([ownCurrentQ, ownNullCurrentQ, transferredQ])
+      const firstErr = own1.error || own2.error || tr.error
+      if (firstErr) return Response.json({ data: [], error: firstErr.message })
 
-      const [{ data: ownData, error: ownErr }, { data: trData, error: trErr }] =
-        await Promise.all([ownQ, transferredQ])
-      if (ownErr || trErr) return Response.json({ data: [], error: (ownErr || trErr).message })
-
-      const merged = [...(ownData || []), ...(trData || [])]
+      // De-dup defensively (a row should only fall in one bucket, but guard anyway).
+      const seen = new Set()
+      const merged = [...(own1.data || []), ...(own2.data || []), ...(tr.data || [])]
+        .filter(r => seen.has(r.id) ? false : (seen.add(r.id), true))
         .sort((a, b) => new Date(b.purchase_date) - new Date(a.purchase_date))
       return Response.json({ data: merged })
     }
