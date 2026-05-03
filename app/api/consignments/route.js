@@ -288,6 +288,30 @@ export async function GET(req) {
     return Response.json({ data: data || [] })
   }
 
+  // ── Approval history (for the Approved / Rejected tabs in the
+  //    Pending Approvals page). Read-only audit trail so accounts has
+  //    a record of past decisions.
+  if (action === 'approval_history') {
+    const status = searchParams.get('status')   // 'approved' | 'rejected'
+    const days   = Math.min(180, Math.max(1, parseInt(searchParams.get('days') || '30')))
+    if (status !== 'approved' && status !== 'rejected') {
+      return Response.json({ error: "status must be 'approved' or 'rejected'" }, { status: 400 })
+    }
+    const sinceIso = new Date(Date.now() - days * 86400000).toISOString()
+    // Order by approved_at if present, else created_at — covers older rows
+    // that may not have approved_at populated.
+    const orderCol = status === 'approved' ? 'approved_at' : 'approved_at'
+    const { data, error } = await supabase
+      .from('consignments')
+      .select('*')
+      .eq('approval_status', status)
+      .neq('status', 'seed')
+      .gte('created_at', sinceIso)
+      .order(orderCol, { ascending: false, nullsFirst: false })
+    if (error) return Response.json({ error: error.message }, { status: 500 })
+    return Response.json({ data: data || [] })
+  }
+
   // ── Pending approvals count (for sidebar badge) ────────────────────────
   if (action === 'pending_approvals_count') {
     const { count, error } = await supabase

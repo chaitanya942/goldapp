@@ -119,7 +119,12 @@ export default function ConsignmentApprovals() {
   const t = THEMES[theme]
   const userEmail = user?.email || userProfile?.email || null
 
+  // Tab state. 'pending' is the live queue (with realtime + sound + alerts).
+  // 'approved' and 'rejected' are read-only audit trails for the last 30 days.
+  const [tab, setTab] = useState('pending')
+
   const [pending, setPending] = useState([])
+  const [history, setHistory] = useState([])  // approved or rejected, depending on tab
   const [loading, setLoading] = useState(true)
   const [actionId, setActionId] = useState(null)
   const [toast, setToast] = useState(null)
@@ -149,7 +154,21 @@ export default function ConsignmentApprovals() {
     setLoading(false)
   }, [])
 
-  useEffect(() => { fetchPending() }, [fetchPending])
+  // Fetches the audit trail for the active history tab. Backed by
+  // /api/consignments?action=approval_history&status=approved|rejected.
+  const fetchHistory = useCallback(async (status, silent = false) => {
+    if (!silent) setLoading(true)
+    const r = await authedFetch(`/api/consignments?action=approval_history&status=${status}&days=30`)
+    const j = await r.json()
+    setHistory(j.data || [])
+    setLoading(false)
+  }, [])
+
+  // Initial fetch + refetch when the user switches tabs.
+  useEffect(() => {
+    if (tab === 'pending') fetchPending()
+    else fetchHistory(tab)
+  }, [tab, fetchPending, fetchHistory])
 
   // Re-render every 30s so the urgency badge stays current
   useEffect(() => {
@@ -310,17 +329,19 @@ export default function ConsignmentApprovals() {
     <div style={{ padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: '10px', maxWidth: '1400px', margin: '0 auto' }}>
       {toast && <Toast key={toast.key} msg={toast.msg} type={toast.type} onDone={() => setToast(null)} />}
 
-      {/* ── Header — single row with title + inline stats + actions ────── */}
+      {/* Header — title + inline stats + actions */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: '14px', flexWrap: 'wrap' }}>
           <div style={{ fontSize: '1.35rem', fontWeight: 300, color: t.text1, letterSpacing: '.02em' }}>
-            Pending Approvals
+            Approvals
           </div>
-          <div style={{ fontSize: '11px', color: t.text3, display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <span style={{ display: 'inline-block', width: '6px', height: '6px', borderRadius: '50%', background: t.green }} />
-            Live
-          </div>
-          {pending.length > 0 && (
+          {tab === 'pending' && (
+            <div style={{ fontSize: '11px', color: t.text3, display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <span style={{ display: 'inline-block', width: '6px', height: '6px', borderRadius: '50%', background: t.green }} />
+              Live
+            </div>
+          )}
+          {tab === 'pending' && pending.length > 0 && (
             <div style={{ fontSize: '11px', color: t.text3, display: 'flex', gap: '12px', alignItems: 'baseline' }}>
               <span><strong style={{ color: t.orange, fontSize: '13px' }}>{pending.length}</strong> waiting</span>
               <span><strong style={{ color: t.gold }}>{totalBills}</strong> bills</span>
@@ -328,21 +349,52 @@ export default function ConsignmentApprovals() {
               <span><strong style={{ color: t.green }}>₹{fmt(Math.round(totalValue))}</strong></span>
             </div>
           )}
+          {tab !== 'pending' && (
+            <div style={{ fontSize: '11px', color: t.text3 }}>
+              Last 30 days · <strong style={{ color: t.text2 }}>{history.length}</strong> {tab}
+            </div>
+          )}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          {pending.length > 0 && oldestBadge && (
+          {tab === 'pending' && pending.length > 0 && oldestBadge && (
             <div style={{ fontSize: '10px', color: t.text3, padding: '5px 10px', background: oldestBadge.bg, borderRadius: '6px', border: `1px solid ${oldestBadge.color}30` }}>
               Oldest: <strong style={{ color: oldestBadge.color }}>{oldestBadge.label}</strong>
             </div>
           )}
-          <button onClick={toggleSound}
-            title={soundEnabled ? 'Sound on. Click to mute.' : 'Sound off. Click to enable.'}
-            aria-label={soundEnabled ? 'Mute approval sound' : 'Unmute approval sound'}
-            style={{ ...btnOut, padding: '7px 14px', color: soundEnabled ? t.text2 : t.text4, borderColor: soundEnabled ? `${t.gold}50` : t.border2 }}>
-            {soundEnabled ? 'Sound on' : 'Sound off'}
-          </button>
-          <button onClick={() => fetchPending(false)} style={btnOut}>Refresh</button>
+          {tab === 'pending' && (
+            <button onClick={toggleSound}
+              title={soundEnabled ? 'Sound on. Click to mute.' : 'Sound off. Click to enable.'}
+              aria-label={soundEnabled ? 'Mute approval sound' : 'Unmute approval sound'}
+              style={{ ...btnOut, padding: '7px 14px', color: soundEnabled ? t.text2 : t.text4, borderColor: soundEnabled ? `${t.gold}50` : t.border2 }}>
+              {soundEnabled ? 'Sound on' : 'Sound off'}
+            </button>
+          )}
+          <button onClick={() => tab === 'pending' ? fetchPending(false) : fetchHistory(tab, false)} style={btnOut}>Refresh</button>
         </div>
+      </div>
+
+      {/* Tab strip — Pending / Approved / Rejected */}
+      <div style={{ display: 'flex', gap: '4px', borderBottom: `1px solid ${t.border}`, marginTop: '-2px' }}>
+        {[
+          { id: 'pending',  label: 'Pending',  color: t.orange },
+          { id: 'approved', label: 'Approved', color: t.green  },
+          { id: 'rejected', label: 'Rejected', color: t.red    },
+        ].map(o => {
+          const active = tab === o.id
+          return (
+            <button key={o.id} onClick={() => setTab(o.id)}
+              style={{
+                background: 'transparent', border: 'none', cursor: 'pointer',
+                padding: '8px 16px', fontSize: '12px', fontWeight: 600,
+                color: active ? o.color : t.text3,
+                borderBottom: `2px solid ${active ? o.color : 'transparent'}`,
+                marginBottom: '-1px',
+                letterSpacing: '.02em',
+              }}>
+              {o.label}
+            </button>
+          )
+        })}
       </div>
 
       {/* Notifications banner */}
@@ -363,16 +415,118 @@ export default function ConsignmentApprovals() {
         </div>
       )}
 
-      {/* Empty state */}
-      {pending.length === 0 ? (
+      {/* Empty state — pending tab */}
+      {tab === 'pending' && pending.length === 0 ? (
         <div style={{ ...card, padding: '60px 20px', textAlign: 'center' }}>
           <div style={{ fontSize: '15px', color: t.text1, fontWeight: 500 }}>No pending approvals</div>
           <div style={{ fontSize: '12px', color: t.text4, marginTop: '6px' }}>
             New requests will appear here as they arrive.
           </div>
         </div>
+      ) : tab !== 'pending' && history.length === 0 ? (
+        /* Empty state — history tab */
+        <div style={{ ...card, padding: '60px 20px', textAlign: 'center' }}>
+          <div style={{ fontSize: '15px', color: t.text1, fontWeight: 500 }}>
+            No {tab} consignments in the last 30 days
+          </div>
+          <div style={{ fontSize: '12px', color: t.text4, marginTop: '6px' }}>
+            {tab === 'approved' ? 'Once you approve a consignment, it will be archived here.' : 'Rejected consignments are recorded here for audit.'}
+          </div>
+        </div>
+      ) : tab !== 'pending' ? (
+        /* History list — read-only, no approve/reject buttons */
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+          {history.map(c => {
+            const isType    = c.movement_type === 'INTERNAL'
+            const dest      = isType ? c.dest_branch : 'Head Office'
+            const isApproved = tab === 'approved'
+            // Time taken: created → approved/rejected. approved_at is set on
+            // both branches by the approve and reject actions.
+            const decidedAt = c.approved_at || c.cancelled_at || c.created_at
+            const ttaMs  = decidedAt && c.created_at ? new Date(decidedAt) - new Date(c.created_at) : null
+            const ttaMin = ttaMs ? Math.max(0, Math.floor(ttaMs / 60000)) : null
+            const ttaLabel = ttaMin == null ? null
+              : ttaMin < 60   ? `${ttaMin}m`
+              : ttaMin < 1440 ? `${Math.floor(ttaMin/60)}h ${ttaMin%60}m`
+              : `${Math.floor(ttaMin/1440)}d ${Math.floor((ttaMin%1440)/60)}h`
+            const accentColor = isApproved ? t.green : t.red
+
+            return (
+              <div key={c.id} style={{ ...card, padding: '12px 16px 12px 18px', borderLeft: `3px solid ${accentColor}`, display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', gap: '14px', alignItems: 'center' }}>
+                <div style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: '14px', color: t.gold, fontWeight: 700, fontFamily: 'monospace', letterSpacing: '.02em' }}>{c.tmp_prf_no}</span>
+                    <span style={{ fontSize: '9px', color: isType ? t.purple : t.orange, background: `${isType ? t.purple : t.orange}15`, borderRadius: '4px', padding: '2px 7px', fontWeight: 600, letterSpacing: '.04em' }}>
+                      {isType ? 'VIA HUB' : 'DIRECT → HO'}
+                    </span>
+                    <span style={{ fontSize: '9px', color: accentColor, background: `${accentColor}15`, borderRadius: '4px', padding: '2px 7px', fontWeight: 700, letterSpacing: '.04em' }}>
+                      {isApproved ? 'APPROVED' : 'REJECTED'}
+                    </span>
+                    {ttaLabel && (
+                      <span title={`Time from creation to ${isApproved ? 'approval' : 'rejection'}`} style={{ fontSize: '9px', color: t.text3, background: `${t.text3}10`, borderRadius: '4px', padding: '2px 7px', fontWeight: 600 }}>
+                        in {ttaLabel}
+                      </span>
+                    )}
+                    {c.eway_bill_no && <span style={{ fontSize: '9px', color: t.green, background: `${t.green}15`, borderRadius: '4px', padding: '2px 7px', fontWeight: 600, letterSpacing: '.04em' }}>EWB</span>}
+                    {c.irn         && <span style={{ fontSize: '9px', color: t.purple, background: `${t.purple}15`, borderRadius: '4px', padding: '2px 7px', fontWeight: 600, letterSpacing: '.04em' }}>IRN</span>}
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: '14px', flexWrap: 'wrap' }}>
+                    <div style={{ fontSize: '13px', color: t.text1, fontWeight: 600 }}>
+                      {c.branch_name}
+                      <span style={{ color: t.text4, margin: '0 8px', fontWeight: 400 }}>→</span>
+                      {dest}
+                    </div>
+                    <div style={{ fontSize: '11px', color: t.text3, display: 'flex', gap: '12px', fontFamily: 'monospace' }}>
+                      <span>{c.total_bills} bills</span>
+                      <span style={{ color: t.gold }}>{fmtWt(c.total_net_wt)}</span>
+                      <span style={{ color: t.blue }}>₹{fmt(Math.round(c.total_amount))}</span>
+                    </div>
+                  </div>
+                  {!isApproved && c.rejection_reason && (
+                    <div style={{ fontSize: '11px', color: t.red, marginTop: '2px' }}>
+                      <span style={{ color: t.text4 }}>Reason:</span> {c.rejection_reason}
+                    </div>
+                  )}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap', marginTop: '2px', fontSize: '10px', color: t.text4 }}>
+                    <span>Created {fmtTS(c.created_at)}{c.created_by && c.created_by !== 'unknown' ? ` by ${c.created_by}` : ''}</span>
+                    {c.approved_at && (
+                      <>
+                        <span>·</span>
+                        <span>{isApproved ? 'Approved' : 'Rejected'} {fmtTS(c.approved_at)}{c.approved_by ? ` by ${c.approved_by}` : ''}</span>
+                      </>
+                    )}
+                    <span>·</span>
+                    <button onClick={() => previewDoc(`/api/generate-consignee-report?id=${c.id}`, `Report-${c.tmp_prf_no}.jpg`, msg => showToast(msg, 'error'))}
+                      style={{ background: 'transparent', border: 'none', padding: 0, fontSize: '10px', color: t.purple, fontWeight: 600, cursor: 'pointer', textDecoration: 'underline' }}>
+                      Report
+                    </button>
+                    <button onClick={() => previewDoc(
+                        isType ? `/api/generate-issue-voucher-pdf?id=${c.id}` : `/api/generate-challan-pdf?id=${c.id}`,
+                        `${isType ? 'Voucher' : 'Challan'}-${c.tmp_prf_no}.pdf`,
+                        msg => showToast(msg, 'error'))}
+                      style={{ background: 'transparent', border: 'none', padding: 0, fontSize: '10px', color: t.gold, fontWeight: 600, cursor: 'pointer', textDecoration: 'underline' }}>
+                      {isType ? 'Voucher' : 'Challan'}
+                    </button>
+                    {c.eway_bill_no && (
+                      <button onClick={() => previewDoc(`/api/eway-bill/pdf?id=${c.id}`, `EWB-${c.eway_bill_no}.pdf`, msg => showToast(msg, 'error'))}
+                        style={{ background: 'transparent', border: 'none', padding: 0, fontSize: '10px', color: t.green, fontWeight: 600, cursor: 'pointer', textDecoration: 'underline' }}>
+                        E-Way Bill
+                      </button>
+                    )}
+                    {c.irn && (
+                      <button onClick={() => previewDoc(`/api/e-invoice/pdf?id=${c.id}`, `EInvoice-${c.tmp_prf_no}.pdf`, msg => showToast(msg, 'error'))}
+                        style={{ background: 'transparent', border: 'none', padding: 0, fontSize: '10px', color: t.purple, fontWeight: 600, cursor: 'pointer', textDecoration: 'underline' }}>
+                        E-Invoice
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )
+          })}
+        </div>
       ) : (
-        /* ── Pending list ────────────────────────────────────────────────── */
+        /* Pending list */
         <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
           {pending.map(c => {
             const isType        = c.movement_type === 'INTERNAL'
