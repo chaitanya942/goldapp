@@ -1,7 +1,13 @@
 import mysql from 'mysql2/promise'
 import postgres from 'postgres'
+import { requireAuth, ROLE_GROUPS } from '../../../lib/apiAuth'
 
-export async function GET() {
+// Schema explorer — admin-only diagnostic. Exposes table layout + connection
+// state for both old MySQL CRM and new Postgres CRM.
+export async function GET(req) {
+  const auth = await requireAuth(req, { requiredRoles: ROLE_GROUPS.ADMIN })
+  if (!auth.ok) return auth.response
+
   const result = { oldCrm: {}, newCrm: {}, errors: {} }
 
   // ── OLD CRM (MySQL) ────────────────────────────────────────────────────────

@@ -1,5 +1,6 @@
 import mysql from 'mysql2/promise'
 import { createClient } from '@supabase/supabase-js'
+import { requireAuth, ROLE_GROUPS } from '../../../lib/apiAuth'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
@@ -33,7 +34,11 @@ function autoBranchCode(branchName, usedCodes) {
   return base // fallback (shouldn't happen)
 }
 
-export async function POST() {
+export async function POST(req) {
+  // Mass-update of branch master from CRM — admin-only.
+  const auth = await requireAuth(req, { requiredRoles: ROLE_GROUPS.ADMIN })
+  if (!auth.ok) return auth.response
+
   let conn
   try {
     conn = await mysql.createConnection({

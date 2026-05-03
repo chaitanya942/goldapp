@@ -5,6 +5,7 @@ import { createWriteStream, createReadStream, mkdirSync, rmSync, existsSync, rea
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { extract } from 'tar'
+import { requireAuth, ROLE_GROUPS } from '../../../lib/apiAuth'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
@@ -143,6 +144,11 @@ async function fetchMetadataFromS3(language, year, month, day) {
 // --- MAIN HANDLER ---
 
 export async function POST(req) {
+  // Pulls voicebot recordings + metadata from S3 / writes to Supabase. Costly
+  // operation that should never be triggered anonymously. Cron variant uses
+  // the GET handler with CRON_SECRET (handled below).
+  const auth = await requireAuth(req, { requiredRoles: ROLE_GROUPS.ADMIN })
+  if (!auth.ok) return auth.response
   try {
     const body = await req.json().catch(() => ({}))
 
@@ -444,6 +450,11 @@ async function handleBackfill() {
 }
 
 export async function GET(req) {
+  // Inventory / count read — exposes S3 layout if `inventory=1`. Restrict to
+  // ADMIN to prevent infra fingerprinting by any logged-in user.
+  const auth = await requireAuth(req, { requiredRoles: ROLE_GROUPS.ADMIN })
+  if (!auth.ok) return auth.response
+
   const { searchParams } = new URL(req.url)
   const { count } = await supabase.from('telesales_calls').select('*', { count: 'exact', head: true })
 

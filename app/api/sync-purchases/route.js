@@ -1,5 +1,6 @@
 import mysql from 'mysql2/promise'
 import { createClient } from '@supabase/supabase-js'
+import { requireAuth, ROLE_GROUPS } from '../../../lib/apiAuth'
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
@@ -70,9 +71,10 @@ function smartDedup(records) {
   return result
 }
 
-export async function POST(request) {
-  // ── days param: how far back to sync. Default 2 for fast manual/background syncs.
-  // Cron (GET) always uses 7 to catch late-approved bills.
+// Extracted sync body — callable from both the user POST handler (auth-gated)
+// and the cron GET handler (CRON_SECRET-gated). Keeps the recursive call from
+// the GET path working without it tripping the user-auth check.
+async function runSync(request) {
   const url = new URL(request.url)
   const daysBack = parseInt(url.searchParams.get('days') || '2')
 
@@ -274,14 +276,21 @@ export async function POST(request) {
   }
 }
 
-// ── GET handler for Vercel cron (midnight auto-sync) — always 7-day window ───
+// Manual sync — ADMIN only.
+export async function POST(request) {
+  const auth = await requireAuth(request, { requiredRoles: ROLE_GROUPS.ADMIN })
+  if (!auth.ok) return auth.response
+  return runSync(request)
+}
+
+// Vercel cron (midnight auto-sync) — always 7-day window. Gated by CRON_SECRET
+// since it's a server-to-server call without a user session.
 export async function GET(req) {
   const authHeader = req.headers.get('authorization')
   if (process.env.CRON_SECRET && authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
     return Response.json({ error: 'Unauthorized' }, { status: 401 })
   }
-  // Force 7-day buffer for cron to catch bills approved days after creation
   const url = new URL(req.url)
   url.searchParams.set('days', '7')
-  return POST(new Request(url.toString(), req))
+  return runSync(new Request(url.toString(), req))
 }

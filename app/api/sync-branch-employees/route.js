@@ -1,12 +1,15 @@
 import mysql from 'mysql2/promise'
 import { createClient } from '@supabase/supabase-js'
+import { requireAuth, ROLE_GROUPS } from '../../../lib/apiAuth'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
   process.env.SUPABASE_SERVICE_ROLE_KEY || 'placeholder'
 )
 
-export async function POST() {
+export async function POST(req) {
+  const auth = await requireAuth(req, { requiredRoles: ROLE_GROUPS.ADMIN })
+  if (!auth.ok) return auth.response
   let conn
   try {
     // Check branch_employees table exists

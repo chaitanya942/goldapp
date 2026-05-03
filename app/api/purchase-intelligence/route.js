@@ -1,7 +1,9 @@
 // app/api/purchase-intelligence/route.js
-// Comprehensive purchase intelligence — branch health, repeat customers, pending aging, funnel
+// Comprehensive purchase intelligence — branch health, repeat customers, pending aging, funnel.
+// SQL aggregations only (no LLM despite the "intelligence" name).
 
 import mysql from 'mysql2/promise'
+import { requireAuth } from '../../../lib/apiAuth'
 
 const ALLOWED = new Set(['overview', 'branch-matrix', 'repeat-customers', 'pending-aging', 'pipeline-intel'])
 
@@ -16,6 +18,11 @@ function createConn() {
 }
 
 export async function GET(req) {
+  // Customer PII flows through these aggregations (repeat-customer lists,
+  // pending-aging) — auth required.
+  const auth = await requireAuth(req, { requiredRoles: null })
+  if (!auth.ok) return auth.response
+
   const { searchParams } = new URL(req.url)
   const action   = searchParams.get('action') || ''
   const minVisits = Math.max(1, parseInt(searchParams.get('minVisits') || '2'))

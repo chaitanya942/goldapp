@@ -1,8 +1,24 @@
 import Anthropic from '@anthropic-ai/sdk'
+import { requireAuth } from '../../../lib/apiAuth'
+
+// 8 MB base64 cap — covers a high-quality phone photo (3-5 MB) with headroom
+// without letting a malicious caller burn LLM credits on a 50 MB upload.
+const MAX_IMAGE_B64_CHARS = 8 * 1024 * 1024 * 4 / 3  // ~10.6 M chars
 
 export async function POST(req) {
+  // LLM-cost-bearing endpoint — any authenticated user (operators OCR scale
+  // photos at branches every minute), but never anonymous.
+  const auth = await requireAuth(req, { requiredRoles: null })
+  if (!auth.ok) return auth.response
+
   try {
     const { image, mediaType, type } = await req.json()
+    if (!image || typeof image !== 'string') {
+      return Response.json({ success: false, error: 'image (base64) required' }, { status: 400 })
+    }
+    if (image.length > MAX_IMAGE_B64_CHARS) {
+      return Response.json({ success: false, error: 'Image too large — please compress to under 8 MB' }, { status: 413 })
+    }
 
     const client = new Anthropic()
 

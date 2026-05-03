@@ -1,6 +1,11 @@
 import mysql from 'mysql2/promise'
+import { requireAuth, ROLE_GROUPS } from '../../../lib/apiAuth'
 
+// Admin-tooling endpoint — exposes raw CRM schema + sample rows. Lock to ADMIN.
 export async function GET(req) {
+  const auth = await requireAuth(req, { requiredRoles: ROLE_GROUPS.ADMIN })
+  if (!auth.ok) return auth.response
+
   const { searchParams } = new URL(req.url)
   const action = searchParams.get('action') || 'schema'
 

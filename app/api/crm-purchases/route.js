@@ -4,6 +4,7 @@
 import mysql    from 'mysql2/promise'
 import postgres  from 'postgres'
 import { createClient } from '@supabase/supabase-js'
+import { requireAuth } from '../../../lib/apiAuth'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
@@ -30,6 +31,11 @@ function createConn() {
 }
 
 export async function GET(req) {
+  // Operational read — any authenticated user. Customer PII flows through here
+  // (rejected/pending/walkin lists), so anonymous reads were a privacy leak.
+  const auth = await requireAuth(req, { requiredRoles: null })
+  if (!auth.ok) return auth.response
+
   const { searchParams } = new URL(req.url)
   const action   = searchParams.get('action') || ''
   const page     = Math.max(0, parseInt(searchParams.get('page') || '0'))

@@ -1,6 +1,7 @@
 import pg from 'pg'
 import { createClient } from '@supabase/supabase-js'
 import { NEW_CRM_LIVE_DATE } from '../../../lib/crmConfig'
+import { requireAuth, ROLE_GROUPS } from '../../../lib/apiAuth'
 
 const { Client } = pg
 
@@ -40,7 +41,8 @@ function fmtTime(ts) {
   return `${String(ist.getUTCHours()).padStart(2,'0')}:${String(ist.getUTCMinutes()).padStart(2,'0')}:${String(ist.getUTCSeconds()).padStart(2,'0')}`
 }
 
-export async function POST(request) {
+// Extracted body so the cron GET handler can call it without tripping user auth.
+async function runSync(request) {
   // ── New CRM not live yet — wipe any test data and skip sync ────────────────
   if (!NEW_CRM_LIVE_DATE) {
     await supabaseAdmin.from('purchases').delete().eq('crm_source', 'new_crm')
@@ -210,10 +212,18 @@ export async function POST(request) {
   }
 }
 
+// Manual sync — ADMIN only.
+export async function POST(request) {
+  const auth = await requireAuth(request, { requiredRoles: ROLE_GROUPS.ADMIN })
+  if (!auth.ok) return auth.response
+  return runSync(request)
+}
+
+// Vercel cron handler — gated by CRON_SECRET (server-to-server).
 export async function GET(req) {
   const authHeader = req.headers.get('authorization')
   if (process.env.CRON_SECRET && authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
     return Response.json({ error: 'Unauthorized' }, { status: 401 })
   }
-  return POST(req)
+  return runSync(req)
 }

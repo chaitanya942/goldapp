@@ -1,5 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { createClient } from '@supabase/supabase-js'
+import { requireAuth, ROLE_GROUPS } from '../../../lib/apiAuth'
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 
@@ -8,11 +9,21 @@ const supabaseAdmin = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY || 'placeholder'
 )
 
+const MAX_FILE_BYTES = 8 * 1024 * 1024  // 8 MB
+
 export async function POST(request) {
+  // Bulk OCR of a Gold Movement Report — high LLM cost (Opus call, 4096 tokens).
+  // Admin-only.
+  const auth = await requireAuth(request, { requiredRoles: ROLE_GROUPS.ADMIN })
+  if (!auth.ok) return auth.response
+
   try {
     const formData = await request.formData()
     const file     = formData.get('image')
     if (!file) return Response.json({ success: false, error: 'No image provided' }, { status: 400 })
+    if (file.size && file.size > MAX_FILE_BYTES) {
+      return Response.json({ success: false, error: `Image too large (${Math.round(file.size / 1024 / 1024)} MB) — limit is 8 MB` }, { status: 413 })
+    }
 
     const bytes  = await file.arrayBuffer()
     const base64 = Buffer.from(bytes).toString('base64')

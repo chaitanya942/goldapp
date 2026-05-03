@@ -1,5 +1,6 @@
 import mysql from 'mysql2/promise'
 import { createClient } from '@supabase/supabase-js'
+import { requireAuth, ROLE_GROUPS } from '../../../lib/apiAuth'
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
@@ -61,6 +62,10 @@ function smartDedup(records) {
 }
 
 export async function POST(request) {
+  // Date-range backfill — pulls historical CRM data into Supabase. Admin-only.
+  const auth = await requireAuth(request, { requiredRoles: ROLE_GROUPS.ADMIN })
+  if (!auth.ok) return auth.response
+
   let conn
   try {
     // ── Parse date range from request body ────────────────

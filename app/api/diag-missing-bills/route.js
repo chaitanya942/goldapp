@@ -1,5 +1,6 @@
 import mysql from 'mysql2/promise'
 import { createClient } from '@supabase/supabase-js'
+import { requireAuth, ROLE_GROUPS } from '../../../lib/apiAuth'
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
@@ -19,7 +20,12 @@ function fmtDate(d) {
 }
 
 // GET /api/diag-missing-bills?from=2026-04-01&to=2026-04-25
+// Diagnostic endpoint — compares CRM rows vs Supabase. Restrict to admin: it
+// exposes raw bill counts/values and reveals CRM connectivity.
 export async function GET(req) {
+  const auth = await requireAuth(req, { requiredRoles: ROLE_GROUPS.ADMIN })
+  if (!auth.ok) return auth.response
+
   const { searchParams } = new URL(req.url)
   const from = searchParams.get('from') || '2026-04-01'
   const to   = searchParams.get('to')   || '2026-04-25'
