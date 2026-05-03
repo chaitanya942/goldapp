@@ -516,7 +516,7 @@ export default function ConsignmentData() {
 
     // Fetch a URL → blob, surfacing JSON error bodies as readable messages.
     const fetchToBlob = async (url) => {
-      const res = await fetch(url)
+      const res = await authedFetch(url)
       if (!res.ok) {
         // Try to extract JSON error message from server
         let detail = `HTTP ${res.status}`
