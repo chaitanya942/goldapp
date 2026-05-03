@@ -59,9 +59,9 @@ export async function GET(req) {
     return Response.json({ error: 'Consignment ID required' }, { status: 400 })
   }
 
-  // Approval gate — blocks download unless accounts team has approved, or the
-  // caller is in ADMIN/ACCOUNTS group with the appropriate preview context.
-  const gate = await checkApproval(supabase, consignmentId, req, auth)
+  // Pre-approval document. The branch needs the challan to physically pack
+  // and dispatch the consignment before accounts has approved.
+  const gate = await checkApproval(supabase, consignmentId, req, auth, 'delivery_challan')
   if (gate.blocked) return gate.response
 
   try {

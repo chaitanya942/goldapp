@@ -31,7 +31,9 @@ export async function GET(req) {
   const consignmentId = searchParams.get('id')
   if (!consignmentId) return Response.json({ error: 'Consignment ID required' }, { status: 400 })
 
-  const gate = await checkApproval(supabase, consignmentId, req, auth)
+  // Pre-approval document for Branch → Hub transfers. The branch needs the
+  // voucher to pack and dispatch the goods before accounts approves.
+  const gate = await checkApproval(supabase, consignmentId, req, auth, 'issue_voucher')
   if (gate.blocked) return gate.response
 
   try {

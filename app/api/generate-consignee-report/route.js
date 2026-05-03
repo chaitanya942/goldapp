@@ -21,7 +21,9 @@ export async function GET(req) {
     return Response.json({ error: 'Consignment ID required' }, { status: 400 })
   }
 
-  const gate = await checkApproval(supabase, consignmentId, req, auth)
+  // Pre-approval document. Operations sends this to the branch so they can
+  // physically pack the consignment before accounts has reviewed it.
+  const gate = await checkApproval(supabase, consignmentId, req, auth, 'consignee_report')
   if (gate.blocked) return gate.response
 
   try {

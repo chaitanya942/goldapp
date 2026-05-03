@@ -498,17 +498,24 @@ export default function ConsignmentData() {
     // Refresh the parent list in the background so the row reflects the new EWB/IRN
     fetchAll()
 
-    // Build the list of files to fetch (using the freshly-generated numbers)
+    // Build the list of files to fetch.
+    //   - Consignee Report + Challan/Voucher: always included. The branch
+    //     needs these to physically pack the consignment, even before
+    //     accounts has approved.
+    //   - EWB + E-Invoice: only included once accounts has approved.
+    //     Including them earlier produces a 403 (approvalGate blocks them
+    //     until the legally-binding GST documents have been verified).
+    const isApproved = cur.approval_status === 'approved'
     const files = []
     files.push({ url: `/api/generate-consignee-report?id=${cur.id}`, name: 'Consignee_Report.jpg' })
     files.push({
       url:  isType ? `/api/generate-issue-voucher-pdf?id=${cur.id}` : `/api/generate-challan-pdf?id=${cur.id}`,
       name: isType ? 'Issue_Voucher.pdf' : 'Delivery_Challan.pdf',
     })
-    if (showEwb && cur.eway_bill_no) {
+    if (isApproved && showEwb && cur.eway_bill_no) {
       files.push({ url: `/api/eway-bill/pdf?id=${cur.id}`, name: `EWB_${sanitize(cur.eway_bill_no)}.pdf` })
     }
-    if (showEinv && cur.irn) {
+    if (isApproved && showEinv && cur.irn) {
       files.push({ url: `/api/e-invoice/pdf?id=${cur.id}`, name: `EInvoice_${sanitize(cur.tmp_prf_no || 'IRN')}.pdf` })
     }
     // Use the refreshed cur object below
@@ -575,8 +582,10 @@ export default function ConsignmentData() {
         }
 
         const missing = []
-        if (showEwb && !c.eway_bill_no) missing.push('E-Way Bill not generated')
-        if (showEinv && !c.irn)         missing.push('E-Invoice not generated')
+        if (showEwb  && !c.eway_bill_no)            missing.push('E-Way Bill not generated')
+        else if (showEwb && c.eway_bill_no && !isApproved)  missing.push('E-Way Bill awaiting accounts approval')
+        if (showEinv && !c.irn)                     missing.push('E-Invoice not generated')
+        else if (showEinv && c.irn && !isApproved)  missing.push('E-Invoice awaiting accounts approval')
         const baseMsg = `Saved to ${folderName}: ${summary.join(', ')}`
         const allFailures = [...genFailures, ...failures]
         if (allFailures.length) {
@@ -615,8 +624,10 @@ export default function ConsignmentData() {
       URL.revokeObjectURL(a.href)
 
       const missing = []
-      if (showEwb && !c.eway_bill_no) missing.push('E-Way Bill not generated')
-      if (showEinv && !c.irn)         missing.push('E-Invoice not generated')
+      if (showEwb  && !c.eway_bill_no)            missing.push('E-Way Bill not generated')
+      else if (showEwb && c.eway_bill_no && !isApproved)  missing.push('E-Way Bill awaiting accounts approval')
+      if (showEinv && !c.irn)                     missing.push('E-Invoice not generated')
+      else if (showEinv && c.irn && !isApproved)  missing.push('E-Invoice awaiting accounts approval')
       const baseMsg = `Downloaded ${folderName}.zip: ${summary.join(', ')}`
       const allFailuresZip = [...genFailures, ...failures]
       if (allFailuresZip.length) {

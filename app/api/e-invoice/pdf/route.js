@@ -23,7 +23,8 @@ export async function GET(req) {
     const consignmentId    = searchParams.get('id')
     if (!consignmentId) return Response.json({ error: 'id required' }, { status: 400 })
 
-    const gate = await checkApproval(supabase, consignmentId, req, auth)
+    // E-Invoice is a legally binding GST document; gated by accounts approval.
+    const gate = await checkApproval(supabase, consignmentId, req, auth, 'e_invoice')
     if (gate.blocked) return gate.response
 
     const { data: consignment, error } = await supabase
