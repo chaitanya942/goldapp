@@ -19,6 +19,17 @@
 -- and flips the purchases' stock_status / current_branch in one transaction.
 -- Returns the new consignment row.
 -- ─────────────────────────────────────────────────────────────────────────────
+
+-- Drop any prior signature first. Postgres treats functions with different
+-- argument lists as different overloads — without this, replacing the
+-- 17-arg version with the 18-arg version (now with p_added_by UUID for
+-- consignment_items.added_by) would leave both in place and the
+-- supabase.rpc() call would be ambiguous.
+DROP FUNCTION IF EXISTS create_consignment_atomic(
+  TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT,
+  INT, NUMERIC, NUMERIC, JSONB, TEXT, UUID[]
+);
+
 CREATE OR REPLACE FUNCTION create_consignment_atomic(
   p_consignment_no   TEXT,
   p_tmp_prf_no       TEXT,
@@ -35,7 +46,8 @@ CREATE OR REPLACE FUNCTION create_consignment_atomic(
   p_total_net_wt     NUMERIC,
   p_total_amount     NUMERIC,
   p_gst_snapshot     JSONB,
-  p_created_by       TEXT,
+  p_created_by       TEXT,    -- email; goes into consignments.created_by + audit log
+  p_added_by         UUID,    -- supabase auth uid; goes into consignment_items.added_by (UUID column)
   p_purchase_ids     UUID[]
 )
 RETURNS consignments
@@ -79,9 +91,12 @@ BEGIN
   )
   RETURNING * INTO v_consignment;
 
-  -- Link every purchase
+  -- Link every purchase. consignment_items.added_by is UUID — we pass the
+  -- supabase auth uid via p_added_by, NOT the email (p_created_by) which is
+  -- TEXT and would fail with "column added_by is of type uuid but expression
+  -- is of type text".
   INSERT INTO consignment_items (consignment_id, purchase_id, added_by)
-  SELECT v_consignment.id, pid, p_created_by FROM unnest(p_purchase_ids) AS pid;
+  SELECT v_consignment.id, pid, p_added_by FROM unnest(p_purchase_ids) AS pid;
 
   -- Flip purchases state. INTERNAL = instant transfer to hub (still at_branch
   -- there). EXTERNAL = in_consignment until HO receive.

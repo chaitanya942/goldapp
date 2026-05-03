@@ -653,7 +653,8 @@ export async function POST(req) {
       p_total_net_wt:  totalNetWt,
       p_total_amount:  totalAmount,
       p_gst_snapshot:  gstSnapshot,
-      p_created_by:    created_by,
+      p_created_by:    created_by,             // email — TEXT — consignments.created_by + audit log
+      p_added_by:      auth.user?.id || null,  // supabase auth uid — UUID — consignment_items.added_by
       p_purchase_ids:  purchase_ids,
     })
 
@@ -705,8 +706,15 @@ export async function POST(req) {
       details:        { movement_type: consignment.movement_type, source: branch_name, dest: isInternal ? dest_branch : 'HO', bills: purchase_ids.length, weight: totalNetWt },
     })
 
+    // consignment_items.added_by is UUID — pass auth.user.id (the supabase
+    // auth uid), NOT the email. Passing email caused 'column "added_by" is
+    // of type uuid but expression is of type text' on the create flow.
     await supabase.from('consignment_items').insert(
-      purchase_ids.map(pid => ({ consignment_id: consignment.id, purchase_id: pid, added_by: created_by }))
+      purchase_ids.map(pid => ({
+        consignment_id: consignment.id,
+        purchase_id:    pid,
+        added_by:       auth.user?.id || null,
+      }))
     )
 
     if (isInternal) {
