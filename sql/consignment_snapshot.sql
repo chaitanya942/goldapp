@@ -71,7 +71,7 @@ WHERE b.name = c.dest_branch
 
 -- consignment_items per-bill snapshot from purchases
 UPDATE consignment_items ci
-SET bill_no_snap       = COALESCE(ci.bill_no_snap,       p.bill_no),
+SET bill_no_snap       = COALESCE(ci.bill_no_snap,       p.sl_no),
     gross_weight_snap  = COALESCE(ci.gross_weight_snap,  p.gross_weight),
     net_weight_snap    = COALESCE(ci.net_weight_snap,    p.net_weight),
     total_amount_snap  = COALESCE(ci.total_amount_snap,  p.total_amount),

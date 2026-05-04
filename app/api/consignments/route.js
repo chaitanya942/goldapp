@@ -625,7 +625,7 @@ export async function POST(req) {
     // Validate selected purchases are currently at this branch (use current_branch with branch_name fallback)
     const { data: purchaseCheck } = await supabase
       .from('purchases')
-      .select('id, bill_no, branch_name, current_branch, stock_status, gross_weight, net_weight, total_amount, customer_name, purchase_date')
+      .select('id, bill_no:sl_no, branch_name, current_branch, stock_status, gross_weight, net_weight, total_amount, customer_name, purchase_date')
       .in('id', purchase_ids)
 
     if (!purchaseCheck || purchaseCheck.length !== purchase_ids.length) {
