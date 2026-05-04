@@ -92,6 +92,17 @@ export async function POST(req) {
       .from('consignments').select('*').eq('id', consignment_id).single()
     if (ce || !consignment) return Response.json({ error: 'Consignment not found' }, { status: 404 })
 
+    // Refuse to fire NIC for a cancelled consignment (covers the auto-voided
+    // rejection case). Without this, accounts could end up with a live EWB
+    // attached to a dead consignment row — confusing audit trail and a
+    // ₹500 NIC API call wasted.
+    if (consignment.status === 'cancelled') {
+      return Response.json({ error: `${consignment.tmp_prf_no} is cancelled. Cannot generate an E-Way Bill against a cancelled consignment.` }, { status: 400 })
+    }
+    if (consignment.approval_status === 'rejected') {
+      return Response.json({ error: `${consignment.tmp_prf_no} was rejected. Cannot generate an E-Way Bill.` }, { status: 400 })
+    }
+
     if (consignment.eway_bill_no) {
       return Response.json({ error: `E-Way Bill already exists: ${consignment.eway_bill_no}` }, { status: 400 })
     }

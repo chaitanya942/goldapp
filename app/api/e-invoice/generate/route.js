@@ -14,6 +14,15 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY || 'placeholder'
 )
 
+function isValidGstin(gstin) {
+  if (!gstin || typeof gstin !== 'string') return false
+  return /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/.test(gstin.toUpperCase())
+}
+
+function isValidPin(pin) {
+  return /^[1-9][0-9]{5}$/.test(String(pin || '').trim())
+}
+
 export async function POST(req) {
   // Accounts owns GST documents — they generate as part of approval review.
   // Operations can no longer generate; they only download once approved.
@@ -26,6 +35,17 @@ export async function POST(req) {
     const { data: consignment, error: ce } = await supabase
       .from('consignments').select('*').eq('id', consignment_id).single()
     if (ce || !consignment) return Response.json({ error: 'Consignment not found' }, { status: 404 })
+
+    // Refuse to fire IRP for a cancelled / rejected consignment. Otherwise accounts could
+    // generate a live IRN against a dead row — IRN cancellation has a 24-hour window and
+    // the row would be permanently stuck with a phantom invoice.
+    if (consignment.status === 'cancelled') {
+      return Response.json({ error: `${consignment.tmp_prf_no} is cancelled. Cannot generate an E-Invoice against a cancelled consignment.` }, { status: 400 })
+    }
+    if (consignment.approval_status === 'rejected') {
+      return Response.json({ error: `${consignment.tmp_prf_no} was rejected. Cannot generate an E-Invoice.` }, { status: 400 })
+    }
+
     if (consignment.irn) return Response.json({ error: `E-Invoice already exists: ${consignment.irn}` }, { status: 400 })
 
     const { data: branch } = await supabase
@@ -53,14 +73,37 @@ export async function POST(req) {
         error: `Seller and buyer GSTINs are the same (${sellerGstin}). E-Invoice requires distinct GSTINs. This typically means an intra-state Karnataka move, which does not legally need an E-Invoice. Use only the E-Way Bill instead.`,
       }, { status: 400 })
     }
+    if (!isValidGstin(sellerGstin)) {
+      return Response.json({ error: `Seller GSTIN '${sellerGstin}' is malformed. Fix it in Admin → Company Settings.` }, { status: 400 })
+    }
+    if (!isValidGstin(buyerGstin)) {
+      return Response.json({ error: `Buyer (HO) GSTIN '${buyerGstin}' is malformed. Fix it in Admin → Company Settings.` }, { status: 400 })
+    }
     if (!branch.address || !branch.pin_code) {
       return Response.json({ error: `Branch '${branch.name}' is missing address or PIN. Fill them in Branch Management.` }, { status: 400 })
+    }
+    if (!isValidPin(branch.pin_code)) {
+      return Response.json({ error: `Branch '${branch.name}' PIN '${branch.pin_code}' is invalid (must be 6 digits, not starting with 0).` }, { status: 400 })
     }
 
     const { data: linkRows } = await supabase
       .from('consignment_items').select('purchase_id').eq('consignment_id', consignment_id)
     const purchaseIds = (linkRows || []).map(r => r.purchase_id)
     const { data: items } = await supabase.from('purchases').select('*').in('id', purchaseIds)
+
+    // Item-level preflight — same as EWB. NIC IRP rejects line items with
+    // zero weight/quantity/value, but the error message is generic. Catch it here.
+    if (!items || items.length === 0) {
+      return Response.json({ error: 'Consignment has no items.' }, { status: 400 })
+    }
+    const totalGross = items.reduce((s, i) => s + Number(i.gross_weight || i.net_weight || 0), 0)
+    if (totalGross <= 0) {
+      return Response.json({ error: 'Total weight is 0; cannot generate an E-Invoice.' }, { status: 400 })
+    }
+    const totalValue = items.reduce((s, i) => s + Number(i.total_amount || 0), 0)
+    if (totalValue <= 0) {
+      return Response.json({ error: 'Total value is 0; cannot generate an E-Invoice.' }, { status: 400 })
+    }
 
     const result = await generateEInvoice({ consignment, branch, items: items || [], companySettings: companySettings || {} })
     // Full response (with redaction) is logged by ctaxLog inside lib/clearTaxClient.js.

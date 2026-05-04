@@ -570,6 +570,21 @@ export async function POST(req) {
     if (!purchase_ids?.length) return Response.json({ error: 'No purchases selected' }, { status: 400 })
     if (!branch_name)          return Response.json({ error: 'Branch name required' },  { status: 400 })
 
+    // Cap consignment size. NIC E-Way Bill caps a single bill at 250 line items;
+    // E-Invoice caps at 1000. Beyond ~100 the PDF challan also becomes unreadable
+    // and approval review unworkable. Operators should split into multiple
+    // consignments rather than stuff everything into one.
+    if (purchase_ids.length > 100) {
+      return Response.json({
+        error: `Too many bills (${purchase_ids.length}). A consignment can carry at most 100 bills — split this into multiple consignments.`,
+      }, { status: 400 })
+    }
+    // Defensive: reject duplicate IDs (shouldn't happen via UI but a hand-rolled
+    // POST could create them, and the RPC would then double-insert link rows).
+    if (new Set(purchase_ids).size !== purchase_ids.length) {
+      return Response.json({ error: 'Duplicate bill IDs in selection.' }, { status: 400 })
+    }
+
     const isInternal = movement_type === 'INTERNAL'
     if (isInternal && !dest_branch) {
       return Response.json({ error: 'Destination hub is required for Branch → Hub movements' }, { status: 400 })
@@ -608,8 +623,14 @@ export async function POST(req) {
     // Validate selected purchases are currently at this branch (use current_branch with branch_name fallback)
     const { data: purchaseCheck } = await supabase
       .from('purchases')
-      .select('id, branch_name, current_branch, stock_status')
+      .select('id, bill_no, branch_name, current_branch, stock_status, gross_weight, net_weight, total_amount, customer_name, purchase_date')
       .in('id', purchase_ids)
+
+    if (!purchaseCheck || purchaseCheck.length !== purchase_ids.length) {
+      return Response.json({
+        error: `${purchase_ids.length - (purchaseCheck?.length || 0)} bill(s) not found. They may have been deleted.`,
+      }, { status: 400 })
+    }
 
     const wrongBranch = (purchaseCheck || []).filter(p => (p.current_branch || p.branch_name) !== branch_name)
     if (wrongBranch.length) {
@@ -622,6 +643,30 @@ export async function POST(req) {
     if (alreadyInConsignment.length) {
       return Response.json({
         error: `${alreadyInConsignment.length} purchase(s) are already in a consignment.`,
+      }, { status: 400 })
+    }
+
+    // Bill-quality validation. Bills with missing/zero weight or amount break
+    // the EWB and E-Invoice payloads silently — NIC accepts the request but
+    // the resulting document is unusable for transport. Catch it here.
+    const todayIso = new Date().toISOString().slice(0, 10)
+    const qualityErrors = []
+    for (const p of purchaseCheck) {
+      const tag = p.bill_no || `bill ${p.id}`
+      // Gross weight is the canonical figure used in challan/EWB/E-Invoice.
+      // Fall back to net_weight only for legacy rows that pre-date the gross_weight column.
+      const wt = Number(p.gross_weight ?? p.net_weight ?? 0)
+      if (wt <= 0) qualityErrors.push(`${tag}: weight is 0 or missing`)
+      if (Number(p.total_amount || 0) <= 0) qualityErrors.push(`${tag}: amount is 0 or missing`)
+      if (!p.customer_name || !String(p.customer_name).trim()) qualityErrors.push(`${tag}: customer name is missing`)
+      if (p.purchase_date && String(p.purchase_date).slice(0, 10) > todayIso) {
+        qualityErrors.push(`${tag}: purchase date is in the future (${p.purchase_date})`)
+      }
+    }
+    if (qualityErrors.length) {
+      return Response.json({
+        error: 'Some bills have incomplete data and cannot be consigned. Fix these in the Purchases module first:\n' + qualityErrors.slice(0, 10).join('\n') + (qualityErrors.length > 10 ? `\n…and ${qualityErrors.length - 10} more` : ''),
+        quality_errors: qualityErrors,
       }, { status: 400 })
     }
 
@@ -846,6 +891,26 @@ export async function POST(req) {
     if (!id) return Response.json({ error: 'consignment id required' }, { status: 400 })
     const nowIso = new Date().toISOString()
 
+    // Block approval on dead or already-decided rows. Without these checks,
+    // an accidental double-click on the Approve button after a cancel/reject
+    // could re-flip the row to 'approved' and silently move bills out of the
+    // branch's stock — invisible to the operator until the next stock count.
+    const { data: existing, error: ee } = await supabase
+      .from('consignments')
+      .select('status, approval_status, tmp_prf_no')
+      .eq('id', id)
+      .single()
+    if (ee || !existing) return Response.json({ error: 'Consignment not found' }, { status: 404 })
+    if (existing.status === 'cancelled') {
+      return Response.json({ error: `${existing.tmp_prf_no} is cancelled. Cannot approve a cancelled consignment.` }, { status: 400 })
+    }
+    if (existing.approval_status === 'approved') {
+      return Response.json({ error: `${existing.tmp_prf_no} is already approved.` }, { status: 400 })
+    }
+    if (existing.approval_status === 'rejected') {
+      return Response.json({ error: `${existing.tmp_prf_no} was already rejected. Cannot re-approve a rejected consignment.` }, { status: 400 })
+    }
+
     // Approval is the moment bills physically leave the source branch.
     // Until accounts approves, purchases.stock_status stays 'at_branch' and
     // the bills appear in the source branch's stock. On approve we flip:
@@ -907,6 +972,23 @@ export async function POST(req) {
     const approver_email = actorEmail
     if (!id) return Response.json({ error: 'consignment id required' }, { status: 400 })
     if (!reason) return Response.json({ error: 'Rejection reason is required' }, { status: 400 })
+
+    // Same guards as approve — don't decide a row that's already decided or dead.
+    const { data: existing, error: ee } = await supabase
+      .from('consignments')
+      .select('status, approval_status, tmp_prf_no')
+      .eq('id', id)
+      .single()
+    if (ee || !existing) return Response.json({ error: 'Consignment not found' }, { status: 404 })
+    if (existing.status === 'cancelled') {
+      return Response.json({ error: `${existing.tmp_prf_no} is already cancelled.` }, { status: 400 })
+    }
+    if (existing.approval_status === 'approved') {
+      return Response.json({ error: `${existing.tmp_prf_no} was already approved. Cannot reject after approval — use Cancel instead.` }, { status: 400 })
+    }
+    if (existing.approval_status === 'rejected') {
+      return Response.json({ error: `${existing.tmp_prf_no} is already rejected.` }, { status: 400 })
+    }
 
     // Rejection auto-voids the consignment row.
     //
