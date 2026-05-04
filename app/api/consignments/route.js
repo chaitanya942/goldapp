@@ -734,11 +734,19 @@ export async function POST(req) {
     // Resolve source GSTIN at this moment so the EWB/E-Invoice generated days
     // later still uses the correct number — even if state-wise GSTIN config or
     // branch_gstin is edited afterwards.
-    const sourceGstinKey = `gstin_${(branchData.state || '').toLowerCase()}`
+    //
+    // IMPORTANT: company_settings stores GSTINs keyed by STATE CODE (gstin_ka, gstin_ts, etc.)
+    // but branches.state can be the full name ("Telangana") or the code ("TS"). Always
+    // resolve through regionToStateCode(branch.region) — that's what lib/clearTaxClient
+    // uses for the auth header. Mismatch here was producing NIC error 106
+    // ("Supplier GSTIN didn't match user GSTIN").
+    const sourceStateCode = regionToStateCode(branchData.region) || branchData.state
+    const sourceGstinKey  = sourceStateCode ? `gstin_${String(sourceStateCode).toLowerCase()}` : null
     const sourceGstinSnap = (sourceGstinKey && cs?.[sourceGstinKey]) || branchData.branch_gstin || cs?.gstin || null
     let destGstinSnap = null
     if (isInternal && destData) {
-      const destGstinKey = `gstin_${(destData.state || '').toLowerCase()}`
+      const destStateCode = regionToStateCode(destData.region) || destData.state
+      const destGstinKey  = destStateCode ? `gstin_${String(destStateCode).toLowerCase()}` : null
       destGstinSnap = (destGstinKey && cs?.[destGstinKey]) || destData.branch_gstin || cs?.gstin || null
     }
 
