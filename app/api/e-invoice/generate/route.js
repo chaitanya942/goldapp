@@ -8,6 +8,7 @@ import { generateEInvoice } from '../../../../lib/clearTaxClient'
 import { logConsignmentEvent } from '../../../../lib/consignmentLog'
 import { requireAuth, ROLE_GROUPS } from '../../../../lib/apiAuth'
 import { REGION_TO_STATE_CODE } from '../../../../lib/stateMap'
+import { loadConsignmentForGeneration } from '../../../../lib/consignmentSnapshot'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
@@ -32,41 +33,20 @@ export async function POST(req) {
     const { consignment_id } = await req.json()
     if (!consignment_id) return Response.json({ error: 'consignment_id required' }, { status: 400 })
 
-    const { data: consignment, error: ce } = await supabase
-      .from('consignments').select('*').eq('id', consignment_id).single()
-    if (ce || !consignment) return Response.json({ error: 'Consignment not found' }, { status: 404 })
+    // Snapshot-first load (consignment + branch + items + companySettings).
+    const loaded = await loadConsignmentForGeneration(supabase, consignment_id)
+    if (loaded.error) return Response.json({ error: loaded.error.message }, { status: loaded.error.status })
+    const { consignment, branch, items, companySettings } = loaded
 
-    // Refuse to fire IRP for a cancelled / rejected consignment. Otherwise accounts could
-    // generate a live IRN against a dead row — IRN cancellation has a 24-hour window and
-    // the row would be permanently stuck with a phantom invoice.
     if (consignment.status === 'cancelled') {
       return Response.json({ error: `${consignment.tmp_prf_no} is cancelled. Cannot generate an E-Invoice against a cancelled consignment.` }, { status: 400 })
     }
     if (consignment.approval_status === 'rejected') {
       return Response.json({ error: `${consignment.tmp_prf_no} was rejected. Cannot generate an E-Invoice.` }, { status: 400 })
     }
-
-    if (consignment.irn) return Response.json({ error: `E-Invoice already exists: ${consignment.irn}` }, { status: 400 })
-
-    // Source "branch" — synthesized from the consignment snapshot. EWB/E-Invoice
-    // must reflect what was approved at creation, not whatever live `branches` says now.
-    const { data: liveBranch } = await supabase
-      .from('branches').select('*').eq('name', consignment.branch_name).single()
-    if (!liveBranch && !consignment.source_address) {
-      return Response.json({ error: `Branch '${consignment.branch_name}' not found and consignment has no address snapshot` }, { status: 404 })
+    if (consignment.irn) {
+      return Response.json({ error: `E-Invoice already exists: ${consignment.irn}` }, { status: 400 })
     }
-    const branch = {
-      ...(liveBranch || {}),
-      name:         consignment.branch_name,
-      address:      consignment.source_address  || liveBranch?.address,
-      city:         consignment.source_city     || liveBranch?.city,
-      pin_code:     consignment.source_pin      || liveBranch?.pin_code,
-      state:        consignment.source_state    || liveBranch?.state,
-      region:       consignment.source_region   || liveBranch?.region,
-      branch_gstin: consignment.source_gstin    || liveBranch?.branch_gstin,
-    }
-
-    const { data: companySettings } = await supabase.from('company_settings').select('*').single()
 
     // Resolve seller GSTIN from company_settings.gstin_<state> (preferred) → branch.branch_gstin → env.
     // Use the shared region→state-code map so adding a new state in stateMap.js
@@ -98,31 +78,6 @@ export async function POST(req) {
     }
     if (!isValidPin(branch.pin_code)) {
       return Response.json({ error: `Branch '${branch.name}' PIN '${branch.pin_code}' is invalid (must be 6 digits, not starting with 0).` }, { status: 400 })
-    }
-
-    // Items from snapshot, falling back to live purchases for legacy rows.
-    const { data: linkRows } = await supabase
-      .from('consignment_items')
-      .select('purchase_id, bill_no_snap, gross_weight_snap, net_weight_snap, total_amount_snap, customer_name_snap, purchase_date_snap, hsn_code_snap')
-      .eq('consignment_id', consignment_id)
-
-    const hasSnapshots = (linkRows || []).every(r => r.gross_weight_snap != null && r.total_amount_snap != null)
-    let items = []
-    if (hasSnapshots && linkRows?.length) {
-      items = linkRows.map(r => ({
-        id:            r.purchase_id,
-        bill_no:       r.bill_no_snap,
-        gross_weight:  Number(r.gross_weight_snap || 0),
-        net_weight:    Number(r.net_weight_snap   || 0),
-        total_amount:  Number(r.total_amount_snap || 0),
-        customer_name: r.customer_name_snap,
-        purchase_date: r.purchase_date_snap,
-        hsn_code:      r.hsn_code_snap,
-      }))
-    } else {
-      const purchaseIds = (linkRows || []).map(r => r.purchase_id)
-      const { data: live } = await supabase.from('purchases').select('*').in('id', purchaseIds)
-      items = live || []
     }
 
     // Item-level preflight — same as EWB. NIC IRP rejects line items with

@@ -41,8 +41,12 @@ ALTER TABLE consignment_items
   ADD COLUMN IF NOT EXISTS net_weight_snap     NUMERIC(12, 3),
   ADD COLUMN IF NOT EXISTS total_amount_snap   NUMERIC(14, 2),
   ADD COLUMN IF NOT EXISTS customer_name_snap  TEXT,
-  ADD COLUMN IF NOT EXISTS purchase_date_snap  DATE,
-  ADD COLUMN IF NOT EXISTS hsn_code_snap       TEXT;
+  ADD COLUMN IF NOT EXISTS purchase_date_snap  DATE;
+
+-- HSN is org-wide on this deployment (company_settings.hsn_code), not per-bill.
+-- A previous draft of this migration added consignment_items.hsn_code_snap; drop it.
+-- Safe: never populated, no app code reads from it after this commit.
+ALTER TABLE consignment_items DROP COLUMN IF EXISTS hsn_code_snap;
 
 -- ── Backfill: copy live data into snapshot for existing rows that don't have it ──
 --
@@ -96,7 +100,6 @@ DECLARE
   has_total_amount  BOOLEAN;
   has_customer_name BOOLEAN;
   has_purchase_date BOOLEAN;
-  has_hsn_code      BOOLEAN;
 BEGIN
   SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='purchases' AND column_name='sl_no'),
          (SELECT data_type FROM information_schema.columns WHERE table_name='purchases' AND column_name='sl_no')
@@ -106,7 +109,6 @@ BEGIN
   SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='purchases' AND column_name='total_amount')  INTO has_total_amount;
   SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='purchases' AND column_name='customer_name') INTO has_customer_name;
   SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='purchases' AND column_name='purchase_date') INTO has_purchase_date;
-  SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='purchases' AND column_name='hsn_code')      INTO has_hsn_code;
 
   -- bill_no_snap ← sl_no (cast to TEXT regardless of source type)
   IF has_sl_no THEN
@@ -134,12 +136,6 @@ BEGIN
   -- purchase_date may be DATE or TIMESTAMP depending on deployment — explicit cast handles both
   IF has_purchase_date THEN
     EXECUTE 'UPDATE consignment_items ci SET purchase_date_snap = COALESCE(ci.purchase_date_snap, p.purchase_date::DATE) FROM purchases p WHERE p.id = ci.purchase_id AND ci.purchase_date_snap IS NULL';
-  END IF;
-
-  -- hsn_code is present on some deployments, absent on others (HSN lives on company_settings here).
-  -- Skip silently when absent — generators fall back to companySettings.hsn_code.
-  IF has_hsn_code THEN
-    EXECUTE 'UPDATE consignment_items ci SET hsn_code_snap = COALESCE(ci.hsn_code_snap, p.hsn_code) FROM purchases p WHERE p.id = ci.purchase_id AND ci.hsn_code_snap IS NULL';
   END IF;
 END $$;
 

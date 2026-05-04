@@ -4,6 +4,7 @@ import { createClient } from '@supabase/supabase-js'
 import { generateDeliveryChallan } from '../../../lib/generateDeliveryChallan'
 import { checkApproval } from '../../../lib/approvalGate'
 import { requireAuth } from '../../../lib/apiAuth'
+import { loadConsignmentForGeneration } from '../../../lib/consignmentSnapshot'
 import fs   from 'fs'
 import path from 'path'
 
@@ -65,34 +66,9 @@ export async function GET(req) {
   if (gate.blocked) return gate.response
 
   try {
-    // ── Fetch consignment ────────────────────────────────────────────────────
-    const { data: consignment, error: ce } = await supabase
-      .from('consignments')
-      .select('*')
-      .eq('id', consignmentId)
-      .single()
-
-    if (ce || !consignment) {
-      return Response.json({ error: 'Consignment not found' }, { status: 404 })
-    }
-
-    // ── Build branch from snapshot — frozen at consignment creation. ─────────
-    // Live branch is fetched only as a backstop for legacy rows that don't
-    // have a snapshot yet. If a live row's address has been corrected since,
-    // the consignment's challan still shows what was approved at creation.
-    const { data: liveBranch } = await supabase
-      .from('branches').select('*').eq('name', consignment.branch_name).single()
-
-    const branch = {
-      ...(liveBranch || {}),
-      name:         consignment.branch_name,
-      address:      consignment.source_address  || liveBranch?.address,
-      city:         consignment.source_city     || liveBranch?.city,
-      pin_code:     consignment.source_pin      || liveBranch?.pin_code,
-      state:        consignment.source_state    || liveBranch?.state,
-      region:       consignment.source_region   || liveBranch?.region,
-      branch_gstin: consignment.source_gstin    || liveBranch?.branch_gstin,
-    }
+    const loaded = await loadConsignmentForGeneration(supabase, consignmentId)
+    if (loaded.error) return Response.json({ error: loaded.error.message }, { status: loaded.error.status })
+    const { consignment, branch, items, companySettings: rawSettings } = loaded
 
     if (!branch.address) {
       return Response.json({
@@ -100,44 +76,9 @@ export async function GET(req) {
       }, { status: 400 })
     }
 
-    // ── Fetch company settings (DB row merged with defaults) ─────────────────
-    const { data: rawSettings } = await supabase.from('company_settings').select('*').single()
     const companySettings = { ...DEFAULT_COMPANY, ...(rawSettings || {}) }
-
-    // ── Fetch consignment_items with snapshot — fall back to live purchases ──
-    const { data: consignmentItems, error: cie } = await supabase
-      .from('consignment_items')
-      .select('purchase_id, bill_no_snap, gross_weight_snap, net_weight_snap, total_amount_snap, customer_name_snap, purchase_date_snap, hsn_code_snap')
-      .eq('consignment_id', consignmentId)
-
-    if (cie) {
-      return Response.json({ error: 'Failed to fetch consignment items' }, { status: 500 })
-    }
-
-    const hasSnapshots = (consignmentItems || []).every(r => r.gross_weight_snap != null && r.total_amount_snap != null)
-    let items = []
-    if (hasSnapshots && consignmentItems?.length) {
-      items = consignmentItems.map(r => ({
-        id:            r.purchase_id,
-        bill_no:       r.bill_no_snap,
-        gross_weight:  Number(r.gross_weight_snap || 0),
-        net_weight:    Number(r.net_weight_snap   || 0),
-        total_amount:  Number(r.total_amount_snap || 0),
-        customer_name: r.customer_name_snap,
-        purchase_date: r.purchase_date_snap,
-        hsn_code:      r.hsn_code_snap,
-      }))
-    } else {
-      const purchaseIds = (consignmentItems || []).map(i => i.purchase_id)
-      const { data: live, error: ie } = await supabase.from('purchases').select('*').in('id', purchaseIds)
-      if (ie) return Response.json({ error: 'Failed to fetch purchase items' }, { status: 500 })
-      items = live || []
-    }
-
-    // ── Load logo ─────────────────────────────────────────────────────────────
     const logoBase64 = loadLogo()
 
-    // ── Generate PDF ──────────────────────────────────────────────────────────
     const pdf = generateDeliveryChallan({
       consignment,
       branch,

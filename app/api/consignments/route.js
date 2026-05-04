@@ -688,33 +688,19 @@ export async function POST(req) {
       challan = ext.challan
     }
 
-    // Fetch the full purchase rows we need to snapshot onto consignment_items.
-    // We re-use the same `purchaseCheck` array that the quality-validator already
-    // loaded above (it has bill_no / weights / amount / customer / date).
+    // Build per-bill snapshots from the data the quality-validator already loaded
+    // (purchaseCheck holds id, bill_no, weights, amount, customer, date).
     const purchasesById = new Map((purchaseCheck || []).map(p => [p.id, p]))
-
-    // Optionally fetch hsn_code per row — column exists on most deployments but
-    // not all. Tolerate absence so the migration can roll out independently.
-    let hsnByPurchaseId = new Map()
-    try {
-      const { data: hsnRows } = await supabase
-        .from('purchases')
-        .select('id, hsn_code')
-        .in('id', purchase_ids)
-      if (hsnRows) hsnByPurchaseId = new Map(hsnRows.map(r => [r.id, r.hsn_code]))
-    } catch { /* hsn_code column not present — skip */ }
-
     const itemSnapshots = purchase_ids.map(pid => {
       const p = purchasesById.get(pid) || {}
       return {
         purchase_id:   pid,
-        bill_no:       p.bill_no || null,
+        bill_no:       p.bill_no != null ? String(p.bill_no) : null,
         gross_weight:  Number(p.gross_weight ?? 0) || 0,
         net_weight:    Number(p.net_weight   ?? 0) || 0,
         total_amount:  Number(p.total_amount ?? 0) || 0,
         customer_name: p.customer_name || null,
         purchase_date: p.purchase_date ? String(p.purchase_date).slice(0, 10) : null,
-        hsn_code:      hsnByPurchaseId.get(pid) || null,
       }
     })
 
@@ -757,137 +743,64 @@ export async function POST(req) {
     }
 
     // ── Atomic create via Postgres RPC ────────────────────────────────────
-    // Wraps consignments INSERT + consignment_items INSERT + purchases UPDATE
-    // in a single transaction. If any step fails, all changes roll back —
-    // previously a failure between steps left bills in `at_branch` while the
-    // consignment row claimed `dispatched`, requiring manual cleanup.
-    //
-    // If the RPC isn't deployed yet (sql/consignment_create_cancel_rpcs.sql),
-    // we fall back to the legacy multi-statement path so the route still works.
+    // create_consignment_atomic takes a single JSONB payload — adding new
+    // snapshot fields no longer requires a function-signature change. The
+    // RPC INSERTS the consignment header, links every purchase via
+    // consignment_items (with per-bill snapshot), and writes the audit log
+    // in one transaction. Bills' stock_status stays 'at_branch' until
+    // accounts approves; that flip lives in approve_consignment below.
     const { data: rpcConsignment, error: rpcErr } = await supabase.rpc('create_consignment_atomic', {
-      p_consignment_no: challan,
-      p_tmp_prf_no:    tmpPrfNo,
-      p_external_no:   extNo,
-      p_internal_no:   internalNo,
-      p_challan_no:    challan,
-      p_branch_name:   branch_name,
-      p_branch_code:   branchCode,
-      p_state_code:    stateCode,
-      p_movement_type: movement_type || 'EXTERNAL',
-      p_dest_branch:   isInternal ? dest_branch : null,
-      p_eway_bill_no:  eway_bill_no || null,
-      p_total_bills:   purchase_ids.length,
-      p_total_net_wt:  totalNetWt,
-      p_total_gross_wt: totalGrossWt,
-      p_total_amount:  totalAmount,
-      p_gst_snapshot:  gstSnapshot,
-      p_created_by:    created_by,             // email — TEXT — consignments.created_by + audit log
-      p_added_by:      auth.user?.id || null,  // supabase auth uid — UUID — consignment_items.added_by
-      p_purchase_ids:  purchase_ids,
-      // Source branch address snapshot — frozen at creation time
-      p_source_address: branchData.address || null,
-      p_source_city:    branchData.city || null,
-      p_source_pin:     branchData.pin_code || null,
-      p_source_state:   branchData.state || null,
-      p_source_region:  branchData.region || null,
-      p_source_gstin:   sourceGstinSnap,
-      // Destination branch address snapshot (only for INTERNAL)
-      p_dest_address:   isInternal ? (destData?.address || null) : null,
-      p_dest_city:      isInternal ? (destData?.city || null) : null,
-      p_dest_pin:       isInternal ? (destData?.pin_code || null) : null,
-      p_dest_state:     isInternal ? (destData?.state || null) : null,
-      p_dest_region:    isInternal ? (destData?.region || null) : null,
-      p_dest_gstin:     isInternal ? destGstinSnap : null,
-      // Per-bill snapshot
-      p_item_snapshots: itemSnapshots,
+      p_payload: {
+        consignment_no:  challan,
+        tmp_prf_no:      tmpPrfNo,
+        external_no:     extNo,
+        internal_no:     internalNo,
+        challan_no:      challan,
+        branch_name,
+        branch_code:     branchCode,
+        state_code:      stateCode,
+        movement_type:   movement_type || 'EXTERNAL',
+        dest_branch:     isInternal ? dest_branch : null,
+        eway_bill_no:    eway_bill_no || null,
+        total_bills:     purchase_ids.length,
+        total_net_wt:    totalNetWt,
+        total_gross_wt:  totalGrossWt,
+        total_amount:    totalAmount,
+        gst_snapshot:    gstSnapshot,
+        created_by,
+        added_by:        auth.user?.id || null,
+        purchase_ids,
+        source_address:  branchData.address || null,
+        source_city:     branchData.city || null,
+        source_pin:      branchData.pin_code || null,
+        source_state:    branchData.state || null,
+        source_region:   branchData.region || null,
+        source_gstin:    sourceGstinSnap,
+        dest_address:    isInternal ? (destData?.address || null) : null,
+        dest_city:       isInternal ? (destData?.city || null) : null,
+        dest_pin:        isInternal ? (destData?.pin_code || null) : null,
+        dest_state:      isInternal ? (destData?.state || null) : null,
+        dest_region:     isInternal ? (destData?.region || null) : null,
+        dest_gstin:      isInternal ? destGstinSnap : null,
+        item_snapshots:  itemSnapshots,
+      },
     })
 
-    if (!rpcErr && rpcConsignment) {
-      return Response.json({ data: rpcConsignment })
-    }
-
-    // Fallback path (RPC not deployed). Logs a warning so we know to apply the SQL.
-    if (rpcErr && rpcErr.code !== 'PGRST202' /* function not found */) {
-      // RPC exists and returned an error — surface it (this is a real failure,
-      // probably a check-violation from the duplicate-link guard).
+    if (rpcErr) {
+      // PGRST202 = function not found. Surface a clear message; do NOT
+      // fall back to a non-atomic legacy path — the snapshot model
+      // requires the RPC's transactional semantics.
+      if (rpcErr.code === 'PGRST202') {
+        return Response.json({
+          error: 'create_consignment_atomic RPC is not deployed. Run sql/consignment_create_cancel_rpcs.sql in Supabase SQL Editor.',
+        }, { status: 500 })
+      }
       return Response.json({ error: rpcErr.message }, { status: 500 })
     }
-    console.warn('[consignments.create] create_consignment_atomic RPC missing — using non-atomic fallback. Apply sql/consignment_create_cancel_rpcs.sql.')
-
-    const { data: consignment, error: ce } = await supabase
-      .from('consignments')
-      .insert({
-        consignment_no: challan,
-        tmp_prf_no:    tmpPrfNo,
-        external_no:   extNo,
-        internal_no:   internalNo,
-        challan_no:    challan,
-        branch_name,
-        branch_code:   branchCode,
-        state_code:    stateCode,
-        movement_type: movement_type || 'EXTERNAL',
-        dest_branch:   isInternal ? dest_branch : null,
-        eway_bill_no:  eway_bill_no || null,
-        status:        isInternal ? 'received'  : 'dispatched',
-        dispatched_at: nowIso,
-        received_at:   isInternal ? nowIso      : null,
-        total_bills:   purchase_ids.length,
-        total_net_wt:  totalNetWt,
-        total_gross_wt: totalGrossWt,
-        total_amount:  totalAmount,
-        gst_rate_snapshot: gstSnapshot,
-        approval_status:   'pending',  // accounts team must approve before docs can be downloaded
-        created_by,
-        // Address snapshot (frozen at creation)
-        source_address: branchData.address || null,
-        source_city:    branchData.city || null,
-        source_pin:     branchData.pin_code || null,
-        source_state:   branchData.state || null,
-        source_region:  branchData.region || null,
-        source_gstin:   sourceGstinSnap,
-        dest_address:   isInternal ? (destData?.address || null) : null,
-        dest_city:      isInternal ? (destData?.city || null) : null,
-        dest_pin:       isInternal ? (destData?.pin_code || null) : null,
-        dest_state:     isInternal ? (destData?.state || null) : null,
-        dest_region:    isInternal ? (destData?.region || null) : null,
-        dest_gstin:     isInternal ? destGstinSnap : null,
-      })
-      .select()
-      .single()
-
-    if (ce) return Response.json({ error: ce.message }, { status: 500 })
-
-    await logConsignmentEvent(supabase, {
-      consignment_id: consignment.id,
-      event_type:     isInternal ? 'created_and_received' : 'created',
-      actor_email:    created_by,
-      details:        { movement_type: consignment.movement_type, source: branch_name, dest: isInternal ? dest_branch : 'HO', bills: purchase_ids.length, weight: totalNetWt },
-    })
-
-    // consignment_items: each row carries a frozen snapshot of the bill at the
-    // moment of consignment creation. Once written, edits to `purchases` (weight
-    // correction, customer rename, etc.) won't change what the EWB/E-Invoice prints.
-    await supabase.from('consignment_items').insert(
-      itemSnapshots.map(s => ({
-        consignment_id:     consignment.id,
-        purchase_id:        s.purchase_id,
-        added_by:           auth.user?.id || null,
-        bill_no_snap:       s.bill_no,
-        gross_weight_snap:  s.gross_weight,
-        net_weight_snap:    s.net_weight,
-        total_amount_snap:  s.total_amount,
-        customer_name_snap: s.customer_name,
-        purchase_date_snap: s.purchase_date,
-        hsn_code_snap:      s.hsn_code,
-      }))
-    )
-
-    // NOTE: bills' stock_status / current_branch are NOT flipped here.
-    // Bills stay at_branch (in the source branch's stock) until accounts
-    // approves the consignment. The flip happens in the approve_consignment
-    // action below. Mirrors the same change in create_consignment_atomic.
-
-    return Response.json({ data: consignment })
+    if (!rpcConsignment) {
+      return Response.json({ error: 'create_consignment_atomic returned no row' }, { status: 500 })
+    }
+    return Response.json({ data: rpcConsignment })
   }
 
   // ── Dispatch consignment ─────────────────────────────────────────────────
