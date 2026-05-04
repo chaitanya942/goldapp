@@ -49,6 +49,13 @@ export default function BranchManagement() {
   const [syncMsg,          setSyncMsg]          = useState('')
   const [filterIncomplete, setFilterIncomplete] = useState(false)
 
+  // Google address auto-resolution state
+  const [resolveOpen,    setResolveOpen]    = useState(false)
+  const [resolving,      setResolving]      = useState(false)
+  const [resolveError,   setResolveError]   = useState('')
+  const [resolveResults, setResolveResults] = useState([])  // [{ branch_name, suggestion?, error?, accepted }]
+  const [savingResolved, setSavingResolved] = useState(false)
+
   useEffect(() => { load(); loadTmap() }, [])
 
   const load = async () => {
@@ -128,6 +135,9 @@ export default function BranchManagement() {
       pin_code: form.pin_code || null,
       branch_gstin: form.branch_gstin || null,
       pickup_time: form.pickup_time || null,
+      // Manual save = human-verified. Locks the row from future auto-resolution overrides.
+      address_verified: true,
+      address_source:   'manual',
     }
     const { error } = editId
       ? await supabase.from('branches').update(payload).eq('id', editId)
@@ -185,6 +195,64 @@ export default function BranchManagement() {
       }
     } catch (e) { setSyncMsg(`Error: ${e.message}`) }
     setSyncing(false)
+  }
+
+  // Open the Google auto-resolve panel. Builds the candidate list:
+  // every branch where address is empty AND address_verified is not true.
+  // Verified rows are skipped — manual edit beats auto-fill, always.
+  const openResolve = async () => {
+    setResolveOpen(true); setResolveError(''); setResolveResults([]); setResolving(true)
+    try {
+      const candidates = branches
+        .filter(b => !b.address_verified && (!b.address || !b.pin_code))
+        .map(b => b.name)
+      if (candidates.length === 0) {
+        setResolveError('All branches already have a verified address. Nothing to resolve.')
+        setResolving(false)
+        return
+      }
+      const res  = await authedFetch('/api/branches/resolve-address', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ branch_names: candidates }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        setResolveError(data.error || 'Resolve failed')
+        setResolving(false)
+        return
+      }
+      // Default: accept all suggestions that came back. Operator can untick before saving.
+      setResolveResults((data.results || []).map(r => ({ ...r, accepted: !!r.suggestion })))
+    } catch (e) {
+      setResolveError(e.message || 'Resolve failed')
+    }
+    setResolving(false)
+  }
+
+  const toggleResolveAccept = (branch_name) => {
+    setResolveResults(rs => rs.map(r => r.branch_name === branch_name ? { ...r, accepted: !r.accepted } : r))
+  }
+
+  const saveResolved = async () => {
+    const accepted = resolveResults
+      .filter(r => r.accepted && r.suggestion)
+      .map(r => ({ branch_name: r.branch_name, ...r.suggestion }))
+    if (accepted.length === 0) { setResolveError('Nothing selected to save.'); return }
+    setSavingResolved(true); setResolveError('')
+    try {
+      const res  = await authedFetch('/api/branches/save-resolved-addresses', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ accepted }),
+      })
+      const data = await res.json()
+      if (!res.ok) { setResolveError(data.error || 'Save failed'); setSavingResolved(false); return }
+      setSyncMsg(`✓ Saved ${data.saved} address${data.saved === 1 ? '' : 'es'}.${data.skipped?.length ? ` Skipped ${data.skipped.length}: ${data.skipped.map(s => s.branch_name).join(', ')}` : ''}`)
+      setResolveOpen(false); setResolveResults([])
+      load(); loadBranches()
+    } catch (e) { setResolveError(e.message || 'Save failed') }
+    setSavingResolved(false)
   }
 
   const cancelForm = () => { setFormOpen(false); setEditId(null); setForm(EMPTY_FORM); setMsg('') }
@@ -301,6 +369,9 @@ export default function BranchManagement() {
           <div style={s.sub}>Add, activate, and manage all branches across states</div>
         </div>
         <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+          <button onClick={openResolve} disabled={resolving} style={{ ...s.btnOutline, opacity: resolving ? .6 : 1 }}>
+            {resolving ? 'Resolving…' : 'Auto-resolve addresses'}
+          </button>
           <button onClick={syncFromCRM} disabled={syncing} style={{ ...s.btnOutline, opacity: syncing ? .6 : 1 }}>
             {syncing ? 'Syncing…' : 'Sync CRM'}
           </button>
@@ -530,6 +601,89 @@ export default function BranchManagement() {
               )}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* Address auto-resolve review modal */}
+      {resolveOpen && (
+        <div
+          onClick={(e) => { if (e.target === e.currentTarget && !savingResolved) setResolveOpen(false) }}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.7)', display: 'flex', alignItems: 'flex-start', justifyContent: 'center', zIndex: 1000, padding: '40px 20px', overflowY: 'auto' }}
+        >
+          <div style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: '10px', width: '100%', maxWidth: '900px', boxShadow: '0 20px 60px rgba(0,0,0,.6)' }}>
+            <div style={{ padding: '20px 24px', borderBottom: `1px solid ${t.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <div style={{ fontSize: '1rem', color: t.text1, fontWeight: 400, letterSpacing: '.04em' }}>Auto-resolve branch addresses</div>
+                <div style={{ fontSize: '.7rem', color: t.text3, marginTop: '4px' }}>Google Maps suggestions for branches missing address. Review, then save accepted ones.</div>
+              </div>
+              <button onClick={() => !savingResolved && setResolveOpen(false)} style={{ background: 'transparent', border: 'none', color: t.text3, fontSize: '1.2rem', cursor: 'pointer' }}>✕</button>
+            </div>
+
+            <div style={{ padding: '20px 24px', maxHeight: '60vh', overflowY: 'auto' }}>
+              {resolving && <div style={{ textAlign: 'center', color: t.text3, padding: '32px', fontSize: '.8rem' }}>Looking up addresses with Google Maps…</div>}
+              {resolveError && (
+                <div style={{ background: '#e0555518', border: '1px solid #e0555540', borderRadius: '6px', padding: '10px 14px', fontSize: '.72rem', color: '#e05555', marginBottom: '12px' }}>{resolveError}</div>
+              )}
+              {!resolving && resolveResults.length > 0 && (
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr>
+                      <th style={{ ...s.th, width: '36px', textAlign: 'center' }}>
+                        <input
+                          type="checkbox"
+                          checked={resolveResults.every(r => !r.suggestion || r.accepted)}
+                          onChange={(e) => setResolveResults(rs => rs.map(r => r.suggestion ? { ...r, accepted: e.target.checked } : r))}
+                        />
+                      </th>
+                      <th style={s.th}>Branch</th>
+                      <th style={s.th}>Suggested Address</th>
+                      <th style={{ ...s.th, width: '90px' }}>PIN</th>
+                      <th style={{ ...s.th, width: '80px' }}>Match</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {resolveResults.map(r => (
+                      <tr key={r.branch_name}>
+                        <td style={{ ...s.td, textAlign: 'center' }}>
+                          {r.suggestion ? (
+                            <input type="checkbox" checked={!!r.accepted} onChange={() => toggleResolveAccept(r.branch_name)} />
+                          ) : '—'}
+                        </td>
+                        <td style={{ ...s.td, color: t.gold, fontWeight: 400 }}>{r.branch_name}</td>
+                        <td style={{ ...s.td, fontSize: '.7rem', color: r.suggestion ? t.text1 : '#e05555' }}>
+                          {r.suggestion?.address || r.error || 'No suggestion'}
+                          {r.suggestion?.city && (
+                            <div style={{ fontSize: '.62rem', color: t.text3, marginTop: '2px' }}>{r.suggestion.city}{r.suggestion.state ? `, ${r.suggestion.state}` : ''}</div>
+                          )}
+                        </td>
+                        <td style={{ ...s.td, fontFamily: 'monospace', fontSize: '.7rem', color: r.suggestion?.pin_code ? t.text1 : t.text4 }}>
+                          {r.suggestion?.pin_code || '—'}
+                        </td>
+                        <td style={{ ...s.td, fontSize: '.62rem', textTransform: 'uppercase', letterSpacing: '.08em', color: r.suggestion?.confidence === 'high' ? t.green : r.suggestion?.confidence === 'medium' ? t.gold : t.text4 }}>
+                          {r.suggestion?.confidence || '—'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+              {!resolving && resolveResults.length === 0 && !resolveError && (
+                <div style={{ textAlign: 'center', color: t.text3, padding: '32px', fontSize: '.8rem' }}>No suggestions returned.</div>
+              )}
+            </div>
+
+            <div style={{ padding: '16px 24px', borderTop: `1px solid ${t.border}`, display: 'flex', gap: '10px', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div style={{ fontSize: '.68rem', color: t.text3 }}>
+                {resolveResults.filter(r => r.accepted).length} of {resolveResults.length} accepted · manual edits stay locked
+              </div>
+              <div style={{ display: 'flex', gap: '10px' }}>
+                <button onClick={() => setResolveOpen(false)} disabled={savingResolved} style={s.btnOutline}>Cancel</button>
+                <button onClick={saveResolved} disabled={savingResolved || resolving || resolveResults.filter(r => r.accepted).length === 0} style={{ ...s.btnGold, opacity: (savingResolved || resolveResults.filter(r => r.accepted).length === 0) ? .5 : 1 }}>
+                  {savingResolved ? 'Saving…' : `Save ${resolveResults.filter(r => r.accepted).length} address${resolveResults.filter(r => r.accepted).length === 1 ? '' : 'es'}`}
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </div>
