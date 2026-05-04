@@ -154,6 +154,20 @@ export default function ConsignmentData() {
   const [ewbActionId,         setEwbActionId]        = useState(null)
   const [transferHistory,     setTransferHistory]    = useState({}) // purchase_id → prior INTERNAL transfer info
   const [toast,               setToast]              = useState(null)
+  // Activity Log drawer — opens on click of "Activity" in row action column.
+  // Stores the consignment id whose activity we're viewing; null = closed.
+  const [activityId,          setActivityId]         = useState(null)
+  const [activityRows,        setActivityRows]       = useState([])
+  const [activityLoading,     setActivityLoading]    = useState(false)
+  useEffect(() => {
+    if (!activityId) return
+    setActivityLoading(true); setActivityRows([])
+    authedFetch(`/api/consignments?action=activity_log&id=${activityId}`)
+      .then(r => r.json())
+      .then(d => setActivityRows(Array.isArray(d.data) ? d.data : []))
+      .catch(() => setActivityRows([]))
+      .finally(() => setActivityLoading(false))
+  }, [activityId])
 
   // List filters
   const [filterType,   setFilterType]   = useState('')
@@ -606,11 +620,13 @@ export default function ConsignmentData() {
 
   // ── Active consignments filtering ─────────────────────────────────────────
   const filteredCons = consignments.filter(c => {
-    // This page is "branch movements in flight" — cancelled rows belong on
-    // the Rejected/Cancelled audit views, not here. Auto-voided rejections
-    // (where reject_approval flips status='cancelled') also drop out here
-    // and only show on the Approvals → Rejected tab.
-    if (c.status === 'cancelled') return false
+    // Show in-flight rows + rejected rows (operations needs visibility into
+    // what accounts pushed back, with the reason). Operator-cancelled rows
+    // (status='cancelled' but approval_status not 'rejected') stay hidden —
+    // those are intentionally voided.
+    const isRejected         = c.approval_status === 'rejected'
+    const isOperatorCancelled = c.status === 'cancelled' && !isRejected
+    if (isOperatorCancelled) return false
     if (filterType   && c.movement_type !== filterType)   return false
     if (filterRegion) {
       const br = branches.find(b => b.name === c.branch_name)
@@ -1054,11 +1070,18 @@ export default function ConsignmentData() {
                             {downloadingId === c.id + ':all' ? '…' : 'Download all'}
                           </button>
                         )}
-                        <button onClick={() => cancelConsignment(c)}
-                          title="Void this consignment. Bills return to the source branch."
-                          style={{ background: 'transparent', border: `1px solid ${t.red}40`, borderRadius: '5px', padding: '5px 12px', fontSize: '10px', color: t.red, cursor: 'pointer' }}>
-                          Void
+                        <button onClick={() => setActivityId(c.id)}
+                          title="View full audit trail for this consignment"
+                          style={{ background: 'transparent', border: `1px solid ${t.border}`, borderRadius: '5px', padding: '5px 12px', fontSize: '10px', color: t.text2, cursor: 'pointer' }}>
+                          Activity
                         </button>
+                        {c.approval_status !== 'rejected' && (
+                          <button onClick={() => cancelConsignment(c)}
+                            title="Void this consignment. Bills return to the source branch."
+                            style={{ background: 'transparent', border: `1px solid ${t.red}40`, borderRadius: '5px', padding: '5px 12px', fontSize: '10px', color: t.red, cursor: 'pointer' }}>
+                            Void
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -1254,6 +1277,97 @@ export default function ConsignmentData() {
       )}
 
       {toast && <Toast msg={toast.msg} type={toast.type} onDone={() => setToast(null)} />}
+
+      {activityId && (
+        <ActivityDrawer
+          consignment={consignments.find(x => x.id === activityId)}
+          rows={activityRows}
+          loading={activityLoading}
+          onClose={() => setActivityId(null)}
+          t={t}
+        />
+      )}
+    </div>
+  )
+}
+
+// ── Activity Log drawer ───────────────────────────────────────────────────────
+// Right-side panel showing every event in consignment_activity_log for one
+// consignment. Surfaces who did what and any reason/remark they gave —
+// the audit trail every operator and accounts query lands on.
+function ActivityDrawer({ consignment, rows, loading, onClose, t }) {
+  const eventLabel = (et) => ({
+    'created':                'Created',
+    'created_and_received':   'Created (auto-received at hub)',
+    'approved_by_accounts':   'Approved by accounts',
+    'rejected_by_accounts':   'Rejected by accounts',
+    'cancelled':              'Cancelled / voided',
+    'received':               'Received at HO',
+    'ewb_generated':          'E-Way Bill generated',
+    'ewb_cancelled':          'E-Way Bill cancelled',
+    'einvoice_generated':     'E-Invoice (IRN) generated',
+    'einvoice_cancelled':     'E-Invoice cancelled',
+  }[et] || et)
+
+  // Pull a human-readable reason/remark out of the details JSON, falling back
+  // to whichever key the action wrote (reason, note, remark, rejection_reason).
+  const reasonOf = (r) => {
+    const d = r.details || {}
+    return d.reason || d.rejection_reason || d.remark || d.note || d.cancel_reason || null
+  }
+
+  const fmt = (ts) => {
+    if (!ts) return ''
+    try { return new Date(ts).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) }
+    catch { return ts }
+  }
+
+  return (
+    <div onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
+      style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.65)', display: 'flex', justifyContent: 'flex-end', zIndex: 2000 }}>
+      <div style={{ width: '440px', maxWidth: '95vw', height: '100vh', background: t.card, borderLeft: `1px solid ${t.border}`, boxShadow: '-12px 0 40px rgba(0,0,0,.5)', display: 'flex', flexDirection: 'column' }}>
+        <div style={{ padding: '18px 22px', borderBottom: `1px solid ${t.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+          <div>
+            <div style={{ fontSize: '14px', color: t.text1, fontWeight: 500, letterSpacing: '.02em' }}>Activity log</div>
+            <div style={{ fontSize: '11px', color: t.text3, marginTop: '4px', fontFamily: 'monospace' }}>
+              {consignment?.tmp_prf_no || '—'} · {consignment?.branch_name} → {consignment?.dest_branch || 'HO'}
+            </div>
+          </div>
+          <button onClick={onClose} style={{ background: 'transparent', border: 'none', color: t.text3, fontSize: '18px', cursor: 'pointer' }}>✕</button>
+        </div>
+
+        <div style={{ flex: 1, overflowY: 'auto', padding: '14px 22px' }}>
+          {loading && <div style={{ color: t.text3, fontSize: '12px', textAlign: 'center', padding: '40px 0' }}>Loading…</div>}
+          {!loading && rows.length === 0 && (
+            <div style={{ color: t.text4, fontSize: '12px', textAlign: 'center', padding: '40px 0' }}>No activity recorded.</div>
+          )}
+          {!loading && rows.map((r, i) => {
+            const reason = reasonOf(r)
+            const isRejection = r.event_type === 'rejected_by_accounts'
+            const isCancel    = r.event_type === 'cancelled'
+            const accent = isRejection ? t.red : isCancel ? t.red : r.event_type === 'approved_by_accounts' ? t.green : t.gold
+            return (
+              <div key={r.id || i} style={{ display: 'flex', gap: '12px', paddingBottom: '14px', marginBottom: '14px', borderBottom: i === rows.length - 1 ? 'none' : `1px solid ${t.border}25` }}>
+                <div style={{ width: '8px', minWidth: '8px', marginTop: '6px' }}>
+                  <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: accent }}></div>
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: '12px', color: t.text1, fontWeight: 500 }}>{eventLabel(r.event_type)}</div>
+                  <div style={{ fontSize: '10px', color: t.text4, marginTop: '2px' }}>
+                    {fmt(r.created_at)}
+                    {r.actor_email && <> · <span style={{ fontFamily: 'monospace', color: t.text3 }}>{r.actor_email}</span></>}
+                  </div>
+                  {reason && (
+                    <div style={{ fontSize: '11px', color: t.text2, marginTop: '6px', background: `${accent}10`, border: `1px solid ${accent}30`, borderRadius: '5px', padding: '7px 10px', whiteSpace: 'pre-wrap' }}>
+                      {reason}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      </div>
     </div>
   )
 }

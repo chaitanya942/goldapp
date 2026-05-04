@@ -151,7 +151,7 @@ BEGIN
 
   -- Audit log (best-effort — table may not exist in older deployments)
   BEGIN
-    INSERT INTO consignment_events (consignment_id, event_type, actor_email, details, created_at)
+    INSERT INTO consignment_activity_log (consignment_id, event_type, actor_email, details, created_at)
     VALUES (
       v_consignment.id,
       CASE WHEN v_is_internal THEN 'created_and_received' ELSE 'created' END,
@@ -247,7 +247,7 @@ BEGIN
   RETURNING * INTO v_c;
 
   BEGIN
-    INSERT INTO consignment_events (consignment_id, event_type, actor_email, details, created_at)
+    INSERT INTO consignment_activity_log (consignment_id, event_type, actor_email, details, created_at)
     VALUES (
       p_consignment_id,
       'cancelled',
