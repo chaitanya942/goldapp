@@ -125,24 +125,70 @@ export async function POST(req) {
     // Helper: release the lock on every error path so user can retry immediately.
     const releaseLock = () => supabase.from('consignments').update({ ewb_generation_started_at: null }).eq('id', consignment_id)
 
-    const { data: branch } = await supabase
+    // Source "branch" — we synthesize from the consignment's frozen address snapshot
+    // so EWB always reflects what the operator approved at creation, not whatever
+    // the live `branches` row has now. Live branch is fetched only as a backstop
+    // for any field the snapshot might be missing (legacy rows pre-snapshot).
+    const { data: liveBranch } = await supabase
       .from('branches').select('*').eq('name', consignment.branch_name).single()
-    if (!branch) {
+    if (!liveBranch && !consignment.source_address) {
       await releaseLock()
-      return Response.json({ error: `Branch '${consignment.branch_name}' not found` }, { status: 404 })
+      return Response.json({ error: `Branch '${consignment.branch_name}' not found and consignment has no address snapshot` }, { status: 404 })
+    }
+    const branch = {
+      ...(liveBranch || {}),
+      name:         consignment.branch_name,
+      address:      consignment.source_address  || liveBranch?.address,
+      city:         consignment.source_city     || liveBranch?.city,
+      pin_code:     consignment.source_pin      || liveBranch?.pin_code,
+      state:        consignment.source_state    || liveBranch?.state,
+      region:       consignment.source_region   || liveBranch?.region,
+      branch_gstin: consignment.source_gstin    || liveBranch?.branch_gstin,
     }
 
-    // For Branch → Hub (INTERNAL) consignments, fetch the destination hub too
+    // For Branch → Hub (INTERNAL) consignments, build the destination from snapshot too
     let destBranch = null
     if (consignment.movement_type === 'INTERNAL' && consignment.dest_branch) {
-      const { data } = await supabase.from('branches').select('*').eq('name', consignment.dest_branch).single()
-      destBranch = data || null
+      const { data: liveDest } = await supabase.from('branches').select('*').eq('name', consignment.dest_branch).single()
+      destBranch = {
+        ...(liveDest || {}),
+        name:         consignment.dest_branch,
+        address:      consignment.dest_address  || liveDest?.address,
+        city:         consignment.dest_city     || liveDest?.city,
+        pin_code:     consignment.dest_pin      || liveDest?.pin_code,
+        state:        consignment.dest_state    || liveDest?.state,
+        region:       consignment.dest_region   || liveDest?.region,
+        branch_gstin: consignment.dest_gstin    || liveDest?.branch_gstin,
+      }
     }
 
+    // Items come from consignment_items snapshot — never from live `purchases`.
+    // The .._snap fields are frozen at creation; if absent (legacy row), fall back
+    // to a join on purchases as a one-time bridge.
     const { data: linkRows } = await supabase
-      .from('consignment_items').select('purchase_id').eq('consignment_id', consignment_id)
-    const purchaseIds = (linkRows || []).map(r => r.purchase_id)
-    const { data: items } = await supabase.from('purchases').select('*').in('id', purchaseIds)
+      .from('consignment_items')
+      .select('purchase_id, bill_no_snap, gross_weight_snap, net_weight_snap, total_amount_snap, customer_name_snap, purchase_date_snap, hsn_code_snap')
+      .eq('consignment_id', consignment_id)
+
+    const hasSnapshots = (linkRows || []).every(r => r.gross_weight_snap != null && r.total_amount_snap != null)
+    let items = []
+    if (hasSnapshots && linkRows?.length) {
+      items = linkRows.map(r => ({
+        id:            r.purchase_id,
+        bill_no:       r.bill_no_snap,
+        gross_weight:  Number(r.gross_weight_snap || 0),
+        net_weight:    Number(r.net_weight_snap   || 0),
+        total_amount:  Number(r.total_amount_snap || 0),
+        customer_name: r.customer_name_snap,
+        purchase_date: r.purchase_date_snap,
+        hsn_code:      r.hsn_code_snap,
+      }))
+    } else {
+      // Legacy bridge — pull from purchases for older consignments not yet snapshotted.
+      const purchaseIds = (linkRows || []).map(r => r.purchase_id)
+      const { data: live } = await supabase.from('purchases').select('*').in('id', purchaseIds)
+      items = live || []
+    }
 
     const { data: companySettings } = await supabase.from('company_settings').select('*').single()
 

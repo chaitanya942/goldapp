@@ -22,12 +22,15 @@
 
 -- Drop any prior signature first. Postgres treats functions with different
 -- argument lists as different overloads — without this, replacing the
--- 17-arg version with the 18-arg version (now with p_added_by UUID for
--- consignment_items.added_by) would leave both in place and the
--- supabase.rpc() call would be ambiguous.
+-- previous version with the new snapshot-aware version would leave both
+-- in place and the supabase.rpc() call would be ambiguous.
 DROP FUNCTION IF EXISTS create_consignment_atomic(
   TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT,
   INT, NUMERIC, NUMERIC, JSONB, TEXT, UUID[]
+);
+DROP FUNCTION IF EXISTS create_consignment_atomic(
+  TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT,
+  INT, NUMERIC, NUMERIC, JSONB, TEXT, UUID, UUID[]
 );
 
 CREATE OR REPLACE FUNCTION create_consignment_atomic(
@@ -44,11 +47,28 @@ CREATE OR REPLACE FUNCTION create_consignment_atomic(
   p_eway_bill_no     TEXT,
   p_total_bills      INT,
   p_total_net_wt     NUMERIC,
+  p_total_gross_wt   NUMERIC,    -- gross weight snapshot (canonical for EWB/E-Invoice/challan)
   p_total_amount     NUMERIC,
   p_gst_snapshot     JSONB,
   p_created_by       TEXT,    -- email; goes into consignments.created_by + audit log
   p_added_by         UUID,    -- supabase auth uid; goes into consignment_items.added_by (UUID column)
-  p_purchase_ids     UUID[]
+  p_purchase_ids     UUID[],
+  -- Source branch address snapshot (frozen at creation time)
+  p_source_address   TEXT,
+  p_source_city      TEXT,
+  p_source_pin       TEXT,
+  p_source_state     TEXT,
+  p_source_region    TEXT,
+  p_source_gstin     TEXT,
+  -- Destination branch address snapshot (only for INTERNAL movements; pass NULL for EXTERNAL)
+  p_dest_address     TEXT,
+  p_dest_city        TEXT,
+  p_dest_pin         TEXT,
+  p_dest_state       TEXT,
+  p_dest_region      TEXT,
+  p_dest_gstin       TEXT,
+  -- Per-bill snapshot, JSONB array of { purchase_id, bill_no, gross_weight, net_weight, total_amount, customer_name, purchase_date, hsn_code }
+  p_item_snapshots   JSONB
 )
 RETURNS consignments
 LANGUAGE plpgsql
@@ -84,29 +104,53 @@ BEGIN
       USING ERRCODE = 'check_violation';
   END IF;
 
-  -- Insert the consignment header
+  -- Insert the consignment header — now including the address + weight snapshot
+  -- so EWB/E-Invoice generation never has to re-read live `branches`.
   INSERT INTO consignments (
     consignment_no, tmp_prf_no, external_no, internal_no, challan_no,
     branch_name, branch_code, state_code, movement_type, dest_branch,
     eway_bill_no, status, dispatched_at, received_at,
-    total_bills, total_net_wt, total_amount, gst_rate_snapshot,
-    approval_status, created_by
+    total_bills, total_net_wt, total_gross_wt, total_amount, gst_rate_snapshot,
+    approval_status, created_by,
+    source_address, source_city, source_pin, source_state, source_region, source_gstin,
+    dest_address,   dest_city,   dest_pin,   dest_state,   dest_region,   dest_gstin
   )
   VALUES (
     p_consignment_no, p_tmp_prf_no, p_external_no, p_internal_no, p_challan_no,
     p_branch_name, p_branch_code, p_state_code, COALESCE(p_movement_type, 'EXTERNAL'), CASE WHEN v_is_internal THEN p_dest_branch ELSE NULL END,
     p_eway_bill_no, v_status, v_now, v_received_at,
-    p_total_bills, p_total_net_wt, p_total_amount, p_gst_snapshot,
-    'pending', p_created_by
+    p_total_bills, p_total_net_wt, p_total_gross_wt, p_total_amount, p_gst_snapshot,
+    'pending', p_created_by,
+    p_source_address, p_source_city, p_source_pin, p_source_state, p_source_region, p_source_gstin,
+    CASE WHEN v_is_internal THEN p_dest_address ELSE NULL END,
+    CASE WHEN v_is_internal THEN p_dest_city    ELSE NULL END,
+    CASE WHEN v_is_internal THEN p_dest_pin     ELSE NULL END,
+    CASE WHEN v_is_internal THEN p_dest_state   ELSE NULL END,
+    CASE WHEN v_is_internal THEN p_dest_region  ELSE NULL END,
+    CASE WHEN v_is_internal THEN p_dest_gstin   ELSE NULL END
   )
   RETURNING * INTO v_consignment;
 
-  -- Link every purchase. consignment_items.added_by is UUID — we pass the
-  -- supabase auth uid via p_added_by, NOT the email (p_created_by) which is
-  -- TEXT and would fail with "column added_by is of type uuid but expression
-  -- is of type text".
-  INSERT INTO consignment_items (consignment_id, purchase_id, added_by)
-  SELECT v_consignment.id, pid, p_added_by FROM unnest(p_purchase_ids) AS pid;
+  -- Link every purchase, freezing the bill-level snapshot at the same time.
+  -- consignment_items.added_by is UUID — we pass the supabase auth uid via
+  -- p_added_by, NOT the email (p_created_by) which would fail the UUID cast.
+  INSERT INTO consignment_items (
+    consignment_id, purchase_id, added_by,
+    bill_no_snap, gross_weight_snap, net_weight_snap, total_amount_snap,
+    customer_name_snap, purchase_date_snap, hsn_code_snap
+  )
+  SELECT
+    v_consignment.id,
+    (item->>'purchase_id')::UUID,
+    p_added_by,
+    item->>'bill_no',
+    NULLIF(item->>'gross_weight', '')::NUMERIC,
+    NULLIF(item->>'net_weight',   '')::NUMERIC,
+    NULLIF(item->>'total_amount', '')::NUMERIC,
+    item->>'customer_name',
+    NULLIF(item->>'purchase_date', '')::DATE,
+    item->>'hsn_code'
+  FROM jsonb_array_elements(p_item_snapshots) AS item;
 
   -- IMPORTANT: do NOT flip purchases.stock_status / current_branch here.
   -- Bills stay at_branch (in the branch's stock) until the accounts team

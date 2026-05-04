@@ -593,10 +593,12 @@ export async function POST(req) {
       return Response.json({ error: 'Source and destination cannot be the same branch' }, { status: 400 })
     }
 
-    // Source branch meta
+    // Source branch meta — fetch FULL address record so we can snapshot it onto
+    // the consignment. EWB / E-Invoice / challan all read from the snapshot, never
+    // from live `branches` again.
     const { data: branchData, error: branchErr } = await supabase
       .from('branches')
-      .select('name, region, state, is_hub')
+      .select('*')
       .eq('name', branch_name)
       .single()
 
@@ -610,7 +612,7 @@ export async function POST(req) {
     if (isInternal) {
       const { data, error } = await supabase
         .from('branches')
-        .select('name, region')
+        .select('*')
         .eq('name', dest_branch)
         .single()
       if (error || !data) return Response.json({ error: `Destination branch '${dest_branch}' not found` }, { status: 400 })
@@ -686,13 +688,39 @@ export async function POST(req) {
       challan = ext.challan
     }
 
-    const { data: purchaseTotals } = await supabase
-      .from('purchases')
-      .select('net_weight, total_amount')
-      .in('id', purchase_ids)
+    // Fetch the full purchase rows we need to snapshot onto consignment_items.
+    // We re-use the same `purchaseCheck` array that the quality-validator already
+    // loaded above (it has bill_no / weights / amount / customer / date).
+    const purchasesById = new Map((purchaseCheck || []).map(p => [p.id, p]))
 
-    const totalNetWt  = (purchaseTotals || []).reduce((s, p) => s + parseFloat(p.net_weight || 0), 0)
-    const totalAmount = (purchaseTotals || []).reduce((s, p) => s + parseFloat(p.total_amount || 0), 0)
+    // Optionally fetch hsn_code per row — column exists on most deployments but
+    // not all. Tolerate absence so the migration can roll out independently.
+    let hsnByPurchaseId = new Map()
+    try {
+      const { data: hsnRows } = await supabase
+        .from('purchases')
+        .select('id, hsn_code')
+        .in('id', purchase_ids)
+      if (hsnRows) hsnByPurchaseId = new Map(hsnRows.map(r => [r.id, r.hsn_code]))
+    } catch { /* hsn_code column not present — skip */ }
+
+    const itemSnapshots = purchase_ids.map(pid => {
+      const p = purchasesById.get(pid) || {}
+      return {
+        purchase_id:   pid,
+        bill_no:       p.bill_no || null,
+        gross_weight:  Number(p.gross_weight ?? 0) || 0,
+        net_weight:    Number(p.net_weight   ?? 0) || 0,
+        total_amount:  Number(p.total_amount ?? 0) || 0,
+        customer_name: p.customer_name || null,
+        purchase_date: p.purchase_date ? String(p.purchase_date).slice(0, 10) : null,
+        hsn_code:      hsnByPurchaseId.get(pid) || null,
+      }
+    })
+
+    const totalNetWt   = itemSnapshots.reduce((s, i) => s + i.net_weight,   0)
+    const totalGrossWt = itemSnapshots.reduce((s, i) => s + i.gross_weight, 0)
+    const totalAmount  = itemSnapshots.reduce((s, i) => s + i.total_amount, 0)
 
     // Status & bill movement depends on movement type:
     //   INTERNAL (Branch → Hub): instantaneous transfer. No receive workflow at hub.
@@ -717,6 +745,17 @@ export async function POST(req) {
       captured_at: nowIso,
     }
 
+    // Resolve source GSTIN at this moment so the EWB/E-Invoice generated days
+    // later still uses the correct number — even if state-wise GSTIN config or
+    // branch_gstin is edited afterwards.
+    const sourceGstinKey = `gstin_${(branchData.state || '').toLowerCase()}`
+    const sourceGstinSnap = (sourceGstinKey && cs?.[sourceGstinKey]) || branchData.branch_gstin || cs?.gstin || null
+    let destGstinSnap = null
+    if (isInternal && destData) {
+      const destGstinKey = `gstin_${(destData.state || '').toLowerCase()}`
+      destGstinSnap = (destGstinKey && cs?.[destGstinKey]) || destData.branch_gstin || cs?.gstin || null
+    }
+
     // ── Atomic create via Postgres RPC ────────────────────────────────────
     // Wraps consignments INSERT + consignment_items INSERT + purchases UPDATE
     // in a single transaction. If any step fails, all changes roll back —
@@ -739,11 +778,28 @@ export async function POST(req) {
       p_eway_bill_no:  eway_bill_no || null,
       p_total_bills:   purchase_ids.length,
       p_total_net_wt:  totalNetWt,
+      p_total_gross_wt: totalGrossWt,
       p_total_amount:  totalAmount,
       p_gst_snapshot:  gstSnapshot,
       p_created_by:    created_by,             // email — TEXT — consignments.created_by + audit log
       p_added_by:      auth.user?.id || null,  // supabase auth uid — UUID — consignment_items.added_by
       p_purchase_ids:  purchase_ids,
+      // Source branch address snapshot — frozen at creation time
+      p_source_address: branchData.address || null,
+      p_source_city:    branchData.city || null,
+      p_source_pin:     branchData.pin_code || null,
+      p_source_state:   branchData.state || null,
+      p_source_region:  branchData.region || null,
+      p_source_gstin:   sourceGstinSnap,
+      // Destination branch address snapshot (only for INTERNAL)
+      p_dest_address:   isInternal ? (destData?.address || null) : null,
+      p_dest_city:      isInternal ? (destData?.city || null) : null,
+      p_dest_pin:       isInternal ? (destData?.pin_code || null) : null,
+      p_dest_state:     isInternal ? (destData?.state || null) : null,
+      p_dest_region:    isInternal ? (destData?.region || null) : null,
+      p_dest_gstin:     isInternal ? destGstinSnap : null,
+      // Per-bill snapshot
+      p_item_snapshots: itemSnapshots,
     })
 
     if (!rpcErr && rpcConsignment) {
@@ -777,10 +833,24 @@ export async function POST(req) {
         received_at:   isInternal ? nowIso      : null,
         total_bills:   purchase_ids.length,
         total_net_wt:  totalNetWt,
+        total_gross_wt: totalGrossWt,
         total_amount:  totalAmount,
         gst_rate_snapshot: gstSnapshot,
         approval_status:   'pending',  // accounts team must approve before docs can be downloaded
         created_by,
+        // Address snapshot (frozen at creation)
+        source_address: branchData.address || null,
+        source_city:    branchData.city || null,
+        source_pin:     branchData.pin_code || null,
+        source_state:   branchData.state || null,
+        source_region:  branchData.region || null,
+        source_gstin:   sourceGstinSnap,
+        dest_address:   isInternal ? (destData?.address || null) : null,
+        dest_city:      isInternal ? (destData?.city || null) : null,
+        dest_pin:       isInternal ? (destData?.pin_code || null) : null,
+        dest_state:     isInternal ? (destData?.state || null) : null,
+        dest_region:    isInternal ? (destData?.region || null) : null,
+        dest_gstin:     isInternal ? destGstinSnap : null,
       })
       .select()
       .single()
@@ -794,14 +864,21 @@ export async function POST(req) {
       details:        { movement_type: consignment.movement_type, source: branch_name, dest: isInternal ? dest_branch : 'HO', bills: purchase_ids.length, weight: totalNetWt },
     })
 
-    // consignment_items.added_by is UUID — pass auth.user.id (the supabase
-    // auth uid), NOT the email. Passing email caused 'column "added_by" is
-    // of type uuid but expression is of type text' on the create flow.
+    // consignment_items: each row carries a frozen snapshot of the bill at the
+    // moment of consignment creation. Once written, edits to `purchases` (weight
+    // correction, customer rename, etc.) won't change what the EWB/E-Invoice prints.
     await supabase.from('consignment_items').insert(
-      purchase_ids.map(pid => ({
-        consignment_id: consignment.id,
-        purchase_id:    pid,
-        added_by:       auth.user?.id || null,
+      itemSnapshots.map(s => ({
+        consignment_id:     consignment.id,
+        purchase_id:        s.purchase_id,
+        added_by:           auth.user?.id || null,
+        bill_no_snap:       s.bill_no,
+        gross_weight_snap:  s.gross_weight,
+        net_weight_snap:    s.net_weight,
+        total_amount_snap:  s.total_amount,
+        customer_name_snap: s.customer_name,
+        purchase_date_snap: s.purchase_date,
+        hsn_code_snap:      s.hsn_code,
       }))
     )
 

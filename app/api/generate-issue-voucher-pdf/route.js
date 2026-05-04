@@ -48,23 +48,63 @@ export async function GET(req) {
       return Response.json({ error: 'Consignment is missing destination hub' }, { status: 400 })
     }
 
-    // Source + dest branches
-    const [{ data: sourceBranch }, { data: destBranch }] = await Promise.all([
+    // Source + dest branches — built from consignment snapshot first, live branch as backstop.
+    const [{ data: liveSource }, { data: liveDest }] = await Promise.all([
       supabase.from('branches').select('*').eq('name', consignment.branch_name).single(),
       supabase.from('branches').select('*').eq('name', consignment.dest_branch).single(),
     ])
 
-    if (!sourceBranch) return Response.json({ error: `Source branch '${consignment.branch_name}' not found` }, { status: 404 })
-    if (!destBranch)   return Response.json({ error: `Destination hub '${consignment.dest_branch}' not found` }, { status: 404 })
+    const sourceBranch = {
+      ...(liveSource || {}),
+      name:         consignment.branch_name,
+      address:      consignment.source_address  || liveSource?.address,
+      city:         consignment.source_city     || liveSource?.city,
+      pin_code:     consignment.source_pin      || liveSource?.pin_code,
+      state:        consignment.source_state    || liveSource?.state,
+      region:       consignment.source_region   || liveSource?.region,
+      branch_gstin: consignment.source_gstin    || liveSource?.branch_gstin,
+    }
+    const destBranch = {
+      ...(liveDest || {}),
+      name:         consignment.dest_branch,
+      address:      consignment.dest_address    || liveDest?.address,
+      city:         consignment.dest_city       || liveDest?.city,
+      pin_code:     consignment.dest_pin        || liveDest?.pin_code,
+      state:        consignment.dest_state      || liveDest?.state,
+      region:       consignment.dest_region     || liveDest?.region,
+      branch_gstin: consignment.dest_gstin      || liveDest?.branch_gstin,
+    }
+
+    if (!sourceBranch.address) return Response.json({ error: `Consignment ${consignment.tmp_prf_no} has no source address (snapshot or live).` }, { status: 400 })
+    if (!destBranch.address)   return Response.json({ error: `Consignment ${consignment.tmp_prf_no} has no destination address (snapshot or live).` }, { status: 400 })
 
     const { data: rawSettings } = await supabase.from('company_settings').select('*').single()
     const companySettings = { company_name: '', ...(rawSettings || {}) }
 
-    // Items
+    // Items — snapshot-first.
     const { data: consignmentItems } = await supabase
-      .from('consignment_items').select('purchase_id').eq('consignment_id', consignmentId)
-    const purchaseIds = (consignmentItems || []).map(i => i.purchase_id)
-    const { data: items } = await supabase.from('purchases').select('*').in('id', purchaseIds)
+      .from('consignment_items')
+      .select('purchase_id, bill_no_snap, gross_weight_snap, net_weight_snap, total_amount_snap, customer_name_snap, purchase_date_snap, hsn_code_snap')
+      .eq('consignment_id', consignmentId)
+
+    const hasSnapshots = (consignmentItems || []).every(r => r.gross_weight_snap != null && r.total_amount_snap != null)
+    let items = []
+    if (hasSnapshots && consignmentItems?.length) {
+      items = consignmentItems.map(r => ({
+        id:            r.purchase_id,
+        bill_no:       r.bill_no_snap,
+        gross_weight:  Number(r.gross_weight_snap || 0),
+        net_weight:    Number(r.net_weight_snap   || 0),
+        total_amount:  Number(r.total_amount_snap || 0),
+        customer_name: r.customer_name_snap,
+        purchase_date: r.purchase_date_snap,
+        hsn_code:      r.hsn_code_snap,
+      }))
+    } else {
+      const purchaseIds = (consignmentItems || []).map(i => i.purchase_id)
+      const { data: live } = await supabase.from('purchases').select('*').in('id', purchaseIds)
+      items = live || []
+    }
 
     const logoBase64 = loadLogo()
 

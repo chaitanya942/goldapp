@@ -48,9 +48,23 @@ export async function POST(req) {
 
     if (consignment.irn) return Response.json({ error: `E-Invoice already exists: ${consignment.irn}` }, { status: 400 })
 
-    const { data: branch } = await supabase
+    // Source "branch" — synthesized from the consignment snapshot. EWB/E-Invoice
+    // must reflect what was approved at creation, not whatever live `branches` says now.
+    const { data: liveBranch } = await supabase
       .from('branches').select('*').eq('name', consignment.branch_name).single()
-    if (!branch) return Response.json({ error: `Branch '${consignment.branch_name}' not found` }, { status: 404 })
+    if (!liveBranch && !consignment.source_address) {
+      return Response.json({ error: `Branch '${consignment.branch_name}' not found and consignment has no address snapshot` }, { status: 404 })
+    }
+    const branch = {
+      ...(liveBranch || {}),
+      name:         consignment.branch_name,
+      address:      consignment.source_address  || liveBranch?.address,
+      city:         consignment.source_city     || liveBranch?.city,
+      pin_code:     consignment.source_pin      || liveBranch?.pin_code,
+      state:        consignment.source_state    || liveBranch?.state,
+      region:       consignment.source_region   || liveBranch?.region,
+      branch_gstin: consignment.source_gstin    || liveBranch?.branch_gstin,
+    }
 
     const { data: companySettings } = await supabase.from('company_settings').select('*').single()
 
@@ -86,10 +100,30 @@ export async function POST(req) {
       return Response.json({ error: `Branch '${branch.name}' PIN '${branch.pin_code}' is invalid (must be 6 digits, not starting with 0).` }, { status: 400 })
     }
 
+    // Items from snapshot, falling back to live purchases for legacy rows.
     const { data: linkRows } = await supabase
-      .from('consignment_items').select('purchase_id').eq('consignment_id', consignment_id)
-    const purchaseIds = (linkRows || []).map(r => r.purchase_id)
-    const { data: items } = await supabase.from('purchases').select('*').in('id', purchaseIds)
+      .from('consignment_items')
+      .select('purchase_id, bill_no_snap, gross_weight_snap, net_weight_snap, total_amount_snap, customer_name_snap, purchase_date_snap, hsn_code_snap')
+      .eq('consignment_id', consignment_id)
+
+    const hasSnapshots = (linkRows || []).every(r => r.gross_weight_snap != null && r.total_amount_snap != null)
+    let items = []
+    if (hasSnapshots && linkRows?.length) {
+      items = linkRows.map(r => ({
+        id:            r.purchase_id,
+        bill_no:       r.bill_no_snap,
+        gross_weight:  Number(r.gross_weight_snap || 0),
+        net_weight:    Number(r.net_weight_snap   || 0),
+        total_amount:  Number(r.total_amount_snap || 0),
+        customer_name: r.customer_name_snap,
+        purchase_date: r.purchase_date_snap,
+        hsn_code:      r.hsn_code_snap,
+      }))
+    } else {
+      const purchaseIds = (linkRows || []).map(r => r.purchase_id)
+      const { data: live } = await supabase.from('purchases').select('*').in('id', purchaseIds)
+      items = live || []
+    }
 
     // Item-level preflight — same as EWB. NIC IRP rejects line items with
     // zero weight/quantity/value, but the error message is generic. Catch it here.

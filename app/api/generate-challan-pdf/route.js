@@ -76,20 +76,27 @@ export async function GET(req) {
       return Response.json({ error: 'Consignment not found' }, { status: 404 })
     }
 
-    // ── Fetch branch ─────────────────────────────────────────────────────────
-    const { data: branch, error: be } = await supabase
-      .from('branches')
-      .select('*')
-      .eq('name', consignment.branch_name)
-      .single()
+    // ── Build branch from snapshot — frozen at consignment creation. ─────────
+    // Live branch is fetched only as a backstop for legacy rows that don't
+    // have a snapshot yet. If a live row's address has been corrected since,
+    // the consignment's challan still shows what was approved at creation.
+    const { data: liveBranch } = await supabase
+      .from('branches').select('*').eq('name', consignment.branch_name).single()
 
-    if (be || !branch) {
-      return Response.json({ error: `Branch '${consignment.branch_name}' not found` }, { status: 404 })
+    const branch = {
+      ...(liveBranch || {}),
+      name:         consignment.branch_name,
+      address:      consignment.source_address  || liveBranch?.address,
+      city:         consignment.source_city     || liveBranch?.city,
+      pin_code:     consignment.source_pin      || liveBranch?.pin_code,
+      state:        consignment.source_state    || liveBranch?.state,
+      region:       consignment.source_region   || liveBranch?.region,
+      branch_gstin: consignment.source_gstin    || liveBranch?.branch_gstin,
     }
 
     if (!branch.address) {
       return Response.json({
-        error: `Branch '${branch.name}' is missing address. Please update in Admin > Branch Management.`,
+        error: `Consignment ${consignment.tmp_prf_no} has no address (neither snapshot nor live branch). Update Branch Management.`,
       }, { status: 400 })
     }
 
@@ -97,25 +104,34 @@ export async function GET(req) {
     const { data: rawSettings } = await supabase.from('company_settings').select('*').single()
     const companySettings = { ...DEFAULT_COMPANY, ...(rawSettings || {}) }
 
-    // ── Fetch purchase items for this consignment ─────────────────────────────
+    // ── Fetch consignment_items with snapshot — fall back to live purchases ──
     const { data: consignmentItems, error: cie } = await supabase
       .from('consignment_items')
-      .select('purchase_id')
+      .select('purchase_id, bill_no_snap, gross_weight_snap, net_weight_snap, total_amount_snap, customer_name_snap, purchase_date_snap, hsn_code_snap')
       .eq('consignment_id', consignmentId)
 
     if (cie) {
       return Response.json({ error: 'Failed to fetch consignment items' }, { status: 500 })
     }
 
-    const purchaseIds = (consignmentItems || []).map(i => i.purchase_id)
-
-    const { data: items, error: ie } = await supabase
-      .from('purchases')
-      .select('*')
-      .in('id', purchaseIds)
-
-    if (ie) {
-      return Response.json({ error: 'Failed to fetch purchase items' }, { status: 500 })
+    const hasSnapshots = (consignmentItems || []).every(r => r.gross_weight_snap != null && r.total_amount_snap != null)
+    let items = []
+    if (hasSnapshots && consignmentItems?.length) {
+      items = consignmentItems.map(r => ({
+        id:            r.purchase_id,
+        bill_no:       r.bill_no_snap,
+        gross_weight:  Number(r.gross_weight_snap || 0),
+        net_weight:    Number(r.net_weight_snap   || 0),
+        total_amount:  Number(r.total_amount_snap || 0),
+        customer_name: r.customer_name_snap,
+        purchase_date: r.purchase_date_snap,
+        hsn_code:      r.hsn_code_snap,
+      }))
+    } else {
+      const purchaseIds = (consignmentItems || []).map(i => i.purchase_id)
+      const { data: live, error: ie } = await supabase.from('purchases').select('*').in('id', purchaseIds)
+      if (ie) return Response.json({ error: 'Failed to fetch purchase items' }, { status: 500 })
+      items = live || []
     }
 
     // ── Load logo ─────────────────────────────────────────────────────────────
