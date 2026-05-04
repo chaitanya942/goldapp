@@ -341,30 +341,9 @@ export default function ConsignmentData() {
     } finally { setCreating(false) }
   }
 
-  async function generateEinv(c) {
-    setEwbActionId(c.id + ':einv')
-    try {
-      const res  = await authedFetch('/api/e-invoice/generate', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ consignment_id: c.id }),
-      })
-      const data = await res.json()
-      if (!res.ok || data.error) {
-        // Dump full debug context to console so it's visible without Railway logs
-        console.group('[E-Invoice] Debug')
-        console.log('Error:', data.error)
-        console.log('ClearTax response:', data.cleartax_response)
-        console.log('Outgoing payload:', data.outgoing_payload)
-        console.groupEnd()
-        setToast({ msg: data.error || 'E-Invoice generation failed.', type: 'error' })
-        return
-      }
-      setToast({ msg: 'E-Invoice generated.', type: 'success' })
-      await fetchAll()
-    } catch (err) {
-      setToast({ msg: err.message || 'E-Invoice generation failed', type: 'error' })
-    } finally { setEwbActionId(null) }
-  }
+  // generateEinv removed — E-Invoice generation moved to the accounts review
+  // page (ConsignmentApprovals.js). The /api/e-invoice/generate route is now
+  // gated to ROLE_GROUPS.ACCOUNTS, so any ops attempt would 403.
 
   async function cancelEinv(c) {
     const ok = await openConfirm({
@@ -387,31 +366,8 @@ export default function ConsignmentData() {
     } finally { setEwbActionId(null) }
   }
 
-  async function generateEwb(c) {
-    setEwbActionId(c.id + ':gen')
-    try {
-      const res  = await authedFetch('/api/eway-bill/generate', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ consignment_id: c.id }),
-      })
-      const data = await res.json()
-      if (!res.ok || data.error) {
-        // Debug payloads are no longer echoed to the client (data leak risk).
-        // The human-readable error message from ClearTax is surfaced as-is;
-        // full payload + response live in the server logs (lib/clearTaxClient.js
-        // ctaxLog, redacted).
-        setToast({ msg: data.error || 'EWB generation failed', type: 'error' })
-        return
-      }
-      setToast({ msg: `E-Way Bill ${data.ewb_no} generated. Downloading PDF.`, type: 'success' })
-      await fetchAll()
-      // Auto-download the EWB PDF immediately
-      await triggerDownload(`/api/eway-bill/pdf?id=${c.id}`, `EWB_${data.ewb_no}.pdf`,
-        msg => setToast({ msg, type: 'error' }))
-    } catch (err) {
-      setToast({ msg: err.message || 'EWB generation failed', type: 'error' })
-    } finally { setEwbActionId(null) }
-  }
+  // generateEwb removed — E-Way Bill generation moved to the accounts review
+  // page. /api/eway-bill/generate is now gated to ROLE_GROUPS.ACCOUNTS.
 
   async function cancelEwb(c) {
     const ok = await openConfirm({
@@ -496,53 +452,13 @@ export default function ConsignmentData() {
 
     setDownloadingId(c.id + ':all')
 
-    // ── Step 0: auto-generate missing EWB / E-Invoice before bundling ──
-    // If generation fails we DON'T abort — we bundle the remaining docs and
-    // surface the error in the final toast, so the user always gets something.
-    let cur = { ...c }
+    // Auto-generate-then-bundle was removed when generation moved to the
+    // accounts review page. By the time ops can click Download all, the
+    // consignment is approved — which means accounts already generated
+    // whatever was applicable. If EWB / IRN are still missing here, the
+    // bundle just skips them.
+    const cur = { ...c }
     const genFailures = []
-
-    if (showEwb && !cur.eway_bill_no) {
-      setToast({ msg: 'Generating E-Way Bill. This can take up to 30 seconds.', type: 'info' })
-      try {
-        const r = await authedFetch('/api/eway-bill/generate', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ consignment_id: cur.id }),
-        })
-        const j = await r.json()
-        if (!r.ok || j.error) {
-          genFailures.push(`EWB: ${j.error || `HTTP ${r.status}`}`)
-        } else {
-          cur.eway_bill_no    = j.ewb_no
-          cur.ewb_valid_until = j.valid_until
-        }
-      } catch (err) {
-        genFailures.push(`EWB: ${err.message}`)
-      }
-    }
-
-    if (showEinv && !cur.irn) {
-      setToast({ msg: 'Generating E-Invoice. This can take up to 30 seconds.', type: 'info' })
-      try {
-        const r = await authedFetch('/api/e-invoice/generate', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ consignment_id: cur.id }),
-        })
-        const j = await r.json()
-        if (!r.ok || j.error) {
-          genFailures.push(`E-Invoice: ${j.error || `HTTP ${r.status}`}`)
-        } else {
-          cur.irn    = j.irn
-          cur.ack_no = j.ack_no
-          cur.ack_dt = j.ack_dt
-        }
-      } catch (err) {
-        genFailures.push(`E-Invoice: ${err.message}`)
-      }
-    }
-
-    // Refresh the parent list in the background so the row reflects the new EWB/IRN
-    fetchAll()
 
     // Build the list of files to fetch.
     //   - Consignee Report + Challan/Voucher: always included. The branch
@@ -1050,10 +966,14 @@ export default function ConsignmentData() {
                       ) : c.eway_bill_no ? (
                         <EwbCell c={c} t={t} downloadingId={downloadingId} ewbActionId={ewbActionId} downloadEwbPdf={downloadEwbPdf} cancelEwb={cancelEwb} />
                       ) : (
-                        <button onClick={() => generateEwb(c)} disabled={!!ewbActionId}
-                          style={{ background: 'transparent', border: `1px solid ${t.green}50`, borderRadius: '5px', padding: '4px 12px', fontSize: '10px', color: t.green, fontWeight: 600, cursor: 'pointer', opacity: ewbActionId === c.id + ':gen' ? 0.6 : 1 }}>
-                          {ewbActionId === c.id + ':gen' ? 'Generating…' : 'Generate'}
-                        </button>
+                        // Generation moved to the accounts review page. Operations
+                        // can no longer trigger NIC from here — the route is now
+                        // gated to ROLE_GROUPS.ACCOUNTS, and clicking would
+                        // produce a 403. Show a status pill that explains why.
+                        <span title="The E-Way Bill is generated by the accounts team during their approval review."
+                          style={{ fontSize: '10px', color: t.text4, fontStyle: 'italic' }}>
+                          awaiting accounts
+                        </span>
                       )}
                     </td>
                     <td style={{ padding: '11px 14px' }}>
@@ -1099,10 +1019,12 @@ export default function ConsignmentData() {
                           `}</style>
                         </div>
                       ) : (
-                        <button onClick={() => generateEinv(c)} disabled={!!ewbActionId}
-                          style={{ background: 'transparent', border: `1px solid ${t.purple}50`, borderRadius: '5px', padding: '4px 12px', fontSize: '10px', color: t.purple, fontWeight: 600, cursor: 'pointer', opacity: ewbActionId === c.id + ':einv' ? 0.6 : 1 }}>
-                          {ewbActionId === c.id + ':einv' ? 'Generating…' : 'Generate'}
-                        </button>
+                        // Generation moved to the accounts review page (same
+                        // reason as the EWB column above).
+                        <span title="The E-Invoice is generated by the accounts team during their approval review."
+                          style={{ fontSize: '10px', color: t.text4, fontStyle: 'italic' }}>
+                          awaiting accounts
+                        </span>
                       )}
                     </td>
                     <td style={{ padding: '11px 14px' }}>

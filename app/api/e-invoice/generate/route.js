@@ -6,7 +6,7 @@
 import { createClient } from '@supabase/supabase-js'
 import { generateEInvoice } from '../../../../lib/clearTaxClient'
 import { logConsignmentEvent } from '../../../../lib/consignmentLog'
-import { requireAuth } from '../../../../lib/apiAuth'
+import { requireAuth, ROLE_GROUPS } from '../../../../lib/apiAuth'
 import { REGION_TO_STATE_CODE } from '../../../../lib/stateMap'
 
 const supabase = createClient(
@@ -15,7 +15,9 @@ const supabase = createClient(
 )
 
 export async function POST(req) {
-  const auth = await requireAuth(req, { requiredRoles: null })
+  // Accounts owns GST documents — they generate as part of approval review.
+  // Operations can no longer generate; they only download once approved.
+  const auth = await requireAuth(req, { requiredRoles: ROLE_GROUPS.ACCOUNTS })
   if (!auth.ok) return auth.response
   try {
     const { consignment_id } = await req.json()
