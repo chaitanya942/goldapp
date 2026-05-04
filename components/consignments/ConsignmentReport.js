@@ -54,6 +54,7 @@ export default function ConsignmentReport() {
   const isMobile = useMobile()
 
   const [consignments,   setConsignments]   = useState([])
+  const [inTransitBills, setInTransitBills] = useState([])
   const [branches,       setBranches]       = useState([])
   const [loading,        setLoading]        = useState(true)
   const [filterRegion,   setFilterRegion]   = useState('')
@@ -71,14 +72,17 @@ export default function ConsignmentReport() {
   async function fetchAll() {
     setLoading(true)
     try {
-      const [cR, bR] = await Promise.all([
+      const [cR, bR, sR] = await Promise.all([
         authedFetch('/api/consignments?action=consignments'),
         authedFetch('/api/consignments?action=branches'),
+        authedFetch('/api/consignments?action=in_transit_stock'),
       ])
       const cJ = await cR.json()
       const bJ = await bR.json()
+      const sJ = await sR.json()
       setConsignments((cJ.data || []).filter(isInFlight))
       setBranches(bJ.data || [])
+      setInTransitBills(sJ.data || [])
     } catch (e) {
       setToast({ msg: e.message || 'Load failed', type: 'error' })
     }
@@ -145,72 +149,105 @@ export default function ConsignmentReport() {
     return true
   }), [consignments, filterRegion, filterType, filterBranch, search, branchByName])
 
-  // ── KPIs ───────────────────────────────────────────────────────────────────
-  const kpiBills = filtered.reduce((s, c) => s + (c.total_bills    || 0), 0)
-  const kpiGross = filtered.reduce((s, c) => s + parseFloat(c.total_gross_wt || c.total_net_wt || 0), 0)
-  const kpiValue = filtered.reduce((s, c) => s + parseFloat(c.total_amount   || 0), 0)
+  // ── In-transit bills filter (region/branch follow same filters as consignments) ─
+  const filteredBills = useMemo(() => inTransitBills.filter(b => {
+    if (filterRegion) {
+      const br = branchByName[b.branch_name]
+      if (br?.region !== filterRegion) return false
+    }
+    if (filterBranch && b.branch_name !== filterBranch) return false
+    if (filterType   && b.consignment?.movement_type && b.consignment.movement_type !== filterType) return false
+    if (search) {
+      const q = search.toLowerCase()
+      const fields = [b.application_id, String(b.sl_no || ''), b.branch_name, b.customer_name, b.consignment?.tmp_prf_no]
+      if (!fields.some(v => (v || '').toLowerCase().includes(q))) return false
+    }
+    return true
+  }), [inTransitBills, filterRegion, filterBranch, filterType, search, branchByName])
+
+  // ── KPIs (bill-level: ground truth from purchases.stock_status) ────────────
+  // We use the bill table for KPIs because it includes orphan in-transit bills
+  // that have no consignment row (e.g. legacy / data-fix scenarios). The
+  // consignment-level table below shows the drillable in-flight consignments.
+  const kpiBills = filteredBills.length
+  const kpiGross = filteredBills.reduce((s, b) => s + parseFloat(b.gross_weight || 0), 0)
+  const kpiValue = filteredBills.reduce((s, b) => s + parseFloat(b.total_amount || 0), 0)
   const oldestDays = filtered.length
     ? Math.max(...filtered.map(c => daysSince(c.dispatched_at || c.created_at)))
     : 0
+  const untrackedCount = filteredBills.filter(b => !b.consignment).length
 
-  // ── Region pills ───────────────────────────────────────────────────────────
+  // ── Region pills (from bill-level data so orphan in-transit bills show up) ─
   const regions = useMemo(() => {
     const r = {}
-    filtered.forEach(c => {
-      const region = branchByName[c.branch_name]?.region || 'Unknown'
-      if (!r[region]) r[region] = { region, bills: 0, gross: 0, value: 0, consignments: 0 }
-      r[region].bills        += c.total_bills    || 0
-      r[region].gross        += parseFloat(c.total_gross_wt || c.total_net_wt || 0)
-      r[region].value        += parseFloat(c.total_amount   || 0)
-      r[region].consignments += 1
+    filteredBills.forEach(b => {
+      const region = branchByName[b.branch_name]?.region || 'Unknown'
+      if (!r[region]) r[region] = { region, bills: 0, gross: 0, value: 0, consignments: new Set() }
+      r[region].bills += 1
+      r[region].gross += parseFloat(b.gross_weight || 0)
+      r[region].value += parseFloat(b.total_amount || 0)
+      if (b.consignment?.id) r[region].consignments.add(b.consignment.id)
     })
-    return Object.values(r).sort((a, b) => b.value - a.value)
-  }, [filtered, branchByName])
+    return Object.values(r)
+      .map(x => ({ ...x, consignments: x.consignments.size }))
+      .sort((a, b) => b.value - a.value)
+  }, [filteredBills, branchByName])
 
-  // ── Per-branch table ───────────────────────────────────────────────────────
+  // ── Per-branch table — bill-level so orphan in-transit bills aggregate too ─
   const byBranch = useMemo(() => {
     const m = {}
-    filtered.forEach(c => {
-      const key = c.branch_name
+    filteredBills.forEach(b => {
+      const key = b.branch_name
       if (!m[key]) {
         m[key] = {
-          branch:    c.branch_name,
-          region:    branchByName[c.branch_name]?.region || '—',
-          consignments: 0, bills: 0, gross: 0, value: 0,
+          branch:    b.branch_name,
+          region:    branchByName[b.branch_name]?.region || '—',
+          consignmentIds: new Set(),
+          bills: 0, gross: 0, value: 0,
           oldestDispatchedAt: null,
           movementTypes: new Set(),
+          untrackedBills: 0,
         }
       }
-      m[key].consignments += 1
-      m[key].bills += c.total_bills || 0
-      m[key].gross += parseFloat(c.total_gross_wt || c.total_net_wt || 0)
-      m[key].value += parseFloat(c.total_amount   || 0)
-      m[key].movementTypes.add(c.movement_type)
-      const dt = c.dispatched_at || c.created_at
-      if (!m[key].oldestDispatchedAt || new Date(dt) < new Date(m[key].oldestDispatchedAt)) {
-        m[key].oldestDispatchedAt = dt
+      m[key].bills += 1
+      m[key].gross += parseFloat(b.gross_weight || 0)
+      m[key].value += parseFloat(b.total_amount || 0)
+      if (b.consignment) {
+        m[key].consignmentIds.add(b.consignment.id)
+        m[key].movementTypes.add(b.consignment.movement_type)
+        const dt = b.consignment.dispatched_at || b.consignment.created_at
+        if (dt && (!m[key].oldestDispatchedAt || new Date(dt) < new Date(m[key].oldestDispatchedAt))) {
+          m[key].oldestDispatchedAt = dt
+        }
+      } else {
+        m[key].untrackedBills += 1
       }
     })
-    return Object.values(m).sort((a, b) => b.value - a.value)
-  }, [filtered, branchByName])
+    return Object.values(m)
+      .map(x => ({ ...x, consignments: x.consignmentIds.size }))
+      .sort((a, b) => b.value - a.value)
+  }, [filteredBills, branchByName])
 
-  // ── Aging buckets (insight: how long bills have been in transit) ───────────
+  // ── Aging buckets (bill-level, by consignment dispatch date when known) ────
   const agingData = useMemo(() => {
     const buckets = [
       { name: '0-1 days',   count: 0, color: '#3aaa6a' },
       { name: '2-3 days',   count: 0, color: '#c9a84c' },
       { name: '4-7 days',   count: 0, color: '#e58a3b' },
       { name: '8+ days',    count: 0, color: '#e05555' },
+      { name: 'Untracked',  count: 0, color: '#777' },
     ]
-    filtered.forEach(c => {
-      const d = daysSince(c.dispatched_at || c.created_at)
+    filteredBills.forEach(b => {
+      const dt = b.consignment?.dispatched_at || b.consignment?.created_at
+      if (!dt) { buckets[4].count++; return }
+      const d = daysSince(dt)
       if      (d <= 1) buckets[0].count++
       else if (d <= 3) buckets[1].count++
       else if (d <= 7) buckets[2].count++
       else             buckets[3].count++
     })
-    return buckets
-  }, [filtered])
+    return buckets.filter(x => x.count > 0 || x.name !== 'Untracked')
+  }, [filteredBills])
 
   // ── Movement type split ────────────────────────────────────────────────────
   const movementData = useMemo(() => {
@@ -243,22 +280,26 @@ export default function ConsignmentReport() {
   // ── Insights strip (auto-generated bullets) ────────────────────────────────
   const insights = useMemo(() => {
     const out = []
-    if (!filtered.length) return out
+    if (!filteredBills.length) return out
 
     const topBranch = byBranch[0]
-    if (topBranch) out.push(`${topBranch.branch} has the highest in-flight value: ${fmtINR(topBranch.value)} across ${topBranch.consignments} consignment${topBranch.consignments !== 1 ? 's' : ''}.`)
+    if (topBranch) out.push(`${topBranch.branch} has the highest in-flight value: ${fmtINR(topBranch.value)} across ${topBranch.bills} bill${topBranch.bills !== 1 ? 's' : ''}.`)
+
+    if (untrackedCount > 0) {
+      out.push(`${untrackedCount} bill${untrackedCount !== 1 ? 's' : ''} marked in-transit have NO consignment record — likely from a manual data fix. Either create a consignment for them or revert their status.`)
+    }
 
     const stale = filtered.filter(c => daysSince(c.dispatched_at || c.created_at) > 3)
     if (stale.length) out.push(`${stale.length} consignment${stale.length !== 1 ? 's' : ''} dispatched more than 3 days ago — review with logistics.`)
 
-    const internal = filtered.filter(c => c.movement_type === 'INTERNAL').length
-    const external = filtered.length - internal
     if (filtered.length > 0) {
+      const internal = filtered.filter(c => c.movement_type === 'INTERNAL').length
+      const external = filtered.length - internal
       const pct = Math.round((external / filtered.length) * 100)
-      out.push(`${pct}% of in-flight consignments are Direct → HO (${external}); the rest are Branch → Hub transfers (${internal}).`)
+      out.push(`${pct}% of tracked in-flight consignments are Direct → HO (${external}); the rest are Branch → Hub transfers (${internal}).`)
     }
     return out
-  }, [filtered, byBranch])
+  }, [filtered, filteredBills, byBranch, untrackedCount])
 
   // ── Styles ────────────────────────────────────────────────────────────────
   const card = { background: t.card, border: `1px solid ${t.border}`, borderRadius: '11px' }
@@ -275,7 +316,10 @@ export default function ConsignmentReport() {
         <div>
           <div style={{ fontSize: '1.35rem', fontWeight: 300, color: t.text1, letterSpacing: '.02em' }}>Consignment Report</div>
           <div style={{ fontSize: '11px', color: t.text3, marginTop: '4px' }}>
-            {filtered.length} in-flight consignment{filtered.length !== 1 ? 's' : ''} · stock currently in transit
+            {filteredBills.length} bill{filteredBills.length !== 1 ? 's' : ''} in transit
+            {filtered.length > 0 && ` · ${filtered.length} active consignment${filtered.length !== 1 ? 's' : ''}`}
+            {untrackedCount > 0 && ` · `}
+            {untrackedCount > 0 && <span style={{ color: t.orange }}>{untrackedCount} untracked</span>}
           </div>
         </div>
         <button onClick={fetchAll} style={btnOut}>⟳ Refresh</button>
@@ -412,36 +456,78 @@ export default function ConsignmentReport() {
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead>
             <tr>
-              {['Branch', 'Region', 'Consignments', 'Bills', 'Gross Wt', 'Value', 'Oldest', 'Type'].map(h =>
+              {['Branch', 'Region', 'Bills', 'Gross Wt', 'Value', 'Consignments', 'Untracked', 'Oldest', 'Type'].map(h =>
                 <th key={h} style={{ padding: '11px 14px', fontSize: '10px', color: t.text3, letterSpacing: '.1em', textTransform: 'uppercase', textAlign: h === 'Branch' || h === 'Region' || h === 'Type' ? 'left' : 'right', borderBottom: `1px solid ${t.border}`, fontWeight: 500 }}>{h}</th>
               )}
             </tr>
           </thead>
           <tbody>
             {byBranch.map(r => {
-              const oldDays = daysSince(r.oldestDispatchedAt)
-              const oldColor = oldDays > 7 ? t.red : oldDays > 3 ? t.orange : t.text2
+              const oldDays = r.oldestDispatchedAt ? daysSince(r.oldestDispatchedAt) : null
+              const oldColor = oldDays == null ? t.text4 : oldDays > 7 ? t.red : oldDays > 3 ? t.orange : t.text2
               return (
                 <tr key={r.branch} style={{ borderBottom: `1px solid ${t.border}20` }}>
                   <td style={{ padding: '11px 14px', fontSize: '12px', color: t.gold, fontWeight: 600 }}>{r.branch}</td>
                   <td style={{ padding: '11px 14px', fontSize: '11px', color: REGION_COLOR[r.region] || t.text3 }}>{r.region}</td>
-                  <td style={{ padding: '11px 14px', fontSize: '12px', color: t.text2, textAlign: 'right' }}>{r.consignments}</td>
                   <td style={{ padding: '11px 14px', fontSize: '12px', color: t.text2, textAlign: 'right' }}>{fmt(r.bills)}</td>
                   <td style={{ padding: '11px 14px', fontSize: '12px', color: t.gold, textAlign: 'right', fontFamily: 'monospace', fontWeight: 600 }}>{fmtWt(r.gross)}</td>
                   <td style={{ padding: '11px 14px', fontSize: '12px', color: t.blue, textAlign: 'right', fontFamily: 'monospace' }}>{fmtINR(r.value)}</td>
-                  <td style={{ padding: '11px 14px', fontSize: '11px', color: oldColor, textAlign: 'right' }}>{oldDays}d</td>
+                  <td style={{ padding: '11px 14px', fontSize: '12px', color: t.text2, textAlign: 'right' }}>{r.consignments || '—'}</td>
+                  <td style={{ padding: '11px 14px', fontSize: '12px', color: r.untrackedBills > 0 ? t.orange : t.text4, textAlign: 'right', fontWeight: r.untrackedBills > 0 ? 600 : 400 }}>{r.untrackedBills || '—'}</td>
+                  <td style={{ padding: '11px 14px', fontSize: '11px', color: oldColor, textAlign: 'right' }}>{oldDays != null ? `${oldDays}d` : '—'}</td>
                   <td style={{ padding: '11px 14px', fontSize: '10px', color: t.text3 }}>
-                    {[...r.movementTypes].map(mt => mt === 'INTERNAL' ? 'Hub' : 'HO').join(' + ')}
+                    {r.movementTypes.size > 0 ? [...r.movementTypes].map(mt => mt === 'INTERNAL' ? 'Hub' : 'HO').join(' + ') : '—'}
                   </td>
                 </tr>
               )
             })}
             {byBranch.length === 0 && (
-              <tr><td colSpan={8} style={{ padding: '40px', textAlign: 'center', color: t.text4, fontSize: '12px' }}>No in-flight consignments match the current filters.</td></tr>
+              <tr><td colSpan={9} style={{ padding: '40px', textAlign: 'center', color: t.text4, fontSize: '12px' }}>No bills in transit match the current filters.</td></tr>
             )}
           </tbody>
         </table>
       </div>
+
+      {/* Untracked in-transit bills — bills marked in_consignment without a dispatched consignment record */}
+      {filteredBills.filter(b => !b.consignment).length > 0 && (
+        <div style={{ ...card, overflowX: 'auto', borderColor: `${t.orange}60` }}>
+          <div style={{ padding: '14px 18px', borderBottom: `1px solid ${t.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: `${t.orange}10` }}>
+            <div>
+              <div style={{ fontSize: '12px', color: t.orange, fontWeight: 600, letterSpacing: '.04em' }}>
+                {filteredBills.filter(b => !b.consignment).length} bill{filteredBills.filter(b => !b.consignment).length !== 1 ? 's' : ''} in transit without a consignment record
+              </div>
+              <div style={{ fontSize: '10px', color: t.text3, marginTop: '4px' }}>
+                These bills are marked stock_status='in_consignment' but have no dispatched consignment linking them. Either create a consignment for them or revert their status.
+              </div>
+            </div>
+          </div>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr>
+                {['Application ID', 'Branch', 'Customer', 'Date', 'Gross', 'Net', 'Value'].map(h =>
+                  <th key={h} style={{ padding: '8px 14px', fontSize: '10px', color: t.text3, letterSpacing: '.1em', textTransform: 'uppercase', textAlign: ['Gross', 'Net', 'Value'].includes(h) ? 'right' : 'left', borderBottom: `1px solid ${t.border}`, fontWeight: 500 }}>{h}</th>
+                )}
+              </tr>
+            </thead>
+            <tbody>
+              {filteredBills.filter(b => !b.consignment).slice(0, 100).map(b => (
+                <tr key={b.id} style={{ borderBottom: `1px solid ${t.border}20` }}>
+                  <td style={{ padding: '8px 14px', fontSize: '11px', color: t.gold, fontFamily: 'monospace' }}>{b.application_id || b.sl_no || '—'}</td>
+                  <td style={{ padding: '8px 14px', fontSize: '11px', color: t.text1 }}>{b.branch_name}</td>
+                  <td style={{ padding: '8px 14px', fontSize: '11px', color: t.text2 }}>{b.customer_name || '—'}</td>
+                  <td style={{ padding: '8px 14px', fontSize: '11px', color: t.text3 }}>{fmtDate(b.purchase_date)}</td>
+                  <td style={{ padding: '8px 14px', fontSize: '11px', color: t.gold, textAlign: 'right', fontFamily: 'monospace' }}>{fmtWt(b.gross_weight)}</td>
+                  <td style={{ padding: '8px 14px', fontSize: '11px', color: t.text2, textAlign: 'right', fontFamily: 'monospace' }}>{fmtWt(b.net_weight)}</td>
+                  <td style={{ padding: '8px 14px', fontSize: '11px', color: t.blue, textAlign: 'right', fontFamily: 'monospace' }}>{fmtINR(b.total_amount)}</td>
+                </tr>
+              ))}
+              {filteredBills.filter(b => !b.consignment).length > 100 && (
+                <tr><td colSpan={7} style={{ padding: '12px', textAlign: 'center', color: t.text4, fontSize: '11px' }}>Showing first 100 — apply a filter to narrow down further.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {/* Consignment-level table for drill-down */}
       <div style={{ ...card, overflowX: 'auto' }}>

@@ -453,6 +453,62 @@ export async function GET(req) {
     return Response.json({ data: Object.values(summary) })
   }
 
+  // ── Bills currently in transit (stock-level truth) ───────────────────────
+  // Returns every purchases row with stock_status='in_consignment', enriched
+  // (when possible) with the dispatched consignment that owns it. Bills that
+  // were marked in_consignment manually (e.g. via SQL during data fixes) and
+  // don't have a dispatched-consignment link still surface here as "untracked".
+  if (action === 'in_transit_stock') {
+    // 1. Live bills currently in transit
+    const { data: bills, error: be } = await supabase
+      .from('purchases')
+      .select('id, sl_no, application_id, branch_name, current_branch, customer_name, purchase_date, gross_weight, net_weight, total_amount')
+      .eq('stock_status', 'in_consignment')
+      .eq('is_deleted', false)
+
+    if (be) return Response.json({ error: be.message }, { status: 500 })
+    if (!bills?.length) return Response.json({ data: [] })
+
+    // 2. For each bill, look up the most recent dispatched consignment that links it.
+    //    A bill might appear in multiple consignment_items rows historically (cancelled
+    //    + re-consigned). Pick the most recent non-cancelled link.
+    const billIds = bills.map(b => b.id)
+    const { data: links } = await supabase
+      .from('consignment_items')
+      .select('purchase_id, consignment:consignment_id(id, tmp_prf_no, branch_name, dest_branch, movement_type, status, approval_status, dispatched_at, created_at)')
+      .in('purchase_id', billIds)
+
+    // Index: purchase_id → best matching consignment (most recent dispatched + approved)
+    const consByPurchase = {}
+    for (const link of links || []) {
+      const c = link.consignment
+      if (!c) continue
+      if (c.status === 'cancelled') continue
+      // Only consider rows that represent current in-flight state
+      const existing = consByPurchase[link.purchase_id]
+      const ts = c.dispatched_at || c.created_at
+      if (!existing || new Date(ts) > new Date(existing._ts)) {
+        consByPurchase[link.purchase_id] = { ...c, _ts: ts }
+      }
+    }
+
+    const enriched = bills.map(b => {
+      const c = consByPurchase[b.id]
+      return {
+        ...b,
+        consignment: c ? {
+          id: c.id, tmp_prf_no: c.tmp_prf_no,
+          source: c.branch_name, dest: c.dest_branch,
+          movement_type: c.movement_type,
+          status: c.status, approval_status: c.approval_status,
+          dispatched_at: c.dispatched_at,
+          created_at: c.created_at,
+        } : null,
+      }
+    })
+    return Response.json({ data: enriched })
+  }
+
   // ── Get all consignments ─────────────────────────────────────────────────
   if (action === 'consignments') {
     const status   = searchParams.get('status')
