@@ -453,6 +453,27 @@ export async function GET(req) {
     return Response.json({ data: Object.values(summary) })
   }
 
+  // ── Bills currently at_branch (stock-level truth, paginated past 1000) ───
+  // Mirror of in_transit_stock for the At Branch tab in Consignment Reports.
+  if (action === 'at_branch_stock') {
+    const CHUNK = 1000
+    let from = 0, all = []
+    while (true) {
+      const { data, error } = await supabase
+        .from('purchases')
+        .select('id, sl_no, application_id, branch_name, current_branch, customer_name, purchase_date, gross_weight, net_weight, total_amount')
+        .eq('stock_status', 'at_branch')
+        .eq('is_deleted', false)
+        .range(from, from + CHUNK - 1)
+      if (error) return Response.json({ error: error.message }, { status: 500 })
+      if (!data?.length) break
+      all = [...all, ...data]
+      if (data.length < CHUNK) break
+      from += CHUNK
+    }
+    return Response.json({ data: all })
+  }
+
   // ── Bills currently in transit (stock-level truth) ───────────────────────
   // Returns every purchases row with stock_status='in_consignment', enriched
   // (when possible) with the dispatched consignment that owns it. Bills that
