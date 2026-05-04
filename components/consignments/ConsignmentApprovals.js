@@ -251,6 +251,38 @@ export default function ConsignmentApprovals() {
     if (next) playApprovalBeep()  // give immediate audible feedback that sound is on
   }
 
+  // Generate EWB / E-Invoice from inside the approval review. Accounts owns
+  // the GST documents; they should produce them as part of the verification
+  // step, not just rubber-stamp what ops generated. Routes are the same
+  // ones ops uses; auth allows any authenticated user (including ACCOUNTS).
+  async function generateEwbForReview(c) {
+    setActionId(c.id + ':gen-ewb')
+    try {
+      const r = await authedFetch('/api/eway-bill/generate', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ consignment_id: c.id }),
+      })
+      const j = await r.json()
+      if (!r.ok || j.error) { showToast(j.error || 'E-Way Bill generation failed.', 'error'); return }
+      showToast(`E-Way Bill ${j.ewb_no} generated.`, 'success')
+      fetchPending(true)  // refresh row so the new EWB chip + preview link appear
+    } finally { setActionId(null) }
+  }
+
+  async function generateEinvForReview(c) {
+    setActionId(c.id + ':gen-einv')
+    try {
+      const r = await authedFetch('/api/e-invoice/generate', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ consignment_id: c.id }),
+      })
+      const j = await r.json()
+      if (!r.ok || j.error) { showToast(j.error || 'E-Invoice generation failed.', 'error'); return }
+      showToast('E-Invoice generated.', 'success')
+      fetchPending(true)
+    } finally { setActionId(null) }
+  }
+
   async function requestNotifications() {
     if (typeof window === 'undefined' || !('Notification' in window)) {
       showToast('Desktop notifications not supported by this browser', 'error'); return
@@ -592,20 +624,47 @@ export default function ConsignmentApprovals() {
                       style={{ background: 'transparent', border: 'none', padding: 0, fontSize: '10px', color: t.gold, fontWeight: 600, cursor: 'pointer', textDecoration: 'underline' }}>
                       {isType ? 'Voucher' : 'Challan'}
                     </button>
-                    {c.eway_bill_no && (
-                      <button onClick={() => previewDoc(`/api/eway-bill/pdf?id=${c.id}`, `EWB-${c.eway_bill_no}.pdf`, msg => showToast(msg, 'error'))}
-                        title={`Preview E-Way Bill ${c.eway_bill_no}`}
-                        style={{ background: 'transparent', border: 'none', padding: 0, fontSize: '10px', color: t.green, fontWeight: 600, cursor: 'pointer', textDecoration: 'underline' }}>
-                        E-Way Bill
-                      </button>
-                    )}
-                    {c.irn && (
-                      <button onClick={() => previewDoc(`/api/e-invoice/pdf?id=${c.id}`, `EInvoice-${c.tmp_prf_no}.pdf`, msg => showToast(msg, 'error'))}
-                        title="Preview E-Invoice PDF"
-                        style={{ background: 'transparent', border: 'none', padding: 0, fontSize: '10px', color: t.purple, fontWeight: 600, cursor: 'pointer', textDecoration: 'underline' }}>
-                        E-Invoice
-                      </button>
-                    )}
+                    {/* EWB column: preview if generated, Generate button if applicable but not yet generated */}
+                    {(() => {
+                      // Same applicability rules as ConsignmentData:
+                      //   showEwb  = INTERNAL OR intrastate Karnataka source
+                      //   showEinv = interstate (non-INTERNAL, non-KA source)
+                      const isKaSource = c.state_code === 'KA'
+                      const showEwb    = isType || isKaSource
+                      const showEinv   = !isType && !isKaSource
+                      const isGenEwbBusy  = actionId === c.id + ':gen-ewb'
+                      const isGenEinvBusy = actionId === c.id + ':gen-einv'
+                      return (
+                        <>
+                          {showEwb && (c.eway_bill_no ? (
+                            <button onClick={() => previewDoc(`/api/eway-bill/pdf?id=${c.id}`, `EWB-${c.eway_bill_no}.pdf`, msg => showToast(msg, 'error'))}
+                              title={`Preview E-Way Bill ${c.eway_bill_no}`}
+                              style={{ background: 'transparent', border: 'none', padding: 0, fontSize: '10px', color: t.green, fontWeight: 600, cursor: 'pointer', textDecoration: 'underline' }}>
+                              E-Way Bill
+                            </button>
+                          ) : (
+                            <button onClick={() => generateEwbForReview(c)} disabled={!!actionId}
+                              title="Generate E-Way Bill via NIC. Verify the values match the Voucher / Challan before approving."
+                              style={{ background: 'transparent', border: `1px solid ${t.green}50`, borderRadius: '5px', padding: '2px 8px', fontSize: '10px', color: t.green, fontWeight: 600, cursor: actionId ? 'not-allowed' : 'pointer', opacity: isGenEwbBusy ? 0.6 : 1 }}>
+                              {isGenEwbBusy ? 'Generating…' : 'Generate EWB'}
+                            </button>
+                          ))}
+                          {showEinv && (c.irn ? (
+                            <button onClick={() => previewDoc(`/api/e-invoice/pdf?id=${c.id}`, `EInvoice-${c.tmp_prf_no}.pdf`, msg => showToast(msg, 'error'))}
+                              title="Preview E-Invoice PDF"
+                              style={{ background: 'transparent', border: 'none', padding: 0, fontSize: '10px', color: t.purple, fontWeight: 600, cursor: 'pointer', textDecoration: 'underline' }}>
+                              E-Invoice
+                            </button>
+                          ) : (
+                            <button onClick={() => generateEinvForReview(c)} disabled={!!actionId}
+                              title="Generate E-Invoice via IRP. Verify the values before approving."
+                              style={{ background: 'transparent', border: `1px solid ${t.purple}50`, borderRadius: '5px', padding: '2px 8px', fontSize: '10px', color: t.purple, fontWeight: 600, cursor: actionId ? 'not-allowed' : 'pointer', opacity: isGenEinvBusy ? 0.6 : 1 }}>
+                              {isGenEinvBusy ? 'Generating…' : 'Generate IRN'}
+                            </button>
+                          ))}
+                        </>
+                      )
+                    })()}
                   </div>
                 </div>
 
