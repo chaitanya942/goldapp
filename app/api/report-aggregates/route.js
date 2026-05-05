@@ -29,6 +29,7 @@ export async function GET(request) {
   const singleDay      = url.searchParams.get('single_day') === 'true'
 
   let regionBranchArr = regionBranches ? regionBranches.split(',') : null
+  const debugInfo = { role: auth.role, user_id: auth.user?.id, profile_allowed_regions: auth.profile?.allowed_regions, fresh_allowed_regions: null, isBypass: null, final_filter: null }
 
   // ── Authoritative region scope ────────────────────────────────────────────
   // Bypass roles only: super_admin / founders_office / admin → no extra filter.
@@ -37,21 +38,22 @@ export async function GET(request) {
   // would leak all-India data to a non-admin user. Instead, return empty.
   const BYPASS = new Set(['super_admin', 'founders_office', 'admin'])
   const isBypass = BYPASS.has(auth.role)
+  debugInfo.isBypass = isBypass
 
   if (!isBypass) {
-    // Fresh, schema-cache-proof read.
-    const { data: prof } = await supabaseAdmin
+    const { data: prof, error: profErr } = await supabaseAdmin
       .from('user_profiles')
       .select('allowed_regions')
       .eq('id', auth.user?.id || auth.profile?.id)
       .maybeSingle()
     const allowedRegions = Array.isArray(prof?.allowed_regions) ? prof.allowed_regions : []
+    debugInfo.fresh_allowed_regions = allowedRegions
+    debugInfo.fresh_query_error = profErr?.message || null
 
     console.log('[report-aggregates] role=%s allowed_regions=%j incoming.regionBranchArr=%j',
       auth.role, allowedRegions, regionBranchArr)
 
     if (allowedRegions.length > 0) {
-      // Resolve to branch names for those regions.
       const { data: bs } = await supabaseAdmin
         .from('branches').select('name').in('region', allowedRegions)
       const userAllowedBranches = (bs || []).map(b => b.name)
@@ -61,12 +63,12 @@ export async function GET(request) {
         : userAllowedBranches
 
       if (regionBranchArr.length === 0) {
-        return Response.json({ empty: true })
+        return Response.json({ empty: true, _debug: debugInfo })
       }
     }
-    // Else: allowed_regions empty → user has no region restriction → fall through (no extra filter).
     console.log('[report-aggregates] final p_region_branches=%j', regionBranchArr)
   }
+  debugInfo.final_filter = regionBranchArr
 
   try {
     const { data, error } = await supabaseAdmin.rpc('get_purchase_aggregates', {
@@ -148,6 +150,7 @@ export async function GET(request) {
       timeOfDay,
       topBills:      data.top_bills      || [],
       hourlyTrend,
+      _debug: debugInfo,
     })
   } catch (err) {
     console.error('report-aggregates error:', err)
