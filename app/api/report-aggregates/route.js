@@ -31,19 +31,18 @@ export async function GET(request) {
   let regionBranchArr = regionBranches ? regionBranches.split(',') : null
 
   // Per-user region scoping: intersect with user's allowed branches if restricted.
-  // Bypass roles + unrestricted users → null (no extra filter).
-  // Restricted user with no UI region filter → use their allowed branches as the filter.
-  // Restricted user WITH a UI region filter → intersect (so they can't expand beyond their access).
   const userAllowedBranches = await resolveAllowedBranchNames(supabaseAdmin, auth)
+  console.log('[report-aggregates] auth.role=%s allowed_regions=%j userAllowedBranches=%j incoming.regionBranchArr=%j',
+    auth.role, auth.profile?.allowed_regions, userAllowedBranches, regionBranchArr)
   if (userAllowedBranches) {
     regionBranchArr = regionBranchArr
       ? regionBranchArr.filter(b => userAllowedBranches.includes(b))
       : userAllowedBranches
     if (regionBranchArr.length === 0) {
-      // User asked for branches outside their region — return empty rather than mis-leading totals.
       return Response.json({ empty: true })
     }
   }
+  console.log('[report-aggregates] final p_region_branches=%j', regionBranchArr)
 
   try {
     const { data, error } = await supabaseAdmin.rpc('get_purchase_aggregates', {
