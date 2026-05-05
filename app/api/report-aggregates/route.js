@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js'
-import { requireAuth } from '../../../lib/apiAuth'
+import { requireAuth, resolveAllowedBranchNames } from '../../../lib/apiAuth'
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
@@ -28,7 +28,22 @@ export async function GET(request) {
   const regionBranches = url.searchParams.get('region_branches')
   const singleDay      = url.searchParams.get('single_day') === 'true'
 
-  const regionBranchArr = regionBranches ? regionBranches.split(',') : null
+  let regionBranchArr = regionBranches ? regionBranches.split(',') : null
+
+  // Per-user region scoping: intersect with user's allowed branches if restricted.
+  // Bypass roles + unrestricted users → null (no extra filter).
+  // Restricted user with no UI region filter → use their allowed branches as the filter.
+  // Restricted user WITH a UI region filter → intersect (so they can't expand beyond their access).
+  const userAllowedBranches = await resolveAllowedBranchNames(supabaseAdmin, auth)
+  if (userAllowedBranches) {
+    regionBranchArr = regionBranchArr
+      ? regionBranchArr.filter(b => userAllowedBranches.includes(b))
+      : userAllowedBranches
+    if (regionBranchArr.length === 0) {
+      // User asked for branches outside their region — return empty rather than mis-leading totals.
+      return Response.json({ empty: true })
+    }
+  }
 
   try {
     const { data, error } = await supabaseAdmin.rpc('get_purchase_aggregates', {

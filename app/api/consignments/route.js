@@ -333,25 +333,29 @@ export async function GET(req) {
     // Order by approved_at if present, else created_at — covers older rows
     // that may not have approved_at populated.
     const orderCol = status === 'approved' ? 'approved_at' : 'approved_at'
-    const { data, error } = await supabase
+    let q = supabase
       .from('consignments')
       .select('*')
       .eq('approval_status', status)
       .neq('status', 'seed')
       .gte('created_at', sinceIso)
       .order(orderCol, { ascending: false, nullsFirst: false })
+    if (allowedBranches) q = q.in('branch_name', allowedBranches)
+    const { data, error } = await q
     if (error) return Response.json({ error: error.message }, { status: 500 })
     return Response.json({ data: data || [] })
   }
 
   // ── Pending approvals count (for sidebar badge) ────────────────────────
   if (action === 'pending_approvals_count') {
-    const { count, error } = await supabase
+    let q = supabase
       .from('consignments')
       .select('id', { count: 'exact', head: true })
       .eq('approval_status', 'pending')
       .neq('status', 'cancelled')
       .neq('status', 'seed')
+    if (allowedBranches) q = q.in('branch_name', allowedBranches)
+    const { count, error } = await q
     if (error) return Response.json({ error: error.message }, { status: 500 })
     return Response.json({ count: count || 0 })
   }
