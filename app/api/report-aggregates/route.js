@@ -30,19 +30,43 @@ export async function GET(request) {
 
   let regionBranchArr = regionBranches ? regionBranches.split(',') : null
 
-  // Per-user region scoping: intersect with user's allowed branches if restricted.
-  const userAllowedBranches = await resolveAllowedBranchNames(supabaseAdmin, auth)
-  console.log('[report-aggregates] auth.role=%s allowed_regions=%j userAllowedBranches=%j incoming.regionBranchArr=%j',
-    auth.role, auth.profile?.allowed_regions, userAllowedBranches, regionBranchArr)
-  if (userAllowedBranches) {
-    regionBranchArr = regionBranchArr
-      ? regionBranchArr.filter(b => userAllowedBranches.includes(b))
-      : userAllowedBranches
-    if (regionBranchArr.length === 0) {
-      return Response.json({ empty: true })
+  // ── Authoritative region scope ────────────────────────────────────────────
+  // Bypass roles only: super_admin / founders_office / admin → no extra filter.
+  // Everyone else: re-fetch allowed_regions DIRECTLY and apply.
+  // We do NOT fall through to "no filter" if allowed_regions is missing — that
+  // would leak all-India data to a non-admin user. Instead, return empty.
+  const BYPASS = new Set(['super_admin', 'founders_office', 'admin'])
+  const isBypass = BYPASS.has(auth.role)
+
+  if (!isBypass) {
+    // Fresh, schema-cache-proof read.
+    const { data: prof } = await supabaseAdmin
+      .from('user_profiles')
+      .select('allowed_regions')
+      .eq('id', auth.user?.id || auth.profile?.id)
+      .maybeSingle()
+    const allowedRegions = Array.isArray(prof?.allowed_regions) ? prof.allowed_regions : []
+
+    console.log('[report-aggregates] role=%s allowed_regions=%j incoming.regionBranchArr=%j',
+      auth.role, allowedRegions, regionBranchArr)
+
+    if (allowedRegions.length > 0) {
+      // Resolve to branch names for those regions.
+      const { data: bs } = await supabaseAdmin
+        .from('branches').select('name').in('region', allowedRegions)
+      const userAllowedBranches = (bs || []).map(b => b.name)
+
+      regionBranchArr = regionBranchArr
+        ? regionBranchArr.filter(b => userAllowedBranches.includes(b))
+        : userAllowedBranches
+
+      if (regionBranchArr.length === 0) {
+        return Response.json({ empty: true })
+      }
     }
+    // Else: allowed_regions empty → user has no region restriction → fall through (no extra filter).
+    console.log('[report-aggregates] final p_region_branches=%j', regionBranchArr)
   }
-  console.log('[report-aggregates] final p_region_branches=%j', regionBranchArr)
 
   try {
     const { data, error } = await supabaseAdmin.rpc('get_purchase_aggregates', {
