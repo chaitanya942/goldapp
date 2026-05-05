@@ -323,17 +323,28 @@ export default function DashboardHome() {
   }, [showPurchase, period, filterType, filterValue]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const fetchAll = async () => {
-    // When the user is region-restricted, wait for branchMeta to load before fetching.
-    // Otherwise we'd derive userBranches=[] and either fetch all-India or return empty.
-    if (regionAccess.restricted && branchMeta.length === 0) {
-      setLoading(true)
-      return
-    }
     setLoading(true)
     setStateData([])
     setTopBranches([])
     setBottomBranches([])
     const { from, to } = getRange(period)
+
+    // Region scoping: resolve the user's allowed branches BY DIRECTLY QUERYING branches.
+    // Don't rely on branchMeta state — it may not have loaded yet, or may be holding
+    // stale all-India data when this runs after a regionAccess change.
+    let userBranches = null
+    if (regionAccess.restricted) {
+      const { data: regionMatch } = await supabase
+        .from('branches')
+        .select('name')
+        .eq('is_active', true)
+        .in('region', regionAccess.regions)
+      userBranches = (regionMatch || []).map(b => b.name)
+      if (userBranches.length === 0) {
+        // No branches in user's regions → nothing to show.
+        setKpis(null); setLoading(false); return
+      }
+    }
 
     // Build filter params — all routes use get_purchase_aggregates for consistent data
     let p_branch = null
@@ -348,31 +359,22 @@ export default function DashboardHome() {
       p_region_branches = branchMeta.filter(b => b.cluster === filterValue).map(b => b.name)
     }
 
-    // Region scoping: when the user is restricted, intersect their allowed branches.
-    // - "All Data" tab (no UI filter set) → use user's allowed branches as the filter,
-    //   otherwise the RPC returns all-India data (the bug seen on the test user dashboard).
-    // - UI filter set → intersect with user's allowed branches; empty intersection → no data.
-    if (regionAccess.restricted) {
-      const userBranches = branchMeta
-        .filter(b => regionAccess.regions.includes(b.region))
-        .map(b => b.name)
+    // Apply user's region restriction:
+    // - "All Data" tab (no UI filter) → set p_region_branches to user's allowed branches
+    // - UI filter set → intersect with user's allowed branches; empty → no data
+    if (userBranches) {
       if (p_region_branches) {
         p_region_branches = p_region_branches.filter(b => userBranches.includes(b))
       } else {
         p_region_branches = userBranches
       }
       if (p_branch && !userBranches.includes(p_branch)) {
-        // User asked for a branch outside their region — block silently.
         p_branch = null
         p_region_branches = []
       }
-    }
-
-    // Empty filter array means "user's intersection is empty" — return nothing.
-    if (Array.isArray(p_region_branches) && p_region_branches.length === 0 && regionAccess.restricted) {
-      setKpis(null)
-      setLoading(false)
-      return
+      if (p_region_branches.length === 0) {
+        setKpis(null); setLoading(false); return
+      }
     }
 
     const { data } = await supabase.rpc('get_purchase_aggregates', {
