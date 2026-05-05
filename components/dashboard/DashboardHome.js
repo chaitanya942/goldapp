@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../../lib/supabase'
-import { useApp } from '../../lib/context'
+import { useApp, useRegionAccess } from '../../lib/context'
 import AnimatedNumber from '../ui/AnimatedNumber'
 import LiveTicker from '../ui/LiveTicker'
 import { getVisibleModules } from '../../lib/modules'
@@ -161,6 +161,7 @@ function useMobile() {
 
 export default function DashboardHome() {
   const { theme, userProfile, canSee, setActiveNav, openMobileMenuWithModule } = useApp()
+  const regionAccess = useRegionAccess()
   const t = THEMES[theme]
   const isMobile = useMobile()
 
@@ -296,11 +297,15 @@ export default function DashboardHome() {
     if (!showPurchase) return
     supabase.from('branches').select('name, region, state, cluster').eq('is_active', true).then(({ data }) => {
       if (!data) return
-      setBranchMeta(data)
+      // Region scoping defense-in-depth: even if RLS isn't applied yet, drop rows outside user's regions.
+      const filtered = regionAccess.restricted
+        ? data.filter(b => regionAccess.regions.includes(b.region))
+        : data
+      setBranchMeta(filtered)
       const rc = {}
-      data.forEach(b => { if (b.region) rc[b.region] = (rc[b.region] || 0) + 1 })
+      filtered.forEach(b => { if (b.region) rc[b.region] = (rc[b.region] || 0) + 1 })
       setRegionCounts(rc)
-      const states = new Set(data.map(b => b.state).filter(Boolean))
+      const states = new Set(filtered.map(b => b.state).filter(Boolean))
       setStateCount(states.size)
     })
   }, [showPurchase])
@@ -332,6 +337,33 @@ export default function DashboardHome() {
       p_region_branches = branchMeta.filter(b => b.state === filterValue).map(b => b.name)
     } else if (filterType === 'cluster' && filterValue) {
       p_region_branches = branchMeta.filter(b => b.cluster === filterValue).map(b => b.name)
+    }
+
+    // Region scoping: when the user is restricted, intersect their allowed branches.
+    // - "All Data" tab (no UI filter set) → use user's allowed branches as the filter,
+    //   otherwise the RPC returns all-India data (the bug seen on the test user dashboard).
+    // - UI filter set → intersect with user's allowed branches; empty intersection → no data.
+    if (regionAccess.restricted) {
+      const userBranches = branchMeta
+        .filter(b => regionAccess.regions.includes(b.region))
+        .map(b => b.name)
+      if (p_region_branches) {
+        p_region_branches = p_region_branches.filter(b => userBranches.includes(b))
+      } else {
+        p_region_branches = userBranches
+      }
+      if (p_branch && !userBranches.includes(p_branch)) {
+        // User asked for a branch outside their region — block silently.
+        p_branch = null
+        p_region_branches = []
+      }
+    }
+
+    // Empty filter array means "user's intersection is empty" — return nothing.
+    if (Array.isArray(p_region_branches) && p_region_branches.length === 0 && regionAccess.restricted) {
+      setKpis(null)
+      setLoading(false)
+      return
     }
 
     const { data } = await supabase.rpc('get_purchase_aggregates', {
@@ -385,14 +417,21 @@ export default function DashboardHome() {
     { key: 'cluster', label: 'Cluster'  },
     { key: 'branch',  label: 'Branch'   },
   ]
+  // Region scoping: when restricted, drop branch-meta rows outside user's regions BEFORE
+  // computing the filter dropdown options. Even if branches RLS isn't deployed yet, the UI
+  // will only let the user pick from their allowed regions.
+  const scopedBranchMeta = regionAccess.restricted
+    ? branchMeta.filter(b => regionAccess.regions.includes(b.region))
+    : branchMeta
+
   const filterValueOptions = filterType === 'region'
-    ? [...new Set(branchMeta.map(b => b.region).filter(Boolean))].sort()
+    ? [...new Set(scopedBranchMeta.map(b => b.region).filter(Boolean))].sort()
     : filterType === 'state'
-    ? [...new Set(branchMeta.map(b => b.state).filter(Boolean))].sort()
+    ? [...new Set(scopedBranchMeta.map(b => b.state).filter(Boolean))].sort()
     : filterType === 'cluster'
-    ? [...new Set(branchMeta.map(b => b.cluster).filter(Boolean))].sort()
+    ? [...new Set(scopedBranchMeta.map(b => b.cluster).filter(Boolean))].sort()
     : filterType === 'branch'
-    ? [...new Set(branchMeta.map(b => b.name).filter(Boolean))].sort()
+    ? [...new Set(scopedBranchMeta.map(b => b.name).filter(Boolean))].sort()
     : []
 
   const maxStateNet  = Math.max(...stateData.map(s=>Number(s.total_net||0)), 1)
