@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { useApp } from '../../lib/context'
+import { useApp, useRegionAccess } from '../../lib/context'
 import GoldSpinner from '../ui/GoldSpinner'
 import { authedFetch, prefetch } from '../../lib/authedFetch'
 import { CONSIGNMENT_THEMES as THEMES, REGION_COLORS, useMobile } from '../../lib/consignmentTheme'
@@ -57,6 +57,7 @@ const SORT_COLS = [
 
 export default function ConsignmentOverview() {
   const { theme, setActiveNav, canSee, setConsignmentDeepLink } = useApp()
+  const regionAccess = useRegionAccess()
   const t = THEMES[theme]
   const isMobile = useMobile()
 
@@ -205,7 +206,8 @@ export default function ConsignmentOverview() {
       </div>
 
       {/* ── Region Flashcards — horizontal scroll-snap on mobile ── */}
-      {canSee('element.consignment-overview.region_cards') && (
+      {/* Hidden entirely when user is restricted to a single region (one card = no value) */}
+      {canSee('element.consignment-overview.region_cards') && !regionAccess.single && (
         <div style={{
           display: 'flex', gap: '10px',
           flexWrap: isMobile ? 'nowrap' : 'wrap',
@@ -217,8 +219,8 @@ export default function ConsignmentOverview() {
           padding: isMobile ? '0 16px 4px' : 0,
         }}>
 
-          {/* All Regions — totals across the board */}
-          {(() => {
+          {/* All Regions — totals across the board. Hidden for region-restricted users. */}
+          {!regionAccess.restricted && (() => {
             const allBills      = data.reduce((s, b) => s + (b.today_bills || 0) + (b.older_bills || 0), 0)
             const allNetWt      = data.reduce((s, b) => s + (b.today_net_wt || 0) + (b.older_net_wt || 0), 0)
             const allTodayBills = data.reduce((s, b) => s + (b.today_bills || 0), 0)
@@ -256,7 +258,7 @@ export default function ConsignmentOverview() {
             )
           })()}
 
-          {regions.map(r => {
+          {regions.map(r => {  // already filtered to user's allowed regions via the data feed
             const stats  = regionStats[r] || {}
             const color  = REGION_COLORS[r] || t.text3
             const icon   = REGION_ICONS[r] || '📍'

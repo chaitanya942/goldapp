@@ -5,7 +5,7 @@
 // section nav pills, and drill-down sub-sections rendered conditionally.
 
 import { useState, useEffect, useMemo } from 'react'
-import { useApp } from '../../lib/context'
+import { useApp, useRegionAccess } from '../../lib/context'
 import { authedFetch } from '../../lib/authedFetch'
 import { CONSIGNMENT_THEMES as THEMES, useMobile } from '../../lib/consignmentTheme'
 import GoldSpinner from '../ui/GoldSpinner'
@@ -73,7 +73,15 @@ export default function ConsignmentReport() {
   // Filters
   const [fromDate,       setFromDate]       = useState('')
   const [toDate,         setToDate]         = useState('')
-  const [filterRegion,   setFilterRegion]   = useState('')
+  const regionAccess = useRegionAccess()
+  const [filterRegion,   setFilterRegion]   = useState(regionAccess.single ? regionAccess.regions[0] : '')
+
+  // Pin filterRegion to the only allowed region whenever scoping is single.
+  useEffect(() => {
+    if (regionAccess.single && filterRegion !== regionAccess.regions[0]) {
+      setFilterRegion(regionAccess.regions[0])
+    }
+  }, [regionAccess.single, regionAccess.regions, filterRegion])
   const [filterType,     setFilterType]     = useState('')
   const [filterBranch,   setFilterBranch]   = useState('')
   const [search,         setSearch]         = useState('')
@@ -405,13 +413,20 @@ export default function ConsignmentReport() {
             <span style={{ fontSize: '10px', color: t.text4 }}>To</span>
             <input type="date" style={inp} value={toDate} onChange={e => setToDate(e.target.value)} />
           </div>
-          <select style={inp} value={filterRegion} onChange={e => setFilterRegion(e.target.value)}>
-            <option value="">All Regions</option>
-            {regions.map(r => <option key={r} value={r}>{r}</option>)}
-          </select>
+          {/* Region dropdown — hidden when user is restricted to a single region */}
+          {!regionAccess.single && (
+            <select style={inp} value={filterRegion} onChange={e => setFilterRegion(e.target.value)}>
+              <option value="">All Regions</option>
+              {(regionAccess.restricted ? regions.filter(r => regionAccess.regions.includes(r.region)) : regions)
+                .map(r => <option key={r.region || r} value={r.region || r}>{r.region || r}</option>)}
+            </select>
+          )}
           <select style={inp} value={filterBranch} onChange={e => setFilterBranch(e.target.value)}>
             <option value="">All Branches</option>
-            {[...new Set([...consignments.map(c => c.branch_name), ...inTransitBills.map(b => b.branch_name)])].sort().map(b => <option key={b} value={b}>{b}</option>)}
+            {[...new Set([...consignments.map(c => c.branch_name), ...inTransitBills.map(b => b.branch_name)])]
+              .filter(b => !regionAccess.restricted || regionAccess.regions.includes(branchByName[b]?.region))
+              .sort()
+              .map(b => <option key={b} value={b}>{b}</option>)}
           </select>
           <select style={inp} value={filterType} onChange={e => setFilterType(e.target.value)}>
             <option value="">All Types</option>
@@ -451,10 +466,12 @@ export default function ConsignmentReport() {
         <Kpi label={mode === 'at_branch' ? 'Stale (>7 days)' : 'Stale (>3 days)'} value={fmt(k.staleCount)} sub={k.staleCount > 0 ? 'past expected window' : 'all on schedule'} color={k.staleCount > 0 ? t.orange : t.green} t={t} />
       </KpiGrid>
 
-      {/* Region pills (clickable filter) */}
-      {byRegion.length > 0 && (
+      {/* Region pills (clickable filter) — hidden for single-region users (only one option, no value) */}
+      {byRegion.length > 0 && !regionAccess.single && (
         <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-          <RegionPill label="ALL"                     bills={k.totalBills} gross={k.totalGross} value={k.totalValue} color={t.gold} active={!filterRegion} onClick={() => setFilterRegion('')} t={t} />
+          {!regionAccess.restricted && (
+            <RegionPill label="ALL"                     bills={k.totalBills} gross={k.totalGross} value={k.totalValue} color={t.gold} active={!filterRegion} onClick={() => setFilterRegion('')} t={t} />
+          )}
           {byRegion.map(r => (
             <RegionPill key={r.region} label={r.region.toUpperCase()} bills={r.bills} gross={r.gross} value={r.value} color={REGION_COLOR[r.region] || t.gold} active={filterRegion === r.region} onClick={() => setFilterRegion(filterRegion === r.region ? '' : r.region)} t={t} />
           ))}

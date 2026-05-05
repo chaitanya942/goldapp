@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { supabase } from '../../../lib/supabase'
-import { useApp } from '../../../lib/context'
+import { useApp, useRegionAccess } from '../../../lib/context'
 import { THEMES, STATES, fmt, fmtVal, fmtDate, pct, getStyles, exportReportPDF } from './reportUtils'
 import ReportCharts from './ReportCharts'
 import ReportDistribution from './ReportDistribution'
@@ -194,6 +194,7 @@ const SECTION_KEY_MAP = {
 
 export default function PurchaseReports() {
   const { theme, canSee, syncVersion } = useApp()
+  const regionAccess = useRegionAccess()
   const t = THEMES[theme] || THEMES.dark
   const s = getStyles(t)
 
@@ -210,7 +211,8 @@ export default function PurchaseReports() {
   const [toDate,        setToDate]        = useState(istStr(_now))
   const [filterBranch,  setFilterBranch]  = useState('')
   const [filterTxn,     setFilterTxn]     = useState('')
-  const [filterRegion,  setFilterRegion]  = useState('')
+  // If the user is restricted to one region, lock filterRegion to that region.
+  const [filterRegion,  setFilterRegion]  = useState(regionAccess.single ? regionAccess.regions[0] : '')
   const [kpis,          setKpis]          = useState(null)
   const [trend,         setTrend]         = useState([])
   const [monthly,       setMonthly]       = useState([])
@@ -269,6 +271,14 @@ export default function PurchaseReports() {
   }, [])
 
   useEffect(() => { fetchAll() }, [fromDate, toDate, filterBranch, filterTxn, filterRegion, syncVersion])
+
+  // Pin filterRegion to user's only region if they're single-region restricted (defense
+  // against any code path that resets filterRegion to '').
+  useEffect(() => {
+    if (regionAccess.single && filterRegion !== regionAccess.regions[0]) {
+      setFilterRegion(regionAccess.regions[0])
+    }
+  }, [regionAccess.single, regionAccess.regions, filterRegion])
 
   const fetchAll = async () => {
     setLoading(true)
@@ -379,7 +389,9 @@ export default function PurchaseReports() {
   const setQuickRange = (days) => { const to = istNow(); const fr = istNow(); fr.setDate(fr.getDate() - days); setToDate(istStr(to)); setFromDate(istStr(fr)) }
   const setThisMonth  = () => { const now = istNow(); setFromDate(`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-01`); setToDate(istStr(now)) }
 
-  const hasFilters    = fromDate || toDate || filterBranch || filterTxn || filterRegion
+  // For UX (Clear filters button visibility): a region pinned by region scoping isn't a "user-applied" filter.
+  const userAppliedRegion = regionAccess.single ? '' : filterRegion
+  const hasFilters    = fromDate || toDate || filterBranch || filterTxn || userAppliedRegion
   const canSeeSection = (key) => canSee(SECTION_KEY_MAP[key] ?? key)
   const showSection   = (key) => canSeeSection(key) && (!activeSection || activeSection === key)
   const visibleSections = SECTIONS.filter(sec => canSeeSection(sec.key))
@@ -449,7 +461,7 @@ export default function PurchaseReports() {
           </button>
           {hasFilters && (
             <button
-              onClick={() => { setFromDate(''); setToDate(''); setFilterBranch(''); setFilterTxn(''); setFilterRegion('') }}
+              onClick={() => { setFromDate(''); setToDate(''); setFilterBranch(''); setFilterTxn(''); setFilterRegion(regionAccess.single ? regionAccess.regions[0] : '') }}
               style={{ background: 'transparent', border: `1px solid ${t.border}`, borderRadius: '8px', padding: '8px 16px', color: t.text3, fontSize: '.7rem', cursor: 'pointer' }}
             >
               Clear all
@@ -493,13 +505,24 @@ export default function PurchaseReports() {
             <span style={{ fontSize: '.6rem', color: t.text4 }}>To</span>
             <input type="date" style={inp} value={toDate} onChange={e => setToDate(e.target.value)} />
           </div>
-          <select style={inp} value={filterRegion} onChange={e => setFilterRegion(e.target.value)}>
-            <option value="">All Regions</option>
-            {regions.map(r => <option key={r} value={r}>{r}</option>)}
-          </select>
+          {/* Region dropdown — hidden entirely when user is restricted to a single region (no point filtering between 1 option). */}
+          {!regionAccess.single && (
+            <select style={inp} value={filterRegion} onChange={e => setFilterRegion(e.target.value)}>
+              <option value="">All Regions</option>
+              {(regionAccess.restricted ? regions.filter(r => regionAccess.regions.includes(r)) : regions)
+                .map(r => <option key={r} value={r}>{r}</option>)}
+            </select>
+          )}
+          {/* Branches dropdown: scoped to user's regions when restricted. */}
           <select style={inp} value={filterBranch} onChange={e => setFilterBranch(e.target.value)}>
             <option value="">All Branches</option>
-            {branches.map(b => <option key={b} value={b}>{b}</option>)}
+            {(regionAccess.restricted
+              ? branches.filter(b => {
+                  const meta = allBranchMeta.find(m => m.name === b)
+                  return meta && regionAccess.regions.includes(meta.region)
+                })
+              : branches
+            ).map(b => <option key={b} value={b}>{b}</option>)}
           </select>
           <select style={inp} value={filterTxn} onChange={e => setFilterTxn(e.target.value)}>
             <option value="">All Types</option>
@@ -509,7 +532,8 @@ export default function PurchaseReports() {
         </div>
         {hasFilters && (
           <div style={{ display: 'flex', gap: '6px', marginTop: '10px', flexWrap: 'wrap' }}>
-            {filterRegion && <FilterChip label={filterRegion} onRemove={() => setFilterRegion('')} color={t.blue}   />}
+            {/* Hide the region chip when single-region restricted — it can't be removed anyway */}
+            {filterRegion && !regionAccess.single && <FilterChip label={filterRegion} onRemove={() => setFilterRegion('')} color={t.blue}   />}
             {filterBranch && <FilterChip label={filterBranch} onRemove={() => setFilterBranch('')} color={t.gold}   />}
             {filterTxn    && <FilterChip label={filterTxn}    onRemove={() => setFilterTxn('')}    color={t.purple} />}
             {(fromDate || toDate) && (

@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
-import { useApp } from '../../lib/context'
+import { useApp, useRegionAccess } from '../../lib/context'
 import GoldSpinner from '../ui/GoldSpinner'
 import { authedFetch } from '../../lib/authedFetch'
 
@@ -162,7 +162,14 @@ export default function LiveFeed() {
   const [viewDate,      setViewDate]      = useState(todayIST)
   const isToday = viewDate === todayIST
   const [crmTab,        setCrmTab]        = useState('old')
-  const [regionFilter,  setRegionFilter]  = useState('')   // '' = all regions
+  const regionAccess = useRegionAccess()
+  // Default region filter: if user is restricted to a single region, lock to it.
+  const [regionFilter,  setRegionFilter]  = useState(regionAccess.single ? regionAccess.regions[0] : '')
+
+  // Pin to allowed region when user is single-region restricted.
+  useEffect(() => {
+    if (regionAccess.single) setRegionFilter(regionAccess.regions[0])
+  }, [regionAccess.single, regionAccess.regions])
   const [data,          setData]          = useState(null)
   const [loadError,     setLoadError]     = useState(null)
   const [loading,       setLoading]       = useState(true)
@@ -222,7 +229,12 @@ export default function LiveFeed() {
   const stages = data?.stages || null
   const todayTxns    = data?.todayTxns    || []
   const todayWalkins = data?.todayWalkins || []
-  const regions      = data?.allRegions   || []
+  const rawRegions   = data?.allRegions   || []
+  // Region scoping: when the user is restricted to specific regions, only show those.
+  // When they have just one, the filter row is auto-hidden via the length-check below.
+  const regions = regionAccess.restricted
+    ? rawRegions.filter(r => regionAccess.regions.includes(r))
+    : rawRegions
   const goldPipeline = data?.goldPipeline || {}
   const kycRows      = data?.kycRows      || []
   const takeoverRows = data?.takeoverRows || []
