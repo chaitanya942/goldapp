@@ -377,14 +377,19 @@ export default function DashboardHome() {
       }
     }
 
-    const { data } = await supabase.rpc('get_purchase_aggregates', {
-      p_from_date: from, p_to_date: to,
-      p_branch, p_txn_type: null,
-      p_region_branches: p_region_branches || null,
-      p_single_day: from === to,
-    })
-
-    if (!data) { setLoading(false); return }
+    // Route through /api/report-aggregates which enforces region scoping server-side
+    // via lib/apiAuth — authoritative even if client-side regionAccess hasn't resolved
+    // yet. The server intersects p_region_branches with the user's allowed branches.
+    const params = new URLSearchParams()
+    if (from)         params.set('from', from)
+    if (to)           params.set('to', to)
+    if (p_branch)     params.set('branch', p_branch)
+    if (p_region_branches?.length) params.set('region_branches', p_region_branches.join(','))
+    if (from === to)  params.set('single_day', 'true')
+    const aggRes = await authedFetch(`/api/report-aggregates?${params}`)
+    const aggJson = await aggRes.json().catch(() => ({}))
+    if (aggJson?.empty || !aggJson?.kpis) { setKpis(null); setLoading(false); return }
+    const data = aggJson
     setKpis(data.kpis || null)
 
     // Group breakdown by region (all/cluster/branch) or by state (when region/state is selected)
