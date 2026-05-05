@@ -41,6 +41,7 @@ export default function UserManagement() {
   const [savingId,   setSavingId]   = useState(null)
   const [confirmDelete, setConfirmDelete] = useState(null) // { id, name }
   const [openRegionsFor, setOpenRegionsFor] = useState(null) // userId whose region popover is open
+  const [regionsAnchor,  setRegionsAnchor]  = useState({ top: 0, left: 0 }) // viewport coords for fixed popover
 
   // Invite form
   const [showInvite, setShowInvite] = useState(false)
@@ -416,51 +417,22 @@ export default function UserManagement() {
                     }
                     const open = openRegionsFor === u.id
                     return (
-                      <>
-                        <button
-                          onClick={() => setOpenRegionsFor(open ? null : u.id)}
-                          disabled={busy}
-                          title={regions.length > 0 ? regions.join(', ') : 'No restriction — user sees all regions'}
-                          style={{ background: 'transparent', border: `1px solid ${t.border}`, borderRadius: '6px', padding: '4px 10px', color: t.text2, fontSize: '.65rem', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '5px' }}>
-                          {labelText}
-                          <span style={{ opacity: 0.5, fontSize: '.55rem' }}>▾</span>
-                        </button>
-                        {open && (
-                          <>
-                            <div onClick={() => setOpenRegionsFor(null)} style={{ position: 'fixed', inset: 0, zIndex: 50 }} />
-                            <div style={{ position: 'absolute', top: '40px', left: '12px', background: t.card, border: `1px solid ${t.border}`, borderRadius: '8px', boxShadow: '0 12px 32px rgba(0,0,0,.4)', padding: '10px 12px', zIndex: 51, minWidth: '200px' }}>
-                              <div style={{ fontSize: '.6rem', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: '8px' }}>Allowed regions</div>
-                              {allRegions.length === 0 && <div style={{ fontSize: '.7rem', color: t.text4 }}>No regions found.</div>}
-                              {allRegions.map(r => {
-                                const checked = regions.includes(r)
-                                return (
-                                  <label key={r} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '5px 0', fontSize: '.72rem', color: t.text1, cursor: 'pointer' }}>
-                                    <input
-                                      type="checkbox"
-                                      checked={checked}
-                                      onChange={() => {
-                                        const next = checked ? regions.filter(x => x !== r) : [...regions, r]
-                                        updateRegions(u.id, next)
-                                      }}
-                                    />
-                                    {r}
-                                  </label>
-                                )
-                              })}
-                              <div style={{ borderTop: `1px solid ${t.border}`, marginTop: '8px', paddingTop: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                <button onClick={() => updateRegions(u.id, [])}
-                                  style={{ background: 'transparent', border: 'none', color: t.gold, fontSize: '.62rem', cursor: 'pointer', padding: '2px 0' }}>
-                                  Clear (all access)
-                                </button>
-                                <button onClick={() => setOpenRegionsFor(null)}
-                                  style={{ background: 'transparent', border: `1px solid ${t.border}`, borderRadius: '4px', color: t.text2, fontSize: '.62rem', padding: '3px 8px', cursor: 'pointer' }}>
-                                  Done
-                                </button>
-                              </div>
-                            </div>
-                          </>
-                        )}
-                      </>
+                      <button
+                        onClick={(e) => {
+                          if (open) { setOpenRegionsFor(null); return }
+                          const r = e.currentTarget.getBoundingClientRect()
+                          // Anchor below + left-aligned to the button. Clamp to viewport so it never spills off-screen.
+                          const popoverWidth = 240
+                          const left = Math.min(r.left, window.innerWidth - popoverWidth - 12)
+                          setRegionsAnchor({ top: r.bottom + 4, left: Math.max(12, left) })
+                          setOpenRegionsFor(u.id)
+                        }}
+                        disabled={busy}
+                        title={regions.length > 0 ? regions.join(', ') : 'No restriction — user sees all regions'}
+                        style={{ background: 'transparent', border: `1px solid ${t.border}`, borderRadius: '6px', padding: '4px 10px', color: t.text2, fontSize: '.65rem', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                        {labelText}
+                        <span style={{ opacity: 0.5, fontSize: '.55rem' }}>▾</span>
+                      </button>
                     )
                   })()}
                 </div>
@@ -517,6 +489,48 @@ export default function UserManagement() {
         </div>
         </div>
       )}
+
+      {/* ── Region popover (floating, viewport-positioned) ── */}
+      {openRegionsFor && (() => {
+        const u = users.find(x => x.id === openRegionsFor)
+        if (!u) return null
+        const regions = Array.isArray(u.allowed_regions) ? u.allowed_regions : []
+        return (
+          <>
+            <div onClick={() => setOpenRegionsFor(null)} style={{ position: 'fixed', inset: 0, zIndex: 100 }} />
+            <div style={{ position: 'fixed', top: regionsAnchor.top, left: regionsAnchor.left, background: t.card, border: `1px solid ${t.border}`, borderRadius: '8px', boxShadow: '0 12px 32px rgba(0,0,0,.5)', padding: '10px 12px', zIndex: 101, width: '240px', maxHeight: '60vh', overflowY: 'auto' }}>
+              <div style={{ fontSize: '.6rem', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: '8px' }}>Allowed regions</div>
+              {allRegions.length === 0 && <div style={{ fontSize: '.7rem', color: t.text4 }}>No regions found.</div>}
+              {allRegions.map(r => {
+                const checked = regions.includes(r)
+                return (
+                  <label key={r} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '5px 0', fontSize: '.72rem', color: t.text1, cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => {
+                        const next = checked ? regions.filter(x => x !== r) : [...regions, r]
+                        updateRegions(u.id, next)
+                      }}
+                    />
+                    {r}
+                  </label>
+                )
+              })}
+              <div style={{ borderTop: `1px solid ${t.border}`, marginTop: '8px', paddingTop: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <button onClick={() => updateRegions(u.id, [])}
+                  style={{ background: 'transparent', border: 'none', color: t.gold, fontSize: '.62rem', cursor: 'pointer', padding: '2px 0' }}>
+                  Clear (all access)
+                </button>
+                <button onClick={() => setOpenRegionsFor(null)}
+                  style={{ background: 'transparent', border: `1px solid ${t.border}`, borderRadius: '4px', color: t.text2, fontSize: '.62rem', padding: '3px 8px', cursor: 'pointer' }}>
+                  Done
+                </button>
+              </div>
+            </div>
+          </>
+        )
+      })()}
 
       {/* ── Delete Confirmation Modal ── */}
       {confirmDelete && (
