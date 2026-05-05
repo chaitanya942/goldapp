@@ -6,6 +6,24 @@ import postgres  from 'postgres'
 import { createClient } from '@supabase/supabase-js'
 import { requireAuth } from '../../../lib/apiAuth'
 
+const REGION_BYPASS_ROLES = new Set(['super_admin', 'founders_office', 'admin'])
+
+// Returns the user's allowed regions array, or null when unrestricted (bypass role
+// or no scoping set). Reads user_profiles directly via the supabase admin client
+// (which bypasses RLS) to dodge any PostgREST schema cache staleness.
+async function getAllowedRegionsForAuth(supabase, auth) {
+  if (!auth || REGION_BYPASS_ROLES.has(auth.role)) return null
+  const uid = auth.user?.id || auth.profile?.id
+  if (!uid) return null
+  const { data: prof } = await supabase
+    .from('user_profiles')
+    .select('allowed_regions')
+    .eq('id', uid)
+    .maybeSingle()
+  const regions = Array.isArray(prof?.allowed_regions) ? prof.allowed_regions : []
+  return regions.length === 0 ? null : regions
+}
+
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
   process.env.SUPABASE_SERVICE_ROLE_KEY || 'placeholder'
@@ -403,6 +421,81 @@ export async function GET(req) {
       for (const w  of todayWalkins) w.region  = regionMap[String(w.branch_id)]  || ''
       for (const k  of kycRows)      k.region  = regionMap[String(k.branh_id)]   || ''
 
+      // ── Region scoping: drop everything outside user's allowed regions ──
+      // Done BEFORE aggregations so summary/goldPipeline/stages/hourly all reflect scope.
+      // Mutating in place because the arrays are bound with `const` (destructured from
+      // Promise.all results); reassigning the binding would throw, but mutating the
+      // backing array is allowed and propagates to all downstream consumers.
+      const allowedRegions = await getAllowedRegionsForAuth(supabase, auth)
+      if (allowedRegions) {
+        const allowedSet = new Set(allowedRegions)
+        const inAllowed = (r) => r && allowedSet.has(r)
+        const replaceInPlace = (arr, predicate) => {
+          if (!Array.isArray(arr)) return
+          const kept = arr.filter(predicate)
+          arr.length = 0
+          for (const x of kept) arr.push(x)
+        }
+        replaceInPlace(branches,     b => inAllowed(b.region))
+        replaceInPlace(todayTxns,    t => inAllowed(t.region))
+        replaceInPlace(todayWalkins, w => inAllowed(w.region))
+        replaceInPlace(kycRows,      k => inAllowed(k.region))
+        // Attach region to takeoverRows then filter (it didn't get region above).
+        if (Array.isArray(takeoverRows)) {
+          for (const r of takeoverRows) r.region = regionMap[String(r.branch_id)] || ''
+          replaceInPlace(takeoverRows, r => inAllowed(r.region))
+        }
+        // ornmentRows aren't branch-keyed directly — they're joined to a transaction by txn_id.
+        // Filter ornmentRows to only those whose transaction is in the (now filtered) todayTxns.
+        const allowedTxnIds = new Set(todayTxns.map(t => t.id))
+        replaceInPlace(ornmentRows, o => allowedTxnIds.has(o.txn_id))
+        // Restrict allRegions to user's allowed regions so the UI region pills stay accurate.
+        // eslint-disable-next-line no-param-reassign
+        allRegions.length = 0
+        for (const r of allowedRegions) if (allRegionsSet.has(r)) allRegions.push(r)
+
+        // hourly came from raw SQL — rebuild from filtered todayTxns.
+        if (Array.isArray(hourly)) {
+          const hourMap = {}
+          for (const t of todayTxns) {
+            // Extract hour from t.time (format "HH:MM:SS") or fallback to txn_date_time
+            const hourStr = (t.time || '').split(':')[0]
+            const h = parseInt(hourStr, 10)
+            if (Number.isNaN(h)) continue
+            if (!hourMap[h]) hourMap[h] = { hour: h, bills: 0, approved: 0, rejected: 0 }
+            hourMap[h].bills++
+            if (t.trxn_status === 'approved') hourMap[h].approved++
+            if (t.trxn_status === 'rejected') hourMap[h].rejected++
+          }
+          hourly.length = 0
+          for (const h of Object.keys(hourMap).map(Number).sort((a, b) => a - b)) hourly.push(hourMap[h])
+        }
+
+        // walkinSummary came from a raw SQL aggregate (no region awareness).
+        // Recompute it from the filtered todayWalkins so the LiveFeed cards
+        // (walked-in count, sold, visited-not-sold, total gold weight, missing-weight)
+        // reflect only the user's regions.
+        if (walkinSummary && Array.isArray(todayWalkins)) {
+          let total = 0, sold = 0, visited_not_sold = 0, no_update = 0
+          let total_gold_wt = 0, missing_weight_count = 0
+          for (const w of todayWalkins) {
+            total++
+            if (w.walkin_status === 'sold') sold++
+            else if (w.walkin_status === 'visited not sold') visited_not_sold++
+            else if (!w.walkin_status) no_update++
+            const wt = parseFloat(w.gms_weight) || 0
+            total_gold_wt += wt
+            if (!wt) missing_weight_count++
+          }
+          walkinSummary.total                = total
+          walkinSummary.sold                 = sold
+          walkinSummary.visited_not_sold     = visited_not_sold
+          walkinSummary.no_update            = no_update
+          walkinSummary.total_gold_wt        = total_gold_wt.toFixed(2)
+          walkinSummary.missing_weight_count = missing_weight_count
+        }
+      }
+
       // grms_wet is CSV per row (e.g. "24.91,17.05,2.96") — must parse in JS
       const csvSum = str => String(str || '').split(',').reduce((s, v) => {
         const n = parseFloat(v.trim()); return s + (isNaN(n) ? 0 : n)
@@ -600,7 +693,11 @@ export async function GET(req) {
         for (const row of txnArr) {
           row.region = nameRegionMap[(row.branch_name || '').trim().toLowerCase()] || ''
         }
-        newCrmTxns = txnArr
+        // Region scope: drop new-CRM rows outside user's allowed regions.
+        const allowedRegionsForNewCrm = await getAllowedRegionsForAuth(supabase, auth)
+        newCrmTxns = allowedRegionsForNewCrm
+          ? txnArr.filter(r => r.region && allowedRegionsForNewCrm.includes(r.region))
+          : txnArr
 
       } catch (e) {
         newCrmError = e.message
