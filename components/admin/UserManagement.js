@@ -36,9 +36,11 @@ export default function UserManagement() {
 
   const [roles,      setRoles]      = useState(DEFAULT_ROLES)
   const [users,      setUsers]      = useState([])
+  const [allRegions, setAllRegions] = useState([])  // pulled from branches.region distinct
   const [loading,    setLoading]    = useState(false)
   const [savingId,   setSavingId]   = useState(null)
   const [confirmDelete, setConfirmDelete] = useState(null) // { id, name }
+  const [openRegionsFor, setOpenRegionsFor] = useState(null) // userId whose region popover is open
 
   // Invite form
   const [showInvite, setShowInvite] = useState(false)
@@ -60,15 +62,28 @@ export default function UserManagement() {
 
   const load = async () => {
     setLoading(true)
-    const [{ data }, rbacRes] = await Promise.all([
+    const [{ data }, rbacRes, branchRes] = await Promise.all([
       supabase.from('user_profiles').select('*').order('full_name'),
       authedFetch('/api/rbac?action=all').then(r => r.json()).catch(() => null),
+      supabase.from('branches').select('region').not('region', 'is', null),
     ])
     if (data) setUsers(data)
     if (rbacRes?.roles?.length) {
       setRoles(rbacRes.roles.map(r => ({ value: r.name, label: r.label, color: r.color || '#7a6a4a' })))
     }
+    if (branchRes?.data) {
+      setAllRegions([...new Set(branchRes.data.map(b => b.region).filter(Boolean))].sort())
+    }
     setLoading(false)
+  }
+
+  // Update a user's allowed_regions (TEXT[]). Empty array = no restriction (sees all).
+  const updateRegions = async (id, regions) => {
+    setSavingId(id)
+    const value = regions.length === 0 ? null : regions
+    await supabase.from('user_profiles').update({ allowed_regions: value }).eq('id', id)
+    setUsers(prev => prev.map(u => u.id === id ? { ...u, allowed_regions: value } : u))
+    setSavingId(null)
   }
 
   const getRoleStyle = (role) => roles.find(r => r.value === role) ?? { label: role, color: '#7a6a4a' }
@@ -322,8 +337,8 @@ export default function UserManagement() {
         <div style={{ minWidth: isMobile ? '720px' : 'auto' }}>
 
           {/* Header row */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1.8fr 1fr 0.7fr 1.4fr', background: t.card }}>
-            {['Name', 'Email', 'Role', 'Status', 'Action'].map(h => (
+          <div style={{ display: 'grid', gridTemplateColumns: '1.3fr 1.6fr 0.9fr 1.1fr 0.65fr 1.2fr', background: t.card }}>
+            {['Name', 'Email', 'Role', 'Regions', 'Status', 'Action'].map(h => (
               <div key={h} style={{ padding: '10px 16px', fontSize: '.58rem', color: t.text3, letterSpacing: '.1em', textTransform: 'uppercase', borderBottom: `1px solid ${t.border}` }}>
                 {h}
               </div>
@@ -342,7 +357,7 @@ export default function UserManagement() {
             return (
               <div
                 key={u.id}
-                style={{ display: 'grid', gridTemplateColumns: '1.4fr 1.8fr 1fr 0.7fr 1.4fr', alignItems: 'center', borderBottom: last ? 'none' : `1px solid ${t.border}20`, transition: 'background .15s' }}
+                style={{ display: 'grid', gridTemplateColumns: '1.3fr 1.6fr 0.9fr 1.1fr 0.65fr 1.2fr', alignItems: 'center', borderBottom: last ? 'none' : `1px solid ${t.border}20`, transition: 'background .15s' }}
                 onMouseEnter={e => e.currentTarget.style.background = `${t.gold}06`}
                 onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
 
@@ -382,6 +397,72 @@ export default function UserManagement() {
                       {rs.label}
                     </span>
                   )}
+                </div>
+
+                {/* Regions — multi-select via popover. Bypass roles always see all. */}
+                <div style={{ padding: '13px 16px', position: 'relative' }}>
+                  {(() => {
+                    const isBypass = ['super_admin', 'founders_office', 'admin'].includes(u.role)
+                    const regions  = Array.isArray(u.allowed_regions) ? u.allowed_regions : []
+                    const labelText = isBypass
+                      ? 'All (admin)'
+                      : regions.length === 0
+                        ? 'All'
+                        : regions.length === 1
+                          ? regions[0]
+                          : `${regions[0]} +${regions.length - 1}`
+                    if (isBypass || !canDo('edit')) {
+                      return <span style={{ fontSize: '.65rem', color: isBypass ? t.text3 : t.text2, padding: '3px 8px', background: `${t.text3}10`, borderRadius: '4px' }}>{labelText}</span>
+                    }
+                    const open = openRegionsFor === u.id
+                    return (
+                      <>
+                        <button
+                          onClick={() => setOpenRegionsFor(open ? null : u.id)}
+                          disabled={busy}
+                          title={regions.length > 0 ? regions.join(', ') : 'No restriction — user sees all regions'}
+                          style={{ background: 'transparent', border: `1px solid ${t.border}`, borderRadius: '6px', padding: '4px 10px', color: t.text2, fontSize: '.65rem', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                          {labelText}
+                          <span style={{ opacity: 0.5, fontSize: '.55rem' }}>▾</span>
+                        </button>
+                        {open && (
+                          <>
+                            <div onClick={() => setOpenRegionsFor(null)} style={{ position: 'fixed', inset: 0, zIndex: 50 }} />
+                            <div style={{ position: 'absolute', top: '40px', left: '12px', background: t.card, border: `1px solid ${t.border}`, borderRadius: '8px', boxShadow: '0 12px 32px rgba(0,0,0,.4)', padding: '10px 12px', zIndex: 51, minWidth: '200px' }}>
+                              <div style={{ fontSize: '.6rem', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: '8px' }}>Allowed regions</div>
+                              {allRegions.length === 0 && <div style={{ fontSize: '.7rem', color: t.text4 }}>No regions found.</div>}
+                              {allRegions.map(r => {
+                                const checked = regions.includes(r)
+                                return (
+                                  <label key={r} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '5px 0', fontSize: '.72rem', color: t.text1, cursor: 'pointer' }}>
+                                    <input
+                                      type="checkbox"
+                                      checked={checked}
+                                      onChange={() => {
+                                        const next = checked ? regions.filter(x => x !== r) : [...regions, r]
+                                        updateRegions(u.id, next)
+                                      }}
+                                    />
+                                    {r}
+                                  </label>
+                                )
+                              })}
+                              <div style={{ borderTop: `1px solid ${t.border}`, marginTop: '8px', paddingTop: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <button onClick={() => updateRegions(u.id, [])}
+                                  style={{ background: 'transparent', border: 'none', color: t.gold, fontSize: '.62rem', cursor: 'pointer', padding: '2px 0' }}>
+                                  Clear (all access)
+                                </button>
+                                <button onClick={() => setOpenRegionsFor(null)}
+                                  style={{ background: 'transparent', border: `1px solid ${t.border}`, borderRadius: '4px', color: t.text2, fontSize: '.62rem', padding: '3px 8px', cursor: 'pointer' }}>
+                                  Done
+                                </button>
+                              </div>
+                            </div>
+                          </>
+                        )}
+                      </>
+                    )
+                  })()}
                 </div>
 
                 {/* Status */}

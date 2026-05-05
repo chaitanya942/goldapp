@@ -5,7 +5,7 @@ import { createClient } from '@supabase/supabase-js'
 import { fetchEWayBillPdf } from '../../../../lib/clearTaxClient'
 import { REGION_TO_STATE_CODE } from '../../../../lib/stateMap'
 import { checkApproval } from '../../../../lib/approvalGate'
-import { requireAuth } from '../../../../lib/apiAuth'
+import { requireAuth, resolveAllowedBranchNames } from '../../../../lib/apiAuth'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
@@ -29,6 +29,11 @@ export async function GET(req) {
     if (error || !consignment) return Response.json({ error: 'Consignment not found' }, { status: 404 })
     if (!consignment.eway_bill_no) {
       return Response.json({ error: 'No E-Way Bill exists for this consignment yet' }, { status: 400 })
+    }
+    // Region scoping
+    const allowedBranches = await resolveAllowedBranchNames(supabase, auth)
+    if (allowedBranches && !allowedBranches.includes(consignment.branch_name)) {
+      return Response.json({ error: 'Forbidden — consignment is outside your assigned region.' }, { status: 403 })
     }
 
     const { data: branch } = await supabase

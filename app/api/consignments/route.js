@@ -10,7 +10,7 @@ import {
   generateIssueVoucherNo,
 } from '../../../lib/consignmentUtils'
 import { logConsignmentEvent } from '../../../lib/consignmentLog'
-import { requireAuth, ROLE_GROUPS } from '../../../lib/apiAuth'
+import { requireAuth, ROLE_GROUPS, getRegionFilter, resolveAllowedBranchNames } from '../../../lib/apiAuth'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
@@ -34,6 +34,14 @@ export async function GET(req) {
   const { searchParams } = new URL(req.url)
   const action = searchParams.get('action')
 
+  // Region scoping: resolve once per request. allowedBranches=null means
+  // "no restriction" (admin/founders bypass, or user has no allowed_regions).
+  // When non-null, it's the explicit list of branch names this user can see;
+  // every data action must filter by it. allowedRegions is the same info but
+  // expressed as region names — useful when joining via branches.region.
+  const allowedRegions  = getRegionFilter(auth)
+  const allowedBranches = allowedRegions ? await resolveAllowedBranchNames(supabase, auth) : null
+
   // ── Branch Stock Overview (new landing view) ──────────────────────────────
   if (action === 'branch_overview') {
     // Server-side aggregation via RPC — single grouped SQL query handles
@@ -45,11 +53,14 @@ export async function GET(req) {
       return Response.json({ data: [], error: 'branch_stock_summary RPC missing. Apply sql/branch_stock_summary_rpc.sql.' })
     }
 
-    // Fetch branch metadata to filter outside_bangalore + attach region/pickup
-    const { data: branches, error: bErr } = await supabase
+    // Fetch branch metadata to filter outside_bangalore + attach region/pickup.
+    // Region scoping applied here so downstream summary only includes user's branches.
+    let branchesQ = supabase
       .from('branches')
       .select('name, region, state, model_type, pickup_time')
       .eq('is_active', true)
+    if (allowedRegions) branchesQ = branchesQ.in('region', allowedRegions)
+    const { data: branches, error: bErr } = await branchesQ
     if (bErr) return Response.json({ data: [], error: bErr.message })
 
     const branchMeta = {}
@@ -124,13 +135,15 @@ export async function GET(req) {
 
   // ── Get outside-Bangalore branches from branches master ──────────────────
   if (action === 'branches') {
-    const { data, error } = await supabase
+    let q = supabase
       .from('branches')
       .select('id, name, state, region, cluster, model_type, address, city, pin_code, contact_person, contact_phone, branch_gstin, is_hub, hub_branch_name, pickup_time')
       .eq('is_active', true)
       .neq('region', 'Bangalore')
       .order('region')
       .order('name')
+    if (allowedRegions) q = q.in('region', allowedRegions)
+    const { data, error } = await q
 
     // Enrich with state_code and branch_code
     const enriched = (data || []).map(b => ({
@@ -459,12 +472,14 @@ export async function GET(req) {
     const CHUNK = 1000
     let from = 0, all = []
     while (true) {
-      const { data, error } = await supabase
+      let q = supabase
         .from('purchases')
         .select('id, sl_no, application_id, branch_name, current_branch, customer_name, purchase_date, gross_weight, net_weight, total_amount')
         .eq('stock_status', 'at_branch')
         .eq('is_deleted', false)
-        .range(from, from + CHUNK - 1)
+      if (allowedBranches) q = q.in('current_branch', allowedBranches)  // current_branch reflects physical location
+      q = q.range(from, from + CHUNK - 1)
+      const { data, error } = await q
       if (error) return Response.json({ error: error.message }, { status: 500 })
       if (!data?.length) break
       all = [...all, ...data]
@@ -480,12 +495,15 @@ export async function GET(req) {
   // were marked in_consignment manually (e.g. via SQL during data fixes) and
   // don't have a dispatched-consignment link still surface here as "untracked".
   if (action === 'in_transit_stock') {
-    // 1. Live bills currently in transit
-    const { data: bills, error: be } = await supabase
+    // 1. Live bills currently in transit (filtered to user's allowed branches when restricted)
+    let billsQ = supabase
       .from('purchases')
       .select('id, sl_no, application_id, branch_name, current_branch, customer_name, purchase_date, gross_weight, net_weight, total_amount')
       .eq('stock_status', 'in_consignment')
       .eq('is_deleted', false)
+    // Filter by branch_name (origin) for in-transit so a Kerala user sees their dispatched bills
+    if (allowedBranches) billsQ = billsQ.in('branch_name', allowedBranches)
+    const { data: bills, error: be } = await billsQ
 
     if (be) return Response.json({ error: be.message }, { status: 500 })
     if (!bills?.length) return Response.json({ data: [] })
@@ -547,6 +565,8 @@ export async function GET(req) {
     if (branch)   query = query.eq('branch_name', branch)
     if (dateFrom) query = query.gte('created_at', dateFrom)
     if (dateTo)   query = query.lte('created_at', dateTo)
+    // Region scoping: a regional user only sees consignments dispatched FROM their region's branches.
+    if (allowedBranches) query = query.in('branch_name', allowedBranches)
 
     const { data, error } = await query
     return Response.json({ data, error: error?.message })
@@ -559,6 +579,10 @@ export async function GET(req) {
       .from('consignments').select('*').eq('id', id).single()
 
     if (ce) return Response.json({ error: ce.message }, { status: 404 })
+    // Region scoping: deny if this consignment isn't from one of the user's branches.
+    if (allowedBranches && !allowedBranches.includes(consignment.branch_name)) {
+      return Response.json({ error: 'Forbidden — consignment is outside your assigned region.' }, { status: 403 })
+    }
 
     const { data: items } = await supabase
       .from('consignment_items')
