@@ -855,11 +855,18 @@ function PreviewModal({ state, t, onClose, onConfirm }) {
 
   return (
     <div onClick={(e) => { if (e.target === e.currentTarget && !generating) onClose() }}
-      style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.7)', display: 'flex', alignItems: 'flex-start', justifyContent: 'center', zIndex: 2000, padding: '40px 20px', overflowY: 'auto' }}>
-      <div style={{ background: t.card, border: `1px solid ${accent}40`, borderRadius: '12px', width: '100%', maxWidth: '720px', boxShadow: '0 20px 60px rgba(0,0,0,.6)' }}>
+      style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000, padding: '20px', overflow: 'hidden' }}>
+      <div style={{
+        background: t.card, border: `1px solid ${accent}40`, borderRadius: '12px',
+        width: '100%', maxWidth: '720px',
+        maxHeight: 'calc(100vh - 40px)',
+        display: 'flex', flexDirection: 'column',
+        boxShadow: '0 20px 60px rgba(0,0,0,.6)',
+        overflow: 'hidden',  // keeps the rounded corners on header / footer
+      }}>
 
-        {/* Header */}
-        <div style={{ padding: '16px 22px', borderBottom: `1px solid ${t.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+        {/* Header — always visible (outside the scrollable body) */}
+        <div style={{ padding: '16px 22px', borderBottom: `1px solid ${t.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexShrink: 0 }}>
           <div>
             <div style={{ fontSize: '.6rem', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: '4px' }}>Preview before generation</div>
             <div style={{ fontSize: '1.05rem', color: accent, fontWeight: 600 }}>{docName} for {c.tmp_prf_no}</div>
@@ -870,8 +877,8 @@ function PreviewModal({ state, t, onClose, onConfirm }) {
           <button onClick={onClose} disabled={generating} style={{ background: 'transparent', border: 'none', color: t.text3, fontSize: '18px', cursor: 'pointer' }}>✕</button>
         </div>
 
-        {/* Body */}
-        <div style={{ padding: '18px 22px', maxHeight: '70vh', overflowY: 'auto' }}>
+        {/* Body — flex-grow + scroll. Only this region scrolls when content overflows. */}
+        <div style={{ padding: '18px 22px', flex: 1, overflowY: 'auto', minHeight: 0 }}>
           {loading && <div style={{ textAlign: 'center', color: t.text3, fontSize: '12px', padding: '40px 0' }}>Loading preview…</div>}
 
           {error && (
@@ -952,8 +959,8 @@ function PreviewModal({ state, t, onClose, onConfirm }) {
           )}
         </div>
 
-        {/* Footer */}
-        <div style={{ padding: '14px 22px', borderTop: `1px solid ${t.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: `${t.card2 || t.card}80` }}>
+        {/* Footer — always visible (outside scroll region) */}
+        <div style={{ padding: '14px 22px', borderTop: `1px solid ${t.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: `${t.card2 || t.card}80`, flexShrink: 0 }}>
           <div style={{ fontSize: '10px', color: t.text4 }}>
             {!blocked && !generating && '⚠ Clicking Confirm will generate this on the GST portal — real legal document.'}
             {blocked && '✕ Generation blocked — see issues above.'}
@@ -1023,16 +1030,16 @@ function CancelModal({ state, t, onChange, onClose, onConfirm, onCreditNote }) {
 
   return (
     <div onClick={(e) => { if (e.target === e.currentTarget && !busy) onClose() }}
-      style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000, padding: '40px 20px' }}>
-      <div style={{ background: t.card, border: `1px solid ${t.red}40`, borderRadius: '12px', width: '100%', maxWidth: '480px', boxShadow: '0 20px 60px rgba(0,0,0,.6)' }}>
-        <div style={{ padding: '16px 22px', borderBottom: `1px solid ${t.border}` }}>
+      style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000, padding: '20px', overflow: 'hidden' }}>
+      <div style={{ background: t.card, border: `1px solid ${t.red}40`, borderRadius: '12px', width: '100%', maxWidth: '480px', maxHeight: 'calc(100vh - 40px)', display: 'flex', flexDirection: 'column', boxShadow: '0 20px 60px rgba(0,0,0,.6)', overflow: 'hidden' }}>
+        <div style={{ padding: '16px 22px', borderBottom: `1px solid ${t.border}`, flexShrink: 0 }}>
           <div style={{ fontSize: '1.05rem', color: t.red, fontWeight: 600 }}>Cancel {docName}</div>
           <div style={{ fontSize: '.7rem', color: t.text3, marginTop: '4px' }}>
             {c.tmp_prf_no} · {docNo}
           </div>
         </div>
 
-        <div style={{ padding: '18px 22px' }}>
+        <div style={{ padding: '18px 22px', flex: 1, overflowY: 'auto', minHeight: 0 }}>
           {!suggestCreditNote && (
             <>
               <div style={{ fontSize: '11px', color: t.text2, marginBottom: '14px', lineHeight: 1.5 }}>
@@ -1087,7 +1094,7 @@ function CancelModal({ state, t, onChange, onClose, onConfirm, onCreditNote }) {
           )}
         </div>
 
-        <div style={{ padding: '14px 22px', borderTop: `1px solid ${t.border}`, display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+        <div style={{ padding: '14px 22px', borderTop: `1px solid ${t.border}`, display: 'flex', justifyContent: 'flex-end', gap: '8px', flexShrink: 0 }}>
           <button onClick={onClose} disabled={busy}
             style={{ background: 'transparent', border: `1px solid ${t.border}`, borderRadius: '6px', padding: '7px 16px', fontSize: '11px', color: t.text3, cursor: 'pointer' }}>
             Close
