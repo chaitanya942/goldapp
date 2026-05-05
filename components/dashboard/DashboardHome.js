@@ -293,6 +293,9 @@ export default function DashboardHome() {
     Promise.all(ps).finally(() => setHubLoading(false))
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Branches load + region scope filter. Re-runs when regionAccess.restricted /
+  // regions change (which happens when userProfile finishes loading) so we don't
+  // miss the filter due to a userProfile-vs-fetch race.
   useEffect(() => {
     if (!showPurchase) return
     supabase.from('branches').select('name, region, state, cluster').eq('is_active', true).then(({ data }) => {
@@ -308,9 +311,9 @@ export default function DashboardHome() {
       const states = new Set(filtered.map(b => b.state).filter(Boolean))
       setStateCount(states.size)
     })
-  }, [showPurchase])
+  }, [showPurchase, regionAccess.restricted, JSON.stringify(regionAccess.regions || [])])
 
-  useEffect(() => { if (showPurchase) { fetchAll(); setLastRefresh(new Date()) } }, [period, showPurchase, filterType, filterValue]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (showPurchase) { fetchAll(); setLastRefresh(new Date()) } }, [period, showPurchase, filterType, filterValue, regionAccess.restricted, JSON.stringify(regionAccess.regions || []), branchMeta.length]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Auto-refresh every 3 minutes when viewing Today
   useEffect(() => {
@@ -320,6 +323,12 @@ export default function DashboardHome() {
   }, [showPurchase, period, filterType, filterValue]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const fetchAll = async () => {
+    // When the user is region-restricted, wait for branchMeta to load before fetching.
+    // Otherwise we'd derive userBranches=[] and either fetch all-India or return empty.
+    if (regionAccess.restricted && branchMeta.length === 0) {
+      setLoading(true)
+      return
+    }
     setLoading(true)
     setStateData([])
     setTopBranches([])
