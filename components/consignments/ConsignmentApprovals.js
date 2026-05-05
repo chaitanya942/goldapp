@@ -127,6 +127,17 @@ export default function ConsignmentApprovals() {
   const [history, setHistory] = useState([])  // approved or rejected, depending on tab
   const [loading, setLoading] = useState(true)
   const [actionId, setActionId] = useState(null)
+  // Preview-before-generate modal state. The modal shows the exact payload that
+  // would be sent to NIC/IRP so accounts can verify addresses + values match
+  // the challan/voucher BEFORE clicking Confirm. Catches "wrong doc" issues
+  // before they become "wrong doc on NIC's books".
+  const [preview, setPreview] = useState(null)
+  // { type: 'ewb'|'irn', consignment, loading, data, generating, error }
+
+  // Cancel modal state for active EWBs/IRNs. Calls our cancel API which talks
+  // to NIC. If NIC says past-24h-window, falls back to credit-note flow (IRN only).
+  const [cancelModal, setCancelModal] = useState(null)
+  // { type: 'ewb'|'irn', consignment, reasonCode, remark, busy, error, suggestCreditNote }
   const [toast, setToast] = useState(null)
   const [notifPermission, setNotifPermission] = useState(typeof window !== 'undefined' && 'Notification' in window ? Notification.permission : 'unsupported')
   const [soundEnabled, setSoundEnabled] = useState(true)
@@ -251,36 +262,114 @@ export default function ConsignmentApprovals() {
     if (next) playApprovalBeep()  // give immediate audible feedback that sound is on
   }
 
-  // Generate EWB / E-Invoice from inside the approval review. Accounts owns
-  // the GST documents; they should produce them as part of the verification
-  // step, not just rubber-stamp what ops generated. Routes are the same
-  // ones ops uses; auth allows any authenticated user (including ACCOUNTS).
-  async function generateEwbForReview(c) {
-    setActionId(c.id + ':gen-ewb')
+  // Open the preview modal — shows exactly what would be sent to NIC/IRP.
+  // No NIC call yet; this just fetches our local payload constructor. Accounts
+  // verifies the addresses, weight, value match the challan/voucher BEFORE
+  // clicking Confirm & Generate inside the modal.
+  async function openPreview(c, type) {
+    const path = type === 'ewb' ? '/api/eway-bill/preview' : '/api/e-invoice/preview'
+    setPreview({ type, consignment: c, loading: true, data: null, generating: false, error: null })
     try {
-      const r = await authedFetch('/api/eway-bill/generate', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ consignment_id: c.id }),
-      })
+      const r = await authedFetch(`${path}?id=${c.id}`)
       const j = await r.json()
-      if (!r.ok || j.error) { showToast(j.error || 'E-Way Bill generation failed.', 'error'); return }
-      showToast(`E-Way Bill ${j.ewb_no} generated.`, 'success')
-      fetchPending(true)  // refresh row so the new EWB chip + preview link appear
-    } finally { setActionId(null) }
+      if (!r.ok || j.error) {
+        setPreview(p => p ? { ...p, loading: false, error: j.error || 'Preview failed' } : null)
+        return
+      }
+      setPreview(p => p ? { ...p, loading: false, data: j } : null)
+    } catch (e) {
+      setPreview(p => p ? { ...p, loading: false, error: e.message } : null)
+    }
   }
 
-  async function generateEinvForReview(c) {
-    setActionId(c.id + ':gen-einv')
+  // After accounts reviews the preview, this fires the actual generation.
+  // This is the ONLY function that hits NIC — gated by an explicit click.
+  async function confirmGenerate() {
+    if (!preview) return
+    const { type, consignment: c } = preview
+    const path = type === 'ewb' ? '/api/eway-bill/generate' : '/api/e-invoice/generate'
+    setPreview(p => p ? { ...p, generating: true, error: null } : null)
     try {
-      const r = await authedFetch('/api/e-invoice/generate', {
+      const r = await authedFetch(path, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ consignment_id: c.id }),
       })
       const j = await r.json()
-      if (!r.ok || j.error) { showToast(j.error || 'E-Invoice generation failed.', 'error'); return }
-      showToast('E-Invoice generated.', 'success')
+      if (!r.ok || j.error) {
+        setPreview(p => p ? { ...p, generating: false, error: j.error || 'Generation failed' } : null)
+        return
+      }
+      const successMsg = type === 'ewb' ? `E-Way Bill ${j.ewb_no} generated.` : 'E-Invoice generated.'
+      showToast(successMsg, 'success')
+      setPreview(null)
       fetchPending(true)
-    } finally { setActionId(null) }
+    } catch (e) {
+      setPreview(p => p ? { ...p, generating: false, error: e.message } : null)
+    }
+  }
+
+  // Open the cancel modal for an existing EWB / IRN.
+  function openCancel(c, type) {
+    setCancelModal({
+      type, consignment: c,
+      reasonCode: '2',  // 2 = Data Entry Mistake (most common reason for our cancellations)
+      remark: '',
+      busy: false, error: null, suggestCreditNote: false,
+    })
+  }
+
+  // Fires the actual cancel call to NIC/IRP via our cancel API.
+  async function confirmCancel() {
+    if (!cancelModal) return
+    const { type, consignment: c, reasonCode, remark } = cancelModal
+    const path = type === 'ewb' ? '/api/eway-bill/cancel' : '/api/e-invoice/cancel'
+    setCancelModal(m => m ? { ...m, busy: true, error: null } : null)
+    try {
+      const r = await authedFetch(path, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ consignment_id: c.id, reason_code: reasonCode, remark }),
+      })
+      const j = await r.json()
+      if (!r.ok || j.error) {
+        // Detect 24h-past errors. NIC returns various phrasings — match the common ones.
+        const msg = (j.error || '').toLowerCase()
+        const isPast24h = type === 'irn' && (
+          msg.includes('24') || msg.includes('cancel') && msg.includes('time') || msg.includes('expired')
+        )
+        setCancelModal(m => m ? { ...m, busy: false, error: j.error || 'Cancel failed', suggestCreditNote: isPast24h } : null)
+        return
+      }
+      showToast(`${type === 'ewb' ? 'E-Way Bill' : 'E-Invoice'} cancelled.`, 'success')
+      setCancelModal(null)
+      fetchPending(true)
+    } catch (e) {
+      setCancelModal(m => m ? { ...m, busy: false, error: e.message } : null)
+    }
+  }
+
+  // Generate a credit note IRN for an E-Invoice that's past the 24h cancel window.
+  // The credit note offsets the original IRN in GSTR-1 — it's the GST-compliant
+  // way to nullify a wrongly-issued invoice when cancellation is no longer allowed.
+  async function generateCreditNote() {
+    if (!cancelModal || cancelModal.type !== 'irn') return
+    const c = cancelModal.consignment
+    setCancelModal(m => m ? { ...m, busy: true, error: null } : null)
+    try {
+      const r = await authedFetch('/api/e-invoice/credit-note', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ consignment_id: c.id, remark: cancelModal.remark || 'Reversal — wrong invoice issued' }),
+      })
+      const j = await r.json()
+      if (!r.ok || j.error) {
+        setCancelModal(m => m ? { ...m, busy: false, error: j.error || 'Credit Note generation failed' } : null)
+        return
+      }
+      showToast(`Credit Note ${j.irn} generated. Original IRN remains on NIC books — both will appear in GSTR-1.`, 'success')
+      setCancelModal(null)
+      fetchPending(true)
+    } catch (e) {
+      setCancelModal(m => m ? { ...m, busy: false, error: e.message } : null)
+    }
   }
 
   async function requestNotifications() {
@@ -637,29 +726,43 @@ export default function ConsignmentApprovals() {
                       return (
                         <>
                           {showEwb && (c.eway_bill_no ? (
-                            <button onClick={() => previewDoc(`/api/eway-bill/pdf?id=${c.id}`, `EWB-${c.eway_bill_no}.pdf`, msg => showToast(msg, 'error'))}
-                              title={`Preview E-Way Bill ${c.eway_bill_no}`}
-                              style={{ background: 'transparent', border: 'none', padding: 0, fontSize: '10px', color: t.green, fontWeight: 600, cursor: 'pointer', textDecoration: 'underline' }}>
-                              E-Way Bill
-                            </button>
+                            <span style={{ display: 'inline-flex', gap: '4px', alignItems: 'center' }}>
+                              <button onClick={() => previewDoc(`/api/eway-bill/pdf?id=${c.id}`, `EWB-${c.eway_bill_no}.pdf`, msg => showToast(msg, 'error'))}
+                                title={`Preview E-Way Bill ${c.eway_bill_no}`}
+                                style={{ background: 'transparent', border: 'none', padding: 0, fontSize: '10px', color: t.green, fontWeight: 600, cursor: 'pointer', textDecoration: 'underline' }}>
+                                E-Way Bill
+                              </button>
+                              <button onClick={() => openCancel(c, 'ewb')}
+                                title="Cancel this E-Way Bill on NIC (must be within 24 hours of generation)"
+                                style={{ background: 'transparent', border: `1px solid ${t.red}40`, borderRadius: '4px', padding: '1px 6px', fontSize: '9px', color: t.red, cursor: 'pointer' }}>
+                                ✕
+                              </button>
+                            </span>
                           ) : (
-                            <button onClick={() => generateEwbForReview(c)} disabled={!!actionId}
-                              title="Generate E-Way Bill via NIC. Verify the values match the Voucher / Challan before approving."
-                              style={{ background: 'transparent', border: `1px solid ${t.green}50`, borderRadius: '5px', padding: '2px 8px', fontSize: '10px', color: t.green, fontWeight: 600, cursor: actionId ? 'not-allowed' : 'pointer', opacity: isGenEwbBusy ? 0.6 : 1 }}>
-                              {isGenEwbBusy ? 'Generating…' : 'Generate EWB'}
+                            <button onClick={() => openPreview(c, 'ewb')} disabled={!!actionId}
+                              title="Preview the E-Way Bill before firing NIC. Verify addresses + value + weight match the Voucher / Challan."
+                              style={{ background: 'transparent', border: `1px solid ${t.green}50`, borderRadius: '5px', padding: '2px 8px', fontSize: '10px', color: t.green, fontWeight: 600, cursor: actionId ? 'not-allowed' : 'pointer' }}>
+                              Preview EWB
                             </button>
                           ))}
                           {showEinv && (c.irn ? (
-                            <button onClick={() => previewDoc(`/api/e-invoice/pdf?id=${c.id}`, `EInvoice-${c.tmp_prf_no}.pdf`, msg => showToast(msg, 'error'))}
-                              title="Preview E-Invoice PDF"
-                              style={{ background: 'transparent', border: 'none', padding: 0, fontSize: '10px', color: t.purple, fontWeight: 600, cursor: 'pointer', textDecoration: 'underline' }}>
-                              E-Invoice
-                            </button>
+                            <span style={{ display: 'inline-flex', gap: '4px', alignItems: 'center' }}>
+                              <button onClick={() => previewDoc(`/api/e-invoice/pdf?id=${c.id}`, `EInvoice-${c.tmp_prf_no}.pdf`, msg => showToast(msg, 'error'))}
+                                title="Preview E-Invoice PDF"
+                                style={{ background: 'transparent', border: 'none', padding: 0, fontSize: '10px', color: t.purple, fontWeight: 600, cursor: 'pointer', textDecoration: 'underline' }}>
+                                E-Invoice
+                              </button>
+                              <button onClick={() => openCancel(c, 'irn')}
+                                title="Cancel this E-Invoice on IRP (within 24h) — or generate a Credit Note if past the window"
+                                style={{ background: 'transparent', border: `1px solid ${t.red}40`, borderRadius: '4px', padding: '1px 6px', fontSize: '9px', color: t.red, cursor: 'pointer' }}>
+                                ✕
+                              </button>
+                            </span>
                           ) : (
-                            <button onClick={() => generateEinvForReview(c)} disabled={!!actionId}
-                              title="Generate E-Invoice via IRP. Verify the values before approving."
-                              style={{ background: 'transparent', border: `1px solid ${t.purple}50`, borderRadius: '5px', padding: '2px 8px', fontSize: '10px', color: t.purple, fontWeight: 600, cursor: actionId ? 'not-allowed' : 'pointer', opacity: isGenEinvBusy ? 0.6 : 1 }}>
-                              {isGenEinvBusy ? 'Generating…' : 'Generate IRN'}
+                            <button onClick={() => openPreview(c, 'irn')} disabled={!!actionId}
+                              title="Preview the E-Invoice payload before firing IRP. Verify GSTINs + value + items match."
+                              style={{ background: 'transparent', border: `1px solid ${t.purple}50`, borderRadius: '5px', padding: '2px 8px', fontSize: '10px', color: t.purple, fontWeight: 600, cursor: actionId ? 'not-allowed' : 'pointer' }}>
+                              Preview IRN
                             </button>
                           ))}
                         </>
@@ -684,6 +787,287 @@ export default function ConsignmentApprovals() {
           })}
         </div>
       )}
+
+      {/* ── Preview Modal: EWB / IRN before firing NIC ── */}
+      {preview && (
+        <PreviewModal
+          state={preview}
+          t={t}
+          onClose={() => setPreview(null)}
+          onConfirm={confirmGenerate}
+        />
+      )}
+
+      {/* ── Cancel Modal: cancel an existing EWB/IRN, with credit note fallback for past 24h ── */}
+      {cancelModal && (
+        <CancelModal
+          state={cancelModal}
+          t={t}
+          onChange={(patch) => setCancelModal(m => m ? { ...m, ...patch } : null)}
+          onClose={() => setCancelModal(null)}
+          onConfirm={confirmCancel}
+          onCreditNote={generateCreditNote}
+        />
+      )}
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Preview modal — shows the exact payload that would be sent to NIC/IRP, side
+// by side with the document fields accounts cares about. Only after explicit
+// confirmation does the actual generate fire.
+// ─────────────────────────────────────────────────────────────────────────────
+function PreviewModal({ state, t, onClose, onConfirm }) {
+  const { type, consignment: c, loading, data, generating, error } = state
+  const isEwb   = type === 'ewb'
+  const docName = isEwb ? 'E-Way Bill' : 'E-Invoice'
+  const accent  = isEwb ? t.green : t.purple
+  const fmtINR  = (n) => n == null ? '—' : `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`
+  const summary = data?.summary
+  const errors  = data?.validation_errors || []
+  const blocked = errors.length > 0 || data?.already_generated || !data?.can_generate
+
+  return (
+    <div onClick={(e) => { if (e.target === e.currentTarget && !generating) onClose() }}
+      style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.7)', display: 'flex', alignItems: 'flex-start', justifyContent: 'center', zIndex: 2000, padding: '40px 20px', overflowY: 'auto' }}>
+      <div style={{ background: t.card, border: `1px solid ${accent}40`, borderRadius: '12px', width: '100%', maxWidth: '720px', boxShadow: '0 20px 60px rgba(0,0,0,.6)' }}>
+
+        {/* Header */}
+        <div style={{ padding: '16px 22px', borderBottom: `1px solid ${t.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+          <div>
+            <div style={{ fontSize: '.6rem', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: '4px' }}>Preview before generation</div>
+            <div style={{ fontSize: '1.05rem', color: accent, fontWeight: 600 }}>{docName} for {c.tmp_prf_no}</div>
+            <div style={{ fontSize: '.7rem', color: t.text3, marginTop: '4px' }}>
+              Review the values below. Click <strong>Confirm &amp; Generate</strong> only if everything matches the Voucher / Challan.
+            </div>
+          </div>
+          <button onClick={onClose} disabled={generating} style={{ background: 'transparent', border: 'none', color: t.text3, fontSize: '18px', cursor: 'pointer' }}>✕</button>
+        </div>
+
+        {/* Body */}
+        <div style={{ padding: '18px 22px', maxHeight: '70vh', overflowY: 'auto' }}>
+          {loading && <div style={{ textAlign: 'center', color: t.text3, fontSize: '12px', padding: '40px 0' }}>Loading preview…</div>}
+
+          {error && (
+            <div style={{ background: `${t.red}15`, border: `1px solid ${t.red}40`, borderRadius: '7px', padding: '10px 14px', fontSize: '12px', color: t.red, marginBottom: '12px' }}>
+              {error}
+            </div>
+          )}
+
+          {data?.already_generated && (
+            <div style={{ background: `${t.orange}15`, border: `1px solid ${t.orange}40`, borderRadius: '7px', padding: '10px 14px', fontSize: '12px', color: t.orange, marginBottom: '12px' }}>
+              {docName} already exists ({data.existing_ewb_no || data.existing_irn}). Cancel it first if you need to regenerate.
+            </div>
+          )}
+
+          {errors.length > 0 && (
+            <div style={{ background: `${t.red}10`, border: `1px solid ${t.red}30`, borderRadius: '7px', padding: '10px 14px', fontSize: '11px', color: t.red, marginBottom: '12px' }}>
+              <div style={{ fontWeight: 600, marginBottom: '4px' }}>Cannot generate — fix these first:</div>
+              {errors.map((e, i) => <div key={i} style={{ marginTop: '2px' }}>· {e}</div>)}
+            </div>
+          )}
+
+          {summary && (
+            <>
+              {/* Header KPIs — easy to scan against challan */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1px', background: t.border, borderRadius: '8px', overflow: 'hidden', marginBottom: '14px' }}>
+                <PreviewKpi t={t} label="Quantity (Gross)" value={`${Number(summary.quantity_grams || 0).toFixed(3)}g`} accent={t.gold} />
+                <PreviewKpi t={t} label="Taxable Amount"   value={fmtINR(summary.taxable_amount)} accent={t.blue} />
+                <PreviewKpi t={t} label="Total Invoice"    value={fmtINR(summary.total_invoice)}  accent={t.green} />
+              </div>
+
+              {/* Side-by-side parties */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '12px', marginBottom: '14px' }}>
+                <PartyCard t={t} title={isEwb ? 'From / Dispatch' : 'Seller'} party={summary.seller} />
+                <PartyCard t={t} title={isEwb ? 'To / Ship'       : 'Buyer (HO)'} party={summary.buyer} />
+              </div>
+
+              {/* Tax breakdown */}
+              <div style={{ background: t.card2 || t.card, border: `1px solid ${t.border}`, borderRadius: '8px', padding: '12px 14px', marginBottom: '14px' }}>
+                <div style={{ fontSize: '.6rem', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: '8px' }}>Tax breakdown</div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '8px', fontSize: '11px' }}>
+                  <div><div style={{ color: t.text4 }}>Taxable</div><div style={{ color: t.text1, fontFamily: 'monospace', marginTop: '2px' }}>{fmtINR(summary.taxable_amount)}</div></div>
+                  <div><div style={{ color: t.text4 }}>IGST{summary.igst_rate ? ` @${summary.igst_rate}%` : ''}</div><div style={{ color: t.text1, fontFamily: 'monospace', marginTop: '2px' }}>{fmtINR(summary.igst_amount)}</div></div>
+                  <div><div style={{ color: t.text4 }}>CGST + SGST</div><div style={{ color: t.text1, fontFamily: 'monospace', marginTop: '2px' }}>{fmtINR((Number(summary.cgst_amount || 0) + Number(summary.sgst_amount || 0)))}</div></div>
+                  <div><div style={{ color: t.text4 }}>Total</div><div style={{ color: t.green, fontFamily: 'monospace', marginTop: '2px', fontWeight: 600 }}>{fmtINR(summary.total_invoice)}</div></div>
+                </div>
+                {isEwb && summary.distance_km != null && (
+                  <div style={{ marginTop: '10px', fontSize: '10px', color: t.text3 }}>Distance: <strong style={{ color: t.text2 }}>{summary.distance_km} km</strong> · HSN: <strong style={{ color: t.text2 }}>{summary.hsn}</strong> · Sub-supply: <strong style={{ color: t.text2 }}>{summary.sub_supply_type}</strong></div>
+                )}
+              </div>
+
+              {/* Items list */}
+              {summary.items?.length > 0 && (
+                <div style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: '8px', overflow: 'hidden', marginBottom: '14px' }}>
+                  <div style={{ padding: '10px 14px', borderBottom: `1px solid ${t.border}`, fontSize: '.6rem', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase' }}>Items ({summary.items.length})</div>
+                  <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                    <thead><tr>{['Bill', 'Customer', 'Gross', 'Net', 'Value'].map(h =>
+                      <th key={h} style={{ padding: '7px 12px', fontSize: '9px', color: t.text3, letterSpacing: '.1em', textTransform: 'uppercase', textAlign: ['Gross','Net','Value'].includes(h) ? 'right' : 'left', fontWeight: 500, borderBottom: `1px solid ${t.border}` }}>{h}</th>
+                    )}</tr></thead>
+                    <tbody>
+                      {summary.items.map((it, i) => (
+                        <tr key={i} style={{ borderBottom: i === summary.items.length - 1 ? 'none' : `1px solid ${t.border}25` }}>
+                          <td style={{ padding: '7px 12px', fontSize: '11px', color: t.gold, fontFamily: 'monospace' }}>{it.bill_no || '—'}</td>
+                          <td style={{ padding: '7px 12px', fontSize: '11px', color: t.text1 }}>{it.customer || '—'}</td>
+                          <td style={{ padding: '7px 12px', fontSize: '11px', color: t.gold, textAlign: 'right', fontFamily: 'monospace' }}>{Number(it.gross_weight).toFixed(3)}g</td>
+                          <td style={{ padding: '7px 12px', fontSize: '11px', color: t.text2, textAlign: 'right', fontFamily: 'monospace' }}>{Number(it.net_weight).toFixed(3)}g</td>
+                          <td style={{ padding: '7px 12px', fontSize: '11px', color: t.blue, textAlign: 'right', fontFamily: 'monospace' }}>{fmtINR(it.total_amount)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              <div style={{ fontSize: '10px', color: t.text4, textAlign: 'center' }}>
+                Document #: <span style={{ fontFamily: 'monospace', color: t.text2 }}>{summary.document_no}</span> · Date: <span style={{ fontFamily: 'monospace', color: t.text2 }}>{summary.document_date}</span>
+              </div>
+            </>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div style={{ padding: '14px 22px', borderTop: `1px solid ${t.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: `${t.card2 || t.card}80` }}>
+          <div style={{ fontSize: '10px', color: t.text4 }}>
+            {!blocked && !generating && '⚠ Clicking Confirm will generate this on the GST portal — real legal document.'}
+            {blocked && '✕ Generation blocked — see issues above.'}
+          </div>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button onClick={onClose} disabled={generating}
+              style={{ background: 'transparent', border: `1px solid ${t.border}`, borderRadius: '6px', padding: '7px 16px', fontSize: '11px', color: t.text3, cursor: 'pointer' }}>
+              Close
+            </button>
+            <button onClick={onConfirm} disabled={blocked || generating || loading}
+              style={{ background: blocked || generating ? t.border : accent, color: blocked || generating ? t.text3 : '#fff', border: 'none', borderRadius: '6px', padding: '7px 18px', fontSize: '11px', fontWeight: 700, cursor: blocked || generating || loading ? 'not-allowed' : 'pointer', opacity: blocked ? 0.5 : 1 }}>
+              {generating ? 'Generating…' : `Confirm & Generate ${docName}`}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function PreviewKpi({ t, label, value, accent }) {
+  return (
+    <div style={{ background: t.card, padding: '11px 14px' }}>
+      <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: '4px' }}>{label}</div>
+      <div style={{ fontSize: '15px', color: accent, fontFamily: 'monospace', fontWeight: 600 }}>{value}</div>
+    </div>
+  )
+}
+
+function PartyCard({ t, title, party }) {
+  if (!party) return null
+  return (
+    <div style={{ background: t.card2 || t.card, border: `1px solid ${t.border}`, borderRadius: '8px', padding: '12px 14px' }}>
+      <div style={{ fontSize: '.6rem', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: '6px' }}>{title}</div>
+      <div style={{ fontSize: '11px', fontFamily: 'monospace', color: t.gold, marginBottom: '4px' }}>{party.gstin || '—'}</div>
+      <div style={{ fontSize: '11px', color: t.text1, fontWeight: 600, marginBottom: '2px' }}>{party.legal_name || '—'}</div>
+      <div style={{ fontSize: '10px', color: t.text2, lineHeight: 1.5 }}>
+        {party.address1}{party.address2 ? ` ${party.address2}` : ''}
+      </div>
+      <div style={{ fontSize: '10px', color: t.text3, marginTop: '4px' }}>
+        {party.location ? `${party.location} · ` : ''}{party.pin ? `PIN ${party.pin}` : ''}{party.state_code ? ` · ${party.state_code}` : ''}
+      </div>
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Cancel modal — calls our cancel API which talks to NIC. If NIC says past 24h,
+// we offer Credit Note (E-Invoice only) as the GST-compliant alternative.
+// ─────────────────────────────────────────────────────────────────────────────
+function CancelModal({ state, t, onChange, onClose, onConfirm, onCreditNote }) {
+  const { type, consignment: c, reasonCode, remark, busy, error, suggestCreditNote } = state
+  const isEwb = type === 'ewb'
+  const docName = isEwb ? 'E-Way Bill' : 'E-Invoice'
+  const docNo = isEwb ? c.eway_bill_no : c.irn
+  const REASONS = isEwb ? [
+    { code: '1', label: 'Duplicate' },
+    { code: '2', label: 'Order Cancelled' },
+    { code: '3', label: 'Data Entry Mistake' },
+    { code: '4', label: 'Others' },
+  ] : [
+    { code: '1', label: 'Duplicate' },
+    { code: '2', label: 'Data Entry Mistake' },
+    { code: '3', label: 'Order Cancelled' },
+    { code: '4', label: 'Others' },
+  ]
+
+  return (
+    <div onClick={(e) => { if (e.target === e.currentTarget && !busy) onClose() }}
+      style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000, padding: '40px 20px' }}>
+      <div style={{ background: t.card, border: `1px solid ${t.red}40`, borderRadius: '12px', width: '100%', maxWidth: '480px', boxShadow: '0 20px 60px rgba(0,0,0,.6)' }}>
+        <div style={{ padding: '16px 22px', borderBottom: `1px solid ${t.border}` }}>
+          <div style={{ fontSize: '1.05rem', color: t.red, fontWeight: 600 }}>Cancel {docName}</div>
+          <div style={{ fontSize: '.7rem', color: t.text3, marginTop: '4px' }}>
+            {c.tmp_prf_no} · {docNo}
+          </div>
+        </div>
+
+        <div style={{ padding: '18px 22px' }}>
+          {!suggestCreditNote && (
+            <>
+              <div style={{ fontSize: '11px', color: t.text2, marginBottom: '14px', lineHeight: 1.5 }}>
+                Cancelling on {isEwb ? 'NIC E-Way Bill portal' : 'IRP / E-Invoice portal'}. Must be within <strong style={{ color: t.orange }}>24 hours</strong> of generation. Once cancelled, you cannot un-cancel — you'd have to regenerate a new one.
+              </div>
+
+              <div style={{ marginBottom: '14px' }}>
+                <div style={{ fontSize: '10px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: '5px' }}>Reason</div>
+                <select value={reasonCode} onChange={e => onChange({ reasonCode: e.target.value })} disabled={busy}
+                  style={{ width: '100%', background: t.card2 || t.card, border: `1px solid ${t.border}`, borderRadius: '6px', padding: '8px 10px', color: t.text1, fontSize: '12px', outline: 'none' }}>
+                  {REASONS.map(r => <option key={r.code} value={r.code}>{r.code} — {r.label}</option>)}
+                </select>
+              </div>
+
+              <div>
+                <div style={{ fontSize: '10px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: '5px' }}>Remark <span style={{ color: t.text4, textTransform: 'none', letterSpacing: 'normal' }}>(optional)</span></div>
+                <input type="text" value={remark} onChange={e => onChange({ remark: e.target.value })} disabled={busy}
+                  placeholder={`Reason for cancellation`}
+                  style={{ width: '100%', background: t.card2 || t.card, border: `1px solid ${t.border}`, borderRadius: '6px', padding: '8px 10px', color: t.text1, fontSize: '12px', outline: 'none', boxSizing: 'border-box' }} />
+              </div>
+            </>
+          )}
+
+          {error && (
+            <div style={{ background: `${t.red}15`, border: `1px solid ${t.red}40`, borderRadius: '7px', padding: '10px 14px', fontSize: '11px', color: t.red, marginTop: '14px' }}>
+              {error}
+            </div>
+          )}
+
+          {suggestCreditNote && (
+            <div style={{ background: `${t.orange}10`, border: `1px solid ${t.orange}40`, borderRadius: '8px', padding: '14px', marginTop: '14px' }}>
+              <div style={{ fontSize: '12px', color: t.orange, fontWeight: 600, marginBottom: '6px' }}>Past the 24-hour cancellation window</div>
+              <div style={{ fontSize: '11px', color: t.text2, lineHeight: 1.6, marginBottom: '10px' }}>
+                NIC won't accept the cancellation now. To nullify this E-Invoice in your GSTR-1, you can issue a <strong style={{ color: t.orange }}>Credit Note</strong> against it. Both the original IRN and the credit note will appear in your filings — net effect on tax: zero.
+              </div>
+              <div style={{ fontSize: '10px', color: t.text3, lineHeight: 1.5 }}>
+                The credit note's IRN will be registered with IRP automatically. Talk to your CA about how to mark this in the next return cycle.
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div style={{ padding: '14px 22px', borderTop: `1px solid ${t.border}`, display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+          <button onClick={onClose} disabled={busy}
+            style={{ background: 'transparent', border: `1px solid ${t.border}`, borderRadius: '6px', padding: '7px 16px', fontSize: '11px', color: t.text3, cursor: 'pointer' }}>
+            Close
+          </button>
+          {suggestCreditNote ? (
+            <button onClick={onCreditNote} disabled={busy}
+              style={{ background: t.orange, color: '#fff', border: 'none', borderRadius: '6px', padding: '7px 18px', fontSize: '11px', fontWeight: 700, cursor: busy ? 'not-allowed' : 'pointer' }}>
+              {busy ? 'Generating…' : 'Generate Credit Note'}
+            </button>
+          ) : (
+            <button onClick={onConfirm} disabled={busy}
+              style={{ background: t.red, color: '#fff', border: 'none', borderRadius: '6px', padding: '7px 18px', fontSize: '11px', fontWeight: 700, cursor: busy ? 'not-allowed' : 'pointer' }}>
+              {busy ? 'Cancelling…' : `Cancel ${docName}`}
+            </button>
+          )}
+        </div>
+      </div>
     </div>
   )
 }
