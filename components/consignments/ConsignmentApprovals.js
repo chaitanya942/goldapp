@@ -848,7 +848,7 @@ function PreviewModal({ state, t, onClose, onConfirm }) {
   const isEwb   = type === 'ewb'
   const docName = isEwb ? 'E-Way Bill' : 'E-Invoice'
   const accent  = isEwb ? t.green : t.purple
-  const fmtINR  = (n) => n == null ? '—' : `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`
+  const fmtINR  = (n) => n == null ? '—' : `₹${Number(n).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
   const summary = data?.summary
   const errors  = data?.validation_errors || []
   const blocked = errors.length > 0 || data?.already_generated || !data?.can_generate
