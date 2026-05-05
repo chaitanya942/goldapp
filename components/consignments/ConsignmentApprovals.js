@@ -269,16 +269,22 @@ export default function ConsignmentApprovals() {
   async function openPreview(c, type) {
     const path = type === 'ewb' ? '/api/eway-bill/preview' : '/api/e-invoice/preview'
     setPreview({ type, consignment: c, loading: true, data: null, generating: false, error: null })
+    // Race guard: if the user opens a different preview while this fetch is in flight,
+    // we must not overwrite their newer preview state with our stale response.
+    const isStillCurrent = (p) => p && p.type === type && p.consignment?.id === c.id && p.loading
     try {
       const r = await authedFetch(`${path}?id=${c.id}`)
       const j = await r.json()
-      if (!r.ok || j.error) {
-        setPreview(p => p ? { ...p, loading: false, error: j.error || 'Preview failed' } : null)
-        return
-      }
-      setPreview(p => p ? { ...p, loading: false, data: j } : null)
+      setPreview(p => {
+        if (!isStillCurrent(p)) return p  // user moved on; don't clobber
+        if (!r.ok || j.error) return { ...p, loading: false, error: j.error || 'Preview failed' }
+        return { ...p, loading: false, data: j }
+      })
     } catch (e) {
-      setPreview(p => p ? { ...p, loading: false, error: e.message } : null)
+      setPreview(p => {
+        if (!isStillCurrent(p)) return p
+        return { ...p, loading: false, error: e.message }
+      })
     }
   }
 
@@ -331,12 +337,32 @@ export default function ConsignmentApprovals() {
       })
       const j = await r.json()
       if (!r.ok || j.error) {
-        // Detect 24h-past errors. NIC returns various phrasings — match the common ones.
+        // Detect 24h-past errors so we can offer the credit-note alternative (IRN only).
+        // NIC error phrasings vary across EWB and IRP responses — match permissively but require an explicit signal.
         const msg = (j.error || '').toLowerCase()
-        const isPast24h = type === 'irn' && (
-          msg.includes('24') || msg.includes('cancel') && msg.includes('time') || msg.includes('expired')
-        )
-        setCancelModal(m => m ? { ...m, busy: false, error: j.error || 'Cancel failed', suggestCreditNote: isPast24h } : null)
+        const matchesWindow = msg.includes('24 hr')
+          || msg.includes('24 hour')
+          || msg.includes('24hour')
+          || msg.includes('24 hrs')
+          || msg.includes('time limit')
+          || msg.includes('time has elapsed')
+          || msg.includes('time exceeded')
+          || msg.includes('time expired')
+          || msg.includes('past time')
+          || msg.includes('cancel window')
+          || msg.includes('cancellation window')
+          || msg.includes('cancellation period')
+          || msg.includes('beyond cancel')
+          || msg.includes('not allowed') && msg.includes('cancel')
+        const isPast24h = type === 'irn' && matchesWindow
+        const isEwbPast24h = type === 'ewb' && matchesWindow
+        setCancelModal(m => m ? {
+          ...m,
+          busy: false,
+          error: j.error || 'Cancel failed',
+          suggestCreditNote: isPast24h,
+          ewbPast24h: isEwbPast24h,
+        } : null)
         return
       }
       showToast(`${type === 'ewb' ? 'E-Way Bill' : 'E-Invoice'} cancelled.`, 'success')
@@ -721,8 +747,7 @@ export default function ConsignmentApprovals() {
                       const isKaSource = c.state_code === 'KA'
                       const showEwb    = isType || isKaSource
                       const showEinv   = !isType && !isKaSource
-                      const isGenEwbBusy  = actionId === c.id + ':gen-ewb'
-                      const isGenEinvBusy = actionId === c.id + ':gen-einv'
+                      // (Generate runs from inside the Preview modal now; busy state is owned by `preview.generating`.)
                       return (
                         <>
                           {showEwb && (c.eway_bill_no ? (
@@ -980,7 +1005,7 @@ function PartyCard({ t, title, party }) {
 // we offer Credit Note (E-Invoice only) as the GST-compliant alternative.
 // ─────────────────────────────────────────────────────────────────────────────
 function CancelModal({ state, t, onChange, onClose, onConfirm, onCreditNote }) {
-  const { type, consignment: c, reasonCode, remark, busy, error, suggestCreditNote } = state
+  const { type, consignment: c, reasonCode, remark, busy, error, suggestCreditNote, ewbPast24h } = state
   const isEwb = type === 'ewb'
   const docName = isEwb ? 'E-Way Bill' : 'E-Invoice'
   const docNo = isEwb ? c.eway_bill_no : c.irn
@@ -1045,6 +1070,18 @@ function CancelModal({ state, t, onChange, onClose, onConfirm, onCreditNote }) {
               </div>
               <div style={{ fontSize: '10px', color: t.text3, lineHeight: 1.5 }}>
                 The credit note's IRN will be registered with IRP automatically. Talk to your CA about how to mark this in the next return cycle.
+              </div>
+            </div>
+          )}
+
+          {ewbPast24h && (
+            <div style={{ background: `${t.red}10`, border: `1px solid ${t.red}40`, borderRadius: '8px', padding: '14px', marginTop: '14px' }}>
+              <div style={{ fontSize: '12px', color: t.red, fontWeight: 600, marginBottom: '6px' }}>Past the 24-hour cancellation window</div>
+              <div style={{ fontSize: '11px', color: t.text2, lineHeight: 1.6, marginBottom: '10px' }}>
+                NIC will not accept this E-Way Bill cancellation anymore. Unlike E-Invoices, EWBs have no <strong>Credit Note</strong> equivalent — they're transport documents only, not tax documents.
+              </div>
+              <div style={{ fontSize: '10px', color: t.text3, lineHeight: 1.5 }}>
+                Action: log this EWB number with accounts. They'll record it in the GSTR-1 reconciliation as an issued-but-unused EWB. Since EWBs don't drive tax computation, there's no GST impact — only documentation.
               </div>
             </div>
           )}

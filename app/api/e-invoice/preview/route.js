@@ -32,7 +32,14 @@ export async function GET(req) {
   const { consignment, branch, items, companySettings } = loaded
 
   // Mirror the generate route's preflight checks so accounts sees the same blockers BEFORE clicking.
+  // ORDER MATTERS: status / approval guards FIRST.
   const errors = []
+  if (consignment.status === 'cancelled') {
+    errors.push(`${consignment.tmp_prf_no} is cancelled. Cannot generate an E-Invoice against a cancelled consignment.`)
+  }
+  if (consignment.approval_status === 'rejected') {
+    errors.push(`${consignment.tmp_prf_no} was rejected by accounts. Cannot generate an E-Invoice.`)
+  }
   if (!items?.length) errors.push('Consignment has no items')
   const totalGross = (items || []).reduce((s, i) => s + Number(i.gross_weight || 0), 0)
   if (totalGross <= 0) errors.push('Total gross weight is 0')

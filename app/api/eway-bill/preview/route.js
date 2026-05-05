@@ -46,8 +46,15 @@ export async function GET(req) {
   const { consignment, branch, destBranch, items, companySettings } = loaded
 
   // Same preflight checks the generate route runs — surface them here so accounts sees them BEFORE clicking Generate.
+  // ORDER MATTERS: status / approval guards FIRST so they always show, regardless of other issues.
   const errors = []
   const isInternal = consignment.movement_type === 'INTERNAL'
+  if (consignment.status === 'cancelled') {
+    errors.push(`${consignment.tmp_prf_no} is cancelled. Cannot generate an E-Way Bill against a cancelled consignment.`)
+  }
+  if (consignment.approval_status === 'rejected') {
+    errors.push(`${consignment.tmp_prf_no} was rejected by accounts. Cannot generate an E-Way Bill.`)
+  }
   if (!branch?.address && !branch?.city) errors.push('Source branch has no address')
   if (isInternal && !destBranch?.address && !destBranch?.city) errors.push('Destination hub has no address')
   if (branch?.pin_code && !isValidPin(branch.pin_code)) errors.push(`Source PIN '${branch.pin_code}' is invalid`)
