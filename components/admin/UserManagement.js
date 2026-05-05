@@ -19,6 +19,35 @@ const DEFAULT_ROLES = [
   { value: 'telesales',       label: 'Telesales',        color: '#e07840' },
 ]
 
+const REGION_COLOR = {
+  'Andhra Pradesh':    '#5ec1d6',
+  'Kerala':            '#3aaa6a',
+  'Telangana':         '#c9a84c',
+  'Tamil Nadu':        '#e58a3b',
+  'Rest of Karnataka': '#9275d5',
+  'Bangalore':         '#e05555',
+}
+
+const REGION_BYPASS_ROLES = new Set(['super_admin', 'founders_office', 'admin'])
+
+// Compact region label (e.g. "Andhra Pradesh" → "AP", "Rest of Karnataka" → "RoK")
+const regionShort = (r) => ({
+  'Andhra Pradesh':    'AP',
+  'Kerala':            'KL',
+  'Telangana':         'TS',
+  'Tamil Nadu':        'TN',
+  'Rest of Karnataka': 'RoK',
+  'Bangalore':         'BLR',
+}[r] || r.slice(0, 3).toUpperCase())
+
+// Initials from full name (e.g. "Mithun Shetty" → "MS")
+const initials = (name) => {
+  if (!name) return '?'
+  const parts = String(name).trim().split(/\s+/)
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase()
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
+}
+
 function useMobile() {
   const [m, setM] = useState(false)
   useEffect(() => {
@@ -42,6 +71,12 @@ export default function UserManagement() {
   const [confirmDelete, setConfirmDelete] = useState(null) // { id, name }
   const [openRegionsFor, setOpenRegionsFor] = useState(null) // userId whose region popover is open
   const [regionsAnchor,  setRegionsAnchor]  = useState({ top: 0, left: 0 }) // viewport coords for fixed popover
+  const [popoverSearch,  setPopoverSearch]  = useState('')
+
+  // Search + filters
+  const [userSearch,    setUserSearch]    = useState('')
+  const [roleFilter,    setRoleFilter]    = useState('')
+  const [regionFilter,  setRegionFilter]  = useState('')
 
   // Invite form
   const [showInvite, setShowInvite] = useState(false)
@@ -190,6 +225,22 @@ export default function UserManagement() {
     setExSaving(false)
   }
 
+  // ── Apply search + role + region filters once for both table + count ──
+  const filteredUsers = users.filter(u => {
+    if (userSearch) {
+      const q = userSearch.toLowerCase()
+      if (!`${u.full_name || ''} ${u.email || ''}`.toLowerCase().includes(q)) return false
+    }
+    if (roleFilter && u.role !== roleFilter) return false
+    if (regionFilter === '__bypass' && !REGION_BYPASS_ROLES.has(u.role)) return false
+    if (regionFilter === '__none'   && (REGION_BYPASS_ROLES.has(u.role) || (u.allowed_regions || []).length > 0)) return false
+    if (regionFilter && !['__bypass', '__none'].includes(regionFilter)) {
+      if (REGION_BYPASS_ROLES.has(u.role)) return true
+      if (!(u.allowed_regions || []).includes(regionFilter)) return false
+    }
+    return true
+  })
+
   // ── SHARED INPUT STYLE ───────────────────────────────────
   const inp = {
     background: t.card2,
@@ -330,6 +381,55 @@ export default function UserManagement() {
         </div>
       )}
 
+      {/* ── Stats strip ── */}
+      {!loading && users.length > 0 && (() => {
+        const total       = users.length
+        const active      = users.filter(u => u.is_active !== false).length
+        const restricted  = users.filter(u => Array.isArray(u.allowed_regions) && u.allowed_regions.length > 0).length
+        const unrestricted= total - restricted - users.filter(u => REGION_BYPASS_ROLES.has(u.role)).length
+        const adminCount  = users.filter(u => REGION_BYPASS_ROLES.has(u.role)).length
+        return (
+          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(4, 1fr)', gap: '1px', background: t.border, borderRadius: '11px', overflow: 'hidden', border: `1px solid ${t.border}`, marginBottom: '14px' }}>
+            <StatCard label="Total Users"     value={total}        sub={`${active} active`}                      color={t.gold}   t={t} />
+            <StatCard label="Admins"          value={adminCount}   sub="full org-wide access"                    color="#8c5ac8"  t={t} />
+            <StatCard label="Region-restricted" value={restricted} sub={restricted === 0 ? 'none scoped yet' : 'scoped to specific regions'} color={restricted > 0 ? t.green : t.text3} t={t} />
+            <StatCard label="Unrestricted"    value={Math.max(unrestricted, 0)} sub="non-admin, no region scope"  color={t.text2}  t={t} />
+          </div>
+        )
+      })()}
+
+      {/* ── Search + filter bar ── */}
+      {!loading && users.length > 0 && (
+        <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center', marginBottom: '14px' }}>
+          <input
+            placeholder="Search name or email…"
+            value={userSearch}
+            onChange={e => setUserSearch(e.target.value)}
+            style={{ ...inp, width: '260px', padding: '8px 12px', fontSize: '.72rem' }} />
+          <select value={roleFilter} onChange={e => setRoleFilter(e.target.value)}
+            style={{ ...inp, width: 'auto', padding: '8px 12px', fontSize: '.72rem', cursor: 'pointer' }}>
+            <option value="">All roles</option>
+            {roles.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+          </select>
+          <select value={regionFilter} onChange={e => setRegionFilter(e.target.value)}
+            style={{ ...inp, width: 'auto', padding: '8px 12px', fontSize: '.72rem', cursor: 'pointer' }}>
+            <option value="">All regions</option>
+            <option value="__bypass">Admin (full access)</option>
+            <option value="__none">Unrestricted</option>
+            {allRegions.map(r => <option key={r} value={r}>{r}</option>)}
+          </select>
+          {(userSearch || roleFilter || regionFilter) && (
+            <button onClick={() => { setUserSearch(''); setRoleFilter(''); setRegionFilter('') }}
+              style={{ background: 'transparent', border: `1px solid ${t.gold}40`, color: t.gold, borderRadius: '6px', padding: '7px 14px', fontSize: '.68rem', cursor: 'pointer' }}>
+              Clear filters
+            </button>
+          )}
+          <span style={{ marginLeft: 'auto', fontSize: '.68rem', color: t.text3 }}>
+            {filteredUsers.length} of {users.length}
+          </span>
+        </div>
+      )}
+
       {/* ── Users Table ── */}
       {loading ? (
         <div style={{ textAlign: 'center', color: t.text3, padding: '48px', fontSize: '.8rem' }}>Loading users…</div>
@@ -350,11 +450,14 @@ export default function UserManagement() {
           {users.length === 0 && (
             <div style={{ textAlign: 'center', color: t.text4, padding: '48px', fontSize: '.8rem' }}>No users found.</div>
           )}
-          {users.map((u, i) => {
+          {users.length > 0 && filteredUsers.length === 0 && (
+            <div style={{ textAlign: 'center', color: t.text4, padding: '48px', fontSize: '.8rem' }}>No users match the current filters.</div>
+          )}
+          {filteredUsers.map((u, i) => {
             const rs     = getRoleStyle(u.role)
             const busy   = savingId === u.id
             const active = u.is_active !== false
-            const last   = i === users.length - 1
+            const last   = i === filteredUsers.length - 1
             return (
               <div
                 key={u.id}
@@ -362,9 +465,23 @@ export default function UserManagement() {
                 onMouseEnter={e => e.currentTarget.style.background = `${t.gold}06`}
                 onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
 
-                {/* Name */}
-                <div style={{ padding: '13px 16px', fontSize: '.75rem', color: t.text1, fontWeight: 500 }}>
-                  {u.full_name || '—'}
+                {/* Name with avatar */}
+                <div style={{ padding: '13px 16px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <div style={{
+                    width: '30px', height: '30px', borderRadius: '50%',
+                    background: `linear-gradient(135deg, ${rs.color}40, ${rs.color}15)`,
+                    border: `1px solid ${rs.color}50`,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: '.7rem', fontWeight: 600, color: rs.color,
+                    flexShrink: 0,
+                  }}>
+                    {initials(u.full_name || u.email)}
+                  </div>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: '.75rem', color: t.text1, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {u.full_name || '—'}
+                    </div>
+                  </div>
                 </div>
 
                 {/* Email */}
@@ -400,38 +517,79 @@ export default function UserManagement() {
                   )}
                 </div>
 
-                {/* Regions — multi-select via popover. Bypass roles always see all. */}
-                <div style={{ padding: '13px 16px', position: 'relative' }}>
+                {/* Regions — chips for restricted users; "All" pill for unrestricted/admins */}
+                <div style={{ padding: '13px 16px' }}>
                   {(() => {
-                    const isBypass = ['super_admin', 'founders_office', 'admin'].includes(u.role)
+                    const isBypass = REGION_BYPASS_ROLES.has(u.role)
                     const regions  = Array.isArray(u.allowed_regions) ? u.allowed_regions : []
-                    const labelText = isBypass
-                      ? 'All (admin)'
-                      : regions.length === 0
-                        ? 'All'
-                        : regions.length === 1
-                          ? regions[0]
-                          : `${regions[0]} +${regions.length - 1}`
-                    if (isBypass || !canDo('edit')) {
-                      return <span style={{ fontSize: '.65rem', color: isBypass ? t.text3 : t.text2, padding: '3px 8px', background: `${t.text3}10`, borderRadius: '4px' }}>{labelText}</span>
+
+                    // Admin / unrestricted: simple "All" pill (with admin lock icon for bypass roles)
+                    if (isBypass) {
+                      return (
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', fontSize: '.62rem', color: t.text3, padding: '3px 9px', background: `${t.text3}10`, border: `1px solid ${t.border}`, borderRadius: '100px' }}>
+                          <span style={{ width: '5px', height: '5px', borderRadius: '50%', background: t.text3 }} />
+                          All (admin)
+                        </span>
+                      )
                     }
+
                     const open = openRegionsFor === u.id
+                    const openPopover = (e) => {
+                      e.stopPropagation()
+                      if (open) { setOpenRegionsFor(null); return }
+                      const r = e.currentTarget.getBoundingClientRect()
+                      const popoverWidth = 280
+                      const left = Math.min(r.left, window.innerWidth - popoverWidth - 12)
+                      setRegionsAnchor({ top: r.bottom + 4, left: Math.max(12, left) })
+                      setPopoverSearch('')
+                      setOpenRegionsFor(u.id)
+                    }
+
+                    if (!canDo('edit')) {
+                      // Read-only view (still show chips)
+                      if (regions.length === 0) {
+                        return <span style={{ fontSize: '.62rem', color: t.text3, padding: '3px 9px', background: `${t.text3}10`, border: `1px solid ${t.border}`, borderRadius: '100px' }}>All</span>
+                      }
+                      return (
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                          {regions.map(r => (
+                            <span key={r} style={{ fontSize: '.6rem', color: REGION_COLOR[r] || t.text3, padding: '2px 8px', background: `${REGION_COLOR[r] || t.text3}15`, border: `1px solid ${REGION_COLOR[r] || t.text3}40`, borderRadius: '100px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                              <span style={{ width: '5px', height: '5px', borderRadius: '50%', background: REGION_COLOR[r] || t.text3 }} />
+                              {regionShort(r)}
+                            </span>
+                          ))}
+                        </div>
+                      )
+                    }
+
+                    // Editable: clickable chip(s) that open the popover
+                    if (regions.length === 0) {
+                      return (
+                        <button onClick={openPopover} disabled={busy}
+                          title="Click to restrict this user to specific regions"
+                          style={{ background: 'transparent', border: `1px dashed ${t.border}`, borderRadius: '100px', padding: '3px 10px', color: t.text3, fontSize: '.62rem', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+                          <span style={{ width: '5px', height: '5px', borderRadius: '50%', background: t.green }} />
+                          All regions
+                          <span style={{ opacity: 0.5, fontSize: '.55rem' }}>▾</span>
+                        </button>
+                      )
+                    }
                     return (
-                      <button
-                        onClick={(e) => {
-                          if (open) { setOpenRegionsFor(null); return }
-                          const r = e.currentTarget.getBoundingClientRect()
-                          // Anchor below + left-aligned to the button. Clamp to viewport so it never spills off-screen.
-                          const popoverWidth = 240
-                          const left = Math.min(r.left, window.innerWidth - popoverWidth - 12)
-                          setRegionsAnchor({ top: r.bottom + 4, left: Math.max(12, left) })
-                          setOpenRegionsFor(u.id)
-                        }}
-                        disabled={busy}
-                        title={regions.length > 0 ? regions.join(', ') : 'No restriction — user sees all regions'}
-                        style={{ background: 'transparent', border: `1px solid ${t.border}`, borderRadius: '6px', padding: '4px 10px', color: t.text2, fontSize: '.65rem', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '5px' }}>
-                        {labelText}
-                        <span style={{ opacity: 0.5, fontSize: '.55rem' }}>▾</span>
+                      <button onClick={openPopover} disabled={busy}
+                        title={regions.join(', ')}
+                        style={{ background: 'transparent', border: 'none', padding: 0, cursor: 'pointer', display: 'flex', flexWrap: 'wrap', gap: '4px', alignItems: 'center' }}>
+                        {regions.slice(0, 3).map(r => (
+                          <span key={r} style={{ fontSize: '.6rem', color: REGION_COLOR[r] || t.text3, padding: '2px 8px', background: `${REGION_COLOR[r] || t.text3}15`, border: `1px solid ${REGION_COLOR[r] || t.text3}40`, borderRadius: '100px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                            <span style={{ width: '5px', height: '5px', borderRadius: '50%', background: REGION_COLOR[r] || t.text3 }} />
+                            {regionShort(r)}
+                          </span>
+                        ))}
+                        {regions.length > 3 && (
+                          <span style={{ fontSize: '.6rem', color: t.text3, padding: '2px 7px', background: `${t.text3}10`, borderRadius: '100px' }}>
+                            +{regions.length - 3}
+                          </span>
+                        )}
+                        <span style={{ opacity: 0.4, fontSize: '.55rem', color: t.text3 }}>▾</span>
                       </button>
                     )
                   })()}
@@ -495,35 +653,111 @@ export default function UserManagement() {
         const u = users.find(x => x.id === openRegionsFor)
         if (!u) return null
         const regions = Array.isArray(u.allowed_regions) ? u.allowed_regions : []
+        const filteredRegions = popoverSearch
+          ? allRegions.filter(r => r.toLowerCase().includes(popoverSearch.toLowerCase()))
+          : allRegions
+        const selectedCount = regions.length
+        const totalCount    = allRegions.length
         return (
           <>
-            <div onClick={() => setOpenRegionsFor(null)} style={{ position: 'fixed', inset: 0, zIndex: 100 }} />
-            <div style={{ position: 'fixed', top: regionsAnchor.top, left: regionsAnchor.left, background: t.card, border: `1px solid ${t.border}`, borderRadius: '8px', boxShadow: '0 12px 32px rgba(0,0,0,.5)', padding: '10px 12px', zIndex: 101, width: '240px', maxHeight: '60vh', overflowY: 'auto' }}>
-              <div style={{ fontSize: '.6rem', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: '8px' }}>Allowed regions</div>
-              {allRegions.length === 0 && <div style={{ fontSize: '.7rem', color: t.text4 }}>No regions found.</div>}
-              {allRegions.map(r => {
-                const checked = regions.includes(r)
-                return (
-                  <label key={r} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '5px 0', fontSize: '.72rem', color: t.text1, cursor: 'pointer' }}>
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      onChange={() => {
+            <div onClick={() => setOpenRegionsFor(null)} style={{ position: 'fixed', inset: 0, zIndex: 100, background: 'rgba(0,0,0,.15)' }} />
+            <div style={{
+              position: 'fixed', top: regionsAnchor.top, left: regionsAnchor.left,
+              background: t.card, border: `1px solid ${t.border}`,
+              borderRadius: '12px', boxShadow: '0 16px 48px rgba(0,0,0,.6)',
+              zIndex: 101, width: '280px', maxHeight: '70vh', display: 'flex', flexDirection: 'column',
+              animation: 'popIn .12s ease-out',
+            }}>
+              <style>{`@keyframes popIn{0%{opacity:0;transform:translateY(-4px)}100%{opacity:1;transform:none}}`}</style>
+
+              {/* Header */}
+              <div style={{ padding: '12px 14px 10px', borderBottom: `1px solid ${t.border}` }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                  <div style={{ fontSize: '.65rem', color: t.text2, letterSpacing: '.08em', textTransform: 'uppercase', fontWeight: 600 }}>
+                    Region access
+                  </div>
+                  <div style={{ fontSize: '.6rem', color: selectedCount === 0 ? t.text3 : t.gold, fontWeight: 500 }}>
+                    {selectedCount === 0 ? 'No restriction' : `${selectedCount} of ${totalCount}`}
+                  </div>
+                </div>
+                <div style={{ fontSize: '.62rem', color: t.text3, marginBottom: '8px', lineHeight: 1.5 }}>
+                  {u.full_name || u.email}
+                </div>
+                {totalCount > 4 && (
+                  <input
+                    autoFocus
+                    placeholder="Search regions…"
+                    value={popoverSearch}
+                    onChange={e => setPopoverSearch(e.target.value)}
+                    style={{ ...inp, padding: '6px 10px', fontSize: '.7rem', width: '100%' }}
+                  />
+                )}
+              </div>
+
+              {/* Region list */}
+              <div style={{ flex: 1, overflowY: 'auto', padding: '6px 6px' }}>
+                {filteredRegions.length === 0 && (
+                  <div style={{ padding: '20px 14px', fontSize: '.7rem', color: t.text4, textAlign: 'center' }}>
+                    {allRegions.length === 0 ? 'No regions configured.' : 'No matches.'}
+                  </div>
+                )}
+                {filteredRegions.map(r => {
+                  const checked = regions.includes(r)
+                  const color = REGION_COLOR[r] || t.gold
+                  return (
+                    <button
+                      key={r}
+                      onClick={() => {
                         const next = checked ? regions.filter(x => x !== r) : [...regions, r]
                         updateRegions(u.id, next)
                       }}
-                    />
-                    {r}
-                  </label>
-                )
-              })}
-              <div style={{ borderTop: `1px solid ${t.border}`, marginTop: '8px', paddingTop: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <button onClick={() => updateRegions(u.id, [])}
-                  style={{ background: 'transparent', border: 'none', color: t.gold, fontSize: '.62rem', cursor: 'pointer', padding: '2px 0' }}>
-                  Clear (all access)
-                </button>
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: '10px',
+                        padding: '8px 10px', width: '100%',
+                        background: checked ? `${color}10` : 'transparent',
+                        border: 'none', borderRadius: '7px',
+                        cursor: 'pointer', textAlign: 'left',
+                        marginBottom: '2px',
+                        transition: 'background .12s',
+                      }}
+                      onMouseEnter={e => { if (!checked) e.currentTarget.style.background = `${t.text3}10` }}
+                      onMouseLeave={e => { if (!checked) e.currentTarget.style.background = 'transparent' }}>
+                      {/* Custom checkbox */}
+                      <span style={{
+                        width: '15px', height: '15px', borderRadius: '4px',
+                        border: `1.5px solid ${checked ? color : t.border2}`,
+                        background: checked ? color : 'transparent',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        flexShrink: 0, transition: 'all .12s',
+                      }}>
+                        {checked && <span style={{ color: '#0a0a0a', fontSize: '11px', lineHeight: 1, fontWeight: 700 }}>✓</span>}
+                      </span>
+                      {/* Region color dot */}
+                      <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: color, flexShrink: 0 }} />
+                      <span style={{ fontSize: '.75rem', color: checked ? color : t.text1, fontWeight: checked ? 600 : 400, flex: 1 }}>
+                        {r}
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
+
+              {/* Footer */}
+              <div style={{ padding: '10px 12px', borderTop: `1px solid ${t.border}`, display: 'flex', gap: '8px', alignItems: 'center', justifyContent: 'space-between', background: `${t.card2}80` }}>
+                <div style={{ display: 'flex', gap: '4px' }}>
+                  <button onClick={() => updateRegions(u.id, allRegions)}
+                    title="Restrict to all configured regions (each region must be added explicitly)"
+                    style={{ background: 'transparent', border: `1px solid ${t.border}`, borderRadius: '5px', color: t.text2, fontSize: '.6rem', padding: '4px 8px', cursor: 'pointer' }}>
+                    Select all
+                  </button>
+                  <button onClick={() => updateRegions(u.id, [])}
+                    title="Remove all restrictions — user sees every region"
+                    style={{ background: 'transparent', border: `1px solid ${t.gold}40`, borderRadius: '5px', color: t.gold, fontSize: '.6rem', padding: '4px 8px', cursor: 'pointer' }}>
+                    Clear
+                  </button>
+                </div>
                 <button onClick={() => setOpenRegionsFor(null)}
-                  style={{ background: 'transparent', border: `1px solid ${t.border}`, borderRadius: '4px', color: t.text2, fontSize: '.62rem', padding: '3px 8px', cursor: 'pointer' }}>
+                  style={{ background: t.gold, border: 'none', borderRadius: '5px', color: '#0a0a0a', fontSize: '.62rem', fontWeight: 700, padding: '4px 12px', cursor: 'pointer' }}>
                   Done
                 </button>
               </div>
@@ -565,6 +799,16 @@ export default function UserManagement() {
         ))}
       </div>
 
+    </div>
+  )
+}
+
+function StatCard({ label, value, sub, color, t }) {
+  return (
+    <div style={{ background: t.card, padding: '14px 16px' }}>
+      <div style={{ fontSize: '.55rem', color: t.text4, letterSpacing: '.14em', textTransform: 'uppercase', marginBottom: '7px', fontWeight: 600 }}>{label}</div>
+      <div style={{ fontSize: '1.4rem', fontWeight: 200, color, lineHeight: 1, fontFamily: 'monospace' }}>{value}</div>
+      {sub && <div style={{ fontSize: '.6rem', color: t.text4, marginTop: '5px' }}>{sub}</div>}
     </div>
   )
 }
