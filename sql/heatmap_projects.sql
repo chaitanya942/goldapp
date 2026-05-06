@@ -63,3 +63,9 @@ BEGIN
       WITH CHECK (public.user_is_admin());
   END IF;
 END $$;
+
+-- Seed goldapp itself — without this, the public ingest endpoint rejects
+-- goldapp events with "unknown project" before they reach heatmap_events.
+INSERT INTO heatmap_projects (id, name, description, is_internal)
+VALUES ('goldapp', 'GoldApp', 'Main goldapp portal — Branch Stock, Consignments, Reports, Approvals', TRUE)
+ON CONFLICT (id) DO NOTHING;

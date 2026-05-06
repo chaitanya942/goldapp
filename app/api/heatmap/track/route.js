@@ -50,13 +50,17 @@ export async function POST(req) {
   if (!Array.isArray(events) || events.length === 0) return Response.json({ error: 'events array required' }, { status: 400, headers })
   if (events.length > 100) return Response.json({ error: 'max 100 events per batch' }, { status: 400, headers })
 
-  // Validate project exists. If heatmap_projects row missing, fail closed.
-  const { data: proj } = await supabase
-    .from('heatmap_projects')
-    .select('id')
-    .eq('id', project)
-    .maybeSingle()
-  if (!proj) return Response.json({ error: 'unknown project' }, { status: 400, headers })
+  // Validate project exists. 'goldapp' is the host app — always allow it
+  // implicitly so events flow before the projects table is even seeded.
+  // Other projects (cross-tool trackers) must be registered.
+  if (project !== 'goldapp') {
+    const { data: proj } = await supabase
+      .from('heatmap_projects')
+      .select('id')
+      .eq('id', project)
+      .maybeSingle()
+    if (!proj) return Response.json({ error: 'unknown project' }, { status: 400, headers })
+  }
 
   // Sanitize + map to columns. Drop anything malformed silently rather than failing the whole batch.
   const rows = []
@@ -95,6 +99,21 @@ export async function POST(req) {
     return Response.json({ error: 'insert failed' }, { status: 500, headers })
   }
   return Response.json({ inserted: rows.length }, { status: 200, headers })
+}
+
+// GET — quick diagnostic so admins can check whether events are landing
+// without opening Supabase. No auth required (returns counts only, no payload).
+export async function GET(req) {
+  const origin = req.headers.get('origin') || ''
+  const headers = corsHeaders(origin)
+  try {
+    const since = new Date(Date.now() - 24 * 3600 * 1000).toISOString()
+    const { count: total }    = await supabase.from('heatmap_events').select('*', { count: 'exact', head: true })
+    const { count: last24h }  = await supabase.from('heatmap_events').select('*', { count: 'exact', head: true }).gte('ts', since)
+    return Response.json({ ok: true, total: total ?? 0, last_24h: last24h ?? 0 }, { headers })
+  } catch (e) {
+    return Response.json({ ok: false, error: e.message }, { status: 500, headers })
+  }
 }
 
 function clamp(n, lo, hi) {
