@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { AppProvider, useApp } from '../../lib/context'
+import Clarity from '../../components/analytics/Clarity'
 import Sidebar from '../../components/Sidebar'
 import Topbar from '../../components/Topbar'
 import DashboardHome from '../../components/dashboard/DashboardHome'
@@ -12,6 +13,7 @@ import ConsignmentSeeds from '../../components/admin/ConsignmentSeeds'
 import BranchEmployees from '../../components/admin/BranchEmployees'
 import ImportLogs from '../../components/admin/ImportLogs'
 import RoleManagement from '../../components/admin/RoleManagement'
+import HeatmapInsights from '../../components/admin/HeatmapInsights'
 import DynamicDashboard from '../../components/dashboard/DynamicDashboard'
 import PurchaseHub   from '../../components/purchases/PurchaseHub'
 import BottomNav from '../../components/BottomNav'
@@ -144,6 +146,7 @@ function DashboardShell() {
       case 'import-logs':         return <ImportLogs />
       case 'role-management':     return role === 'super_admin' ? <RoleManagement /> : <AccessDenied />
       case 'inbound-bot':         return <InboundBotTesting />
+      case 'heatmap-insights':    return ['super_admin', 'founders_office', 'admin'].includes(role) ? <HeatmapInsights /> : <AccessDenied />
       default:                    return <DashboardHome />
     }
   }
@@ -173,6 +176,7 @@ function DashboardShell() {
 export default function DashboardPage() {
   return (
     <AppProvider>
+      <Clarity />
       <DashboardShell />
     </AppProvider>
   )
