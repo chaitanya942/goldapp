@@ -168,8 +168,8 @@ export default function HeatmapViewer() {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
     ctx.clearRect(0, 0, w, h)
 
-    // ── 1. Page schematic ──────────────────────────────────────────────
-    drawSchematic(ctx, w, h, theme)
+    // ── 1. Neutral viewport surface ───────────────────────────────────
+    drawSurface(ctx, w, h, theme)
 
     if (!data?.bins?.length) return
 
@@ -198,60 +198,31 @@ export default function HeatmapViewer() {
       ctx.beginPath(); ctx.arc(x, y, 2.2, 0, 2 * Math.PI); ctx.fill()
     }
 
-    // ── 3. Labelled callouts on the top zones ─────────────────────────
+    // ── 3. Numbered rank pins on the top zones ────────────────────────
+    // We draw just numbered pins on the canvas. Full element labels live
+    // in the side-panel "Hot zones" list (clearer than fighting layout
+    // collisions with floating callouts that overlap each other).
     const zones = data?.top_zones || []
     if (zones.length) {
-      const placed = []  // for collision-avoidance
-      ctx.font = '600 11px ui-monospace, "SF Mono", Menlo, monospace'
-      ctx.textBaseline = 'middle'
       for (let i = 0; i < zones.length; i++) {
         const z = zones[i]
         const x = (z.x_pct / 100) * w
         const y = (z.y_pct / 100) * h
-        const label = `${z.label}  ${z.count}`
-        const tw = ctx.measureText(label).width
-        const padX = 8, padY = 5
-        const boxW = tw + padX * 2
-        const boxH = 22
-        // Try to place above the dot first; flip below if it would overflow top
-        let bx = x + 12
-        let by = y - boxH - 10
-        if (by < 6) by = y + 12
-        if (bx + boxW > w - 6) bx = w - boxW - 6
-        // Crude collision avoidance — nudge down if overlap with prior box
-        let attempts = 0
-        while (placed.some(p => Math.abs(p.bx - bx) < boxW * 0.7 && Math.abs(p.by - by) < boxH * 1.4) && attempts < 6) {
-          by += boxH + 4
-          attempts++
-        }
-        placed.push({ bx, by })
-
-        // Connector line
-        ctx.strokeStyle = 'rgba(0,0,0,.35)'
-        ctx.lineWidth = 1
-        ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(bx + 6, by + boxH / 2); ctx.stroke()
-
-        // Dot
-        ctx.fillStyle = '#1a0a00'
-        ctx.beginPath(); ctx.arc(x, y, 4.5, 0, 2 * Math.PI); ctx.fill()
-        ctx.fillStyle = i < 3 ? '#ffd84a' : '#fff'
-        ctx.beginPath(); ctx.arc(x, y, 2.8, 0, 2 * Math.PI); ctx.fill()
-
-        // Pill background
-        ctx.fillStyle = 'rgba(20,16,8,.92)'
-        roundRect(ctx, bx, by, boxW, boxH, 5)
-        ctx.fill()
-        // Rank chip
-        ctx.fillStyle = i < 3 ? '#ffd84a' : '#9a8a6a'
-        ctx.fillRect(bx, by, 3, boxH)
-        // Text
-        ctx.fillStyle = '#f0e6c8'
-        ctx.fillText(z.label, bx + padX, by + boxH / 2)
-        // Count badge (right side)
-        const cw = ctx.measureText(String(z.count)).width
-        ctx.fillStyle = '#ffd84a'
-        ctx.fillText(String(z.count), bx + boxW - padX - cw, by + boxH / 2)
+        const r = i < 3 ? 14 : 11
+        // White ring for contrast
+        ctx.beginPath(); ctx.arc(x, y, r + 2, 0, 2 * Math.PI)
+        ctx.fillStyle = 'rgba(255,255,255,.92)'; ctx.fill()
+        // Inner solid disc — gold for top 3, dark for the rest
+        ctx.beginPath(); ctx.arc(x, y, r, 0, 2 * Math.PI)
+        ctx.fillStyle = i < 3 ? '#c9a84c' : '#1a1208'; ctx.fill()
+        // Number
+        ctx.fillStyle = i < 3 ? '#1a0a00' : '#f0e6c8'
+        ctx.font = `700 ${i < 3 ? 13 : 11}px ui-monospace, "SF Mono", Menlo, monospace`
+        ctx.textAlign = 'center'
+        ctx.textBaseline = 'middle'
+        ctx.fillText(String(i + 1), x, y + 0.5)
       }
+      ctx.textAlign = 'start'
     }
   }, [data, intensity, theme])
 
@@ -493,7 +464,9 @@ export default function HeatmapViewer() {
         <Kpi t={t} theme={theme} label="Time range" value={`${days}d`} accent={t.text2} icon="◇" />
       </div>
 
-      {/* ── Heatmap viewport (browser-window chrome) ────────────────── */}
+      {/* ── Heatmap viewport + Hot-zones side panel ──────────────────── */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 280px', gap: '14px' }}>
+
       <div style={{
         background: t.card, border: `1px solid ${t.border}`,
         borderRadius: '14px', overflow: 'hidden',
@@ -580,7 +553,7 @@ export default function HeatmapViewer() {
             <span>hot</span>
           </div>
 
-          {/* Schematic hint (top-right) */}
+          {/* Surface hint (top-right) */}
           <div style={{
             position: 'absolute', top: '10px', right: '10px',
             background: theme === 'dark' ? 'rgba(20,20,16,.85)' : 'rgba(255,255,255,.92)',
@@ -588,9 +561,12 @@ export default function HeatmapViewer() {
             padding: '5px 9px',
             fontSize: '9px', color: t.text4, letterSpacing: '.04em', zIndex: 2,
           }}>
-            ◫ wireframe · clicks placed at viewport %
+            ⊞ viewport · 0–100% coordinates
           </div>
         </div>
+      </div>
+
+      <HotZonesPanel t={t} theme={theme} zones={data?.top_zones} loading={loading} />
       </div>
 
       {/* ── Charts row ───────────────────────────────────────────── */}
@@ -599,14 +575,11 @@ export default function HeatmapViewer() {
         <DeviceDonut t={t} theme={theme} breakdown={data?.device_breakdown} />
       </div>
 
-      {/* ── Bottom: top elements + leaderboard ─────────────────── */}
-      <div style={{ display: 'grid', gridTemplateColumns: mode === 'overall' ? 'minmax(0, 1fr) minmax(0, 1fr)' : 'minmax(0, 1fr)', gap: '14px' }}>
-        <TopElements t={t} elements={data?.top_elements} />
-        {mode === 'overall' && (
-          <UserLeaderboard t={t} users={users} loading={usersLoading}
-            onPick={(id) => { setSelectedUserId(id); setMode('user'); setUserListOpen(false) }} />
-        )}
-      </div>
+      {/* ── Bottom: leaderboard (overall mode only) ────────────── */}
+      {mode === 'overall' && (
+        <UserLeaderboard t={t} users={users} loading={usersLoading}
+          onPick={(id) => { setSelectedUserId(id); setMode('user'); setUserListOpen(false) }} />
+      )}
     </div>
   )
 }
@@ -878,6 +851,91 @@ function UserLeaderboard({ t, users, loading, onPick }) {
   )
 }
 
+function HotZonesPanel({ t, theme, zones, loading }) {
+  const list = zones || []
+  return (
+    <div style={{
+      background: t.card, border: `1px solid ${t.border}`,
+      borderRadius: '14px', padding: '14px 16px',
+      display: 'flex', flexDirection: 'column',
+      boxShadow: theme === 'dark' ? '0 4px 24px rgba(0,0,0,.4)' : '0 4px 24px rgba(0,0,0,.06)',
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+        <div>
+          <div style={{ fontSize: '10px', color: t.text3, letterSpacing: '.14em', textTransform: 'uppercase', fontWeight: 700 }}>Hot zones</div>
+          <div style={{ fontSize: '10px', color: t.text4, marginTop: '3px' }}>What users actually clicked</div>
+        </div>
+        <div style={{ fontSize: '10px', color: t.text4, fontFamily: 'monospace', background: t.card2 || t.card, padding: '3px 8px', borderRadius: '4px', border: `1px solid ${t.border}` }}>{list.length}</div>
+      </div>
+
+      {loading && list.length === 0 && (
+        <div style={{ fontSize: '11px', color: t.text4, padding: '20px 0', textAlign: 'center' }}>Loading…</div>
+      )}
+
+      {!loading && list.length === 0 && (
+        <div style={{ padding: '32px 12px', textAlign: 'center' }}>
+          <div style={{
+            width: 44, height: 44, borderRadius: '50%',
+            background: `${t.gold}12`, color: t.gold,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: '20px', margin: '0 auto 12px',
+          }}>◉</div>
+          <div style={{ fontSize: '11px', color: t.text3, lineHeight: 1.5 }}>
+            No labelled clicks yet.<br />
+            <span style={{ color: t.text4, fontSize: '10px' }}>Buttons, links, and inputs that users tap will appear here ranked by frequency.</span>
+          </div>
+        </div>
+      )}
+
+      {list.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', overflowY: 'auto', maxHeight: '440px', paddingRight: '4px' }}>
+          {list.map((z, i) => {
+            const max = list[0].count
+            const pct = (z.count / max) * 100
+            const isTop3 = i < 3
+            return (
+              <div key={i} style={{
+                display: 'flex', alignItems: 'center', gap: '10px',
+                padding: '8px 10px',
+                background: isTop3 ? `${t.gold}10` : t.card2 || t.card,
+                border: `1px solid ${isTop3 ? `${t.gold}40` : t.border}`,
+                borderRadius: '9px',
+              }}>
+                {/* Rank pin matching the canvas */}
+                <div style={{
+                  width: isTop3 ? 26 : 22, height: isTop3 ? 26 : 22,
+                  borderRadius: '50%',
+                  background: isTop3 ? t.gold : t.card,
+                  border: `2px solid ${isTop3 ? t.gold : t.border2 || t.border}`,
+                  color: isTop3 ? '#1a0a00' : t.text2,
+                  fontSize: isTop3 ? '12px' : '11px', fontWeight: 700, fontFamily: 'monospace',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  flexShrink: 0,
+                }}>{i + 1}</div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{
+                    fontSize: '11.5px', color: t.text1, fontWeight: 500,
+                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                  }} title={z.label}>{z.label}</div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '4px' }}>
+                    <div style={{ flex: 1, height: '3px', background: `${t.gold}15`, borderRadius: '2px', overflow: 'hidden' }}>
+                      <div style={{ width: `${pct}%`, height: '100%', background: `linear-gradient(90deg, ${t.gold} 0%, ${t.orange} 100%)` }} />
+                    </div>
+                    <span style={{ fontSize: '10px', color: t.text4, fontFamily: 'monospace' }}>
+                      {Math.round(z.x_pct)},{Math.round(z.y_pct)}
+                    </span>
+                  </div>
+                </div>
+                <div style={{ fontSize: '13px', color: t.gold, fontFamily: 'monospace', fontWeight: 700, flexShrink: 0 }}>{z.count}</div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function EmptyState({ t, icon, title, body }) {
   return (
     <div style={{ padding: '80px 24px', textAlign: 'center', position: 'relative', zIndex: 2 }}>
@@ -920,103 +978,41 @@ function roundRect(ctx, x, y, w, h, r) {
   ctx.closePath()
 }
 
-// Synthetic page schematic — a faint wireframe of a typical app shell so the
-// heatmap has spatial context. Sidebar (left ~6%), topbar (top ~9%), then a
-// grid of content cards. Not pixel-perfect to goldapp; close enough that
-// hot zones near the top-left will read as "navigation", etc.
-function drawSchematic(ctx, w, h, theme) {
+// Neutral viewport surface — subtle dot grid (every 5%), corner crosshairs,
+// and a faint center crosshair so the canvas reads as "the page area" without
+// pretending to draw the actual content.
+function drawSurface(ctx, w, h, theme) {
   const dark = theme === 'dark'
-  const stroke = dark ? 'rgba(201,168,76,.18)' : 'rgba(154,114,40,.22)'
-  const fill   = dark ? 'rgba(201,168,76,.04)' : 'rgba(154,114,40,.05)'
-  const text   = dark ? 'rgba(240,230,200,.32)' : 'rgba(60,42,16,.42)'
-  ctx.lineWidth = 1
-  ctx.strokeStyle = stroke
-  ctx.fillStyle = fill
+  const dot   = dark ? 'rgba(201,168,76,.10)' : 'rgba(154,114,40,.16)'
+  const tick  = dark ? 'rgba(240,230,200,.18)' : 'rgba(60,42,16,.22)'
 
-  // Sidebar
-  const sbW = w * 0.055
-  ctx.fillRect(0, 0, sbW, h)
-  ctx.strokeRect(0.5, 0.5, sbW, h - 1)
-  // Sidebar icons (5 small squares)
-  for (let i = 0; i < 6; i++) {
-    const cy = h * 0.08 + i * (h * 0.08)
-    ctx.beginPath()
-    ctx.arc(sbW / 2, cy, Math.min(8, sbW * 0.28), 0, 2 * Math.PI)
-    ctx.stroke()
-  }
-
-  // Topbar
-  const tbY = 0
-  const tbH = h * 0.075
-  ctx.fillRect(sbW, tbY, w - sbW, tbH)
-  ctx.strokeRect(sbW + 0.5, tbY + 0.5, w - sbW - 1, tbH - 1)
-  // Topbar pills (right side)
-  ctx.font = `${Math.max(9, h * 0.022)}px ui-monospace, monospace`
-  ctx.fillStyle = text
-  ctx.textBaseline = 'middle'
-  ctx.fillText('White Gold / GoldApp', sbW + 14, tbY + tbH / 2)
-  // Three pill blobs to the right
-  const pillW = Math.max(60, w * 0.07)
-  const gap = 12
-  let px = w - pillW - 12
-  for (let i = 0; i < 3; i++) {
-    ctx.strokeRect(px, tbY + tbH * 0.22, pillW, tbH * 0.55)
-    px -= pillW + gap
-  }
-
-  // Hero band
-  const hbY = tbH + h * 0.015
-  const hbH = h * 0.16
-  ctx.strokeStyle = stroke
-  ctx.fillStyle = fill
-  roundRect(ctx, sbW + 16, hbY, w - sbW - 32, hbH, 8)
-  ctx.fill(); ctx.stroke()
-  ctx.fillStyle = text
-  ctx.font = `600 ${Math.max(10, h * 0.026)}px system-ui, sans-serif`
-  ctx.fillText('Page Title', sbW + 32, hbY + hbH * 0.4)
-  ctx.font = `${Math.max(8, h * 0.018)}px system-ui, sans-serif`
-  ctx.fillText('subtitle / breadcrumb', sbW + 32, hbY + hbH * 0.7)
-
-  // Content grid: 4 KPI cards across, then 2 wider cards below.
-  const contentY = hbY + hbH + h * 0.018
-  const contentH = h - contentY - h * 0.025
-  const cardGap = 10
-  const cardsRowH = contentH * 0.32
-  const cardW = (w - sbW - 32 - cardGap * 3) / 4
-  for (let i = 0; i < 4; i++) {
-    const x = sbW + 16 + i * (cardW + cardGap)
-    ctx.strokeStyle = stroke
-    ctx.fillStyle = fill
-    roundRect(ctx, x, contentY, cardW, cardsRowH, 7)
-    ctx.fill(); ctx.stroke()
-    ctx.fillStyle = text
-    ctx.font = `${Math.max(8, h * 0.016)}px system-ui, sans-serif`
-    ctx.fillText(['Events','Sessions','Users','Range'][i], x + 10, contentY + 14)
-    ctx.font = `600 ${Math.max(11, h * 0.024)}px ui-monospace, monospace`
-    ctx.fillText('—', x + 10, contentY + cardsRowH * 0.6)
-  }
-
-  // Two wider panels below
-  const panelY = contentY + cardsRowH + 12
-  const panelH = contentH - cardsRowH - 12
-  const panelW = (w - sbW - 32 - cardGap) / 2
-  for (let i = 0; i < 2; i++) {
-    const x = sbW + 16 + i * (panelW + cardGap)
-    ctx.strokeStyle = stroke
-    ctx.fillStyle = fill
-    roundRect(ctx, x, panelY, panelW, panelH, 7)
-    ctx.fill(); ctx.stroke()
-    ctx.fillStyle = text
-    ctx.font = `${Math.max(8, h * 0.016)}px system-ui, sans-serif`
-    ctx.fillText(i === 0 ? 'Chart / list' : 'Detail panel', x + 10, panelY + 14)
-    // Bars inside the left panel
-    if (i === 0) {
-      for (let b = 0; b < 6; b++) {
-        const bw = panelW - 20 - (b * 5)
-        ctx.fillStyle = fill
-        ctx.fillRect(x + 10, panelY + 28 + b * 14, Math.max(20, bw * 0.7), 7)
-        ctx.strokeRect(x + 10 + 0.5, panelY + 28 + b * 14 + 0.5, Math.max(20, bw * 0.7) - 1, 6)
-      }
+  // 20×20 dot grid (every 5%)
+  ctx.fillStyle = dot
+  for (let yi = 0; yi <= 20; yi++) {
+    for (let xi = 0; xi <= 20; xi++) {
+      const x = (xi / 20) * w
+      const y = (yi / 20) * h
+      ctx.beginPath(); ctx.arc(x, y, 0.9, 0, 2 * Math.PI); ctx.fill()
     }
   }
+
+  // Corner ticks
+  ctx.strokeStyle = tick
+  ctx.lineWidth = 1
+  const tk = 12
+  // top-left
+  ctx.beginPath(); ctx.moveTo(0, tk); ctx.lineTo(0, 0); ctx.lineTo(tk, 0); ctx.stroke()
+  // top-right
+  ctx.beginPath(); ctx.moveTo(w - tk, 0); ctx.lineTo(w, 0); ctx.lineTo(w, tk); ctx.stroke()
+  // bottom-left
+  ctx.beginPath(); ctx.moveTo(0, h - tk); ctx.lineTo(0, h); ctx.lineTo(tk, h); ctx.stroke()
+  // bottom-right
+  ctx.beginPath(); ctx.moveTo(w, h - tk); ctx.lineTo(w, h); ctx.lineTo(w - tk, h); ctx.stroke()
+
+  // Center crosshair (very faint)
+  ctx.setLineDash([3, 5])
+  ctx.strokeStyle = dot
+  ctx.beginPath(); ctx.moveTo(w / 2, 0); ctx.lineTo(w / 2, h); ctx.stroke()
+  ctx.beginPath(); ctx.moveTo(0, h / 2); ctx.lineTo(w, h / 2); ctx.stroke()
+  ctx.setLineDash([])
 }
