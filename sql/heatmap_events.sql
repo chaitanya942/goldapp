@@ -40,6 +40,23 @@ CREATE INDEX IF NOT EXISTS idx_heatmap_events_device          ON heatmap_events 
 
 ALTER TABLE heatmap_events ENABLE ROW LEVEL SECURITY;
 
+-- Helper function — also defined in sql/heatmap_projects.sql. Defined here too
+-- so this file can be applied standalone without ordering surprises.
+-- CREATE OR REPLACE makes it idempotent across both files.
+CREATE OR REPLACE FUNCTION public.user_is_admin()
+RETURNS BOOLEAN
+LANGUAGE plpgsql SECURITY DEFINER STABLE
+SET search_path = public
+AS $$
+DECLARE
+  v_role TEXT;
+BEGIN
+  IF auth.uid() IS NULL THEN RETURN FALSE; END IF;
+  SELECT role INTO v_role FROM public.user_profiles WHERE id = auth.uid();
+  RETURN v_role IN ('super_admin', 'founders_office', 'admin');
+END $$;
+GRANT EXECUTE ON FUNCTION public.user_is_admin() TO authenticated;
+
 -- INSERTs come from the public ingest endpoint (which uses service_role; bypasses RLS).
 -- READs are admin-only (the aggregate endpoint also uses service_role; but we add a policy
 -- so the table is safe by default).
