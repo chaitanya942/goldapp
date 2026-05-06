@@ -234,6 +234,17 @@ function ConsignmentBalanceView({ t, stats, isMobile }) {
         {tile('movement')}
       </div>
 
+      {/* ── At-risk callout (only when there's aged stock) ───────────────── */}
+      {(stats.riskWeight || 0) > 0 && (
+        <AtRiskBanner t={t} stats={stats} isMobile={isMobile} />
+      )}
+
+      {/* ── State donut + Daily movement sparkline (chart row) ───────────── */}
+      <div style={{ display:'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: isMobile ? 12 : 16 }}>
+        <StateDonut t={t} stats={stats} isMobile={isMobile} />
+        <MovementVelocity t={t} stats={stats} isMobile={isMobile} />
+      </div>
+
       {/* ── State-wise split + Top branches (paired analytics row) ───────── */}
       <div style={{ display:'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: isMobile ? 12 : 16 }}>
         <StateBreakdown t={t} stats={stats} isMobile={isMobile} />
@@ -242,6 +253,278 @@ function ConsignmentBalanceView({ t, stats, isMobile }) {
 
       {/* ── Insight strip — single observational line ─────────────────────── */}
       <ConsignmentInsight t={t} stats={stats} isMobile={isMobile} />
+    </div>
+  )
+}
+
+// Donut chart showing state-wise weight distribution. Renders as SVG so it
+// scales cleanly. Center label shows the state count and total weight.
+// Read-only — no interaction. Pairs with StateBreakdown for visual variety:
+// donut tells the story at a glance, bars give the precise rank + share.
+function StateDonut({ t, stats, isMobile }) {
+  const states = stats?.byState || []
+  const total  = states.reduce((s, x) => s + (x.weight || 0), 0)
+  const palette = [t.gold, t.orange, t.blue, t.purple, t.green, t.red, t.text2]
+  const size = 160, stroke = 26
+  const r    = (size - stroke) / 2
+  const cx   = size / 2, cy = size / 2
+  const C    = 2 * Math.PI * r
+
+  // Build slices: top 6 states, rest grouped into 'Others'.
+  const visible = states.slice(0, 6)
+  const others  = states.slice(6).reduce((s, x) => s + x.weight, 0)
+  const slices  = others > 0
+    ? [...visible, { state: 'Others', weight: others }]
+    : visible
+
+  let offset = 0  // running stroke-dashoffset
+
+  return (
+    <div style={{
+      background: t.card, border: `1px solid ${t.border}`,
+      borderRadius: 14,
+      padding: isMobile ? '14px 16px' : '18px 20px',
+      position:'relative', overflow:'hidden',
+    }}>
+      <div style={{ position:'absolute', top:-30, right:-30, width:140, height:140, borderRadius:'50%', background:`radial-gradient(circle, ${t.purple}10 0%, transparent 65%)`, pointerEvents:'none' }}/>
+
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom: 14, position:'relative', zIndex: 1 }}>
+        <div>
+          <div style={{ fontSize: 9, color: t.text4, letterSpacing:'.16em', fontWeight: 700, textTransform:'uppercase' }}>State distribution</div>
+          <div style={{ fontSize: 10, color: t.text4, marginTop: 3 }}>At-branch weight by state</div>
+        </div>
+        <div style={{ fontSize: 10, color: t.text3, fontFamily:'monospace', background: t.border, padding:'3px 8px', borderRadius: 6 }}>
+          {states.length} state{states.length === 1 ? '' : 's'}
+        </div>
+      </div>
+
+      {total === 0 ? (
+        <div style={{ padding:'40px 0', textAlign:'center', fontSize: 11, color: t.text4 }}>
+          No stock at branches.
+        </div>
+      ) : (
+        <div style={{ display:'flex', alignItems:'center', gap: isMobile ? 14 : 22, position:'relative', zIndex: 1 }}>
+          {/* SVG donut */}
+          <div style={{ position:'relative', width: size, height: size, flexShrink: 0 }}>
+            <svg width={size} height={size} style={{ transform:'rotate(-90deg)' }}>
+              <circle cx={cx} cy={cy} r={r} fill="none" stroke={t.border} strokeWidth={stroke}/>
+              {slices.map((s, i) => {
+                const frac    = s.weight / total
+                const length  = frac * C
+                const dash    = `${length} ${C - length}`
+                const arc = (
+                  <circle key={s.state}
+                    cx={cx} cy={cy} r={r} fill="none"
+                    stroke={s.state === 'Others' ? t.text4 : palette[i % palette.length]}
+                    strokeWidth={stroke}
+                    strokeDasharray={dash}
+                    strokeDashoffset={-offset}
+                    style={{ transition: 'stroke-dasharray .9s cubic-bezier(.4,0,.2,1), stroke-dashoffset .9s cubic-bezier(.4,0,.2,1)' }}
+                  />
+                )
+                offset += length
+                return arc
+              })}
+            </svg>
+            {/* Centre label */}
+            <div style={{
+              position:'absolute', inset: 0,
+              display:'flex', flexDirection:'column',
+              alignItems:'center', justifyContent:'center',
+              pointerEvents:'none',
+            }}>
+              <div style={{ fontSize: 9, color: t.text4, letterSpacing:'.14em', fontWeight: 700, textTransform:'uppercase' }}>Total</div>
+              <div style={{ fontSize: 18, color: t.text1, fontFamily:'monospace', fontWeight: 600, letterSpacing:'-.02em', marginTop: 2 }}>
+                {total >= 1000 ? `${(total / 1000).toFixed(1)}k` : total.toFixed(0)}
+              </div>
+              <div style={{ fontSize: 10, color: t.text3, marginTop: 1 }}>grams</div>
+            </div>
+          </div>
+
+          {/* Legend */}
+          <div style={{ flex: 1, display:'flex', flexDirection:'column', gap: 6, minWidth: 0 }}>
+            {slices.map((s, i) => {
+              const pct = (s.weight / total) * 100
+              const c   = s.state === 'Others' ? t.text4 : palette[i % palette.length]
+              return (
+                <div key={s.state} style={{ display:'flex', alignItems:'center', gap: 8, fontSize: 11 }}>
+                  <span style={{ width: 8, height: 8, borderRadius: 2, background: c, flexShrink: 0 }}/>
+                  <span style={{ color: t.text2, flex: 1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{s.state}</span>
+                  <span style={{ color: c, fontFamily:'monospace', fontWeight: 700, fontSize: 10 }}>{pct.toFixed(0)}%</span>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Movement velocity panel: 14-day sparkline of consignments dispatched plus
+// a big delta tile for last-7d vs prior-7d. Spotlights the throughput trend.
+function MovementVelocity({ t, stats, isMobile }) {
+  const series = stats?.dailySeries || []
+  const max    = Math.max(1, ...series.map(b => b.count))
+  const last7  = stats?.last7   || 0
+  const prior7 = stats?.prior7  || 0
+  const last7w = stats?.last7w  || 0
+  const delta  = stats?.velocityPct || 0
+  const positive = delta > 0
+  const neutral  = delta === 0 || (last7 === 0 && prior7 === 0)
+  const tone     = neutral ? t.text3 : (positive ? t.green : t.red)
+  const arrow    = neutral ? '→' : (positive ? '↑' : '↓')
+
+  // Build SVG path for the sparkline (area + line).
+  const w = 220, h = 64
+  const stepX = w / Math.max(1, series.length - 1)
+  const pts = series.map((b, i) => {
+    const x = i * stepX
+    const y = h - (b.count / max) * (h - 6) - 3
+    return [x, y]
+  })
+  const linePath = pts.length
+    ? pts.reduce((acc, [x, y], i) => acc + (i === 0 ? `M${x},${y}` : ` L${x},${y}`), '')
+    : ''
+  const areaPath = pts.length ? `${linePath} L${w},${h} L0,${h} Z` : ''
+
+  return (
+    <div style={{
+      background: t.card, border: `1px solid ${t.border}`,
+      borderRadius: 14,
+      padding: isMobile ? '14px 16px' : '18px 20px',
+      position:'relative', overflow:'hidden',
+    }}>
+      <div style={{ position:'absolute', top:-30, left:-30, width:140, height:140, borderRadius:'50%', background:`radial-gradient(circle, ${t.blue}10 0%, transparent 65%)`, pointerEvents:'none' }}/>
+
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom: 12, position:'relative', zIndex: 1 }}>
+        <div>
+          <div style={{ fontSize: 9, color: t.text4, letterSpacing:'.16em', fontWeight: 700, textTransform:'uppercase' }}>Dispatch velocity</div>
+          <div style={{ fontSize: 10, color: t.text4, marginTop: 3 }}>Last 14 days · daily consignments</div>
+        </div>
+        <div style={{
+          fontSize: 11, color: tone, fontWeight: 700, fontFamily:'monospace',
+          background: `${tone}15`, border: `1px solid ${tone}30`,
+          padding: '4px 10px', borderRadius: 7,
+          display:'flex', alignItems:'center', gap: 4,
+        }}>
+          <span>{arrow}</span>
+          <span>{neutral ? '—' : `${Math.abs(delta).toFixed(0)}%`}</span>
+        </div>
+      </div>
+
+      {/* Number row */}
+      <div style={{ display:'flex', alignItems:'baseline', gap: 14, marginBottom: 10, position:'relative', zIndex: 1, flexWrap:'wrap' }}>
+        <div>
+          <div style={{ fontSize: 9, color: t.text4, letterSpacing:'.12em', fontWeight: 600, textTransform:'uppercase' }}>Last 7d</div>
+          <div style={{ fontSize: isMobile ? 22 : 26, color: t.text1, fontFamily:'monospace', fontWeight: 600, letterSpacing:'-.02em' }}>
+            {last7}
+          </div>
+        </div>
+        <div style={{ width:1, height: 28, background: t.border }}/>
+        <div>
+          <div style={{ fontSize: 9, color: t.text4, letterSpacing:'.12em', fontWeight: 600, textTransform:'uppercase' }}>Prior 7d</div>
+          <div style={{ fontSize: isMobile ? 18 : 20, color: t.text3, fontFamily:'monospace', fontWeight: 500 }}>
+            {prior7}
+          </div>
+        </div>
+        <div style={{ flex: 1 }}/>
+        <div style={{ textAlign:'right' }}>
+          <div style={{ fontSize: 9, color: t.text4, letterSpacing:'.12em', fontWeight: 600, textTransform:'uppercase' }}>Weight 7d</div>
+          <div style={{ fontSize: isMobile ? 13 : 14, color: t.gold, fontFamily:'monospace', fontWeight: 600 }}>
+            {last7w >= 1000 ? `${(last7w / 1000).toFixed(2)}kg` : `${last7w.toFixed(0)}g`}
+          </div>
+        </div>
+      </div>
+
+      {/* Sparkline */}
+      <div style={{ position:'relative', zIndex: 1 }}>
+        <svg width="100%" height={h} viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" style={{ display:'block' }}>
+          <defs>
+            <linearGradient id="velGradient" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%"  stopColor={t.blue}   stopOpacity="0.45"/>
+              <stop offset="100%" stopColor={t.blue}  stopOpacity="0.05"/>
+            </linearGradient>
+          </defs>
+          {areaPath && <path d={areaPath} fill="url(#velGradient)"/>}
+          {linePath && <path d={linePath} fill="none" stroke={t.blue} strokeWidth="1.6" vectorEffect="non-scaling-stroke"/>}
+          {/* Today marker: last point gets a dot */}
+          {pts.length > 0 && (
+            <circle cx={pts[pts.length - 1][0]} cy={pts[pts.length - 1][1]} r="2.2" fill={t.blue}/>
+          )}
+        </svg>
+        <div style={{ display:'flex', justifyContent:'space-between', fontSize: 8, color: t.text4, fontFamily:'monospace', marginTop: 4 }}>
+          <span>14d ago</span>
+          <span>today</span>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// At-risk banner: full-width red callout that surfaces only when there is
+// stock sitting beyond 7 days. Displays bills count, weight, exposure ₹,
+// and how much is past 14 days. The banner's whole purpose is to be
+// impossible to ignore in the morning glance.
+function AtRiskBanner({ t, stats, isMobile }) {
+  const total = (stats.branchWeight || 0) + (stats.movementWeight || 0)
+  const sharePct = total > 0 ? (stats.riskWeight / total) * 100 : 0
+
+  return (
+    <div style={{
+      background:`linear-gradient(135deg, ${t.red}18 0%, ${t.orange}10 100%)`,
+      border:`1px solid ${t.red}40`,
+      borderRadius: 14,
+      padding: isMobile ? '14px 16px' : '16px 22px',
+      position:'relative', overflow:'hidden',
+      display:'flex', alignItems:isMobile ? 'flex-start' : 'center', gap: isMobile ? 12 : 18,
+      flexDirection: isMobile ? 'column' : 'row',
+    }}>
+      {/* Pulsing alert dot */}
+      <div style={{ position:'absolute', top: 14, right: 16, width: 8, height: 8, borderRadius:'50%', background: t.red, boxShadow:`0 0 12px ${t.red}`, animation:'cnsmtPulse 1.4s ease-in-out infinite' }}/>
+      <style>{`@keyframes cnsmtPulse { 0%,100% { opacity: 1; transform: scale(1) } 50% { opacity:.4; transform: scale(1.4) } }`}</style>
+
+      {/* Icon */}
+      <div style={{
+        width: isMobile ? 44 : 52, height: isMobile ? 44 : 52, borderRadius: 12,
+        background: `${t.red}25`, border:`1px solid ${t.red}40`,
+        display:'flex', alignItems:'center', justifyContent:'center',
+        flexShrink: 0,
+      }}>
+        <svg width={isMobile ? 22 : 26} height={isMobile ? 22 : 26} viewBox="0 0 24 24" fill="none" stroke={t.red} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M12 9v4"/>
+          <path d="M12 17h.01"/>
+          <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+        </svg>
+      </div>
+
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 9, color: t.red, letterSpacing:'.18em', fontWeight: 700, textTransform:'uppercase', marginBottom: 4 }}>
+          Stock at Risk
+        </div>
+        <div style={{ display:'flex', alignItems:'baseline', gap: 10, flexWrap:'wrap' }}>
+          <div style={{ fontSize: isMobile ? 22 : 28, color: t.text1, fontFamily:'monospace', fontWeight: 600, letterSpacing:'-.02em', lineHeight: 1 }}>
+            <AnimatedNumber target={stats.riskWeight} decimals={3} duration={900}/>
+          </div>
+          <span style={{ fontSize: isMobile ? 12 : 14, color: t.text3 }}>g</span>
+          <span style={{ fontSize: 11, color: t.red, background: `${t.red}20`, padding: '2px 8px', borderRadius: 5, fontWeight: 700, fontFamily:'monospace' }}>
+            {sharePct.toFixed(1)}% of stock
+          </span>
+        </div>
+        <div style={{ fontSize: isMobile ? 11 : 12, color: t.text2, marginTop: 6, lineHeight: 1.5 }}>
+          <strong style={{ color: t.text1 }}>{stats.riskBills || 0}</strong> bill{(stats.riskBills || 0) === 1 ? '' : 's'} sitting at branches for <strong style={{ color: t.red }}>more than 7 days</strong>
+          {(stats.aged14Weight || 0) > 0 && (
+            <> · <strong style={{ color: t.red }}>{(stats.aged14Weight).toFixed(1)}g</strong> aged beyond 14 days</>
+          )}
+        </div>
+      </div>
+
+      <div style={{ display:'flex', flexDirection: isMobile ? 'row' : 'column', gap: isMobile ? 14 : 4, alignItems: isMobile ? 'baseline' : 'flex-end', flexShrink: 0 }}>
+        <div style={{ fontSize: 9, color: t.text4, letterSpacing:'.14em', fontWeight: 700, textTransform:'uppercase' }}>Exposure</div>
+        <div style={{ fontSize: isMobile ? 18 : 22, color: t.red, fontFamily:'monospace', fontWeight: 700 }}>
+          {fmtCr(stats.riskValue)}
+        </div>
+      </div>
     </div>
   )
 }
@@ -741,6 +1024,27 @@ export default function DashboardHome() {
             .sort((a, b) => b.weight - a.weight)
             .slice(0, 6)
 
+          // ── At-risk rollup (stock sitting > 7 days at any branch) ─────────
+          // We don't have per-bill ages in the rollup, so we conservatively
+          // attribute the *whole* branch's totals to the at-risk bucket if its
+          // oldest_date is > 7 days ago. Good enough for a callout.
+          const now7 = Date.now() - 7  * 86400000
+          const now14 = Date.now() - 14 * 86400000
+          let riskWeight = 0, riskValue = 0, riskBills = 0
+          let aged14Weight = 0
+          for (const b of rows) {
+            const od = b.oldest_date ? new Date(b.oldest_date).getTime() : null
+            if (od == null) continue
+            if (od < now7) {
+              riskWeight += Number(b.total_gross_wt    || 0)
+              riskValue  += Number(b.total_gross_value || 0)
+              riskBills  += (b.older_bills || 0) + (b.today_bills || 0)
+            }
+            if (od < now14) {
+              aged14Weight += Number(b.total_gross_wt || 0)
+            }
+          }
+
           // ── In-movement totals (active consignments — created but not yet
           //    received at the destination). Excludes cancelled and seed rows.
           const cs = consignList.data || []
@@ -763,6 +1067,35 @@ export default function DashboardHome() {
           }
           const movementByState = [...movementStateMap.values()].sort((a, b) => b.weight - a.weight)
 
+          // ── Daily movement series (last 14 days, including today) ─────────
+          // Counts consignments BY CREATION DATE so the sparkline reflects when
+          // each consignment was dispatched. Cancelled rows are excluded. This
+          // lets management see velocity over time at a glance.
+          const today = new Date(); today.setHours(0,0,0,0)
+          const dailySeries = new Array(14).fill(0).map((_, i) => {
+            const d = new Date(today); d.setDate(d.getDate() - (13 - i))
+            return { date: d, count: 0, weight: 0 }
+          })
+          const dayKey = (d) => `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`
+          const seriesByKey = new Map(dailySeries.map(b => [dayKey(b.date), b]))
+          const allMoved = (cs || []).filter(c => c.status !== 'seed' && c.status !== 'cancelled')
+          for (const c of allMoved) {
+            if (!c.created_at) continue
+            const d = new Date(c.created_at); d.setHours(0,0,0,0)
+            const k = dayKey(d)
+            const bucket = seriesByKey.get(k)
+            if (bucket) {
+              bucket.count++
+              bucket.weight += Number(c.total_gross_wt || c.total_net_wt || 0)
+            }
+          }
+          // Velocity: last 7 days vs prior 7 days (count of consignments).
+          const last7   = dailySeries.slice(7).reduce((s, b) => s + b.count, 0)
+          const prior7  = dailySeries.slice(0, 7).reduce((s, b) => s + b.count, 0)
+          const last7w  = dailySeries.slice(7).reduce((s, b) => s + b.weight, 0)
+          const prior7w = dailySeries.slice(0, 7).reduce((s, b) => s + b.weight, 0)
+          const velocityPct = prior7 > 0 ? ((last7 - prior7) / prior7) * 100 : (last7 > 0 ? 100 : 0)
+
           setConsignStats({
             // legacy fields kept for any callers still reading them
             totalBranches: branchesActive,
@@ -775,6 +1108,8 @@ export default function DashboardHome() {
             movementBills, movementWeight, movementValue, movementCount,
             // new richer slices
             byState, topBranches, movementByState,
+            dailySeries, last7, prior7, last7w, prior7w, velocityPct,
+            riskWeight, riskValue, riskBills, aged14Weight,
           })
         }).catch(() => {})
       )
