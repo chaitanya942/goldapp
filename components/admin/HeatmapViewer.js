@@ -150,7 +150,9 @@ export default function HeatmapViewer() {
     return () => { cancel = true }
   }, [mode, selectedUserId, page, device, eventType, fromIso])
 
-  // Canvas
+  // Canvas — draws a synthetic page schematic (sidebar + topbar + content cards)
+  // so the empty area always has structure, then layers heatmap blobs on top,
+  // then labelled callouts at the centroids of the top-clicked elements.
   useEffect(() => {
     const canvas = canvasRef.current
     const wrap   = wrapRef.current
@@ -165,8 +167,13 @@ export default function HeatmapViewer() {
     const ctx = canvas.getContext('2d')
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
     ctx.clearRect(0, 0, w, h)
+
+    // ── 1. Page schematic ──────────────────────────────────────────────
+    drawSchematic(ctx, w, h, theme)
+
     if (!data?.bins?.length) return
 
+    // ── 2. Heatmap blobs ──────────────────────────────────────────────
     const max = data.bins.reduce((m, b) => Math.max(m, b.count), 1)
     ctx.globalCompositeOperation = 'lighter'
     const blobRadius = Math.min(w, h) * 0.075
@@ -186,11 +193,67 @@ export default function HeatmapViewer() {
     for (const b of data.bins) {
       const x = (b.x_bin / 100) * w
       const y = (b.y_bin / 100) * h
-      const intensity = Math.min(1, 0.35 + (b.count / max) * 0.65)
-      ctx.fillStyle = `rgba(255, 255, 255, ${intensity})`
+      const op = Math.min(1, 0.35 + (b.count / max) * 0.65)
+      ctx.fillStyle = `rgba(255, 255, 255, ${op})`
       ctx.beginPath(); ctx.arc(x, y, 2.2, 0, 2 * Math.PI); ctx.fill()
     }
-  }, [data, intensity])
+
+    // ── 3. Labelled callouts on the top zones ─────────────────────────
+    const zones = data?.top_zones || []
+    if (zones.length) {
+      const placed = []  // for collision-avoidance
+      ctx.font = '600 11px ui-monospace, "SF Mono", Menlo, monospace'
+      ctx.textBaseline = 'middle'
+      for (let i = 0; i < zones.length; i++) {
+        const z = zones[i]
+        const x = (z.x_pct / 100) * w
+        const y = (z.y_pct / 100) * h
+        const label = `${z.label}  ${z.count}`
+        const tw = ctx.measureText(label).width
+        const padX = 8, padY = 5
+        const boxW = tw + padX * 2
+        const boxH = 22
+        // Try to place above the dot first; flip below if it would overflow top
+        let bx = x + 12
+        let by = y - boxH - 10
+        if (by < 6) by = y + 12
+        if (bx + boxW > w - 6) bx = w - boxW - 6
+        // Crude collision avoidance — nudge down if overlap with prior box
+        let attempts = 0
+        while (placed.some(p => Math.abs(p.bx - bx) < boxW * 0.7 && Math.abs(p.by - by) < boxH * 1.4) && attempts < 6) {
+          by += boxH + 4
+          attempts++
+        }
+        placed.push({ bx, by })
+
+        // Connector line
+        ctx.strokeStyle = 'rgba(0,0,0,.35)'
+        ctx.lineWidth = 1
+        ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(bx + 6, by + boxH / 2); ctx.stroke()
+
+        // Dot
+        ctx.fillStyle = '#1a0a00'
+        ctx.beginPath(); ctx.arc(x, y, 4.5, 0, 2 * Math.PI); ctx.fill()
+        ctx.fillStyle = i < 3 ? '#ffd84a' : '#fff'
+        ctx.beginPath(); ctx.arc(x, y, 2.8, 0, 2 * Math.PI); ctx.fill()
+
+        // Pill background
+        ctx.fillStyle = 'rgba(20,16,8,.92)'
+        roundRect(ctx, bx, by, boxW, boxH, 5)
+        ctx.fill()
+        // Rank chip
+        ctx.fillStyle = i < 3 ? '#ffd84a' : '#9a8a6a'
+        ctx.fillRect(bx, by, 3, boxH)
+        // Text
+        ctx.fillStyle = '#f0e6c8'
+        ctx.fillText(z.label, bx + padX, by + boxH / 2)
+        // Count badge (right side)
+        const cw = ctx.measureText(String(z.count)).width
+        ctx.fillStyle = '#ffd84a'
+        ctx.fillText(String(z.count), bx + boxW - padX - cw, by + boxH / 2)
+      }
+    }
+  }, [data, intensity, theme])
 
   const filteredUsers = useMemo(() => {
     const q = userSearch.trim().toLowerCase()
@@ -470,20 +533,13 @@ export default function HeatmapViewer() {
           </div>
         </div>
 
-        {/* Canvas area */}
+        {/* Canvas area — wireframe page schematic + heatmap layer */}
         <div ref={wrapRef} style={{
           position: 'relative',
           background: theme === 'dark'
             ? 'radial-gradient(circle at 50% 0%, #1c1a14 0%, #0d0c08 100%)'
-            : 'radial-gradient(circle at 50% 0%, #faf6e8 0%, #f3ecda 100%)',
+            : 'radial-gradient(circle at 50% 0%, #fbf6e6 0%, #f1e9d5 100%)',
         }}>
-          {/* Grid overlay (subtle) */}
-          <div style={{
-            position: 'absolute', inset: 0, pointerEvents: 'none', opacity: theme === 'dark' ? .07 : .12,
-            backgroundImage: `linear-gradient(${t.text3} 1px, transparent 1px), linear-gradient(90deg, ${t.text3} 1px, transparent 1px)`,
-            backgroundSize: '10% 10%',
-          }} />
-
           {error && (
             <div style={{ background: `${t.red}15`, padding: '12px 16px', fontSize: '11px', color: t.red, position: 'relative', zIndex: 2 }}>{error}</div>
           )}
@@ -522,6 +578,17 @@ export default function HeatmapViewer() {
             <span>cool</span>
             <div style={{ width: 70, height: 5, borderRadius: '3px', background: 'linear-gradient(90deg, rgba(255,230,70,.45) 0%, rgba(255,140,30,.7) 50%, rgba(255,50,70,.95) 100%)' }} />
             <span>hot</span>
+          </div>
+
+          {/* Schematic hint (top-right) */}
+          <div style={{
+            position: 'absolute', top: '10px', right: '10px',
+            background: theme === 'dark' ? 'rgba(20,20,16,.85)' : 'rgba(255,255,255,.92)',
+            border: `1px solid ${t.border}`, borderRadius: '7px',
+            padding: '5px 9px',
+            fontSize: '9px', color: t.text4, letterSpacing: '.04em', zIndex: 2,
+          }}>
+            ◫ wireframe · clicks placed at viewport %
           </div>
         </div>
       </div>
@@ -608,35 +675,51 @@ function Kpi({ t, theme, label, value, accent, icon, small }) {
 
 function HourlyChart({ t, theme, hourly }) {
   const data = hourly || new Array(24).fill(0)
-  const max = Math.max(1, ...data)
+  const realMax = Math.max(0, ...data)
+  const max = realMax > 0 ? realMax : 1
+  const hasData = realMax > 0
+  // Find true peak hour from non-zero values only
+  let peakHour = -1
+  for (let i = 0; i < data.length; i++) if (data[i] === realMax) { peakHour = i; break }
   // Build SVG path for smooth area
   const w = 100, h = 100
   const pts = data.map((v, i) => [(i / 23) * w, h - (v / max) * h * .85 - 5])
   const path = pts.reduce((acc, [x, y], i) => acc + (i === 0 ? `M ${x} ${y}` : ` L ${x} ${y}`), '')
   const areaPath = path + ` L ${w} ${h} L 0 ${h} Z`
-  const peakHour = data.indexOf(max)
   return (
     <div style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: '12px', padding: '16px 18px' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
         <div>
           <div style={{ fontSize: '10px', color: t.text3, letterSpacing: '.14em', textTransform: 'uppercase', fontWeight: 700 }}>Activity by hour</div>
-          <div style={{ fontSize: '10px', color: t.text4, marginTop: '3px' }}>Local time · peak {max > 0 ? `${peakHour}:00 (${fmt(max)} ev)` : '—'}</div>
+          <div style={{ fontSize: '10px', color: t.text4, marginTop: '3px' }}>
+            Local time · {hasData ? <>peak <span style={{ color: t.gold, fontFamily: 'monospace' }}>{String(peakHour).padStart(2,'0')}:00</span> · {fmt(realMax)} events</> : 'no activity yet'}
+          </div>
         </div>
       </div>
       <div style={{ position: 'relative', height: '120px' }}>
-        <svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" style={{ width: '100%', height: '100%' }}>
-          <defs>
-            <linearGradient id="hg" x1="0" x2="0" y1="0" y2="1">
-              <stop offset="0%"   stopColor={t.gold}   stopOpacity={0.55} />
-              <stop offset="100%" stopColor={t.gold}   stopOpacity={0} />
-            </linearGradient>
-          </defs>
-          <path d={areaPath} fill="url(#hg)" />
-          <path d={path} stroke={t.gold} strokeWidth="1.5" fill="none" vectorEffect="non-scaling-stroke" />
-          {pts.map(([x, y], i) => max > 0 && data[i] > 0 ? (
-            <circle key={i} cx={x} cy={y} r="0.9" fill={t.orange} vectorEffect="non-scaling-stroke" />
-          ) : null)}
-        </svg>
+        {hasData ? (
+          <svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" style={{ width: '100%', height: '100%' }}>
+            <defs>
+              <linearGradient id="hg" x1="0" x2="0" y1="0" y2="1">
+                <stop offset="0%"   stopColor={t.gold}   stopOpacity={0.55} />
+                <stop offset="100%" stopColor={t.gold}   stopOpacity={0} />
+              </linearGradient>
+            </defs>
+            <path d={areaPath} fill="url(#hg)" />
+            <path d={path} stroke={t.gold} strokeWidth="1.5" fill="none" vectorEffect="non-scaling-stroke" />
+            {pts.map(([x, y], i) => data[i] > 0 ? (
+              <circle key={i} cx={x} cy={y} r="0.9" fill={t.orange} vectorEffect="non-scaling-stroke" />
+            ) : null)}
+          </svg>
+        ) : (
+          <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: '6px', color: t.text4 }}>
+            {/* Dashed baseline */}
+            <svg viewBox="0 0 100 12" preserveAspectRatio="none" style={{ width: '100%', height: '14px' }}>
+              <line x1="0" y1="6" x2="100" y2="6" stroke={t.text4} strokeWidth=".5" strokeDasharray="2 2" vectorEffect="non-scaling-stroke" opacity=".4" />
+            </svg>
+            <div style={{ fontSize: '11px' }}>No activity in this range</div>
+          </div>
+        )}
       </div>
       <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '6px', fontSize: '9px', color: t.text4, fontFamily: 'monospace' }}>
         <span>00</span><span>06</span><span>12</span><span>18</span><span>23</span>
@@ -663,7 +746,12 @@ function DeviceDonut({ t, theme, breakdown }) {
     <div style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: '12px', padding: '16px 18px' }}>
       <div style={{ fontSize: '10px', color: t.text3, letterSpacing: '.14em', textTransform: 'uppercase', fontWeight: 700, marginBottom: '12px' }}>Device split</div>
       {total === 0 ? (
-        <div style={{ fontSize: '11px', color: t.text4, padding: '20px 0', textAlign: 'center' }}>No data.</div>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '14px 0' }}>
+          <svg viewBox="0 0 72 72" style={{ width: 100, height: 100 }}>
+            <circle cx="36" cy="36" r="28" fill="none" stroke={t.border} strokeWidth="10" strokeDasharray="3 5" opacity=".7" />
+            <text x="36" y="40" textAnchor="middle" fontSize="9" fill={t.text4} fontFamily="monospace">no data</text>
+          </svg>
+        </div>
       ) : (
         <div style={{ display: 'flex', gap: '14px', alignItems: 'center' }}>
           <svg viewBox="0 0 72 72" style={{ width: 100, height: 100, flexShrink: 0, transform: 'rotate(-90deg)' }}>
@@ -812,4 +900,123 @@ function Spinner({ color }) {
       <circle cx="16" cy="16" r="12" fill="none" stroke={color} strokeWidth="2.5" strokeDasharray="20 56" strokeLinecap="round" />
     </svg>
   )
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Canvas helpers
+// ─────────────────────────────────────────────────────────────────────────
+
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath()
+  ctx.moveTo(x + r, y)
+  ctx.lineTo(x + w - r, y)
+  ctx.quadraticCurveTo(x + w, y, x + w, y + r)
+  ctx.lineTo(x + w, y + h - r)
+  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h)
+  ctx.lineTo(x + r, y + h)
+  ctx.quadraticCurveTo(x, y + h, x, y + h - r)
+  ctx.lineTo(x, y + r)
+  ctx.quadraticCurveTo(x, y, x + r, y)
+  ctx.closePath()
+}
+
+// Synthetic page schematic — a faint wireframe of a typical app shell so the
+// heatmap has spatial context. Sidebar (left ~6%), topbar (top ~9%), then a
+// grid of content cards. Not pixel-perfect to goldapp; close enough that
+// hot zones near the top-left will read as "navigation", etc.
+function drawSchematic(ctx, w, h, theme) {
+  const dark = theme === 'dark'
+  const stroke = dark ? 'rgba(201,168,76,.18)' : 'rgba(154,114,40,.22)'
+  const fill   = dark ? 'rgba(201,168,76,.04)' : 'rgba(154,114,40,.05)'
+  const text   = dark ? 'rgba(240,230,200,.32)' : 'rgba(60,42,16,.42)'
+  ctx.lineWidth = 1
+  ctx.strokeStyle = stroke
+  ctx.fillStyle = fill
+
+  // Sidebar
+  const sbW = w * 0.055
+  ctx.fillRect(0, 0, sbW, h)
+  ctx.strokeRect(0.5, 0.5, sbW, h - 1)
+  // Sidebar icons (5 small squares)
+  for (let i = 0; i < 6; i++) {
+    const cy = h * 0.08 + i * (h * 0.08)
+    ctx.beginPath()
+    ctx.arc(sbW / 2, cy, Math.min(8, sbW * 0.28), 0, 2 * Math.PI)
+    ctx.stroke()
+  }
+
+  // Topbar
+  const tbY = 0
+  const tbH = h * 0.075
+  ctx.fillRect(sbW, tbY, w - sbW, tbH)
+  ctx.strokeRect(sbW + 0.5, tbY + 0.5, w - sbW - 1, tbH - 1)
+  // Topbar pills (right side)
+  ctx.font = `${Math.max(9, h * 0.022)}px ui-monospace, monospace`
+  ctx.fillStyle = text
+  ctx.textBaseline = 'middle'
+  ctx.fillText('White Gold / GoldApp', sbW + 14, tbY + tbH / 2)
+  // Three pill blobs to the right
+  const pillW = Math.max(60, w * 0.07)
+  const gap = 12
+  let px = w - pillW - 12
+  for (let i = 0; i < 3; i++) {
+    ctx.strokeRect(px, tbY + tbH * 0.22, pillW, tbH * 0.55)
+    px -= pillW + gap
+  }
+
+  // Hero band
+  const hbY = tbH + h * 0.015
+  const hbH = h * 0.16
+  ctx.strokeStyle = stroke
+  ctx.fillStyle = fill
+  roundRect(ctx, sbW + 16, hbY, w - sbW - 32, hbH, 8)
+  ctx.fill(); ctx.stroke()
+  ctx.fillStyle = text
+  ctx.font = `600 ${Math.max(10, h * 0.026)}px system-ui, sans-serif`
+  ctx.fillText('Page Title', sbW + 32, hbY + hbH * 0.4)
+  ctx.font = `${Math.max(8, h * 0.018)}px system-ui, sans-serif`
+  ctx.fillText('subtitle / breadcrumb', sbW + 32, hbY + hbH * 0.7)
+
+  // Content grid: 4 KPI cards across, then 2 wider cards below.
+  const contentY = hbY + hbH + h * 0.018
+  const contentH = h - contentY - h * 0.025
+  const cardGap = 10
+  const cardsRowH = contentH * 0.32
+  const cardW = (w - sbW - 32 - cardGap * 3) / 4
+  for (let i = 0; i < 4; i++) {
+    const x = sbW + 16 + i * (cardW + cardGap)
+    ctx.strokeStyle = stroke
+    ctx.fillStyle = fill
+    roundRect(ctx, x, contentY, cardW, cardsRowH, 7)
+    ctx.fill(); ctx.stroke()
+    ctx.fillStyle = text
+    ctx.font = `${Math.max(8, h * 0.016)}px system-ui, sans-serif`
+    ctx.fillText(['Events','Sessions','Users','Range'][i], x + 10, contentY + 14)
+    ctx.font = `600 ${Math.max(11, h * 0.024)}px ui-monospace, monospace`
+    ctx.fillText('—', x + 10, contentY + cardsRowH * 0.6)
+  }
+
+  // Two wider panels below
+  const panelY = contentY + cardsRowH + 12
+  const panelH = contentH - cardsRowH - 12
+  const panelW = (w - sbW - 32 - cardGap) / 2
+  for (let i = 0; i < 2; i++) {
+    const x = sbW + 16 + i * (panelW + cardGap)
+    ctx.strokeStyle = stroke
+    ctx.fillStyle = fill
+    roundRect(ctx, x, panelY, panelW, panelH, 7)
+    ctx.fill(); ctx.stroke()
+    ctx.fillStyle = text
+    ctx.font = `${Math.max(8, h * 0.016)}px system-ui, sans-serif`
+    ctx.fillText(i === 0 ? 'Chart / list' : 'Detail panel', x + 10, panelY + 14)
+    // Bars inside the left panel
+    if (i === 0) {
+      for (let b = 0; b < 6; b++) {
+        const bw = panelW - 20 - (b * 5)
+        ctx.fillStyle = fill
+        ctx.fillRect(x + 10, panelY + 28 + b * 14, Math.max(20, bw * 0.7), 7)
+        ctx.strokeRect(x + 10 + 0.5, panelY + 28 + b * 14 + 0.5, Math.max(20, bw * 0.7) - 1, 6)
+      }
+    }
+  }
 }
