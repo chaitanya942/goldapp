@@ -234,8 +234,187 @@ function ConsignmentBalanceView({ t, stats, isMobile }) {
         {tile('movement')}
       </div>
 
+      {/* ── State-wise split + Top branches (paired analytics row) ───────── */}
+      <div style={{ display:'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: isMobile ? 12 : 16 }}>
+        <StateBreakdown t={t} stats={stats} isMobile={isMobile} />
+        <TopBranchesPanel t={t} stats={stats} isMobile={isMobile} />
+      </div>
+
       {/* ── Insight strip — single observational line ─────────────────────── */}
       <ConsignmentInsight t={t} stats={stats} isMobile={isMobile} />
+    </div>
+  )
+}
+
+// State-wise breakdown panel: horizontal bars showing the weight share per
+// state for stock currently at branches. Bars are colored from a small palette
+// per state index. Click target removed (read-only widget).
+function StateBreakdown({ t, stats, isMobile }) {
+  const states = stats?.byState || []
+  const total  = states.reduce((s, x) => s + (x.weight || 0), 0)
+
+  const palette = [t.gold, t.orange, t.blue, t.purple, t.green, t.red, t.text2]
+
+  return (
+    <div style={{
+      background: t.card,
+      border: `1px solid ${t.border}`,
+      borderRadius: 14,
+      padding: isMobile ? '14px 16px' : '18px 20px',
+      position:'relative', overflow:'hidden',
+    }}>
+      <div style={{ position:'absolute', top:-40, right:-40, width:140, height:140, borderRadius:'50%', background:`radial-gradient(circle, ${t.gold}10 0%, transparent 65%)`, pointerEvents:'none' }}/>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom: 14, position:'relative', zIndex:1 }}>
+        <div>
+          <div style={{ fontSize: 9, color: t.text4, letterSpacing:'.16em', fontWeight: 700, textTransform:'uppercase' }}>State-wise · At Branch</div>
+          <div style={{ fontSize: 10, color: t.text4, marginTop: 3 }}>Where the gold is parked right now</div>
+        </div>
+        <div style={{ fontSize: 10, color: t.text3, fontFamily:'monospace', background: t.border, padding:'3px 8px', borderRadius: 6 }}>
+          {states.length} state{states.length === 1 ? '' : 's'}
+        </div>
+      </div>
+
+      {states.length === 0 ? (
+        <div style={{ padding:'24px 0', textAlign:'center', fontSize: 11, color: t.text4 }}>
+          No stock at branches.
+        </div>
+      ) : (
+        <div style={{ display:'flex', flexDirection:'column', gap: 10, position:'relative', zIndex: 1 }}>
+          {states.slice(0, 6).map((s, i) => {
+            const pct = total > 0 ? (s.weight / total) * 100 : 0
+            const c   = palette[i % palette.length]
+            return (
+              <div key={s.state}>
+                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline', marginBottom: 5, fontSize: 11 }}>
+                  <span style={{ color: t.text1, fontWeight: 600, display:'flex', alignItems:'center', gap: 7 }}>
+                    <span style={{ width: 8, height: 8, borderRadius: 2, background: c }}/>
+                    {s.state}
+                  </span>
+                  <span style={{ display:'inline-flex', gap: 8, alignItems:'baseline', fontFamily:'monospace' }}>
+                    <span style={{ color: c, fontWeight: 700 }}>{s.weight.toFixed(2)}g</span>
+                    <span style={{ color: t.text4, fontSize: 10 }}>{s.bills} bills</span>
+                    <span style={{ color: t.text4, fontSize: 10 }}>{pct.toFixed(0)}%</span>
+                  </span>
+                </div>
+                <div style={{ height: 6, borderRadius: 3, background: t.border, overflow: 'hidden' }}>
+                  <div style={{
+                    width: `${pct}%`, height: '100%',
+                    background: `linear-gradient(90deg, ${c}, ${c}aa)`,
+                    transition: 'width .8s cubic-bezier(.4,0,.2,1)',
+                  }}/>
+                </div>
+              </div>
+            )
+          })}
+          {states.length > 6 && (
+            <div style={{ fontSize: 10, color: t.text4, textAlign:'right', marginTop: 4 }}>
+              +{states.length - 6} more states
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Top branches by weight — ranked list. Each row shows branch name,
+// state pill, weight, bill count, and an oldest-bill age indicator
+// (red badge if > 7 days). Read-only — no clicks.
+function TopBranchesPanel({ t, stats, isMobile }) {
+  const top = stats?.topBranches || []
+  const max = top.length ? top[0].weight : 1
+
+  const ageDays = (iso) => {
+    if (!iso) return null
+    const ms = Date.now() - new Date(iso).getTime()
+    return Math.floor(ms / 86400000)
+  }
+
+  return (
+    <div style={{
+      background: t.card,
+      border: `1px solid ${t.border}`,
+      borderRadius: 14,
+      padding: isMobile ? '14px 16px' : '18px 20px',
+      position:'relative', overflow:'hidden',
+    }}>
+      <div style={{ position:'absolute', top:-40, left:-40, width:140, height:140, borderRadius:'50%', background:`radial-gradient(circle, ${t.orange}10 0%, transparent 65%)`, pointerEvents:'none' }}/>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom: 14, position:'relative', zIndex:1 }}>
+        <div>
+          <div style={{ fontSize: 9, color: t.text4, letterSpacing:'.16em', fontWeight: 700, textTransform:'uppercase' }}>Top Branches · By Stock</div>
+          <div style={{ fontSize: 10, color: t.text4, marginTop: 3 }}>Highest pending weight at branch</div>
+        </div>
+        <div style={{ fontSize: 10, color: t.text3, fontFamily:'monospace', background: t.border, padding:'3px 8px', borderRadius: 6 }}>
+          Top {top.length}
+        </div>
+      </div>
+
+      {top.length === 0 ? (
+        <div style={{ padding:'24px 0', textAlign:'center', fontSize: 11, color: t.text4 }}>
+          No branches with stock.
+        </div>
+      ) : (
+        <div style={{ display:'flex', flexDirection:'column', gap: 8, position:'relative', zIndex:1 }}>
+          {top.map((b, i) => {
+            const pct  = (b.weight / max) * 100
+            const days = ageDays(b.oldest_date)
+            const ageBadge = days != null
+              ? (days > 7  ? { color: t.red,    label: `${days}d` }
+              :  days > 3  ? { color: t.orange, label: `${days}d` }
+              :              { color: t.green,  label: `${days}d` })
+              : null
+            const isTop3 = i < 3
+
+            return (
+              <div key={b.branch} style={{ display:'flex', alignItems:'center', gap: 10 }}>
+                <div style={{
+                  width: 22, height: 22, borderRadius: 6,
+                  background: isTop3 ? `${t.gold}18` : t.border,
+                  border: `1px solid ${isTop3 ? `${t.gold}50` : t.border}`,
+                  color: isTop3 ? t.gold : t.text3,
+                  fontSize: 10, fontWeight: 700, fontFamily:'monospace',
+                  display:'flex', alignItems:'center', justifyContent:'center',
+                  flexShrink: 0,
+                }}>{i + 1}</div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline', gap: 8, marginBottom: 4 }}>
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <span style={{ fontSize: 11, color: t.text1, fontWeight: 600, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', display:'inline-block', maxWidth: '100%' }}>
+                        {b.branch}
+                      </span>
+                      {b.state && <span style={{ fontSize: 9, color: t.text4, marginLeft: 6 }}>· {b.state}</span>}
+                    </div>
+                    <span style={{ fontSize: 11, color: t.gold, fontFamily:'monospace', fontWeight: 700, flexShrink: 0 }}>
+                      {b.weight.toFixed(2)}g
+                    </span>
+                  </div>
+                  <div style={{ display:'flex', alignItems:'center', gap: 8 }}>
+                    <div style={{ flex: 1, height: 4, borderRadius: 2, background: t.border, overflow:'hidden' }}>
+                      <div style={{
+                        width: `${pct}%`, height: '100%',
+                        background: `linear-gradient(90deg, ${t.orange}, ${t.gold})`,
+                      }}/>
+                    </div>
+                    <span style={{ fontSize: 10, color: t.text4, fontFamily:'monospace', flexShrink: 0 }}>
+                      {b.bills} bill{b.bills === 1 ? '' : 's'}
+                    </span>
+                    {ageBadge && (
+                      <span style={{
+                        fontSize: 9, color: ageBadge.color,
+                        background: `${ageBadge.color}15`,
+                        padding: '1px 6px', borderRadius: 4, fontWeight: 700,
+                        flexShrink: 0,
+                      }} title={`Oldest pending bill is ${days} day${days === 1 ? '' : 's'} old`}>
+                        {ageBadge.label}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }
@@ -519,12 +698,48 @@ export default function DashboardHome() {
           authedFetch('/api/consignments?action=consignments').then(r => r.json()).catch(() => ({ data: [] })),
         ]).then(([overview, consignList]) => {
           const rows = overview.data || []
+
           // ── At-branch totals (gold sitting in branches, not yet in motion) ──
+          // RPC returns total_gross_value, not total_amount — using that for the
+          // value rollup; using total_amount silently produced ₹0 across the UI.
           const branchBills    = rows.reduce((s, b) => s + (b.older_bills || 0) + (b.today_bills || 0), 0)
-          const branchWeight   = rows.reduce((s, b) => s + Number(b.total_gross_wt || 0), 0)
-          const branchValue    = rows.reduce((s, b) => s + Number(b.total_amount   || 0), 0)
+          const branchWeight   = rows.reduce((s, b) => s + Number(b.total_gross_wt    || 0), 0)
+          const branchValue    = rows.reduce((s, b) => s + Number(b.total_gross_value || 0), 0)
           const branchesActive = rows.filter(r => (r.older_bills || 0) + (r.today_bills || 0) > 0).length
           const urgent         = rows.filter(b => (b.oldest_age_days || 0) > 7).length
+
+          // ── State-wise breakdown (rolls each branch's total under its state) ─
+          // Used for the state-split chart in the dashboard widget. Branches with
+          // no state metadata fall under 'Other'. Sorted by weight descending.
+          const stateMap = new Map()
+          for (const b of rows) {
+            const totalBills = (b.older_bills || 0) + (b.today_bills || 0)
+            if (totalBills === 0) continue
+            const stateKey = b.state || b.region || 'Other'
+            const cur = stateMap.get(stateKey) || { state: stateKey, weight: 0, value: 0, bills: 0, branches: 0 }
+            cur.weight   += Number(b.total_gross_wt    || 0)
+            cur.value    += Number(b.total_gross_value || 0)
+            cur.bills    += totalBills
+            cur.branches += 1
+            stateMap.set(stateKey, cur)
+          }
+          const byState = [...stateMap.values()].sort((a, b) => b.weight - a.weight)
+
+          // ── Top branches by weight (drill candidates for management).
+          //    Pull the top 6, also surface oldest-pending date for the age tag.
+          const topBranches = rows
+            .filter(b => Number(b.total_gross_wt || 0) > 0)
+            .map(b => ({
+              branch:      b.branch_name,
+              region:      b.region || null,
+              state:       b.state  || null,
+              weight:      Number(b.total_gross_wt    || 0),
+              value:       Number(b.total_gross_value || 0),
+              bills:       (b.older_bills || 0) + (b.today_bills || 0),
+              oldest_date: b.oldest_date || null,
+            }))
+            .sort((a, b) => b.weight - a.weight)
+            .slice(0, 6)
 
           // ── In-movement totals (active consignments — created but not yet
           //    received at the destination). Excludes cancelled and seed rows.
@@ -534,10 +749,19 @@ export default function DashboardHome() {
           )
           const movementCount  = inMotionList.length
           const movementBills  = inMotionList.reduce((s, c) => s + Number(c.total_bills    || 0), 0)
-          // Use gross weight for parity with branch_overview (both branch + movement
-          // are reconciliation-on-gross). Falls back to net if gross missing.
           const movementWeight = inMotionList.reduce((s, c) => s + Number(c.total_gross_wt || c.total_net_wt || 0), 0)
           const movementValue  = inMotionList.reduce((s, c) => s + Number(c.total_amount   || 0), 0)
+
+          // In-movement state split (where consignments are originating from).
+          const movementStateMap = new Map()
+          for (const c of inMotionList) {
+            const stateKey = c.source_state || c.state_code || c.region || 'Other'
+            const cur = movementStateMap.get(stateKey) || { state: stateKey, weight: 0, count: 0 }
+            cur.weight += Number(c.total_gross_wt || c.total_net_wt || 0)
+            cur.count  += 1
+            movementStateMap.set(stateKey, cur)
+          }
+          const movementByState = [...movementStateMap.values()].sort((a, b) => b.weight - a.weight)
 
           setConsignStats({
             // legacy fields kept for any callers still reading them
@@ -546,9 +770,11 @@ export default function DashboardHome() {
             urgent,
             totalPending:  branchBills,
             inTransit:     movementCount,
-            // new split for the dashboard balance view
+            // split for the dashboard balance view
             branchBills, branchWeight, branchValue, branchesActive,
             movementBills, movementWeight, movementValue, movementCount,
+            // new richer slices
+            byState, topBranches, movementByState,
           })
         }).catch(() => {})
       )
