@@ -269,17 +269,26 @@ export default function ConsignmentApprovals() {
   // clicking Confirm & Generate inside the modal.
   async function openPreview(c, type) {
     const path = type === 'ewb' ? '/api/eway-bill/preview' : '/api/e-invoice/preview'
-    setPreview({ type, consignment: c, loading: true, data: null, generating: false, error: null })
+    setPreview({ type, consignment: c, loading: true, data: null, audit: null, generating: false, error: null })
     // Race guard: if the user opens a different preview while this fetch is in flight,
     // we must not overwrite their newer preview state with our stale response.
-    const isStillCurrent = (p) => p && p.type === type && p.consignment?.id === c.id && p.loading
+    const isStillCurrent = (p) => p && p.type === type && p.consignment?.id === c.id
     try {
-      const r = await authedFetch(`${path}?id=${c.id}`)
-      const j = await r.json()
+      // Fetch preview + cross-doc audit in parallel. The audit catches any
+      // builder drift between EWB / E-Invoice / Challan / Voucher / Consignee
+      // Report so accounts sees mismatches BEFORE clicking Generate.
+      const [previewRes, auditRes] = await Promise.all([
+        authedFetch(`${path}?id=${c.id}`),
+        authedFetch(`/api/consignments/document-audit?id=${c.id}`),
+      ])
+      const previewJson = await previewRes.json()
+      const auditJson   = await auditRes.json().catch(() => null)
       setPreview(p => {
-        if (!isStillCurrent(p)) return p  // user moved on; don't clobber
-        if (!r.ok || j.error) return { ...p, loading: false, error: j.error || 'Preview failed' }
-        return { ...p, loading: false, data: j }
+        if (!isStillCurrent(p)) return p
+        if (!previewRes.ok || previewJson.error) {
+          return { ...p, loading: false, error: previewJson.error || 'Preview failed' }
+        }
+        return { ...p, loading: false, data: previewJson, audit: auditRes.ok ? auditJson : null }
       })
     } catch (e) {
       setPreview(p => {
@@ -845,7 +854,7 @@ export default function ConsignmentApprovals() {
 // confirmation does the actual generate fire.
 // ─────────────────────────────────────────────────────────────────────────────
 function PreviewModal({ state, t, onClose, onConfirm }) {
-  const { type, consignment: c, loading, data, generating, error } = state
+  const { type, consignment: c, loading, data, audit, generating, error } = state
   const isEwb   = type === 'ewb'
   const docName = isEwb ? 'E-Way Bill' : 'E-Invoice'
   const accent  = isEwb ? t.green : t.purple
@@ -933,6 +942,9 @@ function PreviewModal({ state, t, onClose, onConfirm }) {
                 )}
               </div>
 
+              {/* Cross-doc consistency audit — only shown if audit fetched successfully */}
+              {audit && <DocAuditPanel t={t} audit={audit} />}
+
               {/* Items list */}
               {summary.items?.length > 0 && (
                 <div style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: '8px', overflow: 'hidden', marginBottom: '14px' }}>
@@ -990,6 +1002,92 @@ function PreviewKpi({ t, label, value, accent }) {
     <div style={{ background: t.card, padding: '11px 14px' }}>
       <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: '4px' }}>{label}</div>
       <div style={{ fontSize: '15px', color: accent, fontFamily: 'monospace', fontWeight: 600 }}>{value}</div>
+    </div>
+  )
+}
+
+// Cross-document consistency audit panel. Compares what each generator
+// (EWB, E-Invoice, Consignee Report) would output for the same consignment
+// and flags any mismatch. Identical addresses + weight + value across all
+// docs is the whole goal — if anything diverges, accounts sees it here
+// BEFORE clicking Generate.
+function DocAuditPanel({ t, audit }) {
+  const { all_match, checks = [], discrepancies = [] } = audit || {}
+  const allOk = all_match && discrepancies.length === 0
+  const accent = allOk ? t.green : t.red
+  const fmtVal = (v) => {
+    if (v == null || v === '') return '—'
+    if (typeof v === 'number') {
+      // Heuristic: weights tend to be < 1000, amounts ≥ 100. Show 3 decimals
+      // if value looks like grams (no comma in INR formatting).
+      if (Math.abs(v) < 100000 && !Number.isInteger(v)) return v.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 3 })
+      return v.toLocaleString('en-IN')
+    }
+    const s = String(v)
+    return s.length > 60 ? s.slice(0, 57) + '…' : s
+  }
+  return (
+    <div style={{
+      background: allOk ? `${t.green}10` : `${t.red}10`,
+      border: `1px solid ${accent}40`,
+      borderRadius: '8px',
+      padding: '12px 14px',
+      marginBottom: '14px',
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: allOk ? 0 : '10px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <span style={{
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            width: 18, height: 18, borderRadius: '50%',
+            background: accent, color: '#fff', fontSize: 11, fontWeight: 700,
+          }}>{allOk ? '✓' : '!'}</span>
+          <span style={{ fontSize: '11px', color: accent, fontWeight: 700, letterSpacing: '.04em' }}>
+            {allOk
+              ? 'All documents agree'
+              : `${discrepancies.length} discrepanc${discrepancies.length === 1 ? 'y' : 'ies'} between EWB / E-Invoice / Report`}
+          </span>
+        </div>
+        <span style={{ fontSize: '9px', color: t.text4, letterSpacing: '.08em', textTransform: 'uppercase' }}>cross-doc check</span>
+      </div>
+
+      {/* When something is off, list ONLY the mismatches (compact). When all
+          OK, hide the table — the green tick is enough confirmation. */}
+      {!allOk && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'minmax(120px, 1.2fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr)',
+            gap: '6px 10px',
+            fontSize: '9px', color: t.text4,
+            letterSpacing: '.06em', textTransform: 'uppercase',
+            paddingBottom: '4px', borderBottom: `1px solid ${t.border}`,
+          }}>
+            <div>Field</div>
+            <div>EWB</div>
+            <div>E-Invoice</div>
+            <div>Report / Items</div>
+          </div>
+          {discrepancies.map(d => (
+            <div key={d.key} style={{
+              display: 'grid',
+              gridTemplateColumns: 'minmax(120px, 1.2fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr)',
+              gap: '6px 10px',
+              fontSize: '11px',
+              padding: '6px 0',
+              borderBottom: `1px solid ${t.border}30`,
+              alignItems: 'baseline',
+            }}>
+              <div style={{ color: t.text2, fontWeight: 600 }}>{d.label}</div>
+              <div style={{ color: t.text1, fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis' }} title={String(d.ewb)}>{fmtVal(d.ewb)}</div>
+              <div style={{ color: t.text1, fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis' }} title={String(d.einvoice)}>{fmtVal(d.einvoice)}</div>
+              <div style={{ color: t.text1, fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis' }} title={String(d.report ?? '')}>{d.report != null ? fmtVal(d.report) : '—'}</div>
+            </div>
+          ))}
+          <div style={{ fontSize: '10px', color: t.red, marginTop: '6px', lineHeight: 1.5 }}>
+            ⚠ Generation is allowed but the values above will not match across the documents NIC stores. Verify the consignment data before proceeding.
+          </div>
+        </div>
+      )}
     </div>
   )
 }
