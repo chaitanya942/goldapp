@@ -91,7 +91,7 @@ export async function POST(req) {
 
     // Single source of truth: snapshot loader returns consignment + branch + destBranch + items + companySettings
     // with snapshot-first resolution. Avoids divergent re-fetch logic across doc routes.
-    const loaded = await loadConsignmentForGeneration(supabase, consignment_id)
+    const loaded = await loadConsignmentForGeneration(supabase, consignment_id, auth)
     if (loaded.error) return Response.json({ error: loaded.error.message }, { status: loaded.error.status })
     const { consignment, branch, destBranch, items, companySettings } = loaded
 

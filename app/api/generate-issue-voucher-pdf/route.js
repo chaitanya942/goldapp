@@ -38,7 +38,7 @@ export async function GET(req) {
   if (gate.blocked) return gate.response
 
   try {
-    const loaded = await loadConsignmentForGeneration(supabase, consignmentId)
+    const loaded = await loadConsignmentForGeneration(supabase, consignmentId, auth)
     if (loaded.error) return Response.json({ error: loaded.error.message }, { status: loaded.error.status })
     const { consignment, branch: sourceBranch, destBranch, items, companySettings: rawSettings } = loaded
 

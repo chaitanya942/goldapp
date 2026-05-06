@@ -34,7 +34,7 @@ export async function POST(req) {
     if (!consignment_id) return Response.json({ error: 'consignment_id required' }, { status: 400 })
 
     // Snapshot-first load (consignment + branch + items + companySettings).
-    const loaded = await loadConsignmentForGeneration(supabase, consignment_id)
+    const loaded = await loadConsignmentForGeneration(supabase, consignment_id, auth)
     if (loaded.error) return Response.json({ error: loaded.error.message }, { status: loaded.error.status })
     const { consignment, branch, items, companySettings } = loaded
 
