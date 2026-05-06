@@ -33,6 +33,256 @@ function getRange(key) {
   return { from: null, to: null, label: 'All Time' }
 }
 
+// Read-only consignment balance view for the dashboard.
+// Shows the management team how much gold is "still at branches" vs "currently
+// moving" between branches / hub / HO. No buttons, no actions — this is the
+// 90%-of-the-time landing-page view, so it has to be readable at a glance and
+// look refined. Uses gradients, inline progress bar, and animated numbers.
+//
+// Two layouts:
+//   desktop: balance bar on top, two large stat tiles side-by-side beneath
+//   mobile : balance bar on top, two stat tiles stacked
+function ConsignmentBalanceView({ t, stats, isMobile }) {
+  if (!stats) {
+    return (
+      <div style={{ minHeight: 180, display:'flex', alignItems:'center', justifyContent:'center' }}>
+        <div style={{ width:24, height:24, borderRadius:'50%', border:`2px solid ${t.border}`, borderTopColor: t.orange, animation:'spin 1s linear infinite' }}/>
+        <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
+      </div>
+    )
+  }
+
+  const branchWt    = Number(stats.branchWeight   || 0)
+  const movementWt  = Number(stats.movementWeight || 0)
+  const totalWt     = branchWt + movementWt
+  const branchPct   = totalWt > 0 ? (branchWt   / totalWt) * 100 : 0
+  const movementPct = totalWt > 0 ? (movementWt / totalWt) * 100 : 0
+
+  const branchValueFmt   = fmtCr(stats.branchValue)
+  const movementValueFmt = fmtCr(stats.movementValue)
+  const totalValueFmt    = fmtCr((stats.branchValue || 0) + (stats.movementValue || 0))
+
+  const tile = (kind) => {
+    const isBranch = kind === 'branch'
+    const accent   = isBranch ? t.orange : t.blue
+    const label    = isBranch ? 'AT BRANCH' : 'IN MOVEMENT'
+    const subline  = isBranch
+      ? 'Stock awaiting consignment'
+      : 'Active consignments in transit'
+    const wt       = isBranch ? branchWt : movementWt
+    const val      = isBranch ? stats.branchValue : stats.movementValue
+    const bills    = isBranch ? stats.branchBills : stats.movementBills
+    const pct      = isBranch ? branchPct : movementPct
+    const sideTag  = isBranch
+      ? `${stats.branchesActive || 0} branch${(stats.branchesActive || 0) === 1 ? '' : 'es'}`
+      : `${stats.movementCount || 0} consignment${(stats.movementCount || 0) === 1 ? '' : 's'}`
+    const icon = isBranch ? (
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={accent} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M3 9l9-6 9 6v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V9z"/>
+        <path d="M9 22V12h6v10"/>
+      </svg>
+    ) : (
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={accent} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M1 3h15v13H1z"/>
+        <path d="M16 8h4l3 3v5h-7z"/>
+        <circle cx="5.5" cy="18.5" r="2.5"/>
+        <circle cx="18.5" cy="18.5" r="2.5"/>
+      </svg>
+    )
+
+    return (
+      <div style={{
+        position:'relative', overflow:'hidden',
+        background:`linear-gradient(155deg, ${t.card}f5 0%, ${t.card2 || t.card}f5 100%)`,
+        border:`1px solid ${accent}30`,
+        borderRadius: 16,
+        padding: isMobile ? '16px 16px 14px' : '20px 22px 18px',
+        boxShadow:`${t.shadow}, inset 0 1px 0 rgba(255,255,255,.04)`,
+      }}>
+        {/* Accent corner glow */}
+        <div style={{
+          position:'absolute', top:-30, right:-30, width:130, height:130, borderRadius:'50%',
+          background:`radial-gradient(circle, ${accent}28 0%, transparent 65%)`,
+          pointerEvents:'none',
+        }}/>
+        {/* Subtle accent stripe down the left edge */}
+        <div style={{
+          position:'absolute', top:0, left:0, bottom:0, width:3,
+          background:`linear-gradient(180deg, ${accent} 0%, ${accent}40 100%)`,
+        }}/>
+
+        <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom: isMobile ? 12 : 14, position:'relative', zIndex:1 }}>
+          <div style={{ display:'flex', alignItems:'center', gap:10 }}>
+            <div style={{
+              width:34, height:34, borderRadius:9,
+              background: `${accent}18`, border:`1px solid ${accent}30`,
+              display:'flex', alignItems:'center', justifyContent:'center',
+            }}>{icon}</div>
+            <div>
+              <div style={{ fontSize: 10, color: accent, letterSpacing:'.16em', fontWeight: 800 }}>{label}</div>
+              <div style={{ fontSize: 10, color: t.text4, marginTop: 2 }}>{subline}</div>
+            </div>
+          </div>
+          <div style={{
+            fontSize: 10, color: t.text3, fontFamily:'monospace',
+            background: `${t.border}80`, padding:'3px 9px', borderRadius:6,
+            border:`1px solid ${t.border}`,
+            whiteSpace:'nowrap',
+          }}>{sideTag}</div>
+        </div>
+
+        {/* Big number — gold weight */}
+        <div style={{ display:'flex', alignItems:'baseline', gap:6, position:'relative', zIndex:1 }}>
+          <span style={{ fontSize: isMobile ? 30 : 38, fontWeight: 200, color: t.text1, fontFamily:'monospace', letterSpacing:'-.02em', lineHeight: 1 }}>
+            <AnimatedNumber target={wt} decimals={3} duration={900} />
+          </span>
+          <span style={{ fontSize: isMobile ? 14 : 16, color: t.text3, fontWeight: 500 }}>g</span>
+        </div>
+
+        {/* Secondary stats row */}
+        <div style={{ display:'flex', alignItems:'baseline', gap: isMobile ? 14 : 22, marginTop: isMobile ? 10 : 12, flexWrap:'wrap', position:'relative', zIndex:1 }}>
+          <div>
+            <div style={{ fontSize: 9, color: t.text4, letterSpacing:'.1em', fontWeight: 600, textTransform:'uppercase' }}>Value</div>
+            <div style={{ fontSize: isMobile ? 14 : 16, color: t.text2, fontFamily:'monospace', fontWeight: 600, marginTop: 2 }}>
+              {fmtCr(val)}
+            </div>
+          </div>
+          <div>
+            <div style={{ fontSize: 9, color: t.text4, letterSpacing:'.1em', fontWeight: 600, textTransform:'uppercase' }}>Bills</div>
+            <div style={{ fontSize: isMobile ? 14 : 16, color: t.text2, fontFamily:'monospace', fontWeight: 600, marginTop: 2 }}>
+              <AnimatedNumber target={bills || 0} duration={700} />
+            </div>
+          </div>
+          <div>
+            <div style={{ fontSize: 9, color: t.text4, letterSpacing:'.1em', fontWeight: 600, textTransform:'uppercase' }}>Share</div>
+            <div style={{ fontSize: isMobile ? 14 : 16, color: accent, fontFamily:'monospace', fontWeight: 700, marginTop: 2 }}>
+              {pct.toFixed(1)}%
+            </div>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div style={{ display:'flex', flexDirection:'column', gap: isMobile ? 14 : 18 }}>
+
+      {/* ── Total + Balance bar ───────────────────────────────────────────── */}
+      <div style={{
+        background:`linear-gradient(160deg, ${t.card2 || t.card}f8 0%, ${t.card3 || t.card}f8 100%)`,
+        border:`1px solid ${t.border}`,
+        borderRadius: 14,
+        padding: isMobile ? '14px 16px' : '18px 22px',
+        position:'relative', overflow:'hidden',
+      }}>
+        {/* faint orb */}
+        <div style={{ position:'absolute', top:-50, right:-50, width:160, height:160, borderRadius:'50%', background:`radial-gradient(circle, ${t.gold}10 0%, transparent 65%)`, pointerEvents:'none' }}/>
+
+        <div style={{ display:'flex', alignItems:isMobile ? 'flex-start' : 'baseline', justifyContent:'space-between', flexDirection: isMobile ? 'column' : 'row', gap: isMobile ? 4 : 14, marginBottom: 10, position:'relative', zIndex:1 }}>
+          <div>
+            <div style={{ fontSize: 9, color: t.text4, letterSpacing:'.18em', fontWeight: 700, textTransform:'uppercase' }}>Total stock under company</div>
+            <div style={{ display:'flex', alignItems:'baseline', gap: 8, marginTop: 4 }}>
+              <span style={{ fontSize: isMobile ? 24 : 30, fontWeight: 200, color: t.text1, fontFamily:'monospace', letterSpacing:'-.02em', lineHeight: 1 }}>
+                <AnimatedNumber target={totalWt} decimals={3} duration={1100} />
+              </span>
+              <span style={{ fontSize: isMobile ? 13 : 15, color: t.text3, fontWeight: 500 }}>g</span>
+              <span style={{ fontSize: isMobile ? 11 : 12, color: t.text4, marginLeft: 6 }}>·</span>
+              <span style={{ fontSize: isMobile ? 13 : 15, color: t.gold, fontFamily:'monospace', fontWeight: 600 }}>{totalValueFmt}</span>
+            </div>
+          </div>
+          <div style={{ display:'flex', gap: 16, alignItems:'center', fontSize: 10, color: t.text3, flexWrap:'wrap' }}>
+            <span style={{ display:'inline-flex', alignItems:'center', gap: 6 }}>
+              <span style={{ width: 8, height: 8, borderRadius: 2, background: t.orange, boxShadow:`0 0 6px ${t.orange}80` }}/>
+              At branch
+            </span>
+            <span style={{ display:'inline-flex', alignItems:'center', gap: 6 }}>
+              <span style={{ width: 8, height: 8, borderRadius: 2, background: t.blue, boxShadow:`0 0 6px ${t.blue}80` }}/>
+              In movement
+            </span>
+          </div>
+        </div>
+
+        {/* Balance bar — proportional split */}
+        <div style={{
+          position:'relative', zIndex:1,
+          height: 12,
+          borderRadius: 6,
+          background: t.border,
+          overflow:'hidden',
+          display:'flex',
+        }}>
+          <div style={{
+            width: `${branchPct}%`,
+            background: `linear-gradient(90deg, ${t.orange} 0%, ${t.gold} 100%)`,
+            transition: 'width 0.9s cubic-bezier(.4,0,.2,1)',
+          }}/>
+          <div style={{
+            width: `${movementPct}%`,
+            background: `linear-gradient(90deg, ${t.blue} 0%, ${t.purple} 100%)`,
+            transition: 'width 0.9s cubic-bezier(.4,0,.2,1)',
+          }}/>
+        </div>
+        <div style={{ display:'flex', justifyContent:'space-between', marginTop: 6, fontSize: 10, color: t.text4, fontFamily:'monospace', position:'relative', zIndex:1 }}>
+          <span>{branchPct.toFixed(1)}% at branch</span>
+          <span>{movementPct.toFixed(1)}% in movement</span>
+        </div>
+      </div>
+
+      {/* ── Two stat tiles ────────────────────────────────────────────────── */}
+      <div style={{ display:'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: isMobile ? 12 : 16 }}>
+        {tile('branch')}
+        {tile('movement')}
+      </div>
+
+      {/* ── Insight strip — single observational line ─────────────────────── */}
+      <ConsignmentInsight t={t} stats={stats} isMobile={isMobile} />
+    </div>
+  )
+}
+
+// One-liner observation about the current state, refreshed automatically with
+// the data. Avoids cluttering the UI with multiple "alerts" — picks the most
+// salient signal from the data and shows it.
+function ConsignmentInsight({ t, stats, isMobile }) {
+  let icon = '◆', tone = t.text3, message = null
+  if (stats.urgent && stats.urgent > 0) {
+    tone = t.red
+    icon = '⚠'
+    message = `${stats.urgent} branch${stats.urgent === 1 ? '' : 'es'} have stock sitting >7 days — overdue for consignment.`
+  } else if ((stats.movementWeight || 0) > (stats.branchWeight || 0) * 1.5) {
+    tone = t.blue
+    icon = '✈'
+    message = `Most stock is in motion right now — ${(stats.movementWeight / Math.max(1, stats.branchWeight + stats.movementWeight) * 100).toFixed(0)}% travelling.`
+  } else if ((stats.branchWeight || 0) > (stats.movementWeight || 0) * 2) {
+    tone = t.orange
+    icon = '◔'
+    message = `Stock is concentrated at branches — ${(stats.branchWeight / Math.max(1, stats.branchWeight + stats.movementWeight) * 100).toFixed(0)}% awaiting consignment.`
+  } else if ((stats.branchWeight || 0) === 0 && (stats.movementWeight || 0) === 0) {
+    tone = t.text4
+    icon = '◌'
+    message = 'No stock at branches or in motion right now.'
+  } else {
+    tone = t.green
+    icon = '✓'
+    message = 'Stock distribution is balanced — no urgent action needed.'
+  }
+  return (
+    <div style={{
+      display:'flex', alignItems:'center', gap: 10,
+      padding: isMobile ? '10px 14px' : '12px 18px',
+      background: `${tone}10`,
+      border: `1px solid ${tone}30`,
+      borderRadius: 10,
+      fontSize: isMobile ? 11 : 12,
+      color: tone,
+      fontWeight: 500,
+    }}>
+      <span style={{ fontSize: 14, lineHeight: 1 }}>{icon}</span>
+      <span style={{ color: t.text2 }}>{message}</span>
+    </div>
+  )
+}
+
 function KpiCard({ label, value, sub, color, icon, loading, t, delay=0, compact=false }) {
   const [hov, setHov] = useState(false)
   const [vis, setVis] = useState(false)
@@ -269,14 +519,37 @@ export default function DashboardHome() {
           authedFetch('/api/consignments?action=consignments').then(r => r.json()).catch(() => ({ data: [] })),
         ]).then(([overview, consignList]) => {
           const rows = overview.data || []
-          const totalBranches = rows.filter(r => (r.older_bills || 0) + (r.today_bills || 0) > 0).length
-          const totalWeight   = rows.reduce((s, b) => s + (b.total_gross_wt || 0), 0)
-          const totalPending  = rows.reduce((s, b) => s + (b.older_bills || 0), 0)
-          // Bills with oldest age > 7d are urgent
-          const urgent = rows.filter(b => (b.oldest_age_days || 0) > 7).length
+          // ── At-branch totals (gold sitting in branches, not yet in motion) ──
+          const branchBills    = rows.reduce((s, b) => s + (b.older_bills || 0) + (b.today_bills || 0), 0)
+          const branchWeight   = rows.reduce((s, b) => s + Number(b.total_gross_wt || 0), 0)
+          const branchValue    = rows.reduce((s, b) => s + Number(b.total_amount   || 0), 0)
+          const branchesActive = rows.filter(r => (r.older_bills || 0) + (r.today_bills || 0) > 0).length
+          const urgent         = rows.filter(b => (b.oldest_age_days || 0) > 7).length
+
+          // ── In-movement totals (active consignments — created but not yet
+          //    received at the destination). Excludes cancelled and seed rows.
           const cs = consignList.data || []
-          const inTransit = cs.filter(c => c.status !== 'received' && c.status !== 'seed').length
-          setConsignStats({ totalBranches, totalWeight, urgent, totalPending, inTransit })
+          const inMotionList = cs.filter(c =>
+            c.status !== 'received' && c.status !== 'seed' && c.status !== 'cancelled'
+          )
+          const movementCount  = inMotionList.length
+          const movementBills  = inMotionList.reduce((s, c) => s + Number(c.total_bills    || 0), 0)
+          // Use gross weight for parity with branch_overview (both branch + movement
+          // are reconciliation-on-gross). Falls back to net if gross missing.
+          const movementWeight = inMotionList.reduce((s, c) => s + Number(c.total_gross_wt || c.total_net_wt || 0), 0)
+          const movementValue  = inMotionList.reduce((s, c) => s + Number(c.total_amount   || 0), 0)
+
+          setConsignStats({
+            // legacy fields kept for any callers still reading them
+            totalBranches: branchesActive,
+            totalWeight:   branchWeight + movementWeight,
+            urgent,
+            totalPending:  branchBills,
+            inTransit:     movementCount,
+            // new split for the dashboard balance view
+            branchBills, branchWeight, branchValue, branchesActive,
+            movementBills, movementWeight, movementValue, movementCount,
+          })
         }).catch(() => {})
       )
     }
@@ -933,45 +1206,24 @@ export default function DashboardHome() {
               <div style={{ fontSize:14, color:t.text2, letterSpacing:'.12em', textTransform:'uppercase', fontWeight:700 }}>Consignment Overview</div>
             </div>
             {!consignOpen && consignStats && (
-              <div style={{ display:'flex', gap: isMobile ? 12 : 22, alignItems:'center', fontSize: isMobile ? 11 : 12, color: t.text3, marginLeft: isMobile ? 0 : 14, flexWrap:'wrap' }}>
-                <span><strong style={{ color: t.orange, fontWeight: 700 }}>{consignStats.totalBranches || 0}</strong> branches with stock</span>
-                {consignStats.urgent > 0 && <span><strong style={{ color: t.red, fontWeight: 700 }}>{consignStats.urgent}</strong> urgent</span>}
+              <div style={{ display:'flex', gap: isMobile ? 10 : 22, alignItems:'center', fontSize: isMobile ? 11 : 12, color: t.text3, marginLeft: isMobile ? 0 : 14, flexWrap:'wrap' }}>
+                <span style={{ display:'inline-flex', alignItems:'center', gap:6 }}>
+                  <span style={{ width:6, height:6, borderRadius:'50%', background:t.orange, boxShadow:`0 0 6px ${t.orange}` }}/>
+                  <strong style={{ color: t.orange, fontWeight: 700, fontFamily:'monospace' }}>{Number(consignStats.branchWeight || 0).toFixed(0)}g</strong>
+                  <span style={{ color: t.text4 }}>at branch</span>
+                </span>
+                <span style={{ display:'inline-flex', alignItems:'center', gap:6 }}>
+                  <span style={{ width:6, height:6, borderRadius:'50%', background:t.blue, boxShadow:`0 0 6px ${t.blue}` }}/>
+                  <strong style={{ color: t.blue, fontWeight: 700, fontFamily:'monospace' }}>{Number(consignStats.movementWeight || 0).toFixed(0)}g</strong>
+                  <span style={{ color: t.text4 }}>in movement</span>
+                </span>
               </div>
             )}
             <div style={{ marginLeft:'auto', width:28, height:28, borderRadius:8, background:`${t.orange}12`, border:`1px solid ${t.orange}28`, display:'flex', alignItems:'center', justifyContent:'center', color:t.orange, fontSize:11, transition:'transform .35s cubic-bezier(.4,0,.2,1)', transform: consignOpen ? 'rotate(0deg)' : 'rotate(-90deg)' }}>▼</div>
           </div>
           {consignOpen && (
             <div style={{ padding: isMobile ? '16px 14px 20px' : '24px 28px 28px' }}>
-              <div style={{ display:'grid', gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(4, 1fr)', gap: isMobile ? 10 : 14 }}>
-                <KpiCard t={t} delay={0} compact={isMobile} label="Branches with Stock" icon="🏬" color={t.orange} loading={!consignStats}
-                  value={consignStats ? String(consignStats.totalBranches || 0) : '—'} sub="Outside Bangalore" />
-                <KpiCard t={t} delay={60} compact={isMobile} label="Urgent Alerts" icon="⚠️" color={t.red} loading={!consignStats}
-                  value={consignStats ? String(consignStats.urgent || 0) : '—'} sub="Bills sitting > 7 days" />
-                <KpiCard t={t} delay={120} compact={isMobile} label="Pending Bills" icon="📦" color={t.gold} loading={!consignStats}
-                  value={consignStats ? String(consignStats.totalPending || 0) : '—'} sub="Awaiting consignment" />
-                <KpiCard t={t} delay={180} compact={isMobile} label="In Transit" icon="🚚" color={t.blue} loading={!consignStats}
-                  value={consignStats ? String(consignStats.inTransit || 0) : '—'} sub="Active consignments" />
-              </div>
-              <div style={{ marginTop: 14, display:'flex', gap:8, flexWrap:'wrap' }}>
-                {canSee('consignment-overview') && (
-                  <button onClick={() => setActiveNav('consignment-overview')}
-                    style={{ padding:'8px 16px', borderRadius:9, background:`${t.orange}15`, border:`1px solid ${t.orange}35`, color:t.orange, fontSize:11, fontWeight:600, cursor:'pointer' }}>
-                    Branch Stock →
-                  </button>
-                )}
-                {canSee('consignment-data') && (
-                  <button onClick={() => setActiveNav('consignment-data')}
-                    style={{ padding:'8px 16px', borderRadius:9, background:`${t.gold}15`, border:`1px solid ${t.gold}35`, color:t.gold, fontSize:11, fontWeight:600, cursor:'pointer' }}>
-                    Consignment Data →
-                  </button>
-                )}
-                {canSee('consignment-analytics') && (
-                  <button onClick={() => setActiveNav('consignment-analytics')}
-                    style={{ padding:'8px 16px', borderRadius:9, background:`${t.purple}15`, border:`1px solid ${t.purple}35`, color:t.purple, fontSize:11, fontWeight:600, cursor:'pointer' }}>
-                    Analytics →
-                  </button>
-                )}
-              </div>
+              <ConsignmentBalanceView t={t} stats={consignStats} isMobile={isMobile} />
             </div>
           )}
         </div>
