@@ -27,10 +27,11 @@ export async function GET(req) {
   const to      = searchParams.get('to')      || null
   const device  = searchParams.get('device')  || null  // 'mobile' | 'desktop' | etc.
   const eventType = searchParams.get('event_type') || 'click'
+  const userId  = searchParams.get('user_id') || null  // optional — single-user view
 
   let q = supabase
     .from('heatmap_events')
-    .select('x_pct, y_pct, el_tag, el_text, el_id, el_class, scroll_y_pct')
+    .select('x_pct, y_pct, el_tag, el_text, el_id, el_class, scroll_y_pct, session_id, ts, device_class, user_id')
     .eq('project', project)
     .eq('page_path', page)
     .eq('event_type', eventType)
@@ -39,6 +40,7 @@ export async function GET(req) {
   if (from)   q = q.gte('ts', from)
   if (to)     q = q.lte('ts', to)
   if (device) q = q.eq('device_class', device)
+  if (userId) q = q.eq('user_id', userId)
 
   // Pull up to 50k events; clients with more should narrow the date range.
   q = q.limit(50000)
@@ -49,6 +51,12 @@ export async function GET(req) {
   // Bin to 100x100 grid for canvas rendering.
   const bins = new Map()  // 'x,y' → count
   const elementCounts = new Map()  // 'tag#id.class' → count
+  const sessions = new Set()
+  const uniqueUsers = new Set()
+  const deviceCounts = new Map()  // device_class → count
+  // Hourly buckets across the queried window (for the time-of-day chart).
+  // Use UTC hours; client can localize the labels if needed.
+  const hourCounts = new Array(24).fill(0)
   for (const e of data || []) {
     const xb = Math.min(99, Math.floor(Number(e.x_pct) || 0))
     const yb = Math.min(99, Math.floor(Number(e.y_pct) || 0))
@@ -58,6 +66,13 @@ export async function GET(req) {
     if (e.el_tag) {
       const sig = `${e.el_tag}${e.el_id ? '#' + e.el_id : ''}${e.el_class ? '.' + String(e.el_class).split(' ')[0] : ''}${e.el_text ? ` "${e.el_text}"` : ''}`
       elementCounts.set(sig, (elementCounts.get(sig) || 0) + 1)
+    }
+    if (e.session_id) sessions.add(e.session_id)
+    if (e.user_id)    uniqueUsers.add(e.user_id)
+    if (e.device_class) deviceCounts.set(e.device_class, (deviceCounts.get(e.device_class) || 0) + 1)
+    if (e.ts) {
+      const h = new Date(e.ts).getHours()
+      if (h >= 0 && h < 24) hourCounts[h]++
     }
   }
 
@@ -72,10 +87,18 @@ export async function GET(req) {
     .slice(0, 20)
     .map(([sig, count]) => ({ element: sig, count }))
 
+  const deviceBreakdown = [...deviceCounts.entries()]
+    .map(([device, count]) => ({ device, count }))
+    .sort((a, b) => b.count - a.count)
+
   return Response.json({
-    project, page, event_type: eventType,
+    project, page, event_type: eventType, user_id: userId,
     total: data?.length || 0,
+    sessions: sessions.size,
+    unique_users: uniqueUsers.size,
     bins: binsArr,
     top_elements: topElements,
+    device_breakdown: deviceBreakdown,
+    hourly: hourCounts,
   })
 }
