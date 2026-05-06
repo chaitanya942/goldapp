@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import { AppProvider, useApp } from '../../lib/context'
 import Clarity from '../../components/analytics/Clarity'
+import HeatmapTracker from '../../components/analytics/HeatmapTracker'
 import Sidebar from '../../components/Sidebar'
 import Topbar from '../../components/Topbar'
 import DashboardHome from '../../components/dashboard/DashboardHome'
@@ -92,6 +93,12 @@ function DashboardShell() {
     return () => window.removeEventListener('resize', check)
   }, [])
 
+  // Expose current nav to the heatmap tracker so each module shows as a separate "page"
+  // in the Heatmap Viewer (otherwise everything is just /dashboard).
+  useEffect(() => {
+    if (typeof window !== 'undefined') window.__APP_NAV = activeNav
+  }, [activeNav])
+
   useEffect(() => {
     if (role && activeNav !== 'dashboard' && !canSee(activeNav)) {
       setActiveNav('dashboard')
@@ -177,6 +184,7 @@ export default function DashboardPage() {
   return (
     <AppProvider>
       <Clarity />
+      <HeatmapTracker />
       <DashboardShell />
     </AppProvider>
   )

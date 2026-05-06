@@ -19,6 +19,7 @@ import { supabase } from '../../lib/supabase'
 import { useApp } from '../../lib/context'
 import { authedFetch } from '../../lib/authedFetch'
 import { CONSIGNMENT_THEMES as THEMES } from '../../lib/consignmentTheme'
+import HeatmapViewer from './HeatmapViewer'
 
 const PROJECT_TABLE = 'heatmap_projects'
 
@@ -85,6 +86,7 @@ export default function HeatmapInsights() {
   const [editing,   setEditing]   = useState(null)   // project being edited or { new: true }
   const [copiedFor, setCopiedFor] = useState(null)
   const [includeIdentify, setIncludeIdentify] = useState(true)
+  const [tab,       setTab]       = useState('viewer')  // 'viewer' | 'projects'
 
   const goldAppProjectId = process.env.NEXT_PUBLIC_CLARITY_PROJECT_ID
 
@@ -158,22 +160,43 @@ export default function HeatmapInsights() {
     <div style={{ padding: '32px', maxWidth: '1100px' }}>
 
       {/* Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '20px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '14px' }}>
         <div>
           <div style={{ fontSize: '.55rem', color: t.text4, letterSpacing: '.2em', textTransform: 'uppercase', marginBottom: '5px' }}>Analytics</div>
           <div style={{ fontSize: '1.6rem', fontWeight: 200, color: t.text1, letterSpacing: '.02em' }}>Heatmap Insights</div>
           <div style={{ fontSize: '.72rem', color: t.text3, marginTop: '6px', maxWidth: '720px', lineHeight: 1.5 }}>
-            User session heatmaps, click maps, scroll maps, and full session replay across all your tools.
-            Powered by Microsoft Clarity. Data is captured client-side with PII auto-masked.
-            Each tool gets a separate Clarity project — paste the snippet in once, see heatmaps in the Clarity dashboard.
+            In-app heatmaps from our own tracker, plus session replay via Microsoft Clarity for the full picture.
+            Each tool gets its own project; paste the snippet to add tracking.
           </div>
         </div>
-        {isAdmin && (
+        {isAdmin && tab === 'projects' && (
           <button onClick={() => setEditing({ new: true, id: '', name: '', description: '', project_id: '', is_internal: false })} style={btn}>
             + Add tool
           </button>
         )}
       </div>
+
+      {/* Tab switcher */}
+      <div style={{ display: 'flex', gap: '4px', padding: '5px', background: t.card, border: `1px solid ${t.border}`, borderRadius: '11px', alignSelf: 'flex-start', marginBottom: '16px', width: 'fit-content' }}>
+        {[
+          { key: 'viewer',   label: 'Heatmap Viewer',  hint: 'In-app click heatmaps' },
+          { key: 'projects', label: 'Projects & Snippets', hint: 'Manage tools + Clarity setup' },
+        ].map(m => {
+          const active = tab === m.key
+          return (
+            <button key={m.key} onClick={() => setTab(m.key)} title={m.hint}
+              style={{ padding: '8px 18px', borderRadius: '7px', border: 'none', cursor: 'pointer', background: active ? t.gold : 'transparent', color: active ? '#0a0a0a' : t.text3, fontSize: '12px', fontWeight: active ? 600 : 400, letterSpacing: '.04em' }}>
+              {m.label}
+            </button>
+          )
+        })}
+      </div>
+
+      {/* In-app viewer (default) */}
+      {tab === 'viewer' && <HeatmapViewer defaultProject="goldapp" />}
+
+      {/* Projects + snippets section — only on the "projects" tab */}
+      {tab === 'projects' && <>
 
       {/* Setup banner — only when goldapp's own Clarity isn't configured */}
       {!goldAppProjectId && (
@@ -271,6 +294,8 @@ export default function HeatmapInsights() {
           <li>For user-level filtering: in your tool, set <code>{'window.__APP_USER = { id, name, role }'}</code> before the snippet, OR call <code>{`window.clarity('identify', userId)`}</code> after auth</li>
         </ol>
       </div>
+
+      </>}
 
       {/* Edit / new modal */}
       {editing && (
