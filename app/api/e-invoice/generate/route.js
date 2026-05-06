@@ -9,6 +9,7 @@ import { logConsignmentEvent } from '../../../../lib/consignmentLog'
 import { requireAuth, ROLE_GROUPS } from '../../../../lib/apiAuth'
 import { REGION_TO_STATE_CODE } from '../../../../lib/stateMap'
 import { loadConsignmentForGeneration } from '../../../../lib/consignmentSnapshot'
+import { checkWorkflow } from '../../../../lib/workflowGate'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
@@ -32,6 +33,10 @@ export async function POST(req) {
   try {
     const { consignment_id } = await req.json()
     if (!consignment_id) return Response.json({ error: 'consignment_id required' }, { status: 400 })
+
+    // Sequential workflow gate: voucher / challan must have been generated first.
+    const wf = await checkWorkflow(supabase, consignment_id, auth, 'einvoice_generate')
+    if (wf.blocked) return wf.response
 
     // Snapshot-first load (consignment + branch + items + companySettings).
     const loaded = await loadConsignmentForGeneration(supabase, consignment_id, auth)

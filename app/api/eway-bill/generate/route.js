@@ -9,6 +9,7 @@ import { estimateDistanceKm } from '../../../../lib/distanceCalc'
 import { logConsignmentEvent } from '../../../../lib/consignmentLog'
 import { requireAuth, ROLE_GROUPS } from '../../../../lib/apiAuth'
 import { loadConsignmentForGeneration } from '../../../../lib/consignmentSnapshot'
+import { checkWorkflow } from '../../../../lib/workflowGate'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
@@ -88,6 +89,10 @@ export async function POST(req) {
   try {
     const { consignment_id } = await req.json()
     if (!consignment_id) return Response.json({ error: 'consignment_id required' }, { status: 400 })
+
+    // Sequential workflow gate: voucher / challan must have been generated first.
+    const wf = await checkWorkflow(supabase, consignment_id, auth, 'ewb_generate')
+    if (wf.blocked) return wf.response
 
     // Single source of truth: snapshot loader returns consignment + branch + destBranch + items + companySettings
     // with snapshot-first resolution. Avoids divergent re-fetch logic across doc routes.

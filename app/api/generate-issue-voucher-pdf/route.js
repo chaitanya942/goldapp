@@ -4,6 +4,7 @@
 import { createClient } from '@supabase/supabase-js'
 import { generateIssueVoucher } from '../../../lib/generateIssueVoucher'
 import { checkApproval } from '../../../lib/approvalGate'
+import { checkWorkflow, stampWorkflowStep } from '../../../lib/workflowGate'
 import { requireAuth } from '../../../lib/apiAuth'
 import { loadConsignmentForGeneration } from '../../../lib/consignmentSnapshot'
 import fs   from 'fs'
@@ -37,6 +38,11 @@ export async function GET(req) {
   const gate = await checkApproval(supabase, consignmentId, req, auth, 'issue_voucher')
   if (gate.blocked) return gate.response
 
+  // Sequential workflow gate: requires the consignee report to have been
+  // generated first — the voucher uses the same data and is reviewed against it.
+  const wf = await checkWorkflow(supabase, consignmentId, auth, 'issue_voucher')
+  if (wf.blocked) return wf.response
+
   try {
     const loaded = await loadConsignmentForGeneration(supabase, consignmentId, auth)
     if (loaded.error) return Response.json({ error: loaded.error.message }, { status: loaded.error.status })
@@ -65,6 +71,9 @@ export async function GET(req) {
 
     const pdfBuffer = Buffer.from(pdf.output('arraybuffer'))
     const filename  = (consignment.challan_no || consignment.tmp_prf_no || consignmentId).replace(/\//g, '-') + '_voucher.pdf'
+
+    // Stamp the workflow step so EWB / E-Invoice preview unlocks for this consignment.
+    stampWorkflowStep(supabase, consignmentId, 'issue_voucher', auth).catch(() => {})
 
     return new Response(pdfBuffer, {
       headers: {

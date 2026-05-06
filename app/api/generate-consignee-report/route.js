@@ -3,6 +3,7 @@
 import { createClient } from '@supabase/supabase-js'
 import { generateConsigneeReport } from '../../../lib/generateConsigneeReport'
 import { checkApproval } from '../../../lib/approvalGate'
+import { checkWorkflow, stampWorkflowStep } from '../../../lib/workflowGate'
 import { requireAuth } from '../../../lib/apiAuth'
 import { loadConsignmentForGeneration } from '../../../lib/consignmentSnapshot'
 
@@ -26,6 +27,11 @@ export async function GET(req) {
   // physically pack the consignment before accounts has reviewed it.
   const gate = await checkApproval(supabase, consignmentId, req, auth, 'consignee_report')
   if (gate.blocked) return gate.response
+
+  // Sequential workflow gate: requires Operations to have confirmed the
+  // consignment first (locks the bill list).
+  const wf = await checkWorkflow(supabase, consignmentId, auth, 'consignee_report')
+  if (wf.blocked) return wf.response
 
   try {
     const loaded = await loadConsignmentForGeneration(supabase, consignmentId, auth)
@@ -80,6 +86,10 @@ export async function GET(req) {
     })
 
     const filename = `GoldConsigneeReport-${consignment.tmp_prf_no}.jpg`
+
+    // Stamp the workflow step so voucher / challan unlock for this consignment.
+    // Fire-and-forget — failure to stamp shouldn't break the download itself.
+    stampWorkflowStep(supabase, consignmentId, 'consignee_report', auth).catch(() => {})
 
     return new Response(jpegBuffer, {
       headers: {

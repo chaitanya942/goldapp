@@ -18,6 +18,7 @@ import { createClient } from '@supabase/supabase-js'
 import { buildPayload } from '../../../../lib/clearTaxClient'
 import { requireAuth, ROLE_GROUPS } from '../../../../lib/apiAuth'
 import { loadConsignmentForGeneration } from '../../../../lib/consignmentSnapshot'
+import { checkWorkflow } from '../../../../lib/workflowGate'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
@@ -40,6 +41,12 @@ export async function GET(req) {
   const { searchParams } = new URL(req.url)
   const consignmentId = searchParams.get('id')
   if (!consignmentId) return Response.json({ error: 'id required' }, { status: 400 })
+
+  // Sequential workflow gate: requires the issue voucher OR delivery challan
+  // to have been generated first. Preview should mirror what the user already
+  // saw on the physical document.
+  const wf = await checkWorkflow(supabase, consignmentId, auth, 'ewb_preview')
+  if (wf.blocked) return wf.response
 
   const loaded = await loadConsignmentForGeneration(supabase, consignmentId, auth)
   if (loaded.error) return Response.json({ error: loaded.error.message }, { status: loaded.error.status })

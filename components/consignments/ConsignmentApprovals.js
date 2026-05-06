@@ -139,6 +139,11 @@ export default function ConsignmentApprovals() {
   // to NIC. If NIC says past-24h-window, falls back to credit-note flow (IRN only).
   const [cancelModal, setCancelModal] = useState(null)
   // { type: 'ewb'|'irn', consignment, reasonCode, remark, busy, error, suggestCreditNote }
+
+  // ID of the consignment currently being confirmed (POST /confirm in flight).
+  // Disables the Confirm button while the request runs so double-clicks don't
+  // fire two POSTs.
+  const [confirmingConsignmentId, setConfirmingConsignmentId] = useState(null)
   const [toast, setToast] = useState(null)
   const [notifPermission, setNotifPermission] = useState(typeof window !== 'undefined' && 'Notification' in window ? Notification.permission : 'unsupported')
   const [soundEnabled, setSoundEnabled] = useState(true)
@@ -321,6 +326,37 @@ export default function ConsignmentApprovals() {
       fetchPending(true)
     } catch (e) {
       setPreview(p => p ? { ...p, generating: false, error: e.message } : null)
+    }
+  }
+
+  // Operations confirms the bill list is final → unlocks the consignee report
+  // step. Idempotent on the backend, but UI guards against double-fire too.
+  async function openConfirmConsignment(c) {
+    const ok = await openConfirm({
+      title: c.ops_confirmed_at ? `Re-confirm ${c.tmp_prf_no}?` : `Confirm ${c.tmp_prf_no}?`,
+      message: c.ops_confirmed_at
+        ? `This consignment was already confirmed on ${fmtTS(c.ops_confirmed_at)}.\n\nRe-confirming refreshes the timestamp but does NOT unlock anything new — proceed only if you re-checked the bill list.`
+        : `Lock the bill list for ${c.tmp_prf_no} and unlock the consignee report?\n\nAfter this step, bills can no longer be added or removed without reopening the consignment.\n\n· ${c.total_bills} bills\n· ${fmtWt(c.total_net_wt)} net\n· ₹${fmt(Math.round(c.total_amount))} value`,
+      confirmLabel: c.ops_confirmed_at ? 'Re-confirm' : 'Confirm & lock',
+    })
+    if (!ok) return
+    setConfirmingConsignmentId(c.id)
+    try {
+      const r = await authedFetch('/api/consignments/confirm', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ consignment_id: c.id }),
+      })
+      const j = await r.json()
+      if (!r.ok) {
+        showToast(j.error || 'Confirm failed', 'error')
+      } else {
+        showToast(j.message || 'Consignment confirmed', 'success')
+        fetchPending(true)
+      }
+    } catch (e) {
+      showToast(e.message, 'error')
+    } finally {
+      setConfirmingConsignmentId(null)
     }
   }
 
@@ -730,6 +766,15 @@ export default function ConsignmentApprovals() {
                       <span style={{ color: t.blue }}>₹{fmt(Math.round(c.total_amount))}</span>
                     </div>
                   </div>
+                  {/* Workflow stepper — sequential progress through the doc chain */}
+                  <WorkflowStrip
+                    t={t}
+                    c={c}
+                    isType={isType}
+                    onConfirm={() => openConfirmConsignment(c)}
+                    confirmingId={confirmingConsignmentId}
+                  />
+
                   {/* Row 3: timestamp + preview links */}
                   <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap', marginTop: '2px' }}>
                     <span style={{ fontSize: '10px', color: t.text4 }}>
@@ -995,6 +1040,97 @@ function PreviewModal({ state, t, onClose, onConfirm }) {
       </div>
     </div>
   ), document.body)
+}
+
+// Compact 4-step strip showing the sequential workflow on each consignment
+// card: Confirm → Report → Voucher/Challan → EWB / E-Invoice.
+//
+// Each step renders as a pill with one of three states:
+//   - done:      green tick + timestamp
+//   - active:    accent border, the only step the user can act on
+//   - locked:    greyed out — prior step not complete yet
+//
+// The Confirm step is also a clickable button when not yet done. The other
+// steps' actions are the existing buttons elsewhere on the card; this strip
+// is purely a status indicator + the confirm CTA.
+function WorkflowStrip({ t, c, isType, onConfirm, confirmingId }) {
+  const confirmed   = !!c.ops_confirmed_at
+  const reported    = !!c.consignee_report_generated_at
+  const docMade     = !!(c.issue_voucher_generated_at || c.delivery_challan_generated_at)
+  const ewbDone     = !!(c.eway_bill_no || c.irn)
+
+  // The "active" step is the first step that's not done. Locked = any later step
+  // whose prior is not done. Used to dim icons and explain via tooltip why a
+  // step isn't actionable yet.
+  const activeIdx = !confirmed ? 0 : !reported ? 1 : !docMade ? 2 : !ewbDone ? 3 : -1
+
+  const steps = [
+    { key: 'confirm', label: 'Confirm bills',         done: confirmed, ts: c.ops_confirmed_at,              hint: 'Operations locks the bill list' },
+    { key: 'report',  label: 'Consignee report',      done: reported,  ts: c.consignee_report_generated_at, hint: 'Generate the report PDF' },
+    { key: 'doc',     label: isType ? 'Issue voucher' : 'Delivery challan',
+      done: docMade,
+      ts: c.issue_voucher_generated_at || c.delivery_challan_generated_at,
+      hint: isType ? 'Generate the voucher PDF' : 'Generate the challan PDF',
+    },
+    { key: 'ewb',     label: 'EWB / E-Invoice',       done: ewbDone,   ts: c.ewb_generated_at || c.einvoice_generated_at, hint: 'Preview → Confirm → Generate on NIC / IRP' },
+  ]
+
+  const isConfirming = confirmingId === c.id
+
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '6px', flexWrap: 'wrap' }}>
+      <span style={{ fontSize: '9px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', marginRight: '4px' }}>Workflow</span>
+      {steps.map((s, i) => {
+        const isActive = i === activeIdx
+        const isLocked = !s.done && i > activeIdx
+        const tone = s.done ? t.green : isActive ? t.gold : t.text4
+
+        // Confirm step is interactive when active.
+        if (s.key === 'confirm' && !s.done) {
+          return (
+            <span key={s.key} style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+              <button onClick={onConfirm} disabled={isConfirming}
+                title="Lock the bill list and unlock the consignee report"
+                style={{
+                  background: t.gold, color: '#1a0a00', border: 'none',
+                  borderRadius: '6px', padding: '4px 10px',
+                  fontSize: '10px', fontWeight: 700, letterSpacing: '.04em',
+                  cursor: isConfirming ? 'wait' : 'pointer',
+                  opacity: isConfirming ? .55 : 1,
+                  display: 'inline-flex', alignItems: 'center', gap: '5px',
+                }}>
+                <span style={{ fontSize: '11px' }}>◔</span>
+                {isConfirming ? 'Confirming…' : 'Confirm bills'}
+              </button>
+              <span style={{ fontSize: '11px', color: t.text4 }}>›</span>
+            </span>
+          )
+        }
+
+        return (
+          <span key={s.key}
+            title={s.done ? `${s.label} · ${s.ts ? fmtTS(s.ts) : 'done'}` : isActive ? `Next: ${s.hint}` : `Locked — finish prior steps first`}
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: '5px',
+              padding: '3px 9px',
+              background: s.done ? `${t.green}12` : isActive ? `${t.gold}12` : 'transparent',
+              border: `1px solid ${s.done ? `${t.green}40` : isActive ? `${t.gold}40` : t.border}`,
+              borderRadius: '6px',
+              fontSize: '10px',
+              color: tone,
+              fontWeight: s.done || isActive ? 600 : 400,
+              opacity: isLocked ? .55 : 1,
+            }}>
+            <span style={{ fontSize: '11px', lineHeight: 1 }}>
+              {s.done ? '✓' : isActive ? '◔' : '◌'}
+            </span>
+            {s.label}
+            {i < steps.length - 1 && <span style={{ marginLeft: '4px', color: t.text4, opacity: .6 }}>›</span>}
+          </span>
+        )
+      })}
+    </div>
+  )
 }
 
 function PreviewKpi({ t, label, value, accent }) {
