@@ -147,7 +147,9 @@ export async function POST(req) {
   // Pulls voicebot recordings + metadata from S3 / writes to Supabase. Costly
   // operation that should never be triggered anonymously. Cron variant uses
   // the GET handler with CRON_SECRET (handled below).
-  const auth = await requireAuth(req, { requiredRoles: ROLE_GROUPS.ADMIN })
+  // Open to telesales operators too — they're the ones who watch the call list
+  // most actively and need to pull new recordings without waiting for an admin.
+  const auth = await requireAuth(req, { requiredRoles: ROLE_GROUPS.TELESALES })
   if (!auth.ok) return auth.response
   try {
     const body = await req.json().catch(() => ({}))
