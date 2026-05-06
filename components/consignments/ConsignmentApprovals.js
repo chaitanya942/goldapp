@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import { useApp } from '../../lib/context'
 import { supabase as supabaseClient } from '../../lib/supabase'
 import GoldSpinner from '../ui/GoldSpinner'
@@ -853,7 +854,10 @@ function PreviewModal({ state, t, onClose, onConfirm }) {
   const errors  = data?.validation_errors || []
   const blocked = errors.length > 0 || data?.already_generated || !data?.can_generate
 
-  return (
+  // Render via portal so the fixed overlay lives at <body> — escapes any
+  // CSS containing-block created by ancestor transforms / filters / etc.
+  if (typeof document === 'undefined') return null
+  return createPortal((
     <div onClick={(e) => { if (e.target === e.currentTarget && !generating) onClose() }}
       style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000, padding: '20px', overflow: 'hidden' }}>
       <div style={{
@@ -978,7 +982,7 @@ function PreviewModal({ state, t, onClose, onConfirm }) {
         </div>
       </div>
     </div>
-  )
+  ), document.body)
 }
 
 function PreviewKpi({ t, label, value, accent }) {
@@ -1028,7 +1032,8 @@ function CancelModal({ state, t, onChange, onClose, onConfirm, onCreditNote }) {
     { code: '4', label: 'Others' },
   ]
 
-  return (
+  if (typeof document === 'undefined') return null
+  return createPortal((
     <div onClick={(e) => { if (e.target === e.currentTarget && !busy) onClose() }}
       style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000, padding: '20px', overflow: 'hidden' }}>
       <div style={{ background: t.card, border: `1px solid ${t.red}40`, borderRadius: '12px', width: '100%', maxWidth: '480px', maxHeight: 'calc(100vh - 40px)', display: 'flex', flexDirection: 'column', boxShadow: '0 20px 60px rgba(0,0,0,.6)', overflow: 'hidden' }}>
@@ -1113,5 +1118,5 @@ function CancelModal({ state, t, onChange, onClose, onConfirm, onCreditNote }) {
         </div>
       </div>
     </div>
-  )
+  ), document.body)
 }
