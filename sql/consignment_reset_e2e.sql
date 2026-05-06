@@ -78,15 +78,31 @@ DELETE FROM consignment_activity_log
 -- ── 4. Delete the consignments themselves. Seed rows preserved.
 DELETE FROM consignments WHERE status <> 'seed';
 
+-- ── 5. E2E SETUP: park everything older than today at HO ───────────────
+--    Today's (purchase_date = CURRENT_DATE in IST) bills stay at_branch so
+--    operations has fresh in-branch stock to run a clean E2E flow on.
+--    Everything else is moved to 'at_ho' to mirror the steady-state pre-test
+--    inventory (most stock has long since been consolidated to head office).
+--    'sold' bills are not touched.
+--    IST = UTC+05:30 — using (now() at time zone 'Asia/Kolkata')::date so the
+--    cutover lines up with the operations team's calendar day, not UTC.
+UPDATE purchases
+SET stock_status = 'at_ho'
+WHERE stock_status = 'at_branch'
+  AND purchase_date < (now() AT TIME ZONE 'Asia/Kolkata')::date;
+
 -- ── AFTER counts ───────────────────────────────────────────────────────
 DO $$
 DECLARE
-  v_consignments_total INT;
-  v_consignments_seed  INT;
-  v_items_total        INT;
-  v_log_total          INT;
+  v_consignments_total  INT;
+  v_consignments_seed   INT;
+  v_items_total         INT;
+  v_log_total           INT;
   v_purchases_in_motion INT;
   v_purchases_at_branch INT;
+  v_purchases_at_ho     INT;
+  v_purchases_today     INT;
+  v_today_ist           DATE := (now() AT TIME ZONE 'Asia/Kolkata')::date;
 BEGIN
   SELECT COUNT(*) INTO v_consignments_total FROM consignments;
   SELECT COUNT(*) INTO v_consignments_seed  FROM consignments WHERE status = 'seed';
@@ -95,9 +111,15 @@ BEGIN
   SELECT COUNT(*) INTO v_purchases_in_motion
     FROM purchases
     WHERE stock_status IS NOT NULL
-      AND stock_status NOT IN ('at_branch', 'sold');
+      AND stock_status NOT IN ('at_branch', 'at_ho', 'sold');
   SELECT COUNT(*) INTO v_purchases_at_branch
     FROM purchases WHERE stock_status = 'at_branch';
+  SELECT COUNT(*) INTO v_purchases_at_ho
+    FROM purchases WHERE stock_status = 'at_ho';
+  SELECT COUNT(*) INTO v_purchases_today
+    FROM purchases
+    WHERE stock_status = 'at_branch'
+      AND purchase_date = v_today_ist;
 
   RAISE NOTICE '── AFTER ──────────────────────────────────────────';
   RAISE NOTICE 'consignments total .................... %', v_consignments_total;
@@ -105,7 +127,9 @@ BEGIN
   RAISE NOTICE 'consignment_items remaining ........... %', v_items_total;
   RAISE NOTICE 'consignment_activity_log remaining .... %', v_log_total;
   RAISE NOTICE 'purchases stuck in_consignment/transit  %  (should be 0)', v_purchases_in_motion;
-  RAISE NOTICE 'purchases at_branch ................... %', v_purchases_at_branch;
+  RAISE NOTICE 'purchases at_branch ................... %  (should equal today-only count below)', v_purchases_at_branch;
+  RAISE NOTICE 'purchases at_branch with date = % ..  %  (today IST)', v_today_ist, v_purchases_today;
+  RAISE NOTICE 'purchases at_ho ....................... %  (everything else)', v_purchases_at_ho;
 END $$;
 
 -- If counts above look wrong, replace COMMIT with ROLLBACK and re-run.
