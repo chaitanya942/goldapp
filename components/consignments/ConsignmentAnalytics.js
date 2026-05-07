@@ -316,7 +316,7 @@ export default function ConsignmentAnalytics() {
                 return (
                   <div key={k} style={{ marginBottom: '14px' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
-                      <span style={{ fontSize: '12px', color, fontWeight: 600 }}>{k === 'INTERNAL' ? 'Via Hub' : 'Direct → HO'}</span>
+                      <span style={{ fontSize: '12px', color, fontWeight: 600 }}>{k === 'INTERNAL' ? 'Branch → Hub' : 'Branch → HO'}</span>
                       <span style={{ fontSize: '11px', color: t.text2, fontFamily: 'monospace' }}>{stats.count} · {fmtWt(stats.wt)} · {fmtCr(stats.val)}</span>
                     </div>
                     <div style={{ height: '8px', background: t.card2, borderRadius: '4px', overflow: 'hidden' }}>

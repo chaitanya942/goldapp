@@ -347,6 +347,18 @@ export default function ConsignmentData() {
       setToast({ msg: 'Select a destination hub before creating.', type: 'error' })
       return
     }
+
+    // Final confirmation gate — themed dialog so creation never fires from a
+    // single click. Restates the destination, bills, weight, value so the user
+    // can't claim they didn't see it. Cancel here is a clean no-op.
+    const dest = moveType === 'INTERNAL' ? destBranch : 'Head Office'
+    const ok = await openConfirm({
+      title: 'Create this consignment?',
+      message: `${nav.branch} → ${dest}\n\n· ${selected.size} bill${selected.size === 1 ? '' : 's'}\n· ${fmtWt(totalSelWt)} net weight\n· ₹${fmt(Math.round(totalSelAmt))} value\n· ${moveType === 'INTERNAL' ? 'Issue Voucher' : 'Delivery Challan'} will be issued\n\nOnce created, the bills are locked to this consignment until accounts approves or the consignment is voided.`,
+      confirmLabel: 'Yes, create now',
+    })
+    if (!ok) return
+
     setCreating(true)
     try {
       const res = await authedFetch('/api/consignments', {
@@ -978,8 +990,8 @@ export default function ConsignmentData() {
         <select value={filterType} onChange={e => setFilterType(e.target.value)}
           style={{ background: t.card2, border: `1px solid ${t.border2}`, borderRadius: '7px', padding: '7px 10px', fontSize: '12px', color: t.text2, outline: 'none' }}>
           <option value="">All Types</option>
-          <option value="EXTERNAL">Direct → HO</option>
-          <option value="INTERNAL">Via Hub</option>
+          <option value="EXTERNAL">Branch → HO</option>
+          <option value="INTERNAL">Branch → Hub</option>
         </select>
         <select value={filterRegion} onChange={e => setFilterRegion(e.target.value)}
           style={{ background: t.card2, border: `1px solid ${t.border2}`, borderRadius: '7px', padding: '7px 10px', fontSize: '12px', color: t.text2, outline: 'none' }}>
@@ -1051,7 +1063,7 @@ export default function ConsignmentData() {
                     </td>
                     <td style={{ padding: '11px 14px', whiteSpace: 'nowrap' }}>
                       <span style={{ fontSize: '10px', color: tColor, background: `${tColor}15`, borderRadius: '5px', padding: '2px 8px', fontWeight: 600, whiteSpace: 'nowrap', display: 'inline-block' }}>
-                        {isType ? 'Via Hub' : 'Direct → HO'}
+                        {isType ? 'Branch → Hub' : 'Branch → HO'}
                       </span>
                     </td>
                     <td style={{ padding: '11px 14px', fontSize: '12px', color: t.text2, whiteSpace: 'nowrap' }}>
@@ -1317,12 +1329,48 @@ export default function ConsignmentData() {
       )}
 
       {/* Confirm modal — portalled to <body> so the position:fixed overlay can't
-          be clipped by any ancestor with transform / filter / contain. */}
+          be clipped by any ancestor with transform / filter / contain.
+
+          Layout:
+            • hero header (eyebrow + title + subtitle)
+            • movement type segmented control (Branch → HO  /  Branch → Hub)
+            • dest hub picker (only for Branch → Hub)
+            • Source ──→ Destination flow card
+            • Stats row: Bills · Net Weight · Total Value
+            • Document chip
+            • E-Way Bill input (Branch → HO only)
+            • TMP PRF + Challan/Voucher preview badges
+            • Cancel / Confirm-and-Create CTA
+      */}
       {showModal && typeof document !== 'undefined' && createPortal((
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.75)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(4px)' }}>
-          <div style={{ background: t.card, border: `1px solid ${t.border2}`, borderRadius: '16px', padding: '28px', width: '480px', maxWidth: '92vw', boxShadow: '0 24px 64px rgba(0,0,0,.4)', maxHeight: '92vh', overflowY: 'auto' }}>
-            <div style={{ fontSize: '16px', fontWeight: 600, color: t.text1, marginBottom: '6px' }}>Confirm Consignment</div>
-            <div style={{ fontSize: '12px', color: t.text3, marginBottom: '22px' }}>Review and confirm before creating.</div>
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.78)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(6px)', padding: '20px' }}>
+          <div style={{
+            background: t.card,
+            border: `1px solid ${t.border2}`,
+            borderRadius: '18px',
+            width: '560px', maxWidth: '100%',
+            boxShadow: '0 28px 80px rgba(0,0,0,.55)',
+            maxHeight: 'calc(100vh - 40px)',
+            display: 'flex', flexDirection: 'column',
+            overflow: 'hidden',
+          }}>
+
+            {/* ── Hero header ──────────────────────────────────────────── */}
+            <div style={{
+              padding: '20px 26px 18px',
+              borderBottom: `1px solid ${t.border}`,
+              background: `linear-gradient(160deg, ${t.gold}12 0%, transparent 100%)`,
+              flexShrink: 0,
+            }}>
+              <div style={{ fontSize: '9px', color: t.gold, letterSpacing: '.18em', textTransform: 'uppercase', fontWeight: 700 }}>Create Consignment</div>
+              <div style={{ fontSize: '20px', fontWeight: 600, color: t.text1, marginTop: '4px', letterSpacing: '-.01em' }}>Confirm before dispatch</div>
+              <div style={{ fontSize: '12px', color: t.text3, marginTop: '4px' }}>
+                Once you create, bills are locked to this consignment until accounts approves or it's voided.
+              </div>
+            </div>
+
+            {/* ── Body (scrollable) ────────────────────────────────────── */}
+            <div style={{ padding: '20px 26px', overflowY: 'auto', flex: 1, minHeight: 0 }}>
 
             {(() => {
               // Hub must be in the same state as the source branch — interstate
@@ -1331,6 +1379,7 @@ export default function ConsignmentData() {
               const srcBranch = branches.find(b => b.name === nav?.branch)
               const srcState  = srcBranch?.state || null
               const srcRegion = srcBranch?.region || null
+              const srcRegionLabel = srcBranch?.region || ''
               const candidateHubs = branches.filter(b => {
                 if (b.name === nav?.branch) return false
                 if (srcState)  return b.state  === srcState
@@ -1340,46 +1389,75 @@ export default function ConsignmentData() {
               const filteredHubs  = destSearch
                 ? candidateHubs.filter(b => b.name.toLowerCase().includes(destSearch.toLowerCase()) || (b.region || '').toLowerCase().includes(destSearch.toLowerCase()))
                 : candidateHubs
+              const isExternal = moveType === 'EXTERNAL'
+              const dest        = isExternal ? 'Head Office' : (destBranch || '— select hub —')
+              const destRegion  = isExternal ? 'Bangalore (KA)' : (branches.find(b => b.name === destBranch)?.region || '')
 
               return (
                 <>
-                  <div style={{ display: 'flex', gap: '6px', marginBottom: '14px', padding: '4px', background: t.card2, borderRadius: '9px' }}>
-                    <button type="button" onClick={() => setMoveType('EXTERNAL')}
-                      style={{ flex: 1, padding: '8px', border: 'none', borderRadius: '7px', cursor: 'pointer',
-                        background: moveType === 'EXTERNAL' ? t.card : 'transparent',
-                        color: moveType === 'EXTERNAL' ? t.gold : t.text3, fontWeight: moveType === 'EXTERNAL' ? 700 : 500, fontSize: '11px',
-                        boxShadow: moveType === 'EXTERNAL' ? '0 1px 4px rgba(0,0,0,.2)' : 'none' }}>
-                      Direct → HO
-                    </button>
-                    <button type="button" onClick={() => setMoveType('INTERNAL')} disabled={candidateHubs.length === 0}
-                      title={candidateHubs.length === 0 ? `No other branches in ${srcState || srcRegion || 'this state'}` : ''}
-                      style={{ flex: 1, padding: '8px', border: 'none', borderRadius: '7px',
-                        cursor: candidateHubs.length === 0 ? 'not-allowed' : 'pointer',
-                        opacity: candidateHubs.length === 0 ? 0.4 : 1,
-                        background: moveType === 'INTERNAL' ? t.card : 'transparent',
-                        color: moveType === 'INTERNAL' ? t.purple : t.text3, fontWeight: moveType === 'INTERNAL' ? 700 : 500, fontSize: '11px',
-                        boxShadow: moveType === 'INTERNAL' ? '0 1px 4px rgba(0,0,0,.2)' : 'none' }}>
-                      Via Hub → HO
-                    </button>
+                  {/* Movement type — segmented control with semantic labels */}
+                  <div style={{ marginBottom: '18px' }}>
+                    <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', marginBottom: '8px', fontWeight: 700 }}>Movement type</div>
+                    <div style={{ display: 'flex', gap: '6px', padding: '4px', background: t.card2, borderRadius: '10px' }}>
+                      <button type="button" onClick={() => setMoveType('EXTERNAL')}
+                        style={{
+                          flex: 1, padding: '11px 10px', border: 'none', borderRadius: '7px',
+                          cursor: 'pointer',
+                          background: isExternal ? t.card : 'transparent',
+                          color: isExternal ? t.gold : t.text3,
+                          fontWeight: isExternal ? 700 : 500,
+                          fontSize: '12px', letterSpacing: '.02em',
+                          boxShadow: isExternal ? '0 1px 4px rgba(0,0,0,.25)' : 'none',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
+                          transition: 'all .15s',
+                        }}>
+                        <span style={{ fontSize: '14px' }}>📤</span>
+                        Branch → HO
+                      </button>
+                      <button type="button" onClick={() => setMoveType('INTERNAL')} disabled={candidateHubs.length === 0}
+                        title={candidateHubs.length === 0 ? `No other branches in ${srcState || srcRegion || 'this state'}` : ''}
+                        style={{
+                          flex: 1, padding: '11px 10px', border: 'none', borderRadius: '7px',
+                          cursor: candidateHubs.length === 0 ? 'not-allowed' : 'pointer',
+                          opacity: candidateHubs.length === 0 ? 0.4 : 1,
+                          background: !isExternal ? t.card : 'transparent',
+                          color: !isExternal ? t.purple : t.text3,
+                          fontWeight: !isExternal ? 700 : 500,
+                          fontSize: '12px', letterSpacing: '.02em',
+                          boxShadow: !isExternal ? '0 1px 4px rgba(0,0,0,.25)' : 'none',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
+                          transition: 'all .15s',
+                        }}>
+                        <span style={{ fontSize: '14px' }}>🔁</span>
+                        Branch → Hub
+                      </button>
+                    </div>
                   </div>
 
-                  {moveType === 'INTERNAL' && (
-                    <div style={{ marginBottom: '14px', position: 'relative' }}>
-                      <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: '5px', fontWeight: 600 }}>Destination Hub</div>
+                  {/* Hub picker — only when Branch → Hub */}
+                  {!isExternal && (
+                    <div style={{ marginBottom: '18px', position: 'relative' }}>
+                      <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', marginBottom: '6px', fontWeight: 700 }}>Destination hub</div>
                       <input
                         value={destBranch && !destOpen ? destBranch : destSearch}
                         onFocus={() => { setDestOpen(true); setDestSearch('') }}
                         onChange={e => { setDestSearch(e.target.value); setDestBranch(''); setDestOpen(true) }}
-                        placeholder="Type to search any branch…"
-                        style={{ width: '100%', background: t.card2, border: `1px solid ${destBranch ? t.purple + '60' : t.border2}`, borderRadius: '8px', padding: '10px 12px', fontSize: '12px', color: t.text1, outline: 'none', boxSizing: 'border-box' }} />
+                        placeholder={`Type to search any branch in ${srcRegionLabel || 'state'}…`}
+                        style={{
+                          width: '100%',
+                          background: t.card2,
+                          border: `1px solid ${destBranch ? t.purple + '60' : t.border2}`,
+                          borderRadius: '9px', padding: '11px 14px',
+                          fontSize: '13px', color: t.text1, outline: 'none', boxSizing: 'border-box',
+                        }} />
                       {destOpen && (
-                        <div style={{ position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0, background: t.card, border: `1px solid ${t.border2}`, borderRadius: '8px', maxHeight: '240px', overflowY: 'auto', zIndex: 10, boxShadow: '0 8px 24px rgba(0,0,0,.4)' }}>
+                        <div style={{ position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0, background: t.card, border: `1px solid ${t.border2}`, borderRadius: '9px', maxHeight: '240px', overflowY: 'auto', zIndex: 10, boxShadow: '0 12px 36px rgba(0,0,0,.45)' }}>
                           {filteredHubs.length === 0 ? (
                             <div style={{ padding: '14px', fontSize: '12px', color: t.text4, textAlign: 'center' }}>No branches match</div>
                           ) : filteredHubs.map(b => (
                             <div key={b.id}
                               onClick={() => { setDestBranch(b.name); setDestSearch(''); setDestOpen(false) }}
-                              style={{ padding: '9px 12px', cursor: 'pointer', fontSize: '12px', color: t.text1, borderBottom: `1px solid ${t.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+                              style={{ padding: '10px 14px', cursor: 'pointer', fontSize: '12px', color: t.text1, borderBottom: `1px solid ${t.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
                               onMouseEnter={e => e.currentTarget.style.background = `${t.purple}10`}
                               onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
                               <span style={{ fontWeight: 500 }}>{b.name}</span>
@@ -1391,27 +1469,81 @@ export default function ConsignmentData() {
                     </div>
                   )}
 
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '7px', marginBottom: '14px' }}>
-                    {[
-                      ['Source',      nav?.branch],
-                      ['Destination', moveType === 'INTERNAL' ? (destBranch || '— select hub —') : 'Head Office'],
-                      ['Bills',       `${selected.size}`],
-                      ['Net Weight',  fmtWt(totalSelWt)],
-                      ['Amount',      `₹${fmt(Math.round(totalSelAmt))}`],
-                      ['Document',    moveType === 'EXTERNAL' ? 'Delivery Challan' : 'Issue Voucher'],
-                    ].map(([label, value]) => (
-                      <div key={label} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 14px', background: t.card2, borderRadius: '7px' }}>
-                        <span style={{ fontSize: '11px', color: t.text3 }}>{label}</span>
-                        <span style={{ fontSize: '11px', color: t.text1, fontWeight: 600 }}>{value}</span>
-                      </div>
-                    ))}
+                  {/* Source ──→ Destination flow card */}
+                  <div style={{
+                    background: t.card2,
+                    border: `1px solid ${t.border}`,
+                    borderRadius: '12px',
+                    padding: '14px 16px',
+                    marginBottom: '14px',
+                    display: 'grid',
+                    gridTemplateColumns: '1fr auto 1fr',
+                    gap: '12px',
+                    alignItems: 'center',
+                  }}>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 700, marginBottom: '4px' }}>From</div>
+                      <div style={{ fontSize: '13px', fontWeight: 700, color: t.gold, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{nav?.branch || '—'}</div>
+                      {srcRegionLabel && <div style={{ fontSize: '10px', color: t.text3, marginTop: '2px' }}>{srcRegionLabel}</div>}
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column' }}>
+                      <div style={{ fontSize: '20px', color: isExternal ? t.gold : t.purple, lineHeight: 1 }}>→</div>
+                    </div>
+                    <div style={{ minWidth: 0, textAlign: 'right' }}>
+                      <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 700, marginBottom: '4px' }}>To</div>
+                      <div style={{ fontSize: '13px', fontWeight: 700, color: isExternal ? t.gold : t.purple, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{dest}</div>
+                      {destRegion && <div style={{ fontSize: '10px', color: t.text3, marginTop: '2px' }}>{destRegion}</div>}
+                    </div>
                   </div>
 
-                  {moveType === 'EXTERNAL' && (
+                  {/* Stats row — bills · net weight · total value */}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px', marginBottom: '14px' }}>
+                    <div style={{ background: t.card2, border: `1px solid ${t.border}`, borderRadius: '10px', padding: '12px 14px' }}>
+                      <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 700, marginBottom: '4px' }}>Bills</div>
+                      <div style={{ fontSize: '20px', color: t.text1, fontFamily: 'monospace', fontWeight: 600, lineHeight: 1 }}>{selected.size}</div>
+                    </div>
+                    <div style={{ background: t.card2, border: `1px solid ${t.border}`, borderRadius: '10px', padding: '12px 14px' }}>
+                      <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 700, marginBottom: '4px' }}>Net Weight</div>
+                      <div style={{ fontSize: '15px', color: t.gold, fontFamily: 'monospace', fontWeight: 700, lineHeight: 1.1 }}>{fmtWt(totalSelWt)}</div>
+                    </div>
+                    <div style={{ background: t.card2, border: `1px solid ${t.border}`, borderRadius: '10px', padding: '12px 14px' }}>
+                      <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 700, marginBottom: '4px' }}>Value</div>
+                      <div style={{ fontSize: '15px', color: t.blue, fontFamily: 'monospace', fontWeight: 700, lineHeight: 1.1 }}>₹{fmt(Math.round(totalSelAmt))}</div>
+                    </div>
+                  </div>
+
+                  {/* Document chip */}
+                  <div style={{
+                    background: t.card2,
+                    border: `1px solid ${t.border}`,
+                    borderRadius: '10px',
+                    padding: '12px 14px',
+                    marginBottom: '14px',
+                    display: 'flex', alignItems: 'center', gap: '12px',
+                  }}>
+                    <div style={{
+                      width: '34px', height: '34px', borderRadius: '8px',
+                      background: isExternal ? `${t.gold}18` : `${t.purple}18`,
+                      color: isExternal ? t.gold : t.purple,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: '16px', flexShrink: 0,
+                    }}>📄</div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 700 }}>Document</div>
+                      <div style={{ fontSize: '13px', color: t.text1, fontWeight: 600, marginTop: '2px' }}>
+                        {isExternal ? 'Delivery Challan' : 'Issue Voucher'}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* E-Way Bill input — Branch → HO only */}
+                  {isExternal && (
                     <div style={{ marginBottom: '14px' }}>
-                      <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: '5px', fontWeight: 600 }}>E-Way Bill No <span style={{ textTransform: 'none', fontWeight: 400 }}>(optional)</span></div>
-                      <input value={ewayBillNo} onChange={e => setEwayBillNo(e.target.value)} placeholder="Enter E-Way Bill number"
-                        style={{ width: '100%', background: t.card2, border: `1px solid ${t.border2}`, borderRadius: '8px', padding: '9px 12px', fontSize: '12px', color: t.text1, outline: 'none', boxSizing: 'border-box' }} />
+                      <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', marginBottom: '6px', fontWeight: 700 }}>
+                        E-Way Bill No <span style={{ textTransform: 'none', fontWeight: 400, color: t.text4 }}>(optional — accounts will generate after approval)</span>
+                      </div>
+                      <input value={ewayBillNo} onChange={e => setEwayBillNo(e.target.value)} placeholder="Leave blank — accounts generates from preview"
+                        style={{ width: '100%', background: t.card2, border: `1px solid ${t.border2}`, borderRadius: '9px', padding: '11px 14px', fontSize: '13px', color: t.text1, outline: 'none', boxSizing: 'border-box' }} />
                     </div>
                   )}
                 </>
@@ -1419,24 +1551,35 @@ export default function ConsignmentData() {
             })()}
 
             {loadingPreview ? (
-              <div style={{ fontSize: '11px', color: t.text4, marginBottom: '14px', padding: '11px 14px', background: `${t.gold}08`, borderRadius: '8px', border: `1px solid ${t.gold}20`, textAlign: 'center' }}>Generating preview numbers…</div>
+              <div style={{ fontSize: '11px', color: t.text4, marginBottom: '4px', padding: '11px 14px', background: `${t.gold}08`, borderRadius: '9px', border: `1px solid ${t.gold}20`, textAlign: 'center' }}>Generating preview numbers…</div>
             ) : previewNumbers && (
-              <div style={{ marginBottom: '14px', display: 'flex', gap: '8px' }}>
-                <div style={{ flex: 1, padding: '10px 14px', background: `${t.gold}10`, borderRadius: '8px', border: `1px solid ${t.gold}30` }}>
-                  <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: '3px' }}>TMP PRF No</div>
-                  <div style={{ fontSize: '13px', color: t.gold, fontWeight: 700, fontFamily: 'monospace' }}>{previewNumbers.tmp_prf_no}</div>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <div style={{ flex: 1, padding: '11px 14px', background: `${t.gold}10`, borderRadius: '9px', border: `1px solid ${t.gold}30` }}>
+                  <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', marginBottom: '3px', fontWeight: 700 }}>TMP PRF No</div>
+                  <div style={{ fontSize: '14px', color: t.gold, fontWeight: 700, fontFamily: 'monospace' }}>{previewNumbers.tmp_prf_no}</div>
                 </div>
-                <div style={{ flex: 1, padding: '10px 14px', background: `${t.blue}10`, borderRadius: '8px', border: `1px solid ${t.blue}30` }}>
-                  <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: '3px' }}>{moveType === 'INTERNAL' ? 'Voucher No' : 'Challan No'}</div>
-                  <div style={{ fontSize: '11px', color: t.blue, fontWeight: 600, fontFamily: 'monospace' }}>{previewNumbers.challan_no}</div>
+                <div style={{ flex: 1, padding: '11px 14px', background: `${t.blue}10`, borderRadius: '9px', border: `1px solid ${t.blue}30`, minWidth: 0 }}>
+                  <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', marginBottom: '3px', fontWeight: 700 }}>{moveType === 'INTERNAL' ? 'Voucher No' : 'Challan No'}</div>
+                  <div style={{ fontSize: '11px', color: t.blue, fontWeight: 600, fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{previewNumbers.challan_no}</div>
                 </div>
               </div>
             )}
+            </div>
 
-            <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+            {/* ── Footer (sticky to modal bottom) ──────────────────────── */}
+            <div style={{
+              padding: '14px 26px',
+              borderTop: `1px solid ${t.border}`,
+              background: t.card,
+              display: 'flex', gap: '10px', justifyContent: 'flex-end', alignItems: 'center',
+              flexShrink: 0,
+            }}>
+              <span style={{ fontSize: '10px', color: t.text4, marginRight: 'auto' }}>
+                You'll be asked to confirm once more before creation.
+              </span>
               <button onClick={() => setShowModal(false)} style={btnOut}>Cancel</button>
               <button onClick={handleCreate} disabled={creating}
-                style={{ ...btnGold, padding: '9px 22px', fontSize: '13px', opacity: creating ? .7 : 1 }}>
+                style={{ ...btnGold, padding: '10px 22px', fontSize: '13px', opacity: creating ? .7 : 1 }}>
                 {creating ? 'Creating…' : 'Confirm & Create →'}
               </button>
             </div>

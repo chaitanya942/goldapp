@@ -309,7 +309,7 @@ export default function ConsignmentReport() {
 
   // ── Movement type donut ────────────────────────────────────────────────────
   const movementData = useMemo(() => [
-    { name: 'Direct → HO',  value: k.externalCount, color: t.gold },
+    { name: 'Branch → HO',  value: k.externalCount, color: t.gold },
     { name: 'Branch → Hub', value: k.internalCount, color: '#5ec1d6' },
   ].filter(d => d.value > 0), [k, t])
 
@@ -328,7 +328,7 @@ export default function ConsignmentReport() {
       if (k.staleCount > 0) out.push(`${k.staleCount} consignment${k.staleCount !== 1 ? 's' : ''} dispatched > 3 days ago — review with logistics.`)
       if (k.consignmentCount > 0) {
         const pct = Math.round((k.externalCount / k.consignmentCount) * 100)
-        out.push(`${pct}% of tracked consignments are Direct → HO (${k.externalCount}); rest are Branch → Hub (${k.internalCount}).`)
+        out.push(`${pct}% of tracked consignments are Branch → HO (${k.externalCount}); rest are Branch → Hub (${k.internalCount}).`)
       }
     }
     return out
@@ -430,7 +430,7 @@ export default function ConsignmentReport() {
           </select>
           <select style={inp} value={filterType} onChange={e => setFilterType(e.target.value)}>
             <option value="">All Types</option>
-            <option value="EXTERNAL">Direct → HO</option>
+            <option value="EXTERNAL">Branch → HO</option>
             <option value="INTERNAL">Branch → Hub</option>
           </select>
           <input style={{ ...inp, minWidth: '180px' }} placeholder="Search PRF / branch / customer…" value={search} onChange={e => setSearch(e.target.value)} />
@@ -717,7 +717,7 @@ function SectionRoutes({ byRoute, t, card }) {
               <td style={{ padding: '9px 12px', fontSize: '12px', color: t.gold, fontWeight: 600 }}>{r.source}</td>
               <td style={{ padding: '9px 12px', fontSize: '12px', color: t.text1 }}>{r.dest}</td>
               <td style={{ padding: '9px 12px', fontSize: '10px', color: r.type === 'INTERNAL' ? '#5ec1d6' : t.gold }}>
-                <span style={{ background: `${r.type === 'INTERNAL' ? '#5ec1d6' : t.gold}15`, padding: '2px 8px', borderRadius: 4 }}>{r.type === 'INTERNAL' ? 'Via Hub' : 'Direct → HO'}</span>
+                <span style={{ background: `${r.type === 'INTERNAL' ? '#5ec1d6' : t.gold}15`, padding: '2px 8px', borderRadius: 4 }}>{r.type === 'INTERNAL' ? 'Branch → Hub' : 'Branch → HO'}</span>
               </td>
               <td style={{ padding: '9px 12px', fontSize: '11px', color: t.text2, textAlign: 'right' }}>{r.count}</td>
               <td style={{ padding: '9px 12px', fontSize: '11px', color: t.text2, textAlign: 'right' }}>{fmt(r.bills)}</td>
