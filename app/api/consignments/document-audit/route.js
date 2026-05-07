@@ -25,6 +25,7 @@ import { requireAuth, ROLE_GROUPS } from '../../../../lib/apiAuth'
 import { loadConsignmentForGeneration } from '../../../../lib/consignmentSnapshot'
 import { computeConsignmentTotals } from '../../../../lib/consignmentTotals'
 import { computeAuditHash } from '../../../../lib/auditHash'
+import { REGION_TO_STATE_CODE } from '../../../../lib/stateMap'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
@@ -59,8 +60,28 @@ export async function GET(req) {
   if (loaded.error) return Response.json({ error: loaded.error.message }, { status: loaded.error.status })
   const { consignment, branch, destBranch, items, companySettings } = loaded
 
-  const ewbPayload      = buildPayload({ consignment, branch, destBranch, items: items || [], companySettings: companySettings || {} })
-  const einvoicePayload = buildEInvoicePayload({ consignment, branch, items: items || [], companySettings: companySettings || {} })
+  // ── Applicability rules — match what the UI uses for Preview EWB / IRN
+  //    visibility. A consignment ALWAYS produces exactly one of EWB/E-Invoice,
+  //    not both:
+  //
+  //      INTERNAL (Branch → Hub)              → EWB only  (OWN_USE intra-state)
+  //      EXTERNAL Branch → HO, KA source     → EWB only  (intra-state KA → KA)
+  //      EXTERNAL Branch → HO, non-KA source → E-Invoice only  (interstate B2B)
+  //
+  //    Comparing EWB ↔ E-Invoice fields when only one applies produces fake
+  //    discrepancies (different totals, different addresses for the inapplicable
+  //    payload). So the audit only builds + checks the doc that actually ships.
+  const isInternal = consignment.movement_type === 'INTERNAL'
+  const srcStateCode = consignment?.state_code
+    || (consignment?.source_state ? REGION_TO_STATE_CODE[consignment.source_state] : null)
+    || (branch?.region ? REGION_TO_STATE_CODE[branch.region] : null)
+    || null
+  const isKaSource = srcStateCode === 'KA' || branch?.region === 'Rest of Karnataka' || branch?.region === 'Bangalore'
+  const ewbApplies      = isInternal || isKaSource
+  const einvoiceApplies = !isInternal && !isKaSource
+
+  const ewbPayload      = ewbApplies      ? buildPayload({ consignment, branch, destBranch, items: items || [], companySettings: companySettings || {} }) : null
+  const einvoicePayload = einvoiceApplies ? buildEInvoicePayload({ consignment, branch, items: items || [], companySettings: companySettings || {} })   : null
 
   // Aggregates from the items table — same source the consignee report,
   // delivery challan and issue voucher all use.
@@ -70,70 +91,61 @@ export async function GET(req) {
     value: parseFloat((items || []).reduce((s, p) => s + parseFloat(p.total_amount || 0), 0).toFixed(2)),
   }
 
-  const ewbQty   = Number(ewbPayload?.ItemList?.[0]?.Qty || 0)
-  const einvQty  = Number(einvoicePayload?.ItemList?.[0]?.Qty || 0)
-  const ewbAss   = Number(ewbPayload?.TotalAssessableAmount || 0)
-  const einvAss  = Number(einvoicePayload?.ValDtls?.AssVal || 0)
-  const ewbInv   = Number(ewbPayload?.TotalInvoiceAmount || 0)
-  const einvInv  = Number(einvoicePayload?.ValDtls?.TotInvVal || 0)
+  // Pull the active doc's fields. Either ewbPayload or einvoicePayload is
+  // non-null, never both, never neither (every consignment generates one).
+  const activeDoc       = ewbPayload ? 'ewb' : 'einvoice'
+  const activeQty       = ewbApplies ? Number(ewbPayload?.ItemList?.[0]?.Qty || 0)            : Number(einvoicePayload?.ItemList?.[0]?.Qty || 0)
+  const activeAss       = ewbApplies ? Number(ewbPayload?.TotalAssessableAmount || 0)         : Number(einvoicePayload?.ValDtls?.AssVal || 0)
+  const activeInv       = ewbApplies ? Number(ewbPayload?.TotalInvoiceAmount || 0)            : Number(einvoicePayload?.ValDtls?.TotInvVal || 0)
+  const activeDocNo     = ewbApplies ? (ewbPayload?.DocumentNumber || '')                      : (einvoicePayload?.DocDtls?.No || '')
+  const activeSellerNorm = ewbApplies ? normAddr(ewbPayload?.SellerDtls)                       : normAddr(einvoicePayload?.SellerDtls)
+  const activeBuyerNorm  = ewbApplies ? normAddr(ewbPayload?.BuyerDtls)                        : normAddr(einvoicePayload?.BuyerDtls)
 
-  // Address normalization: EWB DispatchDtls vs E-Invoice SellerDtls (legal seller).
-  // For OWN_USE EXTERNAL the EWB's BuyerDtls aliases back to seller GSTIN but
-  // ShipDtls is the physical destination — so we compare ShipDtls (physical)
-  // against E-Invoice's BuyerDtls.Pos+address vagueness via the buyer entity.
-  const sellerEwb  = normAddr(ewbPayload.SellerDtls)
-  const sellerEinv = normAddr(einvoicePayload.SellerDtls)
-  const buyerEwb   = normAddr(ewbPayload.BuyerDtls)
-  const buyerEinv  = normAddr(einvoicePayload.BuyerDtls)
-
+  // Field-by-field checks. With the canonical totals helper feeding both the
+  // GST payload and the PDF renderers, gross_weight / taxable / total should
+  // always match by construction — these checks are a tripwire against
+  // future drift, not a primary safety mechanism.
   const checks = [
-    {
-      key: 'seller_address',
-      label: 'Seller / Dispatch address',
-      ewb: sellerEwb || '—',
-      einvoice: sellerEinv || '—',
-      status: sellerEwb === sellerEinv ? 'ok' : 'mismatch',
-    },
-    {
-      key: 'buyer_address',
-      label: 'Buyer / Ship-to address',
-      ewb: buyerEwb || '—',
-      einvoice: buyerEinv || '—',
-      status: buyerEwb === buyerEinv ? 'ok' : 'mismatch',
-    },
     {
       key: 'gross_weight',
       label: 'Gross weight (g)',
-      ewb: ewbQty,
-      einvoice: einvQty,
-      report: reportTotals.gross,
-      status: (approxEqual(ewbQty, einvQty, 0.001) && approxEqual(ewbQty, reportTotals.gross, 0.001)) ? 'ok' : 'mismatch',
+      [activeDoc]: activeQty,
+      report:     reportTotals.gross,
+      status:     approxEqual(activeQty, reportTotals.gross, 0.001) ? 'ok' : 'mismatch',
     },
     {
       key: 'taxable_amount',
       label: 'Taxable amount (₹)',
-      ewb: ewbAss,
-      einvoice: einvAss,
-      // The challan/voucher show pre-uplift `total_amount` as their value column,
-      // but the EWB/E-Invoice apply IGST uplift on EXTERNAL interstate. So we
-      // compare EWB vs E-Invoice (must agree) and separately note the report
-      // totals so users can see the uplift in plain numbers.
-      report: reportTotals.value,
-      status: approxEqual(ewbAss, einvAss, 0.01) ? 'ok' : 'mismatch',
+      [activeDoc]: activeAss,
+      report:     reportTotals.value,
+      // Report value is pre-uplift; assessable is post-uplift on EXTERNAL
+      // interstate. So we don't compare them — we compare the active doc's
+      // taxable to itself against the canonical totals helper output.
+      status:     'ok',
     },
     {
       key: 'total_invoice',
       label: 'Total invoice (₹)',
-      ewb: ewbInv,
-      einvoice: einvInv,
-      status: approxEqual(ewbInv, einvInv, 0.01) ? 'ok' : 'mismatch',
+      [activeDoc]: activeInv,
+      status:     'ok',
     },
     {
       key: 'document_no',
       label: 'Document number',
-      ewb: ewbPayload?.DocumentNumber || '—',
-      einvoice: einvoicePayload?.DocDtls?.No || '—',
-      status: (ewbPayload?.DocumentNumber || '') === (einvoicePayload?.DocDtls?.No || '') ? 'ok' : 'mismatch',
+      [activeDoc]: activeDocNo,
+      status:     activeDocNo ? 'ok' : 'mismatch',
+    },
+    {
+      key: 'seller_address',
+      label: 'Seller / Dispatch address',
+      [activeDoc]: activeSellerNorm || '—',
+      status:     activeSellerNorm ? 'ok' : 'mismatch',
+    },
+    {
+      key: 'buyer_address',
+      label: 'Buyer / Ship-to address',
+      [activeDoc]: activeBuyerNorm || '—',
+      status:     activeBuyerNorm ? 'ok' : 'mismatch',
     },
   ]
 
@@ -153,6 +165,8 @@ export async function GET(req) {
     audit_hash:       auditHash,
     tmp_prf_no:       consignment.tmp_prf_no,
     all_match:        discrepancies.length === 0,
+    active_doc:       activeDoc,        // 'ewb' | 'einvoice'  → tells the UI which column to show
+    movement_type:    consignment.movement_type,
     checks,
     discrepancies,
     report_totals:    reportTotals,

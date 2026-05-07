@@ -129,7 +129,8 @@ export function canActOnStep(c, step) {
 // Report side-by-side) when they don't. Pure presentation — the audit data
 // itself comes from /api/consignments/document-audit.
 export function DocAuditPanel({ t, audit }) {
-  const { all_match, discrepancies = [], audit_hash } = audit || {}
+  const { all_match, discrepancies = [], audit_hash, active_doc = 'ewb' } = audit || {}
+  const activeLabel = active_doc === 'einvoice' ? 'E-Invoice' : 'EWB'
   const allOk  = all_match && discrepancies.length === 0
   const accent = allOk ? t.green : t.red
 
@@ -185,35 +186,40 @@ export function DocAuditPanel({ t, audit }) {
 
       {!allOk && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+          {/* Two columns: the active doc (EWB or E-Invoice — whichever ships
+              for this consignment) and Report/Items. The OTHER doc is hidden
+              because it's not generated for this movement type, so any
+              numbers it would carry are immaterial. */}
           <div style={{
             display: 'grid',
-            gridTemplateColumns: 'minmax(120px, 1.2fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr)',
+            gridTemplateColumns: 'minmax(120px, 1.2fr) minmax(0, 1fr) minmax(0, 1fr)',
             gap: '6px 10px',
             fontSize: '9px', color: t.text4,
             letterSpacing: '.06em', textTransform: 'uppercase',
             paddingBottom: '4px', borderBottom: `1px solid ${t.border}`,
           }}>
             <div>Field</div>
-            <div>EWB</div>
-            <div>E-Invoice</div>
+            <div>{activeLabel}</div>
             <div>Report / Items</div>
           </div>
-          {discrepancies.map(d => (
-            <div key={d.key} style={{
-              display: 'grid',
-              gridTemplateColumns: 'minmax(120px, 1.2fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr)',
-              gap: '6px 10px',
-              fontSize: '11px',
-              padding: '6px 0',
-              borderBottom: `1px solid ${t.border}30`,
-              alignItems: 'baseline',
-            }}>
-              <div style={{ color: t.text2, fontWeight: 600 }}>{d.label}</div>
-              <div style={{ color: t.text1, fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis' }} title={String(d.ewb)}>{fmtVal(d.ewb)}</div>
-              <div style={{ color: t.text1, fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis' }} title={String(d.einvoice)}>{fmtVal(d.einvoice)}</div>
-              <div style={{ color: t.text1, fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis' }} title={String(d.report ?? '')}>{d.report != null ? fmtVal(d.report) : '—'}</div>
-            </div>
-          ))}
+          {discrepancies.map(d => {
+            const activeVal = d[active_doc]
+            return (
+              <div key={d.key} style={{
+                display: 'grid',
+                gridTemplateColumns: 'minmax(120px, 1.2fr) minmax(0, 1fr) minmax(0, 1fr)',
+                gap: '6px 10px',
+                fontSize: '11px',
+                padding: '6px 0',
+                borderBottom: `1px solid ${t.border}30`,
+                alignItems: 'baseline',
+              }}>
+                <div style={{ color: t.text2, fontWeight: 600 }}>{d.label}</div>
+                <div style={{ color: t.text1, fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis' }} title={String(activeVal)}>{fmtVal(activeVal)}</div>
+                <div style={{ color: t.text1, fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis' }} title={String(d.report ?? '')}>{d.report != null ? fmtVal(d.report) : '—'}</div>
+              </div>
+            )
+          })}
           <div style={{ fontSize: '10px', color: t.red, marginTop: '6px', lineHeight: 1.5 }}>
             ⚠ Generation is allowed but the values above will not match across the documents NIC stores. Verify the consignment data before proceeding.
           </div>

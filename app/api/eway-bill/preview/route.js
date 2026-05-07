@@ -69,12 +69,17 @@ export async function GET(req) {
   // Build the exact payload the generate route would send.
   const payload = buildPayload({ consignment, branch, destBranch, items: items || [], companySettings: companySettings || {} })
 
-  // Distinct seller/buyer GSTIN check (mirrors E-Invoice preview). EWB doesn't
-  // outright fail on identical GSTINs but the doc is functionally meaningless,
-  // so we surface the same warning here as a preflight error.
-  errors.push(
-    ...validateDistinctGstins(payload.SellerDtls?.Gstin, payload.BuyerDtls?.Gstin, 'an E-Way Bill'),
-  )
+  // Distinct seller/buyer GSTIN check — EXTERNAL only.
+  // INTERNAL Branch→Hub is OWN_USE under the same GSTIN by design (intra-
+  // company stock transfer); NIC requires same seller/buyer Gstin in that
+  // mode. Surfacing this as an error there blocks legal consignments.
+  // E-Invoice has a different rule (IRP outright rejects same-GSTIN), so
+  // that gate stays in the E-Invoice preview unchanged.
+  if (consignment.movement_type !== 'INTERNAL') {
+    errors.push(
+      ...validateDistinctGstins(payload.SellerDtls?.Gstin, payload.BuyerDtls?.Gstin, 'an E-Way Bill'),
+    )
+  }
 
   // Human-readable digest the UI shows in the modal — what accounts will compare against the challan.
   const summary = {
