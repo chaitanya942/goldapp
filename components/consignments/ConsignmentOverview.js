@@ -65,7 +65,9 @@ export default function ConsignmentOverview() {
   const [loading,      setLoading]      = useState(true)
   const [search,       setSearch]       = useState('')
   const [activeRegion, setActiveRegion] = useState(null)
-  const [sortKey,      setSortKey]      = useState('older_net_wt')
+  // Default sort: total net weight desc (largest stockholders first). Management
+  // wants to see the biggest exposures at the top without clicking.
+  const [sortKey,      setSortKey]      = useState('total_net_wt')
   const [sortDir,      setSortDir]      = useState(-1)   // -1 = desc, 1 = asc
   const [lastRefresh,  setLastRefresh]  = useState(null)
   const [tick,         setTick]         = useState(0)   // for live clock
@@ -132,6 +134,7 @@ export default function ConsignmentOverview() {
     .slice()
     .sort((a, b) => {
       let av = 0, bv = 0
+      if (sortKey === 'branch_name')        { av = a.branch_name || ''; bv = b.branch_name || ''; return av.localeCompare(bv) * sortDir }
       if (sortKey === 'today_bills')        { av = a.today_bills  || 0; bv = b.today_bills  || 0 }
       if (sortKey === 'today_net_wt')       { av = a.today_net_wt || 0; bv = b.today_net_wt || 0 }
       if (sortKey === 'today_gross_value')  { av = a.today_gross_value || 0; bv = b.today_gross_value || 0 }
@@ -370,7 +373,10 @@ export default function ConsignmentOverview() {
                 <thead style={{ position: 'sticky', top: 0, zIndex: 1 }}>
                   <tr>
                     <th style={{ ...thBase, width: '36px', textAlign: 'center' }}>#</th>
-                    <th style={{ ...thBase }}>Branch</th>
+                    <th style={{ ...thBase, cursor: 'pointer', color: sortKey === 'branch_name' ? t.gold : t.text4 }}
+                        onClick={() => handleSort('branch_name')}>
+                      Branch <SortIcon col="branch_name" />
+                    </th>
                     <th style={{ ...thBase, textAlign: 'right', cursor: 'pointer', color: sortKey === 'total_net_wt' ? t.gold : t.text4 }}
                         onClick={() => handleSort('total_net_wt')}>
                       Total Net Wt <SortIcon col="total_net_wt" />
@@ -452,12 +458,29 @@ export default function ConsignmentOverview() {
                     const rColor  = REGION_COLORS[b.region] || t.text3
                     const hasToday  = (b.today_bills  || 0) > 0
                     const hasPending = (b.older_bills || 0) > 0
+                    // Urgency tier from the oldest pending bill: red for >7d
+                    // (overdue), orange for 4–7d (watch), nothing otherwise.
+                    // Surfaces branches that need attention without forcing
+                    // the user to read the Oldest column.
+                    const ageDays = b.oldest_age_days || 0
+                    const urgentTier = ageDays > 7 ? 'overdue' : ageDays > 3 ? 'watch' : null
+                    const urgentBg   = urgentTier === 'overdue' ? `${t.red}06`
+                                     : urgentTier === 'watch'   ? `${t.orange}06`
+                                     : 'transparent'
+                    const urgentBorder = urgentTier === 'overdue' ? t.red
+                                       : urgentTier === 'watch'   ? t.orange
+                                       : 'transparent'
 
                     return (
                       <tr key={b.branch_name}
-                        style={{ borderBottom: `1px solid ${t.border}20`, transition: 'background .1s' }}
-                        onMouseEnter={e => e.currentTarget.style.background = `${t.gold}06`}
-                        onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                        style={{
+                          borderBottom: `1px solid ${t.border}20`,
+                          borderLeft:   `3px solid ${urgentBorder}`,
+                          background:   urgentBg,
+                          transition:   'background .1s',
+                        }}
+                        onMouseEnter={e => e.currentTarget.style.background = urgentTier ? urgentBg : `${t.gold}06`}
+                        onMouseLeave={e => e.currentTarget.style.background = urgentBg}>
 
                         {/* Rank */}
                         <td style={{ padding: '11px 14px', fontSize: '11px', color: t.text4, textAlign: 'center', fontFamily: 'monospace' }}>{i + 1}</td>
