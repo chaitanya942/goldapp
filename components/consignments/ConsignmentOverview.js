@@ -538,8 +538,8 @@ export default function ConsignmentOverview() {
 
                   {/* Totals row pinned to the top inside <thead> — the whole
                       thead is sticky, so this stays beneath the column titles
-                      as the user scrolls. Mirrors the same numbers the tfoot
-                      shows (kept for redundancy at the bottom of long lists). */}
+                      as the user scrolls. Single source of truth — no <tfoot>
+                      duplicate at the bottom. */}
                   <tr style={{ background: `${t.gold}14`, borderTop: `1px solid ${t.border}`, borderBottom: `2px solid ${t.gold}40` }}>
                     <td colSpan={2} style={{ padding: '9px 14px', fontSize: '10px', color: t.text2, fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase', background: `${t.gold}14` }}>
                       Σ Totals · {filtered.length} branch{filtered.length !== 1 ? 'es' : ''}
@@ -711,24 +711,9 @@ export default function ConsignmentOverview() {
                     )
                   })}
                 </tbody>
-
-                {/* Totals footer */}
-                <tfoot>
-                  <tr style={{ background: `${t.gold}08`, borderTop: `2px solid ${t.border}` }}>
-                    <td colSpan={2} style={{ padding: '11px 14px', fontSize: '11px', color: t.text3, fontWeight: 700, letterSpacing: '.04em' }}>
-                      TOTAL · {filtered.length} branch{filtered.length !== 1 ? 'es' : ''}
-                    </td>
-                    <td style={{ padding: '11px 14px', textAlign: 'right', fontSize: '13px', color: t.gold, fontFamily: 'monospace', fontWeight: 700 }}>
-                      {fmt(grandTodayWt + grandOlderWt, 2)}<span style={{ fontSize: '10px', marginLeft: '2px' }}>g</span>
-                    </td>
-                    <td style={{ padding: '11px 14px', textAlign: 'right', fontSize: '13px', color: t.blue, fontFamily: 'monospace' }}>{fmt(grandTodayWt, 2)}<span style={{ fontSize: '10px', marginLeft: '2px' }}>g</span></td>
-                    <td style={{ padding: '11px 14px', textAlign: 'right', fontSize: '12px', color: t.blue, fontFamily: 'monospace', fontWeight: 700 }}>{grandTodayVal ? fmtINR(grandTodayVal) : '—'}</td>
-                    <td style={{ padding: '11px 14px', textAlign: 'right', fontSize: '14px', color: t.orange, fontFamily: 'monospace', fontWeight: 700 }}>{grandOlder || '—'}</td>
-                    <td style={{ padding: '11px 14px', textAlign: 'right', fontSize: '13px', color: t.orange, fontFamily: 'monospace' }}>{fmt(grandOlderWt, 2)}<span style={{ fontSize: '10px', marginLeft: '2px' }}>g</span></td>
-                    <td style={{ padding: '11px 14px', textAlign: 'right', fontSize: '12px', color: t.orange, fontFamily: 'monospace', fontWeight: 700 }}>{grandOlderVal ? fmtINR(grandOlderVal) : '—'}</td>
-                    <td colSpan={4} style={{ padding: '11px 14px' }} />
-                  </tr>
-                </tfoot>
+                {/* No <tfoot> — totals are pinned to the top of the table
+                    inside <thead>, so a duplicate at the bottom would be
+                    redundant. */}
               </table>
             </div>
           )}
