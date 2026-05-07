@@ -417,6 +417,35 @@ export default function ConsignmentOverview() {
 
                     <th style={{ ...thBase, textAlign: 'center' }}>Action</th>
                   </tr>
+
+                  {/* Totals row pinned to the top inside <thead> — the whole
+                      thead is sticky, so this stays beneath the column titles
+                      as the user scrolls. Mirrors the same numbers the tfoot
+                      shows (kept for redundancy at the bottom of long lists). */}
+                  <tr style={{ background: `${t.gold}14`, borderTop: `1px solid ${t.border}`, borderBottom: `2px solid ${t.gold}40` }}>
+                    <td colSpan={2} style={{ padding: '9px 14px', fontSize: '10px', color: t.text2, fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase', background: `${t.gold}14` }}>
+                      Σ Totals · {filtered.length} branch{filtered.length !== 1 ? 'es' : ''}
+                    </td>
+                    <td style={{ padding: '9px 14px', textAlign: 'right', fontSize: '13px', color: t.gold, fontFamily: 'monospace', fontWeight: 700, background: `${t.gold}14` }}>
+                      {fmt(grandTodayWt + grandOlderWt, 2)}<span style={{ fontSize: '10px', marginLeft: '2px' }}>g</span>
+                    </td>
+                    <td style={{ padding: '9px 14px', textAlign: 'right', fontSize: '13px', color: t.blue, fontFamily: 'monospace', fontWeight: 600, background: `${t.gold}14` }}>
+                      {fmt(grandTodayWt, 2)}<span style={{ fontSize: '10px', marginLeft: '2px' }}>g</span>
+                    </td>
+                    <td style={{ padding: '9px 14px', textAlign: 'right', fontSize: '12px', color: t.blue, fontFamily: 'monospace', fontWeight: 700, background: `${t.gold}14` }}>
+                      {grandTodayVal ? fmtINR(grandTodayVal) : '—'}
+                    </td>
+                    <td style={{ padding: '9px 14px', textAlign: 'right', fontSize: '14px', color: t.orange, fontFamily: 'monospace', fontWeight: 700, background: `${t.gold}14` }}>
+                      {grandOlder || '—'}
+                    </td>
+                    <td style={{ padding: '9px 14px', textAlign: 'right', fontSize: '13px', color: t.orange, fontFamily: 'monospace', fontWeight: 600, background: `${t.gold}14` }}>
+                      {fmt(grandOlderWt, 2)}<span style={{ fontSize: '10px', marginLeft: '2px' }}>g</span>
+                    </td>
+                    <td style={{ padding: '9px 14px', textAlign: 'right', fontSize: '12px', color: t.orange, fontFamily: 'monospace', fontWeight: 700, background: `${t.gold}14` }}>
+                      {grandOlderVal ? fmtINR(grandOlderVal) : '—'}
+                    </td>
+                    <td colSpan={4} style={{ padding: '9px 14px', background: `${t.gold}14` }} />
+                  </tr>
                 </thead>
                 <tbody>
                   {filtered.map((b, i) => {
