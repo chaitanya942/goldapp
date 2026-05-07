@@ -770,7 +770,7 @@ export default function ConsignmentApprovals() {
                       return (
                         <>
                           {showEwb && (c.eway_bill_no ? (
-                            <span style={{ display: 'inline-flex', gap: '4px', alignItems: 'center' }}>
+                            <span style={{ display: 'inline-flex', gap: '6px', alignItems: 'center' }}>
                               <button onClick={() => previewDoc(`/api/eway-bill/pdf?id=${c.id}`, `EWB-${c.eway_bill_no}.pdf`, msg => showToast(msg, 'error'))}
                                 title={`Preview E-Way Bill ${c.eway_bill_no}`}
                                 style={{ background: 'transparent', border: 'none', padding: 0, fontSize: '10px', color: t.green, fontWeight: 600, cursor: 'pointer', textDecoration: 'underline' }}>
@@ -779,8 +779,8 @@ export default function ConsignmentApprovals() {
                               <button onClick={() => openCancel(c, 'ewb')}
                                 aria-label="Cancel E-Way Bill"
                                 title="Cancel this E-Way Bill on NIC (must be within 24 hours of generation)"
-                                style={{ background: 'transparent', border: `1px solid ${t.red}40`, borderRadius: '4px', padding: '1px 6px', fontSize: '9px', color: t.red, cursor: 'pointer' }}>
-                                ✕
+                                style={{ background: 'transparent', border: `1px solid ${t.red}80`, borderRadius: '5px', padding: '2px 8px', fontSize: '10px', color: t.red, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                                Cancel EWB
                               </button>
                             </span>
                           ) : (
@@ -791,7 +791,7 @@ export default function ConsignmentApprovals() {
                             </button>
                           ))}
                           {showEinv && (c.irn ? (
-                            <span style={{ display: 'inline-flex', gap: '4px', alignItems: 'center' }}>
+                            <span style={{ display: 'inline-flex', gap: '6px', alignItems: 'center' }}>
                               <button onClick={() => previewDoc(`/api/e-invoice/pdf?id=${c.id}`, `EInvoice-${c.tmp_prf_no}.pdf`, msg => showToast(msg, 'error'))}
                                 title="Preview E-Invoice PDF"
                                 style={{ background: 'transparent', border: 'none', padding: 0, fontSize: '10px', color: t.purple, fontWeight: 600, cursor: 'pointer', textDecoration: 'underline' }}>
@@ -800,8 +800,8 @@ export default function ConsignmentApprovals() {
                               <button onClick={() => openCancel(c, 'irn')}
                                 aria-label="Cancel E-Invoice"
                                 title="Cancel this E-Invoice on IRP (within 24h) — or generate a Credit Note if past the window"
-                                style={{ background: 'transparent', border: `1px solid ${t.red}40`, borderRadius: '4px', padding: '1px 6px', fontSize: '9px', color: t.red, cursor: 'pointer' }}>
-                                ✕
+                                style={{ background: 'transparent', border: `1px solid ${t.red}80`, borderRadius: '5px', padding: '2px 8px', fontSize: '10px', color: t.red, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                                Cancel E-Invoice
                               </button>
                             </span>
                           ) : (
