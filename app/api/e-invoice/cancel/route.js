@@ -43,6 +43,19 @@ export async function POST(req) {
       gstinOverride: gstinFor,
     })
 
+    // Defensive verification: cancelEInvoice throws on outright failure, but a
+    // 200 with missing/false govt_response (rare ClearTax soft-fail shape) would
+    // slip past. Only clear local IRN once we have explicit Y from IRP.
+    const govtResp = result?.govt_response || result?.[0]?.govt_response
+    const success  = String(govtResp?.Success ?? '').trim().toUpperCase()
+    if (success !== 'Y' && success !== '1' && success !== 'TRUE') {
+      console.error('[einvoice/cancel] IRP did not confirm cancel; preserving local IRN.', { result })
+      return Response.json({
+        error: 'IRP did not confirm cancellation. The E-Invoice remains active locally — check IRP portal directly.',
+        cleartax_response: result,
+      }, { status: 502 })
+    }
+
     const cancelledIrn = consignment.irn
     await supabase.from('consignments')
       .update({ irn: null, ack_no: null, ack_dt: null, signed_qr_code: null, einvoice_generated_at: null })
@@ -52,7 +65,12 @@ export async function POST(req) {
       consignment_id,
       event_type:  'einvoice_cancelled',
       actor_email: auth.profile?.email || auth.user?.email || 'unknown',
-      details:     { irn: cancelledIrn, reason_code: reason_code || '1', remark: remark || 'Duplicate' },
+      details:     {
+        irn:         cancelledIrn,
+        reason_code: reason_code || '1',
+        remark:      remark      || 'Duplicate',
+        irp_ack:     govtResp,
+      },
     })
 
     return Response.json({ success: true })

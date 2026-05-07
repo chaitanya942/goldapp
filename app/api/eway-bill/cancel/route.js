@@ -46,6 +46,19 @@ export async function POST(req) {
       gstinOverride: gstinFor,
     })
 
+    // Defensive verification: cancelEWayBill throws on outright failure, but a
+    // 200 with missing/false govt_response (rare ClearTax soft-fail shape) would
+    // slip past. Only clear the local doc number once we have explicit Y from NIC.
+    const govtResp = result?.govt_response || result?.[0]?.govt_response
+    const success  = String(govtResp?.Success ?? '').trim().toUpperCase()
+    if (success !== 'Y' && success !== '1' && success !== 'TRUE') {
+      console.error('[ewb/cancel] NIC did not confirm cancel; preserving local EWB no.', { result })
+      return Response.json({
+        error: 'NIC did not confirm cancellation. The E-Way Bill remains active locally — check NIC portal directly.',
+        cleartax_response: result,
+      }, { status: 502 })
+    }
+
     const cancelledEwb = consignment.eway_bill_no
     await supabase.from('consignments')
       .update({ eway_bill_no: null, ewb_valid_until: null, ewb_generated_at: null, ewb_generation_started_at: null })
@@ -55,7 +68,12 @@ export async function POST(req) {
       consignment_id,
       event_type:  'ewb_cancelled',
       actor_email: auth.profile?.email || auth.user?.email || 'unknown',
-      details:     { ewb_no: cancelledEwb, reason_code: reason_code || '1', remark: remark || 'Duplicate Entry' },
+      details:     {
+        ewb_no:      cancelledEwb,
+        reason_code: reason_code || '1',
+        remark:      remark      || 'Duplicate Entry',
+        nic_ack:     govtResp,
+      },
     })
 
     return Response.json({ success: true })

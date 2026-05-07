@@ -19,8 +19,9 @@ const supabase = createClient(
 )
 
 export async function POST(req) {
-  // Operations + admins. Accounts shouldn't be confirming consignments.
-  const auth = await requireAuth(req, { requiredRoles: null })
+  // Operations + admins. Accounts shouldn't be confirming consignments — they
+  // review what ops produced. Viewer / telesales have no role here either.
+  const auth = await requireAuth(req, { requiredRoles: ROLE_GROUPS.OPERATIONS })
   if (!auth.ok) return auth.response
 
   const body = await req.json().catch(() => ({}))
