@@ -132,7 +132,9 @@ export default function ConsignmentData() {
   const [unknownBranches,     setUnknownBranches]    = useState([])
   const [loading,             setLoading]            = useState(true)
   const [selected,            setSelected]           = useState(new Set())
-  const [sortBy,              setSortBy]             = useState('date_desc')
+  // Default sort: oldest first. Operations should dispatch ageing bills before
+  // fresh ones (FIFO + risk-management) — surface them at the top.
+  const [sortBy,              setSortBy]             = useState('oldest')
   const [search,              setSearch]             = useState('')
   const [creating,            setCreating]           = useState(false)
   const [moveType,            setMoveType]           = useState('EXTERNAL')
@@ -752,9 +754,23 @@ export default function ConsignmentData() {
             </div>
             <div style={{ fontSize: '11px', color: rColor, marginTop: '2px' }}>{branchInfo?.region}</div>
           </div>
-          <div style={{ display: 'flex', gap: '20px', fontSize: '11px', color: t.text3 }}>
+          <div style={{ display: 'flex', gap: '20px', fontSize: '11px', color: t.text3, alignItems: 'center' }}>
             <span><span style={{ color: t.text4 }}>Bills:</span> <strong style={{ color: t.text1 }}>{visibleBills.length}</strong></span>
             <span><span style={{ color: t.text4 }}>Selected:</span> <strong style={{ color: t.gold }}>{selected.size}</strong></span>
+            {(() => {
+              // Surface the oldest pending bill so ops sees the FIFO risk at a
+              // glance — same green/orange/red convention as Branch Stock.
+              const ages = visibleBills.map(b => daysSince(b.purchase_date)).filter(d => d != null)
+              if (ages.length === 0) return null
+              const maxAge = Math.max(...ages)
+              const tone = maxAge > 7 ? t.red : maxAge > 3 ? t.orange : t.green
+              return (
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                  <span style={{ color: t.text4 }}>Oldest:</span>
+                  <strong style={{ color: tone, background: `${tone}15`, padding: '2px 8px', borderRadius: '5px', fontWeight: 700 }}>{maxAge}d</strong>
+                </span>
+              )
+            })()}
           </div>
         </div>
 
@@ -788,12 +804,35 @@ export default function ConsignmentData() {
           </div>
           <select value={sortBy} onChange={e => setSortBy(e.target.value)}
             style={{ background: t.card2, border: `1px solid ${t.border2}`, borderRadius: '8px', padding: '8px 10px', fontSize: '12px', color: t.text2, outline: 'none' }}>
-            <option value="date_desc">Latest First</option>
             <option value="oldest">Oldest First</option>
+            <option value="date_desc">Latest First</option>
             <option value="weight_desc">Heaviest First</option>
             <option value="amount_desc">Highest Amount</option>
           </select>
-          {/* Quick-select shortcuts — replace current selection */}
+          {/* Overdue quick-select — picks bills the OPS team should clear
+              first (FIFO + risk). Distinct from the date-window shortcuts
+              below: those select bills FROM that window; this one selects
+              bills OLDER than 7 days. Only shown when there's something to
+              flag — otherwise it'd just be noise. */}
+          {(() => {
+            const overdueIds = visibleBills
+              .filter(p => {
+                const d = daysSince(p.purchase_date)
+                return d != null && d > 7
+              })
+              .map(p => p.id)
+            if (overdueIds.length === 0) return null
+            return (
+              <button
+                onClick={() => setSelected(new Set(overdueIds))}
+                title="Select all bills older than 7 days"
+                style={{ background: `${t.red}15`, border: `1px solid ${t.red}50`, borderRadius: '8px', padding: '8px 12px', fontSize: '11px', color: t.red, outline: 'none', cursor: 'pointer', whiteSpace: 'nowrap', fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+                ⚠ Overdue ({overdueIds.length})
+              </button>
+            )
+          })()}
+
+          {/* Date-window quick-select shortcuts — replace current selection */}
           {[
             { label: 'Last 1d', days: 1  },
             { label: 'Last 3d', days: 3  },
@@ -864,11 +903,25 @@ export default function ConsignmentData() {
                   const isSel    = selected.has(row.id)
                   const days     = daysSince(row.purchase_date)
                   const fromOther = isHub && row.branch_name !== nav.branch
+                  // Subtle row tint for overdue bills (>7d) — FIFO risk.
+                  // Selection wins over urgency (gold tint), purple for hub
+                  // transferred-in wins over both (those are mandatory anyway).
+                  const isOverdue = days != null && days > 7
+                  const restingBg =
+                    fromOther  ? `${t.purple}06`
+                    : isSel    ? `${t.gold}08`
+                    : isOverdue ? `${t.red}06`
+                    : 'transparent'
                   return (
                     <tr key={row.id} onClick={() => { if (!fromOther) toggleRow(row.id) }}
-                      style={{ borderBottom: `1px solid ${t.border}15`, background: fromOther ? `${t.purple}06` : (isSel ? `${t.gold}08` : 'transparent'), cursor: fromOther ? 'not-allowed' : 'pointer' }}
-                      onMouseEnter={e => { if (!fromOther && !isSel) e.currentTarget.style.background = `${t.gold}04` }}
-                      onMouseLeave={e => { if (!fromOther && !isSel) e.currentTarget.style.background = 'transparent' }}>
+                      style={{
+                        borderBottom: `1px solid ${t.border}15`,
+                        borderLeft:   isOverdue && !fromOther && !isSel ? `3px solid ${t.red}` : '3px solid transparent',
+                        background:   restingBg,
+                        cursor:       fromOther ? 'not-allowed' : 'pointer',
+                      }}
+                      onMouseEnter={e => { if (!fromOther && !isSel && !isOverdue) e.currentTarget.style.background = `${t.gold}04` }}
+                      onMouseLeave={e => { if (!fromOther && !isSel) e.currentTarget.style.background = restingBg }}>
                       <td style={{ padding: '10px 14px' }} onClick={e => e.stopPropagation()}>
                         <input type="checkbox"
                           checked={fromOther ? true : isSel}
