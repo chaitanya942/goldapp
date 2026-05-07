@@ -188,13 +188,27 @@ export default function ConsignmentData() {
     ])
     setPurchases(p.data || [])
     setBranches(b.data || [])
-    // Active = not received, not seed
-    // Show all non-cancelled, non-seed consignments. INTERNAL Branch→Hub
-    // are auto-marked 'received' on creation but should still appear in the
-    // list so users can see/download docs and void if needed. Hide them after
-    // 24h to keep the active list lean.
+    // Active = in-flight rows + accounts-rejected rows (so ops can see the
+    // pushback + reason). Hide:
+    //   - seed templates
+    //   - operator-cancelled rows (status=cancelled WITHOUT approval=rejected)
+    //   - INTERNAL/EXTERNAL received rows (after the 24h grace window for INTERNAL)
+    // Keep:
+    //   - approval_status='rejected' rows even though the reject flow auto-sets
+    //     status='cancelled' — operations needs to see them and the rejection
+    //     reason. They stay visible until ops re-creates or 7d passes.
     setConsignments((c.data || []).filter(x => {
-      if (x.status === 'seed' || x.status === 'cancelled') return false
+      if (x.status === 'seed') return false
+      const isRejected = x.approval_status === 'rejected'
+      if (x.status === 'cancelled' && !isRejected) return false
+      // Rejected rows: keep for 7 days (gives ops a clear window to review
+      // the reason, fix data, and re-create). After that, they live in the
+      // approval-history audit trail only.
+      if (isRejected) {
+        const ageMs = Date.now() - new Date(x.approved_at || x.created_at).getTime()
+        if (ageMs > 7 * 24 * 3600 * 1000) return false
+        return true
+      }
       if (x.status === 'received' && x.movement_type !== 'INTERNAL') return false
       // Auto-received INTERNAL: keep visible for 24h since creation
       if (x.status === 'received' && x.movement_type === 'INTERNAL') {
@@ -659,10 +673,12 @@ export default function ConsignmentData() {
     return true
   })
 
-  // KPIs
-  const kpiBills    = filteredCons.reduce((s, c) => s + (c.total_bills || 0), 0)
-  const kpiNetWt    = filteredCons.reduce((s, c) => s + parseFloat(c.total_net_wt || 0), 0)
-  const kpiAmount   = filteredCons.reduce((s, c) => s + parseFloat(c.total_amount || 0), 0)
+  // KPIs — exclude rejected rows since their bills are already free (not in
+  // transit). The rejected count surfaces separately as its own KPI tile.
+  const inFlightCons = filteredCons.filter(c => c.approval_status !== 'rejected')
+  const kpiBills    = inFlightCons.reduce((s, c) => s + (c.total_bills || 0), 0)
+  const kpiNetWt    = inFlightCons.reduce((s, c) => s + parseFloat(c.total_net_wt || 0), 0)
+  const kpiAmount   = inFlightCons.reduce((s, c) => s + parseFloat(c.total_amount || 0), 0)
 
   const card    = { background: t.card, border: `1px solid ${t.border}`, borderRadius: '12px' }
   const btnGold = { background: t.gold, color: '#1a0a00', border: 'none', borderRadius: '8px', padding: '7px 16px', fontSize: '12px', fontWeight: 700, cursor: 'pointer' }
@@ -953,12 +969,20 @@ export default function ConsignmentData() {
                 const isKaSource       = sourceBranchInfo?.region === 'Rest of Karnataka' || sourceBranchInfo?.region === 'Bangalore'
                 const showEwb          = isType || isKaSource          // intrastate cases only
                 const showEinvoice     = !isType && !isKaSource        // interstate Hub → HO only
+                const isRejectedRow = c.approval_status === 'rejected'
+                const restingBg     = isNew ? `${t.green}08` : isRejectedRow ? `${t.red}08` : 'transparent'
                 return (
                   <React.Fragment key={c.id}>
                   <tr
-                    style={{ borderBottom: `1px solid ${t.border}15`, background: isNew ? `${t.green}08` : 'transparent', transition: 'background .1s', verticalAlign: 'middle' }}
-                    onMouseEnter={e => { if (!isNew) e.currentTarget.style.background = `${t.gold}04` }}
-                    onMouseLeave={e => { if (!isNew) e.currentTarget.style.background = 'transparent' }}>
+                    style={{
+                      borderBottom: `1px solid ${t.border}15`,
+                      borderLeft: isRejectedRow ? `3px solid ${t.red}` : '3px solid transparent',
+                      background: restingBg,
+                      transition: 'background .1s',
+                      verticalAlign: 'middle',
+                    }}
+                    onMouseEnter={e => { if (!isNew && !isRejectedRow) e.currentTarget.style.background = `${t.gold}04` }}
+                    onMouseLeave={e => { if (!isNew && !isRejectedRow) e.currentTarget.style.background = 'transparent' }}>
                     <td style={{ padding: '11px 14px', fontSize: '12px', color: t.gold, fontWeight: 700, fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
                       {c.tmp_prf_no}
                       {isNew && <span style={{ marginLeft: 6, fontSize: 9, color: t.green, background: `${t.green}20`, padding: '1px 6px', borderRadius: 4, fontWeight: 600 }}>NEW</span>}
@@ -1110,12 +1134,47 @@ export default function ConsignmentData() {
                     </td>
                   </tr>
 
-                  {/* Workflow indicator row — full-width, sits beneath each
-                      consignment row. Mirrors the strip in ConsignmentApprovals
-                      so operations sees the same progression and the Confirm
-                      bills CTA appears wherever they are. Hidden when the
-                      consignment is approved (workflow is moot at that point) */}
-                  {c.approval_status !== 'approved' && c.approval_status !== 'rejected' && (
+                  {/* Sub-row beneath the main row.
+                      - Rejected: an unmissable red banner with the accounts
+                        team's reason, the decider's email, and a hint on what
+                        ops should do next. The bill list was auto-freed on
+                        rejection so the next step is to fix the data and
+                        recreate from Branch Stock.
+                      - In-flight (pending / not yet decided): the four-step
+                        WorkflowStrip with the Confirm bills CTA.
+                      - Approved: nothing — workflow is moot, table stays lean. */}
+                  {isRejectedRow ? (
+                    <tr style={{ background: `${t.red}08`, borderLeft: `3px solid ${t.red}`, borderBottom: `1px solid ${t.border}15` }}>
+                      <td colSpan={11} style={{ padding: '8px 14px 12px' }}>
+                        <div style={{
+                          display: 'flex', alignItems: 'flex-start', gap: '12px',
+                          background: `${t.red}10`, border: `1px solid ${t.red}40`,
+                          borderRadius: '8px', padding: '10px 14px',
+                        }}>
+                          <span style={{
+                            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                            width: 26, height: 26, borderRadius: '50%',
+                            background: t.red, color: '#fff', fontSize: 14, fontWeight: 700,
+                            flexShrink: 0, marginTop: 1,
+                          }} aria-hidden="true">!</span>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontSize: 11, color: t.red, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase' }}>
+                              Accounts rejected this consignment
+                              {c.approved_by && <span style={{ color: t.red, fontWeight: 500, marginLeft: 8, opacity: .85 }}>· by {c.approved_by}</span>}
+                              {c.approved_at && <span style={{ color: t.red, fontWeight: 500, marginLeft: 8, opacity: .65, fontFamily: 'monospace' }}>· {fmtTS(c.approved_at)}</span>}
+                            </div>
+                            <div style={{ fontSize: 12, color: t.text1, marginTop: 5, lineHeight: 1.5 }}>
+                              <strong style={{ color: t.text1 }}>Reason:</strong>{' '}
+                              <span style={{ color: t.text2 }}>{c.rejection_reason || '(no reason given)'}</span>
+                            </div>
+                            <div style={{ fontSize: 11, color: t.text3, marginTop: 6, lineHeight: 1.5 }}>
+                              The bills are already free — fix the data and re-create the consignment from <strong style={{ color: t.text2 }}>Branch Stock</strong>. This row will auto-hide after 7 days; full audit stays in <strong style={{ color: t.text2 }}>Activity</strong>.
+                            </div>
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+                  ) : c.approval_status !== 'approved' && (
                     <tr style={{ background: isNew ? `${t.green}06` : 'transparent' }}>
                       <td colSpan={11} style={{ padding: '4px 14px 12px', borderBottom: `1px solid ${t.border}15` }}>
                         <WorkflowStrip
@@ -1146,12 +1205,23 @@ export default function ConsignmentData() {
     if (v >= 1e5) return `₹${(v / 1e5).toFixed(2)}L`
     return `₹${Math.round(v).toLocaleString('en-IN')}`
   }
+  // Counts the rejected rows so the KPI strip flags them. Stays out of the
+  // in-transit / bills / weight / value rollups because rejected consignments
+  // aren't in transit — bills already returned to source.
+  const rejectedCount = filteredCons.filter(c => c.approval_status === 'rejected').length
+  const inTransitCount = filteredCons.length - rejectedCount
+
   const kpis = [
-    { label: 'Consignments In Transit', value: filteredCons.length, sub: 'in flight',          color: t.orange },
-    { label: 'Bills In Transit',        value: kpiBills,            sub: 'across consignments', color: t.gold   },
-    { label: 'Net Weight',              value: fmtWt(kpiNetWt),     sub: '',                    color: t.blue   },
-    { label: 'Total Value',             value: fmtINR(kpiAmount),   sub: '',                    color: t.green  },
+    { label: 'Consignments In Transit', value: inTransitCount,    sub: 'in flight',           color: t.orange },
+    { label: 'Bills In Transit',        value: kpiBills,           sub: 'across consignments', color: t.gold   },
+    { label: 'Net Weight',              value: fmtWt(kpiNetWt),    sub: '',                    color: t.blue   },
+    { label: 'Total Value',             value: fmtINR(kpiAmount),  sub: '',                    color: t.green  },
   ]
+  // Rejected tile only when there's something to flag — stays out of the way
+  // 99% of the time, draws the eye when accounts pushed something back.
+  if (rejectedCount > 0) {
+    kpis.push({ label: 'Rejected — Review', value: rejectedCount, sub: 'awaiting ops re-create', color: t.red })
+  }
 
   return (
     <div style={{ padding: '18px 16px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
