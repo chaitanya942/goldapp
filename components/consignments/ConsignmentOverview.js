@@ -69,6 +69,9 @@ export default function ConsignmentOverview() {
   // wants to see the biggest exposures at the top without clicking.
   const [sortKey,      setSortKey]      = useState('total_net_wt')
   const [sortDir,      setSortDir]      = useState(-1)   // -1 = desc, 1 = asc
+  // Quick-filter chip state. 'all' = no filter; the others apply on top of
+  // search + region selection so users can narrow further.
+  const [quickFilter,  setQuickFilter]  = useState('all')
   const [lastRefresh,  setLastRefresh]  = useState(null)
   const [tick,         setTick]         = useState(0)   // for live clock
 
@@ -101,6 +104,44 @@ export default function ConsignmentOverview() {
     else { setSortKey(key); setSortDir(-1) }
   }
 
+  // CSV export of the current (filtered + sorted) view. Spreadsheet-friendly
+  // for management who wants to slice the data outside the app. Comma values
+  // and double-quotes inside a field are quoted/escaped per RFC 4180.
+  function exportCsv(rows) {
+    const csvEscape = (v) => {
+      const s = v == null ? '' : String(v)
+      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
+    }
+    const headers = [
+      'Branch','Region','Total Net Wt (g)',
+      "Today's Bills","Today's Net Wt (g)","Today's Value (₹)",
+      'Pending Bills','Pending Net Wt (g)','Pending Value (₹)',
+      'Oldest Bill (days)','Oldest Bill Date',
+      'Last Moved (days ago)','Pickup Time','Total Gross Wt (g)',
+    ]
+    const lines = [headers.map(csvEscape).join(',')]
+    for (const b of rows) {
+      const totalNet = (Number(b.today_net_wt || 0) + Number(b.older_net_wt || 0)).toFixed(3)
+      lines.push([
+        b.branch_name, b.region, totalNet,
+        b.today_bills || 0, Number(b.today_net_wt || 0).toFixed(3), Number(b.today_gross_value || 0).toFixed(2),
+        b.older_bills || 0, Number(b.older_net_wt || 0).toFixed(3), Number(b.older_gross_value || 0).toFixed(2),
+        b.oldest_age_days != null ? b.oldest_age_days : '', b.oldest_date || '',
+        b.last_moved_days_ago != null ? b.last_moved_days_ago : '', b.pickup_time || '',
+        Number(b.total_gross_wt || 0).toFixed(3),
+      ].map(csvEscape).join(','))
+    }
+    const csv = lines.join('\n')
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+    const url  = URL.createObjectURL(blob)
+    const today = new Date().toISOString().slice(0, 10)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `branch-stock-overview_${today}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
   // ── Region summary ────────────────────────────────────────────────────────
   const regions = [...new Set(data.map(b => b.region).filter(Boolean))].sort()
   const regionStats = regions.reduce((acc, r) => {
@@ -128,9 +169,26 @@ export default function ConsignmentOverview() {
   }
 
   // ── Filtered + sorted ─────────────────────────────────────────────────────
+  // Search now matches branch OR region (so typing 'kerala' narrows to all
+  // Kerala branches without having to click the region card).
+  const searchQ = (search || '').toLowerCase()
   const filtered = data
     .filter(b => !activeRegion || b.region === activeRegion)
-    .filter(b => !search || b.branch_name.toLowerCase().includes(search.toLowerCase()))
+    .filter(b => !searchQ || (b.branch_name || '').toLowerCase().includes(searchQ) || (b.region || '').toLowerCase().includes(searchQ))
+    .filter(b => {
+      // Quick-filter chips applied on top of search/region. Each chip targets
+      // a real operations question — "what needs attention now?".
+      const age = b.oldest_age_days || 0
+      const moved = b.last_moved_days_ago
+      switch (quickFilter) {
+        case 'overdue':       return age > 7
+        case 'watch':         return age > 3 && age <= 7
+        case 'today_active':  return (b.today_bills || 0) > 0
+        case 'no_movement':   return moved == null || moved > 30
+        case 'all':
+        default:              return true
+      }
+    })
     .slice()
     .sort((a, b) => {
       let av = 0, bv = 0
@@ -301,8 +359,10 @@ export default function ConsignmentOverview() {
         </div>
       )}
 
-      {/* ── KPI Strip ── */}
-      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(6, 1fr)', gap: '10px' }}>
+      {/* ── KPI Strip ── 8 tiles in two semantic groups (Today / Pending),
+           bookended by Branches and Total Gross Wt. auto-fit lets the strip
+           wrap into 4×2 on narrow viewports, 8×1 on wide. */}
+      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(auto-fit, minmax(160px, 1fr))', gap: '10px' }}>
 
         {/* Branches */}
         <div style={{ ...card, padding: '14px 18px' }}>
@@ -324,6 +384,12 @@ export default function ConsignmentOverview() {
           <div style={{ fontSize: '10px', color: `${t.blue}80`, marginTop: '4px' }}>net gold today</div>
         </div>
 
+        <div style={{ ...card, padding: '14px 18px', borderLeft: `3px solid ${t.blue}`, background: `${t.blue}08` }}>
+          <div style={{ fontSize: '9px', color: t.blue, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: '8px', fontWeight: 600 }}>Today's Value</div>
+          <div style={{ fontSize: '22px', fontWeight: 200, color: t.blue, fontFamily: 'monospace', lineHeight: 1 }}>{grandTodayVal ? fmtINR(grandTodayVal) : '—'}</div>
+          <div style={{ fontSize: '10px', color: `${t.blue}80`, marginTop: '4px' }}>purchase value</div>
+        </div>
+
         {/* Pending group */}
         <div style={{ ...card, padding: '14px 18px', borderLeft: `3px solid ${t.orange}`, background: `${t.orange}08` }}>
           <div style={{ fontSize: '9px', color: t.orange, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: '8px', fontWeight: 600 }}>Pending Bills</div>
@@ -337,6 +403,12 @@ export default function ConsignmentOverview() {
           <div style={{ fontSize: '10px', color: `${t.orange}80`, marginTop: '4px' }}>closing stock</div>
         </div>
 
+        <div style={{ ...card, padding: '14px 18px', borderLeft: `3px solid ${t.orange}`, background: `${t.orange}08` }}>
+          <div style={{ fontSize: '9px', color: t.orange, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: '8px', fontWeight: 600 }}>Pending Value</div>
+          <div style={{ fontSize: '22px', fontWeight: 200, color: t.orange, fontFamily: 'monospace', lineHeight: 1 }}>{grandOlderVal ? fmtINR(grandOlderVal) : '—'}</div>
+          <div style={{ fontSize: '10px', color: `${t.orange}80`, marginTop: '4px' }}>at-risk capital</div>
+        </div>
+
         <div style={{ ...card, padding: '14px 18px', borderLeft: `3px solid ${t.gold}`, background: `${t.gold}06` }}>
           <div style={{ fontSize: '9px', color: t.gold, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: '8px', fontWeight: 600 }}>Total Gross Wt</div>
           <div style={{ fontSize: '26px', fontWeight: 200, color: t.gold, fontFamily: 'monospace', lineHeight: 1 }}>{fmt(grandGrossWt, 2)}<span style={{ fontSize: '13px', marginLeft: '3px' }}>g</span></div>
@@ -344,17 +416,57 @@ export default function ConsignmentOverview() {
         </div>
       </div>
 
-      {/* ── Search ── */}
-      <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+      {/* ── Search + quick filters + CSV export ── */}
+      <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
         {canSee('element.consignment-overview.search') && (
-          <div style={{ position: 'relative', maxWidth: isMobile ? '100%' : '280px', flex: 1, minWidth: isMobile ? '100%' : 'auto' }}>
+          <div style={{ position: 'relative', maxWidth: isMobile ? '100%' : '260px', flex: 1, minWidth: isMobile ? '100%' : 'auto' }}>
             <span style={{ position: 'absolute', left: '11px', top: '50%', transform: 'translateY(-50%)', color: t.text4, fontSize: '13px', pointerEvents: 'none' }}>⌕</span>
-            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search branch…"
+            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search branch or region…"
               style={{ width: '100%', background: t.card2, border: `1px solid ${t.border2}`, borderRadius: '8px', padding: '8px 12px 8px 30px', fontSize: '12px', color: t.text1, outline: 'none', boxSizing: 'border-box' }} />
           </div>
         )}
-        <div style={{ marginLeft: isMobile ? 0 : 'auto', fontSize: '11px', color: t.text4 }}>
-          {filtered.length} of {data.length} branches{isMobile ? ' · swipe table to scroll' : ' · click column headers to sort'}
+
+        {/* Quick filter chips — operations questions, not data dimensions */}
+        <div style={{ display: 'flex', gap: '5px', flexWrap: 'wrap' }}>
+          {[
+            { key: 'all',          label: 'All',           color: t.text2  },
+            { key: 'overdue',      label: 'Overdue >7d',   color: t.red    },
+            { key: 'watch',        label: 'Watch 4-7d',    color: t.orange },
+            { key: 'today_active', label: 'Active today',  color: t.blue   },
+            { key: 'no_movement',  label: 'No movement',   color: t.purple },
+          ].map(q => {
+            const active = quickFilter === q.key
+            return (
+              <button key={q.key}
+                onClick={() => setQuickFilter(q.key)}
+                style={{
+                  padding: '6px 12px', borderRadius: '6px',
+                  background: active ? `${q.color}18` : 'transparent',
+                  border: `1px solid ${active ? `${q.color}80` : t.border2}`,
+                  color: active ? q.color : t.text3,
+                  fontSize: '11px', fontWeight: active ? 700 : 500, letterSpacing: '.02em',
+                  cursor: 'pointer', whiteSpace: 'nowrap',
+                  transition: 'all .12s',
+                }}>
+                {q.label}
+              </button>
+            )
+          })}
+        </div>
+
+        <div style={{ marginLeft: isMobile ? 0 : 'auto', display: 'flex', gap: '8px', alignItems: 'center' }}>
+          <span style={{ fontSize: '11px', color: t.text4 }}>
+            {filtered.length} of {data.length}{isMobile ? ' · swipe' : ''}
+          </span>
+          <button onClick={() => exportCsv(filtered)} title="Download the current view as CSV"
+            style={{
+              padding: '6px 12px', borderRadius: '6px',
+              background: 'transparent', border: `1px solid ${t.border2}`,
+              color: t.text2, fontSize: '11px', fontWeight: 600,
+              cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '5px',
+            }}>
+            ↓ CSV
+          </button>
         </div>
       </div>
 
