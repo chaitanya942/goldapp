@@ -925,20 +925,6 @@ export async function POST(req) {
       .then(() => {})
       .catch(() => {})
 
-    // Permanent ledger entry — INSERT only, never deleted. Ensures future
-    // generateTmpPrfNo / external-no / internal-no calls never reuse a number
-    // we've already burned on NIC / IRP, even after the consignments table
-    // gets wiped during E2E test resets. Triggered the 2026-05-07 incident
-    // where NIC silently returned a stale EWB for a recycled DocNo.
-    supabase.from('consignment_doc_history').insert({
-      tmp_prf_no:     rpcConsignment.tmp_prf_no,
-      challan_no:     rpcConsignment.challan_no   || null,
-      internal_no:    rpcConsignment.internal_no  || null,
-      external_no:    rpcConsignment.external_no  || null,
-      movement_type:  rpcConsignment.movement_type,
-      consignment_id: rpcConsignment.id,
-    }).then(() => {}).catch(() => {})
-
     return Response.json({ data: rpcConsignment })
   }
 
