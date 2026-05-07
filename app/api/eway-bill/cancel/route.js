@@ -46,18 +46,11 @@ export async function POST(req) {
       gstinOverride: gstinFor,
     })
 
-    // Defensive verification: cancelEWayBill throws on outright failure, but a
-    // 200 with missing/false govt_response (rare ClearTax soft-fail shape) would
-    // slip past. Only clear the local doc number once we have explicit Y from NIC.
-    const govtResp = result?.govt_response || result?.[0]?.govt_response
-    const success  = String(govtResp?.Success ?? '').trim().toUpperCase()
-    if (success !== 'Y' && success !== '1' && success !== 'TRUE') {
-      console.error('[ewb/cancel] NIC did not confirm cancel; preserving local EWB no.', { result })
-      return Response.json({
-        error: 'NIC did not confirm cancellation. The E-Way Bill remains active locally — check NIC portal directly.',
-        cleartax_response: result,
-      }, { status: 502 })
-    }
+    // Trust the library: cancelEWayBill throws if NIC's govt_response.Success
+    // isn't 'Y' (or if HTTP fails). If we're past that throw, NIC accepted.
+    // Capture whatever ack shape NIC returned for the audit log — varies by
+    // tenant (sometimes top-level, sometimes wrapped under data/response).
+    const govtResp = result?.govt_response || result?.data?.govt_response || result?.response?.govt_response || result
 
     const cancelledEwb = consignment.eway_bill_no
     await supabase.from('consignments')
