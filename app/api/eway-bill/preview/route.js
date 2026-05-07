@@ -19,19 +19,18 @@ import { buildPayload } from '../../../../lib/clearTaxClient'
 import { requireAuth, ROLE_GROUPS } from '../../../../lib/apiAuth'
 import { loadConsignmentForGeneration } from '../../../../lib/consignmentSnapshot'
 import { checkWorkflow } from '../../../../lib/workflowGate'
+import {
+  validateConsignmentStatus,
+  validateBranchReadiness,
+  validateItemTotals,
+  validateDistinctGstins,
+  isValidGstin,
+} from '../../../../lib/gstDocPreflight'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
   process.env.SUPABASE_SERVICE_ROLE_KEY || 'placeholder'
 )
-
-function isValidGstin(g) {
-  if (!g || typeof g !== 'string') return false
-  return /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/.test(g.toUpperCase())
-}
-function isValidPin(pin) {
-  return /^[1-9][0-9]{5}$/.test(String(pin || '').trim())
-}
 
 export async function GET(req) {
   // ACCOUNTS only — same gate as generate.
@@ -52,29 +51,30 @@ export async function GET(req) {
   if (loaded.error) return Response.json({ error: loaded.error.message }, { status: loaded.error.status })
   const { consignment, branch, destBranch, items, companySettings } = loaded
 
-  // Same preflight checks the generate route runs — surface them here so accounts sees them BEFORE clicking Generate.
-  // ORDER MATTERS: status / approval guards FIRST so they always show, regardless of other issues.
-  const errors = []
+  // Shared preflight — same validators the generate route runs. Order matters:
+  // status / approval guards first so they always show regardless of other
+  // issues. Document-specific checks (source GSTIN format, distinct GSTINs)
+  // come after the universal ones.
   const isInternal = consignment.movement_type === 'INTERNAL'
-  if (consignment.status === 'cancelled') {
-    errors.push(`${consignment.tmp_prf_no} is cancelled. Cannot generate an E-Way Bill against a cancelled consignment.`)
+  const errors = [
+    ...validateConsignmentStatus(consignment, 'an E-Way Bill'),
+    ...validateBranchReadiness(branch, 'source'),
+    ...(isInternal ? validateBranchReadiness(destBranch, 'destination') : []),
+    ...validateItemTotals(items, 'an E-Way Bill', { weightField: 'gross_weight' }),
+  ]
+  if (consignment.source_gstin && !isValidGstin(consignment.source_gstin)) {
+    errors.push(`Source GSTIN '${consignment.source_gstin}' is malformed`)
   }
-  if (consignment.approval_status === 'rejected') {
-    errors.push(`${consignment.tmp_prf_no} was rejected by accounts. Cannot generate an E-Way Bill.`)
-  }
-  if (!branch?.address && !branch?.city) errors.push('Source branch has no address')
-  if (isInternal && !destBranch?.address && !destBranch?.city) errors.push('Destination hub has no address')
-  if (branch?.pin_code && !isValidPin(branch.pin_code)) errors.push(`Source PIN '${branch.pin_code}' is invalid`)
-  if (isInternal && destBranch?.pin_code && !isValidPin(destBranch.pin_code)) errors.push(`Dest PIN '${destBranch.pin_code}' is invalid`)
-  if (consignment.source_gstin && !isValidGstin(consignment.source_gstin)) errors.push(`Source GSTIN '${consignment.source_gstin}' is malformed`)
-  if (!items?.length) errors.push('Consignment has no items')
-  const totalGross = (items || []).reduce((s, i) => s + Number(i.gross_weight || 0), 0)
-  if (totalGross <= 0) errors.push('Total gross weight is 0')
-  const totalVal = (items || []).reduce((s, i) => s + Number(i.total_amount || 0), 0)
-  if (totalVal <= 0) errors.push('Total value is 0')
 
   // Build the exact payload the generate route would send.
   const payload = buildPayload({ consignment, branch, destBranch, items: items || [], companySettings: companySettings || {} })
+
+  // Distinct seller/buyer GSTIN check (mirrors E-Invoice preview). EWB doesn't
+  // outright fail on identical GSTINs but the doc is functionally meaningless,
+  // so we surface the same warning here as a preflight error.
+  errors.push(
+    ...validateDistinctGstins(payload.SellerDtls?.Gstin, payload.BuyerDtls?.Gstin, 'an E-Way Bill'),
+  )
 
   // Human-readable digest the UI shows in the modal — what accounts will compare against the challan.
   const summary = {

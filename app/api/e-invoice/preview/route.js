@@ -6,19 +6,18 @@ import { buildEInvoicePayload } from '../../../../lib/clearTaxClient'
 import { requireAuth, ROLE_GROUPS } from '../../../../lib/apiAuth'
 import { loadConsignmentForGeneration } from '../../../../lib/consignmentSnapshot'
 import { checkWorkflow } from '../../../../lib/workflowGate'
+import {
+  validateConsignmentStatus,
+  validateBranchReadiness,
+  validateItemTotals,
+  validateDistinctGstins,
+  isValidGstin,
+} from '../../../../lib/gstDocPreflight'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
   process.env.SUPABASE_SERVICE_ROLE_KEY || 'placeholder'
 )
-
-function isValidGstin(g) {
-  if (!g || typeof g !== 'string') return false
-  return /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/.test(g.toUpperCase())
-}
-function isValidPin(pin) {
-  return /^[1-9][0-9]{5}$/.test(String(pin || '').trim())
-}
 
 export async function GET(req) {
   const auth = await requireAuth(req, { requiredRoles: ROLE_GROUPS.ACCOUNTS })
@@ -37,30 +36,22 @@ export async function GET(req) {
   if (loaded.error) return Response.json({ error: loaded.error.message }, { status: loaded.error.status })
   const { consignment, branch, items, companySettings } = loaded
 
-  // Mirror the generate route's preflight checks so accounts sees the same blockers BEFORE clicking.
-  // ORDER MATTERS: status / approval guards FIRST.
-  const errors = []
-  if (consignment.status === 'cancelled') {
-    errors.push(`${consignment.tmp_prf_no} is cancelled. Cannot generate an E-Invoice against a cancelled consignment.`)
+  // Shared preflight — same validators EWB preview / generate use.
+  const errors = [
+    ...validateConsignmentStatus(consignment, 'an E-Invoice'),
+    ...validateBranchReadiness(branch, 'source'),
+    ...validateItemTotals(items, 'an E-Invoice', { weightField: 'gross_weight' }),
+  ]
+  if (consignment.source_gstin && !isValidGstin(consignment.source_gstin)) {
+    errors.push(`Source GSTIN '${consignment.source_gstin}' is malformed`)
   }
-  if (consignment.approval_status === 'rejected') {
-    errors.push(`${consignment.tmp_prf_no} was rejected by accounts. Cannot generate an E-Invoice.`)
-  }
-  if (!items?.length) errors.push('Consignment has no items')
-  const totalGross = (items || []).reduce((s, i) => s + Number(i.gross_weight || 0), 0)
-  if (totalGross <= 0) errors.push('Total gross weight is 0')
-  const totalVal = (items || []).reduce((s, i) => s + Number(i.total_amount || 0), 0)
-  if (totalVal <= 0) errors.push('Total value is 0')
-  if (!branch?.address || !branch?.pin_code) errors.push(`Source branch '${branch?.name}' missing address or PIN`)
-  if (branch?.pin_code && !isValidPin(branch.pin_code)) errors.push(`Source PIN '${branch.pin_code}' is invalid`)
-  if (consignment.source_gstin && !isValidGstin(consignment.source_gstin)) errors.push(`Source GSTIN '${consignment.source_gstin}' is malformed`)
 
   const payload = buildEInvoicePayload({ consignment, branch, items: items || [], companySettings: companySettings || {} })
 
-  // Same-GSTIN check (intra-state KA — IRP rejects)
-  if (payload.SellerDtls?.Gstin && payload.BuyerDtls?.Gstin && payload.SellerDtls.Gstin === payload.BuyerDtls.Gstin) {
-    errors.push('Seller and Buyer GSTINs are identical — E-Invoice not required (use EWB only)')
-  }
+  // IRP outright rejects identical seller/buyer GSTINs — surface here too.
+  errors.push(
+    ...validateDistinctGstins(payload.SellerDtls?.Gstin, payload.BuyerDtls?.Gstin, 'an E-Invoice'),
+  )
 
   const summary = {
     document_no:        payload.DocDtls?.No,

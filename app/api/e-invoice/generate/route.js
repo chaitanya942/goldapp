@@ -7,23 +7,21 @@ import { createClient } from '@supabase/supabase-js'
 import { generateEInvoice } from '../../../../lib/clearTaxClient'
 import { logConsignmentEvent } from '../../../../lib/consignmentLog'
 import { requireAuth, ROLE_GROUPS } from '../../../../lib/apiAuth'
-import { REGION_TO_STATE_CODE } from '../../../../lib/stateMap'
 import { loadConsignmentForGeneration } from '../../../../lib/consignmentSnapshot'
 import { checkWorkflow } from '../../../../lib/workflowGate'
+import {
+  validateConsignmentStatus,
+  validateBranchReadiness,
+  validateItemTotals,
+  validateDistinctGstins,
+  resolveSellerGstinForBranch,
+  resolveBuyerGstinForHo,
+} from '../../../../lib/gstDocPreflight'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
   process.env.SUPABASE_SERVICE_ROLE_KEY || 'placeholder'
 )
-
-function isValidGstin(gstin) {
-  if (!gstin || typeof gstin !== 'string') return false
-  return /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/.test(gstin.toUpperCase())
-}
-
-function isValidPin(pin) {
-  return /^[1-9][0-9]{5}$/.test(String(pin || '').trim())
-}
 
 export async function POST(req) {
   // Accounts owns GST documents — they generate as part of approval review.
@@ -43,61 +41,25 @@ export async function POST(req) {
     if (loaded.error) return Response.json({ error: loaded.error.message }, { status: loaded.error.status })
     const { consignment, branch, items, companySettings } = loaded
 
-    if (consignment.status === 'cancelled') {
-      return Response.json({ error: `${consignment.tmp_prf_no} is cancelled. Cannot generate an E-Invoice against a cancelled consignment.` }, { status: 400 })
-    }
-    if (consignment.approval_status === 'rejected') {
-      return Response.json({ error: `${consignment.tmp_prf_no} was rejected. Cannot generate an E-Invoice.` }, { status: 400 })
-    }
-    if (consignment.irn) {
-      return Response.json({ error: `E-Invoice already exists: ${consignment.irn}` }, { status: 400 })
-    }
+    // Universal preflight (status + branch + items) via the shared lib so the
+    // EWB and E-Invoice routes can never silently disagree on what's blocking.
+    const preflight = [
+      ...validateConsignmentStatus(consignment, 'an E-Invoice'),
+      ...validateBranchReadiness(branch, 'source'),
+      ...validateItemTotals(items, 'an E-Invoice', { weightField: 'gross_weight' }),
+    ]
+    if (preflight.length) return Response.json({ error: preflight[0] }, { status: 400 })
+    if (consignment.irn) return Response.json({ error: `E-Invoice already exists: ${consignment.irn}` }, { status: 400 })
 
-    // Resolve seller GSTIN from company_settings.gstin_<state> (preferred) → branch.branch_gstin → env.
-    // Use the shared region→state-code map so adding a new state in stateMap.js
-    // automatically propagates here (and avoids the previous drift bug).
-    const stateCode = REGION_TO_STATE_CODE[branch.region]
-    const stateGstinField = stateCode ? `gstin_${stateCode.toLowerCase()}` : null
-    const sellerGstin = (stateGstinField && companySettings?.[stateGstinField]) || branch.branch_gstin || process.env.WG_GSTIN
-    const buyerGstin  = companySettings?.gstin_ka || companySettings?.gstin || process.env.WG_GSTIN
-
-    if (!sellerGstin) {
-      return Response.json({ error: `No GSTIN found for ${branch.region}. Set 'GSTIN_${stateCode}' in Admin → Company Settings.` }, { status: 400 })
-    }
-    if (!buyerGstin) {
-      return Response.json({ error: `No HO GSTIN configured. Set 'GSTIN' or 'GSTIN_KA' in Admin → Company Settings.` }, { status: 400 })
-    }
-    if (sellerGstin === buyerGstin) {
-      return Response.json({
-        error: `Seller and buyer GSTINs are the same (${sellerGstin}). E-Invoice requires distinct GSTINs. This typically means an intra-state Karnataka move, which does not legally need an E-Invoice. Use only the E-Way Bill instead.`,
-      }, { status: 400 })
-    }
-    if (!isValidGstin(sellerGstin)) {
-      return Response.json({ error: `Seller GSTIN '${sellerGstin}' is malformed. Fix it in Admin → Company Settings.` }, { status: 400 })
-    }
-    if (!isValidGstin(buyerGstin)) {
-      return Response.json({ error: `Buyer (HO) GSTIN '${buyerGstin}' is malformed. Fix it in Admin → Company Settings.` }, { status: 400 })
-    }
-    if (!branch.address || !branch.pin_code) {
-      return Response.json({ error: `Branch '${branch.name}' is missing address or PIN. Fill them in Branch Management.` }, { status: 400 })
-    }
-    if (!isValidPin(branch.pin_code)) {
-      return Response.json({ error: `Branch '${branch.name}' PIN '${branch.pin_code}' is invalid (must be 6 digits, not starting with 0).` }, { status: 400 })
-    }
-
-    // Item-level preflight — same as EWB. NIC IRP rejects line items with
-    // zero weight/quantity/value, but the error message is generic. Catch it here.
-    if (!items || items.length === 0) {
-      return Response.json({ error: 'Consignment has no items.' }, { status: 400 })
-    }
-    const totalGross = items.reduce((s, i) => s + Number(i.gross_weight || i.net_weight || 0), 0)
-    if (totalGross <= 0) {
-      return Response.json({ error: 'Total weight is 0; cannot generate an E-Invoice.' }, { status: 400 })
-    }
-    const totalValue = items.reduce((s, i) => s + Number(i.total_amount || 0), 0)
-    if (totalValue <= 0) {
-      return Response.json({ error: 'Total value is 0; cannot generate an E-Invoice.' }, { status: 400 })
-    }
+    // E-Invoice-specific: resolve seller + buyer GSTINs via the shared resolvers
+    // (same fallback chain the preview uses). Distinct check is mandatory — IRP
+    // outright rejects identical seller/buyer.
+    const sellerR = resolveSellerGstinForBranch({ branch, companySettings: companySettings || {} })
+    if (sellerR.error) return Response.json({ error: sellerR.error }, { status: 400 })
+    const buyerR  = resolveBuyerGstinForHo({ companySettings: companySettings || {} })
+    if (buyerR.error) return Response.json({ error: buyerR.error }, { status: 400 })
+    const distinct = validateDistinctGstins(sellerR.gstin, buyerR.gstin, 'an E-Invoice')
+    if (distinct.length) return Response.json({ error: distinct[0] }, { status: 400 })
 
     const result = await generateEInvoice({ consignment, branch, items: items || [], companySettings: companySettings || {} })
     // Full response (with redaction) is logged by ctaxLog inside lib/clearTaxClient.js.

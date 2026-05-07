@@ -10,73 +10,41 @@ import { logConsignmentEvent } from '../../../../lib/consignmentLog'
 import { requireAuth, ROLE_GROUPS } from '../../../../lib/apiAuth'
 import { loadConsignmentForGeneration } from '../../../../lib/consignmentSnapshot'
 import { checkWorkflow } from '../../../../lib/workflowGate'
+import {
+  validateConsignmentStatus,
+  validateBranchReadiness,
+  validateItemTotals,
+} from '../../../../lib/gstDocPreflight'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
   process.env.SUPABASE_SERVICE_ROLE_KEY || 'placeholder'
 )
 
-// Validates GSTIN format: 15 chars, state-code(2) + PAN(10) + entity(1) + Z + checksum(1).
-function isValidGstin(gstin) {
-  if (!gstin || typeof gstin !== 'string') return false
-  return /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/.test(gstin.toUpperCase())
-}
-
-function isValidPin(pin) {
-  return /^[1-9][0-9]{5}$/.test(String(pin || '').trim())
-}
-
+// Composes the shared validators into the EWB-specific preflight. Includes
+// the source-state-GSTIN check that's unique to EWB (uses state_gstins map
+// rather than the gstin_<code> column flow that E-Invoice uses).
 function preflightValidate({ consignment, branch, destBranch, items, companySettings }) {
-  const errors = []
   const isInternal = consignment.movement_type === 'INTERNAL'
-  const dispatcher = branch
-  const recipient  = isInternal ? destBranch : null
+  const errors = [
+    ...validateConsignmentStatus(consignment, 'an E-Way Bill'),
+    ...validateBranchReadiness(branch, 'source'),
+    ...(isInternal ? validateBranchReadiness(destBranch, 'destination') : []),
+    ...validateItemTotals(items, 'an E-Way Bill', { weightField: 'gross_weight' }),
+  ]
 
-  if (!dispatcher) errors.push('Source branch record missing')
-  if (isInternal && !recipient) errors.push('Destination hub record missing')
-
-  // GSTIN — for OWN_USE, source state determines which GSTIN to use; check it exists
-  const stateGstinMap = companySettings.state_gstins || {}
-  const dispatcherState = dispatcher?.state || dispatcher?.region
-  if (dispatcherState && !stateGstinMap[dispatcherState] && !companySettings.gstin) {
+  // EWB-specific: when a state_gstins map is configured, ensure the source
+  // state has a GSTIN (otherwise sender section is built from fallback values
+  // that NIC won't accept on OWN_USE).
+  const stateGstinMap = companySettings?.state_gstins || {}
+  const dispatcherState = branch?.state || branch?.region
+  if (dispatcherState && !stateGstinMap[dispatcherState] && !companySettings?.gstin) {
     errors.push(`No GSTIN configured for source state '${dispatcherState}'`)
   }
 
-  if (dispatcher?.branch_gstin && !isValidGstin(dispatcher.branch_gstin)) {
-    errors.push(`Source branch GSTIN '${dispatcher.branch_gstin}' is malformed`)
-  }
-  if (recipient?.branch_gstin && !isValidGstin(recipient.branch_gstin)) {
-    errors.push(`Destination GSTIN '${recipient.branch_gstin}' is malformed`)
-  }
-
-  // PIN codes
-  if (dispatcher && !isValidPin(dispatcher.pin_code)) {
-    errors.push(`Source branch PIN '${dispatcher.pin_code || ''}' is invalid (must be 6 digits, not starting with 0)`)
-  }
-  if (isInternal && recipient && !isValidPin(recipient.pin_code)) {
-    errors.push(`Destination hub PIN '${recipient.pin_code || ''}' is invalid`)
-  }
-  // HO PIN check skipped — clearTaxClient uses HO_DEFAULTS (Bangalore 560095)
-  // baked in, so company_settings.ho_pin_code is not required for EWB generation.
-
-  // Address
-  if (!dispatcher?.address && !dispatcher?.city) errors.push('Source branch has no address')
-  if (isInternal && !recipient?.address && !recipient?.city) errors.push('Destination hub has no address')
-
-  // Items + weight + value
-  if (!items || items.length === 0) errors.push('Consignment has no items')
-  const totalWeight = (items || []).reduce((s, i) => s + Number(i.net_weight || 0), 0)
-  if (totalWeight <= 0) errors.push('Total net weight is 0; cannot generate an E-Way Bill.')
-  const totalValue = (items || []).reduce((s, i) => s + Number(i.total_amount || 0), 0)
-  if (totalValue < 50000) {
-    // Below 50k threshold EWB isn't legally required — warn, don't block
-    // (some businesses generate anyway for documentation)
-  }
-
   // Vehicle info is NOT required at generation time — for gold, the vehicle
-  // is often decided at pickup. NIC/ClearTax accepts EWB without it (Part-A only).
-  // The vehicle number can be updated via the EWB update-vehicle API later.
-
+  // is often decided at pickup. NIC/ClearTax accepts EWB without it (Part-A
+  // only). Vehicle can be updated later via the EWB update-vehicle API.
   return errors
 }
 

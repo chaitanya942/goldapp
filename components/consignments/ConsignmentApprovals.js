@@ -795,6 +795,7 @@ export default function ConsignmentApprovals() {
                                 E-Way Bill
                               </button>
                               <button onClick={() => openCancel(c, 'ewb')}
+                                aria-label="Cancel E-Way Bill"
                                 title="Cancel this E-Way Bill on NIC (must be within 24 hours of generation)"
                                 style={{ background: 'transparent', border: `1px solid ${t.red}40`, borderRadius: '4px', padding: '1px 6px', fontSize: '9px', color: t.red, cursor: 'pointer' }}>
                                 ✕
@@ -815,6 +816,7 @@ export default function ConsignmentApprovals() {
                                 E-Invoice
                               </button>
                               <button onClick={() => openCancel(c, 'irn')}
+                                aria-label="Cancel E-Invoice"
                                 title="Cancel this E-Invoice on IRP (within 24h) — or generate a Credit Note if past the window"
                                 style={{ background: 'transparent', border: `1px solid ${t.red}40`, borderRadius: '4px', padding: '1px 6px', fontSize: '9px', color: t.red, cursor: 'pointer' }}>
                                 ✕
@@ -914,7 +916,7 @@ function PreviewModal({ state, t, onClose, onConfirm }) {
               Review the values below. Click <strong>Confirm &amp; Generate</strong> only if everything matches the Voucher / Challan.
             </div>
           </div>
-          <button onClick={onClose} disabled={generating} style={{ background: 'transparent', border: 'none', color: t.text3, fontSize: '18px', cursor: 'pointer' }}>✕</button>
+          <button onClick={onClose} disabled={generating} aria-label="Close preview" style={{ background: 'transparent', border: 'none', color: t.text3, fontSize: '18px', cursor: 'pointer' }}>✕</button>
         </div>
 
         {/* Body — flex-grow + scroll. Only this region scrolls when content overflows. */}

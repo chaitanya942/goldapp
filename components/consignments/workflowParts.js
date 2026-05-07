@@ -80,7 +80,7 @@ export function WorkflowStrip({ t, c, isType, onConfirm, confirmingId }) {
                 disabled={isConfirming}
                 title="Lock the bill list and unlock the consignee report"
                 style={{
-                  background: t.gold, color: '#1a0a00', border: 'none',
+                  background: t.gold, color: t.goldText || '#1a0a00', border: 'none',
                   borderRadius: '6px', padding: '4px 10px',
                   fontSize: '10px', fontWeight: 700, letterSpacing: '.04em',
                   cursor: isConfirming ? 'wait' : 'pointer',
