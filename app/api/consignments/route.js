@@ -346,6 +346,41 @@ export async function GET(req) {
     return Response.json({ data: data || [] })
   }
 
+  // ── Cancellation history: every EWB / E-Invoice cancellation in the window ──
+  // Joins consignment_activity_log (event_type IN ewb_cancelled, einvoice_cancelled)
+  // with the consignment row so the UI can show: who cancelled what, why, when,
+  // plus the consignment context (branch, route, value).
+  if (action === 'cancellation_history') {
+    const days = Math.min(180, Math.max(1, parseInt(searchParams.get('days') || '30')))
+    const sinceIso = new Date(Date.now() - days * 86400000).toISOString()
+    const { data: events, error: evErr } = await supabase
+      .from('consignment_activity_log')
+      .select('id, consignment_id, event_type, actor_email, actor_role, details, created_at')
+      .in('event_type', ['ewb_cancelled', 'einvoice_cancelled'])
+      .gte('created_at', sinceIso)
+      .order('created_at', { ascending: false })
+    if (evErr) return Response.json({ error: evErr.message }, { status: 500 })
+
+    const ids = [...new Set((events || []).map(e => e.consignment_id).filter(Boolean))]
+    let consignments = []
+    if (ids.length) {
+      let cq = supabase
+        .from('consignments')
+        .select('id, tmp_prf_no, branch_name, dest_branch, movement_type, total_bills, total_gross_value, total_net_wt, approval_status, status, rejection_reason, created_at')
+        .in('id', ids)
+      if (allowedBranches) cq = cq.in('branch_name', allowedBranches)
+      const { data: cs, error: cErr } = await cq
+      if (cErr) return Response.json({ error: cErr.message }, { status: 500 })
+      consignments = cs || []
+    }
+    const byId = new Map(consignments.map(c => [c.id, c]))
+    // Drop events whose consignment got filtered out by allowedBranches (RLS-equivalent).
+    const rows = (events || [])
+      .filter(e => byId.has(e.consignment_id))
+      .map(e => ({ ...e, consignment: byId.get(e.consignment_id) }))
+    return Response.json({ data: rows })
+  }
+
   // ── Pending approvals count (for sidebar badge) ────────────────────────
   if (action === 'pending_approvals_count') {
     let q = supabase

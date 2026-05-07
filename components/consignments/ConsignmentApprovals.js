@@ -127,6 +127,7 @@ export default function ConsignmentApprovals() {
 
   const [pending, setPending] = useState([])
   const [history, setHistory] = useState([])  // approved or rejected, depending on tab
+  const [cancellations, setCancellations] = useState([])  // ewb_cancelled / einvoice_cancelled events
   const [loading, setLoading] = useState(true)
   const [actionId, setActionId] = useState(null)
   // Preview-before-generate modal state. The modal shows the exact payload that
@@ -178,11 +179,21 @@ export default function ConsignmentApprovals() {
     setLoading(false)
   }, [])
 
+  // Fetches the cancellation log: every EWB / E-Invoice cancellation in the last 30d.
+  const fetchCancellations = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true)
+    const r = await authedFetch(`/api/consignments?action=cancellation_history&days=30`)
+    const j = await r.json()
+    setCancellations(j.data || [])
+    setLoading(false)
+  }, [])
+
   // Initial fetch + refetch when the user switches tabs.
   useEffect(() => {
     if (tab === 'pending') fetchPending()
+    else if (tab === 'cancellations') fetchCancellations()
     else fetchHistory(tab)
-  }, [tab, fetchPending, fetchHistory])
+  }, [tab, fetchPending, fetchHistory, fetchCancellations])
 
   // Re-render every 30s so the urgency badge stays current
   useEffect(() => {
@@ -512,9 +523,14 @@ export default function ConsignmentApprovals() {
               <span><strong style={{ color: t.green }}>₹{fmt(Math.round(totalValue))}</strong></span>
             </div>
           )}
-          {tab !== 'pending' && (
+          {(tab === 'approved' || tab === 'rejected') && (
             <div style={{ fontSize: '11px', color: t.text3 }}>
               Last 30 days · <strong style={{ color: t.text2 }}>{history.length}</strong> {tab}
+            </div>
+          )}
+          {tab === 'cancellations' && (
+            <div style={{ fontSize: '11px', color: t.text3 }}>
+              Last 30 days · <strong style={{ color: t.text2 }}>{cancellations.length}</strong> doc cancellation{cancellations.length === 1 ? '' : 's'}
             </div>
           )}
         </div>
@@ -532,16 +548,21 @@ export default function ConsignmentApprovals() {
               {soundEnabled ? 'Sound on' : 'Sound off'}
             </button>
           )}
-          <button onClick={() => tab === 'pending' ? fetchPending(false) : fetchHistory(tab, false)} style={btnOut}>Refresh</button>
+          <button onClick={() => {
+            if (tab === 'pending')        fetchPending(false)
+            else if (tab === 'cancellations') fetchCancellations(false)
+            else                          fetchHistory(tab, false)
+          }} style={btnOut}>Refresh</button>
         </div>
       </div>
 
-      {/* Tab strip — Pending / Approved / Rejected */}
+      {/* Tab strip — Pending / Approved / Rejected / Cancellations */}
       <div style={{ display: 'flex', gap: '4px', borderBottom: `1px solid ${t.border}`, marginTop: '-2px' }}>
         {[
-          { id: 'pending',  label: 'Pending',  color: t.orange },
-          { id: 'approved', label: 'Approved', color: t.green  },
-          { id: 'rejected', label: 'Rejected', color: t.red    },
+          { id: 'pending',       label: 'Pending',       color: t.orange },
+          { id: 'approved',      label: 'Approved',      color: t.green  },
+          { id: 'rejected',      label: 'Rejected',      color: t.red    },
+          { id: 'cancellations', label: 'Cancellations', color: t.purple },
         ].map(o => {
           const active = tab === o.id
           return (
@@ -586,7 +607,7 @@ export default function ConsignmentApprovals() {
             New requests will appear here as they arrive.
           </div>
         </div>
-      ) : tab !== 'pending' && history.length === 0 ? (
+      ) : (tab === 'approved' || tab === 'rejected') && history.length === 0 ? (
         /* Empty state — history tab */
         <div style={{ ...card, padding: '60px 20px', textAlign: 'center' }}>
           <div style={{ fontSize: '15px', color: t.text1, fontWeight: 500 }}>
@@ -596,7 +617,85 @@ export default function ConsignmentApprovals() {
             {tab === 'approved' ? 'Once you approve a consignment, it will be archived here.' : 'Rejected consignments are recorded here for audit.'}
           </div>
         </div>
-      ) : tab !== 'pending' ? (
+      ) : tab === 'cancellations' && cancellations.length === 0 ? (
+        /* Empty state — cancellations tab */
+        <div style={{ ...card, padding: '60px 20px', textAlign: 'center' }}>
+          <div style={{ fontSize: '15px', color: t.text1, fontWeight: 500 }}>
+            No EWB / E-Invoice cancellations in the last 30 days
+          </div>
+          <div style={{ fontSize: '12px', color: t.text4, marginTop: '6px' }}>
+            When a cancelled E-Way Bill or E-Invoice voids a consignment, the audit entry appears here.
+          </div>
+        </div>
+      ) : tab === 'cancellations' ? (
+        /* Cancellation log — every doc cancellation in the last 30 days */
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+          {cancellations.map(ev => {
+            const c       = ev.consignment || {}
+            const isEwb   = ev.event_type === 'ewb_cancelled'
+            const docNo   = isEwb ? ev.details?.ewb_no : ev.details?.irn
+            const reasonCode = ev.details?.reason_code
+            const remark  = ev.details?.remark
+            const ack     = isEwb ? ev.details?.nic_ack : ev.details?.irp_ack
+            const accent  = isEwb ? t.green : t.purple
+            const isType  = c.movement_type === 'INTERNAL'
+            const dest    = isType ? c.dest_branch : 'Head Office'
+            return (
+              <div key={ev.id} style={{ ...card, padding: '12px 16px 12px 18px', borderLeft: `3px solid ${accent}`, display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: '9px', color: accent, background: `${accent}15`, borderRadius: '4px', padding: '2px 7px', fontWeight: 700, letterSpacing: '.04em' }}>
+                    {isEwb ? 'EWB CANCELLED' : 'E-INVOICE CANCELLED'}
+                  </span>
+                  {c.tmp_prf_no && <span style={{ fontSize: '13px', color: t.gold, fontWeight: 700, fontFamily: 'monospace', letterSpacing: '.02em' }}>{c.tmp_prf_no}</span>}
+                  {docNo && <span style={{ fontSize: '11px', color: t.text2, fontFamily: 'monospace' }}>{docNo}</span>}
+                  {c.movement_type && (
+                    <span style={{ fontSize: '9px', color: isType ? t.purple : t.orange, background: `${isType ? t.purple : t.orange}15`, borderRadius: '4px', padding: '2px 7px', fontWeight: 600, letterSpacing: '.04em' }}>
+                      {isType ? 'BRANCH → HUB' : 'BRANCH → HO'}
+                    </span>
+                  )}
+                </div>
+                {c.branch_name && (
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: '14px', flexWrap: 'wrap' }}>
+                    <div style={{ fontSize: '12px', color: t.text1, fontWeight: 600 }}>
+                      {c.branch_name}
+                      <span style={{ color: t.text4, margin: '0 8px', fontWeight: 400 }}>→</span>
+                      {dest}
+                    </div>
+                    <div style={{ fontSize: '11px', color: t.text3, display: 'flex', gap: '12px', fontFamily: 'monospace' }}>
+                      {c.total_bills != null && <span>{c.total_bills} bills</span>}
+                      {c.total_net_wt != null && <span style={{ color: t.gold }}>{fmtWt(c.total_net_wt)}</span>}
+                      {c.total_gross_value != null && <span style={{ color: t.blue }}>₹{fmt(Math.round(c.total_gross_value))}</span>}
+                    </div>
+                  </div>
+                )}
+                <div style={{ fontSize: '11px', color: t.text2 }}>
+                  <span style={{ color: t.text4 }}>Reason:</span>{' '}
+                  {reasonCode && <span style={{ color: t.text2, fontWeight: 600 }}>{reasonCode}</span>}
+                  {remark && <span style={{ color: t.text2 }}>{reasonCode ? ' · ' : ''}{remark}</span>}
+                  {!reasonCode && !remark && <span style={{ color: t.text4 }}>—</span>}
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap', fontSize: '10px', color: t.text4 }}>
+                  <span>Cancelled by <strong style={{ color: t.text3 }}>{ev.actor_email || 'unknown'}</strong></span>
+                  <span>·</span>
+                  <span>{fmtTS(ev.created_at)}</span>
+                  {ack?.Success && (
+                    <>
+                      <span>·</span>
+                      <span title="NIC / IRP acknowledgement" style={{ color: t.green }}>{isEwb ? 'NIC' : 'IRP'} ack: {String(ack.Success)}</span>
+                    </>
+                  )}
+                  {c.rejection_reason && (
+                    <>
+                      <span>·</span>
+                      <span style={{ color: t.red }}>Consignment auto-rejected</span>
+                    </>
+                  )}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      ) : (tab === 'approved' || tab === 'rejected') ? (
         /* History list — read-only, no approve/reject buttons */
         <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
           {history.map(c => {

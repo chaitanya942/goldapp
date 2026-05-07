@@ -50,19 +50,46 @@ export async function POST(req) {
     const govtResp = result?.govt_response || result?.data?.govt_response || result?.response?.govt_response || result
 
     const cancelledIrn = consignment.irn
+    const actorEmail   = auth.profile?.email || auth.user?.email || 'unknown'
+    const REJECTION_REASON = 'Rejected because of cancellation of E-Invoice'
+
+    // Cancelling the E-Invoice voids the consignment as a whole — same semantics
+    // as accounts rejecting at approval time. Atomic RPC returns bills to source
+    // (if approval_status was 'approved') in the same txn as the status flip.
+    const { error: rpcErr } = await supabase.rpc('cancel_consignment_atomic', {
+      p_consignment_id: consignment_id,
+      p_reason:         REJECTION_REASON,
+      p_cancelled_by:   actorEmail,
+    })
+    if (rpcErr && rpcErr.code !== 'PGRST202') {
+      console.error('[einvoice/cancel] cancel_consignment_atomic failed:', rpcErr)
+    }
+
+    const nowIso = new Date().toISOString()
     await supabase.from('consignments')
-      .update({ irn: null, ack_no: null, ack_dt: null, signed_qr_code: null, einvoice_generated_at: null })
+      .update({
+        irn:                  null,
+        ack_no:               null,
+        ack_dt:               null,
+        signed_qr_code:       null,
+        einvoice_generated_at: null,
+        approval_status:      'rejected',
+        rejection_reason:     REJECTION_REASON,
+        approved_at:          nowIso,
+        approved_by:          actorEmail,
+      })
       .eq('id', consignment_id)
 
     await logConsignmentEvent(supabase, {
       consignment_id,
       event_type:  'einvoice_cancelled',
-      actor_email: auth.profile?.email || auth.user?.email || 'unknown',
+      actor_email: actorEmail,
       details:     {
         irn:         cancelledIrn,
         reason_code: reason_code || '1',
         remark:      remark      || 'Duplicate',
         irp_ack:     govtResp,
+        auto_rejected: true,
       },
     })
 

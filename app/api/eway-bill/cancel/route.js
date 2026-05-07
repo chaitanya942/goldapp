@@ -53,19 +53,54 @@ export async function POST(req) {
     const govtResp = result?.govt_response || result?.data?.govt_response || result?.response?.govt_response || result
 
     const cancelledEwb = consignment.eway_bill_no
+    const actorEmail   = auth.profile?.email || auth.user?.email || 'unknown'
+    const REJECTION_REASON = 'Rejected because of cancellation of EWB'
+
+    // Cancelling the EWB voids the consignment as a whole. Operator's only path
+    // forward is to recreate with the same (or corrected) bills — same semantics
+    // as accounts rejecting at approval time. Use the atomic RPC so bills are
+    // returned to source (if approval_status was 'approved') in the same txn
+    // as the status flip — race-safe under concurrent receive attempts.
+    const { error: rpcErr } = await supabase.rpc('cancel_consignment_atomic', {
+      p_consignment_id: consignment_id,
+      p_reason:         REJECTION_REASON,
+      p_cancelled_by:   actorEmail,
+    })
+    if (rpcErr && rpcErr.code !== 'PGRST202') {
+      // PGRST202 means the RPC isn't deployed — fall through to manual update.
+      // Any other error is real: surface it but don't unwind the NIC cancel
+      // (NIC is already cancelled, only the local state is inconsistent).
+      console.error('[ewb/cancel] cancel_consignment_atomic failed:', rpcErr)
+    }
+
+    // Clear EWB fields + flip approval_status to rejected. Done after the RPC
+    // so the RPC's "already cancelled" guard doesn't trip on a row we just
+    // cancelled. status='cancelled' is set by the RPC; we just add the
+    // approval-side fields the RPC doesn't touch.
+    const nowIso = new Date().toISOString()
     await supabase.from('consignments')
-      .update({ eway_bill_no: null, ewb_valid_until: null, ewb_generated_at: null, ewb_generation_started_at: null })
+      .update({
+        eway_bill_no:                null,
+        ewb_valid_until:             null,
+        ewb_generated_at:            null,
+        ewb_generation_started_at:   null,
+        approval_status:             'rejected',
+        rejection_reason:            REJECTION_REASON,
+        approved_at:                 nowIso,
+        approved_by:                 actorEmail,
+      })
       .eq('id', consignment_id)
 
     await logConsignmentEvent(supabase, {
       consignment_id,
       event_type:  'ewb_cancelled',
-      actor_email: auth.profile?.email || auth.user?.email || 'unknown',
+      actor_email: actorEmail,
       details:     {
         ewb_no:      cancelledEwb,
         reason_code: reason_code || '1',
         remark:      remark      || 'Duplicate Entry',
         nic_ack:     govtResp,
+        auto_rejected: true,
       },
     })
 
