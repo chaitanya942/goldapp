@@ -23,6 +23,8 @@ import { createClient } from '@supabase/supabase-js'
 import { buildPayload, buildEInvoicePayload } from '../../../../lib/clearTaxClient'
 import { requireAuth, ROLE_GROUPS } from '../../../../lib/apiAuth'
 import { loadConsignmentForGeneration } from '../../../../lib/consignmentSnapshot'
+import { computeConsignmentTotals } from '../../../../lib/consignmentTotals'
+import { computeAuditHash } from '../../../../lib/auditHash'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
@@ -137,9 +139,18 @@ export async function GET(req) {
 
   const discrepancies = checks.filter(c => c.status === 'mismatch')
 
+  // ── Audit fingerprint ─────────────────────────────────────────────────
+  // Same 8-char hash printed on the Consignee Report / Issue Voucher /
+  // Delivery Challan PDFs. Computed from canonical totals + source branch
+  // + consignment ids — so the browser-side preview can show accounts the
+  // exact hash they should see on the printed documents in their hand.
+  const totalsForHash = computeConsignmentTotals({ consignment, items: items || [], companySettings: companySettings || {} })
+  const auditHash = computeAuditHash({ consignment, branch, totals: totalsForHash })
+
   return Response.json({
     ok: true,
     consignment_id:   consignment.id,
+    audit_hash:       auditHash,
     tmp_prf_no:       consignment.tmp_prf_no,
     all_match:        discrepancies.length === 0,
     checks,

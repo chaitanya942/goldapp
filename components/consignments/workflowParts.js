@@ -129,7 +129,7 @@ export function canActOnStep(c, step) {
 // Report side-by-side) when they don't. Pure presentation — the audit data
 // itself comes from /api/consignments/document-audit.
 export function DocAuditPanel({ t, audit }) {
-  const { all_match, discrepancies = [] } = audit || {}
+  const { all_match, discrepancies = [], audit_hash } = audit || {}
   const allOk  = all_match && discrepancies.length === 0
   const accent = allOk ? t.green : t.red
 
@@ -167,7 +167,20 @@ export function DocAuditPanel({ t, audit }) {
               : `${discrepancies.length} discrepanc${discrepancies.length === 1 ? 'y' : 'ies'} between EWB / E-Invoice / Report`}
           </span>
         </div>
-        <span style={{ fontSize: '9px', color: t.text4, letterSpacing: '.08em', textTransform: 'uppercase' }}>cross-doc check</span>
+        {/* Audit fingerprint — the same 8-char hash stamped on every
+            generated PDF (Consignee Report / Issue Voucher / Delivery
+            Challan). Accounts can read the hash off the printed docs and
+            compare against this — a manual paper-trail-friendly cross-check. */}
+        {audit_hash && (
+          <span title="Audit fingerprint — printed on every PDF / JPEG. If hashes match across the printed docs in hand, every audited field agrees."
+            style={{
+              fontSize: '10px', color: accent, fontFamily: 'monospace',
+              background: `${accent}15`, padding: '3px 9px', borderRadius: 5,
+              fontWeight: 700, letterSpacing: '.06em',
+            }}>
+            #{audit_hash}
+          </span>
+        )}
       </div>
 
       {!allOk && (

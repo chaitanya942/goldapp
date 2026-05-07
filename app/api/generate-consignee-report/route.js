@@ -36,7 +36,7 @@ export async function GET(req) {
   try {
     const loaded = await loadConsignmentForGeneration(supabase, consignmentId, auth)
     if (loaded.error) return Response.json({ error: loaded.error.message }, { status: loaded.error.status })
-    const { consignment, items: snappedItems, companySettings } = loaded
+    const { consignment, branch, destBranch, items: snappedItems, companySettings } = loaded
 
     if (!snappedItems.length) return Response.json({ error: 'No items in consignment' }, { status: 400 })
 
@@ -77,9 +77,13 @@ export async function GET(req) {
       }
     }
 
-    // Generate JPEG image
+    // Generate JPEG image — pass branch + destBranch so the renderer can
+    // stamp the AUDIT HASH using the same canonical inputs the EWB/E-Invoice
+    // payloads use. All five docs share one fingerprint by construction.
     const jpegBuffer = await generateConsigneeReport({
       consignment,
+      branch,
+      destBranch,
       items: items || [],
       companySettings: companySettings || {},
       transferHistory,
