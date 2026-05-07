@@ -9,7 +9,7 @@ import Toast from '../ui/Toast'
 import { openConfirm, openPrompt } from '../ui/ConfirmDialog'
 import { authedFetch } from '../../lib/authedFetch'
 import { CONSIGNMENT_THEMES as THEMES } from '../../lib/consignmentTheme'
-import { WorkflowStrip, DocAuditPanel, confirmConsignment } from './workflowParts'
+import { WorkflowStrip, DocAuditPanel } from './workflowParts'
 
 const fmt   = (n) => n != null ? Number(n).toLocaleString('en-IN') : '—'
 const fmtWt = (n) => n != null ? `${Number(n).toFixed(3)}g` : '—'
@@ -141,10 +141,6 @@ export default function ConsignmentApprovals() {
   const [cancelModal, setCancelModal] = useState(null)
   // { type: 'ewb'|'irn', consignment, reasonCode, remark, busy, error, suggestCreditNote }
 
-  // ID of the consignment currently being confirmed (POST /confirm in flight).
-  // Disables the Confirm button while the request runs so double-clicks don't
-  // fire two POSTs.
-  const [confirmingConsignmentId, setConfirmingConsignmentId] = useState(null)
   const [toast, setToast] = useState(null)
   const [notifPermission, setNotifPermission] = useState(typeof window !== 'undefined' && 'Notification' in window ? Notification.permission : 'unsupported')
   const [soundEnabled, setSoundEnabled] = useState(true)
@@ -330,17 +326,9 @@ export default function ConsignmentApprovals() {
     }
   }
 
-  // Operations confirms the bill list is final → unlocks the consignee report
-  // step. Delegates to the shared confirmConsignment helper so this view and
-  // ConsignmentData stay in lockstep.
-  async function openConfirmConsignment(c) {
-    setConfirmingConsignmentId(c.id)
-    try {
-      await confirmConsignment(c, { onToast: showToast, onRefresh: () => fetchPending(true) })
-    } finally {
-      setConfirmingConsignmentId(null)
-    }
-  }
+  // Bill confirmation now happens automatically at consignment creation —
+  // the create flow already gates with two confirms (review modal + 'Yes,
+  // create now' dialog). No standalone confirm step in this view either.
 
   // Open the cancel modal for an existing EWB / IRN.
   function openCancel(c, type) {
@@ -749,13 +737,7 @@ export default function ConsignmentApprovals() {
                     </div>
                   </div>
                   {/* Workflow stepper — sequential progress through the doc chain */}
-                  <WorkflowStrip
-                    t={t}
-                    c={c}
-                    isType={isType}
-                    onConfirm={() => openConfirmConsignment(c)}
-                    confirmingId={confirmingConsignmentId}
-                  />
+                  <WorkflowStrip t={t} c={c} isType={isType} />
 
                   {/* Row 3: timestamp + preview links */}
                   <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap', marginTop: '2px' }}>

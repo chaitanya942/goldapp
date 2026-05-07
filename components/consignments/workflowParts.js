@@ -26,42 +26,42 @@ const fmtWt = (n) => (n != null ? `${Number(n).toFixed(3)}g` : '—')
 const fmtTS = (d) => (d ? new Date(d).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—')
 
 // ───────────────────────────────────────────────────────────────────────────
-// WorkflowStrip — compact 4-step indicator
+// WorkflowStrip — compact 3-step indicator
 // ───────────────────────────────────────────────────────────────────────────
 //
-// Steps: Confirm bills → Consignee report → Voucher/Challan → EWB / E-Invoice
+// Steps: Consignee report → Voucher/Challan → EWB / E-Invoice
+//
+// Bill confirmation is now auto-stamped at consignment creation (the user
+// confirmed twice in the create flow — review modal + 'Yes, create now'
+// dialog). A separate strip step would just be a third redundant click.
 //
 // Each step renders as a pill in one of three states:
 //   - done:    green tick + timestamp on hover
 //   - active:  gold ring, the only step the user can act on right now
 //   - locked:  greyed out — prior step not complete yet
 //
-// The Confirm step is rendered as a clickable gold CTA when not yet done.
-// The other steps are status indicators only — their actions live on the
-// existing Report / Voucher / Preview EWB buttons elsewhere in the card.
-export function WorkflowStrip({ t, c, isType, onConfirm, confirmingId }) {
-  const confirmed = !!c.ops_confirmed_at
+// The strip is purely a status indicator; the actions live on the existing
+// Report / Voucher / Preview EWB buttons elsewhere in the card. The button
+// gating mirrors the strip state via canActOnStep() below.
+export function WorkflowStrip({ t, c, isType }) {
   const reported  = !!c.consignee_report_generated_at
   const docMade   = !!(c.issue_voucher_generated_at || c.delivery_challan_generated_at)
   const ewbDone   = !!(c.eway_bill_no || c.irn)
 
   // First not-done step. Indices after it are locked.
-  const activeIdx = !confirmed ? 0 : !reported ? 1 : !docMade ? 2 : !ewbDone ? 3 : -1
+  const activeIdx = !reported ? 0 : !docMade ? 1 : !ewbDone ? 2 : -1
 
   const steps = [
-    { key: 'confirm', label: 'Confirm bills',     done: confirmed, ts: c.ops_confirmed_at,              hint: 'Operations locks the bill list' },
-    { key: 'report',  label: 'Consignee report',  done: reported,  ts: c.consignee_report_generated_at, hint: 'Generate the report PDF' },
+    { key: 'report',  label: 'Consignee report',  done: reported,  ts: c.consignee_report_generated_at, hint: 'Download the report — operations does this first' },
     {
       key:   'doc',
       label: isType ? 'Issue voucher' : 'Delivery challan',
       done:  docMade,
       ts:    c.issue_voucher_generated_at || c.delivery_challan_generated_at,
-      hint:  isType ? 'Generate the voucher PDF' : 'Generate the challan PDF',
+      hint:  isType ? 'Download the voucher (unlocks after the report)' : 'Download the challan (unlocks after the report)',
     },
-    { key: 'ewb', label: 'EWB / E-Invoice', done: ewbDone, ts: c.ewb_generated_at || c.einvoice_generated_at, hint: 'Preview → Confirm → Generate on NIC / IRP' },
+    { key: 'ewb', label: 'EWB / E-Invoice', done: ewbDone, ts: c.ewb_generated_at || c.einvoice_generated_at, hint: 'Accounts: Preview → Confirm → Generate on NIC / IRP' },
   ]
-
-  const isConfirming = confirmingId === c.id
 
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '6px', flexWrap: 'wrap' }}>
@@ -70,31 +70,6 @@ export function WorkflowStrip({ t, c, isType, onConfirm, confirmingId }) {
         const isActive = i === activeIdx
         const isLocked = !s.done && i > activeIdx
         const tone     = s.done ? t.green : isActive ? t.gold : t.text4
-
-        // Confirm step is the only interactive step in the strip.
-        if (s.key === 'confirm' && !s.done) {
-          return (
-            <span key={s.key} style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-              <button
-                onClick={onConfirm}
-                disabled={isConfirming}
-                title="Lock the bill list and unlock the consignee report"
-                style={{
-                  background: t.gold, color: t.goldText || '#1a0a00', border: 'none',
-                  borderRadius: '6px', padding: '4px 10px',
-                  fontSize: '10px', fontWeight: 700, letterSpacing: '.04em',
-                  cursor: isConfirming ? 'wait' : 'pointer',
-                  opacity: isConfirming ? 0.55 : 1,
-                  display: 'inline-flex', alignItems: 'center', gap: '5px',
-                }}>
-                <span style={{ fontSize: '11px' }}>◔</span>
-                {isConfirming ? 'Confirming…' : 'Confirm bills'}
-              </button>
-              <span style={{ fontSize: '11px', color: t.text4 }}>›</span>
-            </span>
-          )
-        }
-
         return (
           <span
             key={s.key}
@@ -120,6 +95,29 @@ export function WorkflowStrip({ t, c, isType, onConfirm, confirmingId }) {
       })}
     </div>
   )
+}
+
+// Tells the UI whether a given doc-action button is currently allowed.
+// Mirrors the backend gate in lib/workflowGate.js so the button can be
+// visually disabled with a clear tooltip — users never reach the API just
+// to discover they're blocked.
+export function canActOnStep(c, step) {
+  switch (step) {
+    case 'report':
+      return { allowed: true, reason: null }
+    case 'voucher':
+    case 'challan':
+      return c.consignee_report_generated_at
+        ? { allowed: true, reason: null }
+        : { allowed: false, reason: 'Download the Consignee Report first' }
+    case 'preview_ewb':
+    case 'preview_einvoice':
+      return (c.issue_voucher_generated_at || c.delivery_challan_generated_at)
+        ? { allowed: true, reason: null }
+        : { allowed: false, reason: 'Download the Voucher / Challan first' }
+    default:
+      return { allowed: true, reason: null }
+  }
 }
 
 // ───────────────────────────────────────────────────────────────────────────

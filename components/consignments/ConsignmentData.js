@@ -11,7 +11,7 @@ import Toast from '../ui/Toast'
 import { openConfirm, openPrompt } from '../ui/ConfirmDialog'
 import { authedFetch } from '../../lib/authedFetch'
 import { CONSIGNMENT_THEMES as THEMES, REGION_COLORS, useMobile } from '../../lib/consignmentTheme'
-import { WorkflowStrip, confirmConsignment } from './workflowParts'
+import { WorkflowStrip, canActOnStep } from './workflowParts'
 
 async function triggerDownload(url, filename, onError) {
   const res  = await authedFetch(url)
@@ -158,9 +158,6 @@ export default function ConsignmentData() {
   const [ewbActionId,         setEwbActionId]        = useState(null)
   const [transferHistory,     setTransferHistory]    = useState({}) // purchase_id → prior INTERNAL transfer info
   const [toast,               setToast]              = useState(null)
-  // ID of the consignment currently being confirmed via WorkflowStrip's CTA.
-  // Used to disable the button while POST /confirm is in flight.
-  const [confirmingId,        setConfirmingId]       = useState(null)
   // Activity Log drawer — opens on click of "Activity" in row action column.
   // Stores the consignment id whose activity we're viewing; null = closed.
   const [activityId,          setActivityId]         = useState(null)
@@ -469,20 +466,9 @@ export default function ConsignmentData() {
     }
   }
 
-  // Wraps the shared confirmConsignment helper with local busy-state + toast.
-  // Operations clicks "Confirm bills" inside the WorkflowStrip on each row
-  // when the bill list is final → unlocks the consignee report step.
-  async function handleConfirmConsignment(c) {
-    setConfirmingId(c.id)
-    try {
-      await confirmConsignment(c, {
-        onToast:  (msg, type) => setToast({ msg, type }),
-        onRefresh: () => fetchAll(),
-      })
-    } finally {
-      setConfirmingId(null)
-    }
-  }
+  // Bill confirmation now happens automatically at consignment creation
+  // (the user already confirmed twice during the create flow). Removed the
+  // explicit handler; the workflow strip is purely a status indicator now.
 
   async function downloadDoc(c, kind) {
     setDownloadingId(c.id + ':' + kind)
@@ -1075,20 +1061,46 @@ export default function ConsignmentData() {
                     <td style={{ padding: '11px 14px', fontSize: '12px', color: t.gold, textAlign: 'right', fontFamily: 'monospace', fontWeight: 600, whiteSpace: 'nowrap' }}>{fmtWt(c.total_net_wt)}</td>
                     <td style={{ padding: '11px 14px', fontSize: '12px', color: t.blue, textAlign: 'right', fontFamily: 'monospace', whiteSpace: 'nowrap' }}>₹{fmt(Math.round(c.total_amount))}</td>
                     <td style={{ padding: '11px 14px', fontSize: '11px', color: t.text4, whiteSpace: 'nowrap' }}>{fmtTS(c.created_at)}</td>
-                    <td style={{ padding: '11px 14px' }}>
-                      <div style={{ display: 'flex', gap: '4px', flexWrap: 'nowrap', whiteSpace: 'nowrap' }}>
-                        <button onClick={() => downloadDoc(c, isType ? 'voucher' : 'challan')} disabled={!!downloadingId}
-                          title={isType ? 'Issue Voucher' : 'Delivery Challan'}
-                          style={{ ...btnGold, padding: '4px 12px', fontSize: '10px' }}>
-                          {downloadingId === c.id + ':' + (isType ? 'voucher' : 'challan') ? '…' : (isType ? 'Voucher' : 'Challan')}
-                        </button>
-                        <button onClick={() => downloadDoc(c, 'report')} disabled={!!downloadingId}
-                          title="Consignee Report (item-wise summary)"
-                          style={{ background: 'transparent', border: `1px solid ${t.purple}50`, borderRadius: '5px', padding: '4px 12px', fontSize: '10px', color: t.purple, fontWeight: 600, cursor: 'pointer', opacity: downloadingId === c.id + ':report' ? 0.6 : 1 }}>
-                          {downloadingId === c.id + ':report' ? '…' : 'Report'}
-                        </button>
-                      </div>
-                    </td>
+                    {/* Document column — Report comes first (always available),
+                        Voucher/Challan unlocks only after Report. The button
+                        disable + tooltip mirrors the backend workflow gate so
+                        ops sees the lock state instead of getting a 409 toast. */}
+                    {(() => {
+                      const docKind  = isType ? 'voucher' : 'challan'
+                      const docLabel = isType ? 'Voucher' : 'Challan'
+                      const docGate  = canActOnStep(c, docKind)
+                      const reportDone = !!c.consignee_report_generated_at
+                      return (
+                        <td style={{ padding: '11px 14px' }}>
+                          <div style={{ display: 'flex', gap: '4px', flexWrap: 'nowrap', whiteSpace: 'nowrap' }}>
+                            <button onClick={() => downloadDoc(c, 'report')} disabled={!!downloadingId}
+                              title={reportDone ? 'Re-download Consignee Report' : 'Step 1 — Consignee Report (item-wise summary)'}
+                              style={{
+                                background: reportDone ? 'transparent' : t.gold,
+                                color: reportDone ? t.purple : (t.goldText || '#1a0a00'),
+                                border: reportDone ? `1px solid ${t.purple}50` : 'none',
+                                borderRadius: '5px', padding: '4px 12px', fontSize: '10px',
+                                fontWeight: 600, cursor: 'pointer',
+                                opacity: downloadingId === c.id + ':report' ? 0.6 : 1,
+                              }}>
+                              {downloadingId === c.id + ':report' ? '…' : (reportDone ? '✓ Report' : 'Report')}
+                            </button>
+                            <button onClick={() => docGate.allowed && downloadDoc(c, docKind)} disabled={!!downloadingId || !docGate.allowed}
+                              title={docGate.allowed ? docLabel : `Locked — ${docGate.reason}`}
+                              style={{
+                                ...btnGold,
+                                padding: '4px 12px', fontSize: '10px',
+                                background: docGate.allowed ? t.gold : t.border,
+                                color: docGate.allowed ? (t.goldText || '#1a0a00') : t.text4,
+                                cursor: docGate.allowed ? 'pointer' : 'not-allowed',
+                                opacity: !docGate.allowed ? 0.5 : 1,
+                              }}>
+                              {downloadingId === c.id + ':' + docKind ? '…' : (docGate.allowed ? docLabel : `🔒 ${docLabel}`)}
+                            </button>
+                          </div>
+                        </td>
+                      )
+                    })()}
                     <td style={{ padding: '11px 14px' }}>
                       {!showEwb ? (
                         <span title="Interstate Hub-to-HO uses E-Invoice instead. No separate EWB needed." style={{ fontSize: '10px', color: t.text4 }}>n/a</span>
@@ -1242,13 +1254,7 @@ export default function ConsignmentData() {
                   ) : c.approval_status !== 'approved' && (
                     <tr style={{ background: isNew ? `${t.green}06` : 'transparent' }}>
                       <td colSpan={11} style={{ padding: '4px 14px 12px', borderBottom: `1px solid ${t.border}15` }}>
-                        <WorkflowStrip
-                          t={t}
-                          c={c}
-                          isType={isType}
-                          onConfirm={() => handleConfirmConsignment(c)}
-                          confirmingId={confirmingId}
-                        />
+                        <WorkflowStrip t={t} c={c} isType={isType} />
                       </td>
                     </tr>
                   )}

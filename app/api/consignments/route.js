@@ -913,6 +913,18 @@ export async function POST(req) {
     if (!rpcConsignment) {
       return Response.json({ error: 'create_consignment_atomic returned no row' }, { status: 500 })
     }
+
+    // Auto-stamp ops_confirmed_at on creation. The user already confirmed twice
+    // during the create flow (the modal review + the 'Yes, create now' dialog) —
+    // a third manual click in the workflow strip would be redundant, and the
+    // sequential gates downstream still enforce: report → voucher/challan →
+    // EWB. Fire-and-forget; failure to stamp doesn't void the creation.
+    supabase.from('consignments')
+      .update({ ops_confirmed_at: new Date().toISOString(), ops_confirmed_by: auth.user?.id || null })
+      .eq('id', rpcConsignment.id)
+      .then(() => {})
+      .catch(() => {})
+
     return Response.json({ data: rpcConsignment })
   }
 
