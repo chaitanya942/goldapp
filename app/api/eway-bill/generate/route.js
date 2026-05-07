@@ -133,6 +133,35 @@ export async function POST(req) {
       }, { status: 502 })
     }
 
+    // ── Defensive freshness check ───────────────────────────────────────
+    // NIC silently returns the EXISTING EWB when DocNo collides with one
+    // already on its books (the 2026-05-07 incident: a wiped DB recycled
+    // WG000001, NIC returned the May-3 EWB for that DocNo). The returned
+    // ewbDate would be days old; reject and force the operator to bump
+    // the TMP_PRF generator past the historical max.
+    if (ewbDate) {
+      // ewbDate format from NIC: 'DD/MM/YYYY HH:MM:SS' or 'DD/MM/YYYY HH:MM AM'
+      const m = String(ewbDate).match(/^(\d{2})\/(\d{2})\/(\d{4})/)
+      if (m) {
+        const [, dd, mm, yyyy] = m
+        const ewbDayMs = new Date(`${yyyy}-${mm}-${dd}T00:00:00+05:30`).getTime()
+        const todayIst = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }) // YYYY-MM-DD
+        const todayMs  = new Date(`${todayIst}T00:00:00+05:30`).getTime()
+        const daysOld  = Math.round((todayMs - ewbDayMs) / 86400000)
+        if (daysOld >= 1) {
+          await releaseLock()
+          // Surface the stale EWB number so operators can verify on the NIC portal
+          // (and so the activity log has a paper trail of what NIC returned).
+          return Response.json({
+            success: false,
+            error: `NIC returned a stale E-Way Bill (${ewbNo}, dated ${ewbDate}, ${daysOld} day${daysOld === 1 ? '' : 's'} old) instead of generating a fresh one. This usually means the consignment's DocNo (${consignment.tmp_prf_no}) was already used on NIC's books. Cancel this consignment locally, run sql/consignment_doc_history.sql to advance the TMP_PRF sequence past the historical max, and re-create with a fresh number.`,
+            stale_ewb_no:   String(ewbNo),
+            stale_ewb_date: String(ewbDate),
+          }, { status: 409 })
+        }
+      }
+    }
+
     // EWB validity: NIC rule is 1 day per 200 km (rounded up). Min 1 day.
     // HO PIN/state read from company_settings (admin-editable). Final fallback
     // is the same Bangalore HO that clearTaxClient uses for its EWB payload.
