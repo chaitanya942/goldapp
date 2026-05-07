@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
+import { createPortal } from 'react-dom'
 import JSZip from 'jszip'
 import { useApp } from '../../lib/context'
 import { supabase as supabaseClient } from '../../lib/supabase'
@@ -10,6 +11,7 @@ import Toast from '../ui/Toast'
 import { openConfirm, openPrompt } from '../ui/ConfirmDialog'
 import { authedFetch } from '../../lib/authedFetch'
 import { CONSIGNMENT_THEMES as THEMES, REGION_COLORS, useMobile } from '../../lib/consignmentTheme'
+import { WorkflowStrip, confirmConsignment } from './workflowParts'
 
 async function triggerDownload(url, filename, onError) {
   const res  = await authedFetch(url)
@@ -154,6 +156,9 @@ export default function ConsignmentData() {
   const [ewbActionId,         setEwbActionId]        = useState(null)
   const [transferHistory,     setTransferHistory]    = useState({}) // purchase_id → prior INTERNAL transfer info
   const [toast,               setToast]              = useState(null)
+  // ID of the consignment currently being confirmed via WorkflowStrip's CTA.
+  // Used to disable the button while POST /confirm is in flight.
+  const [confirmingId,        setConfirmingId]       = useState(null)
   // Activity Log drawer — opens on click of "Activity" in row action column.
   // Stores the consignment id whose activity we're viewing; null = closed.
   const [activityId,          setActivityId]         = useState(null)
@@ -433,6 +438,21 @@ export default function ConsignmentData() {
       await fetchAll()
     } catch (err) {
       setToast({ msg: err.message || 'Cancel failed', type: 'error' })
+    }
+  }
+
+  // Wraps the shared confirmConsignment helper with local busy-state + toast.
+  // Operations clicks "Confirm bills" inside the WorkflowStrip on each row
+  // when the bill list is final → unlocks the consignee report step.
+  async function handleConfirmConsignment(c) {
+    setConfirmingId(c.id)
+    try {
+      await confirmConsignment(c, {
+        onToast:  (msg, type) => setToast({ msg, type }),
+        onRefresh: () => fetchAll(),
+      })
+    } finally {
+      setConfirmingId(null)
     }
   }
 
@@ -934,7 +954,8 @@ export default function ConsignmentData() {
                 const showEwb          = isType || isKaSource          // intrastate cases only
                 const showEinvoice     = !isType && !isKaSource        // interstate Hub → HO only
                 return (
-                  <tr key={c.id}
+                  <React.Fragment key={c.id}>
+                  <tr
                     style={{ borderBottom: `1px solid ${t.border}15`, background: isNew ? `${t.green}08` : 'transparent', transition: 'background .1s', verticalAlign: 'middle' }}
                     onMouseEnter={e => { if (!isNew) e.currentTarget.style.background = `${t.gold}04` }}
                     onMouseLeave={e => { if (!isNew) e.currentTarget.style.background = 'transparent' }}>
@@ -1085,6 +1106,26 @@ export default function ConsignmentData() {
                       </div>
                     </td>
                   </tr>
+
+                  {/* Workflow indicator row — full-width, sits beneath each
+                      consignment row. Mirrors the strip in ConsignmentApprovals
+                      so operations sees the same progression and the Confirm
+                      bills CTA appears wherever they are. Hidden when the
+                      consignment is approved (workflow is moot at that point) */}
+                  {c.approval_status !== 'approved' && c.approval_status !== 'rejected' && (
+                    <tr style={{ background: isNew ? `${t.green}06` : 'transparent' }}>
+                      <td colSpan={11} style={{ padding: '4px 14px 12px', borderBottom: `1px solid ${t.border}15` }}>
+                        <WorkflowStrip
+                          t={t}
+                          c={c}
+                          isType={isType}
+                          onConfirm={() => handleConfirmConsignment(c)}
+                          confirmingId={confirmingId}
+                        />
+                      </td>
+                    </tr>
+                  )}
+                  </React.Fragment>
                 )
               })}
             </tbody>
@@ -1149,8 +1190,9 @@ export default function ConsignmentData() {
         renderConsignmentsList()
       )}
 
-      {/* Confirm modal */}
-      {showModal && (
+      {/* Confirm modal — portalled to <body> so the position:fixed overlay can't
+          be clipped by any ancestor with transform / filter / contain. */}
+      {showModal && typeof document !== 'undefined' && createPortal((
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.75)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(4px)' }}>
           <div style={{ background: t.card, border: `1px solid ${t.border2}`, borderRadius: '16px', padding: '28px', width: '480px', maxWidth: '92vw', boxShadow: '0 24px 64px rgba(0,0,0,.4)', maxHeight: '92vh', overflowY: 'auto' }}>
             <div style={{ fontSize: '16px', fontWeight: 600, color: t.text1, marginBottom: '6px' }}>Confirm Consignment</div>
@@ -1274,7 +1316,7 @@ export default function ConsignmentData() {
             </div>
           </div>
         </div>
-      )}
+      ), document.body)}
 
       {toast && <Toast msg={toast.msg} type={toast.type} onDone={() => setToast(null)} />}
 
@@ -1322,7 +1364,10 @@ function ActivityDrawer({ consignment, rows, loading, onClose, t }) {
     catch { return ts }
   }
 
-  return (
+  // Portalled to <body> so the right-side drawer can't get clipped by an
+  // ancestor with transform / filter / contain.
+  if (typeof document === 'undefined') return null
+  return createPortal((
     <div onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
       style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.65)', display: 'flex', justifyContent: 'flex-end', zIndex: 2000 }}>
       <div style={{ width: '440px', maxWidth: '95vw', height: '100vh', background: t.card, borderLeft: `1px solid ${t.border}`, boxShadow: '-12px 0 40px rgba(0,0,0,.5)', display: 'flex', flexDirection: 'column' }}>
@@ -1369,5 +1414,5 @@ function ActivityDrawer({ consignment, rows, loading, onClose, t }) {
         </div>
       </div>
     </div>
-  )
+  ), document.body)
 }

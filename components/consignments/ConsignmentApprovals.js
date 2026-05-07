@@ -9,6 +9,7 @@ import Toast from '../ui/Toast'
 import { openConfirm, openPrompt } from '../ui/ConfirmDialog'
 import { authedFetch } from '../../lib/authedFetch'
 import { CONSIGNMENT_THEMES as THEMES } from '../../lib/consignmentTheme'
+import { WorkflowStrip, DocAuditPanel, confirmConsignment } from './workflowParts'
 
 const fmt   = (n) => n != null ? Number(n).toLocaleString('en-IN') : '—'
 const fmtWt = (n) => n != null ? `${Number(n).toFixed(3)}g` : '—'
@@ -330,31 +331,12 @@ export default function ConsignmentApprovals() {
   }
 
   // Operations confirms the bill list is final → unlocks the consignee report
-  // step. Idempotent on the backend, but UI guards against double-fire too.
+  // step. Delegates to the shared confirmConsignment helper so this view and
+  // ConsignmentData stay in lockstep.
   async function openConfirmConsignment(c) {
-    const ok = await openConfirm({
-      title: c.ops_confirmed_at ? `Re-confirm ${c.tmp_prf_no}?` : `Confirm ${c.tmp_prf_no}?`,
-      message: c.ops_confirmed_at
-        ? `This consignment was already confirmed on ${fmtTS(c.ops_confirmed_at)}.\n\nRe-confirming refreshes the timestamp but does NOT unlock anything new — proceed only if you re-checked the bill list.`
-        : `Lock the bill list for ${c.tmp_prf_no} and unlock the consignee report?\n\nAfter this step, bills can no longer be added or removed without reopening the consignment.\n\n· ${c.total_bills} bills\n· ${fmtWt(c.total_net_wt)} net\n· ₹${fmt(Math.round(c.total_amount))} value`,
-      confirmLabel: c.ops_confirmed_at ? 'Re-confirm' : 'Confirm & lock',
-    })
-    if (!ok) return
     setConfirmingConsignmentId(c.id)
     try {
-      const r = await authedFetch('/api/consignments/confirm', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ consignment_id: c.id }),
-      })
-      const j = await r.json()
-      if (!r.ok) {
-        showToast(j.error || 'Confirm failed', 'error')
-      } else {
-        showToast(j.message || 'Consignment confirmed', 'success')
-        fetchPending(true)
-      }
-    } catch (e) {
-      showToast(e.message, 'error')
+      await confirmConsignment(c, { onToast: showToast, onRefresh: () => fetchPending(true) })
     } finally {
       setConfirmingConsignmentId(null)
     }
@@ -1042,188 +1024,14 @@ function PreviewModal({ state, t, onClose, onConfirm }) {
   ), document.body)
 }
 
-// Compact 4-step strip showing the sequential workflow on each consignment
-// card: Confirm → Report → Voucher/Challan → EWB / E-Invoice.
-//
-// Each step renders as a pill with one of three states:
-//   - done:      green tick + timestamp
-//   - active:    accent border, the only step the user can act on
-//   - locked:    greyed out — prior step not complete yet
-//
-// The Confirm step is also a clickable button when not yet done. The other
-// steps' actions are the existing buttons elsewhere on the card; this strip
-// is purely a status indicator + the confirm CTA.
-function WorkflowStrip({ t, c, isType, onConfirm, confirmingId }) {
-  const confirmed   = !!c.ops_confirmed_at
-  const reported    = !!c.consignee_report_generated_at
-  const docMade     = !!(c.issue_voucher_generated_at || c.delivery_challan_generated_at)
-  const ewbDone     = !!(c.eway_bill_no || c.irn)
-
-  // The "active" step is the first step that's not done. Locked = any later step
-  // whose prior is not done. Used to dim icons and explain via tooltip why a
-  // step isn't actionable yet.
-  const activeIdx = !confirmed ? 0 : !reported ? 1 : !docMade ? 2 : !ewbDone ? 3 : -1
-
-  const steps = [
-    { key: 'confirm', label: 'Confirm bills',         done: confirmed, ts: c.ops_confirmed_at,              hint: 'Operations locks the bill list' },
-    { key: 'report',  label: 'Consignee report',      done: reported,  ts: c.consignee_report_generated_at, hint: 'Generate the report PDF' },
-    { key: 'doc',     label: isType ? 'Issue voucher' : 'Delivery challan',
-      done: docMade,
-      ts: c.issue_voucher_generated_at || c.delivery_challan_generated_at,
-      hint: isType ? 'Generate the voucher PDF' : 'Generate the challan PDF',
-    },
-    { key: 'ewb',     label: 'EWB / E-Invoice',       done: ewbDone,   ts: c.ewb_generated_at || c.einvoice_generated_at, hint: 'Preview → Confirm → Generate on NIC / IRP' },
-  ]
-
-  const isConfirming = confirmingId === c.id
-
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '6px', flexWrap: 'wrap' }}>
-      <span style={{ fontSize: '9px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', marginRight: '4px' }}>Workflow</span>
-      {steps.map((s, i) => {
-        const isActive = i === activeIdx
-        const isLocked = !s.done && i > activeIdx
-        const tone = s.done ? t.green : isActive ? t.gold : t.text4
-
-        // Confirm step is interactive when active.
-        if (s.key === 'confirm' && !s.done) {
-          return (
-            <span key={s.key} style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-              <button onClick={onConfirm} disabled={isConfirming}
-                title="Lock the bill list and unlock the consignee report"
-                style={{
-                  background: t.gold, color: '#1a0a00', border: 'none',
-                  borderRadius: '6px', padding: '4px 10px',
-                  fontSize: '10px', fontWeight: 700, letterSpacing: '.04em',
-                  cursor: isConfirming ? 'wait' : 'pointer',
-                  opacity: isConfirming ? .55 : 1,
-                  display: 'inline-flex', alignItems: 'center', gap: '5px',
-                }}>
-                <span style={{ fontSize: '11px' }}>◔</span>
-                {isConfirming ? 'Confirming…' : 'Confirm bills'}
-              </button>
-              <span style={{ fontSize: '11px', color: t.text4 }}>›</span>
-            </span>
-          )
-        }
-
-        return (
-          <span key={s.key}
-            title={s.done ? `${s.label} · ${s.ts ? fmtTS(s.ts) : 'done'}` : isActive ? `Next: ${s.hint}` : `Locked — finish prior steps first`}
-            style={{
-              display: 'inline-flex', alignItems: 'center', gap: '5px',
-              padding: '3px 9px',
-              background: s.done ? `${t.green}12` : isActive ? `${t.gold}12` : 'transparent',
-              border: `1px solid ${s.done ? `${t.green}40` : isActive ? `${t.gold}40` : t.border}`,
-              borderRadius: '6px',
-              fontSize: '10px',
-              color: tone,
-              fontWeight: s.done || isActive ? 600 : 400,
-              opacity: isLocked ? .55 : 1,
-            }}>
-            <span style={{ fontSize: '11px', lineHeight: 1 }}>
-              {s.done ? '✓' : isActive ? '◔' : '◌'}
-            </span>
-            {s.label}
-            {i < steps.length - 1 && <span style={{ marginLeft: '4px', color: t.text4, opacity: .6 }}>›</span>}
-          </span>
-        )
-      })}
-    </div>
-  )
-}
+// WorkflowStrip + DocAuditPanel are imported from ./workflowParts so they
+// stay in lockstep between this view and ConsignmentData.
 
 function PreviewKpi({ t, label, value, accent }) {
   return (
     <div style={{ background: t.card, padding: '11px 14px' }}>
       <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: '4px' }}>{label}</div>
       <div style={{ fontSize: '15px', color: accent, fontFamily: 'monospace', fontWeight: 600 }}>{value}</div>
-    </div>
-  )
-}
-
-// Cross-document consistency audit panel. Compares what each generator
-// (EWB, E-Invoice, Consignee Report) would output for the same consignment
-// and flags any mismatch. Identical addresses + weight + value across all
-// docs is the whole goal — if anything diverges, accounts sees it here
-// BEFORE clicking Generate.
-function DocAuditPanel({ t, audit }) {
-  const { all_match, checks = [], discrepancies = [] } = audit || {}
-  const allOk = all_match && discrepancies.length === 0
-  const accent = allOk ? t.green : t.red
-  const fmtVal = (v) => {
-    if (v == null || v === '') return '—'
-    if (typeof v === 'number') {
-      // Heuristic: weights tend to be < 1000, amounts ≥ 100. Show 3 decimals
-      // if value looks like grams (no comma in INR formatting).
-      if (Math.abs(v) < 100000 && !Number.isInteger(v)) return v.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 3 })
-      return v.toLocaleString('en-IN')
-    }
-    const s = String(v)
-    return s.length > 60 ? s.slice(0, 57) + '…' : s
-  }
-  return (
-    <div style={{
-      background: allOk ? `${t.green}10` : `${t.red}10`,
-      border: `1px solid ${accent}40`,
-      borderRadius: '8px',
-      padding: '12px 14px',
-      marginBottom: '14px',
-    }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: allOk ? 0 : '10px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <span style={{
-            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-            width: 18, height: 18, borderRadius: '50%',
-            background: accent, color: '#fff', fontSize: 11, fontWeight: 700,
-          }}>{allOk ? '✓' : '!'}</span>
-          <span style={{ fontSize: '11px', color: accent, fontWeight: 700, letterSpacing: '.04em' }}>
-            {allOk
-              ? 'All documents agree'
-              : `${discrepancies.length} discrepanc${discrepancies.length === 1 ? 'y' : 'ies'} between EWB / E-Invoice / Report`}
-          </span>
-        </div>
-        <span style={{ fontSize: '9px', color: t.text4, letterSpacing: '.08em', textTransform: 'uppercase' }}>cross-doc check</span>
-      </div>
-
-      {/* When something is off, list ONLY the mismatches (compact). When all
-          OK, hide the table — the green tick is enough confirmation. */}
-      {!allOk && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: 'minmax(120px, 1.2fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr)',
-            gap: '6px 10px',
-            fontSize: '9px', color: t.text4,
-            letterSpacing: '.06em', textTransform: 'uppercase',
-            paddingBottom: '4px', borderBottom: `1px solid ${t.border}`,
-          }}>
-            <div>Field</div>
-            <div>EWB</div>
-            <div>E-Invoice</div>
-            <div>Report / Items</div>
-          </div>
-          {discrepancies.map(d => (
-            <div key={d.key} style={{
-              display: 'grid',
-              gridTemplateColumns: 'minmax(120px, 1.2fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr)',
-              gap: '6px 10px',
-              fontSize: '11px',
-              padding: '6px 0',
-              borderBottom: `1px solid ${t.border}30`,
-              alignItems: 'baseline',
-            }}>
-              <div style={{ color: t.text2, fontWeight: 600 }}>{d.label}</div>
-              <div style={{ color: t.text1, fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis' }} title={String(d.ewb)}>{fmtVal(d.ewb)}</div>
-              <div style={{ color: t.text1, fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis' }} title={String(d.einvoice)}>{fmtVal(d.einvoice)}</div>
-              <div style={{ color: t.text1, fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis' }} title={String(d.report ?? '')}>{d.report != null ? fmtVal(d.report) : '—'}</div>
-            </div>
-          ))}
-          <div style={{ fontSize: '10px', color: t.red, marginTop: '6px', lineHeight: 1.5 }}>
-            ⚠ Generation is allowed but the values above will not match across the documents NIC stores. Verify the consignment data before proceeding.
-          </div>
-        </div>
-      )}
     </div>
   )
 }
