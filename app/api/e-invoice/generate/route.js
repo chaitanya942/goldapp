@@ -9,6 +9,8 @@ import { logConsignmentEvent } from '../../../../lib/consignmentLog'
 import { requireAuth, ROLE_GROUPS } from '../../../../lib/apiAuth'
 import { loadConsignmentForGeneration } from '../../../../lib/consignmentSnapshot'
 import { checkWorkflow } from '../../../../lib/workflowGate'
+import { nextEInvoiceDocNo, getCurrentFyCode } from '../../../../lib/consignmentUtils'
+import { REGION_TO_STATE_CODE } from '../../../../lib/stateMap'
 import {
   validateConsignmentStatus,
   validateBranchReadiness,
@@ -61,7 +63,26 @@ export async function POST(req) {
     const distinct = validateDistinctGstins(sellerR.gstin, buyerR.gstin, 'an E-Invoice')
     if (distinct.length) return Response.json({ error: distinct[0] }, { status: 400 })
 
-    const result = await generateEInvoice({ consignment, branch, items: items || [], companySettings: companySettings || {} })
+    // Allocate the next per-state E-Invoice doc number atomically. Format is
+    // 'WG/{STATE}/{FY}/{SEQ}' — KL/TS/AP each have their own monotonic counter
+    // per fiscal year. The RPC commits the increment, so even on a generation
+    // failure downstream the number is consumed (intentional: GST audit
+    // requires a clean monotonic series with no quiet gaps).
+    const sourceState = REGION_TO_STATE_CODE[branch?.region] || consignment.state_code
+    if (!sourceState || sourceState === 'KA') {
+      return Response.json({ error: `E-Invoice not applicable for source state '${sourceState || branch?.region}'. KA-source consignments use E-Way Bill instead.` }, { status: 400 })
+    }
+    const fy            = getCurrentFyCode()
+    const einvoiceDocNo = await nextEInvoiceDocNo(supabase, sourceState, fy)
+    // Persist immediately so the audit trail records the number even if the
+    // IRP call fails — operator can see what number was burned.
+    await supabase.from('consignments')
+      .update({ einvoice_doc_no: einvoiceDocNo })
+      .eq('id', consignment_id)
+    // Reflect on the in-memory consignment so buildEInvoicePayload picks it up.
+    consignment.einvoice_doc_no = einvoiceDocNo
+
+    const result = await generateEInvoice({ consignment, branch, items: items || [], companySettings: companySettings || {}, docNoOverride: einvoiceDocNo })
     // Full response (with redaction) is logged by ctaxLog inside lib/clearTaxClient.js.
 
     // Robust extraction across response shapes
@@ -98,10 +119,10 @@ export async function POST(req) {
       consignment_id,
       event_type:  'einvoice_generated',
       actor_email: auth.profile?.email || auth.user?.email || 'unknown',
-      details:     { irn, ack_no: ackNo, ack_dt: ackDt },
+      details:     { irn, ack_no: ackNo, ack_dt: ackDt, doc_no: einvoiceDocNo },
     })
 
-    return Response.json({ success: true, irn, ack_no: ackNo, ack_dt: ackDt })
+    return Response.json({ success: true, irn, ack_no: ackNo, ack_dt: ackDt, doc_no: einvoiceDocNo })
   } catch (err) {
     console.error('E-Invoice generate error:', err)
     // Debug payloads stay server-side only (see ctaxLog in lib/clearTaxClient.js).

@@ -6,6 +6,8 @@ import { buildEInvoicePayload } from '../../../../lib/clearTaxClient'
 import { requireAuth, ROLE_GROUPS } from '../../../../lib/apiAuth'
 import { loadConsignmentForGeneration } from '../../../../lib/consignmentSnapshot'
 import { checkWorkflow } from '../../../../lib/workflowGate'
+import { peekEInvoiceDocNo, getCurrentFyCode } from '../../../../lib/consignmentUtils'
+import { REGION_TO_STATE_CODE } from '../../../../lib/stateMap'
 import {
   validateConsignmentStatus,
   validateBranchReadiness,
@@ -46,7 +48,20 @@ export async function GET(req) {
     errors.push(`Source GSTIN '${consignment.source_gstin}' is malformed`)
   }
 
-  const payload = buildEInvoicePayload({ consignment, branch, items: items || [], companySettings: companySettings || {} })
+  // Show what DocNo would be issued WITHOUT consuming the sequence — peek
+  // reads last_seq from einvoice_sequence and returns last_seq + 1. The
+  // actual increment happens inside generate.
+  let previewDocNo = null
+  const sourceState = REGION_TO_STATE_CODE[branch?.region] || consignment.state_code
+  if (sourceState && sourceState !== 'KA' && !consignment.einvoice_doc_no) {
+    try {
+      previewDocNo = await peekEInvoiceDocNo(supabase, sourceState, getCurrentFyCode())
+    } catch {
+      // Sequence table missing / RPC not deployed — fall through silently;
+      // payload will use the legacy fingerprint format.
+    }
+  }
+  const payload = buildEInvoicePayload({ consignment, branch, items: items || [], companySettings: companySettings || {}, docNoOverride: previewDocNo })
 
   // IRP outright rejects identical seller/buyer GSTINs — surface here too.
   errors.push(
