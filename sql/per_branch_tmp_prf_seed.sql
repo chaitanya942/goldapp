@@ -44,11 +44,12 @@ DELETE FROM consignments WHERE status = 'seed';
 
 -- 4. Plant one seed row per branch with tmp_prf_no = (desired_next - 1).
 INSERT INTO consignments (
-  tmp_prf_no, external_no, internal_no, challan_no, branch_name, branch_code,
-  state_code, movement_type, status, total_bills, total_net_wt, total_amount,
-  created_by, created_at
+  consignment_no, tmp_prf_no, external_no, internal_no, challan_no,
+  branch_name, branch_code, state_code, movement_type, status,
+  total_bills, total_net_wt, total_amount, created_by, created_at
 )
 SELECT
+  'SEED-' || s.branch_name,                         -- consignment_no (NOT NULL)
   s.seed_no,
   'SEED-' || s.branch_name,                         -- placeholder external_no
   NULL,
