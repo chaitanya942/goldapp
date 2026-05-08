@@ -88,13 +88,15 @@ export async function POST(req) {
       return Response.json({ error: 'Missing required fields' }, { status: 400 })
     }
 
+    const challanFinal = challan_no || `SEED-${branch_name}`
     const { data, error } = await supabase
       .from('consignments')
       .insert({
+        consignment_no: challanFinal,                 // NOT NULL — mirror challan_no
         tmp_prf_no,
         external_no,
         internal_no:   null,
-        challan_no:    challan_no || `SEED-${branch_name}`,
+        challan_no:    challanFinal,
         branch_name,
         branch_code:   branch_code || branch_name.substring(0, 3).toUpperCase(),
         state_code:    state_code  || 'KA',
