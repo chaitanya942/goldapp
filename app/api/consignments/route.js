@@ -1076,8 +1076,12 @@ export async function POST(req) {
           .update({ stock_status: 'at_branch', current_branch: current.dest_branch })
           .in('id', purchaseIds)
       } else {
+        // Stamp purchases.received_at = nowIsoR alongside stock_status='at_ho' so
+        // the per-bill 'received at HO' timestamp is queryable from the
+        // purchases table directly (parallel to dispatched_at). Avoids a join
+        // through consignment_items every time accounts wants the at-HO date.
         await supabase.from('purchases')
-          .update({ stock_status: 'at_ho' })
+          .update({ stock_status: 'at_ho', received_at: nowIsoR })
           .in('id', purchaseIds)
       }
       // Mark each item as received by this user
@@ -1307,10 +1311,11 @@ export async function POST(req) {
 
     // Bills return to source branch — only if they were actually moved
     // (i.e. accounts had approved at some point). Pre-approval consignments
-    // never flipped purchase state; nothing to reverse.
+    // never flipped purchase state; nothing to reverse. Clear both transition
+    // timestamps so the bill looks like a fresh at_branch row again.
     if (pids.length && c.approval_status === 'approved') {
       await supabase.from('purchases')
-        .update({ stock_status: 'at_branch', current_branch: c.branch_name, dispatched_at: null })
+        .update({ stock_status: 'at_branch', current_branch: c.branch_name, dispatched_at: null, received_at: null })
         .in('id', pids)
     }
 

@@ -62,6 +62,7 @@ const EXPORT_COLS = [
   { key: 'transaction_type',          label: 'Type' },
   { key: 'stock_status',              label: 'Status' },
   { key: 'dispatched_at',             label: 'In Consignment Since' },
+  { key: 'received_at',               label: 'Received At HO' },
 ]
 
 function exportCSV(rows, filename) {
@@ -585,9 +586,10 @@ export default function PurchaseData() {
                   { label: 'Svc Amt',   col: null },
                   { label: 'Final Amt', col: 'final_amount_crm' },
                   { label: 'Type',      col: 'transaction_type' },
-                  { label: 'Status',         col: 'stock_status' },
+                  { label: 'Status',               col: 'stock_status' },
                   { label: 'In Consignment Since', col: 'dispatched_at' },
-                  { label: 'CRM',            col: 'crm_status' },
+                  { label: 'Received At HO',       col: 'received_at' },
+                  { label: 'CRM',                  col: 'crm_status' },
                 ].map(({ label, col }) => (
                   <th key={label}
                     onClick={col ? () => handleSort(col) : undefined}
@@ -658,6 +660,12 @@ export default function PurchaseData() {
                     <td style={{ ...s.td, color: p.dispatched_at ? t.text2 : t.text4, fontSize: '.68rem', whiteSpace: 'nowrap' }}>
                       {fmtDispatched(p.dispatched_at)}
                     </td>
+                    {/* purchases.received_at — stamped on consignment receive at HO,
+                        the moment this bill transitioned in_consignment → at_ho.
+                        Cleared if the consignment is later cancelled. */}
+                    <td style={{ ...s.td, color: p.received_at ? t.text2 : t.text4, fontSize: '.68rem', whiteSpace: 'nowrap' }}>
+                      {fmtDispatched(p.received_at)}
+                    </td>
                     <td style={s.td}>
                       <div style={{ display: 'flex', gap: '4px', flexDirection: 'column' }}>
                         {(() => {
@@ -672,7 +680,7 @@ export default function PurchaseData() {
                 )
               })}
               {purchases.length === 0 && (
-                <tr><td colSpan={isSuperAdmin ? 20 : 19} style={{ ...s.td, textAlign: 'center', color: t.text4, padding: '48px' }}>
+                <tr><td colSpan={isSuperAdmin ? 21 : 20} style={{ ...s.td, textAlign: 'center', color: t.text4, padding: '48px' }}>
                   {(search || filterStatus || filterBranch || filterCrmStatus || filterTxn || fromDate || toDate) ? 'No records match your filters' : 'No purchase data yet. Syncing from CRM in the background.'}
                 </td></tr>
               )}

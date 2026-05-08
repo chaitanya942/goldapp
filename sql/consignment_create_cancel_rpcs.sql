@@ -234,7 +234,8 @@ BEGIN
     UPDATE purchases
     SET stock_status   = 'at_branch',
         current_branch = v_c.branch_name,
-        dispatched_at  = NULL
+        dispatched_at  = NULL,
+        received_at    = NULL  -- clear at-HO timestamp too if the bill had been received
     WHERE id = ANY(v_purchase_ids);
   END IF;
 
