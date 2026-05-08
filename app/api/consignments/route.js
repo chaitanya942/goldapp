@@ -594,10 +594,14 @@ export async function GET(req) {
   // were marked in_consignment manually (e.g. via SQL during data fixes) and
   // don't have a dispatched-consignment link still surface here as "untracked".
   if (action === 'in_transit_stock') {
-    // 1. Live bills currently in transit (filtered to user's allowed branches when restricted)
+    // 1. Live bills currently in transit (filtered to user's allowed branches when restricted).
+    //    purchases.dispatched_at = the moment THIS BILL transitioned at_branch → in_consignment
+    //    (stamped on consignment approval). We expose it so the Consignment Report can
+    //    bucket / filter by bill-level transition date rather than consignment-level
+    //    dates (which can drift when bills are cancelled + re-consigned later).
     let billsQ = supabase
       .from('purchases')
-      .select('id, sl_no, application_id, branch_name, current_branch, customer_name, purchase_date, gross_weight, net_weight, total_amount')
+      .select('id, sl_no, application_id, branch_name, current_branch, customer_name, purchase_date, gross_weight, net_weight, total_amount, dispatched_at')
       .eq('stock_status', 'in_consignment')
       .eq('is_deleted', false)
     // Filter by branch_name (origin) for in-transit so a Kerala user sees their dispatched bills

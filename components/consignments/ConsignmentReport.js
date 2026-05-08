@@ -42,6 +42,7 @@ const REGION_COLOR = {
 
 const SECTIONS_IN = [
   { key: 'trends',       label: 'Trends',       icon: '↗' },
+  { key: 'movement',     label: 'Movement Log', icon: '⇄' },
   { key: 'distribution', label: 'Distribution', icon: '◎' },
   { key: 'branches',     label: 'Branches',     icon: '⬡' },
   { key: 'routes',       label: 'Routes',       icon: '⇉' },
@@ -133,7 +134,13 @@ export default function ConsignmentReport() {
   const sourceBills = mode === 'at_branch' ? atBranchBills : inTransitBills
 
   const filteredBills = useMemo(() => sourceBills.filter(b => {
-    const dt = b.consignment?.dispatched_at || b.consignment?.created_at || b.purchase_date
+    // For in_consignment bills, the canonical date is when THIS BILL transitioned
+    // at_branch → in_consignment (purchases.dispatched_at, stamped on consignment
+    // approval). Falls back to the consignment-level timestamp for older rows
+    // missing the bill-level stamp, then to purchase_date as last resort.
+    const dt = (mode === 'in_consignment'
+      ? (b.dispatched_at || b.consignment?.dispatched_at || b.consignment?.created_at)
+      : b.purchase_date)
     if (fromDate && dt && dt.slice(0, 10) < fromDate) return false
     if (toDate   && dt && dt.slice(0, 10) > toDate)   return false
     if (filterRegion) {
@@ -297,7 +304,8 @@ export default function ConsignmentReport() {
       { name: 'Untracked', count: 0, value: 0, color: '#777' },
     ]
     filteredBills.forEach(b => {
-      const dt = b.consignment?.dispatched_at || b.consignment?.created_at
+      // Bill-level dispatched_at takes precedence — see filteredBills comment.
+      const dt = b.dispatched_at || b.consignment?.dispatched_at || b.consignment?.created_at
       if (!dt) { buckets[4].count++; buckets[4].value += Number(b.total_amount || 0); return }
       const d = daysSince(dt)
       const bucket = d <= 1 ? buckets[0] : d <= 3 ? buckets[1] : d <= 7 ? buckets[2] : buckets[3]
@@ -505,6 +513,7 @@ export default function ConsignmentReport() {
 
       {/* ── SECTIONS ─────────────────────────────────────────────────────────── */}
       {mode === 'in_consignment' && showSection('trends')       && <SectionTrends       trendData={trendData}     t={t} card={card} />}
+      {mode === 'in_consignment' && showSection('movement')     && <SectionMovementLog  bills={filteredBills}     t={t} card={card} isMobile={isMobile} />}
       {showSection('distribution') && <SectionDistribution mode={mode} agingData={agingData} movementData={movementData} byRegion={byRegion} t={t} card={card} />}
       {showSection('branches')     && <SectionBranches     byBranch={byBranch}       t={t} card={card} />}
       {mode === 'in_consignment' && showSection('routes')       && <SectionRoutes       byRoute={byRoute}         t={t} card={card} />}
@@ -774,6 +783,170 @@ function SectionAging({ consignments, t, card }) {
         </table>
       )}
     </SectionCard>
+  )
+}
+
+// Movement Log — bill-level detail of every bill currently in_consignment,
+// keyed off the bill's own dispatched_at (the moment it transitioned
+// at_branch → in_consignment). Two views: a daily summary (counts/value
+// per transition date) and a flat bill-level table that mirrors the
+// Purchase Data layout. Filters from the parent (date range, branch,
+// region, search) all flow into `bills` already.
+function SectionMovementLog({ bills, t, card, isMobile }) {
+  // Group by transition date (YYYY-MM-DD). Bills missing dispatched_at fall
+  // into 'Unknown' so the operator can see them too — those are usually old
+  // rows that pre-date the per-bill stamping (rare, but worth surfacing).
+  const byDay = bills.reduce((acc, b) => {
+    const dt  = b.dispatched_at || b.consignment?.dispatched_at || null
+    const key = dt ? dt.slice(0, 10) : 'Unknown'
+    if (!acc[key]) acc[key] = { date: key, bills: 0, gross: 0, net: 0, value: 0, items: [] }
+    acc[key].bills += 1
+    acc[key].gross += parseFloat(b.gross_weight || 0)
+    acc[key].net   += parseFloat(b.net_weight   || 0)
+    acc[key].value += parseFloat(b.total_amount || 0)
+    acc[key].items.push(b)
+    return acc
+  }, {})
+  const days = Object.values(byDay).sort((a, b) => (a.date < b.date ? 1 : -1))   // newest first
+
+  // CSV export — flat bill rows so accounts can reconcile in Excel.
+  const exportCsv = () => {
+    if (!bills.length) return
+    const rows = bills.map(b => ({
+      transitioned_on:  (b.dispatched_at || b.consignment?.dispatched_at || '').slice(0, 19).replace('T', ' '),
+      application_id:   b.application_id || '',
+      sl_no:            b.sl_no || '',
+      customer:         b.customer_name || '',
+      origin_branch:    b.branch_name || '',
+      current_branch:   b.current_branch || b.branch_name || '',
+      purchase_date:    b.purchase_date || '',
+      gross_weight:     Number(b.gross_weight || 0).toFixed(3),
+      net_weight:       Number(b.net_weight   || 0).toFixed(3),
+      total_amount:     Math.round(b.total_amount || 0),
+      consignment_no:   b.consignment?.tmp_prf_no || '',
+      movement_type:    b.consignment?.movement_type || 'untracked',
+    }))
+    const headers = Object.keys(rows[0])
+    const escape  = (v) => /[",\n]/.test(String(v ?? '')) ? `"${String(v).replace(/"/g, '""')}"` : String(v ?? '')
+    const csv = [headers.join(','), ...rows.map(r => headers.map(h => escape(r[h])).join(','))].join('\n')
+    const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' })
+    const url  = URL.createObjectURL(blob)
+    const a    = document.createElement('a')
+    a.href = url
+    a.download = `bill-movement-log-${new Date().toISOString().slice(0, 10)}.csv`
+    document.body.appendChild(a); a.click(); a.remove()
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
+  }
+
+  // Top of section — summary KPIs + export
+  const totalBills = bills.length
+  const totalGross = bills.reduce((s, b) => s + parseFloat(b.gross_weight || 0), 0)
+  const totalValue = bills.reduce((s, b) => s + parseFloat(b.total_amount || 0), 0)
+
+  // Dates with the most movement (top 3) — quick visual cue
+  const peakDay = days.find(d => d.date !== 'Unknown')
+
+  if (totalBills === 0) {
+    return (
+      <SectionCard title="Bill Movement Log" t={t} card={card}>
+        <div style={{ padding: '24px 0', textAlign: 'center', color: t.text4, fontSize: '12px' }}>
+          No bills moved into consignment in this window.
+        </div>
+      </SectionCard>
+    )
+  }
+
+  return (
+    <div style={{ ...card, padding: 0, overflow: 'hidden' }}>
+      {/* Header — title + summary + export */}
+      <div style={{ padding: '14px 18px', borderBottom: `1px solid ${t.border}`, display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap' }}>
+        <div>
+          <div style={{ fontSize: '10px', color: t.text3, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 600 }}>Bill Movement Log</div>
+          <div style={{ fontSize: '13px', color: t.text1, fontWeight: 500, marginTop: '2px' }}>
+            {totalBills} bill{totalBills === 1 ? '' : 's'} moved <span style={{ color: t.text4 }}>at branch → in consignment</span>
+            {peakDay && <span style={{ color: t.text3 }}> · peak {fmtDate(peakDay.date)} ({peakDay.bills})</span>}
+          </div>
+        </div>
+        <div style={{ flex: 1 }} />
+        <div style={{ display: 'flex', gap: '14px', fontSize: '11px', color: t.text3, alignItems: 'center' }}>
+          <span><strong style={{ color: t.gold, fontFamily: 'monospace' }}>{fmtWt(totalGross)}</strong> gross</span>
+          <span><strong style={{ color: t.blue, fontFamily: 'monospace' }}>{fmtINR(totalValue)}</strong></span>
+          <button onClick={exportCsv}
+            style={{ background: 'transparent', color: t.text2, border: `1px solid ${t.border}`, borderRadius: '7px', padding: '6px 12px', fontSize: '11px', fontWeight: 600, cursor: 'pointer' }}>
+            Export CSV
+          </button>
+        </div>
+      </div>
+
+      {/* Daily summary band — chips per transition date */}
+      <div style={{ padding: '12px 18px', borderBottom: `1px solid ${t.border}`, background: `${t.gold}05` }}>
+        <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', marginBottom: '8px', fontWeight: 600 }}>By transition date</div>
+        <div style={{ display: 'flex', gap: '8px', overflowX: 'auto', paddingBottom: '2px' }}>
+          {days.slice(0, 14).map(d => (
+            <div key={d.date} style={{ flexShrink: 0, minWidth: '120px', background: t.card, border: `1px solid ${t.border}`, borderRadius: '8px', padding: '8px 12px' }}>
+              <div style={{ fontSize: '10px', color: t.text4, fontFamily: 'monospace' }}>
+                {d.date === 'Unknown' ? <span style={{ color: t.orange }}>Unknown</span> : new Date(d.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}
+              </div>
+              <div style={{ fontSize: '15px', color: t.gold, fontWeight: 600, fontFamily: 'monospace', marginTop: '2px' }}>{d.bills}</div>
+              <div style={{ fontSize: '9px', color: t.text4, fontFamily: 'monospace', marginTop: '2px' }}>
+                {fmtWt(d.gross)} · {fmtINR(d.value)}
+              </div>
+            </div>
+          ))}
+          {days.length > 14 && (
+            <div style={{ flexShrink: 0, alignSelf: 'center', fontSize: '11px', color: t.text4, padding: '0 10px' }}>+{days.length - 14} more days</div>
+          )}
+        </div>
+      </div>
+
+      {/* Bill-level table — mirrors the Purchase Data layout that operators are used to */}
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11.5px' }}>
+          <thead>
+            <tr style={{ background: `${t.text4}05` }}>
+              {['Transitioned', 'App ID', 'Customer', 'Origin Branch', 'Current', 'Purchase Date', 'Gross Wt', 'Net Wt', 'Value', 'Consignment'].map(h => (
+                <th key={h} style={{ padding: '10px 14px', textAlign: ['Gross Wt', 'Net Wt', 'Value'].includes(h) ? 'right' : 'left', fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', borderBottom: `1px solid ${t.border}`, fontWeight: 600, whiteSpace: 'nowrap' }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {bills.slice(0, 500).map((b, i) => {
+              const dt = b.dispatched_at || b.consignment?.dispatched_at
+              const dtTxt = dt ? new Date(dt).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: '2-digit', hour: '2-digit', minute: '2-digit' }) : <span style={{ color: t.orange }}>Unknown</span>
+              const movement = b.consignment?.movement_type
+              return (
+                <tr key={b.id} style={{ borderBottom: `1px solid ${t.border}25`, background: i % 2 ? `${t.text4}04` : 'transparent' }}>
+                  <td style={{ padding: '10px 14px', color: t.text2, fontFamily: 'monospace', whiteSpace: 'nowrap' }}>{dtTxt}</td>
+                  <td style={{ padding: '10px 14px', color: t.gold, fontFamily: 'monospace', fontWeight: 600 }}>{b.application_id || b.sl_no || '—'}</td>
+                  <td style={{ padding: '10px 14px', color: t.text1 }}>{b.customer_name || '—'}</td>
+                  <td style={{ padding: '10px 14px', color: t.text2 }}>{b.branch_name}</td>
+                  <td style={{ padding: '10px 14px', color: t.text3 }}>{b.current_branch || b.branch_name}</td>
+                  <td style={{ padding: '10px 14px', color: t.text3, fontFamily: 'monospace', whiteSpace: 'nowrap' }}>{fmtDate(b.purchase_date)}</td>
+                  <td style={{ padding: '10px 14px', color: t.gold, textAlign: 'right', fontFamily: 'monospace' }}>{fmtWt(b.gross_weight)}</td>
+                  <td style={{ padding: '10px 14px', color: t.text2, textAlign: 'right', fontFamily: 'monospace' }}>{fmtWt(b.net_weight)}</td>
+                  <td style={{ padding: '10px 14px', color: t.blue, textAlign: 'right', fontFamily: 'monospace', fontWeight: 600 }}>{fmtINR(b.total_amount)}</td>
+                  <td style={{ padding: '10px 14px', whiteSpace: 'nowrap' }}>
+                    {b.consignment ? (
+                      <>
+                        <span style={{ color: t.gold, fontFamily: 'monospace', fontWeight: 600 }}>{b.consignment.tmp_prf_no}</span>
+                        {movement && (
+                          <span style={{ marginLeft: '6px', fontSize: '9px', color: movement === 'INTERNAL' ? t.purple : t.orange, background: `${movement === 'INTERNAL' ? t.purple : t.orange}15`, borderRadius: '3px', padding: '1px 5px', fontWeight: 600, letterSpacing: '.04em' }}>
+                            {movement === 'INTERNAL' ? 'HUB' : 'HO'}
+                          </span>
+                        )}
+                      </>
+                    ) : <span style={{ color: t.orange, fontSize: '10px' }}>untracked</span>}
+                  </td>
+                </tr>
+              )
+            })}
+            {bills.length > 500 && (
+              <tr><td colSpan={10} style={{ padding: '14px', textAlign: 'center', color: t.text4, fontSize: '11px' }}>Showing first 500 — narrow the date range or filter to see more.</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
   )
 }
 
