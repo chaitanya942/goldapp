@@ -13,8 +13,9 @@ const s3 = new S3Client({
   },
 })
 
+// Telesales team needs to download recordings for offline review.
 export async function POST(req) {
-  const auth = await requireAuth(req, { requiredRoles: ROLE_GROUPS.ADMIN })
+  const auth = await requireAuth(req, { requiredRoles: ROLE_GROUPS.TELESALES })
   if (!auth.ok) return auth.response
   try {
     const { s3_key, filename } = await req.json()

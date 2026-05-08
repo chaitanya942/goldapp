@@ -13,9 +13,11 @@ const s3 = new S3Client({
 const BUCKET = 'whitegold-call-recordings'
 
 // Returns a 1-hour presigned S3 URL for a customer call recording. Audio
-// contains PII — restrict to ADMIN.
+// contains PII but the telesales team needs to listen as part of their
+// daily workflow (review, transcribe, summarise) — so gate to TELESALES
+// (super_admin + founders_office + admin + telesales).
 export async function POST(req) {
-  const auth = await requireAuth(req, { requiredRoles: ROLE_GROUPS.ADMIN })
+  const auth = await requireAuth(req, { requiredRoles: ROLE_GROUPS.TELESALES })
   if (!auth.ok) return auth.response
   try {
     const { s3_key } = await req.json()

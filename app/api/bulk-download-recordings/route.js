@@ -129,8 +129,10 @@ function safe(str) {
   return str.trim().replace(/[^\w\s-]/g, '').replace(/\s+/g, '_').slice(0, 30)
 }
 
+// Bulk-zip download — telesales workflow (e.g. download yesterday's calls
+// for offline analysis).
 export async function POST(req) {
-  const auth = await requireAuth(req, { requiredRoles: ROLE_GROUPS.ADMIN })
+  const auth = await requireAuth(req, { requiredRoles: ROLE_GROUPS.TELESALES })
   if (!auth.ok) return auth.response
   try {
     const { ids } = await req.json()

@@ -5,8 +5,9 @@
 
 import { requireAuth, ROLE_GROUPS } from '../../../lib/apiAuth'
 
+// Telesales reviews calls by triggering transcription.
 export async function POST(req) {
-  const auth = await requireAuth(req, { requiredRoles: ROLE_GROUPS.ADMIN })
+  const auth = await requireAuth(req, { requiredRoles: ROLE_GROUPS.TELESALES })
   if (!auth.ok) return auth.response
   try {
     const { callId, recordingUrl } = await req.json()
