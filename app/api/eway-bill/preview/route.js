@@ -23,7 +23,6 @@ import {
   validateConsignmentStatus,
   validateBranchReadiness,
   validateItemTotals,
-  validateDistinctGstins,
   isValidGstin,
 } from '../../../../lib/gstDocPreflight'
 
@@ -69,17 +68,13 @@ export async function GET(req) {
   // Build the exact payload the generate route would send.
   const payload = buildPayload({ consignment, branch, destBranch, items: items || [], companySettings: companySettings || {} })
 
-  // Distinct seller/buyer GSTIN check — EXTERNAL only.
-  // INTERNAL Branch→Hub is OWN_USE under the same GSTIN by design (intra-
-  // company stock transfer); NIC requires same seller/buyer Gstin in that
-  // mode. Surfacing this as an error there blocks legal consignments.
-  // E-Invoice has a different rule (IRP outright rejects same-GSTIN), so
-  // that gate stays in the E-Invoice preview unchanged.
-  if (consignment.movement_type !== 'INTERNAL') {
-    errors.push(
-      ...validateDistinctGstins(payload.SellerDtls?.Gstin, payload.BuyerDtls?.Gstin, 'an E-Way Bill'),
-    )
-  }
+  // No distinct-GSTIN check on EWB. NIC accepts identical seller/buyer GSTIN
+  // under SubSupplyType='OWN_USE' for ALL movement modes:
+  //   - INTERNAL  Branch → Hub (same KA GSTIN)
+  //   - EXTERNAL  KA branch → KA HO (intrastate own-use, same GSTIN)
+  //   - EXTERNAL  non-KA branch → KA HO (interstate, different state-wise GSTINs)
+  // Only E-Invoice (IRP) outright rejects same-GSTIN B2B — that gate stays in
+  // the E-Invoice preview where it belongs.
 
   // Human-readable digest the UI shows in the modal — what accounts will compare against the challan.
   const summary = {
