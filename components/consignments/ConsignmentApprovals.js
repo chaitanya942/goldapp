@@ -1046,6 +1046,36 @@ function PreviewModal({ state, t, onClose, onConfirm }) {
 
           {summary && (
             <>
+              {/* Document number banner — accounts wants this front-and-centre,
+                  especially for E-Invoice where the per-state sequence number
+                  needs to be verified before generation. EWB shows the system
+                  fingerprint (TMP_PRF + UUID prefix). */}
+              <div style={{
+                background:    `${accent}10`,
+                border:        `1px solid ${accent}40`,
+                borderRadius:  '8px',
+                padding:       '10px 14px',
+                marginBottom:  '14px',
+                display:       'flex',
+                justifyContent:'space-between',
+                alignItems:    'center',
+                gap:           '12px',
+                flexWrap:      'wrap',
+              }}>
+                <div>
+                  <div style={{ fontSize: '.6rem', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: '3px' }}>
+                    {isEwb ? 'EWB Document Number' : 'E-Invoice Number'}
+                  </div>
+                  <div style={{ fontSize: '14px', color: accent, fontFamily: 'monospace', fontWeight: 700, letterSpacing: '.02em' }}>
+                    {summary.document_no || '—'}
+                  </div>
+                </div>
+                <div style={{ textAlign: 'right' }}>
+                  <div style={{ fontSize: '.6rem', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: '3px' }}>Date</div>
+                  <div style={{ fontSize: '12px', color: t.text2, fontFamily: 'monospace' }}>{summary.document_date || '—'}</div>
+                </div>
+              </div>
+
               {/* Header KPIs — easy to scan against challan */}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1px', background: t.border, borderRadius: '8px', overflow: 'hidden', marginBottom: '14px' }}>
                 <PreviewKpi t={t} label="Quantity (Gross)" value={`${Number(summary.quantity_grams || 0).toFixed(3)}g`} accent={t.gold} />
