@@ -381,6 +381,66 @@ export async function GET(req) {
     return Response.json({ data: rows })
   }
 
+  // ── Docs generated report: every EWB + E-Invoice issued in a window ────
+  // Accounts uses this for daily / monthly GST reconciliation. Returns one
+  // row per generated document (a single consignment with both EWB and IRN
+  // appears twice — once per doc type) so the table is flat and exportable.
+  if (action === 'docs_generated_report') {
+    // YYYY-MM-DD strings; default to today (IST). Inclusive range.
+    const istToday = new Date(Date.now() + 19800000).toISOString().slice(0, 10)
+    const fromStr  = searchParams.get('from') || istToday
+    const toStr    = searchParams.get('to')   || fromStr
+    const fromIso  = `${fromStr}T00:00:00+05:30`
+    const toIso    = `${toStr}T23:59:59+05:30`
+
+    // EWBs generated in window
+    let ewbQ = supabase
+      .from('consignments')
+      .select('id, tmp_prf_no, branch_name, dest_branch, movement_type, eway_bill_no, ewb_generated_at, ewb_valid_until, total_bills, total_gross_wt, total_net_wt, total_amount, approval_status, status, einvoice_doc_no, irn, einvoice_generated_at')
+      .not('eway_bill_no', 'is', null)
+      .gte('ewb_generated_at', fromIso)
+      .lte('ewb_generated_at', toIso)
+      .order('ewb_generated_at', { ascending: false })
+    if (allowedBranches) ewbQ = ewbQ.in('branch_name', allowedBranches)
+    const ewbRes = await ewbQ
+    if (ewbRes.error) return Response.json({ error: ewbRes.error.message }, { status: 500 })
+
+    // E-Invoices generated in window
+    let eiQ = supabase
+      .from('consignments')
+      .select('id, tmp_prf_no, branch_name, dest_branch, movement_type, irn, ack_no, ack_dt, einvoice_doc_no, einvoice_generated_at, total_bills, total_gross_wt, total_net_wt, total_amount, approval_status, status, eway_bill_no, ewb_generated_at')
+      .not('irn', 'is', null)
+      .gte('einvoice_generated_at', fromIso)
+      .lte('einvoice_generated_at', toIso)
+      .order('einvoice_generated_at', { ascending: false })
+    if (allowedBranches) eiQ = eiQ.in('branch_name', allowedBranches)
+    const eiRes = await eiQ
+    if (eiRes.error) return Response.json({ error: eiRes.error.message }, { status: 500 })
+
+    // Pull the 'who generated it' from the activity log (ewb_generated /
+    // einvoice_generated events). Map by consignment_id for fast lookup.
+    const ids = [...new Set([...(ewbRes.data || []), ...(eiRes.data || [])].map(r => r.id))]
+    let actorByEwb = new Map(), actorByEi = new Map()
+    if (ids.length) {
+      const { data: events } = await supabase
+        .from('consignment_activity_log')
+        .select('consignment_id, event_type, actor_email, created_at')
+        .in('consignment_id', ids)
+        .in('event_type', ['ewb_generated', 'einvoice_generated'])
+        .order('created_at', { ascending: false })
+      for (const e of events || []) {
+        const map = e.event_type === 'ewb_generated' ? actorByEwb : actorByEi
+        if (!map.has(e.consignment_id)) map.set(e.consignment_id, e.actor_email)
+      }
+    }
+
+    return Response.json({
+      from: fromStr, to: toStr,
+      ewbs: (ewbRes.data || []).map(r => ({ ...r, generated_by: actorByEwb.get(r.id) || null })),
+      einvoices: (eiRes.data || []).map(r => ({ ...r, generated_by: actorByEi.get(r.id) || null })),
+    })
+  }
+
   // ── Pending approvals count (for sidebar badge) ────────────────────────
   if (action === 'pending_approvals_count') {
     let q = supabase

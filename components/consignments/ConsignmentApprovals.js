@@ -128,6 +128,12 @@ export default function ConsignmentApprovals() {
   const [pending, setPending] = useState([])
   const [history, setHistory] = useState([])  // approved or rejected, depending on tab
   const [cancellations, setCancellations] = useState([])  // ewb_cancelled / einvoice_cancelled events
+  const [report,        setReport]        = useState({ ewbs: [], einvoices: [] })
+  const [reportFrom,    setReportFrom]    = useState(() => new Date(Date.now() + 19800000).toISOString().slice(0, 10))
+  const [reportTo,      setReportTo]      = useState(() => new Date(Date.now() + 19800000).toISOString().slice(0, 10))
+  const [settings,      setSettings]      = useState(null)
+  const [settingsBusy,  setSettingsBusy]  = useState(null)  // 'seq:KL' | 'gstin:KA' etc.
+  const [settingsToast, setSettingsToast] = useState(null)
   const [loading, setLoading] = useState(true)
   const [actionId, setActionId] = useState(null)
   // Preview-before-generate modal state. The modal shows the exact payload that
@@ -188,12 +194,68 @@ export default function ConsignmentApprovals() {
     setLoading(false)
   }, [])
 
+  // Reports: every EWB + E-Invoice generated in the [from..to] window.
+  const fetchReport = useCallback(async (from, to, silent = false) => {
+    if (!silent) setLoading(true)
+    const r = await authedFetch(`/api/consignments?action=docs_generated_report&from=${from}&to=${to}`)
+    const j = await r.json()
+    setReport({ ewbs: j.ewbs || [], einvoices: j.einvoices || [] })
+    setLoading(false)
+  }, [])
+
+  // Settings: per-state E-Invoice sequence + state GSTINs.
+  const fetchSettings = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true)
+    const r = await authedFetch('/api/admin/einvoice-settings')
+    const j = await r.json()
+    setSettings(j)
+    setLoading(false)
+  }, [])
+
   // Initial fetch + refetch when the user switches tabs.
   useEffect(() => {
-    if (tab === 'pending') fetchPending()
-    else if (tab === 'cancellations') fetchCancellations()
-    else fetchHistory(tab)
-  }, [tab, fetchPending, fetchHistory, fetchCancellations])
+    if (tab === 'pending')             fetchPending()
+    else if (tab === 'cancellations')  fetchCancellations()
+    else if (tab === 'reports')        fetchReport(reportFrom, reportTo)
+    else if (tab === 'settings')       fetchSettings()
+    else                               fetchHistory(tab)
+  }, [tab, fetchPending, fetchHistory, fetchCancellations, fetchReport, fetchSettings, reportFrom, reportTo])
+
+  // Save a single E-Invoice sequence row (state + last_seq).
+  const saveSeq = useCallback(async (state_code, fy_code, last_seq) => {
+    setSettingsBusy(`seq:${state_code}`)
+    try {
+      const r = await authedFetch('/api/admin/einvoice-settings', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ kind: 'seq', state_code, fy_code, last_seq: Number(last_seq) }),
+      })
+      const j = await r.json()
+      if (!r.ok || j.error) { setSettingsToast({ type: 'error', msg: j.error || 'Save failed' }); return }
+      setSettingsToast({ type: 'success', msg: `${state_code}: next will be ${j.next_no}` })
+      await fetchSettings(true)
+    } finally {
+      setSettingsBusy(null)
+      setTimeout(() => setSettingsToast(null), 4000)
+    }
+  }, [fetchSettings])
+
+  // Save a single state GSTIN.
+  const saveGstin = useCallback(async (state_code, gstin) => {
+    setSettingsBusy(`gstin:${state_code}`)
+    try {
+      const r = await authedFetch('/api/admin/einvoice-settings', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ kind: 'gstin', state_code, gstin }),
+      })
+      const j = await r.json()
+      if (!r.ok || j.error) { setSettingsToast({ type: 'error', msg: j.error || 'Save failed' }); return }
+      setSettingsToast({ type: 'success', msg: `${state_code} GSTIN updated` })
+      await fetchSettings(true)
+    } finally {
+      setSettingsBusy(null)
+      setTimeout(() => setSettingsToast(null), 4000)
+    }
+  }, [fetchSettings])
 
   // Re-render every 30s so the urgency badge stays current
   useEffect(() => {
@@ -554,20 +616,24 @@ export default function ConsignmentApprovals() {
             </button>
           )}
           <button onClick={() => {
-            if (tab === 'pending')        fetchPending(false)
-            else if (tab === 'cancellations') fetchCancellations(false)
-            else                          fetchHistory(tab, false)
+            if (tab === 'pending')             fetchPending(false)
+            else if (tab === 'cancellations')  fetchCancellations(false)
+            else if (tab === 'reports')        fetchReport(reportFrom, reportTo, false)
+            else if (tab === 'settings')       fetchSettings(false)
+            else                               fetchHistory(tab, false)
           }} style={btnOut}>Refresh</button>
         </div>
       </div>
 
-      {/* Tab strip — Pending / Approved / Rejected / Cancellations */}
-      <div style={{ display: 'flex', gap: '4px', borderBottom: `1px solid ${t.border}`, marginTop: '-2px' }}>
+      {/* Tab strip — Pending / Approved / Rejected / Cancellations / Reports / Settings */}
+      <div style={{ display: 'flex', gap: '4px', borderBottom: `1px solid ${t.border}`, marginTop: '-2px', flexWrap: 'wrap' }}>
         {[
           { id: 'pending',       label: 'Pending',       color: t.orange },
           { id: 'approved',      label: 'Approved',      color: t.green  },
           { id: 'rejected',      label: 'Rejected',      color: t.red    },
           { id: 'cancellations', label: 'Cancellations', color: t.purple },
+          { id: 'reports',       label: 'Reports',       color: t.blue   },
+          { id: 'settings',      label: 'Settings',      color: t.gold   },
         ].map(o => {
           const active = tab === o.id
           return (
@@ -699,6 +765,184 @@ export default function ConsignmentApprovals() {
               </div>
             )
           })}
+        </div>
+      ) : tab === 'reports' ? (
+        /* Reports — every EWB + E-Invoice generated in [from..to]. */
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+          {/* Date range picker */}
+          <div style={{ ...card, padding: '12px 16px', display: 'flex', gap: '14px', alignItems: 'center', flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <span style={{ fontSize: '10px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase' }}>From</span>
+              <input type="date" value={reportFrom} onChange={e => setReportFrom(e.target.value)}
+                style={{ background: t.card2 || t.card, border: `1px solid ${t.border}`, borderRadius: '6px', padding: '5px 8px', fontSize: '12px', color: t.text1, fontFamily: 'monospace' }} />
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <span style={{ fontSize: '10px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase' }}>To</span>
+              <input type="date" value={reportTo} onChange={e => setReportTo(e.target.value)}
+                style={{ background: t.card2 || t.card, border: `1px solid ${t.border}`, borderRadius: '6px', padding: '5px 8px', fontSize: '12px', color: t.text1, fontFamily: 'monospace' }} />
+            </div>
+            <button onClick={() => fetchReport(reportFrom, reportTo, false)} style={{ background: t.gold, color: '#1a0a00', border: 'none', borderRadius: '7px', padding: '6px 14px', fontSize: '11px', fontWeight: 700, cursor: 'pointer' }}>
+              Run report
+            </button>
+            <div style={{ flex: 1 }} />
+            <div style={{ fontSize: '11px', color: t.text3 }}>
+              <strong style={{ color: t.green }}>{report.ewbs.length}</strong> EWB · <strong style={{ color: t.purple }}>{report.einvoices.length}</strong> E-Invoice
+            </div>
+          </div>
+
+          {/* EWB section */}
+          <div style={card}>
+            <div style={{ padding: '10px 16px', borderBottom: `1px solid ${t.border}`, display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span style={{ fontSize: '9px', color: t.green, background: `${t.green}15`, borderRadius: '4px', padding: '2px 7px', fontWeight: 700, letterSpacing: '.04em' }}>EWB</span>
+              <span style={{ fontSize: '12px', color: t.text2, fontWeight: 600 }}>E-Way Bills generated</span>
+              <span style={{ fontSize: '11px', color: t.text4 }}>{report.ewbs.length} doc{report.ewbs.length === 1 ? '' : 's'}</span>
+            </div>
+            {report.ewbs.length === 0 ? (
+              <div style={{ padding: '30px', textAlign: 'center', fontSize: '12px', color: t.text4 }}>No E-Way Bills generated in this window.</div>
+            ) : (
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px' }}>
+                  <thead>
+                    <tr style={{ background: t.card2 || t.card }}>
+                      {['Generated', 'TMP_PRF', 'EWB No', 'Branch → Dest', 'Bills', 'Net Wt', 'Value', 'By'].map(h => (
+                        <th key={h} style={{ padding: '8px 12px', textAlign: 'left', fontSize: '9px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', borderBottom: `1px solid ${t.border}`, fontWeight: 600, whiteSpace: 'nowrap' }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {report.ewbs.map(r => (
+                      <tr key={r.id} style={{ borderBottom: `1px solid ${t.border}30` }}>
+                        <td style={{ padding: '7px 12px', color: t.text3, fontFamily: 'monospace', whiteSpace: 'nowrap' }}>{fmtTS(r.ewb_generated_at)}</td>
+                        <td style={{ padding: '7px 12px', color: t.gold, fontFamily: 'monospace', fontWeight: 600 }}>{r.tmp_prf_no}</td>
+                        <td style={{ padding: '7px 12px', color: t.green, fontFamily: 'monospace' }}>{r.eway_bill_no}</td>
+                        <td style={{ padding: '7px 12px', color: t.text2 }}>{r.branch_name} <span style={{ color: t.text4 }}>→</span> {r.movement_type === 'INTERNAL' ? r.dest_branch : 'HO'}</td>
+                        <td style={{ padding: '7px 12px', color: t.text2, textAlign: 'right' }}>{r.total_bills}</td>
+                        <td style={{ padding: '7px 12px', color: t.gold, textAlign: 'right', fontFamily: 'monospace' }}>{fmtWt(r.total_net_wt)}</td>
+                        <td style={{ padding: '7px 12px', color: t.blue, textAlign: 'right', fontFamily: 'monospace' }}>₹{fmt(Math.round(r.total_amount || r.total_gross_value || 0))}</td>
+                        <td style={{ padding: '7px 12px', color: t.text3, fontSize: '10px' }}>{r.generated_by || '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          {/* E-Invoice section */}
+          <div style={card}>
+            <div style={{ padding: '10px 16px', borderBottom: `1px solid ${t.border}`, display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span style={{ fontSize: '9px', color: t.purple, background: `${t.purple}15`, borderRadius: '4px', padding: '2px 7px', fontWeight: 700, letterSpacing: '.04em' }}>E-INV</span>
+              <span style={{ fontSize: '12px', color: t.text2, fontWeight: 600 }}>E-Invoices generated</span>
+              <span style={{ fontSize: '11px', color: t.text4 }}>{report.einvoices.length} doc{report.einvoices.length === 1 ? '' : 's'}</span>
+            </div>
+            {report.einvoices.length === 0 ? (
+              <div style={{ padding: '30px', textAlign: 'center', fontSize: '12px', color: t.text4 }}>No E-Invoices generated in this window.</div>
+            ) : (
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px' }}>
+                  <thead>
+                    <tr style={{ background: t.card2 || t.card }}>
+                      {['Generated', 'Invoice No', 'TMP_PRF', 'IRN (truncated)', 'Branch → Dest', 'Bills', 'Net Wt', 'Value', 'By'].map(h => (
+                        <th key={h} style={{ padding: '8px 12px', textAlign: 'left', fontSize: '9px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', borderBottom: `1px solid ${t.border}`, fontWeight: 600, whiteSpace: 'nowrap' }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {report.einvoices.map(r => (
+                      <tr key={r.id} style={{ borderBottom: `1px solid ${t.border}30` }}>
+                        <td style={{ padding: '7px 12px', color: t.text3, fontFamily: 'monospace', whiteSpace: 'nowrap' }}>{fmtTS(r.einvoice_generated_at)}</td>
+                        <td style={{ padding: '7px 12px', color: t.purple, fontFamily: 'monospace', fontWeight: 700 }}>{r.einvoice_doc_no || '—'}</td>
+                        <td style={{ padding: '7px 12px', color: t.gold, fontFamily: 'monospace', fontWeight: 600 }}>{r.tmp_prf_no}</td>
+                        <td style={{ padding: '7px 12px', color: t.text3, fontFamily: 'monospace', fontSize: '10px' }} title={r.irn}>{r.irn ? r.irn.slice(0, 16) + '…' : '—'}</td>
+                        <td style={{ padding: '7px 12px', color: t.text2 }}>{r.branch_name} <span style={{ color: t.text4 }}>→</span> HO</td>
+                        <td style={{ padding: '7px 12px', color: t.text2, textAlign: 'right' }}>{r.total_bills}</td>
+                        <td style={{ padding: '7px 12px', color: t.gold, textAlign: 'right', fontFamily: 'monospace' }}>{fmtWt(r.total_net_wt)}</td>
+                        <td style={{ padding: '7px 12px', color: t.blue, textAlign: 'right', fontFamily: 'monospace' }}>₹{fmt(Math.round(r.total_amount || r.total_gross_value || 0))}</td>
+                        <td style={{ padding: '7px 12px', color: t.text3, fontSize: '10px' }}>{r.generated_by || '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      ) : tab === 'settings' ? (
+        /* Settings — E-Invoice sequences + state GSTINs + when-to-generate notes */
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+          {settingsToast && (
+            <div style={{ padding: '10px 14px', borderRadius: '8px', background: settingsToast.type === 'success' ? `${t.green}15` : `${t.red}15`, border: `1px solid ${settingsToast.type === 'success' ? t.green : t.red}40`, fontSize: '12px', color: settingsToast.type === 'success' ? t.green : t.red }}>
+              {settingsToast.msg}
+            </div>
+          )}
+
+          {/* When EWB / E-Invoice is generated — instructions */}
+          <div style={card}>
+            <div style={{ padding: '12px 16px', borderBottom: `1px solid ${t.border}`, fontSize: '12px', color: t.text2, fontWeight: 600 }}>
+              When are E-Way Bill and E-Invoice issued?
+            </div>
+            <div style={{ padding: '14px 18px', fontSize: '12px', color: t.text2, lineHeight: 1.7 }}>
+              <div style={{ marginBottom: '10px' }}>
+                <span style={{ display: 'inline-block', minWidth: '90px', fontSize: '9px', color: t.green, background: `${t.green}15`, borderRadius: '4px', padding: '2px 7px', fontWeight: 700, letterSpacing: '.04em', textAlign: 'center', marginRight: '10px' }}>EWB</span>
+                <strong>Karnataka source → Karnataka HO</strong> (intrastate own-use, value &gt; ₹50,000) and <strong>Branch → Hub</strong> internal moves. Same legal entity, same GSTIN. Sub-supply: <code style={{ color: t.gold, background: 'transparent' }}>OWN_USE</code>.
+              </div>
+              <div style={{ marginBottom: '10px' }}>
+                <span style={{ display: 'inline-block', minWidth: '90px', fontSize: '9px', color: t.purple, background: `${t.purple}15`, borderRadius: '4px', padding: '2px 7px', fontWeight: 700, letterSpacing: '.04em', textAlign: 'center', marginRight: '10px' }}>E-INV</span>
+                <strong>Kerala / Telangana / Andhra Pradesh source → Karnataka HO</strong> (interstate sale, B2B). Different state-wise GSTINs are mandatory — IRP rejects matching seller/buyer GSTINs.
+              </div>
+              <div style={{ fontSize: '11px', color: t.text3, marginTop: '10px', paddingTop: '10px', borderTop: `1px solid ${t.border}` }}>
+                <strong style={{ color: t.text2 }}>Workflow order:</strong> Consignee Report → Issue Voucher / Delivery Challan → EWB / E-Invoice. Each step unlocks the next; you can&apos;t fire NIC / IRP before the underlying physical document exists.
+              </div>
+              <div style={{ fontSize: '11px', color: t.text3, marginTop: '6px' }}>
+                <strong style={{ color: t.text2 }}>Cancel window:</strong> 24 hours after generation on both NIC and IRP. Past 24h, an E-Invoice can be nullified via Credit Note (Typ: CRN); an E-Way Bill cannot be retracted, only logged for reconciliation.
+              </div>
+            </div>
+          </div>
+
+          {/* E-Invoice sequence editor */}
+          <div style={card}>
+            <div style={{ padding: '12px 16px', borderBottom: `1px solid ${t.border}`, display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <div style={{ fontSize: '12px', color: t.text2, fontWeight: 600 }}>E-Invoice number sequences</div>
+              <span style={{ fontSize: '11px', color: t.text4 }}>FY {settings?.fy || '—'}</span>
+            </div>
+            <div style={{ padding: '6px 0 0 0' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                <thead>
+                  <tr>
+                    {['State', 'Last used', 'Next will be', 'Action'].map(h => (
+                      <th key={h} style={{ padding: '8px 16px', textAlign: 'left', fontSize: '9px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 600 }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {(settings?.sequences || []).map(s => (
+                    <SeqRow key={s.state_code} t={t} seq={s} busy={settingsBusy === `seq:${s.state_code}`} onSave={saveSeq} />
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* State GSTIN editor */}
+          <div style={card}>
+            <div style={{ padding: '12px 16px', borderBottom: `1px solid ${t.border}`, fontSize: '12px', color: t.text2, fontWeight: 600 }}>State-wise GSTINs</div>
+            <div style={{ padding: '6px 0 0 0' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                <thead>
+                  <tr>
+                    {['State', 'GSTIN', 'Action'].map(h => (
+                      <th key={h} style={{ padding: '8px 16px', textAlign: 'left', fontSize: '9px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 600 }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {['KA', 'KL', 'TS', 'AP'].map(stateCode => (
+                    <GstinRow key={stateCode} t={t} stateCode={stateCode} value={settings?.gstins?.[stateCode] || ''} busy={settingsBusy === `gstin:${stateCode}`} onSave={saveGstin} />
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
       ) : (tab === 'approved' || tab === 'rejected') ? (
         /* History list — read-only, no approve/reject buttons */
@@ -1160,6 +1404,55 @@ function PreviewModal({ state, t, onClose, onConfirm }) {
 
 // WorkflowStrip + DocAuditPanel are imported from ./workflowParts so they
 // stay in lockstep between this view and ConsignmentData.
+
+// Settings → E-Invoice sequence row. Inline-editable last_seq with a Save
+// button. Showing 'next_no' inline lets the operator verify the new value
+// matches what their physical book expects before clicking Save.
+function SeqRow({ t, seq, busy, onSave }) {
+  const [val, setVal] = useState(String(seq.last_seq))
+  useEffect(() => { setVal(String(seq.last_seq)) }, [seq.last_seq])
+  const dirty = String(val) !== String(seq.last_seq)
+  const nextPreview = `WG/${seq.state_code}/${seq.fy_code}/${(parseInt(val) || 0) + 1}`
+  return (
+    <tr style={{ borderTop: `1px solid ${t.border}30` }}>
+      <td style={{ padding: '8px 16px', color: t.text1, fontWeight: 600 }}>{seq.state_code}</td>
+      <td style={{ padding: '8px 16px' }}>
+        <input type="number" min="0" value={val} onChange={e => setVal(e.target.value)} disabled={busy}
+          style={{ width: '100px', background: t.card2 || t.card, border: `1px solid ${dirty ? t.gold : t.border}`, borderRadius: '6px', padding: '5px 8px', fontSize: '12px', color: t.text1, fontFamily: 'monospace', outline: 'none' }} />
+      </td>
+      <td style={{ padding: '8px 16px', color: dirty ? t.gold : t.text3, fontFamily: 'monospace', fontSize: '11px' }}>{nextPreview}</td>
+      <td style={{ padding: '8px 16px' }}>
+        <button onClick={() => onSave(seq.state_code, seq.fy_code, parseInt(val) || 0)} disabled={!dirty || busy}
+          style={{ background: dirty ? t.gold : 'transparent', color: dirty ? '#1a0a00' : t.text4, border: `1px solid ${dirty ? t.gold : t.border}`, borderRadius: '6px', padding: '5px 14px', fontSize: '11px', fontWeight: 700, cursor: dirty && !busy ? 'pointer' : 'not-allowed' }}>
+          {busy ? 'Saving…' : 'Save'}
+        </button>
+      </td>
+    </tr>
+  )
+}
+
+// Settings → State GSTIN row. Same inline-edit pattern.
+function GstinRow({ t, stateCode, value, busy, onSave }) {
+  const [val, setVal] = useState(value || '')
+  useEffect(() => { setVal(value || '') }, [value])
+  const dirty = val.trim().toUpperCase() !== (value || '').toUpperCase()
+  return (
+    <tr style={{ borderTop: `1px solid ${t.border}30` }}>
+      <td style={{ padding: '8px 16px', color: t.text1, fontWeight: 600 }}>{stateCode}</td>
+      <td style={{ padding: '8px 16px' }}>
+        <input value={val} onChange={e => setVal(e.target.value.toUpperCase())} disabled={busy}
+          placeholder="22AAAAA0000A1Z5" maxLength={15}
+          style={{ width: '220px', background: t.card2 || t.card, border: `1px solid ${dirty ? t.gold : t.border}`, borderRadius: '6px', padding: '5px 8px', fontSize: '12px', color: t.text1, fontFamily: 'monospace', outline: 'none', letterSpacing: '.05em' }} />
+      </td>
+      <td style={{ padding: '8px 16px' }}>
+        <button onClick={() => onSave(stateCode, val.trim())} disabled={!dirty || busy}
+          style={{ background: dirty ? t.gold : 'transparent', color: dirty ? '#1a0a00' : t.text4, border: `1px solid ${dirty ? t.gold : t.border}`, borderRadius: '6px', padding: '5px 14px', fontSize: '11px', fontWeight: 700, cursor: dirty && !busy ? 'pointer' : 'not-allowed' }}>
+          {busy ? 'Saving…' : 'Save'}
+        </button>
+      </td>
+    </tr>
+  )
+}
 
 function PreviewKpi({ t, label, value, accent }) {
   return (
