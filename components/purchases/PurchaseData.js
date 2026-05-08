@@ -61,6 +61,7 @@ const EXPORT_COLS = [
   { key: 'final_amount_crm',          label: 'Final Amt (₹)' },
   { key: 'transaction_type',          label: 'Type' },
   { key: 'stock_status',              label: 'Status' },
+  { key: 'dispatched_at',             label: 'In Consignment Since' },
 ]
 
 function exportCSV(rows, filename) {
@@ -266,6 +267,11 @@ export default function PurchaseData() {
 
   const fmt     = (n) => n != null ? Number(n).toLocaleString('en-IN', { maximumFractionDigits: 2 }) : '—'
   const fmtDate = (d) => d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'
+  // Compact timestamp for the 'In Consignment Since' column.
+  // Renders date + 24h time together, e.g. '08 May, 14:59'.
+  const fmtDispatched = (d) => d ? new Date(d).toLocaleString('en-IN', {
+    day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false,
+  }) : '—'
 
   const totalPages          = Math.ceil(totalCount / PAGE_SIZE)
   const allPageSelected     = purchases.length > 0 && purchases.every(p => selectedIds.has(p.id))
@@ -579,8 +585,9 @@ export default function PurchaseData() {
                   { label: 'Svc Amt',   col: null },
                   { label: 'Final Amt', col: 'final_amount_crm' },
                   { label: 'Type',      col: 'transaction_type' },
-                  { label: 'Status',    col: 'stock_status' },
-                  { label: 'CRM',       col: 'crm_status' },
+                  { label: 'Status',         col: 'stock_status' },
+                  { label: 'In Consignment Since', col: 'dispatched_at' },
+                  { label: 'CRM',            col: 'crm_status' },
                 ].map(({ label, col }) => (
                   <th key={label}
                     onClick={col ? () => handleSort(col) : undefined}
@@ -644,6 +651,13 @@ export default function PurchaseData() {
                         }
                       />
                     </td>
+                    {/* purchases.dispatched_at — stamped at consignment approval, the
+                        moment this bill transitioned at_branch → in_consignment.
+                        Cleared when the consignment is cancelled and the bill
+                        returns to at_branch. */}
+                    <td style={{ ...s.td, color: p.dispatched_at ? t.text2 : t.text4, fontSize: '.68rem', whiteSpace: 'nowrap' }}>
+                      {fmtDispatched(p.dispatched_at)}
+                    </td>
                     <td style={s.td}>
                       <div style={{ display: 'flex', gap: '4px', flexDirection: 'column' }}>
                         {(() => {
@@ -658,7 +672,7 @@ export default function PurchaseData() {
                 )
               })}
               {purchases.length === 0 && (
-                <tr><td colSpan={isSuperAdmin ? 19 : 18} style={{ ...s.td, textAlign: 'center', color: t.text4, padding: '48px' }}>
+                <tr><td colSpan={isSuperAdmin ? 20 : 19} style={{ ...s.td, textAlign: 'center', color: t.text4, padding: '48px' }}>
                   {(search || filterStatus || filterBranch || filterCrmStatus || filterTxn || fromDate || toDate) ? 'No records match your filters' : 'No purchase data yet. Syncing from CRM in the background.'}
                 </td></tr>
               )}
