@@ -1446,19 +1446,22 @@ function ReportsTab({ t, card, report, reportFrom, setReportFrom, reportTo, setR
       </div>
 
       {/* KPI summary band */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '1px', background: t.border, borderRadius: '10px', overflow: 'hidden' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: '1px', background: t.border, borderRadius: '10px', overflow: 'hidden' }}>
         <ReportKpi t={t} label="Total docs"    primary={`${report.ewbs.length + report.einvoices.length}`} sub={`${report.ewbs.length} EWB · ${report.einvoices.length} E-Inv`} accent={t.gold} />
         <ReportKpi t={t} label="Total bills"   primary={`${ewbBills + eiBills}`} sub={`${ewbBills} EWB · ${eiBills} E-Inv`} accent={t.text2} />
         <ReportKpi t={t} label="Net weight"    primary={`${(ewbWt + eiWt).toFixed(3)}g`} sub={`${ewbWt.toFixed(3)} EWB · ${eiWt.toFixed(3)} E-Inv`} accent={t.gold} mono />
         <ReportKpi t={t} label="Total value"   primary={`₹${fmt(Math.round(ewbVal + eiVal))}`} sub={`EWB ₹${fmt(Math.round(ewbVal))} · E-Inv ₹${fmt(Math.round(eiVal))}`} accent={t.blue} mono />
-        {/* Per-state E-Invoice mini-breakdown — only show if any E-Invoices exist */}
-        {Object.keys(eiByState).length > 0 && (
-          <ReportKpi t={t} label="By state (E-Inv)"
-            primary={Object.entries(eiByState).map(([s, v]) => `${s}:${v.count}`).join(' · ')}
-            sub={Object.entries(eiByState).map(([s, v]) => `${s} ₹${fmt(Math.round(v.val))}`).join(' · ')}
-            accent={t.purple} small />
-        )}
       </div>
+
+      {/* Visualisations row — activity chart + state donut + top branches.
+          Responsive: stacks below 280px-tile width on narrow viewports. */}
+      {(report.ewbs.length + report.einvoices.length > 0) && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '12px' }}>
+          <ActivityChart t={t} card={card} ewbs={report.ewbs} einvoices={report.einvoices} from={reportFrom} to={reportTo} />
+          <StateDonut    t={t} card={card} einvoices={report.einvoices} />
+          <TopBranches   t={t} card={card} ewbs={report.ewbs} einvoices={report.einvoices} />
+        </div>
+      )}
 
       {/* EWB section */}
       <div style={card}>
@@ -1576,13 +1579,240 @@ function ReportsTab({ t, card, report, reportFrom, setReportFrom, reportTo, setR
   )
 }
 
-// Single KPI tile inside the Reports summary band.
+// Single KPI tile inside the Reports summary band. Subtle accent line on
+// the left + soft hover lift make the band feel alive without being noisy.
 function ReportKpi({ t, label, primary, sub, accent, mono, small }) {
   return (
-    <div style={{ background: t.card, padding: '12px 14px' }}>
-      <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: '5px', fontWeight: 600 }}>{label}</div>
-      <div style={{ fontSize: small ? '12px' : '17px', color: accent || t.text1, fontWeight: 700, fontFamily: mono ? 'monospace' : 'inherit', letterSpacing: '.01em' }}>{primary}</div>
-      {sub && <div style={{ fontSize: '10px', color: t.text4, marginTop: '4px', fontFamily: 'monospace' }}>{sub}</div>}
+    <div style={{
+      background:    t.card,
+      padding:       '14px 16px',
+      borderLeft:    `2px solid ${accent || t.text3}`,
+      transition:    'background .18s ease',
+    }}
+      onMouseEnter={e => e.currentTarget.style.background = `${accent || t.text3}06`}
+      onMouseLeave={e => e.currentTarget.style.background = t.card}>
+      <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', marginBottom: '7px', fontWeight: 600 }}>{label}</div>
+      <div style={{ fontSize: small ? '12px' : '20px', color: accent || t.text1, fontWeight: 700, fontFamily: mono ? 'monospace' : 'inherit', letterSpacing: '-.01em', lineHeight: 1.1 }}>{primary}</div>
+      {sub && <div style={{ fontSize: '10px', color: t.text4, marginTop: '6px', fontFamily: 'monospace', letterSpacing: '.02em' }}>{sub}</div>}
+    </div>
+  )
+}
+
+// ── Activity timeline ────────────────────────────────────────────────────
+// Stacked bars: green = EWB, purple = E-Invoice. Buckets by HOUR if range is
+// a single day, by DAY if it spans multiple days. Hover any bar to see the
+// exact counts.
+function ActivityChart({ t, card, ewbs, einvoices, from, to }) {
+  const isOneDay = from === to
+  const buckets = (() => {
+    if (isOneDay) {
+      // 6am → midnight: business hours give a tighter, more readable axis.
+      const arr = []
+      for (let h = 6; h < 24; h++) arr.push({ key: `${h}`, label: `${String(h).padStart(2, '0')}`, ewb: 0, ei: 0 })
+      const hourOf = (iso) => new Date(iso).getHours()
+      for (const r of ewbs)      { const h = hourOf(r.ewb_generated_at);      const b = arr.find(x => x.key === String(h)); if (b) b.ewb += 1 }
+      for (const r of einvoices) { const h = hourOf(r.einvoice_generated_at); const b = arr.find(x => x.key === String(h)); if (b) b.ei  += 1 }
+      return arr
+    }
+    // Day buckets — inclusive range from..to (YYYY-MM-DD strings)
+    const fromD = new Date(`${from}T00:00:00`); const toD = new Date(`${to}T00:00:00`)
+    const arr = []
+    for (let d = new Date(fromD); d <= toD; d.setDate(d.getDate() + 1)) {
+      const k = d.toISOString().slice(0, 10)
+      arr.push({ key: k, label: k.slice(8, 10) + '/' + k.slice(5, 7), ewb: 0, ei: 0 })
+    }
+    const dayOf = (iso) => new Date(new Date(iso).getTime() + 19800000).toISOString().slice(0, 10)
+    for (const r of ewbs)      { const d = dayOf(r.ewb_generated_at);      const b = arr.find(x => x.key === d); if (b) b.ewb += 1 }
+    for (const r of einvoices) { const d = dayOf(r.einvoice_generated_at); const b = arr.find(x => x.key === d); if (b) b.ei  += 1 }
+    return arr
+  })()
+  const max = Math.max(1, ...buckets.map(b => b.ewb + b.ei))
+
+  // SVG dimensions (responsive — viewBox does the scaling)
+  const W = 600, H = 160, PAD_T = 14, PAD_B = 26, PAD_L = 30, PAD_R = 12
+  const innerW = W - PAD_L - PAD_R, innerH = H - PAD_T - PAD_B
+  const barGap = 2
+  const barW   = Math.max(4, innerW / buckets.length - barGap)
+  const yScale = (v) => innerH - (v / max) * innerH
+  const xOf    = (i) => PAD_L + i * (innerW / buckets.length) + barGap / 2
+  const ticks  = [0, Math.ceil(max / 2), max].filter((v, i, arr) => arr.indexOf(v) === i)
+
+  return (
+    <div style={{ ...card, padding: '14px 16px', display: 'flex', flexDirection: 'column' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+        <div>
+          <div style={{ fontSize: '12px', color: t.text2, fontWeight: 600 }}>{isOneDay ? 'Hourly activity' : 'Daily activity'}</div>
+          <div style={{ fontSize: '10px', color: t.text4, marginTop: '2px' }}>{isOneDay ? '6 AM → 11 PM, IST' : `${buckets.length} day${buckets.length === 1 ? '' : 's'}`}</div>
+        </div>
+        <div style={{ display: 'flex', gap: '12px', fontSize: '10px', color: t.text3 }}>
+          <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}><span style={{ display: 'inline-block', width: '8px', height: '8px', borderRadius: '2px', background: t.green }} />EWB</span>
+          <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}><span style={{ display: 'inline-block', width: '8px', height: '8px', borderRadius: '2px', background: t.purple }} />E-Inv</span>
+        </div>
+      </div>
+      <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto' }}>
+        {/* y-axis grid + ticks */}
+        {ticks.map(v => (
+          <g key={v}>
+            <line x1={PAD_L} y1={PAD_T + yScale(v)} x2={W - PAD_R} y2={PAD_T + yScale(v)} stroke={t.border} strokeWidth="1" strokeDasharray="2 3" />
+            <text x={PAD_L - 6} y={PAD_T + yScale(v) + 3} textAnchor="end" fontSize="9" fill={t.text4}>{v}</text>
+          </g>
+        ))}
+        {/* bars */}
+        {buckets.map((b, i) => {
+          const x = xOf(i)
+          const total = b.ewb + b.ei
+          if (!total) return (
+            <g key={b.key}>
+              <text x={x + barW / 2} y={H - 8} textAnchor="middle" fontSize="8" fill={t.text4}>{b.label}</text>
+            </g>
+          )
+          const ewbH = (b.ewb / max) * innerH
+          const eiH  = (b.ei  / max) * innerH
+          const yEi  = PAD_T + innerH - eiH
+          const yEwb = yEi - ewbH
+          return (
+            <g key={b.key}>
+              <title>{`${b.label}: ${b.ewb} EWB, ${b.ei} E-Invoice`}</title>
+              {b.ei > 0 && <rect x={x} y={yEi}  width={barW} height={eiH}  fill={t.purple} rx="1.5" />}
+              {b.ewb > 0 && <rect x={x} y={yEwb} width={barW} height={ewbH} fill={t.green}  rx="1.5" />}
+              <text x={x + barW / 2} y={H - 8} textAnchor="middle" fontSize="8" fill={t.text4}>{b.label}</text>
+            </g>
+          )
+        })}
+      </svg>
+    </div>
+  )
+}
+
+// ── State donut for E-Invoices ───────────────────────────────────────────
+// Pure SVG ring chart. Each slice is a stroke segment on a circle, sized via
+// stroke-dasharray. Center label shows total. Legend below shows count + value.
+function StateDonut({ t, card, einvoices }) {
+  const palette = { KL: '#e58a3b', TS: '#3a8fbf', AP: '#8c5ac8' }   // distinct hues for the three states
+  const groups = einvoices.reduce((acc, r) => {
+    const m = (r.einvoice_doc_no || '').match(/^WG\/(KL|TS|AP)\//)
+    const k = m?.[1] || '??'
+    if (!acc[k]) acc[k] = { count: 0, val: 0 }
+    acc[k].count += 1
+    acc[k].val   += Number(r.total_amount || r.total_gross_value || 0)
+    return acc
+  }, {})
+  const entries = Object.entries(groups).sort((a, b) => b[1].count - a[1].count)
+  const total = entries.reduce((s, [, v]) => s + v.count, 0)
+
+  // Donut sizing
+  const SIZE = 130, CENTER = SIZE / 2, R = 50, STROKE = 18
+  const C = 2 * Math.PI * R   // full circumference
+
+  let acc = 0
+  return (
+    <div style={{ ...card, padding: '14px 16px', display: 'flex', flexDirection: 'column' }}>
+      <div style={{ fontSize: '12px', color: t.text2, fontWeight: 600, marginBottom: '4px' }}>E-Invoice by state</div>
+      <div style={{ fontSize: '10px', color: t.text4, marginBottom: '10px' }}>Distribution across {entries.length} state{entries.length === 1 ? '' : 's'}</div>
+      {total === 0 ? (
+        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '140px', fontSize: '11px', color: t.text4 }}>
+          No E-Invoices in this window.
+        </div>
+      ) : (
+        <>
+          <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '12px' }}>
+            <svg viewBox={`0 0 ${SIZE} ${SIZE}`} width={SIZE} height={SIZE} style={{ transform: 'rotate(-90deg)' }}>
+              {/* Background ring */}
+              <circle cx={CENTER} cy={CENTER} r={R} fill="none" stroke={t.border} strokeWidth={STROKE} />
+              {entries.map(([k, v]) => {
+                const len    = (v.count / total) * C
+                const offset = -acc
+                acc += len
+                return (
+                  <circle key={k}
+                    cx={CENTER} cy={CENTER} r={R}
+                    fill="none"
+                    stroke={palette[k] || t.text3}
+                    strokeWidth={STROKE}
+                    strokeDasharray={`${len} ${C - len}`}
+                    strokeDashoffset={offset}
+                    strokeLinecap="butt">
+                    <title>{`${k}: ${v.count} doc${v.count === 1 ? '' : 's'}`}</title>
+                  </circle>
+                )
+              })}
+              {/* Center text — un-rotate so it reads upright */}
+              <g transform={`rotate(90 ${CENTER} ${CENTER})`}>
+                <text x={CENTER} y={CENTER - 1} textAnchor="middle" fontSize="20" fontWeight="700" fill={t.text1}>{total}</text>
+                <text x={CENTER} y={CENTER + 11} textAnchor="middle" fontSize="8" fill={t.text4} letterSpacing="1">DOCS</text>
+              </g>
+            </svg>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            {entries.map(([k, v]) => {
+              const pct = ((v.count / total) * 100).toFixed(0)
+              return (
+                <div key={k} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '11px' }}>
+                  <span style={{ display: 'inline-block', width: '10px', height: '10px', borderRadius: '2px', background: palette[k] || t.text3 }} />
+                  <span style={{ color: t.text2, fontWeight: 600, minWidth: '24px' }}>{k}</span>
+                  <span style={{ color: t.text3 }}>{v.count} doc{v.count === 1 ? '' : 's'}</span>
+                  <span style={{ flex: 1, textAlign: 'right', color: t.blue, fontFamily: 'monospace' }}>₹{fmt(Math.round(v.val))}</span>
+                  <span style={{ color: t.text4, fontFamily: 'monospace', minWidth: '32px', textAlign: 'right' }}>{pct}%</span>
+                </div>
+              )
+            })}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+// ── Top branches by activity ─────────────────────────────────────────────
+// Combined EWB + E-Invoice count per branch, sorted descending. Bar visualises
+// branch share of total docs so the leaderboard reads at a glance.
+function TopBranches({ t, card, ewbs, einvoices }) {
+  const map = {}
+  const accumulate = (rows, key) => {
+    for (const r of rows) {
+      const b = r.branch_name || '—'
+      if (!map[b]) map[b] = { ewb: 0, ei: 0, val: 0 }
+      map[b][key] += 1
+      map[b].val  += Number(r.total_amount || r.total_gross_value || 0)
+    }
+  }
+  accumulate(ewbs, 'ewb')
+  accumulate(einvoices, 'ei')
+  const list = Object.entries(map).map(([b, v]) => ({ branch: b, ...v, total: v.ewb + v.ei }))
+                                  .sort((a, b) => b.total - a.total).slice(0, 6)
+  const max = list[0]?.total || 1
+
+  return (
+    <div style={{ ...card, padding: '14px 16px', display: 'flex', flexDirection: 'column' }}>
+      <div style={{ fontSize: '12px', color: t.text2, fontWeight: 600, marginBottom: '4px' }}>Top branches</div>
+      <div style={{ fontSize: '10px', color: t.text4, marginBottom: '10px' }}>By document count in this window</div>
+      {list.length === 0 ? (
+        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '140px', fontSize: '11px', color: t.text4 }}>
+          No documents in this window.
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          {list.map((b, i) => {
+            const pct = (b.total / max) * 100
+            return (
+              <div key={b.branch}>
+                <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: '3px', fontSize: '11px' }}>
+                  <span style={{ color: t.text2, fontWeight: 600 }}>
+                    <span style={{ color: t.text4, marginRight: '6px', fontSize: '9px' }}>{i + 1}</span>
+                    {b.branch}
+                  </span>
+                  <span style={{ color: t.text3, fontFamily: 'monospace' }}>
+                    {b.total} <span style={{ color: t.text4 }}>({b.ewb}E · {b.ei}I)</span>
+                  </span>
+                </div>
+                <div style={{ height: '4px', background: t.border, borderRadius: '2px', overflow: 'hidden' }}>
+                  <div style={{ width: `${pct}%`, height: '100%', background: `linear-gradient(90deg, ${t.gold}, ${t.green})`, borderRadius: '2px' }} />
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }
