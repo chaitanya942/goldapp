@@ -767,106 +767,13 @@ export default function ConsignmentApprovals() {
           })}
         </div>
       ) : tab === 'reports' ? (
-        /* Reports — every EWB + E-Invoice generated in [from..to]. */
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-          {/* Date range picker */}
-          <div style={{ ...card, padding: '12px 16px', display: 'flex', gap: '14px', alignItems: 'center', flexWrap: 'wrap' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <span style={{ fontSize: '10px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase' }}>From</span>
-              <input type="date" value={reportFrom} onChange={e => setReportFrom(e.target.value)}
-                style={{ background: t.card2 || t.card, border: `1px solid ${t.border}`, borderRadius: '6px', padding: '5px 8px', fontSize: '12px', color: t.text1, fontFamily: 'monospace' }} />
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <span style={{ fontSize: '10px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase' }}>To</span>
-              <input type="date" value={reportTo} onChange={e => setReportTo(e.target.value)}
-                style={{ background: t.card2 || t.card, border: `1px solid ${t.border}`, borderRadius: '6px', padding: '5px 8px', fontSize: '12px', color: t.text1, fontFamily: 'monospace' }} />
-            </div>
-            <button onClick={() => fetchReport(reportFrom, reportTo, false)} style={{ background: t.gold, color: '#1a0a00', border: 'none', borderRadius: '7px', padding: '6px 14px', fontSize: '11px', fontWeight: 700, cursor: 'pointer' }}>
-              Run report
-            </button>
-            <div style={{ flex: 1 }} />
-            <div style={{ fontSize: '11px', color: t.text3 }}>
-              <strong style={{ color: t.green }}>{report.ewbs.length}</strong> EWB · <strong style={{ color: t.purple }}>{report.einvoices.length}</strong> E-Invoice
-            </div>
-          </div>
-
-          {/* EWB section */}
-          <div style={card}>
-            <div style={{ padding: '10px 16px', borderBottom: `1px solid ${t.border}`, display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span style={{ fontSize: '9px', color: t.green, background: `${t.green}15`, borderRadius: '4px', padding: '2px 7px', fontWeight: 700, letterSpacing: '.04em' }}>EWB</span>
-              <span style={{ fontSize: '12px', color: t.text2, fontWeight: 600 }}>E-Way Bills generated</span>
-              <span style={{ fontSize: '11px', color: t.text4 }}>{report.ewbs.length} doc{report.ewbs.length === 1 ? '' : 's'}</span>
-            </div>
-            {report.ewbs.length === 0 ? (
-              <div style={{ padding: '30px', textAlign: 'center', fontSize: '12px', color: t.text4 }}>No E-Way Bills generated in this window.</div>
-            ) : (
-              <div style={{ overflowX: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px' }}>
-                  <thead>
-                    <tr style={{ background: t.card2 || t.card }}>
-                      {['Generated', 'TMP_PRF', 'EWB No', 'Branch → Dest', 'Bills', 'Net Wt', 'Value', 'By'].map(h => (
-                        <th key={h} style={{ padding: '8px 12px', textAlign: 'left', fontSize: '9px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', borderBottom: `1px solid ${t.border}`, fontWeight: 600, whiteSpace: 'nowrap' }}>{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {report.ewbs.map(r => (
-                      <tr key={r.id} style={{ borderBottom: `1px solid ${t.border}30` }}>
-                        <td style={{ padding: '7px 12px', color: t.text3, fontFamily: 'monospace', whiteSpace: 'nowrap' }}>{fmtTS(r.ewb_generated_at)}</td>
-                        <td style={{ padding: '7px 12px', color: t.gold, fontFamily: 'monospace', fontWeight: 600 }}>{r.tmp_prf_no}</td>
-                        <td style={{ padding: '7px 12px', color: t.green, fontFamily: 'monospace' }}>{r.eway_bill_no}</td>
-                        <td style={{ padding: '7px 12px', color: t.text2 }}>{r.branch_name} <span style={{ color: t.text4 }}>→</span> {r.movement_type === 'INTERNAL' ? r.dest_branch : 'HO'}</td>
-                        <td style={{ padding: '7px 12px', color: t.text2, textAlign: 'right' }}>{r.total_bills}</td>
-                        <td style={{ padding: '7px 12px', color: t.gold, textAlign: 'right', fontFamily: 'monospace' }}>{fmtWt(r.total_net_wt)}</td>
-                        <td style={{ padding: '7px 12px', color: t.blue, textAlign: 'right', fontFamily: 'monospace' }}>₹{fmt(Math.round(r.total_amount || r.total_gross_value || 0))}</td>
-                        <td style={{ padding: '7px 12px', color: t.text3, fontSize: '10px' }}>{r.generated_by || '—'}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-
-          {/* E-Invoice section */}
-          <div style={card}>
-            <div style={{ padding: '10px 16px', borderBottom: `1px solid ${t.border}`, display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span style={{ fontSize: '9px', color: t.purple, background: `${t.purple}15`, borderRadius: '4px', padding: '2px 7px', fontWeight: 700, letterSpacing: '.04em' }}>E-INV</span>
-              <span style={{ fontSize: '12px', color: t.text2, fontWeight: 600 }}>E-Invoices generated</span>
-              <span style={{ fontSize: '11px', color: t.text4 }}>{report.einvoices.length} doc{report.einvoices.length === 1 ? '' : 's'}</span>
-            </div>
-            {report.einvoices.length === 0 ? (
-              <div style={{ padding: '30px', textAlign: 'center', fontSize: '12px', color: t.text4 }}>No E-Invoices generated in this window.</div>
-            ) : (
-              <div style={{ overflowX: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px' }}>
-                  <thead>
-                    <tr style={{ background: t.card2 || t.card }}>
-                      {['Generated', 'Invoice No', 'TMP_PRF', 'IRN (truncated)', 'Branch → Dest', 'Bills', 'Net Wt', 'Value', 'By'].map(h => (
-                        <th key={h} style={{ padding: '8px 12px', textAlign: 'left', fontSize: '9px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', borderBottom: `1px solid ${t.border}`, fontWeight: 600, whiteSpace: 'nowrap' }}>{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {report.einvoices.map(r => (
-                      <tr key={r.id} style={{ borderBottom: `1px solid ${t.border}30` }}>
-                        <td style={{ padding: '7px 12px', color: t.text3, fontFamily: 'monospace', whiteSpace: 'nowrap' }}>{fmtTS(r.einvoice_generated_at)}</td>
-                        <td style={{ padding: '7px 12px', color: t.purple, fontFamily: 'monospace', fontWeight: 700 }}>{r.einvoice_doc_no || '—'}</td>
-                        <td style={{ padding: '7px 12px', color: t.gold, fontFamily: 'monospace', fontWeight: 600 }}>{r.tmp_prf_no}</td>
-                        <td style={{ padding: '7px 12px', color: t.text3, fontFamily: 'monospace', fontSize: '10px' }} title={r.irn}>{r.irn ? r.irn.slice(0, 16) + '…' : '—'}</td>
-                        <td style={{ padding: '7px 12px', color: t.text2 }}>{r.branch_name} <span style={{ color: t.text4 }}>→</span> HO</td>
-                        <td style={{ padding: '7px 12px', color: t.text2, textAlign: 'right' }}>{r.total_bills}</td>
-                        <td style={{ padding: '7px 12px', color: t.gold, textAlign: 'right', fontFamily: 'monospace' }}>{fmtWt(r.total_net_wt)}</td>
-                        <td style={{ padding: '7px 12px', color: t.blue, textAlign: 'right', fontFamily: 'monospace' }}>₹{fmt(Math.round(r.total_amount || r.total_gross_value || 0))}</td>
-                        <td style={{ padding: '7px 12px', color: t.text3, fontSize: '10px' }}>{r.generated_by || '—'}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-        </div>
+        <ReportsTab
+          t={t} card={card}
+          report={report}
+          reportFrom={reportFrom} setReportFrom={setReportFrom}
+          reportTo={reportTo}     setReportTo={setReportTo}
+          fetchReport={fetchReport}
+        />
       ) : tab === 'settings' ? (
         /* Settings — E-Invoice sequences + state GSTINs + when-to-generate notes */
         <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
@@ -1404,6 +1311,281 @@ function PreviewModal({ state, t, onClose, onConfirm }) {
 
 // WorkflowStrip + DocAuditPanel are imported from ./workflowParts so they
 // stay in lockstep between this view and ConsignmentData.
+
+// Reports tab — date-range picker with quick presets, KPI summary band,
+// EWB + E-Invoice tables with totals row + CSV export. Heavy enough to
+// extract into its own component so the parent doesn't get unwieldy.
+function ReportsTab({ t, card, report, reportFrom, setReportFrom, reportTo, setReportTo, fetchReport }) {
+  // Indian-FY-aware date helpers — operate on YYYY-MM-DD strings shifted to IST
+  // so the picker presets line up with the operations team's calendar day.
+  const istDateStr = (d) => new Date(d.getTime() + 19800000).toISOString().slice(0, 10)
+  const today      = istDateStr(new Date())
+  const yesterday  = istDateStr(new Date(Date.now() - 86400000))
+  const last7      = istDateStr(new Date(Date.now() - 6 * 86400000))
+  const monthStart = today.slice(0, 8) + '01'
+  // FY 26-27 = Apr 2026 → Mar 2027. Generic: if current month >= April, FY
+  // started this calendar year; else last calendar year.
+  const now    = new Date()
+  const fyYear = now.getMonth() + 1 >= 4 ? now.getFullYear() : now.getFullYear() - 1
+  const fyStart = `${fyYear}-04-01`
+
+  const presets = [
+    { label: 'Today',       from: today,      to: today },
+    { label: 'Yesterday',   from: yesterday,  to: yesterday },
+    { label: 'Last 7 days', from: last7,      to: today },
+    { label: 'This month',  from: monthStart, to: today },
+    { label: 'This FY',     from: fyStart,    to: today },
+  ]
+  const isPresetActive = (p) => p.from === reportFrom && p.to === reportTo
+  const applyPreset = (p) => {
+    setReportFrom(p.from); setReportTo(p.to)
+    fetchReport(p.from, p.to, false)
+  }
+
+  // Aggregate totals for the KPI band + totals rows.
+  const sum = (arr, k) => arr.reduce((s, r) => s + (Number(r[k]) || 0), 0)
+  const ewbBills    = sum(report.ewbs, 'total_bills')
+  const ewbWt       = sum(report.ewbs, 'total_net_wt')
+  const ewbVal      = sum(report.ewbs.map(r => ({ v: r.total_amount || r.total_gross_value || 0 })), 'v')
+  const eiBills     = sum(report.einvoices, 'total_bills')
+  const eiWt        = sum(report.einvoices, 'total_net_wt')
+  const eiVal       = sum(report.einvoices.map(r => ({ v: r.total_amount || r.total_gross_value || 0 })), 'v')
+
+  // Per-state E-Invoice breakdown — useful for quick state-level reconciliation.
+  const eiByState = report.einvoices.reduce((acc, r) => {
+    const st = (r.einvoice_doc_no || '').match(/^WG\/(KL|TS|AP)\//)?.[1] || '??'
+    if (!acc[st]) acc[st] = { count: 0, wt: 0, val: 0 }
+    acc[st].count += 1
+    acc[st].wt    += Number(r.total_net_wt || 0)
+    acc[st].val   += Number(r.total_amount || r.total_gross_value || 0)
+    return acc
+  }, {})
+
+  // CSV export helper — quote any field containing comma/quote/newline.
+  const toCsv = (rows) => {
+    if (!rows.length) return ''
+    const headers = Object.keys(rows[0])
+    const escape = (v) => {
+      const s = v == null ? '' : String(v)
+      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
+    }
+    return [headers.join(','), ...rows.map(r => headers.map(h => escape(r[h])).join(','))].join('\n')
+  }
+  const downloadCsv = (filename, rows) => {
+    const csv  = toCsv(rows)
+    const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' })  // BOM so Excel detects UTF-8
+    const url  = URL.createObjectURL(blob)
+    const a    = document.createElement('a')
+    a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove()
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
+  }
+  const dateTag = reportFrom === reportTo ? reportFrom : `${reportFrom}_to_${reportTo}`
+  const exportEwbs = () => downloadCsv(`EWB_${dateTag}.csv`, report.ewbs.map(r => ({
+    Generated:    r.ewb_generated_at,
+    TMP_PRF:      r.tmp_prf_no,
+    'EWB No':     r.eway_bill_no,
+    Branch:       r.branch_name,
+    Destination:  r.movement_type === 'INTERNAL' ? r.dest_branch : 'HO',
+    Bills:        r.total_bills,
+    'Net Wt (g)': Number(r.total_net_wt || 0).toFixed(3),
+    Value:        Math.round(r.total_amount || r.total_gross_value || 0),
+    'Generated By': r.generated_by || '',
+  })))
+  const exportEinv = () => downloadCsv(`EInvoice_${dateTag}.csv`, report.einvoices.map(r => ({
+    Generated:      r.einvoice_generated_at,
+    'Invoice No':   r.einvoice_doc_no || '',
+    TMP_PRF:        r.tmp_prf_no,
+    IRN:            r.irn || '',
+    Branch:         r.branch_name,
+    Destination:    'HO',
+    Bills:          r.total_bills,
+    'Net Wt (g)':   Number(r.total_net_wt || 0).toFixed(3),
+    Value:          Math.round(r.total_amount || r.total_gross_value || 0),
+    'Generated By': r.generated_by || '',
+  })))
+
+  // Stable cell styles
+  const th = { padding: '8px 12px', textAlign: 'left', fontSize: '9px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', borderBottom: `1px solid ${t.border}`, fontWeight: 600, whiteSpace: 'nowrap' }
+  const td = { padding: '7px 12px', verticalAlign: 'middle' }
+  const totalsTd = { ...td, borderTop: `1px solid ${t.border}`, background: `${t.gold}08`, fontWeight: 700 }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+      {/* Date controls — presets + range pickers + run + summary */}
+      <div style={{ ...card, padding: '12px 16px', display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+          {presets.map(p => {
+            const active = isPresetActive(p)
+            return (
+              <button key={p.label} onClick={() => applyPreset(p)}
+                style={{
+                  background: active ? t.gold : 'transparent',
+                  color:      active ? '#1a0a00' : t.text3,
+                  border:     `1px solid ${active ? t.gold : t.border}`,
+                  borderRadius: '14px', padding: '4px 12px', fontSize: '11px', fontWeight: 600, cursor: 'pointer',
+                }}>
+                {p.label}
+              </button>
+            )
+          })}
+        </div>
+        <div style={{ width: '1px', height: '20px', background: t.border }} />
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <span style={{ fontSize: '10px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase' }}>From</span>
+          <input type="date" value={reportFrom} onChange={e => setReportFrom(e.target.value)} max={today}
+            style={{ background: t.card2 || t.card, border: `1px solid ${t.border}`, borderRadius: '6px', padding: '5px 8px', fontSize: '12px', color: t.text1, fontFamily: 'monospace' }} />
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <span style={{ fontSize: '10px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase' }}>To</span>
+          <input type="date" value={reportTo} onChange={e => setReportTo(e.target.value)} max={today}
+            style={{ background: t.card2 || t.card, border: `1px solid ${t.border}`, borderRadius: '6px', padding: '5px 8px', fontSize: '12px', color: t.text1, fontFamily: 'monospace' }} />
+        </div>
+        <button onClick={() => fetchReport(reportFrom, reportTo, false)} style={{ background: t.gold, color: '#1a0a00', border: 'none', borderRadius: '7px', padding: '6px 14px', fontSize: '11px', fontWeight: 700, cursor: 'pointer' }}>
+          Run report
+        </button>
+      </div>
+
+      {/* KPI summary band */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '1px', background: t.border, borderRadius: '10px', overflow: 'hidden' }}>
+        <ReportKpi t={t} label="Total docs"    primary={`${report.ewbs.length + report.einvoices.length}`} sub={`${report.ewbs.length} EWB · ${report.einvoices.length} E-Inv`} accent={t.gold} />
+        <ReportKpi t={t} label="Total bills"   primary={`${ewbBills + eiBills}`} sub={`${ewbBills} EWB · ${eiBills} E-Inv`} accent={t.text2} />
+        <ReportKpi t={t} label="Net weight"    primary={`${(ewbWt + eiWt).toFixed(3)}g`} sub={`${ewbWt.toFixed(3)} EWB · ${eiWt.toFixed(3)} E-Inv`} accent={t.gold} mono />
+        <ReportKpi t={t} label="Total value"   primary={`₹${fmt(Math.round(ewbVal + eiVal))}`} sub={`EWB ₹${fmt(Math.round(ewbVal))} · E-Inv ₹${fmt(Math.round(eiVal))}`} accent={t.blue} mono />
+        {/* Per-state E-Invoice mini-breakdown — only show if any E-Invoices exist */}
+        {Object.keys(eiByState).length > 0 && (
+          <ReportKpi t={t} label="By state (E-Inv)"
+            primary={Object.entries(eiByState).map(([s, v]) => `${s}:${v.count}`).join(' · ')}
+            sub={Object.entries(eiByState).map(([s, v]) => `${s} ₹${fmt(Math.round(v.val))}`).join(' · ')}
+            accent={t.purple} small />
+        )}
+      </div>
+
+      {/* EWB section */}
+      <div style={card}>
+        <div style={{ padding: '10px 16px', borderBottom: `1px solid ${t.border}`, display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <span style={{ fontSize: '9px', color: t.green, background: `${t.green}15`, borderRadius: '4px', padding: '2px 7px', fontWeight: 700, letterSpacing: '.04em' }}>EWB</span>
+          <span style={{ fontSize: '12px', color: t.text2, fontWeight: 600 }}>E-Way Bills generated</span>
+          <span style={{ fontSize: '11px', color: t.text4 }}>{report.ewbs.length} doc{report.ewbs.length === 1 ? '' : 's'}</span>
+          <div style={{ flex: 1 }} />
+          {report.ewbs.length > 0 && (
+            <button onClick={exportEwbs} style={{ background: 'transparent', color: t.text3, border: `1px solid ${t.border}`, borderRadius: '6px', padding: '4px 10px', fontSize: '11px', fontWeight: 600, cursor: 'pointer' }}>
+              Export CSV
+            </button>
+          )}
+        </div>
+        {report.ewbs.length === 0 ? (
+          <div style={{ padding: '30px', textAlign: 'center', fontSize: '12px', color: t.text4 }}>No E-Way Bills generated in this window.</div>
+        ) : (
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px' }}>
+              <thead>
+                <tr style={{ background: t.card2 || t.card }}>
+                  {['Generated', 'TMP_PRF', 'EWB No', 'Branch → Dest', 'Bills', 'Net Wt', 'Value', 'By'].map(h => <th key={h} style={th}>{h}</th>)}
+                </tr>
+              </thead>
+              <tbody>
+                {report.ewbs.map((r, i) => (
+                  <tr key={r.id} style={{ borderBottom: `1px solid ${t.border}30`, background: i % 2 ? `${t.text4}05` : 'transparent' }}>
+                    <td style={{ ...td, color: t.text3, fontFamily: 'monospace', whiteSpace: 'nowrap' }}>{fmtTS(r.ewb_generated_at)}</td>
+                    <td style={{ ...td, color: t.gold, fontFamily: 'monospace', fontWeight: 600 }}>{r.tmp_prf_no}</td>
+                    <td style={{ ...td, color: t.green, fontFamily: 'monospace' }}>{r.eway_bill_no}</td>
+                    <td style={{ ...td, color: t.text2 }}>{r.branch_name} <span style={{ color: t.text4 }}>→</span> {r.movement_type === 'INTERNAL' ? r.dest_branch : 'HO'}</td>
+                    <td style={{ ...td, color: t.text2, textAlign: 'right' }}>{r.total_bills}</td>
+                    <td style={{ ...td, color: t.gold, textAlign: 'right', fontFamily: 'monospace' }}>{fmtWt(r.total_net_wt)}</td>
+                    <td style={{ ...td, color: t.blue, textAlign: 'right', fontFamily: 'monospace' }}>₹{fmt(Math.round(r.total_amount || r.total_gross_value || 0))}</td>
+                    <td style={{ ...td, color: t.text3, fontSize: '10px' }}>{r.generated_by || '—'}</td>
+                  </tr>
+                ))}
+                {/* Totals row */}
+                <tr>
+                  <td style={{ ...totalsTd, color: t.text3, fontSize: '10px', letterSpacing: '.1em', textTransform: 'uppercase' }}>Total</td>
+                  <td style={totalsTd} colSpan={3} />
+                  <td style={{ ...totalsTd, color: t.text1, textAlign: 'right' }}>{ewbBills}</td>
+                  <td style={{ ...totalsTd, color: t.gold, textAlign: 'right', fontFamily: 'monospace' }}>{fmtWt(ewbWt)}</td>
+                  <td style={{ ...totalsTd, color: t.blue, textAlign: 'right', fontFamily: 'monospace' }}>₹{fmt(Math.round(ewbVal))}</td>
+                  <td style={totalsTd} />
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* E-Invoice section */}
+      <div style={card}>
+        <div style={{ padding: '10px 16px', borderBottom: `1px solid ${t.border}`, display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <span style={{ fontSize: '9px', color: t.purple, background: `${t.purple}15`, borderRadius: '4px', padding: '2px 7px', fontWeight: 700, letterSpacing: '.04em' }}>E-INV</span>
+          <span style={{ fontSize: '12px', color: t.text2, fontWeight: 600 }}>E-Invoices generated</span>
+          <span style={{ fontSize: '11px', color: t.text4 }}>{report.einvoices.length} doc{report.einvoices.length === 1 ? '' : 's'}</span>
+          <div style={{ flex: 1 }} />
+          {report.einvoices.length > 0 && (
+            <button onClick={exportEinv} style={{ background: 'transparent', color: t.text3, border: `1px solid ${t.border}`, borderRadius: '6px', padding: '4px 10px', fontSize: '11px', fontWeight: 600, cursor: 'pointer' }}>
+              Export CSV
+            </button>
+          )}
+        </div>
+        {report.einvoices.length === 0 ? (
+          <div style={{ padding: '30px', textAlign: 'center', fontSize: '12px', color: t.text4 }}>No E-Invoices generated in this window.</div>
+        ) : (
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px' }}>
+              <thead>
+                <tr style={{ background: t.card2 || t.card }}>
+                  {['Generated', 'Invoice No', 'State', 'TMP_PRF', 'Branch → Dest', 'Bills', 'Net Wt', 'Value', 'By'].map(h => <th key={h} style={th}>{h}</th>)}
+                </tr>
+              </thead>
+              <tbody>
+                {report.einvoices.map((r, i) => {
+                  const stateMatch = (r.einvoice_doc_no || '').match(/^WG\/(KL|TS|AP)\//)
+                  const stateCode  = stateMatch?.[1] || ''
+                  return (
+                    <tr key={r.id} style={{ borderBottom: `1px solid ${t.border}30`, background: i % 2 ? `${t.text4}05` : 'transparent' }} title={r.irn ? `IRN: ${r.irn}` : ''}>
+                      <td style={{ ...td, color: t.text3, fontFamily: 'monospace', whiteSpace: 'nowrap' }}>{fmtTS(r.einvoice_generated_at)}</td>
+                      <td style={{ ...td, color: t.purple, fontFamily: 'monospace', fontWeight: 700 }}>{r.einvoice_doc_no || '—'}</td>
+                      <td style={td}>
+                        {stateCode && (
+                          <span style={{ fontSize: '9px', color: t.purple, background: `${t.purple}15`, borderRadius: '4px', padding: '2px 6px', fontWeight: 700, letterSpacing: '.04em' }}>
+                            {stateCode}
+                          </span>
+                        )}
+                      </td>
+                      <td style={{ ...td, color: t.gold, fontFamily: 'monospace', fontWeight: 600 }}>{r.tmp_prf_no}</td>
+                      <td style={{ ...td, color: t.text2 }}>{r.branch_name} <span style={{ color: t.text4 }}>→</span> HO</td>
+                      <td style={{ ...td, color: t.text2, textAlign: 'right' }}>{r.total_bills}</td>
+                      <td style={{ ...td, color: t.gold, textAlign: 'right', fontFamily: 'monospace' }}>{fmtWt(r.total_net_wt)}</td>
+                      <td style={{ ...td, color: t.blue, textAlign: 'right', fontFamily: 'monospace' }}>₹{fmt(Math.round(r.total_amount || r.total_gross_value || 0))}</td>
+                      <td style={{ ...td, color: t.text3, fontSize: '10px' }}>{r.generated_by || '—'}</td>
+                    </tr>
+                  )
+                })}
+                {/* Totals row */}
+                <tr>
+                  <td style={{ ...totalsTd, color: t.text3, fontSize: '10px', letterSpacing: '.1em', textTransform: 'uppercase' }}>Total</td>
+                  <td style={totalsTd} colSpan={4} />
+                  <td style={{ ...totalsTd, color: t.text1, textAlign: 'right' }}>{eiBills}</td>
+                  <td style={{ ...totalsTd, color: t.gold, textAlign: 'right', fontFamily: 'monospace' }}>{fmtWt(eiWt)}</td>
+                  <td style={{ ...totalsTd, color: t.blue, textAlign: 'right', fontFamily: 'monospace' }}>₹{fmt(Math.round(eiVal))}</td>
+                  <td style={totalsTd} />
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// Single KPI tile inside the Reports summary band.
+function ReportKpi({ t, label, primary, sub, accent, mono, small }) {
+  return (
+    <div style={{ background: t.card, padding: '12px 14px' }}>
+      <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: '5px', fontWeight: 600 }}>{label}</div>
+      <div style={{ fontSize: small ? '12px' : '17px', color: accent || t.text1, fontWeight: 700, fontFamily: mono ? 'monospace' : 'inherit', letterSpacing: '.01em' }}>{primary}</div>
+      {sub && <div style={{ fontSize: '10px', color: t.text4, marginTop: '4px', fontFamily: 'monospace' }}>{sub}</div>}
+    </div>
+  )
+}
 
 // Settings → E-Invoice sequence row. Inline-editable last_seq with a Save
 // button. Showing 'next_no' inline lets the operator verify the new value
