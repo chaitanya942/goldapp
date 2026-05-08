@@ -394,7 +394,12 @@ export default function ConsignmentApprovals() {
       }
       showToast(`${type === 'ewb' ? 'E-Way Bill' : 'E-Invoice'} cancelled.`, 'success')
       setCancelModal(null)
-      fetchPending(true)
+      // Refresh whichever tab is active. Cancel auto-rejects the consignment,
+      // so the row leaves the current view (Pending or Approved) and lands in
+      // Rejected. Also refresh the Cancellations log on its tab.
+      if (tab === 'pending') fetchPending(true)
+      else if (tab === 'cancellations') fetchCancellations(true)
+      else fetchHistory(tab, true)
     } catch (e) {
       setCancelModal(m => m ? { ...m, busy: false, error: e.message } : null)
     }
@@ -775,10 +780,26 @@ export default function ConsignmentApprovals() {
                         E-Way Bill
                       </button>
                     )}
+                    {/* Cancel EWB on Approved tab — within 24h of generation. Cancelling
+                        auto-rejects the consignment and moves it to the Rejected tab. */}
+                    {isApproved && c.eway_bill_no && (
+                      <button onClick={() => openCancel(c, 'ewb')}
+                        title="Cancel this E-Way Bill on NIC (within 24h). Voids the consignment."
+                        style={{ background: 'transparent', border: `1px solid ${t.red}80`, borderRadius: '5px', padding: '2px 8px', fontSize: '10px', color: t.red, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                        Cancel EWB
+                      </button>
+                    )}
                     {c.irn && (
                       <button onClick={() => previewDoc(`/api/e-invoice/pdf?id=${c.id}`, `EInvoice-${c.tmp_prf_no}.pdf`, msg => showToast(msg, 'error'))}
                         style={{ background: 'transparent', border: 'none', padding: 0, fontSize: '10px', color: t.purple, fontWeight: 600, cursor: 'pointer', textDecoration: 'underline' }}>
                         E-Invoice
+                      </button>
+                    )}
+                    {isApproved && c.irn && (
+                      <button onClick={() => openCancel(c, 'irn')}
+                        title="Cancel this E-Invoice on IRP (within 24h) — or generate a Credit Note if past the window. Voids the consignment."
+                        style={{ background: 'transparent', border: `1px solid ${t.red}80`, borderRadius: '5px', padding: '2px 8px', fontSize: '10px', color: t.red, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                        Cancel E-Invoice
                       </button>
                     )}
                   </div>
