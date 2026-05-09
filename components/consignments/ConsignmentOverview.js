@@ -13,6 +13,10 @@ const REGION_ICONS = {
   'Kerala':            '🌴',
 }
 
+// Display order for the per-region flash cards. Anything not in this list
+// gets sorted alphabetically and appended (defensive for new regions).
+const REGION_ORDER = ['Rest of Karnataka', 'Kerala', 'Andhra Pradesh', 'Telangana']
+
 const fmt     = (n, d = 3) => n != null ? Number(n).toFixed(d) : '—'
 const fmtNum  = (n) => n != null ? Number(n).toLocaleString('en-IN') : '—'
 const fmtINR  = (n) => {
@@ -143,7 +147,14 @@ export default function ConsignmentOverview() {
   }
 
   // ── Region summary ────────────────────────────────────────────────────────
-  const regions = [...new Set(data.map(b => b.region).filter(Boolean))].sort()
+  // Custom order — Rest of Karnataka first, then Kerala / AP / Telangana.
+  // Anything outside the canonical order gets appended alphabetically so a
+  // newly-added region doesn't silently disappear.
+  const allRegions = [...new Set(data.map(b => b.region).filter(Boolean))]
+  const regions = [
+    ...REGION_ORDER.filter(r => allRegions.includes(r)),
+    ...allRegions.filter(r => !REGION_ORDER.includes(r)).sort(),
+  ]
   const regionStats = regions.reduce((acc, r) => {
     const bs = data.filter(b => b.region === r)
     const today_bills  = bs.reduce((s, b) => s + (b.today_bills   || 0), 0)
@@ -173,6 +184,9 @@ export default function ConsignmentOverview() {
   // Kerala branches without having to click the region card).
   const searchQ = (search || '').toLowerCase()
   const filtered = data
+    // Hide branches with zero stock — empty rows are noise. The flash cards
+    // above show 'X / Y branches' so the operator knows how many are hidden.
+    .filter(b => ((b.today_net_wt || 0) + (b.older_net_wt || 0)) > 0)
     .filter(b => !activeRegion || b.region === activeRegion)
     .filter(b => !searchQ || (b.branch_name || '').toLowerCase().includes(searchQ) || (b.region || '').toLowerCase().includes(searchQ))
     .filter(b => {
@@ -286,6 +300,7 @@ export default function ConsignmentOverview() {
             const allBills      = data.reduce((s, b) => s + (b.today_bills || 0) + (b.older_bills || 0), 0)
             const allNetWt      = data.reduce((s, b) => s + (b.today_net_wt || 0) + (b.older_net_wt || 0), 0)
             const allTodayBills = data.reduce((s, b) => s + (b.today_bills || 0), 0)
+            const activeBranches = data.filter(b => ((b.today_net_wt || 0) + (b.older_net_wt || 0)) > 0).length
             const w = fmtWtCard(allNetWt)
             const isActive = !activeRegion
             return (
@@ -311,7 +326,9 @@ export default function ConsignmentOverview() {
                   <span style={{ fontSize: '12px', fontWeight: 500, color: isActive ? t.gold : t.text3 }}>{w.unit}</span>
                 </div>
                 <div style={{ fontSize: '10px', color: t.text4, display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                  <span><strong style={{ color: t.text2 }}>{data.length}</strong> branches</span>
+                  <span title={`${activeBranches} of ${data.length} branches currently hold stock`}>
+                    <strong style={{ color: t.text2 }}>{activeBranches}</strong>/{data.length} branches
+                  </span>
                   <span style={{ color: t.border2 }}>·</span>
                   <span><strong style={{ color: t.text2 }}>{allBills}</strong> bills</span>
                   {allTodayBills > 0 && <><span style={{ color: t.border2 }}>·</span><span style={{ color: t.green, fontWeight: 600 }}>+{allTodayBills} today</span></>}
@@ -349,7 +366,9 @@ export default function ConsignmentOverview() {
                   <span style={{ fontSize: '12px', fontWeight: 500, color: active ? color : t.text3 }}>{w.unit}</span>
                 </div>
                 <div style={{ fontSize: '10px', color: t.text4, display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                  <span><strong style={{ color: t.text2 }}>{stats.active_branches || stats.branches}</strong> branches</span>
+                  <span title={`${stats.active_branches || 0} of ${stats.branches || 0} branches in this region currently hold stock`}>
+                    <strong style={{ color: t.text2 }}>{stats.active_branches || 0}</strong>/{stats.branches || 0} branches
+                  </span>
                   <span style={{ color: t.border2 }}>·</span>
                   <span><strong style={{ color: t.text2 }}>{stats.total_bills || 0}</strong> bills</span>
                   {stats.today_bills > 0 && <><span style={{ color: t.border2 }}>·</span><span style={{ color: t.green, fontWeight: 600 }}>+{stats.today_bills} today</span></>}
@@ -542,8 +561,6 @@ export default function ConsignmentOverview() {
 
                     {/* Pickup */}
                     <th style={{ ...thBase, textAlign: 'center' }}>Pickup</th>
-
-                    <th style={{ ...thBase, textAlign: 'center' }}>Action</th>
                   </tr>
 
                   {/* Totals row pinned to the top inside <thead> — the whole
@@ -582,7 +599,7 @@ export default function ConsignmentOverview() {
                     <td style={{ padding: '9px 14px', textAlign: 'right', fontSize: '12px', color: t.orange, fontFamily: 'monospace', fontWeight: 700, background: `${t.gold}14` }}>
                       {grandOlderVal ? fmtINR(grandOlderVal) : '—'}
                     </td>
-                    <td colSpan={4} style={{ padding: '9px 14px', background: `${t.gold}14` }} />
+                    <td colSpan={3} style={{ padding: '9px 14px', background: `${t.gold}14` }} />
                   </tr>
                 </thead>
                 <tbody>
@@ -605,13 +622,31 @@ export default function ConsignmentOverview() {
 
                     return (
                       <tr key={b.branch_name}
+                        title={`Click to create a consignment from ${b.branch_name}`}
+                        onClick={() => {
+                          setConsignmentDeepLink({ branch: b.branch_name, region: b.region })
+                          setActiveNav('consignment-data')
+                        }}
                         style={{
                           borderBottom: `1px solid ${t.border}20`,
                           borderLeft:   `3px solid ${urgentBorder}`,
                           background:   urgentBg,
                           transition:   'background .1s',
+                          cursor:       'pointer',
                         }}
-                        onMouseEnter={e => e.currentTarget.style.background = urgentTier ? urgentBg : `${t.gold}06`}
+                        onMouseEnter={e => {
+                          e.currentTarget.style.background = urgentTier ? urgentBg : `${t.gold}06`
+                          // Warm the picker cache the moment the user shows
+                          // intent. Prefetch the same two requests the bill
+                          // picker fires on mount, so by the time it lands
+                          // the browser cache already has the response.
+                          if (!e.currentTarget.dataset.prefetched) {
+                            e.currentTarget.dataset.prefetched = '1'
+                            const enc = encodeURIComponent(b.branch_name)
+                            prefetch(`/api/consignments?action=stock_in_branch&branch=${enc}`)
+                            prefetch(`/api/consignments?action=transfer_history&branch=${enc}`)
+                          }
+                        }}
                         onMouseLeave={e => e.currentTarget.style.background = urgentBg}>
 
                         {/* Rank */}
@@ -716,36 +751,6 @@ export default function ConsignmentOverview() {
                             : <span style={{ fontSize: '11px', color: t.text4 }}>—</span>}
                         </td>
 
-                        {/* Action */}
-                        <td style={{ padding: '11px 14px', textAlign: 'center' }}>
-                          <button
-                            onClick={() => {
-                              setConsignmentDeepLink({ branch: b.branch_name, region: b.region })
-                              setActiveNav('consignment-data')
-                            }}
-                            // Warm the cache the moment the user shows intent.
-                            // The bill picker fires the same two requests when
-                            // mounted, so by the time it actually mounts the
-                            // browser cache already has the response. Saves
-                            // 200-800ms perceived latency on the click.
-                            // prefetch() stores the in-flight Promise so the
-                            // picker's authedFetch() reuses it instead of
-                            // triggering a duplicate round trip.
-                            onMouseEnter={e => {
-                              e.currentTarget.style.background = `${t.gold}30`
-                              e.currentTarget.style.borderColor = t.gold
-                              if (!e.currentTarget.dataset.prefetched) {
-                                e.currentTarget.dataset.prefetched = '1'
-                                const enc = encodeURIComponent(b.branch_name)
-                                prefetch(`/api/consignments?action=stock_in_branch&branch=${enc}`)
-                                prefetch(`/api/consignments?action=transfer_history&branch=${enc}`)
-                              }
-                            }}
-                            onMouseLeave={e => { e.currentTarget.style.background = `${t.gold}18`; e.currentTarget.style.borderColor = `${t.gold}50` }}
-                            style={{ background: `${t.gold}18`, border: `1px solid ${t.gold}50`, borderRadius: '7px', padding: '5px 12px', fontSize: '11px', color: t.gold, cursor: 'pointer', fontWeight: 600, whiteSpace: 'nowrap', transition: 'all .1s' }}>
-                            Move →
-                          </button>
-                        </td>
                       </tr>
                     )
                   })}
