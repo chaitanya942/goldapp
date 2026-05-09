@@ -11,6 +11,7 @@ import {
 } from '../../../lib/consignmentUtils'
 import { logConsignmentEvent } from '../../../lib/consignmentLog'
 import { requireAuth, ROLE_GROUPS, getRegionFilter, resolveAllowedBranchNames } from '../../../lib/apiAuth'
+import { istToday } from '../../../lib/dateIst'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
@@ -437,9 +438,8 @@ export async function GET(req) {
   // row per generated document (a single consignment with both EWB and IRN
   // appears twice — once per doc type) so the table is flat and exportable.
   if (action === 'docs_generated_report') {
-    // YYYY-MM-DD strings; default to today (IST). Inclusive range.
-    const istToday = new Date(Date.now() + 19800000).toISOString().slice(0, 10)
-    const fromStr  = searchParams.get('from') || istToday
+    const today    = istToday()
+    const fromStr  = searchParams.get('from') || today
     const toStr    = searchParams.get('to')   || fromStr
     const fromIso  = `${fromStr}T00:00:00+05:30`
     const toIso    = `${toStr}T23:59:59+05:30`
@@ -521,8 +521,8 @@ export async function GET(req) {
   //     shown as the 'in 9m' pill on Approved tab cards). Computed across
   //     approved + rejected decisions; cancellations are pure counts.
   if (action === 'user_efficiency') {
-    const istToday = new Date(Date.now() + 19800000).toISOString().slice(0, 10)
-    const fromStr  = searchParams.get('from') || istToday
+    const today    = istToday()
+    const fromStr  = searchParams.get('from') || today
     const toStr    = searchParams.get('to')   || fromStr
     const fromIso  = `${fromStr}T00:00:00+05:30`
     const toIso    = `${toStr}T23:59:59+05:30`
@@ -1029,12 +1029,10 @@ export async function POST(req) {
     // Bill-quality validation. Bills with missing/zero weight or amount break
     // the EWB and E-Invoice payloads silently — NIC accepts the request but
     // the resulting document is unusable for transport. Catch it here.
-    const todayIso = new Date().toISOString().slice(0, 10)
+    const todayIso = istToday()
     const qualityErrors = []
     for (const p of purchaseCheck) {
       const tag = p.bill_no || `bill ${p.id}`
-      // Gross weight is the canonical figure used in challan/EWB/E-Invoice.
-      // Fall back to net_weight only for legacy rows that pre-date the gross_weight column.
       const wt = Number(p.gross_weight ?? p.net_weight ?? 0)
       if (wt <= 0) qualityErrors.push(`${tag}: weight is 0 or missing`)
       if (Number(p.total_amount || 0) <= 0) qualityErrors.push(`${tag}: amount is 0 or missing`)

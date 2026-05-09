@@ -14,6 +14,7 @@ import ReportCrmInsights from './ReportCrmInsights'
 import ReportComparePeriods from './ReportComparePeriods'
 import ReportUnderperformers from './ReportUnderperformers'
 import { authedFetch } from '../../../lib/authedFetch'
+import { istNow, istStr } from '../../../lib/dateIst'
 
 const SECTIONS = [
   { key: 'charts',         label: 'Trends',         icon: '↗' },
@@ -24,9 +25,6 @@ const SECTIONS = [
   { key: 'compare',        label: 'Compare',        icon: '⇄' },
   { key: 'crm',            label: 'CRM Insights',   icon: '⚡' },
 ]
-
-const istNow = () => new Date(Date.now() + 5.5 * 60 * 60 * 1000)
-const istStr = (d = istNow()) => d.toISOString().split('T')[0]
 
 const EXPORT_COLS = [
   { key: 'purchase_date',             label: 'Date' },

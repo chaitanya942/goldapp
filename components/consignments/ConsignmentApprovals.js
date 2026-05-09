@@ -10,6 +10,7 @@ import { openConfirm, openPrompt } from '../ui/ConfirmDialog'
 import { authedFetch } from '../../lib/authedFetch'
 import { CONSIGNMENT_THEMES as THEMES } from '../../lib/consignmentTheme'
 import { WorkflowStrip, DocAuditPanel } from './workflowParts'
+import { istToday, istDaysAgo } from '../../lib/dateIst'
 
 const fmt   = (n) => n != null ? Number(n).toLocaleString('en-IN') : '—'
 const fmtWt = (n) => n != null ? `${Number(n).toFixed(3)}g` : '—'
@@ -167,13 +168,11 @@ export default function ConsignmentApprovals() {
   const [history, setHistory] = useState([])  // approved or rejected, depending on tab
   const [cancellations, setCancellations] = useState([])  // ewb_cancelled / einvoice_cancelled events
   const [report,        setReport]        = useState({ ewbs: [], einvoices: [] })
-  const [reportFrom,    setReportFrom]    = useState(() => new Date(Date.now() + 19800000).toISOString().slice(0, 10))
-  const [reportTo,      setReportTo]      = useState(() => new Date(Date.now() + 19800000).toISOString().slice(0, 10))
+  const [reportFrom,    setReportFrom]    = useState(() => istToday())
+  const [reportTo,      setReportTo]      = useState(() => istToday())
   const [efficiency,    setEfficiency]    = useState({ users: [] })
-  const [effFrom,       setEffFrom]       = useState(() => {
-    const d = new Date(Date.now() + 19800000); d.setDate(d.getDate() - 6); return d.toISOString().slice(0, 10)
-  })
-  const [effTo,         setEffTo]         = useState(() => new Date(Date.now() + 19800000).toISOString().slice(0, 10))
+  const [effFrom,       setEffFrom]       = useState(() => istDaysAgo(6))
+  const [effTo,         setEffTo]         = useState(() => istToday())
   const [settings,      setSettings]      = useState(null)
   const [settingsBusy,  setSettingsBusy]  = useState(null)  // 'seq:KL' | 'gstin:KA' etc.
   const [settingsToast, setSettingsToast] = useState(null)
@@ -1299,12 +1298,9 @@ function PreviewModal({ state, t, onClose, onConfirm }) {
 // EWB + E-Invoice tables with totals row + CSV export. Heavy enough to
 // extract into its own component so the parent doesn't get unwieldy.
 function ReportsTab({ t, card, report, reportFrom, setReportFrom, reportTo, setReportTo, fetchReport }) {
-  // Indian-FY-aware date helpers — operate on YYYY-MM-DD strings shifted to IST
-  // so the picker presets line up with the operations team's calendar day.
-  const istDateStr = (d) => new Date(d.getTime() + 19800000).toISOString().slice(0, 10)
-  const today      = istDateStr(new Date())
-  const yesterday  = istDateStr(new Date(Date.now() - 86400000))
-  const last7      = istDateStr(new Date(Date.now() - 6 * 86400000))
+  const today      = istToday()
+  const yesterday  = istDaysAgo(1)
+  const last7      = istDaysAgo(6)
   const monthStart = today.slice(0, 8) + '01'
   // FY 26-27 = Apr 2026 → Mar 2027. Generic: if current month >= April, FY
   // started this calendar year; else last calendar year.
@@ -1935,11 +1931,9 @@ function BarCell({ t, count, pct, accent, td }) {
 }
 
 function EfficiencyTab({ t, card, users, from, setFrom, to, setTo, fetchEfficiency }) {
-  // Reuse the same date preset logic as Reports.
-  const istDateStr = (d) => new Date(d.getTime() + 19800000).toISOString().slice(0, 10)
-  const today      = istDateStr(new Date())
-  const yesterday  = istDateStr(new Date(Date.now() - 86400000))
-  const last7      = istDateStr(new Date(Date.now() - 6 * 86400000))
+  const today      = istToday()
+  const yesterday  = istDaysAgo(1)
+  const last7      = istDaysAgo(6)
   const monthStart = today.slice(0, 8) + '01'
   const now        = new Date()
   const fyYear     = now.getMonth() + 1 >= 4 ? now.getFullYear() : now.getFullYear() - 1

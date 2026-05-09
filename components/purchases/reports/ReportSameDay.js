@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../../../lib/supabase'
 import { fmt, fmtVal, getStyles } from './reportUtils'
+import { istToday } from '../../../lib/dateIst'
 
 const DOW_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
 
@@ -14,12 +15,6 @@ function useMobile() {
     return () => window.removeEventListener('resize', check)
   }, [])
   return m
-}
-
-// IST today string
-const istToday = () => {
-  const d = new Date(Date.now() + 5.5 * 60 * 60 * 1000)
-  return d.toISOString().split('T')[0]
 }
 
 // Get DOW from a yyyy-mm-dd string (local, no timezone shift)

@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom'
 import { supabase } from '../../lib/supabase'
 import { useApp } from '../../lib/context'
 import { authedFetch } from '../../lib/authedFetch'
+import { istToday as today } from '../../lib/dateIst'
 
 const T = {
   dark: {
@@ -40,7 +41,6 @@ const fmt  = (n, d = 2) => n != null ? Number(n).toLocaleString('en-IN', { maxim
 const fmtSmart = (n) => n != null ? Number(n).toLocaleString('en-IN', { maximumFractionDigits: 4, minimumFractionDigits: 0 }) : '—'
 const fmtW = (n) => n != null ? `${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 4, minimumFractionDigits: 2 })}g` : '—'
 const fmtV = (n) => n != null ? `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 2, minimumFractionDigits: 2 })}` : '—'
-const today = () => new Date().toISOString().slice(0, 10)
 const fmtDate = (d) => { try { return new Date(d + 'T00:00:00').toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) } catch { return d } }
 
 function allocateGold(quotas, bars, targetDate) {

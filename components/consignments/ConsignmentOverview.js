@@ -1,10 +1,11 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useApp, useRegionAccess } from '../../lib/context'
 import GoldSpinner from '../ui/GoldSpinner'
 import { authedFetch, prefetch } from '../../lib/authedFetch'
 import { CONSIGNMENT_THEMES as THEMES, REGION_COLORS, useMobile } from '../../lib/consignmentTheme'
+import { istToday } from '../../lib/dateIst'
 
 const REGION_ICONS = {
   'Rest of Karnataka': '🏛',
@@ -78,12 +79,49 @@ export default function ConsignmentOverview() {
   const [quickFilter,  setQuickFilter]  = useState('all')
   const [lastRefresh,  setLastRefresh]  = useState(null)
   const [tick,         setTick]         = useState(0)   // for live clock
+  // 'grouped' (default) collapses 73 branches into 4-5 region cards; 'flat' keeps
+  // the dense table for power users. Persisted to localStorage so the choice sticks.
+  const [viewMode, setViewMode] = useState(() => {
+    if (typeof window === 'undefined') return 'grouped'
+    return window.localStorage.getItem('cstock.viewMode') || 'grouped'
+  })
+  useEffect(() => {
+    if (typeof window !== 'undefined') window.localStorage.setItem('cstock.viewMode', viewMode)
+  }, [viewMode])
+  // Region cards default to expanded so the user immediately sees their branches;
+  // they can collapse a region to focus elsewhere. Set holds region names.
+  const [collapsedRegions, setCollapsedRegions] = useState(() => new Set())
+  // Track new-arrival rows for the pulse animation. A bill that lands in the
+  // 'today_bills' column between refreshes flashes briefly so the operator
+  // notices without staring at the table.
+  const [recentlyChanged, setRecentlyChanged] = useState(() => new Set())
+  const prevTodayRef = useRef(new Map())
 
   const fetchData = useCallback(async () => {
     setLoading(true)
     const res  = await authedFetch('/api/consignments?action=branch_overview')
     const json = await res.json()
-    setData(json.data || [])
+    const next = json.data || []
+    // Detect branches whose today_bills count rose since the last poll — flash
+    // them so the operator notices new arrivals without scanning every row.
+    // Use undefined as the "never seen" sentinel so first load doesn't light
+    // every branch and a 0 → 1 transition still pulses.
+    const prev = prevTodayRef.current
+    const isFirstLoad = prev.size === 0
+    const justChanged = new Set()
+    for (const row of next) {
+      const before = prev.get(row.branch_name)
+      const now = row.today_bills || 0
+      if (!isFirstLoad && before != null && now > before) {
+        justChanged.add(row.branch_name)
+      }
+      prev.set(row.branch_name, now)
+    }
+    if (justChanged.size) {
+      setRecentlyChanged(justChanged)
+      setTimeout(() => setRecentlyChanged(new Set()), 6000)
+    }
+    setData(next)
     setLastRefresh(new Date())
     setLoading(false)
   }, [])
@@ -138,10 +176,9 @@ export default function ConsignmentOverview() {
     const csv = lines.join('\n')
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
     const url  = URL.createObjectURL(blob)
-    const today = new Date().toISOString().slice(0, 10)
     const a = document.createElement('a')
     a.href = url
-    a.download = `branch-stock-overview_${today}.csv`
+    a.download = `branch-stock-overview_${istToday()}.csv`
     a.click()
     URL.revokeObjectURL(url)
   }
@@ -220,6 +257,21 @@ export default function ConsignmentOverview() {
       return (av - bv) * sortDir
     })
 
+  // ── Group filtered rows by region for the collapsible card view. Keys keep
+  // the canonical REGION_ORDER so cards render Karnataka → Kerala → AP → Telangana.
+  const groupedByRegion = regions
+    .map(r => ({ region: r, branches: filtered.filter(b => b.region === r) }))
+    .filter(g => g.branches.length > 0)
+
+  function toggleRegionCollapsed(r) {
+    setCollapsedRegions(prev => {
+      const next = new Set(prev)
+      if (next.has(r)) next.delete(r)
+      else             next.add(r)
+      return next
+    })
+  }
+
   // ── Grand totals ──────────────────────────────────────────────────────────
   const grandToday    = filtered.reduce((s, b) => s + (b.today_bills        || 0), 0)
   const grandTodayWt  = filtered.reduce((s, b) => s + (b.today_net_wt       || 0), 0)
@@ -267,6 +319,30 @@ export default function ConsignmentOverview() {
           </div>
         </div>
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          {/* View-mode segmented toggle. Default 'grouped' rolls 73 branches up
+              into ~4 region cards; 'flat' is the dense table for power users. */}
+          <div style={{ display: 'inline-flex', background: t.card2, border: `1px solid ${t.border}`, borderRadius: '8px', padding: '2px' }}>
+            {[
+              { key: 'grouped', label: 'Grouped', icon: '⬡' },
+              { key: 'flat',    label: 'Flat',    icon: '☰' },
+            ].map(v => {
+              const active = viewMode === v.key
+              return (
+                <button key={v.key} onClick={() => setViewMode(v.key)}
+                  title={v.key === 'grouped' ? 'Group branches by region (collapsible)' : 'Flat table view (sortable)'}
+                  style={{
+                    background: active ? `${t.gold}20` : 'transparent',
+                    color: active ? t.gold : t.text3,
+                    border: 'none', borderRadius: '6px',
+                    padding: '5px 11px', fontSize: '11px', fontWeight: 600,
+                    cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '5px',
+                    transition: 'all .12s',
+                  }}>
+                  <span style={{ fontSize: '12px' }}>{v.icon}</span>{v.label}
+                </button>
+              )
+            })}
+          </div>
           {(activeRegion || search) && (
             <button onClick={() => { setActiveRegion(null); setSearch('') }}
               style={{ background: 'transparent', border: `1px solid ${t.border2}`, borderRadius: '8px', padding: '7px 13px', fontSize: '11px', color: t.text3, cursor: 'pointer' }}>
@@ -490,8 +566,238 @@ export default function ConsignmentOverview() {
         </div>
       </div>
 
-      {/* ── Table ── */}
-      {canSee('element.consignment-overview.table') && (
+      {/* ── Grouped view ── default. Folds 73 branches into one card per region. */}
+      {canSee('element.consignment-overview.table') && viewMode === 'grouped' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+          {loading ? (
+            <div style={{ ...card, padding: '80px', display: 'flex', justifyContent: 'center' }}><GoldSpinner size={32} /></div>
+          ) : groupedByRegion.length === 0 ? (
+            <div style={{ ...card, padding: '80px', textAlign: 'center', color: t.text4, fontSize: '13px' }}>
+              {search || activeRegion ? 'No branches match your filter' : 'No stock at any branch'}
+            </div>
+          ) : groupedByRegion.map(g => {
+            const rColor    = REGION_COLORS[g.region] || t.text3
+            const collapsed = collapsedRegions.has(g.region)
+            const stats     = regionStats[g.region] || {}
+            const totalsNow = g.branches.reduce((acc, b) => {
+              acc.today_bills  += b.today_bills  || 0
+              acc.today_net_wt += b.today_net_wt || 0
+              acc.older_bills  += b.older_bills  || 0
+              acc.older_net_wt += b.older_net_wt || 0
+              acc.total_value  += (b.today_gross_value || 0) + (b.older_gross_value || 0)
+              return acc
+            }, { today_bills: 0, today_net_wt: 0, older_bills: 0, older_net_wt: 0, total_value: 0 })
+            const totalNetWt   = totalsNow.today_net_wt + totalsNow.older_net_wt
+            const w            = fmtWtCard(totalNetWt)
+            const branchesShown = g.branches.length
+            const hasFreshBills = g.branches.some(b => recentlyChanged.has(b.branch_name))
+
+            return (
+              <div key={g.region} style={{
+                ...card,
+                overflow: 'hidden',
+                borderTop: `3px solid ${rColor}`,
+                boxShadow: hasFreshBills ? `0 0 0 1px ${rColor}40, 0 6px 20px ${rColor}25` : '0 1px 3px rgba(0,0,0,.2)',
+                transition: 'box-shadow .4s, transform .15s',
+              }}>
+                {/* Region header — clicking toggles collapse */}
+                <div onClick={() => toggleRegionCollapsed(g.region)}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: '12px',
+                    padding: '14px 18px', cursor: 'pointer',
+                    background: `linear-gradient(90deg, ${rColor}10, transparent 60%)`,
+                    borderBottom: collapsed ? 'none' : `1px solid ${t.border}`,
+                  }}>
+                  <span style={{
+                    width: '20px', height: '20px', borderRadius: '50%',
+                    background: `${rColor}25`, color: rColor,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: '11px', fontWeight: 700,
+                    transform: collapsed ? 'rotate(-90deg)' : 'rotate(0deg)',
+                    transition: 'transform .2s',
+                  }}>▾</span>
+                  <span style={{ fontSize: '18px' }}>{REGION_ICONS[g.region] || '📍'}</span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', flexWrap: 'wrap' }}>
+                      <div style={{ fontSize: '15px', fontWeight: 600, color: t.text1 }}>{g.region}</div>
+                      <div style={{ fontSize: '11px', color: t.text4 }}>
+                        <strong style={{ color: t.text2 }}>{branchesShown}</strong>
+                        {stats.branches > branchesShown && <> / {stats.branches}</>} branch{branchesShown !== 1 ? 'es' : ''}
+                        {totalsNow.today_bills > 0 && (
+                          <> · <span style={{ color: t.green, fontWeight: 600 }}>+{totalsNow.today_bills} today</span></>
+                        )}
+                        {hasFreshBills && (
+                          <> · <span style={{ color: rColor, fontWeight: 700, animation: 'pulse 1.4s infinite' }}>● new arrival</span></>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                  {/* Roll-up stats on the right */}
+                  <div style={{ display: 'flex', gap: '18px', alignItems: 'center', flexShrink: 0 }}>
+                    <div style={{ textAlign: 'right' }}>
+                      <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.08em', textTransform: 'uppercase' }}>Net Wt</div>
+                      <div style={{ fontSize: '16px', fontWeight: 600, color: rColor, fontFamily: 'monospace', lineHeight: 1.2 }}>
+                        {w.value}<span style={{ fontSize: '10px', marginLeft: '2px' }}>{w.unit}</span>
+                      </div>
+                    </div>
+                    <div style={{ textAlign: 'right' }}>
+                      <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.08em', textTransform: 'uppercase' }}>Bills</div>
+                      <div style={{ fontSize: '16px', fontWeight: 600, color: t.text1, fontFamily: 'monospace', lineHeight: 1.2 }}>
+                        {totalsNow.today_bills + totalsNow.older_bills || '—'}
+                      </div>
+                    </div>
+                    {!isMobile && totalsNow.total_value > 0 && (
+                      <div style={{ textAlign: 'right' }}>
+                        <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.08em', textTransform: 'uppercase' }}>Value</div>
+                        <div style={{ fontSize: '14px', fontWeight: 600, color: t.gold, fontFamily: 'monospace', lineHeight: 1.2 }}>
+                          {fmtINR(totalsNow.total_value)}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Branches inside this region */}
+                {!collapsed && (
+                  <div>
+                    {g.branches.map((b, i) => {
+                      const hasToday    = (b.today_bills || 0) > 0
+                      const hasPending  = (b.older_bills || 0) > 0
+                      const ageDays     = b.oldest_age_days || 0
+                      const urgentTier  = ageDays > 7 ? 'overdue' : ageDays > 3 ? 'watch' : null
+                      const urgentColor = urgentTier === 'overdue' ? t.red : urgentTier === 'watch' ? t.orange : null
+                      const isFresh     = recentlyChanged.has(b.branch_name)
+                      const totalNet    = (b.today_net_wt || 0) + (b.older_net_wt || 0)
+
+                      return (
+                        <div key={b.branch_name}
+                          className={`cstock-row${isFresh ? ' cstock-row-fresh' : ''}`}
+                          title={`Click to create a consignment from ${b.branch_name}`}
+                          onClick={() => {
+                            setConsignmentDeepLink({ branch: b.branch_name, region: b.region })
+                            setActiveNav('consignment-data')
+                          }}
+                          onMouseEnter={e => {
+                            if (!e.currentTarget.dataset.prefetched) {
+                              e.currentTarget.dataset.prefetched = '1'
+                              const enc = encodeURIComponent(b.branch_name)
+                              prefetch(`/api/consignments?action=stock_in_branch&branch=${enc}`)
+                              prefetch(`/api/consignments?action=transfer_history&branch=${enc}`)
+                            }
+                          }}
+                          style={{
+                            display: 'grid',
+                            gridTemplateColumns: isMobile
+                              ? '1fr auto'
+                              : 'minmax(180px,1.6fr) repeat(4, minmax(72px, .9fr)) auto',
+                            gap: isMobile ? '6px' : '14px',
+                            alignItems: 'center',
+                            padding: '12px 14px 12px 18px',
+                            borderBottom: i < g.branches.length - 1 ? `1px solid ${t.border}40` : 'none',
+                            borderLeft: `3px solid ${urgentColor || rColor + '60'}`,
+                            cursor: 'pointer',
+                            position: 'relative',
+                            background: isFresh ? `${rColor}10` : 'transparent',
+                            transition: 'background .25s',
+                          }}>
+                          {/* Branch name + region accent + age tier ribbon */}
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
+                            <div style={{ minWidth: 0 }}>
+                              <div style={{ fontSize: '13px', fontWeight: 600, color: t.text1, display: 'flex', alignItems: 'center', gap: '6px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                {b.branch_name}
+                                {isFresh && (
+                                  <span title="New bill arrived since last refresh"
+                                    style={{ display: 'inline-block', width: '7px', height: '7px', borderRadius: '50%', background: rColor, animation: 'pulse 1.4s infinite', flexShrink: 0 }} />
+                                )}
+                                {urgentTier && (
+                                  <span style={{ fontSize: '9px', color: urgentColor, background: `${urgentColor}18`, borderRadius: '4px', padding: '1px 5px', fontWeight: 700, letterSpacing: '.04em', textTransform: 'uppercase', flexShrink: 0 }}>
+                                    {urgentTier === 'overdue' ? `${ageDays}d` : 'watch'}
+                                  </span>
+                                )}
+                              </div>
+                              <div style={{ fontSize: '10px', color: t.text4, marginTop: '2px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                                {b.pickup_time && <span title="Daily pickup">⏱ {b.pickup_time}</span>}
+                                {b.last_moved_days_ago != null && (
+                                  <span title="Days since last consignment was created">↻ {b.last_moved_days_ago}d ago</span>
+                                )}
+                                {b.oldest_date && hasPending && (
+                                  <span title="Oldest pending bill date">oldest {fmtDate(b.oldest_date)}</span>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Mobile: collapse the rest into one summary line */}
+                          {isMobile ? (
+                            <div style={{ textAlign: 'right', fontFamily: 'monospace' }}>
+                              <div style={{ fontSize: '13px', color: t.gold, fontWeight: 600 }}>{fmt(totalNet, 2)}<span style={{ fontSize: '10px', marginLeft: '2px' }}>g</span></div>
+                              <div style={{ fontSize: '10px', color: t.text3, marginTop: '2px' }}>
+                                {hasToday && <span style={{ color: t.blue, fontWeight: 600 }}>+{b.today_bills} today</span>}
+                                {hasToday && hasPending && <span style={{ color: t.text4 }}> · </span>}
+                                {hasPending && <span style={{ color: t.orange }}>{b.older_bills} pending</span>}
+                                {!hasToday && !hasPending && <span style={{ color: t.text4 }}>—</span>}
+                              </div>
+                            </div>
+                          ) : (
+                            <>
+                              {/* Today bills */}
+                              <div style={{ textAlign: 'right' }}>
+                                {hasToday ? (
+                                  <span className={isFresh ? 'cstock-cell-pulse' : ''}
+                                    style={{ fontSize: '13px', color: t.blue, fontFamily: 'monospace', fontWeight: 700, background: `${t.blue}15`, padding: '3px 9px', borderRadius: '5px' }}>
+                                    +{b.today_bills}
+                                  </span>
+                                ) : (
+                                  <span style={{ fontSize: '11px', color: t.text4 }}>—</span>
+                                )}
+                                <div style={{ fontSize: '9px', color: t.text4, marginTop: '3px', letterSpacing: '.06em', textTransform: 'uppercase' }}>today</div>
+                              </div>
+                              {/* Pending bills */}
+                              <div style={{ textAlign: 'right' }}>
+                                {hasPending ? (
+                                  <span style={{ fontSize: '13px', color: t.orange, fontFamily: 'monospace', fontWeight: 700, background: `${t.orange}15`, padding: '3px 9px', borderRadius: '5px' }}>
+                                    {b.older_bills}
+                                  </span>
+                                ) : (
+                                  <span style={{ fontSize: '11px', color: t.text4 }}>—</span>
+                                )}
+                                <div style={{ fontSize: '9px', color: t.text4, marginTop: '3px', letterSpacing: '.06em', textTransform: 'uppercase' }}>pending</div>
+                              </div>
+                              {/* Total net wt */}
+                              <div style={{ textAlign: 'right' }}>
+                                <span style={{ fontSize: '13px', color: t.gold, fontFamily: 'monospace', fontWeight: 600 }}>
+                                  {fmt(totalNet, 2)}<span style={{ fontSize: '10px', marginLeft: '2px' }}>g</span>
+                                </span>
+                                <div style={{ fontSize: '9px', color: t.text4, marginTop: '3px', letterSpacing: '.06em', textTransform: 'uppercase' }}>net wt</div>
+                              </div>
+                              {/* Total value */}
+                              <div style={{ textAlign: 'right' }}>
+                                {((b.today_gross_value || 0) + (b.older_gross_value || 0)) > 0 ? (
+                                  <span style={{ fontSize: '12px', color: t.text2, fontFamily: 'monospace' }}>
+                                    {fmtINR((b.today_gross_value || 0) + (b.older_gross_value || 0))}
+                                  </span>
+                                ) : (
+                                  <span style={{ fontSize: '11px', color: t.text4 }}>—</span>
+                                )}
+                                <div style={{ fontSize: '9px', color: t.text4, marginTop: '3px', letterSpacing: '.06em', textTransform: 'uppercase' }}>value</div>
+                              </div>
+                              {/* Affordance arrow */}
+                              <div style={{ color: t.text4, fontSize: '14px' }}>›</div>
+                            </>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {/* ── Flat table view (legacy / power-user) ── */}
+      {canSee('element.consignment-overview.table') && viewMode === 'flat' && (
         <div style={{ ...card, overflow: 'hidden' }}>
           {loading ? (
             <div style={{ padding: '80px', display: 'flex', justifyContent: 'center' }}><GoldSpinner size={32} /></div>
@@ -772,6 +1078,38 @@ export default function ConsignmentOverview() {
       <style>{`
         @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
         @keyframes spin  { to{transform:rotate(360deg)} }
+        @keyframes cstockShimmer {
+          0%   { background-position: -120% 0 }
+          100% { background-position: 220% 0 }
+        }
+        @keyframes cstockCellPulse {
+          0%   { box-shadow: 0 0 0 0 currentColor; opacity:.85 }
+          50%  { box-shadow: 0 0 0 6px transparent; opacity:1 }
+          100% { box-shadow: 0 0 0 0 transparent;   opacity:.85 }
+        }
+        @keyframes cstockGlow {
+          0%,100% { box-shadow: 0 0 0 1px transparent }
+          50%     { box-shadow: 0 0 0 2px rgba(201,168,76,.35) }
+        }
+        .cstock-row {
+          position: relative;
+          overflow: hidden;
+        }
+        .cstock-row::before {
+          content: '';
+          position: absolute; inset: 0;
+          background: linear-gradient(110deg, transparent 35%, rgba(255,255,255,.04) 50%, transparent 65%);
+          background-size: 200% 100%;
+          opacity: 0; pointer-events: none;
+          transition: opacity .15s;
+        }
+        .cstock-row:hover::before {
+          opacity: 1;
+          animation: cstockShimmer 1.2s ease-out 1;
+        }
+        .cstock-row:hover { background: rgba(201,168,76,.04) !important; }
+        .cstock-row-fresh { animation: cstockGlow 2.4s ease-in-out 2; }
+        .cstock-cell-pulse { animation: cstockCellPulse 1.6s ease-in-out 3; }
       `}</style>
     </div>
   )

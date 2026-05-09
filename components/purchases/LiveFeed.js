@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useApp, useRegionAccess } from '../../lib/context'
 import GoldSpinner from '../ui/GoldSpinner'
 import { authedFetch } from '../../lib/authedFetch'
+import { istToday } from '../../lib/dateIst'
 
 const REFRESH_SECS = 60
 
@@ -157,7 +158,7 @@ export default function LiveFeed() {
   const t = THEMES[appTheme] || THEMES.dark
   const isMobile = useMobile()
 
-  const todayIST = new Date(Date.now() + 5.5 * 60 * 60 * 1000).toISOString().split('T')[0]
+  const todayIST = istToday()
 
   const [viewDate,      setViewDate]      = useState(todayIST)
   const isToday = viewDate === todayIST

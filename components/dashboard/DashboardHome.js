@@ -9,10 +9,9 @@ import { getVisibleModules } from '../../lib/modules'
 import { authedFetch } from '../../lib/authedFetch'
 
 import { CONSIGNMENT_THEMES as THEMES } from '../../lib/consignmentTheme'
+import { istNow, istStr, fromUtcDate } from '../../lib/dateIst'
 
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-const istNow  = () => new Date(Date.now() + 5.5 * 60 * 60 * 1000)
-const istStr  = (d = istNow()) => d.toISOString().split('T')[0]
 const fmtDate = (iso) => { if (!iso) return ''; const [y,m,d] = iso.split('-'); return `${d}-${MONTHS[+m-1]}-${y}` }
 const fmt     = (n) => n != null ? Number(n).toLocaleString('en-IN', { maximumFractionDigits: 2 }) : '—'
 const fmtCr   = (n) => { if (n == null) return '—'; const cr = Number(n)/1e7; return cr >= 1 ? `₹${cr.toFixed(2)} Cr` : `₹${Number(n).toLocaleString('en-IN',{maximumFractionDigits:0})}` }
@@ -1071,17 +1070,20 @@ export default function DashboardHome() {
           // Counts consignments BY CREATION DATE so the sparkline reflects when
           // each consignment was dispatched. Cancelled rows are excluded. This
           // lets management see velocity over time at a glance.
-          const today = new Date(); today.setHours(0,0,0,0)
+          // Bucket by IST calendar day so the "today" column flips at IST midnight,
+          // not the browser/server's local midnight.
+          const today = istNow(); today.setUTCHours(0,0,0,0)
           const dailySeries = new Array(14).fill(0).map((_, i) => {
-            const d = new Date(today); d.setDate(d.getDate() - (13 - i))
+            const d = new Date(today); d.setUTCDate(d.getUTCDate() - (13 - i))
             return { date: d, count: 0, weight: 0 }
           })
-          const dayKey = (d) => `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`
+          const dayKey = (d) => istStr(d)
           const seriesByKey = new Map(dailySeries.map(b => [dayKey(b.date), b]))
           const allMoved = (cs || []).filter(c => c.status !== 'seed' && c.status !== 'cancelled')
           for (const c of allMoved) {
             if (!c.created_at) continue
-            const d = new Date(c.created_at); d.setHours(0,0,0,0)
+            const d = fromUtcDate(new Date(c.created_at))
+            d.setUTCHours(0,0,0,0)
             const k = dayKey(d)
             const bucket = seriesByKey.get(k)
             if (bucket) {

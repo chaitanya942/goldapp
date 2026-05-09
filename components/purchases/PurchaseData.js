@@ -6,6 +6,7 @@ import { useApp } from '../../lib/context'
 import GoldSpinner from '../ui/GoldSpinner'
 import Badge from '../ui/Badge'
 import { CONSIGNMENT_THEMES as THEMES, useMobile } from '../../lib/consignmentTheme'
+import { istNow, istStr } from '../../lib/dateIst'
 
 const STATUS_COLORS = {
   at_branch:        { color: '#3a8fbf', label: 'At Branch' },
@@ -37,10 +38,6 @@ function fmtTime(t) {
   const h12 = h % 12 || 12
   return `${h12}:${m} ${ampm}`
 }
-
-// ── DATE HELPERS ────────────────────────────────────────────────────────────
-const istNow = () => new Date(Date.now() + 5.5 * 60 * 60 * 1000)
-const istStr = (d = istNow()) => d.toISOString().split('T')[0]
 
 // ── EXPORT HELPERS ──────────────────────────────────────────────────────────
 const EXPORT_COLS = [

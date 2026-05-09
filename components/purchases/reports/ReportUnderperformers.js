@@ -3,10 +3,7 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../../../lib/supabase'
 import { fmt } from './reportUtils'
-
-const istNow = () => new Date(Date.now() + 5.5 * 60 * 60 * 1000)
-const istStr = (d = istNow()) => d.toISOString().split('T')[0]
-const daysBack = (n) => istStr(new Date(istNow().getTime() - n * 86400000))
+import { istDaysAgo as daysBack } from '../../../lib/dateIst'
 
 // Aggregate purchases over the last N days, group by branch, return worst-N branches.
 // "Underperformer" = active branches (≥1 bill in window) sorted by lowest net weight,

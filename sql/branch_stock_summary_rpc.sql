@@ -17,16 +17,17 @@ returns table (
 language sql
 security definer
 as $$
+  with ist as (select (now() at time zone 'Asia/Kolkata')::date as today)
   select
     coalesce(p.current_branch, p.branch_name) as branch_name,
-    count(*)::bigint                                                              as total_bills,
-    count(*) filter (where p.purchase_date::date = current_date)::bigint          as today_bills,
-    sum(p.gross_weight)                                                           as total_gross_wt,
-    sum(p.net_weight)                                                             as total_net_wt,
-    sum(p.net_weight) filter (where p.purchase_date::date = current_date)         as today_net_wt,
-    sum(p.total_amount)                                                           as total_gross_value,
-    sum(p.total_amount) filter (where p.purchase_date::date = current_date)       as today_gross_value,
-    min(p.purchase_date::date) filter (where p.purchase_date::date < current_date) as oldest_pending_date
+    count(*)::bigint                                                                          as total_bills,
+    count(*) filter (where p.purchase_date::date = (select today from ist))::bigint           as today_bills,
+    sum(p.gross_weight)                                                                       as total_gross_wt,
+    sum(p.net_weight)                                                                         as total_net_wt,
+    sum(p.net_weight) filter (where p.purchase_date::date = (select today from ist))          as today_net_wt,
+    sum(p.total_amount)                                                                       as total_gross_value,
+    sum(p.total_amount) filter (where p.purchase_date::date = (select today from ist))        as today_gross_value,
+    min(p.purchase_date::date) filter (where p.purchase_date::date < (select today from ist)) as oldest_pending_date
   from purchases p
   where p.stock_status = 'at_branch'
     and p.is_deleted   = false

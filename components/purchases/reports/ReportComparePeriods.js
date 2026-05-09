@@ -3,12 +3,10 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../../../lib/supabase'
 import { fmt, fmtVal } from './reportUtils'
+import { istNow, istStr } from '../../../lib/dateIst'
 
-// IST today helper
-const istNow = () => new Date(Date.now() + 5.5 * 60 * 60 * 1000)
-const istStr = (d = istNow()) => d.toISOString().split('T')[0]
 const addDays = (dateStr, n) => {
-  const d = new Date(dateStr); d.setDate(d.getDate() + n); return d.toISOString().split('T')[0]
+  const d = new Date(dateStr); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10)
 }
 
 // Returns { current: {from,to}, previous: {from,to}, label }

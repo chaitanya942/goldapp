@@ -10,12 +10,10 @@ import {
 } from 'recharts'
 
 import { CONSIGNMENT_THEMES as THEMES } from '../../lib/consignmentTheme'
+import { istNow, istStr, istDaysAgo as daysBack } from '../../lib/dateIst'
 
 // ── Date helpers ──────────────────────────────────────────────────────────────
 const MONTHS   = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-const istNow   = () => new Date(Date.now() + 5.5 * 60 * 60 * 1000)
-const istStr   = (d = istNow()) => d.toISOString().split('T')[0]
-const daysBack = (n) => { const d = new Date(istNow().getTime() - n * 86400000); return istStr(d) }
 const fmtDay   = (d) => { if (!d) return ''; const [, m, day] = d.split('-'); return `${day}/${m}` }
 const fmtDate  = (iso) => { if (!iso) return ''; const [y,m,d] = iso.split('-'); return `${d}-${MONTHS[+m-1]}-${y}` }
 // istNow() is pre-shifted by +5.5h, so getUTCHours() returns the actual IST hour.

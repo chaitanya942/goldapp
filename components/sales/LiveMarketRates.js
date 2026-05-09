@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { supabase } from '../../lib/supabase'
 import { useApp } from '../../lib/context'
+import { istStartOfDayIso, istToday } from '../../lib/dateIst'
 
 const THEMES = {
   dark:  { bg: '#0a0a0a', card: '#111111', card2: '#161616', text1: '#f0e6c8', text2: '#c8b89a', text3: '#9a8a6a', text4: '#6a5a3a', gold: '#c9a84c', border: '#1e1e1e', border2: '#252525', green: '#3aaa6a', red: '#e05555', blue: '#3a8fbf', orange: '#c9981f', purple: '#8c5ac8' },
@@ -202,7 +203,8 @@ export default function LiveMarketRates() {
     setFetching(true); setFetchError(null)
     try {
       const since60    = new Date(Date.now() - 60 * 60 * 1000).toISOString()
-      const todayStart = new Date(); todayStart.setHours(0,0,0,0)
+      // IST midnight regardless of browser TZ — fetched_at is TIMESTAMPTZ on Supabase.
+      const todayStart = new Date(istStartOfDayIso(istToday()))
       const [r1, r2] = await Promise.all([
         supabase.from('gold_rates').select('*').gte('fetched_at', since60).order('fetched_at', { ascending: true }),
         supabase.from('gold_rates').select('*').gte('fetched_at', todayStart.toISOString()).order('fetched_at', { ascending: true }),
