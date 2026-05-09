@@ -2311,23 +2311,44 @@ function SettingsTab({ t, card, settings, settingsBusy, settingsToast, saveSeq, 
   )
 }
 
-// Per-state card — combines GSTIN + sequence editors. Header has the state
-// pill + name + remove (✕) button. Body is two stacked rows of inline
-// editors with Save buttons that activate when dirty.
+// 15-char GSTIN regex — re-used for the live ✓ format-valid icon.
+const GSTIN_REGEX = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/
+
+// State-to-GSTN-prefix lookup — first 2 digits of a GSTIN must match the
+// state. We surface a soft warning (not a block) when the prefix doesn't
+// match the state code, since accounts is responsible for the source data.
+const STATE_GSTIN_PREFIX = {
+  AN:'35', AP:'37', AR:'12', AS:'18', BR:'10', CG:'22', CH:'04', DD:'25',
+  DL:'07', DN:'26', GA:'30', GJ:'24', HP:'02', HR:'06', JH:'20', JK:'01',
+  KA:'29', KL:'32', LA:'38', LD:'31', MH:'27', ML:'17', MN:'14', MP:'23',
+  MZ:'15', NL:'13', OD:'21', OR:'21', PB:'03', PY:'34', RJ:'08', SK:'11',
+  TG:'36', TN:'33', TR:'16', TS:'36', UK:'05', UP:'09', UT:'05', WB:'19',
+}
+
+// Per-state card — polished. Top accent stripe, hover lift, inline format
+// validation on GSTIN, two-column body on wide screens, single 'Save changes'
+// footer button that activates when ANY field is dirty.
 function StateCard({ t, row, busy, saveGstin, saveSeq, removeState, openConfirm }) {
   const [gstinVal, setGstinVal] = useState(row.gstin || '')
   const [seqVal,   setSeqVal]   = useState(String(row.seq?.last_seq ?? 0))
+  const [hover,    setHover]    = useState(false)
   useEffect(() => { setGstinVal(row.gstin || '') }, [row.gstin])
   useEffect(() => { setSeqVal(String(row.seq?.last_seq ?? 0)) }, [row.seq?.last_seq])
 
   const gstinDirty = gstinVal.trim().toUpperCase() !== (row.gstin || '').toUpperCase()
   const seqDirty   = row.seq != null && String(seqVal) !== String(row.seq.last_seq)
+  const anyDirty   = gstinDirty || seqDirty
   const gstinBusy  = busy === `gstin:${row.code}`
   const seqBusy    = busy === `seq:${row.code}`
   const removeBusy = busy === `remove:${row.code}`
+  const saving     = gstinBusy || seqBusy
 
   const isKA = row.code === 'KA'
   const accent = isKA ? t.gold : t.purple
+
+  const gstinValid     = !gstinVal || GSTIN_REGEX.test(gstinVal.trim().toUpperCase())
+  const expectedPrefix = STATE_GSTIN_PREFIX[row.code]
+  const prefixMatch    = !gstinVal || !expectedPrefix || gstinVal.trim().slice(0, 2) === expectedPrefix
 
   const onRemove = async () => {
     const ok = await openConfirm({
@@ -2339,74 +2360,178 @@ function StateCard({ t, row, busy, saveGstin, saveSeq, removeState, openConfirm 
     if (ok) removeState(row.code)
   }
 
+  // Save handler — fires only the dirty mutations, in parallel.
+  const saveAll = async () => {
+    const promises = []
+    if (gstinDirty) promises.push(saveGstin(row.code, gstinVal.trim()))
+    if (seqDirty)   promises.push(saveSeq(row.code, row.seq.fy_code, parseInt(seqVal) || 0))
+    await Promise.all(promises)
+  }
+
   const nextPreview = row.seq
     ? `WG/${row.code}/${row.seq.fy_code}/${(parseInt(seqVal) || 0) + 1}`
     : null
 
+  // Card-level styles
+  const baseBg = t.card2 || t.card
+  const hoverBg = `${accent}06`
+
   return (
     <div style={{
-      border: `1px solid ${t.border}`, borderRadius: '10px',
-      background: t.card2 || t.card, overflow: 'hidden',
-      transition: 'border-color .15s ease',
-    }}>
-      {/* Header — state pill + name + remove button */}
-      <div style={{ padding: '10px 14px', borderBottom: `1px solid ${t.border}`, display: 'flex', alignItems: 'center', gap: '10px' }}>
+      position:     'relative',
+      border:       `1px solid ${hover ? `${accent}40` : t.border}`,
+      borderRadius: '12px',
+      background:   hover ? hoverBg : baseBg,
+      overflow:     'hidden',
+      boxShadow:    hover ? `0 2px 12px ${accent}18` : 'none',
+      transition:   'background .18s ease, border-color .18s ease, box-shadow .18s ease',
+    }}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}>
+      {/* Top accent stripe — gold for KA, purple for everyone else */}
+      <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '2px',
+        background: `linear-gradient(90deg, ${accent} 0%, ${accent}30 60%, transparent 100%)`,
+      }} />
+
+      {/* Header — pill + name + read-only metadata + remove */}
+      <div style={{ padding: '14px 18px 12px', display: 'flex', alignItems: 'center', gap: '12px' }}>
         <span style={{
           display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-          minWidth: '36px', padding: '4px 10px',
-          fontSize: '11px', fontWeight: 700, letterSpacing: '.06em',
-          color: accent, background: `${accent}18`, border: `1px solid ${accent}40`,
-          borderRadius: '6px', fontFamily: 'monospace',
+          minWidth: '40px', height: '32px', padding: '0 12px',
+          fontSize: '13px', fontWeight: 700, letterSpacing: '.06em',
+          color: accent, background: `${accent}18`, border: `1px solid ${accent}50`,
+          borderRadius: '7px', fontFamily: 'monospace',
         }}>{row.code}</span>
-        <span style={{ fontSize: '13px', color: t.text1, fontWeight: 600 }}>{STATE_NAME_BY_CODE[row.code] || row.code}</span>
-        {isKA && (
-          <span style={{ fontSize: '9px', color: t.gold, background: `${t.gold}10`, border: `1px solid ${t.gold}30`, borderRadius: '4px', padding: '2px 7px', fontWeight: 600, letterSpacing: '.04em' }}>HO BUYER</span>
-        )}
-        <div style={{ flex: 1 }} />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', minWidth: 0, flex: 1 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+            <span style={{ fontSize: '15px', color: t.text1, fontWeight: 600, letterSpacing: '-.005em' }}>
+              {STATE_NAME_BY_CODE[row.code] || row.code}
+            </span>
+            {isKA && (
+              <span style={{ fontSize: '9px', color: t.gold, background: `${t.gold}10`, border: `1px solid ${t.gold}30`, borderRadius: '4px', padding: '2px 8px', fontWeight: 700, letterSpacing: '.05em' }}>HO BUYER</span>
+            )}
+          </div>
+          <div style={{ fontSize: '10px', color: t.text4, fontFamily: 'monospace', display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+            {row.gstin && <span>{row.gstin}</span>}
+            {row.seq && <span>Format: WG/{row.code}/{row.seq.fy_code}/##</span>}
+            {isKA && !row.seq && <span>Read-only — used as the buyer GSTIN on every E-Invoice</span>}
+          </div>
+        </div>
         {!isKA && (
           <button onClick={onRemove} disabled={removeBusy}
             title={`Remove ${row.code}`}
             style={{
               background: 'transparent', border: `1px solid ${t.red}40`,
-              borderRadius: '6px', padding: '4px 10px',
+              borderRadius: '7px', padding: '6px 11px',
               fontSize: '11px', color: t.red, fontWeight: 600, cursor: removeBusy ? 'wait' : 'pointer',
               opacity: removeBusy ? 0.6 : 1,
-            }}>
-            {removeBusy ? '…' : '✕  Remove'}
+              display: 'inline-flex', alignItems: 'center', gap: '5px',
+              transition: 'background .15s ease',
+            }}
+            onMouseEnter={e => { if (!removeBusy) e.currentTarget.style.background = `${t.red}10` }}
+            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+            {removeBusy ? '…' : <><span style={{ fontSize: '12px' }}>🗑</span> Remove</>}
           </button>
         )}
       </div>
 
-      {/* Body — GSTIN row + (optional) sequence row */}
-      <div style={{ padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-        {/* GSTIN row */}
-        <div style={{ display: 'grid', gridTemplateColumns: '110px 1fr auto', gap: '12px', alignItems: 'center' }}>
-          <span style={{ fontSize: '10px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 600 }}>GSTIN</span>
-          <input value={gstinVal} onChange={e => setGstinVal(e.target.value.toUpperCase())} disabled={gstinBusy}
-            placeholder="22AAAAA0000A1Z5" maxLength={15}
-            style={{ width: '100%', maxWidth: '320px', background: t.card, border: `1px solid ${gstinDirty ? t.gold : t.border}`, borderRadius: '6px', padding: '7px 10px', fontSize: '12px', color: t.text1, fontFamily: 'monospace', outline: 'none', letterSpacing: '.05em' }} />
-          <button onClick={() => saveGstin(row.code, gstinVal.trim())} disabled={!gstinDirty || gstinBusy}
-            style={{ background: gstinDirty ? t.gold : 'transparent', color: gstinDirty ? '#1a0a00' : t.text4, border: `1px solid ${gstinDirty ? t.gold : t.border}`, borderRadius: '6px', padding: '6px 16px', fontSize: '11px', fontWeight: 700, cursor: gstinDirty && !gstinBusy ? 'pointer' : 'not-allowed', whiteSpace: 'nowrap' }}>
-            {gstinBusy ? 'Saving…' : 'Save'}
-          </button>
+      {/* Body — two-column grid (GSTIN + sequence) on wide screens, stacks on narrow.
+          KA gets a single full-width column for GSTIN since it has no sequence. */}
+      <div style={{
+        padding:             '4px 18px 16px',
+        display:             'grid',
+        gridTemplateColumns: row.seq ? 'repeat(auto-fit, minmax(280px, 1fr))' : '1fr',
+        gap:                 '16px',
+      }}>
+        {/* GSTIN field group */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <span style={{ fontSize: '10px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 600 }}>GSTIN</span>
+            {gstinVal && (
+              <span style={{ fontSize: '10px', color: gstinValid && prefixMatch ? t.green : t.orange, fontFamily: 'monospace' }}>
+                {gstinValid && prefixMatch ? '✓ valid'
+                  : !gstinValid ? `${gstinVal.length}/15`
+                  : `prefix should be ${expectedPrefix}`}
+              </span>
+            )}
+          </div>
+          <div style={{ position: 'relative' }}>
+            <input value={gstinVal} onChange={e => setGstinVal(e.target.value.toUpperCase())} disabled={gstinBusy}
+              placeholder={expectedPrefix ? `${expectedPrefix}AAAAA0000A1Z5` : '22AAAAA0000A1Z5'} maxLength={15}
+              style={{
+                width: '100%',
+                background: t.card,
+                border: `1.5px solid ${gstinDirty ? t.gold : (gstinVal && !gstinValid ? t.orange + '60' : t.border)}`,
+                borderRadius: '8px',
+                padding: '10px 12px',
+                fontSize: '13px',
+                color: t.text1,
+                fontFamily: 'monospace',
+                fontWeight: 600,
+                letterSpacing: '.06em',
+                outline: 'none',
+                transition: 'border-color .15s ease, box-shadow .15s ease',
+                boxShadow: gstinDirty ? `0 0 0 3px ${t.gold}20` : 'none',
+              }}
+              onFocus={e => e.currentTarget.style.boxShadow = `0 0 0 3px ${(gstinDirty ? t.gold : accent)}25`}
+              onBlur={e =>  e.currentTarget.style.boxShadow = gstinDirty ? `0 0 0 3px ${t.gold}20` : 'none'} />
+          </div>
         </div>
 
-        {/* Sequence row — KA excluded (no E-Invoice for KA-source) */}
+        {/* Last invoice / sequence field group — KA excluded */}
         {row.seq && (
-          <div style={{ display: 'grid', gridTemplateColumns: '110px 110px 1fr auto', gap: '12px', alignItems: 'center' }}>
-            <span style={{ fontSize: '10px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 600 }}>Last invoice</span>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span style={{ fontSize: '10px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 600 }}>Last invoice number</span>
+              {nextPreview && (
+                <span style={{ fontSize: '10px', color: seqDirty ? t.gold : t.text3, fontFamily: 'monospace', fontWeight: seqDirty ? 700 : 400 }}>
+                  Next → <span style={{ color: seqDirty ? t.gold : t.text2 }}>{nextPreview}</span>
+                </span>
+              )}
+            </div>
             <input type="number" min="0" value={seqVal} onChange={e => setSeqVal(e.target.value)} disabled={seqBusy}
-              style={{ width: '100%', background: t.card, border: `1px solid ${seqDirty ? t.gold : t.border}`, borderRadius: '6px', padding: '7px 10px', fontSize: '12px', color: t.text1, fontFamily: 'monospace', outline: 'none' }} />
-            <span style={{ fontSize: '11px', color: seqDirty ? t.gold : t.text3, fontFamily: 'monospace' }}>
-              <span style={{ color: t.text4, marginRight: '6px' }}>Next →</span>{nextPreview}
-            </span>
-            <button onClick={() => saveSeq(row.code, row.seq.fy_code, parseInt(seqVal) || 0)} disabled={!seqDirty || seqBusy}
-              style={{ background: seqDirty ? t.gold : 'transparent', color: seqDirty ? '#1a0a00' : t.text4, border: `1px solid ${seqDirty ? t.gold : t.border}`, borderRadius: '6px', padding: '6px 16px', fontSize: '11px', fontWeight: 700, cursor: seqDirty && !seqBusy ? 'pointer' : 'not-allowed', whiteSpace: 'nowrap' }}>
-              {seqBusy ? 'Saving…' : 'Save'}
-            </button>
+              style={{
+                width: '100%',
+                background: t.card,
+                border: `1.5px solid ${seqDirty ? t.gold : t.border}`,
+                borderRadius: '8px',
+                padding: '10px 12px',
+                fontSize: '13px',
+                color: t.text1,
+                fontFamily: 'monospace',
+                fontWeight: 600,
+                outline: 'none',
+                transition: 'border-color .15s ease, box-shadow .15s ease',
+                boxShadow: seqDirty ? `0 0 0 3px ${t.gold}20` : 'none',
+              }}
+              onFocus={e => e.currentTarget.style.boxShadow = `0 0 0 3px ${(seqDirty ? t.gold : accent)}25`}
+              onBlur={e =>  e.currentTarget.style.boxShadow = seqDirty ? `0 0 0 3px ${t.gold}20` : 'none'} />
           </div>
         )}
       </div>
+
+      {/* Footer — single Save button when anything is dirty */}
+      {anyDirty && (
+        <div style={{ padding: '12px 18px', borderTop: `1px solid ${t.border}`, background: `${t.gold}05`, display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <span style={{ fontSize: '11px', color: t.text3, flex: 1 }}>
+            <span style={{ color: t.gold, fontWeight: 600 }}>●</span>{' '}
+            Unsaved changes
+            {gstinDirty && seqDirty ? ' to GSTIN and last invoice'
+              : gstinDirty           ? ' to GSTIN'
+              : seqDirty             ? ' to last invoice'
+              : ''}
+          </span>
+          <button onClick={() => { setGstinVal(row.gstin || ''); setSeqVal(String(row.seq?.last_seq ?? 0)) }}
+            disabled={saving}
+            style={{ background: 'transparent', border: `1px solid ${t.border}`, borderRadius: '6px', padding: '7px 14px', fontSize: '11px', color: t.text3, cursor: saving ? 'wait' : 'pointer', fontWeight: 600 }}>
+            Cancel
+          </button>
+          <button onClick={saveAll} disabled={saving}
+            style={{ background: t.gold, color: '#1a0a00', border: 'none', borderRadius: '6px', padding: '7px 18px', fontSize: '11px', fontWeight: 700, cursor: saving ? 'wait' : 'pointer', boxShadow: `0 1px 4px ${t.gold}50`, opacity: saving ? 0.7 : 1 }}>
+            {saving ? 'Saving…' : 'Save changes'}
+          </button>
+        </div>
+      )}
     </div>
   )
 }
