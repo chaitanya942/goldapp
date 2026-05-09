@@ -43,6 +43,7 @@ const ADMIN_ITEMS = [
       { id: 'branch-employees',  label: 'Branch Employees',  dot: '#c9a84c' },
       { id: 'user-management',   label: 'User Management',   dot: '#3aaa6a' },
       { id: 'company-settings',  label: 'Company Settings',  dot: '#c9a84c' },
+      { id: 'logistics',         label: 'Logistics',         dot: '#5ec1d6' },
       { id: 'consignment-seeds', label: 'Consignment Seeds', dot: '#3a8fbf' },
       { id: 'import-logs',       label: 'Import Logs',       dot: '#c9981f' },
       { id: 'role-management',   label: 'Role Management',   dot: '#e05555' },

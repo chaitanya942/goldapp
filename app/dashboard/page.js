@@ -11,6 +11,7 @@ import BranchManagement from '../../components/admin/BranchManagement'
 import UserManagement from '../../components/admin/UserManagement'
 import CompanySettings from '../../components/admin/CompanySettings'
 import ConsignmentSeeds from '../../components/admin/ConsignmentSeeds'
+import Logistics from '../../components/admin/Logistics'
 import BranchEmployees from '../../components/admin/BranchEmployees'
 import ImportLogs from '../../components/admin/ImportLogs'
 import RoleManagement from '../../components/admin/RoleManagement'
@@ -149,6 +150,7 @@ function DashboardShell() {
       case 'user-management':     return <UserManagement />
       case 'company-settings':    return <CompanySettings />
       case 'consignment-seeds':   return <ConsignmentSeeds />
+      case 'logistics':           return <Logistics />
       case 'branch-employees':    return <BranchEmployees />
       case 'import-logs':         return <ImportLogs />
       case 'role-management':     return role === 'super_admin' ? <RoleManagement /> : <AccessDenied />
