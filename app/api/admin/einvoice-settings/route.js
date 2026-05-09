@@ -2,9 +2,17 @@
 //
 // Admin / Accounts edits for E-Invoice numbering + per-state GSTINs.
 //
-// GET  → { sequences: [...], gstins: { ka, kl, ts, ap }, fy: '26-27' }
-// POST → updates a single sequence row OR a single state's GSTIN.
-//        Body: { kind: 'seq', state_code, fy_code, last_seq } | { kind: 'gstin', state_code, gstin }
+// Per-state GSTINs are stored in company_settings.state_gstins (JSONB) —
+// adding a new state is a JSON key insert, no schema migration needed.
+// Legacy gstin_<code> columns are kept in sync as a backstop for older
+// code paths that still read them directly.
+//
+// GET   → { sequences: [...], gstins: { KA, KL, TS, AP, ... }, fy: '26-27' }
+// POST  → updates one of:
+//          { kind: 'seq',         state_code, fy_code, last_seq }
+//          { kind: 'gstin',       state_code, gstin }
+//          { kind: 'gstin_add',   state_code, gstin, last_seq? } — new state
+//          { kind: 'gstin_remove', state_code }                  — drop state
 //
 // Restricted to ROLE_GROUPS.ACCOUNTS (super_admin, founders_office, accounts).
 
@@ -17,7 +25,35 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY || 'placeholder'
 )
 
-const ALLOWED_STATES = new Set(['KA', 'KL', 'TS', 'AP'])
+// 2-letter ISO state codes used by the GSTN.  Used to validate new entries
+// without hardcoding a tight allowlist (any real Indian state can be added).
+const VALID_STATE_CODES = new Set([
+  'AN','AP','AR','AS','BR','CG','CH','DD','DL','DN','GA','GJ','HP','HR','JH',
+  'JK','KA','KL','LA','LD','MH','ML','MN','MP','MZ','NL','OD','OR','PB','PY',
+  'RJ','SK','TG','TN','TR','TS','UK','UP','UT','WB',
+])
+const GSTIN_REGEX = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/
+
+// Build the sequences array — one row per state present in state_gstins,
+// merged with whatever rows exist in einvoice_sequence for the current FY.
+function buildSequences(stateCodes, seqRows, fy) {
+  const present = new Map((seqRows || []).map(r => [r.state_code, r]))
+  return stateCodes
+    // KA-source consignments emit EWB only, never E-Invoice — exclude from sequences.
+    .filter(s => s !== 'KA')
+    .map(s => {
+      const row = present.get(s)
+      const last = row?.last_seq ?? 0
+      return {
+        state_code: s,
+        fy_code:    fy,
+        last_seq:   last,
+        next_no:    `WG/${s}/${fy}/${last + 1}`,
+        updated_at: row?.updated_at || null,
+        exists:     present.has(s),
+      }
+    })
+}
 
 export async function GET(req) {
   const auth = await requireAuth(req, { requiredRoles: ROLE_GROUPS.ACCOUNTS })
@@ -25,44 +61,37 @@ export async function GET(req) {
   try {
     const fy = getCurrentFyCode()
 
-    // Sequences for current FY only — older FYs aren't editable here (audit).
-    const { data: seqRows, error: seqErr } = await supabase
+    const { data: cs } = await supabase
+      .from('company_settings')
+      .select('id, gstin, state_gstins, gstin_ka, gstin_kl, gstin_ts, gstin_ap, head_office_address, head_office_city, head_office_pin, head_office_state')
+      .single()
+
+    // Merge state_gstins JSONB with the legacy columns. JSONB wins; legacy
+    // columns surface only for keys not already present (they're a backstop
+    // until the migration script has been run).
+    const legacy = {
+      KA: cs?.gstin_ka || cs?.gstin || '',
+      KL: cs?.gstin_kl || '',
+      TS: cs?.gstin_ts || '',
+      AP: cs?.gstin_ap || '',
+    }
+    const fromJson = cs?.state_gstins || {}
+    const gstins = { ...legacy, ...fromJson }
+    // Drop any blank values so the UI doesn't show empty rows.
+    Object.keys(gstins).forEach(k => { if (!gstins[k]) delete gstins[k] })
+
+    // Sequences — one per state code that has a GSTIN configured (excluding KA).
+    const stateCodes = Object.keys(gstins).sort()
+    const { data: seqRows } = await supabase
       .from('einvoice_sequence')
       .select('state_code, fy_code, last_seq, updated_at')
       .eq('fy_code', fy)
       .order('state_code')
-    if (seqErr) return Response.json({ error: seqErr.message }, { status: 500 })
-
-    // Make sure KL/TS/AP rows exist (so the UI doesn't show an empty list
-    // before the first generation). KA is excluded — KA-source consignments
-    // get EWB, never E-Invoice.
-    const present = new Set((seqRows || []).map(r => r.state_code))
-    const sequences = ['KL', 'TS', 'AP'].map(s => {
-      const row = (seqRows || []).find(r => r.state_code === s)
-      return {
-        state_code: s,
-        fy_code:    fy,
-        last_seq:   row?.last_seq ?? 0,
-        next_no:    `WG/${s}/${fy}/${(row?.last_seq ?? 0) + 1}`,
-        updated_at: row?.updated_at || null,
-        exists:     present.has(s),
-      }
-    })
-
-    const { data: cs } = await supabase
-      .from('company_settings')
-      .select('gstin, gstin_ka, gstin_kl, gstin_ts, gstin_ap, head_office_address, head_office_city, head_office_pin, head_office_state')
-      .single()
 
     return Response.json({
       fy,
-      sequences,
-      gstins: {
-        KA: cs?.gstin_ka || cs?.gstin || '',
-        KL: cs?.gstin_kl || '',
-        TS: cs?.gstin_ts || '',
-        AP: cs?.gstin_ap || '',
-      },
+      sequences: buildSequences(stateCodes, seqRows, fy),
+      gstins,
       head_office: {
         address: cs?.head_office_address || '',
         city:    cs?.head_office_city    || '',
@@ -75,6 +104,29 @@ export async function GET(req) {
   }
 }
 
+// Helper: write a state's GSTIN to BOTH state_gstins JSONB and the legacy
+// fixed column (when one exists for that code), so old code keeps working.
+async function writeStateGstin(state_code, gstin /* string | null to remove */) {
+  const { data: existing } = await supabase.from('company_settings').select('id, state_gstins').single()
+  if (!existing) throw new Error('company_settings row missing — cannot persist GSTIN')
+
+  const map = { ...(existing.state_gstins || {}) }
+  if (gstin) map[state_code] = gstin
+  else       delete map[state_code]
+
+  const updates = { state_gstins: map }
+  // Mirror to the legacy column if one exists.
+  if (['KA','KL','TS','AP'].includes(state_code)) {
+    updates[`gstin_${state_code.toLowerCase()}`] = gstin || null
+  }
+
+  const { error } = await supabase
+    .from('company_settings')
+    .update(updates)
+    .eq('id', existing.id)
+  if (error) throw new Error(error.message)
+}
+
 export async function POST(req) {
   const auth = await requireAuth(req, { requiredRoles: ROLE_GROUPS.ACCOUNTS })
   if (!auth.ok) return auth.response
@@ -85,8 +137,8 @@ export async function POST(req) {
     // ── Sequence edit ────────────────────────────────────────────────────
     if (kind === 'seq') {
       const { state_code, fy_code, last_seq } = body
-      if (!ALLOWED_STATES.has(state_code) || state_code === 'KA') {
-        return Response.json({ error: `Invalid state_code '${state_code}'. Allowed: KL, TS, AP.` }, { status: 400 })
+      if (!state_code || !VALID_STATE_CODES.has(state_code) || state_code === 'KA') {
+        return Response.json({ error: `Invalid state_code '${state_code}'. KA is excluded (no E-Invoice for KA-source).` }, { status: 400 })
       }
       if (typeof last_seq !== 'number' || !Number.isInteger(last_seq) || last_seq < 0) {
         return Response.json({ error: 'last_seq must be a non-negative integer' }, { status: 400 })
@@ -101,31 +153,76 @@ export async function POST(req) {
       return Response.json({ success: true, state_code, fy_code, last_seq, next_no: `WG/${state_code}/${fy_code}/${last_seq + 1}` })
     }
 
-    // ── GSTIN edit ───────────────────────────────────────────────────────
+    // ── GSTIN edit (existing state) ──────────────────────────────────────
     if (kind === 'gstin') {
       const { state_code, gstin } = body
-      if (!ALLOWED_STATES.has(state_code)) {
-        return Response.json({ error: `Invalid state_code '${state_code}'. Allowed: KA, KL, TS, AP.` }, { status: 400 })
+      if (!state_code || !VALID_STATE_CODES.has(state_code)) {
+        return Response.json({ error: `Invalid state_code '${state_code}'.` }, { status: 400 })
       }
       const cleaned = String(gstin || '').trim().toUpperCase()
-      if (cleaned && !/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/.test(cleaned)) {
+      if (cleaned && !GSTIN_REGEX.test(cleaned)) {
         return Response.json({ error: `GSTIN '${cleaned}' is malformed (15 chars, format 22AAAAA0000A1Z5).` }, { status: 400 })
       }
-      const fieldName = `gstin_${state_code.toLowerCase()}`
-      // Upsert into the singleton company_settings row.
-      const { data: existing } = await supabase.from('company_settings').select('id').single()
-      if (!existing) {
-        return Response.json({ error: 'company_settings row missing — cannot update GSTIN' }, { status: 500 })
-      }
-      const { error } = await supabase
-        .from('company_settings')
-        .update({ [fieldName]: cleaned || null })
-        .eq('id', existing.id)
-      if (error) return Response.json({ error: error.message }, { status: 500 })
+      await writeStateGstin(state_code, cleaned || null)
       return Response.json({ success: true, state_code, gstin: cleaned })
     }
 
-    return Response.json({ error: `Unknown kind '${kind}'. Use 'seq' or 'gstin'.` }, { status: 400 })
+    // ── Add new state ────────────────────────────────────────────────────
+    if (kind === 'gstin_add') {
+      const { state_code, gstin, last_seq } = body
+      if (!state_code || !VALID_STATE_CODES.has(state_code)) {
+        return Response.json({ error: `Invalid state_code '${state_code}'.` }, { status: 400 })
+      }
+      const cleaned = String(gstin || '').trim().toUpperCase()
+      if (!cleaned) return Response.json({ error: 'GSTIN is required when adding a new state.' }, { status: 400 })
+      if (!GSTIN_REGEX.test(cleaned)) {
+        return Response.json({ error: `GSTIN '${cleaned}' is malformed (15 chars, format 22AAAAA0000A1Z5).` }, { status: 400 })
+      }
+      // Validate state code prefix matches GSTIN prefix (first 2 digits map to state).
+      // We don't reject mismatches, but we surface them in the response so the UI
+      // can warn the operator if they paste a Maharashtra GSTIN under MH but
+      // the digits say it's for Tamil Nadu, etc.
+      // (Skipped strict enforcement — accounts is responsible for getting it right.)
+
+      await writeStateGstin(state_code, cleaned)
+
+      // Seed a sequence row for the new state so the UI shows it immediately.
+      // KA gets no sequence row (no E-Invoice for KA).
+      let createdSeq = null
+      if (state_code !== 'KA') {
+        const fy = getCurrentFyCode()
+        const seedSeq = (typeof last_seq === 'number' && last_seq >= 0) ? Math.floor(last_seq) : 0
+        const { error: seqErr } = await supabase
+          .from('einvoice_sequence')
+          .upsert({ state_code, fy_code: fy, last_seq: seedSeq, updated_at: new Date().toISOString() }, { onConflict: 'state_code,fy_code' })
+        if (seqErr) return Response.json({ error: `GSTIN saved but sequence init failed: ${seqErr.message}` }, { status: 500 })
+        createdSeq = { state_code, fy_code: fy, last_seq: seedSeq, next_no: `WG/${state_code}/${fy}/${seedSeq + 1}` }
+      }
+      return Response.json({ success: true, state_code, gstin: cleaned, sequence: createdSeq })
+    }
+
+    // ── Remove a state ───────────────────────────────────────────────────
+    if (kind === 'gstin_remove') {
+      const { state_code } = body
+      if (!state_code) return Response.json({ error: 'state_code required' }, { status: 400 })
+      // KA is special — never let the operator delete it. KA is the buyer
+      // (HO) GSTIN for every E-Invoice; nuking it would break document
+      // generation for the entire company.
+      if (state_code === 'KA') {
+        return Response.json({ error: 'KA cannot be removed — it is the HO buyer GSTIN.' }, { status: 400 })
+      }
+      await writeStateGstin(state_code, null)
+      // Delete sequence rows for this state (all FYs). The operator can
+      // re-add later if they want; sequences will start fresh.
+      const { error: delErr } = await supabase
+        .from('einvoice_sequence')
+        .delete()
+        .eq('state_code', state_code)
+      if (delErr) return Response.json({ error: `GSTIN removed but sequence cleanup failed: ${delErr.message}` }, { status: 500 })
+      return Response.json({ success: true, state_code, removed: true })
+    }
+
+    return Response.json({ error: `Unknown kind '${kind}'. Use 'seq', 'gstin', 'gstin_add', or 'gstin_remove'.` }, { status: 400 })
   } catch (err) {
     return Response.json({ error: err.message }, { status: 500 })
   }

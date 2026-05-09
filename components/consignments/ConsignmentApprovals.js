@@ -310,6 +310,43 @@ export default function ConsignmentApprovals() {
     }
   }, [fetchSettings])
 
+  // Add a new state — GSTIN + opening invoice sequence number.
+  const addState = useCallback(async (state_code, gstin, last_seq) => {
+    setSettingsBusy(`add:${state_code}`)
+    try {
+      const r = await authedFetch('/api/admin/einvoice-settings', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ kind: 'gstin_add', state_code, gstin, last_seq: Number(last_seq) || 0 }),
+      })
+      const j = await r.json()
+      if (!r.ok || j.error) { setSettingsToast({ type: 'error', msg: j.error || 'Add failed' }); return false }
+      setSettingsToast({ type: 'success', msg: `${state_code} added — next invoice will be ${j.sequence?.next_no || '—'}` })
+      await fetchSettings(true)
+      return true
+    } finally {
+      setSettingsBusy(null)
+      setTimeout(() => setSettingsToast(null), 4000)
+    }
+  }, [fetchSettings])
+
+  // Remove a state — wipes GSTIN + every sequence row for that state.
+  const removeState = useCallback(async (state_code) => {
+    setSettingsBusy(`remove:${state_code}`)
+    try {
+      const r = await authedFetch('/api/admin/einvoice-settings', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ kind: 'gstin_remove', state_code }),
+      })
+      const j = await r.json()
+      if (!r.ok || j.error) { setSettingsToast({ type: 'error', msg: j.error || 'Remove failed' }); return }
+      setSettingsToast({ type: 'success', msg: `${state_code} removed` })
+      await fetchSettings(true)
+    } finally {
+      setSettingsBusy(null)
+      setTimeout(() => setSettingsToast(null), 4000)
+    }
+  }, [fetchSettings])
+
   // Re-render every 30s so the urgency badge stays current
   useEffect(() => {
     const id = setInterval(() => forceTick(n => n + 1), 30000)
@@ -847,82 +884,17 @@ export default function ConsignmentApprovals() {
           fetchEfficiency={fetchEfficiency}
         />
       ) : tab === 'settings' ? (
-        /* Settings — E-Invoice sequences + state GSTINs + when-to-generate notes */
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-          {settingsToast && (
-            <div style={{ padding: '10px 14px', borderRadius: '8px', background: settingsToast.type === 'success' ? `${t.green}15` : `${t.red}15`, border: `1px solid ${settingsToast.type === 'success' ? t.green : t.red}40`, fontSize: '12px', color: settingsToast.type === 'success' ? t.green : t.red }}>
-              {settingsToast.msg}
-            </div>
-          )}
-
-          {/* When EWB / E-Invoice is generated — instructions */}
-          <div style={card}>
-            <div style={{ padding: '12px 16px', borderBottom: `1px solid ${t.border}`, fontSize: '12px', color: t.text2, fontWeight: 600 }}>
-              When are E-Way Bill and E-Invoice issued?
-            </div>
-            <div style={{ padding: '14px 18px', fontSize: '12px', color: t.text2, lineHeight: 1.7 }}>
-              <div style={{ marginBottom: '10px' }}>
-                <span style={{ display: 'inline-block', minWidth: '90px', fontSize: '9px', color: t.green, background: `${t.green}15`, borderRadius: '4px', padding: '2px 7px', fontWeight: 700, letterSpacing: '.04em', textAlign: 'center', marginRight: '10px' }}>EWB</span>
-                <strong>Karnataka source → Karnataka HO</strong> (intrastate own-use, value &gt; ₹50,000) and <strong>Branch → Hub</strong> internal moves. Same legal entity, same GSTIN. Sub-supply: <code style={{ color: t.gold, background: 'transparent' }}>OWN_USE</code>.
-              </div>
-              <div style={{ marginBottom: '10px' }}>
-                <span style={{ display: 'inline-block', minWidth: '90px', fontSize: '9px', color: t.purple, background: `${t.purple}15`, borderRadius: '4px', padding: '2px 7px', fontWeight: 700, letterSpacing: '.04em', textAlign: 'center', marginRight: '10px' }}>E-INV</span>
-                <strong>Kerala / Telangana / Andhra Pradesh source → Karnataka HO</strong> (interstate sale, B2B). Different state-wise GSTINs are mandatory — IRP rejects matching seller/buyer GSTINs.
-              </div>
-              <div style={{ fontSize: '11px', color: t.text3, marginTop: '10px', paddingTop: '10px', borderTop: `1px solid ${t.border}` }}>
-                <strong style={{ color: t.text2 }}>Workflow order:</strong> Consignee Report → Issue Voucher / Delivery Challan → EWB / E-Invoice. Each step unlocks the next; you can&apos;t fire NIC / IRP before the underlying physical document exists.
-              </div>
-              <div style={{ fontSize: '11px', color: t.text3, marginTop: '6px' }}>
-                <strong style={{ color: t.text2 }}>Cancel window:</strong> 24 hours after generation on both NIC and IRP. Past 24h, an E-Invoice can be nullified via Credit Note (Typ: CRN); an E-Way Bill cannot be retracted, only logged for reconciliation.
-              </div>
-            </div>
-          </div>
-
-          {/* E-Invoice sequence editor */}
-          <div style={card}>
-            <div style={{ padding: '12px 16px', borderBottom: `1px solid ${t.border}`, display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <div style={{ fontSize: '12px', color: t.text2, fontWeight: 600 }}>E-Invoice number sequences</div>
-              <span style={{ fontSize: '11px', color: t.text4 }}>FY {settings?.fy || '—'}</span>
-            </div>
-            <div style={{ padding: '6px 0 0 0' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
-                <thead>
-                  <tr>
-                    {['State', 'Last used', 'Next will be', 'Action'].map(h => (
-                      <th key={h} style={{ padding: '8px 16px', textAlign: 'left', fontSize: '9px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 600 }}>{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {(settings?.sequences || []).map(s => (
-                    <SeqRow key={s.state_code} t={t} seq={s} busy={settingsBusy === `seq:${s.state_code}`} onSave={saveSeq} />
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          {/* State GSTIN editor */}
-          <div style={card}>
-            <div style={{ padding: '12px 16px', borderBottom: `1px solid ${t.border}`, fontSize: '12px', color: t.text2, fontWeight: 600 }}>State-wise GSTINs</div>
-            <div style={{ padding: '6px 0 0 0' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
-                <thead>
-                  <tr>
-                    {['State', 'GSTIN', 'Action'].map(h => (
-                      <th key={h} style={{ padding: '8px 16px', textAlign: 'left', fontSize: '9px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 600 }}>{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {['KA', 'KL', 'TS', 'AP'].map(stateCode => (
-                    <GstinRow key={stateCode} t={t} stateCode={stateCode} value={settings?.gstins?.[stateCode] || ''} busy={settingsBusy === `gstin:${stateCode}`} onSave={saveGstin} />
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
+        <SettingsTab
+          t={t} card={card}
+          settings={settings}
+          settingsBusy={settingsBusy}
+          settingsToast={settingsToast}
+          saveSeq={saveSeq}
+          saveGstin={saveGstin}
+          addState={addState}
+          removeState={removeState}
+          openConfirm={openConfirm}
+        />
       ) : (tab === 'approved' || tab === 'rejected') ? (
         /* History list — polished card per consignment with stats pills,
            avatar audit trail, doc-action chips, live cancel countdown. */
@@ -2194,52 +2166,304 @@ function EfficiencyTab({ t, card, users, from, setFrom, to, setTo, fetchEfficien
   )
 }
 
-// Settings → E-Invoice sequence row. Inline-editable last_seq with a Save
-// button. Showing 'next_no' inline lets the operator verify the new value
-// matches what their physical book expects before clicking Save.
-function SeqRow({ t, seq, busy, onSave }) {
-  const [val, setVal] = useState(String(seq.last_seq))
-  useEffect(() => { setVal(String(seq.last_seq)) }, [seq.last_seq])
-  const dirty = String(val) !== String(seq.last_seq)
-  const nextPreview = `WG/${seq.state_code}/${seq.fy_code}/${(parseInt(val) || 0) + 1}`
+// All Indian state codes — name + code. Used for the 'add new state' dropdown.
+// Code = the 2-char prefix on GSTINs and on per-state E-Invoice numbers.
+const INDIAN_STATES = [
+  { code: 'AN', name: 'Andaman & Nicobar' },     { code: 'AP', name: 'Andhra Pradesh' },
+  { code: 'AR', name: 'Arunachal Pradesh' },     { code: 'AS', name: 'Assam' },
+  { code: 'BR', name: 'Bihar' },                 { code: 'CG', name: 'Chhattisgarh' },
+  { code: 'CH', name: 'Chandigarh' },            { code: 'DD', name: 'Daman & Diu' },
+  { code: 'DL', name: 'Delhi' },                 { code: 'DN', name: 'Dadra & Nagar Haveli' },
+  { code: 'GA', name: 'Goa' },                   { code: 'GJ', name: 'Gujarat' },
+  { code: 'HP', name: 'Himachal Pradesh' },      { code: 'HR', name: 'Haryana' },
+  { code: 'JH', name: 'Jharkhand' },             { code: 'JK', name: 'Jammu & Kashmir' },
+  { code: 'KA', name: 'Karnataka' },             { code: 'KL', name: 'Kerala' },
+  { code: 'LA', name: 'Ladakh' },                { code: 'LD', name: 'Lakshadweep' },
+  { code: 'MH', name: 'Maharashtra' },           { code: 'ML', name: 'Meghalaya' },
+  { code: 'MN', name: 'Manipur' },               { code: 'MP', name: 'Madhya Pradesh' },
+  { code: 'MZ', name: 'Mizoram' },               { code: 'NL', name: 'Nagaland' },
+  { code: 'OD', name: 'Odisha' },                { code: 'PB', name: 'Punjab' },
+  { code: 'PY', name: 'Puducherry' },            { code: 'RJ', name: 'Rajasthan' },
+  { code: 'SK', name: 'Sikkim' },                { code: 'TG', name: 'Telangana (alt)' },
+  { code: 'TN', name: 'Tamil Nadu' },            { code: 'TR', name: 'Tripura' },
+  { code: 'TS', name: 'Telangana' },             { code: 'UK', name: 'Uttarakhand (alt)' },
+  { code: 'UP', name: 'Uttar Pradesh' },         { code: 'UT', name: 'Uttarakhand' },
+  { code: 'WB', name: 'West Bengal' },
+]
+const STATE_NAME_BY_CODE = Object.fromEntries(INDIAN_STATES.map(s => [s.code, s.name]))
+
+// Settings tab — instructions panel, per-state cards (GSTIN + sequence
+// combined), and an 'add new state' affordance. Add / remove gives ops a
+// self-service path when a new state goes live, no schema migration needed.
+function SettingsTab({ t, card, settings, settingsBusy, settingsToast, saveSeq, saveGstin, addState, removeState, openConfirm }) {
+  // Build the merged per-state list. Every state in `gstins` gets a card.
+  // Sequences for non-KA states are matched by code; KA gets no sequence
+  // (E-Invoices aren't issued for KA-source consignments).
+  const fy = settings?.fy
+  const seqByState = Object.fromEntries((settings?.sequences || []).map(s => [s.state_code, s]))
+  const stateRows = Object.entries(settings?.gstins || {})
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([code, gstin]) => ({
+      code,
+      name: STATE_NAME_BY_CODE[code] || code,
+      gstin: gstin || '',
+      seq: code === 'KA' ? null : (seqByState[code] || { state_code: code, fy_code: fy, last_seq: 0, next_no: `WG/${code}/${fy}/1`, exists: false }),
+    }))
+
+  // States not yet configured — used to populate the 'add new state' dropdown.
+  const usedCodes = new Set(stateRows.map(r => r.code))
+  const availableStates = INDIAN_STATES.filter(s => !usedCodes.has(s.code))
+
+  const [showAdd, setShowAdd] = useState(false)
+
   return (
-    <tr style={{ borderTop: `1px solid ${t.border}30` }}>
-      <td style={{ padding: '8px 16px', color: t.text1, fontWeight: 600 }}>{seq.state_code}</td>
-      <td style={{ padding: '8px 16px' }}>
-        <input type="number" min="0" value={val} onChange={e => setVal(e.target.value)} disabled={busy}
-          style={{ width: '100px', background: t.card2 || t.card, border: `1px solid ${dirty ? t.gold : t.border}`, borderRadius: '6px', padding: '5px 8px', fontSize: '12px', color: t.text1, fontFamily: 'monospace', outline: 'none' }} />
-      </td>
-      <td style={{ padding: '8px 16px', color: dirty ? t.gold : t.text3, fontFamily: 'monospace', fontSize: '11px' }}>{nextPreview}</td>
-      <td style={{ padding: '8px 16px' }}>
-        <button onClick={() => onSave(seq.state_code, seq.fy_code, parseInt(val) || 0)} disabled={!dirty || busy}
-          style={{ background: dirty ? t.gold : 'transparent', color: dirty ? '#1a0a00' : t.text4, border: `1px solid ${dirty ? t.gold : t.border}`, borderRadius: '6px', padding: '5px 14px', fontSize: '11px', fontWeight: 700, cursor: dirty && !busy ? 'pointer' : 'not-allowed' }}>
-          {busy ? 'Saving…' : 'Save'}
-        </button>
-      </td>
-    </tr>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+      {settingsToast && (
+        <div style={{ padding: '10px 14px', borderRadius: '8px', background: settingsToast.type === 'success' ? `${t.green}15` : `${t.red}15`, border: `1px solid ${settingsToast.type === 'success' ? t.green : t.red}40`, fontSize: '12px', color: settingsToast.type === 'success' ? t.green : t.red }}>
+          {settingsToast.msg}
+        </div>
+      )}
+
+      {/* Instructions panel */}
+      <div style={{ ...card, overflow: 'hidden', position: 'relative' }}>
+        <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '2px', background: `linear-gradient(90deg, ${t.gold} 0%, ${t.gold}30 60%, transparent 100%)` }} />
+        <div style={{ padding: '14px 18px', borderBottom: `1px solid ${t.border}`, fontSize: '13px', color: t.text1, fontWeight: 600 }}>
+          When are E-Way Bill and E-Invoice issued?
+        </div>
+        <div style={{ padding: '14px 18px', fontSize: '12px', color: t.text2, lineHeight: 1.7 }}>
+          <div style={{ marginBottom: '10px' }}>
+            <span style={{ display: 'inline-block', minWidth: '90px', fontSize: '9px', color: t.green, background: `${t.green}15`, borderRadius: '4px', padding: '2px 7px', fontWeight: 700, letterSpacing: '.04em', textAlign: 'center', marginRight: '10px' }}>EWB</span>
+            <strong>Karnataka source → Karnataka HO</strong> (intrastate own-use, value &gt; ₹50,000) and <strong>Branch → Hub</strong> internal moves. Same legal entity, same GSTIN. Sub-supply: <code style={{ color: t.gold, background: 'transparent' }}>OWN_USE</code>.
+          </div>
+          <div style={{ marginBottom: '10px' }}>
+            <span style={{ display: 'inline-block', minWidth: '90px', fontSize: '9px', color: t.purple, background: `${t.purple}15`, borderRadius: '4px', padding: '2px 7px', fontWeight: 700, letterSpacing: '.04em', textAlign: 'center', marginRight: '10px' }}>E-INV</span>
+            <strong>Non-Karnataka source → Karnataka HO</strong> (interstate sale, B2B). Different state-wise GSTINs are mandatory — IRP rejects matching seller/buyer GSTINs.
+          </div>
+          <div style={{ fontSize: '11px', color: t.text3, marginTop: '10px', paddingTop: '10px', borderTop: `1px solid ${t.border}` }}>
+            <strong style={{ color: t.text2 }}>Workflow order:</strong> Consignee Report → Issue Voucher / Delivery Challan → EWB / E-Invoice. Each step unlocks the next; you can&apos;t fire NIC / IRP before the underlying physical document exists.
+          </div>
+          <div style={{ fontSize: '11px', color: t.text3, marginTop: '6px' }}>
+            <strong style={{ color: t.text2 }}>Cancel window:</strong> 24 hours after generation on both NIC and IRP. Past 24h, an E-Invoice can be nullified via Credit Note (Typ: CRN); an E-Way Bill cannot be retracted, only logged for reconciliation.
+          </div>
+        </div>
+      </div>
+
+      {/* Per-state configuration */}
+      <div style={{ ...card, overflow: 'hidden', position: 'relative' }}>
+        <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '2px', background: `linear-gradient(90deg, ${t.purple} 0%, ${t.purple}30 60%, transparent 100%)` }} />
+        <div style={{ padding: '14px 18px', borderBottom: `1px solid ${t.border}`, display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <div>
+            <div style={{ fontSize: '13px', color: t.text1, fontWeight: 600 }}>State configuration</div>
+            <div style={{ fontSize: '10px', color: t.text4, marginTop: '2px' }}>One card per state. Edit GSTIN + invoice sequence inline. Add new states when they go live.</div>
+          </div>
+          <div style={{ flex: 1 }} />
+          <span style={{ fontSize: '11px', color: t.text4 }}>FY {fy || '—'}</span>
+        </div>
+
+        <div style={{ padding: '14px 18px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+          {stateRows.length === 0 && (
+            <div style={{ padding: '24px', textAlign: 'center', color: t.text4, fontSize: '12px' }}>
+              No states configured yet. Click <strong>Add state</strong> below to start.
+            </div>
+          )}
+          {stateRows.map(row => (
+            <StateCard
+              key={row.code}
+              t={t}
+              row={row}
+              busy={settingsBusy}
+              saveGstin={saveGstin}
+              saveSeq={saveSeq}
+              removeState={removeState}
+              openConfirm={openConfirm}
+            />
+          ))}
+
+          {/* Add-state affordance */}
+          {!showAdd ? (
+            <button onClick={() => setShowAdd(true)} disabled={availableStates.length === 0}
+              style={{
+                background: 'transparent', border: `1.5px dashed ${t.border}`,
+                borderRadius: '10px', padding: '14px',
+                fontSize: '12px', color: availableStates.length === 0 ? t.text4 : t.text2,
+                fontWeight: 600, cursor: availableStates.length === 0 ? 'not-allowed' : 'pointer',
+                transition: 'background .15s ease, border-color .15s ease',
+              }}
+              onMouseEnter={e => { if (availableStates.length) { e.currentTarget.style.background = `${t.gold}08`; e.currentTarget.style.borderColor = t.gold } }}
+              onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.borderColor = t.border }}>
+              {availableStates.length === 0 ? 'All Indian states already configured' : '＋  Add new state'}
+            </button>
+          ) : (
+            <AddStateForm
+              t={t}
+              availableStates={availableStates}
+              busyKey={settingsBusy}
+              onAdd={async (code, gstin, last_seq) => {
+                const ok = await addState(code, gstin, last_seq)
+                if (ok) setShowAdd(false)
+              }}
+              onCancel={() => setShowAdd(false)}
+            />
+          )}
+        </div>
+      </div>
+    </div>
   )
 }
 
-// Settings → State GSTIN row. Same inline-edit pattern.
-function GstinRow({ t, stateCode, value, busy, onSave }) {
-  const [val, setVal] = useState(value || '')
-  useEffect(() => { setVal(value || '') }, [value])
-  const dirty = val.trim().toUpperCase() !== (value || '').toUpperCase()
+// Per-state card — combines GSTIN + sequence editors. Header has the state
+// pill + name + remove (✕) button. Body is two stacked rows of inline
+// editors with Save buttons that activate when dirty.
+function StateCard({ t, row, busy, saveGstin, saveSeq, removeState, openConfirm }) {
+  const [gstinVal, setGstinVal] = useState(row.gstin || '')
+  const [seqVal,   setSeqVal]   = useState(String(row.seq?.last_seq ?? 0))
+  useEffect(() => { setGstinVal(row.gstin || '') }, [row.gstin])
+  useEffect(() => { setSeqVal(String(row.seq?.last_seq ?? 0)) }, [row.seq?.last_seq])
+
+  const gstinDirty = gstinVal.trim().toUpperCase() !== (row.gstin || '').toUpperCase()
+  const seqDirty   = row.seq != null && String(seqVal) !== String(row.seq.last_seq)
+  const gstinBusy  = busy === `gstin:${row.code}`
+  const seqBusy    = busy === `seq:${row.code}`
+  const removeBusy = busy === `remove:${row.code}`
+
+  const isKA = row.code === 'KA'
+  const accent = isKA ? t.gold : t.purple
+
+  const onRemove = async () => {
+    const ok = await openConfirm({
+      title: `Remove ${row.code} – ${STATE_NAME_BY_CODE[row.code] || row.code}?`,
+      message: `Removes the GSTIN and ${row.seq ? 'every E-Invoice sequence row ' : ''}for this state. ${row.seq?.last_seq ? `Current last invoice (${row.seq.last_seq}) will be lost — re-add later if needed.` : ''}`,
+      confirmLabel: 'Remove',
+      danger: true,
+    })
+    if (ok) removeState(row.code)
+  }
+
+  const nextPreview = row.seq
+    ? `WG/${row.code}/${row.seq.fy_code}/${(parseInt(seqVal) || 0) + 1}`
+    : null
+
   return (
-    <tr style={{ borderTop: `1px solid ${t.border}30` }}>
-      <td style={{ padding: '8px 16px', color: t.text1, fontWeight: 600 }}>{stateCode}</td>
-      <td style={{ padding: '8px 16px' }}>
-        <input value={val} onChange={e => setVal(e.target.value.toUpperCase())} disabled={busy}
+    <div style={{
+      border: `1px solid ${t.border}`, borderRadius: '10px',
+      background: t.card2 || t.card, overflow: 'hidden',
+      transition: 'border-color .15s ease',
+    }}>
+      {/* Header — state pill + name + remove button */}
+      <div style={{ padding: '10px 14px', borderBottom: `1px solid ${t.border}`, display: 'flex', alignItems: 'center', gap: '10px' }}>
+        <span style={{
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          minWidth: '36px', padding: '4px 10px',
+          fontSize: '11px', fontWeight: 700, letterSpacing: '.06em',
+          color: accent, background: `${accent}18`, border: `1px solid ${accent}40`,
+          borderRadius: '6px', fontFamily: 'monospace',
+        }}>{row.code}</span>
+        <span style={{ fontSize: '13px', color: t.text1, fontWeight: 600 }}>{STATE_NAME_BY_CODE[row.code] || row.code}</span>
+        {isKA && (
+          <span style={{ fontSize: '9px', color: t.gold, background: `${t.gold}10`, border: `1px solid ${t.gold}30`, borderRadius: '4px', padding: '2px 7px', fontWeight: 600, letterSpacing: '.04em' }}>HO BUYER</span>
+        )}
+        <div style={{ flex: 1 }} />
+        {!isKA && (
+          <button onClick={onRemove} disabled={removeBusy}
+            title={`Remove ${row.code}`}
+            style={{
+              background: 'transparent', border: `1px solid ${t.red}40`,
+              borderRadius: '6px', padding: '4px 10px',
+              fontSize: '11px', color: t.red, fontWeight: 600, cursor: removeBusy ? 'wait' : 'pointer',
+              opacity: removeBusy ? 0.6 : 1,
+            }}>
+            {removeBusy ? '…' : '✕  Remove'}
+          </button>
+        )}
+      </div>
+
+      {/* Body — GSTIN row + (optional) sequence row */}
+      <div style={{ padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+        {/* GSTIN row */}
+        <div style={{ display: 'grid', gridTemplateColumns: '110px 1fr auto', gap: '12px', alignItems: 'center' }}>
+          <span style={{ fontSize: '10px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 600 }}>GSTIN</span>
+          <input value={gstinVal} onChange={e => setGstinVal(e.target.value.toUpperCase())} disabled={gstinBusy}
+            placeholder="22AAAAA0000A1Z5" maxLength={15}
+            style={{ width: '100%', maxWidth: '320px', background: t.card, border: `1px solid ${gstinDirty ? t.gold : t.border}`, borderRadius: '6px', padding: '7px 10px', fontSize: '12px', color: t.text1, fontFamily: 'monospace', outline: 'none', letterSpacing: '.05em' }} />
+          <button onClick={() => saveGstin(row.code, gstinVal.trim())} disabled={!gstinDirty || gstinBusy}
+            style={{ background: gstinDirty ? t.gold : 'transparent', color: gstinDirty ? '#1a0a00' : t.text4, border: `1px solid ${gstinDirty ? t.gold : t.border}`, borderRadius: '6px', padding: '6px 16px', fontSize: '11px', fontWeight: 700, cursor: gstinDirty && !gstinBusy ? 'pointer' : 'not-allowed', whiteSpace: 'nowrap' }}>
+            {gstinBusy ? 'Saving…' : 'Save'}
+          </button>
+        </div>
+
+        {/* Sequence row — KA excluded (no E-Invoice for KA-source) */}
+        {row.seq && (
+          <div style={{ display: 'grid', gridTemplateColumns: '110px 110px 1fr auto', gap: '12px', alignItems: 'center' }}>
+            <span style={{ fontSize: '10px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 600 }}>Last invoice</span>
+            <input type="number" min="0" value={seqVal} onChange={e => setSeqVal(e.target.value)} disabled={seqBusy}
+              style={{ width: '100%', background: t.card, border: `1px solid ${seqDirty ? t.gold : t.border}`, borderRadius: '6px', padding: '7px 10px', fontSize: '12px', color: t.text1, fontFamily: 'monospace', outline: 'none' }} />
+            <span style={{ fontSize: '11px', color: seqDirty ? t.gold : t.text3, fontFamily: 'monospace' }}>
+              <span style={{ color: t.text4, marginRight: '6px' }}>Next →</span>{nextPreview}
+            </span>
+            <button onClick={() => saveSeq(row.code, row.seq.fy_code, parseInt(seqVal) || 0)} disabled={!seqDirty || seqBusy}
+              style={{ background: seqDirty ? t.gold : 'transparent', color: seqDirty ? '#1a0a00' : t.text4, border: `1px solid ${seqDirty ? t.gold : t.border}`, borderRadius: '6px', padding: '6px 16px', fontSize: '11px', fontWeight: 700, cursor: seqDirty && !seqBusy ? 'pointer' : 'not-allowed', whiteSpace: 'nowrap' }}>
+              {seqBusy ? 'Saving…' : 'Save'}
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// Form for adding a new state — slides in below the state cards when the
+// operator clicks 'Add new state'. State picker + GSTIN + opening invoice
+// number, with an Add / Cancel pair at the bottom.
+function AddStateForm({ t, availableStates, busyKey, onAdd, onCancel }) {
+  const [code, setCode]       = useState(availableStates[0]?.code || '')
+  const [gstin, setGstin]     = useState('')
+  const [lastSeq, setLastSeq] = useState('0')
+  const busy = busyKey?.startsWith('add:')
+  const canSubmit = code && gstin.trim().length === 15 && !busy
+
+  return (
+    <div style={{
+      border: `1.5px solid ${t.gold}`, background: `${t.gold}06`,
+      borderRadius: '10px', padding: '14px 16px',
+      display: 'flex', flexDirection: 'column', gap: '10px',
+    }}>
+      <div style={{ fontSize: '12px', color: t.gold, fontWeight: 700, letterSpacing: '.04em' }}>Add new state</div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '110px 1fr', gap: '12px', alignItems: 'center' }}>
+        <span style={{ fontSize: '10px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 600 }}>State</span>
+        <select value={code} onChange={e => setCode(e.target.value)} disabled={busy}
+          style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: '6px', padding: '7px 10px', fontSize: '12px', color: t.text1, outline: 'none', maxWidth: '320px' }}>
+          {availableStates.map(s => <option key={s.code} value={s.code}>{s.code} — {s.name}</option>)}
+        </select>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '110px 1fr', gap: '12px', alignItems: 'center' }}>
+        <span style={{ fontSize: '10px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 600 }}>GSTIN</span>
+        <input value={gstin} onChange={e => setGstin(e.target.value.toUpperCase())} disabled={busy}
           placeholder="22AAAAA0000A1Z5" maxLength={15}
-          style={{ width: '220px', background: t.card2 || t.card, border: `1px solid ${dirty ? t.gold : t.border}`, borderRadius: '6px', padding: '5px 8px', fontSize: '12px', color: t.text1, fontFamily: 'monospace', outline: 'none', letterSpacing: '.05em' }} />
-      </td>
-      <td style={{ padding: '8px 16px' }}>
-        <button onClick={() => onSave(stateCode, val.trim())} disabled={!dirty || busy}
-          style={{ background: dirty ? t.gold : 'transparent', color: dirty ? '#1a0a00' : t.text4, border: `1px solid ${dirty ? t.gold : t.border}`, borderRadius: '6px', padding: '5px 14px', fontSize: '11px', fontWeight: 700, cursor: dirty && !busy ? 'pointer' : 'not-allowed' }}>
-          {busy ? 'Saving…' : 'Save'}
+          style={{ width: '100%', maxWidth: '320px', background: t.card, border: `1px solid ${t.border}`, borderRadius: '6px', padding: '7px 10px', fontSize: '12px', color: t.text1, fontFamily: 'monospace', outline: 'none', letterSpacing: '.05em' }} />
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '110px 1fr', gap: '12px', alignItems: 'center' }}>
+        <span style={{ fontSize: '10px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 600 }}>Last invoice</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <input type="number" min="0" value={lastSeq} onChange={e => setLastSeq(e.target.value)} disabled={busy}
+            style={{ width: '100px', background: t.card, border: `1px solid ${t.border}`, borderRadius: '6px', padding: '7px 10px', fontSize: '12px', color: t.text1, fontFamily: 'monospace', outline: 'none' }} />
+          <span style={{ fontSize: '10px', color: t.text4 }}>0 if you&apos;re starting fresh</span>
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '4px' }}>
+        <button onClick={onCancel} disabled={busy}
+          style={{ background: 'transparent', border: `1px solid ${t.border}`, borderRadius: '6px', padding: '7px 16px', fontSize: '11px', color: t.text3, cursor: 'pointer' }}>
+          Cancel
         </button>
-      </td>
-    </tr>
+        <button onClick={() => canSubmit && onAdd(code, gstin.trim(), parseInt(lastSeq) || 0)} disabled={!canSubmit}
+          style={{ background: canSubmit ? t.gold : 'transparent', color: canSubmit ? '#1a0a00' : t.text4, border: `1px solid ${canSubmit ? t.gold : t.border}`, borderRadius: '6px', padding: '7px 18px', fontSize: '11px', fontWeight: 700, cursor: canSubmit ? 'pointer' : 'not-allowed' }}>
+          {busy ? 'Adding…' : 'Add state'}
+        </button>
+      </div>
+    </div>
   )
 }
 
