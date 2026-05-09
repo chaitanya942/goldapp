@@ -61,21 +61,35 @@ export async function GET(req) {
   try {
     const fy = getCurrentFyCode()
 
+    // Two-step select so we degrade gracefully when the JSONB migration
+    // hasn't been run yet. The legacy columns are always present; the JSONB
+    // is queried separately and treated as {} on any error.
     const { data: cs } = await supabase
       .from('company_settings')
-      .select('id, gstin, state_gstins, gstin_ka, gstin_kl, gstin_ts, gstin_ap, head_office_address, head_office_city, head_office_pin, head_office_state')
+      .select('id, gstin, gstin_ka, gstin_kl, gstin_ts, gstin_ap, head_office_address, head_office_city, head_office_pin, head_office_state')
       .single()
 
-    // Merge state_gstins JSONB with the legacy columns. JSONB wins; legacy
-    // columns surface only for keys not already present (they're a backstop
-    // until the migration script has been run).
+    let fromJson = {}
+    try {
+      const { data: jsonbRow } = await supabase
+        .from('company_settings')
+        .select('state_gstins')
+        .single()
+      if (jsonbRow?.state_gstins && typeof jsonbRow.state_gstins === 'object') {
+        fromJson = jsonbRow.state_gstins
+      }
+    } catch {
+      // state_gstins column doesn't exist (migration pending) — fall back to
+      // legacy columns only. Settings tab still works.
+    }
+
+    // Merge: JSONB keys win where present; legacy fills in the rest.
     const legacy = {
       KA: cs?.gstin_ka || cs?.gstin || '',
       KL: cs?.gstin_kl || '',
       TS: cs?.gstin_ts || '',
       AP: cs?.gstin_ap || '',
     }
-    const fromJson = cs?.state_gstins || {}
     const gstins = { ...legacy, ...fromJson }
     // Drop any blank values so the UI doesn't show empty rows.
     Object.keys(gstins).forEach(k => { if (!gstins[k]) delete gstins[k] })
@@ -106,24 +120,50 @@ export async function GET(req) {
 
 // Helper: write a state's GSTIN to BOTH state_gstins JSONB and the legacy
 // fixed column (when one exists for that code), so old code keeps working.
+// Falls back to legacy-only writes if the JSONB column hasn't been migrated
+// yet — the Settings tab continues to work, just without support for new
+// states beyond {KA, KL, TS, AP} until the SQL migration is run.
 async function writeStateGstin(state_code, gstin /* string | null to remove */) {
-  const { data: existing } = await supabase.from('company_settings').select('id, state_gstins').single()
-  if (!existing) throw new Error('company_settings row missing — cannot persist GSTIN')
+  // First, try reading state_gstins separately. If it errors, the column
+  // doesn't exist yet → we'll only update the legacy column.
+  let existingMap = null
+  let existingId  = null
+  try {
+    const { data, error } = await supabase
+      .from('company_settings').select('id, state_gstins').single()
+    if (error) throw error
+    existingId  = data?.id
+    existingMap = data?.state_gstins || {}
+  } catch {
+    const { data } = await supabase.from('company_settings').select('id').single()
+    existingId  = data?.id
+    existingMap = null   // sentinel: JSONB column unavailable
+  }
+  if (!existingId) throw new Error('company_settings row missing — cannot persist GSTIN')
 
-  const map = { ...(existing.state_gstins || {}) }
-  if (gstin) map[state_code] = gstin
-  else       delete map[state_code]
-
-  const updates = { state_gstins: map }
+  const updates = {}
+  if (existingMap !== null) {
+    const map = { ...existingMap }
+    if (gstin) map[state_code] = gstin
+    else       delete map[state_code]
+    updates.state_gstins = map
+  }
   // Mirror to the legacy column if one exists.
   if (['KA','KL','TS','AP'].includes(state_code)) {
     updates[`gstin_${state_code.toLowerCase()}`] = gstin || null
+  } else if (existingMap === null) {
+    // New state code AND no JSONB column — there's nowhere to store this.
+    // Surface a clear error so the operator knows to run the migration.
+    throw new Error(
+      `Cannot save '${state_code}' — the state_gstins JSONB column hasn't been added yet. ` +
+      `Run sql/state_gstins_jsonb.sql in Supabase, then retry.`
+    )
   }
 
   const { error } = await supabase
     .from('company_settings')
     .update(updates)
-    .eq('id', existing.id)
+    .eq('id', existingId)
   if (error) throw new Error(error.message)
 }
 
