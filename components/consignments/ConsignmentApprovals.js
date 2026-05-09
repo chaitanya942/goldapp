@@ -15,6 +15,33 @@ const fmt   = (n) => n != null ? Number(n).toLocaleString('en-IN') : '—'
 const fmtWt = (n) => n != null ? `${Number(n).toFixed(3)}g` : '—'
 const fmtTS = (d) => d ? new Date(d).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—'
 
+// 24h cancel window status for an EWB / E-Invoice. Returns the time left
+// until NIC / IRP locks the doc (cancellation is rejected after 24h),
+// colour-coded by urgency.
+//   > 12h         → green   "18h 24m left"
+//   6–12h         → gold    "8h 02m left"
+//   1–6h          → orange  "3h 15m left"
+//   < 1h          → red     "45m left"
+//   past 24h      → text4   "Window closed", expired=true
+//   no timestamp  → null    (caller should hide chip + button)
+function cancelWindow(generatedAt, t) {
+  if (!generatedAt) return null
+  const elapsed   = Date.now() - new Date(generatedAt).getTime()
+  const remaining = 24 * 60 * 60 * 1000 - elapsed
+  if (remaining <= 0) {
+    return { expired: true, label: 'Cancel window closed', color: t.text4, bg: `${t.text4}15` }
+  }
+  const totalMins = Math.floor(remaining / 60000)
+  const h = Math.floor(totalMins / 60)
+  const m = totalMins % 60
+  const label = h > 0 ? `${h}h ${String(m).padStart(2, '0')}m left` : `${m}m left`
+  const color = h >= 12 ? t.green
+              : h >=  6 ? t.gold
+              : h >=  1 ? t.orange
+              :           t.red
+  return { expired: false, label, color, bg: `${color}15`, hours: h, minutes: m }
+}
+
 // Returns { label, color } for waiting time, color-coded by urgency.
 function waitingBadge(ts, t) {
   if (!ts) return { label: '—', color: t.text4, bg: 'transparent' }
@@ -905,7 +932,8 @@ export default function ConsignmentApprovals() {
                       <span style={{ color: t.text4 }}>Reason:</span> {c.rejection_reason}
                     </div>
                   )}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap', marginTop: '2px', fontSize: '10px', color: t.text4 }}>
+                  {/* Row 1: audit trail (created + approved/rejected, by whom). Muted. */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginTop: '2px', fontSize: '10px', color: t.text4 }}>
                     <span>Created {fmtTS(c.created_at)}{c.created_by && c.created_by !== 'unknown' ? ` by ${c.created_by}` : ''}</span>
                     {c.approved_at && (
                       <>
@@ -913,7 +941,10 @@ export default function ConsignmentApprovals() {
                         <span>{isApproved ? 'Approved' : 'Rejected'} {fmtTS(c.approved_at)}{c.approved_by ? ` by ${c.approved_by}` : ''}</span>
                       </>
                     )}
-                    <span>·</span>
+                  </div>
+                  {/* Row 2: doc preview links (left) + cancel-window countdown chip + cancel button (right).
+                      Document tooltips show generation timestamps + EWB validity for context. */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap', marginTop: '6px' }}>
                     <button onClick={() => previewDoc(`/api/generate-consignee-report?id=${c.id}`, `Report-${c.tmp_prf_no}.jpg`, msg => showToast(msg, 'error'))}
                       style={{ background: 'transparent', border: 'none', padding: 0, fontSize: '10px', color: t.purple, fontWeight: 600, cursor: 'pointer', textDecoration: 'underline' }}>
                       Report
@@ -927,32 +958,95 @@ export default function ConsignmentApprovals() {
                     </button>
                     {c.eway_bill_no && (
                       <button onClick={() => previewDoc(`/api/eway-bill/pdf?id=${c.id}`, `EWB-${c.eway_bill_no}.pdf`, msg => showToast(msg, 'error'))}
+                        title={`E-Way Bill ${c.eway_bill_no}\nGenerated ${fmtTS(c.ewb_generated_at)}${c.ewb_valid_until ? `\nValid till ${fmtTS(c.ewb_valid_until)}` : ''}`}
                         style={{ background: 'transparent', border: 'none', padding: 0, fontSize: '10px', color: t.green, fontWeight: 600, cursor: 'pointer', textDecoration: 'underline' }}>
                         E-Way Bill
                       </button>
                     )}
-                    {/* Cancel EWB on Approved tab — within 24h of generation. Cancelling
-                        auto-rejects the consignment and moves it to the Rejected tab. */}
-                    {isApproved && c.eway_bill_no && (
-                      <button onClick={() => openCancel(c, 'ewb')}
-                        title="Cancel this E-Way Bill on NIC (within 24h). Voids the consignment."
-                        style={{ background: 'transparent', border: `1px solid ${t.red}80`, borderRadius: '5px', padding: '2px 8px', fontSize: '10px', color: t.red, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap' }}>
-                        Cancel EWB
-                      </button>
-                    )}
                     {c.irn && (
                       <button onClick={() => previewDoc(`/api/e-invoice/pdf?id=${c.id}`, `EInvoice-${c.tmp_prf_no}.pdf`, msg => showToast(msg, 'error'))}
+                        title={`E-Invoice ${c.einvoice_doc_no || ''}\nGenerated ${fmtTS(c.einvoice_generated_at)}\nIRN ${c.irn}`}
                         style={{ background: 'transparent', border: 'none', padding: 0, fontSize: '10px', color: t.purple, fontWeight: 600, cursor: 'pointer', textDecoration: 'underline' }}>
                         E-Invoice
                       </button>
                     )}
-                    {isApproved && c.irn && (
-                      <button onClick={() => openCancel(c, 'irn')}
-                        title="Cancel this E-Invoice on IRP (within 24h) — or generate a Credit Note if past the window. Voids the consignment."
-                        style={{ background: 'transparent', border: `1px solid ${t.red}80`, borderRadius: '5px', padding: '2px 8px', fontSize: '10px', color: t.red, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap' }}>
-                        Cancel E-Invoice
-                      </button>
-                    )}
+                    {/* Spacer pushes the countdown + cancel button to the right edge. */}
+                    <div style={{ flex: 1 }} />
+                    {/* EWB cancel — shows live countdown, disables once 24h has passed. */}
+                    {isApproved && c.eway_bill_no && (() => {
+                      const w = cancelWindow(c.ewb_generated_at, t)
+                      const disabled = !w || w.expired
+                      return (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          {w && (
+                            <span title={w.expired
+                              ? `Generated ${fmtTS(c.ewb_generated_at)} — over 24h ago. NIC no longer accepts cancellation.`
+                              : `Cancel before ${fmtTS(new Date(new Date(c.ewb_generated_at).getTime() + 24 * 60 * 60 * 1000))}`}
+                              style={{ fontSize: '10px', color: w.color, background: w.bg, border: `1px solid ${w.color}40`, borderRadius: '12px', padding: '3px 9px', fontWeight: 600, fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
+                              ⏱ {w.label}
+                            </span>
+                          )}
+                          <button onClick={disabled ? undefined : () => openCancel(c, 'ewb')}
+                            disabled={disabled}
+                            title={disabled
+                              ? 'Cancel window has passed. NIC no longer accepts cancellation; log the EWB with accounts for GSTR-1 reconciliation.'
+                              : 'Cancel this E-Way Bill on NIC. Voids the consignment.'}
+                            style={{
+                              background:    'transparent',
+                              border:        `1px solid ${disabled ? t.border : t.red + '80'}`,
+                              borderRadius:  '5px',
+                              padding:       '3px 10px',
+                              fontSize:      '10px',
+                              color:         disabled ? t.text4 : t.red,
+                              fontWeight:    600,
+                              cursor:        disabled ? 'not-allowed' : 'pointer',
+                              whiteSpace:    'nowrap',
+                              opacity:       disabled ? 0.55 : 1,
+                            }}>
+                            Cancel EWB
+                          </button>
+                        </div>
+                      )
+                    })()}
+                    {/* E-Invoice cancel — same pattern. Past 24h, the modal's
+                        Credit Note fallback handles nullification, but we still
+                        disable the direct cancel button to avoid a guaranteed
+                        IRP rejection round-trip. */}
+                    {isApproved && c.irn && (() => {
+                      const w = cancelWindow(c.einvoice_generated_at, t)
+                      const disabled = !w || w.expired
+                      return (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          {w && (
+                            <span title={w.expired
+                              ? `Generated ${fmtTS(c.einvoice_generated_at)} — over 24h ago. IRP no longer accepts direct cancel; issue a Credit Note instead.`
+                              : `Cancel before ${fmtTS(new Date(new Date(c.einvoice_generated_at).getTime() + 24 * 60 * 60 * 1000))}`}
+                              style={{ fontSize: '10px', color: w.color, background: w.bg, border: `1px solid ${w.color}40`, borderRadius: '12px', padding: '3px 9px', fontWeight: 600, fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
+                              ⏱ {w.label}
+                            </span>
+                          )}
+                          <button onClick={disabled ? undefined : () => openCancel(c, 'irn')}
+                            disabled={disabled}
+                            title={disabled
+                              ? 'Cancel window has passed. Issue a Credit Note from accounts to nullify this E-Invoice in GSTR-1.'
+                              : 'Cancel this E-Invoice on IRP. Voids the consignment.'}
+                            style={{
+                              background:    'transparent',
+                              border:        `1px solid ${disabled ? t.border : t.red + '80'}`,
+                              borderRadius:  '5px',
+                              padding:       '3px 10px',
+                              fontSize:      '10px',
+                              color:         disabled ? t.text4 : t.red,
+                              fontWeight:    600,
+                              cursor:        disabled ? 'not-allowed' : 'pointer',
+                              whiteSpace:    'nowrap',
+                              opacity:       disabled ? 0.55 : 1,
+                            }}>
+                            Cancel E-Invoice
+                          </button>
+                        </div>
+                      )
+                    })()}
                   </div>
                 </div>
               </div>
