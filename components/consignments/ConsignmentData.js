@@ -268,9 +268,18 @@ export default function ConsignmentData() {
       const history     = h.data || {}
       setBranchBillsState(branchBills)
       setTransferHistory(history)
-      // Only auto-select transferred-in bills that are actually visible
-      const visibleIds = new Set(branchBills.map(b => b.id))
-      const transferredIds = Object.keys(history).filter(id => visibleIds.has(id))
+      // Auto-select EVERY transferred-in bill at this hub. Detect from the
+      // bill row itself (branch_name !== nav.branch && current_branch ===
+      // nav.branch), NOT from transfer_history. The history map is only
+      // populated for INTERNAL+received parent consignments, but transferred-
+      // in bills can be at the hub even when their parent is approved-but-
+      // not-received. Without this, those bills render as force-checked in
+      // the picker UI but get silently dropped from `selected` when the
+      // operator clicks Create — the resulting Hub→HO consignment then
+      // misses them entirely from EWB / report / challan.
+      const transferredIds = branchBills
+        .filter(b => b.branch_name !== nav.branch)
+        .map(b => b.id)
       if (transferredIds.length) {
         setSelected(prev => {
           const next = new Set(prev)
