@@ -352,21 +352,44 @@ export async function GET(req) {
   }
 
   // ── Cancellation history: every EWB / E-Invoice cancellation in the window ──
-  // Joins consignment_activity_log (event_type IN ewb_cancelled, einvoice_cancelled)
-  // with the consignment row so the UI can show: who cancelled what, why, when,
-  // plus the consignment context (branch, route, value).
+  // Joins consignment_activity_log with the consignment row so the UI can
+  // show: who cancelled what, why, when, plus the consignment context.
+  //
+  // Pulls THREE event types to be resilient:
+  //   - ewb_cancelled       (explicit, written by /api/eway-bill/cancel)
+  //   - einvoice_cancelled  (explicit, written by /api/e-invoice/cancel)
+  //   - cancelled           (generic, written by cancel_consignment_atomic RPC)
+  //
+  // Dedup keeps one row per consignment, preferring specific types over the
+  // generic. For any consignment that only has a 'cancelled' event (e.g. the
+  // explicit log call silently failed), we derive the doc type from the
+  // event's details payload (details.had_ewb / details.had_irn) so the row
+  // still appears here instead of disappearing into the void.
   if (action === 'cancellation_history') {
     const days = Math.min(180, Math.max(1, parseInt(searchParams.get('days') || '30')))
     const sinceIso = new Date(Date.now() - days * 86400000).toISOString()
     const { data: events, error: evErr } = await supabase
       .from('consignment_activity_log')
       .select('id, consignment_id, event_type, actor_email, actor_role, details, created_at')
-      .in('event_type', ['ewb_cancelled', 'einvoice_cancelled'])
+      .in('event_type', ['ewb_cancelled', 'einvoice_cancelled', 'cancelled'])
       .gte('created_at', sinceIso)
       .order('created_at', { ascending: false })
     if (evErr) return Response.json({ error: evErr.message }, { status: 500 })
 
-    const ids = [...new Set((events || []).map(e => e.consignment_id).filter(Boolean))]
+    // Group events by consignment_id. For each group prefer specific event
+    // types; fall back to the generic 'cancelled' if that's all we have.
+    const eventsByConsignment = new Map()
+    for (const e of events || []) {
+      const existing = eventsByConsignment.get(e.consignment_id)
+      if (!existing) { eventsByConsignment.set(e.consignment_id, e); continue }
+      const specifity = (t) => t === 'ewb_cancelled' || t === 'einvoice_cancelled' ? 2 : 1
+      if (specifity(e.event_type) > specifity(existing.event_type)) {
+        eventsByConsignment.set(e.consignment_id, e)
+      }
+    }
+    const dedupedEvents = [...eventsByConsignment.values()]
+
+    const ids = [...new Set(dedupedEvents.map(e => e.consignment_id).filter(Boolean))]
     let consignments = []
     if (ids.length) {
       let cq = supabase
@@ -379,10 +402,22 @@ export async function GET(req) {
       consignments = cs || []
     }
     const byId = new Map(consignments.map(c => [c.id, c]))
-    // Drop events whose consignment got filtered out by allowedBranches (RLS-equivalent).
-    const rows = (events || [])
+
+    // For generic 'cancelled' fallbacks, infer the doc-type label from the
+    // event's details payload so the UI's badge logic continues to work
+    // (it switches on event_type === 'ewb_cancelled' for the green EWB pill,
+    // anything else for the purple E-Invoice pill).
+    const rows = dedupedEvents
       .filter(e => byId.has(e.consignment_id))
-      .map(e => ({ ...e, consignment: byId.get(e.consignment_id) }))
+      .map(e => {
+        let inferredType = e.event_type
+        if (e.event_type === 'cancelled') {
+          if (e.details?.had_ewb) inferredType = 'ewb_cancelled'
+          else if (e.details?.had_irn) inferredType = 'einvoice_cancelled'
+          // If neither, leave as 'cancelled' — UI will show as a generic void.
+        }
+        return { ...e, event_type: inferredType, consignment: byId.get(e.consignment_id) }
+      })
     return Response.json({ data: rows })
   }
 
