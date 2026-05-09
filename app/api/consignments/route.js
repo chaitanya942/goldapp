@@ -1289,7 +1289,7 @@ export async function POST(req) {
     // branch's stock — invisible to the operator until the next stock count.
     const { data: existing, error: ee } = await supabase
       .from('consignments')
-      .select('status, approval_status, tmp_prf_no')
+      .select('status, approval_status, tmp_prf_no, movement_type, state_code, eway_bill_no, irn')
       .eq('id', id)
       .single()
     if (ee || !existing) return Response.json({ error: 'Consignment not found' }, { status: 404 })
@@ -1301,6 +1301,30 @@ export async function POST(req) {
     }
     if (existing.approval_status === 'rejected') {
       return Response.json({ error: `${existing.tmp_prf_no} was already rejected. Cannot re-approve a rejected consignment.` }, { status: 400 })
+    }
+
+    // ── Doc-required gate ────────────────────────────────────────────────
+    // Approval = goods physically dispatch. Under GST law, the EWB / E-Invoice
+    // must exist BEFORE transit, not after. Block approval until the right
+    // doc has been generated:
+    //   - INTERNAL Branch → Hub        → EWB required
+    //   - KA-source EXTERNAL → HO      → EWB required (intrastate own-use)
+    //   - Non-KA EXTERNAL → HO         → E-Invoice required (interstate B2B)
+    // Reject is intentionally NOT gated — accounts should be able to stop
+    // bad submissions without burning an NIC document number.
+    const isInternal  = existing.movement_type === 'INTERNAL'
+    const isKaSource  = existing.state_code === 'KA'
+    const needsEwb    = isInternal || (!isInternal && isKaSource)
+    const needsIrn    = !isInternal && !isKaSource
+    if (needsEwb && !existing.eway_bill_no) {
+      return Response.json({
+        error: `Cannot approve ${existing.tmp_prf_no} — generate the E-Way Bill first. Goods cannot move without one.`,
+      }, { status: 400 })
+    }
+    if (needsIrn && !existing.irn) {
+      return Response.json({
+        error: `Cannot approve ${existing.tmp_prf_no} — generate the E-Invoice first. Interstate dispatch requires an IRN before transit.`,
+      }, { status: 400 })
     }
 
     // Approval is the moment bills physically leave the source branch.

@@ -922,6 +922,23 @@ export default function ConsignmentApprovals() {
             const wb            = waitingBadge(c.created_at, t)
             const dest          = isType ? c.dest_branch : 'Head Office'
 
+            // Doc-required gate. Mirrors the backend rule in approve_consignment:
+            //   - INTERNAL Branch → Hub                 → EWB required
+            //   - KA-source EXTERNAL                    → EWB required
+            //   - Non-KA EXTERNAL                       → E-Invoice required
+            // Reject is intentionally NOT gated — accounts can stop bad
+            // submissions without burning an NIC document number.
+            const isKaSource     = c.state_code === 'KA'
+            const needsEwb       = isType || isKaSource
+            const needsIrn       = !isType && !isKaSource
+            const docMissing     = (needsEwb && !c.eway_bill_no) || (needsIrn && !c.irn)
+            const docMissingType = needsEwb ? 'E-Way Bill' : 'E-Invoice'
+            const approveBlocked = docMissing
+            const approveTooltip = approveBlocked
+              ? `Generate the ${docMissingType} first — accounts cannot dispatch goods without one.`
+              : 'Approve this consignment for dispatch'
+            const rejectTooltip  = 'Reject this consignment. Tip: Preview the EWB / E-Invoice first to verify values before deciding.'
+
             // Stat blocks — only show EWB / IRN when generated
             const stats = [
               ['Bills',   c.total_bills,                                t.text1],
@@ -1044,12 +1061,25 @@ export default function ConsignmentApprovals() {
                 {/* Right side: Reject + Approve */}
                 <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
                   <button onClick={() => reject(c)} disabled={!!actionId}
+                    title={rejectTooltip}
                     style={{ background: 'transparent', border: `1px solid ${t.red}`, borderRadius: '7px', padding: '7px 16px', fontSize: '11px', color: t.red, fontWeight: 600, cursor: actionId ? 'not-allowed' : 'pointer', opacity: isRejectBusy ? 0.6 : 1, whiteSpace: 'nowrap' }}>
                     {isRejectBusy ? 'Rejecting…' : 'Reject'}
                   </button>
-                  <button onClick={() => approve(c)} disabled={!!actionId}
-                    style={{ background: t.green, color: '#fff', border: 'none', borderRadius: '7px', padding: '7px 20px', fontSize: '11px', fontWeight: 700, cursor: actionId ? 'not-allowed' : 'pointer', opacity: isApproveBusy ? 0.6 : 1, whiteSpace: 'nowrap' }}>
-                    {isApproveBusy ? 'Approving…' : 'Approve'}
+                  <button onClick={() => approve(c)} disabled={!!actionId || approveBlocked}
+                    title={approveTooltip}
+                    style={{
+                      background:    approveBlocked ? 'transparent' : t.green,
+                      color:         approveBlocked ? t.text4 : '#fff',
+                      border:        approveBlocked ? `1px solid ${t.border}` : 'none',
+                      borderRadius:  '7px',
+                      padding:       '7px 20px',
+                      fontSize:      '11px',
+                      fontWeight:    700,
+                      cursor:        (actionId || approveBlocked) ? 'not-allowed' : 'pointer',
+                      opacity:       isApproveBusy ? 0.6 : (approveBlocked ? 0.7 : 1),
+                      whiteSpace:    'nowrap',
+                    }}>
+                    {isApproveBusy ? 'Approving…' : (approveBlocked ? `Generate ${docMissingType} first` : 'Approve')}
                   </button>
                 </div>
               </div>
