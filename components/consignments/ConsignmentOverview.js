@@ -202,6 +202,7 @@ export default function ConsignmentOverview() {
       if (sortKey === 'oldest_age')         { av = a.oldest_age_days || 0; bv = b.oldest_age_days || 0 }
       if (sortKey === 'last_moved_days_ago'){ av = a.last_moved_days_ago == null ? 99999 : a.last_moved_days_ago; bv = b.last_moved_days_ago == null ? 99999 : b.last_moved_days_ago }
       if (sortKey === 'total_net_wt')       { av = (a.today_net_wt || 0) + (a.older_net_wt || 0); bv = (b.today_net_wt || 0) + (b.older_net_wt || 0) }
+      if (sortKey === 'total_bills')        { av = (a.today_bills  || 0) + (a.older_bills  || 0); bv = (b.today_bills  || 0) + (b.older_bills  || 0) }
       return (av - bv) * sortDir
     })
 
@@ -489,12 +490,21 @@ export default function ConsignmentOverview() {
                         onClick={() => handleSort('branch_name')}>
                       Branch <SortIcon col="branch_name" />
                     </th>
+                    <th style={{ ...thBase, textAlign: 'right', cursor: 'pointer', color: sortKey === 'total_bills' ? t.gold : t.text4 }}
+                        onClick={() => handleSort('total_bills')}
+                        title="Today's bills + pending bills currently at this branch">
+                      Total Bills <SortIcon col="total_bills" />
+                    </th>
                     <th style={{ ...thBase, textAlign: 'right', cursor: 'pointer', color: sortKey === 'total_net_wt' ? t.gold : t.text4 }}
                         onClick={() => handleSort('total_net_wt')}>
                       Total Net Wt <SortIcon col="total_net_wt" />
                     </th>
 
                     {/* Sortable: Today */}
+                    <th style={{ ...thBase, textAlign: 'right', cursor: 'pointer', color: sortKey === 'today_bills' ? t.blue : t.text4 }}
+                        onClick={() => handleSort('today_bills')}>
+                      Today's Bills <SortIcon col="today_bills" />
+                    </th>
                     <th style={{ ...thBase, textAlign: 'right', cursor: 'pointer', color: sortKey === 'today_net_wt' ? t.blue : t.text4 }}
                         onClick={() => handleSort('today_net_wt')}>
                       Today's Net Wt <SortIcon col="today_net_wt" />
@@ -544,9 +554,19 @@ export default function ConsignmentOverview() {
                     <td colSpan={2} style={{ padding: '9px 14px', fontSize: '10px', color: t.text2, fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase', background: `${t.gold}14` }}>
                       Σ Totals · {filtered.length} branch{filtered.length !== 1 ? 'es' : ''}
                     </td>
+                    {/* Total Bills */}
+                    <td style={{ padding: '9px 14px', textAlign: 'right', fontSize: '14px', color: t.gold, fontFamily: 'monospace', fontWeight: 700, background: `${t.gold}14` }}>
+                      {(grandToday + grandOlder) || '—'}
+                    </td>
+                    {/* Total Net Wt */}
                     <td style={{ padding: '9px 14px', textAlign: 'right', fontSize: '13px', color: t.gold, fontFamily: 'monospace', fontWeight: 700, background: `${t.gold}14` }}>
                       {fmt(grandTodayWt + grandOlderWt, 2)}<span style={{ fontSize: '10px', marginLeft: '2px' }}>g</span>
                     </td>
+                    {/* Today's Bills */}
+                    <td style={{ padding: '9px 14px', textAlign: 'right', fontSize: '14px', color: t.blue, fontFamily: 'monospace', fontWeight: 700, background: `${t.gold}14` }}>
+                      {grandToday || '—'}
+                    </td>
+                    {/* Today's Net Wt */}
                     <td style={{ padding: '9px 14px', textAlign: 'right', fontSize: '13px', color: t.blue, fontFamily: 'monospace', fontWeight: 600, background: `${t.gold}14` }}>
                       {fmt(grandTodayWt, 2)}<span style={{ fontSize: '10px', marginLeft: '2px' }}>g</span>
                     </td>
@@ -608,6 +628,18 @@ export default function ConsignmentOverview() {
                           </div>
                         </td>
 
+                        {/* Total Bills */}
+                        {(() => {
+                          const totalBills = (b.today_bills || 0) + (b.older_bills || 0)
+                          return (
+                            <td style={{ padding: '11px 14px', textAlign: 'right' }}>
+                              {totalBills
+                                ? <span style={{ fontSize: '13px', color: t.gold, fontFamily: 'monospace', fontWeight: 600 }}>{totalBills}</span>
+                                : <span style={{ fontSize: '11px', color: t.text4 }}>—</span>}
+                            </td>
+                          )
+                        })()}
+
                         {/* Total Net Wt */}
                         {(() => {
                           const total = (b.today_net_wt || 0) + (b.older_net_wt || 0)
@@ -619,6 +651,13 @@ export default function ConsignmentOverview() {
                             </td>
                           )
                         })()}
+
+                        {/* Today's Bills */}
+                        <td style={{ padding: '11px 14px', textAlign: 'right' }}>
+                          {hasToday
+                            ? <span style={{ fontSize: '13px', color: t.blue, fontFamily: 'monospace', fontWeight: 600 }}>{b.today_bills}</span>
+                            : <span style={{ fontSize: '11px', color: t.text4 }}>—</span>}
+                        </td>
 
                         {/* Today's Net Wt */}
                         <td style={{ padding: '11px 14px', textAlign: 'right' }}>
