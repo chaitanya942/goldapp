@@ -1803,6 +1803,41 @@ function ReportKpi({ t, label, primary, sub, accent, mono, small }) {
 
 // Efficiency tab — per-user accounts performance over a date window.
 // Date controls + KPI band + sortable user table + CSV export.
+// Count cell with an inline horizontal bar tinted to the column accent.
+// Bar width = count / column-max × 100%. Anchors right so high-count rows
+// visually 'lean toward' the number. Zero counts dim out so the live numbers
+// pop on a busy table.
+function BarCell({ t, count, pct, accent, td }) {
+  const isZero = !count
+  return (
+    <td style={{ ...td, position: 'relative', textAlign: 'right' }}>
+      {!isZero && (
+        <div style={{
+          position: 'absolute',
+          right:    '8px',
+          top:      '50%',
+          transform: 'translateY(-50%)',
+          width:    `calc(${pct}% - 16px)`,
+          maxWidth: 'calc(100% - 16px)',
+          height:   '4px',
+          background: `${accent}30`,
+          borderRadius: '2px',
+          pointerEvents: 'none',
+        }} />
+      )}
+      <span style={{
+        position: 'relative',
+        color:    isZero ? t.text4 : accent,
+        fontFamily: 'monospace',
+        fontWeight: isZero ? 400 : 700,
+        fontSize:   isZero ? '12px' : '14px',
+      }}>
+        {isZero ? '—' : count}
+      </span>
+    </td>
+  )
+}
+
 function EfficiencyTab({ t, card, users, from, setFrom, to, setTo, fetchEfficiency }) {
   // Reuse the same date preset logic as Reports.
   const istDateStr = (d) => new Date(d.getTime() + 19800000).toISOString().slice(0, 10)
@@ -1849,6 +1884,45 @@ function EfficiencyTab({ t, card, users, from, setFrom, to, setTo, fetchEfficien
     if (mins == null) return t.text4
     return mins > 5 ? t.red : t.text2
   }
+
+  // Deterministic avatar background from the email — same email always
+  // produces the same colour. 8-bucket palette pulled from the theme so
+  // avatars feel native to the rest of the UI.
+  const avatarPalette = [t.gold, t.green, t.purple, t.blue, t.orange, t.red, '#5ec1d6', '#9275d5']
+  const avatarColor = (email) => {
+    let h = 0
+    for (let i = 0; i < (email || '').length; i++) h = (h * 31 + email.charCodeAt(i)) | 0
+    return avatarPalette[Math.abs(h) % avatarPalette.length]
+  }
+
+  // Maxes per column for the inline proportional bars. Floor at 1 so a
+  // single-row table doesn't divide by zero.
+  const maxApproved  = Math.max(1, ...users.map(u => u.approved_count  || 0))
+  const maxRejected  = Math.max(1, ...users.map(u => u.rejected_count  || 0))
+  const maxCancelled = Math.max(1, ...users.map(u => u.cancelled_count || 0))
+
+  // Top performer for the ★ Fastest ribbon — lowest avg with ≥3 samples to
+  // discount single-decision winners.
+  const fastestUser = users
+    .filter(u => ((u.approved_count || 0) + (u.rejected_count || 0)) >= 3 && u.avg_min != null)
+    .sort((a, b) => a.avg_min - b.avg_min)[0]
+
+  // Team totals row — sum counts, weight-average the avg across all users
+  // (weighted by their decision count), and overall min/max.
+  const teamTotal = users.reduce((acc, u) => {
+    acc.approved  += u.approved_count  || 0
+    acc.rejected  += u.rejected_count  || 0
+    acc.cancelled += u.cancelled_count || 0
+    const decisions = (u.approved_count || 0) + (u.rejected_count || 0)
+    if (u.avg_min != null && decisions > 0) {
+      acc.avgWeightedSum += u.avg_min * decisions
+      acc.avgWeightedDen += decisions
+    }
+    if (u.min_min != null) acc.minMin = acc.minMin == null ? u.min_min : Math.min(acc.minMin, u.min_min)
+    if (u.max_min != null) acc.maxMax = acc.maxMax == null ? u.max_min : Math.max(acc.maxMax, u.max_min)
+    return acc
+  }, { approved: 0, rejected: 0, cancelled: 0, avgWeightedSum: 0, avgWeightedDen: 0, minMin: null, maxMax: null })
+  const teamAvg = teamTotal.avgWeightedDen > 0 ? Math.round(teamTotal.avgWeightedSum / teamTotal.avgWeightedDen) : null
 
   // CSV export — one row per user, 7 columns.
   const dateTag = from === to ? from : `${from}_to_${to}`
@@ -1953,17 +2027,75 @@ function EfficiencyTab({ t, card, users, from, setFrom, to, setTo, fetchEfficien
                 </tr>
               </thead>
               <tbody>
-                {sortedUsers.map((u, i) => (
-                  <tr key={u.email} style={{ borderBottom: `1px solid ${t.border}25`, background: i % 2 ? `${t.text4}05` : 'transparent' }}>
-                    <td style={{ ...td, color: t.text1, fontWeight: 600 }}>{u.email}</td>
-                    <td style={{ ...td, color: timeColor(u.avg_min), textAlign: 'right', fontFamily: 'monospace', fontWeight: 700 }}>{u.avg_min != null ? `${u.avg_min}m` : '—'}</td>
-                    <td style={{ ...td, color: t.text3,             textAlign: 'right', fontFamily: 'monospace' }}>{u.min_min != null ? `${u.min_min}m` : '—'}</td>
-                    <td style={{ ...td, color: timeColor(u.max_min), textAlign: 'right', fontFamily: 'monospace' }}>{u.max_min != null ? `${u.max_min}m` : '—'}</td>
-                    <td style={{ ...td, color: t.green,  textAlign: 'right', fontFamily: 'monospace', fontWeight: 700 }}>{u.approved_count}</td>
-                    <td style={{ ...td, color: t.red,    textAlign: 'right', fontFamily: 'monospace', fontWeight: 700 }}>{u.rejected_count}</td>
-                    <td style={{ ...td, color: t.orange, textAlign: 'right', fontFamily: 'monospace', fontWeight: 700 }}>{u.cancelled_count}</td>
+                {sortedUsers.map((u, i) => {
+                  const isFastest = fastestUser && u.email === fastestUser.email
+                  const initial   = (u.email || '?')[0].toUpperCase()
+                  const aPct = ((u.approved_count  || 0) / maxApproved)  * 100
+                  const rPct = ((u.rejected_count  || 0) / maxRejected)  * 100
+                  const cPct = ((u.cancelled_count || 0) / maxCancelled) * 100
+                  return (
+                    <tr key={u.email}
+                      style={{
+                        borderBottom: `1px solid ${t.border}25`,
+                        background:   i % 2 ? `${t.text4}05` : 'transparent',
+                        borderLeft:   isFastest ? `3px solid ${t.gold}` : '3px solid transparent',
+                        transition:   'background .15s ease',
+                      }}
+                      onMouseEnter={e => e.currentTarget.style.background = `${t.gold}0A`}
+                      onMouseLeave={e => e.currentTarget.style.background = i % 2 ? `${t.text4}05` : 'transparent'}>
+                      {/* User column — avatar + email + ★ Fastest ribbon when applicable. */}
+                      <td style={{ ...td }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                          <span style={{
+                            width: '28px', height: '28px', borderRadius: '50%',
+                            background: avatarColor(u.email), color: '#fff',
+                            fontSize: '12px', fontWeight: 700, display: 'flex',
+                            alignItems: 'center', justifyContent: 'center',
+                            flexShrink: 0, fontFamily: 'inherit',
+                          }}>{initial}</span>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', minWidth: 0 }}>
+                            <span style={{ color: t.text1, fontWeight: 600, fontSize: '12px' }}>{u.email}</span>
+                            {isFastest && (
+                              <span style={{
+                                alignSelf: 'flex-start',
+                                fontSize: '9px', color: t.gold, background: `${t.gold}15`,
+                                border: `1px solid ${t.gold}40`,
+                                borderRadius: '10px', padding: '1px 8px',
+                                fontWeight: 600, letterSpacing: '.05em',
+                              }} title={`Fastest avg in this window — ${u.avg_min}m across ${(u.approved_count || 0) + (u.rejected_count || 0)} decisions`}>
+                                ★ FASTEST
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </td>
+                      <td style={{ ...td, color: timeColor(u.avg_min), textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, fontSize: '14px' }}>
+                        {u.avg_min != null ? `${u.avg_min}m` : <span style={{ color: t.text4 }}>—</span>}
+                      </td>
+                      <td style={{ ...td, color: u.min_min != null ? t.text3 : t.text4, textAlign: 'right', fontFamily: 'monospace', fontSize: '13px' }}>
+                        {u.min_min != null ? `${u.min_min}m` : '—'}
+                      </td>
+                      <td style={{ ...td, color: timeColor(u.max_min), textAlign: 'right', fontFamily: 'monospace', fontSize: '13px' }}>
+                        {u.max_min != null ? `${u.max_min}m` : '—'}
+                      </td>
+                      <BarCell t={t} count={u.approved_count}  pct={aPct} accent={t.green}  td={td} />
+                      <BarCell t={t} count={u.rejected_count}  pct={rPct} accent={t.red}    td={td} />
+                      <BarCell t={t} count={u.cancelled_count} pct={cPct} accent={t.orange} td={td} />
+                    </tr>
+                  )
+                })}
+                {/* Team totals row */}
+                {sortedUsers.length > 1 && (
+                  <tr style={{ borderTop: `2px solid ${t.gold}40`, background: `${t.gold}08` }}>
+                    <td style={{ ...td, color: t.gold, fontWeight: 700, fontSize: '11px', letterSpacing: '.1em', textTransform: 'uppercase' }}>Team total</td>
+                    <td style={{ ...td, color: timeColor(teamAvg),   textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, fontSize: '14px' }}>{teamAvg != null ? `${teamAvg}m` : '—'}</td>
+                    <td style={{ ...td, color: t.text3,              textAlign: 'right', fontFamily: 'monospace', fontSize: '13px' }}>{teamTotal.minMin != null ? `${teamTotal.minMin}m` : '—'}</td>
+                    <td style={{ ...td, color: timeColor(teamTotal.maxMax), textAlign: 'right', fontFamily: 'monospace', fontSize: '13px' }}>{teamTotal.maxMax != null ? `${teamTotal.maxMax}m` : '—'}</td>
+                    <td style={{ ...td, color: t.green,  textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, fontSize: '14px' }}>{teamTotal.approved}</td>
+                    <td style={{ ...td, color: t.red,    textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, fontSize: '14px' }}>{teamTotal.rejected}</td>
+                    <td style={{ ...td, color: t.orange, textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, fontSize: '14px' }}>{teamTotal.cancelled}</td>
                   </tr>
-                ))}
+                )}
               </tbody>
             </table>
           </div>
