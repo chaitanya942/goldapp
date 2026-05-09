@@ -1823,15 +1823,15 @@ function EfficiencyTab({ t, card, users, from, setFrom, to, setTo, fetchEfficien
   const isPresetActive = (p) => p.from === from && p.to === to
   const applyPreset = (p) => { setFrom(p.from); setTo(p.to); fetchEfficiency(p.from, p.to, false) }
 
-  const [sortBy, setSortBy] = useState('total')   // total | approvals | ewb | einv | last
+  const [sortBy, setSortBy] = useState('total')   // total | approved | rejected | cancelled | avg
   const [sortDir, setSortDir] = useState('desc')
 
   const sortKey = (u) => ({
-    total:     (u.total_docs || 0) + (u.approvals_count || 0),
-    approvals: u.approvals_count || 0,
-    ewb:       u.ewb_count || 0,
-    einv:      u.einv_count || 0,
-    last:      u.last_activity ? new Date(u.last_activity).getTime() : 0,
+    total:     (u.approved_count || 0) + (u.rejected_count || 0) + (u.cancelled_count || 0),
+    approved:  u.approved_count || 0,
+    rejected:  u.rejected_count || 0,
+    cancelled: u.cancelled_count || 0,
+    avg:       u.avg_min ?? Number.MAX_SAFE_INTEGER,   // null avgs sort last
   })[sortBy] ?? 0
   const sortedUsers = [...users].sort((a, b) => {
     const da = sortKey(a); const db = sortKey(b)
@@ -1839,49 +1839,29 @@ function EfficiencyTab({ t, card, users, from, setFrom, to, setTo, fetchEfficien
   })
   const toggleSort = (k) => {
     if (sortBy === k) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
-    else { setSortBy(k); setSortDir('desc') }
+    else { setSortBy(k); setSortDir(k === 'avg' ? 'asc' : 'desc') }   // avg defaults asc (faster first)
   }
   const sortIndicator = (k) => sortBy === k ? (sortDir === 'desc' ? ' ↓' : ' ↑') : ''
 
-  // KPI computations
-  const activeUsers = users.length
-  const totalApprovals = users.reduce((s, u) => s + (u.approvals_count || 0), 0)
-  const totalDocs = users.reduce((s, u) => s + (u.total_docs || 0), 0)
-  // Fastest avg approval — only consider users with ≥3 samples (single-sample
-  // winners are noise). Returns { email, avg } or null.
-  const fastestApprover = users
-    .filter(u => (u.approvals_count || 0) >= 3 && u.approvals_avg_min != null)
-    .sort((a, b) => a.approvals_avg_min - b.approvals_avg_min)[0]
-
-  // Time colour ramp. Mirrors the > 5min red rule on individual cards.
+  // Time colour: matches the > 5min red rule on Approved tab cards.
+  // ≤ 5min muted (default), > 5min red.
   const timeColor = (mins) => {
     if (mins == null) return t.text4
-    if (mins <= 2)  return t.green
-    if (mins <= 5)  return t.gold
-    if (mins <= 15) return t.orange
-    return t.red
+    return mins > 5 ? t.red : t.text2
   }
 
-  // CSV export — one row per user.
+  // CSV export — one row per user, 7 columns.
   const dateTag = from === to ? from : `${from}_to_${to}`
   const exportCsv = () => {
     if (!users.length) return
     const rows = users.map(u => ({
-      User:                u.email,
-      'Approvals':         u.approvals_count,
-      'Approval Avg (m)':  u.approvals_avg_min ?? '',
-      'Approval Min (m)':  u.approvals_min_min ?? '',
-      'Approval Max (m)':  u.approvals_max_min ?? '',
-      'EWBs':              u.ewb_count,
-      'EWB Avg (m)':       u.ewb_avg_min ?? '',
-      'EWB Min (m)':       u.ewb_min_min ?? '',
-      'EWB Max (m)':       u.ewb_max_min ?? '',
-      'E-Invoices':        u.einv_count,
-      'E-Inv Avg (m)':     u.einv_avg_min ?? '',
-      'E-Inv Min (m)':     u.einv_min_min ?? '',
-      'E-Inv Max (m)':     u.einv_max_min ?? '',
-      'Total Docs':        u.total_docs,
-      'Last Activity':     u.last_activity || '',
+      User:        u.email,
+      'Avg (m)':   u.avg_min ?? '',
+      'Min (m)':   u.min_min ?? '',
+      'Max (m)':   u.max_min ?? '',
+      Approved:    u.approved_count,
+      Rejected:    u.rejected_count,
+      Cancelled:   u.cancelled_count,
     }))
     const headers = Object.keys(rows[0])
     const escape  = (v) => /[",\n]/.test(String(v ?? '')) ? `"${String(v).replace(/"/g, '""')}"` : String(v ?? '')
@@ -1899,14 +1879,13 @@ function EfficiencyTab({ t, card, users, from, setFrom, to, setTo, fetchEfficien
     ? new Date(from).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
     : `${new Date(from).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })} → ${new Date(to).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}`
 
-  // Stable cell styles
   const th = { padding: '11px 14px', textAlign: 'left', fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', borderBottom: `1px solid ${t.border}`, fontWeight: 600, whiteSpace: 'nowrap', cursor: 'pointer', userSelect: 'none' }
   const thStatic = { ...th, cursor: 'default' }
-  const td = { padding: '12px 14px', verticalAlign: 'middle', fontSize: '11.5px' }
+  const td = { padding: '12px 14px', verticalAlign: 'middle', fontSize: '12px' }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-      {/* ─── Date controls ─── */}
+      {/* Date controls */}
       <div style={{ ...card }}>
         <div style={{ padding: '14px 18px', display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap' }}>
           <div>
@@ -1942,21 +1921,12 @@ function EfficiencyTab({ t, card, users, from, setFrom, to, setTo, fetchEfficien
         </div>
       </div>
 
-      {/* ─── KPI band ─── */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '1px', background: t.border, borderRadius: '12px', overflow: 'hidden', boxShadow: `0 1px 3px ${t.border}50` }}>
-        <ReportKpi t={t} label="Active users"     primary={`${activeUsers}`}                        sub="with ≥1 action in window"             accent={t.gold} />
-        <ReportKpi t={t} label="Total approvals"  primary={`${totalApprovals}`}                     sub="consignments approved"               accent={t.green} />
-        <ReportKpi t={t} label="Total docs"       primary={`${totalDocs}`}                          sub="EWB + E-Invoice generated"           accent={t.purple} />
-        <ReportKpi t={t} label="Fastest approver" primary={fastestApprover ? `${fastestApprover.approvals_avg_min}m` : '—'}
-          sub={fastestApprover ? `${fastestApprover.email.split('@')[0]} · ${fastestApprover.approvals_count} approvals` : 'Need ≥3 approvals/user'} accent={t.blue} mono />
-      </div>
-
-      {/* ─── User table ─── */}
+      {/* User table */}
       <div style={{ ...card, overflow: 'hidden' }}>
         <div style={{ padding: '14px 18px', borderBottom: `1px solid ${t.border}`, display: 'flex', alignItems: 'center', gap: '12px' }}>
           <div>
             <div style={{ fontSize: '13px', color: t.text1, fontWeight: 600 }}>Per-user activity</div>
-            <div style={{ fontSize: '10px', color: t.text4, marginTop: '2px' }}>Counts and average response times. Times colour-ramped: green ≤2m · gold ≤5m · orange ≤15m · red &gt;15m.</div>
+            <div style={{ fontSize: '10px', color: t.text4, marginTop: '2px' }}>Time = created → decision (same number shown as the &quot;in Xm&quot; pill on Approved cards). Avg/min/max across approved + rejected.</div>
           </div>
           <div style={{ flex: 1 }} />
           {users.length > 0 && (
@@ -1970,53 +1940,28 @@ function EfficiencyTab({ t, card, users, from, setFrom, to, setTo, fetchEfficien
           <div style={{ padding: '40px 20px', textAlign: 'center', fontSize: '12px', color: t.text4 }}>No accounts activity in this window.</div>
         ) : (
           <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11.5px' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
               <thead>
                 <tr style={{ background: t.card2 || t.card }}>
                   <th style={thStatic}>User</th>
-                  <th style={th} onClick={() => toggleSort('approvals')} title="Click to sort">Approvals{sortIndicator('approvals')}</th>
-                  <th style={thStatic}>Approval avg / min / max</th>
-                  <th style={th} onClick={() => toggleSort('ewb')} title="Click to sort">EWBs{sortIndicator('ewb')}</th>
-                  <th style={thStatic}>EWB avg / min / max</th>
-                  <th style={th} onClick={() => toggleSort('einv')} title="Click to sort">E-Invoices{sortIndicator('einv')}</th>
-                  <th style={thStatic}>E-Inv avg / min / max</th>
-                  <th style={th} onClick={() => toggleSort('total')} title="Click to sort">Total docs{sortIndicator('total')}</th>
-                  <th style={th} onClick={() => toggleSort('last')} title="Click to sort">Last active{sortIndicator('last')}</th>
+                  <th style={{ ...th, textAlign: 'right' }} onClick={() => toggleSort('avg')}       title="Click to sort">Average{sortIndicator('avg')}</th>
+                  <th style={{ ...thStatic, textAlign: 'right' }}>Minimum</th>
+                  <th style={{ ...thStatic, textAlign: 'right' }}>Maximum</th>
+                  <th style={{ ...th, textAlign: 'right' }} onClick={() => toggleSort('approved')}  title="Click to sort">Approved{sortIndicator('approved')}</th>
+                  <th style={{ ...th, textAlign: 'right' }} onClick={() => toggleSort('rejected')}  title="Click to sort">Rejected{sortIndicator('rejected')}</th>
+                  <th style={{ ...th, textAlign: 'right' }} onClick={() => toggleSort('cancelled')} title="Click to sort">Cancelled{sortIndicator('cancelled')}</th>
                 </tr>
               </thead>
               <tbody>
                 {sortedUsers.map((u, i) => (
                   <tr key={u.email} style={{ borderBottom: `1px solid ${t.border}25`, background: i % 2 ? `${t.text4}05` : 'transparent' }}>
                     <td style={{ ...td, color: t.text1, fontWeight: 600 }}>{u.email}</td>
-                    <td style={{ ...td, color: t.green, textAlign: 'right', fontFamily: 'monospace', fontWeight: 700 }}>{u.approvals_count}</td>
-                    <td style={{ ...td, fontFamily: 'monospace' }}>
-                      {u.approvals_count > 0 ? (
-                        <span style={{ color: t.text3 }}>
-                          <span style={{ color: timeColor(u.approvals_avg_min), fontWeight: 700 }}>{u.approvals_avg_min}m</span>
-                          {' / '}{u.approvals_min_min}m / {u.approvals_max_min}m
-                        </span>
-                      ) : <span style={{ color: t.text4 }}>—</span>}
-                    </td>
-                    <td style={{ ...td, color: t.green, textAlign: 'right', fontFamily: 'monospace' }}>{u.ewb_count}</td>
-                    <td style={{ ...td, fontFamily: 'monospace' }}>
-                      {u.ewb_count > 0 ? (
-                        <span style={{ color: t.text3 }}>
-                          <span style={{ color: timeColor(u.ewb_avg_min), fontWeight: 700 }}>{u.ewb_avg_min}m</span>
-                          {' / '}{u.ewb_min_min}m / {u.ewb_max_min}m
-                        </span>
-                      ) : <span style={{ color: t.text4 }}>—</span>}
-                    </td>
-                    <td style={{ ...td, color: t.purple, textAlign: 'right', fontFamily: 'monospace' }}>{u.einv_count}</td>
-                    <td style={{ ...td, fontFamily: 'monospace' }}>
-                      {u.einv_count > 0 ? (
-                        <span style={{ color: t.text3 }}>
-                          <span style={{ color: timeColor(u.einv_avg_min), fontWeight: 700 }}>{u.einv_avg_min}m</span>
-                          {' / '}{u.einv_min_min}m / {u.einv_max_min}m
-                        </span>
-                      ) : <span style={{ color: t.text4 }}>—</span>}
-                    </td>
-                    <td style={{ ...td, color: t.blue, textAlign: 'right', fontFamily: 'monospace', fontWeight: 700 }}>{u.total_docs}</td>
-                    <td style={{ ...td, color: t.text3, fontSize: '10px', whiteSpace: 'nowrap' }}>{u.last_activity ? fmtTS(u.last_activity) : '—'}</td>
+                    <td style={{ ...td, color: timeColor(u.avg_min), textAlign: 'right', fontFamily: 'monospace', fontWeight: 700 }}>{u.avg_min != null ? `${u.avg_min}m` : '—'}</td>
+                    <td style={{ ...td, color: t.text3,             textAlign: 'right', fontFamily: 'monospace' }}>{u.min_min != null ? `${u.min_min}m` : '—'}</td>
+                    <td style={{ ...td, color: timeColor(u.max_min), textAlign: 'right', fontFamily: 'monospace' }}>{u.max_min != null ? `${u.max_min}m` : '—'}</td>
+                    <td style={{ ...td, color: t.green,  textAlign: 'right', fontFamily: 'monospace', fontWeight: 700 }}>{u.approved_count}</td>
+                    <td style={{ ...td, color: t.red,    textAlign: 'right', fontFamily: 'monospace', fontWeight: 700 }}>{u.rejected_count}</td>
+                    <td style={{ ...td, color: t.orange, textAlign: 'right', fontFamily: 'monospace', fontWeight: 700 }}>{u.cancelled_count}</td>
                   </tr>
                 ))}
               </tbody>
