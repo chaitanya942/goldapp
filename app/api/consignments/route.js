@@ -434,10 +434,32 @@ export async function GET(req) {
       }
     }
 
+    // Pull GST rates from company_settings to compute the E-Invoice value
+    // breakdown. Defaults match what the canonical calculator (lib/consignmentTotals)
+    // uses everywhere else: 7.5% uplift, 3% IGST. Single fetch per request.
+    const { data: cs } = await supabase.from('company_settings').select('value_uplift_pct, igst_rate').single()
+    const upliftPct = parseFloat(cs?.value_uplift_pct ?? 7.5) || 7.5
+    const igstRate  = parseFloat(cs?.igst_rate        ?? 3)   || 3
+
     return Response.json({
       from: fromStr, to: toStr,
       ewbs: (ewbRes.data || []).map(r => ({ ...r, generated_by: actorByEwb.get(r.id) || null })),
-      einvoices: (eiRes.data || []).map(r => ({ ...r, generated_by: actorByEi.get(r.id) || null })),
+      einvoices: (eiRes.data || []).map(r => {
+        // E-Invoice is always interstate (KL/TS/AP source → KA HO), so the
+        // grand total is assessable + IGST. CGST/SGST = 0. Same formulas the
+        // PDF + IRP payload use; numbers will match the printed invoice exactly.
+        const raw            = Number(r.total_amount || 0)
+        const assessable     = parseFloat((raw * (1 + upliftPct / 100)).toFixed(2))
+        const igstAmount     = parseFloat((assessable * igstRate / 100).toFixed(2))
+        const totalInvoice   = parseFloat((assessable + igstAmount).toFixed(2))
+        return {
+          ...r,
+          generated_by:     actorByEi.get(r.id) || null,
+          assessable_value: assessable,
+          igst_amount:      igstAmount,
+          total_invoice:    totalInvoice,
+        }
+      }),
     })
   }
 
