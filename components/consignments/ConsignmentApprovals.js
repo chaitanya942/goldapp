@@ -15,6 +15,17 @@ const fmt   = (n) => n != null ? Number(n).toLocaleString('en-IN') : '—'
 const fmtWt = (n) => n != null ? `${Number(n).toFixed(3)}g` : '—'
 const fmtTS = (d) => d ? new Date(d).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—'
 
+// Deterministic avatar background colour from an email — same email always
+// hashes to the same colour. 8-bucket palette pulled from the theme so
+// avatars feel native everywhere they appear (Efficiency table, Approved
+// cards, future tabs). Returns a single colour token from the theme.
+function hashAvatarColor(email, t) {
+  const palette = [t.gold, t.green, t.purple, t.blue, t.orange, t.red, '#5ec1d6', '#9275d5']
+  let h = 0
+  for (let i = 0; i < (email || '').length; i++) h = (h * 31 + email.charCodeAt(i)) | 0
+  return palette[Math.abs(h) % palette.length]
+}
+
 // 24h cancel window status for an EWB / E-Invoice. Returns the time left
 // until NIC / IRP locks the doc (cancellation is rejected after 24h),
 // colour-coded by urgency.
@@ -904,186 +915,21 @@ export default function ConsignmentApprovals() {
           </div>
         </div>
       ) : (tab === 'approved' || tab === 'rejected') ? (
-        /* History list — read-only, no approve/reject buttons */
+        /* History list — polished card per consignment with stats pills,
+           avatar audit trail, doc-action chips, live cancel countdown. */
         <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-          {history.map(c => {
-            const isType    = c.movement_type === 'INTERNAL'
-            const dest      = isType ? c.dest_branch : 'Head Office'
-            const isApproved = tab === 'approved'
-            // Time taken: created → approved/rejected. approved_at is set on
-            // both branches by the approve and reject actions.
-            const decidedAt = c.approved_at || c.cancelled_at || c.created_at
-            const ttaMs  = decidedAt && c.created_at ? new Date(decidedAt) - new Date(c.created_at) : null
-            const ttaMin = ttaMs ? Math.max(0, Math.floor(ttaMs / 60000)) : null
-            const ttaLabel = ttaMin == null ? null
-              : ttaMin < 60   ? `${ttaMin}m`
-              : ttaMin < 1440 ? `${Math.floor(ttaMin/60)}h ${ttaMin%60}m`
-              : `${Math.floor(ttaMin/1440)}d ${Math.floor((ttaMin%1440)/60)}h`
-            const accentColor = isApproved ? t.green : t.red
-
-            return (
-              <div key={c.id} style={{ ...card, padding: '12px 16px 12px 18px', borderLeft: `3px solid ${accentColor}`, display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', gap: '14px', alignItems: 'center' }}>
-                <div style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                    <span style={{ fontSize: '14px', color: t.gold, fontWeight: 700, fontFamily: 'monospace', letterSpacing: '.02em' }}>{c.tmp_prf_no}</span>
-                    <span style={{ fontSize: '9px', color: isType ? t.purple : t.orange, background: `${isType ? t.purple : t.orange}15`, borderRadius: '4px', padding: '2px 7px', fontWeight: 600, letterSpacing: '.04em' }}>
-                      {isType ? 'BRANCH → HUB' : 'BRANCH → HO'}
-                    </span>
-                    <span style={{ fontSize: '9px', color: accentColor, background: `${accentColor}15`, borderRadius: '4px', padding: '2px 7px', fontWeight: 700, letterSpacing: '.04em' }}>
-                      {isApproved ? 'APPROVED' : 'REJECTED'}
-                    </span>
-                    {ttaLabel && (() => {
-                      // Colour ramp: > 5min reads red — accounts took too long to
-                      // review. ≤ 5min stays muted (the default fast-turnaround look).
-                      const slow = ttaMin > 5
-                      const c = slow ? t.red : t.text3
-                      return (
-                        <span title={`Time from creation to ${isApproved ? 'approval' : 'rejection'}${slow ? ' — over 5 minutes, slow review' : ''}`}
-                          style={{ fontSize: '9px', color: c, background: `${c}${slow ? '18' : '10'}`, borderRadius: '4px', padding: '2px 7px', fontWeight: 600 }}>
-                          in {ttaLabel}
-                        </span>
-                      )
-                    })()}
-                    {c.eway_bill_no && <span style={{ fontSize: '9px', color: t.green, background: `${t.green}15`, borderRadius: '4px', padding: '2px 7px', fontWeight: 600, letterSpacing: '.04em' }}>EWB</span>}
-                    {c.irn         && <span style={{ fontSize: '9px', color: t.purple, background: `${t.purple}15`, borderRadius: '4px', padding: '2px 7px', fontWeight: 600, letterSpacing: '.04em' }}>IRN</span>}
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'baseline', gap: '14px', flexWrap: 'wrap' }}>
-                    <div style={{ fontSize: '13px', color: t.text1, fontWeight: 600 }}>
-                      {c.branch_name}
-                      <span style={{ color: t.text4, margin: '0 8px', fontWeight: 400 }}>→</span>
-                      {dest}
-                    </div>
-                    <div style={{ fontSize: '11px', color: t.text3, display: 'flex', gap: '12px', fontFamily: 'monospace' }}>
-                      <span>{c.total_bills} bills</span>
-                      <span style={{ color: t.gold }}>{fmtWt(c.total_net_wt)}</span>
-                      <span style={{ color: t.blue }}>₹{fmt(Math.round(c.total_amount))}</span>
-                    </div>
-                  </div>
-                  {!isApproved && c.rejection_reason && (
-                    <div style={{ fontSize: '11px', color: t.red, marginTop: '2px' }}>
-                      <span style={{ color: t.text4 }}>Reason:</span> {c.rejection_reason}
-                    </div>
-                  )}
-                  {/* Row 1: audit trail (created + approved/rejected, by whom). Muted. */}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginTop: '2px', fontSize: '10px', color: t.text4 }}>
-                    <span>Created {fmtTS(c.created_at)}{c.created_by && c.created_by !== 'unknown' ? ` by ${c.created_by}` : ''}</span>
-                    {c.approved_at && (
-                      <>
-                        <span>·</span>
-                        <span>{isApproved ? 'Approved' : 'Rejected'} {fmtTS(c.approved_at)}{c.approved_by ? ` by ${c.approved_by}` : ''}</span>
-                      </>
-                    )}
-                  </div>
-                  {/* Row 2: doc preview links (left) + cancel-window countdown chip + cancel button (right).
-                      Document tooltips show generation timestamps + EWB validity for context. */}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap', marginTop: '6px' }}>
-                    <button onClick={() => previewDoc(`/api/generate-consignee-report?id=${c.id}`, `Report-${c.tmp_prf_no}.jpg`, msg => showToast(msg, 'error'))}
-                      style={{ background: 'transparent', border: 'none', padding: 0, fontSize: '10px', color: t.purple, fontWeight: 600, cursor: 'pointer', textDecoration: 'underline' }}>
-                      Report
-                    </button>
-                    <button onClick={() => previewDoc(
-                        isType ? `/api/generate-issue-voucher-pdf?id=${c.id}` : `/api/generate-challan-pdf?id=${c.id}`,
-                        `${isType ? 'Voucher' : 'Challan'}-${c.tmp_prf_no}.pdf`,
-                        msg => showToast(msg, 'error'))}
-                      style={{ background: 'transparent', border: 'none', padding: 0, fontSize: '10px', color: t.gold, fontWeight: 600, cursor: 'pointer', textDecoration: 'underline' }}>
-                      {isType ? 'Voucher' : 'Challan'}
-                    </button>
-                    {c.eway_bill_no && (
-                      <button onClick={() => previewDoc(`/api/eway-bill/pdf?id=${c.id}`, `EWB-${c.eway_bill_no}.pdf`, msg => showToast(msg, 'error'))}
-                        title={`E-Way Bill ${c.eway_bill_no}\nGenerated ${fmtTS(c.ewb_generated_at)}${c.ewb_valid_until ? `\nValid till ${fmtTS(c.ewb_valid_until)}` : ''}`}
-                        style={{ background: 'transparent', border: 'none', padding: 0, fontSize: '10px', color: t.green, fontWeight: 600, cursor: 'pointer', textDecoration: 'underline' }}>
-                        E-Way Bill
-                      </button>
-                    )}
-                    {c.irn && (
-                      <button onClick={() => previewDoc(`/api/e-invoice/pdf?id=${c.id}`, `EInvoice-${c.tmp_prf_no}.pdf`, msg => showToast(msg, 'error'))}
-                        title={`E-Invoice ${c.einvoice_doc_no || ''}\nGenerated ${fmtTS(c.einvoice_generated_at)}\nIRN ${c.irn}`}
-                        style={{ background: 'transparent', border: 'none', padding: 0, fontSize: '10px', color: t.purple, fontWeight: 600, cursor: 'pointer', textDecoration: 'underline' }}>
-                        E-Invoice
-                      </button>
-                    )}
-                    {/* Spacer pushes the countdown + cancel button to the right edge. */}
-                    <div style={{ flex: 1 }} />
-                    {/* EWB cancel — shows live countdown, disables once 24h has passed. */}
-                    {isApproved && c.eway_bill_no && (() => {
-                      const w = cancelWindow(c.ewb_generated_at, t)
-                      const disabled = !w || w.expired
-                      return (
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                          {w && (
-                            <span title={w.expired
-                              ? `Generated ${fmtTS(c.ewb_generated_at)} — over 24h ago. NIC no longer accepts cancellation.`
-                              : `Cancel before ${fmtTS(new Date(new Date(c.ewb_generated_at).getTime() + 24 * 60 * 60 * 1000))}`}
-                              style={{ fontSize: '10px', color: w.color, background: w.bg, border: `1px solid ${w.color}40`, borderRadius: '12px', padding: '3px 9px', fontWeight: 600, fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
-                              ⏱ {w.label}
-                            </span>
-                          )}
-                          <button onClick={disabled ? undefined : () => openCancel(c, 'ewb')}
-                            disabled={disabled}
-                            title={disabled
-                              ? 'Cancel window has passed. NIC no longer accepts cancellation; log the EWB with accounts for GSTR-1 reconciliation.'
-                              : 'Cancel this E-Way Bill on NIC. Voids the consignment.'}
-                            style={{
-                              background:    'transparent',
-                              border:        `1px solid ${disabled ? t.border : t.red + '80'}`,
-                              borderRadius:  '5px',
-                              padding:       '3px 10px',
-                              fontSize:      '10px',
-                              color:         disabled ? t.text4 : t.red,
-                              fontWeight:    600,
-                              cursor:        disabled ? 'not-allowed' : 'pointer',
-                              whiteSpace:    'nowrap',
-                              opacity:       disabled ? 0.55 : 1,
-                            }}>
-                            Cancel EWB
-                          </button>
-                        </div>
-                      )
-                    })()}
-                    {/* E-Invoice cancel — same pattern. Past 24h, the modal's
-                        Credit Note fallback handles nullification, but we still
-                        disable the direct cancel button to avoid a guaranteed
-                        IRP rejection round-trip. */}
-                    {isApproved && c.irn && (() => {
-                      const w = cancelWindow(c.einvoice_generated_at, t)
-                      const disabled = !w || w.expired
-                      return (
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                          {w && (
-                            <span title={w.expired
-                              ? `Generated ${fmtTS(c.einvoice_generated_at)} — over 24h ago. IRP no longer accepts direct cancel; issue a Credit Note instead.`
-                              : `Cancel before ${fmtTS(new Date(new Date(c.einvoice_generated_at).getTime() + 24 * 60 * 60 * 1000))}`}
-                              style={{ fontSize: '10px', color: w.color, background: w.bg, border: `1px solid ${w.color}40`, borderRadius: '12px', padding: '3px 9px', fontWeight: 600, fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
-                              ⏱ {w.label}
-                            </span>
-                          )}
-                          <button onClick={disabled ? undefined : () => openCancel(c, 'irn')}
-                            disabled={disabled}
-                            title={disabled
-                              ? 'Cancel window has passed. Issue a Credit Note from accounts to nullify this E-Invoice in GSTR-1.'
-                              : 'Cancel this E-Invoice on IRP. Voids the consignment.'}
-                            style={{
-                              background:    'transparent',
-                              border:        `1px solid ${disabled ? t.border : t.red + '80'}`,
-                              borderRadius:  '5px',
-                              padding:       '3px 10px',
-                              fontSize:      '10px',
-                              color:         disabled ? t.text4 : t.red,
-                              fontWeight:    600,
-                              cursor:        disabled ? 'not-allowed' : 'pointer',
-                              whiteSpace:    'nowrap',
-                              opacity:       disabled ? 0.55 : 1,
-                            }}>
-                            Cancel E-Invoice
-                          </button>
-                        </div>
-                      )
-                    })()}
-                  </div>
-                </div>
-              </div>
-            )
-          })}
+          {history.map(c => (
+            <HistoryCard
+              key={c.id}
+              c={c}
+              t={t}
+              card={card}
+              isApproved={tab === 'approved'}
+              previewDoc={previewDoc}
+              showToast={showToast}
+              openCancel={openCancel}
+            />
+          ))}
         </div>
       ) : (
         /* Pending list */
@@ -1803,6 +1649,245 @@ function ReportKpi({ t, label, primary, sub, accent, mono, small }) {
 
 // Efficiency tab — per-user accounts performance over a date window.
 // Date controls + KPI band + sortable user table + CSV export.
+// Polished card for the Approved / Rejected history list. Wraps every doc
+// in a consistent layout: identity badges, source→dest hero, stats pills,
+// audit avatars, doc-action chips, and (on Approved) live cancel countdowns.
+// Hover tints the card subtly. Cancel chip pulses when < 1h remains so the
+// operator notices a doc about to slip past the 24h NIC/IRP window.
+function HistoryCard({ c, t, card, isApproved, previewDoc, showToast, openCancel }) {
+  const [hover, setHover] = useState(false)
+  const isType = c.movement_type === 'INTERNAL'
+  const dest   = isType ? c.dest_branch : 'Head Office'
+
+  // Time-to-decision in human form. Reused on the row pill.
+  const decidedAt = c.approved_at || c.cancelled_at || c.created_at
+  const ttaMs   = decidedAt && c.created_at ? new Date(decidedAt) - new Date(c.created_at) : null
+  const ttaMin  = ttaMs ? Math.max(0, Math.floor(ttaMs / 60000)) : null
+  const ttaLabel = ttaMin == null ? null
+    : ttaMin < 60   ? `${ttaMin}m`
+    : ttaMin < 1440 ? `${Math.floor(ttaMin/60)}h ${ttaMin%60}m`
+    : `${Math.floor(ttaMin/1440)}d ${Math.floor((ttaMin%1440)/60)}h`
+
+  const accent = isApproved ? t.green : t.red
+
+  // Avatar component — small initial circle, deterministic colour per email.
+  const Avatar = ({ email, size = 18 }) => {
+    if (!email || email === 'unknown') return null
+    return (
+      <span title={email} style={{
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+        width: `${size}px`, height: `${size}px`, borderRadius: '50%',
+        background: hashAvatarColor(email, t), color: '#fff',
+        fontSize: `${Math.round(size * 0.45)}px`, fontWeight: 700, flexShrink: 0,
+      }}>{email[0].toUpperCase()}</span>
+    )
+  }
+
+  // Doc-preview chip used for Report / Voucher / Challan / EWB / E-Invoice.
+  const DocChip = ({ label, color, onClick, title }) => (
+    <button onClick={onClick} title={title}
+      style={{
+        background:    `${color}10`,
+        border:        `1px solid ${color}40`,
+        color,
+        borderRadius:  '6px',
+        padding:       '4px 10px',
+        fontSize:      '10px',
+        fontWeight:    600,
+        cursor:        'pointer',
+        transition:    'background .15s ease',
+      }}
+      onMouseEnter={e => e.currentTarget.style.background = `${color}25`}
+      onMouseLeave={e => e.currentTarget.style.background = `${color}10`}>
+      {label}
+    </button>
+  )
+
+  // Stats pill — bills / weight / value with subtle tinted background.
+  const StatPill = ({ icon, label, color }) => (
+    <span style={{
+      display: 'inline-flex', alignItems: 'center', gap: '5px',
+      background: `${color}10`, border: `1px solid ${color}25`,
+      borderRadius: '6px', padding: '3px 9px',
+      fontSize: '11px', color, fontFamily: 'monospace', fontWeight: 600,
+    }}>
+      <span style={{ fontSize: '10px', opacity: 0.85 }}>{icon}</span>
+      {label}
+    </span>
+  )
+
+  // Cancel button + countdown chip — extracted to reuse for EWB and IRN.
+  const CancelControl = ({ docKind, generatedAt, modalKey, label, expiredHelp, liveHelp }) => {
+    const w = cancelWindow(generatedAt, t)
+    const disabled = !w || w.expired
+    const critical = w && !w.expired && w.hours < 1
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+        {w && (
+          <span title={w.expired
+              ? `Generated ${fmtTS(generatedAt)} — over 24h ago. ${expiredHelp}`
+              : `Cancel before ${fmtTS(new Date(new Date(generatedAt).getTime() + 24 * 60 * 60 * 1000))}`}
+            style={{
+              fontSize: '10px', color: w.color, background: w.bg,
+              border: `1px solid ${w.color}40`, borderRadius: '12px',
+              padding: '3px 10px', fontWeight: 600, fontFamily: 'monospace',
+              whiteSpace: 'nowrap',
+              animation: critical ? 'glowBreathe 1.6s ease-in-out infinite' : 'none',
+            }}>
+            ⏱ {w.label}
+          </span>
+        )}
+        <button onClick={disabled ? undefined : () => openCancel(c, modalKey)}
+          disabled={disabled}
+          title={disabled ? expiredHelp : liveHelp}
+          style={{
+            background:    'transparent',
+            border:        `1px solid ${disabled ? t.border : t.red + '80'}`,
+            borderRadius:  '6px',
+            padding:       '4px 11px',
+            fontSize:      '10px',
+            color:         disabled ? t.text4 : t.red,
+            fontWeight:    600,
+            cursor:        disabled ? 'not-allowed' : 'pointer',
+            whiteSpace:    'nowrap',
+            opacity:       disabled ? 0.55 : 1,
+          }}>
+          {label}
+        </button>
+      </div>
+    )
+  }
+
+  return (
+    <div style={{
+      ...card,
+      padding:      '0',
+      overflow:     'hidden',
+      position:     'relative',
+      transition:   'background .18s ease, box-shadow .18s ease',
+      background:   hover ? `${accent}06` : t.card,
+      boxShadow:    hover ? `0 2px 12px ${accent}18` : 'none',
+    }}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}>
+      {/* Top accent stripe — green for approved, red for rejected. Fades to
+          transparent so the colour cue is present without screaming. */}
+      <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '2px',
+        background: `linear-gradient(90deg, ${accent} 0%, ${accent}30 60%, transparent 100%)`,
+      }} />
+
+      <div style={{ padding: '14px 18px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+        {/* Row 1 — identity badges */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+          <span style={{ fontSize: '14px', color: t.gold, fontWeight: 700, fontFamily: 'monospace', letterSpacing: '.02em' }}>{c.tmp_prf_no}</span>
+          <span style={{ fontSize: '9px', color: isType ? t.purple : t.orange, background: `${isType ? t.purple : t.orange}15`, borderRadius: '4px', padding: '2px 7px', fontWeight: 600, letterSpacing: '.04em' }}>
+            {isType ? 'BRANCH → HUB' : 'BRANCH → HO'}
+          </span>
+          <span style={{ fontSize: '9px', color: accent, background: `${accent}15`, borderRadius: '4px', padding: '2px 7px', fontWeight: 700, letterSpacing: '.04em' }}>
+            {isApproved ? 'APPROVED' : 'REJECTED'}
+          </span>
+          {ttaLabel && (() => {
+            const slow = ttaMin > 5
+            const cTta = slow ? t.red : t.text3
+            return (
+              <span title={`Time from creation to ${isApproved ? 'approval' : 'rejection'}${slow ? ' — over 5 minutes, slow review' : ''}`}
+                style={{ fontSize: '9px', color: cTta, background: `${cTta}${slow ? '18' : '10'}`, borderRadius: '4px', padding: '2px 7px', fontWeight: 600 }}>
+                in {ttaLabel}
+              </span>
+            )
+          })()}
+          {c.eway_bill_no && <span style={{ fontSize: '9px', color: t.green,  background: `${t.green}15`,  borderRadius: '4px', padding: '2px 7px', fontWeight: 600, letterSpacing: '.04em' }}>EWB</span>}
+          {c.irn         && <span style={{ fontSize: '9px', color: t.purple, background: `${t.purple}15`, borderRadius: '4px', padding: '2px 7px', fontWeight: 600, letterSpacing: '.04em' }}>IRN</span>}
+        </div>
+
+        {/* Row 2 — hero: source → dest + stats pills */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap' }}>
+          <div style={{ fontSize: '15px', color: t.text1, fontWeight: 600, letterSpacing: '-.005em' }}>
+            {c.branch_name}
+            <span style={{ color: t.text4, margin: '0 10px', fontWeight: 300 }}>→</span>
+            {dest}
+          </div>
+          <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+            <StatPill icon="◧" label={`${c.total_bills} bill${c.total_bills === 1 ? '' : 's'}`} color={t.text2} />
+            <StatPill icon="⚖" label={fmtWt(c.total_net_wt)} color={t.gold} />
+            <StatPill icon="₹" label={fmt(Math.round(c.total_amount))} color={t.blue} />
+          </div>
+        </div>
+
+        {/* Row 3 — rejection reason (rejected only) */}
+        {!isApproved && c.rejection_reason && (
+          <div style={{ fontSize: '11px', color: t.red, background: `${t.red}08`, border: `1px solid ${t.red}25`, borderRadius: '6px', padding: '8px 12px' }}>
+            <span style={{ color: t.text4, marginRight: '6px', fontSize: '10px', textTransform: 'uppercase', letterSpacing: '.1em' }}>Reason:</span>
+            {c.rejection_reason}
+          </div>
+        )}
+
+        {/* Row 4 — audit trail with avatar chips */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap', fontSize: '10px', color: t.text4 }}>
+          {c.created_by && c.created_by !== 'unknown' && (
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+              <span style={{ color: t.text4, letterSpacing: '.05em', textTransform: 'uppercase', fontSize: '9px' }}>Created</span>
+              <Avatar email={c.created_by} />
+              <span style={{ color: t.text2, fontWeight: 600 }}>{c.created_by.split('@')[0]}</span>
+              <span style={{ color: t.text4, fontFamily: 'monospace' }}>{fmtTS(c.created_at)}</span>
+            </span>
+          )}
+          {c.approved_at && c.approved_by && (
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+              <span style={{ color: t.text4, letterSpacing: '.05em', textTransform: 'uppercase', fontSize: '9px' }}>{isApproved ? 'Approved' : 'Rejected'}</span>
+              <Avatar email={c.approved_by} />
+              <span style={{ color: t.text2, fontWeight: 600 }}>{c.approved_by.split('@')[0]}</span>
+              <span style={{ color: t.text4, fontFamily: 'monospace' }}>{fmtTS(c.approved_at)}</span>
+            </span>
+          )}
+        </div>
+
+        {/* Row 5 — doc action chips on the left, cancel countdown(s) on the right */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', borderTop: `1px solid ${t.border}40`, paddingTop: '10px' }}>
+          <DocChip label="Report"  color={t.purple} onClick={() => previewDoc(`/api/generate-consignee-report?id=${c.id}`, `Report-${c.tmp_prf_no}.jpg`, msg => showToast(msg, 'error'))} title="Preview the Consignee Report (branch-facing)" />
+          <DocChip label={isType ? 'Voucher' : 'Challan'} color={t.gold}
+            onClick={() => previewDoc(
+              isType ? `/api/generate-issue-voucher-pdf?id=${c.id}` : `/api/generate-challan-pdf?id=${c.id}`,
+              `${isType ? 'Voucher' : 'Challan'}-${c.tmp_prf_no}.pdf`,
+              msg => showToast(msg, 'error'))}
+            title={isType ? 'Preview the Issue Voucher PDF' : 'Preview the Delivery Challan PDF'} />
+          {c.eway_bill_no && (
+            <DocChip label="E-Way Bill" color={t.green}
+              onClick={() => previewDoc(`/api/eway-bill/pdf?id=${c.id}`, `EWB-${c.eway_bill_no}.pdf`, msg => showToast(msg, 'error'))}
+              title={`E-Way Bill ${c.eway_bill_no}\nGenerated ${fmtTS(c.ewb_generated_at)}${c.ewb_valid_until ? `\nValid till ${fmtTS(c.ewb_valid_until)}` : ''}`} />
+          )}
+          {c.irn && (
+            <DocChip label="E-Invoice" color={t.purple}
+              onClick={() => previewDoc(`/api/e-invoice/pdf?id=${c.id}`, `EInvoice-${c.tmp_prf_no}.pdf`, msg => showToast(msg, 'error'))}
+              title={`E-Invoice ${c.einvoice_doc_no || ''}\nGenerated ${fmtTS(c.einvoice_generated_at)}\nIRN ${c.irn}`} />
+          )}
+          <div style={{ flex: 1 }} />
+          {isApproved && c.eway_bill_no && (
+            <CancelControl
+              docKind="EWB"
+              generatedAt={c.ewb_generated_at}
+              modalKey="ewb"
+              label="Cancel EWB"
+              expiredHelp="NIC no longer accepts cancellation; log the EWB with accounts for GSTR-1 reconciliation."
+              liveHelp="Cancel this E-Way Bill on NIC. Voids the consignment."
+            />
+          )}
+          {isApproved && c.irn && (
+            <CancelControl
+              docKind="IRN"
+              generatedAt={c.einvoice_generated_at}
+              modalKey="irn"
+              label="Cancel E-Invoice"
+              expiredHelp="Cancel window has passed. Issue a Credit Note from accounts to nullify this E-Invoice in GSTR-1."
+              liveHelp="Cancel this E-Invoice on IRP. Voids the consignment."
+            />
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // Count cell with an inline horizontal bar tinted to the column accent.
 // Bar width = count / column-max × 100%. Anchors right so high-count rows
 // visually 'lean toward' the number. Zero counts dim out so the live numbers
@@ -1885,15 +1970,10 @@ function EfficiencyTab({ t, card, users, from, setFrom, to, setTo, fetchEfficien
     return mins > 5 ? t.red : t.text2
   }
 
-  // Deterministic avatar background from the email — same email always
-  // produces the same colour. 8-bucket palette pulled from the theme so
-  // avatars feel native to the rest of the UI.
-  const avatarPalette = [t.gold, t.green, t.purple, t.blue, t.orange, t.red, '#5ec1d6', '#9275d5']
-  const avatarColor = (email) => {
-    let h = 0
-    for (let i = 0; i < (email || '').length; i++) h = (h * 31 + email.charCodeAt(i)) | 0
-    return avatarPalette[Math.abs(h) % avatarPalette.length]
-  }
+  // Avatar colour pulls from the shared hashAvatarColor helper so the same
+  // person carries the same colour across Efficiency table, Approved cards,
+  // and any future avatar usage.
+  const avatarColor = (email) => hashAvatarColor(email, t)
 
   // Maxes per column for the inline proportional bars. Floor at 1 so a
   // single-row table doesn't divide by zero.
