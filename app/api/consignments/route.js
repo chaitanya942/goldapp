@@ -390,34 +390,45 @@ export async function GET(req) {
     const dedupedEvents = [...eventsByConsignment.values()]
 
     const ids = [...new Set(dedupedEvents.map(e => e.consignment_id).filter(Boolean))]
-    let consignments = []
+    // Look up consignments WITHOUT the region filter first so we can tell
+    // 'deleted' apart from 'scoped out'. Apply region scoping in JS below.
+    let consignmentsAll = []
     if (ids.length) {
-      let cq = supabase
+      const { data: cs, error: cErr } = await supabase
         .from('consignments')
         .select('id, tmp_prf_no, branch_name, dest_branch, movement_type, total_bills, total_gross_value, total_net_wt, approval_status, status, rejection_reason, created_at')
         .in('id', ids)
-      if (allowedBranches) cq = cq.in('branch_name', allowedBranches)
-      const { data: cs, error: cErr } = await cq
       if (cErr) return Response.json({ error: cErr.message }, { status: 500 })
-      consignments = cs || []
+      consignmentsAll = cs || []
     }
-    const byId = new Map(consignments.map(c => [c.id, c]))
+    const byId = new Map(consignmentsAll.map(c => [c.id, c]))
+    const inScope = (c) => !allowedBranches || (c && allowedBranches.includes(c.branch_name))
 
     // For generic 'cancelled' fallbacks, infer the doc-type label from the
     // event's details payload so the UI's badge logic continues to work
     // (it switches on event_type === 'ewb_cancelled' for the green EWB pill,
     // anything else for the purple E-Invoice pill).
-    const rows = dedupedEvents
-      .filter(e => byId.has(e.consignment_id))
-      .map(e => {
-        let inferredType = e.event_type
-        if (e.event_type === 'cancelled') {
-          if (e.details?.had_ewb) inferredType = 'ewb_cancelled'
-          else if (e.details?.had_irn) inferredType = 'einvoice_cancelled'
-          // If neither, leave as 'cancelled' — UI will show as a generic void.
-        }
-        return { ...e, event_type: inferredType, consignment: byId.get(e.consignment_id) }
-      })
+    const rows = dedupedEvents.flatMap(e => {
+      const c = byId.get(e.consignment_id)
+      // Region scoping: if the consignment exists but is outside the user's
+      // allowed branches, drop the event (security). If the consignment is
+      // missing entirely (deleted), KEEP the event so the audit trail isn't
+      // silently broken — the UI will render with a 'consignment deleted'
+      // placeholder.
+      if (c && !inScope(c)) return []
+      let inferredType = e.event_type
+      if (e.event_type === 'cancelled') {
+        if (e.details?.had_ewb) inferredType = 'ewb_cancelled'
+        else if (e.details?.had_irn) inferredType = 'einvoice_cancelled'
+        // If neither, leave as 'cancelled' — UI will show as a generic void.
+      }
+      return [{
+        ...e,
+        event_type:           inferredType,
+        consignment:          c || null,
+        consignment_missing:  !c,
+      }]
+    })
     return Response.json({ data: rows })
   }
 

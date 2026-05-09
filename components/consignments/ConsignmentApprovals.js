@@ -794,6 +794,15 @@ export default function ConsignmentApprovals() {
                     </div>
                   </div>
                 )}
+                {/* If the consignment row was deleted (e.g. by an E2E reset),
+                    the audit entry still surfaces here. Tell the operator the
+                    branch/route info is unavailable so they don't think we
+                    just hid it. */}
+                {ev.consignment_missing && (
+                  <div style={{ fontSize: '11px', color: t.orange, fontStyle: 'italic' }}>
+                    Consignment record no longer exists — audit entry preserved.
+                  </div>
+                )}
                 <div style={{ fontSize: '11px', color: t.text2 }}>
                   <span style={{ color: t.text4 }}>Reason:</span>{' '}
                   {reasonCode && <span style={{ color: t.text2, fontWeight: 600 }}>{reasonCode}</span>}
