@@ -160,7 +160,7 @@ export default function ConsignmentApprovals() {
   const userEmail = user?.email || userProfile?.email || null
 
   // Tab state. 'pending' is the live queue (with realtime + sound + alerts).
-  // 'approved' and 'rejected' are read-only audit trails for the last 30 days.
+  // 'approved' and 'rejected' are read-only audit trails — all time.
   const [tab, setTab] = useState('pending')
 
   const [pending, setPending] = useState([])
@@ -222,7 +222,7 @@ export default function ConsignmentApprovals() {
   // /api/consignments?action=approval_history&status=approved|rejected.
   const fetchHistory = useCallback(async (status, silent = false) => {
     if (!silent) setLoading(true)
-    const r = await authedFetch(`/api/consignments?action=approval_history&status=${status}&days=30`)
+    const r = await authedFetch(`/api/consignments?action=approval_history&status=${status}`)
     const j = await r.json()
     setHistory(j.data || [])
     setLoading(false)
@@ -231,7 +231,7 @@ export default function ConsignmentApprovals() {
   // Fetches the cancellation log: every EWB / E-Invoice cancellation in the last 30d.
   const fetchCancellations = useCallback(async (silent = false) => {
     if (!silent) setLoading(true)
-    const r = await authedFetch(`/api/consignments?action=cancellation_history&days=30`)
+    const r = await authedFetch(`/api/consignments?action=cancellation_history`)
     const j = await r.json()
     setCancellations(j.data || [])
     setLoading(false)
@@ -645,12 +645,12 @@ export default function ConsignmentApprovals() {
           )}
           {(tab === 'approved' || tab === 'rejected') && (
             <div style={{ fontSize: '11px', color: t.text3 }}>
-              Last 30 days · <strong style={{ color: t.text2 }}>{history.length}</strong> {tab}
+              <strong style={{ color: t.text2 }}>{history.length}</strong> {tab} · all time
             </div>
           )}
           {tab === 'cancellations' && (
             <div style={{ fontSize: '11px', color: t.text3 }}>
-              Last 30 days · <strong style={{ color: t.text2 }}>{cancellations.length}</strong> doc cancellation{cancellations.length === 1 ? '' : 's'}
+              <strong style={{ color: t.text2 }}>{cancellations.length}</strong> doc cancellation{cancellations.length === 1 ? '' : 's'} · all time
             </div>
           )}
         </div>
@@ -737,7 +737,7 @@ export default function ConsignmentApprovals() {
         /* Empty state — history tab */
         <div style={{ ...card, padding: '60px 20px', textAlign: 'center' }}>
           <div style={{ fontSize: '15px', color: t.text1, fontWeight: 500 }}>
-            No {tab} consignments in the last 30 days
+            No {tab} consignments yet
           </div>
           <div style={{ fontSize: '12px', color: t.text4, marginTop: '6px' }}>
             {tab === 'approved' ? 'Once you approve a consignment, it will be archived here.' : 'Rejected consignments are recorded here for audit.'}
@@ -747,14 +747,14 @@ export default function ConsignmentApprovals() {
         /* Empty state — cancellations tab */
         <div style={{ ...card, padding: '60px 20px', textAlign: 'center' }}>
           <div style={{ fontSize: '15px', color: t.text1, fontWeight: 500 }}>
-            No EWB / E-Invoice cancellations in the last 30 days
+            No EWB / E-Invoice cancellations yet
           </div>
           <div style={{ fontSize: '12px', color: t.text4, marginTop: '6px' }}>
             When a cancelled E-Way Bill or E-Invoice voids a consignment, the audit entry appears here.
           </div>
         </div>
       ) : tab === 'cancellations' ? (
-        /* Cancellation log — every doc cancellation in the last 30 days */
+        /* Cancellation log — every doc cancellation, all time */
         <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
           {cancellations.map(ev => {
             const c       = ev.consignment || {}

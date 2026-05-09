@@ -325,17 +325,18 @@ export async function GET(req) {
   //    a record of past decisions.
   if (action === 'approval_history') {
     const status = searchParams.get('status')   // 'approved' | 'rejected'
-    const days   = Math.min(180, Math.max(1, parseInt(searchParams.get('days') || '30')))
     if (status !== 'approved' && status !== 'rejected') {
       return Response.json({ error: "status must be 'approved' or 'rejected'" }, { status: 400 })
     }
-    const sinceIso = new Date(Date.now() - days * 86400000).toISOString()
+    // No date floor — accounts wants the full history of approved / rejected
+    // consignments in one place. If volume becomes a problem we can add
+    // pagination later, but the rolling 30-day cap was hiding rows operators
+    // expected to see.
     let q = supabase
       .from('consignments')
       .select('*')
       .eq('approval_status', status)
       .neq('status', 'seed')
-      .gte('created_at', sinceIso)
       .order('approved_at', { ascending: false, nullsFirst: false })
     if (allowedBranches) q = q.in('branch_name', allowedBranches)
     // For the Rejected tab, exclude rows whose rejection was triggered by an
@@ -366,13 +367,12 @@ export async function GET(req) {
   // event's details payload (details.had_ewb / details.had_irn) so the row
   // still appears here instead of disappearing into the void.
   if (action === 'cancellation_history') {
-    const days = Math.min(180, Math.max(1, parseInt(searchParams.get('days') || '30')))
-    const sinceIso = new Date(Date.now() - days * 86400000).toISOString()
+    // No date floor — the Cancellations tab now shows every recorded
+    // cancellation. Audit data should be permanent.
     const { data: events, error: evErr } = await supabase
       .from('consignment_activity_log')
       .select('id, consignment_id, event_type, actor_email, actor_role, details, created_at')
       .in('event_type', ['ewb_cancelled', 'einvoice_cancelled', 'cancelled'])
-      .gte('created_at', sinceIso)
       .order('created_at', { ascending: false })
     if (evErr) return Response.json({ error: evErr.message }, { status: 500 })
 
