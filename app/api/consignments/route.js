@@ -330,17 +330,22 @@ export async function GET(req) {
       return Response.json({ error: "status must be 'approved' or 'rejected'" }, { status: 400 })
     }
     const sinceIso = new Date(Date.now() - days * 86400000).toISOString()
-    // Order by approved_at if present, else created_at — covers older rows
-    // that may not have approved_at populated.
-    const orderCol = status === 'approved' ? 'approved_at' : 'approved_at'
     let q = supabase
       .from('consignments')
       .select('*')
       .eq('approval_status', status)
       .neq('status', 'seed')
       .gte('created_at', sinceIso)
-      .order(orderCol, { ascending: false, nullsFirst: false })
+      .order('approved_at', { ascending: false, nullsFirst: false })
     if (allowedBranches) q = q.in('branch_name', allowedBranches)
+    // For the Rejected tab, exclude rows whose rejection was triggered by an
+    // EWB / E-Invoice cancel — those belong on the Cancellations tab instead,
+    // not Rejected. Same prefix used by the cancel routes when stamping
+    // rejection_reason on auto-reject. Postgres NOT LIKE is case-sensitive,
+    // matching what we wrote.
+    if (status === 'rejected') {
+      q = q.not('rejection_reason', 'ilike', 'Rejected because of cancellation of%')
+    }
     const { data, error } = await q
     if (error) return Response.json({ error: error.message }, { status: 500 })
     return Response.json({ data: data || [] })
