@@ -463,6 +463,113 @@ export async function GET(req) {
     })
   }
 
+  // ── User efficiency: per-user accounts-team performance over a window ──
+  // Returns one row per actor with counts + min/avg/max minutes for:
+  //   - approvals  (consignment.created → approved_at)
+  //   - EWB gen    (consignment.created → ewb_generated event)
+  //   - E-Inv gen  (consignment.created → einvoice_generated event)
+  // Plus last_activity timestamp so head-of-accounts can spot inactive users.
+  if (action === 'user_efficiency') {
+    const istToday = new Date(Date.now() + 19800000).toISOString().slice(0, 10)
+    const fromStr  = searchParams.get('from') || istToday
+    const toStr    = searchParams.get('to')   || fromStr
+    const fromIso  = `${fromStr}T00:00:00+05:30`
+    const toIso    = `${toStr}T23:59:59+05:30`
+
+    // Approval data — consignments approved in the window. Skip rows where
+    // approved_at is null (still pending) or approved_by is missing.
+    let approvalsQ = supabase
+      .from('consignments')
+      .select('approved_by, approved_at, created_at')
+      .not('approved_by', 'is', null)
+      .not('approved_at', 'is', null)
+      .gte('approved_at', fromIso)
+      .lte('approved_at', toIso)
+      .eq('approval_status', 'approved')
+      .neq('status', 'seed')
+    if (allowedBranches) approvalsQ = approvalsQ.in('branch_name', allowedBranches)
+    const { data: approvals, error: aErr } = await approvalsQ
+    if (aErr) return Response.json({ error: aErr.message }, { status: 500 })
+
+    // Doc generation events from the activity log. Each event carries
+    // actor_email + created_at; we join back to consignments for created_at
+    // to compute the time-to-generation duration.
+    const { data: events, error: eErr } = await supabase
+      .from('consignment_activity_log')
+      .select('event_type, actor_email, created_at, consignment_id')
+      .in('event_type', ['ewb_generated', 'einvoice_generated'])
+      .gte('created_at', fromIso)
+      .lte('created_at', toIso)
+    if (eErr) return Response.json({ error: eErr.message }, { status: 500 })
+
+    // Pull the parent consignment's created_at for each event in one batch.
+    const consignmentIds = [...new Set((events || []).map(e => e.consignment_id))]
+    let createdAtById = new Map()
+    if (consignmentIds.length) {
+      let cq = supabase.from('consignments').select('id, created_at, branch_name').in('id', consignmentIds).neq('status', 'seed')
+      if (allowedBranches) cq = cq.in('branch_name', allowedBranches)
+      const { data: cs } = await cq
+      for (const c of cs || []) createdAtById.set(c.id, c.created_at)
+    }
+
+    // Aggregate per actor
+    const acc = {}                           // email → bucket
+    const ensure = (email) => {
+      if (!acc[email]) acc[email] = {
+        email,
+        approvals: [],   // arrays of minutes; we'll compute count/avg/min/max
+        ewb:       [],
+        einv:      [],
+        last_activity: null,
+      }
+      return acc[email]
+    }
+    const minutesBetween = (start, end) =>
+      Math.max(0, Math.round((new Date(end).getTime() - new Date(start).getTime()) / 60000))
+
+    for (const r of approvals || []) {
+      const u = ensure(r.approved_by)
+      if (r.created_at) u.approvals.push(minutesBetween(r.created_at, r.approved_at))
+      if (!u.last_activity || r.approved_at > u.last_activity) u.last_activity = r.approved_at
+    }
+    for (const e of events || []) {
+      const cAt = createdAtById.get(e.consignment_id)
+      if (!cAt) continue   // event from a row outside the user's region scope
+      const u = ensure(e.actor_email || 'unknown')
+      const bucket = e.event_type === 'ewb_generated' ? u.ewb : u.einv
+      bucket.push(minutesBetween(cAt, e.created_at))
+      if (!u.last_activity || e.created_at > u.last_activity) u.last_activity = e.created_at
+    }
+
+    // Collapse arrays into stat shapes.
+    const stats = (arr) => {
+      if (!arr.length) return { count: 0, avg_min: null, min_min: null, max_min: null }
+      const sum = arr.reduce((s, n) => s + n, 0)
+      return {
+        count:   arr.length,
+        avg_min: Math.round(sum / arr.length),
+        min_min: Math.min(...arr),
+        max_min: Math.max(...arr),
+      }
+    }
+
+    const users = Object.values(acc)
+      .map(u => {
+        const a = stats(u.approvals); const w = stats(u.ewb); const i = stats(u.einv)
+        return {
+          email:           u.email,
+          approvals_count: a.count, approvals_avg_min: a.avg_min, approvals_min_min: a.min_min, approvals_max_min: a.max_min,
+          ewb_count:       w.count, ewb_avg_min:       w.avg_min, ewb_min_min:       w.min_min, ewb_max_min:       w.max_min,
+          einv_count:      i.count, einv_avg_min:      i.avg_min, einv_min_min:      i.min_min, einv_max_min:      i.max_min,
+          total_docs:      w.count + i.count,
+          last_activity:   u.last_activity,
+        }
+      })
+      .sort((a, b) => (b.total_docs + b.approvals_count) - (a.total_docs + a.approvals_count))
+
+    return Response.json({ from: fromStr, to: toStr, users })
+  }
+
   // ── Pending approvals count (for sidebar badge) ────────────────────────
   if (action === 'pending_approvals_count') {
     let q = supabase

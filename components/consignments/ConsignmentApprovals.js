@@ -158,6 +158,11 @@ export default function ConsignmentApprovals() {
   const [report,        setReport]        = useState({ ewbs: [], einvoices: [] })
   const [reportFrom,    setReportFrom]    = useState(() => new Date(Date.now() + 19800000).toISOString().slice(0, 10))
   const [reportTo,      setReportTo]      = useState(() => new Date(Date.now() + 19800000).toISOString().slice(0, 10))
+  const [efficiency,    setEfficiency]    = useState({ users: [] })
+  const [effFrom,       setEffFrom]       = useState(() => {
+    const d = new Date(Date.now() + 19800000); d.setDate(d.getDate() - 6); return d.toISOString().slice(0, 10)
+  })
+  const [effTo,         setEffTo]         = useState(() => new Date(Date.now() + 19800000).toISOString().slice(0, 10))
   const [settings,      setSettings]      = useState(null)
   const [settingsBusy,  setSettingsBusy]  = useState(null)  // 'seq:KL' | 'gstin:KA' etc.
   const [settingsToast, setSettingsToast] = useState(null)
@@ -239,14 +244,24 @@ export default function ConsignmentApprovals() {
     setLoading(false)
   }, [])
 
+  // Efficiency: per-user accounts performance over a date window.
+  const fetchEfficiency = useCallback(async (from, to, silent = false) => {
+    if (!silent) setLoading(true)
+    const r = await authedFetch(`/api/consignments?action=user_efficiency&from=${from}&to=${to}`)
+    const j = await r.json()
+    setEfficiency({ users: j.users || [] })
+    setLoading(false)
+  }, [])
+
   // Initial fetch + refetch when the user switches tabs.
   useEffect(() => {
     if (tab === 'pending')             fetchPending()
     else if (tab === 'cancellations')  fetchCancellations()
     else if (tab === 'reports')        fetchReport(reportFrom, reportTo)
+    else if (tab === 'efficiency')     fetchEfficiency(effFrom, effTo)
     else if (tab === 'settings')       fetchSettings()
     else                               fetchHistory(tab)
-  }, [tab, fetchPending, fetchHistory, fetchCancellations, fetchReport, fetchSettings, reportFrom, reportTo])
+  }, [tab, fetchPending, fetchHistory, fetchCancellations, fetchReport, fetchEfficiency, fetchSettings, reportFrom, reportTo, effFrom, effTo])
 
   // Save a single E-Invoice sequence row (state + last_seq).
   const saveSeq = useCallback(async (state_code, fy_code, last_seq) => {
@@ -646,6 +661,7 @@ export default function ConsignmentApprovals() {
             if (tab === 'pending')             fetchPending(false)
             else if (tab === 'cancellations')  fetchCancellations(false)
             else if (tab === 'reports')        fetchReport(reportFrom, reportTo, false)
+            else if (tab === 'efficiency')     fetchEfficiency(effFrom, effTo, false)
             else if (tab === 'settings')       fetchSettings(false)
             else                               fetchHistory(tab, false)
           }} style={btnOut}>Refresh</button>
@@ -660,7 +676,8 @@ export default function ConsignmentApprovals() {
           { id: 'rejected',      label: 'Rejected',      color: t.red    },
           { id: 'cancellations', label: 'Cancellations', color: t.purple },
           { id: 'reports',       label: 'Reports',       color: t.blue   },
-          { id: 'settings',      label: 'Settings',      color: t.gold   },
+          { id: 'efficiency',    label: 'Efficiency',    color: t.gold   },
+          { id: 'settings',      label: 'Settings',      color: t.text2  },
         ].map(o => {
           const active = tab === o.id
           return (
@@ -801,6 +818,14 @@ export default function ConsignmentApprovals() {
           reportTo={reportTo}     setReportTo={setReportTo}
           fetchReport={fetchReport}
         />
+      ) : tab === 'efficiency' ? (
+        <EfficiencyTab
+          t={t} card={card}
+          users={efficiency.users}
+          from={effFrom} setFrom={setEffFrom}
+          to={effTo}     setTo={setEffTo}
+          fetchEfficiency={fetchEfficiency}
+        />
       ) : tab === 'settings' ? (
         /* Settings — E-Invoice sequences + state GSTINs + when-to-generate notes */
         <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
@@ -907,11 +932,18 @@ export default function ConsignmentApprovals() {
                     <span style={{ fontSize: '9px', color: accentColor, background: `${accentColor}15`, borderRadius: '4px', padding: '2px 7px', fontWeight: 700, letterSpacing: '.04em' }}>
                       {isApproved ? 'APPROVED' : 'REJECTED'}
                     </span>
-                    {ttaLabel && (
-                      <span title={`Time from creation to ${isApproved ? 'approval' : 'rejection'}`} style={{ fontSize: '9px', color: t.text3, background: `${t.text3}10`, borderRadius: '4px', padding: '2px 7px', fontWeight: 600 }}>
-                        in {ttaLabel}
-                      </span>
-                    )}
+                    {ttaLabel && (() => {
+                      // Colour ramp: > 5min reads red — accounts took too long to
+                      // review. ≤ 5min stays muted (the default fast-turnaround look).
+                      const slow = ttaMin > 5
+                      const c = slow ? t.red : t.text3
+                      return (
+                        <span title={`Time from creation to ${isApproved ? 'approval' : 'rejection'}${slow ? ' — over 5 minutes, slow review' : ''}`}
+                          style={{ fontSize: '9px', color: c, background: `${c}${slow ? '18' : '10'}`, borderRadius: '4px', padding: '2px 7px', fontWeight: 600 }}>
+                          in {ttaLabel}
+                        </span>
+                      )
+                    })()}
                     {c.eway_bill_no && <span style={{ fontSize: '9px', color: t.green, background: `${t.green}15`, borderRadius: '4px', padding: '2px 7px', fontWeight: 600, letterSpacing: '.04em' }}>EWB</span>}
                     {c.irn         && <span style={{ fontSize: '9px', color: t.purple, background: `${t.purple}15`, borderRadius: '4px', padding: '2px 7px', fontWeight: 600, letterSpacing: '.04em' }}>IRN</span>}
                   </div>
@@ -1768,6 +1800,233 @@ function ReportKpi({ t, label, primary, sub, accent, mono, small }) {
   )
 }
 
+
+// Efficiency tab — per-user accounts performance over a date window.
+// Date controls + KPI band + sortable user table + CSV export.
+function EfficiencyTab({ t, card, users, from, setFrom, to, setTo, fetchEfficiency }) {
+  // Reuse the same date preset logic as Reports.
+  const istDateStr = (d) => new Date(d.getTime() + 19800000).toISOString().slice(0, 10)
+  const today      = istDateStr(new Date())
+  const yesterday  = istDateStr(new Date(Date.now() - 86400000))
+  const last7      = istDateStr(new Date(Date.now() - 6 * 86400000))
+  const monthStart = today.slice(0, 8) + '01'
+  const now        = new Date()
+  const fyYear     = now.getMonth() + 1 >= 4 ? now.getFullYear() : now.getFullYear() - 1
+  const fyStart    = `${fyYear}-04-01`
+  const presets = [
+    { label: 'Today',       from: today,      to: today },
+    { label: 'Yesterday',   from: yesterday,  to: yesterday },
+    { label: 'Last 7 days', from: last7,      to: today },
+    { label: 'This month',  from: monthStart, to: today },
+    { label: 'This FY',     from: fyStart,    to: today },
+  ]
+  const isPresetActive = (p) => p.from === from && p.to === to
+  const applyPreset = (p) => { setFrom(p.from); setTo(p.to); fetchEfficiency(p.from, p.to, false) }
+
+  const [sortBy, setSortBy] = useState('total')   // total | approvals | ewb | einv | last
+  const [sortDir, setSortDir] = useState('desc')
+
+  const sortKey = (u) => ({
+    total:     (u.total_docs || 0) + (u.approvals_count || 0),
+    approvals: u.approvals_count || 0,
+    ewb:       u.ewb_count || 0,
+    einv:      u.einv_count || 0,
+    last:      u.last_activity ? new Date(u.last_activity).getTime() : 0,
+  })[sortBy] ?? 0
+  const sortedUsers = [...users].sort((a, b) => {
+    const da = sortKey(a); const db = sortKey(b)
+    return sortDir === 'asc' ? da - db : db - da
+  })
+  const toggleSort = (k) => {
+    if (sortBy === k) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
+    else { setSortBy(k); setSortDir('desc') }
+  }
+  const sortIndicator = (k) => sortBy === k ? (sortDir === 'desc' ? ' ↓' : ' ↑') : ''
+
+  // KPI computations
+  const activeUsers = users.length
+  const totalApprovals = users.reduce((s, u) => s + (u.approvals_count || 0), 0)
+  const totalDocs = users.reduce((s, u) => s + (u.total_docs || 0), 0)
+  // Fastest avg approval — only consider users with ≥3 samples (single-sample
+  // winners are noise). Returns { email, avg } or null.
+  const fastestApprover = users
+    .filter(u => (u.approvals_count || 0) >= 3 && u.approvals_avg_min != null)
+    .sort((a, b) => a.approvals_avg_min - b.approvals_avg_min)[0]
+
+  // Time colour ramp. Mirrors the > 5min red rule on individual cards.
+  const timeColor = (mins) => {
+    if (mins == null) return t.text4
+    if (mins <= 2)  return t.green
+    if (mins <= 5)  return t.gold
+    if (mins <= 15) return t.orange
+    return t.red
+  }
+
+  // CSV export — one row per user.
+  const dateTag = from === to ? from : `${from}_to_${to}`
+  const exportCsv = () => {
+    if (!users.length) return
+    const rows = users.map(u => ({
+      User:                u.email,
+      'Approvals':         u.approvals_count,
+      'Approval Avg (m)':  u.approvals_avg_min ?? '',
+      'Approval Min (m)':  u.approvals_min_min ?? '',
+      'Approval Max (m)':  u.approvals_max_min ?? '',
+      'EWBs':              u.ewb_count,
+      'EWB Avg (m)':       u.ewb_avg_min ?? '',
+      'EWB Min (m)':       u.ewb_min_min ?? '',
+      'EWB Max (m)':       u.ewb_max_min ?? '',
+      'E-Invoices':        u.einv_count,
+      'E-Inv Avg (m)':     u.einv_avg_min ?? '',
+      'E-Inv Min (m)':     u.einv_min_min ?? '',
+      'E-Inv Max (m)':     u.einv_max_min ?? '',
+      'Total Docs':        u.total_docs,
+      'Last Activity':     u.last_activity || '',
+    }))
+    const headers = Object.keys(rows[0])
+    const escape  = (v) => /[",\n]/.test(String(v ?? '')) ? `"${String(v).replace(/"/g, '""')}"` : String(v ?? '')
+    const csv = [headers.join(','), ...rows.map(r => headers.map(h => escape(r[h])).join(','))].join('\n')
+    const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' })
+    const url  = URL.createObjectURL(blob)
+    const a    = document.createElement('a')
+    a.href = url
+    a.download = `efficiency_${dateTag}.csv`
+    document.body.appendChild(a); a.click(); a.remove()
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
+  }
+
+  const windowLabel = from === to
+    ? new Date(from).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+    : `${new Date(from).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })} → ${new Date(to).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}`
+
+  // Stable cell styles
+  const th = { padding: '11px 14px', textAlign: 'left', fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', borderBottom: `1px solid ${t.border}`, fontWeight: 600, whiteSpace: 'nowrap', cursor: 'pointer', userSelect: 'none' }
+  const thStatic = { ...th, cursor: 'default' }
+  const td = { padding: '12px 14px', verticalAlign: 'middle', fontSize: '11.5px' }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+      {/* ─── Date controls ─── */}
+      <div style={{ ...card }}>
+        <div style={{ padding: '14px 18px', display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap' }}>
+          <div>
+            <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 600 }}>Reporting window</div>
+            <div style={{ fontSize: '14px', color: t.text1, fontWeight: 600, marginTop: '3px', fontFamily: 'monospace', letterSpacing: '-.01em' }}>{windowLabel}</div>
+          </div>
+          <div style={{ width: '1px', height: '32px', background: t.border }} />
+          <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+            {presets.map(p => {
+              const active = isPresetActive(p)
+              return (
+                <button key={p.label} onClick={() => applyPreset(p)}
+                  style={{ background: active ? t.gold : 'transparent', color: active ? '#1a0a00' : t.text3,
+                    border: `1px solid ${active ? t.gold : t.border}`, boxShadow: active ? `0 1px 4px ${t.gold}40` : 'none',
+                    borderRadius: '16px', padding: '5px 14px', fontSize: '11px', fontWeight: 600, cursor: 'pointer', transition: 'all .15s ease' }}>
+                  {p.label}
+                </button>
+              )
+            })}
+          </div>
+          <div style={{ flex: 1 }} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <input type="date" value={from} onChange={e => setFrom(e.target.value)} max={today}
+              style={{ background: t.card2 || t.card, border: `1px solid ${t.border}`, borderRadius: '7px', padding: '6px 10px', fontSize: '12px', color: t.text1, fontFamily: 'monospace', outline: 'none' }} />
+            <span style={{ fontSize: '11px', color: t.text4 }}>→</span>
+            <input type="date" value={to} onChange={e => setTo(e.target.value)} max={today}
+              style={{ background: t.card2 || t.card, border: `1px solid ${t.border}`, borderRadius: '7px', padding: '6px 10px', fontSize: '12px', color: t.text1, fontFamily: 'monospace', outline: 'none' }} />
+            <button onClick={() => fetchEfficiency(from, to, false)}
+              style={{ background: t.gold, color: '#1a0a00', border: 'none', borderRadius: '7px', padding: '7px 16px', fontSize: '11px', fontWeight: 700, cursor: 'pointer', boxShadow: `0 1px 4px ${t.gold}50` }}>
+              Run
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* ─── KPI band ─── */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '1px', background: t.border, borderRadius: '12px', overflow: 'hidden', boxShadow: `0 1px 3px ${t.border}50` }}>
+        <ReportKpi t={t} label="Active users"     primary={`${activeUsers}`}                        sub="with ≥1 action in window"             accent={t.gold} />
+        <ReportKpi t={t} label="Total approvals"  primary={`${totalApprovals}`}                     sub="consignments approved"               accent={t.green} />
+        <ReportKpi t={t} label="Total docs"       primary={`${totalDocs}`}                          sub="EWB + E-Invoice generated"           accent={t.purple} />
+        <ReportKpi t={t} label="Fastest approver" primary={fastestApprover ? `${fastestApprover.approvals_avg_min}m` : '—'}
+          sub={fastestApprover ? `${fastestApprover.email.split('@')[0]} · ${fastestApprover.approvals_count} approvals` : 'Need ≥3 approvals/user'} accent={t.blue} mono />
+      </div>
+
+      {/* ─── User table ─── */}
+      <div style={{ ...card, overflow: 'hidden' }}>
+        <div style={{ padding: '14px 18px', borderBottom: `1px solid ${t.border}`, display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <div>
+            <div style={{ fontSize: '13px', color: t.text1, fontWeight: 600 }}>Per-user activity</div>
+            <div style={{ fontSize: '10px', color: t.text4, marginTop: '2px' }}>Counts and average response times. Times colour-ramped: green ≤2m · gold ≤5m · orange ≤15m · red &gt;15m.</div>
+          </div>
+          <div style={{ flex: 1 }} />
+          {users.length > 0 && (
+            <button onClick={exportCsv}
+              style={{ background: 'transparent', color: t.text2, border: `1px solid ${t.border}`, borderRadius: '7px', padding: '6px 12px', fontSize: '11px', fontWeight: 600, cursor: 'pointer' }}>
+              Export CSV
+            </button>
+          )}
+        </div>
+        {users.length === 0 ? (
+          <div style={{ padding: '40px 20px', textAlign: 'center', fontSize: '12px', color: t.text4 }}>No accounts activity in this window.</div>
+        ) : (
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11.5px' }}>
+              <thead>
+                <tr style={{ background: t.card2 || t.card }}>
+                  <th style={thStatic}>User</th>
+                  <th style={th} onClick={() => toggleSort('approvals')} title="Click to sort">Approvals{sortIndicator('approvals')}</th>
+                  <th style={thStatic}>Approval avg / min / max</th>
+                  <th style={th} onClick={() => toggleSort('ewb')} title="Click to sort">EWBs{sortIndicator('ewb')}</th>
+                  <th style={thStatic}>EWB avg / min / max</th>
+                  <th style={th} onClick={() => toggleSort('einv')} title="Click to sort">E-Invoices{sortIndicator('einv')}</th>
+                  <th style={thStatic}>E-Inv avg / min / max</th>
+                  <th style={th} onClick={() => toggleSort('total')} title="Click to sort">Total docs{sortIndicator('total')}</th>
+                  <th style={th} onClick={() => toggleSort('last')} title="Click to sort">Last active{sortIndicator('last')}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {sortedUsers.map((u, i) => (
+                  <tr key={u.email} style={{ borderBottom: `1px solid ${t.border}25`, background: i % 2 ? `${t.text4}05` : 'transparent' }}>
+                    <td style={{ ...td, color: t.text1, fontWeight: 600 }}>{u.email}</td>
+                    <td style={{ ...td, color: t.green, textAlign: 'right', fontFamily: 'monospace', fontWeight: 700 }}>{u.approvals_count}</td>
+                    <td style={{ ...td, fontFamily: 'monospace' }}>
+                      {u.approvals_count > 0 ? (
+                        <span style={{ color: t.text3 }}>
+                          <span style={{ color: timeColor(u.approvals_avg_min), fontWeight: 700 }}>{u.approvals_avg_min}m</span>
+                          {' / '}{u.approvals_min_min}m / {u.approvals_max_min}m
+                        </span>
+                      ) : <span style={{ color: t.text4 }}>—</span>}
+                    </td>
+                    <td style={{ ...td, color: t.green, textAlign: 'right', fontFamily: 'monospace' }}>{u.ewb_count}</td>
+                    <td style={{ ...td, fontFamily: 'monospace' }}>
+                      {u.ewb_count > 0 ? (
+                        <span style={{ color: t.text3 }}>
+                          <span style={{ color: timeColor(u.ewb_avg_min), fontWeight: 700 }}>{u.ewb_avg_min}m</span>
+                          {' / '}{u.ewb_min_min}m / {u.ewb_max_min}m
+                        </span>
+                      ) : <span style={{ color: t.text4 }}>—</span>}
+                    </td>
+                    <td style={{ ...td, color: t.purple, textAlign: 'right', fontFamily: 'monospace' }}>{u.einv_count}</td>
+                    <td style={{ ...td, fontFamily: 'monospace' }}>
+                      {u.einv_count > 0 ? (
+                        <span style={{ color: t.text3 }}>
+                          <span style={{ color: timeColor(u.einv_avg_min), fontWeight: 700 }}>{u.einv_avg_min}m</span>
+                          {' / '}{u.einv_min_min}m / {u.einv_max_min}m
+                        </span>
+                      ) : <span style={{ color: t.text4 }}>—</span>}
+                    </td>
+                    <td style={{ ...td, color: t.blue, textAlign: 'right', fontFamily: 'monospace', fontWeight: 700 }}>{u.total_docs}</td>
+                    <td style={{ ...td, color: t.text3, fontSize: '10px', whiteSpace: 'nowrap' }}>{u.last_activity ? fmtTS(u.last_activity) : '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
 
 // Settings → E-Invoice sequence row. Inline-editable last_seq with a Save
 // button. Showing 'next_no' inline lets the operator verify the new value
