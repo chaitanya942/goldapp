@@ -124,6 +124,12 @@ export default function PurchaseData() {
   const [filterTxn, setFilterTxn]     = useState('')
   const [fromDate, setFromDate]     = useState('')
   const [toDate, setToDate]         = useState('')
+  // Separate filter for purchases.dispatched_at — the moment a bill
+  // transitioned at_branch → in_consignment. Useful when you want to
+  // narrow 'all bills currently in transit' down to a specific dispatch
+  // day, rather than filtering by purchase_date.
+  const [dispatchedFrom, setDispatchedFrom] = useState('')
+  const [dispatchedTo,   setDispatchedTo]   = useState('')
 
   const [page, setPage]             = useState(0)
   const [totalCount, setTotalCount] = useState(0)
@@ -145,7 +151,7 @@ export default function PurchaseData() {
       .then(({ data }) => { if (data) setAllBranches(data.map(b => b.name)) })
   }, [])
 
-  useEffect(() => { loadPage(page) }, [page, search, filterCrmStatus, filterCrmSource, filterStatus, filterBranch, filterTxn, fromDate, toDate, sortCol, sortDir])
+  useEffect(() => { loadPage(page) }, [page, search, filterCrmStatus, filterCrmSource, filterStatus, filterBranch, filterTxn, fromDate, toDate, dispatchedFrom, dispatchedTo, sortCol, sortDir])
   useEffect(() => { loadKpis(filterCrmStatus) }, [filterCrmStatus])
 
   const loadKpis = async (crmStatus = '') => {
@@ -166,6 +172,10 @@ export default function PurchaseData() {
     if (filterTxn)    q = q.eq('transaction_type', filterTxn)
     if (fromDate)     q = q.gte('purchase_date', fromDate)
     if (toDate)       q = q.lte('purchase_date', toDate)
+    // dispatched_at is a TIMESTAMPTZ, so wrap the user's YYYY-MM-DD strings in
+    // IST day-bounds to make the range inclusive of the chosen days.
+    if (dispatchedFrom) q = q.gte('dispatched_at', `${dispatchedFrom}T00:00:00+05:30`)
+    if (dispatchedTo)   q = q.lte('dispatched_at', `${dispatchedTo}T23:59:59+05:30`)
     return q
   }
 
@@ -213,7 +223,7 @@ export default function PurchaseData() {
   const setYesterday = () => { const d = istNow(); d.setDate(d.getDate() - 1); const s = istStr(d); setFromDate(s); setToDate(s); setPage(0) }
   const setThisWeek = () => { const to = istNow(); const fr = istNow(); fr.setDate(fr.getDate() - 7); setToDate(istStr(to)); setFromDate(istStr(fr)); setPage(0) }
   const setThisMonth = () => { const now = istNow(); setFromDate(`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-01`); setToDate(istStr(now)); setPage(0) }
-  const clearFilters = () => { setFromDate(''); setToDate(''); setFilterBranch(''); setFilterStatus(''); setFilterTxn(''); setSearch(''); setFilterCrmStatus(''); setFilterCrmSource(''); setPage(0) }
+  const clearFilters = () => { setFromDate(''); setToDate(''); setDispatchedFrom(''); setDispatchedTo(''); setFilterBranch(''); setFilterStatus(''); setFilterTxn(''); setSearch(''); setFilterCrmStatus(''); setFilterCrmSource(''); setPage(0) }
 
   const handleExport = async (format) => {
     setExporting(true)
@@ -306,7 +316,7 @@ export default function PurchaseData() {
         </div>
         <div style={{ fontSize: '.72rem', color: t.red, textAlign: 'center', marginBottom: '28px', lineHeight: 1.7 }}>
           {deleteAllMode
-            ? <>Permanently deletes <strong>ALL {totalCount.toLocaleString('en-IN')}</strong> purchase records{(filterBranch || filterStatus || search || filterCrmStatus || filterCrmSource || filterTxn || fromDate || toDate) ? ' matching current filters' : ''}.<br />This cannot be undone.</>
+            ? <>Permanently deletes <strong>ALL {totalCount.toLocaleString('en-IN')}</strong> purchase records{(filterBranch || filterStatus || search || filterCrmStatus || filterCrmSource || filterTxn || fromDate || toDate || dispatchedFrom || dispatchedTo) ? ' matching current filters' : ''}.<br />This cannot be undone.</>
             : <>Permanently deletes <strong>{selectedIds.size}</strong> purchase {selectedIds.size === 1 ? 'record' : 'records'}.<br />This cannot be undone.</>}
         </div>
         <div style={{ display: 'flex', gap: '10px', justifyContent: 'center' }}>
@@ -456,7 +466,7 @@ export default function PurchaseData() {
             {label}
           </button>
         ))}
-        {(fromDate || toDate || filterBranch || filterStatus || filterTxn || search || filterCrmStatus || filterCrmSource) && (
+        {(fromDate || toDate || dispatchedFrom || dispatchedTo || filterBranch || filterStatus || filterTxn || search || filterCrmStatus || filterCrmSource) && (
           <button onClick={clearFilters}
             style={{ padding: '5px 12px', borderRadius: '100px', border: `1px solid ${t.red}40`, background: 'transparent', color: t.red, fontSize: '.65rem', cursor: 'pointer', marginLeft: '8px' }}>
             Clear all
@@ -480,13 +490,17 @@ export default function PurchaseData() {
           <option value="PHYSICAL">Physical</option>
           <option value="TAKEOVER">Takeover</option>
         </select>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-          <span style={{ fontSize: '.68rem', color: t.text4 }}>From</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }} title="Filter by purchase date (when the bill was sold to White Gold)">
+          <span style={{ fontSize: '.68rem', color: t.text4 }}>Purchase</span>
           <input type="date" style={{ ...s.select, width: 'auto' }} value={fromDate} onChange={e => { setFromDate(e.target.value); setPage(0) }} />
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-          <span style={{ fontSize: '.68rem', color: t.text4 }}>To</span>
+          <span style={{ fontSize: '.68rem', color: t.text4 }}>→</span>
           <input type="date" style={{ ...s.select, width: 'auto' }} value={toDate} onChange={e => { setToDate(e.target.value); setPage(0) }} />
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }} title="Filter by 'In Consignment Since' — when the bill transitioned at_branch → in_consignment">
+          <span style={{ fontSize: '.68rem', color: t.text4 }}>Dispatched</span>
+          <input type="date" style={{ ...s.select, width: 'auto' }} value={dispatchedFrom} onChange={e => { setDispatchedFrom(e.target.value); setPage(0) }} />
+          <span style={{ fontSize: '.68rem', color: t.text4 }}>→</span>
+          <input type="date" style={{ ...s.select, width: 'auto' }} value={dispatchedTo} onChange={e => { setDispatchedTo(e.target.value); setPage(0) }} />
         </div>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: '6px', alignItems: 'center' }}>
           <button style={s.btnSmall} disabled={exporting} onClick={() => handleExport('csv')}
@@ -522,7 +536,7 @@ export default function PurchaseData() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
           {purchases.length === 0 ? (
             <div style={{ textAlign: 'center', color: t.text4, padding: '48px', fontSize: '.75rem' }}>
-              {(search || filterStatus || filterBranch || filterCrmStatus || filterTxn || fromDate || toDate) ? 'No records match your filters' : 'No purchase data yet. Syncing from CRM in the background.'}
+              {(search || filterStatus || filterBranch || filterCrmStatus || filterTxn || fromDate || toDate || dispatchedFrom || dispatchedTo) ? 'No records match your filters' : 'No purchase data yet. Syncing from CRM in the background.'}
             </div>
           ) : purchases.map((p) => {
             const status = STATUS_COLORS[p.stock_status] || { color: t.text3, label: p.stock_status }
@@ -681,7 +695,7 @@ export default function PurchaseData() {
               })}
               {purchases.length === 0 && (
                 <tr><td colSpan={isSuperAdmin ? 21 : 20} style={{ ...s.td, textAlign: 'center', color: t.text4, padding: '48px' }}>
-                  {(search || filterStatus || filterBranch || filterCrmStatus || filterTxn || fromDate || toDate) ? 'No records match your filters' : 'No purchase data yet. Syncing from CRM in the background.'}
+                  {(search || filterStatus || filterBranch || filterCrmStatus || filterTxn || fromDate || toDate || dispatchedFrom || dispatchedTo) ? 'No records match your filters' : 'No purchase data yet. Syncing from CRM in the background.'}
                 </td></tr>
               )}
             </tbody>
