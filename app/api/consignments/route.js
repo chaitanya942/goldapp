@@ -1156,17 +1156,24 @@ export async function POST(req) {
     const purchaseIds = (links || []).map(l => l.purchase_id)
 
     if (purchaseIds.length) {
-      const isInternal = data.movement_type === 'INTERNAL'
-      const dispatchedAt = data.dispatched_at || nowIso  // stamp first-leg time
+      const isInternal   = data.movement_type === 'INTERNAL'
+      const dispatchedAt = data.dispatched_at || nowIso
       if (isInternal) {
+        // INTERNAL Branch → Hub: bills stay 'at_branch' — they just move to a
+        // different branch within the network (the hub). DO NOT stamp
+        // dispatched_at here: that column tracks at_branch → in_consignment
+        // transitions, which only happens on the HO-bound leg. When this hub
+        // later issues a Hub → HO consignment, THAT approval stamps
+        // dispatched_at correctly through the EXTERNAL branch below.
         await supabase.from('purchases')
           .update({
             stock_status:   'at_branch',
             current_branch: data.dest_branch,
-            dispatched_at:  dispatchedAt,
           })
           .in('id', purchaseIds)
       } else {
+        // EXTERNAL Branch → HO or Hub → HO: bills enter transit. Stamp
+        // dispatched_at as the at_branch → in_consignment transition time.
         await supabase.from('purchases')
           .update({
             stock_status:   'in_consignment',
