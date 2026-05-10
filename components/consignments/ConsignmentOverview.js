@@ -875,8 +875,8 @@ export default function ConsignmentOverview() {
                       as the user scrolls. Single source of truth — no <tfoot>
                       duplicate at the bottom. */}
                   <tr style={{ background: `${t.gold}14`, borderTop: `1px solid ${t.border}`, borderBottom: `2px solid ${t.gold}40` }}>
-                    <td style={{ padding: '8px 8px 8px 14px', fontSize: '10px', color: t.text2, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', background: `${t.gold}14` }}>
-                      Σ {filtered.length} branch{filtered.length !== 1 ? 'es' : ''}
+                    <td style={{ padding: '8px 8px 8px 14px', fontSize: '10px', color: t.text2, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', background: `${t.gold}14`, whiteSpace: 'nowrap' }}>
+                      Σ Totals · {filtered.length}
                     </td>
                     {/* Total Bills */}
                     <td style={{ padding: '8px 8px', textAlign: 'right', fontSize: '13px', color: t.gold, fontFamily: 'monospace', fontWeight: 700, background: `${t.gold}14` }}>
@@ -1047,7 +1047,7 @@ export default function ConsignmentOverview() {
                         {/* Last Moved */}
                         <td style={{ padding: tdPad, textAlign: 'center' }}>
                           {b.last_moved_days_ago != null
-                            ? <span style={{ fontSize: '11px', color: t.purple, background: `${t.purple}15`, borderRadius: '5px', padding: '2px 8px', fontWeight: 600 }}>{b.last_moved_days_ago}d ago</span>
+                            ? <span style={{ fontSize: '11px', color: t.purple, background: `${t.purple}15`, borderRadius: '5px', padding: '2px 8px', fontWeight: 600, whiteSpace: 'nowrap' }}>{b.last_moved_days_ago}d ago</span>
                             : <span style={{ fontSize: '11px', color: t.text4 }}>never</span>}
                         </td>
 
