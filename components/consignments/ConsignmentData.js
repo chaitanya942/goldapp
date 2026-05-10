@@ -857,7 +857,30 @@ export default function ConsignmentData() {
               </tr>
             </thead>
             <tbody>
-              {filteredCons.length === 0 ? (
+              {loading && consignments.length === 0 ? (
+                // Skeleton rows on initial load — column-aware widths so each
+                // cell roughly matches the shape of the real data it'll
+                // become. Shimmer is animated via .cdata-skeleton in CSS.
+                Array.from({ length: 8 }).map((_, i) => (
+                  <tr key={`skeleton-${i}`} style={{ borderBottom: `1px solid ${t.border}15` }}>
+                    <td style={{ padding: '14px 14px 14px 11px', boxShadow: `inset 3px 0 0 ${t.border}` }}>
+                      <span className="cdata-skeleton" style={{ width: '78px' }} />
+                    </td>
+                    <td style={{ padding: '14px' }}><span className="cdata-skeleton" style={{ width: '92px', height: '18px', borderRadius: '99px' }} /></td>
+                    <td style={{ padding: '14px' }}><span className="cdata-skeleton" style={{ width: '180px' }} /></td>
+                    <td style={{ padding: '14px', textAlign: 'right' }}><span className="cdata-skeleton" style={{ width: '24px' }} /></td>
+                    <td style={{ padding: '14px', textAlign: 'right' }}><span className="cdata-skeleton" style={{ width: '60px' }} /></td>
+                    <td style={{ padding: '14px', textAlign: 'right' }}><span className="cdata-skeleton" style={{ width: '70px' }} /></td>
+                    <td style={{ padding: '14px' }}>
+                      <span className="cdata-skeleton" style={{ width: '90px' }} /><br />
+                      <span className="cdata-skeleton" style={{ width: '50px', height: '10px', marginTop: '4px' }} />
+                    </td>
+                    <td style={{ padding: '14px' }}><span className="cdata-skeleton" style={{ width: '120px', height: '20px' }} /></td>
+                    <td style={{ padding: '14px' }}><span className="cdata-skeleton" style={{ width: '90px', height: '20px' }} /></td>
+                    <td style={{ padding: '14px' }}><span className="cdata-skeleton" style={{ width: '60px', height: '20px' }} /></td>
+                  </tr>
+                ))
+              ) : filteredCons.length === 0 ? (
                 <tr><td colSpan={10} style={{ padding: '64px', textAlign: 'center', color: t.text4, fontSize: '13px' }}>
                   {consignments.length === 0
                     ? 'No active consignments. Use Branch Stock → Move to create one.'
@@ -1250,8 +1273,12 @@ export default function ConsignmentData() {
         </button>
       </div>
 
-      {/* Content */}
-      {loading ? (
+      {/* Content. Bill picker still uses the spinner overlay (it builds its
+          own complex layout); the active-consignments list renders its own
+          skeleton rows inside the table shell on initial load so the user
+          sees the layout immediately, not a centered spinner on a blank
+          card. */}
+      {loading && nav?.branch ? (
         <div style={{ padding: '64px', display: 'flex', justifyContent: 'center' }}><GoldSpinner size={32} /></div>
       ) : nav?.branch ? (
         renderBillPicker()
