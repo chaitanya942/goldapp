@@ -931,52 +931,14 @@ export default function ConsignmentOverview() {
                                       : urgentTier === 'watch'   ? t.orange
                                       : rColor
 
+                    const glowColor = urgentTier === 'overdue' ? t.red
+                                    : urgentTier === 'watch'   ? t.orange
+                                    : t.gold
                     return (
-                      <tr key={b.branch_name}
-                        className="cstock-flat-row"
-                        title={`Click to create a consignment from ${b.branch_name}`}
-                        onClick={() => {
-                          setConsignmentDeepLink({ branch: b.branch_name, region: b.region })
-                          setActiveNav('consignment-data')
-                        }}
-                        // CSS variable lets :hover paint a row-tinted glow that respects
-                        // the urgency tier (red for overdue, orange for watch, gold default).
-                        style={{
-                          borderBottom: `1px solid ${t.border}20`,
-                          background:   urgentBg,
-                          cursor:       'pointer',
-                          ['--cstock-glow']: urgentTier === 'overdue' ? t.red
-                                           : urgentTier === 'watch'   ? t.orange
-                                           : t.gold,
-                          ['--cstock-stripe']: stripeColor,
-                        }}
-                        onMouseEnter={e => {
-                          // Warm the picker cache the moment the user shows
-                          // intent. Prefetch the same two requests the bill
-                          // picker fires on mount, so by the time it lands
-                          // the browser cache already has the response.
-                          if (!e.currentTarget.dataset.prefetched) {
-                            e.currentTarget.dataset.prefetched = '1'
-                            const enc = encodeURIComponent(b.branch_name)
-                            prefetch(`/api/consignments?action=stock_in_branch&branch=${enc}`)
-                            prefetch(`/api/consignments?action=transfer_history&branch=${enc}`)
-                          }
-                        }}>
-
-                        {/* Branch — stripe is a 3px boxShadow inset on this cell.
-                            Explicit longhand padding so React doesn't shadow the
-                            shorthand. paddingLeft 7px = 3px stripe + 4px gap. */}
-                        <td style={{
-                          paddingTop: '10px',
-                          paddingRight: '8px',
-                          paddingBottom: '10px',
-                          paddingLeft: '7px',
-                          boxShadow: `inset 3px 0 0 var(--cstock-stripe)`,
-                        }}>
-                          <div style={{ minWidth: 0 }}>
-                            <div style={{ fontSize: '13px', fontWeight: 600, color: t.text1, whiteSpace: 'nowrap' }}>{b.branch_name}</div>
-                            <div style={{ fontSize: '10px', color: rColor, marginTop: '1px' }}>{b.region}</div>
-                          </div>
+                      <tr key={b.branch_name} className="cstock-flat-row" title={`Click to create a consignment from ${b.branch_name}`} style={{ borderBottom: `1px solid ${t.border}20`, background: urgentBg, cursor: 'pointer', ['--cstock-glow']: glowColor, ['--cstock-stripe']: stripeColor }} onClick={() => { setConsignmentDeepLink({ branch: b.branch_name, region: b.region }); setActiveNav('consignment-data') }} onMouseEnter={e => { if (!e.currentTarget.dataset.prefetched) { e.currentTarget.dataset.prefetched = '1'; const enc = encodeURIComponent(b.branch_name); prefetch(`/api/consignments?action=stock_in_branch&branch=${enc}`); prefetch(`/api/consignments?action=transfer_history&branch=${enc}`) } }}>
+                        <td className="cstock-branch-cell">
+                          <div className="cstock-branch-name" style={{ color: t.text1 }}>{b.branch_name}</div>
+                          <div className="cstock-branch-region" style={{ color: rColor }}>{b.region}</div>
                         </td>
 
                         {/* Total Bills */}
@@ -1116,6 +1078,15 @@ export default function ConsignmentOverview() {
             0 0 0 1px color-mix(in srgb, var(--cstock-glow) 25%, transparent),
             0 6px 18px color-mix(in srgb, var(--cstock-glow) 18%, transparent);
         }
+        /* Branch cell — stripe via inset shadow at the cell's true left edge.
+           Padding is 7px on the left so text sits 4px after the 3px stripe. */
+        .cstock-branch-cell {
+          padding: 10px 8px 10px 7px;
+          box-shadow: inset 3px 0 0 var(--cstock-stripe);
+          vertical-align: middle;
+        }
+        .cstock-branch-name { font-size: 13px; font-weight: 600; white-space: nowrap; }
+        .cstock-branch-region { font-size: 10px; margin-top: 1px; }
         @keyframes cstockShimmer {
           0%   { background-position: -120% 0 }
           100% { background-position: 220% 0 }
