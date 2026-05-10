@@ -2,13 +2,12 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { createPortal } from 'react-dom'
-import JSZip from 'jszip'
 import { useApp } from '../../lib/context'
 import { supabase as supabaseClient } from '../../lib/supabase'
 import GoldSpinner from '../ui/GoldSpinner'
 import Badge from '../ui/Badge'
 import Toast from '../ui/Toast'
-import { openConfirm, openPrompt } from '../ui/ConfirmDialog'
+import { openConfirm } from '../ui/ConfirmDialog'
 import { authedFetch } from '../../lib/authedFetch'
 import { CONSIGNMENT_THEMES as THEMES, REGION_COLORS, useMobile } from '../../lib/consignmentTheme'
 import { WorkflowStrip, canActOnStep } from './workflowParts'
@@ -48,31 +47,6 @@ const relTime = (d) => {
   return `${days}d ago`
 }
 
-// Waiting-time helper for the approval pending pill in the ALL column.
-// Mirrors ConsignmentApprovals.waitingBadge but returns just label + color
-// urgency band so callers can style their own pill.
-function approvalWaiting(ts, t) {
-  if (!ts) return { label: '—', color: t.text4 }
-  const ms = Date.now() - new Date(ts).getTime()
-  if (ms < 0) return { label: 'just now', color: t.green }
-  const mins = Math.floor(ms / 60000)
-  let label
-  if (mins < 1)        label = 'just now'
-  else if (mins < 60)  label = `${mins}m`
-  else if (mins < 1440) {
-    const h = Math.floor(mins / 60); const m = mins % 60
-    label = m ? `${h}h ${m}m` : `${h}h`
-  } else {
-    const d = Math.floor(mins / 1440); const h = Math.floor((mins % 1440) / 60)
-    label = h ? `${d}d ${h}h` : `${d}d`
-  }
-  // Urgency colour ramp: <1h green, <4h gold, <24h orange, >24h red.
-  const color = mins < 60   ? t.green
-              : mins < 240  ? t.gold
-              : mins < 1440 ? t.orange
-              : t.red
-  return { label, color }
-}
 const daysSince = (d) => d ? Math.floor((Date.now() - new Date(d)) / 86400000) : 0
 
 function AgeBadge({ days, t }) {
@@ -131,11 +105,10 @@ function EwbCell({ c, t, downloadingId, ewbActionId, downloadEwbPdf, cancelEwb }
 }
 
 export default function ConsignmentData() {
-  const { theme, consignmentDeepLink, setConsignmentDeepLink, setActiveNav, user, userProfile } = useApp()
+  const { theme, consignmentDeepLink, setConsignmentDeepLink, setActiveNav } = useApp()
   // Track whether the user landed here via a Branch Stock Overview row click,
   // so the Back button can return them to that view instead of the local list.
   const cameFromBranchStock = useRef(false)
-  const userEmail = user?.email || userProfile?.email || null
   const t = THEMES[theme]
   const isMobile = useMobile()
 
@@ -201,6 +174,12 @@ export default function ConsignmentData() {
   // Sortable columns. Default: newest first by created_at.
   const [sortKey, setSortKey] = useState('created_at')
   const [sortDir, setSortDir] = useState(-1)  // -1 desc, 1 asc
+
+  // Cancellation request modal state. cancelTarget holds the consignment row
+  // whose Cancel button was clicked; null means modal is closed.
+  const [cancelTarget,    setCancelTarget]    = useState(null)
+  const [cancelReason,    setCancelReason]    = useState('')
+  const [cancelSubmitting,setCancelSubmitting]= useState(false)
 
   const fetchAll = useCallback(async () => {
     setLoading(true)
@@ -475,32 +454,6 @@ export default function ConsignmentData() {
     setDownloadingId(null)
   }
 
-  async function cancelConsignment(c) {
-    const reason = await openPrompt({
-      title: `Void ${c.tmp_prf_no}?`,
-      message: `${c.total_bills || 0} bill${c.total_bills === 1 ? '' : 's'} (${fmtWt(c.total_net_wt)}) will return to ${c.branch_name}. If the E-Way Bill or E-Invoice has been generated, cancel them separately on the GST portal.\n\nEnter a reason. It will be saved in the audit log.`,
-      placeholder: 'For example: created on the wrong branch, vehicle cancelled, customer return.',
-      minLength: 8,
-      maxLength: 280,
-      rows: 3,
-      confirmLabel: 'Void',
-      danger: true,
-    })
-    if (!reason) return
-    try {
-      const res = await authedFetch('/api/consignments', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'cancel_consignment', id: c.id, reason, cancelled_by: userEmail }),
-      })
-      const data = await res.json()
-      if (!res.ok || data.error) { setToast({ msg: data.error || 'Cancel failed', type: 'error' }); return }
-      setToast({ msg: 'Consignment voided. Bills have been returned to the source branch.', type: 'success' })
-      await fetchAll()
-    } catch (err) {
-      setToast({ msg: err.message || 'Cancel failed', type: 'error' })
-    }
-  }
-
   // Bill confirmation now happens automatically at consignment creation
   // (the user already confirmed twice during the create flow). Removed the
   // explicit handler; the workflow strip is purely a status indicator now.
@@ -517,175 +470,6 @@ export default function ConsignmentData() {
     setDownloadingId(null)
   }
 
-  // One-click: auto-generate any missing EWB / E-Invoice, then download all
-  // applicable documents into a real folder (File System Access API where
-  // supported — Chrome/Edge), else fall back to ZIP.
-  // Folder name format: {TMP_PRF}_{SOURCE}-to-{DEST}_{YYYY-MM-DD}
-  async function downloadAll(c) {
-    const isType = c.movement_type === 'INTERNAL'
-    const src = branches.find(b => b.name === c.branch_name)
-    const isKaSource = src?.region === 'Rest of Karnataka' || src?.region === 'Bangalore'
-    const showEwb = isType || isKaSource           // intrastate cases
-    const showEinv = !isType && !isKaSource         // interstate Hub→HO
-
-    const sanitize = s => String(s || '').replace(/[^a-zA-Z0-9_-]/g, '-').replace(/-+/g, '-')
-    const dateStr  = new Date(c.created_at).toISOString().slice(0, 10)
-    const dest     = isType ? c.dest_branch : 'HO'
-    const folderName = `${sanitize(c.tmp_prf_no)}_${sanitize(c.branch_name)}-to-${sanitize(dest)}_${dateStr}`
-
-    setDownloadingId(c.id + ':all')
-
-    // Auto-generate-then-bundle was removed when generation moved to the
-    // accounts review page. By the time ops can click Download all, the
-    // consignment is approved — which means accounts already generated
-    // whatever was applicable. If EWB / IRN are still missing here, the
-    // bundle just skips them.
-    const cur = { ...c }
-    const genFailures = []
-
-    // Build the list of files to fetch.
-    //   - Consignee Report + Challan/Voucher: always included. The branch
-    //     needs these to physically pack the consignment, even before
-    //     accounts has approved.
-    //   - EWB + E-Invoice: only included once accounts has approved.
-    //     Including them earlier produces a 403 (approvalGate blocks them
-    //     until the legally-binding GST documents have been verified).
-    const isApproved = cur.approval_status === 'approved'
-    const files = []
-    files.push({ url: `/api/generate-consignee-report?id=${cur.id}`, name: 'Consignee_Report.jpg' })
-    files.push({
-      url:  isType ? `/api/generate-issue-voucher-pdf?id=${cur.id}` : `/api/generate-challan-pdf?id=${cur.id}`,
-      name: isType ? 'Issue_Voucher.pdf' : 'Delivery_Challan.pdf',
-    })
-    if (isApproved && showEwb && cur.eway_bill_no) {
-      files.push({ url: `/api/eway-bill/pdf?id=${cur.id}`, name: `EWB_${sanitize(cur.eway_bill_no)}.pdf` })
-    }
-    if (isApproved && showEinv && cur.irn) {
-      files.push({ url: `/api/e-invoice/pdf?id=${cur.id}`, name: `EInvoice_${sanitize(cur.tmp_prf_no || 'IRN')}.pdf` })
-    }
-    // Use the refreshed cur object below
-    c = cur
-
-    // Fetch a URL → blob, surfacing JSON error bodies as readable messages.
-    const fetchToBlob = async (url) => {
-      const res = await authedFetch(url)
-      if (!res.ok) {
-        // Try to extract JSON error message from server
-        let detail = `HTTP ${res.status}`
-        try {
-          const ct = res.headers.get('content-type') || ''
-          if (ct.includes('json')) {
-            const j = await res.json()
-            if (j?.error) detail = j.error
-          } else {
-            const txt = await res.text()
-            if (txt) detail = txt.slice(0, 200)
-          }
-        } catch {}
-        throw new Error(detail)
-      }
-      return res.blob()
-    }
-
-    try {
-      // ── Path 1: File System Access API (Chrome/Edge) — creates a real folder ──
-      if (typeof window !== 'undefined' && 'showDirectoryPicker' in window) {
-        let parentDir
-        try {
-          parentDir = await window.showDirectoryPicker({ mode: 'readwrite', startIn: 'downloads' })
-        } catch (e) {
-          if (e.name === 'AbortError') { setDownloadingId(null); return }
-          throw e
-        }
-        setToast({ msg: 'Saving documents to folder.', type: 'info' })
-        const subDir = await parentDir.getDirectoryHandle(folderName, { create: true })
-
-        const summary = []
-        const failures = []
-        for (const f of files) {
-          try {
-            const blob = await fetchToBlob(f.url)
-            const fileHandle = await subDir.getFileHandle(f.name, { create: true })
-            const writable = await fileHandle.createWritable()
-            await writable.write(blob)
-            await writable.close()
-            summary.push(f.name.split('.')[0].replace(/_/g, ' '))
-          } catch (e) {
-            console.error(`${f.name} failed:`, e.message)
-            failures.push(`${f.name}: ${e.message}`)
-          }
-        }
-        // Always write a small details file with IRN/AckNo for quick reference
-        // alongside the signed PDF (which is now in `files`).
-        if (showEinv && c.irn) {
-          try {
-            const txtHandle = await subDir.getFileHandle('E-Invoice_Details.txt', { create: true })
-            const w = await txtHandle.createWritable()
-            await w.write(`IRN: ${c.irn}\nAck No: ${c.ack_no || ''}\nAck Date: ${c.ack_dt || ''}\n`)
-            await w.close()
-          } catch (e) { /* non-critical, PDF is the authoritative copy */ }
-        }
-
-        const missing = []
-        if (showEwb  && !c.eway_bill_no)            missing.push('E-Way Bill not generated')
-        else if (showEwb && c.eway_bill_no && !isApproved)  missing.push('E-Way Bill awaiting accounts approval')
-        if (showEinv && !c.irn)                     missing.push('E-Invoice not generated')
-        else if (showEinv && c.irn && !isApproved)  missing.push('E-Invoice awaiting accounts approval')
-        const baseMsg = `Saved to ${folderName}: ${summary.join(', ')}`
-        const allFailures = [...genFailures, ...failures]
-        if (allFailures.length) {
-          // Surface failures prominently — don't pretend success.
-          setToast({ msg: `${baseMsg}. Failed: ${allFailures.join('; ')}.`, type: 'error' })
-        } else if (missing.length) {
-          setToast({ msg: `${baseMsg}. ${missing.join(', ')}.`, type: 'info' })
-        } else {
-          setToast({ msg: baseMsg, type: 'success' })
-        }
-        return
-      }
-
-      // Path 2: Fallback for Firefox/Safari — pack into a ZIP.
-      setToast({ msg: 'Bundling documents into a ZIP.', type: 'info' })
-      const zip = new JSZip()
-      const summary = []
-      const failures = []
-      for (const f of files) {
-        try {
-          const blob = await fetchToBlob(f.url)
-          zip.file(`${folderName}/${f.name}`, blob)
-          summary.push(f.name.split('.')[0].replace(/_/g, ' '))
-        } catch (e) { failures.push(`${f.name}: ${e.message}`) }
-      }
-      // Reference text file alongside the signed PDF
-      if (showEinv && c.irn) {
-        zip.file(`${folderName}/E-Invoice_Details.txt`,
-          `IRN: ${c.irn}\nAck No: ${c.ack_no || ''}\nAck Date: ${c.ack_dt || ''}\n`)
-      }
-      const blob = await zip.generateAsync({ type: 'blob' })
-      const a = document.createElement('a')
-      a.href = URL.createObjectURL(blob)
-      a.download = `${folderName}.zip`
-      a.click()
-      URL.revokeObjectURL(a.href)
-
-      const missing = []
-      if (showEwb  && !c.eway_bill_no)            missing.push('E-Way Bill not generated')
-      else if (showEwb && c.eway_bill_no && !isApproved)  missing.push('E-Way Bill awaiting accounts approval')
-      if (showEinv && !c.irn)                     missing.push('E-Invoice not generated')
-      else if (showEinv && c.irn && !isApproved)  missing.push('E-Invoice awaiting accounts approval')
-      const baseMsg = `Downloaded ${folderName}.zip: ${summary.join(', ')}`
-      const allFailuresZip = [...genFailures, ...failures]
-      if (allFailuresZip.length) {
-        setToast({ msg: `${baseMsg}. Failed: ${allFailuresZip.join('; ')}.`, type: 'error' })
-      } else if (missing.length) {
-        setToast({ msg: `${baseMsg}. ${missing.join(', ')}.`, type: 'info' })
-      } else {
-        setToast({ msg: baseMsg, type: 'success' })
-      }
-    } catch (err) {
-      setToast({ msg: err.message || 'Save failed', type: 'error' })
-    } finally { setDownloadingId(null) }
-  }
 
   // ── Active consignments filtering ─────────────────────────────────────────
   const filteredCons = consignments.filter(c => {
@@ -1143,7 +927,7 @@ export default function ConsignmentData() {
                     { key: 'document',     label: 'Document',  align: 'left',  sortable: false },
                     { key: 'eway',         label: 'E-Way Bill',align: 'left',  sortable: false },
                     { key: 'einvoice',     label: 'E-Invoice', align: 'left',  sortable: false },
-                    { key: 'all',          label: 'All',       align: 'left',  sortable: false },
+                    { key: 'cancel',       label: 'Cancel',    align: 'left',  sortable: false },
                   ]
                   return cols.map(col => {
                     const isActive = col.sortable && sortKey === col.key
@@ -1349,46 +1133,47 @@ export default function ConsignmentData() {
                         </span>
                       )}
                     </td>
-                    <td style={{ padding: '11px 14px' }}>
-                      <div style={{ display: 'flex', gap: '4px', flexWrap: 'nowrap', whiteSpace: 'nowrap', alignItems: 'center' }}>
-                        {c.approval_status === 'pending' ? (() => {
-                          // Pending: show a status pill instead of "Download all".
-                          // The bundle would skip EWB / E-Invoice anyway, so a
-                          // disabled pill is honest about what's blocked. Timer
-                          // shows accounts how long they've kept ops waiting.
-                          const wait = approvalWaiting(c.created_at, t)
+                    <td style={{ padding: '11px 14px', whiteSpace: 'nowrap' }}>
+                      {(() => {
+                        // Cancellation already requested → show pill, no button.
+                        if (c.cancellation_requested_at) {
                           return (
-                            <span title={`Awaiting accounts approval. Voucher / Challan / Report can be downloaded individually from the Document column. EWB and E-Invoice unlock on approval.`}
-                              style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', background: `${t.orange}10`, border: `1px solid ${t.orange}40`, borderRadius: '6px', padding: '5px 12px', fontSize: '10px', color: t.orange, fontWeight: 600 }}>
-                              <span>EWB &amp; E-Invoice approval pending</span>
-                              <span style={{ color: wait.color, fontWeight: 700 }}>· {wait.label}</span>
+                            <span title={`Reason: ${c.cancellation_reason || '—'}\nRequested by: ${c.cancellation_requested_by || '—'}\nWaiting for accounts to approve / reject.`}
+                              style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', background: `${t.orange}12`, border: `1px solid ${t.orange}40`, borderRadius: '6px', padding: '5px 11px', fontSize: '10px', color: t.orange, fontWeight: 600 }}>
+                              <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: t.orange, display: 'inline-block' }} />
+                              Cancellation requested
                             </span>
                           )
-                        })() : c.approval_status === 'rejected' ? (
-                          <span title={c.rejection_reason ? `Rejected: ${c.rejection_reason}` : 'Rejected by accounts'}
-                            style={{ background: `${t.red}10`, border: `1px solid ${t.red}40`, borderRadius: '6px', padding: '5px 12px', fontSize: '10px', color: t.red, fontWeight: 600 }}>
-                            Approval rejected
-                          </span>
-                        ) : (
-                          <button onClick={() => downloadAll(c)} disabled={downloadingId === c.id + ':all'}
-                            title="Download Consignee Report, Voucher or Challan, EWB, and E-Invoice in one click"
-                            style={{ background: t.gold, color: '#1a0a00', border: 'none', borderRadius: '6px', padding: '5px 14px', fontSize: '10px', fontWeight: 700, cursor: downloadingId === c.id + ':all' ? 'not-allowed' : 'pointer', opacity: downloadingId === c.id + ':all' ? 0.6 : 1, whiteSpace: 'nowrap' }}>
-                            {downloadingId === c.id + ':all' ? '…' : 'Download all'}
+                        }
+                        // Cancellable check — same logic as the API gate so the
+                        // user doesn't click into a doomed flow.
+                        const HOUR_MS = 3600 * 1000
+                        const WINDOW  = 24 * HOUR_MS
+                        const now     = Date.now()
+                        let blockReason = null
+                        if (c.eway_bill_no && c.ewb_generated_at) {
+                          const elapsed = now - new Date(c.ewb_generated_at).getTime()
+                          if (elapsed >= WINDOW) blockReason = 'E-Way Bill cancel window has closed (>24h since generation).'
+                        }
+                        if (!blockReason && c.irn && c.einvoice_generated_at) {
+                          const elapsed = now - new Date(c.einvoice_generated_at).getTime()
+                          if (elapsed >= WINDOW) blockReason = 'E-Invoice cancel window has closed (>24h since generation).'
+                        }
+                        if (blockReason) {
+                          return (
+                            <span title={blockReason} style={{ fontSize: '10px', color: t.text4, fontStyle: 'italic' }}>
+                              cancel window closed
+                            </span>
+                          )
+                        }
+                        return (
+                          <button onClick={() => setCancelTarget(c)}
+                            title="Send a cancellation request to accounts. Bills will return to the source branch once accounts approves."
+                            style={{ background: 'transparent', border: `1px solid ${t.red}50`, borderRadius: '6px', padding: '5px 12px', fontSize: '10px', color: t.red, cursor: 'pointer', fontWeight: 600 }}>
+                            Cancel
                           </button>
-                        )}
-                        <button onClick={() => setActivityId(c.id)}
-                          title="View full audit trail for this consignment"
-                          style={{ background: 'transparent', border: `1px solid ${t.border}`, borderRadius: '5px', padding: '5px 12px', fontSize: '10px', color: t.text2, cursor: 'pointer' }}>
-                          Activity
-                        </button>
-                        {c.approval_status !== 'rejected' && (
-                          <button onClick={() => cancelConsignment(c)}
-                            title="Void this consignment. Bills return to the source branch."
-                            style={{ background: 'transparent', border: `1px solid ${t.red}40`, borderRadius: '5px', padding: '5px 12px', fontSize: '10px', color: t.red, cursor: 'pointer' }}>
-                            Void
-                          </button>
-                        )}
-                      </div>
+                        )
+                      })()}
                     </td>
                   </tr>
 
@@ -1526,6 +1311,74 @@ export default function ConsignmentData() {
             • TMP PRF + Challan/Voucher preview badges
             • Cancel / Confirm-and-Create CTA
       */}
+      {/* Cancellation request modal — operations fills in a reason and confirms;
+          server records the request and accounts processes it later. */}
+      {cancelTarget && typeof document !== 'undefined' && createPortal((
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.78)', zIndex: 110, display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(6px)', padding: '20px' }}
+          onClick={() => { if (!cancelSubmitting) { setCancelTarget(null); setCancelReason('') } }}>
+          <div onClick={e => e.stopPropagation()}
+            style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: '14px', padding: '24px 26px', width: '100%', maxWidth: '480px', boxShadow: '0 20px 60px rgba(0,0,0,.5)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '6px' }}>
+              <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 28, height: 28, borderRadius: '50%', background: `${t.red}18`, color: t.red, fontSize: '15px', fontWeight: 700 }}>!</span>
+              <div style={{ fontSize: '15px', fontWeight: 600, color: t.text1 }}>Request cancellation</div>
+            </div>
+            <div style={{ fontSize: '11px', color: t.text3, marginBottom: '14px' }}>
+              Consignment <strong style={{ color: t.gold, fontFamily: 'monospace' }}>{cancelTarget.tmp_prf_no}</strong> ·{' '}
+              {cancelTarget.branch_name} → {cancelTarget.movement_type === 'INTERNAL' ? (cancelTarget.dest_branch || '?') : 'Head Office'}
+            </div>
+            <div style={{ background: `${t.orange}10`, border: `1px solid ${t.orange}35`, borderRadius: '8px', padding: '10px 12px', fontSize: '11px', color: t.orange, marginBottom: '14px', lineHeight: 1.5 }}>
+              Accounts will review the request and decide whether to cancel the consignment, the E-Way Bill, and the E-Invoice (if any). Bills will return to {cancelTarget.branch_name} only after accounts approves.
+            </div>
+            <label style={{ display: 'block', fontSize: '10px', color: t.text4, letterSpacing: '.08em', textTransform: 'uppercase', fontWeight: 600, marginBottom: '6px' }}>
+              Reason <span style={{ color: t.red }}>*</span>
+            </label>
+            <textarea
+              value={cancelReason}
+              onChange={e => setCancelReason(e.target.value)}
+              placeholder="Why does this consignment need to be cancelled? Accounts sees this verbatim."
+              autoFocus
+              rows={4}
+              style={{ width: '100%', background: t.card2, border: `1px solid ${t.border2}`, borderRadius: '8px', padding: '10px 12px', fontSize: '12px', color: t.text1, outline: 'none', resize: 'vertical', boxSizing: 'border-box', fontFamily: 'inherit' }}
+            />
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '16px' }}>
+              <button onClick={() => { setCancelTarget(null); setCancelReason('') }} disabled={cancelSubmitting}
+                style={{ background: 'transparent', border: `1px solid ${t.border2}`, borderRadius: '8px', padding: '8px 16px', fontSize: '12px', color: t.text2, cursor: cancelSubmitting ? 'not-allowed' : 'pointer' }}>
+                Back
+              </button>
+              <button onClick={async () => {
+                const reason = cancelReason.trim()
+                if (!reason) return
+                setCancelSubmitting(true)
+                try {
+                  const res  = await authedFetch('/api/consignments', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: 'request_cancellation', id: cancelTarget.id, reason }),
+                  })
+                  const json = await res.json()
+                  if (!res.ok) throw new Error(json.error || 'Failed to send request')
+                  setToast({ msg: json.message || 'Cancellation request sent to accounts.', type: 'success' })
+                  setCancelTarget(null)
+                  setCancelReason('')
+                  fetchAll()
+                } catch (err) {
+                  setToast({ msg: err.message || 'Failed to send request', type: 'error' })
+                } finally { setCancelSubmitting(false) }
+              }}
+                disabled={cancelSubmitting || !cancelReason.trim()}
+                style={{
+                  background: cancelReason.trim() && !cancelSubmitting ? t.red : `${t.red}40`,
+                  color: '#fff', border: 'none', borderRadius: '8px',
+                  padding: '8px 18px', fontSize: '12px', fontWeight: 700,
+                  cursor: cancelSubmitting || !cancelReason.trim() ? 'not-allowed' : 'pointer',
+                }}>
+                {cancelSubmitting ? 'Sending…' : 'Confirm cancellation'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ), document.body)}
+
       {showModal && typeof document !== 'undefined' && createPortal((
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.78)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(6px)', padding: '20px' }}>
           <div style={{

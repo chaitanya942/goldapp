@@ -1454,6 +1454,67 @@ export async function POST(req) {
     return Response.json({ success: true, data })
   }
 
+  // ── Request cancellation (operations side, no role gate) ─────────────────
+  // Operations files a cancellation request with a reason. Accounts sees it
+  // in Pending Approvals and either approves (which then runs the actual
+  // cancel_consignment flow + cancels EWB / IRN on NIC / IRP) or rejects.
+  // We don't void anything here — just record the request and audit it.
+  if (action === 'request_cancellation') {
+    const { id, reason } = body
+    if (!id || !reason || !String(reason).trim()) {
+      return Response.json({ error: 'Reason is required' }, { status: 400 })
+    }
+
+    const { data: c, error: fetchErr } = await supabase
+      .from('consignments').select('*').eq('id', id).single()
+    if (fetchErr || !c) return Response.json({ error: 'Consignment not found' }, { status: 404 })
+    if (c.status === 'cancelled')          return Response.json({ error: 'Already cancelled' }, { status: 400 })
+    if (c.cancellation_requested_at)       return Response.json({ error: 'Cancellation already requested' }, { status: 400 })
+    if (c.approval_status === 'rejected')  return Response.json({ error: 'Already rejected — no cancellation needed' }, { status: 400 })
+
+    // EWB / IRN cancel windows are 24h on NIC / IRP. If either window has
+    // closed, accounts can no longer cancel them, so the consignment can't
+    // be unwound either. Block the request at the door.
+    const HOUR_MS  = 3600 * 1000
+    const WINDOW   = 24 * HOUR_MS
+    const now      = Date.now()
+    if (c.eway_bill_no && c.ewb_generated_at) {
+      const elapsed = now - new Date(c.ewb_generated_at).getTime()
+      if (elapsed >= WINDOW) {
+        return Response.json({ error: 'E-Way Bill cancel window has closed (>24h since generation). Cannot cancel this consignment.' }, { status: 400 })
+      }
+    }
+    if (c.irn && c.einvoice_generated_at) {
+      const elapsed = now - new Date(c.einvoice_generated_at).getTime()
+      if (elapsed >= WINDOW) {
+        return Response.json({ error: 'E-Invoice cancel window has closed (>24h since generation). Cannot cancel this consignment.' }, { status: 400 })
+      }
+    }
+
+    const reqIso = new Date().toISOString()
+    const { data: updated, error: updErr } = await supabase
+      .from('consignments')
+      .update({
+        cancellation_requested_at: reqIso,
+        cancellation_reason:       String(reason).trim(),
+        cancellation_requested_by: actorEmail,
+      })
+      .eq('id', id)
+      .select()
+      .single()
+    if (updErr) return Response.json({ error: updErr.message }, { status: 500 })
+
+    await logConsignmentEvent(supabase, {
+      consignment_id: id,
+      event_type:     'cancellation_requested',
+      actor_email:    actorEmail,
+      actor_role:     auth.role,
+      details:        { reason: String(reason).trim() },
+    })
+
+    return Response.json({ data: updated, message: 'Cancellation request sent to accounts.' })
+  }
+
   // ── Cancel consignment (reverse flow) ────────────────────────────────────
   // Voids a consignment that was created by mistake. Bills return to source.
   // Blocked if any bill has since been re-consigned in a later movement.
