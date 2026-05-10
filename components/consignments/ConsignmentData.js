@@ -1011,7 +1011,7 @@ export default function ConsignmentData() {
                                 ) : (
                                   <span title="PDF unlocks once accounts approves." style={{ fontSize: '10px', color: t.text4, fontStyle: 'italic' }}>locked</span>
                                 )}
-                                <span style={{ fontSize: '10px', color: t.green, background: `${t.green}15`, borderRadius: '4px', padding: '2px 8px', fontWeight: 700, letterSpacing: '.04em' }}>EWB</span>
+                                <span style={{ fontSize: '10px', color: t.green, background: `${t.green}22`, border: `1px solid ${t.green}55`, borderRadius: '4px', padding: '1px 8px', fontWeight: 700, letterSpacing: '.06em' }}>EWB</span>
                               </div>
                             )
                           }
@@ -1041,7 +1041,7 @@ export default function ConsignmentData() {
                                 ) : (
                                   <span title="PDF unlocks once accounts approves." style={{ fontSize: '10px', color: t.text4, fontStyle: 'italic' }}>locked</span>
                                 )}
-                                <span style={{ fontSize: '10px', color: t.purple, background: `${t.purple}15`, borderRadius: '4px', padding: '2px 8px', fontWeight: 700, letterSpacing: '.04em' }}>E-Invoice</span>
+                                <span style={{ fontSize: '10px', color: t.purple, background: `${t.purple}22`, border: `1px solid ${t.purple}55`, borderRadius: '4px', padding: '1px 8px', fontWeight: 700, letterSpacing: '.06em' }}>E-Invoice</span>
                               </div>
                             )
                           }
@@ -1085,11 +1085,9 @@ export default function ConsignmentData() {
                           if (elapsed >= WINDOW) blockReason = 'E-Invoice cancel window has closed (>24h since generation).'
                         }
                         if (blockReason) {
-                          return (
-                            <span title={blockReason} style={{ fontSize: '10px', color: t.text4, fontStyle: 'italic' }}>
-                              cancel window closed
-                            </span>
-                          )
+                          // Window closed → don't shout about it on every row.
+                          // Tooltip still explains why if the user hovers.
+                          return <span title={blockReason} style={{ fontSize: '12px', color: t.text4 }}>—</span>
                         }
                         return (
                           <button onClick={() => setCancelTarget(c)}
