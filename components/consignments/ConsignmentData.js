@@ -12,6 +12,7 @@ import { openConfirm, openPrompt } from '../ui/ConfirmDialog'
 import { authedFetch } from '../../lib/authedFetch'
 import { CONSIGNMENT_THEMES as THEMES, REGION_COLORS, useMobile } from '../../lib/consignmentTheme'
 import { WorkflowStrip, canActOnStep } from './workflowParts'
+import { istToday, istDaysAgo, istStartOfDayIso, istEndOfDayIso } from '../../lib/dateIst'
 
 async function triggerDownload(url, filename, onError) {
   const res  = await authedFetch(url)
@@ -32,6 +33,20 @@ const fmt     = (n) => n != null ? Number(n).toLocaleString('en-IN') : '—'
 const fmtWt   = (n) => n != null ? `${Number(n).toFixed(3)}g` : '—'
 const fmtDate = (d) => d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: '2-digit' }) : '—'
 const fmtTS   = (d) => d ? new Date(d).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—'
+// Compact "2h ago" / "3d ago" display so the operator can eyeball freshness
+// next to the absolute timestamp without doing date math in their head.
+const relTime = (d) => {
+  if (!d) return ''
+  const diffMs = Date.now() - new Date(d).getTime()
+  if (diffMs < 0) return 'just now'
+  const mins = Math.floor(diffMs / 60000)
+  if (mins < 1)  return 'just now'
+  if (mins < 60) return `${mins}m ago`
+  const hrs = Math.floor(mins / 60)
+  if (hrs < 24)  return `${hrs}h ago`
+  const days = Math.floor(hrs / 24)
+  return `${days}d ago`
+}
 
 // Waiting-time helper for the approval pending pill in the ALL column.
 // Mirrors ConsignmentApprovals.waitingBadge but returns just label + color
@@ -176,9 +191,13 @@ export default function ConsignmentData() {
       .finally(() => setActivityLoading(false))
   }, [activityId])
 
-  // List filters
-  const [filterType,   setFilterType]   = useState('')
-  const [filterRegion, setFilterRegion] = useState('')
+  // List filters. filterRegions is a Set of region names — multi-select via
+  // toggleable chips. dateFrom / dateTo bound created_at against IST calendar
+  // days so "today" matches the operator's clock, not the server's.
+  const [filterType,    setFilterType]    = useState('')
+  const [filterRegions, setFilterRegions] = useState(() => new Set())
+  const [dateFrom,      setDateFrom]      = useState('')
+  const [dateTo,        setDateTo]        = useState('')
 
   const fetchAll = useCallback(async () => {
     setLoading(true)
@@ -675,10 +694,15 @@ export default function ConsignmentData() {
     const isOperatorCancelled = c.status === 'cancelled' && !isRejected
     if (isOperatorCancelled) return false
     if (filterType   && c.movement_type !== filterType)   return false
-    if (filterRegion) {
+    if (filterRegions.size > 0) {
       const br = branches.find(b => b.name === c.branch_name)
-      if (br?.region !== filterRegion) return false
+      if (!filterRegions.has(br?.region)) return false
     }
+    // Date range bounds c.created_at against IST calendar days. Uses
+    // istStartOfDayIso/istEndOfDayIso so the from/to inputs (YYYY-MM-DD) get
+    // converted to UTC instants at IST midnight, not server-local midnight.
+    if (dateFrom && c.created_at && c.created_at < istStartOfDayIso(dateFrom)) return false
+    if (dateTo   && c.created_at && c.created_at > istEndOfDayIso(dateTo))     return false
     if (search && !nav) {
       const q = search.toLowerCase()
       if (![c.tmp_prf_no, c.challan_no, c.branch_name, c.dest_branch].some(v => (v || '').toLowerCase().includes(q))) return false
@@ -985,29 +1009,99 @@ export default function ConsignmentData() {
   // Same render-helper pattern as renderBillPicker — see comment there.
   const renderConsignmentsList = () => (
     <>
-      {/* Filters */}
-      <div style={{ ...card, padding: '10px 14px', display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
-        <div style={{ position: 'relative', flex: 1, minWidth: '220px' }}>
-          <span style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: t.text4, fontSize: '13px', pointerEvents: 'none' }}>⌕</span>
-          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search TMP PRF, Challan, Branch…"
-            style={{ width: '100%', background: t.card2, border: `1px solid ${t.border2}`, borderRadius: '7px', padding: '7px 10px 7px 28px', fontSize: '12px', color: t.text1, outline: 'none', boxSizing: 'border-box' }} />
-        </div>
-        <select value={filterType} onChange={e => setFilterType(e.target.value)}
-          style={{ background: t.card2, border: `1px solid ${t.border2}`, borderRadius: '7px', padding: '7px 10px', fontSize: '12px', color: t.text2, outline: 'none' }}>
-          <option value="">All Types</option>
-          <option value="EXTERNAL">Branch → HO</option>
-          <option value="INTERNAL">Branch → Hub</option>
-        </select>
-        <select value={filterRegion} onChange={e => setFilterRegion(e.target.value)}
-          style={{ background: t.card2, border: `1px solid ${t.border2}`, borderRadius: '7px', padding: '7px 10px', fontSize: '12px', color: t.text2, outline: 'none' }}>
-          <option value="">All Regions</option>
-          {[...new Set(branches.map(b => b.region).filter(Boolean))].sort().map(r => <option key={r} value={r}>{r}</option>)}
-        </select>
-        {(filterType || filterRegion || search) && (
-          <button onClick={() => { setFilterType(''); setFilterRegion(''); setSearch('') }} style={btnOut}>Clear</button>
-        )}
-        <div style={{ marginLeft: 'auto', fontSize: '11px', color: t.text4 }}>{filteredCons.length} of {consignments.length}</div>
-      </div>
+      {/* Filters — two stacked rows. Top: search + date range with quick presets.
+          Bottom: type chips + multi-select region chips + clear + count. */}
+      {(() => {
+        const allRegions = [...new Set(branches.map(b => b.region).filter(Boolean))].sort()
+        const hasFilters = filterType || filterRegions.size > 0 || search || dateFrom || dateTo
+        const today = istToday()
+        const datePresetActive =
+          dateFrom === today && dateTo === today                ? 'today'
+          : dateFrom === istDaysAgo(1) && dateTo === istDaysAgo(1) ? 'yesterday'
+          : dateFrom === istDaysAgo(6) && dateTo === today      ? 'last7'
+          : null
+        const setPreset = (kind) => {
+          if (kind === 'today')     { setDateFrom(today);          setDateTo(today)          }
+          if (kind === 'yesterday') { setDateFrom(istDaysAgo(1));  setDateTo(istDaysAgo(1))  }
+          if (kind === 'last7')     { setDateFrom(istDaysAgo(6));  setDateTo(today)          }
+          if (kind === 'all')       { setDateFrom('');             setDateTo('')             }
+        }
+        const Chip = ({ active, color, onClick, children, title }) => (
+          <button onClick={onClick} title={title}
+            style={{
+              padding: '5px 11px', borderRadius: '99px',
+              background: active ? `${color}18` : 'transparent',
+              border: `1px solid ${active ? `${color}80` : t.border2}`,
+              color: active ? color : t.text3,
+              fontSize: '11px', fontWeight: active ? 700 : 500,
+              cursor: 'pointer', whiteSpace: 'nowrap',
+              transition: 'all .12s', display: 'inline-flex', alignItems: 'center', gap: '5px',
+            }}>
+            {children}
+          </button>
+        )
+        return (
+          <div style={{ ...card, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            {/* Row 1 — search + date */}
+            <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }}>
+              <div style={{ position: 'relative', flex: 1, minWidth: '220px' }}>
+                <span style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: t.text4, fontSize: '13px', pointerEvents: 'none' }}>⌕</span>
+                <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search TMP PRF, Challan, Branch…"
+                  style={{ width: '100%', background: t.card2, border: `1px solid ${t.border2}`, borderRadius: '7px', padding: '8px 10px 8px 28px', fontSize: '12px', color: t.text1, outline: 'none', boxSizing: 'border-box' }} />
+              </div>
+              <div style={{ display: 'flex', gap: '4px', alignItems: 'center', flexWrap: 'wrap' }}>
+                <span style={{ fontSize: '10px', color: t.text4, letterSpacing: '.06em', textTransform: 'uppercase', fontWeight: 600, marginRight: '2px' }}>Created</span>
+                <Chip active={!dateFrom && !dateTo}        color={t.gold}  onClick={() => setPreset('all')}>All</Chip>
+                <Chip active={datePresetActive === 'today'}     color={t.blue}   onClick={() => setPreset('today')}>Today</Chip>
+                <Chip active={datePresetActive === 'yesterday'} color={t.purple} onClick={() => setPreset('yesterday')}>Yesterday</Chip>
+                <Chip active={datePresetActive === 'last7'}     color={t.orange} onClick={() => setPreset('last7')}>Last 7d</Chip>
+                <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} max={dateTo || undefined}
+                  title="From (inclusive)"
+                  style={{ background: t.card2, border: `1px solid ${t.border2}`, borderRadius: '7px', padding: '6px 8px', fontSize: '11px', color: t.text2, outline: 'none', colorScheme: 'dark' }} />
+                <span style={{ color: t.text4, fontSize: '11px' }}>→</span>
+                <input type="date" value={dateTo}   onChange={e => setDateTo(e.target.value)}   min={dateFrom || undefined}
+                  title="To (inclusive)"
+                  style={{ background: t.card2, border: `1px solid ${t.border2}`, borderRadius: '7px', padding: '6px 8px', fontSize: '11px', color: t.text2, outline: 'none', colorScheme: 'dark' }} />
+              </div>
+            </div>
+
+            {/* Row 2 — type chips + region multi-select chips + clear + count */}
+            <div style={{ display: 'flex', gap: '14px', flexWrap: 'wrap', alignItems: 'center' }}>
+              <div style={{ display: 'flex', gap: '4px', alignItems: 'center', flexWrap: 'wrap' }}>
+                <span style={{ fontSize: '10px', color: t.text4, letterSpacing: '.06em', textTransform: 'uppercase', fontWeight: 600, marginRight: '2px' }}>Type</span>
+                <Chip active={!filterType}                color={t.gold}   onClick={() => setFilterType('')}>All</Chip>
+                <Chip active={filterType === 'EXTERNAL'} color={t.orange} onClick={() => setFilterType(filterType === 'EXTERNAL' ? '' : 'EXTERNAL')}>Branch → HO</Chip>
+                <Chip active={filterType === 'INTERNAL'} color={t.purple} onClick={() => setFilterType(filterType === 'INTERNAL' ? '' : 'INTERNAL')}>Branch → Hub</Chip>
+              </div>
+              <div style={{ display: 'flex', gap: '4px', alignItems: 'center', flexWrap: 'wrap' }}>
+                <span style={{ fontSize: '10px', color: t.text4, letterSpacing: '.06em', textTransform: 'uppercase', fontWeight: 600, marginRight: '2px' }}>Region</span>
+                <Chip active={filterRegions.size === 0} color={t.gold} onClick={() => setFilterRegions(new Set())}>All</Chip>
+                {allRegions.map(r => {
+                  const active = filterRegions.has(r)
+                  const color  = REGION_COLORS[r] || t.text3
+                  return (
+                    <Chip key={r} active={active} color={color}
+                      onClick={() => setFilterRegions(prev => {
+                        const next = new Set(prev)
+                        if (next.has(r)) next.delete(r); else next.add(r)
+                        return next
+                      })}>
+                      {active && <span style={{ fontSize: '11px' }}>✓</span>}{r}
+                    </Chip>
+                  )
+                })}
+              </div>
+              {hasFilters && (
+                <button onClick={() => { setFilterType(''); setFilterRegions(new Set()); setSearch(''); setDateFrom(''); setDateTo('') }}
+                  style={{ ...btnOut, padding: '5px 11px', fontSize: '11px' }}>Clear all</button>
+              )}
+              <div style={{ marginLeft: 'auto', fontSize: '11px', color: t.text4 }}>
+                <strong style={{ color: t.text2, fontFamily: 'monospace' }}>{filteredCons.length}</strong> of {consignments.length}
+              </div>
+            </div>
+          </div>
+        )
+      })()}
 
       {/* Table */}
       <div style={{ ...card, overflow: 'hidden' }}>
@@ -1079,7 +1173,10 @@ export default function ConsignmentData() {
                     <td style={{ padding: '11px 14px', fontSize: '12px', color: t.text2, textAlign: 'right' }}>{c.total_bills}</td>
                     <td style={{ padding: '11px 14px', fontSize: '12px', color: t.gold, textAlign: 'right', fontFamily: 'monospace', fontWeight: 600, whiteSpace: 'nowrap' }}>{fmtWt(c.total_net_wt)}</td>
                     <td style={{ padding: '11px 14px', fontSize: '12px', color: t.blue, textAlign: 'right', fontFamily: 'monospace', whiteSpace: 'nowrap' }}>₹{fmt(Math.round(c.total_amount))}</td>
-                    <td style={{ padding: '11px 14px', fontSize: '11px', color: t.text4, whiteSpace: 'nowrap' }}>{fmtTS(c.created_at)}</td>
+                    <td style={{ padding: '11px 14px', whiteSpace: 'nowrap' }}>
+                      <div style={{ fontSize: '11px', color: t.text2, fontFamily: 'monospace' }}>{fmtTS(c.created_at)}</div>
+                      <div style={{ fontSize: '10px', color: t.text4, marginTop: '2px' }}>{relTime(c.created_at)}</div>
+                    </td>
                     {/* Document column — Report comes first (always available),
                         Voucher/Challan unlocks only after Report. The button
                         disable + tooltip mirrors the backend workflow gate so
@@ -1290,13 +1387,34 @@ export default function ConsignmentData() {
   return (
     <div style={{ padding: '18px 16px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
 
-      {/* Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-        <div>
-          <div style={{ fontSize: '1.35rem', fontWeight: 300, color: t.text1, letterSpacing: '.02em' }}>
-            {nav?.branch ? 'Create Consignment' : 'Consignment Data'}
+      {/* Header — title + at-a-glance status chips so the operator sees the
+          backlog before scanning the table. Chips only render on the list view. */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '12px', flexWrap: 'wrap' }}>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+            <div style={{ fontSize: '1.35rem', fontWeight: 300, color: t.text1, letterSpacing: '.02em' }}>
+              {nav?.branch ? 'Create Consignment' : 'Consignment Data'}
+            </div>
+            {!nav && (() => {
+              const inReview  = consignments.filter(c => c.approval_status === 'pending').length
+              const rejected  = consignments.filter(c => c.approval_status === 'rejected').length
+              const approved  = consignments.filter(c => c.approval_status === 'approved' && c.status !== 'cancelled').length
+              const Chip = ({ label, count, color, title }) => count > 0 ? (
+                <span title={title} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', background: `${color}12`, border: `1px solid ${color}35`, borderRadius: '99px', padding: '3px 11px', fontSize: '11px', color, fontWeight: 600 }}>
+                  <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: color, display: 'inline-block' }} />
+                  <strong style={{ fontFamily: 'monospace', fontWeight: 700 }}>{count}</strong> {label}
+                </span>
+              ) : null
+              return (
+                <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                  <Chip label="approved"  count={approved} color={t.green}  title="Accounts-approved consignments still in transit" />
+                  <Chip label="in review" count={inReview} color={t.orange} title="Awaiting accounts approval" />
+                  <Chip label="rejected"  count={rejected} color={t.red}    title="Accounts pushed back — fix and re-create" />
+                </div>
+              )
+            })()}
           </div>
-          <div style={{ fontSize: '11px', color: t.text3, marginTop: '4px' }}>
+          <div style={{ fontSize: '11px', color: t.text3, marginTop: '6px' }}>
             {nav?.branch
               ? `Select bills to dispatch from ${nav.branch}`
               : `${consignments.length} active consignment${consignments.length !== 1 ? 's' : ''} · branch movements in flight`}
