@@ -55,55 +55,6 @@ function AgeBadge({ days, t }) {
   return <span style={{ fontSize: '10px', color, background: `${color}18`, borderRadius: '5px', padding: '2px 7px', fontWeight: 700, letterSpacing: '.02em' }}>{days}d</span>
 }
 
-// EWB cell — single-line layout. EWB number visible on wide screens, short
-// "EWB" badge on narrow screens. Expiry shown as tooltip.
-// PDF download is hidden until accounts approves; EWB itself is generated
-// during create, but the legally binding PDF stays gated. Cancel and the
-// number badge remain visible so ops can see the EWB exists and roll it
-// back if needed within the 24h NIC window.
-function EwbCell({ c, t, downloadingId, ewbActionId, downloadEwbPdf, cancelEwb }) {
-  const validUntil = c.ewb_valid_until ? new Date(c.ewb_valid_until) : null
-  const tooltipText = validUntil
-    ? `EWB ${c.eway_bill_no}. Valid till ${validUntil.toLocaleString()}.`
-    : `EWB ${c.eway_bill_no}`
-  const isApproved = c.approval_status === 'approved'
-  return (
-    <div style={{ display: 'flex', gap: '4px', flexWrap: 'nowrap', alignItems: 'center', whiteSpace: 'nowrap' }} title={tooltipText}>
-      <span className="ewb-num-full"
-        style={{ fontSize: '10px', color: t.green, background: `${t.green}15`, borderRadius: '4px', padding: '2px 7px', fontWeight: 600, fontFamily: 'monospace' }}>
-        {c.eway_bill_no}
-      </span>
-      <span className="ewb-num-short"
-        style={{ fontSize: '10px', color: t.green, background: `${t.green}15`, borderRadius: '4px', padding: '2px 7px', fontWeight: 600 }}>
-        EWB
-      </span>
-      {isApproved ? (
-        <button onClick={() => downloadEwbPdf(c)} disabled={!!downloadingId}
-          style={{ background: t.blue, color: '#fff', border: 'none', borderRadius: '5px', padding: '3px 10px', fontSize: '10px', fontWeight: 600, cursor: 'pointer', opacity: downloadingId === c.id + ':ewb' ? 0.6 : 1 }}>
-          {downloadingId === c.id + ':ewb' ? '…' : 'PDF'}
-        </button>
-      ) : (
-        <span title="PDF unlocks once accounts approves the consignment."
-          style={{ fontSize: '10px', color: t.text4, padding: '3px 8px', fontStyle: 'italic' }}>
-          locked
-        </span>
-      )}
-      <button onClick={() => cancelEwb(c)} disabled={!!ewbActionId}
-        title="Cancel E-Way Bill (within 24h)"
-        style={{ background: 'transparent', border: `1px solid ${t.red}40`, borderRadius: '5px', padding: '3px 10px', fontSize: '10px', color: t.red, cursor: 'pointer', opacity: ewbActionId === c.id + ':cancel' ? 0.6 : 1 }}>
-        {ewbActionId === c.id + ':cancel' ? '…' : 'Cancel'}
-      </button>
-      <style>{`
-        .ewb-num-short { display: none; }
-        @media (max-width: 1280px) {
-          .ewb-num-full  { display: none; }
-          .ewb-num-short { display: inline-block; }
-        }
-      `}</style>
-    </div>
-  )
-}
-
 export default function ConsignmentData() {
   const { theme, consignmentDeepLink, setConsignmentDeepLink, setActiveNav } = useApp()
   // Track whether the user landed here via a Branch Stock Overview row click,
@@ -146,7 +97,6 @@ export default function ConsignmentData() {
   const [previewNumbers,      setPreviewNumbers]     = useState(null)
   const [loadingPreview,      setLoadingPreview]     = useState(false)
   const [downloadingId,       setDownloadingId]      = useState(null)
-  const [ewbActionId,         setEwbActionId]        = useState(null)
   const [transferHistory,     setTransferHistory]    = useState({}) // purchase_id → prior INTERNAL transfer info
   const [toast,               setToast]              = useState(null)
   // Activity Log drawer — opens on click of "Activity" in row action column.
@@ -399,54 +349,6 @@ export default function ConsignmentData() {
     } finally { setCreating(false) }
   }
 
-  // generateEinv removed — E-Invoice generation moved to the accounts review
-  // page (ConsignmentApprovals.js). The /api/e-invoice/generate route is now
-  // gated to ROLE_GROUPS.ACCOUNTS, so any ops attempt would 403.
-
-  async function cancelEinv(c) {
-    const ok = await openConfirm({
-      title: `Cancel E-Invoice for ${c.tmp_prf_no}?`,
-      message: `IRN ${String(c.irn || '').slice(0, 20)}…\n${c.branch_name} to ${c.dest_branch || 'Head Office'}.\n\nThe IRP only accepts cancellation within 24 hours of generation. After that, the IRN is locked and a credit note is required instead.`,
-      confirmLabel: 'Cancel E-Invoice',
-      danger: true,
-    })
-    if (!ok) return
-    setEwbActionId(c.id + ':einv-cancel')
-    try {
-      const res  = await authedFetch('/api/e-invoice/cancel', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ consignment_id: c.id }),
-      })
-      const data = await res.json()
-      if (!res.ok || data.error) { setToast({ msg: data.error || 'E-Invoice cancel failed', type: 'error' }); return }
-      setToast({ msg: 'E-Invoice cancelled', type: 'success' })
-      await fetchAll()
-    } finally { setEwbActionId(null) }
-  }
-
-  // generateEwb removed — E-Way Bill generation moved to the accounts review
-  // page. /api/eway-bill/generate is now gated to ROLE_GROUPS.ACCOUNTS.
-
-  async function cancelEwb(c) {
-    const ok = await openConfirm({
-      title: `Cancel E-Way Bill ${c.eway_bill_no}?`,
-      message: `${c.tmp_prf_no}, ${c.branch_name} to ${c.dest_branch || 'Head Office'}.\n\nNIC only accepts cancellation within 24 hours of generation. After that the EWB is locked and the goods cannot move under it.`,
-      confirmLabel: 'Cancel E-Way Bill',
-      danger: true,
-    })
-    if (!ok) return
-    setEwbActionId(c.id + ':cancel')
-    try {
-      const res  = await authedFetch('/api/eway-bill/cancel', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ consignment_id: c.id }),
-      })
-      const data = await res.json()
-      if (!res.ok || data.error) { setToast({ msg: data.error || 'EWB cancel failed', type: 'error' }); return }
-      setToast({ msg: 'E-Way Bill cancelled', type: 'success' })
-      await fetchAll()
-    } finally { setEwbActionId(null) }
-  }
 
   async function downloadEwbPdf(c) {
     setDownloadingId(c.id + ':ewb')
@@ -925,8 +827,7 @@ export default function ConsignmentData() {
                     { key: 'total_amount', label: 'Value',     align: 'right', sortable: true  },
                     { key: 'created_at',   label: 'Created',   align: 'left',  sortable: true  },
                     { key: 'document',     label: 'Document',  align: 'left',  sortable: false },
-                    { key: 'eway',         label: 'E-Way Bill',align: 'left',  sortable: false },
-                    { key: 'einvoice',     label: 'E-Invoice', align: 'left',  sortable: false },
+                    { key: 'gst_doc',      label: 'EWB / E-Invoice', align: 'left', sortable: false },
                     { key: 'cancel',       label: 'Cancel',    align: 'left',  sortable: false },
                   ]
                   return cols.map(col => {
@@ -957,7 +858,7 @@ export default function ConsignmentData() {
             </thead>
             <tbody>
               {filteredCons.length === 0 ? (
-                <tr><td colSpan={11} style={{ padding: '64px', textAlign: 'center', color: t.text4, fontSize: '13px' }}>
+                <tr><td colSpan={10} style={{ padding: '64px', textAlign: 'center', color: t.text4, fontSize: '13px' }}>
                   {consignments.length === 0
                     ? 'No active consignments. Use Branch Stock → Move to create one.'
                     : 'No consignments match the filters'}
@@ -1066,72 +967,73 @@ export default function ConsignmentData() {
                         </td>
                       )
                     })()}
-                    <td style={{ padding: '11px 14px' }}>
-                      {!showEwb ? (
-                        <span title="Interstate Hub-to-HO uses E-Invoice instead. No separate EWB needed." style={{ fontSize: '10px', color: t.text4 }}>n/a</span>
-                      ) : c.eway_bill_no ? (
-                        <EwbCell c={c} t={t} downloadingId={downloadingId} ewbActionId={ewbActionId} downloadEwbPdf={downloadEwbPdf} cancelEwb={cancelEwb} />
-                      ) : (
-                        // Generation moved to the accounts review page. Operations
-                        // can no longer trigger NIC from here — the route is now
-                        // gated to ROLE_GROUPS.ACCOUNTS, and clicking would
-                        // produce a 403. Show a status pill that explains why.
-                        <span title="Accounts will preview, confirm, and generate the E-Way Bill on NIC during their review. Operations does not trigger this step."
-                          style={{ fontSize: '10px', color: t.text4, fontStyle: 'italic' }}>
-                          accounts to generate
-                        </span>
-                      )}
-                    </td>
-                    <td style={{ padding: '11px 14px' }}>
-                      {!showEinvoice ? (
-                        <span title={isType ? 'Branch-to-Hub uses Issue Voucher only. No E-Invoice required.' : 'Intrastate Karnataka Branch-to-HO uses EWB only. No E-Invoice required.'} style={{ fontSize: '10px', color: t.text4 }}>n/a</span>
-                      ) : c.irn ? (
-                        <div style={{ display: 'flex', gap: '4px', flexWrap: 'nowrap', alignItems: 'center', whiteSpace: 'nowrap' }} title={`IRN: ${c.irn}`}>
-                          <span className="irn-full" style={{ fontSize: '10px', color: t.purple, background: `${t.purple}15`, borderRadius: '4px', padding: '2px 7px', fontWeight: 600, fontFamily: 'monospace' }}>
-                            IRN {String(c.irn).slice(0, 8)}…
-                          </span>
-                          <span className="irn-short" style={{ fontSize: '10px', color: t.purple, background: `${t.purple}15`, borderRadius: '4px', padding: '2px 7px', fontWeight: 600 }}>
-                            IRN
-                          </span>
-                          {c.approval_status === 'approved' ? (
-                            <button onClick={async () => {
-                              setDownloadingId(c.id + ':einv')
-                              await triggerDownload(`/api/e-invoice/pdf?id=${c.id}`,
-                                `EInvoice_${c.tmp_prf_no || c.id}.pdf`,
-                                msg => setToast({ msg, type: 'error' }))
-                              setDownloadingId(null)
-                            }} disabled={!!downloadingId}
-                              title="Download signed E-Invoice PDF with QR code"
-                              style={{ background: t.purple, color: '#fff', border: 'none', borderRadius: '5px', padding: '3px 10px', fontSize: '10px', fontWeight: 600, cursor: 'pointer', opacity: downloadingId === c.id + ':einv' ? 0.6 : 1 }}>
-                              {downloadingId === c.id + ':einv' ? '…' : 'PDF'}
-                            </button>
-                          ) : (
-                            <span title="PDF unlocks once accounts approves the consignment."
-                              style={{ fontSize: '10px', color: t.text4, padding: '3px 8px', fontStyle: 'italic' }}>
-                              locked
+                    {/* Merged GST doc cell. EWB and E-Invoice are mutually
+                        exclusive per consignment (intrastate KA → EWB, interstate
+                        Hub→HO → E-Invoice, INTERNAL → EWB). Render whichever
+                        applies as a single labelled pill + PDF. Cancel lives in
+                        the dedicated Cancel column — no inline cancel here. */}
+                    <td style={{ padding: '11px 14px', whiteSpace: 'nowrap' }}>
+                      {(() => {
+                        const isApproved = c.approval_status === 'approved'
+                        if (showEwb) {
+                          if (c.eway_bill_no) {
+                            return (
+                              <div style={{ display: 'inline-flex', gap: '6px', alignItems: 'center' }} title={`E-Way Bill ${c.eway_bill_no}${c.ewb_valid_until ? ` · valid till ${new Date(c.ewb_valid_until).toLocaleString()}` : ''}`}>
+                                <span style={{ fontSize: '10px', color: t.green, background: `${t.green}15`, borderRadius: '4px', padding: '2px 8px', fontWeight: 700, letterSpacing: '.04em' }}>EWB</span>
+                                {isApproved ? (
+                                  <button onClick={() => downloadEwbPdf(c)} disabled={!!downloadingId}
+                                    title="Download signed E-Way Bill PDF"
+                                    style={{ background: t.blue, color: '#fff', border: 'none', borderRadius: '5px', padding: '3px 10px', fontSize: '10px', fontWeight: 600, cursor: 'pointer', opacity: downloadingId === c.id + ':ewb' ? 0.6 : 1 }}>
+                                    {downloadingId === c.id + ':ewb' ? '…' : 'PDF'}
+                                  </button>
+                                ) : (
+                                  <span title="PDF unlocks once accounts approves." style={{ fontSize: '10px', color: t.text4, fontStyle: 'italic' }}>locked</span>
+                                )}
+                              </div>
+                            )
+                          }
+                          return (
+                            <span title="Accounts will generate the E-Way Bill on NIC during their review."
+                              style={{ fontSize: '10px', color: t.text4, fontStyle: 'italic' }}>
+                              accounts to generate EWB
                             </span>
-                          )}
-                          <button onClick={() => cancelEinv(c)} disabled={!!ewbActionId}
-                            title="Cancel E-Invoice (within 24h)"
-                            style={{ background: 'transparent', border: `1px solid ${t.red}40`, borderRadius: '5px', padding: '3px 10px', fontSize: '10px', color: t.red, cursor: 'pointer', opacity: ewbActionId === c.id + ':einv-cancel' ? 0.6 : 1 }}>
-                            {ewbActionId === c.id + ':einv-cancel' ? '…' : 'Cancel'}
-                          </button>
-                          <style>{`
-                            .irn-short { display: none; }
-                            @media (max-width: 1280px) {
-                              .irn-full  { display: none; }
-                              .irn-short { display: inline-block; }
-                            }
-                          `}</style>
-                        </div>
-                      ) : (
-                        // Generation moved to the accounts review page (same
-                        // reason as the EWB column above).
-                        <span title="Accounts will preview, confirm, and generate the E-Invoice on IRP during their review. Operations does not trigger this step."
-                          style={{ fontSize: '10px', color: t.text4, fontStyle: 'italic' }}>
-                          accounts to generate
-                        </span>
-                      )}
+                          )
+                        }
+                        if (showEinvoice) {
+                          if (c.irn) {
+                            return (
+                              <div style={{ display: 'inline-flex', gap: '6px', alignItems: 'center' }} title={`IRN: ${c.irn}`}>
+                                <span style={{ fontSize: '10px', color: t.purple, background: `${t.purple}15`, borderRadius: '4px', padding: '2px 8px', fontWeight: 700, letterSpacing: '.04em' }}>E-Invoice</span>
+                                {isApproved ? (
+                                  <button onClick={async () => {
+                                    setDownloadingId(c.id + ':einv')
+                                    await triggerDownload(`/api/e-invoice/pdf?id=${c.id}`,
+                                      `EInvoice_${c.tmp_prf_no || c.id}.pdf`,
+                                      msg => setToast({ msg, type: 'error' }))
+                                    setDownloadingId(null)
+                                  }} disabled={!!downloadingId}
+                                    title="Download signed E-Invoice PDF with QR code"
+                                    style={{ background: t.purple, color: '#fff', border: 'none', borderRadius: '5px', padding: '3px 10px', fontSize: '10px', fontWeight: 600, cursor: 'pointer', opacity: downloadingId === c.id + ':einv' ? 0.6 : 1 }}>
+                                    {downloadingId === c.id + ':einv' ? '…' : 'PDF'}
+                                  </button>
+                                ) : (
+                                  <span title="PDF unlocks once accounts approves." style={{ fontSize: '10px', color: t.text4, fontStyle: 'italic' }}>locked</span>
+                                )}
+                              </div>
+                            )
+                          }
+                          return (
+                            <span title="Accounts will generate the E-Invoice on IRP during their review."
+                              style={{ fontSize: '10px', color: t.text4, fontStyle: 'italic' }}>
+                              accounts to generate E-Invoice
+                            </span>
+                          )
+                        }
+                        // Neither applies (e.g. INTERNAL Branch→Hub uses Issue Voucher only)
+                        return (
+                          <span title="No GST document required for this movement." style={{ fontSize: '10px', color: t.text4 }}>n/a</span>
+                        )
+                      })()}
                     </td>
                     <td style={{ padding: '11px 14px', whiteSpace: 'nowrap' }}>
                       {(() => {
@@ -1188,7 +1090,7 @@ export default function ConsignmentData() {
                       - Approved: nothing — workflow is moot, table stays lean. */}
                   {isRejectedRow ? (
                     <tr style={{ background: `${t.red}08`, borderLeft: `3px solid ${t.red}`, borderBottom: `1px solid ${t.border}15` }}>
-                      <td colSpan={11} style={{ padding: '8px 14px 12px' }}>
+                      <td colSpan={10} style={{ padding: '8px 14px 12px' }}>
                         <div style={{
                           display: 'flex', alignItems: 'flex-start', gap: '12px',
                           background: `${t.red}10`, border: `1px solid ${t.red}40`,
@@ -1219,7 +1121,7 @@ export default function ConsignmentData() {
                     </tr>
                   ) : c.approval_status !== 'approved' && (
                     <tr style={{ background: isNew ? `${t.green}06` : 'transparent' }}>
-                      <td colSpan={11} style={{ padding: '4px 14px 12px', borderBottom: `1px solid ${t.border}15` }}>
+                      <td colSpan={10} style={{ padding: '4px 14px 12px', borderBottom: `1px solid ${t.border}15` }}>
                         <WorkflowStrip t={t} c={c} isType={isType} />
                       </td>
                     </tr>
