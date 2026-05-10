@@ -79,11 +79,12 @@ export default function ConsignmentOverview() {
   const [quickFilter,  setQuickFilter]  = useState('all')
   const [lastRefresh,  setLastRefresh]  = useState(null)
   const [tick,         setTick]         = useState(0)   // for live clock
-  // 'grouped' (default) collapses 73 branches into 4-5 region cards; 'flat' keeps
-  // the dense table for power users. Persisted to localStorage so the choice sticks.
+  // 'flat' (default) is the dense sortable table — what most operators want.
+  // 'grouped' collapses 73 branches into region cards for a higher-level view.
+  // Persisted to localStorage so the choice sticks per device.
   const [viewMode, setViewMode] = useState(() => {
-    if (typeof window === 'undefined') return 'grouped'
-    return window.localStorage.getItem('cstock.viewMode') || 'grouped'
+    if (typeof window === 'undefined') return 'flat'
+    return window.localStorage.getItem('cstock.viewMode') || 'flat'
   })
   useEffect(() => {
     if (typeof window !== 'undefined') window.localStorage.setItem('cstock.viewMode', viewMode)
@@ -290,11 +291,13 @@ export default function ConsignmentOverview() {
   }
 
   const thBase = {
-    padding: '10px 14px', fontSize: '10px', color: t.text4,
-    letterSpacing: '.08em', textTransform: 'uppercase',
+    padding: '9px 8px', fontSize: '10px', color: t.text4,
+    letterSpacing: '.06em', textTransform: 'uppercase',
     background: t.card2, borderBottom: `1px solid ${t.border}`,
     whiteSpace: 'nowrap', fontWeight: 600, userSelect: 'none',
   }
+  // Body cells use the same horizontal rhythm so the table aligns and stays compact.
+  const tdPad = '10px 8px'
 
   return (
     <div style={{ padding: '18px 16px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
@@ -807,11 +810,10 @@ export default function ConsignmentOverview() {
             </div>
           ) : (
             <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '860px' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'auto' }}>
                 <thead style={{ position: 'sticky', top: 0, zIndex: 1 }}>
                   <tr>
-                    <th style={{ ...thBase, width: '36px', textAlign: 'center' }}>#</th>
-                    <th style={{ ...thBase, cursor: 'pointer', color: sortKey === 'branch_name' ? t.gold : t.text4 }}
+                    <th style={{ ...thBase, cursor: 'pointer', color: sortKey === 'branch_name' ? t.gold : t.text4, paddingLeft: '14px' }}
                         onClick={() => handleSort('branch_name')}>
                       Branch <SortIcon col="branch_name" />
                     </th>
@@ -874,42 +876,42 @@ export default function ConsignmentOverview() {
                       as the user scrolls. Single source of truth — no <tfoot>
                       duplicate at the bottom. */}
                   <tr style={{ background: `${t.gold}14`, borderTop: `1px solid ${t.border}`, borderBottom: `2px solid ${t.gold}40` }}>
-                    <td colSpan={2} style={{ padding: '9px 14px', fontSize: '10px', color: t.text2, fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase', background: `${t.gold}14` }}>
-                      Σ Totals · {filtered.length} branch{filtered.length !== 1 ? 'es' : ''}
+                    <td style={{ padding: '8px 8px 8px 14px', fontSize: '10px', color: t.text2, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', background: `${t.gold}14` }}>
+                      Σ {filtered.length} branch{filtered.length !== 1 ? 'es' : ''}
                     </td>
                     {/* Total Bills */}
-                    <td style={{ padding: '9px 14px', textAlign: 'right', fontSize: '14px', color: t.gold, fontFamily: 'monospace', fontWeight: 700, background: `${t.gold}14` }}>
+                    <td style={{ padding: '8px 8px', textAlign: 'right', fontSize: '13px', color: t.gold, fontFamily: 'monospace', fontWeight: 700, background: `${t.gold}14` }}>
                       {(grandToday + grandOlder) || '—'}
                     </td>
                     {/* Total Net Wt */}
-                    <td style={{ padding: '9px 14px', textAlign: 'right', fontSize: '13px', color: t.gold, fontFamily: 'monospace', fontWeight: 700, background: `${t.gold}14` }}>
+                    <td style={{ padding: '8px 8px', textAlign: 'right', fontSize: '12px', color: t.gold, fontFamily: 'monospace', fontWeight: 700, background: `${t.gold}14` }}>
                       {fmt(grandTodayWt + grandOlderWt, 2)}<span style={{ fontSize: '10px', marginLeft: '2px' }}>g</span>
                     </td>
                     {/* Today's Bills */}
-                    <td style={{ padding: '9px 14px', textAlign: 'right', fontSize: '14px', color: t.blue, fontFamily: 'monospace', fontWeight: 700, background: `${t.gold}14` }}>
+                    <td style={{ padding: '8px 8px', textAlign: 'right', fontSize: '13px', color: t.blue, fontFamily: 'monospace', fontWeight: 700, background: `${t.gold}14` }}>
                       {grandToday || '—'}
                     </td>
                     {/* Today's Net Wt */}
-                    <td style={{ padding: '9px 14px', textAlign: 'right', fontSize: '13px', color: t.blue, fontFamily: 'monospace', fontWeight: 600, background: `${t.gold}14` }}>
+                    <td style={{ padding: '8px 8px', textAlign: 'right', fontSize: '12px', color: t.blue, fontFamily: 'monospace', fontWeight: 600, background: `${t.gold}14` }}>
                       {fmt(grandTodayWt, 2)}<span style={{ fontSize: '10px', marginLeft: '2px' }}>g</span>
                     </td>
-                    <td style={{ padding: '9px 14px', textAlign: 'right', fontSize: '12px', color: t.blue, fontFamily: 'monospace', fontWeight: 700, background: `${t.gold}14` }}>
+                    <td style={{ padding: '8px 8px', textAlign: 'right', fontSize: '11px', color: t.blue, fontFamily: 'monospace', fontWeight: 700, background: `${t.gold}14` }}>
                       {grandTodayVal ? fmtINR(grandTodayVal) : '—'}
                     </td>
-                    <td style={{ padding: '9px 14px', textAlign: 'right', fontSize: '14px', color: t.orange, fontFamily: 'monospace', fontWeight: 700, background: `${t.gold}14` }}>
+                    <td style={{ padding: '8px 8px', textAlign: 'right', fontSize: '13px', color: t.orange, fontFamily: 'monospace', fontWeight: 700, background: `${t.gold}14` }}>
                       {grandOlder || '—'}
                     </td>
-                    <td style={{ padding: '9px 14px', textAlign: 'right', fontSize: '13px', color: t.orange, fontFamily: 'monospace', fontWeight: 600, background: `${t.gold}14` }}>
+                    <td style={{ padding: '8px 8px', textAlign: 'right', fontSize: '12px', color: t.orange, fontFamily: 'monospace', fontWeight: 600, background: `${t.gold}14` }}>
                       {fmt(grandOlderWt, 2)}<span style={{ fontSize: '10px', marginLeft: '2px' }}>g</span>
                     </td>
-                    <td style={{ padding: '9px 14px', textAlign: 'right', fontSize: '12px', color: t.orange, fontFamily: 'monospace', fontWeight: 700, background: `${t.gold}14` }}>
+                    <td style={{ padding: '8px 8px', textAlign: 'right', fontSize: '11px', color: t.orange, fontFamily: 'monospace', fontWeight: 700, background: `${t.gold}14` }}>
                       {grandOlderVal ? fmtINR(grandOlderVal) : '—'}
                     </td>
-                    <td colSpan={3} style={{ padding: '9px 14px', background: `${t.gold}14` }} />
+                    <td colSpan={3} style={{ padding: '8px 8px', background: `${t.gold}14` }} />
                   </tr>
                 </thead>
                 <tbody>
-                  {filtered.map((b, i) => {
+                  {filtered.map((b) => {
                     const rColor  = REGION_COLORS[b.region] || t.text3
                     const hasToday  = (b.today_bills  || 0) > 0
                     const hasPending = (b.older_bills || 0) > 0
@@ -955,16 +957,13 @@ export default function ConsignmentOverview() {
                         }}
                         onMouseLeave={e => e.currentTarget.style.background = urgentBg}>
 
-                        {/* Rank */}
-                        <td style={{ padding: '11px 14px', fontSize: '11px', color: t.text4, textAlign: 'center', fontFamily: 'monospace' }}>{i + 1}</td>
-
                         {/* Branch */}
-                        <td style={{ padding: '11px 14px' }}>
+                        <td style={{ padding: tdPad, paddingLeft: '14px' }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                            <div style={{ width: '3px', height: '32px', borderRadius: '2px', background: rColor, flexShrink: 0 }} />
-                            <div>
-                              <div style={{ fontSize: '13px', fontWeight: 600, color: t.text1 }}>{b.branch_name}</div>
-                              <div style={{ fontSize: '10px', color: rColor, marginTop: '2px' }}>{b.region}</div>
+                            <div style={{ width: '3px', height: '30px', borderRadius: '2px', background: rColor, flexShrink: 0 }} />
+                            <div style={{ minWidth: 0 }}>
+                              <div style={{ fontSize: '13px', fontWeight: 600, color: t.text1, whiteSpace: 'nowrap' }}>{b.branch_name}</div>
+                              <div style={{ fontSize: '10px', color: rColor, marginTop: '1px' }}>{b.region}</div>
                             </div>
                           </div>
                         </td>
@@ -973,7 +972,7 @@ export default function ConsignmentOverview() {
                         {(() => {
                           const totalBills = (b.today_bills || 0) + (b.older_bills || 0)
                           return (
-                            <td style={{ padding: '11px 14px', textAlign: 'right' }}>
+                            <td style={{ padding: tdPad, textAlign: 'right' }}>
                               {totalBills
                                 ? <span style={{ fontSize: '13px', color: t.gold, fontFamily: 'monospace', fontWeight: 600 }}>{totalBills}</span>
                                 : <span style={{ fontSize: '11px', color: t.text4 }}>—</span>}
@@ -985,7 +984,7 @@ export default function ConsignmentOverview() {
                         {(() => {
                           const total = (b.today_net_wt || 0) + (b.older_net_wt || 0)
                           return (
-                            <td style={{ padding: '11px 14px', textAlign: 'right' }}>
+                            <td style={{ padding: tdPad, textAlign: 'right' }}>
                               <span style={{ fontSize: '13px', color: t.gold, fontFamily: 'monospace', fontWeight: 600 }}>
                                 {fmt(total, 2)}<span style={{ fontSize: '10px', marginLeft: '2px' }}>g</span>
                               </span>
@@ -1036,7 +1035,7 @@ export default function ConsignmentOverview() {
                         </td>
 
                         {/* Oldest Bill */}
-                        <td style={{ padding: '11px 14px', textAlign: 'center' }}>
+                        <td style={{ padding: tdPad, textAlign: 'center' }}>
                           <AgeBadge days={b.oldest_age_days} t={t} />
                           {b.oldest_date && (
                             <div style={{ fontSize: '10px', color: t.text4, marginTop: '3px' }}>{fmtDate(b.oldest_date)}</div>
@@ -1044,14 +1043,14 @@ export default function ConsignmentOverview() {
                         </td>
 
                         {/* Last Moved */}
-                        <td style={{ padding: '11px 14px', textAlign: 'center' }}>
+                        <td style={{ padding: tdPad, textAlign: 'center' }}>
                           {b.last_moved_days_ago != null
                             ? <span style={{ fontSize: '11px', color: t.purple, background: `${t.purple}15`, borderRadius: '5px', padding: '2px 8px', fontWeight: 600 }}>{b.last_moved_days_ago}d ago</span>
                             : <span style={{ fontSize: '11px', color: t.text4 }}>never</span>}
                         </td>
 
                         {/* Pickup */}
-                        <td style={{ padding: '11px 14px', textAlign: 'center' }}>
+                        <td style={{ padding: tdPad, textAlign: 'center' }}>
                           {b.pickup_time
                             ? <span style={{ fontSize: '11px', color: t.text2, background: t.card2, borderRadius: '5px', padding: '2px 8px', whiteSpace: 'nowrap' }}>{b.pickup_time}</span>
                             : <span style={{ fontSize: '11px', color: t.text4 }}>—</span>}
