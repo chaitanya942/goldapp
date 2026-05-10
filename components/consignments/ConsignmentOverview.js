@@ -812,7 +812,7 @@ export default function ConsignmentOverview() {
               <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'auto' }}>
                 <thead style={{ position: 'sticky', top: 0, zIndex: 1 }}>
                   <tr>
-                    <th style={{ ...thBase, cursor: 'pointer', color: sortKey === 'branch_name' ? t.gold : t.text4, paddingLeft: '14px', textAlign: 'left' }}
+                    <th style={{ ...thBase, cursor: 'pointer', color: sortKey === 'branch_name' ? t.gold : t.text4, paddingLeft: '7px', textAlign: 'left' }}
                         onClick={() => handleSort('branch_name')}>
                       Branch <SortIcon col="branch_name" />
                     </th>
@@ -875,7 +875,7 @@ export default function ConsignmentOverview() {
                       as the user scrolls. Single source of truth — no <tfoot>
                       duplicate at the bottom. */}
                   <tr style={{ background: `${t.gold}14`, borderTop: `1px solid ${t.border}`, borderBottom: `2px solid ${t.gold}40` }}>
-                    <td style={{ padding: '8px 8px 8px 14px', fontSize: '10px', color: t.text2, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', background: `${t.gold}14`, whiteSpace: 'nowrap' }}>
+                    <td style={{ padding: '8px 8px 8px 7px', fontSize: '10px', color: t.text2, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', background: `${t.gold}14`, whiteSpace: 'nowrap' }}>
                       Σ Totals · {filtered.length}
                     </td>
                     {/* Total Bills */}
@@ -943,7 +943,7 @@ export default function ConsignmentOverview() {
                         // the urgency tier (red for overdue, orange for watch, gold default).
                         style={{
                           borderBottom: `1px solid ${t.border}20`,
-                          borderLeft:   `4px solid ${stripeColor}`,
+                          borderLeft:   `3px solid ${stripeColor}`,
                           background:   urgentBg,
                           cursor:       'pointer',
                           ['--cstock-glow']: urgentTier === 'overdue' ? t.red
@@ -963,9 +963,9 @@ export default function ConsignmentOverview() {
                           }
                         }}>
 
-                        {/* Branch — left stripe lives on the row itself, so the
-                            cell only needs minimal padding to clear the stripe. */}
-                        <td style={{ padding: tdPad, paddingLeft: '10px' }}>
+                        {/* Branch — stripe lives on the row's borderLeft, so the
+                            cell padding-left is just enough breathing room. */}
+                        <td style={{ padding: tdPad, paddingLeft: '4px' }}>
                           <div style={{ minWidth: 0 }}>
                             <div style={{ fontSize: '13px', fontWeight: 600, color: t.text1, whiteSpace: 'nowrap' }}>{b.branch_name}</div>
                             <div style={{ fontSize: '10px', color: rColor, marginTop: '1px' }}>{b.region}</div>
