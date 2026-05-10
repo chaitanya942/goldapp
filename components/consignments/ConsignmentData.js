@@ -741,7 +741,7 @@ export default function ConsignmentData() {
               color: active ? color : t.text3,
               fontSize: '11px', fontWeight: active ? 700 : 500,
               cursor: 'pointer', whiteSpace: 'nowrap',
-              transition: 'all .12s', display: 'inline-flex', alignItems: 'center', gap: '5px',
+              transition: 'background .18s ease, color .18s ease, border-color .18s ease, transform .12s ease', display: 'inline-flex', alignItems: 'center', gap: '5px',
             }}>
             {children}
           </button>
@@ -920,11 +920,11 @@ export default function ConsignmentData() {
                       <span style={{ color: t.text4, margin: '0 6px' }}>→</span>
                       <span>{isType ? (c.dest_branch || '?') : 'Head Office'}</span>
                     </td>
-                    <td style={{ padding: '11px 14px', fontSize: '12px', color: t.text2, textAlign: 'right' }}>{c.total_bills}</td>
-                    <td style={{ padding: '11px 14px', fontSize: '12px', color: t.gold, textAlign: 'right', fontFamily: 'monospace', fontWeight: 600, whiteSpace: 'nowrap' }}>{fmtWt(c.total_net_wt)}</td>
-                    <td style={{ padding: '11px 14px', fontSize: '12px', color: t.blue, textAlign: 'right', fontFamily: 'monospace', whiteSpace: 'nowrap' }}>₹{fmt(Math.round(c.total_amount))}</td>
+                    <td className="cdata-num" style={{ padding: '11px 14px', fontSize: '12px', color: t.text2, textAlign: 'right' }}>{c.total_bills}</td>
+                    <td className="cdata-num" style={{ padding: '11px 14px', fontSize: '12px', color: t.gold, textAlign: 'right', fontFamily: 'monospace', fontWeight: 600, whiteSpace: 'nowrap' }}>{fmtWt(c.total_net_wt)}</td>
+                    <td className="cdata-num" style={{ padding: '11px 14px', fontSize: '12px', color: t.blue, textAlign: 'right', fontFamily: 'monospace', whiteSpace: 'nowrap' }}>₹{fmt(Math.round(c.total_amount))}</td>
                     <td style={{ padding: '11px 14px', whiteSpace: 'nowrap' }}>
-                      <div style={{ fontSize: '11px', color: t.text2, fontFamily: 'monospace' }}>{fmtTS(c.created_at)}</div>
+                      <div className="cdata-num" style={{ fontSize: '11px', color: t.text2, fontFamily: 'monospace' }}>{fmtTS(c.created_at)}</div>
                       <div style={{ fontSize: '10px', color: t.text4, marginTop: '2px' }}>{relTime(c.created_at)}</div>
                     </td>
                     {/* Document column — Report comes first (always available),
@@ -1134,18 +1134,75 @@ export default function ConsignmentData() {
         </div>
       </div>
 
-      {/* Hover glow + zebra striping for the active-consignments table.
-          Pure CSS so React inline-style serialisation can't shadow it.
-          --cdata-glow is set per row so the glow tint matches state
-          (gold for normal, red for rejected, green for newly created). */}
+      {/* Hover glow + zebra + entrance animation for the active-consignments
+          table. Pure CSS so React inline-style serialisation can't shadow
+          it. --cdata-glow / --cdata-stripe set per row inline. */}
       <style>{`
-        .cdata-row { transition: background .15s ease, box-shadow .25s ease; }
+        @keyframes cdataRowIn {
+          from { opacity: 0; transform: translateY(4px); }
+          to   { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes cdataChipPulse {
+          0%, 100% { box-shadow: 0 0 0 0 currentColor; }
+          50%      { box-shadow: 0 0 0 4px transparent; }
+        }
+        @keyframes cdataSpin { to { transform: rotate(360deg); } }
+        @keyframes cdataSkeleton {
+          0%   { background-position: 200% 0; }
+          100% { background-position: -200% 0; }
+        }
+
+        /* Row entrance — staggered fade-in (cap at 12 so a 200-row table
+           doesn't have rows still appearing 4s later). */
+        .cdata-row { animation: cdataRowIn .35s cubic-bezier(.4, .0, .2, 1) backwards; transition: background .15s ease, box-shadow .25s ease; }
+        .cdata-row:nth-child(1)  { animation-delay: 0ms; }
+        .cdata-row:nth-child(2)  { animation-delay: 30ms; }
+        .cdata-row:nth-child(3)  { animation-delay: 60ms; }
+        .cdata-row:nth-child(4)  { animation-delay: 90ms; }
+        .cdata-row:nth-child(5)  { animation-delay: 120ms; }
+        .cdata-row:nth-child(6)  { animation-delay: 150ms; }
+        .cdata-row:nth-child(7)  { animation-delay: 180ms; }
+        .cdata-row:nth-child(8)  { animation-delay: 210ms; }
+        .cdata-row:nth-child(9)  { animation-delay: 240ms; }
+        .cdata-row:nth-child(10) { animation-delay: 270ms; }
+        .cdata-row:nth-child(11) { animation-delay: 300ms; }
+        .cdata-row:nth-child(12) { animation-delay: 330ms; }
+
         .cdata-row:nth-child(even):not(:hover) { background: rgba(201,168,76,.018); }
         .cdata-row:hover {
           background: color-mix(in srgb, var(--cdata-glow) 6%, transparent) !important;
           box-shadow:
             inset 3px 0 0 var(--cdata-glow),
             0 4px 14px color-mix(in srgb, var(--cdata-glow) 16%, transparent);
+        }
+
+        /* Tabular-nums on numeric cells so digits line up vertically. */
+        .cdata-num { font-variant-numeric: tabular-nums; }
+
+        /* Status chips in the header — subtle pulse on the dot. */
+        .cdata-status-dot { animation: cdataChipPulse 2.4s ease-in-out infinite; }
+
+        /* Refresh button spin while loading. */
+        .cdata-refresh-spin { animation: cdataSpin .9s linear infinite; }
+
+        /* Skeleton loading row shimmer. */
+        .cdata-skeleton {
+          background: linear-gradient(90deg,
+            rgba(255,255,255,.04) 0%,
+            rgba(255,255,255,.10) 50%,
+            rgba(255,255,255,.04) 100%);
+          background-size: 200% 100%;
+          animation: cdataSkeleton 1.4s linear infinite;
+          border-radius: 4px;
+          height: 12px;
+          display: inline-block;
+        }
+
+        /* Honour reduce-motion users — skip the animations entirely. */
+        @media (prefers-reduced-motion: reduce) {
+          .cdata-row, .cdata-status-dot, .cdata-refresh-spin, .cdata-skeleton {
+            animation: none !important;
+          }
         }
       `}</style>
     </>
@@ -1168,7 +1225,7 @@ export default function ConsignmentData() {
               const approved  = consignments.filter(c => c.approval_status === 'approved' && c.status !== 'cancelled').length
               const Chip = ({ label, count, color, title }) => count > 0 ? (
                 <span title={title} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', background: `${color}12`, border: `1px solid ${color}35`, borderRadius: '99px', padding: '3px 11px', fontSize: '11px', color, fontWeight: 600 }}>
-                  <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: color, display: 'inline-block' }} />
+                  <span className="cdata-status-dot" style={{ width: '6px', height: '6px', borderRadius: '50%', background: color, display: 'inline-block', color }} />
                   <strong style={{ fontFamily: 'monospace', fontWeight: 700 }}>{count}</strong> {label}
                 </span>
               ) : null
@@ -1187,7 +1244,10 @@ export default function ConsignmentData() {
               : `${consignments.length} active consignment${consignments.length !== 1 ? 's' : ''} · branch movements in flight`}
           </div>
         </div>
-        <button onClick={fetchAll} style={btnOut}>⟳ Refresh</button>
+        <button onClick={fetchAll} disabled={loading} style={{ ...btnOut, display: 'inline-flex', alignItems: 'center', gap: '6px', cursor: loading ? 'not-allowed' : 'pointer', opacity: loading ? 0.7 : 1 }}>
+          <span className={loading ? 'cdata-refresh-spin' : ''} style={{ display: 'inline-block', fontSize: '13px' }}>⟳</span>
+          {loading ? 'Refreshing…' : 'Refresh'}
+        </button>
       </div>
 
       {/* Content */}
