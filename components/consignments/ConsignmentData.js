@@ -1002,7 +1002,6 @@ export default function ConsignmentData() {
                           if (c.eway_bill_no) {
                             return (
                               <div style={{ display: 'inline-flex', gap: '6px', alignItems: 'center' }} title={`E-Way Bill ${c.eway_bill_no}${c.ewb_valid_until ? ` · valid till ${new Date(c.ewb_valid_until).toLocaleString()}` : ''}`}>
-                                <span style={{ fontSize: '10px', color: t.green, background: `${t.green}15`, borderRadius: '4px', padding: '2px 8px', fontWeight: 700, letterSpacing: '.04em' }}>EWB</span>
                                 {isApproved ? (
                                   <button onClick={() => downloadEwbPdf(c)} disabled={!!downloadingId}
                                     title="Download signed E-Way Bill PDF"
@@ -1012,6 +1011,7 @@ export default function ConsignmentData() {
                                 ) : (
                                   <span title="PDF unlocks once accounts approves." style={{ fontSize: '10px', color: t.text4, fontStyle: 'italic' }}>locked</span>
                                 )}
+                                <span style={{ fontSize: '10px', color: t.green, background: `${t.green}15`, borderRadius: '4px', padding: '2px 8px', fontWeight: 700, letterSpacing: '.04em' }}>EWB</span>
                               </div>
                             )
                           }
@@ -1026,7 +1026,6 @@ export default function ConsignmentData() {
                           if (c.irn) {
                             return (
                               <div style={{ display: 'inline-flex', gap: '6px', alignItems: 'center' }} title={`IRN: ${c.irn}`}>
-                                <span style={{ fontSize: '10px', color: t.purple, background: `${t.purple}15`, borderRadius: '4px', padding: '2px 8px', fontWeight: 700, letterSpacing: '.04em' }}>E-Invoice</span>
                                 {isApproved ? (
                                   <button onClick={async () => {
                                     setDownloadingId(c.id + ':einv')
@@ -1042,6 +1041,7 @@ export default function ConsignmentData() {
                                 ) : (
                                   <span title="PDF unlocks once accounts approves." style={{ fontSize: '10px', color: t.text4, fontStyle: 'italic' }}>locked</span>
                                 )}
+                                <span style={{ fontSize: '10px', color: t.purple, background: `${t.purple}15`, borderRadius: '4px', padding: '2px 8px', fontWeight: 700, letterSpacing: '.04em' }}>E-Invoice</span>
                               </div>
                             )
                           }
