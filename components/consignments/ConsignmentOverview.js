@@ -943,12 +943,12 @@ export default function ConsignmentOverview() {
                         // the urgency tier (red for overdue, orange for watch, gold default).
                         style={{
                           borderBottom: `1px solid ${t.border}20`,
-                          borderLeft:   `3px solid ${stripeColor}`,
                           background:   urgentBg,
                           cursor:       'pointer',
                           ['--cstock-glow']: urgentTier === 'overdue' ? t.red
                                            : urgentTier === 'watch'   ? t.orange
                                            : t.gold,
+                          ['--cstock-stripe']: stripeColor,
                         }}
                         onMouseEnter={e => {
                           // Warm the picker cache the moment the user shows
@@ -963,9 +963,16 @@ export default function ConsignmentOverview() {
                           }
                         }}>
 
-                        {/* Branch — stripe lives on the row's borderLeft, so the
-                            cell padding-left is just enough breathing room. */}
-                        <td style={{ padding: tdPad, paddingLeft: '4px' }}>
+                        {/* Branch — stripe is a 3px boxShadow inset on this cell.
+                            Explicit longhand padding so React doesn't shadow the
+                            shorthand. paddingLeft 7px = 3px stripe + 4px gap. */}
+                        <td style={{
+                          paddingTop: '10px',
+                          paddingRight: '8px',
+                          paddingBottom: '10px',
+                          paddingLeft: '7px',
+                          boxShadow: `inset 3px 0 0 var(--cstock-stripe)`,
+                        }}>
                           <div style={{ minWidth: 0 }}>
                             <div style={{ fontSize: '13px', fontWeight: 600, color: t.text1, whiteSpace: 'nowrap' }}>{b.branch_name}</div>
                             <div style={{ fontSize: '10px', color: rColor, marginTop: '1px' }}>{b.region}</div>
