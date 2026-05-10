@@ -210,12 +210,11 @@ export default function ConsignmentOverview() {
     return acc
   }, {})
 
-  // Format weight: shows "1.23kg" if > 1000g else "987g" — cleaner card display
-  const fmtWtCard = (g) => {
-    const n = Number(g || 0)
-    if (n >= 1000) return { value: (n / 1000).toFixed(2), unit: 'kg' }
-    return { value: n.toFixed(0), unit: 'g' }
-  }
+  // Always display weights in grams (no kg conversion). Comma-grouped for readability.
+  const fmtWtCard = (g) => ({
+    value: Math.round(Number(g || 0)).toLocaleString('en-IN'),
+    unit: 'g',
+  })
 
   // ── Filtered + sorted ─────────────────────────────────────────────────────
   // Search now matches branch OR region (so typing 'kerala' narrows to all
@@ -930,20 +929,24 @@ export default function ConsignmentOverview() {
 
                     return (
                       <tr key={b.branch_name}
+                        className="cstock-flat-row"
                         title={`Click to create a consignment from ${b.branch_name}`}
                         onClick={() => {
                           setConsignmentDeepLink({ branch: b.branch_name, region: b.region })
                           setActiveNav('consignment-data')
                         }}
+                        // CSS variable lets :hover paint a row-tinted glow that respects
+                        // the urgency tier (red for overdue, orange for watch, gold default).
                         style={{
                           borderBottom: `1px solid ${t.border}20`,
                           borderLeft:   `3px solid ${urgentBorder}`,
                           background:   urgentBg,
-                          transition:   'background .1s',
                           cursor:       'pointer',
+                          ['--cstock-glow']: urgentTier === 'overdue' ? t.red
+                                           : urgentTier === 'watch'   ? t.orange
+                                           : t.gold,
                         }}
                         onMouseEnter={e => {
-                          e.currentTarget.style.background = urgentTier ? urgentBg : `${t.gold}06`
                           // Warm the picker cache the moment the user shows
                           // intent. Prefetch the same two requests the bill
                           // picker fires on mount, so by the time it lands
@@ -954,8 +957,7 @@ export default function ConsignmentOverview() {
                             prefetch(`/api/consignments?action=stock_in_branch&branch=${enc}`)
                             prefetch(`/api/consignments?action=transfer_history&branch=${enc}`)
                           }
-                        }}
-                        onMouseLeave={e => e.currentTarget.style.background = urgentBg}>
+                        }}>
 
                         {/* Branch */}
                         <td style={{ padding: tdPad, paddingLeft: '14px' }}>
@@ -1077,6 +1079,34 @@ export default function ConsignmentOverview() {
       <style>{`
         @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
         @keyframes spin  { to{transform:rotate(360deg)} }
+        /* ── Flat-table row hover glow ──
+           Uses --cstock-glow (set inline per-row) so the tint matches the row's
+           urgency tier: red for overdue, orange for watch, gold for normal.
+           Pseudo-element keeps the base urgentBg intact underneath. */
+        .cstock-flat-row {
+          position: relative;
+          transition: box-shadow .25s ease;
+        }
+        .cstock-flat-row > td { position: relative; z-index: 1; }
+        .cstock-flat-row::before {
+          content: '';
+          position: absolute; inset: 0;
+          background: linear-gradient(90deg,
+            color-mix(in srgb, var(--cstock-glow) 14%, transparent) 0%,
+            color-mix(in srgb, var(--cstock-glow)  4%, transparent) 35%,
+            transparent 75%);
+          opacity: 0;
+          transition: opacity .25s ease;
+          pointer-events: none;
+          z-index: 0;
+        }
+        .cstock-flat-row:hover::before { opacity: 1; }
+        .cstock-flat-row:hover {
+          box-shadow:
+            inset 3px 0 0 var(--cstock-glow),
+            0 0 0 1px color-mix(in srgb, var(--cstock-glow) 25%, transparent),
+            0 6px 18px color-mix(in srgb, var(--cstock-glow) 18%, transparent);
+        }
         @keyframes cstockShimmer {
           0%   { background-position: -120% 0 }
           100% { background-position: 220% 0 }
