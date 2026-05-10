@@ -812,7 +812,7 @@ export default function ConsignmentOverview() {
               <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'auto' }}>
                 <thead style={{ position: 'sticky', top: 0, zIndex: 1 }}>
                   <tr>
-                    <th style={{ ...thBase, cursor: 'pointer', color: sortKey === 'branch_name' ? t.gold : t.text4, paddingLeft: '14px' }}
+                    <th style={{ ...thBase, cursor: 'pointer', color: sortKey === 'branch_name' ? t.gold : t.text4, paddingLeft: '14px', textAlign: 'left' }}
                         onClick={() => handleSort('branch_name')}>
                       Branch <SortIcon col="branch_name" />
                     </th>
@@ -923,9 +923,13 @@ export default function ConsignmentOverview() {
                     const urgentBg   = urgentTier === 'overdue' ? `${t.red}06`
                                      : urgentTier === 'watch'   ? `${t.orange}06`
                                      : 'transparent'
-                    const urgentBorder = urgentTier === 'overdue' ? t.red
-                                       : urgentTier === 'watch'   ? t.orange
-                                       : 'transparent'
+                    // Single stripe at the row's left edge — region colour by
+                    // default, urgency colour when the row needs attention.
+                    // Removes the old inline 3px inner stripe so we don't get
+                    // a double-line + dead gutter before the branch name.
+                    const stripeColor = urgentTier === 'overdue' ? t.red
+                                      : urgentTier === 'watch'   ? t.orange
+                                      : rColor
 
                     return (
                       <tr key={b.branch_name}
@@ -939,7 +943,7 @@ export default function ConsignmentOverview() {
                         // the urgency tier (red for overdue, orange for watch, gold default).
                         style={{
                           borderBottom: `1px solid ${t.border}20`,
-                          borderLeft:   `3px solid ${urgentBorder}`,
+                          borderLeft:   `4px solid ${stripeColor}`,
                           background:   urgentBg,
                           cursor:       'pointer',
                           ['--cstock-glow']: urgentTier === 'overdue' ? t.red
@@ -959,14 +963,12 @@ export default function ConsignmentOverview() {
                           }
                         }}>
 
-                        {/* Branch */}
-                        <td style={{ padding: tdPad, paddingLeft: '14px' }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                            <div style={{ width: '3px', height: '30px', borderRadius: '2px', background: rColor, flexShrink: 0 }} />
-                            <div style={{ minWidth: 0 }}>
-                              <div style={{ fontSize: '13px', fontWeight: 600, color: t.text1, whiteSpace: 'nowrap' }}>{b.branch_name}</div>
-                              <div style={{ fontSize: '10px', color: rColor, marginTop: '1px' }}>{b.region}</div>
-                            </div>
+                        {/* Branch — left stripe lives on the row itself, so the
+                            cell only needs minimal padding to clear the stripe. */}
+                        <td style={{ padding: tdPad, paddingLeft: '10px' }}>
+                          <div style={{ minWidth: 0 }}>
+                            <div style={{ fontSize: '13px', fontWeight: 600, color: t.text1, whiteSpace: 'nowrap' }}>{b.branch_name}</div>
+                            <div style={{ fontSize: '10px', color: rColor, marginTop: '1px' }}>{b.region}</div>
                           </div>
                         </td>
 
