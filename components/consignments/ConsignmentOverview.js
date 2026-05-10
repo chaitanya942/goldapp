@@ -1050,10 +1050,9 @@ export default function ConsignmentOverview() {
       <style>{`
         @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
         @keyframes spin  { to{transform:rotate(360deg)} }
-        /* ── Flat-table row hover glow ──
-           NOTE: `position: relative` on <tr> with `border-collapse: collapse`
-           desyncs thead/tbody column widths in Chromium. The hover effect is
-           done with box-shadow only — no pseudo-elements, no positioning. */
+        /* Flat-table row hover glow.
+           No position:relative on tr (it desyncs thead/tbody columns in
+           Chromium under border-collapse:collapse). Hover is box-shadow only. */
         .cstock-flat-row { transition: background .15s ease, box-shadow .25s ease; }
         .cstock-flat-row:hover {
           background: color-mix(in srgb, var(--cstock-glow) 6%, transparent) !important;
