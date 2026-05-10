@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import JSZip from 'jszip'
 import { useApp } from '../../lib/context'
@@ -116,7 +116,10 @@ function EwbCell({ c, t, downloadingId, ewbActionId, downloadEwbPdf, cancelEwb }
 }
 
 export default function ConsignmentData() {
-  const { theme, consignmentDeepLink, setConsignmentDeepLink, user, userProfile } = useApp()
+  const { theme, consignmentDeepLink, setConsignmentDeepLink, setActiveNav, user, userProfile } = useApp()
+  // Track whether the user landed here via a Branch Stock Overview row click,
+  // so the Back button can return them to that view instead of the local list.
+  const cameFromBranchStock = useRef(false)
   const userEmail = user?.email || userProfile?.email || null
   const t = THEMES[theme]
   const isMobile = useMobile()
@@ -250,6 +253,7 @@ export default function ConsignmentData() {
       setNav({ type: 'branch', branch: consignmentDeepLink.branch, fromRegion: consignmentDeepLink.region })
       setSelected(new Set())
       setSearch('')
+      cameFromBranchStock.current = true
       setConsignmentDeepLink(null)
     }
   }, [consignmentDeepLink])
@@ -752,7 +756,20 @@ export default function ConsignmentData() {
 
         {/* Branch header */}
         <div style={{ ...card, padding: '16px 20px', display: 'flex', alignItems: 'center', gap: '14px' }}>
-          <button onClick={() => { setNav(null); setSelected(new Set()) }} style={btnOut}>← Back</button>
+          <button onClick={() => {
+            // If the user arrived via Branch Stock Overview, send them back there
+            // instead of dropping them into the regional consignment list — they
+            // never saw that list and it'd feel like teleporting sideways.
+            if (cameFromBranchStock.current) {
+              cameFromBranchStock.current = false
+              setSelected(new Set())
+              setNav(null)
+              setActiveNav('consignment-overview')
+            } else {
+              setNav(null)
+              setSelected(new Set())
+            }
+          }} style={btnOut}>← Back</button>
           <div style={{ width: '4px', height: '36px', background: rColor, borderRadius: '4px' }} />
           <div style={{ flex: 1 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
