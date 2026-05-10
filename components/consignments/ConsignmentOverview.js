@@ -1051,31 +1051,14 @@ export default function ConsignmentOverview() {
         @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
         @keyframes spin  { to{transform:rotate(360deg)} }
         /* ── Flat-table row hover glow ──
-           Uses --cstock-glow (set inline per-row) so the tint matches the row's
-           urgency tier: red for overdue, orange for watch, gold for normal.
-           Pseudo-element keeps the base urgentBg intact underneath. */
-        .cstock-flat-row {
-          position: relative;
-          transition: box-shadow .25s ease;
-        }
-        .cstock-flat-row > td { position: relative; z-index: 1; }
-        .cstock-flat-row::before {
-          content: '';
-          position: absolute; inset: 0;
-          background: linear-gradient(90deg,
-            color-mix(in srgb, var(--cstock-glow) 14%, transparent) 0%,
-            color-mix(in srgb, var(--cstock-glow)  4%, transparent) 35%,
-            transparent 75%);
-          opacity: 0;
-          transition: opacity .25s ease;
-          pointer-events: none;
-          z-index: 0;
-        }
-        .cstock-flat-row:hover::before { opacity: 1; }
+           NOTE: `position: relative` on <tr> with `border-collapse: collapse`
+           desyncs thead/tbody column widths in Chromium. The hover effect is
+           done with box-shadow only — no pseudo-elements, no positioning. */
+        .cstock-flat-row { transition: background .15s ease, box-shadow .25s ease; }
         .cstock-flat-row:hover {
+          background: color-mix(in srgb, var(--cstock-glow) 6%, transparent) !important;
           box-shadow:
             inset 3px 0 0 var(--cstock-glow),
-            0 0 0 1px color-mix(in srgb, var(--cstock-glow) 25%, transparent),
             0 6px 18px color-mix(in srgb, var(--cstock-glow) 18%, transparent);
         }
         /* Branch cell — stripe via inset shadow at the cell's true left edge.
