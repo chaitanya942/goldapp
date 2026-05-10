@@ -686,13 +686,6 @@ export default function ConsignmentData() {
     return true
   })
 
-  // KPIs — exclude rejected rows since their bills are already free (not in
-  // transit). The rejected count surfaces separately as its own KPI tile.
-  const inFlightCons = filteredCons.filter(c => c.approval_status !== 'rejected')
-  const kpiBills    = inFlightCons.reduce((s, c) => s + (c.total_bills || 0), 0)
-  const kpiNetWt    = inFlightCons.reduce((s, c) => s + parseFloat(c.total_net_wt || 0), 0)
-  const kpiAmount   = inFlightCons.reduce((s, c) => s + parseFloat(c.total_amount || 0), 0)
-
   const card    = { background: t.card, border: `1px solid ${t.border}`, borderRadius: '12px' }
   const btnGold = { background: t.gold, color: '#1a0a00', border: 'none', borderRadius: '8px', padding: '7px 16px', fontSize: '12px', fontWeight: 700, cursor: 'pointer' }
   const btnOut  = { background: 'transparent', border: `1px solid ${t.border2}`, borderRadius: '8px', padding: '7px 14px', fontSize: '12px', color: t.text3, cursor: 'pointer' }
@@ -1294,32 +1287,6 @@ export default function ConsignmentData() {
     </>
   )
 
-  // ── KPIs ──────────────────────────────────────────────────────────────────
-  const fmtINR = (n) => {
-    if (n == null) return '—'
-    const v = Number(n)
-    if (v >= 1e7) return `₹${(v / 1e7).toFixed(2)}Cr`
-    if (v >= 1e5) return `₹${(v / 1e5).toFixed(2)}L`
-    return `₹${Math.round(v).toLocaleString('en-IN')}`
-  }
-  // Counts the rejected rows so the KPI strip flags them. Stays out of the
-  // in-transit / bills / weight / value rollups because rejected consignments
-  // aren't in transit — bills already returned to source.
-  const rejectedCount = filteredCons.filter(c => c.approval_status === 'rejected').length
-  const inTransitCount = filteredCons.length - rejectedCount
-
-  const kpis = [
-    { label: 'Consignments In Transit', value: inTransitCount,    sub: 'in flight',           color: t.orange },
-    { label: 'Bills In Transit',        value: kpiBills,           sub: 'across consignments', color: t.gold   },
-    { label: 'Net Weight',              value: fmtWt(kpiNetWt),    sub: '',                    color: t.blue   },
-    { label: 'Total Value',             value: fmtINR(kpiAmount),  sub: '',                    color: t.green  },
-  ]
-  // Rejected tile only when there's something to flag — stays out of the way
-  // 99% of the time, draws the eye when accounts pushed something back.
-  if (rejectedCount > 0) {
-    kpis.push({ label: 'Rejected — Review', value: rejectedCount, sub: 'awaiting ops re-create', color: t.red })
-  }
-
   return (
     <div style={{ padding: '18px 16px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
 
@@ -1337,19 +1304,6 @@ export default function ConsignmentData() {
         </div>
         <button onClick={fetchAll} style={btnOut}>⟳ Refresh</button>
       </div>
-
-      {/* KPIs (only on list view) */}
-      {!nav && (
-        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(4, 1fr)', gap: '1px', background: t.border, borderRadius: '11px', overflow: 'hidden', border: `1px solid ${t.border}` }}>
-          {kpis.map(k => (
-            <div key={k.label} style={{ background: t.card, padding: '15px 18px' }}>
-              <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: '7px', fontWeight: 600 }}>{k.label}</div>
-              <div style={{ fontSize: '22px', fontWeight: 300, color: k.color, lineHeight: 1, fontFamily: 'monospace' }}>{k.value}</div>
-              {k.sub && <div style={{ fontSize: '10px', color: t.text4, marginTop: '5px' }}>{k.sub}</div>}
-            </div>
-          ))}
-        </div>
-      )}
 
       {/* Content */}
       {loading ? (
