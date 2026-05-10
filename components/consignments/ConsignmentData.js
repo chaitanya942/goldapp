@@ -198,6 +198,9 @@ export default function ConsignmentData() {
   const [filterRegions, setFilterRegions] = useState(() => new Set())
   const [dateFrom,      setDateFrom]      = useState('')
   const [dateTo,        setDateTo]        = useState('')
+  // Sortable columns. Default: newest first by created_at.
+  const [sortKey, setSortKey] = useState('created_at')
+  const [sortDir, setSortDir] = useState(-1)  // -1 desc, 1 asc
 
   const fetchAll = useCallback(async () => {
     setLoading(true)
@@ -708,7 +711,24 @@ export default function ConsignmentData() {
       if (![c.tmp_prf_no, c.challan_no, c.branch_name, c.dest_branch].some(v => (v || '').toLowerCase().includes(q))) return false
     }
     return true
+  }).slice().sort((a, b) => {
+    let av, bv
+    switch (sortKey) {
+      case 'tmp_prf_no':   av = a.tmp_prf_no || '';                 bv = b.tmp_prf_no || '';                 return av.localeCompare(bv) * sortDir
+      case 'branch_name':  av = a.branch_name || '';                bv = b.branch_name || '';                return av.localeCompare(bv) * sortDir
+      case 'total_bills':  av = a.total_bills || 0;                 bv = b.total_bills || 0;                 break
+      case 'total_net_wt': av = parseFloat(a.total_net_wt || 0);    bv = parseFloat(b.total_net_wt || 0);    break
+      case 'total_amount': av = parseFloat(a.total_amount || 0);    bv = parseFloat(b.total_amount || 0);    break
+      case 'created_at':
+      default:             av = new Date(a.created_at || 0).getTime(); bv = new Date(b.created_at || 0).getTime()
+    }
+    return (av - bv) * sortDir
   })
+
+  function handleSort(key) {
+    if (sortKey === key) setSortDir(d => d * -1)
+    else { setSortKey(key); setSortDir(-1) }
+  }
 
   const card    = { background: t.card, border: `1px solid ${t.border}`, borderRadius: '12px' }
   const btnGold = { background: t.gold, color: '#1a0a00', border: 'none', borderRadius: '8px', padding: '7px 16px', fontSize: '12px', fontWeight: 700, cursor: 'pointer' }
@@ -1103,15 +1123,52 @@ export default function ConsignmentData() {
         )
       })()}
 
-      {/* Table */}
-      <div style={{ ...card, overflow: 'hidden' }}>
-        <div style={{ overflowX: 'auto', maxHeight: 'calc(100vh - 380px)', overflowY: 'auto' }}>
+      {/* Table — flex:1 so it claims all the vertical space the page has left
+          after the header + filter bar, instead of a fixed maxHeight that
+          left dead air at the bottom. */}
+      <div style={{ ...card, overflow: 'hidden', flex: 1, display: 'flex', flexDirection: 'column', minHeight: '480px' }}>
+        <div style={{ overflowX: 'auto', overflowY: 'auto', flex: 1 }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '900px' }}>
-            <thead style={{ position: 'sticky', top: 0, zIndex: 1 }}>
+            <thead>
               <tr>
-                {['TMP PRF', 'Type', 'Source → Destination', 'Bills', 'Net Wt', 'Value', 'Created', 'Document', 'E-Way Bill', 'E-Invoice', 'All'].map(h => (
-                  <th key={h} style={{ padding: '10px 14px', fontSize: '10px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', textAlign: h === 'Bills' || h === 'Net Wt' || h === 'Value' ? 'right' : 'left', background: t.card2, borderBottom: `1px solid ${t.border}`, whiteSpace: 'nowrap', fontWeight: 600 }}>{h}</th>
-                ))}
+                {(() => {
+                  const cols = [
+                    { key: 'tmp_prf_no',   label: 'TMP PRF',   align: 'left',  sortable: true  },
+                    { key: 'type',         label: 'Type',      align: 'left',  sortable: false },
+                    { key: 'branch_name',  label: 'Source → Destination', align: 'left',  sortable: true },
+                    { key: 'total_bills',  label: 'Bills',     align: 'right', sortable: true  },
+                    { key: 'total_net_wt', label: 'Net Wt',    align: 'right', sortable: true  },
+                    { key: 'total_amount', label: 'Value',     align: 'right', sortable: true  },
+                    { key: 'created_at',   label: 'Created',   align: 'left',  sortable: true  },
+                    { key: 'document',     label: 'Document',  align: 'left',  sortable: false },
+                    { key: 'eway',         label: 'E-Way Bill',align: 'left',  sortable: false },
+                    { key: 'einvoice',     label: 'E-Invoice', align: 'left',  sortable: false },
+                    { key: 'all',          label: 'All',       align: 'left',  sortable: false },
+                  ]
+                  return cols.map(col => {
+                    const isActive = col.sortable && sortKey === col.key
+                    const arrow = !col.sortable ? '' : isActive ? (sortDir === -1 ? '↓' : '↑') : '⇅'
+                    const arrowColor = isActive ? t.gold : t.text4
+                    return (
+                      <th key={col.key}
+                        onClick={col.sortable ? () => handleSort(col.key) : undefined}
+                        style={{
+                          padding: '10px 14px', fontSize: '10px',
+                          color: isActive ? t.gold : t.text4,
+                          letterSpacing: '.1em', textTransform: 'uppercase',
+                          textAlign: col.align,
+                          background: t.card2, borderBottom: `1px solid ${t.border}`,
+                          whiteSpace: 'nowrap', fontWeight: 600,
+                          cursor: col.sortable ? 'pointer' : 'default',
+                          userSelect: 'none',
+                          position: 'sticky', top: 0, zIndex: 1,
+                        }}>
+                        {col.label}
+                        {col.sortable && <span style={{ marginLeft: '5px', fontSize: '10px', color: arrowColor }}>{arrow}</span>}
+                      </th>
+                    )
+                  })
+                })()}
               </tr>
             </thead>
             <tbody>
@@ -1125,6 +1182,12 @@ export default function ConsignmentData() {
                 const isType = c.movement_type === 'INTERNAL'
                 const tColor = isType ? t.purple : t.orange
                 const isNew  = lastConsignment?.id === c.id
+                // Pick the row's left-edge stripe colour: rejection wins over
+                // region so urgent state pops; otherwise the source-branch
+                // region tint (Karnataka green, Kerala teal, AP amber, TS rose)
+                // gives the operator regional context at a glance.
+                const sourceRegion = (branches.find(b => b.name === c.branch_name) || {}).region
+                const regionStripe = REGION_COLORS[sourceRegion] || t.text4
                 // Document applicability per business rules:
                 //   Intrastate KA Branch → HO       : EWB ✓ + Challan,  NO E-Invoice
                 //   Intrastate non-KA Branch → Hub  : EWB ✓ + Voucher,  NO E-Invoice
@@ -1138,16 +1201,18 @@ export default function ConsignmentData() {
                 return (
                   <React.Fragment key={c.id}>
                   <tr
+                    className="cdata-row"
                     style={{
                       borderBottom: `1px solid ${t.border}15`,
-                      borderLeft: isRejectedRow ? `3px solid ${t.red}` : '3px solid transparent',
                       background: restingBg,
-                      transition: 'background .1s',
                       verticalAlign: 'middle',
-                    }}
-                    onMouseEnter={e => { if (!isNew && !isRejectedRow) e.currentTarget.style.background = `${t.gold}04` }}
-                    onMouseLeave={e => { if (!isNew && !isRejectedRow) e.currentTarget.style.background = 'transparent' }}>
-                    <td style={{ padding: '11px 14px', fontSize: '12px', color: t.gold, fontWeight: 700, fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
+                      // CSS variables drive the per-row stripe + hover glow.
+                      // Stripe is painted as inset boxShadow on the first cell
+                      // so the row's borderLeft can't desync thead/tbody widths.
+                      ['--cdata-stripe']: isRejectedRow ? t.red : regionStripe,
+                      ['--cdata-glow']:   isRejectedRow ? t.red : isNew ? t.green : t.gold,
+                    }}>
+                    <td style={{ paddingTop: '11px', paddingRight: '14px', paddingBottom: '11px', paddingLeft: '11px', fontSize: '12px', color: t.gold, fontWeight: 700, fontFamily: 'monospace', whiteSpace: 'nowrap', boxShadow: 'inset 3px 0 0 var(--cdata-stripe)' }}>
                       {c.tmp_prf_no}
                       {isNew && <span style={{ marginLeft: 6, fontSize: 9, color: t.green, background: `${t.green}20`, padding: '1px 6px', borderRadius: 4, fontWeight: 600 }}>NEW</span>}
                       {c.approval_status === 'pending' && (
@@ -1381,11 +1446,26 @@ export default function ConsignmentData() {
           </table>
         </div>
       </div>
+
+      {/* Hover glow + zebra striping for the active-consignments table.
+          Pure CSS so React inline-style serialisation can't shadow it.
+          --cdata-glow is set per row so the glow tint matches state
+          (gold for normal, red for rejected, green for newly created). */}
+      <style>{`
+        .cdata-row { transition: background .15s ease, box-shadow .25s ease; }
+        .cdata-row:nth-child(even):not(:hover) { background: rgba(201,168,76,.018); }
+        .cdata-row:hover {
+          background: color-mix(in srgb, var(--cdata-glow) 6%, transparent) !important;
+          box-shadow:
+            inset 3px 0 0 var(--cdata-glow),
+            0 4px 14px color-mix(in srgb, var(--cdata-glow) 16%, transparent);
+        }
+      `}</style>
     </>
   )
 
   return (
-    <div style={{ padding: '18px 16px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+    <div style={{ padding: '18px 16px', display: 'flex', flexDirection: 'column', gap: '14px', minHeight: 'calc(100vh - 60px)' }}>
 
       {/* Header — title + at-a-glance status chips so the operator sees the
           backlog before scanning the table. Chips only render on the list view. */}
