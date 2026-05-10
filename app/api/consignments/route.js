@@ -20,9 +20,14 @@ const supabase = createClient(
 
 // Map POST actions to required role groups. Default is ANY authenticated user.
 const ACTION_ROLE_REQUIREMENTS = {
-  approve_consignment:  ROLE_GROUPS.ACCOUNTS,
-  reject_approval:      ROLE_GROUPS.ACCOUNTS,
-  cancel_consignment:   ROLE_GROUPS.ADMIN,
+  approve_consignment:    ROLE_GROUPS.ACCOUNTS,
+  reject_approval:        ROLE_GROUPS.ACCOUNTS,
+  cancel_consignment:     ROLE_GROUPS.ADMIN,
+  // Cancellation request lifecycle. Operations files request_cancellation
+  // (any auth'd user). Accounts decides via approve_cancellation /
+  // reject_cancellation — same role gate as other approval decisions.
+  approve_cancellation:   ROLE_GROUPS.ACCOUNTS,
+  reject_cancellation:    ROLE_GROUPS.ACCOUNTS,
 }
 
 // ── GET handler ───────────────────────────────────────────────────────────────
@@ -367,6 +372,25 @@ export async function GET(req) {
   // explicit log call silently failed), we derive the doc type from the
   // event's details payload (details.had_ewb / details.had_irn) so the row
   // still appears here instead of disappearing into the void.
+  // Pending cancellation requests — accounts queue. Returns consignments
+  // where ops has filed a cancellation request but accounts hasn't approved
+  // or rejected yet. Region-scoped via the same filter as the other lists.
+  if (action === 'cancellation_requests') {
+    let q = supabase
+      .from('consignments')
+      .select('*')
+      .not('cancellation_requested_at', 'is', null)
+      .neq('status', 'cancelled')
+      .order('cancellation_requested_at', { ascending: true }) // oldest first → FIFO
+    const regionFilter = getRegionFilter(auth, req)
+    if (regionFilter?.branch_names?.length) {
+      q = q.in('branch_name', regionFilter.branch_names)
+    }
+    const { data, error } = await q
+    if (error) return Response.json({ error: error.message }, { status: 500 })
+    return Response.json({ data: data || [] })
+  }
+
   if (action === 'cancellation_history') {
     // No date floor — the Cancellations tab now shows every recorded
     // cancellation. Audit data should be permanent.
@@ -1513,6 +1537,117 @@ export async function POST(req) {
     })
 
     return Response.json({ data: updated, message: 'Cancellation request sent to accounts.' })
+  }
+
+  // ── Approve a pending cancellation request (accounts side) ───────────────
+  // Reuses the same atomic cancel RPC as the legacy admin cancel_consignment
+  // path so bills + status flip in one transaction. Audit log entry is
+  // distinct ('cancellation_approved') so the timeline reads as a two-step
+  // approval flow, not a unilateral void.
+  if (action === 'approve_cancellation') {
+    const { id } = body
+    if (!id) return Response.json({ error: 'Missing id' }, { status: 400 })
+
+    const { data: c, error: fetchErr } = await supabase
+      .from('consignments').select('*').eq('id', id).single()
+    if (fetchErr || !c)              return Response.json({ error: 'Consignment not found' }, { status: 404 })
+    if (!c.cancellation_requested_at) return Response.json({ error: 'No cancellation request on this consignment' }, { status: 400 })
+    if (c.status === 'cancelled')    return Response.json({ error: 'Already cancelled' }, { status: 400 })
+
+    // Use the request reason as the cancellation reason on the consignment,
+    // prefixed with who approved it so the audit trail is unambiguous.
+    const composedReason = `Approved by accounts (${actorEmail}). Operations reason: ${c.cancellation_reason || '—'}`
+
+    // Atomic path: same RPC as the legacy cancel_consignment action.
+    const { data: rpcCancelled, error: rpcCancelErr } = await supabase.rpc('cancel_consignment_atomic', {
+      p_consignment_id: id,
+      p_reason:         composedReason,
+      p_cancelled_by:   actorEmail,
+    })
+    if (rpcCancelErr && rpcCancelErr.code !== 'PGRST202') {
+      return Response.json({ error: rpcCancelErr.message }, { status: 400 })
+    }
+    if (rpcCancelErr) {
+      // RPC missing — fall back to manual updates so the request isn't stuck.
+      console.warn('[consignments.approve_cancellation] cancel_consignment_atomic RPC missing — using manual fallback.')
+      const { data: links } = await supabase.from('consignment_items').select('purchase_id').eq('consignment_id', id)
+      const pids = (links || []).map(l => l.purchase_id)
+      if (pids.length) {
+        await supabase.from('purchases')
+          .update({ stock_status: 'at_branch', current_branch: c.branch_name })
+          .in('id', pids)
+      }
+      await supabase.from('consignments')
+        .update({ status: 'cancelled', cancelled_at: new Date().toISOString(), cancelled_by: actorEmail, cancellation_reason_final: composedReason })
+        .eq('id', id)
+    }
+
+    await logConsignmentEvent(supabase, {
+      consignment_id: id,
+      event_type:     'cancellation_approved',
+      actor_email:    actorEmail,
+      actor_role:     auth.role,
+      details: {
+        operations_reason: c.cancellation_reason,
+        requested_by:      c.cancellation_requested_by,
+        requested_at:      c.cancellation_requested_at,
+      },
+    })
+
+    // Surface warnings: EWB / IRN still active on NIC / IRP need to be
+    // cancelled separately on the GST portal within their 24h window.
+    const warnings = []
+    const src    = rpcCancelled || c
+    if (src.eway_bill_no) warnings.push(`E-Way Bill ${src.eway_bill_no} is still active. Cancel it on the NIC portal within 24h of generation.`)
+    if (src.irn)          warnings.push(`E-Invoice IRN is still active. Cancel it on the IRP portal within 24h of generation.`)
+
+    return Response.json({
+      data:     rpcCancelled || { id, status: 'cancelled' },
+      message:  'Cancellation approved. Bills returned to source branch.',
+      warnings: warnings.length ? warnings : undefined,
+    })
+  }
+
+  // ── Reject a pending cancellation request (accounts side) ────────────────
+  // Clears the request fields and logs the rejection with reason. Bills stay
+  // attached — they were never freed by request_cancellation in the first
+  // place. Operations sees the row revert to its normal Cancel button.
+  if (action === 'reject_cancellation') {
+    const { id, reason } = body
+    if (!id || !reason || !String(reason).trim()) {
+      return Response.json({ error: 'Rejection reason is required' }, { status: 400 })
+    }
+
+    const { data: c, error: fetchErr } = await supabase
+      .from('consignments').select('id, cancellation_requested_at, cancellation_reason, cancellation_requested_by, status').eq('id', id).single()
+    if (fetchErr || !c)                return Response.json({ error: 'Consignment not found' }, { status: 404 })
+    if (!c.cancellation_requested_at)  return Response.json({ error: 'No cancellation request on this consignment' }, { status: 400 })
+    if (c.status === 'cancelled')      return Response.json({ error: 'Already cancelled' }, { status: 400 })
+
+    const { error: updErr } = await supabase
+      .from('consignments')
+      .update({
+        cancellation_requested_at: null,
+        cancellation_reason:       null,
+        cancellation_requested_by: null,
+      })
+      .eq('id', id)
+    if (updErr) return Response.json({ error: updErr.message }, { status: 500 })
+
+    await logConsignmentEvent(supabase, {
+      consignment_id: id,
+      event_type:     'cancellation_rejected',
+      actor_email:    actorEmail,
+      actor_role:     auth.role,
+      details: {
+        rejection_reason:  String(reason).trim(),
+        operations_reason: c.cancellation_reason,
+        requested_by:      c.cancellation_requested_by,
+        requested_at:      c.cancellation_requested_at,
+      },
+    })
+
+    return Response.json({ data: { id }, message: 'Cancellation request rejected.' })
   }
 
   // ── Cancel consignment (reverse flow) ────────────────────────────────────

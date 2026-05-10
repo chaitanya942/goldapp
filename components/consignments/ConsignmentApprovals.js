@@ -167,6 +167,12 @@ export default function ConsignmentApprovals() {
   const [pending, setPending] = useState([])
   const [history, setHistory] = useState([])  // approved or rejected, depending on tab
   const [cancellations, setCancellations] = useState([])  // ewb_cancelled / einvoice_cancelled events
+  const [cancelRequests, setCancelRequests] = useState([])  // pending cancellation requests from ops
+  // Modal state for the reject-cancellation flow (reason input).
+  const [rejectCancelTarget,    setRejectCancelTarget]    = useState(null)
+  const [rejectCancelReason,    setRejectCancelReason]    = useState('')
+  const [rejectCancelBusy,      setRejectCancelBusy]      = useState(false)
+  const [approveCancelBusy,     setApproveCancelBusy]     = useState(null) // consignment id mid-approval
   const [report,        setReport]        = useState({ ewbs: [], einvoices: [] })
   const [reportFrom,    setReportFrom]    = useState(() => istToday())
   const [reportTo,      setReportTo]      = useState(() => istToday())
@@ -236,6 +242,16 @@ export default function ConsignmentApprovals() {
     setLoading(false)
   }, [])
 
+  // Fetches pending cancellation requests filed by operations. Oldest first so
+  // accounts works through them FIFO (matches the API ordering).
+  const fetchCancelRequests = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true)
+    const r = await authedFetch(`/api/consignments?action=cancellation_requests`)
+    const j = await r.json()
+    setCancelRequests(j.data || [])
+    setLoading(false)
+  }, [])
+
   // Reports: every EWB + E-Invoice generated in the [from..to] window.
   const fetchReport = useCallback(async (from, to, silent = false) => {
     if (!silent) setLoading(true)
@@ -265,13 +281,14 @@ export default function ConsignmentApprovals() {
 
   // Initial fetch + refetch when the user switches tabs.
   useEffect(() => {
-    if (tab === 'pending')             fetchPending()
-    else if (tab === 'cancellations')  fetchCancellations()
-    else if (tab === 'reports')        fetchReport(reportFrom, reportTo)
-    else if (tab === 'efficiency')     fetchEfficiency(effFrom, effTo)
-    else if (tab === 'settings')       fetchSettings()
-    else                               fetchHistory(tab)
-  }, [tab, fetchPending, fetchHistory, fetchCancellations, fetchReport, fetchEfficiency, fetchSettings, reportFrom, reportTo, effFrom, effTo])
+    if (tab === 'pending')                 fetchPending()
+    else if (tab === 'cancel_requests')    fetchCancelRequests()
+    else if (tab === 'cancellations')      fetchCancellations()
+    else if (tab === 'reports')            fetchReport(reportFrom, reportTo)
+    else if (tab === 'efficiency')         fetchEfficiency(effFrom, effTo)
+    else if (tab === 'settings')           fetchSettings()
+    else                                   fetchHistory(tab)
+  }, [tab, fetchPending, fetchHistory, fetchCancelRequests, fetchCancellations, fetchReport, fetchEfficiency, fetchSettings, reportFrom, reportTo, effFrom, effTo])
 
   // Save a single E-Invoice sequence row (state + last_seq).
   const saveSeq = useCallback(async (state_code, fy_code, last_seq) => {
@@ -689,6 +706,11 @@ export default function ConsignmentApprovals() {
               <strong style={{ color: t.text2 }}>{cancellations.length}</strong> doc cancellation{cancellations.length === 1 ? '' : 's'} · all time
             </div>
           )}
+          {tab === 'cancel_requests' && (
+            <div style={{ fontSize: '11px', color: t.text3 }}>
+              <strong style={{ color: t.text2 }}>{cancelRequests.length}</strong> pending cancellation request{cancelRequests.length === 1 ? '' : 's'} · oldest first
+            </div>
+          )}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           {tab === 'pending' && pending.length > 0 && oldestBadge && (
@@ -705,11 +727,12 @@ export default function ConsignmentApprovals() {
             </button>
           )}
           <button onClick={() => {
-            if (tab === 'pending')             fetchPending(false)
-            else if (tab === 'cancellations')  fetchCancellations(false)
-            else if (tab === 'reports')        fetchReport(reportFrom, reportTo, false)
-            else if (tab === 'efficiency')     fetchEfficiency(effFrom, effTo, false)
-            else if (tab === 'settings')       fetchSettings(false)
+            if (tab === 'pending')               fetchPending(false)
+            else if (tab === 'cancel_requests')  fetchCancelRequests(false)
+            else if (tab === 'cancellations')    fetchCancellations(false)
+            else if (tab === 'reports')          fetchReport(reportFrom, reportTo, false)
+            else if (tab === 'efficiency')       fetchEfficiency(effFrom, effTo, false)
+            else if (tab === 'settings')         fetchSettings(false)
             else                               fetchHistory(tab, false)
           }} style={btnOut}>Refresh</button>
         </div>
@@ -718,13 +741,14 @@ export default function ConsignmentApprovals() {
       {/* Tab strip — Pending / Approved / Rejected / Cancellations / Reports / Settings */}
       <div style={{ display: 'flex', gap: '4px', borderBottom: `1px solid ${t.border}`, marginTop: '-2px', flexWrap: 'wrap' }}>
         {[
-          { id: 'pending',       label: 'Pending',       color: t.orange },
-          { id: 'approved',      label: 'Approved',      color: t.green  },
-          { id: 'rejected',      label: 'Rejected',      color: t.red    },
-          { id: 'cancellations', label: 'Cancellations', color: t.purple },
-          { id: 'reports',       label: 'Reports',       color: t.blue   },
-          { id: 'efficiency',    label: 'Efficiency',    color: t.gold   },
-          { id: 'settings',      label: 'Settings',      color: t.text2  },
+          { id: 'pending',         label: 'Pending',         color: t.orange,                       badge: pending.length },
+          { id: 'cancel_requests', label: 'Cancel Requests', color: t.red,                          badge: cancelRequests.length },
+          { id: 'approved',        label: 'Approved',        color: t.green  },
+          { id: 'rejected',        label: 'Rejected',        color: t.red    },
+          { id: 'cancellations',   label: 'Cancellations',   color: t.purple },
+          { id: 'reports',         label: 'Reports',         color: t.blue   },
+          { id: 'efficiency',      label: 'Efficiency',      color: t.gold   },
+          { id: 'settings',        label: 'Settings',        color: t.text2  },
         ].map(o => {
           const active = tab === o.id
           return (
@@ -736,8 +760,14 @@ export default function ConsignmentApprovals() {
                 borderBottom: `2px solid ${active ? o.color : 'transparent'}`,
                 marginBottom: '-1px',
                 letterSpacing: '.02em',
+                display: 'inline-flex', alignItems: 'center', gap: '6px',
               }}>
               {o.label}
+              {o.badge ? (
+                <span style={{ background: `${o.color}25`, color: o.color, fontSize: '10px', fontWeight: 700, padding: '1px 7px', borderRadius: '99px', fontFamily: 'monospace', minWidth: '18px', textAlign: 'center' }}>
+                  {o.badge}
+                </span>
+              ) : null}
             </button>
           )
         })}
@@ -778,6 +808,108 @@ export default function ConsignmentApprovals() {
           <div style={{ fontSize: '12px', color: t.text4, marginTop: '6px' }}>
             {tab === 'approved' ? 'Once you approve a consignment, it will be archived here.' : 'Rejected consignments are recorded here for audit.'}
           </div>
+        </div>
+      ) : tab === 'cancel_requests' && cancelRequests.length === 0 ? (
+        /* Empty state — Cancel Requests tab */
+        <div style={{ ...card, padding: '60px 20px', textAlign: 'center' }}>
+          <div style={{ fontSize: '15px', color: t.text1, fontWeight: 500 }}>No pending cancellation requests</div>
+          <div style={{ fontSize: '12px', color: t.text4, marginTop: '6px' }}>
+            When operations files a Cancel request from the Consignment Data page, it appears here for accounts to approve or reject.
+          </div>
+        </div>
+      ) : tab === 'cancel_requests' ? (
+        /* Pending cancellation requests — accounts queue. Oldest first (FIFO). */
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+          {cancelRequests.map(c => {
+            const isType   = c.movement_type === 'INTERNAL'
+            const dest     = isType ? (c.dest_branch || '?') : 'Head Office'
+            const requestAge = (() => {
+              if (!c.cancellation_requested_at) return ''
+              const ms = Date.now() - new Date(c.cancellation_requested_at).getTime()
+              const mins = Math.floor(ms / 60000)
+              if (mins < 1)    return 'just now'
+              if (mins < 60)   return `${mins}m ago`
+              const hrs = Math.floor(mins / 60)
+              if (hrs < 24)    return `${hrs}h ago`
+              const days = Math.floor(hrs / 24)
+              return `${days}d ago`
+            })()
+            const ewbActive = !!c.eway_bill_no
+            const irnActive = !!c.irn
+            const busy = approveCancelBusy === c.id
+            return (
+              <div key={c.id} style={{ ...card, padding: '14px 18px', borderLeft: `3px solid ${t.red}`, display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                {/* Header row — TMP PRF, type, source→dest, request age */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: '13px', fontWeight: 700, color: t.gold, fontFamily: 'monospace' }}>{c.tmp_prf_no}</span>
+                  <span style={{ fontSize: '10px', color: isType ? t.purple : t.orange, background: `${isType ? t.purple : t.orange}15`, borderRadius: '5px', padding: '2px 8px', fontWeight: 600 }}>
+                    {isType ? 'Branch → Hub' : 'Branch → HO'}
+                  </span>
+                  <span style={{ fontSize: '12px', color: t.text2 }}>
+                    <strong style={{ color: t.text1 }}>{c.branch_name}</strong>
+                    <span style={{ color: t.text4, margin: '0 6px' }}>→</span>
+                    {dest}
+                  </span>
+                  <span style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '10px', color: t.red, background: `${t.red}12`, border: `1px solid ${t.red}35`, borderRadius: '99px', padding: '3px 11px', fontWeight: 600 }}>
+                    <span className="cdata-status-dot" style={{ width: '6px', height: '6px', borderRadius: '50%', background: t.red, display: 'inline-block', color: t.red }} />
+                    Requested {requestAge}
+                  </span>
+                </div>
+
+                {/* Reason block — surfaced loudly because it's the whole point of the queue */}
+                <div style={{ background: `${t.red}08`, border: `1px solid ${t.red}25`, borderRadius: '8px', padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  <div style={{ fontSize: '10px', color: t.text4, letterSpacing: '.08em', textTransform: 'uppercase', fontWeight: 600 }}>Reason from operations</div>
+                  <div style={{ fontSize: '13px', color: t.text1, lineHeight: 1.5 }}>{c.cancellation_reason || '—'}</div>
+                  <div style={{ fontSize: '11px', color: t.text4, marginTop: '2px' }}>by {c.cancellation_requested_by || 'unknown'}</div>
+                </div>
+
+                {/* Stats + active-doc warnings */}
+                <div style={{ display: 'flex', gap: '18px', flexWrap: 'wrap', alignItems: 'center', fontSize: '11px', color: t.text3 }}>
+                  <span><strong style={{ color: t.text1, fontFamily: 'monospace' }}>{c.total_bills}</strong> bills</span>
+                  <span><strong style={{ color: t.gold, fontFamily: 'monospace' }}>{Number(c.total_net_wt || 0).toFixed(3)}g</strong> net wt</span>
+                  <span><strong style={{ color: t.blue, fontFamily: 'monospace' }}>₹{Number(c.total_amount || 0).toLocaleString('en-IN')}</strong></span>
+                  {(ewbActive || irnActive) && (
+                    <span style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: t.orange, fontWeight: 600 }}>
+                      <span>⚠</span>
+                      {ewbActive && irnActive ? 'EWB + E-Invoice still active on portal' : ewbActive ? 'EWB still active on NIC' : 'E-Invoice still active on IRP'}
+                    </span>
+                  )}
+                </div>
+
+                {/* Actions */}
+                <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '2px' }}>
+                  <button onClick={() => { setRejectCancelTarget(c); setRejectCancelReason('') }} disabled={busy}
+                    style={{ background: 'transparent', border: `1px solid ${t.border2}`, color: t.text2, borderRadius: '8px', padding: '7px 14px', fontSize: '12px', fontWeight: 600, cursor: busy ? 'not-allowed' : 'pointer' }}>
+                    Reject request
+                  </button>
+                  <button onClick={async () => {
+                    const ok = await openConfirm({
+                      title: `Approve cancellation of ${c.tmp_prf_no}?`,
+                      message: `${c.total_bills} bill${c.total_bills === 1 ? '' : 's'} will return to ${c.branch_name}.${ewbActive ? '\n\n⚠ Cancel EWB ' + c.eway_bill_no + ' on the NIC portal within 24h of generation.' : ''}${irnActive ? '\n\n⚠ Cancel the E-Invoice IRN on the IRP portal within 24h of generation.' : ''}`,
+                      confirmLabel: 'Approve cancellation',
+                      danger: true,
+                    })
+                    if (!ok) return
+                    setApproveCancelBusy(c.id)
+                    try {
+                      const r = await authedFetch('/api/consignments', {
+                        method: 'POST', headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ action: 'approve_cancellation', id: c.id }),
+                      })
+                      const j = await r.json()
+                      if (!r.ok || j.error) { showToast(j.error || 'Approval failed', 'error'); return }
+                      const warningSuffix = j.warnings?.length ? ' ' + j.warnings.join(' ') : ''
+                      showToast((j.message || 'Cancellation approved.') + warningSuffix, j.warnings?.length ? 'info' : 'success')
+                      fetchCancelRequests(true)
+                    } finally { setApproveCancelBusy(null) }
+                  }} disabled={busy}
+                    style={{ background: busy ? `${t.red}50` : t.red, color: '#fff', border: 'none', borderRadius: '8px', padding: '7px 16px', fontSize: '12px', fontWeight: 700, cursor: busy ? 'not-allowed' : 'pointer' }}>
+                    {busy ? 'Approving…' : 'Approve cancellation'}
+                  </button>
+                </div>
+              </div>
+            )
+          })}
         </div>
       ) : tab === 'cancellations' && cancellations.length === 0 ? (
         /* Empty state — cancellations tab */
@@ -1108,6 +1240,77 @@ export default function ConsignmentApprovals() {
           onCreditNote={generateCreditNote}
         />
       )}
+
+      {/* ── Reject Cancellation Request Modal — accounts pushes back on an
+            ops-filed cancellation request. Requires a reason so operations
+            knows why and can fix-and-refile (or drop it). ── */}
+      {rejectCancelTarget && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.78)', zIndex: 120, display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(6px)', padding: '20px' }}
+          onClick={() => { if (!rejectCancelBusy) { setRejectCancelTarget(null); setRejectCancelReason('') } }}>
+          <div onClick={e => e.stopPropagation()}
+            style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: '14px', padding: '24px 26px', width: '100%', maxWidth: '460px', boxShadow: '0 20px 60px rgba(0,0,0,.5)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '6px' }}>
+              <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 28, height: 28, borderRadius: '50%', background: `${t.orange}18`, color: t.orange, fontSize: '15px', fontWeight: 700 }}>?</span>
+              <div style={{ fontSize: '15px', fontWeight: 600, color: t.text1 }}>Reject cancellation request</div>
+            </div>
+            <div style={{ fontSize: '11px', color: t.text3, marginBottom: '14px' }}>
+              <strong style={{ color: t.gold, fontFamily: 'monospace' }}>{rejectCancelTarget.tmp_prf_no}</strong> ·{' '}
+              {rejectCancelTarget.branch_name} → {rejectCancelTarget.movement_type === 'INTERNAL' ? (rejectCancelTarget.dest_branch || '?') : 'Head Office'}
+            </div>
+            <div style={{ background: `${t.orange}10`, border: `1px solid ${t.orange}35`, borderRadius: '8px', padding: '10px 12px', fontSize: '11px', color: t.orange, marginBottom: '14px', lineHeight: 1.5 }}>
+              Bills stay attached. Operations will see the row revert to a normal Cancel button and can re-file with corrected details if needed.
+            </div>
+            <label style={{ display: 'block', fontSize: '10px', color: t.text4, letterSpacing: '.08em', textTransform: 'uppercase', fontWeight: 600, marginBottom: '6px' }}>
+              Why are you rejecting? <span style={{ color: t.red }}>*</span>
+            </label>
+            <textarea
+              value={rejectCancelReason}
+              onChange={e => setRejectCancelReason(e.target.value)}
+              placeholder="Operations sees this verbatim. Be specific so they can fix-and-refile."
+              autoFocus rows={4}
+              style={{ width: '100%', background: t.card2, border: `1px solid ${t.border2}`, borderRadius: '8px', padding: '10px 12px', fontSize: '12px', color: t.text1, outline: 'none', resize: 'vertical', boxSizing: 'border-box', fontFamily: 'inherit' }}
+            />
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '16px' }}>
+              <button onClick={() => { setRejectCancelTarget(null); setRejectCancelReason('') }} disabled={rejectCancelBusy}
+                style={{ background: 'transparent', border: `1px solid ${t.border2}`, borderRadius: '8px', padding: '8px 16px', fontSize: '12px', color: t.text2, cursor: rejectCancelBusy ? 'not-allowed' : 'pointer' }}>
+                Back
+              </button>
+              <button onClick={async () => {
+                const reason = rejectCancelReason.trim()
+                if (!reason) return
+                setRejectCancelBusy(true)
+                try {
+                  const r = await authedFetch('/api/consignments', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: 'reject_cancellation', id: rejectCancelTarget.id, reason }),
+                  })
+                  const j = await r.json()
+                  if (!r.ok || j.error) { showToast(j.error || 'Rejection failed', 'error'); return }
+                  showToast(j.message || 'Cancellation request rejected.', 'success')
+                  setRejectCancelTarget(null)
+                  setRejectCancelReason('')
+                  fetchCancelRequests(true)
+                } finally { setRejectCancelBusy(false) }
+              }}
+                disabled={rejectCancelBusy || !rejectCancelReason.trim()}
+                style={{
+                  background: rejectCancelReason.trim() && !rejectCancelBusy ? t.orange : `${t.orange}40`,
+                  color: '#1a0a00', border: 'none', borderRadius: '8px',
+                  padding: '8px 18px', fontSize: '12px', fontWeight: 700,
+                  cursor: rejectCancelBusy || !rejectCancelReason.trim() ? 'not-allowed' : 'pointer',
+                }}>
+                {rejectCancelBusy ? 'Rejecting…' : 'Confirm rejection'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Pulse keyframe used by the request-age dot, mirroring ConsignmentData. */}
+      <style>{`
+        @keyframes cdataChipPulse { 0%,100% { box-shadow: 0 0 0 0 currentColor; } 50% { box-shadow: 0 0 0 4px transparent; } }
+        .cdata-status-dot { animation: cdataChipPulse 2.4s ease-in-out infinite; }
+      `}</style>
     </div>
   )
 }
