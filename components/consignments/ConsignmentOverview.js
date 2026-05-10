@@ -809,7 +809,24 @@ export default function ConsignmentOverview() {
             </div>
           ) : (
             <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
+                {/* Explicit column widths so the browser can't auto-balance them
+                    and shove the Branch column far right. Branch gets a fixed
+                    slice; numeric columns share the remainder evenly. */}
+                <colgroup>
+                  <col style={{ width: '200px' }} />              {/* Branch */}
+                  <col />                                          {/* Total Bills */}
+                  <col />                                          {/* Total Net Wt */}
+                  <col />                                          {/* Today's Bills */}
+                  <col />                                          {/* Today's Net Wt */}
+                  <col />                                          {/* Today's Value */}
+                  <col />                                          {/* Pending Bills */}
+                  <col />                                          {/* Pending Net Wt */}
+                  <col />                                          {/* Pending Value */}
+                  <col style={{ width: '90px' }} />               {/* Oldest Bill */}
+                  <col style={{ width: '80px' }} />               {/* Last Moved */}
+                  <col style={{ width: '70px' }} />               {/* Pickup */}
+                </colgroup>
                 <thead style={{ position: 'sticky', top: 0, zIndex: 1 }}>
                   <tr>
                     <th style={{ ...thBase, cursor: 'pointer', color: sortKey === 'branch_name' ? t.gold : t.text4, paddingLeft: '7px', textAlign: 'left' }}
