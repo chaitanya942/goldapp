@@ -163,8 +163,95 @@ function ConsignmentBalanceView({ t, stats, isMobile }) {
     )
   }
 
+  // Lifecycle KPI band — shows the 4 numbers operations / accounts care about
+  // most: how many consignments are mid-flight, awaiting accounts approval,
+  // waiting on a cancellation decision, and how many fresh ones today.
+  // Responsive: 2x2 on mobile, single row on desktop.
+  const KpiPill = ({ label, value, color, sub, pulse }) => (
+    <div style={{
+      flex: 1, minWidth: isMobile ? 'calc(50% - 8px)' : 0,
+      position: 'relative', overflow: 'hidden',
+      background: `linear-gradient(155deg, ${color}12 0%, ${t.card2 || t.card}90 60%)`,
+      border: `1px solid ${color}35`,
+      borderRadius: 12,
+      padding: isMobile ? '10px 12px' : '12px 14px',
+    }}>
+      <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 2,
+        background: `linear-gradient(90deg, ${color} 0%, ${color}40 60%, transparent 100%)` }} />
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <span style={{ fontSize: 9, color: t.text4, letterSpacing: '.14em', textTransform: 'uppercase', fontWeight: 700 }}>{label}</span>
+        {pulse && value > 0 && <span style={{ width: 5, height: 5, borderRadius: '50%', background: color, animation: 'spin .8s ease-in-out infinite alternate' }} />}
+      </div>
+      <div style={{ fontSize: isMobile ? 20 : 24, fontWeight: 700, color, marginTop: 4, fontFamily: 'monospace', lineHeight: 1.05 }}>
+        <AnimatedNumber target={value || 0} duration={650} />
+      </div>
+      {sub && <div style={{ fontSize: 9.5, color: t.text4, marginTop: 4 }}>{sub}</div>}
+    </div>
+  )
+
+  // 7-day sparkline of dispatched consignments — built from dailySeries.
+  // Renders as a tight bar chart with the most recent days emphasised.
+  const sparkData = (stats.dailySeries || []).slice(7).map((d, i) => ({ k: i, count: d.count }))
+  const sparkMax  = Math.max(...sparkData.map(d => d.count), 1)
+  const velocityUp = (stats.velocityPct || 0) >= 0
+
   return (
     <div style={{ display:'flex', flexDirection:'column', gap: isMobile ? 14 : 18 }}>
+
+      {/* ── Lifecycle KPI strip ── */}
+      <div style={{ display: 'flex', gap: isMobile ? 8 : 10, flexWrap: 'wrap' }}>
+        <KpiPill label="In Transit"      value={stats.movementCount  || 0} color={t.blue}   sub={`${(stats.movementBills || 0)} bill${stats.movementBills === 1 ? '' : 's'}`} />
+        <KpiPill label="Awaiting Review" value={stats.pendingCount   || 0} color={t.orange} sub="accounts to approve" pulse />
+        <KpiPill label="Cancel Requests" value={stats.cancelReqCount || 0} color={t.red}    sub="ops asked to void" pulse />
+        <KpiPill label="Today"           value={stats.todayCount     || 0} color={t.green}  sub="new consignments" />
+      </div>
+
+      {/* ── 7-day sparkline + velocity ── */}
+      {sparkData.some(d => d.count > 0) && (
+        <div style={{
+          background: `linear-gradient(160deg, ${t.card2 || t.card}f8 0%, ${t.card3 || t.card}f8 100%)`,
+          border: `1px solid ${t.border}`,
+          borderRadius: 14,
+          padding: isMobile ? '12px 14px' : '14px 18px',
+          display: 'flex', alignItems: 'center', gap: isMobile ? 12 : 18,
+          flexDirection: isMobile ? 'column' : 'row',
+        }}>
+          <div style={{ minWidth: isMobile ? 'auto' : 180 }}>
+            <div style={{ fontSize: 9, color: t.text4, letterSpacing: '.14em', textTransform: 'uppercase', fontWeight: 700 }}>Last 7 days</div>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginTop: 4 }}>
+              <span style={{ fontSize: isMobile ? 22 : 26, fontWeight: 700, color: t.text1, fontFamily: 'monospace' }}>{stats.last7 || 0}</span>
+              <span style={{ fontSize: 11, color: t.text4 }}>consignments</span>
+            </div>
+            <div style={{ fontSize: 10, marginTop: 6, color: velocityUp ? t.green : t.red, fontWeight: 600 }}>
+              {velocityUp ? '▲' : '▼'} {Math.abs(stats.velocityPct || 0).toFixed(0)}%
+              <span style={{ color: t.text4, fontWeight: 500, marginLeft: 4 }}>vs prior 7d ({stats.prior7 || 0})</span>
+            </div>
+          </div>
+          <div style={{ flex: 1, display: 'flex', alignItems: 'flex-end', gap: 4, height: isMobile ? 52 : 60, width: '100%' }}>
+            {sparkData.map((d, i) => {
+              const h = sparkMax === 0 ? 2 : Math.max(3, (d.count / sparkMax) * 100)
+              const isToday = i === sparkData.length - 1
+              const accent = isToday ? t.gold : t.blue
+              return (
+                <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+                  <div title={`${d.count} consignment${d.count === 1 ? '' : 's'}`}
+                    style={{
+                      width: '100%', height: `${h}%`, minHeight: 2,
+                      background: `linear-gradient(180deg, ${accent} 0%, ${accent}50 100%)`,
+                      borderRadius: '4px 4px 2px 2px',
+                      transition: 'height .4s cubic-bezier(.4,0,.2,1)',
+                      animation: `dashGrow .5s cubic-bezier(.4,0,.2,1) ${i * 40}ms backwards`,
+                    }} />
+                  <span style={{ fontSize: 9, color: isToday ? t.gold : t.text4, fontWeight: isToday ? 700 : 500 }}>
+                    {d.count}
+                  </span>
+                </div>
+              )
+            })}
+          </div>
+          <style>{`@keyframes dashGrow { from { transform: scaleY(0); transform-origin: bottom } to { transform: scaleY(1); transform-origin: bottom } }`}</style>
+        </div>
+      )}
 
       {/* ── Total + Balance bar ───────────────────────────────────────────── */}
       <div style={{
@@ -1098,6 +1185,21 @@ export default function DashboardHome() {
           const prior7w = dailySeries.slice(0, 7).reduce((s, b) => s + b.weight, 0)
           const velocityPct = prior7 > 0 ? ((last7 - prior7) / prior7) * 100 : (last7 > 0 ? 100 : 0)
 
+          // ── Lifecycle counts derived from the consignment list ──────────
+          // Pending = accounts hasn't approved yet (after creation but before
+          // doc generation). Cancel requests = ops asked to void, awaiting
+          // accounts. Today = consignments created during the IST calendar
+          // day. Counts only include in-flight rows (excludes received,
+          // cancelled, seed).
+          const todayKey = istStr(istNow())
+          const pendingCount = inMotionList.filter(c => c.approval_status === 'pending').length
+          const cancelReqCount = inMotionList.filter(c => c.cancellation_requested_at).length
+          const todayCount = inMotionList.filter(c => {
+            if (!c.created_at) return false
+            const d = fromUtcDate(new Date(c.created_at))
+            return istStr(d) === todayKey
+          }).length
+
           setConsignStats({
             // legacy fields kept for any callers still reading them
             totalBranches: branchesActive,
@@ -1112,6 +1214,8 @@ export default function DashboardHome() {
             byState, topBranches, movementByState,
             dailySeries, last7, prior7, last7w, prior7w, velocityPct,
             riskWeight, riskValue, riskBills, aged14Weight,
+            // lifecycle counts for the dashboard KPI strip
+            pendingCount, cancelReqCount, todayCount,
           })
         }).catch(() => {})
       )
