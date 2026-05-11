@@ -1149,7 +1149,12 @@ export default function DashboardHome() {
     })
   }, [showPurchase, regionAccess.restricted, JSON.stringify(regionAccess.regions || [])])
 
-  useEffect(() => { if (showPurchase) { fetchAll(); setLastRefresh(new Date()) } }, [period, showPurchase, filterType, filterValue, regionAccess.restricted, JSON.stringify(regionAccess.regions || []), branchMeta.length]) // eslint-disable-line react-hooks/exhaustive-deps
+  // Re-run fetchAll whenever fresh purchases land in the DB. lastSyncAt is
+  // polled every 30s from purchases.updated_at, so the dashboard catches the
+  // post-sync state shortly after the fire-and-forget /sync-purchases finishes
+  // (previously the dashboard rendered pre-sync data and only refreshed if
+  // you navigated away and back).
+  useEffect(() => { if (showPurchase) { fetchAll(); setLastRefresh(new Date()) } }, [period, showPurchase, filterType, filterValue, regionAccess.restricted, JSON.stringify(regionAccess.regions || []), branchMeta.length, lastSyncAt]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Auto-refresh every 3 minutes when viewing Today
   useEffect(() => {
