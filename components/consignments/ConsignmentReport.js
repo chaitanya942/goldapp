@@ -405,49 +405,101 @@ export default function ConsignmentReport() {
         })}
       </div>
 
-      {/* Filter bar */}
-      <div style={{ ...card, padding: isMobile ? '10px 12px' : '14px 18px' }}>
-        <div style={{ display: 'flex', gap: '5px', overflowX: 'auto', marginBottom: '10px', scrollbarWidth: 'none' }}>
-          {[['7D', () => setQuickRange(7)], ['30D', () => setQuickRange(30)], ['90D', () => setQuickRange(90)], ['This Month', setThisMonth], ['All', () => { setFromDate(''); setToDate('') }]].map(([lbl, fn]) => (
-            <button key={lbl} onClick={fn} style={{ padding: '5px 12px', borderRadius: '100px', border: `1px solid ${t.border}`, background: 'transparent', color: t.text3, fontSize: '11px', cursor: 'pointer', flexShrink: 0 }}>{lbl}</button>
-          ))}
-        </div>
-        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <span style={{ fontSize: '10px', color: t.text4 }}>From</span>
-            <input type="date" style={inp} value={fromDate} onChange={e => setFromDate(e.target.value)} />
+      {/* Filter bar — date quick chips + grouped fields + search.
+          Mobile: search becomes full-width on its own row, dates stack
+          before the selects so the cursor flow matches reading order. */}
+      {(() => {
+        // Detect which quick-date chip is currently "active" by comparing
+        // against the recipe each chip would produce. Lets the operator see
+        // which preset they're on at a glance.
+        const today = new Date().toISOString().slice(0, 10)
+        const daysAgo = (n) => { const d = new Date(); d.setDate(d.getDate() - n + 1); return d.toISOString().slice(0, 10) }
+        const monthStart = (() => { const n = new Date(); return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}-01` })()
+        const presetActive =
+          !fromDate && !toDate                                       ? 'all'
+          : fromDate === daysAgo(7)   && toDate === today            ? '7d'
+          : fromDate === daysAgo(30)  && toDate === today            ? '30d'
+          : fromDate === daysAgo(90)  && toDate === today            ? '90d'
+          : fromDate === monthStart   && toDate === today            ? 'month'
+          : null
+        const presets = [
+          { id: '7d',    label: 'Last 7d',    fn: () => setQuickRange(7),  color: t.green  },
+          { id: '30d',   label: 'Last 30d',   fn: () => setQuickRange(30), color: t.blue   },
+          { id: '90d',   label: 'Last 90d',   fn: () => setQuickRange(90), color: t.purple },
+          { id: 'month', label: 'This Month', fn: setThisMonth,            color: t.orange },
+          { id: 'all',   label: 'All',        fn: () => { setFromDate(''); setToDate('') }, color: t.gold },
+        ]
+        const Chip = ({ active, color, onClick, children }) => (
+          <button onClick={onClick}
+            style={{
+              padding: '5px 12px',
+              borderRadius: '99px',
+              background: active ? `${color}22` : 'transparent',
+              border: `1px solid ${active ? `${color}70` : t.border}`,
+              color: active ? color : t.text3,
+              fontSize: '11px',
+              fontWeight: active ? 700 : 500,
+              cursor: 'pointer',
+              flexShrink: 0,
+              transition: 'background .15s, border-color .15s, color .15s',
+              whiteSpace: 'nowrap',
+            }}>
+            {children}
+          </button>
+        )
+        return (
+          <div style={{ ...card, padding: isMobile ? '12px 12px' : '14px 18px', display: 'flex', flexDirection: 'column', gap: isMobile ? '10px' : '10px' }}>
+            {/* Row 1 — quick-date chips, scrollable on mobile */}
+            <div style={{ display: 'flex', gap: '6px', overflowX: 'auto', scrollbarWidth: 'none', alignItems: 'center' }}>
+              <span style={{ fontSize: '10px', color: t.text4, letterSpacing: '.08em', textTransform: 'uppercase', fontWeight: 600, marginRight: '2px', flexShrink: 0 }}>Range</span>
+              {presets.map(p => (
+                <Chip key={p.id} active={presetActive === p.id} color={p.color} onClick={p.fn}>{p.label}</Chip>
+              ))}
+            </div>
+            {/* Row 2 — custom date inputs (when no preset matches) + selects + search */}
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+              <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                <span style={{ fontSize: '10px', color: t.text4 }}>From</span>
+                <input type="date" style={{ ...inp, padding: '7px 10px' }} value={fromDate} onChange={e => setFromDate(e.target.value)} max={toDate || undefined} />
+              </div>
+              <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                <span style={{ fontSize: '10px', color: t.text4 }}>To</span>
+                <input type="date" style={{ ...inp, padding: '7px 10px' }} value={toDate} onChange={e => setToDate(e.target.value)} min={fromDate || undefined} />
+              </div>
+              {!regionAccess.single && (
+                <select style={inp} value={filterRegion} onChange={e => setFilterRegion(e.target.value)}>
+                  <option value="">All Regions</option>
+                  {(regionAccess.restricted ? regions.filter(r => regionAccess.regions.includes(r.region)) : regions)
+                    .map(r => <option key={r.region || r} value={r.region || r}>{r.region || r}</option>)}
+                </select>
+              )}
+              <select style={inp} value={filterBranch} onChange={e => setFilterBranch(e.target.value)}>
+                <option value="">All Branches</option>
+                {[...new Set([...consignments.map(c => c.branch_name), ...inTransitBills.map(b => b.branch_name)])]
+                  .filter(b => !regionAccess.restricted || regionAccess.regions.includes(branchByName[b]?.region))
+                  .sort()
+                  .map(b => <option key={b} value={b}>{b}</option>)}
+              </select>
+              <select style={inp} value={filterType} onChange={e => setFilterType(e.target.value)}>
+                <option value="">All Types</option>
+                <option value="EXTERNAL">Branch → HO</option>
+                <option value="INTERNAL">Branch → Hub</option>
+              </select>
+              <div style={{ position: 'relative', flex: 1, minWidth: isMobile ? '100%' : '200px' }}>
+                <span style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: t.text4, fontSize: '13px', pointerEvents: 'none' }}>⌕</span>
+                <input style={{ ...inp, paddingLeft: '28px', width: '100%', boxSizing: 'border-box' }}
+                  placeholder="Search PRF / branch / customer…" value={search} onChange={e => setSearch(e.target.value)} />
+              </div>
+              {hasFilters && (
+                <button onClick={() => { setFromDate(''); setToDate(''); setFilterRegion(''); setFilterType(''); setFilterBranch(''); setSearch('') }}
+                  style={{ ...inp, color: t.gold, background: `${t.gold}10`, borderColor: `${t.gold}55`, padding: '7px 12px', fontWeight: 600 }}>
+                  Clear all
+                </button>
+              )}
+            </div>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <span style={{ fontSize: '10px', color: t.text4 }}>To</span>
-            <input type="date" style={inp} value={toDate} onChange={e => setToDate(e.target.value)} />
-          </div>
-          {/* Region dropdown — hidden when user is restricted to a single region */}
-          {!regionAccess.single && (
-            <select style={inp} value={filterRegion} onChange={e => setFilterRegion(e.target.value)}>
-              <option value="">All Regions</option>
-              {(regionAccess.restricted ? regions.filter(r => regionAccess.regions.includes(r.region)) : regions)
-                .map(r => <option key={r.region || r} value={r.region || r}>{r.region || r}</option>)}
-            </select>
-          )}
-          <select style={inp} value={filterBranch} onChange={e => setFilterBranch(e.target.value)}>
-            <option value="">All Branches</option>
-            {[...new Set([...consignments.map(c => c.branch_name), ...inTransitBills.map(b => b.branch_name)])]
-              .filter(b => !regionAccess.restricted || regionAccess.regions.includes(branchByName[b]?.region))
-              .sort()
-              .map(b => <option key={b} value={b}>{b}</option>)}
-          </select>
-          <select style={inp} value={filterType} onChange={e => setFilterType(e.target.value)}>
-            <option value="">All Types</option>
-            <option value="EXTERNAL">Branch → HO</option>
-            <option value="INTERNAL">Branch → Hub</option>
-          </select>
-          <input style={{ ...inp, minWidth: '180px' }} placeholder="Search PRF / branch / customer…" value={search} onChange={e => setSearch(e.target.value)} />
-          {hasFilters && (
-            <button onClick={() => { setFromDate(''); setToDate(''); setFilterRegion(''); setFilterType(''); setFilterBranch(''); setSearch('') }}
-              style={{ ...inp, color: t.gold, borderColor: `${t.gold}40`, padding: '8px 14px' }}>Clear all</button>
-          )}
-        </div>
-      </div>
+        )
+      })()}
 
       {/* KPI Row 1: Volume — same shape both modes */}
       <KpiGrid t={t} isMobile={isMobile} cols={4}>
