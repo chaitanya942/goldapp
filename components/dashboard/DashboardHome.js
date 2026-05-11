@@ -422,33 +422,34 @@ function DashConsSection({ t, title, subtitle, accent, regions, getTotals, getBr
                   boxShadow: `0 0 0 3px ${color}25, 0 0 8px ${color}50`,
                 }} />
                 <span style={{ fontSize: 13.5, color: t.text1, fontWeight: 600, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', letterSpacing: '-.005em' }}>{r}</span>
-                <span style={{ fontSize: 10.5, color: t.text3, fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
-                  <span style={{ color: t.text4 }}>{rowCount} {countLabel}</span>
-                  <span style={{ color: t.border, margin: '0 5px' }}>·</span>
-                  <strong style={{ color: t.text2 }}>{tot.bills}</strong>
-                  <span style={{ color: t.text4 }}> bills</span>
-                  <span style={{ color: t.border, margin: '0 5px' }}>·</span>
-                  <strong style={{ color: t.gold }}>{fmtWtDash(tot.netWt)}</strong>
-                </span>
-                {/* Today's net-weight badge — green pill, only when > 0.
-                    Shows weight rather than bill count: more meaningful as a
-                    "today's inflow" metric for management. */}
-                {tot.todayNetWt > 0 && (
-                  <span title={`${tot.todayBills} bill${tot.todayBills === 1 ? '' : 's'} totalling ${fmtWtDash(tot.todayNetWt)} added today in this region`}
-                    style={{ fontSize: 9, color: t.green, background: `${t.green}15`, border: `1px solid ${t.green}40`, padding: '2px 7px', borderRadius: 99, fontWeight: 700, fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
-                    +{fmtWtDash(tot.todayNetWt)}
+                {/* Per-region metrics. Sized + weighted so they read clearly
+                    at a glance — no need to lean in. Today's-weight badge
+                    has been removed from this row (it's still surfaced at
+                    the section level). Each value gets its own micro-block
+                    so the numbers stand out from their labels. */}
+                <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: 14, fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
+                  <span>
+                    <strong style={{ color: t.text1, fontSize: 13, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{rowCount}</strong>
+                    <span style={{ color: t.text4, fontSize: 10, marginLeft: 3 }}>{countLabel}</span>
                   </span>
-                )}
+                  <span>
+                    <strong style={{ color: t.text1, fontSize: 13, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{tot.bills}</strong>
+                    <span style={{ color: t.text4, fontSize: 10, marginLeft: 3 }}>bills</span>
+                  </span>
+                  <span style={{ color: t.gold, fontSize: 13.5, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
+                    {fmtWtDash(tot.netWt)}
+                  </span>
+                </span>
                 {/* Urgency badge — red pill when any branch has oldest > 7d */}
                 {tot.maxOldestDays > 7 && (
                   <span title={`Oldest bill in this region is ${tot.maxOldestDays} days old`}
                     className="logi-pulse"
-                    style={{ fontSize: 9, color: t.red, background: `${t.red}15`, border: `1px solid ${t.red}45`, padding: '2px 7px', borderRadius: 99, fontWeight: 700, fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
+                    style={{ fontSize: 9.5, color: t.red, background: `${t.red}15`, border: `1px solid ${t.red}45`, padding: '2px 7px', borderRadius: 99, fontWeight: 700, fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
                     {tot.maxOldestDays}d
                   </span>
                 )}
                 {/* Per-row share indicator: small pill showing % of section total */}
-                <span style={{ fontSize: 9.5, color, fontFamily: 'monospace', fontWeight: 700, background: `${color}15`, padding: '2px 7px', borderRadius: 99, border: `1px solid ${color}30`, whiteSpace: 'nowrap' }}>
+                <span style={{ fontSize: 10, color, fontFamily: 'monospace', fontWeight: 700, background: `${color}15`, padding: '2px 8px', borderRadius: 99, border: `1px solid ${color}30`, whiteSpace: 'nowrap' }}>
                   {(share * 100).toFixed(0)}%
                 </span>
                 <span style={{ fontSize: 10, color: t.text4, transform: open ? 'rotate(0)' : 'rotate(-90deg)', transition: 'transform .25s', marginLeft: 2 }}>▾</span>
