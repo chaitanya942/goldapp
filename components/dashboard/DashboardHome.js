@@ -638,7 +638,9 @@ export default function DashboardHome() {
     if (canSee('consignment-overview') || canSee('consignment-data')) {
       ps.push(
         Promise.all([
-          authedFetch('/api/consignments?action=branch_overview&status=at_branch').then(r => r.json()).catch(() => ({ data: [] })),
+          // at_branch: outstation full + Bangalore today-only.
+          authedFetch('/api/consignments?action=branch_overview&status=at_branch&include_bangalore_today=true').then(r => r.json()).catch(() => ({ data: [] })),
+          // in_consignment: outstation only (Bangalore doesn't dispatch via consignment).
           authedFetch('/api/consignments?action=branch_overview&status=in_consignment').then(r => r.json()).catch(() => ({ data: [] })),
           // Still pulled for the legacy roll-up fields (movementBills, etc).
           // The new region-grouped overview reads from in-transit rows above.
