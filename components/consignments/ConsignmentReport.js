@@ -40,6 +40,25 @@ const REGION_COLOR = {
   'Bangalore':         '#e05555',
 }
 
+// Compact weight formatter — switches to kg above 1000g. Used by the
+// region-grouped in-transit view ported from the dashboard.
+const fmtWtCompact = (g) => {
+  const n = Number(g || 0)
+  if (n >= 1000) return `${(n / 1000).toFixed(2)} kg`
+  return `${n.toFixed(0)} g`
+}
+
+// Compact age formatter — 'today' / '1d' / 'Nd'. Falls back to em dash for null.
+const fmtAgeCompact = (d) => {
+  if (!d) return '—'
+  const ms = Date.now() - new Date(d).getTime()
+  if (ms < 0) return 'today'
+  const days = Math.floor(ms / 86400000)
+  if (days === 0) return 'today'
+  if (days === 1) return '1d'
+  return `${days}d`
+}
+
 const SECTIONS_IN = [
   { key: 'trends',       label: 'Trends',       icon: '↗' },
   { key: 'movement',     label: 'Movement Log', icon: '⇄' },
@@ -67,6 +86,10 @@ export default function ConsignmentReport() {
   const [consignments,   setConsignments]   = useState([])
   const [inTransitBills, setInTransitBills] = useState([])
   const [atBranchBills,  setAtBranchBills]  = useState([])
+  // Per-branch roll-up for the In Consignment view (same shape the dashboard's
+  // Consignment Overview reads) — fed by branch_stock_summary RPC via
+  // /api/consignments?action=branch_overview&status=in_consignment.
+  const [inTransitOverview, setInTransitOverview] = useState([])
   const [branches,       setBranches]       = useState([])
   const [loading,        setLoading]        = useState(true)
   const [toast,          setToast]          = useState(null)
@@ -93,16 +116,21 @@ export default function ConsignmentReport() {
   async function fetchAll() {
     setLoading(true)
     try {
-      const [cR, bR, sR, abR] = await Promise.all([
+      const [cR, bR, sR, abR, ovR] = await Promise.all([
         authedFetch('/api/consignments?action=consignments'),
         authedFetch('/api/consignments?action=branches'),
         authedFetch('/api/consignments?action=in_transit_stock'),
         authedFetch('/api/consignments?action=at_branch_stock'),
+        // Per-branch in-transit roll-up — same RPC the dashboard reads.
+        // include_bangalore=true so Bangalore branches in the in_consignment
+        // window (19:30 IST → midnight) appear in the view too.
+        authedFetch('/api/consignments?action=branch_overview&status=in_consignment&include_bangalore=true'),
       ])
       setConsignments(((await cR.json()).data || []).filter(isInFlight))
       setBranches((await bR.json()).data || [])
       setInTransitBills((await sR.json()).data || [])
       setAtBranchBills((await abR.json()).data || [])
+      setInTransitOverview((await ovR.json()).data || [])
     } catch (e) {
       setToast({ msg: e.message || 'Load failed', type: 'error' })
     }
@@ -405,6 +433,20 @@ export default function ConsignmentReport() {
         })}
       </div>
 
+      {/* ── IN CONSIGNMENT MODE ─────────────────────────────────────────────
+          Region-grouped, expandable per-branch view — a direct port of the
+          dashboard's Consignment Overview component, fed by the same
+          branch_stock_summary RPC (status=in_consignment). Replaces the
+          old KPI grids / charts / section nav for this tab. */}
+      {mode === 'in_consignment' && (
+        <InTransitOverview rows={inTransitOverview} t={t} isMobile={isMobile} />
+      )}
+
+      {/* ── AT BRANCH MODE ──────────────────────────────────────────────────
+          Existing analytics flow: filter bar → KPI rows → region pills →
+          insights → section nav → sections. Untouched in this iteration. */}
+      {mode === 'at_branch' && <>
+
       {/* Filter bar — date quick chips + grouped fields + search.
           Mobile: search becomes full-width on its own row, dates stack
           before the selects so the cursor flow matches reading order. */}
@@ -571,6 +613,8 @@ export default function ConsignmentReport() {
       {mode === 'in_consignment' && showSection('routes')       && <SectionRoutes       byRoute={byRoute}         t={t} card={card} />}
       {mode === 'in_consignment' && showSection('aging')        && <SectionAging        consignments={filteredCons} t={t} card={card} />}
       {mode === 'in_consignment' && showSection('untracked')    && <SectionUntracked    bills={filteredBills}     t={t} card={card} />}
+
+      </>}
 
       {toast && <Toast msg={toast.msg} type={toast.type} onDone={() => setToast(null)} />}
     </div>
@@ -1038,6 +1082,405 @@ function SectionUntracked({ bills, t, card }) {
           )}
         </tbody>
       </table>
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// IN TRANSIT OVERVIEW — region-grouped, expandable per-branch view ported from
+// the dashboard's Consignment Overview. Same look, same RPC, same shape.
+// `rows` are per-branch from /api/consignments?action=branch_overview
+//        &status=in_consignment&include_bangalore=true.
+// ─────────────────────────────────────────────────────────────────────────────
+function InTransitOverview({ rows, t, isMobile }) {
+  const [filterRegion, setFilterRegion] = useState('all')
+  const [expanded,     setExpanded]     = useState(() => new Set())
+
+  // Filter to branches with at least one bill in transit.
+  const transitRows = (rows || []).filter(b => ((b.today_bills || 0) + (b.older_bills || 0)) > 0)
+
+  const allRegions = [...new Set(transitRows.map(b => b.region).filter(Boolean))].sort()
+  const filtered   = filterRegion === 'all' ? transitRows : transitRows.filter(b => b.region === filterRegion)
+
+  // Group by region; rows are already per-branch.
+  const byRegion = {}
+  for (const b of filtered) {
+    const r = b.region || 'Other'
+    if (!byRegion[r]) byRegion[r] = []
+    byRegion[r].push(b)
+  }
+
+  // Per-region totals — same shape as the dashboard's `regionTotals` so the
+  // ported section component reads the same fields without modification.
+  const regionTotals = (region) => {
+    const rs = byRegion[region] || []
+    return {
+      branchCount:   rs.length,
+      bills:         rs.reduce((s, b) => s + (b.today_bills || 0) + (b.older_bills || 0), 0),
+      todayBills:    rs.reduce((s, b) => s + (b.today_bills || 0), 0),
+      todayNetWt:    rs.reduce((s, b) => s + Number(b.today_net_wt || 0), 0),
+      netWt:         rs.reduce((s, b) => s + Number(b.total_net_wt || 0), 0),
+      maxOldestDays: rs.reduce((m, b) => Math.max(m, b.oldest_age_days || 0), 0),
+    }
+  }
+
+  const toggle = (r) => setExpanded(prev => {
+    const next = new Set(prev)
+    if (next.has(r)) next.delete(r); else next.add(r)
+    return next
+  })
+
+  const regions = Object.keys(byRegion).sort()
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      {/* Region filter chips */}
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+        <span style={{ fontSize: 10, color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 700, marginRight: 4 }}>Region</span>
+        <ConsReportFilterPill active={filterRegion === 'all'} color={t.gold} onClick={() => setFilterRegion('all')} t={t}>All</ConsReportFilterPill>
+        {allRegions.map(r => (
+          <ConsReportFilterPill key={r} active={filterRegion === r} color={REGION_COLOR[r] || t.gold} onClick={() => setFilterRegion(r)} t={t}>{r}</ConsReportFilterPill>
+        ))}
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 14 }}>
+        <ConsReportSection
+          t={t} title="In Transit" subtitle="bills currently in flight" accent={t.blue}
+          regions={regions}
+          getTotals={regionTotals}
+          getBranches={(r) => byRegion[r] || []}
+          getBranchView={(b) => ({
+            name:   b.branch_name,
+            bills:  (b.today_bills || 0) + (b.older_bills || 0),
+            netWt:  Number(b.total_net_wt || 0),
+            oldest: b.oldest_date,
+          })}
+          expanded={expanded} onToggle={toggle}
+          countLabel="br"
+          onSegmentClick={(r) => setFilterRegion(filterRegion === r ? 'all' : r)}
+        />
+      </div>
+
+      {/* Animations + hover states — copied from the dashboard so the look
+          stays in lock-step. prefers-reduced-motion honoured. */}
+      <style>{`
+        @keyframes consRptRowIn    { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes consRptBranchIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes consRptRowBar   { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+        @keyframes consRptExpand   { from { opacity: 0; max-height: 0; } to { opacity: 1; max-height: 600px; } }
+        @keyframes consRptGrow     { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+        .cons-rpt-region-row:hover {
+          background: color-mix(in srgb, var(--region-color) 8%, transparent) !important;
+        }
+        .cons-rpt-region-row:hover > span:first-child {
+          box-shadow: 0 0 0 5px color-mix(in srgb, var(--region-color) 35%, transparent) !important;
+          transition: box-shadow .2s ease;
+        }
+        .cons-rpt-branch-row:hover { background: rgba(201,168,76,.04); }
+        @media (prefers-reduced-motion: reduce) {
+          .cons-rpt-region-row, .cons-rpt-branch-row { animation: none !important; }
+        }
+      `}</style>
+    </div>
+  )
+}
+
+function ConsReportFilterPill({ active, color, onClick, t, children }) {
+  return (
+    <button onClick={onClick}
+      style={{
+        padding: '5px 11px',
+        background: active ? `${color}22` : 'transparent',
+        border: `1px solid ${active ? `${color}70` : t.border}`,
+        color: active ? color : t.text3,
+        borderRadius: '99px',
+        fontSize: 11,
+        fontWeight: active ? 700 : 500,
+        cursor: 'pointer',
+        whiteSpace: 'nowrap',
+        transition: 'all .15s ease',
+      }}>
+      {children}
+    </button>
+  )
+}
+
+function ConsReportSection({ t, title, subtitle, accent, regions, getTotals, getBranches, getBranchView, expanded, onToggle, countLabel, onSegmentClick }) {
+  // Per-section sort. 'weight' = net wt desc (default).
+  const [sortKey, setSortKey] = useState('weight')
+
+  // Section roll-up — top summary + share-of-total bars.
+  const sectionTotals = regions.reduce((acc, r) => {
+    const tot = getTotals(r)
+    acc.bills      += tot.bills
+    acc.todayBills += tot.todayBills || 0
+    acc.todayNetWt += tot.todayNetWt || 0
+    acc.netWt      += tot.netWt
+    acc.units      += tot.branchCount != null ? tot.branchCount : tot.consignmentCount
+    return acc
+  }, { bills: 0, todayBills: 0, todayNetWt: 0, netWt: 0, units: 0 })
+
+  // Region share data — share % computed from net weight so the bar still
+  // aligns with the section's primary metric regardless of sort key.
+  const distribution = regions.map(r => {
+    const tot = getTotals(r)
+    return { r, tot, share: sectionTotals.netWt > 0 ? tot.netWt / sectionTotals.netWt : 0 }
+  }).sort((a, b) => {
+    if (sortKey === 'bills')  return b.tot.bills - a.tot.bills
+    if (sortKey === 'oldest') return (b.tot.maxOldestDays || 0) - (a.tot.maxOldestDays || 0)
+    if (sortKey === 'name')   return a.r.localeCompare(b.r)
+    return b.share - a.share  // default: weight
+  })
+
+  const SortBtn = ({ k, label }) => {
+    const active = sortKey === k
+    return (
+      <button onClick={() => setSortKey(k)}
+        style={{
+          padding: '3px 9px',
+          borderRadius: 99,
+          background: active ? `${accent}22` : 'transparent',
+          border: `1px solid ${active ? `${accent}60` : t.border}`,
+          color: active ? accent : t.text4,
+          fontSize: 9.5, fontWeight: active ? 700 : 500,
+          cursor: 'pointer', letterSpacing: '.04em',
+          transition: 'all .12s ease',
+        }}>
+        {label}
+      </button>
+    )
+  }
+
+  return (
+    <div style={{
+      position: 'relative', overflow: 'hidden',
+      background: `linear-gradient(165deg, ${t.card} 0%, ${t.card2 || t.card} 100%)`,
+      border: `1px solid ${t.border}`,
+      borderTop: `2px solid ${accent}55`,
+      borderRadius: 14,
+      boxShadow: `0 1px 0 ${accent}08 inset, 0 4px 16px rgba(0,0,0,.12)`,
+      transition: 'border-color .2s, box-shadow .25s',
+    }}>
+      {/* Watermark glow */}
+      <div aria-hidden style={{
+        position: 'absolute', top: -50, right: -60, width: 180, height: 180,
+        borderRadius: '50%', pointerEvents: 'none',
+        background: `radial-gradient(circle, ${accent}15 0%, transparent 65%)`,
+      }} />
+
+      {/* Header — title + subtitle */}
+      <div style={{
+        position: 'relative', zIndex: 1,
+        padding: '14px 18px',
+        borderBottom: `1px solid ${t.border}`,
+        background: `linear-gradient(90deg, ${accent}1a 0%, ${accent}06 35%, transparent 70%)`,
+        display: 'flex', alignItems: 'center', gap: 10,
+      }}>
+        <div style={{ width: 3, height: 22, borderRadius: 2, background: `linear-gradient(180deg, ${accent} 0%, ${accent}40 100%)`, boxShadow: `0 0 10px ${accent}60` }} />
+        <span style={{ fontSize: 12.5, color: accent, letterSpacing: '.16em', fontWeight: 700, textTransform: 'uppercase' }}>{title}</span>
+        <span style={{ fontSize: 10, color: t.text4, letterSpacing: '.04em' }}>· {subtitle}</span>
+      </div>
+
+      {/* Section summary — hero number + distribution bar */}
+      {regions.length > 0 && (
+        <div style={{
+          position: 'relative', zIndex: 1,
+          padding: '18px 18px 16px', borderBottom: `1px solid ${t.border}40`,
+        }}>
+          <div style={{ display: 'flex', alignItems: 'flex-end', gap: 14, flexWrap: 'wrap', marginBottom: 14 }}>
+            <div>
+              <div style={{ fontSize: 9, color: t.text4, letterSpacing: '.16em', textTransform: 'uppercase', fontWeight: 700, marginBottom: 4 }}>Total Net Wt</div>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+                <span style={{
+                  fontSize: 32, fontWeight: 200, color: t.text1,
+                  fontFamily: 'monospace', lineHeight: 1, letterSpacing: '-.02em',
+                  fontVariantNumeric: 'tabular-nums',
+                }}>
+                  {fmtWtCompact(sectionTotals.netWt).replace(/\s.+/, '')}
+                </span>
+                <span style={{ fontSize: 13, color: t.text3, fontWeight: 500 }}>{fmtWtCompact(sectionTotals.netWt).split(' ')[1] || 'g'}</span>
+              </div>
+              {sectionTotals.todayNetWt > 0 && (
+                <div style={{ marginTop: 6, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                  <span style={{ width: 5, height: 5, borderRadius: '50%', background: t.green, color: t.green }} />
+                  <span title={`${sectionTotals.todayBills} bill${sectionTotals.todayBills === 1 ? '' : 's'} totalling ${fmtWtCompact(sectionTotals.todayNetWt)} added today across this section`}
+                    style={{ fontSize: 10, color: t.green, fontWeight: 700, fontFamily: 'monospace', letterSpacing: '.02em' }}>
+                    +{fmtWtCompact(sectionTotals.todayNetWt)} TODAY
+                  </span>
+                </div>
+              )}
+            </div>
+            <div style={{ display: 'flex', gap: 18, marginLeft: 'auto', alignItems: 'flex-end' }}>
+              <div style={{ textAlign: 'right' }}>
+                <div style={{ fontSize: 9, color: t.text4, letterSpacing: '.14em', textTransform: 'uppercase', fontWeight: 700 }}>{countLabel === 'br' ? 'Branches' : 'Consignments'}</div>
+                <div style={{ fontSize: 16, color: t.text1, fontWeight: 700, fontFamily: 'monospace', marginTop: 2 }}>{sectionTotals.units}</div>
+              </div>
+              <div style={{ textAlign: 'right' }}>
+                <div style={{ fontSize: 9, color: t.text4, letterSpacing: '.14em', textTransform: 'uppercase', fontWeight: 700 }}>Bills</div>
+                <div style={{ fontSize: 16, color: t.text1, fontWeight: 700, fontFamily: 'monospace', marginTop: 2 }}>{sectionTotals.bills}</div>
+              </div>
+            </div>
+          </div>
+          {/* Sort selector — only picks the region order; visual layout is unchanged. */}
+          {regions.length > 1 && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10, flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 9, color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 700, marginRight: 2 }}>Sort</span>
+              <SortBtn k="weight" label="Weight" />
+              <SortBtn k="bills"  label="Bills" />
+              <SortBtn k="oldest" label="Oldest" />
+              <SortBtn k="name"   label="Region" />
+            </div>
+          )}
+          {/* Stacked distribution bar — clickable segments filter to a region. */}
+          {sectionTotals.netWt > 0 && (
+            <div style={{
+              display: 'flex', height: 12, borderRadius: 7, overflow: 'hidden',
+              background: `${t.border}50`,
+              boxShadow: `inset 0 1px 2px rgba(0,0,0,.18)`,
+              cursor: onSegmentClick ? 'pointer' : 'default',
+            }}>
+              {distribution.map(({ r, tot, share }, i) => {
+                const color = REGION_COLOR[r] || t.text3
+                const widthPct = share * 100
+                if (widthPct < 0.5) return null
+                return (
+                  <div key={r}
+                    onClick={() => onSegmentClick && onSegmentClick(r)}
+                    title={`${r}: ${fmtWtCompact(tot.netWt)} (${(share * 100).toFixed(1)}%) — click to filter`}
+                    style={{
+                      width: `${widthPct}%`,
+                      background: `linear-gradient(180deg, ${color} 0%, ${color}cc 100%)`,
+                      boxShadow: `inset 0 1px 0 rgba(255,255,255,.18)`,
+                      transition: 'width .6s cubic-bezier(.4,0,.2,1), opacity .15s, transform .15s',
+                      animation: `consRptGrow .6s cubic-bezier(.4,0,.2,1) ${i * 80}ms backwards`,
+                      transformOrigin: 'left',
+                    }}
+                    onMouseEnter={e => { if (onSegmentClick) e.currentTarget.style.opacity = '.7' }}
+                    onMouseLeave={e => { if (onSegmentClick) e.currentTarget.style.opacity = '1' }}
+                  />
+                )
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      <div>
+        {regions.length === 0 ? (
+          <div style={{ padding: '32px 18px', textAlign: 'center', color: t.text4, fontSize: 12 }}>No data</div>
+        ) : distribution.map(({ r, tot, share }, idx) => {
+          const branches = getBranches(r)
+          const color = REGION_COLOR[r] || t.text3
+          const open = expanded.has(r)
+          const rowCount = tot.branchCount != null ? tot.branchCount : tot.consignmentCount
+          return (
+            <div key={r}
+              style={{
+                borderTop: `1px solid ${t.border}30`,
+                animation: `consRptRowIn .35s cubic-bezier(.4,0,.2,1) ${idx * 50}ms backwards`,
+              }}>
+              <button onClick={() => onToggle(r)}
+                className="cons-rpt-region-row"
+                style={{
+                  position: 'relative', overflow: 'hidden',
+                  width: '100%', textAlign: 'left',
+                  background: open ? `linear-gradient(90deg, ${color}18 0%, ${color}06 50%, transparent 100%)` : 'transparent',
+                  border: 'none', cursor: 'pointer',
+                  padding: '15px 16px 13px 20px',
+                  display: 'flex', alignItems: 'center', gap: 10,
+                  transition: 'background .18s, transform .12s',
+                  ['--region-color']: color,
+                }}>
+                {/* Left edge accent stripe in the region's colour */}
+                <span aria-hidden style={{
+                  position: 'absolute', left: 0, top: 0, bottom: 0, width: 3,
+                  background: `linear-gradient(180deg, ${color} 0%, ${color}60 100%)`,
+                  boxShadow: `0 0 8px ${color}40`,
+                }} />
+                <span style={{
+                  width: 10, height: 10, borderRadius: '50%',
+                  background: color, flexShrink: 0,
+                  boxShadow: `0 0 0 3px ${color}25, 0 0 8px ${color}50`,
+                }} />
+                <span style={{ fontSize: 13.5, color: t.text1, fontWeight: 600, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', letterSpacing: '-.005em' }}>{r}</span>
+                {/* Per-region metrics — sized + weighted so they read clearly at a glance. */}
+                <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: 14, fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
+                  <span>
+                    <strong style={{ color: t.text1, fontSize: 13, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{rowCount}</strong>
+                    <span style={{ color: t.text4, fontSize: 10, marginLeft: 3 }}>{countLabel}</span>
+                  </span>
+                  <span>
+                    <strong style={{ color: t.text1, fontSize: 13, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{tot.bills}</strong>
+                    <span style={{ color: t.text4, fontSize: 10, marginLeft: 3 }}>bills</span>
+                  </span>
+                  <span style={{ color: t.gold, fontSize: 13.5, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
+                    {fmtWtCompact(tot.netWt)}
+                  </span>
+                </span>
+                {/* Urgency badge — red pill when any branch has oldest > 7d */}
+                {tot.maxOldestDays > 7 && (
+                  <span title={`Oldest bill in this region is ${tot.maxOldestDays} days old`}
+                    style={{ fontSize: 9.5, color: t.red, background: `${t.red}15`, border: `1px solid ${t.red}45`, padding: '2px 7px', borderRadius: 99, fontWeight: 700, fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
+                    {tot.maxOldestDays}d
+                  </span>
+                )}
+                {/* Per-row share pill */}
+                <span style={{ fontSize: 10, color, fontFamily: 'monospace', fontWeight: 700, background: `${color}15`, padding: '2px 8px', borderRadius: 99, border: `1px solid ${color}30`, whiteSpace: 'nowrap' }}>
+                  {(share * 100).toFixed(0)}%
+                </span>
+                <span style={{ fontSize: 10, color: t.text4, transform: open ? 'rotate(0)' : 'rotate(-90deg)', transition: 'transform .25s', marginLeft: 2 }}>▾</span>
+                {/* Bottom share bar */}
+                <span style={{
+                  position: 'absolute', bottom: 0, left: 3,
+                  height: 3, width: `${share * 100}%`,
+                  background: `linear-gradient(90deg, ${color} 0%, ${color}50 100%)`,
+                  boxShadow: `0 0 4px ${color}40`,
+                  transition: 'width .6s cubic-bezier(.4,0,.2,1)',
+                  animation: `consRptRowBar .6s cubic-bezier(.4,0,.2,1) ${idx * 60 + 200}ms backwards`,
+                  transformOrigin: 'left',
+                }} />
+              </button>
+              {open && (
+                <div style={{
+                  background: `${color}06`,
+                  padding: '4px 0 10px',
+                  animation: 'consRptExpand .25s cubic-bezier(.4,0,.2,1)',
+                }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 56px 80px 50px', gap: 8, padding: '8px 14px 4px', fontSize: 9, color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 700 }}>
+                    <span>Branch</span>
+                    <span style={{ textAlign: 'right' }}>Bills</span>
+                    <span style={{ textAlign: 'right' }}>Net Wt</span>
+                    <span style={{ textAlign: 'right' }}>Oldest</span>
+                  </div>
+                  {branches.map((b, i) => {
+                    const v = getBranchView(b)
+                    const ageDays = v.oldest ? Math.floor((Date.now() - new Date(v.oldest).getTime()) / 86400000) : 0
+                    const ageColor = ageDays > 7 ? t.red : ageDays > 3 ? t.orange : t.green
+                    return (
+                      <div key={i}
+                        className="cons-rpt-branch-row"
+                        style={{
+                          display: 'grid', gridTemplateColumns: '1fr 56px 80px 50px',
+                          gap: 8, padding: '8px 14px',
+                          fontSize: 11.5, color: t.text2,
+                          borderTop: `1px solid ${t.border}25`,
+                          alignItems: 'center',
+                          transition: 'background .12s',
+                          animation: `consRptBranchIn .28s cubic-bezier(.4,0,.2,1) ${i * 30}ms backwards`,
+                        }}>
+                        <span style={{ color: t.text1, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{v.name}</span>
+                        <span style={{ textAlign: 'right', fontFamily: 'monospace', fontWeight: 600 }}>{v.bills}</span>
+                        <span style={{ textAlign: 'right', fontFamily: 'monospace', color: t.gold, fontWeight: 600 }}>{fmtWtCompact(v.netWt)}</span>
+                        <span style={{ textAlign: 'right', fontFamily: 'monospace', fontSize: 10, color: ageColor, fontWeight: 600 }}>{fmtAgeCompact(v.oldest)}</span>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+          )
+        })}
+      </div>
     </div>
   )
 }
