@@ -760,7 +760,11 @@ export default function DashboardHome() {
           }).catch(() => {})
       )
     }
-    if (canSee('consignment-overview') || canSee('consignment-data')) {
+    // Dashboard's Consignment Overview widget is gated to the consignment-report
+    // permission specifically — the widget IS the dashboard's mini consignment
+    // report, so anyone allowed to see consignment reports sees it; anyone not
+    // doesn't. Keeps role configuration intuitive (one permission, one widget).
+    if (canSee('consignment-report')) {
       ps.push(
         Promise.all([
           // Both at_branch and in_consignment include Bangalore. The RPC
@@ -1585,8 +1589,14 @@ export default function DashboardHome() {
         </div>
       </div>}
 
-      {/* ── CONSIGNMENT OVERVIEW (collapsible) ── */}
-      {(canSee('consignment-overview') || canSee('consignment-data') || canSee('consignment-report') || canSee('consignment-analytics')) && (
+      {/* ── CONSIGNMENT OVERVIEW (collapsible) ──
+          Gated specifically to consignment-report: this widget IS the
+          dashboard's mini consignment report, so role configuration is
+          one-permission-one-widget. Roles with consignment-overview /
+          consignment-data / consignment-analytics but NOT consignment-report
+          won't see this section on the dashboard (they can still navigate
+          to the full pages via the sidebar based on their other perms). */}
+      {canSee('consignment-report') && (
         <div style={{ marginTop: 12, border:`1px solid ${t.border2}`, borderRadius:20, background:`linear-gradient(160deg,${t.card2},${t.card3})`, boxShadow:`${t.shadow},inset 0 1px 0 rgba(255,255,255,.03)`, position:'relative', overflow:'hidden', transition:'all .35s ease' }}>
           <div style={{ position:'absolute', top:0, left:0, width:160, height:160, background:`radial-gradient(circle at top left,${t.orange}08,transparent 70%)`, pointerEvents:'none' }}/>
           <div onClick={() => setConsignOpen(o => !o)}
