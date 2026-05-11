@@ -22,10 +22,6 @@ const REGION_COLORS = {
 const DAYS = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun']
 const DOW  = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']
 
-// Single source of truth for the row grid template. The card and the column
-// header above the rows share this so the labels line up with each control.
-const ROW_GRID = '22px 38px minmax(170px, 1.2fr) 112px 108px 130px 196px 100px'
-
 // Compute the next scheduled pickup for a branch.
 // Returns { label, color, tier } where tier ∈ 'now'|'today'|'missed'|'tomorrow'|'soon'|'later'.
 function nextPickup(pickupTime, pickupDays, now = new Date()) {
@@ -64,9 +60,10 @@ function nextPickup(pickupTime, pickupDays, now = new Date()) {
   return null
 }
 
-// Known partners — extensible. The dropdown also supports free text via the
-// 'Other' option, falling back to a text input.
-const PARTNERS = ['BVC', 'BlueDart', 'DTDC', 'India Post', 'Other']
+// Default partners. Operators can add new ones at runtime via the
+// 'Add new partner…' option in any branch's picker — added partners then
+// appear in every other branch's dropdown for the rest of the session.
+const PARTNERS = ['BVC']
 
 export default function Logistics() {
   const { theme } = useApp()
@@ -79,11 +76,13 @@ export default function Logistics() {
   const [partner,  setPartner]      = useState('')
   const [busyName, setBusyName]     = useState(null)
   const [toast,    setToast]        = useState(null)
-  // Multi-select state for bulk apply. A Set of branch names; the floating
-  // panel at the bottom edits common fields and applies them to this set
-  // in one call to bulk_update.
-  const [selected, setSelected]     = useState(() => new Set())
-  const [bulkBusy, setBulkBusy]     = useState(false)
+  // Collapsed region groups — Set of region names. Click the region banner
+  // to toggle. Default: all regions expanded.
+  const [collapsedRegions, setCollapsedRegions] = useState(() => new Set())
+  // Partners added at runtime via 'Add new partner…' in any picker. Merged
+  // with PARTNERS + values already present on existing branches so a partner
+  // typed on branch A immediately becomes selectable on every other branch.
+  const [customPartners, setCustomPartners] = useState([])
 
   const fetchAll = useCallback(async () => {
     setLoading(true)
@@ -119,42 +118,33 @@ export default function Logistics() {
   }, [])
 
   // Apply a partial patch to every selected branch in a single API call.
-  // Only fields the user actually set in the bulk panel get sent — empty
-  // strings / unset means "leave alone".
-  const applyBulk = useCallback(async (patch) => {
-    if (selected.size === 0) return
-    const branch_names = [...selected]
-    setBulkBusy(true)
-    try {
-      const r = await authedFetch('/api/admin/logistics', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ kind: 'bulk_update', branch_names, ...patch }),
-      })
-      const j = await r.json()
-      if (!r.ok || j.error) { setToast({ type: 'error', msg: j.error || 'Bulk apply failed' }); return }
-      // Patch local state for every returned branch row so each card refreshes
-      // without a full fetch round-trip.
-      const byName = new Map((j.branches || []).map(b => [b.name, b]))
-      setBranches(prev => prev.map(b => byName.has(b.name) ? { ...b, ...byName.get(b.name) } : b))
-      setSelected(new Set())
-      setToast({ type: 'success', msg: `${j.updated_count} branch${j.updated_count === 1 ? '' : 'es'} updated` })
-    } finally {
-      setBulkBusy(false)
-      setTimeout(() => setToast(null), 4000)
-    }
-  }, [selected])
-
-  const toggleSelect = useCallback((name) => {
-    setSelected(prev => {
+  const toggleRegionCollapsed = useCallback((r) => {
+    setCollapsedRegions(prev => {
       const next = new Set(prev)
-      if (next.has(name)) next.delete(name); else next.add(name)
+      if (next.has(r)) next.delete(r); else next.add(r)
       return next
     })
+  }, [])
+
+  const addCustomPartner = useCallback((name) => {
+    const cleaned = String(name || '').trim()
+    if (!cleaned) return
+    setCustomPartners(prev => prev.includes(cleaned) ? prev : [...prev, cleaned])
   }, [])
 
   // Region + partner filter options derived from data.
   const regions  = useMemo(() => [...new Set(branches.map(b => b.region).filter(Boolean))].sort(), [branches])
   const partners = useMemo(() => [...new Set(branches.map(b => b.logistics_partner).filter(Boolean))].sort(), [branches])
+  // Full partner list shown in every BranchCard's picker: defaults + values
+  // present on any branch + anything the operator added at runtime. Dedupes
+  // case-sensitively so 'BVC' and 'bvc' would coexist (which is unlikely
+  // since the API trims and validates on save).
+  const allPartners = useMemo(() => {
+    const set = new Set(PARTNERS)
+    partners.forEach(p => set.add(p))
+    customPartners.forEach(p => set.add(p))
+    return [...set]
+  }, [partners, customPartners])
 
   const filtered = useMemo(() => branches.filter(b => {
     if (region  && b.region !== region) return false
@@ -235,34 +225,10 @@ export default function Logistics() {
             Configure courier partner, pickup time and delivery TAT per outstation branch.
           </div>
         </div>
-        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-          <button onClick={async () => {
-            if (!window.confirm('Apply BVC partner schedule to 36 branches?\n\nThis will overwrite logistics partner, pickup time, delivery TAT and pickup days for the branches BVC services. Branches not in the BVC table stay untouched.')) return
-            setBulkBusy(true)
-            try {
-              const r = await authedFetch('/api/admin/logistics', {
-                method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ kind: 'seed_bvc_schedule' }),
-              })
-              const j = await r.json()
-              if (!r.ok || j.error) { setToast({ type: 'error', msg: j.error || 'Seed failed' }); return }
-              const byName = new Map((j.branches || []).map(b => [b.name, b]))
-              setBranches(prev => prev.map(b => byName.has(b.name) ? { ...b, ...byName.get(b.name) } : b))
-              setToast({ type: 'success', msg: `Seeded ${j.updated_count} of ${j.requested_count} branches with BVC defaults` })
-            } finally {
-              setBulkBusy(false)
-              setTimeout(() => setToast(null), 5000)
-            }
-          }} disabled={bulkBusy}
-            title="Apply the BVC partner schedule to the 36 branches BVC services"
-            style={{ background: `${t.gold}15`, border: `1px solid ${t.gold}55`, borderRadius: '8px', padding: '7px 14px', color: t.gold, fontSize: '12px', fontWeight: 700, cursor: bulkBusy ? 'wait' : 'pointer' }}>
-            {bulkBusy ? 'Seeding…' : '⚡ Seed BVC schedule'}
-          </button>
-          <button onClick={fetchAll}
-            style={{ background: 'transparent', border: `1px solid ${t.border}`, borderRadius: '8px', padding: '7px 14px', color: t.text2, fontSize: '12px', cursor: 'pointer' }}>
-            ⟳ Refresh
-          </button>
-        </div>
+        <button onClick={fetchAll}
+          style={{ background: 'transparent', border: `1px solid ${t.border}`, borderRadius: '8px', padding: '7px 14px', color: t.text2, fontSize: '12px', cursor: 'pointer' }}>
+          ⟳ Refresh
+        </button>
       </div>
 
       {/* Stat band — gradient cards with prominent numbers and a status pulse
@@ -322,206 +288,45 @@ export default function Logistics() {
       ) : (
         Object.entries(grouped).map(([r, list]) => {
           const accent = REGION_COLORS[r] || t.gold
-          const allSelected = list.length > 0 && list.every(b => selected.has(b.name))
-          const someSelected = list.some(b => selected.has(b.name))
-          const selectedCount = list.filter(b => selected.has(b.name)).length
+          const collapsed = collapsedRegions.has(r)
           const configuredCount = list.filter(b => b.logistics_partner && b.pickup_time && b.delivery_tat_hours && (b.pickup_days || []).length).length
-          const toggleRegion = () => {
-            setSelected(prev => {
-              const next = new Set(prev)
-              if (allSelected) list.forEach(b => next.delete(b.name))
-              else             list.forEach(b => next.add(b.name))
-              return next
-            })
-          }
           return (
             <div key={r} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
               <RegionBanner
                 t={t} accent={accent} regionName={r} list={list}
-                configuredCount={configuredCount} selectedCount={selectedCount}
-                allSelected={allSelected} someSelected={someSelected}
-                onToggleSelect={toggleRegion}
-                onApplyDefaults={async (patch) => {
-                  setBulkBusy(true)
-                  try {
-                    const branch_names = list.map(b => b.name)
-                    const res = await authedFetch('/api/admin/logistics', {
-                      method: 'POST', headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ kind: 'bulk_update', branch_names, ...patch }),
-                    })
-                    const j = await res.json()
-                    if (!res.ok || j.error) { setToast({ type: 'error', msg: j.error || 'Apply failed' }); return false }
-                    const byName = new Map((j.branches || []).map(b => [b.name, b]))
-                    setBranches(prev => prev.map(b => byName.has(b.name) ? { ...b, ...byName.get(b.name) } : b))
-                    setToast({ type: 'success', msg: `${j.updated_count} branches in ${r} updated` })
-                    return true
-                  } finally {
-                    setBulkBusy(false)
-                    setTimeout(() => setToast(null), 4000)
-                  }
-                }}
+                configuredCount={configuredCount}
+                collapsed={collapsed}
+                onToggleCollapse={() => toggleRegionCollapsed(r)}
               />
-              {/* Card grid — auto-fill so cards reflow naturally; min 320px */}
-              <div style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))',
-                gap: '10px',
-              }}>
-                {list.map((b, i) => (
-                  <BranchCard
-                    key={b.name}
-                    t={t}
-                    branch={b}
-                    busy={busyName === b.name}
-                    onSave={saveBranch}
-                    regionAccent={accent}
-                    selected={selected.has(b.name)}
-                    onToggleSelect={() => toggleSelect(b.name)}
-                    delayMs={Math.min(i * 25, 300)}
-                  />
-                ))}
-              </div>
+              {!collapsed && (
+                <div style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))',
+                  gap: '10px',
+                }}>
+                  {list.map((b, i) => (
+                    <BranchCard
+                      key={b.name}
+                      t={t}
+                      branch={b}
+                      busy={busyName === b.name}
+                      onSave={saveBranch}
+                      regionAccent={accent}
+                      partnerOptions={allPartners}
+                      onAddPartner={addCustomPartner}
+                      delayMs={Math.min(i * 25, 300)}
+                    />
+                  ))}
+                </div>
+              )}
             </div>
           )
         })
       )}
-
-      {/* Sticky bulk-apply panel — only renders when at least one branch is selected.
-          Lives outside the body scroll area so the floating bar stays put as
-          the user scrolls through 73 branches. */}
-      {selected.size > 0 && (
-        <BulkPanel
-          t={t}
-          count={selected.size}
-          busy={bulkBusy}
-          onApply={applyBulk}
-          onClear={() => setSelected(new Set())}
-        />
-      )}
     </div>
   )
 }
 
-// Floating bulk-apply panel. Stays at the bottom of the viewport while the user
-// scrolls. Inputs default to blank; only fields the user touches are sent —
-// touched-state tracked per-field so we can distinguish "leave alone" from
-// "clear this field" (the latter handled by setting a specific blank marker
-// in the input, but for now we treat empty string + untouched the same way:
-// don't include in the patch).
-function BulkPanel({ t, count, busy, onApply, onClear }) {
-  const [partner,     setPartner]     = useState('')
-  const [pickupTime,  setPickupTime]  = useState('')
-  const [tat,         setTat]         = useState('')
-  const [days,        setDays]        = useState([])
-  const [daysTouched, setDaysTouched] = useState(false)
-
-  const reset = () => {
-    setPartner(''); setPickupTime(''); setTat(''); setDays([]); setDaysTouched(false)
-  }
-
-  // Build the patch — only include fields the user actually set.
-  const hasAny = (partner || pickupTime || tat || daysTouched)
-
-  const handleApply = async () => {
-    const patch = {}
-    if (partner)      patch.partner            = partner
-    if (pickupTime)   patch.pickup_time        = pickupTime
-    if (tat)          patch.delivery_tat_hours = Number(tat)
-    if (daysTouched)  patch.pickup_days        = days
-    if (!Object.keys(patch).length) return
-    await onApply(patch)
-    reset()
-  }
-
-  const chip = (active, color) => ({
-    background: active ? `${color}20` : 'transparent',
-    color:      active ? color : t.text3,
-    border:     `1px solid ${active ? `${color}55` : t.border2 || t.border}`,
-    borderRadius:'6px', padding:'6px 11px', fontSize:'11px', fontWeight:600, cursor:'pointer',
-  })
-  const inp = { background: t.card2 || t.card, border: `1px solid ${t.border}`, borderRadius: '6px', padding: '7px 10px', fontSize: '12px', color: t.text1, outline: 'none' }
-
-  return (
-    <div style={{
-      position: 'sticky', bottom: '12px',
-      background: t.card, border: `1px solid ${t.gold}40`,
-      borderRadius: '14px', padding: '14px 18px',
-      boxShadow: `0 12px 36px rgba(0,0,0,.35), 0 0 0 1px ${t.gold}15`,
-      marginTop: '8px', zIndex: 5,
-      display: 'flex', flexDirection: 'column', gap: '10px',
-    }}>
-      {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', fontSize: '13px', fontWeight: 700, color: t.gold }}>
-          <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: t.gold }} />
-          {count} branch{count === 1 ? '' : 'es'} selected
-        </span>
-        <span style={{ fontSize: '10px', color: t.text4 }}>Only the fields you fill below are applied. Empty fields stay untouched.</span>
-        <button onClick={onClear} disabled={busy}
-          style={{ marginLeft: 'auto', background: 'transparent', border: `1px solid ${t.border}`, color: t.text3, borderRadius: '6px', padding: '5px 12px', fontSize: '11px', cursor: 'pointer' }}>
-          Clear selection
-        </button>
-      </div>
-
-      {/* Field row */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '10px' }}>
-        <div>
-          <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 600, marginBottom: '4px' }}>Partner</div>
-          <select value={partner} onChange={e => setPartner(e.target.value)} disabled={busy} style={inp}>
-            <option value="">— leave —</option>
-            {PARTNERS.filter(p => p !== 'Other').map(p => <option key={p} value={p}>{p}</option>)}
-          </select>
-        </div>
-        <div>
-          <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 600, marginBottom: '4px' }}>Pickup time</div>
-          <input type="time" value={pickupTime} onChange={e => setPickupTime(e.target.value)} disabled={busy} style={inp} />
-        </div>
-        <div>
-          <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 600, marginBottom: '4px' }}>TAT</div>
-          <div style={{ display: 'flex', gap: '4px' }}>
-            {['', 24, 48, 72].map(h => (
-              <button key={h || 'none'} onClick={() => setTat(h === '' ? '' : String(h))} disabled={busy}
-                style={chip(String(tat) === String(h), t.gold)}>
-                {h === '' ? '—' : `${h}h`}
-              </button>
-            ))}
-          </div>
-        </div>
-        <div style={{ gridColumn: 'span 2' }}>
-          <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 600, marginBottom: '4px' }}>Pickup days {daysTouched ? <span style={{ color: t.gold }}>· will be applied</span> : <span>· untouched</span>}</div>
-          <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
-            {DAYS.map(d => {
-              const active = days.includes(d)
-              return (
-                <button key={d} onClick={() => { setDaysTouched(true); setDays(prev => active ? prev.filter(x => x !== d) : [...prev, d]) }} disabled={busy}
-                  style={chip(active, t.green)}>
-                  {d}
-                </button>
-              )
-            })}
-            {daysTouched && (
-              <button onClick={() => { setDaysTouched(false); setDays([]) }} disabled={busy}
-                style={{ ...chip(false, t.text3), borderStyle: 'dashed' }}>
-                undo
-              </button>
-            )}
-          </div>
-        </div>
-        <button onClick={handleApply} disabled={busy || !hasAny}
-          style={{
-            background: hasAny && !busy ? t.gold : `${t.gold}40`,
-            color: '#1a0a00', border: 'none', borderRadius: '8px',
-            padding: '9px 18px', fontSize: '12px', fontWeight: 700,
-            cursor: busy || !hasAny ? 'not-allowed' : 'pointer',
-            whiteSpace: 'nowrap',
-            alignSelf: 'end',
-          }}>
-          {busy ? `Applying to ${count}…` : `Apply to ${count} branch${count === 1 ? '' : 'es'}`}
-        </button>
-      </div>
-    </div>
-  )
-}
 
 function Stat({ t, label, value, sub, accent, icon, pulse }) {
   return (
@@ -573,18 +378,23 @@ function FilterChip({ t, active, color, onClick, children }) {
 }
 
 // PartnerPicker — custom popover replacing the native <select>. Button shows
-// the active partner as a chip; clicking opens a small menu of options.
-// Closes on outside click + Escape.
-function PartnerPicker({ t, accent, busy, value, onChange, other, setOther, dirty, options, legacy }) {
-  const [open, setOpen] = useState(false)
+// the active partner as a chip; clicking opens a menu of options + an
+// 'Add new partner…' affordance at the bottom. Partners added here propagate
+// to every other card's picker via the shared options list.
+function PartnerPicker({ t, accent, busy, value, onChange, dirty, options, onAddPartner }) {
+  const [open,      setOpen]      = useState(false)
+  const [adding,    setAdding]    = useState(false)
+  const [newName,   setNewName]   = useState('')
   const rootRef = useRef(null)
 
   useEffect(() => {
     if (!open) return
     const onDocClick = (e) => {
-      if (rootRef.current && !rootRef.current.contains(e.target)) setOpen(false)
+      if (rootRef.current && !rootRef.current.contains(e.target)) {
+        setOpen(false); setAdding(false); setNewName('')
+      }
     }
-    const onKey = (e) => { if (e.key === 'Escape') setOpen(false) }
+    const onKey = (e) => { if (e.key === 'Escape') { setOpen(false); setAdding(false); setNewName('') } }
     document.addEventListener('mousedown', onDocClick)
     document.addEventListener('keydown', onKey)
     return () => {
@@ -593,17 +403,21 @@ function PartnerPicker({ t, accent, busy, value, onChange, other, setOther, dirt
     }
   }, [open])
 
-  const display = value === 'Other' ? (other?.trim() || 'Other') : value || legacy || 'Set partner'
-  // Same logo / dot styling for known partners so the chip reads more like a
-  // brand chip than a generic dropdown — visually distinguishes BVC from
-  // BlueDart at a glance without expanding the picker.
-  const partnerColor = {
-    BVC:        accent,
-    BlueDart:   t.blue,
-    DTDC:       t.green,
-    'India Post': t.red,
-    Other:      t.text3,
-  }[value] || accent
+  // Brand-colour map for the known partners. Anything not listed inherits
+  // the region accent — covers BVC and any custom-added partners.
+  const colorFor = (p) => ({
+    BVC: accent, BlueDart: t.blue, DTDC: t.green, 'India Post': t.red,
+  }[p]) || accent
+
+  const display = value || 'Set partner'
+  const partnerColor = colorFor(value)
+
+  const confirmAdd = () => {
+    const cleaned = newName.trim()
+    if (!cleaned) return
+    if (onAddPartner) onAddPartner(cleaned)
+    setAdding(false); setNewName(''); setOpen(false)
+  }
 
   return (
     <div ref={rootRef} style={{ position: 'relative' }}>
@@ -642,11 +456,9 @@ function PartnerPicker({ t, accent, busy, value, onChange, other, setOther, dirt
         }}>
           {options.map(opt => {
             const active = value === opt
-            const optColor = {
-              BVC: accent, BlueDart: t.blue, DTDC: t.green, 'India Post': t.red, Other: t.text3,
-            }[opt] || accent
+            const optColor = colorFor(opt)
             return (
-              <button key={opt} onClick={() => { onChange(opt); if (opt !== 'Other') setOpen(false) }}
+              <button key={opt} onClick={() => { onChange(opt); setOpen(false) }}
                 style={{
                   width: '100%', textAlign: 'left',
                   display: 'flex', alignItems: 'center', gap: '8px',
@@ -664,24 +476,43 @@ function PartnerPicker({ t, accent, busy, value, onChange, other, setOther, dirt
               </button>
             )
           })}
-          {legacy && !options.includes(legacy) && (
-            <button onClick={() => { onChange(legacy); setOpen(false) }}
-              style={{ width: '100%', textAlign: 'left', background: 'transparent', border: 'none', padding: '7px 12px', fontSize: '11px', color: t.text3, fontStyle: 'italic', cursor: 'pointer' }}>
-              Legacy: {legacy}
+          {adding ? (
+            <div style={{ display: 'flex', gap: '4px', padding: '6px 8px', background: `${t.gold}06` }}>
+              <input value={newName} onChange={e => setNewName(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); confirmAdd() } }}
+                autoFocus placeholder="New partner name" maxLength={60}
+                style={{
+                  flex: 1, background: t.card,
+                  border: `1px solid ${t.gold}`,
+                  borderRadius: '5px', padding: '5px 8px',
+                  fontSize: '11.5px', color: t.text1, outline: 'none',
+                }} />
+              <button onClick={confirmAdd} disabled={!newName.trim()}
+                style={{ background: newName.trim() ? t.gold : `${t.gold}40`, color: '#1a0a00', border: 'none', borderRadius: '5px', padding: '5px 10px', fontSize: '11px', fontWeight: 700, cursor: newName.trim() ? 'pointer' : 'not-allowed' }}>
+                Add
+              </button>
+              <button onClick={() => { setAdding(false); setNewName('') }}
+                style={{ background: 'transparent', border: `1px solid ${t.border}`, color: t.text3, borderRadius: '5px', padding: '5px 10px', fontSize: '11px', fontWeight: 600, cursor: 'pointer' }}>
+                ×
+              </button>
+            </div>
+          ) : (
+            <button onClick={() => setAdding(true)}
+              style={{
+                width: '100%', textAlign: 'left',
+                display: 'flex', alignItems: 'center', gap: '8px',
+                background: 'transparent', border: 'none',
+                padding: '8px 12px', fontSize: '11.5px',
+                color: t.gold, fontWeight: 600, cursor: 'pointer',
+                transition: 'background .12s',
+              }}
+              onMouseEnter={e => e.currentTarget.style.background = `${t.gold}10`}
+              onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+              <span style={{ fontSize: '13px', lineHeight: 1 }}>＋</span>
+              <span>Add new partner…</span>
             </button>
           )}
         </div>
-      )}
-
-      {value === 'Other' && (
-        <input value={other || ''} onChange={e => setOther(e.target.value)} placeholder="Partner name" maxLength={60} disabled={busy}
-          style={{
-            width: '100%', marginTop: '4px',
-            background: t.card,
-            border: `1px solid ${t.gold}`,
-            borderRadius: '6px', padding: '5px 8px', fontSize: '12px', color: t.text1, outline: 'none',
-            boxSizing: 'border-box',
-          }} />
       )}
     </div>
   )
@@ -691,190 +522,76 @@ function PartnerPicker({ t, accent, busy, value, onChange, other, setOther, dirt
 // expandable form. Lets the operator stamp partner/time/TAT/days onto all
 // branches in the region in a single click without opening the floating
 // bulk panel. Only fields with values are sent in the patch.
-function RegionBanner({ t, accent, regionName, list, configuredCount, selectedCount, allSelected, someSelected, onToggleSelect, onApplyDefaults }) {
-  const [open, setOpen] = useState(false)
-  const [partner,     setPartner]     = useState('')
-  const [pickupTime,  setPickupTime]  = useState('')
-  const [tat,         setTat]         = useState('')
-  const [days,        setDays]        = useState([])
-  const [daysTouched, setDaysTouched] = useState(false)
-  const [busy,        setBusy]        = useState(false)
 
-  const reset = () => { setPartner(''); setPickupTime(''); setTat(''); setDays([]); setDaysTouched(false) }
-  const hasAny = partner || pickupTime || tat || daysTouched
-
-  const apply = async () => {
-    const patch = {}
-    if (partner)     patch.partner            = partner
-    if (pickupTime)  patch.pickup_time        = pickupTime
-    if (tat)         patch.delivery_tat_hours = Number(tat)
-    if (daysTouched) patch.pickup_days        = days
-    if (!Object.keys(patch).length) return
-    setBusy(true)
-    try {
-      const ok = await onApplyDefaults(patch)
-      if (ok) { reset(); setOpen(false) }
-    } finally { setBusy(false) }
-  }
-
-  const chip = (active, color) => ({
-    background: active ? `${color}22` : 'transparent',
-    color:      active ? color : t.text3,
-    border:     `1px solid ${active ? `${color}70` : t.border}`,
-    borderRadius:'6px', padding:'5px 10px', fontSize:'11px', fontWeight:600, cursor:'pointer',
-  })
-  const inp = { background: t.card, border: `1px solid ${t.border}`, borderRadius: '6px', padding: '6px 9px', fontSize: '12px', color: t.text1, outline: 'none' }
-
+// Collapsible region header. Clicking the banner toggles whether the cards
+// underneath are visible. Shows region name, configured-count, and a chevron.
+function RegionBanner({ t, accent, regionName, list, configuredCount, collapsed, onToggleCollapse }) {
   return (
-    <div style={{
-      background: `linear-gradient(90deg, ${accent}22 0%, ${accent}08 40%, transparent 70%)`,
-      border: `1px solid ${accent}30`,
-      borderLeft: `4px solid ${accent}`,
-      borderRadius: '10px',
-      padding: '12px 18px',
-      display: 'flex', flexDirection: 'column', gap: open ? '12px' : '0',
-      transition: 'gap .2s ease',
-    }}>
-      {/* Top strip — name, count, actions */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap' }}>
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: '10px', flexWrap: 'wrap' }}>
-          <span style={{ fontSize: '15px', color: t.text1, fontWeight: 700, letterSpacing: '.02em' }}>{regionName}</span>
-          <span style={{ fontSize: '11px', color: t.text3 }}>
-            <strong style={{ color: accent, fontFamily: 'monospace' }}>{configuredCount}</strong>
-            <span style={{ color: t.text4 }}> / </span>
-            <strong style={{ color: t.text2, fontFamily: 'monospace' }}>{list.length}</strong> configured
-          </span>
-        </div>
-        <div style={{ flex: 1 }} />
-        <button onClick={() => setOpen(o => !o)}
-          style={{
-            background: open ? `${accent}22` : 'transparent',
-            border: `1px solid ${open ? `${accent}70` : `${accent}40`}`,
-            color: open ? accent : t.text2,
-            borderRadius: '7px', padding: '6px 14px', fontSize: '11px', fontWeight: 600,
-            cursor: 'pointer', letterSpacing: '.03em',
-            transition: 'all .15s ease',
-            display: 'inline-flex', alignItems: 'center', gap: '6px',
-          }}>
-          <span style={{ fontSize: '10px', transform: open ? 'rotate(180deg)' : 'rotate(0)', transition: 'transform .15s' }}>▾</span>
-          {open ? 'Hide region defaults' : 'Set region defaults'}
-        </button>
-        <button onClick={onToggleSelect}
-          style={{
-            background: someSelected ? `${accent}22` : 'transparent',
-            border: `1px solid ${someSelected ? `${accent}70` : `${accent}40`}`,
-            color: someSelected ? accent : t.text2,
-            borderRadius: '7px', padding: '6px 14px', fontSize: '11px', fontWeight: 600,
-            cursor: 'pointer', letterSpacing: '.03em',
-            transition: 'all .15s ease',
-          }}>
-          {allSelected ? '✓ All selected · clear' : someSelected ? `${selectedCount} of ${list.length} selected · select rest` : 'Select all in region'}
-        </button>
+    <div onClick={onToggleCollapse}
+      role="button" tabIndex={0}
+      onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onToggleCollapse() } }}
+      style={{
+        background: `linear-gradient(90deg, ${accent}22 0%, ${accent}08 40%, transparent 70%)`,
+        border: `1px solid ${accent}30`,
+        borderLeft: `4px solid ${accent}`,
+        borderRadius: '10px',
+        padding: '12px 18px',
+        display: 'flex', alignItems: 'center', gap: '14px',
+        flexWrap: 'wrap',
+        cursor: 'pointer',
+        userSelect: 'none',
+        transition: 'background .2s ease, border-color .2s ease',
+      }}>
+      <span style={{
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+        width: '22px', height: '22px', borderRadius: '50%',
+        background: `${accent}25`, color: accent,
+        fontSize: '12px', fontWeight: 700,
+        transform: collapsed ? 'rotate(-90deg)' : 'rotate(0deg)',
+        transition: 'transform .2s ease',
+      }}>▾</span>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: '10px', flexWrap: 'wrap' }}>
+        <span style={{ fontSize: '15px', color: t.text1, fontWeight: 700, letterSpacing: '.02em' }}>{regionName}</span>
+        <span style={{ fontSize: '11px', color: t.text3 }}>
+          <strong style={{ color: accent, fontFamily: 'monospace' }}>{configuredCount}</strong>
+          <span style={{ color: t.text4 }}> / </span>
+          <strong style={{ color: t.text2, fontFamily: 'monospace' }}>{list.length}</strong> configured
+        </span>
       </div>
-
-      {/* Expandable defaults — empty fields = leave alone. Apply hits all
-          branches in this region (not just selected) so it's a true region
-          stamp. */}
-      {open && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '10px' }}>
-            <div>
-              <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 600, marginBottom: '4px' }}>Partner</div>
-              <select value={partner} onChange={e => setPartner(e.target.value)} disabled={busy} style={inp}>
-                <option value="">— leave —</option>
-                {PARTNERS.filter(p => p !== 'Other').map(p => <option key={p} value={p}>{p}</option>)}
-              </select>
-            </div>
-            <div>
-              <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 600, marginBottom: '4px' }}>Pickup</div>
-              <input type="time" value={pickupTime} onChange={e => setPickupTime(e.target.value)} disabled={busy} style={inp} />
-            </div>
-            <div>
-              <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 600, marginBottom: '4px' }}>TAT</div>
-              <div style={{ display: 'flex', gap: '4px' }}>
-                {['', 24, 48, 72].map(h => (
-                  <button key={h || 'none'} onClick={() => setTat(h === '' ? '' : String(h))} disabled={busy}
-                    style={chip(String(tat) === String(h), accent)}>
-                    {h === '' ? '—' : `${h}h`}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div style={{ gridColumn: 'span 2' }}>
-              <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 600, marginBottom: '4px' }}>
-                Days {daysTouched ? <span style={{ color: accent }}>· will be applied</span> : <span>· untouched</span>}
-              </div>
-              <div style={{ display: 'flex', gap: '3px', flexWrap: 'wrap' }}>
-                {DAYS.map(d => {
-                  const active = days.includes(d)
-                  return (
-                    <button key={d} onClick={() => { setDaysTouched(true); setDays(prev => active ? prev.filter(x => x !== d) : [...prev, d]) }} disabled={busy}
-                      style={chip(active, accent)}>
-                      {d}
-                    </button>
-                  )
-                })}
-                {daysTouched && (
-                  <button onClick={() => { setDaysTouched(false); setDays([]) }} disabled={busy}
-                    style={{ ...chip(false, t.text3), borderStyle: 'dashed' }}>
-                    undo
-                  </button>
-                )}
-              </div>
-            </div>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span style={{ fontSize: '10px', color: t.text4, flex: 1 }}>
-              Stamps these fields on <strong style={{ color: t.text2 }}>all {list.length} {regionName} branches</strong>. Fields left blank are untouched.
-            </span>
-            <button onClick={apply} disabled={busy || !hasAny}
-              style={{
-                background: hasAny && !busy ? accent : `${accent}40`,
-                color: '#fff', border: 'none',
-                borderRadius: '7px', padding: '7px 16px', fontSize: '11px', fontWeight: 700,
-                cursor: busy || !hasAny ? 'not-allowed' : 'pointer',
-                boxShadow: hasAny && !busy ? `0 2px 8px ${accent}55` : 'none',
-              }}>
-              {busy ? `Applying to ${list.length}…` : `Apply to ${list.length} branches`}
-            </button>
-          </div>
-        </div>
+      <div style={{ flex: 1 }} />
+      {collapsed && (
+        <span style={{ fontSize: '10px', color: t.text4, fontStyle: 'italic' }}>click to expand</span>
       )}
     </div>
   )
 }
 
-// Per-branch editor — compact single-row card. Operational fields only
-// (partner, pickup, TAT, days). Contact + notes were dropped to keep
-// the row tight; columns still exist in the DB if needed later.
-function BranchCard({ t, branch, busy, onSave, regionAccent, selected, onToggleSelect, delayMs = 0 }) {
+// Per-branch editor card. Partner picker uses partnerOptions (merged default +
+// per-branch existing + runtime-added) and can add new partners via
+// onAddPartner. No checkbox / no bulk affordance — pure single-branch edit.
+function BranchCard({ t, branch, busy, onSave, regionAccent, partnerOptions, onAddPartner, delayMs = 0 }) {
   const [partner,      setPartner]      = useState(branch.logistics_partner || 'BVC')
-  const [partnerOther, setPartnerOther] = useState(PARTNERS.includes(branch.logistics_partner) ? '' : (branch.logistics_partner || ''))
-  const [pickup,       setPickup]       = useState(branch.pickup_time || '')
-  const [tat,          setTat]          = useState(branch.delivery_tat_hours || 24)
-  const [days,         setDays]         = useState(branch.pickup_days || ['Mon','Tue','Wed','Thu','Fri','Sat'])
-  const [hover,        setHover]        = useState(false)
+  const [pickup,  setPickup]  = useState(branch.pickup_time || '')
+  const [tat,     setTat]     = useState(branch.delivery_tat_hours || 24)
+  const [days,    setDays]    = useState(branch.pickup_days || ['Mon','Tue','Wed','Thu','Fri','Sat'])
+  const [hover,   setHover]   = useState(false)
 
   // Reset on branch row update (after save)
   useEffect(() => { setPartner(branch.logistics_partner || 'BVC') }, [branch.logistics_partner])
-  useEffect(() => { setPartnerOther(PARTNERS.includes(branch.logistics_partner) ? '' : (branch.logistics_partner || '')) }, [branch.logistics_partner])
   useEffect(() => { setPickup(branch.pickup_time || '') }, [branch.pickup_time])
   useEffect(() => { setTat(branch.delivery_tat_hours || 24) }, [branch.delivery_tat_hours])
   useEffect(() => { setDays(branch.pickup_days || ['Mon','Tue','Wed','Thu','Fri','Sat']) }, [branch.pickup_days])
 
-  // Resolve effective partner (dropdown or 'Other' free text)
-  const effectivePartner = partner === 'Other' ? partnerOther.trim() : partner
-
   const dirty = (
-    (effectivePartner || null)             !== (branch.logistics_partner       || null) ||
-    (pickup || '')                          !== (branch.pickup_time             || '')   ||
-    Number(tat)                             !== Number(branch.delivery_tat_hours || 24)  ||
-    JSON.stringify([...days].sort())        !== JSON.stringify([...(branch.pickup_days || ['Mon','Tue','Wed','Thu','Fri','Sat'])].sort())
+    (partner || null)                !== (branch.logistics_partner || null) ||
+    (pickup || '')                    !== (branch.pickup_time       || '')   ||
+    Number(tat)                       !== Number(branch.delivery_tat_hours || 24)  ||
+    JSON.stringify([...days].sort()) !== JSON.stringify([...(branch.pickup_days || ['Mon','Tue','Wed','Thu','Fri','Sat'])].sort())
   )
 
   const onSubmit = async () => {
     await onSave(branch.name, {
-      partner:            effectivePartner,
+      partner,
       pickup_time:        pickup,
       delivery_tat_hours: tat,
       pickup_days:        days,
@@ -883,7 +600,6 @@ function BranchCard({ t, branch, busy, onSave, regionAccent, selected, onToggleS
 
   const onReset = () => {
     setPartner(branch.logistics_partner || 'BVC')
-    setPartnerOther(PARTNERS.includes(branch.logistics_partner) ? '' : (branch.logistics_partner || ''))
     setPickup(branch.pickup_time || '')
     setTat(branch.delivery_tat_hours || 24)
     setDays(branch.pickup_days || ['Mon','Tue','Wed','Thu','Fri','Sat'])
@@ -942,11 +658,9 @@ function BranchCard({ t, branch, busy, onSave, regionAccent, selected, onToggleS
         backgroundImage: branch.is_hub
           ? `repeating-linear-gradient(135deg, transparent 0 10px, ${t.gold}06 10px 11px)`
           : 'none',
-        border: `1px solid ${selected ? t.gold : hover ? `${accent}55` : (configured ? t.border : `${t.orange}25`)}`,
+        border: `1px solid ${hover ? `${accent}55` : (configured ? t.border : `${t.orange}25`)}`,
         borderRadius: '12px',
-        boxShadow: selected
-          ? `0 0 0 1px ${t.gold}55, 0 6px 20px ${t.gold}25`
-          : hover ? `0 6px 22px ${accent}26` : '0 1px 3px rgba(0,0,0,.15)',
+        boxShadow: hover ? `0 6px 22px ${accent}26` : '0 1px 3px rgba(0,0,0,.15)',
         transform: hover ? 'translateY(-2px)' : 'translateY(0)',
         transition: 'background .25s ease, border-color .2s ease, box-shadow .25s ease, transform .15s ease',
         padding: '14px 16px',
@@ -958,37 +672,8 @@ function BranchCard({ t, branch, busy, onSave, regionAccent, selected, onToggleS
         background: `linear-gradient(90deg, ${accent} 0%, ${accent}40 60%, transparent 100%)` }} />
       {dirty && <div className="logi-pulse-bar" style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '2px', background: t.gold, opacity: .8 }} />}
 
-      {/* Card header — click anywhere on this strip (except the checkbox
-          itself, which already handles the click) to toggle selection. The
-          field rows below remain independent so editing isn't ambiguous. */}
-      <div onClick={onToggleSelect ? () => onToggleSelect() : undefined}
-        style={{
-          display: 'flex', alignItems: 'center', gap: '10px',
-          marginBottom: '12px', marginLeft: '-4px', marginRight: '-4px',
-          padding: '2px 4px', borderRadius: '6px',
-          cursor: onToggleSelect ? 'pointer' : 'default',
-          transition: 'background .15s',
-        }}
-        onMouseEnter={e => { if (onToggleSelect) e.currentTarget.style.background = `${t.gold}10` }}
-        onMouseLeave={e => { if (onToggleSelect) e.currentTarget.style.background = 'transparent' }}>
-        {onToggleSelect ? (
-          <button onClick={e => { e.stopPropagation(); onToggleSelect() }}
-            aria-label={selected ? 'Deselect' : 'Select for bulk'}
-            title={selected ? 'Selected. Click to deselect.' : 'Select for bulk apply'}
-            style={{
-              width: '20px', height: '20px',
-              background: selected ? t.gold : 'transparent',
-              border: `1.5px solid ${selected ? t.gold : t.border2 || t.border}`,
-              borderRadius: '5px', cursor: 'pointer',
-              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-              color: '#1a0a00', fontSize: '12px', fontWeight: 700,
-              padding: 0, flexShrink: 0,
-              transition: 'background .15s, border-color .15s, transform .12s',
-              transform: selected ? 'scale(1)' : 'scale(.95)',
-            }}>
-            {selected ? '✓' : ''}
-          </button>
-        ) : null}
+      {/* Card header — purely informational (no selection / bulk affordance). */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '12px' }}>
         <span style={{
           display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
           height: '22px', padding: '0 8px',
@@ -1014,10 +699,12 @@ function BranchCard({ t, branch, busy, onSave, regionAccent, selected, onToggleS
           <PartnerPicker
             t={t} accent={accent} busy={busy}
             value={partner} onChange={setPartner}
-            other={partnerOther} setOther={setPartnerOther}
-            dirty={effectivePartner !== (branch.logistics_partner || null)}
-            options={PARTNERS}
-            legacy={branch.logistics_partner && !PARTNERS.includes(branch.logistics_partner) ? branch.logistics_partner : null}
+            dirty={partner !== (branch.logistics_partner || null)}
+            options={partnerOptions || PARTNERS}
+            onAddPartner={(name) => {
+              if (onAddPartner) onAddPartner(name)
+              setPartner(name)
+            }}
           />
         </Row>
         <Row label="Pickup">
