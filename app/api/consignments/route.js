@@ -50,15 +50,25 @@ export async function GET(req) {
   const allowedRegions  = getRegionFilter(auth)
   const allowedBranches = allowedRegions ? await resolveAllowedBranchNames(supabase, auth) : null
 
-  // ── Branch Stock Overview (new landing view) ──────────────────────────────
+  // ── Branch Stock / In Transit Overview (new landing view) ────────────────
+  // Single endpoint serves both lifecycle states via the ?status= param so
+  // the dashboard reads at_branch and in_consignment from the same RPC and
+  // they stay in lock-step semantically (per-bill counts, oldest = MIN
+  // purchase_date, etc.). Defaults to at_branch for backwards-compat.
   if (action === 'branch_overview') {
+    const stockStatus = searchParams.get('status') || 'at_branch'
+    if (!['at_branch', 'in_consignment'].includes(stockStatus)) {
+      return Response.json({ data: [], error: `Invalid status '${stockStatus}'. Use 'at_branch' or 'in_consignment'.` }, { status: 400 })
+    }
+
     // Server-side aggregation via RPC — single grouped SQL query handles
-    // 24K+ bills in <500ms. Falls back to JS pagination if RPC missing.
-    const { data: rpcRows, error: rpcErr } = await supabase.rpc('branch_stock_summary')
+    // 24K+ bills in <500ms. RPC must be the parameterised version from
+    // sql/branch_stock_summary_rpc.sql.
+    const { data: rpcRows, error: rpcErr } = await supabase.rpc('branch_stock_summary', { p_stock_status: stockStatus })
 
     if (rpcErr) {
-      console.warn('[branch_overview] RPC failed, falling back to pagination:', rpcErr.message)
-      return Response.json({ data: [], error: 'branch_stock_summary RPC missing. Apply sql/branch_stock_summary_rpc.sql.' })
+      console.warn('[branch_overview] RPC failed:', rpcErr.message)
+      return Response.json({ data: [], error: `branch_stock_summary RPC missing or incompatible. Apply sql/branch_stock_summary_rpc.sql. Error: ${rpcErr.message}` })
     }
 
     // Fetch branch metadata to filter outside_bangalore + attach region/pickup.

@@ -79,73 +79,46 @@ function ConsignmentBalanceView({ t, stats, isMobile }) {
     )
   }
 
-  // Source rows: branch overview (at-branch stock) + in-flight consignments.
-  const stockRows = (stats.branchOverviewRaw || []).filter(b => ((b.today_bills || 0) + (b.older_bills || 0)) > 0)
-  const transitRows = stats.inTransitRaw || []
-
-  // Branch → region lookup. Consignment rows often don't carry a region
-  // column, so we resolve it from the matching branch_overview row instead
-  // (which always has region). Falls back to c.region if present.
-  const branchToRegion = new Map()
-  for (const b of (stats.branchOverviewRaw || [])) {
-    if (b.branch_name && b.region) branchToRegion.set(b.branch_name, b.region)
-  }
-  const regionOf = (c) => branchToRegion.get(c.branch_name) || c.region || 'Other'
+  // Both columns now read from the same RPC (branch_stock_summary), one
+  // call per stock_status. Each row is already per-branch and carries
+  // total_bills / total_net_wt / oldest_date / region in the same shape,
+  // so the column-rendering code is identical for both.
+  const stockRows   = (stats.branchOverviewRaw    || []).filter(b => ((b.today_bills || 0) + (b.older_bills || 0)) > 0)
+  const transitRows = (stats.inTransitOverviewRaw || []).filter(b => ((b.today_bills || 0) + (b.older_bills || 0)) > 0)
 
   const allRegions = [...new Set([
     ...stockRows.map(b => b.region).filter(Boolean),
-    ...transitRows.map(regionOf).filter(Boolean),
+    ...transitRows.map(b => b.region).filter(Boolean),
   ])].sort()
 
   const stockFiltered   = filterRegion === 'all' ? stockRows   : stockRows.filter(b => b.region === filterRegion)
-  const transitFiltered = filterRegion === 'all' ? transitRows : transitRows.filter(c => regionOf(c) === filterRegion)
+  const transitFiltered = filterRegion === 'all' ? transitRows : transitRows.filter(b => b.region === filterRegion)
 
-  // Group stock by region (branches are already per-row, one branch = one row).
-  const stockByRegion = {}
-  for (const b of stockFiltered) {
-    const r = b.region || 'Other'
-    if (!stockByRegion[r]) stockByRegion[r] = []
-    stockByRegion[r].push(b)
+  // Group both by region; rows are already per-branch.
+  const groupByRegion = (rows) => {
+    const m = {}
+    for (const b of rows) {
+      const r = b.region || 'Other'
+      if (!m[r]) m[r] = []
+      m[r].push(b)
+    }
+    return m
   }
-  // Group transit by region → branch (a branch may have N consignments).
-  const transitByRegion = {}
-  for (const c of transitFiltered) {
-    const r = regionOf(c)
-    if (!transitByRegion[r]) transitByRegion[r] = []
-    transitByRegion[r].push(c)
-  }
+  const stockByRegion   = groupByRegion(stockFiltered)
+  const transitByRegion = groupByRegion(transitFiltered)
 
-  const stockRegionTotals = (region) => {
-    const rows = stockByRegion[region] || []
+  // Per-region totals — identical shape for both columns since both sources
+  // are now per-branch with the same fields.
+  const regionTotals = (byRegionMap) => (region) => {
+    const rows = byRegionMap[region] || []
     return {
       branchCount: rows.length,
       bills: rows.reduce((s, b) => s + (b.today_bills || 0) + (b.older_bills || 0), 0),
       netWt: rows.reduce((s, b) => s + Number(b.total_net_wt || 0), 0),
     }
   }
-  const transitRegionTotals = (region) => {
-    const cs = transitByRegion[region] || []
-    return {
-      consignmentCount: cs.length,
-      bills: cs.reduce((s, c) => s + Number(c.total_bills || 0), 0),
-      netWt: cs.reduce((s, c) => s + Number(c.total_net_wt || c.total_gross_wt || 0), 0),
-    }
-  }
-  // Aggregate transit by branch within a region so the expand shows one row
-  // per branch with totals across that branch's consignments.
-  const transitByBranchFor = (region) => {
-    const cs = transitByRegion[region] || []
-    const byBranch = new Map()
-    for (const c of cs) {
-      const cur = byBranch.get(c.branch_name) || { branch: c.branch_name, bills: 0, netWt: 0, oldest: null }
-      cur.bills += Number(c.total_bills || 0)
-      cur.netWt += Number(c.total_net_wt || c.total_gross_wt || 0)
-      const ts = c.created_at ? new Date(c.created_at).getTime() : null
-      if (ts && (!cur.oldest || ts < cur.oldest)) cur.oldest = ts
-      byBranch.set(c.branch_name, cur)
-    }
-    return [...byBranch.values()].sort((a, b) => b.netWt - a.netWt)
-  }
+  const stockRegionTotals   = regionTotals(stockByRegion)
+  const transitRegionTotals = regionTotals(transitByRegion)
 
   const toggle = (set, setter) => (r) => setter(prev => {
     const next = new Set(prev)
@@ -185,18 +158,18 @@ function ConsignmentBalanceView({ t, stats, isMobile }) {
           countLabel="br"
         />
         <DashConsSection
-          t={t} title="In Transit" subtitle="active consignments" accent={t.blue}
+          t={t} title="In Transit" subtitle="bills currently in flight" accent={t.blue}
           regions={transitRegions}
           getTotals={transitRegionTotals}
-          getBranches={transitByBranchFor}
+          getBranches={(r) => transitByRegion[r] || []}
           getBranchView={(b) => ({
-            name:   b.branch,
-            bills:  b.bills,
-            netWt:  b.netWt,
-            oldest: b.oldest ? new Date(b.oldest) : null,
+            name:   b.branch_name,
+            bills:  (b.today_bills || 0) + (b.older_bills || 0),
+            netWt:  Number(b.total_net_wt || 0),
+            oldest: b.oldest_date,
           })}
           expanded={expandedTransit} onToggle={toggleTransit}
-          countLabel="cn"
+          countLabel="br"
         />
       </div>
 
@@ -665,10 +638,14 @@ export default function DashboardHome() {
     if (canSee('consignment-overview') || canSee('consignment-data')) {
       ps.push(
         Promise.all([
-          authedFetch('/api/consignments?action=branch_overview').then(r => r.json()).catch(() => ({ data: [] })),
+          authedFetch('/api/consignments?action=branch_overview&status=at_branch').then(r => r.json()).catch(() => ({ data: [] })),
+          authedFetch('/api/consignments?action=branch_overview&status=in_consignment').then(r => r.json()).catch(() => ({ data: [] })),
+          // Still pulled for the legacy roll-up fields (movementBills, etc).
+          // The new region-grouped overview reads from in-transit rows above.
           authedFetch('/api/consignments?action=consignments').then(r => r.json()).catch(() => ({ data: [] })),
-        ]).then(([overview, consignList]) => {
-          const rows = overview.data || []
+        ]).then(([overview, transit, consignList]) => {
+          const rows        = overview.data || []
+          const transitRows = transit.data  || []  // per-branch in-transit roll-up
 
           // ── At-branch totals (gold sitting in branches, not yet in motion) ──
           // RPC returns total_gross_value, not total_amount — using that for the
@@ -812,9 +789,14 @@ export default function DashboardHome() {
             // split for the dashboard balance view
             branchBills, branchWeight, branchValue, branchesActive,
             movementBills, movementWeight, movementValue, movementCount,
-            // raw rows for the region-grouped expandable overview
-            branchOverviewRaw: rows,
-            inTransitRaw:      inMotionList,
+            // raw rows for the region-grouped expandable overview.
+            // Both are per-branch shaped — same columns (total_bills,
+            // total_net_wt, oldest_date, region) — so the dashboard component
+            // treats them identically.
+            branchOverviewRaw:     rows,
+            inTransitOverviewRaw:  transitRows,
+            // legacy: consignment-level list still passed for other widgets
+            inTransitRaw:          inMotionList,
             // new richer slices
             byState, topBranches, movementByState,
             dailySeries, last7, prior7, last7w, prior7w, velocityPct,
