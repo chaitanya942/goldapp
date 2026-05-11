@@ -65,7 +65,7 @@ const fmtAgeDash = (d) => {
   return `${days}d`
 }
 
-function ConsignmentBalanceView({ t, stats, isMobile }) {
+function ConsignmentBalanceView({ t, stats, isMobile, setActiveNav }) {
   const [filterRegion,    setFilterRegion]    = useState('all')
   const [expandedStock,   setExpandedStock]   = useState(() => new Set())
   const [expandedTransit, setExpandedTransit] = useState(() => new Set())
@@ -162,6 +162,7 @@ function ConsignmentBalanceView({ t, stats, isMobile }) {
           expanded={expandedStock} onToggle={toggleStock}
           countLabel="br"
           onSegmentClick={(r) => setFilterRegion(filterRegion === r ? 'all' : r)}
+          cta={setActiveNav ? { label: 'Open Branch Stock', onClick: () => setActiveNav('consignment-overview') } : null}
         />
         <DashConsSection
           t={t} title="In Transit" subtitle="bills currently in flight" accent={t.blue}
@@ -177,6 +178,7 @@ function ConsignmentBalanceView({ t, stats, isMobile }) {
           expanded={expandedTransit} onToggle={toggleTransit}
           countLabel="br"
           onSegmentClick={(r) => setFilterRegion(filterRegion === r ? 'all' : r)}
+          cta={setActiveNav ? { label: 'Open Consignment Report', onClick: () => setActiveNav('consignment-report') } : null}
         />
       </div>
 
@@ -216,7 +218,7 @@ function ConsignmentBalanceView({ t, stats, isMobile }) {
   )
 }
 
-function DashConsSection({ t, title, subtitle, accent, regions, getTotals, getBranches, getBranchView, expanded, onToggle, countLabel, onSegmentClick }) {
+function DashConsSection({ t, title, subtitle, accent, regions, getTotals, getBranches, getBranchView, expanded, onToggle, countLabel, onSegmentClick, cta }) {
   // Per-section sort. 'weight' = net wt desc (default). Others sort accordingly.
   const [sortKey, setSortKey] = useState('weight')
 
@@ -507,6 +509,29 @@ function DashConsSection({ t, title, subtitle, accent, regions, getTotals, getBr
           )
         })}
       </div>
+
+      {/* Footer CTA — drills into the module that owns this slice
+          (Branch Stock for at-branch, Consignment Report for in-transit). */}
+      {cta && (
+        <div style={{ borderTop: `1px solid ${t.border}`, background: `${accent}06`, padding: '10px 14px' }}>
+          <button onClick={cta.onClick}
+            style={{
+              width: '100%', padding: '9px 12px',
+              borderRadius: 8,
+              background: `${accent}15`,
+              border: `1px solid ${accent}40`,
+              color: accent,
+              fontSize: 11.5, fontWeight: 700,
+              letterSpacing: '.04em',
+              cursor: 'pointer',
+              transition: 'background .15s, transform .12s',
+            }}
+            onMouseEnter={e => { e.currentTarget.style.background = `${accent}25` }}
+            onMouseLeave={e => { e.currentTarget.style.background = `${accent}15` }}>
+            {cta.label} →
+          </button>
+        </div>
+      )}
     </div>
   )
 }
@@ -1623,7 +1648,7 @@ export default function DashboardHome() {
           </div>
           {consignOpen && (
             <div style={{ padding: isMobile ? '16px 14px 20px' : '24px 28px 28px' }}>
-              <ConsignmentBalanceView t={t} stats={consignStats} isMobile={isMobile} />
+              <ConsignmentBalanceView t={t} stats={consignStats} isMobile={isMobile} setActiveNav={setActiveNav} />
             </div>
           )}
         </div>

@@ -878,14 +878,24 @@ function RatesSection({ t, setActiveNav, canSeeRates, canSeeCalTable }) {
   )
 }
 
-// ── Section label divider ─────────────────────────────────────────────────────
-function SectionLabel({ icon, label, color, t }) {
+// ── Collapsible section wrapper ───────────────────────────────────────────────
+// Each dashboard section has a clickable header that toggles a chevron and
+// collapses its content. Without this, users scroll past Purchases every time
+// just to reach Consignments — the toggle keeps the most-used module on top.
+function CollapsibleSection({ icon, label, color, t, expanded, onToggle, children }) {
   return (
-    <div style={{ display:'flex', alignItems:'center', gap:10, paddingBottom:4 }}>
-      <div style={{ width:28, height:28, borderRadius:8, background:`${color}18`, border:`1px solid ${color}30`, display:'flex', alignItems:'center', justifyContent:'center', fontSize:'.9rem', flexShrink:0 }}>{icon}</div>
-      <div style={{ fontSize:11, fontWeight:700, color:t.text3, letterSpacing:'.1em', textTransform:'uppercase' }}>{label}</div>
-      <div style={{ flex:1, height:1, background:`linear-gradient(90deg,${color}30,transparent)` }}/>
-    </div>
+    <>
+      <div onClick={onToggle}
+        role="button" tabIndex={0}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onToggle() } }}
+        style={{ display:'flex', alignItems:'center', gap:10, paddingBottom:4, cursor:'pointer', userSelect:'none' }}>
+        <div style={{ width:28, height:28, borderRadius:8, background:`${color}18`, border:`1px solid ${color}30`, display:'flex', alignItems:'center', justifyContent:'center', fontSize:'.9rem', flexShrink:0 }}>{icon}</div>
+        <div style={{ fontSize:11, fontWeight:700, color:t.text3, letterSpacing:'.1em', textTransform:'uppercase' }}>{label}</div>
+        <div style={{ flex:1, height:1, background:`linear-gradient(90deg,${color}30,transparent)` }}/>
+        <span aria-hidden style={{ fontSize: 12, color: t.text4, transform: expanded ? 'rotate(0)' : 'rotate(-90deg)', transition: 'transform .2s', padding: '0 4px' }}>▾</span>
+      </div>
+      {expanded && children}
+    </>
   )
 }
 
@@ -905,6 +915,23 @@ export default function DynamicDashboard() {
   const hasAdmin       = canSee('user-management') || canSee('branch-management')
   const hasRates       = canSee('live-market-rates') || canSee('cal-table')
   const hasAnything    = hasPurchase || hasTelesales || hasConsignment || hasAdmin || hasRates
+
+  // Section open/closed state — persisted per device. Defaults to all open
+  // so first-time users see everything; their collapse choices stick.
+  const [sectionOpen, setSectionOpen] = useState(() => {
+    if (typeof window === 'undefined') return { purchase: true, telesales: true, consignment: true, admin: true, rates: true }
+    try {
+      const raw = window.localStorage.getItem('dynDash.sectionOpen')
+      if (raw) return { purchase: true, telesales: true, consignment: true, admin: true, rates: true, ...JSON.parse(raw) }
+    } catch {}
+    return { purchase: true, telesales: true, consignment: true, admin: true, rates: true }
+  })
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      try { window.localStorage.setItem('dynDash.sectionOpen', JSON.stringify(sectionOpen)) } catch {}
+    }
+  }, [sectionOpen])
+  const toggleSection = (k) => setSectionOpen(s => ({ ...s, [k]: !s[k] }))
 
   return (
     <div style={{ padding: isMobile ? '16px' : '28px 32px', display:'flex', flexDirection:'column', gap: isMobile ? 14 : 20, maxWidth: '100%', boxSizing: 'border-box' }}>
@@ -938,18 +965,16 @@ export default function DynamicDashboard() {
 
       {/* ── Purchase ── */}
       {hasPurchase && (
-        <>
-          <SectionLabel icon="◉" label="Purchases" color={t.gold} t={t} />
+        <CollapsibleSection icon="◉" label="Purchases" color={t.gold} t={t} expanded={sectionOpen.purchase} onToggle={() => toggleSection('purchase')}>
           <PurchaseInline t={t} setActiveNav={setActiveNav} canSee={canSee} />
-        </>
+        </CollapsibleSection>
       )}
 
       {/* ── Telesales ── */}
       {hasTelesales && (
-        <>
-          <SectionLabel icon="◑" label="Telesales" color={t.purple} t={t} />
+        <CollapsibleSection icon="◑" label="Telesales" color={t.purple} t={t} expanded={sectionOpen.telesales} onToggle={() => toggleSection('telesales')}>
           <TelesalesSection t={t} setActiveNav={setActiveNav} />
-        </>
+        </CollapsibleSection>
       )}
 
       {/* ── Consignments ──
@@ -958,31 +983,27 @@ export default function DynamicDashboard() {
           super-admin dashboard renders. Other consignment roles (branch
           stock / data only) keep the simpler legacy ConsignmentSection. */}
       {hasConsignment && canSee('consignment-report') ? (
-        <>
-          <SectionLabel icon="📦" label="Consignment Overview" color={t.orange} t={t} />
-          <ConsignmentOverviewWidget t={t} isMobile={isMobile} />
-        </>
+        <CollapsibleSection icon="📦" label="Consignment Overview" color={t.orange} t={t} expanded={sectionOpen.consignment} onToggle={() => toggleSection('consignment')}>
+          <ConsignmentOverviewWidget t={t} isMobile={isMobile} setActiveNav={setActiveNav} />
+        </CollapsibleSection>
       ) : hasConsignment ? (
-        <>
-          <SectionLabel icon="📦" label="Branch Stock" color={t.orange} t={t} />
+        <CollapsibleSection icon="📦" label="Branch Stock" color={t.orange} t={t} expanded={sectionOpen.consignment} onToggle={() => toggleSection('consignment')}>
           <ConsignmentSection t={t} setActiveNav={setActiveNav} canSee={canSee} />
-        </>
+        </CollapsibleSection>
       ) : null}
 
       {/* ── Admin ── */}
       {hasAdmin && (
-        <>
-          <SectionLabel icon="⚙" label="Administration" color={t.blue} t={t} />
+        <CollapsibleSection icon="⚙" label="Administration" color={t.blue} t={t} expanded={sectionOpen.admin} onToggle={() => toggleSection('admin')}>
           <AdminSection t={t} setActiveNav={setActiveNav} canSeeUsers={canSee('user-management')} canSeeBranches={canSee('branch-management')} />
-        </>
+        </CollapsibleSection>
       )}
 
       {/* ── Rates ── */}
       {hasRates && (
-        <>
-          <SectionLabel icon="◎" label="Market Rates" color={t.blue} t={t} />
+        <CollapsibleSection icon="◎" label="Market Rates" color={t.blue} t={t} expanded={sectionOpen.rates} onToggle={() => toggleSection('rates')}>
           <RatesSection t={t} setActiveNav={setActiveNav} canSeeRates={canSee('live-market-rates')} canSeeCalTable={canSee('cal-table')} />
-        </>
+        </CollapsibleSection>
       )}
 
       {/* ── No access ── */}

@@ -39,7 +39,7 @@ const fmtAge = (d) => {
   return `${days}d`
 }
 
-export default function ConsignmentOverviewWidget({ t, isMobile }) {
+export default function ConsignmentOverviewWidget({ t, isMobile, setActiveNav }) {
   const [stockRows,   setStockRows]   = useState(null)
   const [transitRows, setTransitRows] = useState(null)
 
@@ -139,6 +139,7 @@ export default function ConsignmentOverviewWidget({ t, isMobile }) {
           getBranches={(r) => stockByRegion[r] || []}
           expanded={expandedStock} onToggle={toggleStock}
           onSegmentClick={(r) => setFilterRegion(filterRegion === r ? 'all' : r)}
+          cta={setActiveNav ? { label: 'Open Branch Stock', onClick: () => setActiveNav('consignment-overview') } : null}
         />
         <ConsSection
           t={t} title="In Transit" subtitle="bills currently in flight" accent={t.blue}
@@ -147,6 +148,7 @@ export default function ConsignmentOverviewWidget({ t, isMobile }) {
           getBranches={(r) => transitByRegion[r] || []}
           expanded={expandedTransit} onToggle={toggleTransit}
           onSegmentClick={(r) => setFilterRegion(filterRegion === r ? 'all' : r)}
+          cta={setActiveNav ? { label: 'Open Consignment Report', onClick: () => setActiveNav('consignment-report') } : null}
         />
       </div>
 
@@ -192,7 +194,7 @@ function FilterPill({ active, color, onClick, t, children }) {
   )
 }
 
-function ConsSection({ t, title, subtitle, accent, regions, getTotals, getBranches, expanded, onToggle, onSegmentClick }) {
+function ConsSection({ t, title, subtitle, accent, regions, getTotals, getBranches, expanded, onToggle, onSegmentClick, cta }) {
   const [sortKey, setSortKey] = useState('weight')
 
   const sectionTotals = regions.reduce((acc, r) => {
@@ -455,6 +457,29 @@ function ConsSection({ t, title, subtitle, accent, regions, getTotals, getBranch
           )
         })}
       </div>
+
+      {/* Footer CTA — drills into the module that owns this slice
+          (Branch Stock for at-branch, Consignment Report for in-transit). */}
+      {cta && (
+        <div style={{ borderTop: `1px solid ${t.border}`, background: `${accent}06`, padding: '10px 14px' }}>
+          <button onClick={cta.onClick}
+            style={{
+              width: '100%', padding: '9px 12px',
+              borderRadius: 8,
+              background: `${accent}15`,
+              border: `1px solid ${accent}40`,
+              color: accent,
+              fontSize: 11.5, fontWeight: 700,
+              letterSpacing: '.04em',
+              cursor: 'pointer',
+              transition: 'background .15s, transform .12s',
+            }}
+            onMouseEnter={e => { e.currentTarget.style.background = `${accent}25` }}
+            onMouseLeave={e => { e.currentTarget.style.background = `${accent}15` }}>
+            {cta.label} →
+          </button>
+        </div>
+      )}
     </div>
   )
 }
