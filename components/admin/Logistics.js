@@ -21,6 +21,10 @@ const REGION_COLORS = {
 
 const DAYS = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun']
 
+// Single source of truth for the row grid template. The card and the column
+// header above the rows share this so the labels line up with each control.
+const ROW_GRID = '22px 38px minmax(170px, 1.2fr) 112px 108px 130px 196px 100px'
+
 // Known partners — extensible. The dropdown also supports free text via the
 // 'Other' option, falling back to a text input.
 const PARTNERS = ['BVC', 'BlueDart', 'DTDC', 'India Post', 'Other']
@@ -204,7 +208,28 @@ export default function Logistics() {
       ) : filtered.length === 0 ? (
         <div style={{ ...card, padding: '60px 20px', textAlign: 'center', color: t.text4, fontSize: '13px' }}>No branches match the current filter.</div>
       ) : (
-        Object.entries(grouped).map(([r, list]) => {
+        <>
+        {/* Column header — sticky so it stays in view while scrolling through
+            73 branches. Shares ROW_GRID with each BranchCard so labels line up
+            perfectly with the controls underneath. */}
+        <div style={{
+          position: 'sticky', top: 0, zIndex: 4,
+          background: t.bg || t.card2, padding: '8px 14px',
+          borderRadius: '8px', border: `1px solid ${t.border}`,
+          display: 'grid', gridTemplateColumns: ROW_GRID,
+          alignItems: 'center', gap: '12px',
+          fontSize: '9px', color: t.text4, letterSpacing: '.14em', textTransform: 'uppercase', fontWeight: 700,
+        }}>
+          <span></span>
+          <span></span>
+          <span>Branch</span>
+          <span>Partner</span>
+          <span>Pickup</span>
+          <span>TAT</span>
+          <span>Pickup days</span>
+          <span style={{ textAlign: 'right' }}>Save</span>
+        </div>
+        {Object.entries(grouped).map(([r, list]) => {
           const allSelected = list.length > 0 && list.every(b => selected.has(b.name))
           const someSelected = list.some(b => selected.has(b.name))
           const toggleRegion = () => {
@@ -240,7 +265,8 @@ export default function Logistics() {
               ))}
             </div>
           )
-        })
+        })}
+        </>
       )}
 
       {/* Sticky bulk-apply panel — only renders when at least one branch is selected.
@@ -450,85 +476,102 @@ function BranchCard({ t, branch, busy, onSave, regionAccent, selected, onToggleS
     transition: 'border-color .15s ease',
   })
 
+  // Configured = all 4 operational fields have a value. Surfaces a green tick
+  // accent so the eye can quickly scan which branches are still pending.
+  const configured = !!branch.logistics_partner && !!branch.pickup_time && !!branch.delivery_tat_hours && (branch.pickup_days || []).length > 0
+
   return (
     <div
+      className="logi-row"
       onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
       style={{
-        background: hover ? `${accent}06` : baseBg,
-        border: `1px solid ${hover ? `${accent}40` : t.border}`,
-        borderLeft: `3px solid ${accent}`,
+        display: 'grid',
+        gridTemplateColumns: ROW_GRID,
+        alignItems: 'center',
+        gap: '12px',
+        background: hover ? `${accent}08` : (configured ? baseBg : `${t.orange}05`),
+        border: `1px solid ${hover ? `${accent}55` : (configured ? t.border : `${t.orange}25`)}`,
+        borderLeft: `3px solid ${selected ? t.gold : accent}`,
         borderRadius: '8px',
-        boxShadow: hover ? `0 2px 8px ${accent}18` : 'none',
-        transition: 'background .18s ease, border-color .18s ease, box-shadow .18s ease',
-        padding: '7px 12px',
-        display: 'flex', alignItems: 'center', gap: '10px',
-        flexWrap: 'wrap',
+        boxShadow: hover ? `0 4px 14px ${accent}22` : 'none',
+        transform: hover ? 'translateY(-1px)' : 'translateY(0)',
+        transition: 'background .18s ease, border-color .18s ease, box-shadow .2s ease, transform .15s ease',
+        padding: '8px 14px',
       }}>
       {/* Select checkbox */}
-      {onToggleSelect && (
+      {onToggleSelect ? (
         <button onClick={onToggleSelect} aria-label={selected ? 'Deselect' : 'Select for bulk'}
           title={selected ? 'Selected. Click to deselect.' : 'Select for bulk apply'}
           style={{
-            width: '17px', height: '17px', flexShrink: 0,
-            background: selected ? accent : 'transparent',
-            border: `1.5px solid ${selected ? accent : t.border2 || t.border}`,
+            width: '18px', height: '18px',
+            background: selected ? t.gold : 'transparent',
+            border: `1.5px solid ${selected ? t.gold : t.border2 || t.border}`,
             borderRadius: '4px', cursor: 'pointer',
             display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-            color: '#fff', fontSize: '10px', fontWeight: 700,
+            color: '#1a0a00', fontSize: '11px', fontWeight: 700,
             padding: 0,
+            transition: 'background .15s, border-color .15s',
           }}>
           {selected ? '✓' : ''}
         </button>
-      )}
+      ) : <span />}
 
-      {/* Branch identity */}
+      {/* Region/state badge */}
       <span style={{
         display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-        minWidth: '28px', height: '20px', padding: '0 7px',
-        fontSize: '9px', fontWeight: 700, letterSpacing: '.04em',
+        height: '22px',
+        fontSize: '9.5px', fontWeight: 700, letterSpacing: '.05em',
         color: '#fff', background: accent, borderRadius: '4px',
-        fontFamily: 'monospace', flexShrink: 0,
+        fontFamily: 'monospace',
       }}>{branch.name.split('-')[0]}</span>
-      <span style={{ fontSize: '12.5px', color: t.text1, fontWeight: 600, minWidth: '170px' }}>{branch.name}</span>
-      {branch.is_hub && (
-        <span style={{ fontSize: '8px', color: t.gold, background: `${t.gold}15`, border: `1px solid ${t.gold}40`, borderRadius: '3px', padding: '1px 5px', fontWeight: 700, letterSpacing: '.05em', flexShrink: 0 }}>HUB</span>
-      )}
+
+      {/* Branch name + hub tag + status dot (configured/pending) */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
+        <span title={configured ? 'Fully configured' : 'Some fields are missing'}
+          style={{ width: '6px', height: '6px', borderRadius: '50%', background: configured ? t.green : t.orange, flexShrink: 0 }} />
+        <span style={{ fontSize: '13px', color: t.text1, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{branch.name}</span>
+        {branch.is_hub && (
+          <span style={{ fontSize: '8px', color: t.gold, background: `${t.gold}15`, border: `1px solid ${t.gold}40`, borderRadius: '3px', padding: '1px 5px', fontWeight: 700, letterSpacing: '.05em', flexShrink: 0 }}>HUB</span>
+        )}
+      </div>
 
       {/* Partner */}
-      <select value={partner} onChange={e => setPartner(e.target.value)} disabled={busy}
-        title="Logistics partner"
-        style={{ ...inp(effectivePartner !== (branch.logistics_partner || null)), minWidth: '92px' }}>
-        {PARTNERS.map(p => <option key={p} value={p}>{p}</option>)}
-        {branch.logistics_partner && !PARTNERS.includes(branch.logistics_partner) && (
-          <option value={branch.logistics_partner}>{branch.logistics_partner}</option>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', minWidth: 0 }}>
+        <select value={partner} onChange={e => setPartner(e.target.value)} disabled={busy}
+          title="Logistics partner"
+          style={{ ...inp(effectivePartner !== (branch.logistics_partner || null)), width: '100%' }}>
+          {PARTNERS.map(p => <option key={p} value={p}>{p}</option>)}
+          {branch.logistics_partner && !PARTNERS.includes(branch.logistics_partner) && (
+            <option value={branch.logistics_partner}>{branch.logistics_partner}</option>
+          )}
+        </select>
+        {partner === 'Other' && (
+          <input value={partnerOther} onChange={e => setPartnerOther(e.target.value)} placeholder="Partner" maxLength={60} disabled={busy}
+            style={{ ...inp(true), width: '100%' }} />
         )}
-      </select>
-      {partner === 'Other' && (
-        <input value={partnerOther} onChange={e => setPartnerOther(e.target.value)} placeholder="Partner" maxLength={60} disabled={busy}
-          style={{ ...inp(true), width: '100px' }} />
-      )}
+      </div>
 
       {/* Pickup time */}
       <input type="time" value={pickup} onChange={e => setPickup(e.target.value)} disabled={busy}
         title="Pickup time"
-        style={{ ...inp((pickup || '') !== (branch.pickup_time || '')), width: '110px' }} />
+        style={{ ...inp((pickup || '') !== (branch.pickup_time || '')), width: '100%' }} />
 
-      {/* TAT chips */}
-      <div style={{ display: 'inline-flex', gap: '3px' }} title="Delivery TAT">
+      {/* TAT chips — equal-width 3-up segmented control */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '3px' }} title="Delivery TAT">
         {[24, 48, 72].map(h => {
           const active = Number(tat) === h
           return (
             <button key={h} onClick={() => setTat(h)} disabled={busy}
               style={{
                 background:   active ? t.gold : 'transparent',
-                color:        active ? '#1a0a00' : t.text2,
+                color:        active ? '#1a0a00' : t.text3,
                 border:       `1px solid ${active ? t.gold : t.border}`,
                 borderRadius: '5px',
-                padding:      '4px 8px',
+                padding:      '5px 0',
                 fontSize:     '11px',
                 fontWeight:   active ? 700 : 500,
                 cursor:       'pointer',
-                minWidth:     '32px',
+                transition:   'all .12s ease',
               }}>
               {h}h
             </button>
@@ -536,23 +579,23 @@ function BranchCard({ t, branch, busy, onSave, regionAccent, selected, onToggleS
         })}
       </div>
 
-      {/* Days chips — single letters to keep the row tight */}
-      <div style={{ display: 'inline-flex', gap: '2px' }} title="Pickup days">
+      {/* Days chips — equal-width 7-up segmented control */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '2px' }} title="Pickup days">
         {DAYS.map(d => {
           const active = days.includes(d)
           return (
             <button key={d} onClick={() => setDays(prev => active ? prev.filter(x => x !== d) : [...prev, d])} disabled={busy}
               title={d}
               style={{
-                background:   active ? `${accent}20` : 'transparent',
+                background:   active ? `${accent}25` : 'transparent',
                 color:        active ? accent : t.text4,
-                border:       `1px solid ${active ? `${accent}50` : t.border}`,
+                border:       `1px solid ${active ? `${accent}65` : t.border}`,
                 borderRadius: '4px',
-                padding:      '3px 0',
+                padding:      '4px 0',
                 fontSize:     '10px',
-                fontWeight:   600,
+                fontWeight:   700,
                 cursor:       'pointer',
-                width:        '24px',
+                transition:   'all .12s ease',
               }}>
               {d[0]}
             </button>
@@ -560,22 +603,24 @@ function BranchCard({ t, branch, busy, onSave, regionAccent, selected, onToggleS
         })}
       </div>
 
-      <div style={{ flex: 1, minWidth: '4px' }} />
-
-      {/* Save / cancel — inline, only when dirty */}
-      {dirty && (
-        <div style={{ display: 'inline-flex', gap: '6px', alignItems: 'center' }}>
-          <span title="Unsaved" style={{ width: '7px', height: '7px', borderRadius: '50%', background: t.gold }} />
-          <button onClick={onReset} disabled={busy}
-            style={{ background: 'transparent', border: `1px solid ${t.border}`, borderRadius: '5px', padding: '4px 10px', fontSize: '10px', color: t.text3, cursor: busy ? 'wait' : 'pointer', fontWeight: 600 }}>
-            Cancel
-          </button>
-          <button onClick={onSubmit} disabled={busy}
-            style={{ background: t.gold, color: '#1a0a00', border: 'none', borderRadius: '5px', padding: '4px 12px', fontSize: '10px', fontWeight: 700, cursor: busy ? 'wait' : 'pointer', boxShadow: `0 1px 4px ${t.gold}50`, opacity: busy ? 0.7 : 1 }}>
-            {busy ? 'Saving…' : 'Save'}
-          </button>
-        </div>
-      )}
+      {/* Save area — fixed 100px slot so dirty/clean rows align identically. */}
+      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '5px', alignItems: 'center', minHeight: '24px' }}>
+        {dirty ? (
+          <>
+            <button onClick={onReset} disabled={busy}
+              title="Discard changes"
+              style={{ background: 'transparent', border: `1px solid ${t.border}`, borderRadius: '5px', padding: '4px 8px', fontSize: '10px', color: t.text3, cursor: busy ? 'wait' : 'pointer', fontWeight: 600 }}>
+              ×
+            </button>
+            <button onClick={onSubmit} disabled={busy}
+              style={{ background: t.gold, color: '#1a0a00', border: 'none', borderRadius: '5px', padding: '4px 12px', fontSize: '10px', fontWeight: 700, cursor: busy ? 'wait' : 'pointer', boxShadow: `0 1px 6px ${t.gold}55`, opacity: busy ? 0.7 : 1, minWidth: '52px' }}>
+              {busy ? '…' : 'Save'}
+            </button>
+          </>
+        ) : (
+          <span style={{ fontSize: '10px', color: t.text4, letterSpacing: '.04em' }}>—</span>
+        )}
+      </div>
     </div>
   )
 }
