@@ -167,10 +167,34 @@ export default function Logistics() {
             Configure courier partner, pickup time and delivery TAT per outstation branch.
           </div>
         </div>
-        <button onClick={fetchAll}
-          style={{ background: 'transparent', border: `1px solid ${t.border}`, borderRadius: '8px', padding: '7px 14px', color: t.text2, fontSize: '12px', cursor: 'pointer' }}>
-          ⟳ Refresh
-        </button>
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          <button onClick={async () => {
+            if (!window.confirm('Apply BVC partner schedule to 36 branches?\n\nThis will overwrite logistics partner, pickup time, delivery TAT and pickup days for the branches BVC services. Branches not in the BVC table stay untouched.')) return
+            setBulkBusy(true)
+            try {
+              const r = await authedFetch('/api/admin/logistics', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ kind: 'seed_bvc_schedule' }),
+              })
+              const j = await r.json()
+              if (!r.ok || j.error) { setToast({ type: 'error', msg: j.error || 'Seed failed' }); return }
+              const byName = new Map((j.branches || []).map(b => [b.name, b]))
+              setBranches(prev => prev.map(b => byName.has(b.name) ? { ...b, ...byName.get(b.name) } : b))
+              setToast({ type: 'success', msg: `Seeded ${j.updated_count} of ${j.requested_count} branches with BVC defaults` })
+            } finally {
+              setBulkBusy(false)
+              setTimeout(() => setToast(null), 5000)
+            }
+          }} disabled={bulkBusy}
+            title="Apply the BVC partner schedule to the 36 branches BVC services"
+            style={{ background: `${t.gold}15`, border: `1px solid ${t.gold}55`, borderRadius: '8px', padding: '7px 14px', color: t.gold, fontSize: '12px', fontWeight: 700, cursor: bulkBusy ? 'wait' : 'pointer' }}>
+            {bulkBusy ? 'Seeding…' : '⚡ Seed BVC schedule'}
+          </button>
+          <button onClick={fetchAll}
+            style={{ background: 'transparent', border: `1px solid ${t.border}`, borderRadius: '8px', padding: '7px 14px', color: t.text2, fontSize: '12px', cursor: 'pointer' }}>
+            ⟳ Refresh
+          </button>
+        </div>
       </div>
 
       {/* Stat band */}
