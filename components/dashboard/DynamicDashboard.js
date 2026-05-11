@@ -11,6 +11,7 @@ import {
 
 import { CONSIGNMENT_THEMES as THEMES } from '../../lib/consignmentTheme'
 import { istNow, istStr, istDaysAgo as daysBack } from '../../lib/dateIst'
+import ConsignmentOverviewWidget from './ConsignmentOverviewWidget'
 
 // ── Date helpers ──────────────────────────────────────────────────────────────
 const MONTHS   = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
@@ -951,13 +952,22 @@ export default function DynamicDashboard() {
         </>
       )}
 
-      {/* ── Consignments ── */}
-      {hasConsignment && (
+      {/* ── Consignments ──
+          Roles with consignment-report permission see the rich region-grouped
+          overview (Branch In Stock + In Transit columns) — same widget the
+          super-admin dashboard renders. Other consignment roles (branch
+          stock / data only) keep the simpler legacy ConsignmentSection. */}
+      {hasConsignment && canSee('consignment-report') ? (
+        <>
+          <SectionLabel icon="📦" label="Consignment Overview" color={t.orange} t={t} />
+          <ConsignmentOverviewWidget t={t} isMobile={isMobile} />
+        </>
+      ) : hasConsignment ? (
         <>
           <SectionLabel icon="📦" label="Branch Stock" color={t.orange} t={t} />
           <ConsignmentSection t={t} setActiveNav={setActiveNav} canSee={canSee} />
         </>
-      )}
+      ) : null}
 
       {/* ── Admin ── */}
       {hasAdmin && (
