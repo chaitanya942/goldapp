@@ -265,43 +265,73 @@ function DashConsSection({ t, title, subtitle, accent, regions, getTotals, getBr
 
   return (
     <div style={{
-      background: t.card, border: `1px solid ${t.border}`,
-      borderRadius: 14, overflow: 'hidden',
-      transition: 'border-color .2s',
+      position: 'relative', overflow: 'hidden',
+      background: `linear-gradient(165deg, ${t.card} 0%, ${t.card2 || t.card} 100%)`,
+      border: `1px solid ${t.border}`,
+      borderTop: `2px solid ${accent}55`,
+      borderRadius: 14,
+      boxShadow: `0 1px 0 ${accent}08 inset, 0 4px 16px rgba(0,0,0,.12)`,
+      transition: 'border-color .2s, box-shadow .25s',
     }}>
+      {/* Watermark glow in the top-right of each section card */}
+      <div aria-hidden style={{
+        position: 'absolute', top: -50, right: -60, width: 180, height: 180,
+        borderRadius: '50%', pointerEvents: 'none',
+        background: `radial-gradient(circle, ${accent}15 0%, transparent 65%)`,
+      }} />
+
       {/* Header — title + subtitle */}
       <div style={{
-        padding: '12px 16px',
+        position: 'relative', zIndex: 1,
+        padding: '14px 18px',
         borderBottom: `1px solid ${t.border}`,
-        background: `linear-gradient(90deg, ${accent}14 0%, transparent 60%)`,
+        background: `linear-gradient(90deg, ${accent}1a 0%, ${accent}06 35%, transparent 70%)`,
         display: 'flex', alignItems: 'center', gap: 10,
       }}>
-        <div style={{ width: 3, height: 18, borderRadius: 2, background: accent, boxShadow: `0 0 6px ${accent}55` }} />
-        <span style={{ fontSize: 12, color: accent, letterSpacing: '.14em', fontWeight: 700, textTransform: 'uppercase' }}>{title}</span>
-        <span style={{ fontSize: 10, color: t.text4 }}>· {subtitle}</span>
+        <div style={{ width: 3, height: 22, borderRadius: 2, background: `linear-gradient(180deg, ${accent} 0%, ${accent}40 100%)`, boxShadow: `0 0 10px ${accent}60` }} />
+        <span style={{ fontSize: 12.5, color: accent, letterSpacing: '.16em', fontWeight: 700, textTransform: 'uppercase' }}>{title}</span>
+        <span style={{ fontSize: 10, color: t.text4, letterSpacing: '.04em' }}>· {subtitle}</span>
       </div>
 
-      {/* Section summary — big numbers + stacked distribution bar */}
+      {/* Section summary — hero number + stacked distribution bar */}
       {regions.length > 0 && (
-        <div style={{ padding: '14px 16px', borderBottom: `1px solid ${t.border}40`,
-          background: `linear-gradient(180deg, ${t.card2 || t.card}80 0%, transparent 100%)` }}>
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: 14, flexWrap: 'wrap', marginBottom: 10 }}>
+        <div style={{
+          position: 'relative', zIndex: 1,
+          padding: '18px 18px 16px', borderBottom: `1px solid ${t.border}40`,
+        }}>
+          <div style={{ display: 'flex', alignItems: 'flex-end', gap: 14, flexWrap: 'wrap', marginBottom: 14 }}>
             <div>
-              <div style={{ fontSize: 8.5, color: t.text4, letterSpacing: '.14em', textTransform: 'uppercase', fontWeight: 700 }}>Total Net Wt</div>
-              <div style={{ display: 'flex', alignItems: 'baseline', gap: 4, marginTop: 3 }}>
-                <span className="logi-grow" style={{ fontSize: 22, fontWeight: 700, color: accent, fontFamily: 'monospace', lineHeight: 1, letterSpacing: '-.01em' }}>{fmtWtDash(sectionTotals.netWt).replace(/\s.+/, '')}</span>
-                <span style={{ fontSize: 11, color: t.text3 }}>{fmtWtDash(sectionTotals.netWt).split(' ')[1] || 'g'}</span>
-                {sectionTotals.todayNetWt > 0 && (
-                  <span title={`${sectionTotals.todayBills} bill${sectionTotals.todayBills === 1 ? '' : 's'} totalling ${fmtWtDash(sectionTotals.todayNetWt)} added today across this section`}
-                    style={{ marginLeft: 8, fontSize: 10, color: t.green, background: `${t.green}15`, border: `1px solid ${t.green}40`, borderRadius: 99, padding: '2px 8px', fontWeight: 700, fontFamily: 'monospace' }}>
-                    +{fmtWtDash(sectionTotals.todayNetWt)} today
-                  </span>
-                )}
+              <div style={{ fontSize: 9, color: t.text4, letterSpacing: '.16em', textTransform: 'uppercase', fontWeight: 700, marginBottom: 4 }}>Total Net Wt</div>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+                <span className="logi-grow"
+                  style={{
+                    fontSize: 32, fontWeight: 200, color: t.text1,
+                    fontFamily: 'monospace', lineHeight: 1, letterSpacing: '-.02em',
+                    fontVariantNumeric: 'tabular-nums',
+                  }}>
+                  {fmtWtDash(sectionTotals.netWt).replace(/\s.+/, '')}
+                </span>
+                <span style={{ fontSize: 13, color: t.text3, fontWeight: 500 }}>{fmtWtDash(sectionTotals.netWt).split(' ')[1] || 'g'}</span>
               </div>
+              {sectionTotals.todayNetWt > 0 && (
+                <div style={{ marginTop: 6, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                  <span className="logi-pulse" style={{ width: 5, height: 5, borderRadius: '50%', background: t.green, color: t.green }} />
+                  <span title={`${sectionTotals.todayBills} bill${sectionTotals.todayBills === 1 ? '' : 's'} totalling ${fmtWtDash(sectionTotals.todayNetWt)} added today across this section`}
+                    style={{ fontSize: 10, color: t.green, fontWeight: 700, fontFamily: 'monospace', letterSpacing: '.02em' }}>
+                    +{fmtWtDash(sectionTotals.todayNetWt)} TODAY
+                  </span>
+                </div>
+              )}
             </div>
-            <div style={{ display: 'flex', gap: 16, marginLeft: 'auto', fontSize: 10.5, color: t.text3, fontFamily: 'monospace' }}>
-              <span><strong style={{ color: t.text2 }}>{sectionTotals.units}</strong> <span style={{ color: t.text4 }}>{countLabel === 'br' ? (sectionTotals.units === 1 ? 'branch' : 'branches') : (sectionTotals.units === 1 ? 'consignment' : 'consignments')}</span></span>
-              <span><strong style={{ color: t.text2 }}>{sectionTotals.bills}</strong> <span style={{ color: t.text4 }}>bills</span></span>
+            <div style={{ display: 'flex', gap: 18, marginLeft: 'auto', alignItems: 'flex-end' }}>
+              <div style={{ textAlign: 'right' }}>
+                <div style={{ fontSize: 9, color: t.text4, letterSpacing: '.14em', textTransform: 'uppercase', fontWeight: 700 }}>{countLabel === 'br' ? 'Branches' : 'Consignments'}</div>
+                <div style={{ fontSize: 16, color: t.text1, fontWeight: 700, fontFamily: 'monospace', marginTop: 2 }}>{sectionTotals.units}</div>
+              </div>
+              <div style={{ textAlign: 'right' }}>
+                <div style={{ fontSize: 9, color: t.text4, letterSpacing: '.14em', textTransform: 'uppercase', fontWeight: 700 }}>Bills</div>
+                <div style={{ fontSize: 16, color: t.text1, fontWeight: 700, fontFamily: 'monospace', marginTop: 2 }}>{sectionTotals.bills}</div>
+              </div>
             </div>
           </div>
           {/* Sort selector — small chip row that picks which dimension drives
@@ -317,9 +347,16 @@ function DashConsSection({ t, title, subtitle, accent, regions, getTotals, getBr
             </div>
           )}
           {/* Stacked distribution bar — clickable segments filter the section
-              to that region. Click again on the same region or 'All' to clear. */}
+              to that region. Click again on the same region or 'All' to clear.
+              Each segment carries a soft inner highlight so the bar reads as a
+              physical strip rather than flat blocks. */}
           {sectionTotals.netWt > 0 && (
-            <div style={{ display: 'flex', height: 10, borderRadius: 6, overflow: 'hidden', background: `${t.border}50`, cursor: onSegmentClick ? 'pointer' : 'default' }}>
+            <div style={{
+              display: 'flex', height: 12, borderRadius: 7, overflow: 'hidden',
+              background: `${t.border}50`,
+              boxShadow: `inset 0 1px 2px rgba(0,0,0,.18)`,
+              cursor: onSegmentClick ? 'pointer' : 'default',
+            }}>
               {distribution.map(({ r, tot, share }, i) => {
                 const color = REGION_COLORS_DASH[r] || t.text3
                 const widthPct = share * 100
@@ -330,12 +367,13 @@ function DashConsSection({ t, title, subtitle, accent, regions, getTotals, getBr
                     title={`${r}: ${fmtWtDash(tot.netWt)} (${(share * 100).toFixed(1)}%) — click to filter`}
                     style={{
                       width: `${widthPct}%`,
-                      background: color,
+                      background: `linear-gradient(180deg, ${color} 0%, ${color}cc 100%)`,
+                      boxShadow: `inset 0 1px 0 rgba(255,255,255,.18)`,
                       transition: 'width .6s cubic-bezier(.4,0,.2,1), opacity .15s, transform .15s',
                       animation: `dashGrow .6s cubic-bezier(.4,0,.2,1) ${i * 80}ms backwards`,
                       transformOrigin: 'left',
                     }}
-                    onMouseEnter={e => { if (onSegmentClick) e.currentTarget.style.opacity = '.75' }}
+                    onMouseEnter={e => { if (onSegmentClick) e.currentTarget.style.opacity = '.7' }}
                     onMouseLeave={e => { if (onSegmentClick) e.currentTarget.style.opacity = '1' }}
                   />
                 )
@@ -365,19 +403,25 @@ function DashConsSection({ t, title, subtitle, accent, regions, getTotals, getBr
                 style={{
                   position: 'relative', overflow: 'hidden',
                   width: '100%', textAlign: 'left',
-                  background: open ? `${color}10` : 'transparent',
+                  background: open ? `linear-gradient(90deg, ${color}18 0%, ${color}06 50%, transparent 100%)` : 'transparent',
                   border: 'none', cursor: 'pointer',
-                  padding: '13px 14px 11px',
+                  padding: '15px 16px 13px 20px',
                   display: 'flex', alignItems: 'center', gap: 10,
                   transition: 'background .18s, transform .12s',
                   ['--region-color']: color,
                 }}>
+                {/* Left edge accent stripe in the region's colour */}
+                <span aria-hidden style={{
+                  position: 'absolute', left: 0, top: 0, bottom: 0, width: 3,
+                  background: `linear-gradient(180deg, ${color} 0%, ${color}60 100%)`,
+                  boxShadow: `0 0 8px ${color}40`,
+                }} />
                 <span style={{
                   width: 10, height: 10, borderRadius: '50%',
                   background: color, flexShrink: 0,
-                  boxShadow: `0 0 0 3px ${color}25`,
+                  boxShadow: `0 0 0 3px ${color}25, 0 0 8px ${color}50`,
                 }} />
-                <span style={{ fontSize: 12.5, color: t.text1, fontWeight: 600, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r}</span>
+                <span style={{ fontSize: 13.5, color: t.text1, fontWeight: 600, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', letterSpacing: '-.005em' }}>{r}</span>
                 <span style={{ fontSize: 10.5, color: t.text3, fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
                   <span style={{ color: t.text4 }}>{rowCount} {countLabel}</span>
                   <span style={{ color: t.border, margin: '0 5px' }}>·</span>
@@ -408,11 +452,14 @@ function DashConsSection({ t, title, subtitle, accent, regions, getTotals, getBr
                   {(share * 100).toFixed(0)}%
                 </span>
                 <span style={{ fontSize: 10, color: t.text4, transform: open ? 'rotate(0)' : 'rotate(-90deg)', transition: 'transform .25s', marginLeft: 2 }}>▾</span>
-                {/* Bottom share bar — fills proportional to region's share of section total */}
+                {/* Bottom share bar — fills proportional to region's share.
+                    Thicker (3px) and slightly glowing for a more deliberate
+                    "weight" visual under each row. */}
                 <span style={{
-                  position: 'absolute', bottom: 0, left: 0,
-                  height: 2, width: `${share * 100}%`,
-                  background: `linear-gradient(90deg, ${color} 0%, ${color}60 100%)`,
+                  position: 'absolute', bottom: 0, left: 3, // align past the accent stripe
+                  height: 3, width: `${share * 100}%`,
+                  background: `linear-gradient(90deg, ${color} 0%, ${color}50 100%)`,
+                  boxShadow: `0 0 4px ${color}40`,
                   transition: 'width .6s cubic-bezier(.4,0,.2,1)',
                   animation: `dashRowBar .6s cubic-bezier(.4,0,.2,1) ${idx * 60 + 200}ms backwards`,
                   transformOrigin: 'left',
