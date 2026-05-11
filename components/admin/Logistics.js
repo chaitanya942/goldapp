@@ -5,7 +5,7 @@
 // TAT, active days, courier contact, free-form notes. One card per outstation
 // branch with a single 'Save changes' footer button when any field is dirty.
 
-import React, { useState, useEffect, useMemo, useCallback } from 'react'
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { useApp } from '../../lib/context'
 import { authedFetch } from '../../lib/authedFetch'
 import { CONSIGNMENT_THEMES as THEMES } from '../../lib/consignmentTheme'
@@ -543,6 +543,121 @@ function FilterChip({ t, active, color, onClick, children }) {
   )
 }
 
+// PartnerPicker — custom popover replacing the native <select>. Button shows
+// the active partner as a chip; clicking opens a small menu of options.
+// Closes on outside click + Escape.
+function PartnerPicker({ t, accent, busy, value, onChange, other, setOther, dirty, options, legacy }) {
+  const [open, setOpen] = useState(false)
+  const rootRef = useRef(null)
+
+  useEffect(() => {
+    if (!open) return
+    const onDocClick = (e) => {
+      if (rootRef.current && !rootRef.current.contains(e.target)) setOpen(false)
+    }
+    const onKey = (e) => { if (e.key === 'Escape') setOpen(false) }
+    document.addEventListener('mousedown', onDocClick)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDocClick)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+
+  const display = value === 'Other' ? (other?.trim() || 'Other') : value || legacy || 'Set partner'
+  // Same logo / dot styling for known partners so the chip reads more like a
+  // brand chip than a generic dropdown — visually distinguishes BVC from
+  // BlueDart at a glance without expanding the picker.
+  const partnerColor = {
+    BVC:        accent,
+    BlueDart:   t.blue,
+    DTDC:       t.green,
+    'India Post': t.red,
+    Other:      t.text3,
+  }[value] || accent
+
+  return (
+    <div ref={rootRef} style={{ position: 'relative' }}>
+      <button onClick={() => !busy && setOpen(o => !o)} disabled={busy}
+        style={{
+          width: '100%',
+          display: 'flex', alignItems: 'center', gap: '8px',
+          background: dirty ? `${t.gold}10` : `${partnerColor}10`,
+          border: `1px solid ${dirty ? t.gold : `${partnerColor}55`}`,
+          borderRadius: '7px',
+          padding: '6px 10px',
+          fontSize: '12px',
+          color: t.text1,
+          cursor: busy ? 'not-allowed' : 'pointer',
+          textAlign: 'left',
+          transition: 'background .15s, border-color .15s',
+        }}>
+        <span style={{
+          width: '7px', height: '7px', borderRadius: '50%',
+          background: partnerColor, flexShrink: 0,
+          boxShadow: `0 0 0 2px ${partnerColor}25`,
+        }} />
+        <span style={{ flex: 1, fontWeight: 600, color: value ? t.text1 : t.text4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {display}
+        </span>
+        <span style={{ fontSize: '9px', color: t.text4, transform: open ? 'rotate(180deg)' : 'rotate(0)', transition: 'transform .15s' }}>▾</span>
+      </button>
+
+      {open && (
+        <div style={{
+          position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0,
+          background: t.card, border: `1px solid ${t.border}`,
+          borderRadius: '8px', overflow: 'hidden', zIndex: 6,
+          boxShadow: '0 8px 24px rgba(0,0,0,.35)',
+          animation: 'logiCardIn .15s ease-out',
+        }}>
+          {options.map(opt => {
+            const active = value === opt
+            const optColor = {
+              BVC: accent, BlueDart: t.blue, DTDC: t.green, 'India Post': t.red, Other: t.text3,
+            }[opt] || accent
+            return (
+              <button key={opt} onClick={() => { onChange(opt); if (opt !== 'Other') setOpen(false) }}
+                style={{
+                  width: '100%', textAlign: 'left',
+                  display: 'flex', alignItems: 'center', gap: '8px',
+                  background: active ? `${optColor}15` : 'transparent',
+                  border: 'none', borderBottom: `1px solid ${t.border}`,
+                  padding: '7px 12px', fontSize: '11.5px', color: t.text1,
+                  fontWeight: active ? 700 : 500, cursor: 'pointer',
+                  transition: 'background .12s',
+                }}
+                onMouseEnter={e => e.currentTarget.style.background = `${optColor}12`}
+                onMouseLeave={e => e.currentTarget.style.background = active ? `${optColor}15` : 'transparent'}>
+                <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: optColor, flexShrink: 0 }} />
+                <span style={{ flex: 1 }}>{opt}</span>
+                {active && <span style={{ fontSize: '11px', color: optColor }}>✓</span>}
+              </button>
+            )
+          })}
+          {legacy && !options.includes(legacy) && (
+            <button onClick={() => { onChange(legacy); setOpen(false) }}
+              style={{ width: '100%', textAlign: 'left', background: 'transparent', border: 'none', padding: '7px 12px', fontSize: '11px', color: t.text3, fontStyle: 'italic', cursor: 'pointer' }}>
+              Legacy: {legacy}
+            </button>
+          )}
+        </div>
+      )}
+
+      {value === 'Other' && (
+        <input value={other || ''} onChange={e => setOther(e.target.value)} placeholder="Partner name" maxLength={60} disabled={busy}
+          style={{
+            width: '100%', marginTop: '4px',
+            background: t.card,
+            border: `1px solid ${t.gold}`,
+            borderRadius: '6px', padding: '5px 8px', fontSize: '12px', color: t.text1, outline: 'none',
+            boxSizing: 'border-box',
+          }} />
+      )}
+    </div>
+  )
+}
+
 // Per-branch editor — compact single-row card. Operational fields only
 // (partner, pickup, TAT, days). Contact + notes were dropped to keep
 // the row tight; columns still exist in the DB if needed later.
@@ -679,17 +794,14 @@ function BranchCard({ t, branch, busy, onSave, regionAccent, selected, onToggleS
       {/* Field rows — consistent label / control grid */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
         <Row label="Partner">
-          <select value={partner} onChange={e => setPartner(e.target.value)} disabled={busy}
-            style={{ ...inp(effectivePartner !== (branch.logistics_partner || null)), width: '100%' }}>
-            {PARTNERS.map(p => <option key={p} value={p}>{p}</option>)}
-            {branch.logistics_partner && !PARTNERS.includes(branch.logistics_partner) && (
-              <option value={branch.logistics_partner}>{branch.logistics_partner}</option>
-            )}
-          </select>
-          {partner === 'Other' && (
-            <input value={partnerOther} onChange={e => setPartnerOther(e.target.value)} placeholder="Partner" maxLength={60} disabled={busy}
-              style={{ ...inp(true), width: '100%', marginTop: '4px' }} />
-          )}
+          <PartnerPicker
+            t={t} accent={accent} busy={busy}
+            value={partner} onChange={setPartner}
+            other={partnerOther} setOther={setPartnerOther}
+            dirty={effectivePartner !== (branch.logistics_partner || null)}
+            options={PARTNERS}
+            legacy={branch.logistics_partner && !PARTNERS.includes(branch.logistics_partner) ? branch.logistics_partner : null}
+          />
         </Row>
         <Row label="Pickup">
           <input type="time" value={pickup} onChange={e => setPickup(e.target.value)} disabled={busy}
