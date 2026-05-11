@@ -152,8 +152,37 @@ export default function Logistics() {
 
   return (
     <div style={{ padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: '14px', maxWidth: '1400px', margin: '0 auto' }}>
+      {/* Global animations + interactive states for the page. */}
+      <style>{`
+        @keyframes logiCardIn {
+          from { opacity: 0; transform: translateY(8px); }
+          to   { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes logiPulse {
+          0%,100% { box-shadow: 0 0 0 0 currentColor; opacity: 1; }
+          50%     { box-shadow: 0 0 0 6px transparent;  opacity: .55; }
+        }
+        @keyframes logiToast {
+          from { opacity: 0; transform: translateY(-6px); }
+          to   { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes logiBar {
+          0%   { background-position: -120% 0; }
+          100% { background-position: 220% 0; }
+        }
+        .logi-pulse { animation: logiPulse 2.4s ease-in-out infinite; }
+        .logi-toast { animation: logiToast .25s ease-out; }
+        .logi-pulse-bar {
+          background: linear-gradient(90deg, transparent 0%, currentColor 50%, transparent 100%) !important;
+          background-size: 200% 100% !important;
+          animation: logiBar 2s linear infinite;
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .logi-card, .logi-pulse, .logi-toast, .logi-pulse-bar { animation: none !important; }
+        }
+      `}</style>
       {toast && (
-        <div style={{ padding: '10px 14px', borderRadius: '8px', background: toast.type === 'success' ? `${t.green}15` : `${t.red}15`, border: `1px solid ${toast.type === 'success' ? t.green : t.red}40`, fontSize: '12px', color: toast.type === 'success' ? t.green : t.red }}>
+        <div className="logi-toast" style={{ padding: '10px 14px', borderRadius: '8px', background: toast.type === 'success' ? `${t.green}15` : `${t.red}15`, border: `1px solid ${toast.type === 'success' ? t.green : t.red}40`, fontSize: '12px', color: toast.type === 'success' ? t.green : t.red }}>
           {toast.msg}
         </div>
       )}
@@ -197,33 +226,53 @@ export default function Logistics() {
         </div>
       </div>
 
-      {/* Stat band */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '1px', background: t.border, borderRadius: '10px', overflow: 'hidden' }}>
-        <Stat t={t} label="Outstation branches"   value={stats.total}                                                      sub="active rows"            accent={t.gold} />
-        <Stat t={t} label="With pickup time"      value={`${stats.withPickup} / ${stats.total}`}                          sub="config complete"        accent={t.green} />
-        <Stat t={t} label="With TAT"              value={`${stats.withTat} / ${stats.total}`}                             sub="delivery target set"    accent={t.blue} />
-        <Stat t={t} label="Needs attention"       value={stats.missingAny}                                                 sub={stats.missingAny ? 'missing pickup, TAT, or partner' : 'all branches configured'}  accent={stats.missingAny ? t.orange : t.green} />
+      {/* Stat band — gradient cards with prominent numbers and a status pulse
+          on Needs Attention so the eye is pulled where work remains. */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px' }}>
+        <Stat t={t} label="Outstation branches" value={stats.total} sub="active rows" accent={t.gold}   icon="◉" />
+        <Stat t={t} label="With pickup time"    value={`${stats.withPickup} / ${stats.total}`} sub="config complete"     accent={t.green}  icon="◷" />
+        <Stat t={t} label="With TAT"            value={`${stats.withTat} / ${stats.total}`}    sub="delivery target set" accent={t.blue}   icon="⇄" />
+        <Stat t={t} label="Needs attention"     value={stats.missingAny} sub={stats.missingAny ? 'missing pickup, TAT, or partner' : 'all configured'} accent={stats.missingAny ? t.orange : t.green} icon="!" pulse={stats.missingAny > 0} />
       </div>
 
-      {/* Filter bar */}
-      <div style={{ ...card, padding: '12px 16px', display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
-        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search branch / region…"
-          style={{ ...inp, minWidth: '220px', flex: 1 }} />
-        <select value={region} onChange={e => setRegion(e.target.value)} style={inp}>
-          <option value="">All regions</option>
-          {regions.map(r => <option key={r} value={r}>{r}</option>)}
-        </select>
-        <select value={partner} onChange={e => setPartner(e.target.value)} style={inp}>
-          <option value="">All partners</option>
-          {partners.map(p => <option key={p} value={p}>{p}</option>)}
-        </select>
-        {(search || region || partner) && (
-          <button onClick={() => { setSearch(''); setRegion(''); setPartner('') }}
-            style={{ ...inp, color: t.gold, borderColor: `${t.gold}50`, cursor: 'pointer' }}>
-            Clear
-          </button>
-        )}
-        <span style={{ fontSize: '11px', color: t.text4 }}>{filtered.length} of {branches.length}</span>
+      {/* Filter bar — chip-based instead of select-based. Search stays as input. */}
+      <div style={{ ...card, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+        <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+          <div style={{ position: 'relative', flex: 1, minWidth: '220px' }}>
+            <span style={{ position: 'absolute', left: '11px', top: '50%', transform: 'translateY(-50%)', color: t.text4, fontSize: '13px', pointerEvents: 'none' }}>⌕</span>
+            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search branch / region…"
+              style={{ ...inp, width: '100%', padding: '8px 12px 8px 30px', boxSizing: 'border-box' }} />
+          </div>
+          {(search || region || partner) && (
+            <button onClick={() => { setSearch(''); setRegion(''); setPartner('') }}
+              style={{ ...inp, color: t.gold, borderColor: `${t.gold}55`, cursor: 'pointer', fontWeight: 600 }}>
+              Clear all
+            </button>
+          )}
+          <span style={{ fontSize: '11px', color: t.text4 }}>
+            <strong style={{ color: t.text2, fontFamily: 'monospace' }}>{filtered.length}</strong> of {branches.length}
+          </span>
+        </div>
+        <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'center' }}>
+          {/* Region chips */}
+          <div style={{ display: 'flex', gap: '4px', alignItems: 'center', flexWrap: 'wrap' }}>
+            <span style={{ fontSize: '10px', color: t.text4, letterSpacing: '.08em', textTransform: 'uppercase', fontWeight: 600, marginRight: '2px' }}>Region</span>
+            <FilterChip t={t} active={!region} color={t.gold} onClick={() => setRegion('')}>All</FilterChip>
+            {regions.map(r => (
+              <FilterChip key={r} t={t} active={region === r} color={REGION_COLORS[r] || t.gold} onClick={() => setRegion(region === r ? '' : r)}>{r}</FilterChip>
+            ))}
+          </div>
+          {/* Partner chips */}
+          {partners.length > 0 && (
+            <div style={{ display: 'flex', gap: '4px', alignItems: 'center', flexWrap: 'wrap' }}>
+              <span style={{ fontSize: '10px', color: t.text4, letterSpacing: '.08em', textTransform: 'uppercase', fontWeight: 600, marginRight: '2px' }}>Partner</span>
+              <FilterChip t={t} active={!partner} color={t.gold} onClick={() => setPartner('')}>All</FilterChip>
+              {partners.map(p => (
+                <FilterChip key={p} t={t} active={partner === p} color={t.blue} onClick={() => setPartner(partner === p ? '' : p)}>{p}</FilterChip>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Body */}
@@ -232,30 +281,12 @@ export default function Logistics() {
       ) : filtered.length === 0 ? (
         <div style={{ ...card, padding: '60px 20px', textAlign: 'center', color: t.text4, fontSize: '13px' }}>No branches match the current filter.</div>
       ) : (
-        <>
-        {/* Column header — sticky so it stays in view while scrolling through
-            73 branches. Shares ROW_GRID with each BranchCard so labels line up
-            perfectly with the controls underneath. */}
-        <div style={{
-          position: 'sticky', top: 0, zIndex: 4,
-          background: t.bg || t.card2, padding: '8px 14px',
-          borderRadius: '8px', border: `1px solid ${t.border}`,
-          display: 'grid', gridTemplateColumns: ROW_GRID,
-          alignItems: 'center', gap: '12px',
-          fontSize: '9px', color: t.text4, letterSpacing: '.14em', textTransform: 'uppercase', fontWeight: 700,
-        }}>
-          <span></span>
-          <span></span>
-          <span>Branch</span>
-          <span>Partner</span>
-          <span>Pickup</span>
-          <span>TAT</span>
-          <span>Pickup days</span>
-          <span style={{ textAlign: 'right' }}>Save</span>
-        </div>
-        {Object.entries(grouped).map(([r, list]) => {
+        Object.entries(grouped).map(([r, list]) => {
+          const accent = REGION_COLORS[r] || t.gold
           const allSelected = list.length > 0 && list.every(b => selected.has(b.name))
           const someSelected = list.some(b => selected.has(b.name))
+          const selectedCount = list.filter(b => selected.has(b.name)).length
+          const configuredCount = list.filter(b => b.logistics_partner && b.pickup_time && b.delivery_tat_hours && (b.pickup_days || []).length).length
           const toggleRegion = () => {
             setSelected(prev => {
               const next = new Set(prev)
@@ -266,31 +297,64 @@ export default function Logistics() {
           }
           return (
             <div key={r} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '4px 6px' }}>
-                <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: REGION_COLORS[r] || t.text3 }} />
-                <span style={{ fontSize: '11px', color: t.text2, fontWeight: 700, letterSpacing: '.1em', textTransform: 'uppercase' }}>{r}</span>
-                <span style={{ fontSize: '10px', color: t.text4 }}>· {list.length} branch{list.length === 1 ? '' : 'es'}</span>
+              {/* Region banner — coloured gradient, large name, inline metrics + select all */}
+              <div style={{
+                background: `linear-gradient(90deg, ${accent}22 0%, ${accent}08 40%, transparent 70%)`,
+                border: `1px solid ${accent}30`,
+                borderLeft: `4px solid ${accent}`,
+                borderRadius: '10px',
+                padding: '12px 18px',
+                display: 'flex', alignItems: 'center', gap: '14px',
+                flexWrap: 'wrap',
+              }}>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: '10px', flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: '15px', color: t.text1, fontWeight: 700, letterSpacing: '.02em' }}>{r}</span>
+                  <span style={{ fontSize: '11px', color: t.text3 }}>
+                    <strong style={{ color: accent, fontFamily: 'monospace' }}>{configuredCount}</strong>
+                    <span style={{ color: t.text4 }}> / </span>
+                    <strong style={{ color: t.text2, fontFamily: 'monospace' }}>{list.length}</strong> configured
+                  </span>
+                </div>
+                <div style={{ flex: 1 }} />
                 <button onClick={toggleRegion}
-                  style={{ marginLeft: '8px', background: 'transparent', border: `1px solid ${allSelected || someSelected ? `${REGION_COLORS[r] || t.gold}60` : t.border}`, color: allSelected || someSelected ? (REGION_COLORS[r] || t.gold) : t.text3, borderRadius: '6px', padding: '3px 10px', fontSize: '10px', fontWeight: 600, cursor: 'pointer', letterSpacing: '.04em' }}>
-                  {allSelected ? '✓ All selected · click to clear' : someSelected ? `${list.filter(b => selected.has(b.name)).length} selected · select rest` : 'Select all in region'}
+                  style={{
+                    background: someSelected ? `${accent}22` : 'transparent',
+                    border: `1px solid ${someSelected ? `${accent}70` : `${accent}40`}`,
+                    color: someSelected ? accent : t.text2,
+                    borderRadius: '7px',
+                    padding: '6px 14px',
+                    fontSize: '11px',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    letterSpacing: '.03em',
+                    transition: 'all .15s ease',
+                  }}>
+                  {allSelected ? '✓ All selected · clear' : someSelected ? `${selectedCount} of ${list.length} selected · select rest` : 'Select all in region'}
                 </button>
               </div>
-              {list.map(b => (
-                <BranchCard
-                  key={b.name}
-                  t={t}
-                  branch={b}
-                  busy={busyName === b.name}
-                  onSave={saveBranch}
-                  regionAccent={REGION_COLORS[r] || t.gold}
-                  selected={selected.has(b.name)}
-                  onToggleSelect={() => toggleSelect(b.name)}
-                />
-              ))}
+              {/* Card grid — auto-fill so cards reflow naturally; min 320px */}
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))',
+                gap: '10px',
+              }}>
+                {list.map((b, i) => (
+                  <BranchCard
+                    key={b.name}
+                    t={t}
+                    branch={b}
+                    busy={busyName === b.name}
+                    onSave={saveBranch}
+                    regionAccent={accent}
+                    selected={selected.has(b.name)}
+                    onToggleSelect={() => toggleSelect(b.name)}
+                    delayMs={Math.min(i * 25, 300)}
+                  />
+                ))}
+              </div>
             </div>
           )
-        })}
-        </>
+        })
       )}
 
       {/* Sticky bulk-apply panel — only renders when at least one branch is selected.
@@ -430,21 +494,59 @@ function BulkPanel({ t, count, busy, onApply, onClear }) {
   )
 }
 
-function Stat({ t, label, value, sub, accent }) {
+function Stat({ t, label, value, sub, accent, icon, pulse }) {
   return (
-    <div style={{ background: t.card, padding: '14px 16px', position: 'relative' }}>
-      <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '2px', background: accent || t.text3, opacity: .55 }} />
-      <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.14em', textTransform: 'uppercase', fontWeight: 600 }}>{label}</div>
-      <div style={{ fontSize: '20px', color: accent || t.text1, fontWeight: 700, marginTop: '6px', fontFamily: 'monospace', lineHeight: 1.1 }}>{value}</div>
-      {sub && <div style={{ fontSize: '10px', color: t.text4, marginTop: '6px' }}>{sub}</div>}
+    <div style={{
+      position: 'relative', overflow: 'hidden',
+      background: `linear-gradient(135deg, ${accent}10 0%, ${t.card} 60%)`,
+      border: `1px solid ${accent}30`,
+      borderRadius: '12px',
+      padding: '14px 16px',
+    }}>
+      {/* Top accent stripe */}
+      <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '2px', background: `linear-gradient(90deg, ${accent} 0%, ${accent}40 60%, transparent 100%)` }} />
+      {/* Big watermark icon */}
+      {icon && (
+        <span aria-hidden style={{
+          position: 'absolute', top: '50%', right: '14px', transform: 'translateY(-50%)',
+          fontSize: '46px', color: accent, opacity: .14, fontWeight: 700, lineHeight: 1, pointerEvents: 'none',
+        }}>{icon}</span>
+      )}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+        <span style={{ fontSize: '9px', color: t.text4, letterSpacing: '.14em', textTransform: 'uppercase', fontWeight: 600 }}>{label}</span>
+        {pulse && <span className="logi-pulse" style={{ width: '6px', height: '6px', borderRadius: '50%', background: accent, color: accent, display: 'inline-block' }} />}
+      </div>
+      <div style={{ fontSize: '22px', color: accent, fontWeight: 700, marginTop: '6px', fontFamily: 'monospace', lineHeight: 1.1, letterSpacing: '-.01em' }}>{value}</div>
+      {sub && <div style={{ fontSize: '10px', color: t.text4, marginTop: '6px', position: 'relative', zIndex: 1 }}>{sub}</div>}
     </div>
+  )
+}
+
+function FilterChip({ t, active, color, onClick, children }) {
+  return (
+    <button onClick={onClick}
+      style={{
+        padding: '5px 11px',
+        background: active ? `${color}22` : 'transparent',
+        border: `1px solid ${active ? `${color}70` : t.border2 || t.border}`,
+        color: active ? color : t.text3,
+        borderRadius: '99px',
+        fontSize: '11px',
+        fontWeight: active ? 700 : 500,
+        cursor: 'pointer',
+        letterSpacing: '.02em',
+        transition: 'all .15s ease',
+        whiteSpace: 'nowrap',
+      }}>
+      {children}
+    </button>
   )
 }
 
 // Per-branch editor — compact single-row card. Operational fields only
 // (partner, pickup, TAT, days). Contact + notes were dropped to keep
 // the row tight; columns still exist in the DB if needed later.
-function BranchCard({ t, branch, busy, onSave, regionAccent, selected, onToggleSelect }) {
+function BranchCard({ t, branch, busy, onSave, regionAccent, selected, onToggleSelect, delayMs = 0 }) {
   const [partner,      setPartner]      = useState(branch.logistics_partner || 'BVC')
   const [partnerOther, setPartnerOther] = useState(PARTNERS.includes(branch.logistics_partner) ? '' : (branch.logistics_partner || ''))
   const [pickup,       setPickup]       = useState(branch.pickup_time || '')
@@ -504,147 +606,174 @@ function BranchCard({ t, branch, busy, onSave, regionAccent, selected, onToggleS
   // accent so the eye can quickly scan which branches are still pending.
   const configured = !!branch.logistics_partner && !!branch.pickup_time && !!branch.delivery_tat_hours && (branch.pickup_days || []).length > 0
 
+  // Field row helper — label on the left, control on the right, both share
+  // a consistent baseline so every card lines up internally.
+  const Row = ({ label, children }) => (
+    <div style={{ display: 'grid', gridTemplateColumns: '64px 1fr', alignItems: 'center', gap: '10px' }}>
+      <span style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 700 }}>{label}</span>
+      <div style={{ minWidth: 0 }}>{children}</div>
+    </div>
+  )
+
   return (
     <div
-      className="logi-row"
+      className="logi-card"
       onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
       style={{
-        display: 'grid',
-        gridTemplateColumns: ROW_GRID,
-        alignItems: 'center',
-        gap: '12px',
-        background: hover ? `${accent}08` : (configured ? baseBg : `${t.orange}05`),
-        border: `1px solid ${hover ? `${accent}55` : (configured ? t.border : `${t.orange}25`)}`,
-        borderLeft: `3px solid ${selected ? t.gold : accent}`,
-        borderRadius: '8px',
-        boxShadow: hover ? `0 4px 14px ${accent}22` : 'none',
-        transform: hover ? 'translateY(-1px)' : 'translateY(0)',
-        transition: 'background .18s ease, border-color .18s ease, box-shadow .2s ease, transform .15s ease',
-        padding: '8px 14px',
+        position: 'relative', overflow: 'hidden',
+        background: hover ? `linear-gradient(180deg, ${accent}10 0%, ${baseBg} 60%)` : (configured ? baseBg : `${t.orange}06`),
+        border: `1px solid ${selected ? t.gold : hover ? `${accent}55` : (configured ? t.border : `${t.orange}25`)}`,
+        borderRadius: '12px',
+        boxShadow: selected
+          ? `0 0 0 1px ${t.gold}55, 0 6px 20px ${t.gold}25`
+          : hover ? `0 6px 22px ${accent}26` : '0 1px 3px rgba(0,0,0,.15)',
+        transform: hover ? 'translateY(-2px)' : 'translateY(0)',
+        transition: 'background .25s ease, border-color .2s ease, box-shadow .25s ease, transform .15s ease',
+        padding: '14px 16px',
+        animation: 'logiCardIn .35s cubic-bezier(.4,0,.2,1) backwards',
+        animationDelay: `${delayMs}ms`,
       }}>
-      {/* Select checkbox */}
-      {onToggleSelect ? (
-        <button onClick={onToggleSelect} aria-label={selected ? 'Deselect' : 'Select for bulk'}
-          title={selected ? 'Selected. Click to deselect.' : 'Select for bulk apply'}
-          style={{
-            width: '18px', height: '18px',
-            background: selected ? t.gold : 'transparent',
-            border: `1.5px solid ${selected ? t.gold : t.border2 || t.border}`,
-            borderRadius: '4px', cursor: 'pointer',
-            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-            color: '#1a0a00', fontSize: '11px', fontWeight: 700,
-            padding: 0,
-            transition: 'background .15s, border-color .15s',
-          }}>
-          {selected ? '✓' : ''}
-        </button>
-      ) : <span />}
+      {/* Accent gradient top stripe */}
+      <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '2px',
+        background: `linear-gradient(90deg, ${accent} 0%, ${accent}40 60%, transparent 100%)` }} />
+      {dirty && <div className="logi-pulse-bar" style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '2px', background: t.gold, opacity: .8 }} />}
 
-      {/* Region/state badge */}
-      <span style={{
-        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-        height: '22px',
-        fontSize: '9.5px', fontWeight: 700, letterSpacing: '.05em',
-        color: '#fff', background: accent, borderRadius: '4px',
-        fontFamily: 'monospace',
-      }}>{branch.name.split('-')[0]}</span>
-
-      {/* Branch name + hub tag + status dot (configured/pending) */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
-        <span title={configured ? 'Fully configured' : 'Some fields are missing'}
-          style={{ width: '6px', height: '6px', borderRadius: '50%', background: configured ? t.green : t.orange, flexShrink: 0 }} />
-        <span style={{ fontSize: '13px', color: t.text1, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{branch.name}</span>
-        {branch.is_hub && (
-          <span style={{ fontSize: '8px', color: t.gold, background: `${t.gold}15`, border: `1px solid ${t.gold}40`, borderRadius: '3px', padding: '1px 5px', fontWeight: 700, letterSpacing: '.05em', flexShrink: 0 }}>HUB</span>
-        )}
-      </div>
-
-      {/* Partner */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', minWidth: 0 }}>
-        <select value={partner} onChange={e => setPartner(e.target.value)} disabled={busy}
-          title="Logistics partner"
-          style={{ ...inp(effectivePartner !== (branch.logistics_partner || null)), width: '100%' }}>
-          {PARTNERS.map(p => <option key={p} value={p}>{p}</option>)}
-          {branch.logistics_partner && !PARTNERS.includes(branch.logistics_partner) && (
-            <option value={branch.logistics_partner}>{branch.logistics_partner}</option>
+      {/* Card header — checkbox · badge · name · status · hub tag */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '12px' }}>
+        {onToggleSelect ? (
+          <button onClick={onToggleSelect} aria-label={selected ? 'Deselect' : 'Select for bulk'}
+            title={selected ? 'Selected. Click to deselect.' : 'Select for bulk apply'}
+            style={{
+              width: '20px', height: '20px',
+              background: selected ? t.gold : 'transparent',
+              border: `1.5px solid ${selected ? t.gold : t.border2 || t.border}`,
+              borderRadius: '5px', cursor: 'pointer',
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+              color: '#1a0a00', fontSize: '12px', fontWeight: 700,
+              padding: 0, flexShrink: 0,
+              transition: 'background .15s, border-color .15s, transform .12s',
+              transform: selected ? 'scale(1)' : 'scale(.95)',
+            }}>
+            {selected ? '✓' : ''}
+          </button>
+        ) : null}
+        <span style={{
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          height: '22px', padding: '0 8px',
+          fontSize: '10px', fontWeight: 700, letterSpacing: '.05em',
+          color: '#fff', background: accent, borderRadius: '5px',
+          fontFamily: 'monospace', flexShrink: 0,
+          boxShadow: `0 2px 6px ${accent}40`,
+        }}>{branch.name.split('-')[0]}</span>
+        <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <span style={{ fontSize: '14px', color: t.text1, fontWeight: 700, letterSpacing: '-.005em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{branch.name}</span>
+          {branch.is_hub && (
+            <span style={{ fontSize: '8.5px', color: t.gold, background: `${t.gold}15`, border: `1px solid ${t.gold}40`, borderRadius: '3px', padding: '1px 6px', fontWeight: 700, letterSpacing: '.06em', flexShrink: 0 }}>HUB</span>
           )}
-        </select>
-        {partner === 'Other' && (
-          <input value={partnerOther} onChange={e => setPartnerOther(e.target.value)} placeholder="Partner" maxLength={60} disabled={busy}
-            style={{ ...inp(true), width: '100%' }} />
-        )}
+        </div>
+        <span title={configured ? 'Fully configured' : 'Some fields are missing'}
+          className={configured ? '' : 'logi-pulse'}
+          style={{ width: '8px', height: '8px', borderRadius: '50%', background: configured ? t.green : t.orange, color: configured ? t.green : t.orange, flexShrink: 0 }} />
       </div>
 
-      {/* Pickup time */}
-      <input type="time" value={pickup} onChange={e => setPickup(e.target.value)} disabled={busy}
-        title="Pickup time"
-        style={{ ...inp((pickup || '') !== (branch.pickup_time || '')), width: '100%' }} />
-
-      {/* TAT chips — equal-width 3-up segmented control */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '3px' }} title="Delivery TAT">
-        {[24, 48, 72].map(h => {
-          const active = Number(tat) === h
-          return (
-            <button key={h} onClick={() => setTat(h)} disabled={busy}
-              style={{
-                background:   active ? t.gold : 'transparent',
-                color:        active ? '#1a0a00' : t.text3,
-                border:       `1px solid ${active ? t.gold : t.border}`,
-                borderRadius: '5px',
-                padding:      '5px 0',
-                fontSize:     '11px',
-                fontWeight:   active ? 700 : 500,
-                cursor:       'pointer',
-                transition:   'all .12s ease',
-              }}>
-              {h}h
-            </button>
-          )
-        })}
+      {/* Field rows — consistent label / control grid */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+        <Row label="Partner">
+          <select value={partner} onChange={e => setPartner(e.target.value)} disabled={busy}
+            style={{ ...inp(effectivePartner !== (branch.logistics_partner || null)), width: '100%' }}>
+            {PARTNERS.map(p => <option key={p} value={p}>{p}</option>)}
+            {branch.logistics_partner && !PARTNERS.includes(branch.logistics_partner) && (
+              <option value={branch.logistics_partner}>{branch.logistics_partner}</option>
+            )}
+          </select>
+          {partner === 'Other' && (
+            <input value={partnerOther} onChange={e => setPartnerOther(e.target.value)} placeholder="Partner" maxLength={60} disabled={busy}
+              style={{ ...inp(true), width: '100%', marginTop: '4px' }} />
+          )}
+        </Row>
+        <Row label="Pickup">
+          <input type="time" value={pickup} onChange={e => setPickup(e.target.value)} disabled={busy}
+            style={{ ...inp((pickup || '') !== (branch.pickup_time || '')), width: '100%' }} />
+        </Row>
+        <Row label="TAT">
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '4px' }}>
+            {[24, 48, 72].map(h => {
+              const active = Number(tat) === h
+              return (
+                <button key={h} onClick={() => setTat(h)} disabled={busy}
+                  style={{
+                    background:   active ? t.gold : 'transparent',
+                    color:        active ? '#1a0a00' : t.text3,
+                    border:       `1px solid ${active ? t.gold : t.border}`,
+                    borderRadius: '6px',
+                    padding:      '6px 0',
+                    fontSize:     '11px',
+                    fontWeight:   active ? 700 : 500,
+                    cursor:       'pointer',
+                    transition:   'all .12s ease',
+                    boxShadow:    active ? `0 1px 4px ${t.gold}45` : 'none',
+                  }}>
+                  {h}h
+                </button>
+              )
+            })}
+          </div>
+        </Row>
+        <Row label="Days">
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '3px' }}>
+            {DAYS.map(d => {
+              const active = days.includes(d)
+              return (
+                <button key={d} onClick={() => setDays(prev => active ? prev.filter(x => x !== d) : [...prev, d])} disabled={busy}
+                  title={d}
+                  style={{
+                    background:   active ? `${accent}28` : 'transparent',
+                    color:        active ? accent : t.text4,
+                    border:       `1px solid ${active ? `${accent}70` : t.border}`,
+                    borderRadius: '5px',
+                    padding:      '5px 0',
+                    fontSize:     '10px',
+                    fontWeight:   700,
+                    cursor:       'pointer',
+                    transition:   'all .12s ease',
+                  }}>
+                  {d[0]}
+                </button>
+              )
+            })}
+          </div>
+        </Row>
       </div>
 
-      {/* Days chips — equal-width 7-up segmented control */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '2px' }} title="Pickup days">
-        {DAYS.map(d => {
-          const active = days.includes(d)
-          return (
-            <button key={d} onClick={() => setDays(prev => active ? prev.filter(x => x !== d) : [...prev, d])} disabled={busy}
-              title={d}
-              style={{
-                background:   active ? `${accent}25` : 'transparent',
-                color:        active ? accent : t.text4,
-                border:       `1px solid ${active ? `${accent}65` : t.border}`,
-                borderRadius: '4px',
-                padding:      '4px 0',
-                fontSize:     '10px',
-                fontWeight:   700,
-                cursor:       'pointer',
-                transition:   'all .12s ease',
-              }}>
-              {d[0]}
-            </button>
-          )
-        })}
-      </div>
-
-      {/* Save area — fixed 100px slot so dirty/clean rows align identically. */}
-      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '5px', alignItems: 'center', minHeight: '24px' }}>
-        {dirty ? (
-          <>
-            <button onClick={onReset} disabled={busy}
-              title="Discard changes"
-              style={{ background: 'transparent', border: `1px solid ${t.border}`, borderRadius: '5px', padding: '4px 8px', fontSize: '10px', color: t.text3, cursor: busy ? 'wait' : 'pointer', fontWeight: 600 }}>
-              ×
-            </button>
-            <button onClick={onSubmit} disabled={busy}
-              style={{ background: t.gold, color: '#1a0a00', border: 'none', borderRadius: '5px', padding: '4px 12px', fontSize: '10px', fontWeight: 700, cursor: busy ? 'wait' : 'pointer', boxShadow: `0 1px 6px ${t.gold}55`, opacity: busy ? 0.7 : 1, minWidth: '52px' }}>
-              {busy ? '…' : 'Save'}
-            </button>
-          </>
-        ) : (
-          <span style={{ fontSize: '10px', color: t.text4, letterSpacing: '.04em' }}>—</span>
-        )}
-      </div>
+      {/* Footer — save / cancel slides in when dirty */}
+      {dirty && (
+        <div style={{
+          marginTop: '12px', paddingTop: '12px',
+          borderTop: `1px solid ${t.border}`,
+          display: 'flex', alignItems: 'center', gap: '8px',
+        }}>
+          <span style={{ fontSize: '10px', color: t.gold, fontWeight: 600, letterSpacing: '.04em', flex: 1 }}>
+            <span style={{ display: 'inline-block', width: '6px', height: '6px', borderRadius: '50%', background: t.gold, marginRight: '6px' }} />
+            Unsaved changes
+          </span>
+          <button onClick={onReset} disabled={busy}
+            style={{ background: 'transparent', border: `1px solid ${t.border}`, borderRadius: '6px', padding: '6px 12px', fontSize: '10px', color: t.text3, cursor: busy ? 'wait' : 'pointer', fontWeight: 600 }}>
+            Cancel
+          </button>
+          <button onClick={onSubmit} disabled={busy}
+            style={{
+              background: `linear-gradient(180deg, ${t.gold} 0%, ${t.gold} 100%)`,
+              color: '#1a0a00', border: 'none',
+              borderRadius: '6px', padding: '6px 16px',
+              fontSize: '10px', fontWeight: 700,
+              cursor: busy ? 'wait' : 'pointer',
+              boxShadow: `0 2px 10px ${t.gold}65`,
+              opacity: busy ? 0.7 : 1,
+            }}>
+            {busy ? 'Saving…' : 'Save changes'}
+          </button>
+        </div>
+      )}
     </div>
   )
 }
