@@ -108,14 +108,16 @@ function ConsignmentBalanceView({ t, stats, isMobile }) {
   const transitByRegion = groupByRegion(transitFiltered)
 
   // Per-region totals — identical shape for both columns since both sources
-  // are now per-branch with the same fields. Includes today's count and the
-  // max age across branches in the region (for the urgency badge).
+  // are now per-branch with the same fields. Includes today's net weight
+  // (preferred over today's bill count for the inflow badge) and the max age
+  // across branches in the region (for the urgency badge).
   const regionTotals = (byRegionMap) => (region) => {
     const rows = byRegionMap[region] || []
     return {
       branchCount:   rows.length,
       bills:         rows.reduce((s, b) => s + (b.today_bills || 0) + (b.older_bills || 0), 0),
       todayBills:    rows.reduce((s, b) => s + (b.today_bills || 0), 0),
+      todayNetWt:    rows.reduce((s, b) => s + Number(b.today_net_wt || 0), 0),
       netWt:         rows.reduce((s, b) => s + Number(b.total_net_wt || 0), 0),
       maxOldestDays: rows.reduce((m, b) => Math.max(m, b.oldest_age_days || 0), 0),
     }
@@ -223,10 +225,11 @@ function DashConsSection({ t, title, subtitle, accent, regions, getTotals, getBr
     const tot = getTotals(r)
     acc.bills      += tot.bills
     acc.todayBills += tot.todayBills || 0
+    acc.todayNetWt += tot.todayNetWt || 0
     acc.netWt      += tot.netWt
     acc.units      += tot.branchCount != null ? tot.branchCount : tot.consignmentCount
     return acc
-  }, { bills: 0, todayBills: 0, netWt: 0, units: 0 })
+  }, { bills: 0, todayBills: 0, todayNetWt: 0, netWt: 0, units: 0 })
 
   // Region share data — sorted per the user's choice. Share % is always
   // computed from net weight so the visual distribution bar still aligns
@@ -288,10 +291,10 @@ function DashConsSection({ t, title, subtitle, accent, regions, getTotals, getBr
               <div style={{ display: 'flex', alignItems: 'baseline', gap: 4, marginTop: 3 }}>
                 <span className="logi-grow" style={{ fontSize: 22, fontWeight: 700, color: accent, fontFamily: 'monospace', lineHeight: 1, letterSpacing: '-.01em' }}>{fmtWtDash(sectionTotals.netWt).replace(/\s.+/, '')}</span>
                 <span style={{ fontSize: 11, color: t.text3 }}>{fmtWtDash(sectionTotals.netWt).split(' ')[1] || 'g'}</span>
-                {sectionTotals.todayBills > 0 && (
-                  <span title={`${sectionTotals.todayBills} bills added today across this section`}
+                {sectionTotals.todayNetWt > 0 && (
+                  <span title={`${sectionTotals.todayBills} bill${sectionTotals.todayBills === 1 ? '' : 's'} totalling ${fmtWtDash(sectionTotals.todayNetWt)} added today across this section`}
                     style={{ marginLeft: 8, fontSize: 10, color: t.green, background: `${t.green}15`, border: `1px solid ${t.green}40`, borderRadius: 99, padding: '2px 8px', fontWeight: 700, fontFamily: 'monospace' }}>
-                    +{sectionTotals.todayBills} today
+                    +{fmtWtDash(sectionTotals.todayNetWt)} today
                   </span>
                 )}
               </div>
@@ -383,11 +386,13 @@ function DashConsSection({ t, title, subtitle, accent, regions, getTotals, getBr
                   <span style={{ color: t.border, margin: '0 5px' }}>·</span>
                   <strong style={{ color: t.gold }}>{fmtWtDash(tot.netWt)}</strong>
                 </span>
-                {/* Today's bills badge — green pill, only when > 0 */}
-                {tot.todayBills > 0 && (
-                  <span title={`${tot.todayBills} bills added today in this region`}
+                {/* Today's net-weight badge — green pill, only when > 0.
+                    Shows weight rather than bill count: more meaningful as a
+                    "today's inflow" metric for management. */}
+                {tot.todayNetWt > 0 && (
+                  <span title={`${tot.todayBills} bill${tot.todayBills === 1 ? '' : 's'} totalling ${fmtWtDash(tot.todayNetWt)} added today in this region`}
                     style={{ fontSize: 9, color: t.green, background: `${t.green}15`, border: `1px solid ${t.green}40`, padding: '2px 7px', borderRadius: 99, fontWeight: 700, fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
-                    +{tot.todayBills}
+                    +{fmtWtDash(tot.todayNetWt)}
                   </span>
                 )}
                 {/* Urgency badge — red pill when any branch has oldest > 7d */}
