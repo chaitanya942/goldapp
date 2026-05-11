@@ -75,7 +75,7 @@ export async function POST(req) {
         { name: 'DEVANAHALLI',            time: '15:00', tat: 24, days: 'daily' },
         { name: 'MANDYA',                 time: '17:00', tat: 24, days: 'daily' },
         { name: 'KOLAR',                  time: null,    tat: 24, days: 'mwf' },
-        { name: 'CHITHRADURGA',           time: '12:00', tat: 24, days: 'daily' },
+        { name: 'CHITRADURGA',            time: '12:00', tat: 24, days: 'daily' },
         { name: 'HOSPETE',                time: '11:00', tat: 48, days: 'ts' },
         { name: 'VIJAYAPURA',             time: '11:00', tat: 48, days: 'mwf' },
         { name: 'BELAGAVI',               time: '16:00', tat: 48, days: 'daily' },
@@ -93,7 +93,7 @@ export async function POST(req) {
         { name: 'AP-ANANTAPUR',           time: '17:00', tat: 24, days: 'mwf' },
         { name: 'AP-KURNOOL',             time: '16:00', tat: 48, days: 'tts' },
         // ─── Telangana — all identical (5-6pm, NEXT DAY, daily) ────
-        { name: 'TS-CHANDANAGAR',         time: '17:00', tat: 24, days: 'daily' },
+        { name: 'TS-CHANDA NAGAR',        time: '17:00', tat: 24, days: 'daily' },
         { name: 'TS-KUKATPALLY',          time: '17:00', tat: 24, days: 'daily' },
         { name: 'TS-AS RAO NAGAR',        time: '17:00', tat: 24, days: 'daily' },
         { name: 'TS-PANJAGUTTA',          time: '17:00', tat: 24, days: 'daily' },
