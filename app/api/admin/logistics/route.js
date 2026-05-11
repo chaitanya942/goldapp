@@ -48,12 +48,20 @@ export async function POST(req) {
     const body = await req.json()
     const kind = body?.kind
 
-    if (kind !== 'update') {
-      return Response.json({ error: `Unknown kind '${kind}'. Use 'update'.` }, { status: 400 })
+    if (kind !== 'update' && kind !== 'bulk_update') {
+      return Response.json({ error: `Unknown kind '${kind}'. Use 'update' or 'bulk_update'.` }, { status: 400 })
     }
 
-    const { branch_name, partner, pickup_time, delivery_tat_hours, pickup_days, contact_name, contact_phone, notes } = body
-    if (!branch_name) return Response.json({ error: 'branch_name required' }, { status: 400 })
+    const { branch_name, branch_names, partner, pickup_time, delivery_tat_hours, pickup_days, contact_name, contact_phone, notes } = body
+
+    if (kind === 'update') {
+      if (!branch_name) return Response.json({ error: 'branch_name required' }, { status: 400 })
+    }
+    if (kind === 'bulk_update') {
+      if (!Array.isArray(branch_names) || branch_names.length === 0) {
+        return Response.json({ error: 'branch_names array required' }, { status: 400 })
+      }
+    }
 
     // Build the update object — only keys that were explicitly sent are
     // included, so the caller can patch a single field without nulling the
@@ -106,6 +114,21 @@ export async function POST(req) {
 
     if (!Object.keys(updates).length) {
       return Response.json({ error: 'no fields to update' }, { status: 400 })
+    }
+
+    if (kind === 'bulk_update') {
+      const { data, error } = await supabase
+        .from('branches')
+        .update(updates)
+        .in('name', branch_names)
+        .select()
+      if (error) return Response.json({ error: error.message }, { status: 500 })
+      return Response.json({
+        success: true,
+        branches: data || [],
+        updated_count: (data || []).length,
+        requested_count: branch_names.length,
+      })
     }
 
     const { data, error } = await supabase

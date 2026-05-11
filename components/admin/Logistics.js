@@ -36,6 +36,11 @@ export default function Logistics() {
   const [partner,  setPartner]      = useState('')
   const [busyName, setBusyName]     = useState(null)
   const [toast,    setToast]        = useState(null)
+  // Multi-select state for bulk apply. A Set of branch names; the floating
+  // panel at the bottom edits common fields and applies them to this set
+  // in one call to bulk_update.
+  const [selected, setSelected]     = useState(() => new Set())
+  const [bulkBusy, setBulkBusy]     = useState(false)
 
   const fetchAll = useCallback(async () => {
     setLoading(true)
@@ -68,6 +73,40 @@ export default function Logistics() {
       setBusyName(null)
       setTimeout(() => setToast(null), 4000)
     }
+  }, [])
+
+  // Apply a partial patch to every selected branch in a single API call.
+  // Only fields the user actually set in the bulk panel get sent — empty
+  // strings / unset means "leave alone".
+  const applyBulk = useCallback(async (patch) => {
+    if (selected.size === 0) return
+    const branch_names = [...selected]
+    setBulkBusy(true)
+    try {
+      const r = await authedFetch('/api/admin/logistics', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ kind: 'bulk_update', branch_names, ...patch }),
+      })
+      const j = await r.json()
+      if (!r.ok || j.error) { setToast({ type: 'error', msg: j.error || 'Bulk apply failed' }); return }
+      // Patch local state for every returned branch row so each card refreshes
+      // without a full fetch round-trip.
+      const byName = new Map((j.branches || []).map(b => [b.name, b]))
+      setBranches(prev => prev.map(b => byName.has(b.name) ? { ...b, ...byName.get(b.name) } : b))
+      setSelected(new Set())
+      setToast({ type: 'success', msg: `${j.updated_count} branch${j.updated_count === 1 ? '' : 'es'} updated` })
+    } finally {
+      setBulkBusy(false)
+      setTimeout(() => setToast(null), 4000)
+    }
+  }, [selected])
+
+  const toggleSelect = useCallback((name) => {
+    setSelected(prev => {
+      const next = new Set(prev)
+      if (next.has(name)) next.delete(name); else next.add(name)
+      return next
+    })
   }, [])
 
   // Region + partner filter options derived from data.
@@ -165,19 +204,197 @@ export default function Logistics() {
       ) : filtered.length === 0 ? (
         <div style={{ ...card, padding: '60px 20px', textAlign: 'center', color: t.text4, fontSize: '13px' }}>No branches match the current filter.</div>
       ) : (
-        Object.entries(grouped).map(([r, list]) => (
-          <div key={r} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '4px 6px' }}>
-              <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: REGION_COLORS[r] || t.text3 }} />
-              <span style={{ fontSize: '11px', color: t.text2, fontWeight: 700, letterSpacing: '.1em', textTransform: 'uppercase' }}>{r}</span>
-              <span style={{ fontSize: '10px', color: t.text4 }}>· {list.length} branch{list.length === 1 ? '' : 'es'}</span>
+        Object.entries(grouped).map(([r, list]) => {
+          const allSelected = list.length > 0 && list.every(b => selected.has(b.name))
+          const someSelected = list.some(b => selected.has(b.name))
+          const toggleRegion = () => {
+            setSelected(prev => {
+              const next = new Set(prev)
+              if (allSelected) list.forEach(b => next.delete(b.name))
+              else             list.forEach(b => next.add(b.name))
+              return next
+            })
+          }
+          return (
+            <div key={r} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '4px 6px' }}>
+                <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: REGION_COLORS[r] || t.text3 }} />
+                <span style={{ fontSize: '11px', color: t.text2, fontWeight: 700, letterSpacing: '.1em', textTransform: 'uppercase' }}>{r}</span>
+                <span style={{ fontSize: '10px', color: t.text4 }}>· {list.length} branch{list.length === 1 ? '' : 'es'}</span>
+                <button onClick={toggleRegion}
+                  style={{ marginLeft: '8px', background: 'transparent', border: `1px solid ${allSelected || someSelected ? `${REGION_COLORS[r] || t.gold}60` : t.border}`, color: allSelected || someSelected ? (REGION_COLORS[r] || t.gold) : t.text3, borderRadius: '6px', padding: '3px 10px', fontSize: '10px', fontWeight: 600, cursor: 'pointer', letterSpacing: '.04em' }}>
+                  {allSelected ? '✓ All selected · click to clear' : someSelected ? `${list.filter(b => selected.has(b.name)).length} selected · select rest` : 'Select all in region'}
+                </button>
+              </div>
+              {list.map(b => (
+                <BranchCard
+                  key={b.name}
+                  t={t}
+                  branch={b}
+                  busy={busyName === b.name}
+                  onSave={saveBranch}
+                  regionAccent={REGION_COLORS[r] || t.gold}
+                  selected={selected.has(b.name)}
+                  onToggleSelect={() => toggleSelect(b.name)}
+                />
+              ))}
             </div>
-            {list.map(b => (
-              <BranchCard key={b.name} t={t} branch={b} busy={busyName === b.name} onSave={saveBranch} regionAccent={REGION_COLORS[r] || t.gold} />
+          )
+        })
+      )}
+
+      {/* Sticky bulk-apply panel — only renders when at least one branch is selected.
+          Lives outside the body scroll area so the floating bar stays put as
+          the user scrolls through 73 branches. */}
+      {selected.size > 0 && (
+        <BulkPanel
+          t={t}
+          count={selected.size}
+          busy={bulkBusy}
+          onApply={applyBulk}
+          onClear={() => setSelected(new Set())}
+        />
+      )}
+    </div>
+  )
+}
+
+// Floating bulk-apply panel. Stays at the bottom of the viewport while the user
+// scrolls. Inputs default to blank; only fields the user touches are sent —
+// touched-state tracked per-field so we can distinguish "leave alone" from
+// "clear this field" (the latter handled by setting a specific blank marker
+// in the input, but for now we treat empty string + untouched the same way:
+// don't include in the patch).
+function BulkPanel({ t, count, busy, onApply, onClear }) {
+  const [partner,     setPartner]     = useState('')
+  const [pickupTime,  setPickupTime]  = useState('')
+  const [tat,         setTat]         = useState('')
+  const [days,        setDays]        = useState([])
+  const [daysTouched, setDaysTouched] = useState(false)
+  const [contactName, setContactName] = useState('')
+  const [contactPhone,setContactPhone]= useState('')
+  const [notes,       setNotes]       = useState('')
+
+  const reset = () => {
+    setPartner(''); setPickupTime(''); setTat(''); setDays([]); setDaysTouched(false)
+    setContactName(''); setContactPhone(''); setNotes('')
+  }
+
+  // Build the patch — only include fields the user actually set.
+  const hasAny = (partner || pickupTime || tat || daysTouched || contactName || contactPhone || notes)
+
+  const handleApply = async () => {
+    const patch = {}
+    if (partner)      patch.partner            = partner
+    if (pickupTime)   patch.pickup_time        = pickupTime
+    if (tat)          patch.delivery_tat_hours = Number(tat)
+    if (daysTouched)  patch.pickup_days        = days
+    if (contactName)  patch.contact_name       = contactName
+    if (contactPhone) patch.contact_phone      = contactPhone
+    if (notes)        patch.notes              = notes
+    if (!Object.keys(patch).length) return
+    await onApply(patch)
+    reset()
+  }
+
+  const chip = (active, color) => ({
+    background: active ? `${color}20` : 'transparent',
+    color:      active ? color : t.text3,
+    border:     `1px solid ${active ? `${color}55` : t.border2 || t.border}`,
+    borderRadius:'6px', padding:'6px 11px', fontSize:'11px', fontWeight:600, cursor:'pointer',
+  })
+  const inp = { background: t.card2 || t.card, border: `1px solid ${t.border}`, borderRadius: '6px', padding: '7px 10px', fontSize: '12px', color: t.text1, outline: 'none' }
+
+  return (
+    <div style={{
+      position: 'sticky', bottom: '12px',
+      background: t.card, border: `1px solid ${t.gold}40`,
+      borderRadius: '14px', padding: '14px 18px',
+      boxShadow: `0 12px 36px rgba(0,0,0,.35), 0 0 0 1px ${t.gold}15`,
+      marginTop: '8px', zIndex: 5,
+      display: 'flex', flexDirection: 'column', gap: '10px',
+    }}>
+      {/* Header */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', fontSize: '13px', fontWeight: 700, color: t.gold }}>
+          <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: t.gold }} />
+          {count} branch{count === 1 ? '' : 'es'} selected
+        </span>
+        <span style={{ fontSize: '10px', color: t.text4 }}>Only the fields you fill below are applied. Empty fields stay untouched.</span>
+        <button onClick={onClear} disabled={busy}
+          style={{ marginLeft: 'auto', background: 'transparent', border: `1px solid ${t.border}`, color: t.text3, borderRadius: '6px', padding: '5px 12px', fontSize: '11px', cursor: 'pointer' }}>
+          Clear selection
+        </button>
+      </div>
+
+      {/* Field row */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '10px' }}>
+        <div>
+          <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 600, marginBottom: '4px' }}>Partner</div>
+          <select value={partner} onChange={e => setPartner(e.target.value)} disabled={busy} style={inp}>
+            <option value="">— leave —</option>
+            {PARTNERS.filter(p => p !== 'Other').map(p => <option key={p} value={p}>{p}</option>)}
+          </select>
+        </div>
+        <div>
+          <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 600, marginBottom: '4px' }}>Pickup time</div>
+          <input type="time" value={pickupTime} onChange={e => setPickupTime(e.target.value)} disabled={busy} style={inp} />
+        </div>
+        <div>
+          <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 600, marginBottom: '4px' }}>TAT</div>
+          <div style={{ display: 'flex', gap: '4px' }}>
+            {['', 24, 48, 72].map(h => (
+              <button key={h || 'none'} onClick={() => setTat(h === '' ? '' : String(h))} disabled={busy}
+                style={chip(String(tat) === String(h), t.gold)}>
+                {h === '' ? '—' : `${h}h`}
+              </button>
             ))}
           </div>
-        ))
-      )}
+        </div>
+        <div style={{ gridColumn: 'span 2' }}>
+          <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 600, marginBottom: '4px' }}>Pickup days {daysTouched ? <span style={{ color: t.gold }}>· will be applied</span> : <span>· untouched</span>}</div>
+          <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+            {DAYS.map(d => {
+              const active = days.includes(d)
+              return (
+                <button key={d} onClick={() => { setDaysTouched(true); setDays(prev => active ? prev.filter(x => x !== d) : [...prev, d]) }} disabled={busy}
+                  style={chip(active, t.green)}>
+                  {d}
+                </button>
+              )
+            })}
+            {daysTouched && (
+              <button onClick={() => { setDaysTouched(false); setDays([]) }} disabled={busy}
+                style={{ ...chip(false, t.text3), borderStyle: 'dashed' }}>
+                undo
+              </button>
+            )}
+          </div>
+        </div>
+        <div>
+          <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 600, marginBottom: '4px' }}>Contact name</div>
+          <input value={contactName} onChange={e => setContactName(e.target.value)} placeholder="—" maxLength={80} disabled={busy} style={inp} />
+        </div>
+        <div>
+          <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 600, marginBottom: '4px' }}>Contact phone</div>
+          <input value={contactPhone} onChange={e => setContactPhone(e.target.value)} placeholder="—" maxLength={20} disabled={busy} style={inp} />
+        </div>
+      </div>
+
+      {/* Apply CTA */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+        <input value={notes} onChange={e => setNotes(e.target.value)} placeholder="Notes (optional) — same text on every selected branch" maxLength={500} disabled={busy} style={{ ...inp, flex: 1 }} />
+        <button onClick={handleApply} disabled={busy || !hasAny}
+          style={{
+            background: hasAny && !busy ? t.gold : `${t.gold}40`,
+            color: '#1a0a00', border: 'none', borderRadius: '8px',
+            padding: '9px 18px', fontSize: '12px', fontWeight: 700,
+            cursor: busy || !hasAny ? 'not-allowed' : 'pointer',
+            whiteSpace: 'nowrap',
+          }}>
+          {busy ? `Applying to ${count}…` : `Apply to ${count} branch${count === 1 ? '' : 'es'}`}
+        </button>
+      </div>
     </div>
   )
 }
@@ -195,7 +412,8 @@ function Stat({ t, label, value, sub, accent }) {
 
 // Per-branch editor card. Same chrome pattern as the Settings tab state cards:
 // top accent stripe, hover lift, single 'Save changes' footer when dirty.
-function BranchCard({ t, branch, busy, onSave, regionAccent }) {
+// Also carries a multi-select checkbox in the header for the bulk-apply panel.
+function BranchCard({ t, branch, busy, onSave, regionAccent, selected, onToggleSelect }) {
   const [partner,    setPartner]    = useState(branch.logistics_partner || 'BVC')
   const [partnerOther, setPartnerOther] = useState(PARTNERS.includes(branch.logistics_partner) ? '' : (branch.logistics_partner || ''))
   const [pickup,     setPickup]     = useState(branch.pickup_time || '')
@@ -302,6 +520,22 @@ function BranchCard({ t, branch, busy, onSave, regionAccent }) {
 
       {/* Header */}
       <div style={{ padding: '14px 18px 10px', display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+        {/* Multi-select checkbox — clicking ticks this branch into the bulk panel. */}
+        {onToggleSelect && (
+          <button onClick={onToggleSelect} aria-label={selected ? 'Deselect for bulk' : 'Select for bulk'}
+            title={selected ? 'Selected for bulk apply. Click to deselect.' : 'Select for bulk apply'}
+            style={{
+              width: '20px', height: '20px', flexShrink: 0,
+              background: selected ? accent : 'transparent',
+              border: `1.5px solid ${selected ? accent : t.border2 || t.border}`,
+              borderRadius: '5px', cursor: 'pointer',
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+              color: '#fff', fontSize: '13px', fontWeight: 700,
+              transition: 'background .15s, border-color .15s',
+            }}>
+            {selected ? '✓' : ''}
+          </button>
+        )}
         <span style={{
           display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
           minWidth: '40px', height: '32px', padding: '0 12px',
