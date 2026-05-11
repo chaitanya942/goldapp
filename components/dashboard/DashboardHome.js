@@ -108,13 +108,16 @@ function ConsignmentBalanceView({ t, stats, isMobile }) {
   const transitByRegion = groupByRegion(transitFiltered)
 
   // Per-region totals — identical shape for both columns since both sources
-  // are now per-branch with the same fields.
+  // are now per-branch with the same fields. Includes today's count and the
+  // max age across branches in the region (for the urgency badge).
   const regionTotals = (byRegionMap) => (region) => {
     const rows = byRegionMap[region] || []
     return {
-      branchCount: rows.length,
-      bills: rows.reduce((s, b) => s + (b.today_bills || 0) + (b.older_bills || 0), 0),
-      netWt: rows.reduce((s, b) => s + Number(b.total_net_wt || 0), 0),
+      branchCount:   rows.length,
+      bills:         rows.reduce((s, b) => s + (b.today_bills || 0) + (b.older_bills || 0), 0),
+      todayBills:    rows.reduce((s, b) => s + (b.today_bills || 0), 0),
+      netWt:         rows.reduce((s, b) => s + Number(b.total_net_wt || 0), 0),
+      maxOldestDays: rows.reduce((m, b) => Math.max(m, b.oldest_age_days || 0), 0),
     }
   }
   const stockRegionTotals   = regionTotals(stockByRegion)
@@ -156,6 +159,7 @@ function ConsignmentBalanceView({ t, stats, isMobile }) {
           })}
           expanded={expandedStock} onToggle={toggleStock}
           countLabel="br"
+          onSegmentClick={(r) => setFilterRegion(filterRegion === r ? 'all' : r)}
         />
         <DashConsSection
           t={t} title="In Transit" subtitle="bills currently in flight" accent={t.blue}
@@ -170,6 +174,7 @@ function ConsignmentBalanceView({ t, stats, isMobile }) {
           })}
           expanded={expandedTransit} onToggle={toggleTransit}
           countLabel="br"
+          onSegmentClick={(r) => setFilterRegion(filterRegion === r ? 'all' : r)}
         />
       </div>
 
@@ -209,22 +214,51 @@ function ConsignmentBalanceView({ t, stats, isMobile }) {
   )
 }
 
-function DashConsSection({ t, title, subtitle, accent, regions, getTotals, getBranches, getBranchView, expanded, onToggle, countLabel }) {
+function DashConsSection({ t, title, subtitle, accent, regions, getTotals, getBranches, getBranchView, expanded, onToggle, countLabel, onSegmentClick }) {
+  // Per-section sort. 'weight' = net wt desc (default). Others sort accordingly.
+  const [sortKey, setSortKey] = useState('weight')
+
   // Section roll-up — used for the top summary + share-of-total bars below.
   const sectionTotals = regions.reduce((acc, r) => {
     const tot = getTotals(r)
-    acc.bills += tot.bills
-    acc.netWt += tot.netWt
-    acc.units += tot.branchCount != null ? tot.branchCount : tot.consignmentCount
+    acc.bills      += tot.bills
+    acc.todayBills += tot.todayBills || 0
+    acc.netWt      += tot.netWt
+    acc.units      += tot.branchCount != null ? tot.branchCount : tot.consignmentCount
     return acc
-  }, { bills: 0, netWt: 0, units: 0 })
+  }, { bills: 0, todayBills: 0, netWt: 0, units: 0 })
 
-  // Region share data — sorted desc by weight so the largest region dominates
-  // the visual distribution bar.
+  // Region share data — sorted per the user's choice. Share % is always
+  // computed from net weight so the visual distribution bar still aligns
+  // with the section's primary metric.
   const distribution = regions.map(r => {
     const tot = getTotals(r)
     return { r, tot, share: sectionTotals.netWt > 0 ? tot.netWt / sectionTotals.netWt : 0 }
-  }).sort((a, b) => b.share - a.share)
+  }).sort((a, b) => {
+    if (sortKey === 'bills')  return b.tot.bills - a.tot.bills
+    if (sortKey === 'oldest') return (b.tot.maxOldestDays || 0) - (a.tot.maxOldestDays || 0)
+    if (sortKey === 'name')   return a.r.localeCompare(b.r)
+    return b.share - a.share  // default: weight
+  })
+
+  const SortBtn = ({ k, label }) => {
+    const active = sortKey === k
+    return (
+      <button onClick={() => setSortKey(k)}
+        style={{
+          padding: '3px 9px',
+          borderRadius: 99,
+          background: active ? `${accent}22` : 'transparent',
+          border: `1px solid ${active ? `${accent}60` : t.border}`,
+          color: active ? accent : t.text4,
+          fontSize: 9.5, fontWeight: active ? 700 : 500,
+          cursor: 'pointer', letterSpacing: '.04em',
+          transition: 'all .12s ease',
+        }}>
+        {label}
+      </button>
+    )
+  }
 
   return (
     <div style={{
@@ -254,6 +288,12 @@ function DashConsSection({ t, title, subtitle, accent, regions, getTotals, getBr
               <div style={{ display: 'flex', alignItems: 'baseline', gap: 4, marginTop: 3 }}>
                 <span className="logi-grow" style={{ fontSize: 22, fontWeight: 700, color: accent, fontFamily: 'monospace', lineHeight: 1, letterSpacing: '-.01em' }}>{fmtWtDash(sectionTotals.netWt).replace(/\s.+/, '')}</span>
                 <span style={{ fontSize: 11, color: t.text3 }}>{fmtWtDash(sectionTotals.netWt).split(' ')[1] || 'g'}</span>
+                {sectionTotals.todayBills > 0 && (
+                  <span title={`${sectionTotals.todayBills} bills added today across this section`}
+                    style={{ marginLeft: 8, fontSize: 10, color: t.green, background: `${t.green}15`, border: `1px solid ${t.green}40`, borderRadius: 99, padding: '2px 8px', fontWeight: 700, fontFamily: 'monospace' }}>
+                    +{sectionTotals.todayBills} today
+                  </span>
+                )}
               </div>
             </div>
             <div style={{ display: 'flex', gap: 16, marginLeft: 'auto', fontSize: 10.5, color: t.text3, fontFamily: 'monospace' }}>
@@ -261,23 +301,40 @@ function DashConsSection({ t, title, subtitle, accent, regions, getTotals, getBr
               <span><strong style={{ color: t.text2 }}>{sectionTotals.bills}</strong> <span style={{ color: t.text4 }}>bills</span></span>
             </div>
           </div>
-          {/* Stacked distribution bar — each region as a coloured segment proportional to its weight */}
+          {/* Sort selector — small chip row that picks which dimension drives
+              the region order. Visual layout (share %, bar, distribution) is
+              unchanged; only the row ordering shifts. */}
+          {regions.length > 1 && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10, flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 9, color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 700, marginRight: 2 }}>Sort</span>
+              <SortBtn k="weight" label="Weight" />
+              <SortBtn k="bills"  label="Bills" />
+              <SortBtn k="oldest" label="Oldest" />
+              <SortBtn k="name"   label="Region" />
+            </div>
+          )}
+          {/* Stacked distribution bar — clickable segments filter the section
+              to that region. Click again on the same region or 'All' to clear. */}
           {sectionTotals.netWt > 0 && (
-            <div style={{ display: 'flex', height: 8, borderRadius: 5, overflow: 'hidden', background: `${t.border}50` }}>
+            <div style={{ display: 'flex', height: 10, borderRadius: 6, overflow: 'hidden', background: `${t.border}50`, cursor: onSegmentClick ? 'pointer' : 'default' }}>
               {distribution.map(({ r, tot, share }, i) => {
                 const color = REGION_COLORS_DASH[r] || t.text3
                 const widthPct = share * 100
                 if (widthPct < 0.5) return null
                 return (
                   <div key={r}
-                    title={`${r}: ${fmtWtDash(tot.netWt)} (${(share * 100).toFixed(1)}%)`}
+                    onClick={() => onSegmentClick && onSegmentClick(r)}
+                    title={`${r}: ${fmtWtDash(tot.netWt)} (${(share * 100).toFixed(1)}%) — click to filter`}
                     style={{
                       width: `${widthPct}%`,
                       background: color,
-                      transition: 'width .6s cubic-bezier(.4,0,.2,1)',
+                      transition: 'width .6s cubic-bezier(.4,0,.2,1), opacity .15s, transform .15s',
                       animation: `dashGrow .6s cubic-bezier(.4,0,.2,1) ${i * 80}ms backwards`,
                       transformOrigin: 'left',
-                    }} />
+                    }}
+                    onMouseEnter={e => { if (onSegmentClick) e.currentTarget.style.opacity = '.75' }}
+                    onMouseLeave={e => { if (onSegmentClick) e.currentTarget.style.opacity = '1' }}
+                  />
                 )
               })}
             </div>
@@ -326,6 +383,21 @@ function DashConsSection({ t, title, subtitle, accent, regions, getTotals, getBr
                   <span style={{ color: t.border, margin: '0 5px' }}>·</span>
                   <strong style={{ color: t.gold }}>{fmtWtDash(tot.netWt)}</strong>
                 </span>
+                {/* Today's bills badge — green pill, only when > 0 */}
+                {tot.todayBills > 0 && (
+                  <span title={`${tot.todayBills} bills added today in this region`}
+                    style={{ fontSize: 9, color: t.green, background: `${t.green}15`, border: `1px solid ${t.green}40`, padding: '2px 7px', borderRadius: 99, fontWeight: 700, fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
+                    +{tot.todayBills}
+                  </span>
+                )}
+                {/* Urgency badge — red pill when any branch has oldest > 7d */}
+                {tot.maxOldestDays > 7 && (
+                  <span title={`Oldest bill in this region is ${tot.maxOldestDays} days old`}
+                    className="logi-pulse"
+                    style={{ fontSize: 9, color: t.red, background: `${t.red}15`, border: `1px solid ${t.red}45`, padding: '2px 7px', borderRadius: 99, fontWeight: 700, fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
+                    {tot.maxOldestDays}d
+                  </span>
+                )}
                 {/* Per-row share indicator: small pill showing % of section total */}
                 <span style={{ fontSize: 9.5, color, fontFamily: 'monospace', fontWeight: 700, background: `${color}15`, padding: '2px 7px', borderRadius: 99, border: `1px solid ${color}30`, whiteSpace: 'nowrap' }}>
                   {(share * 100).toFixed(0)}%
