@@ -3,7 +3,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../../lib/supabase'
 import { useApp, useRegionAccess } from '../../lib/context'
-import AnimatedNumber from '../ui/AnimatedNumber'
 import LiveTicker from '../ui/LiveTicker'
 import { getVisibleModules } from '../../lib/modules'
 import { authedFetch } from '../../lib/authedFetch'
@@ -35,14 +34,43 @@ function getRange(key) {
 // Read-only consignment balance view for the dashboard.
 // Shows the management team how much gold is "still at branches" vs "currently
 // moving" between branches / hub / HO. No buttons, no actions — this is the
-// 90%-of-the-time landing-page view, so it has to be readable at a glance and
-// look refined. Uses gradients, inline progress bar, and animated numbers.
-//
-// Two layouts:
-//   desktop: balance bar on top, two large stat tiles side-by-side beneath
-//   mobile : balance bar on top, two stat tiles stacked
+// ── Consignment overview for the dashboard ───────────────────────────────────
+// Two side-by-side columns: "Branch In Stock" and "In Transit". Each shows
+// region cards with rolled-up totals; click a card to expand into per-branch
+// rows (Bills · Net Wt · Oldest). Region filter chips on top.
+// Mobile: columns stack vertically.
+
+const REGION_COLORS_DASH = {
+  'Andhra Pradesh':    '#5ec1d6',
+  'Kerala':            '#3aaa6a',
+  'Telangana':         '#c9a84c',
+  'Tamil Nadu':        '#e58a3b',
+  'Rest of Karnataka': '#9275d5',
+  'Bangalore':         '#e05555',
+}
+
+const fmtWtDash = (g) => {
+  const n = Number(g || 0)
+  if (n >= 1000) return `${(n / 1000).toFixed(2)} kg`
+  return `${n.toFixed(0)} g`
+}
+
+const fmtAgeDash = (d) => {
+  if (!d) return '—'
+  const ms = Date.now() - new Date(d).getTime()
+  if (ms < 0) return 'today'
+  const days = Math.floor(ms / 86400000)
+  if (days === 0) return 'today'
+  if (days === 1) return '1d'
+  return `${days}d`
+}
+
 function ConsignmentBalanceView({ t, stats, isMobile }) {
-  if (!stats) {
+  const [filterRegion,    setFilterRegion]    = useState('all')
+  const [expandedStock,   setExpandedStock]   = useState(() => new Set())
+  const [expandedTransit, setExpandedTransit] = useState(() => new Set())
+
+  if (!stats || !stats.branchOverviewRaw) {
     return (
       <div style={{ minHeight: 180, display:'flex', alignItems:'center', justifyContent:'center' }}>
         <div style={{ width:24, height:24, borderRadius:'50%', border:`2px solid ${t.border}`, borderTopColor: t.orange, animation:'spin 1s linear infinite' }}/>
@@ -51,783 +79,213 @@ function ConsignmentBalanceView({ t, stats, isMobile }) {
     )
   }
 
-  const branchWt    = Number(stats.branchWeight   || 0)
-  const movementWt  = Number(stats.movementWeight || 0)
-  const totalWt     = branchWt + movementWt
-  const branchPct   = totalWt > 0 ? (branchWt   / totalWt) * 100 : 0
-  const movementPct = totalWt > 0 ? (movementWt / totalWt) * 100 : 0
+  // Source rows: branch overview (at-branch stock) + in-flight consignments.
+  const stockRows = (stats.branchOverviewRaw || []).filter(b => ((b.today_bills || 0) + (b.older_bills || 0)) > 0)
+  const transitRows = stats.inTransitRaw || []
 
-  const branchValueFmt   = fmtCr(stats.branchValue)
-  const movementValueFmt = fmtCr(stats.movementValue)
-  const totalValueFmt    = fmtCr((stats.branchValue || 0) + (stats.movementValue || 0))
+  const allRegions = [...new Set([
+    ...stockRows.map(b => b.region).filter(Boolean),
+    ...transitRows.map(c => c.region).filter(Boolean),
+  ])].sort()
 
-  const tile = (kind) => {
-    const isBranch = kind === 'branch'
-    const accent   = isBranch ? t.orange : t.blue
-    const label    = isBranch ? 'AT BRANCH' : 'IN MOVEMENT'
-    const subline  = isBranch
-      ? 'Stock awaiting consignment'
-      : 'Active consignments in transit'
-    const wt       = isBranch ? branchWt : movementWt
-    const val      = isBranch ? stats.branchValue : stats.movementValue
-    const bills    = isBranch ? stats.branchBills : stats.movementBills
-    const pct      = isBranch ? branchPct : movementPct
-    const sideTag  = isBranch
-      ? `${stats.branchesActive || 0} branch${(stats.branchesActive || 0) === 1 ? '' : 'es'}`
-      : `${stats.movementCount || 0} consignment${(stats.movementCount || 0) === 1 ? '' : 's'}`
-    const icon = isBranch ? (
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={accent} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M3 9l9-6 9 6v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V9z"/>
-        <path d="M9 22V12h6v10"/>
-      </svg>
-    ) : (
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={accent} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M1 3h15v13H1z"/>
-        <path d="M16 8h4l3 3v5h-7z"/>
-        <circle cx="5.5" cy="18.5" r="2.5"/>
-        <circle cx="18.5" cy="18.5" r="2.5"/>
-      </svg>
-    )
+  const stockFiltered   = filterRegion === 'all' ? stockRows   : stockRows.filter(b => b.region === filterRegion)
+  const transitFiltered = filterRegion === 'all' ? transitRows : transitRows.filter(c => c.region === filterRegion)
 
-    return (
-      <div style={{
-        position:'relative', overflow:'hidden',
-        background:`linear-gradient(155deg, ${t.card}f5 0%, ${t.card2 || t.card}f5 100%)`,
-        border:`1px solid ${accent}30`,
-        borderRadius: 16,
-        padding: isMobile ? '16px 16px 14px' : '20px 22px 18px',
-        boxShadow:`${t.shadow}, inset 0 1px 0 rgba(255,255,255,.04)`,
-      }}>
-        {/* Accent corner glow */}
-        <div style={{
-          position:'absolute', top:-30, right:-30, width:130, height:130, borderRadius:'50%',
-          background:`radial-gradient(circle, ${accent}28 0%, transparent 65%)`,
-          pointerEvents:'none',
-        }}/>
-        {/* Subtle accent stripe down the left edge */}
-        <div style={{
-          position:'absolute', top:0, left:0, bottom:0, width:3,
-          background:`linear-gradient(180deg, ${accent} 0%, ${accent}40 100%)`,
-        }}/>
-
-        <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom: isMobile ? 12 : 14, position:'relative', zIndex:1 }}>
-          <div style={{ display:'flex', alignItems:'center', gap:10 }}>
-            <div style={{
-              width:34, height:34, borderRadius:9,
-              background: `${accent}18`, border:`1px solid ${accent}30`,
-              display:'flex', alignItems:'center', justifyContent:'center',
-            }}>{icon}</div>
-            <div>
-              <div style={{ fontSize: 10, color: accent, letterSpacing:'.16em', fontWeight: 800 }}>{label}</div>
-              <div style={{ fontSize: 10, color: t.text4, marginTop: 2 }}>{subline}</div>
-            </div>
-          </div>
-          <div style={{
-            fontSize: 10, color: t.text3, fontFamily:'monospace',
-            background: `${t.border}80`, padding:'3px 9px', borderRadius:6,
-            border:`1px solid ${t.border}`,
-            whiteSpace:'nowrap',
-          }}>{sideTag}</div>
-        </div>
-
-        {/* Big number — gold weight */}
-        <div style={{ display:'flex', alignItems:'baseline', gap:6, position:'relative', zIndex:1 }}>
-          <span style={{ fontSize: isMobile ? 30 : 38, fontWeight: 200, color: t.text1, fontFamily:'monospace', letterSpacing:'-.02em', lineHeight: 1 }}>
-            <AnimatedNumber target={wt} decimals={3} duration={900} />
-          </span>
-          <span style={{ fontSize: isMobile ? 14 : 16, color: t.text3, fontWeight: 500 }}>g</span>
-        </div>
-
-        {/* Secondary stats row */}
-        <div style={{ display:'flex', alignItems:'baseline', gap: isMobile ? 14 : 22, marginTop: isMobile ? 10 : 12, flexWrap:'wrap', position:'relative', zIndex:1 }}>
-          <div>
-            <div style={{ fontSize: 9, color: t.text4, letterSpacing:'.1em', fontWeight: 600, textTransform:'uppercase' }}>Value</div>
-            <div style={{ fontSize: isMobile ? 14 : 16, color: t.text2, fontFamily:'monospace', fontWeight: 600, marginTop: 2 }}>
-              {fmtCr(val)}
-            </div>
-          </div>
-          <div>
-            <div style={{ fontSize: 9, color: t.text4, letterSpacing:'.1em', fontWeight: 600, textTransform:'uppercase' }}>Bills</div>
-            <div style={{ fontSize: isMobile ? 14 : 16, color: t.text2, fontFamily:'monospace', fontWeight: 600, marginTop: 2 }}>
-              <AnimatedNumber target={bills || 0} duration={700} />
-            </div>
-          </div>
-          <div>
-            <div style={{ fontSize: 9, color: t.text4, letterSpacing:'.1em', fontWeight: 600, textTransform:'uppercase' }}>Share</div>
-            <div style={{ fontSize: isMobile ? 14 : 16, color: accent, fontFamily:'monospace', fontWeight: 700, marginTop: 2 }}>
-              {pct.toFixed(1)}%
-            </div>
-          </div>
-        </div>
-      </div>
-    )
+  // Group stock by region (branches are already per-row, one branch = one row).
+  const stockByRegion = {}
+  for (const b of stockFiltered) {
+    const r = b.region || 'Other'
+    if (!stockByRegion[r]) stockByRegion[r] = []
+    stockByRegion[r].push(b)
+  }
+  // Group transit by region → branch (a branch may have N consignments).
+  const transitByRegion = {}
+  for (const c of transitFiltered) {
+    const r = c.region || 'Other'
+    if (!transitByRegion[r]) transitByRegion[r] = []
+    transitByRegion[r].push(c)
   }
 
-  // Lifecycle KPI band — shows the 4 numbers operations / accounts care about
-  // most: how many consignments are mid-flight, awaiting accounts approval,
-  // waiting on a cancellation decision, and how many fresh ones today.
-  // Responsive: 2x2 on mobile, single row on desktop.
-  const KpiPill = ({ label, value, color, sub, pulse }) => (
-    <div style={{
-      flex: 1, minWidth: isMobile ? 'calc(50% - 8px)' : 0,
-      position: 'relative', overflow: 'hidden',
-      background: `linear-gradient(155deg, ${color}12 0%, ${t.card2 || t.card}90 60%)`,
-      border: `1px solid ${color}35`,
-      borderRadius: 12,
-      padding: isMobile ? '10px 12px' : '12px 14px',
-    }}>
-      <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 2,
-        background: `linear-gradient(90deg, ${color} 0%, ${color}40 60%, transparent 100%)` }} />
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-        <span style={{ fontSize: 9, color: t.text4, letterSpacing: '.14em', textTransform: 'uppercase', fontWeight: 700 }}>{label}</span>
-        {pulse && value > 0 && <span style={{ width: 5, height: 5, borderRadius: '50%', background: color, animation: 'spin .8s ease-in-out infinite alternate' }} />}
-      </div>
-      <div style={{ fontSize: isMobile ? 20 : 24, fontWeight: 700, color, marginTop: 4, fontFamily: 'monospace', lineHeight: 1.05 }}>
-        <AnimatedNumber target={value || 0} duration={650} />
-      </div>
-      {sub && <div style={{ fontSize: 9.5, color: t.text4, marginTop: 4 }}>{sub}</div>}
-    </div>
-  )
+  const stockRegionTotals = (region) => {
+    const rows = stockByRegion[region] || []
+    return {
+      branchCount: rows.length,
+      bills: rows.reduce((s, b) => s + (b.today_bills || 0) + (b.older_bills || 0), 0),
+      netWt: rows.reduce((s, b) => s + Number(b.total_net_wt || 0), 0),
+    }
+  }
+  const transitRegionTotals = (region) => {
+    const cs = transitByRegion[region] || []
+    return {
+      consignmentCount: cs.length,
+      bills: cs.reduce((s, c) => s + Number(c.total_bills || 0), 0),
+      netWt: cs.reduce((s, c) => s + Number(c.total_net_wt || c.total_gross_wt || 0), 0),
+    }
+  }
+  // Aggregate transit by branch within a region so the expand shows one row
+  // per branch with totals across that branch's consignments.
+  const transitByBranchFor = (region) => {
+    const cs = transitByRegion[region] || []
+    const byBranch = new Map()
+    for (const c of cs) {
+      const cur = byBranch.get(c.branch_name) || { branch: c.branch_name, bills: 0, netWt: 0, oldest: null }
+      cur.bills += Number(c.total_bills || 0)
+      cur.netWt += Number(c.total_net_wt || c.total_gross_wt || 0)
+      const ts = c.created_at ? new Date(c.created_at).getTime() : null
+      if (ts && (!cur.oldest || ts < cur.oldest)) cur.oldest = ts
+      byBranch.set(c.branch_name, cur)
+    }
+    return [...byBranch.values()].sort((a, b) => b.netWt - a.netWt)
+  }
 
-  // 7-day sparkline of dispatched consignments — built from dailySeries.
-  // Renders as a tight bar chart with the most recent days emphasised.
-  const sparkData = (stats.dailySeries || []).slice(7).map((d, i) => ({ k: i, count: d.count }))
-  const sparkMax  = Math.max(...sparkData.map(d => d.count), 1)
-  const velocityUp = (stats.velocityPct || 0) >= 0
-
-  return (
-    <div style={{ display:'flex', flexDirection:'column', gap: isMobile ? 14 : 18 }}>
-
-      {/* ── Lifecycle KPI strip ── */}
-      <div style={{ display: 'flex', gap: isMobile ? 8 : 10, flexWrap: 'wrap' }}>
-        <KpiPill label="In Transit"      value={stats.movementCount  || 0} color={t.blue}   sub={`${(stats.movementBills || 0)} bill${stats.movementBills === 1 ? '' : 's'}`} />
-        <KpiPill label="Awaiting Review" value={stats.pendingCount   || 0} color={t.orange} sub="accounts to approve" pulse />
-        <KpiPill label="Cancel Requests" value={stats.cancelReqCount || 0} color={t.red}    sub="ops asked to void" pulse />
-        <KpiPill label="Today"           value={stats.todayCount     || 0} color={t.green}  sub="new consignments" />
-      </div>
-
-      {/* ── 7-day sparkline + velocity ── */}
-      {sparkData.some(d => d.count > 0) && (
-        <div style={{
-          background: `linear-gradient(160deg, ${t.card2 || t.card}f8 0%, ${t.card3 || t.card}f8 100%)`,
-          border: `1px solid ${t.border}`,
-          borderRadius: 14,
-          padding: isMobile ? '12px 14px' : '14px 18px',
-          display: 'flex', alignItems: 'center', gap: isMobile ? 12 : 18,
-          flexDirection: isMobile ? 'column' : 'row',
-        }}>
-          <div style={{ minWidth: isMobile ? 'auto' : 180 }}>
-            <div style={{ fontSize: 9, color: t.text4, letterSpacing: '.14em', textTransform: 'uppercase', fontWeight: 700 }}>Last 7 days</div>
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginTop: 4 }}>
-              <span style={{ fontSize: isMobile ? 22 : 26, fontWeight: 700, color: t.text1, fontFamily: 'monospace' }}>{stats.last7 || 0}</span>
-              <span style={{ fontSize: 11, color: t.text4 }}>consignments</span>
-            </div>
-            <div style={{ fontSize: 10, marginTop: 6, color: velocityUp ? t.green : t.red, fontWeight: 600 }}>
-              {velocityUp ? '▲' : '▼'} {Math.abs(stats.velocityPct || 0).toFixed(0)}%
-              <span style={{ color: t.text4, fontWeight: 500, marginLeft: 4 }}>vs prior 7d ({stats.prior7 || 0})</span>
-            </div>
-          </div>
-          <div style={{ flex: 1, display: 'flex', alignItems: 'flex-end', gap: 4, height: isMobile ? 52 : 60, width: '100%' }}>
-            {sparkData.map((d, i) => {
-              const h = sparkMax === 0 ? 2 : Math.max(3, (d.count / sparkMax) * 100)
-              const isToday = i === sparkData.length - 1
-              const accent = isToday ? t.gold : t.blue
-              return (
-                <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
-                  <div title={`${d.count} consignment${d.count === 1 ? '' : 's'}`}
-                    style={{
-                      width: '100%', height: `${h}%`, minHeight: 2,
-                      background: `linear-gradient(180deg, ${accent} 0%, ${accent}50 100%)`,
-                      borderRadius: '4px 4px 2px 2px',
-                      transition: 'height .4s cubic-bezier(.4,0,.2,1)',
-                      animation: `dashGrow .5s cubic-bezier(.4,0,.2,1) ${i * 40}ms backwards`,
-                    }} />
-                  <span style={{ fontSize: 9, color: isToday ? t.gold : t.text4, fontWeight: isToday ? 700 : 500 }}>
-                    {d.count}
-                  </span>
-                </div>
-              )
-            })}
-          </div>
-          <style>{`@keyframes dashGrow { from { transform: scaleY(0); transform-origin: bottom } to { transform: scaleY(1); transform-origin: bottom } }`}</style>
-        </div>
-      )}
-
-      {/* ── Total + Balance bar ───────────────────────────────────────────── */}
-      <div style={{
-        background:`linear-gradient(160deg, ${t.card2 || t.card}f8 0%, ${t.card3 || t.card}f8 100%)`,
-        border:`1px solid ${t.border}`,
-        borderRadius: 14,
-        padding: isMobile ? '14px 16px' : '18px 22px',
-        position:'relative', overflow:'hidden',
-      }}>
-        {/* faint orb */}
-        <div style={{ position:'absolute', top:-50, right:-50, width:160, height:160, borderRadius:'50%', background:`radial-gradient(circle, ${t.gold}10 0%, transparent 65%)`, pointerEvents:'none' }}/>
-
-        <div style={{ display:'flex', alignItems:isMobile ? 'flex-start' : 'baseline', justifyContent:'space-between', flexDirection: isMobile ? 'column' : 'row', gap: isMobile ? 4 : 14, marginBottom: 10, position:'relative', zIndex:1 }}>
-          <div>
-            <div style={{ fontSize: 9, color: t.text4, letterSpacing:'.18em', fontWeight: 700, textTransform:'uppercase' }}>Total stock under company</div>
-            <div style={{ display:'flex', alignItems:'baseline', gap: 8, marginTop: 4 }}>
-              <span style={{ fontSize: isMobile ? 24 : 30, fontWeight: 200, color: t.text1, fontFamily:'monospace', letterSpacing:'-.02em', lineHeight: 1 }}>
-                <AnimatedNumber target={totalWt} decimals={3} duration={1100} />
-              </span>
-              <span style={{ fontSize: isMobile ? 13 : 15, color: t.text3, fontWeight: 500 }}>g</span>
-              <span style={{ fontSize: isMobile ? 11 : 12, color: t.text4, marginLeft: 6 }}>·</span>
-              <span style={{ fontSize: isMobile ? 13 : 15, color: t.gold, fontFamily:'monospace', fontWeight: 600 }}>{totalValueFmt}</span>
-            </div>
-          </div>
-          <div style={{ display:'flex', gap: 16, alignItems:'center', fontSize: 10, color: t.text3, flexWrap:'wrap' }}>
-            <span style={{ display:'inline-flex', alignItems:'center', gap: 6 }}>
-              <span style={{ width: 8, height: 8, borderRadius: 2, background: t.orange, boxShadow:`0 0 6px ${t.orange}80` }}/>
-              At branch
-            </span>
-            <span style={{ display:'inline-flex', alignItems:'center', gap: 6 }}>
-              <span style={{ width: 8, height: 8, borderRadius: 2, background: t.blue, boxShadow:`0 0 6px ${t.blue}80` }}/>
-              In movement
-            </span>
-          </div>
-        </div>
-
-        {/* Balance bar — proportional split */}
-        <div style={{
-          position:'relative', zIndex:1,
-          height: 12,
-          borderRadius: 6,
-          background: t.border,
-          overflow:'hidden',
-          display:'flex',
-        }}>
-          <div style={{
-            width: `${branchPct}%`,
-            background: `linear-gradient(90deg, ${t.orange} 0%, ${t.gold} 100%)`,
-            transition: 'width 0.9s cubic-bezier(.4,0,.2,1)',
-          }}/>
-          <div style={{
-            width: `${movementPct}%`,
-            background: `linear-gradient(90deg, ${t.blue} 0%, ${t.purple} 100%)`,
-            transition: 'width 0.9s cubic-bezier(.4,0,.2,1)',
-          }}/>
-        </div>
-        <div style={{ display:'flex', justifyContent:'space-between', marginTop: 6, fontSize: 10, color: t.text4, fontFamily:'monospace', position:'relative', zIndex:1 }}>
-          <span>{branchPct.toFixed(1)}% at branch</span>
-          <span>{movementPct.toFixed(1)}% in movement</span>
-        </div>
-      </div>
-
-      {/* ── Two stat tiles ────────────────────────────────────────────────── */}
-      <div style={{ display:'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: isMobile ? 12 : 16 }}>
-        {tile('branch')}
-        {tile('movement')}
-      </div>
-
-      {/* ── At-risk callout (only when there's aged stock) ───────────────── */}
-      {(stats.riskWeight || 0) > 0 && (
-        <AtRiskBanner t={t} stats={stats} isMobile={isMobile} />
-      )}
-
-      {/* ── State donut + Daily movement sparkline (chart row) ───────────── */}
-      <div style={{ display:'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: isMobile ? 12 : 16 }}>
-        <StateDonut t={t} stats={stats} isMobile={isMobile} />
-        <MovementVelocity t={t} stats={stats} isMobile={isMobile} />
-      </div>
-
-      {/* ── State-wise split + Top branches (paired analytics row) ───────── */}
-      <div style={{ display:'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: isMobile ? 12 : 16 }}>
-        <StateBreakdown t={t} stats={stats} isMobile={isMobile} />
-        <TopBranchesPanel t={t} stats={stats} isMobile={isMobile} />
-      </div>
-
-      {/* ── Insight strip — single observational line ─────────────────────── */}
-      <ConsignmentInsight t={t} stats={stats} isMobile={isMobile} />
-    </div>
-  )
-}
-
-// Donut chart showing state-wise weight distribution. Renders as SVG so it
-// scales cleanly. Center label shows the state count and total weight.
-// Read-only — no interaction. Pairs with StateBreakdown for visual variety:
-// donut tells the story at a glance, bars give the precise rank + share.
-function StateDonut({ t, stats, isMobile }) {
-  const states = stats?.byState || []
-  const total  = states.reduce((s, x) => s + (x.weight || 0), 0)
-  const palette = [t.gold, t.orange, t.blue, t.purple, t.green, t.red, t.text2]
-  const size = 160, stroke = 26
-  const r    = (size - stroke) / 2
-  const cx   = size / 2, cy = size / 2
-  const C    = 2 * Math.PI * r
-
-  // Build slices: top 6 states, rest grouped into 'Others'.
-  const visible = states.slice(0, 6)
-  const others  = states.slice(6).reduce((s, x) => s + x.weight, 0)
-  const slices  = others > 0
-    ? [...visible, { state: 'Others', weight: others }]
-    : visible
-
-  let offset = 0  // running stroke-dashoffset
-
-  return (
-    <div style={{
-      background: t.card, border: `1px solid ${t.border}`,
-      borderRadius: 14,
-      padding: isMobile ? '14px 16px' : '18px 20px',
-      position:'relative', overflow:'hidden',
-    }}>
-      <div style={{ position:'absolute', top:-30, right:-30, width:140, height:140, borderRadius:'50%', background:`radial-gradient(circle, ${t.purple}10 0%, transparent 65%)`, pointerEvents:'none' }}/>
-
-      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom: 14, position:'relative', zIndex: 1 }}>
-        <div>
-          <div style={{ fontSize: 9, color: t.text4, letterSpacing:'.16em', fontWeight: 700, textTransform:'uppercase' }}>State distribution</div>
-          <div style={{ fontSize: 10, color: t.text4, marginTop: 3 }}>At-branch weight by state</div>
-        </div>
-        <div style={{ fontSize: 10, color: t.text3, fontFamily:'monospace', background: t.border, padding:'3px 8px', borderRadius: 6 }}>
-          {states.length} state{states.length === 1 ? '' : 's'}
-        </div>
-      </div>
-
-      {total === 0 ? (
-        <div style={{ padding:'40px 0', textAlign:'center', fontSize: 11, color: t.text4 }}>
-          No stock at branches.
-        </div>
-      ) : (
-        <div style={{ display:'flex', alignItems:'center', gap: isMobile ? 14 : 22, position:'relative', zIndex: 1 }}>
-          {/* SVG donut */}
-          <div style={{ position:'relative', width: size, height: size, flexShrink: 0 }}>
-            <svg width={size} height={size} style={{ transform:'rotate(-90deg)' }}>
-              <circle cx={cx} cy={cy} r={r} fill="none" stroke={t.border} strokeWidth={stroke}/>
-              {slices.map((s, i) => {
-                const frac    = s.weight / total
-                const length  = frac * C
-                const dash    = `${length} ${C - length}`
-                const arc = (
-                  <circle key={s.state}
-                    cx={cx} cy={cy} r={r} fill="none"
-                    stroke={s.state === 'Others' ? t.text4 : palette[i % palette.length]}
-                    strokeWidth={stroke}
-                    strokeDasharray={dash}
-                    strokeDashoffset={-offset}
-                    style={{ transition: 'stroke-dasharray .9s cubic-bezier(.4,0,.2,1), stroke-dashoffset .9s cubic-bezier(.4,0,.2,1)' }}
-                  />
-                )
-                offset += length
-                return arc
-              })}
-            </svg>
-            {/* Centre label */}
-            <div style={{
-              position:'absolute', inset: 0,
-              display:'flex', flexDirection:'column',
-              alignItems:'center', justifyContent:'center',
-              pointerEvents:'none',
-            }}>
-              <div style={{ fontSize: 9, color: t.text4, letterSpacing:'.14em', fontWeight: 700, textTransform:'uppercase' }}>Total</div>
-              <div style={{ fontSize: 18, color: t.text1, fontFamily:'monospace', fontWeight: 600, letterSpacing:'-.02em', marginTop: 2 }}>
-                {total >= 1000 ? `${(total / 1000).toFixed(1)}k` : total.toFixed(0)}
-              </div>
-              <div style={{ fontSize: 10, color: t.text3, marginTop: 1 }}>grams</div>
-            </div>
-          </div>
-
-          {/* Legend */}
-          <div style={{ flex: 1, display:'flex', flexDirection:'column', gap: 6, minWidth: 0 }}>
-            {slices.map((s, i) => {
-              const pct = (s.weight / total) * 100
-              const c   = s.state === 'Others' ? t.text4 : palette[i % palette.length]
-              return (
-                <div key={s.state} style={{ display:'flex', alignItems:'center', gap: 8, fontSize: 11 }}>
-                  <span style={{ width: 8, height: 8, borderRadius: 2, background: c, flexShrink: 0 }}/>
-                  <span style={{ color: t.text2, flex: 1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{s.state}</span>
-                  <span style={{ color: c, fontFamily:'monospace', fontWeight: 700, fontSize: 10 }}>{pct.toFixed(0)}%</span>
-                </div>
-              )
-            })}
-          </div>
-        </div>
-      )}
-    </div>
-  )
-}
-
-// Movement velocity panel: 14-day sparkline of consignments dispatched plus
-// a big delta tile for last-7d vs prior-7d. Spotlights the throughput trend.
-function MovementVelocity({ t, stats, isMobile }) {
-  const series = stats?.dailySeries || []
-  const max    = Math.max(1, ...series.map(b => b.count))
-  const last7  = stats?.last7   || 0
-  const prior7 = stats?.prior7  || 0
-  const last7w = stats?.last7w  || 0
-  const delta  = stats?.velocityPct || 0
-  const positive = delta > 0
-  const neutral  = delta === 0 || (last7 === 0 && prior7 === 0)
-  const tone     = neutral ? t.text3 : (positive ? t.green : t.red)
-  const arrow    = neutral ? '→' : (positive ? '↑' : '↓')
-
-  // Build SVG path for the sparkline (area + line).
-  const w = 220, h = 64
-  const stepX = w / Math.max(1, series.length - 1)
-  const pts = series.map((b, i) => {
-    const x = i * stepX
-    const y = h - (b.count / max) * (h - 6) - 3
-    return [x, y]
+  const toggle = (set, setter) => (r) => setter(prev => {
+    const next = new Set(prev)
+    if (next.has(r)) next.delete(r); else next.add(r)
+    return next
   })
-  const linePath = pts.length
-    ? pts.reduce((acc, [x, y], i) => acc + (i === 0 ? `M${x},${y}` : ` L${x},${y}`), '')
-    : ''
-  const areaPath = pts.length ? `${linePath} L${w},${h} L0,${h} Z` : ''
+  const toggleStock   = toggle(expandedStock,   setExpandedStock)
+  const toggleTransit = toggle(expandedTransit, setExpandedTransit)
+
+  const stockRegions   = Object.keys(stockByRegion).sort()
+  const transitRegions = Object.keys(transitByRegion).sort()
 
   return (
-    <div style={{
-      background: t.card, border: `1px solid ${t.border}`,
-      borderRadius: 14,
-      padding: isMobile ? '14px 16px' : '18px 20px',
-      position:'relative', overflow:'hidden',
-    }}>
-      <div style={{ position:'absolute', top:-30, left:-30, width:140, height:140, borderRadius:'50%', background:`radial-gradient(circle, ${t.blue}10 0%, transparent 65%)`, pointerEvents:'none' }}/>
-
-      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom: 12, position:'relative', zIndex: 1 }}>
-        <div>
-          <div style={{ fontSize: 9, color: t.text4, letterSpacing:'.16em', fontWeight: 700, textTransform:'uppercase' }}>Dispatch velocity</div>
-          <div style={{ fontSize: 10, color: t.text4, marginTop: 3 }}>Last 14 days · daily consignments</div>
-        </div>
-        <div style={{
-          fontSize: 11, color: tone, fontWeight: 700, fontFamily:'monospace',
-          background: `${tone}15`, border: `1px solid ${tone}30`,
-          padding: '4px 10px', borderRadius: 7,
-          display:'flex', alignItems:'center', gap: 4,
-        }}>
-          <span>{arrow}</span>
-          <span>{neutral ? '—' : `${Math.abs(delta).toFixed(0)}%`}</span>
-        </div>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      {/* Region filter chips */}
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+        <span style={{ fontSize: 10, color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 700, marginRight: 4 }}>Region</span>
+        <DashFilterPill active={filterRegion === 'all'} color={t.gold} onClick={() => setFilterRegion('all')} t={t}>All</DashFilterPill>
+        {allRegions.map(r => (
+          <DashFilterPill key={r} active={filterRegion === r} color={REGION_COLORS_DASH[r] || t.gold} onClick={() => setFilterRegion(r)} t={t}>{r}</DashFilterPill>
+        ))}
       </div>
 
-      {/* Number row */}
-      <div style={{ display:'flex', alignItems:'baseline', gap: 14, marginBottom: 10, position:'relative', zIndex: 1, flexWrap:'wrap' }}>
-        <div>
-          <div style={{ fontSize: 9, color: t.text4, letterSpacing:'.12em', fontWeight: 600, textTransform:'uppercase' }}>Last 7d</div>
-          <div style={{ fontSize: isMobile ? 22 : 26, color: t.text1, fontFamily:'monospace', fontWeight: 600, letterSpacing:'-.02em' }}>
-            {last7}
-          </div>
-        </div>
-        <div style={{ width:1, height: 28, background: t.border }}/>
-        <div>
-          <div style={{ fontSize: 9, color: t.text4, letterSpacing:'.12em', fontWeight: 600, textTransform:'uppercase' }}>Prior 7d</div>
-          <div style={{ fontSize: isMobile ? 18 : 20, color: t.text3, fontFamily:'monospace', fontWeight: 500 }}>
-            {prior7}
-          </div>
-        </div>
-        <div style={{ flex: 1 }}/>
-        <div style={{ textAlign:'right' }}>
-          <div style={{ fontSize: 9, color: t.text4, letterSpacing:'.12em', fontWeight: 600, textTransform:'uppercase' }}>Weight 7d</div>
-          <div style={{ fontSize: isMobile ? 13 : 14, color: t.gold, fontFamily:'monospace', fontWeight: 600 }}>
-            {last7w >= 1000 ? `${(last7w / 1000).toFixed(2)}kg` : `${last7w.toFixed(0)}g`}
-          </div>
-        </div>
-      </div>
-
-      {/* Sparkline */}
-      <div style={{ position:'relative', zIndex: 1 }}>
-        <svg width="100%" height={h} viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" style={{ display:'block' }}>
-          <defs>
-            <linearGradient id="velGradient" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%"  stopColor={t.blue}   stopOpacity="0.45"/>
-              <stop offset="100%" stopColor={t.blue}  stopOpacity="0.05"/>
-            </linearGradient>
-          </defs>
-          {areaPath && <path d={areaPath} fill="url(#velGradient)"/>}
-          {linePath && <path d={linePath} fill="none" stroke={t.blue} strokeWidth="1.6" vectorEffect="non-scaling-stroke"/>}
-          {/* Today marker: last point gets a dot */}
-          {pts.length > 0 && (
-            <circle cx={pts[pts.length - 1][0]} cy={pts[pts.length - 1][1]} r="2.2" fill={t.blue}/>
-          )}
-        </svg>
-        <div style={{ display:'flex', justifyContent:'space-between', fontSize: 8, color: t.text4, fontFamily:'monospace', marginTop: 4 }}>
-          <span>14d ago</span>
-          <span>today</span>
-        </div>
+      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 14 }}>
+        <DashConsSection
+          t={t} title="Branch In Stock" subtitle="awaiting consignment" accent={t.orange}
+          regions={stockRegions}
+          getTotals={stockRegionTotals}
+          getBranches={(r) => stockByRegion[r] || []}
+          getBranchView={(b) => ({
+            name:   b.branch_name,
+            bills:  (b.today_bills || 0) + (b.older_bills || 0),
+            netWt:  Number(b.total_net_wt || 0),
+            oldest: b.oldest_date,
+          })}
+          expanded={expandedStock} onToggle={toggleStock}
+          countLabel="br"
+        />
+        <DashConsSection
+          t={t} title="In Transit" subtitle="active consignments" accent={t.blue}
+          regions={transitRegions}
+          getTotals={transitRegionTotals}
+          getBranches={transitByBranchFor}
+          getBranchView={(b) => ({
+            name:   b.branch,
+            bills:  b.bills,
+            netWt:  b.netWt,
+            oldest: b.oldest ? new Date(b.oldest) : null,
+          })}
+          expanded={expandedTransit} onToggle={toggleTransit}
+          countLabel="cn"
+        />
       </div>
     </div>
   )
 }
 
-// At-risk banner: full-width red callout that surfaces only when there is
-// stock sitting beyond 7 days. Displays bills count, weight, exposure ₹,
-// and how much is past 14 days. The banner's whole purpose is to be
-// impossible to ignore in the morning glance.
-function AtRiskBanner({ t, stats, isMobile }) {
-  const total = (stats.branchWeight || 0) + (stats.movementWeight || 0)
-  const sharePct = total > 0 ? (stats.riskWeight / total) * 100 : 0
-
+function DashConsSection({ t, title, subtitle, accent, regions, getTotals, getBranches, getBranchView, expanded, onToggle, countLabel }) {
   return (
-    <div style={{
-      background:`linear-gradient(135deg, ${t.red}18 0%, ${t.orange}10 100%)`,
-      border:`1px solid ${t.red}40`,
-      borderRadius: 14,
-      padding: isMobile ? '14px 16px' : '16px 22px',
-      position:'relative', overflow:'hidden',
-      display:'flex', alignItems:isMobile ? 'flex-start' : 'center', gap: isMobile ? 12 : 18,
-      flexDirection: isMobile ? 'column' : 'row',
-    }}>
-      {/* Pulsing alert dot */}
-      <div style={{ position:'absolute', top: 14, right: 16, width: 8, height: 8, borderRadius:'50%', background: t.red, boxShadow:`0 0 12px ${t.red}`, animation:'cnsmtPulse 1.4s ease-in-out infinite' }}/>
-      <style>{`@keyframes cnsmtPulse { 0%,100% { opacity: 1; transform: scale(1) } 50% { opacity:.4; transform: scale(1.4) } }`}</style>
-
-      {/* Icon */}
+    <div style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: 12, overflow: 'hidden' }}>
       <div style={{
-        width: isMobile ? 44 : 52, height: isMobile ? 44 : 52, borderRadius: 12,
-        background: `${t.red}25`, border:`1px solid ${t.red}40`,
-        display:'flex', alignItems:'center', justifyContent:'center',
-        flexShrink: 0,
+        padding: '12px 16px', borderBottom: `1px solid ${t.border}`,
+        background: `linear-gradient(90deg, ${accent}12 0%, transparent 60%)`,
+        display: 'flex', alignItems: 'center', gap: 10,
       }}>
-        <svg width={isMobile ? 22 : 26} height={isMobile ? 22 : 26} viewBox="0 0 24 24" fill="none" stroke={t.red} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M12 9v4"/>
-          <path d="M12 17h.01"/>
-          <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
-        </svg>
+        <div style={{ width: 3, height: 18, borderRadius: 2, background: accent, boxShadow: `0 0 6px ${accent}55` }} />
+        <span style={{ fontSize: 12, color: accent, letterSpacing: '.14em', fontWeight: 700, textTransform: 'uppercase' }}>{title}</span>
+        <span style={{ fontSize: 10, color: t.text4 }}>· {subtitle}</span>
       </div>
-
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 9, color: t.red, letterSpacing:'.18em', fontWeight: 700, textTransform:'uppercase', marginBottom: 4 }}>
-          Stock at Risk
-        </div>
-        <div style={{ display:'flex', alignItems:'baseline', gap: 10, flexWrap:'wrap' }}>
-          <div style={{ fontSize: isMobile ? 22 : 28, color: t.text1, fontFamily:'monospace', fontWeight: 600, letterSpacing:'-.02em', lineHeight: 1 }}>
-            <AnimatedNumber target={stats.riskWeight} decimals={3} duration={900}/>
-          </div>
-          <span style={{ fontSize: isMobile ? 12 : 14, color: t.text3 }}>g</span>
-          <span style={{ fontSize: 11, color: t.red, background: `${t.red}20`, padding: '2px 8px', borderRadius: 5, fontWeight: 700, fontFamily:'monospace' }}>
-            {sharePct.toFixed(1)}% of stock
-          </span>
-        </div>
-        <div style={{ fontSize: isMobile ? 11 : 12, color: t.text2, marginTop: 6, lineHeight: 1.5 }}>
-          <strong style={{ color: t.text1 }}>{stats.riskBills || 0}</strong> bill{(stats.riskBills || 0) === 1 ? '' : 's'} sitting at branches for <strong style={{ color: t.red }}>more than 7 days</strong>
-          {(stats.aged14Weight || 0) > 0 && (
-            <> · <strong style={{ color: t.red }}>{(stats.aged14Weight).toFixed(1)}g</strong> aged beyond 14 days</>
-          )}
-        </div>
-      </div>
-
-      <div style={{ display:'flex', flexDirection: isMobile ? 'row' : 'column', gap: isMobile ? 14 : 4, alignItems: isMobile ? 'baseline' : 'flex-end', flexShrink: 0 }}>
-        <div style={{ fontSize: 9, color: t.text4, letterSpacing:'.14em', fontWeight: 700, textTransform:'uppercase' }}>Exposure</div>
-        <div style={{ fontSize: isMobile ? 18 : 22, color: t.red, fontFamily:'monospace', fontWeight: 700 }}>
-          {fmtCr(stats.riskValue)}
-        </div>
-      </div>
-    </div>
-  )
-}
-
-// State-wise breakdown panel: horizontal bars showing the weight share per
-// state for stock currently at branches. Bars are colored from a small palette
-// per state index. Click target removed (read-only widget).
-function StateBreakdown({ t, stats, isMobile }) {
-  const states = stats?.byState || []
-  const total  = states.reduce((s, x) => s + (x.weight || 0), 0)
-
-  const palette = [t.gold, t.orange, t.blue, t.purple, t.green, t.red, t.text2]
-
-  return (
-    <div style={{
-      background: t.card,
-      border: `1px solid ${t.border}`,
-      borderRadius: 14,
-      padding: isMobile ? '14px 16px' : '18px 20px',
-      position:'relative', overflow:'hidden',
-    }}>
-      <div style={{ position:'absolute', top:-40, right:-40, width:140, height:140, borderRadius:'50%', background:`radial-gradient(circle, ${t.gold}10 0%, transparent 65%)`, pointerEvents:'none' }}/>
-      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom: 14, position:'relative', zIndex:1 }}>
-        <div>
-          <div style={{ fontSize: 9, color: t.text4, letterSpacing:'.16em', fontWeight: 700, textTransform:'uppercase' }}>State-wise · At Branch</div>
-          <div style={{ fontSize: 10, color: t.text4, marginTop: 3 }}>Where the gold is parked right now</div>
-        </div>
-        <div style={{ fontSize: 10, color: t.text3, fontFamily:'monospace', background: t.border, padding:'3px 8px', borderRadius: 6 }}>
-          {states.length} state{states.length === 1 ? '' : 's'}
-        </div>
-      </div>
-
-      {states.length === 0 ? (
-        <div style={{ padding:'24px 0', textAlign:'center', fontSize: 11, color: t.text4 }}>
-          No stock at branches.
-        </div>
-      ) : (
-        <div style={{ display:'flex', flexDirection:'column', gap: 10, position:'relative', zIndex: 1 }}>
-          {states.slice(0, 6).map((s, i) => {
-            const pct = total > 0 ? (s.weight / total) * 100 : 0
-            const c   = palette[i % palette.length]
-            return (
-              <div key={s.state}>
-                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline', marginBottom: 5, fontSize: 11 }}>
-                  <span style={{ color: t.text1, fontWeight: 600, display:'flex', alignItems:'center', gap: 7 }}>
-                    <span style={{ width: 8, height: 8, borderRadius: 2, background: c }}/>
-                    {s.state}
-                  </span>
-                  <span style={{ display:'inline-flex', gap: 8, alignItems:'baseline', fontFamily:'monospace' }}>
-                    <span style={{ color: c, fontWeight: 700 }}>{s.weight.toFixed(2)}g</span>
-                    <span style={{ color: t.text4, fontSize: 10 }}>{s.bills} bills</span>
-                    <span style={{ color: t.text4, fontSize: 10 }}>{pct.toFixed(0)}%</span>
-                  </span>
+      <div>
+        {regions.length === 0 ? (
+          <div style={{ padding: '32px 18px', textAlign: 'center', color: t.text4, fontSize: 12 }}>No data</div>
+        ) : regions.map(r => {
+          const tot = getTotals(r)
+          const branches = getBranches(r)
+          const color = REGION_COLORS_DASH[r] || t.text3
+          const open = expanded.has(r)
+          const rowCount = tot.branchCount != null ? tot.branchCount : tot.consignmentCount
+          return (
+            <div key={r} style={{ borderTop: `1px solid ${t.border}30` }}>
+              <button onClick={() => onToggle(r)}
+                style={{
+                  width: '100%', textAlign: 'left',
+                  background: open ? `${color}10` : 'transparent',
+                  border: 'none', cursor: 'pointer',
+                  padding: '11px 14px',
+                  display: 'flex', alignItems: 'center', gap: 10,
+                  transition: 'background .15s',
+                }}
+                onMouseEnter={e => { if (!open) e.currentTarget.style.background = `${color}06` }}
+                onMouseLeave={e => { if (!open) e.currentTarget.style.background = 'transparent' }}>
+                <span style={{ width: 8, height: 8, borderRadius: '50%', background: color, flexShrink: 0 }} />
+                <span style={{ fontSize: 12.5, color: t.text1, fontWeight: 600, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r}</span>
+                <span style={{ fontSize: 10.5, color: t.text3, fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
+                  <span style={{ color: t.text4 }}>{rowCount} {countLabel}</span>
+                  <span style={{ color: t.border, margin: '0 5px' }}>·</span>
+                  <strong style={{ color: t.text2 }}>{tot.bills}</strong>
+                  <span style={{ color: t.text4 }}> bills</span>
+                  <span style={{ color: t.border, margin: '0 5px' }}>·</span>
+                  <strong style={{ color: t.gold }}>{fmtWtDash(tot.netWt)}</strong>
+                </span>
+                <span style={{ fontSize: 10, color: t.text4, transform: open ? 'rotate(0)' : 'rotate(-90deg)', transition: 'transform .2s', marginLeft: 4 }}>▾</span>
+              </button>
+              {open && (
+                <div style={{ background: `${color}06`, padding: '4px 0 8px' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 56px 80px 50px', gap: 8, padding: '6px 14px', fontSize: 9, color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 700 }}>
+                    <span>Branch</span>
+                    <span style={{ textAlign: 'right' }}>Bills</span>
+                    <span style={{ textAlign: 'right' }}>Net Wt</span>
+                    <span style={{ textAlign: 'right' }}>Oldest</span>
+                  </div>
+                  {branches.map((b, i) => {
+                    const v = getBranchView(b)
+                    return (
+                      <div key={i} style={{ display: 'grid', gridTemplateColumns: '1fr 56px 80px 50px', gap: 8, padding: '7px 14px', fontSize: 11.5, color: t.text2, borderTop: `1px solid ${t.border}25`, alignItems: 'center' }}>
+                        <span style={{ color: t.text1, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{v.name}</span>
+                        <span style={{ textAlign: 'right', fontFamily: 'monospace' }}>{v.bills}</span>
+                        <span style={{ textAlign: 'right', fontFamily: 'monospace', color: t.gold }}>{fmtWtDash(v.netWt)}</span>
+                        <span style={{ textAlign: 'right', fontFamily: 'monospace', fontSize: 10, color: t.text3 }}>{fmtAgeDash(v.oldest)}</span>
+                      </div>
+                    )
+                  })}
                 </div>
-                <div style={{ height: 6, borderRadius: 3, background: t.border, overflow: 'hidden' }}>
-                  <div style={{
-                    width: `${pct}%`, height: '100%',
-                    background: `linear-gradient(90deg, ${c}, ${c}aa)`,
-                    transition: 'width .8s cubic-bezier(.4,0,.2,1)',
-                  }}/>
-                </div>
-              </div>
-            )
-          })}
-          {states.length > 6 && (
-            <div style={{ fontSize: 10, color: t.text4, textAlign:'right', marginTop: 4 }}>
-              +{states.length - 6} more states
+              )}
             </div>
-          )}
-        </div>
-      )}
-    </div>
-  )
-}
-
-// Top branches by weight — ranked list. Each row shows branch name,
-// state pill, weight, bill count, and an oldest-bill age indicator
-// (red badge if > 7 days). Read-only — no clicks.
-function TopBranchesPanel({ t, stats, isMobile }) {
-  const top = stats?.topBranches || []
-  const max = top.length ? top[0].weight : 1
-
-  const ageDays = (iso) => {
-    if (!iso) return null
-    const ms = Date.now() - new Date(iso).getTime()
-    return Math.floor(ms / 86400000)
-  }
-
-  return (
-    <div style={{
-      background: t.card,
-      border: `1px solid ${t.border}`,
-      borderRadius: 14,
-      padding: isMobile ? '14px 16px' : '18px 20px',
-      position:'relative', overflow:'hidden',
-    }}>
-      <div style={{ position:'absolute', top:-40, left:-40, width:140, height:140, borderRadius:'50%', background:`radial-gradient(circle, ${t.orange}10 0%, transparent 65%)`, pointerEvents:'none' }}/>
-      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom: 14, position:'relative', zIndex:1 }}>
-        <div>
-          <div style={{ fontSize: 9, color: t.text4, letterSpacing:'.16em', fontWeight: 700, textTransform:'uppercase' }}>Top Branches · By Stock</div>
-          <div style={{ fontSize: 10, color: t.text4, marginTop: 3 }}>Highest pending weight at branch</div>
-        </div>
-        <div style={{ fontSize: 10, color: t.text3, fontFamily:'monospace', background: t.border, padding:'3px 8px', borderRadius: 6 }}>
-          Top {top.length}
-        </div>
+          )
+        })}
       </div>
-
-      {top.length === 0 ? (
-        <div style={{ padding:'24px 0', textAlign:'center', fontSize: 11, color: t.text4 }}>
-          No branches with stock.
-        </div>
-      ) : (
-        <div style={{ display:'flex', flexDirection:'column', gap: 8, position:'relative', zIndex:1 }}>
-          {top.map((b, i) => {
-            const pct  = (b.weight / max) * 100
-            const days = ageDays(b.oldest_date)
-            const ageBadge = days != null
-              ? (days > 7  ? { color: t.red,    label: `${days}d` }
-              :  days > 3  ? { color: t.orange, label: `${days}d` }
-              :              { color: t.green,  label: `${days}d` })
-              : null
-            const isTop3 = i < 3
-
-            return (
-              <div key={b.branch} style={{ display:'flex', alignItems:'center', gap: 10 }}>
-                <div style={{
-                  width: 22, height: 22, borderRadius: 6,
-                  background: isTop3 ? `${t.gold}18` : t.border,
-                  border: `1px solid ${isTop3 ? `${t.gold}50` : t.border}`,
-                  color: isTop3 ? t.gold : t.text3,
-                  fontSize: 10, fontWeight: 700, fontFamily:'monospace',
-                  display:'flex', alignItems:'center', justifyContent:'center',
-                  flexShrink: 0,
-                }}>{i + 1}</div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline', gap: 8, marginBottom: 4 }}>
-                    <div style={{ minWidth: 0, flex: 1 }}>
-                      <span style={{ fontSize: 11, color: t.text1, fontWeight: 600, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', display:'inline-block', maxWidth: '100%' }}>
-                        {b.branch}
-                      </span>
-                      {b.state && <span style={{ fontSize: 9, color: t.text4, marginLeft: 6 }}>· {b.state}</span>}
-                    </div>
-                    <span style={{ fontSize: 11, color: t.gold, fontFamily:'monospace', fontWeight: 700, flexShrink: 0 }}>
-                      {b.weight.toFixed(2)}g
-                    </span>
-                  </div>
-                  <div style={{ display:'flex', alignItems:'center', gap: 8 }}>
-                    <div style={{ flex: 1, height: 4, borderRadius: 2, background: t.border, overflow:'hidden' }}>
-                      <div style={{
-                        width: `${pct}%`, height: '100%',
-                        background: `linear-gradient(90deg, ${t.orange}, ${t.gold})`,
-                      }}/>
-                    </div>
-                    <span style={{ fontSize: 10, color: t.text4, fontFamily:'monospace', flexShrink: 0 }}>
-                      {b.bills} bill{b.bills === 1 ? '' : 's'}
-                    </span>
-                    {ageBadge && (
-                      <span style={{
-                        fontSize: 9, color: ageBadge.color,
-                        background: `${ageBadge.color}15`,
-                        padding: '1px 6px', borderRadius: 4, fontWeight: 700,
-                        flexShrink: 0,
-                      }} title={`Oldest pending bill is ${days} day${days === 1 ? '' : 's'} old`}>
-                        {ageBadge.label}
-                      </span>
-                    )}
-                  </div>
-                </div>
-              </div>
-            )
-          })}
-        </div>
-      )}
     </div>
   )
 }
 
-// One-liner observation about the current state, refreshed automatically with
-// the data. Avoids cluttering the UI with multiple "alerts" — picks the most
-// salient signal from the data and shows it.
-function ConsignmentInsight({ t, stats, isMobile }) {
-  let icon = '◆', tone = t.text3, message = null
-  if (stats.urgent && stats.urgent > 0) {
-    tone = t.red
-    icon = '⚠'
-    message = `${stats.urgent} branch${stats.urgent === 1 ? '' : 'es'} have stock sitting >7 days — overdue for consignment.`
-  } else if ((stats.movementWeight || 0) > (stats.branchWeight || 0) * 1.5) {
-    tone = t.blue
-    icon = '✈'
-    message = `Most stock is in motion right now — ${(stats.movementWeight / Math.max(1, stats.branchWeight + stats.movementWeight) * 100).toFixed(0)}% travelling.`
-  } else if ((stats.branchWeight || 0) > (stats.movementWeight || 0) * 2) {
-    tone = t.orange
-    icon = '◔'
-    message = `Stock is concentrated at branches — ${(stats.branchWeight / Math.max(1, stats.branchWeight + stats.movementWeight) * 100).toFixed(0)}% awaiting consignment.`
-  } else if ((stats.branchWeight || 0) === 0 && (stats.movementWeight || 0) === 0) {
-    tone = t.text4
-    icon = '◌'
-    message = 'No stock at branches or in motion right now.'
-  } else {
-    tone = t.green
-    icon = '✓'
-    message = 'Stock distribution is balanced — no urgent action needed.'
-  }
+function DashFilterPill({ active, color, onClick, t, children }) {
   return (
-    <div style={{
-      display:'flex', alignItems:'center', gap: 10,
-      padding: isMobile ? '10px 14px' : '12px 18px',
-      background: `${tone}10`,
-      border: `1px solid ${tone}30`,
-      borderRadius: 10,
-      fontSize: isMobile ? 11 : 12,
-      color: tone,
-      fontWeight: 500,
-    }}>
-      <span style={{ fontSize: 14, lineHeight: 1 }}>{icon}</span>
-      <span style={{ color: t.text2 }}>{message}</span>
-    </div>
+    <button onClick={onClick}
+      style={{
+        padding: '5px 11px',
+        background: active ? `${color}22` : 'transparent',
+        border: `1px solid ${active ? `${color}70` : t.border}`,
+        color: active ? color : t.text3,
+        borderRadius: '99px',
+        fontSize: 11,
+        fontWeight: active ? 700 : 500,
+        cursor: 'pointer',
+        whiteSpace: 'nowrap',
+        transition: 'all .15s ease',
+      }}>
+      {children}
+    </button>
   )
 }
 
@@ -1210,11 +668,15 @@ export default function DashboardHome() {
             // split for the dashboard balance view
             branchBills, branchWeight, branchValue, branchesActive,
             movementBills, movementWeight, movementValue, movementCount,
+            // raw rows for the region-grouped expandable overview
+            branchOverviewRaw: rows,
+            inTransitRaw:      inMotionList,
             // new richer slices
             byState, topBranches, movementByState,
             dailySeries, last7, prior7, last7w, prior7w, velocityPct,
             riskWeight, riskValue, riskBills, aged14Weight,
-            // lifecycle counts for the dashboard KPI strip
+            // lifecycle counts (still computed; unused by the new overview
+            // but kept in case another widget reads them)
             pendingCount, cancelReqCount, todayCount,
           })
         }).catch(() => {})
