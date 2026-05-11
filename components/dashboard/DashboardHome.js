@@ -83,13 +83,22 @@ function ConsignmentBalanceView({ t, stats, isMobile }) {
   const stockRows = (stats.branchOverviewRaw || []).filter(b => ((b.today_bills || 0) + (b.older_bills || 0)) > 0)
   const transitRows = stats.inTransitRaw || []
 
+  // Branch → region lookup. Consignment rows often don't carry a region
+  // column, so we resolve it from the matching branch_overview row instead
+  // (which always has region). Falls back to c.region if present.
+  const branchToRegion = new Map()
+  for (const b of (stats.branchOverviewRaw || [])) {
+    if (b.branch_name && b.region) branchToRegion.set(b.branch_name, b.region)
+  }
+  const regionOf = (c) => branchToRegion.get(c.branch_name) || c.region || 'Other'
+
   const allRegions = [...new Set([
     ...stockRows.map(b => b.region).filter(Boolean),
-    ...transitRows.map(c => c.region).filter(Boolean),
+    ...transitRows.map(regionOf).filter(Boolean),
   ])].sort()
 
   const stockFiltered   = filterRegion === 'all' ? stockRows   : stockRows.filter(b => b.region === filterRegion)
-  const transitFiltered = filterRegion === 'all' ? transitRows : transitRows.filter(c => c.region === filterRegion)
+  const transitFiltered = filterRegion === 'all' ? transitRows : transitRows.filter(c => regionOf(c) === filterRegion)
 
   // Group stock by region (branches are already per-row, one branch = one row).
   const stockByRegion = {}
@@ -101,7 +110,7 @@ function ConsignmentBalanceView({ t, stats, isMobile }) {
   // Group transit by region → branch (a branch may have N consignments).
   const transitByRegion = {}
   for (const c of transitFiltered) {
-    const r = c.region || 'Other'
+    const r = regionOf(c)
     if (!transitByRegion[r]) transitByRegion[r] = []
     transitByRegion[r].push(c)
   }
@@ -190,45 +199,151 @@ function ConsignmentBalanceView({ t, stats, isMobile }) {
           countLabel="cn"
         />
       </div>
+
+      {/* Global animations + interactive states for the consignment overview. */}
+      <style>{`
+        @keyframes dashRowIn {
+          from { opacity: 0; transform: translateY(6px); }
+          to   { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes dashBranchIn {
+          from { opacity: 0; transform: translateY(4px); }
+          to   { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes dashRowBar {
+          from { transform: scaleX(0); }
+          to   { transform: scaleX(1); }
+        }
+        @keyframes dashExpand {
+          from { opacity: 0; max-height: 0; }
+          to   { opacity: 1; max-height: 600px; }
+        }
+        .dash-region-row:hover {
+          background: color-mix(in srgb, var(--region-color) 8%, transparent) !important;
+        }
+        .dash-region-row:hover > span:first-child {
+          box-shadow: 0 0 0 5px color-mix(in srgb, var(--region-color) 35%, transparent) !important;
+          transition: box-shadow .2s ease;
+        }
+        .dash-branch-row:hover {
+          background: rgba(201,168,76,.04);
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .dash-region-row, .dash-branch-row, [class*="logi-"] { animation: none !important; }
+        }
+      `}</style>
     </div>
   )
 }
 
 function DashConsSection({ t, title, subtitle, accent, regions, getTotals, getBranches, getBranchView, expanded, onToggle, countLabel }) {
+  // Section roll-up — used for the top summary + share-of-total bars below.
+  const sectionTotals = regions.reduce((acc, r) => {
+    const tot = getTotals(r)
+    acc.bills += tot.bills
+    acc.netWt += tot.netWt
+    acc.units += tot.branchCount != null ? tot.branchCount : tot.consignmentCount
+    return acc
+  }, { bills: 0, netWt: 0, units: 0 })
+
+  // Region share data — sorted desc by weight so the largest region dominates
+  // the visual distribution bar.
+  const distribution = regions.map(r => {
+    const tot = getTotals(r)
+    return { r, tot, share: sectionTotals.netWt > 0 ? tot.netWt / sectionTotals.netWt : 0 }
+  }).sort((a, b) => b.share - a.share)
+
   return (
-    <div style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: 12, overflow: 'hidden' }}>
+    <div style={{
+      background: t.card, border: `1px solid ${t.border}`,
+      borderRadius: 14, overflow: 'hidden',
+      transition: 'border-color .2s',
+    }}>
+      {/* Header — title + subtitle */}
       <div style={{
-        padding: '12px 16px', borderBottom: `1px solid ${t.border}`,
-        background: `linear-gradient(90deg, ${accent}12 0%, transparent 60%)`,
+        padding: '12px 16px',
+        borderBottom: `1px solid ${t.border}`,
+        background: `linear-gradient(90deg, ${accent}14 0%, transparent 60%)`,
         display: 'flex', alignItems: 'center', gap: 10,
       }}>
         <div style={{ width: 3, height: 18, borderRadius: 2, background: accent, boxShadow: `0 0 6px ${accent}55` }} />
         <span style={{ fontSize: 12, color: accent, letterSpacing: '.14em', fontWeight: 700, textTransform: 'uppercase' }}>{title}</span>
         <span style={{ fontSize: 10, color: t.text4 }}>· {subtitle}</span>
       </div>
+
+      {/* Section summary — big numbers + stacked distribution bar */}
+      {regions.length > 0 && (
+        <div style={{ padding: '14px 16px', borderBottom: `1px solid ${t.border}40`,
+          background: `linear-gradient(180deg, ${t.card2 || t.card}80 0%, transparent 100%)` }}>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 14, flexWrap: 'wrap', marginBottom: 10 }}>
+            <div>
+              <div style={{ fontSize: 8.5, color: t.text4, letterSpacing: '.14em', textTransform: 'uppercase', fontWeight: 700 }}>Total Net Wt</div>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: 4, marginTop: 3 }}>
+                <span className="logi-grow" style={{ fontSize: 22, fontWeight: 700, color: accent, fontFamily: 'monospace', lineHeight: 1, letterSpacing: '-.01em' }}>{fmtWtDash(sectionTotals.netWt).replace(/\s.+/, '')}</span>
+                <span style={{ fontSize: 11, color: t.text3 }}>{fmtWtDash(sectionTotals.netWt).split(' ')[1] || 'g'}</span>
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 16, marginLeft: 'auto', fontSize: 10.5, color: t.text3, fontFamily: 'monospace' }}>
+              <span><strong style={{ color: t.text2 }}>{sectionTotals.units}</strong> <span style={{ color: t.text4 }}>{countLabel === 'br' ? (sectionTotals.units === 1 ? 'branch' : 'branches') : (sectionTotals.units === 1 ? 'consignment' : 'consignments')}</span></span>
+              <span><strong style={{ color: t.text2 }}>{sectionTotals.bills}</strong> <span style={{ color: t.text4 }}>bills</span></span>
+            </div>
+          </div>
+          {/* Stacked distribution bar — each region as a coloured segment proportional to its weight */}
+          {sectionTotals.netWt > 0 && (
+            <div style={{ display: 'flex', height: 8, borderRadius: 5, overflow: 'hidden', background: `${t.border}50` }}>
+              {distribution.map(({ r, tot, share }, i) => {
+                const color = REGION_COLORS_DASH[r] || t.text3
+                const widthPct = share * 100
+                if (widthPct < 0.5) return null
+                return (
+                  <div key={r}
+                    title={`${r}: ${fmtWtDash(tot.netWt)} (${(share * 100).toFixed(1)}%)`}
+                    style={{
+                      width: `${widthPct}%`,
+                      background: color,
+                      transition: 'width .6s cubic-bezier(.4,0,.2,1)',
+                      animation: `dashGrow .6s cubic-bezier(.4,0,.2,1) ${i * 80}ms backwards`,
+                      transformOrigin: 'left',
+                    }} />
+                )
+              })}
+            </div>
+          )}
+          <style>{`@keyframes dashGrow { from { transform: scaleX(0); } to { transform: scaleX(1); } }`}</style>
+        </div>
+      )}
+
       <div>
         {regions.length === 0 ? (
           <div style={{ padding: '32px 18px', textAlign: 'center', color: t.text4, fontSize: 12 }}>No data</div>
-        ) : regions.map(r => {
-          const tot = getTotals(r)
+        ) : distribution.map(({ r, tot, share }, idx) => {
           const branches = getBranches(r)
           const color = REGION_COLORS_DASH[r] || t.text3
           const open = expanded.has(r)
           const rowCount = tot.branchCount != null ? tot.branchCount : tot.consignmentCount
           return (
-            <div key={r} style={{ borderTop: `1px solid ${t.border}30` }}>
+            <div key={r}
+              style={{
+                borderTop: `1px solid ${t.border}30`,
+                animation: `dashRowIn .35s cubic-bezier(.4,0,.2,1) ${idx * 50}ms backwards`,
+              }}>
               <button onClick={() => onToggle(r)}
+                className="dash-region-row"
                 style={{
+                  position: 'relative', overflow: 'hidden',
                   width: '100%', textAlign: 'left',
                   background: open ? `${color}10` : 'transparent',
                   border: 'none', cursor: 'pointer',
-                  padding: '11px 14px',
+                  padding: '13px 14px 11px',
                   display: 'flex', alignItems: 'center', gap: 10,
-                  transition: 'background .15s',
-                }}
-                onMouseEnter={e => { if (!open) e.currentTarget.style.background = `${color}06` }}
-                onMouseLeave={e => { if (!open) e.currentTarget.style.background = 'transparent' }}>
-                <span style={{ width: 8, height: 8, borderRadius: '50%', background: color, flexShrink: 0 }} />
+                  transition: 'background .18s, transform .12s',
+                  ['--region-color']: color,
+                }}>
+                <span style={{
+                  width: 10, height: 10, borderRadius: '50%',
+                  background: color, flexShrink: 0,
+                  boxShadow: `0 0 0 3px ${color}25`,
+                }} />
                 <span style={{ fontSize: 12.5, color: t.text1, fontWeight: 600, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r}</span>
                 <span style={{ fontSize: 10.5, color: t.text3, fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
                   <span style={{ color: t.text4 }}>{rowCount} {countLabel}</span>
@@ -238,11 +353,28 @@ function DashConsSection({ t, title, subtitle, accent, regions, getTotals, getBr
                   <span style={{ color: t.border, margin: '0 5px' }}>·</span>
                   <strong style={{ color: t.gold }}>{fmtWtDash(tot.netWt)}</strong>
                 </span>
-                <span style={{ fontSize: 10, color: t.text4, transform: open ? 'rotate(0)' : 'rotate(-90deg)', transition: 'transform .2s', marginLeft: 4 }}>▾</span>
+                {/* Per-row share indicator: small pill showing % of section total */}
+                <span style={{ fontSize: 9.5, color, fontFamily: 'monospace', fontWeight: 700, background: `${color}15`, padding: '2px 7px', borderRadius: 99, border: `1px solid ${color}30`, whiteSpace: 'nowrap' }}>
+                  {(share * 100).toFixed(0)}%
+                </span>
+                <span style={{ fontSize: 10, color: t.text4, transform: open ? 'rotate(0)' : 'rotate(-90deg)', transition: 'transform .25s', marginLeft: 2 }}>▾</span>
+                {/* Bottom share bar — fills proportional to region's share of section total */}
+                <span style={{
+                  position: 'absolute', bottom: 0, left: 0,
+                  height: 2, width: `${share * 100}%`,
+                  background: `linear-gradient(90deg, ${color} 0%, ${color}60 100%)`,
+                  transition: 'width .6s cubic-bezier(.4,0,.2,1)',
+                  animation: `dashRowBar .6s cubic-bezier(.4,0,.2,1) ${idx * 60 + 200}ms backwards`,
+                  transformOrigin: 'left',
+                }} />
               </button>
               {open && (
-                <div style={{ background: `${color}06`, padding: '4px 0 8px' }}>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 56px 80px 50px', gap: 8, padding: '6px 14px', fontSize: 9, color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 700 }}>
+                <div style={{
+                  background: `${color}06`,
+                  padding: '4px 0 10px',
+                  animation: 'dashExpand .25s cubic-bezier(.4,0,.2,1)',
+                }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 56px 80px 50px', gap: 8, padding: '8px 14px 4px', fontSize: 9, color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 700 }}>
                     <span>Branch</span>
                     <span style={{ textAlign: 'right' }}>Bills</span>
                     <span style={{ textAlign: 'right' }}>Net Wt</span>
@@ -250,12 +382,24 @@ function DashConsSection({ t, title, subtitle, accent, regions, getTotals, getBr
                   </div>
                   {branches.map((b, i) => {
                     const v = getBranchView(b)
+                    const ageDays = v.oldest ? Math.floor((Date.now() - new Date(v.oldest).getTime()) / 86400000) : 0
+                    const ageColor = ageDays > 7 ? t.red : ageDays > 3 ? t.orange : t.green
                     return (
-                      <div key={i} style={{ display: 'grid', gridTemplateColumns: '1fr 56px 80px 50px', gap: 8, padding: '7px 14px', fontSize: 11.5, color: t.text2, borderTop: `1px solid ${t.border}25`, alignItems: 'center' }}>
+                      <div key={i}
+                        className="dash-branch-row"
+                        style={{
+                          display: 'grid', gridTemplateColumns: '1fr 56px 80px 50px',
+                          gap: 8, padding: '8px 14px',
+                          fontSize: 11.5, color: t.text2,
+                          borderTop: `1px solid ${t.border}25`,
+                          alignItems: 'center',
+                          transition: 'background .12s',
+                          animation: `dashBranchIn .28s cubic-bezier(.4,0,.2,1) ${i * 30}ms backwards`,
+                        }}>
                         <span style={{ color: t.text1, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{v.name}</span>
-                        <span style={{ textAlign: 'right', fontFamily: 'monospace' }}>{v.bills}</span>
-                        <span style={{ textAlign: 'right', fontFamily: 'monospace', color: t.gold }}>{fmtWtDash(v.netWt)}</span>
-                        <span style={{ textAlign: 'right', fontFamily: 'monospace', fontSize: 10, color: t.text3 }}>{fmtAgeDash(v.oldest)}</span>
+                        <span style={{ textAlign: 'right', fontFamily: 'monospace', fontWeight: 600 }}>{v.bills}</span>
+                        <span style={{ textAlign: 'right', fontFamily: 'monospace', color: t.gold, fontWeight: 600 }}>{fmtWtDash(v.netWt)}</span>
+                        <span style={{ textAlign: 'right', fontFamily: 'monospace', fontSize: 10, color: ageColor, fontWeight: 600 }}>{fmtAgeDash(v.oldest)}</span>
                       </div>
                     )
                   })}
