@@ -88,13 +88,16 @@ export async function GET(req) {
     const outsideBranches = new Set(
       (branches || []).filter(b => b.model_type === 'outside_bangalore').map(b => b.name)
     )
-    // Dashboard's Consignment Overview wants Bangalore branches too — but
-    // only for *today's* purchases, since older Bangalore stock has already
-    // moved through sales / melting. Outstation branches always include
-    // their full at_branch pool (today + older).
-    const includeBangaloreToday = searchParams.get('include_bangalore_today') === 'true' && stockStatus === 'at_branch'
+    // Dashboard's Consignment Overview wants Bangalore branches in scope too.
+    // The RPC handles the time-of-day lifecycle for Bangalore (at_branch
+    // before 19:30 IST → in_consignment after 19:30 → at_ho after midnight),
+    // so the API just needs to allow Bangalore rows into the response when
+    // the caller asks for them.
+    const includeBangalore =
+      searchParams.get('include_bangalore_today') === 'true'
+      || searchParams.get('include_bangalore') === 'true'
     const bangaloreBranches = new Set(
-      includeBangaloreToday
+      includeBangalore
         ? (branches || []).filter(b => b.region === 'Bangalore').map(b => b.name)
         : []
     )
@@ -130,10 +133,10 @@ export async function GET(req) {
     for (const branchName of outsideBranches)   populateZeroRow(branchName)
     for (const branchName of bangaloreBranches) populateZeroRow(branchName)
 
-    // Merge RPC aggregates into summary.
-    // For Bangalore branches in the consignment-overview scope we only count
-    // today's bills — older stock has moved through sales / melting and isn't
-    // 'in stock' in the way outstation at_branch bills are.
+    // Merge RPC aggregates into summary. The RPC already applies the
+    // Bangalore time-of-day lifecycle (at_branch before 19:30 IST →
+    // in_consignment after → at_ho after midnight), so Bangalore rows arrive
+    // already filtered — no special transform needed here.
     for (const row of rpcRows || []) {
       const isOutside   = outsideBranches.has(row.branch_name)
       const isBangalore = bangaloreBranches.has(row.branch_name)
@@ -148,25 +151,7 @@ export async function GET(req) {
       const totalVal   = parseFloat(row.total_gross_value || 0)
       const todayVal   = parseFloat(row.today_gross_value || 0)
 
-      if (isBangalore) {
-        // Bangalore: today-only. Older counts stay 0.
-        s.total_bills        = todayBills
-        s.today_bills        = todayBills
-        s.older_bills        = 0
-        s.total_net_wt       = todayNet
-        s.today_net_wt       = todayNet
-        s.older_net_wt       = 0
-        s.total_gross_wt     = todayNet  // RPC doesn't return today_gross_wt; net is a safe proxy here
-        s.total_gross_value  = todayVal
-        s.today_gross_value  = todayVal
-        s.older_gross_value  = 0
-        // Bangalore's stock is today only — oldest = today's date so the UI
-        // computes age = 0 and renders 'today' rather than an em-dash.
-        s.oldest_date        = todayBills > 0 ? istToday() : null
-        continue
-      }
-
-      // Outstation: full at_branch picture.
+      // Same merge for both outstation and Bangalore now.
       s.total_bills        = totalBills
       s.today_bills        = todayBills
       s.older_bills        = totalBills - todayBills
