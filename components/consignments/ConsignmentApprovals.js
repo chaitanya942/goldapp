@@ -869,9 +869,10 @@ export default function ConsignmentApprovals() {
                   <span><strong style={{ color: t.gold, fontFamily: 'monospace' }}>{Number(c.total_net_wt || 0).toFixed(3)}g</strong> net wt</span>
                   <span><strong style={{ color: t.blue, fontFamily: 'monospace' }}>₹{Number(c.total_amount || 0).toLocaleString('en-IN')}</strong></span>
                   {(ewbActive || irnActive) && (
-                    <span style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: t.orange, fontWeight: 600 }}>
-                      <span>⚠</span>
-                      {ewbActive && irnActive ? 'EWB + E-Invoice still active on portal' : ewbActive ? 'EWB still active on NIC' : 'E-Invoice still active on IRP'}
+                    <span style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: t.blue, fontWeight: 600 }}
+                      title="Approving will cancel this on the GST portal first, then void the consignment. All in one click.">
+                      <span>⟲</span>
+                      {ewbActive && irnActive ? 'EWB + E-Invoice will be cancelled on portal' : ewbActive ? 'EWB will be cancelled on NIC' : 'E-Invoice will be cancelled on IRP'}
                     </span>
                   )}
                 </div>
@@ -883,9 +884,17 @@ export default function ConsignmentApprovals() {
                     Reject request
                   </button>
                   <button onClick={async () => {
+                    // Compose the confirmation message so accounts knows exactly what
+                    // the single click will do — NIC + IRP + local void all happen
+                    // server-side now, no more separate GST portal trip.
+                    const steps = []
+                    if (ewbActive) steps.push(`Cancel EWB ${c.eway_bill_no} on NIC`)
+                    if (irnActive) steps.push('Cancel the E-Invoice IRN on IRP')
+                    steps.push(`Return ${c.total_bills} bill${c.total_bills === 1 ? '' : 's'} to ${c.branch_name}`)
+                    steps.push('Mark consignment as cancelled')
                     const ok = await openConfirm({
                       title: `Approve cancellation of ${c.tmp_prf_no}?`,
-                      message: `${c.total_bills} bill${c.total_bills === 1 ? '' : 's'} will return to ${c.branch_name}.${ewbActive ? '\n\n⚠ Cancel EWB ' + c.eway_bill_no + ' on the NIC portal within 24h of generation.' : ''}${irnActive ? '\n\n⚠ Cancel the E-Invoice IRN on the IRP portal within 24h of generation.' : ''}`,
+                      message: `This will:\n\n${steps.map((s, i) => `${i + 1}. ${s}`).join('\n')}\n\nAll in one shot. If NIC or IRP rejects (e.g. > 24h since generation), nothing is changed and you'll see the error.`,
                       confirmLabel: 'Approve cancellation',
                       danger: true,
                     })
@@ -898,13 +907,12 @@ export default function ConsignmentApprovals() {
                       })
                       const j = await r.json()
                       if (!r.ok || j.error) { showToast(j.error || 'Approval failed', 'error'); return }
-                      const warningSuffix = j.warnings?.length ? ' ' + j.warnings.join(' ') : ''
-                      showToast((j.message || 'Cancellation approved.') + warningSuffix, j.warnings?.length ? 'info' : 'success')
+                      showToast(j.message || 'Cancellation approved.', 'success')
                       fetchCancelRequests(true)
                     } finally { setApproveCancelBusy(null) }
                   }} disabled={busy}
                     style={{ background: busy ? `${t.red}50` : t.red, color: '#fff', border: 'none', borderRadius: '8px', padding: '7px 16px', fontSize: '12px', fontWeight: 700, cursor: busy ? 'not-allowed' : 'pointer' }}>
-                    {busy ? 'Approving…' : 'Approve cancellation'}
+                    {busy ? (ewbActive || irnActive ? 'Cancelling on portal…' : 'Approving…') : 'Approve cancellation'}
                   </button>
                 </div>
               </div>

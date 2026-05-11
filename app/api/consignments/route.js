@@ -12,6 +12,8 @@ import {
 import { logConsignmentEvent } from '../../../lib/consignmentLog'
 import { requireAuth, ROLE_GROUPS, getRegionFilter, resolveAllowedBranchNames } from '../../../lib/apiAuth'
 import { istToday } from '../../../lib/dateIst'
+import { cancelEWayBill, cancelEInvoice } from '../../../lib/clearTaxClient'
+import { REGION_TO_STATE_CODE } from '../../../lib/stateMap'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
@@ -1540,10 +1542,13 @@ export async function POST(req) {
   }
 
   // ── Approve a pending cancellation request (accounts side) ───────────────
-  // Reuses the same atomic cancel RPC as the legacy admin cancel_consignment
-  // path so bills + status flip in one transaction. Audit log entry is
-  // distinct ('cancellation_approved') so the timeline reads as a two-step
-  // approval flow, not a unilateral void.
+  // Three-step flow done server-side so accounts never needs to leave the app:
+  //   1. Cancel the EWB on NIC (if one was generated). Hard failure stops the
+  //      whole approval — operations team can inspect the error and retry.
+  //   2. Cancel the IRN on IRP (if one was generated). Same hard-fail policy.
+  //   3. Void the consignment via cancel_consignment_atomic (frees bills,
+  //      marks status='cancelled' in a single txn).
+  // Audit log entries written at each step so the timeline reads sequentially.
   if (action === 'approve_cancellation') {
     const { id } = body
     if (!id) return Response.json({ error: 'Missing id' }, { status: 400 })
@@ -1554,11 +1559,108 @@ export async function POST(req) {
     if (!c.cancellation_requested_at) return Response.json({ error: 'No cancellation request on this consignment' }, { status: 400 })
     if (c.status === 'cancelled')    return Response.json({ error: 'Already cancelled' }, { status: 400 })
 
-    // Use the request reason as the cancellation reason on the consignment,
-    // prefixed with who approved it so the audit trail is unambiguous.
-    const composedReason = `Approved by accounts (${actorEmail}). Operations reason: ${c.cancellation_reason || '—'}`
+    // Resolve the same state-wise GSTIN that generated EWB / IRN. The NIC and
+    // IRP cancel endpoints reject the request if the cancelling GSTIN doesn't
+    // match the generator. Branch-level GSTIN is the legacy fallback; env
+    // last-resort for old data.
+    const { data: branch } = await supabase
+      .from('branches').select('branch_gstin, region').eq('name', c.branch_name).single()
+    const { data: companySettings } = await supabase.from('company_settings').select('*').single()
+    const stateCode  = REGION_TO_STATE_CODE[branch?.region]
+    const stateGstin = stateCode ? companySettings?.[`gstin_${stateCode.toLowerCase()}`] : null
+    const gstinFor   = stateGstin || branch?.branch_gstin || process.env.WG_GSTIN
 
-    // Atomic path: same RPC as the legacy cancel_consignment action.
+    const HOUR_MS = 3600 * 1000
+    const WINDOW  = 24 * HOUR_MS
+    const now     = Date.now()
+    const composedReason = `Approved by accounts (${actorEmail}). Operations reason: ${c.cancellation_reason || '—'}`
+    const portalCancelled = []  // tracks what we cancelled for the audit + UI
+
+    // STEP 1 — EWB on NIC
+    if (c.eway_bill_no) {
+      // Sanity check: is the 24h NIC window even open? request_cancellation
+      // already gated this when the request was filed, but the request might
+      // have been sitting in the queue for hours. Re-check at approval time.
+      const ewbAge = c.ewb_generated_at ? now - new Date(c.ewb_generated_at).getTime() : Infinity
+      if (ewbAge >= WINDOW) {
+        return Response.json({
+          error: `E-Way Bill cancel window has closed (>24h since generation). NIC cannot cancel ${c.eway_bill_no} anymore. Generate a fresh consignment with the corrected bills.`,
+        }, { status: 400 })
+      }
+      try {
+        const nicResult = await cancelEWayBill({
+          ewbNumber:     c.eway_bill_no,
+          reasonCode:    '2', // 2 = Order Cancelled (best fit for ops-requested cancellation)
+          remark:        String(c.cancellation_reason || 'Operations cancellation request').slice(0, 100),
+          gstinOverride: gstinFor,
+        })
+        const govtResp = nicResult?.govt_response || nicResult?.data?.govt_response || nicResult?.response?.govt_response || nicResult
+        await logConsignmentEvent(supabase, {
+          consignment_id: id,
+          event_type:     'ewb_cancelled',
+          actor_email:    actorEmail,
+          actor_role:     auth.role,
+          details: {
+            ewb_no:     c.eway_bill_no,
+            reason_code:'2',
+            remark:     c.cancellation_reason || 'Operations cancellation request',
+            nic_ack:    govtResp,
+            triggered_by: 'approve_cancellation',
+          },
+        })
+        portalCancelled.push(`EWB ${c.eway_bill_no} cancelled on NIC`)
+      } catch (err) {
+        console.error('[approve_cancellation] NIC EWB cancel failed:', err)
+        return Response.json({
+          error: `Could not cancel the E-Way Bill on NIC: ${err.message || 'unknown error'}. Nothing has been changed. Try again or escalate if NIC is down.`,
+        }, { status: 502 })
+      }
+    }
+
+    // STEP 2 — IRN on IRP
+    if (c.irn) {
+      const irnAge = c.einvoice_generated_at ? now - new Date(c.einvoice_generated_at).getTime() : Infinity
+      if (irnAge >= WINDOW) {
+        return Response.json({
+          error: 'E-Invoice cancel window has closed (>24h since generation). IRP cannot cancel this IRN anymore. A credit note is required instead.',
+        }, { status: 400 })
+      }
+      try {
+        const irpResult = await cancelEInvoice({
+          irn:           c.irn,
+          reasonCode:    '1', // 1 = Duplicate (IRP's default; "Order Cancelled" isn't a standard code there)
+          remark:        String(c.cancellation_reason || 'Operations cancellation request').slice(0, 100),
+          gstinOverride: gstinFor,
+        })
+        const govtResp = irpResult?.govt_response || irpResult?.data?.govt_response || irpResult?.response?.govt_response || irpResult
+        await logConsignmentEvent(supabase, {
+          consignment_id: id,
+          event_type:     'einvoice_cancelled',
+          actor_email:    actorEmail,
+          actor_role:     auth.role,
+          details: {
+            irn:        c.irn,
+            reason_code:'1',
+            remark:     c.cancellation_reason || 'Operations cancellation request',
+            irp_ack:    govtResp,
+            triggered_by: 'approve_cancellation',
+          },
+        })
+        portalCancelled.push('E-Invoice cancelled on IRP')
+      } catch (err) {
+        console.error('[approve_cancellation] IRP E-Invoice cancel failed:', err)
+        // EWB may have already been cancelled by this point — that's an
+        // inconsistent state. Tell the user precisely so they can decide.
+        const ewbNote = portalCancelled.length
+          ? ` Note: the E-Way Bill was already cancelled on NIC. The consignment has NOT been voided.`
+          : ''
+        return Response.json({
+          error: `Could not cancel the E-Invoice on IRP: ${err.message || 'unknown error'}.${ewbNote}`,
+        }, { status: 502 })
+      }
+    }
+
+    // STEP 3 — Void the consignment locally (free bills, flip status)
     const { data: rpcCancelled, error: rpcCancelErr } = await supabase.rpc('cancel_consignment_atomic', {
       p_consignment_id: id,
       p_reason:         composedReason,
@@ -1568,7 +1670,7 @@ export async function POST(req) {
       return Response.json({ error: rpcCancelErr.message }, { status: 400 })
     }
     if (rpcCancelErr) {
-      // RPC missing — fall back to manual updates so the request isn't stuck.
+      // RPC missing — manual fallback.
       console.warn('[consignments.approve_cancellation] cancel_consignment_atomic RPC missing — using manual fallback.')
       const { data: links } = await supabase.from('consignment_items').select('purchase_id').eq('consignment_id', id)
       const pids = (links || []).map(l => l.purchase_id)
@@ -1582,6 +1684,27 @@ export async function POST(req) {
         .eq('id', id)
     }
 
+    // Clear the portal-doc fields locally so the UI stops showing them as
+    // active. Done after the RPC so the RPC's "already cancelled" guard
+    // doesn't trip on a row we've just cancelled.
+    const clearUpdate = {}
+    if (c.eway_bill_no) {
+      clearUpdate.eway_bill_no = null
+      clearUpdate.ewb_valid_until = null
+      clearUpdate.ewb_generated_at = null
+      clearUpdate.ewb_generation_started_at = null
+    }
+    if (c.irn) {
+      clearUpdate.irn = null
+      clearUpdate.ack_no = null
+      clearUpdate.ack_dt = null
+      clearUpdate.signed_qr_code = null
+      clearUpdate.einvoice_generated_at = null
+    }
+    if (Object.keys(clearUpdate).length) {
+      await supabase.from('consignments').update(clearUpdate).eq('id', id)
+    }
+
     await logConsignmentEvent(supabase, {
       consignment_id: id,
       event_type:     'cancellation_approved',
@@ -1591,20 +1714,17 @@ export async function POST(req) {
         operations_reason: c.cancellation_reason,
         requested_by:      c.cancellation_requested_by,
         requested_at:      c.cancellation_requested_at,
+        portal_cancelled:  portalCancelled,
       },
     })
 
-    // Surface warnings: EWB / IRN still active on NIC / IRP need to be
-    // cancelled separately on the GST portal within their 24h window.
-    const warnings = []
-    const src    = rpcCancelled || c
-    if (src.eway_bill_no) warnings.push(`E-Way Bill ${src.eway_bill_no} is still active. Cancel it on the NIC portal within 24h of generation.`)
-    if (src.irn)          warnings.push(`E-Invoice IRN is still active. Cancel it on the IRP portal within 24h of generation.`)
+    // Compose a user-facing message that names what was cancelled where.
+    const parts = ['Cancellation approved.', 'Bills returned to source branch.']
+    if (portalCancelled.length) parts.push(portalCancelled.join(' · ') + '.')
 
     return Response.json({
-      data:     rpcCancelled || { id, status: 'cancelled' },
-      message:  'Cancellation approved. Bills returned to source branch.',
-      warnings: warnings.length ? warnings : undefined,
+      data:    rpcCancelled || { id, status: 'cancelled' },
+      message: parts.join(' '),
     })
   }
 
