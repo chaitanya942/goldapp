@@ -271,17 +271,13 @@ function BulkPanel({ t, count, busy, onApply, onClear }) {
   const [tat,         setTat]         = useState('')
   const [days,        setDays]        = useState([])
   const [daysTouched, setDaysTouched] = useState(false)
-  const [contactName, setContactName] = useState('')
-  const [contactPhone,setContactPhone]= useState('')
-  const [notes,       setNotes]       = useState('')
 
   const reset = () => {
     setPartner(''); setPickupTime(''); setTat(''); setDays([]); setDaysTouched(false)
-    setContactName(''); setContactPhone(''); setNotes('')
   }
 
   // Build the patch — only include fields the user actually set.
-  const hasAny = (partner || pickupTime || tat || daysTouched || contactName || contactPhone || notes)
+  const hasAny = (partner || pickupTime || tat || daysTouched)
 
   const handleApply = async () => {
     const patch = {}
@@ -289,9 +285,6 @@ function BulkPanel({ t, count, busy, onApply, onClear }) {
     if (pickupTime)   patch.pickup_time        = pickupTime
     if (tat)          patch.delivery_tat_hours = Number(tat)
     if (daysTouched)  patch.pickup_days        = days
-    if (contactName)  patch.contact_name       = contactName
-    if (contactPhone) patch.contact_phone      = contactPhone
-    if (notes)        patch.notes              = notes
     if (!Object.keys(patch).length) return
     await onApply(patch)
     reset()
@@ -371,19 +364,6 @@ function BulkPanel({ t, count, busy, onApply, onClear }) {
             )}
           </div>
         </div>
-        <div>
-          <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 600, marginBottom: '4px' }}>Contact name</div>
-          <input value={contactName} onChange={e => setContactName(e.target.value)} placeholder="—" maxLength={80} disabled={busy} style={inp} />
-        </div>
-        <div>
-          <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 600, marginBottom: '4px' }}>Contact phone</div>
-          <input value={contactPhone} onChange={e => setContactPhone(e.target.value)} placeholder="—" maxLength={20} disabled={busy} style={inp} />
-        </div>
-      </div>
-
-      {/* Apply CTA */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-        <input value={notes} onChange={e => setNotes(e.target.value)} placeholder="Notes (optional) — same text on every selected branch" maxLength={500} disabled={busy} style={{ ...inp, flex: 1 }} />
         <button onClick={handleApply} disabled={busy || !hasAny}
           style={{
             background: hasAny && !busy ? t.gold : `${t.gold}40`,
@@ -391,6 +371,7 @@ function BulkPanel({ t, count, busy, onApply, onClear }) {
             padding: '9px 18px', fontSize: '12px', fontWeight: 700,
             cursor: busy || !hasAny ? 'not-allowed' : 'pointer',
             whiteSpace: 'nowrap',
+            alignSelf: 'end',
           }}>
           {busy ? `Applying to ${count}…` : `Apply to ${count} branch${count === 1 ? '' : 'es'}`}
         </button>
@@ -410,19 +391,16 @@ function Stat({ t, label, value, sub, accent }) {
   )
 }
 
-// Per-branch editor card. Same chrome pattern as the Settings tab state cards:
-// top accent stripe, hover lift, single 'Save changes' footer when dirty.
-// Also carries a multi-select checkbox in the header for the bulk-apply panel.
+// Per-branch editor — compact single-row card. Operational fields only
+// (partner, pickup, TAT, days). Contact + notes were dropped to keep
+// the row tight; columns still exist in the DB if needed later.
 function BranchCard({ t, branch, busy, onSave, regionAccent, selected, onToggleSelect }) {
-  const [partner,    setPartner]    = useState(branch.logistics_partner || 'BVC')
+  const [partner,      setPartner]      = useState(branch.logistics_partner || 'BVC')
   const [partnerOther, setPartnerOther] = useState(PARTNERS.includes(branch.logistics_partner) ? '' : (branch.logistics_partner || ''))
-  const [pickup,     setPickup]     = useState(branch.pickup_time || '')
-  const [tat,        setTat]        = useState(branch.delivery_tat_hours || 24)
-  const [days,       setDays]       = useState(branch.pickup_days || ['Mon','Tue','Wed','Thu','Fri','Sat'])
-  const [contactName,setContactName]= useState(branch.logistics_contact_name  || '')
-  const [contactPhone,setContactPhone]= useState(branch.logistics_contact_phone || '')
-  const [notes,      setNotes]      = useState(branch.logistics_notes || '')
-  const [hover,      setHover]      = useState(false)
+  const [pickup,       setPickup]       = useState(branch.pickup_time || '')
+  const [tat,          setTat]          = useState(branch.delivery_tat_hours || 24)
+  const [days,         setDays]         = useState(branch.pickup_days || ['Mon','Tue','Wed','Thu','Fri','Sat'])
+  const [hover,        setHover]        = useState(false)
 
   // Reset on branch row update (after save)
   useEffect(() => { setPartner(branch.logistics_partner || 'BVC') }, [branch.logistics_partner])
@@ -430,9 +408,6 @@ function BranchCard({ t, branch, busy, onSave, regionAccent, selected, onToggleS
   useEffect(() => { setPickup(branch.pickup_time || '') }, [branch.pickup_time])
   useEffect(() => { setTat(branch.delivery_tat_hours || 24) }, [branch.delivery_tat_hours])
   useEffect(() => { setDays(branch.pickup_days || ['Mon','Tue','Wed','Thu','Fri','Sat']) }, [branch.pickup_days])
-  useEffect(() => { setContactName(branch.logistics_contact_name || '') }, [branch.logistics_contact_name])
-  useEffect(() => { setContactPhone(branch.logistics_contact_phone || '') }, [branch.logistics_contact_phone])
-  useEffect(() => { setNotes(branch.logistics_notes || '') }, [branch.logistics_notes])
 
   // Resolve effective partner (dropdown or 'Other' free text)
   const effectivePartner = partner === 'Other' ? partnerOther.trim() : partner
@@ -441,10 +416,7 @@ function BranchCard({ t, branch, busy, onSave, regionAccent, selected, onToggleS
     (effectivePartner || null)             !== (branch.logistics_partner       || null) ||
     (pickup || '')                          !== (branch.pickup_time             || '')   ||
     Number(tat)                             !== Number(branch.delivery_tat_hours || 24)  ||
-    JSON.stringify([...days].sort())        !== JSON.stringify([...(branch.pickup_days || ['Mon','Tue','Wed','Thu','Fri','Sat'])].sort()) ||
-    (contactName || '')                     !== (branch.logistics_contact_name  || '')   ||
-    (contactPhone|| '')                     !== (branch.logistics_contact_phone || '')   ||
-    (notes || '')                           !== (branch.logistics_notes         || '')
+    JSON.stringify([...days].sort())        !== JSON.stringify([...(branch.pickup_days || ['Mon','Tue','Wed','Thu','Fri','Sat'])].sort())
   )
 
   const onSubmit = async () => {
@@ -453,9 +425,6 @@ function BranchCard({ t, branch, busy, onSave, regionAccent, selected, onToggleS
       pickup_time:        pickup,
       delivery_tat_hours: tat,
       pickup_days:        days,
-      contact_name:       contactName,
-      contact_phone:      contactPhone,
-      notes,
     })
   }
 
@@ -465,204 +434,145 @@ function BranchCard({ t, branch, busy, onSave, regionAccent, selected, onToggleS
     setPickup(branch.pickup_time || '')
     setTat(branch.delivery_tat_hours || 24)
     setDays(branch.pickup_days || ['Mon','Tue','Wed','Thu','Fri','Sat'])
-    setContactName(branch.logistics_contact_name || '')
-    setContactPhone(branch.logistics_contact_phone || '')
-    setNotes(branch.logistics_notes || '')
   }
 
   const accent = regionAccent || t.gold
   const baseBg = t.card2 || t.card
 
-  // Estimated arrival = today's pickup time + TAT hours, in human form.
-  const arrivalHint = useMemo(() => {
-    if (!pickup || !tat) return null
-    const [h, m] = pickup.split(':').map(Number)
-    if (Number.isNaN(h)) return null
-    const d = new Date(); d.setHours(h, m || 0, 0, 0); d.setHours(d.getHours() + Number(tat))
-    return d.toLocaleString('en-IN', { weekday: 'short', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
-  }, [pickup, tat])
-
-  const Field = ({ label, hint, children }) => (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <span style={{ fontSize: '10px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 600 }}>{label}</span>
-        {hint && <span style={{ fontSize: '10px', color: t.text4 }}>{hint}</span>}
-      </div>
-      {children}
-    </div>
-  )
-  const inputStyle = (isDirty) => ({
-    width: '100%',
+  const inp = (isDirty) => ({
     background: t.card,
-    border: `1.5px solid ${isDirty ? t.gold : t.border}`,
-    borderRadius: '8px',
-    padding: '9px 12px',
+    border: `1px solid ${isDirty ? t.gold : t.border}`,
+    borderRadius: '6px',
+    padding: '5px 8px',
     fontSize: '12px',
     color: t.text1,
     outline: 'none',
-    transition: 'border-color .15s ease, box-shadow .15s ease',
+    transition: 'border-color .15s ease',
   })
 
   return (
-    <div style={{
-      position: 'relative',
-      background: hover ? `${accent}06` : baseBg,
-      border: `1px solid ${hover ? `${accent}40` : t.border}`,
-      borderRadius: '12px',
-      overflow: 'hidden',
-      boxShadow: hover ? `0 2px 12px ${accent}18` : 'none',
-      transition: 'background .18s ease, border-color .18s ease, box-shadow .18s ease',
-    }}
-      onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}>
-      {/* Top accent stripe in the region's colour */}
-      <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '2px',
-        background: `linear-gradient(90deg, ${accent} 0%, ${accent}30 60%, transparent 100%)` }} />
-
-      {/* Header */}
-      <div style={{ padding: '14px 18px 10px', display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-        {/* Multi-select checkbox — clicking ticks this branch into the bulk panel. */}
-        {onToggleSelect && (
-          <button onClick={onToggleSelect} aria-label={selected ? 'Deselect for bulk' : 'Select for bulk'}
-            title={selected ? 'Selected for bulk apply. Click to deselect.' : 'Select for bulk apply'}
-            style={{
-              width: '20px', height: '20px', flexShrink: 0,
-              background: selected ? accent : 'transparent',
-              border: `1.5px solid ${selected ? accent : t.border2 || t.border}`,
-              borderRadius: '5px', cursor: 'pointer',
-              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-              color: '#fff', fontSize: '13px', fontWeight: 700,
-              transition: 'background .15s, border-color .15s',
-            }}>
-            {selected ? '✓' : ''}
-          </button>
-        )}
-        <span style={{
-          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-          minWidth: '40px', height: '32px', padding: '0 12px',
-          fontSize: '13px', fontWeight: 700, letterSpacing: '.04em',
-          color: '#fff', background: accent, borderRadius: '7px',
-          fontFamily: 'monospace',
-        }}>{branch.name.split('-')[0]}</span>
-        <span style={{ fontSize: '15px', color: t.text1, fontWeight: 600, letterSpacing: '-.005em' }}>{branch.name}</span>
-        {branch.is_hub && (
-          <span style={{ fontSize: '9px', color: t.gold, background: `${t.gold}15`, border: `1px solid ${t.gold}40`, borderRadius: '4px', padding: '2px 7px', fontWeight: 700, letterSpacing: '.05em' }}>HUB</span>
-        )}
-        <div style={{ flex: 1 }} />
-        {arrivalHint && (
-          <span title="Estimated arrival at HO based on pickup time + TAT" style={{ fontSize: '10px', color: t.text3, fontFamily: 'monospace' }}>
-            <span style={{ color: t.text4 }}>Today&apos;s pickup → HO by</span> <strong style={{ color: t.text2 }}>{arrivalHint}</strong>
-          </span>
-        )}
-      </div>
-
-      {/* Body — responsive grid of fields */}
-      <div style={{
-        padding: '4px 18px 16px',
-        display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-        gap: '14px',
+    <div
+      onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
+      style={{
+        background: hover ? `${accent}06` : baseBg,
+        border: `1px solid ${hover ? `${accent}40` : t.border}`,
+        borderLeft: `3px solid ${accent}`,
+        borderRadius: '8px',
+        boxShadow: hover ? `0 2px 8px ${accent}18` : 'none',
+        transition: 'background .18s ease, border-color .18s ease, box-shadow .18s ease',
+        padding: '7px 12px',
+        display: 'flex', alignItems: 'center', gap: '10px',
+        flexWrap: 'wrap',
       }}>
-        <Field label="Logistics partner">
-          <select value={partner} onChange={e => setPartner(e.target.value)} disabled={busy}
-            style={inputStyle(effectivePartner !== (branch.logistics_partner || null))}>
-            {PARTNERS.map(p => <option key={p} value={p}>{p}</option>)}
-            {/* Allow legacy values that aren't in PARTNERS */}
-            {branch.logistics_partner && !PARTNERS.includes(branch.logistics_partner) && (
-              <option value={branch.logistics_partner}>{branch.logistics_partner}</option>
-            )}
-          </select>
-          {partner === 'Other' && (
-            <input value={partnerOther} onChange={e => setPartnerOther(e.target.value)} placeholder="Partner name" maxLength={60} disabled={busy}
-              style={{ ...inputStyle(true), marginTop: '4px' }} />
-          )}
-        </Field>
+      {/* Select checkbox */}
+      {onToggleSelect && (
+        <button onClick={onToggleSelect} aria-label={selected ? 'Deselect' : 'Select for bulk'}
+          title={selected ? 'Selected. Click to deselect.' : 'Select for bulk apply'}
+          style={{
+            width: '17px', height: '17px', flexShrink: 0,
+            background: selected ? accent : 'transparent',
+            border: `1.5px solid ${selected ? accent : t.border2 || t.border}`,
+            borderRadius: '4px', cursor: 'pointer',
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            color: '#fff', fontSize: '10px', fontWeight: 700,
+            padding: 0,
+          }}>
+          {selected ? '✓' : ''}
+        </button>
+      )}
 
-        <Field label="Pickup time" hint={pickup ? '24-hour' : 'optional'}>
-          <input type="time" value={pickup} onChange={e => setPickup(e.target.value)} disabled={busy}
-            style={inputStyle((pickup || '') !== (branch.pickup_time || ''))} />
-        </Field>
+      {/* Branch identity */}
+      <span style={{
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+        minWidth: '28px', height: '20px', padding: '0 7px',
+        fontSize: '9px', fontWeight: 700, letterSpacing: '.04em',
+        color: '#fff', background: accent, borderRadius: '4px',
+        fontFamily: 'monospace', flexShrink: 0,
+      }}>{branch.name.split('-')[0]}</span>
+      <span style={{ fontSize: '12.5px', color: t.text1, fontWeight: 600, minWidth: '170px' }}>{branch.name}</span>
+      {branch.is_hub && (
+        <span style={{ fontSize: '8px', color: t.gold, background: `${t.gold}15`, border: `1px solid ${t.gold}40`, borderRadius: '3px', padding: '1px 5px', fontWeight: 700, letterSpacing: '.05em', flexShrink: 0 }}>HUB</span>
+      )}
 
-        <Field label="Delivery TAT">
-          <div style={{ display: 'flex', gap: '6px' }}>
-            {[24, 48, 72].map(h => {
-              const active = Number(tat) === h
-              const wasOriginal = h === Number(branch.delivery_tat_hours || 24)
-              return (
-                <button key={h} onClick={() => setTat(h)} disabled={busy}
-                  style={{
-                    flex: 1,
-                    background:    active ? t.gold : 'transparent',
-                    color:         active ? '#1a0a00' : t.text2,
-                    border:        `1.5px solid ${active && !wasOriginal ? t.gold : (active ? t.gold : t.border)}`,
-                    borderRadius:  '8px',
-                    padding:       '9px 10px',
-                    fontSize:      '12px',
-                    fontWeight:    active ? 700 : 500,
-                    cursor:        'pointer',
-                    transition:    'all .15s ease',
-                  }}>
-                  {h}h
-                </button>
-              )
-            })}
-          </div>
-        </Field>
+      {/* Partner */}
+      <select value={partner} onChange={e => setPartner(e.target.value)} disabled={busy}
+        title="Logistics partner"
+        style={{ ...inp(effectivePartner !== (branch.logistics_partner || null)), minWidth: '92px' }}>
+        {PARTNERS.map(p => <option key={p} value={p}>{p}</option>)}
+        {branch.logistics_partner && !PARTNERS.includes(branch.logistics_partner) && (
+          <option value={branch.logistics_partner}>{branch.logistics_partner}</option>
+        )}
+      </select>
+      {partner === 'Other' && (
+        <input value={partnerOther} onChange={e => setPartnerOther(e.target.value)} placeholder="Partner" maxLength={60} disabled={busy}
+          style={{ ...inp(true), width: '100px' }} />
+      )}
 
-        <Field label="Pickup days">
-          <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
-            {DAYS.map(d => {
-              const active = days.includes(d)
-              return (
-                <button key={d} onClick={() => setDays(prev => active ? prev.filter(x => x !== d) : [...prev, d])} disabled={busy}
-                  style={{
-                    background:    active ? `${accent}20` : 'transparent',
-                    color:         active ? accent : t.text4,
-                    border:        `1px solid ${active ? `${accent}50` : t.border}`,
-                    borderRadius:  '6px',
-                    padding:       '6px 10px',
-                    fontSize:      '11px',
-                    fontWeight:    600,
-                    cursor:        'pointer',
-                    minWidth:      '40px',
-                  }}>
-                  {d}
-                </button>
-              )
-            })}
-          </div>
-        </Field>
+      {/* Pickup time */}
+      <input type="time" value={pickup} onChange={e => setPickup(e.target.value)} disabled={busy}
+        title="Pickup time"
+        style={{ ...inp((pickup || '') !== (branch.pickup_time || '')), width: '110px' }} />
 
-        <Field label="Courier contact (name)">
-          <input value={contactName} onChange={e => setContactName(e.target.value)} placeholder="e.g. Ramesh Kumar" maxLength={80} disabled={busy}
-            style={inputStyle((contactName || '') !== (branch.logistics_contact_name || ''))} />
-        </Field>
-
-        <Field label="Courier contact (phone)">
-          <input value={contactPhone} onChange={e => setContactPhone(e.target.value)} placeholder="+91 98765 43210" maxLength={20} disabled={busy}
-            style={inputStyle((contactPhone || '') !== (branch.logistics_contact_phone || ''))} />
-        </Field>
-
-        <div style={{ gridColumn: '1 / -1' }}>
-          <Field label="Notes">
-            <textarea value={notes} onChange={e => setNotes(e.target.value)} placeholder="Edge cases, e.g. 'Double pickup on Mondays. Skips Sundays + bank holidays.'" maxLength={500} rows={2} disabled={busy}
-              style={{ ...inputStyle((notes || '') !== (branch.logistics_notes || '')), resize: 'vertical', minHeight: '52px', fontFamily: 'inherit' }} />
-          </Field>
-        </div>
+      {/* TAT chips */}
+      <div style={{ display: 'inline-flex', gap: '3px' }} title="Delivery TAT">
+        {[24, 48, 72].map(h => {
+          const active = Number(tat) === h
+          return (
+            <button key={h} onClick={() => setTat(h)} disabled={busy}
+              style={{
+                background:   active ? t.gold : 'transparent',
+                color:        active ? '#1a0a00' : t.text2,
+                border:       `1px solid ${active ? t.gold : t.border}`,
+                borderRadius: '5px',
+                padding:      '4px 8px',
+                fontSize:     '11px',
+                fontWeight:   active ? 700 : 500,
+                cursor:       'pointer',
+                minWidth:     '32px',
+              }}>
+              {h}h
+            </button>
+          )
+        })}
       </div>
 
-      {/* Footer — Save changes, only when dirty */}
+      {/* Days chips — single letters to keep the row tight */}
+      <div style={{ display: 'inline-flex', gap: '2px' }} title="Pickup days">
+        {DAYS.map(d => {
+          const active = days.includes(d)
+          return (
+            <button key={d} onClick={() => setDays(prev => active ? prev.filter(x => x !== d) : [...prev, d])} disabled={busy}
+              title={d}
+              style={{
+                background:   active ? `${accent}20` : 'transparent',
+                color:        active ? accent : t.text4,
+                border:       `1px solid ${active ? `${accent}50` : t.border}`,
+                borderRadius: '4px',
+                padding:      '3px 0',
+                fontSize:     '10px',
+                fontWeight:   600,
+                cursor:       'pointer',
+                width:        '24px',
+              }}>
+              {d[0]}
+            </button>
+          )
+        })}
+      </div>
+
+      <div style={{ flex: 1, minWidth: '4px' }} />
+
+      {/* Save / cancel — inline, only when dirty */}
       {dirty && (
-        <div style={{ padding: '12px 18px', borderTop: `1px solid ${t.border}`, background: `${t.gold}05`, display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <span style={{ fontSize: '11px', color: t.text3, flex: 1 }}>
-            <span style={{ color: t.gold, fontWeight: 600 }}>●</span>{' '}Unsaved changes
-          </span>
+        <div style={{ display: 'inline-flex', gap: '6px', alignItems: 'center' }}>
+          <span title="Unsaved" style={{ width: '7px', height: '7px', borderRadius: '50%', background: t.gold }} />
           <button onClick={onReset} disabled={busy}
-            style={{ background: 'transparent', border: `1px solid ${t.border}`, borderRadius: '6px', padding: '7px 14px', fontSize: '11px', color: t.text3, cursor: busy ? 'wait' : 'pointer', fontWeight: 600 }}>
+            style={{ background: 'transparent', border: `1px solid ${t.border}`, borderRadius: '5px', padding: '4px 10px', fontSize: '10px', color: t.text3, cursor: busy ? 'wait' : 'pointer', fontWeight: 600 }}>
             Cancel
           </button>
           <button onClick={onSubmit} disabled={busy}
-            style={{ background: t.gold, color: '#1a0a00', border: 'none', borderRadius: '6px', padding: '7px 18px', fontSize: '11px', fontWeight: 700, cursor: busy ? 'wait' : 'pointer', boxShadow: `0 1px 4px ${t.gold}50`, opacity: busy ? 0.7 : 1 }}>
-            {busy ? 'Saving…' : 'Save changes'}
+            style={{ background: t.gold, color: '#1a0a00', border: 'none', borderRadius: '5px', padding: '4px 12px', fontSize: '10px', fontWeight: 700, cursor: busy ? 'wait' : 'pointer', boxShadow: `0 1px 4px ${t.gold}50`, opacity: busy ? 0.7 : 1 }}>
+            {busy ? 'Saving…' : 'Save'}
           </button>
         </div>
       )}
