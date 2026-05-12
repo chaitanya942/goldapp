@@ -50,6 +50,11 @@ export async function POST(req) {
       gstinOverride: gstinFor,
     })
 
+    // Soft-success: NIC returned 107 ("EWB missing") after retries — usually
+    // a prior attempt cancelled it or it's no longer recognised at NIC.
+    // Proceed with local cleanup; audit log captures the discrepancy.
+    const ewbNotFound = !!result?.ewb_not_found
+
     // Trust the library: cancelEWayBill throws if NIC's govt_response.Success
     // isn't 'Y' (or if HTTP fails). If we're past that throw, NIC accepted.
     // Capture whatever ack shape NIC returned for the audit log — varies by
@@ -97,7 +102,7 @@ export async function POST(req) {
 
     await logConsignmentEvent(supabase, {
       consignment_id,
-      event_type:  'ewb_cancelled',
+      event_type:  ewbNotFound ? 'ewb_cancel_skipped' : 'ewb_cancelled',
       actor_email: actorEmail,
       details:     {
         ewb_no:      cancelledEwb,
@@ -105,10 +110,11 @@ export async function POST(req) {
         remark:      remark      || 'Duplicate Entry',
         nic_ack:     govtResp,
         auto_rejected: true,
+        ...(ewbNotFound ? { soft_success_reason: 'NIC returned 107 (EWB not active) — local cleanup only' } : {}),
       },
     })
 
-    return Response.json({ success: true })
+    return Response.json({ success: true, ewb_not_found: ewbNotFound })
   } catch (err) {
     console.error('E-Way Bill cancel error:', err)
     return Response.json({ error: err.message || 'Failed to cancel E-Way Bill' }, { status: 500 })

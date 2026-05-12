@@ -1630,21 +1630,39 @@ export async function POST(req) {
           remark:        String(c.cancellation_reason || 'Operations cancellation request').slice(0, 100),
           gstinOverride: gstinFor,
         })
-        const govtResp = nicResult?.govt_response || nicResult?.data?.govt_response || nicResult?.response?.govt_response || nicResult
-        await logConsignmentEvent(supabase, {
-          consignment_id: id,
-          event_type:     'ewb_cancelled',
-          actor_email:    actorEmail,
-          actor_role:     auth.role,
-          details: {
-            ewb_no:     c.eway_bill_no,
-            reason_code:'2',
-            remark:     c.cancellation_reason || 'Operations cancellation request',
-            nic_ack:    govtResp,
-            triggered_by: 'approve_cancellation',
-          },
-        })
-        portalCancelled.push(`EWB ${c.eway_bill_no} cancelled on NIC`)
+        // Soft-success path: NIC said the EWB is no longer active (107 after
+        // retries). Treat as already-cancelled-upstream and proceed.
+        if (nicResult?.ewb_not_found) {
+          await logConsignmentEvent(supabase, {
+            consignment_id: id,
+            event_type:     'ewb_cancel_skipped',
+            actor_email:    actorEmail,
+            actor_role:     auth.role,
+            details: {
+              ewb_no:        c.eway_bill_no,
+              reason:        'NIC returned 107 (EWB not active) — treating as already cancelled',
+              raw:           nicResult?.raw,
+              triggered_by:  'approve_cancellation',
+            },
+          })
+          portalCancelled.push(`EWB ${c.eway_bill_no} was already not active at NIC`)
+        } else {
+          const govtResp = nicResult?.govt_response || nicResult?.data?.govt_response || nicResult?.response?.govt_response || nicResult
+          await logConsignmentEvent(supabase, {
+            consignment_id: id,
+            event_type:     'ewb_cancelled',
+            actor_email:    actorEmail,
+            actor_role:     auth.role,
+            details: {
+              ewb_no:     c.eway_bill_no,
+              reason_code:'2',
+              remark:     c.cancellation_reason || 'Operations cancellation request',
+              nic_ack:    govtResp,
+              triggered_by: 'approve_cancellation',
+            },
+          })
+          portalCancelled.push(`EWB ${c.eway_bill_no} cancelled on NIC`)
+        }
       } catch (err) {
         console.error('[approve_cancellation] NIC EWB cancel failed:', err)
         return Response.json({
@@ -1668,21 +1686,40 @@ export async function POST(req) {
           remark:        String(c.cancellation_reason || 'Operations cancellation request').slice(0, 100),
           gstinOverride: gstinFor,
         })
-        const govtResp = irpResult?.govt_response || irpResult?.data?.govt_response || irpResult?.response?.govt_response || irpResult
-        await logConsignmentEvent(supabase, {
-          consignment_id: id,
-          event_type:     'einvoice_cancelled',
-          actor_email:    actorEmail,
-          actor_role:     auth.role,
-          details: {
-            irn:        c.irn,
-            reason_code:'1',
-            remark:     c.cancellation_reason || 'Operations cancellation request',
-            irp_ack:    govtResp,
-            triggered_by: 'approve_cancellation',
-          },
-        })
-        portalCancelled.push('E-Invoice cancelled on IRP')
+        // Soft-success path: IRP said the IRN is no longer active (107 after
+        // retries). Treat as already-cancelled-upstream and proceed with
+        // local cleanup. Audit log records the discrepancy.
+        if (irpResult?.irp_not_found) {
+          await logConsignmentEvent(supabase, {
+            consignment_id: id,
+            event_type:     'einvoice_cancel_skipped',
+            actor_email:    actorEmail,
+            actor_role:     auth.role,
+            details: {
+              irn:           c.irn,
+              reason:        'IRP returned 107 (IRN not active) — treating as already cancelled',
+              raw:           irpResult?.raw,
+              triggered_by:  'approve_cancellation',
+            },
+          })
+          portalCancelled.push(`E-Invoice was already not active at IRP`)
+        } else {
+          const govtResp = irpResult?.govt_response || irpResult?.data?.govt_response || irpResult?.response?.govt_response || irpResult
+          await logConsignmentEvent(supabase, {
+            consignment_id: id,
+            event_type:     'einvoice_cancelled',
+            actor_email:    actorEmail,
+            actor_role:     auth.role,
+            details: {
+              irn:        c.irn,
+              reason_code:'1',
+              remark:     c.cancellation_reason || 'Operations cancellation request',
+              irp_ack:    govtResp,
+              triggered_by: 'approve_cancellation',
+            },
+          })
+          portalCancelled.push('E-Invoice cancelled on IRP')
+        }
       } catch (err) {
         console.error('[approve_cancellation] IRP E-Invoice cancel failed:', err)
         // EWB may have already been cancelled by this point — that's an

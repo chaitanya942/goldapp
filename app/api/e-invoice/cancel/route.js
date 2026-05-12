@@ -53,6 +53,12 @@ export async function POST(req) {
       gstinOverride: gstinFor,
     })
 
+    // Soft-success: cancelEInvoice returns { irp_not_found: true } when IRP
+    // replies 107 after retries — usually means a prior attempt already
+    // cancelled it (or the IRN was never actually persisted at IRP). The
+    // audit log records the discrepancy; downstream cleanup runs normally.
+    const irpNotFound = !!result?.irp_not_found
+
     // Trust the library: cancelEInvoice throws if IRP's govt_response.Success
     // isn't 'Y' (or if HTTP fails). If we're past that throw, IRP accepted.
     // Capture whatever ack shape IRP returned for the audit log — varies by
@@ -92,7 +98,7 @@ export async function POST(req) {
 
     await logConsignmentEvent(supabase, {
       consignment_id,
-      event_type:  'einvoice_cancelled',
+      event_type:  irpNotFound ? 'einvoice_cancel_skipped' : 'einvoice_cancelled',
       actor_email: actorEmail,
       details:     {
         irn:         cancelledIrn,
@@ -100,10 +106,11 @@ export async function POST(req) {
         remark:      remark      || 'Duplicate',
         irp_ack:     govtResp,
         auto_rejected: true,
+        ...(irpNotFound ? { soft_success_reason: 'IRP returned 107 (IRN not active) — local cleanup only' } : {}),
       },
     })
 
-    return Response.json({ success: true })
+    return Response.json({ success: true, irp_not_found: irpNotFound })
   } catch (err) {
     console.error('E-Invoice cancel error:', err)
     return Response.json({ error: err.message || 'Failed to cancel E-Invoice' }, { status: 500 })
