@@ -22,7 +22,7 @@ export async function POST(req) {
     if (!consignment_id) return Response.json({ error: 'consignment_id required' }, { status: 400 })
 
     const { data: consignment, error } = await supabase
-      .from('consignments').select('eway_bill_no, branch_name').eq('id', consignment_id).single()
+      .from('consignments').select('eway_bill_no, branch_name, source_gstin').eq('id', consignment_id).single()
     if (error || !consignment) return Response.json({ error: 'Consignment not found' }, { status: 404 })
     if (!consignment.eway_bill_no) {
       return Response.json({ error: 'No E-Way Bill to cancel for this consignment' }, { status: 400 })
@@ -31,11 +31,15 @@ export async function POST(req) {
     const { data: branch } = await supabase
       .from('branches').select('branch_gstin, region').eq('name', consignment.branch_name).single()
 
-    // Cancel must use the same GSTIN that generated the EWB (state-wise GSTIN, not legacy KA one)
+    // GSTIN MUST match the one used to GENERATE the EWB. If company_settings has
+    // been edited since (or the state-wise GSTIN was overridden), re-resolving
+    // here can pick a different value and NIC rejects the cancel. The
+    // source_gstin snapshot frozen on the consignment is authoritative —
+    // same priority order as buildPayload in lib/clearTaxClient.
     const { data: companySettings } = await supabase.from('company_settings').select('*').single()
     const stateCode  = REGION_TO_STATE_CODE[branch?.region]
     const stateGstin = stateCode ? companySettings?.[`gstin_${stateCode.toLowerCase()}`] : null
-    const gstinFor   = stateGstin || branch?.branch_gstin || process.env.WG_GSTIN
+    const gstinFor   = consignment.source_gstin || stateGstin || branch?.branch_gstin || process.env.WG_GSTIN
 
     // NIC EWB cancel reason codes: 1=Duplicate, 2=Order Cancelled,
     // 3=Data Entry Mistake, 4=Others. Default to 1=Duplicate.
