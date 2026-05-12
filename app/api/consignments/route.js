@@ -394,6 +394,162 @@ export async function GET(req) {
     return Response.json({ data: data || [] })
   }
 
+  // ── Bidding volume: gold expected to be available at HO on a given date ──
+  // The bid desk uses this to decide tomorrow morning's price. "Available"
+  // means the bill will be at HO by the morning bid (i.e. has arrived
+  // overnight). Two contributions:
+  //   1. Today's Bangalore purchases — auto-consolidated at 19:30 IST so
+  //      they're at HO by tomorrow morning. To view tomorrow's pool we
+  //      include Bangalore approved bills purchased today.
+  //   2. Outside-Bangalore bills currently in_consignment — for each, the
+  //      expected arrival = dispatched_at + branch.delivery_tat_hours.
+  //      A 24h-TAT branch dispatched today arrives tomorrow → included
+  //      in tomorrow's pool. A 48h-TAT branch dispatched today arrives the
+  //      day after → NOT in tomorrow's pool, in day-after-tomorrow's.
+  //
+  // Query string:
+  //   ?action=bidding_volume[&date=YYYY-MM-DD]   — arrival date (IST). Default: tomorrow.
+  if (action === 'bidding_volume') {
+    const today = istToday()                                              // 'YYYY-MM-DD' IST
+    const addDays = (yyyymmdd, n) => {
+      const [y, m, d] = yyyymmdd.split('-').map(Number)
+      const dt = new Date(Date.UTC(y, m - 1, d + n))
+      return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, '0')}-${String(dt.getUTCDate()).padStart(2, '0')}`
+    }
+    const arrivalDate    = searchParams.get('date') || addDays(today, 1)  // default: tomorrow IST
+    const bangalorePurchaseDate = addDays(arrivalDate, -1)                // bangalore today = arrival - 1
+
+    // Branch metadata — TAT, region, pickup time.
+    let branchQ = supabase
+      .from('branches')
+      .select('name, region, state, delivery_tat_hours, pickup_time, logistics_partner')
+      .eq('is_active', true)
+    if (allowedRegions) branchQ = branchQ.in('region', allowedRegions)
+    const { data: branchRows, error: bErr } = await branchQ
+    if (bErr) return Response.json({ error: bErr.message }, { status: 500 })
+    const branchMeta = {}
+    for (const b of branchRows || []) branchMeta[b.name] = b
+
+    const bangaloreBranchNames = (branchRows || []).filter(b => b.region === 'Bangalore').map(b => b.name)
+    const outsideBranchNames   = (branchRows || []).filter(b => b.region !== 'Bangalore').map(b => b.name)
+
+    // 1) Bangalore — bills purchased on bangalorePurchaseDate, status approved.
+    //    Include any stock_status: the time-of-day lifecycle moves them at
+    //    19:30 IST so depending on when this endpoint is queried they could
+    //    be at_branch, in_consignment, or at_ho. All of them count toward
+    //    tomorrow's bid.
+    let bangBills = []
+    if (bangaloreBranchNames.length) {
+      const { data: bb, error: bbErr } = await supabase
+        .from('purchases')
+        .select('id, application_id, branch_name, gross_weight, net_weight, total_amount, purchase_date, stock_status, dispatched_at, crm_status')
+        .in('branch_name', bangaloreBranchNames)
+        .gte('purchase_date', bangalorePurchaseDate)
+        .lt('purchase_date',  addDays(bangalorePurchaseDate, 1))
+        .eq('crm_status', 'approved')
+        .eq('is_deleted', false)
+      if (bbErr) return Response.json({ error: bbErr.message }, { status: 500 })
+      bangBills = bb || []
+    }
+
+    // 2) Outside Bangalore — bills currently in_consignment. Filter to those
+    //    whose expected arrival (dispatched_at + branch.delivery_tat_hours)
+    //    lands on the target arrivalDate in IST. Done client-side since the
+    //    join+date-math is cleaner in JS than embedded in PostgREST filters.
+    let inflightBills = []
+    if (outsideBranchNames.length) {
+      const { data: ib, error: ibErr } = await supabase
+        .from('purchases')
+        .select('id, application_id, branch_name, gross_weight, net_weight, total_amount, purchase_date, dispatched_at, stock_status, crm_status')
+        .in('branch_name', outsideBranchNames)
+        .eq('stock_status', 'in_consignment')
+        .eq('is_deleted', false)
+        .not('dispatched_at', 'is', null)
+      if (ibErr) return Response.json({ error: ibErr.message }, { status: 500 })
+      inflightBills = ib || []
+    }
+
+    // Compute arrival_date for each in-flight bill and filter to target.
+    const istDateOf = (utcIso, offsetHours = 0) => {
+      const ms = new Date(utcIso).getTime() + offsetHours * 3600_000
+      const d  = new Date(ms + 5.5 * 3600_000)  // shift to IST
+      return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`
+    }
+    const inflightForTarget = inflightBills
+      .map(b => {
+        const tat = branchMeta[b.branch_name]?.delivery_tat_hours || 24
+        const arrivalDateIst = istDateOf(b.dispatched_at, tat)
+        return { ...b, _arrival_date: arrivalDateIst, _tat_hours: tat }
+      })
+      .filter(b => b._arrival_date === arrivalDate)
+
+    // Group by branch for the per-branch breakdown card.
+    const groupByBranch = (bills) => {
+      const m = {}
+      for (const b of bills) {
+        const key = b.branch_name
+        if (!m[key]) {
+          const meta = branchMeta[key] || {}
+          m[key] = {
+            branch_name:   key,
+            region:        meta.region || 'Unknown',
+            tat_hours:     meta.delivery_tat_hours || null,
+            pickup_time:   meta.pickup_time || null,
+            partner:       meta.logistics_partner || null,
+            bills:         [],
+            total_bills:   0,
+            total_gross_wt: 0,
+            total_net_wt:  0,
+            total_amount:  0,
+          }
+        }
+        const row = m[key]
+        row.bills.push(b)
+        row.total_bills    += 1
+        row.total_gross_wt += Number(b.gross_weight || 0)
+        row.total_net_wt   += Number(b.net_weight   || 0)
+        row.total_amount   += Number(b.total_amount || 0)
+      }
+      return Object.values(m).sort((a, b) => b.total_net_wt - a.total_net_wt)
+    }
+
+    const bangaloreByBranch = groupByBranch(bangBills)
+    const inflightByBranch  = groupByBranch(inflightForTarget)
+
+    // Section totals + grand total.
+    const sumOf = (rows) => rows.reduce((a, r) => ({
+      bills:    a.bills    + r.total_bills,
+      gross_wt: a.gross_wt + r.total_gross_wt,
+      net_wt:   a.net_wt   + r.total_net_wt,
+      amount:   a.amount   + r.total_amount,
+    }), { bills: 0, gross_wt: 0, net_wt: 0, amount: 0 })
+
+    const bangTotal     = sumOf(bangaloreByBranch)
+    const inflightTotal = sumOf(inflightByBranch)
+    const grandTotal    = {
+      bills:    bangTotal.bills    + inflightTotal.bills,
+      gross_wt: bangTotal.gross_wt + inflightTotal.gross_wt,
+      net_wt:   bangTotal.net_wt   + inflightTotal.net_wt,
+      amount:   bangTotal.amount   + inflightTotal.amount,
+    }
+
+    return Response.json({
+      data: {
+        arrival_date:           arrivalDate,
+        bangalore_purchase_date: bangalorePurchaseDate,
+        bangalore: {
+          branches: bangaloreByBranch,
+          total:    bangTotal,
+        },
+        in_transit: {
+          branches: inflightByBranch,
+          total:    inflightTotal,
+        },
+        grand_total: grandTotal,
+      },
+    })
+  }
+
   // ── Cancellation history: every EWB / E-Invoice cancellation in the window ──
   // Joins consignment_activity_log with the consignment row so the UI can
   // show: who cancelled what, why, when, plus the consignment context.
