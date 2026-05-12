@@ -1593,16 +1593,18 @@ export async function POST(req) {
     if (!c.cancellation_requested_at) return Response.json({ error: 'No cancellation request on this consignment' }, { status: 400 })
     if (c.status === 'cancelled')    return Response.json({ error: 'Already cancelled' }, { status: 400 })
 
-    // Resolve the same state-wise GSTIN that generated EWB / IRN. The NIC and
-    // IRP cancel endpoints reject the request if the cancelling GSTIN doesn't
-    // match the generator. Branch-level GSTIN is the legacy fallback; env
-    // last-resort for old data.
+    // GSTIN MUST match the one that GENERATED the EWB / IRN. Re-resolving from
+    // current company_settings risks drift (state-wise GSTIN may have been
+    // edited since generation), and NIC/IRP then reject with "Valid Irn
+    // missing (107)" because the IRN doesn't belong to the GSTIN we present.
+    // source_gstin is the authoritative snapshot frozen at create time —
+    // same priority order as lib/clearTaxClient.buildPayload.
     const { data: branch } = await supabase
       .from('branches').select('branch_gstin, region').eq('name', c.branch_name).single()
     const { data: companySettings } = await supabase.from('company_settings').select('*').single()
     const stateCode  = REGION_TO_STATE_CODE[branch?.region]
     const stateGstin = stateCode ? companySettings?.[`gstin_${stateCode.toLowerCase()}`] : null
-    const gstinFor   = stateGstin || branch?.branch_gstin || process.env.WG_GSTIN
+    const gstinFor   = c.source_gstin || stateGstin || branch?.branch_gstin || process.env.WG_GSTIN
 
     const HOUR_MS = 3600 * 1000
     const WINDOW  = 24 * HOUR_MS
