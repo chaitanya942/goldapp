@@ -111,21 +111,36 @@ export default function BiddingVolume() {
     return () => { cancelled = true }
   }, [bookingsResp])
 
-  // Gain rate — projected refining gain in % per gram of available net wt.
-  // Default 3.5% (≈ 35 g per 1 kg available). One-level flat rate per the
-  // ops spec. Persisted to localStorage so the operator's override sticks
-  // across sessions; per-device for v1. (TODO: move to company_settings
-  // when the ops team needs to share the rate across users.)
+  // Gain — projected refining recovery on incoming net weight. Two-mode:
+  //   - Default: percent rate (3.5%) baked into the company; gain in grams
+  //     computed from incoming on each render.
+  //   - Override: operator sets an absolute grams value for the day (e.g.
+  //     "I'm expecting 80g of gain regardless"). Stored separately so
+  //     swapping the date doesn't drag the override along blindly — when
+  //     gainOverrideGrams is null, we fall back to the percent rate.
+  // Both persist to localStorage so reload keeps the operator's last choice.
+  // (TODO: move to company_settings for team-wide shared state.)
   const [gainRatePct, setGainRatePct] = useState(() => {
     if (typeof window === 'undefined') return 3.5
     const stored = window.localStorage.getItem('bidding.gainRatePct')
     const n = stored != null ? Number(stored) : NaN
     return Number.isFinite(n) && n >= 0 ? n : 3.5
   })
+  const [gainOverrideGrams, setGainOverrideGrams] = useState(() => {
+    if (typeof window === 'undefined') return null
+    const stored = window.localStorage.getItem('bidding.gainOverrideGrams')
+    const n = stored != null && stored !== '' ? Number(stored) : NaN
+    return Number.isFinite(n) && n >= 0 ? n : null
+  })
   const [editingGain, setEditingGain] = useState(false)
   useEffect(() => {
     if (typeof window !== 'undefined') window.localStorage.setItem('bidding.gainRatePct', String(gainRatePct))
   }, [gainRatePct])
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    if (gainOverrideGrams == null) window.localStorage.removeItem('bidding.gainOverrideGrams')
+    else window.localStorage.setItem('bidding.gainOverrideGrams', String(gainOverrideGrams))
+  }, [gainOverrideGrams])
 
   const fetchAll = useCallback(async (silent = false) => {
     if (!silent) setLoading(true)
@@ -167,7 +182,14 @@ export default function BiddingVolume() {
   const bookedQty       = bookingsResp?.active_qty_grams || 0
   const bookedValue     = bookingsResp?.active_value     || 0
 
-  const gainGrams       = incomingNetWt * (gainRatePct / 100)
+  // Gain in grams — operator override wins if set, otherwise the default
+  // percentage. Effective rate (used for per-branch booking weight scaling)
+  // is just gain / incoming when incoming > 0.
+  const gainGrams       = gainOverrideGrams != null
+    ? gainOverrideGrams
+    : incomingNetWt * (gainRatePct / 100)
+  const gainOverridden  = gainOverrideGrams != null
+  const effectiveGainRate = incomingNetWt > 0 ? gainGrams / incomingNetWt : 0
   const availablePool   = incomingNetWt + gainGrams
   const remainingQty    = availablePool - bookedQty
   const overbooked      = remainingQty < 0
@@ -256,9 +278,15 @@ export default function BiddingVolume() {
 
   // ── Mutations ──────────────────────────────────────────────────────────────
   const createBooking = async (payload) => {
+    // Capture the selected branch names so the API can mark their eligible
+    // bills with the booking id (purchases.booking_id). Sending names
+    // rather than bill ids keeps the request body small; the server
+    // re-derives eligibility using the same rule the bidding-volume reader
+    // applies.
+    const sourceBranches = [...selected].map(k => branchesByKey[k]?.branch_name).filter(Boolean)
     const r = await authedFetch('/api/consignments?action=create_booking', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...payload, date: arrivalDate }),
+      body: JSON.stringify({ ...payload, date: arrivalDate, source_branches: sourceBranches }),
     })
     const j = await r.json()
     if (!r.ok || j.error) { showToast(j.error || 'Booking failed', 'error'); return false }
@@ -376,9 +404,11 @@ export default function BiddingVolume() {
           basisGrams={incomingNetWt}
           gainGrams={gainGrams}
           ratePct={gainRatePct}
+          overridden={gainOverridden}
           editing={editingGain}
           onStartEdit={() => setEditingGain(true)}
-          onSave={(v) => { setGainRatePct(v); setEditingGain(false) }}
+          onSave={(v) => { setGainOverrideGrams(v); setEditingGain(false) }}
+          onResetDefault={() => { setGainOverrideGrams(null); setEditingGain(false) }}
           onCancel={() => setEditingGain(false)} />
 
         <KpiCard
@@ -460,6 +490,7 @@ export default function BiddingVolume() {
           selectedTotal={selectedTotal}
           branchesByKey={branchesByKey}
           bidders={bidders}
+          effectiveGainRate={effectiveGainRate}
           isKerala={selectionIsKerala}
           onUnselect={(k) => toggleBranch(k)}
           onSubmit={createBooking}
@@ -511,36 +542,36 @@ function KpiCard({ label, value, sub, accent, card, t, pulse = false, big = fals
   )
 }
 
-// ── Gain Card — projected refining margin on the incoming pool ───────────────
-// Inline-editable rate; default 3.5% ≈ 35g per kg. Click the rate pill to
-// edit; Enter saves, Escape cancels. Per-spec a "one-level" flat rate so
-// no tiered logic here. Basis = INCOMING (not available) — gain is what
-// we expect to recover *on top of* what's coming in, so it adds to the
-// sellable pool rather than scaling with what's left to book.
-function GainCard({ t, card, basisGrams, gainGrams, ratePct, editing, onStartEdit, onSave, onCancel }) {
-  const [draft, setDraft] = useState(ratePct)
-  useEffect(() => { if (editing) setDraft(ratePct) }, [editing, ratePct])
+// ── Gain Card — projected refining recovery on incoming net weight ───────────
+// Click the pill to override the gain in *grams* directly (ops doesn't
+// think in percentages mid-shift — they know "today I expect 80g back").
+// Enter saves the override; Escape cancels. When overridden, a small
+// "↺ default" link appears to revert to the percent-based estimate.
+// Per-spec one-level flat rate, no tiered logic.
+function GainCard({ t, card, basisGrams, gainGrams, ratePct, overridden, editing, onStartEdit, onSave, onResetDefault, onCancel }) {
+  const [draft, setDraft] = useState('')
+  useEffect(() => { if (editing) setDraft(gainGrams ? gainGrams.toFixed(2) : '') }, [editing, gainGrams])
   const accent = t.orange || '#e58a3b'
   const commit = () => {
     const n = Number(draft)
-    if (Number.isFinite(n) && n >= 0 && n <= 100) onSave(n)
+    if (Number.isFinite(n) && n >= 0) onSave(n)
     else onCancel()
   }
   return (
     <div style={{ ...card, padding: '14px 18px', borderLeft: `3px solid ${accent}`, position: 'relative' }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px', gap: 6 }}>
         <span style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 700 }}>Gain (est.)</span>
         {editing ? (
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
             <input
-              type="number" step="0.1" min="0" max="100"
+              type="number" step="0.01" min="0"
               value={draft}
               onChange={e => setDraft(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') onCancel() }}
               onBlur={commit}
               autoFocus
               style={{
-                width: 56,
+                width: 76,
                 background: t.card2 || t.card,
                 border: `1px solid ${accent}`,
                 borderRadius: 5,
@@ -552,34 +583,56 @@ function GainCard({ t, card, basisGrams, gainGrams, ratePct, editing, onStartEdi
                 outline: 'none',
                 textAlign: 'right',
               }} />
-            <span style={{ fontSize: 10, color: accent, fontWeight: 700 }}>%</span>
+            <span style={{ fontSize: 10, color: accent, fontWeight: 700 }}>g</span>
           </span>
         ) : (
-          <button onClick={onStartEdit}
-            title="Click to override the gain rate"
-            style={{
-              background: `${accent}15`,
-              border: `1px solid ${accent}40`,
-              color: accent,
-              borderRadius: 99,
-              padding: '2px 9px',
-              fontSize: 10,
-              fontWeight: 700,
-              fontFamily: 'monospace',
-              cursor: 'pointer',
-              letterSpacing: '.04em',
-            }}
-            onMouseEnter={e => { e.currentTarget.style.background = `${accent}25` }}
-            onMouseLeave={e => { e.currentTarget.style.background = `${accent}15` }}>
-            {ratePct.toFixed(2)}% ✎
-          </button>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+            {overridden && (
+              <button onClick={onResetDefault}
+                title={`Reset to default rate (${ratePct.toFixed(2)}%)`}
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  color: t.text4,
+                  fontSize: 10,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  padding: '2px 4px',
+                }}
+                onMouseEnter={e => { e.currentTarget.style.color = accent }}
+                onMouseLeave={e => { e.currentTarget.style.color = t.text4 }}>
+                ↺
+              </button>
+            )}
+            <button onClick={onStartEdit}
+              title="Click to override the gain in grams"
+              style={{
+                background: `${accent}15`,
+                border: `1px solid ${accent}40`,
+                color: accent,
+                borderRadius: 99,
+                padding: '2px 9px',
+                fontSize: 10,
+                fontWeight: 700,
+                fontFamily: 'monospace',
+                cursor: 'pointer',
+                letterSpacing: '.04em',
+                display: 'inline-flex', alignItems: 'center', gap: 4,
+              }}
+              onMouseEnter={e => { e.currentTarget.style.background = `${accent}25` }}
+              onMouseLeave={e => { e.currentTarget.style.background = `${accent}15` }}>
+              {overridden ? 'MANUAL' : `${ratePct.toFixed(2)}%`} ✎
+            </button>
+          </span>
         )}
       </div>
       <div style={{ fontSize: '24px', fontWeight: 200, color: accent, fontFamily: 'monospace', lineHeight: 1, letterSpacing: '-.01em' }}>
         {fmt(gainGrams, 2)}<span style={{ fontSize: 13, color: t.text3, marginLeft: 4 }}>g</span>
       </div>
       <div style={{ fontSize: '10px', color: t.text4, marginTop: 6 }}>
-        on {fmt(basisGrams, 2)} g incoming · {Math.round(ratePct * 10)}g per kg
+        {overridden
+          ? `manual override on ${fmt(basisGrams, 2)} g incoming`
+          : `on ${fmt(basisGrams, 2)} g incoming · ${Math.round(ratePct * 10)}g per kg`}
       </div>
     </div>
   )
@@ -591,13 +644,15 @@ function BookingsList({ t, card, bookings, onUpdateStatus, onRequestCancel, onCr
   const visible = hideCancelled ? bookings.filter(b => b.status !== 'cancelled') : bookings
 
   if (bookings.length === 0) {
+    // Empty state — no explicit + New Booking CTA here; the booking flow
+    // is selection-first. Pick branches above to start; the CTA appears
+    // in the sources card once anything is ticked.
     return (
-      <div style={{ ...card, padding: '40px 24px', textAlign: 'center' }}>
+      <div style={{ ...card, padding: '36px 24px', textAlign: 'center' }}>
         <div style={{ fontSize: '14px', color: t.text1, fontWeight: 600 }}>No bookings yet for this date</div>
-        <div style={{ fontSize: '11.5px', color: t.text4, marginTop: 6, maxWidth: 420, marginLeft: 'auto', marginRight: 'auto' }}>
-          Use “+ New Booking” to commit a portion of the incoming pool to a buyer. Bookings created here also appear in the Sales → Cal Table → Quotas tab for allocation.
+        <div style={{ fontSize: '11.5px', color: t.text4, marginTop: 6, maxWidth: 420, marginLeft: 'auto', marginRight: 'auto', lineHeight: 1.6 }}>
+          Tick branches in <strong style={{ color: t.text3 }}>Incoming Sources</strong> above to start a booking. Bookings also appear in <strong style={{ color: t.text3 }}>Sales → Cal Table → Quotas</strong> on the same date.
         </div>
-        <button onClick={onCreate} style={{ marginTop: 16, background: t.gold, color: '#1a0a00', border: 'none', borderRadius: 8, padding: '7px 16px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>+ New Booking</button>
       </div>
     )
   }
@@ -738,12 +793,26 @@ function ActionPill({ label, color, onClick, t, subtle = false }) {
 function SourcePicker({ t, card, supply, bangBranches, inTBranches, selected, selectedTotal, selectionMode, branchLocked, onToggleBranch, onSelectGroup, onBook, incomingNetWt, incomingBills, arrivalDate }) {
   const hasSelection = selected.size > 0
 
+  // Each region group is collapsed by default — the operator opens the
+  // ones they care about. The header row stays clickable + carries the
+  // group-level select-all checkbox.
+  const [openGroups, setOpenGroups] = useState(() => new Set())
+  const toggleGroup = (k) => setOpenGroups(prev => {
+    const next = new Set(prev)
+    if (next.has(k)) next.delete(k); else next.add(k)
+    return next
+  })
+
   // Group "select all" toggles only count branches that are currently
   // eligible (not locked by the Kerala rule).
   const bangEligible = bangBranches.filter(b => !branchLocked(b))
   const inTEligible  = inTBranches.filter(b => !branchLocked(b))
   const bangAllSelected = bangEligible.length > 0 && bangEligible.every(b => selected.has(`B:${b.branch_name}`))
   const inTAllSelected  = inTEligible.length  > 0 && inTEligible.every(b => selected.has(`T:${b.branch_name}`))
+
+  // Shared grid template across header row + branch rows so the columns
+  // line up perfectly: checkbox · branch · region · bills · net weight.
+  const ROW_GRID = '28px minmax(140px, 1fr) 1fr 70px 100px'
 
   const renderBranchRow = (b, prefix, accent) => {
     const k = `${prefix}:${b.branch_name}`
@@ -760,7 +829,7 @@ function SourcePicker({ t, card, supply, bangBranches, inTBranches, selected, se
         title={lockReason}
         style={{
           display: 'grid',
-          gridTemplateColumns: '28px minmax(140px, 1fr) 1fr auto 90px',
+          gridTemplateColumns: ROW_GRID,
           gap: 12,
           alignItems: 'center',
           padding: '10px 18px',
@@ -783,11 +852,9 @@ function SourcePicker({ t, card, supply, bangBranches, inTBranches, selected, se
             <span style={{ fontSize: 9, color: t.green, background: `${t.green}15`, border: `1px solid ${t.green}40`, borderRadius: 3, padding: '1px 4px', fontWeight: 700, letterSpacing: '.06em' }}>KL</span>
           )}
         </span>
-        {b.tat_hours != null ? (
-          <span style={{ fontSize: 10, color: t.text2, background: `${t.text4}15`, borderRadius: 4, padding: '2px 7px', fontFamily: 'monospace', fontWeight: 600, whiteSpace: 'nowrap' }}>
-            {b.tat_hours}h
-          </span>
-        ) : <span />}
+        <span style={{ fontSize: 11.5, color: t.text2, fontFamily: 'monospace', textAlign: 'right', fontWeight: 600 }}>
+          {b.total_bills || 0}
+        </span>
         <span style={{ fontSize: 12.5, color: t.gold, fontFamily: 'monospace', fontWeight: 700, textAlign: 'right' }}>
           {fmt(b.total_net_wt, 2)}<span style={{ fontSize: 10, marginLeft: 2, color: t.text4 }}>g</span>
         </span>
@@ -795,10 +862,63 @@ function SourcePicker({ t, card, supply, bangBranches, inTBranches, selected, se
     )
   }
 
+  // Column header strip — sits between the action bar and the first group
+  // so the meaning of each column is explicit.
+  const renderColHeader = () => (
+    <div style={{
+      display: 'grid',
+      gridTemplateColumns: ROW_GRID,
+      gap: 12,
+      padding: '8px 18px',
+      background: `${t.text4}06`,
+      borderBottom: `1px solid ${t.border}`,
+    }}>
+      <span />
+      <span style={{ fontSize: 9.5, color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 700 }}>Branch</span>
+      <span style={{ fontSize: 9.5, color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 700 }}>Region</span>
+      <span style={{ fontSize: 9.5, color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 700, textAlign: 'right' }}>Bills</span>
+      <span style={{ fontSize: 9.5, color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 700, textAlign: 'right' }}>Net Weight</span>
+    </div>
+  )
+
+  const renderGroupHeader = (key, label, branches, accent, eligible, allSelected, allOnHandler, contextLine, totalNetWt) => {
+    const open = openGroups.has(key)
+    return (
+      <div onClick={() => toggleGroup(key)}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 10,
+          padding: '10px 18px',
+          background: `${accent}08`,
+          borderBottom: `1px solid ${t.border}`,
+          cursor: 'pointer', userSelect: 'none',
+        }}>
+        <span style={{
+          width: 16, height: 16, borderRadius: '50%',
+          background: `${accent}25`, color: accent,
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          fontSize: 9, fontWeight: 700,
+          transform: open ? 'rotate(0)' : 'rotate(-90deg)',
+          transition: 'transform .2s',
+          flexShrink: 0,
+        }}>▾</span>
+        <input type="checkbox" checked={allSelected} disabled={eligible.length === 0}
+          onChange={() => allOnHandler()}
+          onClick={e => e.stopPropagation()}
+          style={{ accentColor: accent, cursor: eligible.length ? 'pointer' : 'not-allowed', width: 16, height: 16 }} />
+        <span style={{ fontSize: 11, color: t.text2, fontWeight: 700, letterSpacing: '.04em', textTransform: 'uppercase' }}>{label}</span>
+        <span style={{ fontSize: 10, color: t.text4, fontFamily: 'monospace' }}>{contextLine}</span>
+        <div style={{ flex: 1 }} />
+        <span style={{ fontSize: 11, color: accent, fontFamily: 'monospace', fontWeight: 700 }}>
+          {fmt(totalNetWt, 2)}<span style={{ fontSize: 9, marginLeft: 2 }}>g</span>
+        </span>
+      </div>
+    )
+  }
+
   return (
     <div style={{ ...card, overflow: 'hidden' }}>
-      {/* Header — always shows pool totals; flips to selection summary + CTA
-          once anything is checked. */}
+      {/* Action bar — pool summary, flips to Book Selected → once anything
+          is ticked. */}
       <div style={{
         padding: '14px 18px',
         borderBottom: `1px solid ${t.border}`,
@@ -841,52 +961,39 @@ function SourcePicker({ t, card, supply, bangBranches, inTBranches, selected, se
           </div>
         ) : (
           <span style={{ fontSize: 11, color: t.text4, fontStyle: 'italic' }}>
-            Tick branches to start a booking · Kerala bookings are exclusive
+            Open a region to start ticking branches · Kerala bookings are exclusive
           </span>
         )}
       </div>
 
-      {/* Bangalore group */}
+      {/* Column header strip */}
+      {(bangBranches.length > 0 || inTBranches.length > 0) && renderColHeader()}
+
+      {/* Bangalore group — collapsed by default */}
       {bangBranches.length > 0 && (
         <div>
-          <div onClick={() => onSelectGroup(bangBranches, 'B', bangAllSelected)}
-            style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 18px', background: `${t.red}08`, borderBottom: `1px solid ${t.border}`, cursor: 'pointer', userSelect: 'none' }}>
-            <input type="checkbox" checked={bangAllSelected}
-              onChange={() => onSelectGroup(bangBranches, 'B', bangAllSelected)}
-              onClick={e => e.stopPropagation()}
-              style={{ accentColor: t.red, cursor: 'pointer', width: 16, height: 16 }} />
-            <span style={{ fontSize: 11, color: t.text2, fontWeight: 700, letterSpacing: '.04em', textTransform: 'uppercase' }}>Bangalore</span>
-            <span style={{ fontSize: 10, color: t.text4, fontFamily: 'monospace' }}>
-              {bangBranches.length} {bangBranches.length === 1 ? 'branch' : 'branches'} · purchase {fmtDateShort(supply?.bangalore_purchase_date || '')}
-            </span>
-            <div style={{ flex: 1 }} />
-            <span style={{ fontSize: 11, color: t.red, fontFamily: 'monospace', fontWeight: 700 }}>
-              {fmt(supply?.bangalore?.total?.net_wt || 0, 2)}<span style={{ fontSize: 9, marginLeft: 2 }}>g</span>
-            </span>
-          </div>
-          {bangBranches.map(b => renderBranchRow(b, 'B', t.red))}
+          {renderGroupHeader(
+            'bangalore', 'Bangalore', bangBranches, t.red,
+            bangEligible, bangAllSelected,
+            () => onSelectGroup(bangBranches, 'B', bangAllSelected),
+            `${bangBranches.length} ${bangBranches.length === 1 ? 'branch' : 'branches'} · purchase ${fmtDateShort(supply?.bangalore_purchase_date || '')}`,
+            supply?.bangalore?.total?.net_wt || 0,
+          )}
+          {openGroups.has('bangalore') && bangBranches.map(b => renderBranchRow(b, 'B', t.red))}
         </div>
       )}
 
-      {/* Outside in-transit group */}
+      {/* Outside in-transit group — collapsed by default */}
       {inTBranches.length > 0 && (
         <div>
-          <div onClick={() => onSelectGroup(inTBranches, 'T', inTAllSelected)}
-            style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 18px', background: `${t.blue}08`, borderTop: bangBranches.length > 0 ? `1px solid ${t.border}` : 'none', borderBottom: `1px solid ${t.border}`, cursor: 'pointer', userSelect: 'none' }}>
-            <input type="checkbox" checked={inTAllSelected}
-              onChange={() => onSelectGroup(inTBranches, 'T', inTAllSelected)}
-              onClick={e => e.stopPropagation()}
-              style={{ accentColor: t.blue, cursor: 'pointer', width: 16, height: 16 }} />
-            <span style={{ fontSize: 11, color: t.text2, fontWeight: 700, letterSpacing: '.04em', textTransform: 'uppercase' }}>Outside In-Transit</span>
-            <span style={{ fontSize: 10, color: t.text4, fontFamily: 'monospace' }}>
-              {inTBranches.length} {inTBranches.length === 1 ? 'branch' : 'branches'} · arriving {fmtDateShort(supply?.arrival_date || arrivalDate)}
-            </span>
-            <div style={{ flex: 1 }} />
-            <span style={{ fontSize: 11, color: t.blue, fontFamily: 'monospace', fontWeight: 700 }}>
-              {fmt(supply?.in_transit?.total?.net_wt || 0, 2)}<span style={{ fontSize: 9, marginLeft: 2 }}>g</span>
-            </span>
-          </div>
-          {inTBranches.map(b => renderBranchRow(b, 'T', t.blue))}
+          {renderGroupHeader(
+            'in_transit', 'Outside In-Transit', inTBranches, t.blue,
+            inTEligible, inTAllSelected,
+            () => onSelectGroup(inTBranches, 'T', inTAllSelected),
+            `${inTBranches.length} ${inTBranches.length === 1 ? 'branch' : 'branches'} · arriving ${fmtDateShort(supply?.arrival_date || arrivalDate)}`,
+            supply?.in_transit?.total?.net_wt || 0,
+          )}
+          {openGroups.has('in_transit') && inTBranches.map(b => renderBranchRow(b, 'T', t.blue))}
         </div>
       )}
 
@@ -908,27 +1015,71 @@ function SourcePicker({ t, card, supply, bangBranches, inTBranches, selected, se
 //
 // Selected sources display: compact by default — chip strip is collapsed
 // to "first 6 + (N more)" so 20+ branches don't blow up the modal height.
-function BookingModal({ t, arrivalDate, availablePool, remainingQty, selected, selectedTotal, branchesByKey, bidders, isKerala, onUnselect, onSubmit, onClose, onSuccess }) {
-  const [weightDirty, setWeightDirty] = useState(false)
+function BookingModal({ t, arrivalDate, availablePool, remainingQty, selected, selectedTotal, branchesByKey, bidders, effectiveGainRate, isKerala, onUnselect, onSubmit, onClose, onSuccess }) {
+  // Net weight from the selection (read-only display) versus the
+  // operator-entered booking weight (what we actually commit). Default
+  // booking weight = net × (1 + effective gain rate) so the booking
+  // includes the day's expected refining gain on the selected portion.
+  const netFromSelection = selectedTotal
+  const defaultBookingWeight = netFromSelection > 0
+    ? netFromSelection * (1 + (effectiveGainRate || 0))
+    : 0
+  const [bookingWeight, setBookingWeight] = useState(() => defaultBookingWeight > 0 ? defaultBookingWeight.toFixed(2) : '')
+  const [bookingWeightDirty, setBookingWeightDirty] = useState(false)
   const [party,       setParty]       = useState('')
-  const [weight,      setWeight]      = useState(() => selectedTotal > 0 ? selectedTotal.toFixed(2) : '')
   const [rate,        setRate]        = useState('')
   const [busy,        setBusy]        = useState(false)
   const [chipsExpanded, setChipsExpanded] = useState(false)
+  // Local bidder roster (combines API list + names saved during this
+  // session). On submit we POST to /api/consignments?action=create_booking
+  // which writes the party into cal_quotas; next mount the API list
+  // picks it up.
+  const [localBidders, setLocalBidders] = useState(() => {
+    if (typeof window === 'undefined') return []
+    try { return JSON.parse(window.localStorage.getItem('bidding.localBidders') || '[]') } catch { return [] }
+  })
+  const allBidders = useMemo(() => {
+    const seen = new Set(); const out = []
+    for (const b of [...(bidders || []), ...localBidders]) {
+      const k = String(b || '').trim().toLowerCase()
+      if (!k || seen.has(k)) continue
+      seen.add(k); out.push(b)
+    }
+    return out.sort((a, b) => a.localeCompare(b))
+  }, [bidders, localBidders])
+  const isNewBidder = party.trim().length > 0 && !allBidders.some(b => b.toLowerCase() === party.trim().toLowerCase())
+  const saveNewBidder = () => {
+    const name = party.trim()
+    if (!name || !isNewBidder) return
+    const next = [...localBidders, name]
+    setLocalBidders(next)
+    if (typeof window !== 'undefined') {
+      try { window.localStorage.setItem('bidding.localBidders', JSON.stringify(next)) } catch {}
+    }
+  }
 
-  // Keep weight in sync with the page's selection unless the user
-  // manually edits — then leave their override alone.
+  // Lock body scroll while the modal is open — page underneath shouldn't
+  // scroll when the operator wheel-scrolls inside the modal.
   useEffect(() => {
-    if (weightDirty) return
-    setWeight(selectedTotal > 0 ? selectedTotal.toFixed(2) : '')
-  }, [selectedTotal, weightDirty])
+    if (typeof document === 'undefined') return
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => { document.body.style.overflow = prev }
+  }, [])
+
+  // Keep booking weight in sync with the selection (× gain factor) unless
+  // the operator has manually edited it.
+  useEffect(() => {
+    if (bookingWeightDirty) return
+    setBookingWeight(defaultBookingWeight > 0 ? defaultBookingWeight.toFixed(2) : '')
+  }, [defaultBookingWeight, bookingWeightDirty])
 
   const selectedRows = [...selected].map(k => ({ k, b: branchesByKey[k] })).filter(x => x.b)
   const CHIP_PREVIEW = 6
   const visibleChips = chipsExpanded ? selectedRows : selectedRows.slice(0, CHIP_PREVIEW)
   const hiddenCount = Math.max(0, selectedRows.length - CHIP_PREVIEW)
 
-  const w = Number(weight); const r = Number(rate)
+  const w = Number(bookingWeight); const r = Number(rate)
   const total = Number.isFinite(w) && Number.isFinite(r) ? w * r : 0
   const wouldOverbook = Number.isFinite(w) && w > 0 && w > remainingQty
 
@@ -937,19 +1088,20 @@ function BookingModal({ t, arrivalDate, availablePool, remainingQty, selected, s
     if (!Number.isFinite(w) || w <= 0) return
     if (!Number.isFinite(r) || r <= 0) return
     setBusy(true)
-    // Audit trail: stamp selected branches into notes for later reference.
+    // Pin the new name into the local roster on submit too — covers the
+    // case where the operator skipped the explicit "+ Save" button.
+    if (isNewBidder) saveNewBidder()
     const selectedBranchList = selectedRows.map(({ b }) => b.branch_name)
     const compositeNotes = selectedBranchList.length
       ? `Sources: ${selectedBranchList.join(', ')}`
       : null
-
     const ok = await onSubmit({
       party:       party.trim(),
       buyer_phone: null,
       weight:      w,
       rate:        r,
       purity:      null,
-      is_kl:       !!isKerala,   // auto-derived from selection
+      is_kl:       !!isKerala,
       notes:       compositeNotes,
     })
     if (ok && onSuccess) onSuccess()
@@ -1031,43 +1183,75 @@ function BookingModal({ t, arrivalDate, availablePool, remainingQty, selected, s
             </div>
           )}
 
-          {/* Bidder dropdown — datalist combobox: pick from past names or type a new one */}
+          {/* Bidder combobox — known names auto-suggest via <datalist>.
+              Typing a new name surfaces a "+ Save" chip below so it joins
+              the local roster immediately (the API list refreshes on the
+              next mount via cal_quotas anyway). */}
           <Field label="Bidder">
             <input value={party} list="bidding-bidder-list"
               onChange={e => setParty(e.target.value)}
               autoFocus placeholder="Select or type bidder name"
               style={inputStyle(t)} />
             <datalist id="bidding-bidder-list">
-              {(bidders || []).map(b => <option key={b} value={b} />)}
+              {allBidders.map(b => <option key={b} value={b} />)}
             </datalist>
-            {bidders && bidders.length > 0 && !party && (
-              <div style={{ fontSize: 10, color: t.text4, marginTop: 4 }}>
-                {bidders.length} known bidder{bidders.length === 1 ? '' : 's'} · type to filter or add new
-              </div>
-            )}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6, minHeight: 18 }}>
+              {isNewBidder ? (
+                <button type="button" onClick={saveNewBidder}
+                  style={{
+                    background: `${t.green}15`,
+                    border: `1px solid ${t.green}40`,
+                    color: t.green,
+                    borderRadius: 99,
+                    padding: '3px 10px',
+                    fontSize: 10,
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    letterSpacing: '.04em',
+                  }}>
+                  + Save “{party.trim()}” as new bidder
+                </button>
+              ) : allBidders.length > 0 && !party ? (
+                <span style={{ fontSize: 10, color: t.text4 }}>
+                  {allBidders.length} known bidder{allBidders.length === 1 ? '' : 's'} · type to filter or add a new one
+                </span>
+              ) : null}
+            </div>
           </Field>
 
-          {/* Weight + Rate side-by-side */}
+          {/* Net Weight (read-only from selection) + Booking Weight (editable)
+              The booking weight defaults to net × (1 + effective gain rate)
+              so the commit reflects what we expect to actually deliver. */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-            <Field label={`Weight (g)${selectedTotal > 0 && !weightDirty ? ' · auto' : ''}`}>
-              <input value={weight}
-                onChange={e => { setWeight(e.target.value.replace(/[^\d.]/g, '')); setWeightDirty(true) }}
+            <Field label="Net Weight">
+              <input value={netFromSelection > 0 ? netFromSelection.toFixed(2) : ''}
+                readOnly placeholder="from selection"
+                style={{ ...inputStyle(t), fontFamily: 'monospace', background: t.card2 || t.card, color: t.text3, cursor: 'default' }} />
+              <div style={{ fontSize: 10, color: t.text4, marginTop: 4 }}>
+                Sum of selected branches
+              </div>
+            </Field>
+            <Field label={`Booking Weight${defaultBookingWeight > 0 && !bookingWeightDirty ? ' · auto · net + gain' : ''}`}>
+              <input value={bookingWeight}
+                onChange={e => { setBookingWeight(e.target.value.replace(/[^\d.]/g, '')); setBookingWeightDirty(true) }}
                 placeholder="0.000"
-                style={{ ...inputStyle(t), fontFamily: 'monospace', borderColor: weightDirty || selectedTotal === 0 ? t.border : `${t.gold}80` }} />
-              {weightDirty && selectedTotal > 0 && (
-                <button type="button" onClick={() => { setWeightDirty(false); setWeight(selectedTotal.toFixed(2)) }}
+                style={{ ...inputStyle(t), fontFamily: 'monospace', borderColor: bookingWeightDirty || netFromSelection === 0 ? t.border : `${t.gold}80` }} />
+              {bookingWeightDirty && defaultBookingWeight > 0 && (
+                <button type="button" onClick={() => { setBookingWeightDirty(false); setBookingWeight(defaultBookingWeight.toFixed(2)) }}
                   style={{ background: 'transparent', border: 'none', color: t.gold, fontSize: 10, cursor: 'pointer', padding: '4px 0 0', textAlign: 'left' }}>
-                  ↺ Reset to {fmt(selectedTotal, 2)} g
+                  ↺ Reset to {fmt(defaultBookingWeight, 2)} g
                 </button>
               )}
             </Field>
-            <Field label="Rate (₹/g)">
-              <input value={rate}
-                onChange={e => setRate(e.target.value.replace(/[^\d.]/g, ''))}
-                placeholder="7250.00"
-                style={{ ...inputStyle(t), fontFamily: 'monospace' }} />
-            </Field>
           </div>
+
+          {/* Rate */}
+          <Field label="Rate (₹/g)">
+            <input value={rate}
+              onChange={e => setRate(e.target.value.replace(/[^\d.]/g, ''))}
+              placeholder="7250.00"
+              style={{ ...inputStyle(t), fontFamily: 'monospace' }} />
+          </Field>
 
           {/* Live total — prominent */}
           <div style={{

@@ -601,6 +601,7 @@ export default function PurchaseData() {
                   { label: 'In Consignment Since', col: 'dispatched_at' },
                   { label: 'Received At HO',       col: 'received_at' },
                   { label: 'CRM',                  col: 'crm_status' },
+                  { label: 'Booking',              col: 'booking_id' },
                 ].map(({ label, col }) => (
                   <th key={label}
                     onClick={col ? () => handleSort(col) : undefined}
@@ -687,11 +688,19 @@ export default function PurchaseData() {
                         {bothCrmIds.has(p.application_id) && <Badge label="Both CRMs" color="gold" />}
                       </div>
                     </td>
+                    {/* Booking status — bills linked to a cal_quotas booking via
+                        purchases.booking_id show as "Booked" (blue). Existing
+                        bills without a link remain blank (dash). */}
+                    <td style={s.td}>
+                      {p.booking_id
+                        ? <Badge label="Booked" color="blue" />
+                        : <span style={{ color: t.text4 }}>—</span>}
+                    </td>
                   </tr>
                 )
               })}
               {purchases.length === 0 && (
-                <tr><td colSpan={isSuperAdmin ? 21 : 20} style={{ ...s.td, textAlign: 'center', color: t.text4, padding: '48px' }}>
+                <tr><td colSpan={isSuperAdmin ? 22 : 21} style={{ ...s.td, textAlign: 'center', color: t.text4, padding: '48px' }}>
                   {(search || filterStatus || filterBranch || filterCrmStatus || filterTxn || fromDate || toDate || dispatchedFrom || dispatchedTo) ? 'No records match your filters' : 'No purchase data yet. Syncing from CRM in the background.'}
                 </td></tr>
               )}

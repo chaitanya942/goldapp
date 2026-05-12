@@ -448,6 +448,7 @@ export async function GET(req) {
         .lt('purchase_date',  addDays(bangalorePurchaseDate, 1))
         .eq('crm_status', 'approved')
         .eq('is_deleted', false)
+        .is('booking_id', null)
       if (bbErr) return Response.json({ error: bbErr.message }, { status: 500 })
       bangBills = bb || []
     }
@@ -465,6 +466,7 @@ export async function GET(req) {
         .eq('stock_status', 'in_consignment')
         .eq('is_deleted', false)
         .not('dispatched_at', 'is', null)
+        .is('booking_id', null)
       if (ibErr) return Response.json({ error: ibErr.message }, { status: 500 })
       inflightBills = ib || []
     }
@@ -2161,7 +2163,7 @@ export async function POST(req) {
   // separate cancelled state that voids the row from the active pool.
 
   if (action === 'create_booking') {
-    const { date, party, buyer_phone, weight, rate, purity, is_kl, notes } = body
+    const { date, party, buyer_phone, weight, rate, purity, is_kl, notes, source_branches } = body
     if (!date)   return Response.json({ error: 'date required (YYYY-MM-DD)' }, { status: 400 })
     if (!party || !String(party).trim()) return Response.json({ error: 'Buyer name required' }, { status: 400 })
     const w = Number(weight); const r = Number(rate)
@@ -2188,6 +2190,82 @@ export async function POST(req) {
       .select()
       .single()
     if (insErr) return Response.json({ error: insErr.message }, { status: 500 })
+
+    // Mark the source branches' eligible bills as booked. Same eligibility
+    // logic as the bidding_volume reader: Bangalore = purchase_date on the
+    // bangalore source date (arrival - 1) and crm approved; outside = bills
+    // in_consignment whose computed arrival lands on the booking date.
+    // Errors here are logged but don't fail the booking (the audit row is
+    // already created; an admin can rerun the link if needed).
+    if (Array.isArray(source_branches) && source_branches.length > 0) {
+      try {
+        const { data: branchRows } = await supabase
+          .from('branches')
+          .select('name, region, delivery_tat_hours')
+          .in('name', source_branches)
+        const branchMeta = {}
+        for (const b of branchRows || []) branchMeta[b.name] = b
+        const bangaloreNames = source_branches.filter(n => branchMeta[n]?.region === 'Bangalore')
+        const outsideNames   = source_branches.filter(n => branchMeta[n]?.region && branchMeta[n].region !== 'Bangalore')
+
+        const bookedAt = new Date().toISOString()
+
+        // Bangalore: purchase_date = date - 1 day
+        if (bangaloreNames.length) {
+          const bangPurchaseDate = (() => {
+            const [y, m, d] = date.split('-').map(Number)
+            const dt = new Date(Date.UTC(y, m - 1, d - 1))
+            return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, '0')}-${String(dt.getUTCDate()).padStart(2, '0')}`
+          })()
+          const bangPurchaseNextDate = (() => {
+            const [y, m, d] = bangPurchaseDate.split('-').map(Number)
+            const dt = new Date(Date.UTC(y, m - 1, d + 1))
+            return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, '0')}-${String(dt.getUTCDate()).padStart(2, '0')}`
+          })()
+          await supabase
+            .from('purchases')
+            .update({ booking_id: data.id, booked_at: bookedAt })
+            .in('branch_name', bangaloreNames)
+            .gte('purchase_date', bangPurchaseDate)
+            .lt('purchase_date',  bangPurchaseNextDate)
+            .eq('crm_status', 'approved')
+            .eq('is_deleted', false)
+            .is('booking_id', null)
+        }
+
+        // Outside in-transit: arrival date math has to happen in JS because
+        // PostgREST can't easily do `(dispatched_at + tat_hours)::date == X`.
+        // Fetch candidates, compute, then update by id list.
+        if (outsideNames.length) {
+          const { data: candidates } = await supabase
+            .from('purchases')
+            .select('id, branch_name, dispatched_at')
+            .in('branch_name', outsideNames)
+            .eq('stock_status', 'in_consignment')
+            .eq('is_deleted', false)
+            .not('dispatched_at', 'is', null)
+            .is('booking_id', null)
+          const istDateOf = (utcIso, offsetHours = 0) => {
+            const ms = new Date(utcIso).getTime() + offsetHours * 3600_000
+            const d  = new Date(ms + 5.5 * 3600_000)
+            return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`
+          }
+          const matchingIds = (candidates || []).filter(b => {
+            const tat = branchMeta[b.branch_name]?.delivery_tat_hours || 24
+            return istDateOf(b.dispatched_at, tat) === date
+          }).map(b => b.id)
+          if (matchingIds.length) {
+            await supabase
+              .from('purchases')
+              .update({ booking_id: data.id, booked_at: bookedAt })
+              .in('id', matchingIds)
+          }
+        }
+      } catch (linkErr) {
+        console.error('[create_booking] failed to mark source bills:', linkErr?.message)
+      }
+    }
+
     return Response.json({ data, message: 'Booking created.' })
   }
 
@@ -2229,6 +2307,20 @@ export async function POST(req) {
       .select()
       .single()
     if (updErr) return Response.json({ error: updErr.message }, { status: 500 })
+
+    // Releasing the booking → release the bills it had claimed so they're
+    // available for re-booking. Safe to no-op when nothing was linked.
+    if (status === 'cancelled') {
+      try {
+        await supabase
+          .from('purchases')
+          .update({ booking_id: null, booked_at: null })
+          .eq('booking_id', id)
+      } catch (unlinkErr) {
+        console.error('[update_booking_status] failed to release bills:', unlinkErr?.message)
+      }
+    }
+
     return Response.json({ data, message: `Booking marked ${status}.` })
   }
 
