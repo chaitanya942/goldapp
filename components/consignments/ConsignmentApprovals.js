@@ -1983,35 +1983,53 @@ function ApprovedFilterBar({ t, card, from, setFrom, setTo, to, doc, setDoc, tot
     { id: 'einv', label: 'E-Inv only', color: t.purple },
   ]
 
+  const windowLabel = !from && !to
+    ? 'all time'
+    : (from === to && from)
+      ? new Date(from).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+      : `${from ? new Date(from).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) : 'start'} → ${to ? new Date(to).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : 'now'}`
+
   return (
-    <div style={{ ...card, padding: '12px 16px', display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap' }}>
+    <div style={{ ...card, padding: '12px 16px', display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap', position: 'relative' }}>
+      {/* Soft top accent strip — visual marker that this is a filter strip */}
+      <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '1px', background: `linear-gradient(90deg, ${t.gold}40 0%, transparent 60%)`, pointerEvents: 'none' }} />
+
+      {/* RANGE label */}
+      <span style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 700 }}>Range</span>
+
       {/* Date preset chips */}
-      <div style={{ display: 'flex', gap: '5px', flexWrap: 'wrap' }}>
+      <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
         {presets.map(p => {
           const active = activePreset === p.id
           return (
             <button key={p.id}
               onClick={() => { setFrom(p.from); setTo(p.to) }}
               style={{
-                background:   active ? `${t.gold}20` : 'transparent',
+                background:   active ? `${t.gold}22` : 'transparent',
                 color:        active ? t.gold : t.text3,
-                border:       `1px solid ${active ? `${t.gold}60` : t.border}`,
-                borderRadius: '14px',
+                border:       `1px solid ${active ? `${t.gold}70` : 'transparent'}`,
+                borderRadius: '99px',
                 padding:      '4px 11px',
-                fontSize:     '10px',
+                fontSize:     '10.5px',
                 fontWeight:   active ? 700 : 500,
                 cursor:       'pointer',
                 transition:   'all .12s',
                 whiteSpace:   'nowrap',
-              }}>
+                letterSpacing:'.02em',
+              }}
+              onMouseEnter={e => { if (!active) e.currentTarget.style.background = `${t.text4}10` }}
+              onMouseLeave={e => { if (!active) e.currentTarget.style.background = 'transparent' }}>
               {p.label}
             </button>
           )
         })}
       </div>
 
+      {/* Divider */}
+      <span style={{ width: 1, height: 18, background: t.border }} />
+
       {/* Custom date inputs */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
         <input type="date" value={from} onChange={e => setFrom(e.target.value)} max={to || today}
           style={{ background: t.card2 || t.card, border: `1px solid ${t.border}`, borderRadius: '6px', padding: '5px 8px', fontSize: '11px', color: t.text1, fontFamily: 'monospace', outline: 'none' }} />
         <span style={{ fontSize: '10px', color: t.text4 }}>→</span>
@@ -2019,7 +2037,11 @@ function ApprovedFilterBar({ t, card, from, setFrom, setTo, to, doc, setDoc, tot
           style={{ background: t.card2 || t.card, border: `1px solid ${t.border}`, borderRadius: '6px', padding: '5px 8px', fontSize: '11px', color: t.text1, fontFamily: 'monospace', outline: 'none' }} />
       </div>
 
-      {/* Doc-type segmented toggle */}
+      {/* Divider */}
+      <span style={{ width: 1, height: 18, background: t.border }} />
+
+      {/* TYPE label + Doc-type segmented toggle */}
+      <span style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 700 }}>Type</span>
       <div style={{ display: 'inline-flex', background: t.card2, border: `1px solid ${t.border}`, borderRadius: '7px', padding: '2px' }}>
         {docOptions.map(o => {
           const active = doc === o.id
@@ -2030,7 +2052,7 @@ function ApprovedFilterBar({ t, card, from, setFrom, setTo, to, doc, setDoc, tot
                 color:        active ? o.color : t.text3,
                 border:       'none', borderRadius: '5px',
                 padding:      '4px 11px',
-                fontSize:     '11px',
+                fontSize:     '10.5px',
                 fontWeight:   active ? 700 : 500,
                 cursor:       'pointer',
                 transition:   'all .12s',
@@ -2043,9 +2065,14 @@ function ApprovedFilterBar({ t, card, from, setFrom, setTo, to, doc, setDoc, tot
       </div>
 
       <div style={{ flex: 1 }} />
-      <span style={{ fontSize: '10px', color: t.text4, fontFamily: 'monospace' }}>
-        {total} approved · all time
-      </span>
+      {/* Count + active window summary, right aligned. The dual-line layout
+          keeps the numbers prominent without crowding the chips. */}
+      <div style={{ textAlign: 'right', lineHeight: 1.25 }}>
+        <div style={{ fontSize: '13px', color: t.text1, fontWeight: 700, fontFamily: 'monospace' }}>
+          {total} <span style={{ color: t.text4, fontWeight: 500, fontSize: '10px', letterSpacing: '.06em' }}>approved</span>
+        </div>
+        <div style={{ fontSize: '9.5px', color: t.text4, letterSpacing: '.04em', textTransform: 'uppercase' }}>{windowLabel}</div>
+      </div>
     </div>
   )
 }
@@ -2172,72 +2199,79 @@ function HistoryCard({ c, t, card, isApproved, previewDoc, showToast, openCancel
         background: `linear-gradient(90deg, ${accent} 0%, ${accent}30 60%, transparent 100%)`,
       }} />
 
-      <div style={{ padding: '14px 18px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-        {/* Row 1 — identity badges.
-            Headline: the actual NIC document number (EWB no / E-Invoice doc
-            no) is what accounts reconciles against, so it gets the gold
-            monospace prominence. TMP_PRF moves to a smaller secondary chip
-            for internal reference. If neither doc exists yet (rare for
-            approved), the TMP_PRF takes the lead as a fallback. */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-          {(c.eway_bill_no || c.einvoice_doc_no || c.irn) ? (
-            <>
-              {c.eway_bill_no && (
-                <span title={`E-Way Bill ${c.eway_bill_no}`}
-                  style={{ fontSize: '13.5px', color: t.green, fontWeight: 700, fontFamily: 'monospace', letterSpacing: '.02em' }}>
-                  <span style={{ fontSize: '9px', color: t.green, background: `${t.green}15`, borderRadius: '4px', padding: '1px 5px', marginRight: '6px', fontWeight: 700, letterSpacing: '.04em', verticalAlign: '2px' }}>EWB</span>
-                  {c.eway_bill_no}
+      <div style={{ padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+        {/* HEADER — doc number(s) as the hero, route + stats as the title row.
+            Strict 2-row hierarchy: line 1 = identity (big monospace doc nos
+            with prefix labels), line 2 = source→dest + stat pills. The
+            quiet metadata (TMP_PRF, BRANCH→X badge, status, TTA) is pushed
+            to a separate dimmer strip below so accounts can see numbers
+            first, context second. */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          {/* Doc number row */}
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: '14px', flexWrap: 'wrap' }}>
+            {(c.eway_bill_no || c.einvoice_doc_no || c.irn) ? (
+              <>
+                {c.eway_bill_no && (
+                  <span title={`E-Way Bill ${c.eway_bill_no}\nGenerated ${fmtTS(c.ewb_generated_at)}`}
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ fontSize: '9px', color: t.green, background: `${t.green}18`, border: `1px solid ${t.green}30`, borderRadius: '4px', padding: '2px 6px', fontWeight: 800, letterSpacing: '.08em', textTransform: 'uppercase' }}>EWB</span>
+                    <span style={{ fontSize: '17px', color: t.text1, fontWeight: 700, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', letterSpacing: '.01em' }}>{c.eway_bill_no}</span>
+                  </span>
+                )}
+                {(c.einvoice_doc_no || c.irn) && (
+                  <span title={c.irn ? `IRN ${c.irn}\nGenerated ${fmtTS(c.einvoice_generated_at)}` : ''}
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ fontSize: '9px', color: t.purple, background: `${t.purple}18`, border: `1px solid ${t.purple}30`, borderRadius: '4px', padding: '2px 6px', fontWeight: 800, letterSpacing: '.08em', textTransform: 'uppercase' }}>E-Inv</span>
+                    <span style={{ fontSize: '17px', color: t.text1, fontWeight: 700, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', letterSpacing: '.01em' }}>{c.einvoice_doc_no || `${String(c.irn).slice(0, 12)}…`}</span>
+                  </span>
+                )}
+              </>
+            ) : (
+              <span style={{ fontSize: '17px', color: t.gold, fontWeight: 700, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', letterSpacing: '.01em' }}>{c.tmp_prf_no}</span>
+            )}
+            <div style={{ flex: 1 }} />
+            <span style={{ fontSize: '9px', color: accent, background: `${accent}15`, border: `1px solid ${accent}30`, borderRadius: '99px', padding: '3px 10px', fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase' }}>
+              {isApproved ? '✓ Approved' : '✕ Rejected'}
+            </span>
+          </div>
+
+          {/* Source → dest + stats — the at-a-glance summary line */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap' }}>
+            <div style={{ fontSize: '14.5px', color: t.text1, fontWeight: 600, letterSpacing: '-.005em', display: 'inline-flex', alignItems: 'center', gap: '10px' }}>
+              <span>{c.branch_name}</span>
+              <span style={{ color: t.text4, fontWeight: 300 }}>→</span>
+              <span>{dest}</span>
+            </div>
+            <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+              <StatPill icon="◧" label={`${c.total_bills} bill${c.total_bills === 1 ? '' : 's'}`} color={t.text2} />
+              <StatPill icon="⚖" label={fmtWt(c.total_net_wt)} color={t.gold} />
+              <StatPill icon="₹" label={fmt(Math.round(c.total_amount))} color={t.blue} />
+            </div>
+          </div>
+
+          {/* Quiet metadata strip — secondary context that accounts only
+              needs occasionally (TMP_PRF, route type, time-to-decision). */}
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '10px', fontSize: '10.5px', color: t.text4, flexWrap: 'wrap' }}>
+            {(c.eway_bill_no || c.einvoice_doc_no || c.irn) && (
+              <span title={`Internal tamper-proof reference`} style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}>{c.tmp_prf_no}</span>
+            )}
+            <span style={{ color: isType ? t.purple : t.orange, fontWeight: 600, letterSpacing: '.04em' }}>
+              {isType ? 'BRANCH → HUB' : 'BRANCH → HO'}
+            </span>
+            {ttaLabel && (() => {
+              const slow = ttaMin > 5
+              const cTta = slow ? t.red : t.text4
+              return (
+                <span title={`Time from creation to ${isApproved ? 'approval' : 'rejection'}${slow ? ' — over 5 minutes, slow review' : ''}`}
+                  style={{ color: cTta, fontWeight: slow ? 700 : 500 }}>
+                  decided in {ttaLabel}
                 </span>
-              )}
-              {(c.einvoice_doc_no || c.irn) && (
-                <span title={c.irn ? `IRN ${c.irn}` : ''}
-                  style={{ fontSize: '13.5px', color: t.purple, fontWeight: 700, fontFamily: 'monospace', letterSpacing: '.02em' }}>
-                  <span style={{ fontSize: '9px', color: t.purple, background: `${t.purple}15`, borderRadius: '4px', padding: '1px 5px', marginRight: '6px', fontWeight: 700, letterSpacing: '.04em', verticalAlign: '2px' }}>E-INV</span>
-                  {c.einvoice_doc_no || `${String(c.irn).slice(0, 12)}…`}
-                </span>
-              )}
-              <span title={`Internal tamper-proof reference ${c.tmp_prf_no}`}
-                style={{ fontSize: '10px', color: t.text4, fontFamily: 'monospace', letterSpacing: '.02em' }}>
-                {c.tmp_prf_no}
-              </span>
-            </>
-          ) : (
-            // No NIC document on file yet — show TMP_PRF as the headline.
-            <span style={{ fontSize: '14px', color: t.gold, fontWeight: 700, fontFamily: 'monospace', letterSpacing: '.02em' }}>{c.tmp_prf_no}</span>
-          )}
-          <span style={{ fontSize: '9px', color: isType ? t.purple : t.orange, background: `${isType ? t.purple : t.orange}15`, borderRadius: '4px', padding: '2px 7px', fontWeight: 600, letterSpacing: '.04em' }}>
-            {isType ? 'BRANCH → HUB' : 'BRANCH → HO'}
-          </span>
-          <span style={{ fontSize: '9px', color: accent, background: `${accent}15`, borderRadius: '4px', padding: '2px 7px', fontWeight: 700, letterSpacing: '.04em' }}>
-            {isApproved ? 'APPROVED' : 'REJECTED'}
-          </span>
-          {ttaLabel && (() => {
-            const slow = ttaMin > 5
-            const cTta = slow ? t.red : t.text3
-            return (
-              <span title={`Time from creation to ${isApproved ? 'approval' : 'rejection'}${slow ? ' — over 5 minutes, slow review' : ''}`}
-                style={{ fontSize: '9px', color: cTta, background: `${cTta}${slow ? '18' : '10'}`, borderRadius: '4px', padding: '2px 7px', fontWeight: 600 }}>
-                in {ttaLabel}
-              </span>
-            )
-          })()}
+              )
+            })()}
+          </div>
         </div>
 
-        {/* Row 2 — hero: source → dest + stats pills */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap' }}>
-          <div style={{ fontSize: '15px', color: t.text1, fontWeight: 600, letterSpacing: '-.005em' }}>
-            {c.branch_name}
-            <span style={{ color: t.text4, margin: '0 10px', fontWeight: 300 }}>→</span>
-            {dest}
-          </div>
-          <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-            <StatPill icon="◧" label={`${c.total_bills} bill${c.total_bills === 1 ? '' : 's'}`} color={t.text2} />
-            <StatPill icon="⚖" label={fmtWt(c.total_net_wt)} color={t.gold} />
-            <StatPill icon="₹" label={fmt(Math.round(c.total_amount))} color={t.blue} />
-          </div>
-        </div>
-
-        {/* Row 3 — rejection reason (rejected only) */}
+        {/* REJECTION REASON (rejected only) */}
         {!isApproved && c.rejection_reason && (
           <div style={{ fontSize: '11px', color: t.red, background: `${t.red}08`, border: `1px solid ${t.red}25`, borderRadius: '6px', padding: '8px 12px' }}>
             <span style={{ color: t.text4, marginRight: '6px', fontSize: '10px', textTransform: 'uppercase', letterSpacing: '.1em' }}>Reason:</span>
@@ -2245,46 +2279,57 @@ function HistoryCard({ c, t, card, isApproved, previewDoc, showToast, openCancel
           </div>
         )}
 
-        {/* Row 4 — audit trail with avatar chips */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap', fontSize: '10px', color: t.text4 }}>
-          {c.created_by && c.created_by !== 'unknown' && (
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
-              <span style={{ color: t.text4, letterSpacing: '.05em', textTransform: 'uppercase', fontSize: '9px' }}>Created</span>
-              <Avatar email={c.created_by} />
-              <span style={{ color: t.text2, fontWeight: 600 }}>{c.created_by.split('@')[0]}</span>
-              <span style={{ color: t.text4, fontFamily: 'monospace' }}>{fmtTS(c.created_at)}</span>
-            </span>
-          )}
-          {c.approved_at && c.approved_by && (
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
-              <span style={{ color: t.text4, letterSpacing: '.05em', textTransform: 'uppercase', fontSize: '9px' }}>{isApproved ? 'Approved' : 'Rejected'}</span>
-              <Avatar email={c.approved_by} />
-              <span style={{ color: t.text2, fontWeight: 600 }}>{c.approved_by.split('@')[0]}</span>
-              <span style={{ color: t.text4, fontFamily: 'monospace' }}>{fmtTS(c.approved_at)}</span>
-            </span>
-          )}
-        </div>
+        {/* FOOTER — audit trail (compact) + actions + cancel control.
+            Single row, separated by a hairline. Audit avatars on the left,
+            doc chips in the middle, cancel control aligned right so the
+            countdown sits where the eye expects deadlines to live. */}
+        <div style={{ borderTop: `1px solid ${t.border}50`, paddingTop: '10px', display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+          {/* Audit avatars — compact, no labels (avatar title carries email) */}
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', fontSize: '10px', color: t.text4 }}>
+            {c.created_by && c.created_by !== 'unknown' && (
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }} title={`Created by ${c.created_by} on ${fmtTS(c.created_at)}`}>
+                <Avatar email={c.created_by} size={16} />
+                <span style={{ color: t.text3 }}>{fmtTS(c.created_at)}</span>
+              </span>
+            )}
+            {c.approved_at && c.approved_by && (
+              <>
+                <span style={{ color: t.text4, opacity: 0.5 }}>·</span>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }} title={`${isApproved ? 'Approved' : 'Rejected'} by ${c.approved_by} on ${fmtTS(c.approved_at)}`}>
+                  <Avatar email={c.approved_by} size={16} />
+                  <span style={{ color: t.text3 }}>{fmtTS(c.approved_at)}</span>
+                </span>
+              </>
+            )}
+          </div>
 
-        {/* Row 5 — doc action chips on the left, cancel countdown(s) on the right */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', borderTop: `1px solid ${t.border}40`, paddingTop: '10px' }}>
-          <DocChip label="Report"  color={t.purple} onClick={() => previewDoc(`/api/generate-consignee-report?id=${c.id}`, `Report-${c.tmp_prf_no}.jpg`, msg => showToast(msg, 'error'))} title="Preview the Consignee Report (branch-facing)" />
-          <DocChip label={isType ? 'Voucher' : 'Challan'} color={t.gold}
-            onClick={() => previewDoc(
-              isType ? `/api/generate-issue-voucher-pdf?id=${c.id}` : `/api/generate-challan-pdf?id=${c.id}`,
-              `${isType ? 'Voucher' : 'Challan'}-${c.tmp_prf_no}.pdf`,
-              msg => showToast(msg, 'error'))}
-            title={isType ? 'Preview the Issue Voucher PDF' : 'Preview the Delivery Challan PDF'} />
-          {c.eway_bill_no && (
-            <DocChip label="E-Way Bill" color={t.green}
-              onClick={() => previewDoc(`/api/eway-bill/pdf?id=${c.id}`, `EWB-${c.eway_bill_no}.pdf`, msg => showToast(msg, 'error'))}
-              title={`E-Way Bill ${c.eway_bill_no}\nGenerated ${fmtTS(c.ewb_generated_at)}${c.ewb_valid_until ? `\nValid till ${fmtTS(c.ewb_valid_until)}` : ''}`} />
-          )}
-          {c.irn && (
-            <DocChip label="E-Invoice" color={t.purple}
-              onClick={() => previewDoc(`/api/e-invoice/pdf?id=${c.id}`, `EInvoice-${c.tmp_prf_no}.pdf`, msg => showToast(msg, 'error'))}
-              title={`E-Invoice ${c.einvoice_doc_no || ''}\nGenerated ${fmtTS(c.einvoice_generated_at)}\nIRN ${c.irn}`} />
-          )}
+          {/* Divider */}
+          <span style={{ width: 1, height: 16, background: t.border, opacity: 0.5 }} />
+
+          {/* Doc action chips */}
+          <div style={{ display: 'inline-flex', gap: '6px', flexWrap: 'wrap' }}>
+            <DocChip label="Report"  color={t.purple} onClick={() => previewDoc(`/api/generate-consignee-report?id=${c.id}`, `Report-${c.tmp_prf_no}.jpg`, msg => showToast(msg, 'error'))} title="Preview the Consignee Report (branch-facing)" />
+            <DocChip label={isType ? 'Voucher' : 'Challan'} color={t.gold}
+              onClick={() => previewDoc(
+                isType ? `/api/generate-issue-voucher-pdf?id=${c.id}` : `/api/generate-challan-pdf?id=${c.id}`,
+                `${isType ? 'Voucher' : 'Challan'}-${c.tmp_prf_no}.pdf`,
+                msg => showToast(msg, 'error'))}
+              title={isType ? 'Preview the Issue Voucher PDF' : 'Preview the Delivery Challan PDF'} />
+            {c.eway_bill_no && (
+              <DocChip label="E-Way Bill" color={t.green}
+                onClick={() => previewDoc(`/api/eway-bill/pdf?id=${c.id}`, `EWB-${c.eway_bill_no}.pdf`, msg => showToast(msg, 'error'))}
+                title={`E-Way Bill ${c.eway_bill_no}\nGenerated ${fmtTS(c.ewb_generated_at)}${c.ewb_valid_until ? `\nValid till ${fmtTS(c.ewb_valid_until)}` : ''}`} />
+            )}
+            {c.irn && (
+              <DocChip label="E-Invoice" color={t.purple}
+                onClick={() => previewDoc(`/api/e-invoice/pdf?id=${c.id}`, `EInvoice-${c.tmp_prf_no}.pdf`, msg => showToast(msg, 'error'))}
+                title={`E-Invoice ${c.einvoice_doc_no || ''}\nGenerated ${fmtTS(c.einvoice_generated_at)}\nIRN ${c.irn}`} />
+            )}
+          </div>
+
           <div style={{ flex: 1 }} />
+
+          {/* Cancel controls — right-aligned where deadlines live */}
           {isApproved && c.eway_bill_no && (
             <CancelControl
               docKind="EWB"
