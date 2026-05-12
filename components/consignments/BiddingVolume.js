@@ -99,6 +99,18 @@ export default function BiddingVolume() {
   // specific (a YELAHANKA shipment for 13 May isn't the same as 14 May's).
   useEffect(() => { setSelected(new Set()) }, [arrivalDate])
 
+  // Past bidder names — drives the dropdown in the booking modal. Pulled
+  // once on mount; the list refreshes after a new booking via fetchAll's
+  // side-effects (since new parties land in cal_quotas).
+  const [bidders, setBidders] = useState([])
+  useEffect(() => {
+    let cancelled = false
+    authedFetch('/api/consignments?action=bidder_names').then(r => r.json()).then(j => {
+      if (!cancelled && Array.isArray(j.data)) setBidders(j.data)
+    }).catch(() => {})
+    return () => { cancelled = true }
+  }, [bookingsResp])
+
   // Gain rate — projected refining gain in % per gram of available net wt.
   // Default 3.5% (≈ 35 g per 1 kg available). One-level flat rate per the
   // ops spec. Persisted to localStorage so the operator's override sticks
@@ -188,6 +200,36 @@ export default function BiddingVolume() {
     }
     return next
   })
+
+  // Kerala (KL) no-mix rule — Kerala bookings must be exclusive. The mode is
+  // 'kerala' if any selected branch is Kerala, 'other' if any non-Kerala
+  // branch is selected, or null when nothing is picked. Branches outside
+  // the current mode are disabled in the source picker to prevent
+  // accidental mixed selection.
+  const isKerala = (b) => b?.region === 'Kerala'
+  const selectionMode = useMemo(() => {
+    let hasKerala = false, hasOther = false
+    for (const k of selected) {
+      const b = branchesByKey[k]
+      if (!b) continue
+      if (isKerala(b)) hasKerala = true
+      else             hasOther  = true
+    }
+    if (hasKerala && hasOther) return 'mixed' // shouldn't happen — picker prevents it
+    if (hasKerala) return 'kerala'
+    if (hasOther)  return 'other'
+    return null
+  }, [selected, branchesByKey])
+  // A branch is locked when the current selection mode disallows it.
+  const branchLocked = (b) => {
+    if (!selectionMode) return false
+    if (selectionMode === 'kerala') return !isKerala(b)
+    if (selectionMode === 'other')  return  isKerala(b)
+    return false
+  }
+  // Auto-derived KL flag for the booking insert. CalTable's allocation
+  // reads is_kl to keep Kerala buyers paired with Kerala bars.
+  const selectionIsKerala = selectionMode === 'kerala'
 
   // ── Date label ─────────────────────────────────────────────────────────────
   const dayDiff = dateDiff(arrivalDate, today)
@@ -381,6 +423,8 @@ export default function BiddingVolume() {
         inTBranches={inTBranches}
         selected={selected}
         selectedTotal={selectedTotal}
+        selectionMode={selectionMode}
+        branchLocked={branchLocked}
         onToggleBranch={toggleBranch}
         onSelectGroup={selectGroupAll}
         onBook={() => setShowBookModal(true)}
@@ -402,10 +446,10 @@ export default function BiddingVolume() {
         Bookings stored in <code style={{ background: t.card2, padding: '1px 4px', borderRadius: '3px', color: t.text3 }}>cal_quotas</code> — also visible in Sales → Cal Table → Quotas on the same date.
       </div>
 
-      {/* ── Booking form modal — fired from "Book Selected" on the sources
-            card. Source picker is no longer inside the modal; the modal
-            just shows a read-only chip strip of selected branches plus
-            the buyer-details form. */}
+      {/* ── Booking form modal — bidder/weight/rate only. Source selection
+            is on the page; the modal displays selected branches as a
+            compact chip strip and auto-derives the Kerala (KL) flag from
+            the selection. */}
       {showBookModal && (
         <BookingModal
           t={t}
@@ -415,6 +459,8 @@ export default function BiddingVolume() {
           selected={selected}
           selectedTotal={selectedTotal}
           branchesByKey={branchesByKey}
+          bidders={bidders}
+          isKerala={selectionIsKerala}
           onUnselect={(k) => toggleBranch(k)}
           onSubmit={createBooking}
           onClose={() => setShowBookModal(false)}
@@ -689,17 +735,29 @@ function ActionPill({ label, color, onClick, t, subtle = false }) {
 // selection state lights up the contextual action bar in the card header
 // once anything is checked. Clicking "Book Selected" opens the booking
 // form modal with the weight pre-filled from the selection total.
-function SourcePicker({ t, card, supply, bangBranches, inTBranches, selected, selectedTotal, onToggleBranch, onSelectGroup, onBook, incomingNetWt, incomingBills, arrivalDate }) {
+function SourcePicker({ t, card, supply, bangBranches, inTBranches, selected, selectedTotal, selectionMode, branchLocked, onToggleBranch, onSelectGroup, onBook, incomingNetWt, incomingBills, arrivalDate }) {
   const hasSelection = selected.size > 0
 
-  const bangAllSelected = bangBranches.length > 0 && bangBranches.every(b => selected.has(`B:${b.branch_name}`))
-  const inTAllSelected  = inTBranches.length  > 0 && inTBranches.every(b => selected.has(`T:${b.branch_name}`))
+  // Group "select all" toggles only count branches that are currently
+  // eligible (not locked by the Kerala rule).
+  const bangEligible = bangBranches.filter(b => !branchLocked(b))
+  const inTEligible  = inTBranches.filter(b => !branchLocked(b))
+  const bangAllSelected = bangEligible.length > 0 && bangEligible.every(b => selected.has(`B:${b.branch_name}`))
+  const inTAllSelected  = inTEligible.length  > 0 && inTEligible.every(b => selected.has(`T:${b.branch_name}`))
 
   const renderBranchRow = (b, prefix, accent) => {
     const k = `${prefix}:${b.branch_name}`
     const on = selected.has(k)
+    const locked = branchLocked(b)
+    const lockReason = locked
+      ? (selectionMode === 'kerala'
+          ? 'Kerala bookings can’t mix with other regions — clear the Kerala selection first.'
+          : 'Selection already contains other regions — Kerala bookings must be exclusive.')
+      : ''
     return (
-      <div key={b.branch_name} onClick={() => onToggleBranch(k)}
+      <div key={b.branch_name}
+        onClick={() => { if (!locked) onToggleBranch(k) }}
+        title={lockReason}
         style={{
           display: 'grid',
           gridTemplateColumns: '28px minmax(140px, 1fr) 1fr auto 90px',
@@ -707,17 +765,24 @@ function SourcePicker({ t, card, supply, bangBranches, inTBranches, selected, se
           alignItems: 'center',
           padding: '10px 18px',
           borderBottom: `1px solid ${t.border}30`,
-          cursor: 'pointer',
+          cursor: locked ? 'not-allowed' : 'pointer',
           background: on ? `${accent}10` : 'transparent',
           borderLeft: `3px solid ${on ? accent : 'transparent'}`,
-          transition: 'background .12s',
+          opacity: locked ? 0.4 : 1,
+          transition: 'background .12s, opacity .15s',
         }}
-        onMouseEnter={e => { if (!on) e.currentTarget.style.background = `${t.text4}06` }}
-        onMouseLeave={e => { if (!on) e.currentTarget.style.background = 'transparent' }}>
-        <input type="checkbox" checked={on} onChange={() => onToggleBranch(k)} onClick={e => e.stopPropagation()}
-          style={{ accentColor: accent, cursor: 'pointer', width: 16, height: 16 }} />
+        onMouseEnter={e => { if (!on && !locked) e.currentTarget.style.background = `${t.text4}06` }}
+        onMouseLeave={e => { if (!on && !locked) e.currentTarget.style.background = 'transparent' }}>
+        <input type="checkbox" checked={on} disabled={locked}
+          onChange={() => onToggleBranch(k)} onClick={e => e.stopPropagation()}
+          style={{ accentColor: accent, cursor: locked ? 'not-allowed' : 'pointer', width: 16, height: 16 }} />
         <span style={{ fontSize: 12.5, color: t.text1, fontWeight: 600 }}>{b.branch_name}</span>
-        <span style={{ fontSize: 11, color: REGION_COLORS[b.region] || t.text3 }}>{b.region}</span>
+        <span style={{ fontSize: 11, color: REGION_COLORS[b.region] || t.text3, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+          {b.region}
+          {b.region === 'Kerala' && (
+            <span style={{ fontSize: 9, color: t.green, background: `${t.green}15`, border: `1px solid ${t.green}40`, borderRadius: 3, padding: '1px 4px', fontWeight: 700, letterSpacing: '.06em' }}>KL</span>
+          )}
+        </span>
         {b.tat_hours != null ? (
           <span style={{ fontSize: 10, color: t.text2, background: `${t.text4}15`, borderRadius: 4, padding: '2px 7px', fontFamily: 'monospace', fontWeight: 600, whiteSpace: 'nowrap' }}>
             {b.tat_hours}h
@@ -749,6 +814,12 @@ function SourcePicker({ t, card, supply, bangBranches, inTBranches, selected, se
         </div>
         {hasSelection ? (
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            {selectionMode === 'kerala' && (
+              <span title="Kerala bookings can’t mix with other regions"
+                style={{ fontSize: 9.5, color: t.green, background: `${t.green}18`, border: `1px solid ${t.green}40`, borderRadius: 4, padding: '3px 8px', fontWeight: 700, letterSpacing: '.08em' }}>
+                KL · KERALA ONLY
+              </span>
+            )}
             <div style={{ textAlign: 'right' }}>
               <div style={{ fontSize: 13.5, color: t.gold, fontFamily: 'monospace', fontWeight: 700 }}>
                 {fmt(selectedTotal, 2)} g
@@ -770,7 +841,7 @@ function SourcePicker({ t, card, supply, bangBranches, inTBranches, selected, se
           </div>
         ) : (
           <span style={{ fontSize: 11, color: t.text4, fontStyle: 'italic' }}>
-            Tick branches to start a booking
+            Tick branches to start a booking · Kerala bookings are exclusive
           </span>
         )}
       </div>
@@ -828,30 +899,34 @@ function SourcePicker({ t, card, supply, bangBranches, inTBranches, selected, se
   )
 }
 
-// ── Booking modal — buyer-form-only ──────────────────────────────────────────
-// Source selection happens on the page now; this modal just confirms the
-// already-selected branches (as removable chips) and collects buyer + rate
-// + notes. Weight pre-fills from the selection total and is editable for
-// partial commits.
-function BookingModal({ t, arrivalDate, availablePool, remainingQty, selected, selectedTotal, branchesByKey, onUnselect, onSubmit, onClose, onSuccess }) {
+// ── Booking modal — minimal: Bidder · Weight · Rate ──────────────────────────
+// Per ops spec, the booking form collects only what's strictly required:
+// bidder (dropdown), weight (auto-filled from selection), rate per gram.
+// Phone / purity / notes / KL toggle are dropped — KL is auto-derived
+// from whether the selection is all-Kerala (selection rules enforce
+// that bookings are never mixed across Kerala / non-Kerala).
+//
+// Selected sources display: compact by default — chip strip is collapsed
+// to "first 6 + (N more)" so 20+ branches don't blow up the modal height.
+function BookingModal({ t, arrivalDate, availablePool, remainingQty, selected, selectedTotal, branchesByKey, bidders, isKerala, onUnselect, onSubmit, onClose, onSuccess }) {
   const [weightDirty, setWeightDirty] = useState(false)
   const [party,       setParty]       = useState('')
-  const [buyerPhone,  setBuyerPhone]  = useState('')
   const [weight,      setWeight]      = useState(() => selectedTotal > 0 ? selectedTotal.toFixed(2) : '')
   const [rate,        setRate]        = useState('')
-  const [purity,      setPurity]      = useState('')
-  const [isKl,        setIsKl]        = useState(false)
-  const [notes,       setNotes]       = useState('')
   const [busy,        setBusy]        = useState(false)
+  const [chipsExpanded, setChipsExpanded] = useState(false)
 
-  // Selection can change while the modal is open (operator removes a chip).
-  // Keep the weight in sync unless they've manually edited it.
+  // Keep weight in sync with the page's selection unless the user
+  // manually edits — then leave their override alone.
   useEffect(() => {
     if (weightDirty) return
     setWeight(selectedTotal > 0 ? selectedTotal.toFixed(2) : '')
   }, [selectedTotal, weightDirty])
 
   const selectedRows = [...selected].map(k => ({ k, b: branchesByKey[k] })).filter(x => x.b)
+  const CHIP_PREVIEW = 6
+  const visibleChips = chipsExpanded ? selectedRows : selectedRows.slice(0, CHIP_PREVIEW)
+  const hiddenCount = Math.max(0, selectedRows.length - CHIP_PREVIEW)
 
   const w = Number(weight); const r = Number(rate)
   const total = Number.isFinite(w) && Number.isFinite(r) ? w * r : 0
@@ -862,22 +937,19 @@ function BookingModal({ t, arrivalDate, availablePool, remainingQty, selected, s
     if (!Number.isFinite(w) || w <= 0) return
     if (!Number.isFinite(r) || r <= 0) return
     setBusy(true)
-    // Stamp the selected branch names into notes so the audit trail records
-    // which sources the booking was committed against. (When partial-bill
-    // selection becomes a feature we'll add a proper booking_sources join.)
+    // Audit trail: stamp selected branches into notes for later reference.
     const selectedBranchList = selectedRows.map(({ b }) => b.branch_name)
-    const compositeNotes = [
-      notes.trim() || null,
-      selectedBranchList.length ? `Sources: ${selectedBranchList.join(', ')}` : null,
-    ].filter(Boolean).join(' · ') || null
+    const compositeNotes = selectedBranchList.length
+      ? `Sources: ${selectedBranchList.join(', ')}`
+      : null
 
     const ok = await onSubmit({
       party:       party.trim(),
-      buyer_phone: buyerPhone.trim() || null,
+      buyer_phone: null,
       weight:      w,
       rate:        r,
-      purity:      purity || null,
-      is_kl:       isKl,
+      purity:      null,
+      is_kl:       !!isKerala,   // auto-derived from selection
       notes:       compositeNotes,
     })
     if (ok && onSuccess) onSuccess()
@@ -889,120 +961,153 @@ function BookingModal({ t, arrivalDate, availablePool, remainingQty, selected, s
   return (
     <div onClick={onClose} style={{
       position: 'fixed', inset: 0, zIndex: 100,
-      background: 'rgba(0,0,0,.55)',
+      background: 'rgba(0,0,0,.6)',
       display: 'flex', alignItems: 'center', justifyContent: 'center',
       padding: 20, overflow: 'auto',
     }}>
       <div onClick={e => e.stopPropagation()} style={{
-        width: '100%', maxWidth: 540, maxHeight: '90vh', overflow: 'auto',
+        width: '100%', maxWidth: 460, maxHeight: '90vh', overflow: 'auto',
         background: t.card, border: `1px solid ${t.border}`,
-        borderRadius: 14, padding: 22,
-        display: 'flex', flexDirection: 'column', gap: 14,
+        borderRadius: 16,
+        boxShadow: '0 20px 60px rgba(0,0,0,.4)',
+        display: 'flex', flexDirection: 'column',
       }}>
-        <div>
-          <div style={{ fontSize: 15, fontWeight: 700, color: t.text1 }}>New Booking</div>
-          <div style={{ fontSize: 11, color: t.text4, marginTop: 4 }}>Committing against arrival on {fmtDate(arrivalDate)}</div>
+        {/* Header */}
+        <div style={{ padding: '20px 22px 14px', borderBottom: `1px solid ${t.border}` }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+            <div>
+              <div style={{ fontSize: 16, fontWeight: 700, color: t.text1, letterSpacing: '-.01em' }}>New Booking</div>
+              <div style={{ fontSize: 11, color: t.text4, marginTop: 3 }}>Arrival · {fmtDate(arrivalDate)}</div>
+            </div>
+            {isKerala && (
+              <span style={{ fontSize: 9.5, color: t.green, background: `${t.green}18`, border: `1px solid ${t.green}40`, borderRadius: 99, padding: '3px 10px', fontWeight: 800, letterSpacing: '.08em' }}>
+                KL · KERALA
+              </span>
+            )}
+          </div>
         </div>
 
-        {/* Selected sources — chips strip. Click ✕ to remove a chip; the
-            selection on the page updates in real time. */}
-        {selectedRows.length > 0 ? (
-          <div style={{ border: `1px solid ${t.border}`, borderRadius: 10, padding: '10px 12px', background: t.card2 }}>
-            <div style={{ fontSize: 10, color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 700, marginBottom: 8 }}>
-              Selected sources · {fmt(selectedTotal, 2)} g
+        {/* Body */}
+        <div style={{ padding: '18px 22px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+          {/* Selected sources — compact chips with show-more */}
+          {selectedRows.length > 0 && (
+            <div style={{ background: t.card2, border: `1px solid ${t.border}`, borderRadius: 10, padding: '10px 12px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                <span style={{ fontSize: 9.5, color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 700 }}>
+                  Sources · {selectedRows.length} {selectedRows.length === 1 ? 'branch' : 'branches'}
+                </span>
+                <span style={{ fontSize: 13, color: t.gold, fontFamily: 'monospace', fontWeight: 700 }}>
+                  {fmt(selectedTotal, 2)} g
+                </span>
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+                {visibleChips.map(({ k, b }) => {
+                  const accent = b.group === 'bangalore' ? t.red : t.blue
+                  return (
+                    <span key={k} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: `${accent}12`, border: `1px solid ${accent}30`, borderRadius: 99, padding: '2px 4px 2px 9px', fontSize: 10.5, color: t.text2, fontWeight: 600 }}>
+                      {b.branch_name}
+                      <button onClick={() => onUnselect(k)} title="Remove"
+                        style={{ background: 'transparent', border: 'none', color: t.text4, cursor: 'pointer', fontSize: 11, lineHeight: 1, padding: '0 3px', borderRadius: 99 }}
+                        onMouseEnter={e => { e.currentTarget.style.color = accent }}
+                        onMouseLeave={e => { e.currentTarget.style.color = t.text4 }}>
+                        ✕
+                      </button>
+                    </span>
+                  )
+                })}
+                {hiddenCount > 0 && !chipsExpanded && (
+                  <button onClick={() => setChipsExpanded(true)}
+                    style={{ background: 'transparent', border: `1px dashed ${t.border2 || t.border}`, borderRadius: 99, padding: '2px 10px', fontSize: 10.5, color: t.text3, fontWeight: 600, cursor: 'pointer' }}>
+                    +{hiddenCount} more
+                  </button>
+                )}
+                {chipsExpanded && selectedRows.length > CHIP_PREVIEW && (
+                  <button onClick={() => setChipsExpanded(false)}
+                    style={{ background: 'transparent', border: 'none', color: t.text3, fontSize: 10.5, fontWeight: 600, cursor: 'pointer', padding: '2px 8px' }}>
+                    Show less
+                  </button>
+                )}
+              </div>
             </div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-              {selectedRows.map(({ k, b }) => {
-                const accent = b.group === 'bangalore' ? t.red : t.blue
-                return (
-                  <span key={k} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: `${accent}15`, border: `1px solid ${accent}40`, borderRadius: 99, padding: '3px 6px 3px 10px', fontSize: 11, color: t.text1, fontWeight: 600 }}>
-                    {b.branch_name}
-                    <span style={{ fontSize: 10, color: t.gold, fontFamily: 'monospace', fontWeight: 700 }}>{fmt(b.total_net_wt, 2)}g</span>
-                    <button onClick={() => onUnselect(k)} title="Remove from selection"
-                      style={{ background: 'transparent', border: 'none', color: t.text3, cursor: 'pointer', fontSize: 12, lineHeight: 1, padding: '0 4px' }}>
-                      ✕
-                    </button>
-                  </span>
-                )
-              })}
-            </div>
-          </div>
-        ) : (
-          <div style={{ fontSize: 11, color: t.text4, fontStyle: 'italic', padding: '6px 0' }}>
-            No sources selected — booking will commit the entered weight directly against the pool.
-          </div>
-        )}
+          )}
 
-        {/* Buyer + commercial */}
-        <Field label="Buyer name *">
-          <input value={party} onChange={e => setParty(e.target.value)} autoFocus placeholder="e.g. ABC Jewellers"
-            style={inputStyle(t)} />
-        </Field>
-
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-          <Field label="Buyer phone (optional)">
-            <input value={buyerPhone} onChange={e => setBuyerPhone(e.target.value)} placeholder="+91 …"
+          {/* Bidder dropdown — datalist combobox: pick from past names or type a new one */}
+          <Field label="Bidder">
+            <input value={party} list="bidding-bidder-list"
+              onChange={e => setParty(e.target.value)}
+              autoFocus placeholder="Select or type bidder name"
               style={inputStyle(t)} />
-          </Field>
-          <Field label="Purity (optional)">
-            <select value={purity} onChange={e => setPurity(e.target.value)} style={inputStyle(t)}>
-              <option value="">—</option>
-              <option value="24K">24K</option>
-              <option value="22K">22K</option>
-              <option value="18K">18K</option>
-            </select>
-          </Field>
-        </div>
-
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-          <Field label={`Weight (g) *${selectedTotal > 0 && !weightDirty ? ' · auto-filled' : ''}`}>
-            <input value={weight}
-              onChange={e => { setWeight(e.target.value.replace(/[^\d.]/g, '')); setWeightDirty(true) }}
-              placeholder="100.000"
-              style={{ ...inputStyle(t), fontFamily: 'monospace', borderColor: weightDirty || selectedTotal === 0 ? t.border : t.gold }} />
-            {weightDirty && selectedTotal > 0 && (
-              <button type="button" onClick={() => { setWeightDirty(false); setWeight(selectedTotal.toFixed(2)) }}
-                style={{ background: 'transparent', border: 'none', color: t.gold, fontSize: 10, cursor: 'pointer', padding: '4px 0 0', textAlign: 'left' }}>
-                ↺ Reset to selected total ({fmt(selectedTotal, 2)} g)
-              </button>
+            <datalist id="bidding-bidder-list">
+              {(bidders || []).map(b => <option key={b} value={b} />)}
+            </datalist>
+            {bidders && bidders.length > 0 && !party && (
+              <div style={{ fontSize: 10, color: t.text4, marginTop: 4 }}>
+                {bidders.length} known bidder{bidders.length === 1 ? '' : 's'} · type to filter or add new
+              </div>
             )}
           </Field>
-          <Field label="Rate (₹/g) *">
-            <input value={rate} onChange={e => setRate(e.target.value.replace(/[^\d.]/g, ''))} placeholder="7250.00"
-              style={{ ...inputStyle(t), fontFamily: 'monospace' }} />
-          </Field>
-        </div>
 
-        <Field label="Notes (optional)">
-          <input value={notes} onChange={e => setNotes(e.target.value)} placeholder="Any context for accounts"
-            style={inputStyle(t)} />
-        </Field>
-
-        <label style={{ display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 11, color: t.text2 }}>
-          <input type="checkbox" checked={isKl} onChange={e => setIsKl(e.target.checked)} />
-          Karnataka local (KL) — used by CalTable allocation
-        </label>
-
-        {/* Live total */}
-        <div style={{ background: t.card2, border: `1px solid ${t.border}`, borderRadius: 8, padding: '10px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <span style={{ fontSize: 10, color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 700 }}>Total value</span>
-          <span style={{ fontSize: 16, color: t.blue, fontFamily: 'monospace', fontWeight: 700 }}>{total > 0 ? fmtINR(total) : '—'}</span>
-        </div>
-
-        {wouldOverbook && (
-          <div style={{ background: `${t.red}10`, border: `1px solid ${t.red}40`, borderRadius: 8, padding: '8px 12px', fontSize: 11, color: t.red, fontWeight: 600 }}>
-            ⚠ This booking will overbook by {fmt(w - remainingQty, 2)} g (available pool {fmt(availablePool, 2)} g). Allowed, but flagged.
+          {/* Weight + Rate side-by-side */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <Field label={`Weight (g)${selectedTotal > 0 && !weightDirty ? ' · auto' : ''}`}>
+              <input value={weight}
+                onChange={e => { setWeight(e.target.value.replace(/[^\d.]/g, '')); setWeightDirty(true) }}
+                placeholder="0.000"
+                style={{ ...inputStyle(t), fontFamily: 'monospace', borderColor: weightDirty || selectedTotal === 0 ? t.border : `${t.gold}80` }} />
+              {weightDirty && selectedTotal > 0 && (
+                <button type="button" onClick={() => { setWeightDirty(false); setWeight(selectedTotal.toFixed(2)) }}
+                  style={{ background: 'transparent', border: 'none', color: t.gold, fontSize: 10, cursor: 'pointer', padding: '4px 0 0', textAlign: 'left' }}>
+                  ↺ Reset to {fmt(selectedTotal, 2)} g
+                </button>
+              )}
+            </Field>
+            <Field label="Rate (₹/g)">
+              <input value={rate}
+                onChange={e => setRate(e.target.value.replace(/[^\d.]/g, ''))}
+                placeholder="7250.00"
+                style={{ ...inputStyle(t), fontFamily: 'monospace' }} />
+            </Field>
           </div>
-        )}
 
-        <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+          {/* Live total — prominent */}
+          <div style={{
+            background: total > 0 ? `linear-gradient(135deg, ${t.blue}10, ${t.blue}04)` : t.card2,
+            border: `1px solid ${total > 0 ? `${t.blue}30` : t.border}`,
+            borderRadius: 10, padding: '12px 16px',
+            display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+            transition: 'all .2s',
+          }}>
+            <span style={{ fontSize: 10, color: t.text4, letterSpacing: '.14em', textTransform: 'uppercase', fontWeight: 700 }}>Total Value</span>
+            <span style={{ fontSize: 20, color: t.blue, fontFamily: 'monospace', fontWeight: 700, letterSpacing: '-.01em' }}>
+              {total > 0 ? fmtINR(total) : '—'}
+            </span>
+          </div>
+
+          {wouldOverbook && (
+            <div style={{ background: `${t.red}10`, border: `1px solid ${t.red}40`, borderRadius: 8, padding: '9px 12px', fontSize: 11, color: t.red, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontSize: 13 }}>⚠</span>
+              Overbooking by {fmt(w - remainingQty, 2)} g · pool {fmt(availablePool, 2)} g · allowed but flagged
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div style={{ padding: '14px 22px', borderTop: `1px solid ${t.border}`, display: 'flex', gap: 8, background: t.card2 }}>
           <button onClick={onClose}
-            style={{ flex: 1, background: 'transparent', border: `1px solid ${t.border}`, borderRadius: 8, padding: '9px 14px', fontSize: 12, color: t.text2, cursor: 'pointer', fontWeight: 600 }}>
+            style={{ flex: 1, background: 'transparent', border: `1px solid ${t.border}`, borderRadius: 8, padding: '10px 14px', fontSize: 12.5, color: t.text2, cursor: 'pointer', fontWeight: 600 }}>
             Cancel
           </button>
           <button onClick={submit} disabled={!valid || busy}
-            style={{ flex: 1, background: valid && !busy ? t.gold : t.card2, color: valid && !busy ? '#1a0a00' : t.text4, border: 'none', borderRadius: 8, padding: '9px 14px', fontSize: 12, fontWeight: 700, cursor: valid && !busy ? 'pointer' : 'not-allowed' }}>
-            {busy ? 'Creating…' : 'Create Booking'}
+            style={{
+              flex: 2,
+              background: valid && !busy ? t.gold : t.card2,
+              color: valid && !busy ? '#1a0a00' : t.text4,
+              border: 'none', borderRadius: 8, padding: '10px 14px',
+              fontSize: 12.5, fontWeight: 700, letterSpacing: '.03em',
+              cursor: valid && !busy ? 'pointer' : 'not-allowed',
+              boxShadow: valid && !busy ? `0 1px 4px ${t.gold}50` : 'none',
+            }}>
+            {busy ? 'Creating…' : `Create Booking · ${total > 0 ? fmtINR(total) : ''}`}
           </button>
         </div>
       </div>

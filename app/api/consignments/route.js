@@ -550,6 +550,32 @@ export async function GET(req) {
     })
   }
 
+  // ── Bidder names — distinct parties seen on past bookings ────────────────
+  // Powers the dropdown on the Bidding Volume booking modal. Sourced from
+  // cal_quotas.party (the same column CalTable writes to) so any name that
+  // has ever appeared in either flow shows up as a suggestion.
+  if (action === 'bidder_names') {
+    const { data, error } = await supabase
+      .from('cal_quotas')
+      .select('party, created_at')
+      .not('party', 'is', null)
+      .neq('party', '')
+      .order('created_at', { ascending: false })
+      .limit(1000)
+    if (error) return Response.json({ error: error.message }, { status: 500 })
+    // De-dupe case-insensitively, preserve most-recent capitalisation, return
+    // a flat sorted list.
+    const seen = new Map()
+    for (const r of data || []) {
+      const p = String(r.party || '').trim()
+      if (!p) continue
+      const k = p.toLowerCase()
+      if (!seen.has(k)) seen.set(k, p)
+    }
+    const bidders = [...seen.values()].sort((a, b) => a.localeCompare(b))
+    return Response.json({ data: bidders })
+  }
+
   // ── Bidding bookings: list of buyer commitments for a given arrival date ──
   // Stored in cal_quotas (same table the Sales → Cal Table → Quotas tab
   // reads), with extended columns for status + audit trail. We surface all
