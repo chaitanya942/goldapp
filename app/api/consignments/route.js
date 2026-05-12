@@ -430,14 +430,24 @@ export async function GET(req) {
   if (action === 'cancellation_history') {
     // No date floor — the Cancellations tab now shows every recorded
     // cancellation. Audit data should be permanent.
-    // Includes the legacy *_cancel_skipped variants from an earlier soft-
-    // success implementation so those audit entries don't get orphaned.
-    // New code paths write the standard *_cancelled type either way; the
-    // skipped variants only exist on rows logged during that brief window.
+    // Includes:
+    //   - the canonical *_cancelled types
+    //   - the legacy generic 'cancelled' (written by the RPC)
+    //   - the legacy *_cancel_skipped variants (interim soft-success implementation)
+    //   - cancellation_approved (written by the approve route after every
+    //     successful approval — most reliable signal since it's logged
+    //     outside the RPC's exception-swallowing block).
+    // Audit-critical: as long as any one of these exists the cancellation
+    // surfaces, so a silent RPC failure or a missed per-doc event can't
+    // make a cancelled consignment vanish from the audit log.
     const { data: events, error: evErr } = await supabase
       .from('consignment_activity_log')
       .select('id, consignment_id, event_type, actor_email, actor_role, details, created_at')
-      .in('event_type', ['ewb_cancelled', 'einvoice_cancelled', 'cancelled', 'ewb_cancel_skipped', 'einvoice_cancel_skipped'])
+      .in('event_type', [
+        'ewb_cancelled', 'einvoice_cancelled', 'cancelled',
+        'ewb_cancel_skipped', 'einvoice_cancel_skipped',
+        'cancellation_approved',
+      ])
       .order('created_at', { ascending: false })
     if (evErr) return Response.json({ error: evErr.message }, { status: 500 })
 
@@ -448,13 +458,20 @@ export async function GET(req) {
       if (e.event_type === 'einvoice_cancel_skipped') e.event_type = 'einvoice_cancelled'
     }
 
-    // Group events by consignment_id. For each group prefer specific event
-    // types; fall back to the generic 'cancelled' if that's all we have.
+    // Group events by consignment_id. Specificity ordering so the tab shows
+    // the most informative event per consignment:
+    //   3 = ewb_cancelled / einvoice_cancelled (has doc no, ack, reason)
+    //   2 = cancelled (RPC marker, carries had_ewb/had_irn flags)
+    //   1 = cancellation_approved (route marker, carries portal_cancelled list)
     const eventsByConsignment = new Map()
     for (const e of events || []) {
       const existing = eventsByConsignment.get(e.consignment_id)
       if (!existing) { eventsByConsignment.set(e.consignment_id, e); continue }
-      const specifity = (t) => t === 'ewb_cancelled' || t === 'einvoice_cancelled' ? 2 : 1
+      const specifity = (t) => {
+        if (t === 'ewb_cancelled' || t === 'einvoice_cancelled') return 3
+        if (t === 'cancelled') return 2
+        return 1
+      }
       if (specifity(e.event_type) > specifity(existing.event_type)) {
         eventsByConsignment.set(e.consignment_id, e)
       }
@@ -476,10 +493,11 @@ export async function GET(req) {
     const byId = new Map(consignmentsAll.map(c => [c.id, c]))
     const inScope = (c) => !allowedBranches || (c && allowedBranches.includes(c.branch_name))
 
-    // For generic 'cancelled' fallbacks, infer the doc-type label from the
-    // event's details payload so the UI's badge logic continues to work
-    // (it switches on event_type === 'ewb_cancelled' for the green EWB pill,
-    // anything else for the purple E-Invoice pill).
+    // For non-specific fallbacks ('cancelled' and 'cancellation_approved'),
+    // infer the doc-type label from the event's details payload so the
+    // UI's badge logic continues to work (it switches on event_type ===
+    // 'ewb_cancelled' for the green EWB pill, anything else for the
+    // purple E-Invoice pill).
     const rows = dedupedEvents.flatMap(e => {
       const c = byId.get(e.consignment_id)
       // Region scoping: if the consignment exists but is outside the user's
@@ -492,11 +510,39 @@ export async function GET(req) {
       if (e.event_type === 'cancelled') {
         if (e.details?.had_ewb) inferredType = 'ewb_cancelled'
         else if (e.details?.had_irn) inferredType = 'einvoice_cancelled'
-        // If neither, leave as 'cancelled' — UI will show as a generic void.
+      } else if (e.event_type === 'cancellation_approved') {
+        // portal_cancelled is a free-form string array: ["EWB 123 cancelled on NIC", "E-Invoice cancelled on IRP", ...]
+        // Sniff for the EWB pattern first so combo cases (had both) prefer EWB
+        // styling — matches the priority in the upstream cancel flow.
+        const portal = e.details?.portal_cancelled
+        const hasEwb = Array.isArray(portal) && portal.some(p => /\bewb\b/i.test(String(p)))
+        const hasIrn = Array.isArray(portal) && portal.some(p => /e-?invoice|irp|irn/i.test(String(p)))
+        if (hasEwb) inferredType = 'ewb_cancelled'
+        else if (hasIrn) inferredType = 'einvoice_cancelled'
+        // Last resort: read the consignment row itself if it was cancelled,
+        // since the portal_cancelled array may be empty for pre-doc cancels.
+        else if (c?.status === 'cancelled') inferredType = 'cancelled'
+      }
+      // Also surface the doc number on the synthesized details so the UI
+      // shows something useful even when only the cancellation_approved
+      // event survived (the canonical EWB/IRN cancel events carry it
+      // directly; for fallbacks we read it from the consignment row, or
+      // from the portal_cancelled array as a last resort).
+      const synthDetails = { ...(e.details || {}) }
+      if (inferredType === 'ewb_cancelled' && !synthDetails.ewb_no) {
+        const portal = e.details?.portal_cancelled
+        const ewbFromPortal = Array.isArray(portal)
+          ? (portal.find(p => /ewb\s+\S+/i.test(String(p))) || '').match(/ewb\s+(\S+)/i)?.[1]
+          : null
+        synthDetails.ewb_no = ewbFromPortal || c?.eway_bill_no || null
+      }
+      if (inferredType === 'einvoice_cancelled' && !synthDetails.irn) {
+        synthDetails.irn = c?.irn || null
       }
       return [{
         ...e,
         event_type:           inferredType,
+        details:              synthDetails,
         consignment:          c || null,
         consignment_missing:  !c,
       }]
