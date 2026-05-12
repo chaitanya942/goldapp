@@ -243,7 +243,7 @@ function ConfirmModal({ message, onConfirm, onCancel, t }) {
 }
 
 export default function CalTable() {
-  const { theme, user } = useApp(); const t = T[theme] || T.dark
+  const { theme, user, setActiveNav } = useApp(); const t = T[theme] || T.dark
   const [isMobile, setIsMobile] = useState(false)
   useEffect(() => {
     const check = () => setIsMobile(window.innerWidth < 768)
@@ -469,7 +469,9 @@ export default function CalTable() {
   }
 
   const runAllocation = async () => {
-    const vQ = quotas.filter(q => q.party && q.weight && q.rate)
+    // Exclude cancelled bookings from allocation — they no longer represent
+    // a buyer commitment. booked / confirmed / fulfilled all stay in the pool.
+    const vQ = quotas.filter(q => q.party && q.weight && q.rate && q.status !== 'cancelled')
     const vB = bars.filter(b => b.batch && b.market_weight && b.purity)
     if (!vQ.length || !vB.length) return
     setRunning(true)
@@ -589,62 +591,40 @@ export default function CalTable() {
 
       {/* QUOTAS TAB */}
       {tab === 'quotas' && (
-        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '280px 1fr', gap: '16px', alignItems: 'start' }}>
-          {/* LEFT: FORM */}
-          <div style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: '12px', overflow: 'hidden', position: 'sticky', top: '20px' }}>
-            <div style={{ padding: '14px 18px', borderBottom: `1px solid ${t.border}`, background: t.card2, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div style={{ fontSize: '0.88rem', fontWeight: 600, color: t.text1 }}>New Quota</div>
-              <span style={{ background: t.gold, color: '#1a0a00', borderRadius: '20px', padding: '2px 9px', fontSize: '0.68rem', fontWeight: 700 }}>{validQ}</span>
+        /* Read-only reflection of cal_quotas rows for the selected date.
+           Bookings are created and managed in Consignments → Bidding
+           Volume now — this tab exists so the allocation step (Bars
+           tab + Allocate button) has visibility into what came through,
+           but no longer accepts direct edits. Single input, single
+           source of truth. */
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+          {/* Banner — explain where bookings come from + deep link */}
+          <div style={{
+            background: `linear-gradient(90deg, ${t.gold}12 0%, transparent 70%)`,
+            border: `1px solid ${t.gold}40`,
+            borderRadius: '10px',
+            padding: '12px 16px',
+            display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap',
+          }}>
+            <span style={{ fontSize: '11px', color: t.gold, background: `${t.gold}25`, borderRadius: '4px', padding: '3px 9px', fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase' }}>Read-only</span>
+            <div style={{ flex: 1, minWidth: 0, fontSize: '12px', color: t.text2 }}>
+              Bookings are now created in <strong style={{ color: t.text1 }}>Bidding Volume</strong>. This tab reflects what's been booked for <strong style={{ color: t.text1 }}>{date}</strong> and feeds into allocation.
             </div>
-            <div style={{ padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: '13px' }}>
-              <FormField label="Party Name" required t={t}>
-                <PartyDropdown value={qForm.party} t={t} onChange={v => setQForm(f => ({ ...f, party: v }))} />
-              </FormField>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-                <FormField label="Weight (g)" required t={t}>
-                  <input type="number" value={qForm.weight} onChange={e => setQForm(f => ({ ...f, weight: e.target.value }))}
-                    onKeyDown={e => e.key === 'Enter' && submitQuota()}
-                    placeholder="0.0000" step="any"
-                    style={{ width: '100%', background: t.card2, border: `1px solid ${t.border}`, borderRadius: '7px', padding: '8px 10px', fontSize: '0.85rem', color: t.text1, outline: 'none', fontFamily: 'inherit' }}
-                    onFocus={e => e.target.style.borderColor = t.gold} onBlur={e => e.target.style.borderColor = t.border} />
-                </FormField>
-                <FormField label="Rate (₹/g)" required t={t}>
-                  <input type="number" value={qForm.rate} onChange={e => setQForm(f => ({ ...f, rate: e.target.value }))}
-                    onKeyDown={e => e.key === 'Enter' && submitQuota()}
-                    placeholder="0" step="1"
-                    style={{ width: '100%', background: t.card2, border: `1px solid ${t.border}`, borderRadius: '7px', padding: '8px 10px', fontSize: '0.85rem', color: t.text1, outline: 'none', fontFamily: 'inherit' }}
-                    onFocus={e => e.target.style.borderColor = t.gold} onBlur={e => e.target.style.borderColor = t.border} />
-                </FormField>
-              </div>
-              <FormField label="KL Quota" t={t}>
-                <div style={{ display: 'flex', gap: '8px' }}>
-                  {['No', 'Yes'].map(v => (
-                    <button key={v} onClick={() => setQForm(f => ({ ...f, is_kl: v === 'Yes' }))}
-                      style={{ flex: 1, padding: '7px', borderRadius: '7px', border: `1px solid ${(v === 'Yes') === qForm.is_kl ? t.blue : t.border}`, background: (v === 'Yes') === qForm.is_kl ? t.blueDim : 'transparent', color: (v === 'Yes') === qForm.is_kl ? t.blue : t.text3, fontSize: '0.82rem', cursor: 'pointer', fontFamily: 'inherit', fontWeight: (v === 'Yes') === qForm.is_kl ? 600 : 400 }}>
-                      {v}
-                    </button>
-                  ))}
-                </div>
-              </FormField>
-            </div>
-            <div style={{ padding: '12px 18px', borderTop: `1px solid ${t.border}`, display: 'flex', gap: '8px' }}>
-              <button onClick={submitQuota}
-                style={{ flex: 1, background: t.text1, color: t.bg, border: 'none', borderRadius: '8px', padding: '11px', fontSize: '0.85rem', fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', letterSpacing: '.03em' }}>
-                {qEditId ? 'Update Quota' : 'Add Quota'}
+            {setActiveNav && (
+              <button onClick={() => setActiveNav('consignment-bidding')}
+                style={{ background: t.gold, color: '#1a0a00', border: 'none', borderRadius: '7px', padding: '7px 14px', fontSize: '11px', fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                Open Bidding Volume →
               </button>
-              {qEditId && <button onClick={() => { setQForm({ party: '', weight: '', rate: '', is_kl: false }); setQEditId(null) }}
-                style={{ background: 'transparent', border: `1px solid ${t.border}`, borderRadius: '8px', padding: '11px 14px', color: t.text3, cursor: 'pointer', fontFamily: 'inherit', fontSize: '0.82rem' }}>↺</button>}
-            </div>
+            )}
           </div>
 
-          {/* RIGHT: TABLE */}
+          {/* Read-only ledger table */}
           <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-              <div style={{ fontSize: '0.72rem', color: t.text3, letterSpacing: '.1em', textTransform: 'uppercase' }}>Quota Ledger</div>
-              <div style={{ display: 'flex', gap: '8px' }}>
-                <button onClick={() => setPasteModal('quotas')} style={{ ...css.btn, background: t.card, border: `1px solid ${t.border}`, color: t.text2, padding: '7px 13px', fontSize: '0.75rem' }}>📥 Paste</button>
-                {quotas.filter(q => !q._new).length > 0 && <button onClick={() => setConfirmClear('quotas')} style={{ ...css.btn, background: 'transparent', border: `1px solid ${t.border}`, color: t.text3, padding: '7px 13px', fontSize: '0.75rem' }}>Clear all</button>}
-              </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+              <div style={{ fontSize: '0.72rem', color: t.text3, letterSpacing: '.1em', textTransform: 'uppercase' }}>Quota Ledger · {date}</div>
+              <span style={{ fontSize: '11px', color: t.text4, fontFamily: 'monospace' }}>
+                {quotas.filter(q => !q._new).length} {quotas.filter(q => !q._new).length === 1 ? 'row' : 'rows'}
+              </span>
             </div>
             {loadingQ ? <LoadingCard t={t} /> : (
               <div style={css.card}>
@@ -655,43 +635,49 @@ export default function CalTable() {
                     <th style={{ ...css.th, textAlign: 'right' }}>Weight (g)</th>
                     <th style={{ ...css.th, textAlign: 'right' }}>Rate (₹/g)</th>
                     <th style={{ ...css.th, textAlign: 'center', width: '60px' }}>KL</th>
-                    <th style={{ ...css.th, width: '64px' }}></th>
+                    <th style={{ ...css.th, textAlign: 'center', width: '100px' }}>Status</th>
                   </tr></thead>
                   <tbody>
                     {quotas.filter(q => !q._new).length === 0 ? (
                       <tr><td colSpan={6} style={{ ...css.td, textAlign: 'center', color: t.text4, padding: '48px', fontSize: '0.82rem' }}>
-                        No quotas yet — use the form to add
+                        No bookings for this date. Add one in <strong style={{ color: t.text3 }}>Bidding Volume</strong>.
                       </td></tr>
-                    ) : quotas.filter(q => !q._new).map((row, i) => (
-                      <tr key={row._id}
-                        style={{ background: qEditId === row.id ? `${t.gold}10` : i % 2 !== 0 ? t.rowAlt : 'transparent', cursor: 'pointer' }}
-                        onClick={() => { setQForm({ party: row.party, weight: row.weight, rate: row.rate, is_kl: row.is_kl }); setQEditId(row.id) }}>
-                        <td style={{ ...css.td, textAlign: 'center', color: t.text4, fontSize: '0.72rem' }}>{i + 1}</td>
-                        <td style={css.td}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                            <div style={{ width: '7px', height: '7px', borderRadius: '50%', background: partyColor(row.party), flexShrink: 0 }} />
-                            <span style={{ fontWeight: 500, color: t.text1 }}>{row.party}</span>
-                          </div>
-                        </td>
-                        <td style={{ ...css.td, textAlign: 'right', fontFamily: 'monospace', color: t.gold }}>{fmtSmart(row.weight)}</td>
-                        <td style={{ ...css.td, textAlign: 'right', fontFamily: 'monospace' }}>₹{Number(row.rate).toLocaleString('en-IN')}</td>
-                        <td style={{ ...css.td, textAlign: 'center' }}>
-                          {row.is_kl && <span style={{ background: t.blueDim, color: t.blue, borderRadius: '4px', padding: '2px 7px', fontSize: '0.68rem', fontWeight: 700 }}>KL</span>}
-                        </td>
-                        <td style={css.td} onClick={e => e.stopPropagation()}>
-                          <button onClick={() => deleteQuota(row)}
-                            style={{ background: 'none', border: 'none', color: t.text4, cursor: 'pointer', padding: '4px 8px', borderRadius: '5px', fontSize: '0.78rem' }}
-                            onMouseEnter={e => e.currentTarget.style.color = t.red}
-                            onMouseLeave={e => e.currentTarget.style.color = t.text4}>✕</button>
-                        </td>
-                      </tr>
-                    ))}
+                    ) : quotas.filter(q => !q._new).map((row, i) => {
+                      const status = row.status || 'booked'
+                      const sMeta = {
+                        booked:    { label: 'Booked',    color: t.gold },
+                        confirmed: { label: 'Confirmed', color: t.blue },
+                        fulfilled: { label: 'Fulfilled', color: '#3aaa6a' },
+                        cancelled: { label: 'Cancelled', color: t.red },
+                      }[status] || { label: status, color: t.text3 }
+                      const isCancelled = status === 'cancelled'
+                      return (
+                        <tr key={row._id}
+                          style={{ background: i % 2 !== 0 ? t.rowAlt : 'transparent', opacity: isCancelled ? 0.5 : 1 }}>
+                          <td style={{ ...css.td, textAlign: 'center', color: t.text4, fontSize: '0.72rem' }}>{i + 1}</td>
+                          <td style={css.td}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <div style={{ width: '7px', height: '7px', borderRadius: '50%', background: partyColor(row.party), flexShrink: 0 }} />
+                              <span style={{ fontWeight: 500, color: t.text1, textDecoration: isCancelled ? 'line-through' : 'none' }}>{row.party}</span>
+                            </div>
+                          </td>
+                          <td style={{ ...css.td, textAlign: 'right', fontFamily: 'monospace', color: t.gold }}>{fmtSmart(row.weight)}</td>
+                          <td style={{ ...css.td, textAlign: 'right', fontFamily: 'monospace' }}>₹{Number(row.rate).toLocaleString('en-IN')}</td>
+                          <td style={{ ...css.td, textAlign: 'center' }}>
+                            {row.is_kl && <span style={{ background: t.blueDim, color: t.blue, borderRadius: '4px', padding: '2px 7px', fontSize: '0.68rem', fontWeight: 700 }}>KL</span>}
+                          </td>
+                          <td style={{ ...css.td, textAlign: 'center' }}>
+                            <span style={{ background: `${sMeta.color}18`, color: sMeta.color, border: `1px solid ${sMeta.color}40`, borderRadius: '99px', padding: '2px 9px', fontSize: '0.66rem', fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase' }}>{sMeta.label}</span>
+                          </td>
+                        </tr>
+                      )
+                    })}
                   </tbody>
-                  {quotas.filter(q => !q._new).length > 0 && (
+                  {quotas.filter(q => !q._new && q.status !== 'cancelled').length > 0 && (
                     <tfoot>
                       <tr style={{ borderTop: `1px solid ${t.border}`, background: t.card2 }}>
-                        <td colSpan={2} style={{ ...css.td, fontSize: '0.68rem', color: t.text3, letterSpacing: '.08em', textTransform: 'uppercase' }}>Total</td>
-                        <td style={{ ...css.td, textAlign: 'right', fontFamily: 'monospace', color: t.gold, fontWeight: 600 }}>{fmtSmart(quotas.filter(q => !q._new).reduce((s, q) => s + Number(q.weight || 0), 0))}g</td>
+                        <td colSpan={2} style={{ ...css.td, fontSize: '0.68rem', color: t.text3, letterSpacing: '.08em', textTransform: 'uppercase' }}>Active total</td>
+                        <td style={{ ...css.td, textAlign: 'right', fontFamily: 'monospace', color: t.gold, fontWeight: 600 }}>{fmtSmart(quotas.filter(q => !q._new && q.status !== 'cancelled').reduce((s, q) => s + Number(q.weight || 0), 0))}g</td>
                         <td colSpan={3} style={css.td}></td>
                       </tr>
                     </tfoot>
@@ -699,7 +685,7 @@ export default function CalTable() {
                 </table>
               </div>
             )}
-            {quotas.filter(q => !q._new).length > 0 && <QuotaSummary quotas={quotas} t={t} />}
+            {quotas.filter(q => !q._new && q.status !== 'cancelled').length > 0 && <QuotaSummary quotas={quotas.filter(q => q.status !== 'cancelled')} t={t} />}
           </div>
         </div>
       )}

@@ -553,7 +553,7 @@ function SourcesSection({ t, supply }) {
             <tr key={r.branch_name}>
               <td style={{ padding: '8px 14px', fontSize: 12, color: t.text1, fontWeight: 600, borderLeft: `3px solid ${rColor}80` }}>{r.branch_name}</td>
               <td style={{ padding: '8px 14px', fontSize: 11, color: rColor }}>{r.region}</td>
-              {showTat && <td style={{ padding: '8px 14px', fontSize: 10 }}><span style={{ color: t.text2, background: `${t.text4}15`, borderRadius: 4, padding: '2px 7px', fontFamily: 'monospace', fontWeight: 600 }}>{r.tat_hours ? `${r.tat_hours}h` : '—'}</span></span></td>}
+              {showTat && <td style={{ padding: '8px 14px', fontSize: 10 }}><span style={{ color: t.text2, background: `${t.text4}15`, borderRadius: 4, padding: '2px 7px', fontFamily: 'monospace', fontWeight: 600 }}>{r.tat_hours ? `${r.tat_hours}h` : '—'}</span></td>}
               <td style={{ padding: '8px 14px', fontSize: 12, color: t.gold, fontFamily: 'monospace', fontWeight: 600, textAlign: 'right' }}>{r.total_bills}</td>
               <td style={{ padding: '8px 14px', fontSize: 12, color: t.gold, fontFamily: 'monospace', fontWeight: 600, textAlign: 'right' }}>{fmt(r.total_net_wt, 2)}<span style={{ fontSize: 10, marginLeft: 2 }}>g</span></td>
             </tr>
