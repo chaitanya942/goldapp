@@ -176,6 +176,12 @@ export default function ConsignmentApprovals() {
   const [report,        setReport]        = useState({ ewbs: [], einvoices: [] })
   const [reportFrom,    setReportFrom]    = useState(() => istToday())
   const [reportTo,      setReportTo]      = useState(() => istToday())
+  // Approved tab filters — accounts review tool. Default: all-time, all doc
+  // types. Client-side because volume is moderate and the underlying fetch
+  // already returns the full history sorted by approved_at desc.
+  const [approvedFrom,  setApprovedFrom]  = useState('')      // YYYY-MM-DD, '' = no floor
+  const [approvedTo,    setApprovedTo]    = useState('')      // YYYY-MM-DD, '' = no ceiling
+  const [approvedDoc,   setApprovedDoc]   = useState('all')   // 'all' | 'ewb' | 'einv'
   const [efficiency,    setEfficiency]    = useState({ users: [] })
   const [effFrom,       setEffFrom]       = useState(() => istDaysAgo(6))
   const [effTo,         setEffTo]         = useState(() => istToday())
@@ -1082,20 +1088,55 @@ export default function ConsignmentApprovals() {
         />
       ) : (tab === 'approved' || tab === 'rejected') ? (
         /* History list — polished card per consignment with stats pills,
-           avatar audit trail, doc-action chips, live cancel countdown. */
+           avatar audit trail, doc-action chips, live cancel countdown.
+           Approved tab gets accounts-driven filters (date range + doc type)
+           so the team can drill into a specific reconciliation window. */
         <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-          {history.map(c => (
-            <HistoryCard
-              key={c.id}
-              c={c}
+          {tab === 'approved' && (
+            <ApprovedFilterBar
               t={t}
               card={card}
-              isApproved={tab === 'approved'}
-              previewDoc={previewDoc}
-              showToast={showToast}
-              openCancel={openCancel}
+              from={approvedFrom} setFrom={setApprovedFrom}
+              to={approvedTo}     setTo={setApprovedTo}
+              doc={approvedDoc}   setDoc={setApprovedDoc}
+              total={history.length}
             />
-          ))}
+          )}
+          {(() => {
+            // Client-side filter for the Approved tab only — rejected stays
+            // unfiltered (audit-critical) until accounts asks otherwise.
+            const list = tab === 'approved'
+              ? history.filter(c => {
+                  // Doc-type filter
+                  if (approvedDoc === 'ewb'  && !c.eway_bill_no) return false
+                  if (approvedDoc === 'einv' && !c.irn)          return false
+                  // Date filter on approved_at (the audit-relevant timestamp)
+                  if (approvedFrom || approvedTo) {
+                    if (!c.approved_at) return false
+                    const d = String(c.approved_at).slice(0, 10)
+                    if (approvedFrom && d < approvedFrom) return false
+                    if (approvedTo   && d > approvedTo)   return false
+                  }
+                  return true
+                })
+              : history
+            return list.length === 0 ? (
+              <div style={{ ...card, padding: '40px 20px', textAlign: 'center', color: t.text3, fontSize: '12px' }}>
+                No {tab === 'approved' ? 'approved' : 'rejected'} consignments match the current filters.
+              </div>
+            ) : list.map(c => (
+              <HistoryCard
+                key={c.id}
+                c={c}
+                t={t}
+                card={card}
+                isApproved={tab === 'approved'}
+                previewDoc={previewDoc}
+                showToast={showToast}
+                openCancel={openCancel}
+              />
+            ))
+          })()}
         </div>
       ) : (
         /* Pending list */
@@ -1918,6 +1959,97 @@ function ReportKpi({ t, label, primary, sub, accent, mono, small }) {
 // audit avatars, doc-action chips, and (on Approved) live cancel countdowns.
 // Hover tints the card subtly. Cancel chip pulses when < 1h remains so the
 // operator notices a doc about to slip past the 24h NIC/IRP window.
+// ApprovedFilterBar — accounts-team filter strip above the Approved list.
+// Date range applies to approved_at (the audit timestamp). Doc-type segments
+// narrow to EWB-only or E-Invoice-only when reconciling against a specific
+// portal. Quick presets cover the common windows (today / this month / etc).
+function ApprovedFilterBar({ t, card, from, setFrom, setTo, to, doc, setDoc, total }) {
+  const today      = new Date().toISOString().slice(0, 10)
+  const daysAgo    = (n) => { const d = new Date(); d.setDate(d.getDate() - n + 1); return d.toISOString().slice(0, 10) }
+  const monthStart = (() => { const n = new Date(); return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}-01` })()
+
+  const presets = [
+    { id: 'today',  label: 'Today',      from: today,        to: today },
+    { id: '7d',     label: 'Last 7d',    from: daysAgo(7),   to: today },
+    { id: '30d',    label: 'Last 30d',   from: daysAgo(30),  to: today },
+    { id: 'month',  label: 'This Month', from: monthStart,   to: today },
+    { id: 'all',    label: 'All time',   from: '',           to: '' },
+  ]
+  const activePreset = presets.find(p => p.from === from && p.to === to)?.id
+
+  const docOptions = [
+    { id: 'all',  label: 'All',        color: t.text2 },
+    { id: 'ewb',  label: 'EWB only',   color: t.green },
+    { id: 'einv', label: 'E-Inv only', color: t.purple },
+  ]
+
+  return (
+    <div style={{ ...card, padding: '12px 16px', display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap' }}>
+      {/* Date preset chips */}
+      <div style={{ display: 'flex', gap: '5px', flexWrap: 'wrap' }}>
+        {presets.map(p => {
+          const active = activePreset === p.id
+          return (
+            <button key={p.id}
+              onClick={() => { setFrom(p.from); setTo(p.to) }}
+              style={{
+                background:   active ? `${t.gold}20` : 'transparent',
+                color:        active ? t.gold : t.text3,
+                border:       `1px solid ${active ? `${t.gold}60` : t.border}`,
+                borderRadius: '14px',
+                padding:      '4px 11px',
+                fontSize:     '10px',
+                fontWeight:   active ? 700 : 500,
+                cursor:       'pointer',
+                transition:   'all .12s',
+                whiteSpace:   'nowrap',
+              }}>
+              {p.label}
+            </button>
+          )
+        })}
+      </div>
+
+      {/* Custom date inputs */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+        <input type="date" value={from} onChange={e => setFrom(e.target.value)} max={to || today}
+          style={{ background: t.card2 || t.card, border: `1px solid ${t.border}`, borderRadius: '6px', padding: '5px 8px', fontSize: '11px', color: t.text1, fontFamily: 'monospace', outline: 'none' }} />
+        <span style={{ fontSize: '10px', color: t.text4 }}>→</span>
+        <input type="date" value={to} onChange={e => setTo(e.target.value)} min={from || undefined} max={today}
+          style={{ background: t.card2 || t.card, border: `1px solid ${t.border}`, borderRadius: '6px', padding: '5px 8px', fontSize: '11px', color: t.text1, fontFamily: 'monospace', outline: 'none' }} />
+      </div>
+
+      {/* Doc-type segmented toggle */}
+      <div style={{ display: 'inline-flex', background: t.card2, border: `1px solid ${t.border}`, borderRadius: '7px', padding: '2px' }}>
+        {docOptions.map(o => {
+          const active = doc === o.id
+          return (
+            <button key={o.id} onClick={() => setDoc(o.id)}
+              style={{
+                background:   active ? `${o.color}25` : 'transparent',
+                color:        active ? o.color : t.text3,
+                border:       'none', borderRadius: '5px',
+                padding:      '4px 11px',
+                fontSize:     '11px',
+                fontWeight:   active ? 700 : 500,
+                cursor:       'pointer',
+                transition:   'all .12s',
+                letterSpacing:'.02em',
+              }}>
+              {o.label}
+            </button>
+          )
+        })}
+      </div>
+
+      <div style={{ flex: 1 }} />
+      <span style={{ fontSize: '10px', color: t.text4, fontFamily: 'monospace' }}>
+        {total} approved · all time
+      </span>
+    </div>
+  )
+}
+
 function HistoryCard({ c, t, card, isApproved, previewDoc, showToast, openCancel }) {
   const [hover, setHover] = useState(false)
   const isType = c.movement_type === 'INTERNAL'
@@ -2041,9 +2173,38 @@ function HistoryCard({ c, t, card, isApproved, previewDoc, showToast, openCancel
       }} />
 
       <div style={{ padding: '14px 18px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-        {/* Row 1 — identity badges */}
+        {/* Row 1 — identity badges.
+            Headline: the actual NIC document number (EWB no / E-Invoice doc
+            no) is what accounts reconciles against, so it gets the gold
+            monospace prominence. TMP_PRF moves to a smaller secondary chip
+            for internal reference. If neither doc exists yet (rare for
+            approved), the TMP_PRF takes the lead as a fallback. */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-          <span style={{ fontSize: '14px', color: t.gold, fontWeight: 700, fontFamily: 'monospace', letterSpacing: '.02em' }}>{c.tmp_prf_no}</span>
+          {(c.eway_bill_no || c.einvoice_doc_no || c.irn) ? (
+            <>
+              {c.eway_bill_no && (
+                <span title={`E-Way Bill ${c.eway_bill_no}`}
+                  style={{ fontSize: '13.5px', color: t.green, fontWeight: 700, fontFamily: 'monospace', letterSpacing: '.02em' }}>
+                  <span style={{ fontSize: '9px', color: t.green, background: `${t.green}15`, borderRadius: '4px', padding: '1px 5px', marginRight: '6px', fontWeight: 700, letterSpacing: '.04em', verticalAlign: '2px' }}>EWB</span>
+                  {c.eway_bill_no}
+                </span>
+              )}
+              {(c.einvoice_doc_no || c.irn) && (
+                <span title={c.irn ? `IRN ${c.irn}` : ''}
+                  style={{ fontSize: '13.5px', color: t.purple, fontWeight: 700, fontFamily: 'monospace', letterSpacing: '.02em' }}>
+                  <span style={{ fontSize: '9px', color: t.purple, background: `${t.purple}15`, borderRadius: '4px', padding: '1px 5px', marginRight: '6px', fontWeight: 700, letterSpacing: '.04em', verticalAlign: '2px' }}>E-INV</span>
+                  {c.einvoice_doc_no || `${String(c.irn).slice(0, 12)}…`}
+                </span>
+              )}
+              <span title={`Internal tamper-proof reference ${c.tmp_prf_no}`}
+                style={{ fontSize: '10px', color: t.text4, fontFamily: 'monospace', letterSpacing: '.02em' }}>
+                {c.tmp_prf_no}
+              </span>
+            </>
+          ) : (
+            // No NIC document on file yet — show TMP_PRF as the headline.
+            <span style={{ fontSize: '14px', color: t.gold, fontWeight: 700, fontFamily: 'monospace', letterSpacing: '.02em' }}>{c.tmp_prf_no}</span>
+          )}
           <span style={{ fontSize: '9px', color: isType ? t.purple : t.orange, background: `${isType ? t.purple : t.orange}15`, borderRadius: '4px', padding: '2px 7px', fontWeight: 600, letterSpacing: '.04em' }}>
             {isType ? 'BRANCH → HUB' : 'BRANCH → HO'}
           </span>
@@ -2060,8 +2221,6 @@ function HistoryCard({ c, t, card, isApproved, previewDoc, showToast, openCancel
               </span>
             )
           })()}
-          {c.eway_bill_no && <span style={{ fontSize: '9px', color: t.green,  background: `${t.green}15`,  borderRadius: '4px', padding: '2px 7px', fontWeight: 600, letterSpacing: '.04em' }}>EWB</span>}
-          {c.irn         && <span style={{ fontSize: '9px', color: t.purple, background: `${t.purple}15`, borderRadius: '4px', padding: '2px 7px', fontWeight: 600, letterSpacing: '.04em' }}>IRN</span>}
         </div>
 
         {/* Row 2 — hero: source → dest + stats pills */}
