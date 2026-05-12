@@ -197,6 +197,10 @@ export default function ConsignmentApprovals() {
   // { type: 'ewb'|'irn', consignment, reasonCode, remark, busy, error, suggestCreditNote }
 
   const [toast, setToast] = useState(null)
+  // Diagnostic state for the Cancellations tab — populated by the "Run
+  // diagnostic" button on the empty state so we can see exactly what the
+  // server returns when the tab looks blank.
+  const [cancelDiag, setCancelDiag] = useState(null)
   const [notifPermission, setNotifPermission] = useState(typeof window !== 'undefined' && 'Notification' in window ? Notification.permission : 'unsupported')
   const [soundEnabled, setSoundEnabled] = useState(true)
   useEffect(() => { setSoundEnabled(readSoundPref()) }, [])
@@ -920,13 +924,55 @@ export default function ConsignmentApprovals() {
           })}
         </div>
       ) : tab === 'cancellations' && cancellations.length === 0 ? (
-        /* Empty state — cancellations tab */
+        /* Empty state — cancellations tab.
+           Includes a diagnostic button that calls the endpoint with debug=1
+           and surfaces the raw response inline. Useful when accounts is
+           certain a cancellation happened but the tab is empty — we can
+           see whether the API is returning rows, hitting a permission
+           filter, or never being called at all. */
         <div style={{ ...card, padding: '60px 20px', textAlign: 'center' }}>
           <div style={{ fontSize: '15px', color: t.text1, fontWeight: 500 }}>
             No EWB / E-Invoice cancellations yet
           </div>
           <div style={{ fontSize: '12px', color: t.text4, marginTop: '6px' }}>
             When a cancelled E-Way Bill or E-Invoice voids a consignment, the audit entry appears here.
+          </div>
+          <div style={{ marginTop: '20px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
+            <button
+              onClick={async () => {
+                setCancelDiag({ loading: true })
+                try {
+                  const r = await authedFetch(`/api/consignments?action=cancellation_history&debug=1`)
+                  const j = await r.json()
+                  setCancelDiag({ loading: false, status: r.status, body: j })
+                } catch (e) {
+                  setCancelDiag({ loading: false, error: String(e?.message || e) })
+                }
+              }}
+              style={{
+                ...btnOut,
+                padding: '6px 14px',
+                fontSize: '11px',
+                borderColor: `${t.purple}55`,
+                color: t.purple,
+              }}>
+              {cancelDiag?.loading ? 'Running…' : 'Run diagnostic'}
+            </button>
+            {cancelDiag && !cancelDiag.loading && (
+              <pre style={{
+                marginTop: 8, padding: '12px 14px',
+                background: t.card2, border: `1px solid ${t.border}`,
+                borderRadius: 8, textAlign: 'left',
+                fontSize: 10, color: t.text2,
+                maxWidth: 720, maxHeight: 400, overflow: 'auto',
+                fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+                whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+              }}>
+{cancelDiag.error
+  ? `Fetch error: ${cancelDiag.error}`
+  : `HTTP ${cancelDiag.status}\n\n${JSON.stringify(cancelDiag.body, null, 2)}`}
+              </pre>
+            )}
           </div>
         </div>
       ) : tab === 'cancellations' ? (
