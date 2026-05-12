@@ -21,7 +21,7 @@
 // collapsed section at the bottom since the primary use case is the
 // booking ledger now.
 
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useApp } from '../../lib/context'
 import GoldSpinner from '../ui/GoldSpinner'
 import { authedFetch } from '../../lib/authedFetch'
@@ -524,8 +524,20 @@ export default function BiddingVolume() {
       )}
 
       <style>{`
-        @keyframes spin { to { transform: rotate(360deg) } }
+        @keyframes spin  { to { transform: rotate(360deg) } }
         @keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: .5 } }
+        /* Source picker — staggered branch fade-in when a region expands */
+        @keyframes bidRowIn       { from { opacity: 0; transform: translateY(-4px) } to { opacity: 1; transform: translateY(0) } }
+        @keyframes bidGroupExpand { from { opacity: 0; max-height: 0 } to { opacity: 1; max-height: 9999px } }
+        @keyframes bidActionIn    { from { opacity: 0; transform: translateY(4px) } to { opacity: 1; transform: translateY(0) } }
+        /* Modal entrance — soft scale + fade */
+        @keyframes bidModalOverlayIn { from { opacity: 0 } to { opacity: 1 } }
+        @keyframes bidModalIn        { from { opacity: 0; transform: translateY(12px) scale(.98) } to { opacity: 1; transform: translateY(0) scale(1) } }
+        /* Chip add-in */
+        @keyframes bidChipIn { from { opacity: 0; transform: scale(.85) } to { opacity: 1; transform: scale(1) } }
+        @media (prefers-reduced-motion: reduce) {
+          [class*="bid"] { animation: none !important; }
+        }
       `}</style>
     </div>
   )
@@ -793,29 +805,66 @@ function ActionPill({ label, color, onClick, t, subtle = false }) {
 function SourcePicker({ t, card, supply, bangBranches, inTBranches, selected, selectedTotal, selectionMode, branchLocked, onToggleBranch, onSelectGroup, onBook, incomingNetWt, incomingBills, arrivalDate }) {
   const hasSelection = selected.size > 0
 
-  // Each region group is collapsed by default — the operator opens the
-  // ones they care about. The header row stays clickable + carries the
-  // group-level select-all checkbox.
-  const [openGroups, setOpenGroups] = useState(() => new Set())
-  const toggleGroup = (k) => setOpenGroups(prev => {
+  // Region-wise grouping — every branch lives under its own region. Bangalore
+  // is one of the regions, not a separate top-level container, so the picker
+  // reads as a uniform list of region drill-downs.
+  const REGION_ORDER = ['Bangalore', 'Rest of Karnataka', 'Kerala', 'Andhra Pradesh', 'Telangana', 'Tamil Nadu']
+  const branchesByRegion = useMemo(() => {
+    const m = {}
+    for (const b of bangBranches) {
+      const r = b.region || 'Bangalore'
+      ;(m[r] = m[r] || []).push({ ...b, _prefix: 'B' })
+    }
+    for (const b of inTBranches) {
+      const r = b.region || 'Unknown'
+      ;(m[r] = m[r] || []).push({ ...b, _prefix: 'T' })
+    }
+    return m
+  }, [bangBranches, inTBranches])
+  const orderedRegions = useMemo(() => {
+    const all = Object.keys(branchesByRegion)
+    return [
+      ...REGION_ORDER.filter(r => all.includes(r)),
+      ...all.filter(r => !REGION_ORDER.includes(r)).sort(),
+    ]
+  }, [branchesByRegion])
+
+  // Each region group collapsed by default. The operator drills into the
+  // ones they're actually booking from.
+  const [openRegions, setOpenRegions] = useState(() => new Set())
+  const toggleRegion = (r) => setOpenRegions(prev => {
     const next = new Set(prev)
-    if (next.has(k)) next.delete(k); else next.add(k)
+    if (next.has(r)) next.delete(r); else next.add(r)
     return next
   })
 
-  // Group "select all" toggles only count branches that are currently
-  // eligible (not locked by the Kerala rule).
-  const bangEligible = bangBranches.filter(b => !branchLocked(b))
-  const inTEligible  = inTBranches.filter(b => !branchLocked(b))
-  const bangAllSelected = bangEligible.length > 0 && bangEligible.every(b => selected.has(`B:${b.branch_name}`))
-  const inTAllSelected  = inTEligible.length  > 0 && inTEligible.every(b => selected.has(`T:${b.branch_name}`))
+  // Shared grid template — checkbox · branch · bills · net weight.
+  // (Region column dropped from the row since the group header already
+  // carries the region name; saves a column and lets the branch name
+  // breathe.)
+  const ROW_GRID = '28px minmax(160px, 1fr) 80px 110px'
 
-  // Shared grid template across header row + branch rows so the columns
-  // line up perfectly: checkbox · branch · region · bills · net weight.
-  const ROW_GRID = '28px minmax(140px, 1fr) 1fr 70px 100px'
+  const accentForRegion = (r) => REGION_COLORS[r] || t.text3
 
-  const renderBranchRow = (b, prefix, accent) => {
-    const k = `${prefix}:${b.branch_name}`
+  // Column header strip — explicit names for the data underneath.
+  const renderColHeader = () => (
+    <div style={{
+      display: 'grid',
+      gridTemplateColumns: ROW_GRID,
+      gap: 12,
+      padding: '8px 18px',
+      background: `${t.text4}06`,
+      borderBottom: `1px solid ${t.border}`,
+    }}>
+      <span />
+      <span style={{ fontSize: 9.5, color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 700 }}>Branch</span>
+      <span style={{ fontSize: 9.5, color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 700, textAlign: 'right' }}>Bills</span>
+      <span style={{ fontSize: 9.5, color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 700, textAlign: 'right' }}>Net Weight</span>
+    </div>
+  )
+
+  const renderBranchRow = (b, accent, idx) => {
+    const k = `${b._prefix}:${b.branch_name}`
     const on = selected.has(k)
     const locked = branchLocked(b)
     const lockReason = locked
@@ -832,13 +881,14 @@ function SourcePicker({ t, card, supply, bangBranches, inTBranches, selected, se
           gridTemplateColumns: ROW_GRID,
           gap: 12,
           alignItems: 'center',
-          padding: '10px 18px',
+          padding: '10px 18px 10px 32px',  // extra left pad — visually nested under group
           borderBottom: `1px solid ${t.border}30`,
           cursor: locked ? 'not-allowed' : 'pointer',
           background: on ? `${accent}10` : 'transparent',
           borderLeft: `3px solid ${on ? accent : 'transparent'}`,
           opacity: locked ? 0.4 : 1,
-          transition: 'background .12s, opacity .15s',
+          transition: 'background .15s ease, opacity .2s ease',
+          animation: `bidRowIn .22s cubic-bezier(.4,0,.2,1) ${Math.min(idx, 8) * 18}ms backwards`,
         }}
         onMouseEnter={e => { if (!on && !locked) e.currentTarget.style.background = `${t.text4}06` }}
         onMouseLeave={e => { if (!on && !locked) e.currentTarget.style.background = 'transparent' }}>
@@ -846,12 +896,6 @@ function SourcePicker({ t, card, supply, bangBranches, inTBranches, selected, se
           onChange={() => onToggleBranch(k)} onClick={e => e.stopPropagation()}
           style={{ accentColor: accent, cursor: locked ? 'not-allowed' : 'pointer', width: 16, height: 16 }} />
         <span style={{ fontSize: 12.5, color: t.text1, fontWeight: 600 }}>{b.branch_name}</span>
-        <span style={{ fontSize: 11, color: REGION_COLORS[b.region] || t.text3, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-          {b.region}
-          {b.region === 'Kerala' && (
-            <span style={{ fontSize: 9, color: t.green, background: `${t.green}15`, border: `1px solid ${t.green}40`, borderRadius: 3, padding: '1px 4px', fontWeight: 700, letterSpacing: '.06em' }}>KL</span>
-          )}
-        </span>
         <span style={{ fontSize: 11.5, color: t.text2, fontFamily: 'monospace', textAlign: 'right', fontWeight: 600 }}>
           {b.total_bills || 0}
         </span>
@@ -862,58 +906,73 @@ function SourcePicker({ t, card, supply, bangBranches, inTBranches, selected, se
     )
   }
 
-  // Column header strip — sits between the action bar and the first group
-  // so the meaning of each column is explicit.
-  const renderColHeader = () => (
-    <div style={{
-      display: 'grid',
-      gridTemplateColumns: ROW_GRID,
-      gap: 12,
-      padding: '8px 18px',
-      background: `${t.text4}06`,
-      borderBottom: `1px solid ${t.border}`,
-    }}>
-      <span />
-      <span style={{ fontSize: 9.5, color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 700 }}>Branch</span>
-      <span style={{ fontSize: 9.5, color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 700 }}>Region</span>
-      <span style={{ fontSize: 9.5, color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 700, textAlign: 'right' }}>Bills</span>
-      <span style={{ fontSize: 9.5, color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 700, textAlign: 'right' }}>Net Weight</span>
-    </div>
-  )
+  const renderRegionGroup = (region) => {
+    const branches = branchesByRegion[region] || []
+    if (!branches.length) return null
+    const accent = accentForRegion(region)
+    const open = openRegions.has(region)
+    const isKerala = region === 'Kerala'
 
-  const renderGroupHeader = (key, label, branches, accent, eligible, allSelected, allOnHandler, contextLine, totalNetWt) => {
-    const open = openGroups.has(key)
+    const eligible = branches.filter(b => !branchLocked(b))
+    const allSelected = eligible.length > 0 && eligible.every(b => selected.has(`${b._prefix}:${b.branch_name}`))
+    const totalBills = branches.reduce((s, b) => s + (b.total_bills || 0), 0)
+    const totalNetWt = branches.reduce((s, b) => s + Number(b.total_net_wt || 0), 0)
+
+    const contextLine = region === 'Bangalore'
+      ? `purchase ${fmtDateShort(supply?.bangalore_purchase_date || '')}`
+      : `arriving ${fmtDateShort(supply?.arrival_date || arrivalDate)}`
+
     return (
-      <div onClick={() => toggleGroup(key)}
-        style={{
-          display: 'flex', alignItems: 'center', gap: 10,
-          padding: '10px 18px',
-          background: `${accent}08`,
-          borderBottom: `1px solid ${t.border}`,
-          cursor: 'pointer', userSelect: 'none',
-        }}>
-        <span style={{
-          width: 16, height: 16, borderRadius: '50%',
-          background: `${accent}25`, color: accent,
-          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-          fontSize: 9, fontWeight: 700,
-          transform: open ? 'rotate(0)' : 'rotate(-90deg)',
-          transition: 'transform .2s',
-          flexShrink: 0,
-        }}>▾</span>
-        <input type="checkbox" checked={allSelected} disabled={eligible.length === 0}
-          onChange={() => allOnHandler()}
-          onClick={e => e.stopPropagation()}
-          style={{ accentColor: accent, cursor: eligible.length ? 'pointer' : 'not-allowed', width: 16, height: 16 }} />
-        <span style={{ fontSize: 11, color: t.text2, fontWeight: 700, letterSpacing: '.04em', textTransform: 'uppercase' }}>{label}</span>
-        <span style={{ fontSize: 10, color: t.text4, fontFamily: 'monospace' }}>{contextLine}</span>
-        <div style={{ flex: 1 }} />
-        <span style={{ fontSize: 11, color: accent, fontFamily: 'monospace', fontWeight: 700 }}>
-          {fmt(totalNetWt, 2)}<span style={{ fontSize: 9, marginLeft: 2 }}>g</span>
-        </span>
+      <div key={region}>
+        <div onClick={() => toggleRegion(region)}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 10,
+            padding: '11px 18px',
+            background: open ? `${accent}10` : `${accent}06`,
+            borderBottom: `1px solid ${t.border}`,
+            cursor: 'pointer', userSelect: 'none',
+            transition: 'background .2s ease',
+          }}>
+          <span style={{
+            width: 18, height: 18, borderRadius: '50%',
+            background: `${accent}25`, color: accent,
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: 10, fontWeight: 700,
+            transform: open ? 'rotate(0)' : 'rotate(-90deg)',
+            transition: 'transform .25s ease',
+            flexShrink: 0,
+          }}>▾</span>
+          <input type="checkbox" checked={allSelected} disabled={eligible.length === 0}
+            onChange={() => onSelectGroup(branches, branches[0]?._prefix || 'T', allSelected)}
+            onClick={e => e.stopPropagation()}
+            style={{ accentColor: accent, cursor: eligible.length ? 'pointer' : 'not-allowed', width: 16, height: 16 }} />
+          <span style={{ fontSize: 12, color: t.text1, fontWeight: 700, letterSpacing: '.04em', textTransform: 'uppercase' }}>
+            {region}
+          </span>
+          {isKerala && (
+            <span title="Kerala bookings can’t mix with other regions"
+              style={{ fontSize: 9, color: t.green, background: `${t.green}18`, border: `1px solid ${t.green}40`, borderRadius: 3, padding: '2px 6px', fontWeight: 800, letterSpacing: '.08em' }}>
+              KL · EXCLUSIVE
+            </span>
+          )}
+          <span style={{ fontSize: 10, color: t.text4, fontFamily: 'monospace' }}>
+            {branches.length} {branches.length === 1 ? 'branch' : 'branches'} · {totalBills} bill{totalBills === 1 ? '' : 's'} · {contextLine}
+          </span>
+          <div style={{ flex: 1 }} />
+          <span style={{ fontSize: 12, color: accent, fontFamily: 'monospace', fontWeight: 700 }}>
+            {fmt(totalNetWt, 2)}<span style={{ fontSize: 9, marginLeft: 2 }}>g</span>
+          </span>
+        </div>
+        {open && (
+          <div style={{ animation: 'bidGroupExpand .25s cubic-bezier(.4,0,.2,1)' }}>
+            {branches.map((b, i) => renderBranchRow(b, accent, i))}
+          </div>
+        )}
       </div>
     )
   }
+
+  const totalRegions = orderedRegions.length
 
   return (
     <div style={{ ...card, overflow: 'hidden' }}>
@@ -924,16 +983,16 @@ function SourcePicker({ t, card, supply, bangBranches, inTBranches, selected, se
         borderBottom: `1px solid ${t.border}`,
         display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
         background: hasSelection ? `linear-gradient(90deg, ${t.gold}10 0%, transparent 70%)` : 'transparent',
-        transition: 'background .2s',
+        transition: 'background .25s ease',
       }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 13, fontWeight: 700, color: t.text1 }}>Incoming Sources</div>
           <div style={{ fontSize: 11, color: t.text4, marginTop: 2 }}>
-            Bangalore today + outside in-transit · {fmt(incomingNetWt, 2)} g · {incomingBills} bill{incomingBills === 1 ? '' : 's'}
+            {totalRegions} region{totalRegions === 1 ? '' : 's'} · {fmt(incomingNetWt, 2)} g · {incomingBills} bill{incomingBills === 1 ? '' : 's'}
           </div>
         </div>
         {hasSelection ? (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, animation: 'bidActionIn .25s cubic-bezier(.34,1.2,.64,1)' }}>
             {selectionMode === 'kerala' && (
               <span title="Kerala bookings can’t mix with other regions"
                 style={{ fontSize: 9.5, color: t.green, background: `${t.green}18`, border: `1px solid ${t.green}40`, borderRadius: 4, padding: '3px 8px', fontWeight: 700, letterSpacing: '.08em' }}>
@@ -955,7 +1014,10 @@ function SourcePicker({ t, card, supply, bangBranches, inTBranches, selected, se
                 fontSize: 12.5, fontWeight: 700, letterSpacing: '.04em',
                 cursor: 'pointer', boxShadow: `0 1px 4px ${t.gold}50`,
                 whiteSpace: 'nowrap',
-              }}>
+                transition: 'transform .12s ease, box-shadow .12s ease',
+              }}
+              onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-1px)'; e.currentTarget.style.boxShadow = `0 4px 12px ${t.gold}60` }}
+              onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)';   e.currentTarget.style.boxShadow = `0 1px 4px ${t.gold}50` }}>
               Book Selected →
             </button>
           </div>
@@ -967,43 +1029,150 @@ function SourcePicker({ t, card, supply, bangBranches, inTBranches, selected, se
       </div>
 
       {/* Column header strip */}
-      {(bangBranches.length > 0 || inTBranches.length > 0) && renderColHeader()}
+      {totalRegions > 0 && renderColHeader()}
 
-      {/* Bangalore group — collapsed by default */}
-      {bangBranches.length > 0 && (
-        <div>
-          {renderGroupHeader(
-            'bangalore', 'Bangalore', bangBranches, t.red,
-            bangEligible, bangAllSelected,
-            () => onSelectGroup(bangBranches, 'B', bangAllSelected),
-            `${bangBranches.length} ${bangBranches.length === 1 ? 'branch' : 'branches'} · purchase ${fmtDateShort(supply?.bangalore_purchase_date || '')}`,
-            supply?.bangalore?.total?.net_wt || 0,
-          )}
-          {openGroups.has('bangalore') && bangBranches.map(b => renderBranchRow(b, 'B', t.red))}
-        </div>
-      )}
+      {/* Region groups, ordered */}
+      {orderedRegions.map(renderRegionGroup)}
 
-      {/* Outside in-transit group — collapsed by default */}
-      {inTBranches.length > 0 && (
-        <div>
-          {renderGroupHeader(
-            'in_transit', 'Outside In-Transit', inTBranches, t.blue,
-            inTEligible, inTAllSelected,
-            () => onSelectGroup(inTBranches, 'T', inTAllSelected),
-            `${inTBranches.length} ${inTBranches.length === 1 ? 'branch' : 'branches'} · arriving ${fmtDateShort(supply?.arrival_date || arrivalDate)}`,
-            supply?.in_transit?.total?.net_wt || 0,
-          )}
-          {openGroups.has('in_transit') && inTBranches.map(b => renderBranchRow(b, 'T', t.blue))}
-        </div>
-      )}
-
-      {bangBranches.length === 0 && inTBranches.length === 0 && (
+      {totalRegions === 0 && (
         <div style={{ padding: '32px 18px', textAlign: 'center', color: t.text4, fontSize: 12 }}>
           No incoming sources for this date.
         </div>
       )}
     </div>
   )
+}
+
+// ── Bidder combobox — custom dropdown (replaces native datalist) ─────────────
+// Wraps the input + a click-to-open dropdown listing known bidders, with an
+// always-visible "+ Add new bidder" option at the top of the list (and a
+// dynamic "+ Add '<typed>'" row when the operator types a name that's not
+// in the roster). Native datalist couldn't surface the add-new affordance
+// inside the drop-down itself, which is what the ops team asked for.
+function BidderCombobox({ t, value, onChange, options, onAddNew }) {
+  const [open, setOpen] = useState(false)
+  const wrapRef = useRef(null)
+
+  // Close when clicking outside.
+  useEffect(() => {
+    if (!open) return
+    const onDoc = (e) => { if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false) }
+    document.addEventListener('mousedown', onDoc)
+    return () => document.removeEventListener('mousedown', onDoc)
+  }, [open])
+
+  const query = value.trim().toLowerCase()
+  const filtered = useMemo(() => {
+    if (!query) return options
+    return options.filter(o => o.toLowerCase().includes(query))
+  }, [options, query])
+  const isNew = value.trim().length > 0 && !options.some(o => o.toLowerCase() === query)
+
+  return (
+    <div ref={wrapRef} style={{ position: 'relative' }}>
+      <div style={{ position: 'relative' }}>
+        <input value={value}
+          onChange={e => { onChange(e.target.value); if (!open) setOpen(true) }}
+          onFocus={() => setOpen(true)}
+          autoFocus
+          placeholder="Select or type bidder name"
+          style={{ ...inputStyle(t), paddingRight: 32 }} />
+        <button type="button" onClick={() => setOpen(o => !o)}
+          style={{
+            position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)',
+            background: 'transparent', border: 'none', color: t.text3,
+            cursor: 'pointer', padding: '4px 6px', borderRadius: 4,
+            fontSize: 10, lineHeight: 1,
+            transition: 'transform .2s, color .2s',
+          }}
+          onMouseEnter={e => { e.currentTarget.style.color = t.gold }}
+          onMouseLeave={e => { e.currentTarget.style.color = t.text3 }}>
+          <span style={{ display: 'inline-block', transform: open ? 'rotate(180deg)' : 'rotate(0)', transition: 'transform .2s' }}>▾</span>
+        </button>
+      </div>
+      {open && (
+        <div style={{
+          position: 'absolute', left: 0, right: 0, top: 'calc(100% + 4px)',
+          background: t.card, border: `1px solid ${t.border}`,
+          borderRadius: 8, boxShadow: '0 10px 30px rgba(0,0,0,.3)',
+          maxHeight: 240, overflowY: 'auto', zIndex: 200,
+          animation: 'bidRowIn .15s cubic-bezier(.4,0,.2,1)',
+        }}>
+          {/* Add-new row sits at the very top so it's always reachable */}
+          {isNew && (
+            <button type="button"
+              onClick={() => { if (onAddNew) onAddNew(value.trim()); setOpen(false) }}
+              style={{
+                width: '100%', textAlign: 'left',
+                background: `${t.green}10`,
+                border: 'none', borderBottom: `1px solid ${t.border}`,
+                padding: '10px 14px',
+                fontSize: 12, color: t.green, fontWeight: 700,
+                cursor: 'pointer',
+                display: 'flex', alignItems: 'center', gap: 8,
+              }}
+              onMouseEnter={e => { e.currentTarget.style.background = `${t.green}20` }}
+              onMouseLeave={e => { e.currentTarget.style.background = `${t.green}10` }}>
+              <span style={{ fontSize: 14, lineHeight: 1 }}>+</span>
+              Add “{value.trim()}” as new bidder
+            </button>
+          )}
+          {!isNew && (
+            <div style={{
+              padding: '8px 14px',
+              fontSize: 9.5, color: t.text4,
+              letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 700,
+              borderBottom: `1px solid ${t.border}`, background: `${t.text4}06`,
+            }}>
+              {filtered.length} {filtered.length === 1 ? 'bidder' : 'bidders'} · type to add new
+            </div>
+          )}
+          {filtered.length === 0 && !isNew && (
+            <div style={{ padding: '20px 14px', fontSize: 11, color: t.text4, textAlign: 'center', fontStyle: 'italic' }}>
+              No bidders yet — type a name above to add one
+            </div>
+          )}
+          {filtered.map((o, i) => {
+            const isSelected = o === value
+            return (
+              <button key={o} type="button"
+                onClick={() => { onChange(o); setOpen(false) }}
+                style={{
+                  width: '100%', textAlign: 'left',
+                  background: isSelected ? `${t.gold}15` : 'transparent',
+                  border: 'none', borderBottom: i === filtered.length - 1 ? 'none' : `1px solid ${t.border}30`,
+                  padding: '9px 14px',
+                  fontSize: 12, color: isSelected ? t.gold : t.text2,
+                  fontWeight: isSelected ? 700 : 500,
+                  cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', gap: 8,
+                  transition: 'background .1s',
+                }}
+                onMouseEnter={e => { if (!isSelected) e.currentTarget.style.background = `${t.text4}10` }}
+                onMouseLeave={e => { if (!isSelected) e.currentTarget.style.background = 'transparent' }}>
+                <span style={{
+                  width: 18, height: 18, borderRadius: '50%',
+                  background: hashAvatarBg(o, t), color: '#fff',
+                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                  fontSize: 9, fontWeight: 700,
+                }}>{o[0].toUpperCase()}</span>
+                {o}
+                {isSelected && <span style={{ marginLeft: 'auto', color: t.gold, fontSize: 11 }}>✓</span>}
+              </button>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Stable avatar bg colour per bidder — same name always gets the same chip.
+function hashAvatarBg(s, t) {
+  const palette = [t.gold, t.blue, t.green, t.purple || '#8c5ac8', t.orange || '#e58a3b', t.red]
+  let h = 0
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0
+  return palette[h % palette.length]
 }
 
 // ── Booking modal — minimal: Bidder · Weight · Rate ──────────────────────────
@@ -1058,13 +1227,35 @@ function BookingModal({ t, arrivalDate, availablePool, remainingQty, selected, s
     }
   }
 
-  // Lock body scroll while the modal is open — page underneath shouldn't
-  // scroll when the operator wheel-scrolls inside the modal.
+  // Lock the page scroll while the modal is open. body.overflow=hidden alone
+  // doesn't hold on every browser (some put the scroller on <html>), so we
+  // pin both elements AND use position: fixed + saved scrollY to defeat any
+  // pull-to-refresh / overscroll behaviour on mobile. Restored on close.
   useEffect(() => {
     if (typeof document === 'undefined') return
-    const prev = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
-    return () => { document.body.style.overflow = prev }
+    const html = document.documentElement
+    const body = document.body
+    const scrollY = window.scrollY || window.pageYOffset || 0
+    const prev = {
+      bodyOverflow:  body.style.overflow,
+      htmlOverflow:  html.style.overflow,
+      bodyPosition:  body.style.position,
+      bodyTop:       body.style.top,
+      bodyWidth:     body.style.width,
+    }
+    body.style.overflow = 'hidden'
+    html.style.overflow = 'hidden'
+    body.style.position = 'fixed'
+    body.style.top      = `-${scrollY}px`
+    body.style.width    = '100%'
+    return () => {
+      body.style.overflow = prev.bodyOverflow
+      html.style.overflow = prev.htmlOverflow
+      body.style.position = prev.bodyPosition
+      body.style.top      = prev.bodyTop
+      body.style.width    = prev.bodyWidth
+      window.scrollTo(0, scrollY)
+    }
   }, [])
 
   // Keep booking weight in sync with the selection (× gain factor) unless
@@ -1116,6 +1307,7 @@ function BookingModal({ t, arrivalDate, availablePool, remainingQty, selected, s
       background: 'rgba(0,0,0,.6)',
       display: 'flex', alignItems: 'center', justifyContent: 'center',
       padding: 20, overflow: 'auto',
+      animation: 'bidModalOverlayIn .18s ease',
     }}>
       <div onClick={e => e.stopPropagation()} style={{
         width: '100%', maxWidth: 460, maxHeight: '90vh', overflow: 'auto',
@@ -1123,6 +1315,7 @@ function BookingModal({ t, arrivalDate, availablePool, remainingQty, selected, s
         borderRadius: 16,
         boxShadow: '0 20px 60px rgba(0,0,0,.4)',
         display: 'flex', flexDirection: 'column',
+        animation: 'bidModalIn .25s cubic-bezier(.34,1.2,.64,1)',
       }}>
         {/* Header */}
         <div style={{ padding: '20px 22px 14px', borderBottom: `1px solid ${t.border}` }}>
@@ -1153,10 +1346,16 @@ function BookingModal({ t, arrivalDate, availablePool, remainingQty, selected, s
                 </span>
               </div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
-                {visibleChips.map(({ k, b }) => {
+                {visibleChips.map(({ k, b }, i) => {
                   const accent = b.group === 'bangalore' ? t.red : t.blue
                   return (
-                    <span key={k} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: `${accent}12`, border: `1px solid ${accent}30`, borderRadius: 99, padding: '2px 4px 2px 9px', fontSize: 10.5, color: t.text2, fontWeight: 600 }}>
+                    <span key={k} style={{
+                      display: 'inline-flex', alignItems: 'center', gap: 5,
+                      background: `${accent}12`, border: `1px solid ${accent}30`,
+                      borderRadius: 99, padding: '2px 4px 2px 9px',
+                      fontSize: 10.5, color: t.text2, fontWeight: 600,
+                      animation: `bidChipIn .18s cubic-bezier(.34,1.2,.64,1) ${Math.min(i, 12) * 20}ms backwards`,
+                    }}>
                       {b.branch_name}
                       <button onClick={() => onUnselect(k)} title="Remove"
                         style={{ background: 'transparent', border: 'none', color: t.text4, cursor: 'pointer', fontSize: 11, lineHeight: 1, padding: '0 3px', borderRadius: 99 }}
@@ -1183,65 +1382,47 @@ function BookingModal({ t, arrivalDate, availablePool, remainingQty, selected, s
             </div>
           )}
 
-          {/* Bidder combobox — known names auto-suggest via <datalist>.
-              Typing a new name surfaces a "+ Save" chip below so it joins
-              the local roster immediately (the API list refreshes on the
-              next mount via cal_quotas anyway). */}
+          {/* Bidder combobox — custom dropdown with inline + Add new */}
           <Field label="Bidder">
-            <input value={party} list="bidding-bidder-list"
-              onChange={e => setParty(e.target.value)}
-              autoFocus placeholder="Select or type bidder name"
-              style={inputStyle(t)} />
-            <datalist id="bidding-bidder-list">
-              {allBidders.map(b => <option key={b} value={b} />)}
-            </datalist>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6, minHeight: 18 }}>
-              {isNewBidder ? (
-                <button type="button" onClick={saveNewBidder}
-                  style={{
-                    background: `${t.green}15`,
-                    border: `1px solid ${t.green}40`,
-                    color: t.green,
-                    borderRadius: 99,
-                    padding: '3px 10px',
-                    fontSize: 10,
-                    fontWeight: 700,
-                    cursor: 'pointer',
-                    letterSpacing: '.04em',
-                  }}>
-                  + Save “{party.trim()}” as new bidder
-                </button>
-              ) : allBidders.length > 0 && !party ? (
-                <span style={{ fontSize: 10, color: t.text4 }}>
-                  {allBidders.length} known bidder{allBidders.length === 1 ? '' : 's'} · type to filter or add a new one
-                </span>
-              ) : null}
-            </div>
+            <BidderCombobox
+              t={t}
+              value={party}
+              onChange={setParty}
+              options={allBidders}
+              onAddNew={(name) => { setParty(name); saveNewBidder() }}
+            />
           </Field>
 
-          {/* Net Weight (read-only from selection) + Booking Weight (editable)
-              The booking weight defaults to net × (1 + effective gain rate)
-              so the commit reflects what we expect to actually deliver. */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-            <Field label="Net Weight">
+          {/* Net Weight + Booking Weight side by side. Short uppercase labels
+              with a small typed-tag below so nothing gets clipped. The two
+              fields visually pair as a small "= net + gain" computation. */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 12px 1fr', gap: 8, alignItems: 'start' }}>
+            <Field label="Net Wt (g)">
               <input value={netFromSelection > 0 ? netFromSelection.toFixed(2) : ''}
                 readOnly placeholder="from selection"
                 style={{ ...inputStyle(t), fontFamily: 'monospace', background: t.card2 || t.card, color: t.text3, cursor: 'default' }} />
-              <div style={{ fontSize: 10, color: t.text4, marginTop: 4 }}>
-                Sum of selected branches
+              <div style={{ fontSize: 9.5, color: t.text4, marginTop: 4, letterSpacing: '.02em' }}>
+                sum of selected
               </div>
             </Field>
-            <Field label={`Booking Weight${defaultBookingWeight > 0 && !bookingWeightDirty ? ' · auto · net + gain' : ''}`}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', paddingTop: 22, fontSize: 14, color: t.text4 }}>+</div>
+            <Field label="Booking Wt (g)">
               <input value={bookingWeight}
                 onChange={e => { setBookingWeight(e.target.value.replace(/[^\d.]/g, '')); setBookingWeightDirty(true) }}
                 placeholder="0.000"
                 style={{ ...inputStyle(t), fontFamily: 'monospace', borderColor: bookingWeightDirty || netFromSelection === 0 ? t.border : `${t.gold}80` }} />
-              {bookingWeightDirty && defaultBookingWeight > 0 && (
-                <button type="button" onClick={() => { setBookingWeightDirty(false); setBookingWeight(defaultBookingWeight.toFixed(2)) }}
-                  style={{ background: 'transparent', border: 'none', color: t.gold, fontSize: 10, cursor: 'pointer', padding: '4px 0 0', textAlign: 'left' }}>
-                  ↺ Reset to {fmt(defaultBookingWeight, 2)} g
-                </button>
-              )}
+              <div style={{ fontSize: 9.5, color: t.text4, marginTop: 4, letterSpacing: '.02em', display: 'flex', alignItems: 'center', gap: 6 }}>
+                {defaultBookingWeight > 0 && !bookingWeightDirty ? (
+                  <span style={{ color: t.gold, fontWeight: 700 }}>auto · net + gain</span>
+                ) : bookingWeightDirty && defaultBookingWeight > 0 ? (
+                  <button type="button" onClick={() => { setBookingWeightDirty(false); setBookingWeight(defaultBookingWeight.toFixed(2)) }}
+                    style={{ background: 'transparent', border: 'none', color: t.gold, fontSize: 9.5, cursor: 'pointer', padding: 0, textAlign: 'left' }}>
+                    ↺ reset to {fmt(defaultBookingWeight, 2)} g
+                  </button>
+                ) : (
+                  <span>manual entry</span>
+                )}
+              </div>
             </Field>
           </div>
 
