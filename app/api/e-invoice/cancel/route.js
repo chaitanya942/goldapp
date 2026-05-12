@@ -98,7 +98,10 @@ export async function POST(req) {
 
     await logConsignmentEvent(supabase, {
       consignment_id,
-      event_type:  irpNotFound ? 'einvoice_cancel_skipped' : 'einvoice_cancelled',
+      // Use the standard event_type either way so the Cancellations tab
+      // picks it up; the not_active_at_irp flag (if set) preserves the
+      // distinction for audit reviewers.
+      event_type:  'einvoice_cancelled',
       actor_email: actorEmail,
       details:     {
         irn:         cancelledIrn,
@@ -106,7 +109,10 @@ export async function POST(req) {
         remark:      remark      || 'Duplicate',
         irp_ack:     govtResp,
         auto_rejected: true,
-        ...(irpNotFound ? { soft_success_reason: 'IRP returned 107 (IRN not active) — local cleanup only' } : {}),
+        ...(irpNotFound ? {
+          not_active_at_irp: true,
+          not_active_reason: 'IRP returned 107 (IRN not recognised) — treated as already cancelled upstream',
+        } : {}),
       },
     })
 

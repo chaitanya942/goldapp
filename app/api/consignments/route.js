@@ -430,12 +430,23 @@ export async function GET(req) {
   if (action === 'cancellation_history') {
     // No date floor — the Cancellations tab now shows every recorded
     // cancellation. Audit data should be permanent.
+    // Includes the legacy *_cancel_skipped variants from an earlier soft-
+    // success implementation so those audit entries don't get orphaned.
+    // New code paths write the standard *_cancelled type either way; the
+    // skipped variants only exist on rows logged during that brief window.
     const { data: events, error: evErr } = await supabase
       .from('consignment_activity_log')
       .select('id, consignment_id, event_type, actor_email, actor_role, details, created_at')
-      .in('event_type', ['ewb_cancelled', 'einvoice_cancelled', 'cancelled'])
+      .in('event_type', ['ewb_cancelled', 'einvoice_cancelled', 'cancelled', 'ewb_cancel_skipped', 'einvoice_cancel_skipped'])
       .order('created_at', { ascending: false })
     if (evErr) return Response.json({ error: evErr.message }, { status: 500 })
+
+    // Normalise legacy skipped events back to the canonical type so the rest
+    // of this handler + the UI's badge logic don't need a special case.
+    for (const e of events || []) {
+      if (e.event_type === 'ewb_cancel_skipped')      e.event_type = 'ewb_cancelled'
+      if (e.event_type === 'einvoice_cancel_skipped') e.event_type = 'einvoice_cancelled'
+    }
 
     // Group events by consignment_id. For each group prefer specific event
     // types; fall back to the generic 'cancelled' if that's all we have.
@@ -1631,18 +1642,23 @@ export async function POST(req) {
           gstinOverride: gstinFor,
         })
         // Soft-success path: NIC said the EWB is no longer active (107 after
-        // retries). Treat as already-cancelled-upstream and proceed.
+        // retries). Log under the standard ewb_cancelled type so the
+        // Cancellations tab picks it up; flag the not_active_at_nic detail so
+        // anyone auditing can see NIC didn't actively confirm.
         if (nicResult?.ewb_not_found) {
           await logConsignmentEvent(supabase, {
             consignment_id: id,
-            event_type:     'ewb_cancel_skipped',
+            event_type:     'ewb_cancelled',
             actor_email:    actorEmail,
             actor_role:     auth.role,
             details: {
-              ewb_no:        c.eway_bill_no,
-              reason:        'NIC returned 107 (EWB not active) — treating as already cancelled',
-              raw:           nicResult?.raw,
-              triggered_by:  'approve_cancellation',
+              ewb_no:                c.eway_bill_no,
+              reason_code:           '2',
+              remark:                c.cancellation_reason || 'Operations cancellation request',
+              triggered_by:          'approve_cancellation',
+              not_active_at_nic:     true,
+              not_active_reason:     'NIC returned 107 (EWB not recognised) — treated as already cancelled upstream',
+              raw_nic_response:      nicResult?.raw,
             },
           })
           portalCancelled.push(`EWB ${c.eway_bill_no} was already not active at NIC`)
@@ -1687,19 +1703,23 @@ export async function POST(req) {
           gstinOverride: gstinFor,
         })
         // Soft-success path: IRP said the IRN is no longer active (107 after
-        // retries). Treat as already-cancelled-upstream and proceed with
-        // local cleanup. Audit log records the discrepancy.
+        // retries). Log under the standard einvoice_cancelled type so the
+        // Cancellations tab picks it up; flag the not_active_at_irp detail
+        // so anyone auditing can see IRP didn't actively confirm.
         if (irpResult?.irp_not_found) {
           await logConsignmentEvent(supabase, {
             consignment_id: id,
-            event_type:     'einvoice_cancel_skipped',
+            event_type:     'einvoice_cancelled',
             actor_email:    actorEmail,
             actor_role:     auth.role,
             details: {
-              irn:           c.irn,
-              reason:        'IRP returned 107 (IRN not active) — treating as already cancelled',
-              raw:           irpResult?.raw,
-              triggered_by:  'approve_cancellation',
+              irn:                   c.irn,
+              reason_code:           '1',
+              remark:                c.cancellation_reason || 'Operations cancellation request',
+              triggered_by:          'approve_cancellation',
+              not_active_at_irp:     true,
+              not_active_reason:     'IRP returned 107 (IRN not recognised) — treated as already cancelled upstream',
+              raw_irp_response:      irpResult?.raw,
             },
           })
           portalCancelled.push(`E-Invoice was already not active at IRP`)

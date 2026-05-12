@@ -102,7 +102,10 @@ export async function POST(req) {
 
     await logConsignmentEvent(supabase, {
       consignment_id,
-      event_type:  ewbNotFound ? 'ewb_cancel_skipped' : 'ewb_cancelled',
+      // Use the standard event_type either way so the Cancellations tab
+      // picks it up; the not_active_at_nic flag (if set) preserves the
+      // distinction for audit reviewers.
+      event_type:  'ewb_cancelled',
       actor_email: actorEmail,
       details:     {
         ewb_no:      cancelledEwb,
@@ -110,7 +113,10 @@ export async function POST(req) {
         remark:      remark      || 'Duplicate Entry',
         nic_ack:     govtResp,
         auto_rejected: true,
-        ...(ewbNotFound ? { soft_success_reason: 'NIC returned 107 (EWB not active) — local cleanup only' } : {}),
+        ...(ewbNotFound ? {
+          not_active_at_nic: true,
+          not_active_reason: 'NIC returned 107 (EWB not recognised) — treated as already cancelled upstream',
+        } : {}),
       },
     })
 
