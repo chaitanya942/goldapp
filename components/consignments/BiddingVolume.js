@@ -87,10 +87,17 @@ export default function BiddingVolume() {
   const [bookingsResp, setBookingsResp] = useState(null)
   const [loading,      setLoading]      = useState(true)
   const [error,        setError]        = useState(null)
-  const [sourcesOpen,  setSourcesOpen]  = useState(false)
   const [showBookModal, setShowBookModal] = useState(false)
   const [cancelTarget, setCancelTarget] = useState(null)
   const [toast,        setToast]        = useState(null)
+  // Source selection — branches the ops team has ticked from the inline
+  // picker. Keys are `B:<branch_name>` for Bangalore, `T:<branch_name>` for
+  // outside in-transit. Lifted to the parent so the contextual CTA, the
+  // KPI summary, and the modal all share the same selection.
+  const [selected,     setSelected]     = useState(() => new Set())
+  // Reset selection when the arrival date changes — selections are date-
+  // specific (a YELAHANKA shipment for 13 May isn't the same as 14 May's).
+  useEffect(() => { setSelected(new Set()) }, [arrivalDate])
 
   // Gain rate — projected refining gain in % per gram of available net wt.
   // Default 3.5% (≈ 35 g per 1 kg available). One-level flat rate per the
@@ -132,6 +139,13 @@ export default function BiddingVolume() {
   useEffect(() => { fetchAll() }, [fetchAll])
 
   // ── Derived numbers ────────────────────────────────────────────────────────
+  // Pool composition (revised per ops spec):
+  //   gain          = incoming * gain_rate / 100   (refining margin estimate)
+  //   available     = incoming + gain              (total grams sellable)
+  //   booked        = sum(active bookings)         (cancelled excluded)
+  //   remaining     = available - booked           (still bookable)
+  // When remaining < 0, ops has overbooked; UI flags it but lets the booking
+  // through (operator may have committed against shipments not yet visible).
   const incomingNetWt   = supply?.grand_total?.net_wt    || 0
   const incomingGrossWt = supply?.grand_total?.gross_wt  || 0
   const incomingBills   = supply?.grand_total?.bills     || 0
@@ -140,9 +154,40 @@ export default function BiddingVolume() {
   const activeBookings  = useMemo(() => bookings.filter(b => b.status !== 'cancelled'), [bookings])
   const bookedQty       = bookingsResp?.active_qty_grams || 0
   const bookedValue     = bookingsResp?.active_value     || 0
-  const availableQty    = incomingNetWt - bookedQty
-  const overbooked      = availableQty < 0
-  const bookedPct       = incomingNetWt > 0 ? Math.min(100, (bookedQty / incomingNetWt) * 100) : 0
+
+  const gainGrams       = incomingNetWt * (gainRatePct / 100)
+  const availablePool   = incomingNetWt + gainGrams
+  const remainingQty    = availablePool - bookedQty
+  const overbooked      = remainingQty < 0
+  const bookedPct       = availablePool > 0 ? Math.min(100, (bookedQty / availablePool) * 100) : 0
+
+  // Source picker helpers — shared between the inline picker and the modal.
+  const bangBranches = supply?.bangalore?.branches  || []
+  const inTBranches  = supply?.in_transit?.branches || []
+  const branchesByKey = useMemo(() => {
+    const m = {}
+    for (const b of bangBranches) m[`B:${b.branch_name}`] = { ...b, group: 'bangalore' }
+    for (const b of inTBranches)  m[`T:${b.branch_name}`] = { ...b, group: 'in_transit' }
+    return m
+  }, [bangBranches, inTBranches])
+  const selectedTotal = useMemo(() => {
+    let s = 0
+    for (const k of selected) s += Number(branchesByKey[k]?.total_net_wt || 0)
+    return s
+  }, [selected, branchesByKey])
+  const toggleBranch = (k) => setSelected(prev => {
+    const next = new Set(prev)
+    if (next.has(k)) next.delete(k); else next.add(k)
+    return next
+  })
+  const selectGroupAll = (rows, prefix, allOn) => setSelected(prev => {
+    const next = new Set(prev)
+    for (const b of rows) {
+      const k = `${prefix}:${b.branch_name}`
+      if (allOn) next.delete(k); else next.add(k)
+    }
+    return next
+  })
 
   // ── Date label ─────────────────────────────────────────────────────────────
   const dayDiff = dateDiff(arrivalDate, today)
@@ -226,14 +271,13 @@ export default function BiddingVolume() {
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
+          {/* Top-right "+ New Booking" CTA removed — booking flow is now
+              source-pick first. The Book CTA surfaces inside the Incoming
+              Sources card as soon as any branch is checked. */}
           <button onClick={() => fetchAll()} disabled={loading}
             style={{ background: loading ? t.card2 : 'transparent', border: `1px solid ${t.border}`, borderRadius: '8px', padding: '7px 14px', fontSize: '12px', color: loading ? t.text4 : t.text2, cursor: loading ? 'default' : 'pointer', fontWeight: 500, display: 'flex', alignItems: 'center', gap: 6 }}>
             <span style={{ display: 'inline-block', animation: loading ? 'spin 1s linear infinite' : 'none', fontSize: '13px' }}>⟳</span>
             Refresh
-          </button>
-          <button onClick={() => setShowBookModal(true)}
-            style={{ background: t.gold, color: '#1a0a00', border: 'none', borderRadius: '8px', padding: '7px 16px', fontSize: '12px', fontWeight: 700, cursor: 'pointer', boxShadow: `0 1px 4px ${t.gold}50` }}>
-            + New Booking
           </button>
         </div>
       </div>
@@ -274,49 +318,48 @@ export default function BiddingVolume() {
         </div>
       </div>
 
-      {/* ── Worksheet KPI strip — Incoming / Booked / Available / Gain / Progress ── */}
+      {/* ── KPI strip — Incoming + Gain = Available; Available − Booked = Remaining
+          Order reads left-to-right as the equation. The two operator-input
+          tiles (Gain rate override, Booked from the bookings list) sit
+          between the two computed totals. */}
       <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(5, 1fr)', gap: '10px' }}>
-        <KpiCard label="Incoming Net Wt" value={`${fmt(incomingNetWt, 2)} g`} sub={`${incomingBills} bill${incomingBills === 1 ? '' : 's'} · gross ${fmt(incomingGrossWt, 2)} g`} accent={t.gold} card={card} t={t} />
-        <KpiCard label="Booked" value={`${fmt(bookedQty, 2)} g`} sub={`${activeBookings.length} booking${activeBookings.length === 1 ? '' : 's'} · ${fmtINR(bookedValue)}`} accent={t.blue} card={card} t={t} />
         <KpiCard
-          label={overbooked ? 'Overbooked' : 'Available'}
-          value={`${overbooked ? '−' : ''}${fmt(Math.abs(availableQty), 2)} g`}
-          sub={overbooked
-            ? `${fmt(Math.abs(availableQty), 2)} g over the incoming pool`
-            : `${incomingNetWt > 0 ? Math.round(100 - bookedPct) : 0}% of incoming free`}
-          accent={overbooked ? t.red : t.green} card={card} t={t}
-          pulse={overbooked} />
+          label="Incoming"
+          value={`${fmt(incomingNetWt, 2)} g`}
+          sub={`${incomingBills} bill${incomingBills === 1 ? '' : 's'} · gross ${fmt(incomingGrossWt, 2)} g`}
+          accent={t.gold} card={card} t={t} />
 
-        {/* Projected gain — refining margin estimate on AVAILABLE net wt.
-            Rate is operator-overridable (default 3.5%) so days with
-            unusual recoveries can be modelled inline. The "available" basis
-            shrinks as ops books, which keeps this honest as the day's
-            commitments fill up. */}
         <GainCard
           t={t} card={card}
-          basisGrams={Math.max(0, availableQty)}
+          basisGrams={incomingNetWt}
+          gainGrams={gainGrams}
           ratePct={gainRatePct}
           editing={editingGain}
           onStartEdit={() => setEditingGain(true)}
           onSave={(v) => { setGainRatePct(v); setEditingGain(false) }}
           onCancel={() => setEditingGain(false)} />
 
-        {/* Bidding progress bar — visual sense of booked ratio */}
-        <div style={{ ...card, padding: '14px 18px', borderLeft: `3px solid ${t.purple}`, position: 'relative' }}>
-          <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', marginBottom: '10px', fontWeight: 700 }}>Bid Progress</div>
-          <div style={{ position: 'relative', height: 10, background: `${t.border}`, borderRadius: 6, overflow: 'hidden' }}>
-            <div style={{
-              position: 'absolute', left: 0, top: 0, bottom: 0,
-              width: `${Math.min(100, bookedPct)}%`,
-              background: `linear-gradient(90deg, ${t.blue} 0%, ${overbooked ? t.red : t.green} 100%)`,
-              transition: 'width .4s ease',
-            }} />
-          </div>
-          <div style={{ marginTop: 6, fontSize: '11px', color: t.text3, display: 'flex', justifyContent: 'space-between', fontFamily: 'monospace' }}>
-            <span>{Math.round(bookedPct)}% booked</span>
-            <span style={{ color: overbooked ? t.red : t.text3 }}>{Math.max(0, Math.round(100 - bookedPct))}% free</span>
-          </div>
-        </div>
+        <KpiCard
+          label="Available"
+          value={`${fmt(availablePool, 2)} g`}
+          sub={`Incoming + Gain · pool for tomorrow's bid`}
+          accent={t.text1 || t.gold} card={card} t={t}
+          big />
+
+        <KpiCard
+          label="Booked"
+          value={`${fmt(bookedQty, 2)} g`}
+          sub={`${activeBookings.length} booking${activeBookings.length === 1 ? '' : 's'} · ${fmtINR(bookedValue)}`}
+          accent={t.blue} card={card} t={t} />
+
+        <KpiCard
+          label={overbooked ? 'Overbooked' : 'Remaining'}
+          value={`${overbooked ? '−' : ''}${fmt(Math.abs(remainingQty), 2)} g`}
+          sub={overbooked
+            ? `${fmt(Math.abs(remainingQty), 2)} g past available pool`
+            : `${availablePool > 0 ? Math.round(100 - bookedPct) : 0}% of available free`}
+          accent={overbooked ? t.red : t.green} card={card} t={t}
+          pulse={overbooked} />
       </div>
 
       {overbooked && (
@@ -326,7 +369,27 @@ export default function BiddingVolume() {
         </div>
       )}
 
-      {/* ── Bookings list ── */}
+      {/* ── Incoming Sources — primary interactive surface.
+          Always expanded. Each branch is a checkbox row; checking a
+          branch adds its net weight to the running total in the
+          header's contextual action bar. Clicking "Book Selected →"
+          opens the booking modal with the weight pre-filled. */}
+      <SourcePicker
+        t={t} card={card}
+        supply={supply}
+        bangBranches={bangBranches}
+        inTBranches={inTBranches}
+        selected={selected}
+        selectedTotal={selectedTotal}
+        onToggleBranch={toggleBranch}
+        onSelectGroup={selectGroupAll}
+        onBook={() => setShowBookModal(true)}
+        incomingNetWt={incomingNetWt}
+        incomingBills={incomingBills}
+        arrivalDate={arrivalDate}
+      />
+
+      {/* ── Bookings list — what's already committed ── */}
       <BookingsList
         t={t} card={card}
         bookings={bookings}
@@ -335,47 +398,27 @@ export default function BiddingVolume() {
         onCreate={() => setShowBookModal(true)}
       />
 
-      {/* ── Sources (collapsed) — incoming volume breakdown by branch ── */}
-      <div style={{ ...card, overflow: 'hidden' }}>
-        <div onClick={() => setSourcesOpen(o => !o)}
-          style={{ padding: '12px 18px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 12, userSelect: 'none', borderBottom: sourcesOpen ? `1px solid ${t.border}` : 'none' }}>
-          <span style={{
-            width: 18, height: 18, borderRadius: '50%',
-            background: `${t.gold}25`, color: t.gold,
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            fontSize: 10, fontWeight: 700,
-            transform: sourcesOpen ? 'rotate(0)' : 'rotate(-90deg)',
-            transition: 'transform .2s',
-          }}>▾</span>
-          <div style={{ flex: 1 }}>
-            <div style={{ fontSize: '12.5px', fontWeight: 700, color: t.text1 }}>Incoming Sources</div>
-            <div style={{ fontSize: '10.5px', color: t.text4, marginTop: 2 }}>
-              Bangalore today + outside in-transit (arrival per branch TAT)
-            </div>
-          </div>
-          <span style={{ fontSize: '11px', color: t.text3, fontFamily: 'monospace' }}>
-            {fmt(incomingNetWt, 2)} g · {incomingBills} bills
-          </span>
-        </div>
-        {sourcesOpen && supply && (
-          <SourcesSection t={t} supply={supply} />
-        )}
-      </div>
-
       <div style={{ fontSize: '10px', color: t.text4, textAlign: 'right' }}>
         Bookings stored in <code style={{ background: t.card2, padding: '1px 4px', borderRadius: '3px', color: t.text3 }}>cal_quotas</code> — also visible in Sales → Cal Table → Quotas on the same date.
       </div>
 
-      {/* ── New Booking modal ── */}
+      {/* ── Booking form modal — fired from "Book Selected" on the sources
+            card. Source picker is no longer inside the modal; the modal
+            just shows a read-only chip strip of selected branches plus
+            the buyer-details form. */}
       {showBookModal && (
         <BookingModal
           t={t}
           arrivalDate={arrivalDate}
-          incomingNetWt={incomingNetWt}
-          bookedQty={bookedQty}
-          sources={supply}
+          availablePool={availablePool}
+          remainingQty={remainingQty}
+          selected={selected}
+          selectedTotal={selectedTotal}
+          branchesByKey={branchesByKey}
+          onUnselect={(k) => toggleBranch(k)}
           onSubmit={createBooking}
           onClose={() => setShowBookModal(false)}
+          onSuccess={() => setSelected(new Set())}
         />
       )}
 
@@ -412,25 +455,26 @@ export default function BiddingVolume() {
 }
 
 // ── KPI Card ─────────────────────────────────────────────────────────────────
-function KpiCard({ label, value, sub, accent, card, t, pulse = false }) {
+function KpiCard({ label, value, sub, accent, card, t, pulse = false, big = false }) {
   return (
     <div style={{ ...card, padding: '14px 18px', borderLeft: `3px solid ${accent}`, position: 'relative' }}>
       <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', marginBottom: '8px', fontWeight: 700 }}>{label}</div>
-      <div style={{ fontSize: '24px', fontWeight: 200, color: accent, fontFamily: 'monospace', lineHeight: 1, letterSpacing: '-.01em', animation: pulse ? 'pulse 1.4s infinite' : 'none' }}>{value}</div>
+      <div style={{ fontSize: big ? '28px' : '24px', fontWeight: big ? 300 : 200, color: accent, fontFamily: 'monospace', lineHeight: 1, letterSpacing: '-.01em', animation: pulse ? 'pulse 1.4s infinite' : 'none' }}>{value}</div>
       {sub && <div style={{ fontSize: '10px', color: t.text4, marginTop: 6 }}>{sub}</div>}
     </div>
   )
 }
 
-// ── Gain Card — projected refining margin on available net weight ────────────
+// ── Gain Card — projected refining margin on the incoming pool ───────────────
 // Inline-editable rate; default 3.5% ≈ 35g per kg. Click the rate pill to
 // edit; Enter saves, Escape cancels. Per-spec a "one-level" flat rate so
-// no tiered logic here.
-function GainCard({ t, card, basisGrams, ratePct, editing, onStartEdit, onSave, onCancel }) {
+// no tiered logic here. Basis = INCOMING (not available) — gain is what
+// we expect to recover *on top of* what's coming in, so it adds to the
+// sellable pool rather than scaling with what's left to book.
+function GainCard({ t, card, basisGrams, gainGrams, ratePct, editing, onStartEdit, onSave, onCancel }) {
   const [draft, setDraft] = useState(ratePct)
   useEffect(() => { if (editing) setDraft(ratePct) }, [editing, ratePct])
   const accent = t.orange || '#e58a3b'
-  const gainGrams = basisGrams * (ratePct / 100)
   const commit = () => {
     const n = Number(draft)
     if (Number.isFinite(n) && n >= 0 && n <= 100) onSave(n)
@@ -489,7 +533,7 @@ function GainCard({ t, card, basisGrams, ratePct, editing, onStartEdit, onSave, 
         {fmt(gainGrams, 2)}<span style={{ fontSize: 13, color: t.text3, marginLeft: 4 }}>g</span>
       </div>
       <div style={{ fontSize: '10px', color: t.text4, marginTop: 6 }}>
-        on {fmt(basisGrams, 2)} g available · {Math.round(ratePct * 10)}g per kg
+        on {fmt(basisGrams, 2)} g incoming · {Math.round(ratePct * 10)}g per kg
       </div>
     </div>
   )
@@ -640,119 +684,188 @@ function ActionPill({ label, color, onClick, t, subtle = false }) {
   )
 }
 
-// ── Sources section (collapsed by default) ───────────────────────────────────
-function SourcesSection({ t, supply }) {
-  const renderBranchTable = (rows, accent, showTat = false) => (
-    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-      <thead>
-        <tr style={{ background: `${t.text4}05` }}>
-          {['Branch', 'Region', ...(showTat ? ['TAT'] : []), 'Bills', 'Net Wt'].map(h => (
-            <th key={h} style={{ padding: '8px 14px', fontSize: '9.5px', color: t.text4, letterSpacing: '.08em', textTransform: 'uppercase', fontWeight: 700, textAlign: ['Bills', 'Net Wt'].includes(h) ? 'right' : 'left', borderBottom: `1px solid ${t.border}` }}>{h}</th>
-          ))}
-        </tr>
-      </thead>
-      <tbody>
-        {rows.map(r => {
-          const rColor = REGION_COLORS[r.region] || t.text3
-          return (
-            <tr key={r.branch_name}>
-              <td style={{ padding: '8px 14px', fontSize: 12, color: t.text1, fontWeight: 600, borderLeft: `3px solid ${rColor}80` }}>{r.branch_name}</td>
-              <td style={{ padding: '8px 14px', fontSize: 11, color: rColor }}>{r.region}</td>
-              {showTat && <td style={{ padding: '8px 14px', fontSize: 10 }}><span style={{ color: t.text2, background: `${t.text4}15`, borderRadius: 4, padding: '2px 7px', fontFamily: 'monospace', fontWeight: 600 }}>{r.tat_hours ? `${r.tat_hours}h` : '—'}</span></td>}
-              <td style={{ padding: '8px 14px', fontSize: 12, color: t.gold, fontFamily: 'monospace', fontWeight: 600, textAlign: 'right' }}>{r.total_bills}</td>
-              <td style={{ padding: '8px 14px', fontSize: 12, color: t.gold, fontFamily: 'monospace', fontWeight: 600, textAlign: 'right' }}>{fmt(r.total_net_wt, 2)}<span style={{ fontSize: 10, marginLeft: 2 }}>g</span></td>
-            </tr>
-          )
-        })}
-      </tbody>
-    </table>
-  )
+// ── Source Picker — primary interactive surface on the page ──────────────────
+// Inline (not modal) — every branch is a row with a checkbox; the page-level
+// selection state lights up the contextual action bar in the card header
+// once anything is checked. Clicking "Book Selected" opens the booking
+// form modal with the weight pre-filled from the selection total.
+function SourcePicker({ t, card, supply, bangBranches, inTBranches, selected, selectedTotal, onToggleBranch, onSelectGroup, onBook, incomingNetWt, incomingBills, arrivalDate }) {
+  const hasSelection = selected.size > 0
 
-  const bang = supply.bangalore?.branches || []
-  const inT  = supply.in_transit?.branches || []
+  const bangAllSelected = bangBranches.length > 0 && bangBranches.every(b => selected.has(`B:${b.branch_name}`))
+  const inTAllSelected  = inTBranches.length  > 0 && inTBranches.every(b => selected.has(`T:${b.branch_name}`))
+
+  const renderBranchRow = (b, prefix, accent) => {
+    const k = `${prefix}:${b.branch_name}`
+    const on = selected.has(k)
+    return (
+      <div key={b.branch_name} onClick={() => onToggleBranch(k)}
+        style={{
+          display: 'grid',
+          gridTemplateColumns: '28px minmax(140px, 1fr) 1fr auto 90px',
+          gap: 12,
+          alignItems: 'center',
+          padding: '10px 18px',
+          borderBottom: `1px solid ${t.border}30`,
+          cursor: 'pointer',
+          background: on ? `${accent}10` : 'transparent',
+          borderLeft: `3px solid ${on ? accent : 'transparent'}`,
+          transition: 'background .12s',
+        }}
+        onMouseEnter={e => { if (!on) e.currentTarget.style.background = `${t.text4}06` }}
+        onMouseLeave={e => { if (!on) e.currentTarget.style.background = 'transparent' }}>
+        <input type="checkbox" checked={on} onChange={() => onToggleBranch(k)} onClick={e => e.stopPropagation()}
+          style={{ accentColor: accent, cursor: 'pointer', width: 16, height: 16 }} />
+        <span style={{ fontSize: 12.5, color: t.text1, fontWeight: 600 }}>{b.branch_name}</span>
+        <span style={{ fontSize: 11, color: REGION_COLORS[b.region] || t.text3 }}>{b.region}</span>
+        {b.tat_hours != null ? (
+          <span style={{ fontSize: 10, color: t.text2, background: `${t.text4}15`, borderRadius: 4, padding: '2px 7px', fontFamily: 'monospace', fontWeight: 600, whiteSpace: 'nowrap' }}>
+            {b.tat_hours}h
+          </span>
+        ) : <span />}
+        <span style={{ fontSize: 12.5, color: t.gold, fontFamily: 'monospace', fontWeight: 700, textAlign: 'right' }}>
+          {fmt(b.total_net_wt, 2)}<span style={{ fontSize: 10, marginLeft: 2, color: t.text4 }}>g</span>
+        </span>
+      </div>
+    )
+  }
 
   return (
-    <div>
-      <div style={{ padding: '12px 18px', fontSize: 11, color: t.text3, background: `${t.red}06`, borderBottom: `1px solid ${t.border}` }}>
-        <strong style={{ color: t.text1, fontSize: 11.5 }}>Bangalore Purchases</strong> · purchase date {fmtDateShort(supply.bangalore_purchase_date)} · {fmt(supply.bangalore?.total?.net_wt || 0, 2)} g · {supply.bangalore?.total?.bills || 0} bills
+    <div style={{ ...card, overflow: 'hidden' }}>
+      {/* Header — always shows pool totals; flips to selection summary + CTA
+          once anything is checked. */}
+      <div style={{
+        padding: '14px 18px',
+        borderBottom: `1px solid ${t.border}`,
+        display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
+        background: hasSelection ? `linear-gradient(90deg, ${t.gold}10 0%, transparent 70%)` : 'transparent',
+        transition: 'background .2s',
+      }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: t.text1 }}>Incoming Sources</div>
+          <div style={{ fontSize: 11, color: t.text4, marginTop: 2 }}>
+            Bangalore today + outside in-transit · {fmt(incomingNetWt, 2)} g · {incomingBills} bill{incomingBills === 1 ? '' : 's'}
+          </div>
+        </div>
+        {hasSelection ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{ textAlign: 'right' }}>
+              <div style={{ fontSize: 13.5, color: t.gold, fontFamily: 'monospace', fontWeight: 700 }}>
+                {fmt(selectedTotal, 2)} g
+              </div>
+              <div style={{ fontSize: 10, color: t.text4, marginTop: 1 }}>
+                {selected.size} branch{selected.size === 1 ? '' : 'es'} selected
+              </div>
+            </div>
+            <button onClick={onBook}
+              style={{
+                background: t.gold, color: '#1a0a00', border: 'none',
+                borderRadius: 8, padding: '9px 18px',
+                fontSize: 12.5, fontWeight: 700, letterSpacing: '.04em',
+                cursor: 'pointer', boxShadow: `0 1px 4px ${t.gold}50`,
+                whiteSpace: 'nowrap',
+              }}>
+              Book Selected →
+            </button>
+          </div>
+        ) : (
+          <span style={{ fontSize: 11, color: t.text4, fontStyle: 'italic' }}>
+            Tick branches to start a booking
+          </span>
+        )}
       </div>
-      {bang.length > 0 ? renderBranchTable(bang, t.red, false) : <div style={{ padding: '20px', fontSize: 11, color: t.text4, textAlign: 'center' }}>No approved Bangalore purchases on the source date.</div>}
-      <div style={{ padding: '12px 18px', fontSize: 11, color: t.text3, background: `${t.blue}06`, borderTop: `1px solid ${t.border}`, borderBottom: `1px solid ${t.border}` }}>
-        <strong style={{ color: t.text1, fontSize: 11.5 }}>Outside-Bangalore In Transit</strong> · arriving on {fmtDateShort(supply.arrival_date)} · {fmt(supply.in_transit?.total?.net_wt || 0, 2)} g · {supply.in_transit?.total?.bills || 0} bills
-      </div>
-      {inT.length > 0 ? renderBranchTable(inT, t.blue, true) : <div style={{ padding: '20px', fontSize: 11, color: t.text4, textAlign: 'center' }}>No outstation bills are scheduled to arrive on this date.</div>}
+
+      {/* Bangalore group */}
+      {bangBranches.length > 0 && (
+        <div>
+          <div onClick={() => onSelectGroup(bangBranches, 'B', bangAllSelected)}
+            style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 18px', background: `${t.red}08`, borderBottom: `1px solid ${t.border}`, cursor: 'pointer', userSelect: 'none' }}>
+            <input type="checkbox" checked={bangAllSelected}
+              onChange={() => onSelectGroup(bangBranches, 'B', bangAllSelected)}
+              onClick={e => e.stopPropagation()}
+              style={{ accentColor: t.red, cursor: 'pointer', width: 16, height: 16 }} />
+            <span style={{ fontSize: 11, color: t.text2, fontWeight: 700, letterSpacing: '.04em', textTransform: 'uppercase' }}>Bangalore</span>
+            <span style={{ fontSize: 10, color: t.text4, fontFamily: 'monospace' }}>
+              {bangBranches.length} {bangBranches.length === 1 ? 'branch' : 'branches'} · purchase {fmtDateShort(supply?.bangalore_purchase_date || '')}
+            </span>
+            <div style={{ flex: 1 }} />
+            <span style={{ fontSize: 11, color: t.red, fontFamily: 'monospace', fontWeight: 700 }}>
+              {fmt(supply?.bangalore?.total?.net_wt || 0, 2)}<span style={{ fontSize: 9, marginLeft: 2 }}>g</span>
+            </span>
+          </div>
+          {bangBranches.map(b => renderBranchRow(b, 'B', t.red))}
+        </div>
+      )}
+
+      {/* Outside in-transit group */}
+      {inTBranches.length > 0 && (
+        <div>
+          <div onClick={() => onSelectGroup(inTBranches, 'T', inTAllSelected)}
+            style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 18px', background: `${t.blue}08`, borderTop: bangBranches.length > 0 ? `1px solid ${t.border}` : 'none', borderBottom: `1px solid ${t.border}`, cursor: 'pointer', userSelect: 'none' }}>
+            <input type="checkbox" checked={inTAllSelected}
+              onChange={() => onSelectGroup(inTBranches, 'T', inTAllSelected)}
+              onClick={e => e.stopPropagation()}
+              style={{ accentColor: t.blue, cursor: 'pointer', width: 16, height: 16 }} />
+            <span style={{ fontSize: 11, color: t.text2, fontWeight: 700, letterSpacing: '.04em', textTransform: 'uppercase' }}>Outside In-Transit</span>
+            <span style={{ fontSize: 10, color: t.text4, fontFamily: 'monospace' }}>
+              {inTBranches.length} {inTBranches.length === 1 ? 'branch' : 'branches'} · arriving {fmtDateShort(supply?.arrival_date || arrivalDate)}
+            </span>
+            <div style={{ flex: 1 }} />
+            <span style={{ fontSize: 11, color: t.blue, fontFamily: 'monospace', fontWeight: 700 }}>
+              {fmt(supply?.in_transit?.total?.net_wt || 0, 2)}<span style={{ fontSize: 9, marginLeft: 2 }}>g</span>
+            </span>
+          </div>
+          {inTBranches.map(b => renderBranchRow(b, 'T', t.blue))}
+        </div>
+      )}
+
+      {bangBranches.length === 0 && inTBranches.length === 0 && (
+        <div style={{ padding: '32px 18px', textAlign: 'center', color: t.text4, fontSize: 12 }}>
+          No incoming sources for this date.
+        </div>
+      )}
     </div>
   )
 }
 
-// ── Booking modal ────────────────────────────────────────────────────────────
-function BookingModal({ t, arrivalDate, incomingNetWt, bookedQty, sources, onSubmit, onClose }) {
-  // Source picker — flatten Bangalore + outside in-transit into one list
-  // with group headers. Selecting a branch adds its net weight to the
-  // running total which auto-fills the Weight field; ops can still
-  // override the weight manually for a partial commit (e.g. "book 100g
-  // of SHIVAMOGGA's 250g shipment").
-  const bangBranches = sources?.bangalore?.branches  || []
-  const inTBranches  = sources?.in_transit?.branches || []
-  const branchesByKey = useMemo(() => {
-    const m = {}
-    for (const b of bangBranches) m[`B:${b.branch_name}`] = { ...b, group: 'bangalore' }
-    for (const b of inTBranches)  m[`T:${b.branch_name}`] = { ...b, group: 'in_transit' }
-    return m
-  }, [bangBranches, inTBranches])
-
-  const [selected, setSelected] = useState(() => new Set())
-  const [weightDirty, setWeightDirty] = useState(false) // true once user manually edits weight
+// ── Booking modal — buyer-form-only ──────────────────────────────────────────
+// Source selection happens on the page now; this modal just confirms the
+// already-selected branches (as removable chips) and collects buyer + rate
+// + notes. Weight pre-fills from the selection total and is editable for
+// partial commits.
+function BookingModal({ t, arrivalDate, availablePool, remainingQty, selected, selectedTotal, branchesByKey, onUnselect, onSubmit, onClose, onSuccess }) {
+  const [weightDirty, setWeightDirty] = useState(false)
   const [party,       setParty]       = useState('')
   const [buyerPhone,  setBuyerPhone]  = useState('')
-  const [weight,      setWeight]      = useState('')
+  const [weight,      setWeight]      = useState(() => selectedTotal > 0 ? selectedTotal.toFixed(2) : '')
   const [rate,        setRate]        = useState('')
   const [purity,      setPurity]      = useState('')
   const [isKl,        setIsKl]        = useState(false)
   const [notes,       setNotes]       = useState('')
   const [busy,        setBusy]        = useState(false)
 
-  // Auto-fill weight from selection. Once the operator manually edits the
-  // weight field, stop auto-filling so partial commits aren't clobbered.
-  const selectedTotal = useMemo(() => {
-    let s = 0
-    for (const k of selected) s += Number(branchesByKey[k]?.total_net_wt || 0)
-    return s
-  }, [selected, branchesByKey])
-
+  // Selection can change while the modal is open (operator removes a chip).
+  // Keep the weight in sync unless they've manually edited it.
   useEffect(() => {
     if (weightDirty) return
     setWeight(selectedTotal > 0 ? selectedTotal.toFixed(2) : '')
   }, [selectedTotal, weightDirty])
 
-  const toggle = (k) => setSelected(prev => {
-    const next = new Set(prev)
-    if (next.has(k)) next.delete(k); else next.add(k)
-    return next
-  })
-  const selectGroup = (rows, prefix, allOn) => setSelected(prev => {
-    const next = new Set(prev)
-    for (const b of rows) {
-      const k = `${prefix}:${b.branch_name}`
-      if (allOn) next.delete(k); else next.add(k)
-    }
-    return next
-  })
+  const selectedRows = [...selected].map(k => ({ k, b: branchesByKey[k] })).filter(x => x.b)
 
   const w = Number(weight); const r = Number(rate)
   const total = Number.isFinite(w) && Number.isFinite(r) ? w * r : 0
-  const remaining = incomingNetWt - bookedQty
-  const wouldOverbook = Number.isFinite(w) && w > 0 && w > remaining
+  const wouldOverbook = Number.isFinite(w) && w > 0 && w > remainingQty
 
   const submit = async () => {
     if (!party.trim()) return
     if (!Number.isFinite(w) || w <= 0) return
     if (!Number.isFinite(r) || r <= 0) return
     setBusy(true)
-    // Capture the selected branch names in notes so the audit trail keeps
-    // which sources this booking was committed against. (Future: a proper
-    // booking_sources join table when partial-bill selection is needed.)
-    const selectedBranchList = [...selected].map(k => branchesByKey[k]?.branch_name).filter(Boolean)
+    // Stamp the selected branch names into notes so the audit trail records
+    // which sources the booking was committed against. (When partial-bill
+    // selection becomes a feature we'll add a proper booking_sources join.)
+    const selectedBranchList = selectedRows.map(({ b }) => b.branch_name)
     const compositeNotes = [
       notes.trim() || null,
       selectedBranchList.length ? `Sources: ${selectedBranchList.join(', ')}` : null,
@@ -767,47 +880,11 @@ function BookingModal({ t, arrivalDate, incomingNetWt, bookedQty, sources, onSub
       is_kl:       isKl,
       notes:       compositeNotes,
     })
+    if (ok && onSuccess) onSuccess()
     if (!ok) setBusy(false)
   }
 
   const valid = party.trim() && Number.isFinite(w) && w > 0 && Number.isFinite(r) && r > 0
-
-  const bangAllSelected = bangBranches.length > 0 && bangBranches.every(b => selected.has(`B:${b.branch_name}`))
-  const inTAllSelected  = inTBranches.length  > 0 && inTBranches.every(b => selected.has(`T:${b.branch_name}`))
-
-  // Row component for a branch in the picker.
-  const SourceRow = ({ b, prefix, accent }) => {
-    const k = `${prefix}:${b.branch_name}`
-    const on = selected.has(k)
-    return (
-      <div onClick={() => toggle(k)}
-        style={{
-          display: 'grid',
-          gridTemplateColumns: '24px 1fr auto auto',
-          gap: 10,
-          alignItems: 'center',
-          padding: '8px 12px',
-          background: on ? `${accent}10` : 'transparent',
-          borderLeft: `3px solid ${on ? accent : 'transparent'}`,
-          cursor: 'pointer',
-          transition: 'background .12s',
-        }}
-        onMouseEnter={e => { if (!on) e.currentTarget.style.background = `${t.text4}06` }}
-        onMouseLeave={e => { if (!on) e.currentTarget.style.background = 'transparent' }}>
-        <input type="checkbox" checked={on} onChange={() => toggle(k)} onClick={e => e.stopPropagation()}
-          style={{ accentColor: accent, cursor: 'pointer' }} />
-        <span style={{ fontSize: 12, color: t.text1, fontWeight: 600 }}>{b.branch_name}</span>
-        {b.tat_hours != null && (
-          <span style={{ fontSize: 9, color: t.text3, background: `${t.text4}15`, borderRadius: 4, padding: '2px 6px', fontFamily: 'monospace', fontWeight: 600 }}>
-            {b.tat_hours}h
-          </span>
-        )}
-        <span style={{ fontSize: 12, color: t.gold, fontFamily: 'monospace', fontWeight: 700, textAlign: 'right' }}>
-          {fmt(b.total_net_wt, 2)}<span style={{ fontSize: 9, marginLeft: 2, color: t.text4 }}>g</span>
-        </span>
-      </div>
-    )
-  }
 
   return (
     <div onClick={onClose} style={{
@@ -817,7 +894,7 @@ function BookingModal({ t, arrivalDate, incomingNetWt, bookedQty, sources, onSub
       padding: 20, overflow: 'auto',
     }}>
       <div onClick={e => e.stopPropagation()} style={{
-        width: '100%', maxWidth: 680, maxHeight: '90vh', overflow: 'auto',
+        width: '100%', maxWidth: 540, maxHeight: '90vh', overflow: 'auto',
         background: t.card, border: `1px solid ${t.border}`,
         borderRadius: 14, padding: 22,
         display: 'flex', flexDirection: 'column', gap: 14,
@@ -827,46 +904,32 @@ function BookingModal({ t, arrivalDate, incomingNetWt, bookedQty, sources, onSub
           <div style={{ fontSize: 11, color: t.text4, marginTop: 4 }}>Committing against arrival on {fmtDate(arrivalDate)}</div>
         </div>
 
-        {/* Source picker */}
-        {(bangBranches.length > 0 || inTBranches.length > 0) ? (
-          <div style={{ border: `1px solid ${t.border}`, borderRadius: 10, overflow: 'hidden' }}>
-            <div style={{ background: t.card2, padding: '10px 14px', display: 'flex', alignItems: 'center', gap: 10, borderBottom: `1px solid ${t.border}` }}>
-              <span style={{ fontSize: 10, color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 700 }}>Select from incoming</span>
-              <div style={{ flex: 1 }} />
-              <span style={{ fontSize: 11, color: t.text3, fontFamily: 'monospace' }}>
-                {selected.size} of {bangBranches.length + inTBranches.length} · <strong style={{ color: t.gold }}>{fmt(selectedTotal, 2)} g</strong>
-              </span>
+        {/* Selected sources — chips strip. Click ✕ to remove a chip; the
+            selection on the page updates in real time. */}
+        {selectedRows.length > 0 ? (
+          <div style={{ border: `1px solid ${t.border}`, borderRadius: 10, padding: '10px 12px', background: t.card2 }}>
+            <div style={{ fontSize: 10, color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 700, marginBottom: 8 }}>
+              Selected sources · {fmt(selectedTotal, 2)} g
             </div>
-
-            {/* Bangalore group */}
-            {bangBranches.length > 0 && (
-              <div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 14px', background: `${t.red}08`, borderBottom: `1px solid ${t.border}` }}>
-                  <input type="checkbox" checked={bangAllSelected} onChange={() => selectGroup(bangBranches, 'B', bangAllSelected)}
-                    style={{ accentColor: t.red, cursor: 'pointer' }} />
-                  <span style={{ fontSize: 11, color: t.text2, fontWeight: 700, letterSpacing: '.04em' }}>Bangalore</span>
-                  <span style={{ fontSize: 10, color: t.text4, fontFamily: 'monospace' }}>{bangBranches.length} {bangBranches.length === 1 ? 'branch' : 'branches'} · {fmt(sources?.bangalore?.total?.net_wt || 0, 2)} g</span>
-                </div>
-                {bangBranches.map(b => <SourceRow key={b.branch_name} b={b} prefix="B" accent={t.red} />)}
-              </div>
-            )}
-
-            {/* Outside in-transit group */}
-            {inTBranches.length > 0 && (
-              <div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 14px', background: `${t.blue}08`, borderTop: bangBranches.length > 0 ? `1px solid ${t.border}` : 'none', borderBottom: `1px solid ${t.border}` }}>
-                  <input type="checkbox" checked={inTAllSelected} onChange={() => selectGroup(inTBranches, 'T', inTAllSelected)}
-                    style={{ accentColor: t.blue, cursor: 'pointer' }} />
-                  <span style={{ fontSize: 11, color: t.text2, fontWeight: 700, letterSpacing: '.04em' }}>Outside In-Transit</span>
-                  <span style={{ fontSize: 10, color: t.text4, fontFamily: 'monospace' }}>{inTBranches.length} {inTBranches.length === 1 ? 'branch' : 'branches'} · {fmt(sources?.in_transit?.total?.net_wt || 0, 2)} g</span>
-                </div>
-                {inTBranches.map(b => <SourceRow key={b.branch_name} b={b} prefix="T" accent={t.blue} />)}
-              </div>
-            )}
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              {selectedRows.map(({ k, b }) => {
+                const accent = b.group === 'bangalore' ? t.red : t.blue
+                return (
+                  <span key={k} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: `${accent}15`, border: `1px solid ${accent}40`, borderRadius: 99, padding: '3px 6px 3px 10px', fontSize: 11, color: t.text1, fontWeight: 600 }}>
+                    {b.branch_name}
+                    <span style={{ fontSize: 10, color: t.gold, fontFamily: 'monospace', fontWeight: 700 }}>{fmt(b.total_net_wt, 2)}g</span>
+                    <button onClick={() => onUnselect(k)} title="Remove from selection"
+                      style={{ background: 'transparent', border: 'none', color: t.text3, cursor: 'pointer', fontSize: 12, lineHeight: 1, padding: '0 4px' }}>
+                      ✕
+                    </button>
+                  </span>
+                )
+              })}
+            </div>
           </div>
         ) : (
-          <div style={{ fontSize: 11, color: t.text4, fontStyle: 'italic', padding: '8px 0' }}>
-            No incoming sources for this date — enter weight manually below.
+          <div style={{ fontSize: 11, color: t.text4, fontStyle: 'italic', padding: '6px 0' }}>
+            No sources selected — booking will commit the entered weight directly against the pool.
           </div>
         )}
 
@@ -892,13 +955,13 @@ function BookingModal({ t, arrivalDate, incomingNetWt, bookedQty, sources, onSub
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-          <Field label={`Weight (g) *${selected.size > 0 && !weightDirty ? ' · auto-filled' : ''}`}>
+          <Field label={`Weight (g) *${selectedTotal > 0 && !weightDirty ? ' · auto-filled' : ''}`}>
             <input value={weight}
               onChange={e => { setWeight(e.target.value.replace(/[^\d.]/g, '')); setWeightDirty(true) }}
               placeholder="100.000"
-              style={{ ...inputStyle(t), fontFamily: 'monospace', borderColor: weightDirty || selected.size === 0 ? t.border : t.gold }} />
-            {weightDirty && selected.size > 0 && (
-              <button type="button" onClick={() => { setWeightDirty(false); setWeight(selectedTotal > 0 ? selectedTotal.toFixed(2) : '') }}
+              style={{ ...inputStyle(t), fontFamily: 'monospace', borderColor: weightDirty || selectedTotal === 0 ? t.border : t.gold }} />
+            {weightDirty && selectedTotal > 0 && (
+              <button type="button" onClick={() => { setWeightDirty(false); setWeight(selectedTotal.toFixed(2)) }}
                 style={{ background: 'transparent', border: 'none', color: t.gold, fontSize: 10, cursor: 'pointer', padding: '4px 0 0', textAlign: 'left' }}>
                 ↺ Reset to selected total ({fmt(selectedTotal, 2)} g)
               </button>
@@ -928,7 +991,7 @@ function BookingModal({ t, arrivalDate, incomingNetWt, bookedQty, sources, onSub
 
         {wouldOverbook && (
           <div style={{ background: `${t.red}10`, border: `1px solid ${t.red}40`, borderRadius: 8, padding: '8px 12px', fontSize: 11, color: t.red, fontWeight: 600 }}>
-            ⚠ This booking will overbook by {fmt(w - remaining, 2)} g. Allowed, but flagged.
+            ⚠ This booking will overbook by {fmt(w - remainingQty, 2)} g (available pool {fmt(availablePool, 2)} g). Allowed, but flagged.
           </div>
         )}
 
