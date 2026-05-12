@@ -550,6 +550,45 @@ export async function GET(req) {
     })
   }
 
+  // ── Bidding bookings: list of buyer commitments for a given arrival date ──
+  // Stored in cal_quotas (same table the Sales → Cal Table → Quotas tab
+  // reads), with extended columns for status + audit trail. We surface all
+  // statuses so the UI can show fulfilled/cancelled rows in their own
+  // collapsed groups; the active-pool roll-up excludes cancelled.
+  if (action === 'bidding_bookings') {
+    const date = searchParams.get('date')
+    if (!date) return Response.json({ error: 'date required (YYYY-MM-DD)' }, { status: 400 })
+
+    const { data: rows, error: bkErr } = await supabase
+      .from('cal_quotas')
+      .select(`id, date, party, buyer_phone, weight, rate, is_kl, purity, notes,
+               status, created_at, created_by,
+               confirmed_at, confirmed_by, fulfilled_at, fulfilled_by,
+               cancelled_at, cancelled_by, cancellation_reason`)
+      .eq('date', date)
+      .order('created_at', { ascending: false })
+    if (bkErr) return Response.json({ error: bkErr.message }, { status: 500 })
+
+    // Roll-up — active = booked + confirmed + fulfilled; cancelled excluded.
+    const active = (rows || []).filter(r => r.status !== 'cancelled')
+    const totalQty   = active.reduce((s, r) => s + Number(r.weight || 0), 0)
+    const totalValue = active.reduce((s, r) => s + Number(r.weight || 0) * Number(r.rate || 0), 0)
+    const byStatus = (rows || []).reduce((m, r) => {
+      m[r.status] = (m[r.status] || 0) + 1
+      return m
+    }, {})
+
+    return Response.json({
+      data: {
+        date,
+        bookings:        rows || [],
+        active_qty_grams: totalQty,
+        active_value:    totalValue,
+        counts:          byStatus,
+      },
+    })
+  }
+
   // ── Cancellation history: every EWB / E-Invoice cancellation in the window ──
   // Joins consignment_activity_log with the consignment row so the UI can
   // show: who cancelled what, why, when, plus the consignment context.
@@ -2087,6 +2126,84 @@ export async function POST(req) {
     })
 
     return Response.json({ data: { id }, message: 'Cancellation request rejected.' })
+  }
+
+  // ── Bidding bookings: create + status transitions ────────────────────────
+  // Rows live in cal_quotas (same table CalTable's Quotas tab uses), so a
+  // booking created here automatically appears for allocation on the
+  // arrival date. Status flow: booked → confirmed → fulfilled, with a
+  // separate cancelled state that voids the row from the active pool.
+
+  if (action === 'create_booking') {
+    const { date, party, buyer_phone, weight, rate, purity, is_kl, notes } = body
+    if (!date)   return Response.json({ error: 'date required (YYYY-MM-DD)' }, { status: 400 })
+    if (!party || !String(party).trim()) return Response.json({ error: 'Buyer name required' }, { status: 400 })
+    const w = Number(weight); const r = Number(rate)
+    if (!Number.isFinite(w) || w <= 0) return Response.json({ error: 'weight must be a positive number' }, { status: 400 })
+    if (!Number.isFinite(r) || r <= 0) return Response.json({ error: 'rate must be a positive number' }, { status: 400 })
+    if (purity && !['24K', '22K', '18K'].includes(purity)) {
+      return Response.json({ error: "purity must be one of '24K', '22K', '18K'" }, { status: 400 })
+    }
+
+    const { data, error: insErr } = await supabase
+      .from('cal_quotas')
+      .insert({
+        date,
+        party:       String(party).trim(),
+        buyer_phone: buyer_phone ? String(buyer_phone).trim() : null,
+        weight:      w,
+        rate:        r,
+        is_kl:       !!is_kl,
+        purity:      purity || null,
+        notes:       notes ? String(notes).trim() : null,
+        status:      'booked',
+        created_by:  actorEmail,
+      })
+      .select()
+      .single()
+    if (insErr) return Response.json({ error: insErr.message }, { status: 500 })
+    return Response.json({ data, message: 'Booking created.' })
+  }
+
+  if (action === 'update_booking_status') {
+    const { id, status, reason } = body
+    if (!id) return Response.json({ error: 'id required' }, { status: 400 })
+    const allowed = ['booked', 'confirmed', 'fulfilled', 'cancelled']
+    if (!allowed.includes(status)) return Response.json({ error: `status must be one of ${allowed.join(', ')}` }, { status: 400 })
+
+    // Status-specific audit columns. Fetch the row first to gate transitions
+    // (no transitioning out of cancelled / fulfilled).
+    const { data: existing, error: fetchErr } = await supabase
+      .from('cal_quotas')
+      .select('id, status')
+      .eq('id', id)
+      .single()
+    if (fetchErr || !existing) return Response.json({ error: 'Booking not found' }, { status: 404 })
+    if (existing.status === 'cancelled' && status !== 'cancelled') {
+      return Response.json({ error: 'Cancelled bookings cannot be re-activated. Create a new one.' }, { status: 400 })
+    }
+    if (existing.status === 'fulfilled' && status !== 'fulfilled') {
+      return Response.json({ error: 'Fulfilled bookings are immutable.' }, { status: 400 })
+    }
+
+    const now = new Date().toISOString()
+    const upd = { status }
+    if (status === 'confirmed')  { upd.confirmed_at  = now; upd.confirmed_by  = actorEmail }
+    if (status === 'fulfilled')  { upd.fulfilled_at  = now; upd.fulfilled_by  = actorEmail }
+    if (status === 'cancelled')  {
+      upd.cancelled_at = now
+      upd.cancelled_by = actorEmail
+      upd.cancellation_reason = reason ? String(reason).trim() : null
+    }
+
+    const { data, error: updErr } = await supabase
+      .from('cal_quotas')
+      .update(upd)
+      .eq('id', id)
+      .select()
+      .single()
+    if (updErr) return Response.json({ error: updErr.message }, { status: 500 })
+    return Response.json({ data, message: `Booking marked ${status}.` })
   }
 
   // ── Cancel consignment (reverse flow) ────────────────────────────────────
