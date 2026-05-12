@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { AppProvider, useApp } from '../../lib/context'
 import Clarity from '../../components/analytics/Clarity'
 import HeatmapTracker from '../../components/analytics/HeatmapTracker'
@@ -106,6 +106,74 @@ function DashboardShell() {
     }
   }, [role, activeNav, previewRole])
 
+  // ── Back-button / swipe-back interception ──────────────────────────────────
+  // The app navigates between modules via the activeNav state, not URL changes,
+  // so the browser back button used to close the tab/app entirely. That was
+  // disorienting on mobile especially (swipe back = app gone). New behaviour:
+  //
+  //   1. Inside any module → back returns to the dashboard.
+  //   2. On dashboard, first back arms a 2.5s "press back again to exit" toast.
+  //   3. Second back within the window genuinely exits (to login/previous page).
+  //
+  // Mechanism: push a sentinel history entry on mount so the first back lands
+  // here instead of leaving the app. The popstate handler reads the latest
+  // activeNav (via a ref to avoid stale closures), takes the appropriate
+  // action, and re-pushes the sentinel so subsequent back presses behave the
+  // same — except in the armed-exit case where we let it through.
+  const activeNavRef = useRef(activeNav)
+  useEffect(() => { activeNavRef.current = activeNav }, [activeNav])
+  const exitArmedRef = useRef(false)
+  const exitTimerRef = useRef(null)
+  const [exitPrompt, setExitPrompt] = useState(false)
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+
+    // Sentinel: a no-op history entry so the first back press lands in our
+    // handler instead of leaving the page. We tag it via state so we know it
+    // came from us if we ever need to disambiguate.
+    const pushSentinel = () => window.history.pushState({ __goldNavSentinel: true }, '', window.location.href)
+    pushSentinel()
+
+    const handlePop = () => {
+      if (activeNavRef.current !== 'dashboard') {
+        // Inside a module → back means "return to dashboard". Consume the back
+        // press by re-pushing the sentinel so the user stays in the app.
+        setActiveNav('dashboard')
+        pushSentinel()
+        return
+      }
+
+      if (exitArmedRef.current) {
+        // Confirmed exit — let the browser take them out. We don't re-push
+        // the sentinel; calling history.back() walks past /dashboard to
+        // whatever the user came from (typically /login).
+        exitArmedRef.current = false
+        if (exitTimerRef.current) { clearTimeout(exitTimerRef.current); exitTimerRef.current = null }
+        window.history.back()
+        return
+      }
+
+      // First back on dashboard → arm the exit and surface the toast. Re-push
+      // the sentinel so the next back press triggers popstate again.
+      exitArmedRef.current = true
+      setExitPrompt(true)
+      if (exitTimerRef.current) clearTimeout(exitTimerRef.current)
+      exitTimerRef.current = setTimeout(() => {
+        exitArmedRef.current = false
+        setExitPrompt(false)
+        exitTimerRef.current = null
+      }, 2500)
+      pushSentinel()
+    }
+
+    window.addEventListener('popstate', handlePop)
+    return () => {
+      window.removeEventListener('popstate', handlePop)
+      if (exitTimerRef.current) clearTimeout(exitTimerRef.current)
+    }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
   if (!profileLoaded) return (
     <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: t.bg }}>
       <svg width="36" height="36" viewBox="0 0 32 32" style={{ animation: 'spin 1s linear infinite' }}>
@@ -178,6 +246,44 @@ function DashboardShell() {
 
       {/* Global themed dialog host — replaces native window.confirm() / window.prompt() */}
       <DialogHost />
+
+      {/* Exit-confirmation toast — surfaces when the user presses back on the
+          dashboard. A second back press within 2.5s actually exits. Sits
+          above the bottom nav on mobile so it's visible. */}
+      {exitPrompt && (
+        <div
+          role="status"
+          aria-live="polite"
+          style={{
+            position: 'fixed',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            bottom: isMobile ? 76 : 24,
+            zIndex: 10000,
+            background: theme === 'dark' ? 'rgba(20,20,20,.96)' : 'rgba(36,28,16,.96)',
+            color: '#f0e6c8',
+            border: `1px solid ${t.gold}40`,
+            borderRadius: 999,
+            padding: '10px 18px',
+            fontSize: 12.5,
+            fontWeight: 600,
+            letterSpacing: '.02em',
+            boxShadow: '0 8px 24px rgba(0,0,0,.35)',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 8,
+            animation: 'goldExitPromptIn .22s cubic-bezier(.34,1.2,.64,1)',
+          }}>
+          <span style={{ width: 6, height: 6, borderRadius: '50%', background: t.gold, animation: 'pulse 1.4s infinite' }} />
+          Press back again to exit
+        </div>
+      )}
+      <style>{`
+        @keyframes goldExitPromptIn {
+          from { opacity: 0; transform: translate(-50%, 8px); }
+          to   { opacity: 1; transform: translate(-50%, 0); }
+        }
+      `}</style>
     </div>
   )
 }
