@@ -547,6 +547,26 @@ export async function GET(req) {
         consignment_missing:  !c,
       }]
     })
+    // Opt-in diagnostics: ?action=cancellation_history&debug=1 returns a
+    // breakdown of every stage of the pipeline so we can pin down where
+    // rows are dropping out (raw events / dedupe / consignment lookup /
+    // region scope). Audit-only; doesn't change normal callers.
+    if (searchParams.get('debug') === '1') {
+      return Response.json({
+        data: rows,
+        debug: {
+          allowedBranches:    allowedBranches,
+          raw_events_count:   events?.length || 0,
+          raw_events_sample:  (events || []).slice(0, 10).map(e => ({
+            consignment_id: e.consignment_id, event_type: e.event_type, created_at: e.created_at,
+          })),
+          deduped_count:      dedupedEvents.length,
+          consignment_ids:    ids,
+          consignments_found: consignmentsAll.map(c => ({ id: c.id, tmp_prf_no: c.tmp_prf_no, branch_name: c.branch_name })),
+          rows_count:         rows.length,
+        },
+      })
+    }
     return Response.json({ data: rows })
   }
 
