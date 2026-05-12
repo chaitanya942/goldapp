@@ -483,12 +483,16 @@ export async function GET(req) {
     // 'deleted' apart from 'scoped out'. Apply region scoping in JS below.
     let consignmentsAll = []
     if (ids.length) {
+      // total_amount is the canonical column on consignments; older summary
+      // shapes use total_gross_value as the alias, so we re-expose both so
+      // either consumer (Cancellations card UI, docs report, etc.) finds
+      // what it expects without another round trip.
       const { data: cs, error: cErr } = await supabase
         .from('consignments')
-        .select('id, tmp_prf_no, branch_name, dest_branch, movement_type, total_bills, total_gross_value, total_net_wt, approval_status, status, rejection_reason, created_at')
+        .select('id, tmp_prf_no, branch_name, dest_branch, movement_type, total_bills, total_amount, total_net_wt, approval_status, status, rejection_reason, created_at, eway_bill_no, irn')
         .in('id', ids)
       if (cErr) return Response.json({ error: cErr.message }, { status: 500 })
-      consignmentsAll = cs || []
+      consignmentsAll = (cs || []).map(c => ({ ...c, total_gross_value: c.total_amount }))
     }
     const byId = new Map(consignmentsAll.map(c => [c.id, c]))
     const inScope = (c) => !allowedBranches || (c && allowedBranches.includes(c.branch_name))
