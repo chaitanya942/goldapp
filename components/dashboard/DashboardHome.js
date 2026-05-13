@@ -715,9 +715,13 @@ export default function DashboardHome() {
     if (filterType !== 'branch') { setBranchSearch(''); setBranchDropOpen(false) }
   }, [filterType])
 
-  // Fire-and-forget sync on mount + poll MAX(updated_at) for freshness display.
+  // Trigger a CRM→Supabase sync every 30s (fire-and-forget) and poll
+  // MAX(updated_at) so the dashboard keeps catching up with the live feed.
+  // Previously sync only ran once on mount, so any CRM rows approved after
+  // page load stayed invisible until the user navigated away and back —
+  // visibly contradicting the LiveFeedFlashcards which read CRM directly.
   useEffect(() => {
-    authedFetch('/api/sync-purchases?days=2', { method: 'POST' }).catch(() => null)
+    const triggerSync = () => authedFetch('/api/sync-purchases?days=2', { method: 'POST' }).catch(() => null)
     const fetchLastSync = async () => {
       const { data } = await supabase
         .from('purchases')
@@ -726,8 +730,9 @@ export default function DashboardHome() {
         .limit(1)
       if (data?.[0]?.updated_at) setLastSyncAt(data[0].updated_at)
     }
+    triggerSync()
     fetchLastSync()
-    const id = setInterval(fetchLastSync, 30 * 1000)
+    const id = setInterval(() => { triggerSync(); fetchLastSync() }, 30 * 1000)
     return () => clearInterval(id)
   }, [])
 

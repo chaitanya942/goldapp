@@ -140,6 +140,7 @@ function PurchaseInline({ t, setActiveNav, canSee }) {
   const [branchSearch,    setBranchSearch]    = useState('')
   const [branchDropOpen,  setBranchDropOpen]  = useState(false)
   const [lastRefresh,     setLastRefresh]     = useState(null)
+  const [lastSyncAt,      setLastSyncAt]      = useState(null)
   const branchInputRef = useRef(null)
   const branchDropRef  = useRef(null)
   const refreshRef     = useRef(null)
@@ -147,6 +148,24 @@ function PurchaseInline({ t, setActiveNav, canSee }) {
   useEffect(() => {
     if (filterType !== 'branch') { setBranchSearch(''); setBranchDropOpen(false) }
   }, [filterType])
+
+  // Trigger a CRM→Supabase sync every 30s and poll MAX(updated_at) so this
+  // panel keeps catching up with LiveFeedFlashcards (which read CRM directly).
+  useEffect(() => {
+    const triggerSync   = () => authedFetch('/api/sync-purchases?days=2', { method: 'POST' }).catch(() => null)
+    const fetchLastSync = async () => {
+      const { data } = await supabase
+        .from('purchases')
+        .select('updated_at')
+        .order('updated_at', { ascending: false })
+        .limit(1)
+      if (data?.[0]?.updated_at) setLastSyncAt(data[0].updated_at)
+    }
+    triggerSync()
+    fetchLastSync()
+    const id = setInterval(() => { triggerSync(); fetchLastSync() }, 30 * 1000)
+    return () => clearInterval(id)
+  }, [])
 
   useEffect(() => {
     const handler = (e) => {
@@ -195,8 +214,9 @@ function PurchaseInline({ t, setActiveNav, canSee }) {
     Promise.all(ps).catch(()=>{}).finally(()=>setTrendLoading(false))
   }, [filterType, filterValue, branchMeta]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Period-dependent data
-  useEffect(() => { fetchPeriod(); setLastRefresh(new Date()) }, [period, filterType, filterValue]) // eslint-disable-line react-hooks/exhaustive-deps
+  // Period-dependent data — also re-runs when fresh rows land in the
+  // purchases table (lastSyncAt advances) so the panel matches LiveFeed.
+  useEffect(() => { fetchPeriod(); setLastRefresh(new Date()) }, [period, filterType, filterValue, lastSyncAt]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Auto-refresh every 30s when viewing Today (matches LiveFeedFlashcards so
   // the two surfaces don't contradict each other). Also refetch when the tab
