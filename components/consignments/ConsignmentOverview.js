@@ -210,9 +210,11 @@ export default function ConsignmentOverview() {
     return acc
   }, {})
 
-  // Always display weights in grams (no kg conversion). Comma-grouped for readability.
+  // Always display weights in grams (no kg conversion). Comma-grouped, two
+  // decimals so the operations team sees the exact figure (rounding to
+  // integers was hiding sub-gram differences they need to reconcile).
   const fmtWtCard = (g) => ({
-    value: Math.round(Number(g || 0)).toLocaleString('en-IN'),
+    value: Number(g || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
     unit: 'g',
   })
 
