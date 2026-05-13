@@ -262,12 +262,7 @@ function PurchaseInline({ t, setActiveNav, canSee }) {
       p_region_branches = branchMeta.filter(b => b.cluster === filterValue).map(b => b.name)
     }
 
-    // Kick Supabase aggregate and CRM-live override in parallel so first
-    // paint isn't blocked by the slower of the two. Supabase usually wins
-    // (~500ms) — render those numbers immediately, drop the shimmer. CRM
-    // patches the headline KPIs when it lands (~1–1.5s later), at which
-    // point the panel agrees with LiveFeedFlashcards. Sequential await was
-    // forcing ops to stare at skeletons for the full CRM round trip.
+    // Parallel fetches so first paint isn't blocked by the slower one.
     const needsLive = period === 'today' && !filterType
     const aggPromise = supabase.rpc('get_purchase_aggregates', {
       p_from_date: from, p_to_date: to,
@@ -281,24 +276,14 @@ function PurchaseInline({ t, setActiveNav, canSee }) {
 
     const { data } = await aggPromise
     if (!data) { if (!silent) setLoading(false); return }
-    setKpis(data.kpis || null)
-    if (!silent) setLoading(false)
 
-    if (needsLive) {
-      const liveJson = await livePromise
-      if (liveJson && !liveJson.error) {
-        const apvCount = Number(liveJson.summary?.approved) || 0
-        const apvWt    = parseFloat(liveJson.goldPipeline?.purchased_wt) || 0
-        const apvVal   = parseFloat(liveJson.summary?.approved_value) || 0
-        setKpis(prev => prev ? {
-          ...prev,
-          total_count:        apvCount,
-          total_net:          apvWt,
-          total_value:        apvVal,
-          avg_rate_per_gram:  apvWt > 0 ? apvVal / apvWt : 0,
-          avg_net_per_txn:    apvCount > 0 ? apvWt / apvCount : 0,
-        } : prev)
-      }
+    // Non-silent (user-driven) loads: show Supabase numbers immediately so
+    // shimmer disappears in ~500ms. Silent (10s background) refreshes skip
+    // this intermediate write — otherwise the headline would regress from
+    // CRM (143) back to Supabase (140) for the ~1s CRM round trip each tick.
+    if (!silent) {
+      setKpis(data.kpis || null)
+      setLoading(false)
     }
 
     const branchRows = data.branches || []
@@ -317,7 +302,28 @@ function PurchaseInline({ t, setActiveNav, canSee }) {
     setTopBranches(sortedDesc.slice(0, 5))
     const activeAsc = sortedDesc.filter(b => Number(b.txn_count || 0) > 0).reverse()
     setBottomBranches(activeAsc.slice(0, 5))
-    // setLoading(false) already fired earlier when Supabase resolved.
+
+    // Merge CRM-live numbers (if needed) and commit as the single
+    // authoritative setKpis on the silent path — no intermediate Supabase
+    // value gets shown, so the headline never regresses tick to tick.
+    let mergedKpis = data.kpis || null
+    if (needsLive) {
+      const liveJson = await livePromise
+      if (liveJson && !liveJson.error && mergedKpis) {
+        const apvCount = Number(liveJson.summary?.approved) || 0
+        const apvWt    = parseFloat(liveJson.goldPipeline?.purchased_wt) || 0
+        const apvVal   = parseFloat(liveJson.summary?.approved_value) || 0
+        mergedKpis = {
+          ...mergedKpis,
+          total_count:        apvCount,
+          total_net:          apvWt,
+          total_value:        apvVal,
+          avg_rate_per_gram:  apvWt > 0 ? apvVal / apvWt : 0,
+          avg_net_per_txn:    apvCount > 0 ? apvWt / apvCount : 0,
+        }
+      }
+    }
+    setKpis(mergedKpis)
   }
 
   // Derived

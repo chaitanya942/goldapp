@@ -1107,10 +1107,8 @@ export default function DashboardHome() {
     if (p_region_branches?.length) params.set('region_branches', p_region_branches.join(','))
     if (from === to)  params.set('single_day', 'true')
     // Fetch Supabase aggregate and CRM live in parallel so first paint isn't
-    // blocked by the slower of the two. Supabase usually responds first; the
-    // CRM-live override (which is what makes the dashboard match the
-    // flashcards) is applied when it lands. Sequential await would double
-    // the perceived load time and force ops to stare at shimmer.
+    // blocked by the slower of the two. The CRM-live override (which makes
+    // the dashboard match the flashcards) lands ~1s after Supabase.
     const needsLive = period === 'today' && !filterType
     const aggPromise  = authedFetch(`/api/report-aggregates?${params}`).then(r => r.json()).catch(() => ({}))
     const livePromise = needsLive
@@ -1120,30 +1118,21 @@ export default function DashboardHome() {
     const aggJson = await aggPromise
     if (aggJson?.empty || !aggJson?.kpis) { finishEmpty(); return }
     const data = aggJson
-    // Show Supabase numbers immediately — the override patches in when CRM
-    // responds. Brief flicker from e.g. 64 → 89 is acceptable; staring at
-    // skeletons for 3 seconds is not.
-    setKpis(data.kpis || null)
-    if (!silent) setLoading(false)
 
-    if (needsLive) {
-      const liveJson = await livePromise
-      if (liveJson && !liveJson.error) {
-        const apvCount = Number(liveJson.summary?.approved) || 0
-        const apvWt    = parseFloat(liveJson.goldPipeline?.purchased_wt) || 0
-        const apvVal   = parseFloat(liveJson.summary?.approved_value) || 0
-        setKpis(prev => prev ? {
-          ...prev,
-          total_count:        apvCount,
-          total_net:          apvWt,
-          total_value:        apvVal,
-          avg_rate_per_gram:  apvWt > 0 ? apvVal / apvWt : 0,
-          avg_net_per_txn:    apvCount > 0 ? apvWt / apvCount : 0,
-        } : prev)
-      }
+    // Non-silent (user-driven) loads: show Supabase numbers immediately so the
+    // shimmer disappears in ~500ms. They'll be merged with CRM when it lands.
+    // Silent (background) refreshes deliberately skip this intermediate write
+    // — otherwise every 10s tick would regress the headline from CRM (143)
+    // back to Supabase (140) for the ~1s CRM round trip, and a user
+    // screenshotting in that window would see them disagree.
+    if (!silent) {
+      setKpis(data.kpis || null)
+      setLoading(false)
     }
 
-    // Group breakdown by region (all/cluster/branch) or by state (when region/state is selected)
+    // State/branch breakdowns use Supabase data — run as soon as the aggregate
+    // resolves, regardless of silent vs not. They are independent of the
+    // CRM override which only touches the headline KPIs.
     const branchRows = data.branches || []
     const groupByState = filterType === 'region' || filterType === 'state'
     const groupKey = groupByState ? 'state' : 'region'
@@ -1156,14 +1145,32 @@ export default function DashboardHome() {
       groupMap[key].branch_count++
     })
     setStateData(Object.values(groupMap).sort((a, b) => b.total_net - a.total_net))
-    // Top 5 (descending net wt) + Bottom 5 (ascending net wt, only branches with at least 1 txn).
-    // Excluding zero-txn branches keeps "Bottom" meaningful — otherwise bottom is just inactive ones.
     const sortedDesc = [...branchRows].sort((a, b) => Number(b.total_net || 0) - Number(a.total_net || 0))
     setTopBranches(sortedDesc.slice(0, 5))
     const activeAsc = sortedDesc.filter(b => Number(b.txn_count || 0) > 0).reverse()
     setBottomBranches(activeAsc.slice(0, 5))
-    // setLoading(false) already fired earlier the moment Supabase resolved —
-    // nothing more to do here.
+
+    // Merge CRM-live numbers (if needed) and commit. This is the single
+    // authoritative setKpis on the silent path — no intermediate Supabase
+    // value gets shown, so the headline never regresses between ticks.
+    let mergedKpis = data.kpis || null
+    if (needsLive) {
+      const liveJson = await livePromise
+      if (liveJson && !liveJson.error && mergedKpis) {
+        const apvCount = Number(liveJson.summary?.approved) || 0
+        const apvWt    = parseFloat(liveJson.goldPipeline?.purchased_wt) || 0
+        const apvVal   = parseFloat(liveJson.summary?.approved_value) || 0
+        mergedKpis = {
+          ...mergedKpis,
+          total_count:        apvCount,
+          total_net:          apvWt,
+          total_value:        apvVal,
+          avg_rate_per_gram:  apvWt > 0 ? apvVal / apvWt : 0,
+          avg_net_per_txn:    apvCount > 0 ? apvWt / apvCount : 0,
+        }
+      }
+    }
+    setKpis(mergedKpis)
   }
 
   const name          = userProfile?.full_name?.split(' ')[0] || 'there'
