@@ -78,11 +78,17 @@ export async function GET(req) {
     return Response.json({ error: 'Invalid action' }, { status: 400 })
   }
 
-  // ── FLASHCARDS fast path ─────────────────────────────────────────────────
-  // Lightweight endpoint backing LiveFeedFlashcards + the dashboard panel's
-  // CRM-live override. We check the in-memory cache BEFORE acquiring a pool
-  // connection so cache hits don't queue behind other in-flight queries.
-  // Cache miss falls through to the regular pool-backed query path below.
+  // ── FLASHCARDS endpoint ──────────────────────────────────────────────────
+  // Backs LiveFeedFlashcards. Two-source design — same answer as the rest
+  // of the app:
+  //   • PURCHASED count + weight + value: from Supabase (via the same
+  //     get_purchase_aggregates RPC the dashboard panel and Purchase Reports
+  //     use). Guarantees the flashcards never disagree with Purchase Reports
+  //     by construction. Lags CRM by the sync interval (~10s, accepted).
+  //   • WALKED IN count + weight: from CRM customer_walkin (this data does
+  //     not exist in Supabase — sync only mirrors purchases). Real-time.
+  // Cache check happens BEFORE acquiring a MySQL pool connection so cache
+  // hits don't queue behind other in-flight queries.
   if (action === 'flashcards') {
     const istNow     = new Date(Date.now() + 5.5 * 60 * 60 * 1000)
     const defaultIST = istNow.toISOString().split('T')[0]
@@ -96,24 +102,44 @@ export async function GET(req) {
       return Response.json({ ...cached.data, cached: true })
     }
 
-    // Cache miss — need pool now.
     let conn
     try {
+      // Region-scoped users need a branch→region map (CRM has only branch
+      // IDs). Admin/founder/super_admin skip this Supabase round trip.
+      const needRegionMap = !!allowedRegions
+
+      // Resolve allowed branch *names* for the Supabase aggregate call — the
+      // RPC expects branch names, not regions. For unrestricted users we
+      // pass null (= all branches).
+      let regionBranches = null
+      if (allowedRegions) {
+        const { data: sbBranches } = await supabase
+          .from('branches')
+          .select('name')
+          .eq('is_active', true)
+          .in('region', allowedRegions)
+        regionBranches = (sbBranches || []).map(b => b.name)
+        if (regionBranches.length === 0) {
+          // No accessible branches → empty result, no point hitting CRM.
+          const empty = {
+            todayIST,
+            walkinSummary: { total: 0, total_gold_wt: 0 },
+            summary:       { approved: 0, approved_value: 0 },
+            goldPipeline:  { walked_in_wt: 0, purchased_wt: 0 },
+          }
+          flashcardCache.set(cacheKey, { data: empty, ts: Date.now() })
+          return Response.json(empty)
+        }
+      }
+
       conn = await createConn()
 
-      // Use the same timezone-independent WHERE the rest of the file uses
-      // (`DATE(date + INTERVAL 330 MINUTE) = ?`). An earlier attempt at an
-      // index-friendly range comparison (`date >= ? AND date < ?` with
-      // UTC bounds) silently dropped ~35% of net weight because MySQL
-      // interprets datetime literals in the session timezone, and we can't
-      // assume that's UTC. The +330-minute arithmetic does explicit minute
-      // math regardless of session zone. Slower but correct — correctness
-      // wins.
-      const needRegionMap = !!allowedRegions
+      // CRM walk-ins + branch→region map (for filtering walk-ins) +
+      // Supabase aggregate (for purchased numbers) all in parallel.
       const [
         [walkinRows],
-        [ornmentRows],
-        sbBranchesResult,
+        sbBranchesForMap,
+        agg,
       ] = await Promise.all([
         conn.execute(`
           SELECT branch_id, COUNT(*) AS bills, ROUND(SUM(gms_weight + 0), 2) AS wt
@@ -121,26 +147,27 @@ export async function GET(req) {
           WHERE DATE(date + INTERVAL 330 MINUTE) = ?
           GROUP BY branch_id
         `, [todayIST]),
-        conn.execute(`
-          SELECT t.trxn_status, t.id AS txn_id, t.branch_id,
-            (t.finl_amnt+0) AS amount, o.net_wet
-          FROM transac_tbl t
-          LEFT JOIN ornments_tbl o ON o.trnxnn_id = t.id
-          WHERE DATE(t.date + INTERVAL 330 MINUTE) = ?
-        `, [todayIST]),
         needRegionMap
           ? supabase.from('branches').select('crm_branch_id, region').not('region', 'is', null)
           : Promise.resolve({ data: [] }),
+        supabase.rpc('get_purchase_aggregates', {
+          p_from_date:        todayIST,
+          p_to_date:          todayIST,
+          p_branch:           null,
+          p_txn_type:         null,
+          p_region_branches:  regionBranches,
+          p_single_day:       true,
+        }),
       ])
 
+      // Build branch→region map for walk-in scoping.
       const regionMap = {}
-      for (const b of (sbBranchesResult?.data || [])) {
+      for (const b of (sbBranchesForMap?.data || [])) {
         if (b.crm_branch_id) regionMap[String(b.crm_branch_id)] = b.region
       }
       const allowedSet = needRegionMap ? new Set(allowedRegions) : null
       const inAllowed  = (branchId) => !needRegionMap || allowedSet.has(regionMap[String(branchId)] || '')
 
-      // Walk-in totals (region-filtered if needed)
       let walkedInCount = 0
       let walkedInWt    = 0
       for (const r of walkinRows) {
@@ -149,33 +176,13 @@ export async function GET(req) {
         walkedInWt    += parseFloat(r.wt) || 0
       }
 
-      // Aggregate ornaments per transaction (one CRM txn has N ornament rows).
-      // Net weight sums across all ornaments; status and amount come from the
-      // transaction row, identical on every joined row of the same txn_id.
-      const txnAgg = new Map()
-      for (const r of ornmentRows) {
-        if (!txnAgg.has(r.txn_id)) {
-          txnAgg.set(r.txn_id, {
-            status:    r.trxn_status,
-            branch_id: r.branch_id,
-            amount:    parseFloat(r.amount) || 0,
-            net_wt:    0,
-          })
-        }
-        txnAgg.get(r.txn_id).net_wt += parseFloat(r.net_wet) || 0
-      }
-
-      let approvedCount = 0
-      let purchasedWt   = 0
-      let approvedValue = 0
-      for (const txn of txnAgg.values()) {
-        if (!inAllowed(txn.branch_id)) continue
-        if (txn.status === 'approved') {
-          approvedCount++
-          purchasedWt   += txn.net_wt
-          approvedValue += txn.amount
-        }
-      }
+      // Purchased numbers come straight from Supabase aggregate — same
+      // source as Purchase Reports / dashboard panel, so they cannot
+      // disagree.
+      const kpis = agg?.data?.kpis || {}
+      const purchasedCount = Number(kpis.total_count) || 0
+      const purchasedWt    = Number(kpis.total_net)   || 0
+      const approvedValue  = Number(kpis.total_value) || 0
 
       const result = {
         todayIST,
@@ -184,7 +191,7 @@ export async function GET(req) {
           total_gold_wt: Number(walkedInWt.toFixed(2)),
         },
         summary: {
-          approved:       approvedCount,
+          approved:       purchasedCount,
           approved_value: Number(approvedValue.toFixed(2)),
         },
         goldPipeline: {
@@ -193,8 +200,6 @@ export async function GET(req) {
         },
       }
 
-      // Bound the cache size — one key per (date × region-scope-fingerprint).
-      // Days roll over and add new entries; trim oldest to keep memory flat.
       flashcardCache.set(cacheKey, { data: result, ts: Date.now() })
       if (flashcardCache.size > FLASHCARD_CACHE_MAX) {
         flashcardCache.delete(flashcardCache.keys().next().value)
