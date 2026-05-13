@@ -262,7 +262,33 @@ function PurchaseInline({ t, setActiveNav, canSee }) {
     })
 
     if (!data) { setLoading(false); return }
-    setKpis(data.kpis || null)
+    let mergedKpis = data.kpis || null
+
+    // For the unfiltered "Today" view, override headline KPIs with CRM-live
+    // numbers (same payload LiveFeedFlashcards uses) so the two surfaces
+    // always agree. Sync lag would otherwise make this panel trail the
+    // flashcards by up to 30s. Skip when a filter is active — the live
+    // endpoint is unfiltered and would clobber the filtered aggregate.
+    if (period === 'today' && mergedKpis && !filterType) {
+      try {
+        const liveRes  = await authedFetch('/api/crm-purchases?action=live')
+        const liveJson = await liveRes.json().catch(() => null)
+        if (liveJson && !liveJson.error) {
+          const apvCount = Number(liveJson.summary?.approved) || 0
+          const apvWt    = parseFloat(liveJson.goldPipeline?.purchased_wt) || 0
+          const apvVal   = parseFloat(liveJson.summary?.approved_value) || 0
+          mergedKpis = {
+            ...mergedKpis,
+            total_count:        apvCount,
+            total_net:          apvWt,
+            total_value:        apvVal,
+            avg_rate_per_gram:  apvWt > 0 ? apvVal / apvWt : 0,
+            avg_net_per_txn:    apvCount > 0 ? apvWt / apvCount : 0,
+          }
+        }
+      } catch { /* fall back to Supabase numbers */ }
+    }
+    setKpis(mergedKpis)
 
     const branchRows = data.branches || []
     const groupByState = filterType === 'region' || filterType === 'state'

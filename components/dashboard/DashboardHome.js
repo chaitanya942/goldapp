@@ -1101,7 +1101,35 @@ export default function DashboardHome() {
     const aggJson = await aggRes.json().catch(() => ({}))
     if (aggJson?.empty || !aggJson?.kpis) { setKpis(null); setLoading(false); return }
     const data = aggJson
-    setKpis(data.kpis || null)
+    let mergedKpis = data.kpis || null
+
+    // For the unfiltered "Today" view, override the headline KPIs (bills,
+    // weight, value) with the CRM-live numbers — the same payload that
+    // LiveFeedFlashcards reads. Sync lag means the Supabase aggregate trails
+    // CRM by up to ~30s; routing both surfaces through one query guarantees
+    // the dashboard and the live feed always agree on "purchases today".
+    // We only do this when no filter is active so we don't override filtered
+    // aggregates with an unfiltered total.
+    if (period === 'today' && mergedKpis && !filterType) {
+      try {
+        const liveRes  = await authedFetch('/api/crm-purchases?action=live')
+        const liveJson = await liveRes.json().catch(() => null)
+        if (liveJson && !liveJson.error) {
+          const apvCount = Number(liveJson.summary?.approved) || 0
+          const apvWt    = parseFloat(liveJson.goldPipeline?.purchased_wt) || 0
+          const apvVal   = parseFloat(liveJson.summary?.approved_value) || 0
+          mergedKpis = {
+            ...mergedKpis,
+            total_count:        apvCount,
+            total_net:          apvWt,
+            total_value:        apvVal,
+            avg_rate_per_gram:  apvWt > 0 ? apvVal / apvWt : 0,
+            avg_net_per_txn:    apvCount > 0 ? apvWt / apvCount : 0,
+          }
+        }
+      } catch { /* fall back to Supabase numbers */ }
+    }
+    setKpis(mergedKpis)
 
     // Group breakdown by region (all/cluster/branch) or by state (when region/state is selected)
     const branchRows = data.branches || []
