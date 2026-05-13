@@ -1006,24 +1006,26 @@ export default function DashboardHome() {
     })
   }, [showPurchase, regionAccess.restricted, JSON.stringify(regionAccess.regions || [])])
 
-  // Re-run fetchAll whenever fresh purchases land in the DB. lastSyncAt is
-  // polled every 30s from purchases.updated_at, so the dashboard catches the
-  // post-sync state shortly after the fire-and-forget /sync-purchases finishes
-  // (previously the dashboard rendered pre-sync data and only refreshed if
-  // you navigated away and back).
-  useEffect(() => { if (showPurchase) { fetchAll(); setLastRefresh(new Date()) } }, [period, showPurchase, filterType, filterValue, regionAccess.restricted, JSON.stringify(regionAccess.regions || []), branchMeta.length, lastSyncAt]) // eslint-disable-line react-hooks/exhaustive-deps
+  // User-driven refetch: period/filter/region change → loud (show shimmer)
+  // because the user explicitly asked for different data.
+  useEffect(() => { if (showPurchase) { fetchAll(); setLastRefresh(new Date()) } }, [period, showPurchase, filterType, filterValue, regionAccess.restricted, JSON.stringify(regionAccess.regions || []), branchMeta.length]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Auto-refresh every 30s when viewing Today (matches LiveFeedFlashcards so
-  // the two surfaces don't contradict each other). Also refetch on tab focus /
-  // visibility change — covers the "navigate away and back" case even when
-  // this component stays mounted.
+  // Background refetch when fresh rows land in DB → silent (keep old numbers
+  // on screen, swap when new fetch resolves). Skipped on the initial null
+  // tick because the period effect above already fired the loud first load.
+  useEffect(() => {
+    if (showPurchase && lastSyncAt) { fetchAll({ silent: true }); setLastRefresh(new Date()) }
+  }, [lastSyncAt]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Auto-refresh every 30s when viewing Today + refetch on tab focus /
+  // visibility change. All silent so the panel doesn't flash skeletons.
   useEffect(() => {
     if (!showPurchase || period !== 'today') { clearInterval(refreshRef.current); return }
-    refreshRef.current = setInterval(() => { fetchAll(); setLastRefresh(new Date()) }, 30 * 1000)
+    refreshRef.current = setInterval(() => { fetchAll({ silent: true }); setLastRefresh(new Date()) }, 30 * 1000)
     const onVisible = () => {
-      if (document.visibilityState === 'visible') { fetchAll(); setLastRefresh(new Date()) }
+      if (document.visibilityState === 'visible') { fetchAll({ silent: true }); setLastRefresh(new Date()) }
     }
-    const onFocus = () => { fetchAll(); setLastRefresh(new Date()) }
+    const onFocus = () => { fetchAll({ silent: true }); setLastRefresh(new Date()) }
     document.addEventListener('visibilitychange', onVisible)
     window.addEventListener('focus', onFocus)
     return () => {
@@ -1033,11 +1035,19 @@ export default function DashboardHome() {
     }
   }, [showPurchase, period, filterType, filterValue]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const fetchAll = async () => {
-    setLoading(true)
-    setStateData([])
-    setTopBranches([])
-    setBottomBranches([])
+  // silent=true → background refresh: keep the existing numbers/tables on
+  // screen and swap them in atomically when the new fetch lands. Stops the
+  // dashboard from flashing shimmer skeletons every 30s. silent=false (the
+  // default) is for user-driven actions (period or filter change), where the
+  // skeleton makes it clear that conceptually different data is loading.
+  const fetchAll = async ({ silent = false } = {}) => {
+    if (!silent) {
+      setLoading(true)
+      setStateData([])
+      setTopBranches([])
+      setBottomBranches([])
+    }
+    const finishEmpty = () => { if (!silent) { setKpis(null); setLoading(false) } }
     const { from, to } = getRange(period)
 
     // Region scoping: resolve the user's allowed branches BY DIRECTLY QUERYING branches.
@@ -1053,7 +1063,7 @@ export default function DashboardHome() {
       userBranches = (regionMatch || []).map(b => b.name)
       if (userBranches.length === 0) {
         // No branches in user's regions → nothing to show.
-        setKpis(null); setLoading(false); return
+        finishEmpty(); return
       }
     }
 
@@ -1084,7 +1094,7 @@ export default function DashboardHome() {
         p_region_branches = []
       }
       if (p_region_branches.length === 0) {
-        setKpis(null); setLoading(false); return
+        finishEmpty(); return
       }
     }
 
@@ -1099,7 +1109,7 @@ export default function DashboardHome() {
     if (from === to)  params.set('single_day', 'true')
     const aggRes = await authedFetch(`/api/report-aggregates?${params}`)
     const aggJson = await aggRes.json().catch(() => ({}))
-    if (aggJson?.empty || !aggJson?.kpis) { setKpis(null); setLoading(false); return }
+    if (aggJson?.empty || !aggJson?.kpis) { finishEmpty(); return }
     const data = aggJson
     let mergedKpis = data.kpis || null
 
@@ -1150,7 +1160,7 @@ export default function DashboardHome() {
     setTopBranches(sortedDesc.slice(0, 5))
     const activeAsc = sortedDesc.filter(b => Number(b.txn_count || 0) > 0).reverse()
     setBottomBranches(activeAsc.slice(0, 5))
-    setLoading(false)
+    if (!silent) setLoading(false)
   }
 
   const name          = userProfile?.full_name?.split(' ')[0] || 'there'
@@ -1423,7 +1433,7 @@ export default function DashboardHome() {
               ))}
             </div>}
             {showPeriodSelector && <div style={{ fontSize:12, color:t.text3, fontStyle:'italic' }}>{!loading && dateLabel}</div>}
-            <button onClick={e => { e.stopPropagation(); fetchAll(); setLastRefresh(new Date()) }}
+            <button onClick={e => { e.stopPropagation(); fetchAll({ silent: true }); setLastRefresh(new Date()) }}
               style={{ padding:'5px 10px', borderRadius:7, border:`1px solid ${t.border}`, background:t.card, color:t.text3, fontSize:12, cursor:'pointer', display:'flex', alignItems:'center', gap:5, whiteSpace:'nowrap' }}>
               ↻{lastRefresh && <span style={{ fontSize:10, color:t.text4 }}>{lastRefresh.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'})}</span>}
             </button>
@@ -1453,7 +1463,7 @@ export default function DashboardHome() {
                     </button>
                   ))}
                 </div>
-                <button onClick={() => { fetchAll(); setLastRefresh(new Date()) }}
+                <button onClick={() => { fetchAll({ silent: true }); setLastRefresh(new Date()) }}
                   style={{ padding:'6px 10px', borderRadius:8, border:`1px solid ${t.border}`, background:t.card, color:loading?t.gold:t.text3, fontSize:14, cursor:'pointer', flexShrink:0, transition:'color .2s' }}>
                   ↻
                 </button>

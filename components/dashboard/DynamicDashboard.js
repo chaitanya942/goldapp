@@ -214,21 +214,25 @@ function PurchaseInline({ t, setActiveNav, canSee }) {
     Promise.all(ps).catch(()=>{}).finally(()=>setTrendLoading(false))
   }, [filterType, filterValue, branchMeta]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Period-dependent data — also re-runs when fresh rows land in the
-  // purchases table (lastSyncAt advances) so the panel matches LiveFeed.
-  useEffect(() => { fetchPeriod(); setLastRefresh(new Date()) }, [period, filterType, filterValue, lastSyncAt]) // eslint-disable-line react-hooks/exhaustive-deps
+  // User-driven refetch on period/filter change → loud (show shimmer because
+  // conceptually different data is loading).
+  useEffect(() => { fetchPeriod(); setLastRefresh(new Date()) }, [period, filterType, filterValue]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Auto-refresh every 30s when viewing Today (matches LiveFeedFlashcards so
-  // the two surfaces don't contradict each other). Also refetch when the tab
-  // regains focus or visibility — covers the "navigate away and back" case
-  // even when the parent keeps this component mounted.
+  // Background refetch when fresh rows land → silent (keep current numbers
+  // visible, swap when new fetch resolves).
+  useEffect(() => {
+    if (lastSyncAt) { fetchPeriod({ silent: true }); setLastRefresh(new Date()) }
+  }, [lastSyncAt]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Auto-refresh every 30s on Today + refetch on tab focus/visibility. All
+  // silent so the panel doesn't flash shimmer skeletons mid-session.
   useEffect(() => {
     if (period !== 'today') { clearInterval(refreshRef.current); return }
-    refreshRef.current = setInterval(() => { fetchPeriod(); setLastRefresh(new Date()) }, 30 * 1000)
+    refreshRef.current = setInterval(() => { fetchPeriod({ silent: true }); setLastRefresh(new Date()) }, 30 * 1000)
     const onVisible = () => {
-      if (document.visibilityState === 'visible') { fetchPeriod(); setLastRefresh(new Date()) }
+      if (document.visibilityState === 'visible') { fetchPeriod({ silent: true }); setLastRefresh(new Date()) }
     }
-    const onFocus = () => { fetchPeriod(); setLastRefresh(new Date()) }
+    const onFocus = () => { fetchPeriod({ silent: true }); setLastRefresh(new Date()) }
     document.addEventListener('visibilitychange', onVisible)
     window.addEventListener('focus', onFocus)
     return () => {
@@ -238,8 +242,11 @@ function PurchaseInline({ t, setActiveNav, canSee }) {
     }
   }, [period, filterType, filterValue]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const fetchPeriod = async () => {
-    setLoading(true)
+  // silent=true → background refresh: keep current numbers/tables visible and
+  // swap them in atomically when the new fetch lands. Avoids flashing the
+  // shimmer skeletons every 30s. silent=false (default) is for user actions.
+  const fetchPeriod = async ({ silent = false } = {}) => {
+    if (!silent) setLoading(true)
     const { from, to } = getRange(period)
 
     let p_branch = null
@@ -261,7 +268,7 @@ function PurchaseInline({ t, setActiveNav, canSee }) {
       p_single_day: from === to,
     })
 
-    if (!data) { setLoading(false); return }
+    if (!data) { if (!silent) setLoading(false); return }
     let mergedKpis = data.kpis || null
 
     // For the unfiltered "Today" view, override headline KPIs with CRM-live
@@ -307,7 +314,7 @@ function PurchaseInline({ t, setActiveNav, canSee }) {
     const activeAsc = sortedDesc.filter(b => Number(b.txn_count || 0) > 0).reverse()
     setBottomBranches(activeAsc.slice(0, 5))
 
-    setLoading(false)
+    if (!silent) setLoading(false)
   }
 
   // Derived
@@ -365,7 +372,7 @@ function PurchaseInline({ t, setActiveNav, canSee }) {
                 </button>
               ))}
             </div>
-            <button onClick={() => { fetchPeriod(); setLastRefresh(new Date()) }}
+            <button onClick={() => { fetchPeriod({ silent: true }); setLastRefresh(new Date()) }}
               title="Refresh data"
               style={{ padding:'7px 10px', borderRadius:9, border:`1px solid ${t.border}`, background:t.card, color:loading?t.gold:t.text3, fontSize:15, cursor:'pointer', flexShrink:0, transition:'color .2s' }}>
               ↻
