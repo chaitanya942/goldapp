@@ -78,29 +78,41 @@ export async function GET(req) {
     return Response.json({ error: 'Invalid action' }, { status: 400 })
   }
 
-  let conn
-  try {
-    conn = await createConn()
+  // ── FLASHCARDS fast path ─────────────────────────────────────────────────
+  // Lightweight endpoint backing LiveFeedFlashcards + the dashboard panel's
+  // CRM-live override. We check the in-memory cache BEFORE acquiring a pool
+  // connection so cache hits don't queue behind other in-flight queries.
+  // Cache miss falls through to the regular pool-backed query path below.
+  if (action === 'flashcards') {
+    const istNow     = new Date(Date.now() + 5.5 * 60 * 60 * 1000)
+    const defaultIST = istNow.toISOString().split('T')[0]
+    const todayIST   = searchParams.get('date') || defaultIST
 
-    // ── FLASHCARDS ───────────────────────────────────────────────────────────
-    // Lightweight endpoint backing LiveFeedFlashcards + the dashboard panel's
-    // CRM-live override. Returns only the four numbers those surfaces render:
-    // walked-in count, walked-in weight, approved count, approved weight (plus
-    // approved_value for the dashboard's gross-value tile). Two MySQL queries
-    // instead of the eleven-query, three-database fan-out behind `live`, so
-    // first paint is ~300ms cold and ~10ms when the 5s cache is warm.
-    if (action === 'flashcards') {
-      const istNow     = new Date(Date.now() + 5.5 * 60 * 60 * 1000)
-      const defaultIST = istNow.toISOString().split('T')[0]
-      const todayIST   = searchParams.get('date') || defaultIST
+    const allowedRegions = await getAllowedRegionsForAuth(supabase, auth)
+    const cacheKey = `${todayIST}::${(allowedRegions || ['ALL']).slice().sort().join(',')}`
 
-      const allowedRegions = await getAllowedRegionsForAuth(supabase, auth)
-      const cacheKey = `${todayIST}::${(allowedRegions || ['ALL']).slice().sort().join(',')}`
+    const cached = flashcardCache.get(cacheKey)
+    if (cached && Date.now() - cached.ts < FLASHCARD_CACHE_TTL_MS) {
+      return Response.json({ ...cached.data, cached: true })
+    }
 
-      const cached = flashcardCache.get(cacheKey)
-      if (cached && Date.now() - cached.ts < FLASHCARD_CACHE_TTL_MS) {
-        return Response.json({ ...cached.data, cached: true })
-      }
+    // Convert IST date to its UTC datetime bounds so we can use the index on
+    // `date`. Previously we filtered with `DATE(date + INTERVAL 330 MINUTE)
+    // = ?` — wrapping the column in a function disables index use and forces
+    // a full scan of transac_tbl (millions of rows), which is why the cold
+    // first-load was multi-second-to-minutes. India has no DST so the +5:30
+    // offset is constant; this conversion is exact, not approximate.
+    const [y, mo, d] = todayIST.split('-').map(Number)
+    const startUtcMs = Date.UTC(y, mo - 1, d,     -5, -30, 0)
+    const endUtcMs   = Date.UTC(y, mo - 1, d + 1, -5, -30, 0)
+    const fmtDt = (ms) => new Date(ms).toISOString().slice(0, 19).replace('T', ' ')
+    const startUtc = fmtDt(startUtcMs)   // e.g. 2026-05-12 18:30:00 for IST 2026-05-13
+    const endUtc   = fmtDt(endUtcMs)     // e.g. 2026-05-13 18:30:00
+
+    // Cache miss — need pool now.
+    let conn
+    try {
+      conn = await createConn()
 
       // Branch→region lookup only needed when scoping is active. For
       // admin/founders/super_admin we skip that Supabase round trip.
@@ -113,16 +125,16 @@ export async function GET(req) {
         conn.execute(`
           SELECT branch_id, COUNT(*) AS bills, ROUND(SUM(gms_weight + 0), 2) AS wt
           FROM customer_walkin
-          WHERE DATE(date + INTERVAL 330 MINUTE) = ?
+          WHERE date >= ? AND date < ?
           GROUP BY branch_id
-        `, [todayIST]),
+        `, [startUtc, endUtc]),
         conn.execute(`
           SELECT t.trxn_status, t.id AS txn_id, t.branch_id,
             (t.finl_amnt+0) AS amount, o.net_wet
           FROM transac_tbl t
           LEFT JOIN ornments_tbl o ON o.trnxnn_id = t.id
-          WHERE DATE(t.date + INTERVAL 330 MINUTE) = ?
-        `, [todayIST]),
+          WHERE t.date >= ? AND t.date < ?
+        `, [startUtc, endUtc]),
         needRegionMap
           ? supabase.from('branches').select('crm_branch_id, region').not('region', 'is', null)
           : Promise.resolve({ data: [] }),
@@ -195,7 +207,18 @@ export async function GET(req) {
         flashcardCache.delete(flashcardCache.keys().next().value)
       }
       return Response.json(result)
+    } catch (err) {
+      console.error('Flashcards error:', err)
+      return Response.json({ error: err.message }, { status: 500 })
+    } finally {
+      if (conn) conn.release()
     }
+  }
+
+  // ── All other actions share an outer pool connection ────────────────────
+  let conn
+  try {
+    conn = await createConn()
 
     // ── REJECTED BILLS ───────────────────────────────────────────────────────
     if (action === 'rejected') {
