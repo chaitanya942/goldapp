@@ -9,6 +9,7 @@ import { authedFetch } from '../../lib/authedFetch'
 
 import { CONSIGNMENT_THEMES as THEMES } from '../../lib/consignmentTheme'
 import { istNow, istStr, fromUtcDate } from '../../lib/dateIst'
+import LiveFeedFlashcards from './LiveFeedFlashcards'
 
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
 const fmtDate = (iso) => { if (!iso) return ''; const [y,m,d] = iso.split('-'); return `${d}-${MONTHS[+m-1]}-${y}` }
@@ -1209,6 +1210,15 @@ export default function DashboardHome() {
 
       {/* ── LIVE RATES ── */}
       <LiveTicker />
+
+      {/* ── LIVE FEED FLASHCARDS — today's walk-ins / purchases / conversion.
+            Gated on the same permission as the Purchase Data → Live tab so
+            anyone who can open that tab also sees the snapshot here. */}
+      {canSee('tab.purchase-data.live') && (
+        <div style={{ marginTop: 14 }}>
+          <LiveFeedFlashcards t={t} isMobile={isMobile} />
+        </div>
+      )}
 
       {/* ── MOBILE MODULE GRID — clean grouped-by-module view (role-aware) ── */}
       {isMobile && (() => {

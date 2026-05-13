@@ -12,6 +12,7 @@ import {
 import { CONSIGNMENT_THEMES as THEMES } from '../../lib/consignmentTheme'
 import { istNow, istStr, istDaysAgo as daysBack } from '../../lib/dateIst'
 import ConsignmentOverviewWidget from './ConsignmentOverviewWidget'
+import LiveFeedFlashcards from './LiveFeedFlashcards'
 
 // ── Date helpers ──────────────────────────────────────────────────────────────
 const MONTHS   = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
@@ -962,6 +963,14 @@ export default function DynamicDashboard() {
           </div>
         </div>
       </div>
+
+      {/* ── Live Feed flashcards ──
+          Anyone with access to Purchase Data → Live tab sees today's
+          live snapshot at the top of their dashboard (walk-ins,
+          purchases, conversion). Auto-refreshes every 30s. */}
+      {canSee('tab.purchase-data.live') && (
+        <LiveFeedFlashcards t={t} isMobile={isMobile} />
+      )}
 
       {/* ── Purchase ── */}
       {hasPurchase && (
