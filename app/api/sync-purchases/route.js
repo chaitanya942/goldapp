@@ -151,7 +151,8 @@ async function runSync(request) {
       }
 
       return {
-        _txn_id:                    r.txn_id,
+        _txn_id:                    r.txn_id,    // smartDedup sorting (stripped before upsert)
+        crm_txn_id:                 r.txn_id,    // persisted: stable identity for rename detection
         application_id:             appId,
         crm_status:                 r.crm_status || 'approved',
         purchase_date:              fmtDate(r.purchase_date),
@@ -186,6 +187,53 @@ async function runSync(request) {
 
     // ── Dedup within the CRM result set ──────────────────────────────────────
     const deduped = smartDedup(allRecords).map(({ _txn_id, ...r }) => r)
+
+    // ── Detect CRM bill_no renames; rename in place to preserve stock_status ─
+    // application_id (= bill_no) is mutable in CRM. Without this step, a
+    // rename looks like "new bill": fresh row inserted at stock_status
+    // default 'at_branch', original row carrying ops's in_consignment /
+    // at_ho work gets orphaned and reconcile marks it deleted. Matching on
+    // crm_txn_id (CRM's primary key — stable across renames) lets us spot
+    // the same transaction under a new bill_no and UPDATE the existing
+    // row's application_id in place, so the row's stock_status survives.
+    let renamed = 0, renameCollisions = 0
+    const incomingByTxn = new Map()
+    for (const r of deduped) {
+      if (r.crm_txn_id) incomingByTxn.set(r.crm_txn_id, r.application_id)
+    }
+    const txnIds = [...incomingByTxn.keys()]
+    if (txnIds.length > 0) {
+      // Page through Supabase 1000 at a time (max_rows limit) to find existing
+      // rows whose crm_txn_id matches an incoming record.
+      const CHUNK = 1000
+      const existingRows = []
+      for (let i = 0; i < txnIds.length; i += CHUNK) {
+        const slice = txnIds.slice(i, i + CHUNK)
+        const { data } = await supabaseAdmin
+          .from('purchases')
+          .select('application_id, crm_txn_id')
+          .eq('crm_source', 'old_crm')
+          .in('crm_txn_id', slice)
+        if (data) existingRows.push(...data)
+      }
+      for (const existing of existingRows) {
+        const incomingAppId = incomingByTxn.get(existing.crm_txn_id)
+        if (incomingAppId && existing.application_id !== incomingAppId) {
+          const { error } = await supabaseAdmin
+            .from('purchases')
+            .update({ application_id: incomingAppId })
+            .eq('crm_txn_id', existing.crm_txn_id)
+            .eq('crm_source', 'old_crm')
+          if (error) {
+            renameCollisions++
+            console.warn(`Bill_no rename collision: ${existing.application_id} → ${incomingAppId} (crm_txn_id=${existing.crm_txn_id}):`, error.message)
+          } else {
+            renamed++
+            console.log(`Bill_no renamed: ${existing.application_id} → ${incomingAppId} (crm_txn_id=${existing.crm_txn_id}, stock_status preserved)`)
+          }
+        }
+      }
+    }
 
     // ── Safe upsert-only sync (no delete) ────────────────────────────────────
     // Deleting before upsert caused data loss when function timed out mid-operation.
@@ -259,10 +307,12 @@ async function runSync(request) {
       success:  errors === 0,
       total:    rows.length,
       synced,
+      renamed,
+      renameCollisions,
       errors,
       ghostsMarked,
       lastError: lastError ? JSON.stringify(lastError) : null,
-      message:  `Upsert ${minDate}→${maxDate}: ${deduped.length} approved bills synced, ${ghostsMarked} ghost bills marked deleted (${errors} errors)`,
+      message:  `Upsert ${minDate}→${maxDate}: ${deduped.length} approved bills synced, ${renamed} bill_no renames preserved, ${ghostsMarked} ghost bills marked deleted (${errors} errors)`,
     })
 
   } catch (err) {
