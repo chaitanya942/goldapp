@@ -5,7 +5,7 @@ import { useApp, useRegionAccess } from '../../lib/context'
 import GoldSpinner from '../ui/GoldSpinner'
 import { authedFetch, prefetch } from '../../lib/authedFetch'
 import { CONSIGNMENT_THEMES as THEMES, REGION_COLORS, useMobile } from '../../lib/consignmentTheme'
-import { istToday } from '../../lib/dateIst'
+import { istToday, istNow } from '../../lib/dateIst'
 
 const REGION_ICONS = {
   'Rest of Karnataka': '🏛',
@@ -133,13 +133,52 @@ export default function ConsignmentOverview() {
     return () => clearInterval(interval)
   }, [fetchData])
 
-  // Live "X min ago" clock
+  // Live "X min ago" clock — also drives the pickup-alert recomputation.
   useEffect(() => {
     const t = setInterval(() => setTick(x => x + 1), 30000)
     return () => clearInterval(t)
   }, [])
 
   const minsAgo = lastRefresh ? Math.floor((Date.now() - lastRefresh.getTime()) / 60000) : null
+
+  // ── Pickup-time alerts ────────────────────────────────────────────────────
+  // Ops team wanted a heads-up 30 min before each branch's scheduled pickup so
+  // they're not caught flat-footed. We tick every 30s (same interval as the
+  // clock), compute mins-until-pickup in IST, and surface a sticky banner with
+  // any branches inside the 30-min window. Each entry can be dismissed for the
+  // rest of the day — dismissals persist in localStorage keyed to today's IST
+  // date so they reset at midnight.
+  const [dismissedPickups, setDismissedPickups] = useState({})
+  useEffect(() => {
+    try {
+      const stored = JSON.parse(window.localStorage.getItem(`pickup-dismissed-${istToday()}`) || '{}')
+      setDismissedPickups(stored)
+    } catch {}
+  }, [])
+  const dismissPickup = (branch) => {
+    const next = { ...dismissedPickups, [branch]: 1 }
+    setDismissedPickups(next)
+    try { window.localStorage.setItem(`pickup-dismissed-${istToday()}`, JSON.stringify(next)) } catch {}
+  }
+
+  // Re-evaluated every render — cheap (≤73 branches) and `tick` ensures it
+  // refreshes every 30s. Keep this list short by capping at the 5 most-imminent.
+  const pickupAlerts = (() => {
+    const now = istNow()
+    const currentMins = now.getUTCHours() * 60 + now.getUTCMinutes()
+    return data
+      .filter(b => b.pickup_time && !dismissedPickups[b.branch_name])
+      .map(b => {
+        const [hh, mm] = String(b.pickup_time).split(':').map(Number)
+        if (Number.isNaN(hh) || Number.isNaN(mm)) return null
+        const diff = (hh * 60 + mm) - currentMins
+        if (diff <= 0 || diff > 30) return null
+        return { branch: b.branch_name, region: b.region, mins: diff, pickup_time: b.pickup_time }
+      })
+      .filter(Boolean)
+      .sort((a, b) => a.mins - b.mins)
+      .slice(0, 5)
+  })()
 
   // ── Column sort toggle ────────────────────────────────────────────────────
   function handleSort(key) {
@@ -360,6 +399,53 @@ export default function ConsignmentOverview() {
           </button>
         </div>
       </div>
+
+      {/* ── Pickup alerts — sticky banner, surfaces branches within 30 min
+           of scheduled pickup so the ops team can prep. Dismissible per
+           branch, resets at midnight IST. */}
+      {pickupAlerts.length > 0 && (
+        <div style={{
+          background: `linear-gradient(135deg, ${t.orange}18, ${t.orange}08)`,
+          border: `1px solid ${t.orange}50`,
+          borderLeft: `4px solid ${t.orange}`,
+          borderRadius: '10px',
+          padding: '10px 14px',
+          display: 'flex',
+          alignItems: 'center',
+          flexWrap: 'wrap',
+          gap: '10px',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
+            <span style={{ fontSize: '16px', animation: 'pulse 1.8s infinite' }}>⏰</span>
+            <span style={{ fontSize: '11px', color: t.orange, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase' }}>Pickup approaching</span>
+          </div>
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', flex: 1 }}>
+            {pickupAlerts.map(a => {
+              const isSoon = a.mins <= 10
+              return (
+                <span key={a.branch} style={{
+                  display: 'inline-flex', alignItems: 'center', gap: '6px',
+                  background: t.card, border: `1px solid ${isSoon ? t.red : t.orange}40`,
+                  borderRadius: '6px', padding: '4px 8px 4px 10px',
+                  fontSize: '11px', color: t.text2,
+                }}>
+                  <strong style={{ color: t.text1, fontWeight: 600 }}>{a.branch}</strong>
+                  <span style={{ color: t.text4 }}>·</span>
+                  <span style={{ color: isSoon ? t.red : t.orange, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
+                    {a.mins}m
+                  </span>
+                  <span style={{ color: t.text4, fontSize: '10px' }}>@ {a.pickup_time}</span>
+                  <button onClick={() => dismissPickup(a.branch)}
+                    title="Dismiss until tomorrow"
+                    style={{ background: 'none', border: 'none', color: t.text4, cursor: 'pointer', fontSize: '14px', padding: '0 0 0 4px', lineHeight: 1 }}>
+                    ×
+                  </button>
+                </span>
+              )
+            })}
+          </div>
+        </div>
+      )}
 
       {/* ── Region Flashcards — horizontal scroll-snap on mobile ── */}
       {/* Hidden entirely when user is restricted to a single region (one card = no value) */}
@@ -868,8 +954,9 @@ export default function ConsignmentOverview() {
                       Last Moved <SortIcon col="last_moved_days_ago" />
                     </th>
 
-                    {/* Pickup */}
-                    <th style={{ ...thBase, textAlign: 'center' }}>Pickup</th>
+                    {/* Move — explicit action button (also doubles as the
+                        pickup-time tooltip target so ops still see the schedule). */}
+                    <th style={{ ...thBase, textAlign: 'center' }}>Move</th>
                   </tr>
 
                   {/* Totals row pinned to the top inside <thead> — the whole
@@ -1024,11 +1111,23 @@ export default function ConsignmentOverview() {
                             : <span style={{ fontSize: '11px', color: t.text4 }}>never</span>}
                         </td>
 
-                        {/* Pickup */}
-                        <td style={{ padding: tdPad, textAlign: 'center' }}>
-                          {b.pickup_time
-                            ? <span style={{ fontSize: '11px', color: t.text2, background: t.card2, borderRadius: '5px', padding: '2px 8px', whiteSpace: 'nowrap' }}>{b.pickup_time}</span>
-                            : <span style={{ fontSize: '11px', color: t.text4 }}>—</span>}
+                        {/* Move — explicit affordance for the deep-link nav.
+                            Row click still works; this button restores the
+                            visible CTA the ops team relied on. The pickup
+                            time (was the previous column's data) now lives
+                            in the tooltip so it isn't lost. */}
+                        <td style={{ padding: tdPad, textAlign: 'center' }} onClick={e => e.stopPropagation()}>
+                          <button
+                            title={b.pickup_time ? `Pickup at ${b.pickup_time}` : 'No pickup time set'}
+                            onClick={() => {
+                              setConsignmentDeepLink({ branch: b.branch_name, region: b.region })
+                              setActiveNav('consignment-data')
+                            }}
+                            onMouseEnter={e => { e.currentTarget.style.background = `${t.gold}30`; e.currentTarget.style.borderColor = t.gold }}
+                            onMouseLeave={e => { e.currentTarget.style.background = `${t.gold}18`; e.currentTarget.style.borderColor = `${t.gold}50` }}
+                            style={{ background: `${t.gold}18`, border: `1px solid ${t.gold}50`, borderRadius: '7px', padding: '5px 12px', fontSize: '11px', color: t.gold, cursor: 'pointer', fontWeight: 600, whiteSpace: 'nowrap', transition: 'all .15s' }}>
+                            Move →
+                          </button>
                         </td>
 
                       </tr>
