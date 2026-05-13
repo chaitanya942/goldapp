@@ -262,41 +262,44 @@ function PurchaseInline({ t, setActiveNav, canSee }) {
       p_region_branches = branchMeta.filter(b => b.cluster === filterValue).map(b => b.name)
     }
 
-    const { data } = await supabase.rpc('get_purchase_aggregates', {
+    // Kick Supabase aggregate and CRM-live override in parallel so first
+    // paint isn't blocked by the slower of the two. Supabase usually wins
+    // (~500ms) — render those numbers immediately, drop the shimmer. CRM
+    // patches the headline KPIs when it lands (~1–1.5s later), at which
+    // point the panel agrees with LiveFeedFlashcards. Sequential await was
+    // forcing ops to stare at skeletons for the full CRM round trip.
+    const needsLive = period === 'today' && !filterType
+    const aggPromise = supabase.rpc('get_purchase_aggregates', {
       p_from_date: from, p_to_date: to,
       p_branch, p_txn_type: null,
       p_region_branches: p_region_branches || null,
       p_single_day: from === to,
     })
+    const livePromise = needsLive
+      ? authedFetch('/api/crm-purchases?action=live').then(r => r.json()).catch(() => null)
+      : Promise.resolve(null)
 
+    const { data } = await aggPromise
     if (!data) { if (!silent) setLoading(false); return }
-    let mergedKpis = data.kpis || null
+    setKpis(data.kpis || null)
+    if (!silent) setLoading(false)
 
-    // For the unfiltered "Today" view, override headline KPIs with CRM-live
-    // numbers (same payload LiveFeedFlashcards uses) so the two surfaces
-    // always agree. Sync lag would otherwise make this panel trail the
-    // flashcards by up to 30s. Skip when a filter is active — the live
-    // endpoint is unfiltered and would clobber the filtered aggregate.
-    if (period === 'today' && mergedKpis && !filterType) {
-      try {
-        const liveRes  = await authedFetch('/api/crm-purchases?action=live')
-        const liveJson = await liveRes.json().catch(() => null)
-        if (liveJson && !liveJson.error) {
-          const apvCount = Number(liveJson.summary?.approved) || 0
-          const apvWt    = parseFloat(liveJson.goldPipeline?.purchased_wt) || 0
-          const apvVal   = parseFloat(liveJson.summary?.approved_value) || 0
-          mergedKpis = {
-            ...mergedKpis,
-            total_count:        apvCount,
-            total_net:          apvWt,
-            total_value:        apvVal,
-            avg_rate_per_gram:  apvWt > 0 ? apvVal / apvWt : 0,
-            avg_net_per_txn:    apvCount > 0 ? apvWt / apvCount : 0,
-          }
-        }
-      } catch { /* fall back to Supabase numbers */ }
+    if (needsLive) {
+      const liveJson = await livePromise
+      if (liveJson && !liveJson.error) {
+        const apvCount = Number(liveJson.summary?.approved) || 0
+        const apvWt    = parseFloat(liveJson.goldPipeline?.purchased_wt) || 0
+        const apvVal   = parseFloat(liveJson.summary?.approved_value) || 0
+        setKpis(prev => prev ? {
+          ...prev,
+          total_count:        apvCount,
+          total_net:          apvWt,
+          total_value:        apvVal,
+          avg_rate_per_gram:  apvWt > 0 ? apvVal / apvWt : 0,
+          avg_net_per_txn:    apvCount > 0 ? apvWt / apvCount : 0,
+        } : prev)
+      }
     }
-    setKpis(mergedKpis)
 
     const branchRows = data.branches || []
     const groupByState = filterType === 'region' || filterType === 'state'
@@ -314,8 +317,7 @@ function PurchaseInline({ t, setActiveNav, canSee }) {
     setTopBranches(sortedDesc.slice(0, 5))
     const activeAsc = sortedDesc.filter(b => Number(b.txn_count || 0) > 0).reverse()
     setBottomBranches(activeAsc.slice(0, 5))
-
-    if (!silent) setLoading(false)
+    // setLoading(false) already fired earlier when Supabase resolved.
   }
 
   // Derived

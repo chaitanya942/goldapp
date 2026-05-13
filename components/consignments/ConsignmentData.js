@@ -175,11 +175,14 @@ export default function ConsignmentData() {
     setLoading(false)
   }, [])
 
-  // Trigger a CRM→Supabase sync the moment ops opens this page (and on each
-  // mount-equivalent re-run), so the bill picker reflects what just hit CRM.
-  // Without this, a bill approved 5s ago is invisible here until the next
-  // background sync — operations couldn't add it to a consignment.
-  useEffect(() => { triggerSync({ minIntervalMs: 0 }).finally(fetchAll) }, [fetchAll])
+  // Render the bill picker immediately (don't block on sync). In parallel,
+  // force a fresh CRM→Supabase sync so any just-approved bills land. When
+  // it resolves, refetch silently to surface them. Previously fetchAll
+  // waited for sync to complete — adding 1–3s to the page open.
+  useEffect(() => {
+    fetchAll()
+    triggerSync({ minIntervalMs: 0 }).then(res => { if (res) fetchAll() })
+  }, [fetchAll])
 
   // Realtime: when accounts approves/rejects a consignment, the badge and
   // download buttons in this view update without the user refreshing.

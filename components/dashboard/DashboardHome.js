@@ -1106,39 +1106,42 @@ export default function DashboardHome() {
     if (p_branch)     params.set('branch', p_branch)
     if (p_region_branches?.length) params.set('region_branches', p_region_branches.join(','))
     if (from === to)  params.set('single_day', 'true')
-    const aggRes = await authedFetch(`/api/report-aggregates?${params}`)
-    const aggJson = await aggRes.json().catch(() => ({}))
+    // Fetch Supabase aggregate and CRM live in parallel so first paint isn't
+    // blocked by the slower of the two. Supabase usually responds first; the
+    // CRM-live override (which is what makes the dashboard match the
+    // flashcards) is applied when it lands. Sequential await would double
+    // the perceived load time and force ops to stare at shimmer.
+    const needsLive = period === 'today' && !filterType
+    const aggPromise  = authedFetch(`/api/report-aggregates?${params}`).then(r => r.json()).catch(() => ({}))
+    const livePromise = needsLive
+      ? authedFetch('/api/crm-purchases?action=live').then(r => r.json()).catch(() => null)
+      : Promise.resolve(null)
+
+    const aggJson = await aggPromise
     if (aggJson?.empty || !aggJson?.kpis) { finishEmpty(); return }
     const data = aggJson
-    let mergedKpis = data.kpis || null
+    // Show Supabase numbers immediately — the override patches in when CRM
+    // responds. Brief flicker from e.g. 64 → 89 is acceptable; staring at
+    // skeletons for 3 seconds is not.
+    setKpis(data.kpis || null)
+    if (!silent) setLoading(false)
 
-    // For the unfiltered "Today" view, override the headline KPIs (bills,
-    // weight, value) with the CRM-live numbers — the same payload that
-    // LiveFeedFlashcards reads. Sync lag means the Supabase aggregate trails
-    // CRM by up to ~30s; routing both surfaces through one query guarantees
-    // the dashboard and the live feed always agree on "purchases today".
-    // We only do this when no filter is active so we don't override filtered
-    // aggregates with an unfiltered total.
-    if (period === 'today' && mergedKpis && !filterType) {
-      try {
-        const liveRes  = await authedFetch('/api/crm-purchases?action=live')
-        const liveJson = await liveRes.json().catch(() => null)
-        if (liveJson && !liveJson.error) {
-          const apvCount = Number(liveJson.summary?.approved) || 0
-          const apvWt    = parseFloat(liveJson.goldPipeline?.purchased_wt) || 0
-          const apvVal   = parseFloat(liveJson.summary?.approved_value) || 0
-          mergedKpis = {
-            ...mergedKpis,
-            total_count:        apvCount,
-            total_net:          apvWt,
-            total_value:        apvVal,
-            avg_rate_per_gram:  apvWt > 0 ? apvVal / apvWt : 0,
-            avg_net_per_txn:    apvCount > 0 ? apvWt / apvCount : 0,
-          }
-        }
-      } catch { /* fall back to Supabase numbers */ }
+    if (needsLive) {
+      const liveJson = await livePromise
+      if (liveJson && !liveJson.error) {
+        const apvCount = Number(liveJson.summary?.approved) || 0
+        const apvWt    = parseFloat(liveJson.goldPipeline?.purchased_wt) || 0
+        const apvVal   = parseFloat(liveJson.summary?.approved_value) || 0
+        setKpis(prev => prev ? {
+          ...prev,
+          total_count:        apvCount,
+          total_net:          apvWt,
+          total_value:        apvVal,
+          avg_rate_per_gram:  apvWt > 0 ? apvVal / apvWt : 0,
+          avg_net_per_txn:    apvCount > 0 ? apvWt / apvCount : 0,
+        } : prev)
+      }
     }
-    setKpis(mergedKpis)
 
     // Group breakdown by region (all/cluster/branch) or by state (when region/state is selected)
     const branchRows = data.branches || []
@@ -1159,7 +1162,8 @@ export default function DashboardHome() {
     setTopBranches(sortedDesc.slice(0, 5))
     const activeAsc = sortedDesc.filter(b => Number(b.txn_count || 0) > 0).reverse()
     setBottomBranches(activeAsc.slice(0, 5))
-    if (!silent) setLoading(false)
+    // setLoading(false) already fired earlier the moment Supabase resolved —
+    // nothing more to do here.
   }
 
   const name          = userProfile?.full_name?.split(' ')[0] || 'there'

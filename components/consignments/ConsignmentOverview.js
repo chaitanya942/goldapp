@@ -128,14 +128,15 @@ export default function ConsignmentOverview() {
     setLoading(false)
   }, [])
 
-  // Mount: trigger a fresh CRM→Supabase sync so the branch-stock numbers
-  // reflect what just hit CRM (consignment creation reads from purchases,
-  // which depends on this sync). Then poll the branch overview every 15s,
-  // pairing each poll with another sync trigger (shared helper coalesces
-  // overlapping calls). Drops the previous 3-min interval where ops would
-  // sit on stale stock while new approvals piled up in CRM.
+  // Mount: render Supabase data immediately (don't block on sync). In
+  // parallel, force a fresh CRM→Supabase sync — when it lands, refetch
+  // silently so any just-approved bills appear. Then poll every 15s,
+  // pairing each poll with a sync trigger (shared helper coalesces
+  // overlapping calls). Drops the previous 3-min interval where ops sat on
+  // stale stock while new approvals piled up in CRM.
   useEffect(() => {
-    triggerSync({ minIntervalMs: 0 }).finally(() => fetchData())
+    fetchData()
+    triggerSync({ minIntervalMs: 0 }).then(res => { if (res) fetchData() })
     const interval = setInterval(() => {
       triggerSync()
       fetchData()
