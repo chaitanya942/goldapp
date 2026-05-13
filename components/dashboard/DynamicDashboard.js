@@ -198,11 +198,24 @@ function PurchaseInline({ t, setActiveNav, canSee }) {
   // Period-dependent data
   useEffect(() => { fetchPeriod(); setLastRefresh(new Date()) }, [period, filterType, filterValue]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Auto-refresh every 3 minutes when viewing Today
+  // Auto-refresh every 30s when viewing Today (matches LiveFeedFlashcards so
+  // the two surfaces don't contradict each other). Also refetch when the tab
+  // regains focus or visibility — covers the "navigate away and back" case
+  // even when the parent keeps this component mounted.
   useEffect(() => {
     if (period !== 'today') { clearInterval(refreshRef.current); return }
-    refreshRef.current = setInterval(() => { fetchPeriod(); setLastRefresh(new Date()) }, 3 * 60 * 1000)
-    return () => clearInterval(refreshRef.current)
+    refreshRef.current = setInterval(() => { fetchPeriod(); setLastRefresh(new Date()) }, 30 * 1000)
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') { fetchPeriod(); setLastRefresh(new Date()) }
+    }
+    const onFocus = () => { fetchPeriod(); setLastRefresh(new Date()) }
+    document.addEventListener('visibilitychange', onVisible)
+    window.addEventListener('focus', onFocus)
+    return () => {
+      clearInterval(refreshRef.current)
+      document.removeEventListener('visibilitychange', onVisible)
+      window.removeEventListener('focus', onFocus)
+    }
   }, [period, filterType, filterValue]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const fetchPeriod = async () => {

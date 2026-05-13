@@ -1008,11 +1008,24 @@ export default function DashboardHome() {
   // you navigated away and back).
   useEffect(() => { if (showPurchase) { fetchAll(); setLastRefresh(new Date()) } }, [period, showPurchase, filterType, filterValue, regionAccess.restricted, JSON.stringify(regionAccess.regions || []), branchMeta.length, lastSyncAt]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Auto-refresh every 3 minutes when viewing Today
+  // Auto-refresh every 30s when viewing Today (matches LiveFeedFlashcards so
+  // the two surfaces don't contradict each other). Also refetch on tab focus /
+  // visibility change — covers the "navigate away and back" case even when
+  // this component stays mounted.
   useEffect(() => {
     if (!showPurchase || period !== 'today') { clearInterval(refreshRef.current); return }
-    refreshRef.current = setInterval(() => { fetchAll(); setLastRefresh(new Date()) }, 3 * 60 * 1000)
-    return () => clearInterval(refreshRef.current)
+    refreshRef.current = setInterval(() => { fetchAll(); setLastRefresh(new Date()) }, 30 * 1000)
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') { fetchAll(); setLastRefresh(new Date()) }
+    }
+    const onFocus = () => { fetchAll(); setLastRefresh(new Date()) }
+    document.addEventListener('visibilitychange', onVisible)
+    window.addEventListener('focus', onFocus)
+    return () => {
+      clearInterval(refreshRef.current)
+      document.removeEventListener('visibilitychange', onVisible)
+      window.removeEventListener('focus', onFocus)
+    }
   }, [showPurchase, period, filterType, filterValue]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const fetchAll = async () => {
