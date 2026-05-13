@@ -8,8 +8,8 @@ import { openAlert } from '../ui/ConfirmDialog'
 
 // ── Local role defaults ────────────────────────────────────────────────────────
 const _ROLE_PAGES = {
-  super_admin:     ['dashboard','purchase-data','purchase-reports','consignment-overview','consignment-data','consignment-report','consignment-summary','melting','sales','cal-table','live-market-rates','reports','branch-management','branch-employees','user-management','company-settings','consignment-seeds','import-logs','inbound-bot'],
-  founders_office: ['dashboard','purchase-data','purchase-reports','consignment-overview','consignment-data','consignment-report','consignment-summary','melting','sales','cal-table','live-market-rates','reports','branch-management','branch-employees','user-management','company-settings','consignment-seeds','import-logs','inbound-bot'],
+  super_admin:     ['dashboard','purchase-data','purchase-reports','consignment-overview','consignment-data','consignment-report','consignment-summary','melting','sales','cal-table','live-market-rates','reports','branch-management','branch-employees','user-management','company-settings','consignment-seeds','import-logs','inbound-bot','gold-buying-rate'],
+  founders_office: ['dashboard','purchase-data','purchase-reports','consignment-overview','consignment-data','consignment-report','consignment-summary','melting','sales','cal-table','live-market-rates','reports','branch-management','branch-employees','user-management','company-settings','consignment-seeds','import-logs','inbound-bot','gold-buying-rate'],
   admin:           ['dashboard','purchase-data','purchase-reports','consignment-overview','consignment-data','consignment-report','consignment-summary','cal-table','live-market-rates'],
   manager:         ['dashboard','purchase-data','purchase-reports','live-market-rates'],
   branch_staff:    ['dashboard','purchase-data','purchase-reports'],
@@ -145,6 +145,7 @@ const PERM_TREE = [
       { key: 'page.branch-employees',  label: 'Branch Employees',   desc: 'View and manage employee records' },
       { key: 'page.user-management',   label: 'User Management',    desc: 'Manage app users, roles and access' },
       { key: 'page.company-settings',  label: 'Company Settings',   desc: 'Company-wide configuration' },
+      { key: 'page.gold-buying-rate',  label: 'Gold Buying Rate',   desc: 'Live buying rates per state from new CRM' },
       { key: 'page.logistics',         label: 'Logistics',          desc: 'Per-branch courier partner, pickup time, delivery TAT' },
       { key: 'page.consignment-seeds', label: 'Consignment Seeds',  desc: 'Test seed data management' },
       { key: 'page.import-logs',       label: 'Import Logs',        desc: 'Data import history and status' },
@@ -286,6 +287,7 @@ export const PERMISSION_REGISTRY = [
       { key: 'page.branch-employees',     label: 'Branch Employees',    desc: 'Admin: employee records' },
       { key: 'page.user-management',      label: 'User Management',     desc: 'Admin: manage app users' },
       { key: 'page.company-settings',     label: 'Company Settings',    desc: 'Admin: company config' },
+      { key: 'page.gold-buying-rate',     label: 'Gold Buying Rate',    desc: 'Admin: live buying rates per state' },
       { key: 'page.logistics',            label: 'Logistics',           desc: 'Admin: per-branch courier config' },
       { key: 'page.consignment-seeds',    label: 'Consignment Seeds',   desc: 'Admin: seed data' },
       { key: 'page.import-logs',          label: 'Import Logs',         desc: 'Admin: data import history' },

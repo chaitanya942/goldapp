@@ -10,6 +10,7 @@ import DashboardHome from '../../components/dashboard/DashboardHome'
 import BranchManagement from '../../components/admin/BranchManagement'
 import UserManagement from '../../components/admin/UserManagement'
 import CompanySettings from '../../components/admin/CompanySettings'
+import GoldBuyingRate from '../../components/admin/GoldBuyingRate'
 import ConsignmentSeeds from '../../components/admin/ConsignmentSeeds'
 import Logistics from '../../components/admin/Logistics'
 import BranchEmployees from '../../components/admin/BranchEmployees'
@@ -219,6 +220,7 @@ function DashboardShell() {
       case 'branch-management':   return <BranchManagement />
       case 'user-management':     return <UserManagement />
       case 'company-settings':    return <CompanySettings />
+      case 'gold-buying-rate':    return <GoldBuyingRate />
       case 'consignment-seeds':   return <ConsignmentSeeds />
       case 'logistics':           return <Logistics />
       case 'branch-employees':    return <BranchEmployees />
