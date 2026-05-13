@@ -695,7 +695,6 @@ export default function DashboardHome() {
   const showStateTable     = canSee('element.dashboard.state_table')
   const showTopBranches    = canSee('element.dashboard.top_branches')
   const showRegionCards    = canSee('element.dashboard.region_cards')
-  const visiblePanels      = [showStateTable, showTopBranches].filter(Boolean).length
 
   const COLOR_PALETTE = [t.gold, t.green, t.blue, t.purple, t.orange, t.red]
 
@@ -1607,34 +1606,32 @@ export default function DashboardHome() {
               )}
             </>}
 
-            {/* Bottom panels grid — only visible panels */}
-            {visiblePanels > 0 && <div style={{ display:'grid', gridTemplateColumns: isMobile ? '1fr' : `repeat(${visiblePanels},1fr)`, gap:16 }}>
+            {/* By Region — pulled up so the regional breakdown sits directly
+                under the score cards, not buried in the bottom grid. */}
+            {showStateTable && <div style={{ ...panel, marginBottom: 16 }}>
+              <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16 }}>
+                <div style={panelTitle}>By Region</div>
+                <div style={panelMeta}>Net Weight</div>
+              </div>
+              {loading
+                ? [0,1,2,3,4].map(i=><div key={i} style={{ height:30, background:`linear-gradient(90deg,${t.border},${t.border2},${t.border})`, backgroundSize:'200% 100%', borderRadius:6, marginBottom:6, animation:'shimmer 1.5s infinite' }}/>)
+                : !hasStateData
+                  ? <EmptyPanel t={t} />
+                  : stateData.filter(s=>s.state && Number(s.total_net||0)>0).map((s,i)=>(
+                      <StatRow key={s.state||i} delay={i*60}
+                        label={s.state}
+                        sub={`${s.branch_count||0} branches · ${Number(s.txn_count||s.total_count||0).toLocaleString('en-IN')} bills`}
+                        value={`${fmt(s.total_net)}g`}
+                        color={regionColorMap[s.state] || COLOR_PALETTE[i % COLOR_PALETTE.length]}
+                        t={t}
+                        bar={Number(s.total_net||0)} barMax={maxStateNet}/>
+                    ))
+              }
+            </div>}
 
-              {/* By Region */}
-              {showStateTable && <div style={panel}>
-                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16 }}>
-                  <div style={panelTitle}>By Region</div>
-                  <div style={panelMeta}>Net Weight</div>
-                </div>
-                {loading
-                  ? [0,1,2,3,4].map(i=><div key={i} style={{ height:30, background:`linear-gradient(90deg,${t.border},${t.border2},${t.border})`, backgroundSize:'200% 100%', borderRadius:6, marginBottom:6, animation:'shimmer 1.5s infinite' }}/>)
-                  : !hasStateData
-                    ? <EmptyPanel t={t} />
-                    : stateData.filter(s=>s.state && Number(s.total_net||0)>0).map((s,i)=>(
-                        <StatRow key={s.state||i} delay={i*60}
-                          label={s.state}
-                          sub={`${s.branch_count||0} branches · ${Number(s.txn_count||s.total_count||0).toLocaleString('en-IN')} bills`}
-                          value={`${fmt(s.total_net)}g`}
-                          color={regionColorMap[s.state] || COLOR_PALETTE[i % COLOR_PALETTE.length]}
-                          t={t}
-                          bar={Number(s.total_net||0)} barMax={maxStateNet}/>
-                      ))
-                }
-              </div>}
-
-
-              {/* Top Branches */}
-              {showTopBranches && <div style={panel}>
+            {/* Bottom panel — Top/Bottom Branches (By Region moved above). */}
+            {showTopBranches && (
+              <div style={panel}>
                 <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16 }}>
                   <div style={panelTitle}>Top 5 Branches</div>
                   <div style={panelMeta}>Net Weight</div>
@@ -1673,9 +1670,8 @@ export default function DashboardHome() {
                     ))}
                   </>
                 )}
-              </div>}
-
-            </div>}
+              </div>
+            )}
           </div>
         </div>
       </div>}
