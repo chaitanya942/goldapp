@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../../lib/supabase'
 import { useApp } from '../../lib/context'
 import { authedFetch } from '../../lib/authedFetch'
+import { triggerSync } from '../../lib/triggerSync'
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
   LineChart, Line, CartesianGrid,
@@ -149,10 +150,10 @@ function PurchaseInline({ t, setActiveNav, canSee }) {
     if (filterType !== 'branch') { setBranchSearch(''); setBranchDropOpen(false) }
   }, [filterType])
 
-  // Trigger a CRM→Supabase sync every 30s and poll MAX(updated_at) so this
-  // panel keeps catching up with LiveFeedFlashcards (which read CRM directly).
+  // Trigger a CRM→Supabase sync every 10s (shared helper coalesces overlapping
+  // calls across components) and poll MAX(updated_at) so this panel keeps
+  // catching up with LiveFeedFlashcards (which read CRM directly).
   useEffect(() => {
-    const triggerSync   = () => authedFetch('/api/sync-purchases?days=2', { method: 'POST' }).catch(() => null)
     const fetchLastSync = async () => {
       const { data } = await supabase
         .from('purchases')
@@ -163,7 +164,7 @@ function PurchaseInline({ t, setActiveNav, canSee }) {
     }
     triggerSync()
     fetchLastSync()
-    const id = setInterval(() => { triggerSync(); fetchLastSync() }, 30 * 1000)
+    const id = setInterval(() => { triggerSync(); fetchLastSync() }, 10 * 1000)
     return () => clearInterval(id)
   }, [])
 
@@ -224,11 +225,11 @@ function PurchaseInline({ t, setActiveNav, canSee }) {
     if (lastSyncAt) { fetchPeriod({ silent: true }); setLastRefresh(new Date()) }
   }, [lastSyncAt]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Auto-refresh every 30s on Today + refetch on tab focus/visibility. All
+  // Auto-refresh every 10s on Today + refetch on tab focus/visibility. All
   // silent so the panel doesn't flash shimmer skeletons mid-session.
   useEffect(() => {
     if (period !== 'today') { clearInterval(refreshRef.current); return }
-    refreshRef.current = setInterval(() => { fetchPeriod({ silent: true }); setLastRefresh(new Date()) }, 30 * 1000)
+    refreshRef.current = setInterval(() => { fetchPeriod({ silent: true }); setLastRefresh(new Date()) }, 10 * 1000)
     const onVisible = () => {
       if (document.visibilityState === 'visible') { fetchPeriod({ silent: true }); setLastRefresh(new Date()) }
     }

@@ -12,7 +12,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { authedFetch } from '../../lib/authedFetch'
 import { istToday } from '../../lib/dateIst'
 
-const REFRESH_SECS = 30
+const REFRESH_SECS = 10
 
 export default function LiveFeedFlashcards({ t, isMobile }) {
   const [data,        setData]        = useState(null)

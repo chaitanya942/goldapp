@@ -9,6 +9,7 @@ import Badge from '../ui/Badge'
 import Toast from '../ui/Toast'
 import { openConfirm } from '../ui/ConfirmDialog'
 import { authedFetch } from '../../lib/authedFetch'
+import { triggerSync } from '../../lib/triggerSync'
 import { CONSIGNMENT_THEMES as THEMES, REGION_COLORS, useMobile } from '../../lib/consignmentTheme'
 import { WorkflowStrip, canActOnStep } from './workflowParts'
 import { istToday, istDaysAgo, istStartOfDayIso, istEndOfDayIso } from '../../lib/dateIst'
@@ -174,7 +175,11 @@ export default function ConsignmentData() {
     setLoading(false)
   }, [])
 
-  useEffect(() => { fetchAll() }, [fetchAll])
+  // Trigger a CRM→Supabase sync the moment ops opens this page (and on each
+  // mount-equivalent re-run), so the bill picker reflects what just hit CRM.
+  // Without this, a bill approved 5s ago is invisible here until the next
+  // background sync — operations couldn't add it to a consignment.
+  useEffect(() => { triggerSync({ minIntervalMs: 0 }).finally(fetchAll) }, [fetchAll])
 
   // Realtime: when accounts approves/rejects a consignment, the badge and
   // download buttons in this view update without the user refreshing.

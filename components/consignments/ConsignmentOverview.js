@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { useApp, useRegionAccess } from '../../lib/context'
 import GoldSpinner from '../ui/GoldSpinner'
 import { authedFetch, prefetch } from '../../lib/authedFetch'
+import { triggerSync } from '../../lib/triggerSync'
 import { CONSIGNMENT_THEMES as THEMES, REGION_COLORS, useMobile } from '../../lib/consignmentTheme'
 import { istToday, istNow } from '../../lib/dateIst'
 
@@ -127,9 +128,18 @@ export default function ConsignmentOverview() {
     setLoading(false)
   }, [])
 
+  // Mount: trigger a fresh CRM→Supabase sync so the branch-stock numbers
+  // reflect what just hit CRM (consignment creation reads from purchases,
+  // which depends on this sync). Then poll the branch overview every 15s,
+  // pairing each poll with another sync trigger (shared helper coalesces
+  // overlapping calls). Drops the previous 3-min interval where ops would
+  // sit on stale stock while new approvals piled up in CRM.
   useEffect(() => {
-    fetchData()
-    const interval = setInterval(fetchData, 3 * 60 * 1000)
+    triggerSync({ minIntervalMs: 0 }).finally(() => fetchData())
+    const interval = setInterval(() => {
+      triggerSync()
+      fetchData()
+    }, 15 * 1000)
     return () => clearInterval(interval)
   }, [fetchData])
 
@@ -392,7 +402,7 @@ export default function ConsignmentOverview() {
               Clear
             </button>
           )}
-          <button onClick={fetchData} disabled={loading}
+          <button onClick={() => { triggerSync({ minIntervalMs: 0 }).finally(fetchData) }} disabled={loading}
             style={{ background: loading ? t.card2 : `${t.gold}15`, border: `1px solid ${loading ? t.border : t.gold}40`, borderRadius: '8px', padding: '7px 16px', fontSize: '12px', color: loading ? t.text4 : t.gold, cursor: loading ? 'default' : 'pointer', fontWeight: 600, transition: 'all .15s', display: 'flex', alignItems: 'center', gap: '6px' }}>
             <span style={{ display: 'inline-block', animation: loading ? 'spin 1s linear infinite' : 'none', fontSize: '13px' }}>⟳</span>
             {loading ? 'Refreshing…' : 'Refresh'}

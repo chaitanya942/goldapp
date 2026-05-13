@@ -6,6 +6,7 @@ import { useApp, useRegionAccess } from '../../lib/context'
 import LiveTicker from '../ui/LiveTicker'
 import { getVisibleModules } from '../../lib/modules'
 import { authedFetch } from '../../lib/authedFetch'
+import { triggerSync } from '../../lib/triggerSync'
 
 import { CONSIGNMENT_THEMES as THEMES } from '../../lib/consignmentTheme'
 import { istNow, istStr, fromUtcDate } from '../../lib/dateIst'
@@ -714,13 +715,12 @@ export default function DashboardHome() {
     if (filterType !== 'branch') { setBranchSearch(''); setBranchDropOpen(false) }
   }, [filterType])
 
-  // Trigger a CRM→Supabase sync every 30s (fire-and-forget) and poll
+  // Trigger a CRM→Supabase sync every 10s (via shared in-flight-guarded
+  // helper so multiple surfaces don't pile up overlapping syncs) and poll
   // MAX(updated_at) so the dashboard keeps catching up with the live feed.
-  // Previously sync only ran once on mount, so any CRM rows approved after
-  // page load stayed invisible until the user navigated away and back —
-  // visibly contradicting the LiveFeedFlashcards which read CRM directly.
+  // Combined with the 10s data refresh below, the panel should be within
+  // 10–15s of CRM at any moment.
   useEffect(() => {
-    const triggerSync = () => authedFetch('/api/sync-purchases?days=2', { method: 'POST' }).catch(() => null)
     const fetchLastSync = async () => {
       const { data } = await supabase
         .from('purchases')
@@ -731,7 +731,7 @@ export default function DashboardHome() {
     }
     triggerSync()
     fetchLastSync()
-    const id = setInterval(() => { triggerSync(); fetchLastSync() }, 30 * 1000)
+    const id = setInterval(() => { triggerSync(); fetchLastSync() }, 10 * 1000)
     return () => clearInterval(id)
   }, [])
 
@@ -1016,11 +1016,11 @@ export default function DashboardHome() {
     if (showPurchase && lastSyncAt) { fetchAll({ silent: true }); setLastRefresh(new Date()) }
   }, [lastSyncAt]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Auto-refresh every 30s when viewing Today + refetch on tab focus /
+  // Auto-refresh every 10s when viewing Today + refetch on tab focus /
   // visibility change. All silent so the panel doesn't flash skeletons.
   useEffect(() => {
     if (!showPurchase || period !== 'today') { clearInterval(refreshRef.current); return }
-    refreshRef.current = setInterval(() => { fetchAll({ silent: true }); setLastRefresh(new Date()) }, 30 * 1000)
+    refreshRef.current = setInterval(() => { fetchAll({ silent: true }); setLastRefresh(new Date()) }, 10 * 1000)
     const onVisible = () => {
       if (document.visibilityState === 'visible') { fetchAll({ silent: true }); setLastRefresh(new Date()) }
     }
