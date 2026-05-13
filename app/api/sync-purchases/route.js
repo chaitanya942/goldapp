@@ -39,34 +39,31 @@ function fmtDate(d) {
   return String(d).split('T')[0].split(' ')[0]
 }
 
-// ── Smart dedup: same bill_no only a true dup if key fields also match ────────
+// ── Preserve every CRM transaction; suffix on bill_no collision ──────────────
+// Older logic dropped rows it thought were duplicates (matched by name + date
+// + weight + amount + phone). That cost ops 25+ bills per day in production
+// because walk-ins with NULL phone or shared default names were wrongly
+// collapsed, leaving consignments uncreatable for the missing bills.
+//
+// New rule: every distinct CRM txn_id is preserved. We only modify
+// application_id (bill_no) to stay unique within the batch — CRM legitimately
+// re-uses bill numbers across transactions, but the (application_id,
+// crm_source) upsert key must be unique. Smallest txn_id within a group
+// keeps the bare bill_no so the assignment is deterministic across syncs;
+// the rest get suffixed with their txn_id.
 function smartDedup(records) {
-  const grouped = new Map()
-  records.forEach(r => {
-    const key = r.application_id
-    if (!grouped.has(key)) grouped.set(key, [])
-    grouped.get(key).push(r)
-  })
+  const groups = new Map()
+  for (const r of records) {
+    if (!groups.has(r.application_id)) groups.set(r.application_id, [])
+    groups.get(r.application_id).push(r)
+  }
   const result = []
-  for (const group of grouped.values()) {
-    if (group.length === 1) { result.push(group[0]); continue }
-    const kept = []
-    for (const r of group) {
-      const dupIdx = kept.findIndex(d =>
-        d.customer_name === r.customer_name &&
-        d.purchase_date === r.purchase_date &&
-        Math.abs((d.net_weight||0) - (r.net_weight||0)) < 0.01 &&
-        Math.abs((d.final_amount_crm||0) - (r.final_amount_crm||0)) < 1 &&
-        d.phone_number === r.phone_number
-      )
-      if (dupIdx >= 0) {
-        kept[dupIdx].is_duplicate = true // true duplicate — mark and skip
-      } else {
-        if (kept.length > 0) r.application_id = `${r.application_id}-${r._txn_id}`
-        kept.push(r)
-      }
+  for (const group of groups.values()) {
+    group.sort((a, b) => Number(a._txn_id) - Number(b._txn_id))
+    for (let i = 0; i < group.length; i++) {
+      const r = group[i]
+      result.push(i === 0 ? r : { ...r, application_id: `${r.application_id}-${r._txn_id}` })
     }
-    result.push(...kept)
   }
   return result
 }
