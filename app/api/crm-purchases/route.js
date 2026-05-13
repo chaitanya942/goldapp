@@ -96,26 +96,19 @@ export async function GET(req) {
       return Response.json({ ...cached.data, cached: true })
     }
 
-    // Convert IST date to its UTC datetime bounds so we can use the index on
-    // `date`. Previously we filtered with `DATE(date + INTERVAL 330 MINUTE)
-    // = ?` — wrapping the column in a function disables index use and forces
-    // a full scan of transac_tbl (millions of rows), which is why the cold
-    // first-load was multi-second-to-minutes. India has no DST so the +5:30
-    // offset is constant; this conversion is exact, not approximate.
-    const [y, mo, d] = todayIST.split('-').map(Number)
-    const startUtcMs = Date.UTC(y, mo - 1, d,     -5, -30, 0)
-    const endUtcMs   = Date.UTC(y, mo - 1, d + 1, -5, -30, 0)
-    const fmtDt = (ms) => new Date(ms).toISOString().slice(0, 19).replace('T', ' ')
-    const startUtc = fmtDt(startUtcMs)   // e.g. 2026-05-12 18:30:00 for IST 2026-05-13
-    const endUtc   = fmtDt(endUtcMs)     // e.g. 2026-05-13 18:30:00
-
     // Cache miss — need pool now.
     let conn
     try {
       conn = await createConn()
 
-      // Branch→region lookup only needed when scoping is active. For
-      // admin/founders/super_admin we skip that Supabase round trip.
+      // Use the same timezone-independent WHERE the rest of the file uses
+      // (`DATE(date + INTERVAL 330 MINUTE) = ?`). An earlier attempt at an
+      // index-friendly range comparison (`date >= ? AND date < ?` with
+      // UTC bounds) silently dropped ~35% of net weight because MySQL
+      // interprets datetime literals in the session timezone, and we can't
+      // assume that's UTC. The +330-minute arithmetic does explicit minute
+      // math regardless of session zone. Slower but correct — correctness
+      // wins.
       const needRegionMap = !!allowedRegions
       const [
         [walkinRows],
@@ -125,16 +118,16 @@ export async function GET(req) {
         conn.execute(`
           SELECT branch_id, COUNT(*) AS bills, ROUND(SUM(gms_weight + 0), 2) AS wt
           FROM customer_walkin
-          WHERE date >= ? AND date < ?
+          WHERE DATE(date + INTERVAL 330 MINUTE) = ?
           GROUP BY branch_id
-        `, [startUtc, endUtc]),
+        `, [todayIST]),
         conn.execute(`
           SELECT t.trxn_status, t.id AS txn_id, t.branch_id,
             (t.finl_amnt+0) AS amount, o.net_wet
           FROM transac_tbl t
           LEFT JOIN ornments_tbl o ON o.trnxnn_id = t.id
-          WHERE t.date >= ? AND t.date < ?
-        `, [startUtc, endUtc]),
+          WHERE DATE(t.date + INTERVAL 330 MINUTE) = ?
+        `, [todayIST]),
         needRegionMap
           ? supabase.from('branches').select('crm_branch_id, region').not('region', 'is', null)
           : Promise.resolve({ data: [] }),
