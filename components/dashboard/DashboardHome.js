@@ -1112,7 +1112,7 @@ export default function DashboardHome() {
     const needsLive = period === 'today' && !filterType
     const aggPromise  = authedFetch(`/api/report-aggregates?${params}`).then(r => r.json()).catch(() => ({}))
     const livePromise = needsLive
-      ? authedFetch('/api/crm-purchases?action=live').then(r => r.json()).catch(() => null)
+      ? authedFetch('/api/crm-purchases?action=flashcards').then(r => r.json()).catch(() => null)
       : Promise.resolve(null)
 
     const aggJson = await aggPromise

@@ -29,7 +29,17 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY || 'placeholder'
 )
 
-const ALLOWED_ACTIONS = new Set(['rejected', 'pending', 'walkin', 'blacklisted', 'branches', 'kpis', 'live'])
+const ALLOWED_ACTIONS = new Set(['rejected', 'pending', 'walkin', 'blacklisted', 'branches', 'kpis', 'live', 'flashcards'])
+
+// In-memory cache for the lightweight `flashcards` endpoint. LiveFeedFlashcards
+// + the dashboard panel both poll every 10s; a small TTL coalesces concurrent
+// callers (and same caller across ticks) so we don't run the MySQL queries
+// every time. 5s keeps us inside the ops-stated "5-10s is fine" tolerance.
+// Cache key includes the region-scope fingerprint so a region-restricted user
+// can never read another scope's cached payload.
+const FLASHCARD_CACHE_TTL_MS = 5000
+const FLASHCARD_CACHE_MAX    = 50
+const flashcardCache = new Map()
 
 let _pool
 function createConn() {
@@ -71,6 +81,121 @@ export async function GET(req) {
   let conn
   try {
     conn = await createConn()
+
+    // ── FLASHCARDS ───────────────────────────────────────────────────────────
+    // Lightweight endpoint backing LiveFeedFlashcards + the dashboard panel's
+    // CRM-live override. Returns only the four numbers those surfaces render:
+    // walked-in count, walked-in weight, approved count, approved weight (plus
+    // approved_value for the dashboard's gross-value tile). Two MySQL queries
+    // instead of the eleven-query, three-database fan-out behind `live`, so
+    // first paint is ~300ms cold and ~10ms when the 5s cache is warm.
+    if (action === 'flashcards') {
+      const istNow     = new Date(Date.now() + 5.5 * 60 * 60 * 1000)
+      const defaultIST = istNow.toISOString().split('T')[0]
+      const todayIST   = searchParams.get('date') || defaultIST
+
+      const allowedRegions = await getAllowedRegionsForAuth(supabase, auth)
+      const cacheKey = `${todayIST}::${(allowedRegions || ['ALL']).slice().sort().join(',')}`
+
+      const cached = flashcardCache.get(cacheKey)
+      if (cached && Date.now() - cached.ts < FLASHCARD_CACHE_TTL_MS) {
+        return Response.json({ ...cached.data, cached: true })
+      }
+
+      // Branch→region lookup only needed when scoping is active. For
+      // admin/founders/super_admin we skip that Supabase round trip.
+      const needRegionMap = !!allowedRegions
+      const [
+        [walkinRows],
+        [ornmentRows],
+        sbBranchesResult,
+      ] = await Promise.all([
+        conn.execute(`
+          SELECT branch_id, COUNT(*) AS bills, ROUND(SUM(gms_weight + 0), 2) AS wt
+          FROM customer_walkin
+          WHERE DATE(date + INTERVAL 330 MINUTE) = ?
+          GROUP BY branch_id
+        `, [todayIST]),
+        conn.execute(`
+          SELECT t.trxn_status, t.id AS txn_id, t.branch_id,
+            (t.finl_amnt+0) AS amount, o.net_wet
+          FROM transac_tbl t
+          LEFT JOIN ornments_tbl o ON o.trnxnn_id = t.id
+          WHERE DATE(t.date + INTERVAL 330 MINUTE) = ?
+        `, [todayIST]),
+        needRegionMap
+          ? supabase.from('branches').select('crm_branch_id, region').not('region', 'is', null)
+          : Promise.resolve({ data: [] }),
+      ])
+
+      const regionMap = {}
+      for (const b of (sbBranchesResult?.data || [])) {
+        if (b.crm_branch_id) regionMap[String(b.crm_branch_id)] = b.region
+      }
+      const allowedSet = needRegionMap ? new Set(allowedRegions) : null
+      const inAllowed  = (branchId) => !needRegionMap || allowedSet.has(regionMap[String(branchId)] || '')
+
+      // Walk-in totals (region-filtered if needed)
+      let walkedInCount = 0
+      let walkedInWt    = 0
+      for (const r of walkinRows) {
+        if (!inAllowed(r.branch_id)) continue
+        walkedInCount += Number(r.bills) || 0
+        walkedInWt    += parseFloat(r.wt) || 0
+      }
+
+      // Aggregate ornaments per transaction (one CRM txn has N ornament rows).
+      // Net weight sums across all ornaments; status and amount come from the
+      // transaction row, identical on every joined row of the same txn_id.
+      const txnAgg = new Map()
+      for (const r of ornmentRows) {
+        if (!txnAgg.has(r.txn_id)) {
+          txnAgg.set(r.txn_id, {
+            status:    r.trxn_status,
+            branch_id: r.branch_id,
+            amount:    parseFloat(r.amount) || 0,
+            net_wt:    0,
+          })
+        }
+        txnAgg.get(r.txn_id).net_wt += parseFloat(r.net_wet) || 0
+      }
+
+      let approvedCount = 0
+      let purchasedWt   = 0
+      let approvedValue = 0
+      for (const txn of txnAgg.values()) {
+        if (!inAllowed(txn.branch_id)) continue
+        if (txn.status === 'approved') {
+          approvedCount++
+          purchasedWt   += txn.net_wt
+          approvedValue += txn.amount
+        }
+      }
+
+      const result = {
+        todayIST,
+        walkinSummary: {
+          total:         walkedInCount,
+          total_gold_wt: Number(walkedInWt.toFixed(2)),
+        },
+        summary: {
+          approved:       approvedCount,
+          approved_value: Number(approvedValue.toFixed(2)),
+        },
+        goldPipeline: {
+          walked_in_wt: Number(walkedInWt.toFixed(2)),
+          purchased_wt: Number(purchasedWt.toFixed(2)),
+        },
+      }
+
+      // Bound the cache size — one key per (date × region-scope-fingerprint).
+      // Days roll over and add new entries; trim oldest to keep memory flat.
+      flashcardCache.set(cacheKey, { data: result, ts: Date.now() })
+      if (flashcardCache.size > FLASHCARD_CACHE_MAX) {
+        flashcardCache.delete(flashcardCache.keys().next().value)
+      }
+      return Response.json(result)
+    }
 
     // ── REJECTED BILLS ───────────────────────────────────────────────────────
     if (action === 'rejected') {

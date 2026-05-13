@@ -23,7 +23,7 @@ export default function LiveFeedFlashcards({ t, isMobile }) {
   const load = useCallback(async () => {
     try {
       const today = istToday()
-      const res = await authedFetch(`/api/crm-purchases?action=live&date=${today}`)
+      const res = await authedFetch(`/api/crm-purchases?action=flashcards&date=${today}`)
       const json = await res.json()
       if (!json.error) {
         setData(json)

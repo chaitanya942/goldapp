@@ -271,7 +271,7 @@ function PurchaseInline({ t, setActiveNav, canSee }) {
       p_single_day: from === to,
     })
     const livePromise = needsLive
-      ? authedFetch('/api/crm-purchases?action=live').then(r => r.json()).catch(() => null)
+      ? authedFetch('/api/crm-purchases?action=flashcards').then(r => r.json()).catch(() => null)
       : Promise.resolve(null)
 
     const { data } = await aggPromise
