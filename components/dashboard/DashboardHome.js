@@ -710,6 +710,15 @@ export default function DashboardHome() {
   const branchInputRef = useRef(null)
   const branchDropRef  = useRef(null)
   const [lastSyncAt,   setLastSyncAt]   = useState(null)
+  // 1-second tick to drive the "Synced Ns ago" badge counter and trip the
+  // stale-color threshold the moment 60s elapses without a fresh sync.
+  // Re-rendering once per second is cheap; it only re-evaluates the small
+  // badge JSX, no fetches.
+  const [, setBadgeTick] = useState(0)
+  useEffect(() => {
+    const id = setInterval(() => setBadgeTick(n => n + 1), 1000)
+    return () => clearInterval(id)
+  }, [])
 
   useEffect(() => {
     if (filterType !== 'branch') { setBranchSearch(''); setBranchDropOpen(false) }
@@ -1218,17 +1227,23 @@ export default function DashboardHome() {
             <span style={{ width:24, height:1, background:`linear-gradient(90deg,transparent,${t.gold})`, display:'inline-block' }}/>
             {getGreeting()}, {name}
             {lastSyncAt && (() => {
+              // Thresholds tuned for the cron-worker setup: sync runs every
+              // 30s background, so anything older than 60s means the cron
+              // worker is failing (or auth broken) — surface it as red so
+              // it's noticed instead of silently drifting.
               const ageMs  = Date.now() - new Date(lastSyncAt).getTime()
-              const ageMin = Math.floor(ageMs / 60000)
               const ageSec = Math.floor(ageMs / 1000)
-              const fresh  = ageMs < 5 * 60 * 1000
-              const stale  = ageMs > 15 * 60 * 1000
-              const color  = stale ? t.red : fresh ? t.green : t.text3
-              const label  = ageSec < 60 ? 'just now' : ageMin < 60 ? `${ageMin}m ago` : `${Math.floor(ageMin/60)}h ago`
+              const ageMin = Math.floor(ageMs / 60000)
+              const fresh  = ageSec < 30
+              const warn   = ageSec >= 30 && ageSec < 60
+              const stale  = ageSec >= 60
+              const color  = stale ? t.red : warn ? (t.orange || t.gold) : t.green
+              const label  = ageSec < 60 ? `${ageSec}s ago` : ageMin < 60 ? `${ageMin}m ago` : `${Math.floor(ageMin/60)}h ago`
+              const title  = stale ? 'Sync looks stuck — check the cron-worker service in Railway' : `Last sync ${ageSec}s ago`
               return (
-                <span style={{ display:'flex', alignItems:'center', gap:5, color, textTransform:'none', letterSpacing:'.02em', fontSize:11 }}>
-                  <span style={{ width:6, height:6, borderRadius:'50%', background:color, boxShadow: fresh ? `0 0 6px ${color}` : 'none' }} />
-                  Synced {label}
+                <span title={title} style={{ display:'flex', alignItems:'center', gap:5, color, textTransform:'none', letterSpacing:'.02em', fontSize:11, fontWeight: stale ? 700 : 400 }}>
+                  <span style={{ width:6, height:6, borderRadius:'50%', background:color, boxShadow: fresh ? `0 0 6px ${color}` : 'none', animation: stale ? 'pglow 1.4s infinite' : 'none' }} />
+                  {stale ? `Sync ${label}` : `Synced ${label}`}
                 </span>
               )
             })()}
