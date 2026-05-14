@@ -142,7 +142,21 @@ export async function GET(req) {
         agg,
       ] = await Promise.all([
         conn.execute(`
-          SELECT branch_id, COUNT(*) AS bills, ROUND(SUM(gms_weight + 0), 2) AS wt
+          SELECT
+            branch_id,
+            COUNT(*) AS bills,
+            -- Only sum weights that look like real gold weights. Lead-form
+            -- bugs occasionally copy the customer's 10-digit mobile into
+            -- gms_weight; without this guard a single bad row poisons the
+            -- daily total by ~9 billion grams. Heuristic: valid = below
+            -- 10000 OR has a decimal component. A genuine 9.876 gram entry
+            -- has decimals; a 9876543210 phone number does not.
+            ROUND(SUM(CASE
+              WHEN (gms_weight + 0) < 10000
+                OR (gms_weight + 0) != FLOOR(gms_weight + 0)
+              THEN gms_weight + 0
+              ELSE 0
+            END), 2) AS wt
           FROM customer_walkin
           WHERE DATE(date + INTERVAL 330 MINUTE) = ?
           GROUP BY branch_id
@@ -431,8 +445,27 @@ export async function GET(req) {
             SUM(CASE WHEN walkin_status='sold'              THEN 1 ELSE 0 END)         AS sold,
             SUM(CASE WHEN walkin_status='visited not sold'  THEN 1 ELSE 0 END)         AS visited_not_sold,
             SUM(CASE WHEN walkin_status IS NULL OR walkin_status='' THEN 1 ELSE 0 END) AS no_update,
-            ROUND(SUM(gms_weight + 0), 2)                                              AS total_gold_wt,
-            SUM(CASE WHEN gms_weight IS NULL OR gms_weight=0 THEN 1 ELSE 0 END)        AS missing_weight_count
+            -- Sanity filter: lead-form bugs occasionally jam the customer's
+            -- 10-digit mobile into gms_weight. A genuine weight is either
+            -- under 10000g (very high upper bound for any plausible visit)
+            -- or has a decimal component (real weights like 9.876g do).
+            -- Phone numbers are large integers, so they fail both checks
+            -- and contribute 0 to the daily total instead of poisoning it.
+            ROUND(SUM(CASE
+              WHEN (gms_weight + 0) < 10000
+                OR (gms_weight + 0) != FLOOR(gms_weight + 0)
+              THEN gms_weight + 0
+              ELSE 0
+            END), 2)                                                                    AS total_gold_wt,
+            SUM(CASE WHEN gms_weight IS NULL OR gms_weight=0 THEN 1 ELSE 0 END)        AS missing_weight_count,
+            -- Count of rows where the filter rejected the weight — surfaced
+            -- so the UI can flag "N walk-ins have invalid weight entries"
+            -- without ops having to dig through CRM.
+            SUM(CASE
+              WHEN (gms_weight + 0) >= 10000
+                AND (gms_weight + 0) = FLOOR(gms_weight + 0)
+              THEN 1 ELSE 0
+            END)                                                                        AS invalid_weight_count
           FROM customer_walkin
           WHERE DATE(date + INTERVAL 330 MINUTE) = ?
         `, [todayIST]),
@@ -623,14 +656,19 @@ export async function GET(req) {
         // reflect only the user's regions.
         if (walkinSummary && Array.isArray(todayWalkins)) {
           let total = 0, sold = 0, visited_not_sold = 0, no_update = 0
-          let total_gold_wt = 0, missing_weight_count = 0
+          let total_gold_wt = 0, missing_weight_count = 0, invalid_weight_count = 0
           for (const w of todayWalkins) {
             total++
             if (w.walkin_status === 'sold') sold++
             else if (w.walkin_status === 'visited not sold') visited_not_sold++
             else if (!w.walkin_status) no_update++
             const wt = parseFloat(w.gms_weight) || 0
-            total_gold_wt += wt
+            // Mirror the SQL-side sanity filter — a phone number jammed into
+            // gms_weight (large integer, no decimals) gets excluded from the
+            // total. Counted separately so the UI can flag the rows.
+            const isInvalid = wt >= 10000 && wt === Math.floor(wt)
+            if (isInvalid) invalid_weight_count++
+            else total_gold_wt += wt
             if (!wt) missing_weight_count++
           }
           walkinSummary.total                = total
@@ -639,6 +677,7 @@ export async function GET(req) {
           walkinSummary.no_update            = no_update
           walkinSummary.total_gold_wt        = total_gold_wt.toFixed(2)
           walkinSummary.missing_weight_count = missing_weight_count
+          walkinSummary.invalid_weight_count = invalid_weight_count
         }
       }
 
