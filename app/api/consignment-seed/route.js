@@ -1,8 +1,9 @@
 // API to set/get initial seed values for consignment number generation.
-// Reads are admin-only (used by Admin > Consignment Seeds page); writes
-// change the next-issued PRF/voucher numbers and are also admin-only.
+// Authorisation: page-permission based — any role granted
+// `page.consignment-seeds` via Role Management can read AND write. Previously
+// hard-coded to ROLE_GROUPS.ADMIN, which silently broke delegation.
 import { createClient } from '@supabase/supabase-js'
-import { requireAuth, ROLE_GROUPS } from '../../../lib/apiAuth'
+import { requireAuthForPage } from '../../../lib/apiAuth'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
@@ -11,7 +12,7 @@ const supabase = createClient(
 
 // GET: Fetch current seed values (3 parallel queries instead of 140+).
 export async function GET(req) {
-  const auth = await requireAuth(req, { requiredRoles: ROLE_GROUPS.ADMIN })
+  const auth = await requireAuthForPage(req, 'consignment-seeds')
   if (!auth.ok) return auth.response
   try {
     // Run all 3 fetches in parallel
@@ -76,9 +77,9 @@ export async function GET(req) {
 }
 
 // POST: Manually set seed consignment for a branch — changes the next
-// number issued, so admin only.
+// number issued. Allowed for any role granted page.consignment-seeds.
 export async function POST(req) {
-  const auth = await requireAuth(req, { requiredRoles: ROLE_GROUPS.ADMIN })
+  const auth = await requireAuthForPage(req, 'consignment-seeds')
   if (!auth.ok) return auth.response
   try {
     const body = await req.json()
