@@ -471,14 +471,15 @@ export default function BiddingVolume() {
           = Remaining. Order reads left-to-right as the equation. Operator-
           input tiles (Gain override, Pending Delivery, Booked) sit between
           the computed totals. 6 columns now. */}
-      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(6, 1fr)', gap: '10px' }}>
+      <div className="bidKpi" style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(6, 1fr)', gap: '10px' }}>
         <KpiCard
           label="Incoming"
           value={`${fmt(incomingNetWt, 2)} g`}
           sub={`${incomingBills} bill${incomingBills === 1 ? '' : 's'} · gross ${fmt(incomingGrossWt, 2)} g`}
-          accent={t.gold} card={card} t={t} />
+          accent={t.gold} card={card} t={t} variant="source" />
 
         <GainCard
+          op="+"
           t={t} card={card}
           basisGrams={incomingNetWt}
           gainGrams={gainGrams}
@@ -491,6 +492,7 @@ export default function BiddingVolume() {
           onCancel={() => setEditingGain(false)} />
 
         <PendingCard
+          op={pendingGrams > 0 ? '+' : pendingGrams < 0 ? '−' : '±'}
           t={t} card={card}
           grams={pendingGrams}
           setBy={pendingSetBy}
@@ -502,26 +504,29 @@ export default function BiddingVolume() {
           onCancel={() => setEditingPending(false)} />
 
         <KpiCard
+          op="="
           label="Available"
           value={`${fmt(availablePool, 2)} g`}
           sub={`${pendingGrams === 0
             ? 'Incoming + Gain'
             : `Incoming + Gain ${pendingGrams < 0 ? '−' : '+'} Pending`} · pool for tomorrow's bid`}
-          accent={t.text1 || t.gold} card={card} t={t}
-          big />
+          accent={t.gold} card={card} t={t}
+          variant="result" />
 
         <KpiCard
+          op="−"
           label="Booked"
           value={`${fmt(bookedQty, 2)} g`}
           sub={`${activeBookings.length} booking${activeBookings.length === 1 ? '' : 's'} · ${fmtINR(bookedValue)}`}
-          accent={t.blue} card={card} t={t} />
+          accent={t.blue} card={card} t={t} variant="consumed" />
 
         <KpiCard
+          op="="
           label={poolState.label}
           value={poolState.value}
           sub={poolState.sub}
           accent={poolState.accent} card={card} t={t}
-          pulse={poolState.alert} />
+          variant="state" pulse={poolState.alert} />
       </div>
 
       {poolNegative && (
@@ -650,8 +655,16 @@ export default function BiddingVolume() {
         .bidGauge   { transition: width .55s cubic-bezier(.34,1.1,.64,1); }
         .bidInput   { transition: border-color .18s ease, box-shadow .18s ease, background .18s ease; }
         .bidInput:focus { box-shadow: 0 0 0 3px rgba(201,168,76,.18); }
+        /* KPI strip cascades in left→right like the equation reads */
+        .bidKpi > * { animation: bidFieldIn .42s cubic-bezier(.34,1.12,.64,1) backwards; }
+        .bidKpi > *:nth-child(1) { animation-delay: .03s }
+        .bidKpi > *:nth-child(2) { animation-delay: .09s }
+        .bidKpi > *:nth-child(3) { animation-delay: .15s }
+        .bidKpi > *:nth-child(4) { animation-delay: .21s }
+        .bidKpi > *:nth-child(5) { animation-delay: .27s }
+        .bidKpi > *:nth-child(6) { animation-delay: .33s }
         @media (prefers-reduced-motion: reduce) {
-          [class*="bid"], .bidStagger > * { animation: none !important; transition: none !important; }
+          [class*="bid"], .bidStagger > *, .bidKpi > * { animation: none !important; transition: none !important; }
         }
       `}</style>
     </div>
@@ -659,12 +672,60 @@ export default function BiddingVolume() {
 }
 
 // ── KPI Card ─────────────────────────────────────────────────────────────────
-function KpiCard({ label, value, sub, accent, card, t, pulse = false, big = false }) {
+// variant differentiates the six strip tiles so they don't read as one
+// repeated block — they read as the equation:
+//   source  → Incoming (where it comes from)
+//   result  → Available (the hero: the pool everything builds to)
+//   consumed→ Booked (what's been taken)
+//   state   → Remaining / Pool Deficit / Overbooked (the outcome)
+// `op` is the dim equation operator shown before the label (+ ± = −).
+// Hover lifts the card, brightens the border, and blooms a corner glow.
+function KpiCard({ label, value, sub, accent, card, t, op, variant = 'source', pulse = false, big = false }) {
+  const [hov, setHov] = useState(false)
+  const isResult = variant === 'result'
+  const isState  = variant === 'state'
+  const lit      = isResult || (isState && pulse)         // tinted at rest
+  const glow     = hov ? '28' : lit ? '14' : '00'
   return (
-    <div style={{ ...card, padding: '14px 18px', borderLeft: `3px solid ${accent}`, position: 'relative' }}>
-      <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', marginBottom: '8px', fontWeight: 700 }}>{label}</div>
-      <div style={{ fontSize: big ? '28px' : '24px', fontWeight: big ? 300 : 200, color: accent, fontFamily: 'monospace', lineHeight: 1, letterSpacing: '-.01em', animation: pulse ? 'pulse 1.4s infinite' : 'none' }}>{value}</div>
-      {sub && <div style={{ fontSize: '10px', color: t.text4, marginTop: 6 }}>{sub}</div>}
+    <div
+      onMouseEnter={() => setHov(true)}
+      onMouseLeave={() => setHov(false)}
+      style={{
+        position: 'relative', overflow: 'hidden',
+        background: lit
+          ? `linear-gradient(135deg, ${accent}12, ${accent}04 60%, ${t.card})`
+          : t.card,
+        border: `1px solid ${hov ? `${accent}55` : t.border}`,
+        borderLeft: `3px solid ${accent}`,
+        borderRadius: 12,
+        padding: isResult ? '16px 18px' : '14px 18px',
+        transform: hov ? 'translateY(-3px)' : 'translateY(0)',
+        boxShadow: hov
+          ? `0 9px 24px ${accent}26`
+          : isResult ? `0 1px 0 ${accent}1f inset` : 'none',
+        transition: 'transform .18s cubic-bezier(.34,1.1,.64,1), box-shadow .2s ease, border-color .2s ease, background .25s ease',
+      }}>
+      <div aria-hidden style={{
+        position: 'absolute', top: -45, right: -45, width: 130, height: 130, borderRadius: '50%',
+        pointerEvents: 'none', transition: 'background .25s ease',
+        background: `radial-gradient(circle, ${accent}${glow} 0%, transparent 70%)`,
+      }}/>
+      {isResult && (
+        <div aria-hidden style={{ position: 'absolute', top: 0, left: 14, right: 14, height: 1,
+          background: `linear-gradient(90deg, transparent, ${accent}66, transparent)`, pointerEvents: 'none' }}/>
+      )}
+      <div style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+        {op && <span style={{ fontSize: 12, color: t.text4, fontFamily: 'monospace', fontWeight: 700, opacity: .75 }}>{op}</span>}
+        <span style={{ fontSize: 9, color: t.text4, letterSpacing: '.13em', textTransform: 'uppercase', fontWeight: 700 }}>{label}</span>
+      </div>
+      <div style={{
+        position: 'relative',
+        fontSize: isResult ? 30 : (big ? 28 : 23),
+        fontWeight: isResult ? 300 : 200,
+        color: accent, fontFamily: 'monospace', lineHeight: 1, letterSpacing: '-.02em',
+        animation: pulse ? 'pulse 1.4s infinite' : 'none',
+      }}>{value}</div>
+      {sub && <div style={{ position: 'relative', fontSize: 10, color: t.text4, marginTop: 6, lineHeight: 1.4 }}>{sub}</div>}
     </div>
   )
 }
@@ -675,8 +736,9 @@ function KpiCard({ label, value, sub, accent, card, t, pulse = false, big = fals
 // Enter saves the override; Escape cancels. When overridden, a small
 // "↺ default" link appears to revert to the percent-based estimate.
 // Per-spec one-level flat rate, no tiered logic.
-function GainCard({ t, card, basisGrams, gainGrams, ratePct, overridden, editing, onStartEdit, onSave, onResetDefault, onCancel }) {
+function GainCard({ op, t, card, basisGrams, gainGrams, ratePct, overridden, editing, onStartEdit, onSave, onResetDefault, onCancel }) {
   const [draft, setDraft] = useState('')
+  const [hov, setHov] = useState(false)
   useEffect(() => { if (editing) setDraft(gainGrams ? gainGrams.toFixed(2) : '') }, [editing, gainGrams])
   const accent = t.orange || '#e58a3b'
   const commit = () => {
@@ -685,9 +747,28 @@ function GainCard({ t, card, basisGrams, gainGrams, ratePct, overridden, editing
     else onCancel()
   }
   return (
-    <div style={{ ...card, padding: '14px 18px', borderLeft: `3px solid ${accent}`, position: 'relative' }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px', gap: 6 }}>
-        <span style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 700 }}>Gain (est.)</span>
+    <div
+      onMouseEnter={() => setHov(true)}
+      onMouseLeave={() => setHov(false)}
+      style={{
+        ...card, padding: '14px 18px', borderLeft: `3px solid ${accent}`,
+        position: 'relative', overflow: 'hidden',
+        border: `1px solid ${hov ? `${accent}55` : t.border}`,
+        borderLeftWidth: 3, borderLeftColor: accent,
+        transform: hov ? 'translateY(-3px)' : 'translateY(0)',
+        boxShadow: hov ? `0 9px 24px ${accent}26` : 'none',
+        transition: 'transform .18s cubic-bezier(.34,1.1,.64,1), box-shadow .2s ease, border-color .2s ease',
+      }}>
+      <div aria-hidden style={{
+        position: 'absolute', top: -45, right: -45, width: 130, height: 130, borderRadius: '50%',
+        pointerEvents: 'none', transition: 'background .25s ease',
+        background: `radial-gradient(circle, ${accent}${hov ? '24' : '00'} 0%, transparent 70%)`,
+      }}/>
+      <div style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px', gap: 6 }}>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+          {op && <span style={{ fontSize: 12, color: t.text4, fontFamily: 'monospace', fontWeight: 700, opacity: .75 }}>{op}</span>}
+          <span style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 700 }}>Gain (est.)</span>
+        </span>
         {editing ? (
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
             <input
@@ -753,10 +834,10 @@ function GainCard({ t, card, basisGrams, gainGrams, ratePct, overridden, editing
           </span>
         )}
       </div>
-      <div style={{ fontSize: '24px', fontWeight: 200, color: accent, fontFamily: 'monospace', lineHeight: 1, letterSpacing: '-.01em' }}>
+      <div style={{ position: 'relative', fontSize: '24px', fontWeight: 200, color: accent, fontFamily: 'monospace', lineHeight: 1, letterSpacing: '-.01em' }}>
         {fmt(gainGrams, 2)}<span style={{ fontSize: 13, color: t.text3, marginLeft: 4 }}>g</span>
       </div>
-      <div style={{ fontSize: '10px', color: t.text4, marginTop: 6 }}>
+      <div style={{ position: 'relative', fontSize: '10px', color: t.text4, marginTop: 6 }}>
         {overridden
           ? `manual override on ${fmt(basisGrams, 2)} g incoming`
           : `on ${fmt(basisGrams, 2)} g incoming · ${Math.round(ratePct * 10)}g per kg`}
@@ -773,8 +854,9 @@ function GainCard({ t, card, basisGrams, gainGrams, ratePct, overridden, editing
 // and the value comes from supply, not localStorage. Negative values are
 // allowed and shown with an explicit sign. Click the pill to edit; Enter
 // saves; Escape cancels. When non-zero a small "↺" clears it back to 0.
-function PendingCard({ t, card, grams, setBy, editing, saving, onStartEdit, onSave, onClear, onCancel }) {
+function PendingCard({ op, t, card, grams, setBy, editing, saving, onStartEdit, onSave, onClear, onCancel }) {
   const [draft, setDraft] = useState('')
+  const [hov, setHov] = useState(false)
   useEffect(() => { if (editing) setDraft(grams ? String(grams) : '') }, [editing, grams])
   // Blue-violet so it's visually distinct from Gain's orange and the gold/
   // green computed tiles.
@@ -787,9 +869,28 @@ function PendingCard({ t, card, grams, setBy, editing, saving, onStartEdit, onSa
     else onCancel()
   }
   return (
-    <div style={{ ...card, padding: '14px 18px', borderLeft: `3px solid ${accent}`, position: 'relative', opacity: saving ? 0.65 : 1, transition: 'opacity .15s' }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px', gap: 6 }}>
-        <span style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 700 }}>Pending Delivery</span>
+    <div
+      onMouseEnter={() => setHov(true)}
+      onMouseLeave={() => setHov(false)}
+      style={{
+        ...card, padding: '14px 18px', position: 'relative', overflow: 'hidden',
+        border: `1px solid ${hov ? `${accent}55` : t.border}`,
+        borderLeft: `3px solid ${accent}`,
+        opacity: saving ? 0.65 : 1,
+        transform: hov ? 'translateY(-3px)' : 'translateY(0)',
+        boxShadow: hov ? `0 9px 24px ${accent}26` : 'none',
+        transition: 'opacity .15s, transform .18s cubic-bezier(.34,1.1,.64,1), box-shadow .2s ease, border-color .2s ease',
+      }}>
+      <div aria-hidden style={{
+        position: 'absolute', top: -45, right: -45, width: 130, height: 130, borderRadius: '50%',
+        pointerEvents: 'none', transition: 'background .25s ease',
+        background: `radial-gradient(circle, ${accent}${hov ? '24' : '00'} 0%, transparent 70%)`,
+      }}/>
+      <div style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px', gap: 6 }}>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+          {op && <span style={{ fontSize: 12, color: t.text4, fontFamily: 'monospace', fontWeight: 700, opacity: .75 }}>{op}</span>}
+          <span style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 700 }}>Pending Delivery</span>
+        </span>
         {editing ? (
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
             <input
@@ -850,13 +951,14 @@ function PendingCard({ t, card, grams, setBy, editing, saving, onStartEdit, onSa
         )}
       </div>
       <div style={{
+        position: 'relative',
         fontSize: '24px', fontWeight: 200,
         color: grams === 0 ? t.text3 : accent,
         fontFamily: 'monospace', lineHeight: 1, letterSpacing: '-.01em',
       }}>
         {grams === 0 ? '0.00' : signed}<span style={{ fontSize: 13, color: t.text3, marginLeft: 4 }}>g</span>
       </div>
-      <div style={{ fontSize: '10px', color: t.text4, marginTop: 6 }}>
+      <div style={{ position: 'relative', fontSize: '10px', color: t.text4, marginTop: 6 }}>
         {grams === 0
           ? 'no carry-over for this date'
           : `${grams > 0 ? 'delayed gold rolling in' : 'pull-back'}${setBy ? ` · by ${String(setBy).split('@')[0]}` : ''}`}
@@ -1052,6 +1154,15 @@ function SourcePicker({ t, card, supply, bangBranches, inTBranches, selected, se
     if (next.has(r)) next.delete(r); else next.add(r)
     return next
   })
+  // Third drill level: region → branch → bills. A branch row can be expanded
+  // (independent of its selection state) to reveal the individual CRM bills
+  // backing its number — case-level visibility/audit.
+  const [openBranches, setOpenBranches] = useState(() => new Set())
+  const toggleBranchExpand = (k) => setOpenBranches(prev => {
+    const next = new Set(prev)
+    if (next.has(k)) next.delete(k); else next.add(k)
+    return next
+  })
 
   // Shared grid template — checkbox · branch · bills · net weight.
   // (Region column dropped from the row since the group header already
@@ -1078,45 +1189,104 @@ function SourcePicker({ t, card, supply, bangBranches, inTBranches, selected, se
     </div>
   )
 
+  const renderBillRow = (bl, accent, j) => (
+    <div key={bl.id || bl.application_id || j}
+      style={{
+        display: 'grid',
+        gridTemplateColumns: '1fr 96px 110px',
+        gap: 12, alignItems: 'center',
+        padding: '7px 18px 7px 64px',     // deepest indent — nested under branch
+        borderBottom: `1px solid ${t.border}1f`,
+        background: `${accent}05`,
+        animation: `bidRowIn .2s cubic-bezier(.4,0,.2,1) ${Math.min(j, 10) * 16}ms backwards`,
+      }}>
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+        <span style={{ width: 4, height: 4, borderRadius: '50%', background: `${accent}99`, flexShrink: 0 }} />
+        <span style={{ fontSize: 11.5, color: t.text2, fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {bl.application_id || '—'}
+        </span>
+        {bl.stock_status && bl.stock_status !== 'at_branch' && (
+          <span style={{ fontSize: 8.5, color: t.text4, background: `${t.text4}14`, borderRadius: 3, padding: '1px 5px', letterSpacing: '.06em', textTransform: 'uppercase', fontWeight: 700, flexShrink: 0 }}>
+            {String(bl.stock_status).replace(/_/g, ' ')}
+          </span>
+        )}
+      </span>
+      <span style={{ fontSize: 10.5, color: t.text4, fontFamily: 'monospace', textAlign: 'right' }}>
+        {fmt(bl.gross_weight, 2)}<span style={{ fontSize: 8.5, marginLeft: 2 }}>g gr</span>
+      </span>
+      <span style={{ fontSize: 11.5, color: accent, fontFamily: 'monospace', fontWeight: 700, textAlign: 'right' }}>
+        {fmt(bl.net_weight, 2)}<span style={{ fontSize: 9, marginLeft: 2, color: t.text4 }}>g</span>
+      </span>
+    </div>
+  )
+
   const renderBranchRow = (b, accent, idx) => {
     const k = `${b._prefix}:${b.branch_name}`
     const on = selected.has(k)
     const locked = branchLocked(b)
+    const expanded = openBranches.has(k)
+    const bills = Array.isArray(b.bills) ? b.bills : []
     const lockReason = locked
       ? (selectionMode === 'kerala'
           ? 'Kerala bookings can’t mix with other regions — clear the Kerala selection first.'
           : 'Selection already contains other regions — Kerala bookings must be exclusive.')
       : ''
     return (
-      <div key={b.branch_name}
-        onClick={() => { if (!locked) onToggleBranch(k) }}
-        title={lockReason}
-        style={{
-          display: 'grid',
-          gridTemplateColumns: ROW_GRID,
-          gap: 12,
-          alignItems: 'center',
-          padding: '10px 18px 10px 32px',  // extra left pad — visually nested under group
-          borderBottom: `1px solid ${t.border}30`,
-          cursor: locked ? 'not-allowed' : 'pointer',
-          background: on ? `${accent}10` : 'transparent',
-          borderLeft: `3px solid ${on ? accent : 'transparent'}`,
-          opacity: locked ? 0.4 : 1,
-          transition: 'background .15s ease, opacity .2s ease',
-          animation: `bidRowIn .22s cubic-bezier(.4,0,.2,1) ${Math.min(idx, 8) * 18}ms backwards`,
-        }}
-        onMouseEnter={e => { if (!on && !locked) e.currentTarget.style.background = `${t.text4}06` }}
-        onMouseLeave={e => { if (!on && !locked) e.currentTarget.style.background = 'transparent' }}>
-        <input type="checkbox" checked={on} disabled={locked}
-          onChange={() => onToggleBranch(k)} onClick={e => e.stopPropagation()}
-          style={{ accentColor: accent, cursor: locked ? 'not-allowed' : 'pointer', width: 16, height: 16 }} />
-        <span style={{ fontSize: 12.5, color: t.text1, fontWeight: 600 }}>{b.branch_name}</span>
-        <span style={{ fontSize: 11.5, color: t.text2, fontFamily: 'monospace', textAlign: 'right', fontWeight: 600 }}>
-          {b.total_bills || 0}
-        </span>
-        <span style={{ fontSize: 12.5, color: t.gold, fontFamily: 'monospace', fontWeight: 700, textAlign: 'right' }}>
-          {fmt(b.total_net_wt, 2)}<span style={{ fontSize: 10, marginLeft: 2, color: t.text4 }}>g</span>
-        </span>
+      <div key={b.branch_name}>
+        <div
+          onClick={() => { if (!locked) onToggleBranch(k) }}
+          title={lockReason}
+          style={{
+            display: 'grid',
+            gridTemplateColumns: ROW_GRID,
+            gap: 12,
+            alignItems: 'center',
+            padding: '10px 18px 10px 32px',  // extra left pad — visually nested under group
+            borderBottom: `1px solid ${t.border}30`,
+            cursor: locked ? 'not-allowed' : 'pointer',
+            background: on ? `${accent}10` : 'transparent',
+            borderLeft: `3px solid ${on ? accent : 'transparent'}`,
+            opacity: locked ? 0.4 : 1,
+            transition: 'background .15s ease, opacity .2s ease',
+            animation: `bidRowIn .22s cubic-bezier(.4,0,.2,1) ${Math.min(idx, 8) * 18}ms backwards`,
+          }}
+          onMouseEnter={e => { if (!on && !locked) e.currentTarget.style.background = `${t.text4}06` }}
+          onMouseLeave={e => { if (!on && !locked) e.currentTarget.style.background = on ? `${accent}10` : 'transparent' }}>
+          <input type="checkbox" checked={on} disabled={locked}
+            onChange={() => onToggleBranch(k)} onClick={e => e.stopPropagation()}
+            style={{ accentColor: accent, cursor: locked ? 'not-allowed' : 'pointer', width: 16, height: 16 }} />
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+            {bills.length > 0 && (
+              <button
+                onClick={e => { e.stopPropagation(); toggleBranchExpand(k) }}
+                title={expanded ? 'Hide bills' : `Show ${bills.length} bill${bills.length === 1 ? '' : 's'}`}
+                style={{
+                  width: 16, height: 16, flexShrink: 0,
+                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                  background: expanded ? `${accent}22` : 'transparent',
+                  border: `1px solid ${expanded ? `${accent}55` : t.border}`,
+                  borderRadius: 4, color: expanded ? accent : t.text4,
+                  fontSize: 9, cursor: 'pointer',
+                  transform: expanded ? 'rotate(0)' : 'rotate(-90deg)',
+                  transition: 'transform .22s ease, background .15s ease, color .15s ease, border-color .15s ease',
+                }}>▾</button>
+            )}
+            <span style={{ fontSize: 12.5, color: t.text1, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {b.branch_name}
+            </span>
+          </span>
+          <span style={{ fontSize: 11.5, color: t.text2, fontFamily: 'monospace', textAlign: 'right', fontWeight: 600 }}>
+            {b.total_bills || 0}
+          </span>
+          <span style={{ fontSize: 12.5, color: t.gold, fontFamily: 'monospace', fontWeight: 700, textAlign: 'right' }}>
+            {fmt(b.total_net_wt, 2)}<span style={{ fontSize: 10, marginLeft: 2, color: t.text4 }}>g</span>
+          </span>
+        </div>
+        {expanded && bills.length > 0 && (
+          <div style={{ animation: 'bidGroupExpand .25s cubic-bezier(.4,0,.2,1)' }}>
+            {bills.map((bl, j) => renderBillRow(bl, accent, j))}
+          </div>
+        )}
       </div>
     )
   }
