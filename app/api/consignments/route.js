@@ -535,6 +535,14 @@ export async function GET(req) {
       amount:   bangTotal.amount   + inflightTotal.amount,
     }
 
+    // Pending Delivery — shared signed carry-over for this arrival date.
+    // maybeSingle() so a date with no row just yields 0 (the common case).
+    const { data: pendingRow } = await supabase
+      .from('bidding_pending_delivery')
+      .select('pending_grams, note, updated_at, updated_by')
+      .eq('arrival_date', arrivalDate)
+      .maybeSingle()
+
     return Response.json({
       data: {
         arrival_date:           arrivalDate,
@@ -548,6 +556,12 @@ export async function GET(req) {
           total:    inflightTotal,
         },
         grand_total: grandTotal,
+        pending: {
+          grams:      Number(pendingRow?.pending_grams) || 0,
+          note:       pendingRow?.note       || null,
+          updated_at: pendingRow?.updated_at || null,
+          updated_by: pendingRow?.updated_by || null,
+        },
       },
     })
   }
@@ -2161,6 +2175,31 @@ export async function POST(req) {
   // booking created here automatically appears for allocation on the
   // arrival date. Status flow: booked → confirmed → fulfilled, with a
   // separate cancelled state that voids the row from the active pool.
+
+  // ── Set Pending Delivery carry-over for an arrival date ──────────────────
+  // Shared, server-side. Signed value (can be negative). Upsert keyed on
+  // arrival_date so re-saving the same date overwrites rather than stacking.
+  if (action === 'set_bidding_pending') {
+    const { date, pending_grams, note } = body
+    if (!date) return Response.json({ error: 'date required (YYYY-MM-DD)' }, { status: 400 })
+    const g = Number(pending_grams)
+    if (!Number.isFinite(g)) {
+      return Response.json({ error: 'pending_grams must be a finite number (may be negative)' }, { status: 400 })
+    }
+    const { data, error } = await supabase
+      .from('bidding_pending_delivery')
+      .upsert({
+        arrival_date:  date,
+        pending_grams: g,
+        note:          note ? String(note).trim() : null,
+        updated_at:    new Date().toISOString(),
+        updated_by:    actorEmail,
+      }, { onConflict: 'arrival_date' })
+      .select()
+      .single()
+    if (error) return Response.json({ error: error.message }, { status: 500 })
+    return Response.json({ data })
+  }
 
   if (action === 'create_booking') {
     const { date, party, buyer_phone, weight, rate, purity, is_kl, notes, source_branches } = body

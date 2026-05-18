@@ -133,6 +133,14 @@ export default function BiddingVolume() {
     return Number.isFinite(n) && n >= 0 ? n : null
   })
   const [editingGain, setEditingGain] = useState(false)
+
+  // Pending Delivery — shared, server-side carry-over for the arrival date
+  // (NOT localStorage like Gain — the whole ops team books against one
+  // number). Value lives in supply.pending.grams; editing is local UI state;
+  // saving POSTs and refetches so every device converges.
+  const [editingPending,  setEditingPending]  = useState(false)
+  const [savingPending,   setSavingPending]   = useState(false)
+
   useEffect(() => {
     if (typeof window !== 'undefined') window.localStorage.setItem('bidding.gainRatePct', String(gainRatePct))
   }, [gainRatePct])
@@ -165,6 +173,30 @@ export default function BiddingVolume() {
 
   useEffect(() => { fetchAll() }, [fetchAll])
 
+  // Persist Pending Delivery for this arrival date, then refetch so the
+  // recomputed pool (and every other device on next poll) reflects it.
+  const savePending = useCallback(async (grams) => {
+    setSavingPending(true)
+    try {
+      const res = await authedFetch('/api/consignments', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'set_bidding_pending', date: arrivalDate, pending_grams: grams }),
+      })
+      const j = await res.json()
+      if (!res.ok || j.error) throw new Error(j.error || `HTTP ${res.status}`)
+      setEditingPending(false)
+      await fetchAll(true)               // silent refetch — keep numbers on screen
+      setToast({ msg: `Pending Delivery set to ${grams >= 0 ? '+' : ''}${grams.toFixed(2)} g`, type: 'success', key: Date.now() })
+      setTimeout(() => setToast(null), 3500)
+    } catch (e) {
+      setToast({ msg: `Couldn't save Pending Delivery: ${String(e?.message || e)}`, type: 'error', key: Date.now() })
+      setTimeout(() => setToast(null), 3500)
+    } finally {
+      setSavingPending(false)
+    }
+  }, [arrivalDate, fetchAll])
+
   // ── Derived numbers ────────────────────────────────────────────────────────
   // Pool composition (revised per ops spec):
   //   gain          = incoming * gain_rate / 100   (refining margin estimate)
@@ -190,7 +222,13 @@ export default function BiddingVolume() {
     : incomingNetWt * (gainRatePct / 100)
   const gainOverridden  = gainOverrideGrams != null
   const effectiveGainRate = incomingNetWt > 0 ? gainGrams / incomingNetWt : 0
-  const availablePool   = incomingNetWt + gainGrams
+
+  // Pending Delivery — signed carry-over from supply (server-side, shared).
+  // Folded into the pool: Available = Incoming + Gain ± Pending.
+  const pendingGrams    = supply?.pending?.grams || 0
+  const pendingSetBy    = supply?.pending?.updated_by || null
+
+  const availablePool   = incomingNetWt + gainGrams + pendingGrams
   const remainingQty    = availablePool - bookedQty
   const overbooked      = remainingQty < 0
   const bookedPct       = availablePool > 0 ? Math.min(100, (bookedQty / availablePool) * 100) : 0
@@ -388,11 +426,11 @@ export default function BiddingVolume() {
         </div>
       </div>
 
-      {/* ── KPI strip — Incoming + Gain = Available; Available − Booked = Remaining
-          Order reads left-to-right as the equation. The two operator-input
-          tiles (Gain rate override, Booked from the bookings list) sit
-          between the two computed totals. */}
-      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(5, 1fr)', gap: '10px' }}>
+      {/* ── KPI strip — Incoming + Gain ± Pending = Available; Available − Booked
+          = Remaining. Order reads left-to-right as the equation. Operator-
+          input tiles (Gain override, Pending Delivery, Booked) sit between
+          the computed totals. 6 columns now. */}
+      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(6, 1fr)', gap: '10px' }}>
         <KpiCard
           label="Incoming"
           value={`${fmt(incomingNetWt, 2)} g`}
@@ -411,10 +449,23 @@ export default function BiddingVolume() {
           onResetDefault={() => { setGainOverrideGrams(null); setEditingGain(false) }}
           onCancel={() => setEditingGain(false)} />
 
+        <PendingCard
+          t={t} card={card}
+          grams={pendingGrams}
+          setBy={pendingSetBy}
+          editing={editingPending}
+          saving={savingPending}
+          onStartEdit={() => setEditingPending(true)}
+          onSave={savePending}
+          onClear={() => savePending(0)}
+          onCancel={() => setEditingPending(false)} />
+
         <KpiCard
           label="Available"
           value={`${fmt(availablePool, 2)} g`}
-          sub={`Incoming + Gain · pool for tomorrow's bid`}
+          sub={`${pendingGrams === 0
+            ? 'Incoming + Gain'
+            : `Incoming + Gain ${pendingGrams < 0 ? '−' : '+'} Pending`} · pool for tomorrow's bid`}
           accent={t.text1 || t.gold} card={card} t={t}
           big />
 
@@ -437,7 +488,7 @@ export default function BiddingVolume() {
       {overbooked && (
         <div style={{ ...card, padding: '10px 16px', borderColor: `${t.red}55`, background: `${t.red}10`, fontSize: '12px', color: t.red, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}>
           <span style={{ fontSize: 14 }}>⚠</span>
-          Bookings exceed expected incoming by <strong>{fmt(Math.abs(availableQty), 2)} g</strong>. Consider deferring some or sourcing additional supply.
+          Bookings exceed available pool by <strong>{fmt(Math.abs(remainingQty), 2)} g</strong>. Consider deferring some or sourcing additional supply.
         </div>
       )}
 
@@ -645,6 +696,106 @@ function GainCard({ t, card, basisGrams, gainGrams, ratePct, overridden, editing
         {overridden
           ? `manual override on ${fmt(basisGrams, 2)} g incoming`
           : `on ${fmt(basisGrams, 2)} g incoming · ${Math.round(ratePct * 10)}g per kg`}
+      </div>
+    </div>
+  )
+}
+
+// ── Pending Delivery Card — shared signed carry-over for this arrival date ────
+// Gold expected for an earlier booking cycle that slipped (uncertain events)
+// and now adjusts this date's pool: positive = delayed gold rolling in,
+// negative = a pull-back. Unlike Gain this is server-side and shared (the
+// whole ops team books against one number), so saving goes through the API
+// and the value comes from supply, not localStorage. Negative values are
+// allowed and shown with an explicit sign. Click the pill to edit; Enter
+// saves; Escape cancels. When non-zero a small "↺" clears it back to 0.
+function PendingCard({ t, card, grams, setBy, editing, saving, onStartEdit, onSave, onClear, onCancel }) {
+  const [draft, setDraft] = useState('')
+  useEffect(() => { if (editing) setDraft(grams ? String(grams) : '') }, [editing, grams])
+  // Blue-violet so it's visually distinct from Gain's orange and the gold/
+  // green computed tiles.
+  const accent = t.purple || '#8c5ac8'
+  const nonZero = Number(grams) !== 0
+  const signed  = `${grams > 0 ? '+' : grams < 0 ? '−' : ''}${fmt(Math.abs(grams), 2)}`
+  const commit = () => {
+    const n = Number(draft)
+    if (Number.isFinite(n)) onSave(n)   // negative allowed by design
+    else onCancel()
+  }
+  return (
+    <div style={{ ...card, padding: '14px 18px', borderLeft: `3px solid ${accent}`, position: 'relative', opacity: saving ? 0.65 : 1, transition: 'opacity .15s' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px', gap: 6 }}>
+        <span style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 700 }}>Pending Delivery</span>
+        {editing ? (
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+            <input
+              type="number" step="0.01"
+              value={draft}
+              onChange={e => setDraft(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') onCancel() }}
+              onBlur={commit}
+              autoFocus
+              placeholder="±g"
+              style={{
+                width: 82,
+                background: t.card2 || t.card,
+                border: `1px solid ${accent}`,
+                borderRadius: 5,
+                padding: '2px 6px',
+                fontSize: 11,
+                color: accent,
+                fontFamily: 'monospace',
+                fontWeight: 700,
+                outline: 'none',
+                textAlign: 'right',
+              }} />
+            <span style={{ fontSize: 10, color: accent, fontWeight: 700 }}>g</span>
+          </span>
+        ) : (
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+            {nonZero && (
+              <button onClick={onClear}
+                title="Clear carry-over (set to 0)"
+                disabled={saving}
+                style={{ background: 'transparent', border: 'none', color: t.text4, fontSize: 10, fontWeight: 600, cursor: saving ? 'default' : 'pointer', padding: '2px 4px' }}
+                onMouseEnter={e => { if (!saving) e.currentTarget.style.color = accent }}
+                onMouseLeave={e => { e.currentTarget.style.color = t.text4 }}>
+                ↺
+              </button>
+            )}
+            <button onClick={onStartEdit}
+              title="Click to set the pending carry-over (can be negative)"
+              disabled={saving}
+              style={{
+                background: `${accent}15`,
+                border: `1px solid ${accent}40`,
+                color: accent,
+                borderRadius: 99,
+                padding: '2px 9px',
+                fontSize: 10,
+                fontWeight: 700,
+                fontFamily: 'monospace',
+                cursor: saving ? 'default' : 'pointer',
+                letterSpacing: '.04em',
+              }}
+              onMouseEnter={e => { if (!saving) e.currentTarget.style.background = `${accent}25` }}
+              onMouseLeave={e => { e.currentTarget.style.background = `${accent}15` }}>
+              {saving ? '…' : 'SET ✎'}
+            </button>
+          </span>
+        )}
+      </div>
+      <div style={{
+        fontSize: '24px', fontWeight: 200,
+        color: grams === 0 ? t.text3 : accent,
+        fontFamily: 'monospace', lineHeight: 1, letterSpacing: '-.01em',
+      }}>
+        {grams === 0 ? '0.00' : signed}<span style={{ fontSize: 13, color: t.text3, marginLeft: 4 }}>g</span>
+      </div>
+      <div style={{ fontSize: '10px', color: t.text4, marginTop: 6 }}>
+        {grams === 0
+          ? 'no carry-over for this date'
+          : `${grams > 0 ? 'delayed gold rolling in' : 'pull-back'}${setBy ? ` · by ${String(setBy).split('@')[0]}` : ''}`}
       </div>
     </div>
   )
