@@ -230,8 +230,41 @@ export default function BiddingVolume() {
 
   const availablePool   = incomingNetWt + gainGrams + pendingGrams
   const remainingQty    = availablePool - bookedQty
-  const overbooked      = remainingQty < 0
   const bookedPct       = availablePool > 0 ? Math.min(100, (bookedQty / availablePool) * 100) : 0
+
+  // Two distinct deficit states — they were conflated before, which made a
+  // −Pending with zero bookings wrongly read as "Bookings exceed pool":
+  //   poolNegative — the pool itself is underwater because the Pending
+  //                  pull-back exceeds Incoming + Gain. Independent of
+  //                  bookings; there's simply nothing to bid.
+  //   overbooked   — the pool is non-negative but commitments exceed it
+  //                  (genuine overbooking). Only meaningful when something
+  //                  is actually booked.
+  const poolNegative    = availablePool < 0
+  const overbooked      = !poolNegative && bookedQty > 0 && remainingQty < 0
+
+  // Single source for the last tile + the alert banner so they never
+  // disagree.
+  const poolState = poolNegative
+    ? {
+        label:  'Pool Deficit',
+        value:  `−${fmt(Math.abs(availablePool), 2)} g`,
+        sub:    'Pending pull-back exceeds Incoming + Gain',
+        accent: t.red, alert: true,
+      }
+    : overbooked
+    ? {
+        label:  'Overbooked',
+        value:  `−${fmt(Math.abs(remainingQty), 2)} g`,
+        sub:    `${fmt(Math.abs(remainingQty), 2)} g past available pool`,
+        accent: t.red, alert: true,
+      }
+    : {
+        label:  'Remaining',
+        value:  `${fmt(remainingQty, 2)} g`,
+        sub:    `${availablePool > 0 ? Math.round(100 - bookedPct) : 0}% of available free`,
+        accent: t.green, alert: false,
+      }
 
   // Source picker helpers — shared between the inline picker and the modal.
   const bangBranches = supply?.bangalore?.branches  || []
@@ -476,14 +509,19 @@ export default function BiddingVolume() {
           accent={t.blue} card={card} t={t} />
 
         <KpiCard
-          label={overbooked ? 'Overbooked' : 'Remaining'}
-          value={`${overbooked ? '−' : ''}${fmt(Math.abs(remainingQty), 2)} g`}
-          sub={overbooked
-            ? `${fmt(Math.abs(remainingQty), 2)} g past available pool`
-            : `${availablePool > 0 ? Math.round(100 - bookedPct) : 0}% of available free`}
-          accent={overbooked ? t.red : t.green} card={card} t={t}
-          pulse={overbooked} />
+          label={poolState.label}
+          value={poolState.value}
+          sub={poolState.sub}
+          accent={poolState.accent} card={card} t={t}
+          pulse={poolState.alert} />
       </div>
+
+      {poolNegative && (
+        <div style={{ ...card, padding: '10px 16px', borderColor: `${t.red}55`, background: `${t.red}10`, fontSize: '12px', color: t.red, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontSize: 14 }}>⚠</span>
+          Available pool is negative — the Pending pull-back (<strong>{fmt(pendingGrams, 2)} g</strong>) exceeds Incoming + Gain by <strong>{fmt(Math.abs(availablePool), 2)} g</strong>. Nothing to bid until supply arrives or the pull-back is reduced.
+        </div>
+      )}
 
       {overbooked && (
         <div style={{ ...card, padding: '10px 16px', borderColor: `${t.red}55`, background: `${t.red}10`, fontSize: '12px', color: t.red, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}>
