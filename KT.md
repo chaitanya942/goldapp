@@ -277,12 +277,13 @@ it lost.** Silent.
   in place** so its status survives.
 - *Delete-and-recreate:* staff deleted the transaction and made a new one
   (new immutable id) for the same physical thing. The anchor can't help —
-  there is no shared id. **Still open in GoldApp.** Agreed fix: a
-  post-reconcile carry-forward — when a row gets marked deleted *and* it
-  had been moved past default state, find exactly one fresh default-state
-  row with matching business attributes (customer+location+date+quantity
-  within tolerance) and a different label; carry the state forward; log
-  it; skip ambiguous multi-matches.
+  there is no shared id. **Fixed in GoldApp** (sync route, post-reconcile
+  "Carry-forward" block + `sql/backfill_carryforward_stock_status.sql` for
+  already-orphaned rows): when a row is marked deleted *and* it had been
+  moved past default state, find exactly one fresh default-state row with
+  matching business attributes (customer+location+date+quantity within
+  tolerance) and a different label; carry state (and booking link)
+  forward; log it; skip ambiguous (0 or >1) and NULL-keyed rows.
 
 **Apply:** add the immutable upstream id as a column from day one even if
 you key on the friendly id (you can migrate the key later; you cannot
@@ -463,7 +464,7 @@ Every serious production bug, abstracted to the lesson that transfers.
 | Cross-system literals aren't context-free; diff rows before claiming equivalence | A "harmless" index-friendly WHERE rewrite dropped 35% of data |
 | Background refresh commits once, after all data resolves | Headline flickered to the stale value every refresh tick |
 | Anchor identity on the immutable upstream key | Editing a friendly id reverted workflow state to default |
-| Constrained fuzzy match for delete-recreate | Same as above but with a *new* upstream id — no shared anchor (open) |
+| Constrained fuzzy match for delete-recreate | Same but with a *new* upstream id — no shared anchor; rescued by a single-match-only carry-forward + one-time backfill |
 | Validate at the boundary; defend downstream too | Upstream form copied a phone number into a weight field; one row poisoned a total by ~9 billion |
 | Authorise by granted permission, not role name | Delegated page visible in UI, every API call 403'd |
 | New privileged pages must be added to the owner allowlist | Super-admin couldn't see a freshly-shipped admin page |
@@ -571,9 +572,12 @@ pool, animated gauge; selected branches saved as a note, not a block.
 Bookings in `cal_quotas` (Sales→Cal Table Quotas tab is read-only mirror).
 
 ### XII.8 Open items (Part VI/X)
-1. **Delete-recreate carry-forward — queued, designed (Part VI.1), not
-   built.** Build it: post-reconcile, constrained single-match, +
-   one-time backfill of already-orphaned rows.
+1. ~~Delete-recreate carry-forward~~ **DONE** — sync route post-reconcile
+   "Carry-forward" block (single-match only, NULL-keyed skipped, bounded
+   to this run, idempotent) + `sql/backfill_carryforward_stock_status.sql`
+   (PREVIEW/PREVIEW-ambiguous/UPDATE/VERIFY) for already-orphaned rows.
+   Run the backfill once in Supabase. Response now reports
+   `carriedForward` / `carryAmbiguous`.
 2. Gold-rate feeder not running on new-CRM side (app correct, degrades to
    0).
 3. `purchase_date` UTC-vs-IST edge (VI.3) — deferred.

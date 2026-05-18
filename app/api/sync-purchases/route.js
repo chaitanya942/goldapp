@@ -266,6 +266,8 @@ async function runSync(request) {
     // approved ID set for the synced date range, anything in Supabase but not in
     // CRM was deleted from CRM and should be marked accordingly.
     let ghostsMarked = 0
+    let deletedIds = []
+    let carriedForward = 0, carryAmbiguous = 0
     try {
       const crmIds = new Set(deduped.map(r => r.application_id))
 
@@ -286,7 +288,7 @@ async function runSync(request) {
         offset += CHUNK
       }
 
-      const deletedIds = supaRows
+      deletedIds = supaRows
         .map(b => b.application_id)
         .filter(id => !crmIds.has(id))
 
@@ -303,6 +305,82 @@ async function runSync(request) {
       console.error('Reconcile error (non-fatal):', ghostErr.message)
     }
 
+    // ── Carry-forward: rescue stock_status across CRM delete-and-recreate ──
+    // Distinct from the bill_no-rename case (handled by crm_txn_id above):
+    // here CRM DELETED a transaction and made a brand-new one (different
+    // crm_txn_id) for the same physical bill. No shared identity, so we fall
+    // back to a TIGHTLY constrained business-attribute match — and only when
+    //   (a) the just-deleted row had ops state worth saving (moved past
+    //       at_branch), and
+    //   (b) there's exactly ONE fresh at_branch lookalike under a different
+    //       application_id.
+    // Anything ambiguous (0 or >1 matches) is logged and skipped, never
+    // guessed — that's the V.1 over-merge lesson. Bounded to rows deleted in
+    // THIS run (O(new deletions), not O(all-deletions-ever)) and idempotent:
+    // once carried, the lookalike is no longer at_branch so it can't match
+    // again on a later sync.
+    try {
+      if (deletedIds.length > 0) {
+        const lost = []
+        for (let i = 0; i < deletedIds.length; i += 1000) {
+          const slice = deletedIds.slice(i, i + 1000)
+          const { data } = await supabaseAdmin
+            .from('purchases')
+            .select('id, application_id, stock_status, booking_id, customer_name, branch_name, purchase_date, net_weight')
+            .eq('crm_source', 'old_crm')
+            .in('application_id', slice)
+            .neq('stock_status', 'at_branch')
+            .not('stock_status', 'is', null)
+          if (data) lost.push(...data)
+        }
+
+        for (const L of lost) {
+          // Need strong business keys to match safely — if any are missing
+          // we cannot trust a fuzzy match (NULL-heavy rows are exactly what
+          // caused the original over-merge). Skip rather than risk it.
+          if (!L.customer_name || !L.branch_name || !L.purchase_date || L.net_weight == null) {
+            carryAmbiguous++
+            console.warn(`Carry-forward skipped (insufficient match keys): ${L.application_id}`)
+            continue
+          }
+          const { data: cands } = await supabaseAdmin
+            .from('purchases')
+            .select('id, application_id, net_weight')
+            .eq('crm_source', 'old_crm')
+            .eq('crm_status', 'approved')
+            .eq('stock_status', 'at_branch')
+            .eq('customer_name', L.customer_name)
+            .eq('branch_name', L.branch_name)
+            .eq('purchase_date', L.purchase_date)
+            .neq('application_id', L.application_id)
+          const matches = (cands || []).filter(c =>
+            Math.abs(Number(c.net_weight) - Number(L.net_weight)) < 0.001
+          )
+          if (matches.length === 1) {
+            const tgt = matches[0]
+            const upd = { stock_status: L.stock_status }
+            if (L.booking_id) upd.booking_id = L.booking_id  // booking follows the gold
+            const { error: cfErr } = await supabaseAdmin
+              .from('purchases')
+              .update(upd)
+              .eq('id', tgt.id)
+            if (cfErr) {
+              console.warn(`Carry-forward failed ${L.application_id} → ${tgt.application_id}:`, cfErr.message)
+            } else {
+              carriedForward++
+              console.log(`Carry-forward: ${L.stock_status} ${L.application_id} → ${tgt.application_id} (delete+recreate, single business-attr match)`)
+            }
+          } else if (matches.length > 1) {
+            carryAmbiguous++
+            console.warn(`Carry-forward ambiguous for ${L.application_id}: ${matches.length} lookalikes — skipped, manual review`, matches.map(m => m.application_id))
+          }
+          // matches.length === 0 → genuinely deleted, not recreated. Leave it.
+        }
+      }
+    } catch (cfErr) {
+      console.error('Carry-forward error (non-fatal):', cfErr.message)
+    }
+
     return Response.json({
       success:  errors === 0,
       total:    rows.length,
@@ -311,8 +389,10 @@ async function runSync(request) {
       renameCollisions,
       errors,
       ghostsMarked,
+      carriedForward,
+      carryAmbiguous,
       lastError: lastError ? JSON.stringify(lastError) : null,
-      message:  `Upsert ${minDate}→${maxDate}: ${deduped.length} approved bills synced, ${renamed} bill_no renames preserved, ${ghostsMarked} ghost bills marked deleted (${errors} errors)`,
+      message:  `Upsert ${minDate}→${maxDate}: ${deduped.length} approved bills synced, ${renamed} bill_no renames preserved, ${ghostsMarked} ghost bills marked deleted, ${carriedForward} stock_status carried forward across delete-recreate (${carryAmbiguous} ambiguous skipped, ${errors} errors)`,
     })
 
   } catch (err) {
