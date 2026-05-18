@@ -10,7 +10,7 @@ import {
   generateIssueVoucherNo,
 } from '../../../lib/consignmentUtils'
 import { logConsignmentEvent } from '../../../lib/consignmentLog'
-import { requireAuth, ROLE_GROUPS, getRegionFilter, resolveAllowedBranchNames } from '../../../lib/apiAuth'
+import { requireAuth, requireAuthForPage, ROLE_GROUPS, getRegionFilter, resolveAllowedBranchNames } from '../../../lib/apiAuth'
 import { istToday } from '../../../lib/dateIst'
 import { cancelEWayBill, cancelEInvoice } from '../../../lib/clearTaxClient'
 import { REGION_TO_STATE_CODE } from '../../../lib/stateMap'
@@ -597,6 +597,16 @@ export async function GET(req) {
   // reads), with extended columns for status + audit trail. We surface all
   // statuses so the UI can show fulfilled/cancelled rows in their own
   // collapsed groups; the active-pool roll-up excludes cancelled.
+  //
+  // KNOWN CONSTRAINT (go-live, tracked): cal_quotas has NO branch/region
+  // column — source branches live only in the free-text `notes` ("Sources:
+  // …"). So this list is NOT region-scoped. bidding_volume IS region-scoped
+  // (Incoming), so a region-restricted user would get scoped Incoming but
+  // full-company Booked → a wrong (often falsely-overbooked) pool. Bidding
+  // Volume is therefore HQ-only for now: do NOT grant page.consignment-
+  // bidding to a region-restricted role until cal_quotas gains a region
+  // dimension. Bypass roles (super_admin/founders_office/admin) are
+  // unaffected (they see all regions anyway).
   if (action === 'bidding_bookings') {
     const date = searchParams.get('date')
     if (!date) return Response.json({ error: 'date required (YYYY-MM-DD)' }, { status: 400 })
@@ -1309,10 +1319,23 @@ export async function POST(req) {
   const body   = await req.json()
   const { action } = body
 
-  // Role check based on action. requireAuth always validates the bearer token;
-  // requiredRoles narrows further for accounts/admin-only actions.
-  const requiredRoles = ACTION_ROLE_REQUIREMENTS[action] || null
-  const auth = await requireAuth(req, { requiredRoles })
+  // Bidding Volume writes mutate shared, money/inventory-affecting state
+  // (the team-wide Pending pool number; financial booking commitments in
+  // cal_quotas). They were previously ungated → ANY authenticated session
+  // could POST them. Gate them by the SAME permission that controls who
+  // can see the Bidding Volume page (page.consignment-bidding) rather than
+  // a hardcoded role group — so the gate can never lock out whichever role
+  // ops actually grant the page to (the KT §VII trap-2 lesson).
+  const BIDDING_WRITES = new Set(['set_bidding_pending', 'create_booking', 'update_booking_status'])
+  let auth
+  if (BIDDING_WRITES.has(action)) {
+    auth = await requireAuthForPage(req, 'consignment-bidding')
+  } else {
+    // requireAuth always validates the bearer token; requiredRoles narrows
+    // further for accounts/admin-only actions.
+    const requiredRoles = ACTION_ROLE_REQUIREMENTS[action] || null
+    auth = await requireAuth(req, { requiredRoles })
+  }
   if (!auth.ok) return auth.response
 
   // Identity is now derived from the verified session — never from the body.

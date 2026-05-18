@@ -175,7 +175,15 @@ export default function BiddingVolume() {
 
   // Persist Pending Delivery for this arrival date, then refetch so the
   // recomputed pool (and every other device on next poll) reflects it.
-  const savePending = useCallback(async (grams) => {
+  const savePending = useCallback(async (gramsRaw) => {
+    // Coerce at the boundary — callers pass numbers today, but a bad value
+    // must fail loud, not send NaN to the API or throw on .toFixed.
+    const grams = Number(gramsRaw)
+    if (!Number.isFinite(grams)) {
+      setToast({ msg: 'Pending Delivery must be a number', type: 'error', key: Date.now() })
+      setTimeout(() => setToast(null), 3500)
+      return
+    }
     setSavingPending(true)
     try {
       const res = await authedFetch('/api/consignments', {
@@ -1488,12 +1496,20 @@ function BookingModal({ t, arrivalDate, availablePool, remainingQty, incomingNet
   const wValid = Number.isFinite(w) && w > 0
   const freePool = remainingQty                                    // pool − already booked
   const afterFree = wValid ? freePool - w : freePool
-  const wouldOverbook = wValid && w > freePool
+  // wouldOverbook also true when there is NO free pool at all (deficit /
+  // already fully booked) and the operator still enters a weight.
+  const wouldOverbook = wValid && (freePool <= 0 || w > freePool)
   // Gauge fill: fraction of the free pool this commitment consumes.
-  // Clamped 0–100 for the green fill; overflow shown as a separate red
-  // segment so overbooking reads visually, not just as text.
-  const fillPct = freePool > 0 && wValid ? Math.min(100, (w / freePool) * 100) : 0
-  const overPct = freePool > 0 && wouldOverbook
+  // Critical edge: when freePool <= 0 the pool is in deficit / fully
+  // booked — any positive commit is 100% over. Show a FULL red bar so the
+  // showpiece conveys "no room" instead of going blank in exactly the
+  // dangerous state (audit should-fix #4).
+  const fillPct = !wValid
+    ? 0
+    : freePool > 0
+      ? Math.min(100, (w / freePool) * 100)
+      : 100
+  const overPct = freePool > 0 && wValid && w > freePool
     ? Math.min(100, ((w - freePool) / freePool) * 100)
     : 0
 
