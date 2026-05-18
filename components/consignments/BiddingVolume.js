@@ -628,8 +628,22 @@ export default function BiddingVolume() {
         @keyframes bidModalIn        { from { opacity: 0; transform: translateY(12px) scale(.98) } to { opacity: 1; transform: translateY(0) scale(1) } }
         /* Chip add-in */
         @keyframes bidChipIn { from { opacity: 0; transform: scale(.85) } to { opacity: 1; transform: scale(1) } }
+        /* Booking modal — staggered field reveal + gauge sheen */
+        @keyframes bidFieldIn  { from { opacity: 0; transform: translateY(10px) } to { opacity: 1; transform: translateY(0) } }
+        @keyframes bidHeroIn   { from { opacity: 0; transform: translateY(8px) scale(.985) } to { opacity: 1; transform: translateY(0) scale(1) } }
+        @keyframes bidSheen    { from { background-position: 200% 0 } to { background-position: -200% 0 } }
+        @keyframes bidFadeIn   { from { opacity: 0 } to { opacity: 1 } }
+        .bidStagger > * { animation: bidFieldIn .34s cubic-bezier(.34,1.12,.64,1) backwards; }
+        .bidStagger > *:nth-child(1) { animation-delay: .04s }
+        .bidStagger > *:nth-child(2) { animation-delay: .09s }
+        .bidStagger > *:nth-child(3) { animation-delay: .14s }
+        .bidStagger > *:nth-child(4) { animation-delay: .19s }
+        .bidStagger > *:nth-child(5) { animation-delay: .24s }
+        .bidGauge   { transition: width .55s cubic-bezier(.34,1.1,.64,1); }
+        .bidInput   { transition: border-color .18s ease, box-shadow .18s ease, background .18s ease; }
+        .bidInput:focus { box-shadow: 0 0 0 3px rgba(201,168,76,.18); }
         @media (prefers-reduced-motion: reduce) {
-          [class*="bid"] { animation: none !important; }
+          [class*="bid"], .bidStagger > * { animation: none !important; transition: none !important; }
         }
       `}</style>
     </div>
@@ -1397,7 +1411,6 @@ function BookingModal({ t, arrivalDate, availablePool, remainingQty, incomingNet
   const [party,       setParty]       = useState('')
   const [rate,        setRate]        = useState('')
   const [busy,        setBusy]        = useState(false)
-  const [chipsExpanded, setChipsExpanded] = useState(false)
   // Local bidder roster (combines API list + names saved during this
   // session). On submit we POST to /api/consignments?action=create_booking
   // which writes the party into cal_quotas; next mount the API list
@@ -1464,14 +1477,25 @@ function BookingModal({ t, arrivalDate, availablePool, remainingQty, incomingNet
     setBookingWeight(defaultBookingWeight > 0 ? defaultBookingWeight.toFixed(2) : '')
   }, [defaultBookingWeight, bookingWeightDirty])
 
+  // selectedRows is still needed by submit() to compose the "Sources: …"
+  // note saved with the booking — the branches just no longer get their
+  // own visual block in the modal (per ops: selection happens in the
+  // Incoming Sources picker, the modal is about the commitment).
   const selectedRows = [...selected].map(k => ({ k, b: branchesByKey[k] })).filter(x => x.b)
-  const CHIP_PREVIEW = 6
-  const visibleChips = chipsExpanded ? selectedRows : selectedRows.slice(0, CHIP_PREVIEW)
-  const hiddenCount = Math.max(0, selectedRows.length - CHIP_PREVIEW)
 
   const w = Number(bookingWeight); const r = Number(rate)
   const total = Number.isFinite(w) && Number.isFinite(r) ? w * r : 0
-  const wouldOverbook = Number.isFinite(w) && w > 0 && w > remainingQty
+  const wValid = Number.isFinite(w) && w > 0
+  const freePool = remainingQty                                    // pool − already booked
+  const afterFree = wValid ? freePool - w : freePool
+  const wouldOverbook = wValid && w > freePool
+  // Gauge fill: fraction of the free pool this commitment consumes.
+  // Clamped 0–100 for the green fill; overflow shown as a separate red
+  // segment so overbooking reads visually, not just as text.
+  const fillPct = freePool > 0 && wValid ? Math.min(100, (w / freePool) * 100) : 0
+  const overPct = freePool > 0 && wouldOverbook
+    ? Math.min(100, ((w - freePool) / freePool) * 100)
+    : 0
 
   const submit = async () => {
     if (!party.trim()) return
@@ -1532,31 +1556,40 @@ function BookingModal({ t, arrivalDate, availablePool, remainingQty, incomingNet
         </div>
 
         {/* Body */}
-        <div style={{ padding: '18px 22px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <div style={{ padding: '20px 22px', display: 'flex', flexDirection: 'column', gap: 16 }}>
 
-          {/* ── Pool ceiling — the booking is committed against the whole
-              available pool (Incoming + Gain ± Pending), not the exact
-              selected-branch math. This is the answer to "where's the
-              Pending gold" — it's surfaced right here as the ceiling. */}
+          {/* ── Pool ceiling + gauge — the showpiece. The booking is committed
+              against the whole available pool (Incoming + Gain ± Pending),
+              surfaced here so ops sees the ceiling and how much of it this
+              commitment consumes, animated as they type. */}
           {(() => {
-            const free = remainingQty                          // pool − already booked
-            const wNum = Number(bookingWeight)
-            const afterFree = Number.isFinite(wNum) && wNum > 0 ? free - wNum : free
-            const over = afterFree < 0
-            const pAbs = Math.abs(pendingGrams || 0)
+            const pAbs  = Math.abs(pendingGrams || 0)
             const pSign = pendingGrams > 0 ? '+' : pendingGrams < 0 ? '−' : ''
+            const fillColor = wouldOverbook
+              ? `linear-gradient(90deg, ${t.red}, ${t.red}cc)`
+              : `linear-gradient(90deg, ${t.gold}, ${t.green || '#3aaa6a'})`
             return (
               <div style={{
-                background: `linear-gradient(135deg, ${t.gold}12, ${t.gold}04)`,
-                border: `1px solid ${t.gold}33`, borderRadius: 12, padding: '14px 16px',
+                position: 'relative', overflow: 'hidden',
+                background: `linear-gradient(150deg, ${t.gold}14, ${t.gold}05 55%, transparent)`,
+                border: `1px solid ${wouldOverbook ? `${t.red}45` : `${t.gold}38`}`,
+                borderRadius: 14, padding: '16px 18px',
+                animation: 'bidHeroIn .4s cubic-bezier(.34,1.12,.64,1)',
+                transition: 'border-color .25s ease',
               }}>
-                <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 10 }}>
+                {/* soft corner glow */}
+                <div aria-hidden style={{
+                  position: 'absolute', top: -50, right: -50, width: 150, height: 150,
+                  borderRadius: '50%', pointerEvents: 'none',
+                  background: `radial-gradient(circle, ${(wouldOverbook ? t.red : t.gold)}22 0%, transparent 70%)`,
+                }}/>
+                <div style={{ position: 'relative', display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 10 }}>
                   <div>
-                    <div style={{ fontSize: 9.5, color: t.text4, letterSpacing: '.14em', textTransform: 'uppercase', fontWeight: 700 }}>
+                    <div style={{ fontSize: 9.5, color: t.text4, letterSpacing: '.16em', textTransform: 'uppercase', fontWeight: 700 }}>
                       Free to commit
                     </div>
-                    <div style={{ fontSize: 26, color: over ? t.red : t.gold, fontFamily: 'monospace', fontWeight: 300, lineHeight: 1.1, marginTop: 4, letterSpacing: '-.02em' }}>
-                      {fmt(free, 2)}<span style={{ fontSize: 13, color: t.text3, marginLeft: 4 }}>g</span>
+                    <div style={{ fontSize: 30, color: wouldOverbook ? t.red : t.gold, fontFamily: 'monospace', fontWeight: 300, lineHeight: 1.05, marginTop: 5, letterSpacing: '-.025em' }}>
+                      {fmt(freePool, 2)}<span style={{ fontSize: 14, color: t.text3, marginLeft: 4 }}>g</span>
                     </div>
                   </div>
                   <div style={{ textAlign: 'right', fontSize: 10, color: t.text4, lineHeight: 1.7 }}>
@@ -1564,8 +1597,29 @@ function BookingModal({ t, arrivalDate, availablePool, remainingQty, incomingNet
                     {bookedQty > 0 && <div>booked <strong style={{ color: t.text3, fontFamily: 'monospace' }}>{fmt(bookedQty, 2)} g</strong></div>}
                   </div>
                 </div>
-                {/* Pool breakdown — makes Incoming / Gain / Pending explicit */}
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 12, paddingTop: 10, borderTop: `1px solid ${t.gold}22` }}>
+
+                {/* Gauge — fills as you type the committed weight. Green→gold
+                    while within pool; red once overbooking. Width eases via
+                    .bidGauge so the bar glides instead of snapping. */}
+                <div style={{ position: 'relative', marginTop: 14, height: 10, borderRadius: 99, background: `${t.text4}22`, overflow: 'hidden' }}>
+                  <div className="bidGauge" style={{
+                    height: '100%', width: `${fillPct}%`, borderRadius: 99,
+                    background: fillColor,
+                    boxShadow: wValid ? `0 0 10px ${(wouldOverbook ? t.red : t.gold)}66` : 'none',
+                  }}>
+                    {wValid && !wouldOverbook && (
+                      <div aria-hidden style={{
+                        position: 'absolute', inset: 0,
+                        background: 'linear-gradient(90deg, transparent, rgba(255,255,255,.28), transparent)',
+                        backgroundSize: '200% 100%',
+                        animation: 'bidSheen 2.4s linear infinite',
+                      }}/>
+                    )}
+                  </div>
+                </div>
+
+                {/* Breakdown chips */}
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 14 }}>
                   <PoolChip t={t} label="Incoming" val={`${fmt(incomingNetWt, 2)} g`} />
                   <PoolChip t={t} label="Gain" val={`+${fmt(gainGrams, 2)} g`} />
                   {pendingGrams !== 0 && (
@@ -1573,134 +1627,83 @@ function BookingModal({ t, arrivalDate, availablePool, remainingQty, incomingNet
                       tone={pendingGrams < 0 ? t.red : (t.purple || '#8c5ac8')} />
                   )}
                 </div>
-                {/* Live "after this commit" feedback */}
-                {Number.isFinite(wNum) && wNum > 0 && (
-                  <div style={{ marginTop: 10, fontSize: 11, fontWeight: 600, color: over ? t.red : t.green }}>
-                    {over
-                      ? `⚠ Committing ${fmt(wNum, 2)} g overbooks the pool by ${fmt(Math.abs(afterFree), 2)} g`
-                      : `Committing ${fmt(wNum, 2)} g · ${fmt(afterFree, 2)} g still free after this`}
+
+                {/* Live feedback — keyed so it cross-fades on each change */}
+                {wValid && (
+                  <div key={`${wouldOverbook}-${Math.round(afterFree)}`}
+                    style={{ marginTop: 12, fontSize: 11.5, fontWeight: 700, color: wouldOverbook ? t.red : t.green, animation: 'bidFadeIn .22s ease' }}>
+                    {wouldOverbook
+                      ? `⚠ ${fmt(w, 2)} g committed · overbooks the pool by ${fmt(Math.abs(afterFree), 2)} g`
+                      : `${fmt(w, 2)} g committed · ${fmt(afterFree, 2)} g still free after this`}
                   </div>
                 )}
               </div>
             )
           })()}
 
-          {/* Bidder combobox — custom dropdown with inline + Add new */}
-          <Field label="Bidder">
-            <BidderCombobox
-              t={t}
-              value={party}
-              onChange={setParty}
-              options={allBidders}
-              onAddNew={(name) => { setParty(name); saveNewBidder() }}
-            />
-          </Field>
+          {/* Staggered field reveal */}
+          <div className="bidStagger" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
 
-          {/* Committed weight — the negotiated figure the bidder is told
-              (e.g. "550 g"). Free entry against the pool above. The selected
-              branches' net+gain is offered only as a one-tap suggestion. */}
-          <Field label="Committed to bidder (g)">
-            <input value={bookingWeight}
-              onChange={e => { setBookingWeight(e.target.value.replace(/[^\d.]/g, '')); setBookingWeightDirty(true) }}
-              placeholder="e.g. 550"
-              inputMode="decimal"
-              style={{ ...inputStyle(t), fontFamily: 'monospace', fontSize: 18, fontWeight: 700, padding: '12px 14px', color: t.gold }} />
-            <div style={{ fontSize: 9.5, color: t.text4, marginTop: 5, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-              {suggestedWeight > 0 && (
-                <button type="button"
-                  onClick={() => { setBookingWeight(suggestedWeight.toFixed(2)); setBookingWeightDirty(true) }}
-                  style={{
-                    background: `${t.gold}15`, border: `1px solid ${t.gold}40`,
-                    borderRadius: 99, padding: '2px 9px', fontSize: 9.5, fontWeight: 700,
-                    color: t.gold, cursor: 'pointer', letterSpacing: '.02em',
-                  }}
-                  onMouseEnter={e => { e.currentTarget.style.background = `${t.gold}25` }}
-                  onMouseLeave={e => { e.currentTarget.style.background = `${t.gold}15` }}>
-                  use selected net+gain · {fmt(suggestedWeight, 2)} g
-                </button>
-              )}
-              <span>negotiated figure — type what's committed to the bidder</span>
-            </div>
-          </Field>
+            <Field label="Bidder">
+              <BidderCombobox
+                t={t}
+                value={party}
+                onChange={setParty}
+                options={allBidders}
+                onAddNew={(name) => { setParty(name); saveNewBidder() }}
+              />
+            </Field>
 
-          {/* Rate */}
-          <Field label="Rate (₹/g)">
-            <input value={rate}
-              onChange={e => setRate(e.target.value.replace(/[^\d.]/g, ''))}
-              placeholder="7250.00"
-              style={{ ...inputStyle(t), fontFamily: 'monospace' }} />
-          </Field>
-
-          {/* Backing bills — demoted to a secondary detail. These are the
-              bills that underpin the commitment; they no longer drive the
-              quantity (the pool + the negotiated figure do). */}
-          {selectedRows.length > 0 && (
-            <div style={{ background: t.card2, border: `1px solid ${t.border}`, borderRadius: 10, padding: '10px 12px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-                <span style={{ fontSize: 9.5, color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 700 }}>
-                  Backing bills · {selectedRows.length} {selectedRows.length === 1 ? 'branch' : 'branches'}
-                </span>
-                <span style={{ fontSize: 12, color: t.text3, fontFamily: 'monospace', fontWeight: 700 }}>
-                  {fmt(selectedTotal, 2)} g net
-                </span>
-              </div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
-                {visibleChips.map(({ k, b }, i) => {
-                  const accent = b.group === 'bangalore' ? t.red : t.blue
-                  return (
-                    <span key={k} style={{
-                      display: 'inline-flex', alignItems: 'center', gap: 5,
-                      background: `${accent}12`, border: `1px solid ${accent}30`,
-                      borderRadius: 99, padding: '2px 4px 2px 9px',
-                      fontSize: 10.5, color: t.text2, fontWeight: 600,
-                      animation: `bidChipIn .18s cubic-bezier(.34,1.2,.64,1) ${Math.min(i, 12) * 20}ms backwards`,
-                    }}>
-                      {b.branch_name}
-                      <button onClick={() => onUnselect(k)} title="Remove"
-                        style={{ background: 'transparent', border: 'none', color: t.text4, cursor: 'pointer', fontSize: 11, lineHeight: 1, padding: '0 3px', borderRadius: 99 }}
-                        onMouseEnter={e => { e.currentTarget.style.color = accent }}
-                        onMouseLeave={e => { e.currentTarget.style.color = t.text4 }}>
-                        ✕
-                      </button>
-                    </span>
-                  )
-                })}
-                {hiddenCount > 0 && !chipsExpanded && (
-                  <button onClick={() => setChipsExpanded(true)}
-                    style={{ background: 'transparent', border: `1px dashed ${t.border2 || t.border}`, borderRadius: 99, padding: '2px 10px', fontSize: 10.5, color: t.text3, fontWeight: 600, cursor: 'pointer' }}>
-                    +{hiddenCount} more
+            {/* Committed weight — the negotiated figure ("550 g"). Free
+                entry against the pool above; selected net+gain is a one-tap
+                suggestion only. */}
+            <Field label="Committed to bidder (g)">
+              <input value={bookingWeight} className="bidInput"
+                onChange={e => { setBookingWeight(e.target.value.replace(/[^\d.]/g, '')); setBookingWeightDirty(true) }}
+                placeholder="e.g. 550"
+                inputMode="decimal"
+                style={{ ...inputStyle(t), fontFamily: 'monospace', fontSize: 19, fontWeight: 700, padding: '13px 14px', color: wouldOverbook ? t.red : t.gold, borderColor: wouldOverbook ? `${t.red}66` : (wValid ? `${t.gold}66` : t.border) }} />
+              <div style={{ fontSize: 9.5, color: t.text4, marginTop: 6, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                {suggestedWeight > 0 && (
+                  <button type="button"
+                    onClick={() => { setBookingWeight(suggestedWeight.toFixed(2)); setBookingWeightDirty(true) }}
+                    style={{
+                      background: `${t.gold}15`, border: `1px solid ${t.gold}40`,
+                      borderRadius: 99, padding: '3px 10px', fontSize: 9.5, fontWeight: 700,
+                      color: t.gold, cursor: 'pointer', letterSpacing: '.02em',
+                      transition: 'background .15s ease',
+                    }}
+                    onMouseEnter={e => { e.currentTarget.style.background = `${t.gold}28` }}
+                    onMouseLeave={e => { e.currentTarget.style.background = `${t.gold}15` }}>
+                    use selected net+gain · {fmt(suggestedWeight, 2)} g
                   </button>
                 )}
-                {chipsExpanded && selectedRows.length > CHIP_PREVIEW && (
-                  <button onClick={() => setChipsExpanded(false)}
-                    style={{ background: 'transparent', border: 'none', color: t.text3, fontSize: 10.5, fontWeight: 600, cursor: 'pointer', padding: '2px 8px' }}>
-                    Show less
-                  </button>
-                )}
+                <span>negotiated figure — type what's committed to the bidder</span>
               </div>
-            </div>
-          )}
+            </Field>
 
-          {/* Live total — prominent */}
-          <div style={{
-            background: total > 0 ? `linear-gradient(135deg, ${t.blue}10, ${t.blue}04)` : t.card2,
-            border: `1px solid ${total > 0 ? `${t.blue}30` : t.border}`,
-            borderRadius: 10, padding: '12px 16px',
-            display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-            transition: 'all .2s',
-          }}>
-            <span style={{ fontSize: 10, color: t.text4, letterSpacing: '.14em', textTransform: 'uppercase', fontWeight: 700 }}>Total Value</span>
-            <span style={{ fontSize: 20, color: t.blue, fontFamily: 'monospace', fontWeight: 700, letterSpacing: '-.01em' }}>
-              {total > 0 ? fmtINR(total) : '—'}
-            </span>
+            <Field label="Rate (₹/g)">
+              <input value={rate} className="bidInput"
+                onChange={e => setRate(e.target.value.replace(/[^\d.]/g, ''))}
+                placeholder="7250.00"
+                style={{ ...inputStyle(t), fontFamily: 'monospace' }} />
+            </Field>
+
+            {/* Total Value — prominent, eases when it changes */}
+            <div style={{
+              background: total > 0 ? `linear-gradient(135deg, ${t.blue}14, ${t.blue}05)` : t.card2,
+              border: `1px solid ${total > 0 ? `${t.blue}38` : t.border}`,
+              borderRadius: 12, padding: '14px 16px',
+              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+              transition: 'background .25s ease, border-color .25s ease',
+            }}>
+              <span style={{ fontSize: 10, color: t.text4, letterSpacing: '.16em', textTransform: 'uppercase', fontWeight: 700 }}>Total Value</span>
+              <span key={Math.round(total)} style={{ fontSize: 22, color: total > 0 ? t.blue : t.text4, fontFamily: 'monospace', fontWeight: 700, letterSpacing: '-.015em', animation: total > 0 ? 'bidFadeIn .22s ease' : 'none' }}>
+                {total > 0 ? fmtINR(total) : '—'}
+              </span>
+            </div>
+
           </div>
-
-          {wouldOverbook && (
-            <div style={{ background: `${t.red}10`, border: `1px solid ${t.red}40`, borderRadius: 8, padding: '9px 12px', fontSize: 11, color: t.red, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ fontSize: 13 }}>⚠</span>
-              Overbooking by {fmt(w - remainingQty, 2)} g · pool {fmt(availablePool, 2)} g · allowed but flagged
-            </div>
-          )}
         </div>
 
         {/* Footer */}
