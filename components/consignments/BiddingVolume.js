@@ -340,6 +340,17 @@ export default function BiddingVolume() {
     : dayDiff > 0 ? `in ${dayDiff} days`
     : `${Math.abs(dayDiff)} days ago`
 
+  // "Today's bid = tomorrow's HO arrival." The bidding SESSION for an
+  // arrival date D is run on D−1, so the headline pill is keyed to the
+  // bidding day, not the arrival day. Presentation only — the arrival-date
+  // machinery (and every number) is unchanged.
+  const bidDiff = dayDiff - 1
+  const bidLabel = bidDiff === 0 ? "Today's Bid"
+    : bidDiff === 1 ? "Tomorrow's Bid"
+    : bidDiff === -1 ? "Yesterday's Bid"
+    : bidDiff > 0 ? `Bid +${bidDiff}d`
+    : `Bid ${bidDiff}d`
+
   const presets = [
     { id: 'today',     label: 'Today',     date: today },
     { id: 'tomorrow',  label: 'Tomorrow',  date: tomorrow },
@@ -412,11 +423,13 @@ export default function BiddingVolume() {
             <div style={{ fontSize: '1.4rem', fontWeight: 300, color: t.text1, letterSpacing: '.03em' }}>Bidding Volume</div>
             <span style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '10px', color: t.gold, background: `${t.gold}15`, borderRadius: '20px', padding: '3px 10px', fontWeight: 700, letterSpacing: '.04em', textTransform: 'uppercase' }}>
               <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: t.gold, display: 'inline-block' }} />
-              {dayLabel}
+              {bidLabel}
             </span>
           </div>
           <div style={{ fontSize: '11px', color: t.text3, marginTop: '4px' }}>
-            Book against gold expected at HO on <strong style={{ color: t.text1 }}>{fmtDate(arrivalDate)}</strong>
+            {bidLabel}: today's Bangalore purchases + outstation in-transit — all expected at HO{' '}
+            <strong style={{ color: t.text1 }}>{dayLabel}</strong>{' '}
+            (<strong style={{ color: t.text1 }}>{fmtDate(arrivalDate)}</strong>)
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
@@ -434,7 +447,7 @@ export default function BiddingVolume() {
       {/* ── Date controls ── */}
       <div style={{ ...card, padding: '12px 16px', display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap', position: 'relative' }}>
         <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '1px', background: `linear-gradient(90deg, ${t.gold}40 0%, transparent 60%)`, pointerEvents: 'none' }} />
-        <span style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 700 }}>Arrival</span>
+        <span style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 700 }}>HO Arrival</span>
         <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
           {presets.map(p => {
             const active = activePreset === p.id
