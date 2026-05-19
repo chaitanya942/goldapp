@@ -1225,60 +1225,35 @@ export default function ConsignmentApprovals() {
                       style={{ background: 'transparent', border: 'none', padding: 0, fontSize: '10px', color: t.gold, fontWeight: 600, cursor: 'pointer', textDecoration: 'underline' }}>
                       {isType ? 'Voucher' : 'Challan'}
                     </button>
-                    {/* EWB column: preview if generated, Generate button if applicable but not yet generated */}
+                    {/* E-Invoice preview / generate / cancel. EWB is no longer
+                        handled here — it's operations self-service on the
+                        Consignment Data page, so EWB-route consignments never
+                        reach this accounts queue (filtered server-side). */}
                     {(() => {
-                      // Same applicability rules as ConsignmentData:
-                      //   showEwb  = INTERNAL OR intrastate Karnataka source
-                      //   showEinv = interstate (non-INTERNAL, non-KA source)
                       const isKaSource = c.state_code === 'KA'
-                      const showEwb    = isType || isKaSource
                       const showEinv   = !isType && !isKaSource
+                      if (!showEinv) return null
                       // (Generate runs from inside the Preview modal now; busy state is owned by `preview.generating`.)
-                      return (
-                        <>
-                          {showEwb && (c.eway_bill_no ? (
-                            <span style={{ display: 'inline-flex', gap: '6px', alignItems: 'center' }}>
-                              <button onClick={() => previewDoc(`/api/eway-bill/pdf?id=${c.id}`, `EWB-${c.eway_bill_no}.pdf`, msg => showToast(msg, 'error'))}
-                                title={`Preview E-Way Bill ${c.eway_bill_no}`}
-                                style={{ background: 'transparent', border: 'none', padding: 0, fontSize: '10px', color: t.green, fontWeight: 600, cursor: 'pointer', textDecoration: 'underline' }}>
-                                E-Way Bill
-                              </button>
-                              <button onClick={() => openCancel(c, 'ewb')}
-                                aria-label="Cancel E-Way Bill"
-                                title="Cancel this E-Way Bill on NIC (must be within 24 hours of generation)"
-                                style={{ background: 'transparent', border: `1px solid ${t.red}80`, borderRadius: '5px', padding: '2px 8px', fontSize: '10px', color: t.red, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap' }}>
-                                Cancel EWB
-                              </button>
-                            </span>
-                          ) : (
-                            <button onClick={() => openPreview(c, 'ewb')} disabled={!!actionId}
-                              title="Preview the E-Way Bill before firing NIC. Verify addresses + value + weight match the Voucher / Challan."
-                              style={{ background: 'transparent', border: `1px solid ${t.green}50`, borderRadius: '5px', padding: '2px 8px', fontSize: '10px', color: t.green, fontWeight: 600, cursor: actionId ? 'not-allowed' : 'pointer' }}>
-                              Preview EWB
-                            </button>
-                          ))}
-                          {showEinv && (c.irn ? (
-                            <span style={{ display: 'inline-flex', gap: '6px', alignItems: 'center' }}>
-                              <button onClick={() => previewDoc(`/api/e-invoice/pdf?id=${c.id}`, `EInvoice-${c.tmp_prf_no}.pdf`, msg => showToast(msg, 'error'))}
-                                title="Preview E-Invoice PDF"
-                                style={{ background: 'transparent', border: 'none', padding: 0, fontSize: '10px', color: t.purple, fontWeight: 600, cursor: 'pointer', textDecoration: 'underline' }}>
-                                E-Invoice
-                              </button>
-                              <button onClick={() => openCancel(c, 'irn')}
-                                aria-label="Cancel E-Invoice"
-                                title="Cancel this E-Invoice on IRP (within 24h) — or generate a Credit Note if past the window"
-                                style={{ background: 'transparent', border: `1px solid ${t.red}80`, borderRadius: '5px', padding: '2px 8px', fontSize: '10px', color: t.red, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap' }}>
-                                Cancel E-Invoice
-                              </button>
-                            </span>
-                          ) : (
-                            <button onClick={() => openPreview(c, 'irn')} disabled={!!actionId}
-                              title="Preview the E-Invoice payload before firing IRP. Verify GSTINs + value + items match."
-                              style={{ background: 'transparent', border: `1px solid ${t.purple}50`, borderRadius: '5px', padding: '2px 8px', fontSize: '10px', color: t.purple, fontWeight: 600, cursor: actionId ? 'not-allowed' : 'pointer' }}>
-                              Preview IRN
-                            </button>
-                          ))}
-                        </>
+                      return c.irn ? (
+                        <span style={{ display: 'inline-flex', gap: '6px', alignItems: 'center' }}>
+                          <button onClick={() => previewDoc(`/api/e-invoice/pdf?id=${c.id}`, `EInvoice-${c.tmp_prf_no}.pdf`, msg => showToast(msg, 'error'))}
+                            title="Preview E-Invoice PDF"
+                            style={{ background: 'transparent', border: 'none', padding: 0, fontSize: '10px', color: t.purple, fontWeight: 600, cursor: 'pointer', textDecoration: 'underline' }}>
+                            E-Invoice
+                          </button>
+                          <button onClick={() => openCancel(c, 'irn')}
+                            aria-label="Cancel E-Invoice"
+                            title="Cancel this E-Invoice on IRP (within 24h) — or generate a Credit Note if past the window"
+                            style={{ background: 'transparent', border: `1px solid ${t.red}80`, borderRadius: '5px', padding: '2px 8px', fontSize: '10px', color: t.red, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                            Cancel E-Invoice
+                          </button>
+                        </span>
+                      ) : (
+                        <button onClick={() => openPreview(c, 'irn')} disabled={!!actionId}
+                          title="Preview the E-Invoice payload before firing IRP. Verify GSTINs + value + items match."
+                          style={{ background: 'transparent', border: `1px solid ${t.purple}50`, borderRadius: '5px', padding: '2px 8px', fontSize: '10px', color: t.purple, fontWeight: 600, cursor: actionId ? 'not-allowed' : 'pointer' }}>
+                          Preview IRN
+                        </button>
                       )
                     })()}
                   </div>
