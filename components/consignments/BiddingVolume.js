@@ -24,6 +24,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useApp } from '../../lib/context'
 import GoldSpinner from '../ui/GoldSpinner'
+import AnimatedNumber from '../ui/AnimatedNumber'
 import { authedFetch } from '../../lib/authedFetch'
 import { CONSIGNMENT_THEMES as THEMES, REGION_COLORS, useMobile } from '../../lib/consignmentTheme'
 import { istToday } from '../../lib/dateIst'
@@ -256,20 +257,20 @@ export default function BiddingVolume() {
   const poolState = poolNegative
     ? {
         label:  'Pool Deficit',
-        value:  `−${fmt(Math.abs(availablePool), 2)} g`,
+        num:    Math.abs(availablePool), prefix: '−',
         sub:    'Pending pull-back exceeds Incoming + Gain',
         accent: t.red, alert: true,
       }
     : overbooked
     ? {
         label:  'Overbooked',
-        value:  `−${fmt(Math.abs(remainingQty), 2)} g`,
+        num:    Math.abs(remainingQty), prefix: '−',
         sub:    `${fmt(Math.abs(remainingQty), 2)} g past available pool`,
         accent: t.red, alert: true,
       }
     : {
         label:  'Remaining',
-        value:  `${fmt(remainingQty, 2)} g`,
+        num:    remainingQty, prefix: '',
         sub:    `${availablePool > 0 ? Math.round(100 - bookedPct) : 0}% of available free`,
         accent: t.green, alert: false,
       }
@@ -487,7 +488,8 @@ export default function BiddingVolume() {
       <div className="bidKpi" style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(6, 1fr)', gap: '10px' }}>
         <KpiCard
           label="Incoming"
-          value={`${fmt(incomingNetWt, 2)} g`}
+          value={<AnimatedNumber target={incomingNetWt} decimals={2} suffix=" g"
+                   fromPrevious animateOnMount={false} replayable={false} duration={650} />}
           sub={`${incomingBills} bill${incomingBills === 1 ? '' : 's'} · gross ${fmt(incomingGrossWt, 2)} g`}
           accent={t.gold} card={card} t={t} variant="source" />
 
@@ -519,7 +521,8 @@ export default function BiddingVolume() {
         <KpiCard
           op="="
           label="Available"
-          value={`${fmt(availablePool, 2)} g`}
+          value={<AnimatedNumber target={availablePool} decimals={2} suffix=" g"
+                   fromPrevious animateOnMount={false} replayable={false} duration={650} />}
           sub={`${pendingGrams === 0
             ? 'Incoming + Gain'
             : `Incoming + Gain ${pendingGrams < 0 ? '−' : '+'} Pending`} · pool for tomorrow's bid`}
@@ -529,14 +532,16 @@ export default function BiddingVolume() {
         <KpiCard
           op="−"
           label="Booked"
-          value={`${fmt(bookedQty, 2)} g`}
+          value={<AnimatedNumber target={bookedQty} decimals={2} suffix=" g"
+                   fromPrevious animateOnMount={false} replayable={false} duration={650} />}
           sub={`${activeBookings.length} booking${activeBookings.length === 1 ? '' : 's'} · ${fmtINR(bookedValue)}`}
           accent={t.blue} card={card} t={t} variant="consumed" />
 
         <KpiCard
           op="="
           label={poolState.label}
-          value={poolState.value}
+          value={<AnimatedNumber target={poolState.num} prefix={poolState.prefix} decimals={2} suffix=" g"
+                   fromPrevious animateOnMount={false} replayable={false} duration={650} />}
           sub={poolState.sub}
           accent={poolState.accent} card={card} t={t}
           variant="state" pulse={poolState.alert} />
@@ -633,13 +638,27 @@ export default function BiddingVolume() {
 
       {/* ── Toast ── */}
       {toast && (
-        <div style={{
+        <div key={toast.key} className="bidToast" style={{
           position: 'fixed', bottom: 20, right: 20, zIndex: 100,
           background: toast.type === 'error' ? t.red : toast.type === 'success' ? t.green : t.card,
           color: '#fff',
-          padding: '10px 18px', borderRadius: 8, fontSize: 12, fontWeight: 600,
-          boxShadow: '0 4px 16px rgba(0,0,0,.25)',
-        }}>{toast.msg}</div>
+          borderRadius: 10, fontSize: 12, fontWeight: 600,
+          boxShadow: '0 8px 28px rgba(0,0,0,.32)',
+          overflow: 'hidden', minWidth: 180, maxWidth: 360,
+          animation: 'bidToastIn .32s cubic-bezier(.34,1.12,.64,1)',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '11px 16px' }}>
+            <span style={{ fontSize: 14, lineHeight: 1 }}>
+              {toast.type === 'error' ? '⚠' : toast.type === 'success' ? '✓' : '•'}
+            </span>
+            <span style={{ lineHeight: 1.35 }}>{toast.msg}</span>
+          </div>
+          <div aria-hidden className="bidToastBar" style={{
+            height: 2, background: 'rgba(255,255,255,.34)',
+            transformOrigin: 'left',
+            animation: 'bidToastBar 3.5s linear forwards',
+          }} />
+        </div>
       )}
 
       <style>{`
@@ -659,6 +678,9 @@ export default function BiddingVolume() {
         @keyframes bidHeroIn   { from { opacity: 0; transform: translateY(8px) scale(.985) } to { opacity: 1; transform: translateY(0) scale(1) } }
         @keyframes bidSheen    { from { background-position: 200% 0 } to { background-position: -200% 0 } }
         @keyframes bidFadeIn   { from { opacity: 0 } to { opacity: 1 } }
+        /* Toast — slide-up entrance + a bar that drains over its 3.5s life */
+        @keyframes bidToastIn  { from { opacity: 0; transform: translateY(14px) scale(.96) } to { opacity: 1; transform: translateY(0) scale(1) } }
+        @keyframes bidToastBar { from { transform: scaleX(1) } to { transform: scaleX(0) } }
         .bidStagger > * { animation: bidFieldIn .34s cubic-bezier(.34,1.12,.64,1) backwards; }
         .bidStagger > *:nth-child(1) { animation-delay: .04s }
         .bidStagger > *:nth-child(2) { animation-delay: .09s }
