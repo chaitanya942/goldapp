@@ -10,6 +10,7 @@ import {
   generateIssueVoucherNo,
 } from '../../../lib/consignmentUtils'
 import { logConsignmentEvent } from '../../../lib/consignmentLog'
+import { applyConsignmentApproval } from '../../../lib/consignmentApproval'
 import { requireAuth, requireAuthForPage, ROLE_GROUPS, getRegionFilter, resolveAllowedBranchNames } from '../../../lib/apiAuth'
 import { istToday } from '../../../lib/dateIst'
 import { cancelEWayBill, cancelEInvoice } from '../../../lib/clearTaxClient'
@@ -350,6 +351,12 @@ export async function GET(req) {
   }
 
   // ── Pending approvals — accounts team queue ────────────────────────────
+  // EWB-route consignments (INTERNAL, or KA-source EXTERNAL) are now
+  // operations self-service: ops previews/generates the EWB on Consignment
+  // Data, which auto-approves. Accounts has no action to take on them, so
+  // they're filtered OUT of this action queue (they still appear in the
+  // read-only Approved / Rejected / Cancellations / Reports tabs). Only
+  // E-Invoice-route consignments (non-KA interstate) still need accounts.
   if (action === 'pending_approvals') {
     const { data, error } = await supabase
       .from('consignments')
@@ -359,7 +366,13 @@ export async function GET(req) {
       .neq('status', 'seed')
       .order('created_at', { ascending: false })
     if (error) return Response.json({ error: error.message }, { status: 500 })
-    return Response.json({ data: data || [] })
+    const rows = (data || []).filter(c => {
+      const isInternal = c.movement_type === 'INTERNAL'
+      const isKaSource = c.state_code === 'KA'
+      const needsEwb   = isInternal || isKaSource   // EWB route → ops self-serves
+      return !needsEwb
+    })
+    return Response.json({ data: rows })
   }
 
   // ── Approval history (for the Approved / Rejected tabs in the
@@ -1005,16 +1018,25 @@ export async function GET(req) {
 
   // ── Pending approvals count (for sidebar badge) ────────────────────────
   if (action === 'pending_approvals_count') {
+    // Mirror the pending_approvals filter exactly: EWB-route consignments are
+    // ops self-service and must not inflate the accounts badge. Fetch the
+    // discriminator columns and filter in JS so this stays in lockstep with
+    // the queue (no PostgREST null-handling drift).
     let q = supabase
       .from('consignments')
-      .select('id', { count: 'exact', head: true })
+      .select('movement_type, state_code, branch_name')
       .eq('approval_status', 'pending')
       .neq('status', 'cancelled')
       .neq('status', 'seed')
     if (allowedBranches) q = q.in('branch_name', allowedBranches)
-    const { count, error } = await q
+    const { data, error } = await q
     if (error) return Response.json({ error: error.message }, { status: 500 })
-    return Response.json({ count: count || 0 })
+    const count = (data || []).filter(c => {
+      const isInternal = c.movement_type === 'INTERNAL'
+      const isKaSource = c.state_code === 'KA'
+      return !(isInternal || isKaSource)   // only E-Invoice-route awaits accounts
+    }).length
+    return Response.json({ count })
   }
 
   // ── Bill journey: every consignment a bill has been part of ────────────
@@ -1680,7 +1702,6 @@ export async function POST(req) {
     const { id, note } = body
     const approver_email = actorEmail
     if (!id) return Response.json({ error: 'consignment id required' }, { status: 400 })
-    const nowIso = new Date().toISOString()
 
     // Block approval on dead or already-decided rows. Without these checks,
     // an accidental double-click on the Approve button after a cancel/reject
@@ -1726,66 +1747,17 @@ export async function POST(req) {
       }, { status: 400 })
     }
 
-    // Approval is the moment bills physically leave the source branch.
-    // Until accounts approves, purchases.stock_status stays 'at_branch' and
-    // the bills appear in the source branch's stock. On approve we flip:
-    //   - INTERNAL (Branch → Hub): stock_status stays 'at_branch' but
-    //     current_branch flips to dest_branch (so the bills appear in the
-    //     hub's stock for onward consolidation).
-    //   - EXTERNAL (Direct → HO / Hub → HO): stock_status flips to
-    //     'in_consignment' (removed from branch stock, in transit to HO).
-    const { data, error } = await supabase
-      .from('consignments')
-      .update({
-        approval_status:   'approved',
-        approved_at:       nowIso,
-        approved_by:       approver_email || null,
-        rejection_reason:  null,
-      })
-      .eq('id', id)
-      .select()
-      .single()
-    if (error) return Response.json({ error: error.message }, { status: 500 })
-
-    // Look up linked purchases and flip their state.
-    const { data: links } = await supabase
-      .from('consignment_items').select('purchase_id').eq('consignment_id', id)
-    const purchaseIds = (links || []).map(l => l.purchase_id)
-
-    if (purchaseIds.length) {
-      const isInternal   = data.movement_type === 'INTERNAL'
-      const dispatchedAt = data.dispatched_at || nowIso
-      if (isInternal) {
-        // INTERNAL Branch → Hub: bills stay 'at_branch' — they just move to a
-        // different branch within the network (the hub). DO NOT stamp
-        // dispatched_at here: that column tracks at_branch → in_consignment
-        // transitions, which only happens on the HO-bound leg. When this hub
-        // later issues a Hub → HO consignment, THAT approval stamps
-        // dispatched_at correctly through the EXTERNAL branch below.
-        await supabase.from('purchases')
-          .update({
-            stock_status:   'at_branch',
-            current_branch: data.dest_branch,
-          })
-          .in('id', purchaseIds)
-      } else {
-        // EXTERNAL Branch → HO or Hub → HO: bills enter transit. Stamp
-        // dispatched_at as the at_branch → in_consignment transition time.
-        await supabase.from('purchases')
-          .update({
-            stock_status:   'in_consignment',
-            dispatched_at:  dispatchedAt,
-          })
-          .in('id', purchaseIds)
-      }
-    }
-
-    await logConsignmentEvent(supabase, {
-      consignment_id: id,
-      event_type:     'approved_by_accounts',
-      actor_email:    approver_email,
-      details:        { note: note || null, bills_moved: purchaseIds.length },
+    // Approval is the moment bills physically leave the source branch — the
+    // transition + stock movement live in one shared helper so an accounts
+    // approval and an EWB-generate auto-approval can never move stock
+    // differently. See lib/consignmentApproval.js.
+    const { data, error } = await applyConsignmentApproval(supabase, {
+      id,
+      approverEmail: approver_email,
+      eventType:     'approved_by_accounts',
+      note:          note || null,
     })
+    if (error) return Response.json({ error: error.message }, { status: 500 })
     return Response.json({ success: true, data })
   }
 

@@ -16,7 +16,7 @@
 
 import { createClient } from '@supabase/supabase-js'
 import { buildPayload } from '../../../../lib/clearTaxClient'
-import { requireAuth, ROLE_GROUPS } from '../../../../lib/apiAuth'
+import { requireAuthForPage } from '../../../../lib/apiAuth'
 import { loadConsignmentForGeneration } from '../../../../lib/consignmentSnapshot'
 import { checkWorkflow } from '../../../../lib/workflowGate'
 import {
@@ -32,8 +32,10 @@ const supabase = createClient(
 )
 
 export async function GET(req) {
-  // ACCOUNTS only — same gate as generate.
-  const auth = await requireAuth(req, { requiredRoles: ROLE_GROUPS.ACCOUNTS })
+  // Operations self-service: anyone who can see the Consignment Data module
+  // may preview the EWB (same gate as generate). Accounts no longer sits in
+  // the EWB path; E-Invoice preview keeps its own ACCOUNTS gate.
+  const auth = await requireAuthForPage(req, 'consignment-data')
   if (!auth.ok) return auth.response
 
   const { searchParams } = new URL(req.url)

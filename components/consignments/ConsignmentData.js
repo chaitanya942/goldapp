@@ -132,6 +132,12 @@ export default function ConsignmentData() {
   const [cancelReason,    setCancelReason]    = useState('')
   const [cancelSubmitting,setCancelSubmitting]= useState(false)
 
+  // EWB preview/generate modal. EWB is operations self-service now: ops
+  // reviews the exact NIC payload here, then Generate fires NIC + auto-
+  // approves the consignment (server-side). null = closed.
+  //   { c, loading, data, error, generating }
+  const [ewbModal, setEwbModal] = useState(null)
+
   const fetchAll = useCallback(async () => {
     setLoading(true)
     const [p, b, c, u] = await Promise.all([
@@ -362,6 +368,52 @@ export default function ConsignmentData() {
     setDownloadingId(c.id + ':ewb')
     await triggerDownload(`/api/eway-bill/pdf?id=${c.id}`, `EWB_${c.eway_bill_no}.pdf`, msg => setToast({ msg, type: 'error' }))
     setDownloadingId(null)
+  }
+
+  // Open the EWB preview modal — fetches the exact payload that WOULD be sent
+  // to NIC (no NIC call yet). Ops verifies from/to/qty/value match the
+  // voucher/challan before clicking Generate.
+  async function openEwbPreview(c) {
+    setEwbModal({ c, loading: true, data: null, error: null, generating: false })
+    try {
+      const r = await authedFetch(`/api/eway-bill/preview?id=${c.id}`)
+      const j = await r.json()
+      setEwbModal(m => {
+        if (!m || m.c.id !== c.id) return m   // a newer modal opened — don't clobber
+        if (!r.ok || j.error) return { ...m, loading: false, error: j.error || 'Preview failed' }
+        return { ...m, loading: false, data: j }
+      })
+    } catch (e) {
+      setEwbModal(m => (m && m.c.id === c.id ? { ...m, loading: false, error: e.message } : m))
+    }
+  }
+
+  // Fires the actual EWB generation on NIC. On success the server also auto-
+  // approves the consignment and moves stock (lib/consignmentApproval) — so a
+  // refetch shows the row as approved with the PDF available.
+  async function confirmGenerateEwb() {
+    if (!ewbModal?.c) return
+    const c = ewbModal.c
+    setEwbModal(m => m ? { ...m, generating: true, error: null } : null)
+    try {
+      const r = await authedFetch('/api/eway-bill/generate', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ consignment_id: c.id }),
+      })
+      const j = await r.json()
+      if (!r.ok || j.error) {
+        setEwbModal(m => m ? { ...m, generating: false, error: j.error || 'Generation failed' } : null)
+        return
+      }
+      const warn = j.auto_approve_warning
+        ? ` (auto-approve needs attention: ${j.auto_approve_warning})`
+        : ''
+      setToast({ msg: `E-Way Bill ${j.ewb_no} generated.${warn}`, type: warn ? 'error' : 'success' })
+      setEwbModal(null)
+      fetchAll()
+    } catch (e) {
+      setEwbModal(m => m ? { ...m, generating: false, error: e.message } : null)
+    }
   }
 
   // Bill confirmation now happens automatically at consignment creation
@@ -932,7 +984,7 @@ export default function ConsignmentData() {
                       {c.tmp_prf_no}
                       {isNew && <span style={{ marginLeft: 6, fontSize: 9, color: t.green, background: `${t.green}20`, padding: '1px 6px', borderRadius: 4, fontWeight: 600 }}>NEW</span>}
                       {c.approval_status === 'pending' && (
-                        <span title="Awaiting accounts review. Operations docs (report / voucher / challan) can be downloaded; EWB and E-Invoice unlock once accounts approves and generates them."
+                        <span title="In progress. Report / voucher / challan can be downloaded now. EWB is operations self-service (Preview & Generate here). E-Invoice routes still need accounts to generate & approve."
                           style={{ marginLeft: 6, fontSize: 9, color: t.orange, background: `${t.orange}20`, padding: '1px 6px', borderRadius: 4, fontWeight: 600 }}>
                           IN REVIEW
                         </span>
@@ -1008,26 +1060,39 @@ export default function ConsignmentData() {
                         const isApproved = c.approval_status === 'approved'
                         if (showEwb) {
                           if (c.eway_bill_no) {
+                            // EWB auto-approves on generation, so the signed PDF
+                            // is available immediately — no accounts gate.
                             return (
                               <div style={{ display: 'inline-flex', gap: '6px', alignItems: 'center' }} title={`E-Way Bill ${c.eway_bill_no}${c.ewb_valid_until ? ` · valid till ${new Date(c.ewb_valid_until).toLocaleString()}` : ''}`}>
-                                {isApproved ? (
-                                  <button onClick={() => downloadEwbPdf(c)} disabled={!!downloadingId}
-                                    title="Download signed E-Way Bill PDF"
-                                    style={{ background: t.blue, color: '#fff', border: 'none', borderRadius: '5px', padding: '3px 10px', fontSize: '10px', fontWeight: 600, cursor: 'pointer', opacity: downloadingId === c.id + ':ewb' ? 0.6 : 1 }}>
-                                    {downloadingId === c.id + ':ewb' ? '…' : 'PDF'}
-                                  </button>
-                                ) : (
-                                  <span title="PDF unlocks once accounts approves." style={{ fontSize: '10px', color: t.text4, fontStyle: 'italic' }}>locked</span>
-                                )}
+                                <button onClick={() => downloadEwbPdf(c)} disabled={!!downloadingId}
+                                  title="Download signed E-Way Bill PDF"
+                                  style={{ background: t.blue, color: '#fff', border: 'none', borderRadius: '5px', padding: '3px 10px', fontSize: '10px', fontWeight: 600, cursor: 'pointer', opacity: downloadingId === c.id + ':ewb' ? 0.6 : 1 }}>
+                                  {downloadingId === c.id + ':ewb' ? '…' : 'PDF'}
+                                </button>
                                 <span style={{ fontSize: '10px', color: t.green, background: `${t.green}22`, border: `1px solid ${t.green}55`, borderRadius: '4px', padding: '1px 8px', fontWeight: 700, letterSpacing: '.06em' }}>EWB</span>
                               </div>
                             )
                           }
+                          // Not yet generated. EWB is ops self-service — show
+                          // the Preview/Generate action unless the consignment
+                          // is dead (rejected / cancelled / cancel requested).
+                          const blocked = c.approval_status === 'rejected'
+                            || c.status === 'cancelled'
+                            || !!c.cancellation_requested_at
+                          if (blocked) {
+                            return (
+                              <span title="EWB unavailable — consignment is rejected or cancelled."
+                                style={{ fontSize: '10px', color: t.text4, fontStyle: 'italic' }}>
+                                —
+                              </span>
+                            )
+                          }
                           return (
-                            <span title="Accounts will generate the E-Way Bill on NIC during their review."
-                              style={{ fontSize: '10px', color: t.text4, fontStyle: 'italic' }}>
-                              accounts to generate EWB
-                            </span>
+                            <button onClick={() => openEwbPreview(c)} disabled={!!downloadingId}
+                              title="Preview the E-Way Bill payload, then generate it on NIC. Generating dispatches the consignment."
+                              style={{ ...btnGold, padding: '4px 12px', fontSize: '10px', display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                              Preview &amp; Generate EWB
+                            </button>
                           )
                         }
                         if (showEinvoice) {
@@ -1306,6 +1371,103 @@ export default function ConsignmentData() {
             • TMP PRF + Challan/Voucher preview badges
             • Cancel / Confirm-and-Create CTA
       */}
+      {/* EWB preview / generate modal — operations self-service. Review the
+          exact NIC payload, then Generate fires NIC and (server-side) auto-
+          approves the consignment + moves stock. */}
+      {ewbModal && typeof document !== 'undefined' && createPortal((
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.78)', zIndex: 115, display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(6px)', padding: '20px' }}
+          onClick={() => { if (!ewbModal.generating) setEwbModal(null) }}>
+          <div onClick={e => e.stopPropagation()}
+            style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: '14px', padding: '22px 24px', width: '100%', maxWidth: '560px', maxHeight: '85vh', overflowY: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,.5)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '4px' }}>
+              <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 28, height: 28, borderRadius: '50%', background: `${t.gold}1e`, color: t.gold, fontSize: '14px', fontWeight: 700 }}>⛟</span>
+              <div style={{ fontSize: '15px', fontWeight: 600, color: t.text1 }}>Preview E-Way Bill</div>
+            </div>
+            <div style={{ fontSize: '11px', color: t.text3, marginBottom: '14px' }}>
+              <strong style={{ color: t.gold, fontFamily: 'monospace' }}>{ewbModal.c.tmp_prf_no}</strong> ·{' '}
+              {ewbModal.c.branch_name} → {ewbModal.c.movement_type === 'INTERNAL' ? (ewbModal.c.dest_branch || '?') : 'Head Office'}
+            </div>
+
+            {ewbModal.loading ? (
+              <div style={{ padding: '40px 0', display: 'flex', justifyContent: 'center' }}><GoldSpinner size={26} /></div>
+            ) : ewbModal.error ? (
+              <div style={{ background: `${t.red}10`, border: `1px solid ${t.red}40`, borderRadius: '8px', padding: '12px 14px', fontSize: '12px', color: t.red, lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>
+                {ewbModal.error}
+              </div>
+            ) : ewbModal.data ? (() => {
+              const d  = ewbModal.data
+              const s  = d.summary || {}
+              const ve = d.validation_errors || []
+              const cell = { fontSize: '11px', color: t.text2, lineHeight: 1.5 }
+              const lbl  = { fontSize: '9px', color: t.text4, letterSpacing: '.08em', textTransform: 'uppercase', fontWeight: 700, marginBottom: 2 }
+              return (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  {d.already_generated && (
+                    <div style={{ background: `${t.green}12`, border: `1px solid ${t.green}40`, borderRadius: 8, padding: '8px 12px', fontSize: 11, color: t.green, fontWeight: 600 }}>
+                      Already generated: {d.existing_ewb_no}
+                    </div>
+                  )}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px 16px' }}>
+                    <div><div style={lbl}>From</div><div style={cell}>{s.seller?.legal_name || '—'}<br/>{s.seller?.location || ''}{s.seller?.state_code ? ` · ${s.seller.state_code}` : ''}</div></div>
+                    <div><div style={lbl}>To</div><div style={cell}>{s.buyer?.legal_name || '—'}<br/>{s.buyer?.location || ''}{s.buyer?.state_code ? ` · ${s.buyer.state_code}` : ''}</div></div>
+                    <div><div style={lbl}>Quantity</div><div style={cell}>{s.quantity_grams != null ? `${Number(s.quantity_grams).toLocaleString('en-IN')} ${s.unit || 'GMS'}` : '—'}</div></div>
+                    <div><div style={lbl}>Bills</div><div style={cell}>{(s.items || []).length}</div></div>
+                    <div><div style={lbl}>Taxable</div><div style={cell}>₹{s.taxable_amount != null ? fmt(Math.round(s.taxable_amount)) : '—'}</div></div>
+                    <div><div style={lbl}>Total invoice</div><div style={cell}>₹{s.total_invoice != null ? fmt(Math.round(s.total_invoice)) : '—'}</div></div>
+                    <div><div style={lbl}>Distance</div><div style={cell}>{s.distance_km != null ? `${s.distance_km} km` : '—'}</div></div>
+                    <div><div style={lbl}>Sub-supply</div><div style={cell}>{s.sub_supply_type || '—'}</div></div>
+                  </div>
+                  {ve.length > 0 && (
+                    <div style={{ background: `${t.red}10`, border: `1px solid ${t.red}40`, borderRadius: 8, padding: '10px 12px' }}>
+                      <div style={{ fontSize: 10, color: t.red, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', marginBottom: 6 }}>Fix before generating</div>
+                      <ul style={{ margin: 0, paddingLeft: 16, fontSize: 11, color: t.red, lineHeight: 1.6 }}>
+                        {ve.map((er, i) => <li key={i}>{er}</li>)}
+                      </ul>
+                    </div>
+                  )}
+                  <div style={{ background: `${t.orange}10`, border: `1px solid ${t.orange}35`, borderRadius: 8, padding: '9px 12px', fontSize: 11, color: t.orange, lineHeight: 1.5 }}>
+                    Generating files this E-Way Bill on NIC and dispatches the consignment (bills move out of branch stock). It can only be undone via Cancel within 24h.
+                  </div>
+                </div>
+              )
+            })() : null}
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '18px' }}>
+              <button onClick={() => setEwbModal(null)} disabled={ewbModal.generating}
+                style={{ background: 'transparent', border: `1px solid ${t.border2}`, borderRadius: '8px', padding: '8px 16px', fontSize: '12px', color: t.text2, cursor: ewbModal.generating ? 'not-allowed' : 'pointer' }}>
+                Back
+              </button>
+              {ewbModal.error && !ewbModal.data ? (
+                <button onClick={() => openEwbPreview(ewbModal.c)}
+                  style={{ ...btnGold, padding: '8px 18px' }}>
+                  Retry preview
+                </button>
+              ) : (
+                <button
+                  onClick={confirmGenerateEwb}
+                  disabled={
+                    ewbModal.generating || ewbModal.loading || !ewbModal.data
+                    || (ewbModal.data.validation_errors || []).length > 0
+                    || ewbModal.data.already_generated
+                  }
+                  style={{
+                    background: (!ewbModal.generating && !ewbModal.loading && ewbModal.data
+                      && (ewbModal.data.validation_errors || []).length === 0
+                      && !ewbModal.data.already_generated) ? t.gold : `${t.gold}40`,
+                    color: '#1a0a00', border: 'none', borderRadius: '8px',
+                    padding: '8px 18px', fontSize: '12px', fontWeight: 700,
+                    cursor: (ewbModal.generating || ewbModal.loading || !ewbModal.data
+                      || (ewbModal.data.validation_errors || []).length > 0
+                      || ewbModal.data.already_generated) ? 'not-allowed' : 'pointer',
+                  }}>
+                  {ewbModal.generating ? 'Generating…' : 'Generate E-Way Bill'}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      ), document.body)}
+
       {/* Cancellation request modal — operations fills in a reason and confirms;
           server records the request and accounts processes it later. */}
       {cancelTarget && typeof document !== 'undefined' && createPortal((

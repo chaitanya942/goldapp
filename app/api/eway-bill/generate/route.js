@@ -7,7 +7,8 @@ import { createClient } from '@supabase/supabase-js'
 import { generateEWayBill } from '../../../../lib/clearTaxClient'
 import { estimateDistanceKm } from '../../../../lib/distanceCalc'
 import { logConsignmentEvent } from '../../../../lib/consignmentLog'
-import { requireAuth, ROLE_GROUPS } from '../../../../lib/apiAuth'
+import { requireAuthForPage } from '../../../../lib/apiAuth'
+import { applyConsignmentApproval } from '../../../../lib/consignmentApproval'
 import { loadConsignmentForGeneration } from '../../../../lib/consignmentSnapshot'
 import { checkWorkflow } from '../../../../lib/workflowGate'
 import {
@@ -49,10 +50,13 @@ function preflightValidate({ consignment, branch, destBranch, items, companySett
 }
 
 export async function POST(req) {
-  // Accounts owns GST documents — they generate as part of approval review.
-  // Operations can no longer generate; they only download once approved.
-  // ROLE_GROUPS.ACCOUNTS includes super_admin / founders_office / accounts.
-  const auth = await requireAuth(req, { requiredRoles: ROLE_GROUPS.ACCOUNTS })
+  // EWB is now operations self-service: anyone who can see the Consignment
+  // Data module may generate it. Generating the E-Way Bill IS the dispatch
+  // decision — on success this route auto-approves the consignment and moves
+  // stock (see the applyConsignmentApproval call below), so accounts no longer
+  // sits in the EWB path. (E-Invoice is unaffected — that route still gates on
+  // ROLE_GROUPS.ACCOUNTS and still requires a manual accounts approval.)
+  const auth = await requireAuthForPage(req, 'consignment-data')
   if (!auth.ok) return auth.response
   try {
     const { consignment_id } = await req.json()
@@ -189,7 +193,38 @@ export async function POST(req) {
       details:     { ewb_no: String(ewbNo), ewb_date: ewbDate, valid_until: validUntil, distance_km: distKm },
     })
 
-    return Response.json({ success: true, ewb_no: ewbNo, ewb_date: ewbDate, valid_until: validUntil })
+    // ── Auto-approve + dispatch ──────────────────────────────────────────
+    // EWB no longer needs a separate accounts approval. Generating the
+    // legally-binding doc IS the dispatch decision, so we run the SAME
+    // approval transition accounts used to do (mark approved, move linked
+    // bills' stock, log the event) via the shared helper. This keeps the
+    // Approved / Cancelled report surfaces populated for accounts and means
+    // EWB-route stock still moves exactly as before.
+    //
+    // It is wrapped: the EWB is already on NIC's books at this point, so a
+    // hiccup here must NOT 500 the request (that would hide a real EWB).
+    // We surface a warning instead so ops/accounts can reconcile.
+    let autoApproveWarning = null
+    try {
+      const appr = await applyConsignmentApproval(supabase, {
+        id:           consignment_id,
+        approverEmail: auth.profile?.email || auth.user?.email || 'system',
+        eventType:    'approved_on_ewb_generate',
+        note:         'Auto-approved on E-Way Bill generation (operations self-service)',
+      })
+      if (appr?.error) {
+        autoApproveWarning = appr.error.message || String(appr.error)
+        console.error('[EWB] auto-approve failed after generation:', consignment_id, autoApproveWarning)
+      }
+    } catch (e) {
+      autoApproveWarning = e?.message || String(e)
+      console.error('[EWB] auto-approve threw after generation:', consignment_id, autoApproveWarning)
+    }
+
+    return Response.json({
+      success: true, ewb_no: ewbNo, ewb_date: ewbDate, valid_until: validUntil,
+      ...(autoApproveWarning ? { auto_approve_warning: autoApproveWarning } : {}),
+    })
   } catch (err) {
     console.error('E-Way Bill generate error:', err)
     // Always release the lock (success or failure) so user can retry.
