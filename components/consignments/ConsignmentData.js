@@ -14,6 +14,7 @@ import { CONSIGNMENT_THEMES as THEMES, REGION_COLORS, useMobile } from '../../li
 import { WorkflowStrip, canActOnStep } from './workflowParts'
 import PreviewModal from './PreviewModal'
 import { istToday, istDaysAgo, istStartOfDayIso, istEndOfDayIso } from '../../lib/dateIst'
+import { docFilename } from '../../lib/docFilename'
 
 async function triggerDownload(url, filename, onError) {
   const res  = await authedFetch(url)
@@ -373,7 +374,10 @@ export default function ConsignmentData() {
 
   async function downloadEwbPdf(c) {
     setDownloadingId(c.id + ':ewb')
-    await triggerDownload(`/api/eway-bill/pdf?id=${c.id}`, `EWB_${c.eway_bill_no}.pdf`, msg => setToast({ msg, type: 'error' }))
+    const branch = branches.find(b => b.name === c.branch_name)
+    await triggerDownload(`/api/eway-bill/pdf?id=${c.id}`,
+      docFilename({ consignment: c, branch, docType: 'ewb', ext: 'pdf' }),
+      msg => setToast({ msg, type: 'error' }))
     setDownloadingId(null)
   }
 
@@ -439,12 +443,15 @@ export default function ConsignmentData() {
 
   async function downloadDoc(c, kind) {
     setDownloadingId(c.id + ':' + kind)
+    const branch   = branches.find(b => b.name === c.branch_name)
     const url      = kind === 'report'  ? `/api/generate-consignee-report?id=${c.id}`
                    : kind === 'voucher' ? `/api/generate-issue-voucher-pdf?id=${c.id}`
                    :                       `/api/generate-challan-pdf?id=${c.id}`
-    const filename = kind === 'report'  ? `GoldConsigneeReport-${c.tmp_prf_no}.jpg`
-                   : kind === 'voucher' ? `${(c.tmp_prf_no || 'voucher').replace(/\//g,'-')}_voucher.pdf`
-                   :                       `${(c.challan_no || c.tmp_prf_no || 'challan').replace(/\//g,'-')}.pdf`
+    const filename = docFilename({
+      consignment: c, branch,
+      docType: kind,                          // 'report' | 'voucher' | 'challan'
+      ext:     kind === 'report' ? 'jpg' : 'pdf',
+    })
     await triggerDownload(url, filename, msg => setToast({ msg, type: 'error' }))
     setDownloadingId(null)
   }
@@ -1130,7 +1137,7 @@ export default function ConsignmentData() {
                                   <button onClick={async () => {
                                     setDownloadingId(c.id + ':einv')
                                     await triggerDownload(`/api/e-invoice/pdf?id=${c.id}`,
-                                      `EInvoice_${c.tmp_prf_no || c.id}.pdf`,
+                                      docFilename({ consignment: c, branch: sourceBranchInfo, docType: 'einvoice', ext: 'pdf' }),
                                       msg => setToast({ msg, type: 'error' }))
                                     setDownloadingId(null)
                                   }} disabled={!!downloadingId}

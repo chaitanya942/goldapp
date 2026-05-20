@@ -6,6 +6,7 @@ import { checkApproval } from '../../../lib/approvalGate'
 import { checkWorkflow, stampWorkflowStep } from '../../../lib/workflowGate'
 import { requireAuth } from '../../../lib/apiAuth'
 import { loadConsignmentForGeneration } from '../../../lib/consignmentSnapshot'
+import { docFilename } from '../../../lib/docFilename'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
@@ -89,7 +90,7 @@ export async function GET(req) {
       transferHistory,
     })
 
-    const filename = `GoldConsigneeReport-${consignment.tmp_prf_no}.jpg`
+    const filename = docFilename({ consignment, branch, docType: 'report', ext: 'jpg' })
 
     // Stamp the workflow step so voucher / challan unlock for this consignment.
     // Fire-and-forget — failure to stamp shouldn't break the download itself.

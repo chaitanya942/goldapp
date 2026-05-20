@@ -6,6 +6,7 @@ import { fetchEWayBillPdf } from '../../../../lib/clearTaxClient'
 import { REGION_TO_STATE_CODE } from '../../../../lib/stateMap'
 import { checkApproval } from '../../../../lib/approvalGate'
 import { requireAuth, resolveAllowedBranchNames } from '../../../../lib/apiAuth'
+import { docFilename } from '../../../../lib/docFilename'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
@@ -53,7 +54,7 @@ export async function GET(req) {
       gstinOverride: gstinForPdf,
     })
 
-    const filename = `EWB_${consignment.eway_bill_no}_${(consignment.tmp_prf_no || consignmentId)}.pdf`.replace(/\//g, '-')
+    const filename = docFilename({ consignment, branch, docType: 'ewb', ext: 'pdf' })
     return new Response(pdfBuffer, {
       headers: {
         'Content-Type':        'application/pdf',

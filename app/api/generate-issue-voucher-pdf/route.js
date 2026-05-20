@@ -7,6 +7,7 @@ import { checkApproval } from '../../../lib/approvalGate'
 import { checkWorkflow, stampWorkflowStep } from '../../../lib/workflowGate'
 import { requireAuth } from '../../../lib/apiAuth'
 import { loadConsignmentForGeneration } from '../../../lib/consignmentSnapshot'
+import { docFilename } from '../../../lib/docFilename'
 import fs   from 'fs'
 import path from 'path'
 
@@ -70,7 +71,7 @@ export async function GET(req) {
     })
 
     const pdfBuffer = Buffer.from(pdf.output('arraybuffer'))
-    const filename  = (consignment.challan_no || consignment.tmp_prf_no || consignmentId).replace(/\//g, '-') + '_voucher.pdf'
+    const filename  = docFilename({ consignment, branch: sourceBranch, docType: 'voucher', ext: 'pdf' })
 
     // Stamp the workflow step so EWB / E-Invoice preview unlocks for this consignment.
     stampWorkflowStep(supabase, consignmentId, 'issue_voucher', auth).catch(() => {})

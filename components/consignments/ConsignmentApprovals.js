@@ -12,6 +12,7 @@ import { CONSIGNMENT_THEMES as THEMES } from '../../lib/consignmentTheme'
 import { WorkflowStrip } from './workflowParts'
 import PreviewModal from './PreviewModal'
 import { istToday, istDaysAgo } from '../../lib/dateIst'
+import { docFilename } from '../../lib/docFilename'
 
 const fmt   = (n) => n != null ? Number(n).toLocaleString('en-IN') : '—'
 const fmtWt = (n) => n != null ? `${Number(n).toFixed(3)}g` : '—'
@@ -1213,14 +1214,14 @@ export default function ConsignmentApprovals() {
                       {fmtTS(c.created_at)}{c.created_by && c.created_by !== 'unknown' ? ` · ${c.created_by}` : ''}
                     </span>
                     <span style={{ color: t.text4, fontSize: '10px' }}>·</span>
-                    <button onClick={() => previewDoc(`/api/generate-consignee-report?id=${c.id}`, `Report-${c.tmp_prf_no}.jpg`, msg => showToast(msg, 'error'))}
+                    <button onClick={() => previewDoc(`/api/generate-consignee-report?id=${c.id}`, docFilename({ consignment: c, docType: 'report', ext: 'jpg' }), msg => showToast(msg, 'error'))}
                       title="Preview Consignee Report"
                       style={{ background: 'transparent', border: 'none', padding: 0, fontSize: '10px', color: t.purple, fontWeight: 600, cursor: 'pointer', textDecoration: 'underline' }}>
                       Report
                     </button>
                     <button onClick={() => previewDoc(
                         isType ? `/api/generate-issue-voucher-pdf?id=${c.id}` : `/api/generate-challan-pdf?id=${c.id}`,
-                        `${isType ? 'Voucher' : 'Challan'}-${c.tmp_prf_no}.pdf`,
+                        docFilename({ consignment: c, docType: isType ? 'voucher' : 'challan', ext: 'pdf' }),
                         msg => showToast(msg, 'error'))}
                       title={isType ? 'Preview Issue Voucher' : 'Preview Delivery Challan'}
                       style={{ background: 'transparent', border: 'none', padding: 0, fontSize: '10px', color: t.gold, fontWeight: 600, cursor: 'pointer', textDecoration: 'underline' }}>
@@ -1237,7 +1238,7 @@ export default function ConsignmentApprovals() {
                       // (Generate runs from inside the Preview modal now; busy state is owned by `preview.generating`.)
                       return c.irn ? (
                         <span style={{ display: 'inline-flex', gap: '6px', alignItems: 'center' }}>
-                          <button onClick={() => previewDoc(`/api/e-invoice/pdf?id=${c.id}`, `EInvoice-${c.tmp_prf_no}.pdf`, msg => showToast(msg, 'error'))}
+                          <button onClick={() => previewDoc(`/api/e-invoice/pdf?id=${c.id}`, docFilename({ consignment: c, docType: 'einvoice', ext: 'pdf' }), msg => showToast(msg, 'error'))}
                             title="Preview E-Invoice PDF"
                             style={{ background: 'transparent', border: 'none', padding: 0, fontSize: '10px', color: t.purple, fontWeight: 600, cursor: 'pointer', textDecoration: 'underline' }}>
                             E-Invoice
@@ -2107,7 +2108,7 @@ function HistoryCard({ c, t, card, isApproved, previewDoc, showToast, openCancel
 
           {/* Doc action chips */}
           <div style={{ display: 'inline-flex', gap: '6px', flexWrap: 'wrap' }}>
-            <DocChip label="Report"  color={t.purple} onClick={() => previewDoc(`/api/generate-consignee-report?id=${c.id}`, `Report-${c.tmp_prf_no}.jpg`, msg => showToast(msg, 'error'))} title="Preview the Consignee Report (branch-facing)" />
+            <DocChip label="Report"  color={t.purple} onClick={() => previewDoc(`/api/generate-consignee-report?id=${c.id}`, docFilename({ consignment: c, docType: 'report', ext: 'jpg' }), msg => showToast(msg, 'error'))} title="Preview the Consignee Report (branch-facing)" />
             <DocChip label={isType ? 'Voucher' : 'Challan'} color={t.gold}
               onClick={() => previewDoc(
                 isType ? `/api/generate-issue-voucher-pdf?id=${c.id}` : `/api/generate-challan-pdf?id=${c.id}`,
@@ -2116,12 +2117,12 @@ function HistoryCard({ c, t, card, isApproved, previewDoc, showToast, openCancel
               title={isType ? 'Preview the Issue Voucher PDF' : 'Preview the Delivery Challan PDF'} />
             {c.eway_bill_no && (
               <DocChip label="E-Way Bill" color={t.green}
-                onClick={() => previewDoc(`/api/eway-bill/pdf?id=${c.id}`, `EWB-${c.eway_bill_no}.pdf`, msg => showToast(msg, 'error'))}
+                onClick={() => previewDoc(`/api/eway-bill/pdf?id=${c.id}`, docFilename({ consignment: c, docType: 'ewb', ext: 'pdf' }), msg => showToast(msg, 'error'))}
                 title={`E-Way Bill ${c.eway_bill_no}\nGenerated ${fmtTS(c.ewb_generated_at)}${c.ewb_valid_until ? `\nValid till ${fmtTS(c.ewb_valid_until)}` : ''}`} />
             )}
             {c.irn && (
               <DocChip label="E-Invoice" color={t.purple}
-                onClick={() => previewDoc(`/api/e-invoice/pdf?id=${c.id}`, `EInvoice-${c.tmp_prf_no}.pdf`, msg => showToast(msg, 'error'))}
+                onClick={() => previewDoc(`/api/e-invoice/pdf?id=${c.id}`, docFilename({ consignment: c, docType: 'einvoice', ext: 'pdf' }), msg => showToast(msg, 'error'))}
                 title={`E-Invoice ${c.einvoice_doc_no || ''}\nGenerated ${fmtTS(c.einvoice_generated_at)}\nIRN ${c.irn}`} />
             )}
           </div>

@@ -9,6 +9,7 @@ import { createClient } from '@supabase/supabase-js'
 import { generateEInvoicePdf } from '../../../../lib/generateEInvoicePdf'
 import { checkApproval } from '../../../../lib/approvalGate'
 import { requireAuth, resolveAllowedBranchNames } from '../../../../lib/apiAuth'
+import { docFilename } from '../../../../lib/docFilename'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
@@ -69,7 +70,7 @@ export async function GET(req) {
       signedQrCode,
     })
 
-    const filename = `EInvoice_${(consignment.tmp_prf_no || consignmentId)}.pdf`.replace(/\//g, '-')
+    const filename = docFilename({ consignment, branch, docType: 'einvoice', ext: 'pdf' })
     return new Response(pdfBuffer, {
       headers: {
         'Content-Type':        'application/pdf',
