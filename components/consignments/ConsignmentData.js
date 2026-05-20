@@ -163,6 +163,11 @@ export default function ConsignmentData() {
       if (x.status === 'seed') return false
       const isRejected = x.approval_status === 'rejected'
       if (x.status === 'cancelled' && !isRejected) return false
+      // Anything still awaiting a decision must surface here — otherwise it
+      // can appear in the accounts Pending Approvals queue but be invisible
+      // to ops. Trumps the received/age gates below in case status/approval
+      // got out of sync (e.g. a received row that never got approved).
+      if (x.approval_status === 'pending') return true
       // Rejected rows: keep for 7 days (gives ops a clear window to review
       // the reason, fix data, and re-create). After that, they live in the
       // approval-history audit trail only.
