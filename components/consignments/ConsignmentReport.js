@@ -244,9 +244,10 @@ export default function ConsignmentReport() {
     return acc
   }, {})
 
-  // Always display weights in grams (no kg conversion). Comma-grouped.
+  // Always display weights in grams (no kg conversion). Comma-grouped, 2-dp
+  // so ops see sub-gram precision on the headline cards.
   const fmtWtCard = (g) => ({
-    value: Math.round(Number(g || 0)).toLocaleString('en-IN'),
+    value: Number(g || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
     unit: 'g',
   })
 
@@ -346,6 +347,24 @@ export default function ConsignmentReport() {
     else { setCaseSortKey(key); setCaseSortDir(-1) }
   }
 
+  // Σ totals across the visible case rows — drives the totals row pinned
+  // beneath the headers. Note: Svc % can't be summed (it's a per-bill rate),
+  // so we show a weighted average instead — Σ(svc_amt) / Σ(gross_amt) × 100.
+  const caseTotals = filteredCaseRows.reduce((acc, r) => {
+    acc.bills        += 1
+    acc.gross_weight += Number(r.gross_weight || 0)
+    acc.stone_weight += Number(r.stone_weight || 0)
+    acc.wastage      += Number(r.wastage      || 0)
+    acc.net_weight   += Number(r.net_weight   || 0)
+    acc.gross_amt    += Number(r.total_amount || 0)
+    acc.svc_amt      += Number(r.service_charge_amount_crm || 0)
+    acc.final_amt    += Number(r.final_amount_crm || 0)
+    return acc
+  }, { bills: 0, gross_weight: 0, stone_weight: 0, wastage: 0, net_weight: 0, gross_amt: 0, svc_amt: 0, final_amt: 0 })
+  const caseAvgSvcPct = caseTotals.gross_amt > 0
+    ? (caseTotals.svc_amt / caseTotals.gross_amt) * 100
+    : 0
+
   function exportCaseCsv(rows) {
     const csvEscape = (v) => {
       const s = v == null ? '' : String(v)
@@ -365,7 +384,7 @@ export default function ConsignmentReport() {
       ['service_charge_amount_crm', 'Svc Amt'],
       ['final_amount_crm',          'Final Amt'],
       ['transaction_type',          'Type'],
-      ['dispatched_at',             'Consignment Created On'],
+      ['dispatched_at',             'Consignment Date'],
     ]
     const lines = [cols.map(([, l]) => csvEscape(l)).join(',')]
     for (const r of rows) {
@@ -658,7 +677,7 @@ export default function ConsignmentReport() {
         {/* Case mode: "consignment since" date filter — chips + custom range */}
         {viewMode === 'case' && (
           <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
-            <span style={{ fontSize: '10px', color: t.text4, letterSpacing: '.08em', textTransform: 'uppercase', fontWeight: 600 }}>Consignment created on</span>
+            <span style={{ fontSize: '10px', color: t.text4, letterSpacing: '.08em', textTransform: 'uppercase', fontWeight: 600 }}>Consignment date</span>
             {[
               { key: 'all',       label: 'All' },
               { key: 'today',     label: 'Today' },
@@ -932,79 +951,107 @@ export default function ConsignmentReport() {
             <div style={{ padding: '80px', textAlign: 'center', color: t.text4, fontSize: '13px' }}>
               {caseData.length === 0 ? 'No bills currently in transit' : 'No bills match your filter'}
             </div>
-          ) : (
+          ) : (() => {
+            // Case-wise table — tighter than the branch-wise rollup so all 14
+            // columns fit a 1440px+ viewport without horizontal scroll. Smaller
+            // viewports still get the overflow-x scroll fallback below.
+            const caseTdPad = '7px 8px'
+            const caseTd    = { padding: caseTdPad, verticalAlign: 'middle', fontSize: '10.5px' }
+            const caseTdL   = { ...caseTd, textAlign: 'left' }
+            const caseTdR   = { ...caseTd, textAlign: 'right', fontFamily: 'monospace' }
+            const caseTh    = (col) => ({
+              padding: '8px 8px', fontSize: '9px', color: caseSortKey === col.k ? t.gold : t.text4,
+              letterSpacing: '.04em', textTransform: 'uppercase',
+              background: t.card2, borderBottom: `1px solid ${t.border}`,
+              whiteSpace: 'nowrap', fontWeight: 600, userSelect: 'none',
+              verticalAlign: 'middle', textAlign: col.a, cursor: 'pointer',
+              position: 'sticky', top: 0, zIndex: 2,                        // stays put while you scroll the page
+            })
+            const fmtAmt = (n) => n != null ? `₹${Math.round(n).toLocaleString('en-IN')}` : '—'
+            const fmtWt  = (n) => n != null ? Number(n).toFixed(3) : '—'
+            return (
             <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px', tableLayout: 'auto' }}>
                 <thead>
                   <tr>
                     {[
-                      { k: 'application_id',            l: 'App ID',            a: 'left'  },
-                      { k: 'purchase_date',             l: 'Purchase',          a: 'left'  },
-                      { k: 'customer_name',             l: 'Customer',          a: 'left'  },
-                      { k: 'branch_name',               l: 'Branch',            a: 'left'  },
-                      { k: 'gross_weight',              l: 'Gross (g)',         a: 'right' },
-                      { k: 'stone_weight',              l: 'Stone (g)',         a: 'right' },
-                      { k: 'wastage',                   l: 'Wastage (g)',       a: 'right' },
-                      { k: 'net_weight',                l: 'Net (g)',           a: 'right' },
-                      { k: 'total_amount',              l: 'Gross Amt',         a: 'right' },
-                      { k: 'service_charge_pct',        l: 'Svc %',             a: 'right' },
-                      { k: 'service_charge_amount_crm', l: 'Svc Amt',           a: 'right' },
-                      { k: 'final_amount_crm',          l: 'Final Amt',         a: 'right' },
-                      { k: 'transaction_type',          l: 'Type',              a: 'left'  },
-                      { k: 'dispatched_at',             l: 'Consignment Created On', a: 'left'  },
+                      { k: 'application_id',            l: 'App ID',     a: 'left'  },
+                      { k: 'purchase_date',             l: 'Purchase',   a: 'left'  },
+                      { k: 'customer_name',             l: 'Customer',   a: 'left'  },
+                      { k: 'branch_name',               l: 'Branch',     a: 'left'  },
+                      { k: 'gross_weight',              l: 'Gross (g)',  a: 'right' },
+                      { k: 'stone_weight',              l: 'Stone (g)',  a: 'right' },
+                      { k: 'wastage',                   l: 'Wastage (g)',a: 'right' },
+                      { k: 'net_weight',                l: 'Net (g)',    a: 'right' },
+                      { k: 'total_amount',              l: 'Gross Amt',  a: 'right' },
+                      { k: 'service_charge_pct',        l: 'Svc %',      a: 'right' },
+                      { k: 'service_charge_amount_crm', l: 'Svc Amt',    a: 'right' },
+                      { k: 'final_amount_crm',          l: 'Final Amt',  a: 'right' },
+                      { k: 'transaction_type',          l: 'Type',       a: 'left'  },
+                      { k: 'dispatched_at',             l: 'Consignment Date', a: 'left' },
                     ].map(col => (
-                      <th key={col.k}
-                        onClick={() => handleCaseSort(col.k)}
-                        style={{
-                          ...thBase,
-                          padding: '10px 12px',                            // match td exactly so header text and cell text line up
-                          verticalAlign: 'middle',
-                          cursor: 'pointer',
-                          textAlign: col.a,
-                          color: caseSortKey === col.k ? t.gold : t.text4,
-                        }}>
+                      <th key={col.k} onClick={() => handleCaseSort(col.k)} style={caseTh(col)}>
                         {col.l}
-                        <span style={{ color: caseSortKey === col.k ? t.gold : t.text4, fontSize: '10px', marginLeft: '4px' }}>
+                        <span style={{ color: caseSortKey === col.k ? t.gold : t.text4, fontSize: '9px', marginLeft: '3px' }}>
                           {caseSortKey === col.k ? (caseSortDir === -1 ? '↓' : '↑') : '⇅'}
                         </span>
                       </th>
                     ))}
                   </tr>
+                  {/* Σ TOTALS — pinned just under the headers. Sums across
+                      the currently-filtered rows; Svc % is a weighted avg
+                      since percentages don't sum meaningfully. */}
+                  <tr style={{ background: `${t.gold}0c`, borderBottom: `1px solid ${t.gold}40` }}>
+                    <td style={{ ...caseTdL, color: t.gold, fontWeight: 700, letterSpacing: '.04em', whiteSpace: 'nowrap' }}>Σ TOTALS</td>
+                    <td style={caseTdL} />
+                    <td style={{ ...caseTdL, color: t.text3, fontSize: '10px' }}>{caseTotals.bills} bill{caseTotals.bills === 1 ? '' : 's'}</td>
+                    <td style={caseTdL} />
+                    <td style={{ ...caseTdR, color: t.text2, fontWeight: 600 }}>{fmtWt(caseTotals.gross_weight)}</td>
+                    <td style={{ ...caseTdR, color: t.text3 }}>{fmtWt(caseTotals.stone_weight)}</td>
+                    <td style={{ ...caseTdR, color: t.text3 }}>{fmtWt(caseTotals.wastage)}</td>
+                    <td style={{ ...caseTdR, color: t.gold,  fontWeight: 700 }}>{fmtWt(caseTotals.net_weight)}</td>
+                    <td style={{ ...caseTdR, color: t.text2, fontWeight: 600 }}>{fmtAmt(caseTotals.gross_amt)}</td>
+                    <td style={{ ...caseTdR, color: t.text4 }} title="Weighted average across visible rows (Σ Svc Amt / Σ Gross Amt × 100)">~{caseAvgSvcPct.toFixed(2)}%</td>
+                    <td style={{ ...caseTdR, color: t.text3 }}>{fmtAmt(caseTotals.svc_amt)}</td>
+                    <td style={{ ...caseTdR, color: t.green, fontWeight: 700 }}>{fmtAmt(caseTotals.final_amt)}</td>
+                    <td style={caseTdL} />
+                    <td style={caseTdL} />
+                  </tr>
                 </thead>
                 <tbody>
                   {filteredCaseRows.map((r, i) => {
-                    // Shared baseline so every body cell has EXACTLY the same
-                    // padding/alignment as the header. We dropped the
-                    // .cnsrpt-row class here — its `position: relative` on a
-                    // <tr> was non-standard and Chrome was inflating the row
-                    // box, making cells visually shift relative to the header.
-                    const tdL = { padding: tdPad, verticalAlign: 'middle', textAlign: 'left' }
-                    const tdR = { padding: tdPad, verticalAlign: 'middle', textAlign: 'right', fontFamily: 'monospace' }
+                    // Light zebra striping — even rows get a hair-thin tint.
+                    // No CSS class (avoids the position: relative bug); inline
+                    // backgroundColor with a hover overlay via onMouseEnter.
+                    const zebraBg = i % 2 === 0 ? 'transparent' : `${t.card2}30`
                     return (
-                      <tr key={r.id || i} style={{ borderBottom: `1px solid ${t.border}25` }}>
-                        <td style={{ ...tdL, color: t.gold, fontFamily: 'monospace', fontWeight: 600, whiteSpace: 'nowrap' }}>{r.application_id || '—'}</td>
-                        <td style={{ ...tdL, color: t.text2, whiteSpace: 'nowrap' }}>{r.purchase_date ? fmtDate(r.purchase_date) : '—'}</td>
-                        <td style={{ ...tdL, color: t.text1 }}>{r.customer_name || '—'}</td>
-                        <td style={{ ...tdL, color: t.text2, whiteSpace: 'nowrap' }}>{r.branch_name || '—'}</td>
-                        <td style={{ ...tdR, color: t.text2 }}>{r.gross_weight != null ? Number(r.gross_weight).toFixed(3) : '—'}</td>
-                        <td style={{ ...tdR, color: t.text3 }}>{r.stone_weight != null ? Number(r.stone_weight).toFixed(3) : '—'}</td>
-                        <td style={{ ...tdR, color: t.text3 }}>{r.wastage != null ? Number(r.wastage).toFixed(3) : '—'}</td>
-                        <td style={{ ...tdR, color: t.gold, fontWeight: 600 }}>{r.net_weight != null ? Number(r.net_weight).toFixed(3) : '—'}</td>
-                        <td style={{ ...tdR, color: t.text2 }}>{r.total_amount != null ? `₹${Math.round(r.total_amount).toLocaleString('en-IN')}` : '—'}</td>
-                        <td style={{ ...tdR, color: t.text3 }}>{r.service_charge_pct != null ? `${Number(r.service_charge_pct).toFixed(2)}%` : '—'}</td>
-                        <td style={{ ...tdR, color: t.text3 }}>{r.service_charge_amount_crm != null ? `₹${Math.round(r.service_charge_amount_crm).toLocaleString('en-IN')}` : '—'}</td>
-                        <td style={{ ...tdR, color: t.green, fontWeight: 600 }}>{r.final_amount_crm != null ? `₹${Math.round(r.final_amount_crm).toLocaleString('en-IN')}` : '—'}</td>
-                        <td style={tdL}>
+                      <tr key={r.id || i}
+                        style={{ borderBottom: `1px solid ${t.border}25`, background: zebraBg, transition: 'background .12s ease' }}
+                        onMouseEnter={e => { e.currentTarget.style.background = `${t.gold}0e` }}
+                        onMouseLeave={e => { e.currentTarget.style.background = zebraBg }}>
+                        <td style={{ ...caseTdL, color: t.gold, fontFamily: 'monospace', fontWeight: 600, whiteSpace: 'nowrap' }}>{r.application_id || '—'}</td>
+                        <td style={{ ...caseTdL, color: t.text2, whiteSpace: 'nowrap' }}>{r.purchase_date ? fmtDate(r.purchase_date) : '—'}</td>
+                        <td style={{ ...caseTdL, color: t.text1 }}>{r.customer_name || '—'}</td>
+                        <td style={{ ...caseTdL, color: t.text2, whiteSpace: 'nowrap' }}>{r.branch_name || '—'}</td>
+                        <td style={{ ...caseTdR, color: t.text2 }}>{fmtWt(r.gross_weight)}</td>
+                        <td style={{ ...caseTdR, color: t.text3 }}>{fmtWt(r.stone_weight)}</td>
+                        <td style={{ ...caseTdR, color: t.text3 }}>{fmtWt(r.wastage)}</td>
+                        <td style={{ ...caseTdR, color: t.gold, fontWeight: 600 }}>{fmtWt(r.net_weight)}</td>
+                        <td style={{ ...caseTdR, color: t.text2 }}>{fmtAmt(r.total_amount)}</td>
+                        <td style={{ ...caseTdR, color: t.text3 }}>{r.service_charge_pct != null ? `${Number(r.service_charge_pct).toFixed(2)}%` : '—'}</td>
+                        <td style={{ ...caseTdR, color: t.text3 }}>{fmtAmt(r.service_charge_amount_crm)}</td>
+                        <td style={{ ...caseTdR, color: t.green, fontWeight: 600 }}>{fmtAmt(r.final_amount_crm)}</td>
+                        <td style={caseTdL}>
                           {r.transaction_type ? (
                             <span style={{
-                              fontSize: '10px', padding: '2px 8px', borderRadius: '4px',
+                              fontSize: '9.5px', padding: '2px 7px', borderRadius: '4px',
                               background: r.transaction_type === 'TAKEOVER' ? `${t.purple}18` : `${t.gold}18`,
                               color:      r.transaction_type === 'TAKEOVER' ? t.purple : t.gold,
                               fontWeight: 700, letterSpacing: '.02em', whiteSpace: 'nowrap',
                             }}>{r.transaction_type}</span>
                           ) : <span style={{ color: t.text4 }}>—</span>}
                         </td>
-                        <td style={{ ...tdL, color: t.text2, fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
+                        <td style={{ ...caseTdL, color: t.text2, fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
                           {r.dispatched_at
                             ? new Date(r.dispatched_at).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short' })
                             : '—'}
@@ -1015,14 +1062,15 @@ export default function ConsignmentReport() {
                 </tbody>
               </table>
             </div>
-          )}
+            )
+          })()}
         </div>
       )}
 
       {/* Footer note */}
       <div style={{ fontSize: '10px', color: t.text4, textAlign: 'right' }}>
         {viewMode === 'case'
-          ? <>Case-wise = <code style={{ background: t.card2, padding: '1px 4px', borderRadius: '3px', color: t.text3 }}>purchases.stock_status = in_consignment</code> · &quot;Consignment created on&quot; filters by <code style={{ background: t.card2, padding: '1px 4px', borderRadius: '3px', color: t.text3 }}>dispatched_at</code> (IST)</>
+          ? <>Case-wise = <code style={{ background: t.card2, padding: '1px 4px', borderRadius: '3px', color: t.text3 }}>purchases.stock_status = in_consignment</code> · &quot;Consignment date&quot; filters by <code style={{ background: t.card2, padding: '1px 4px', borderRadius: '3px', color: t.text3 }}>dispatched_at</code> (IST)</>
           : <>In-Flight = <code style={{ background: t.card2, padding: '1px 4px', borderRadius: '3px', color: t.text3 }}>stock_status = in_consignment</code> before today · Age alert: &gt;3d orange, &gt;7d red</>}
       </div>
 
