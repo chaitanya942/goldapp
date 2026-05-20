@@ -99,8 +99,13 @@ export default function ConsignmentOverview() {
   const [recentlyChanged, setRecentlyChanged] = useState(() => new Set())
   const prevTodayRef = useRef(new Map())
 
-  const fetchData = useCallback(async () => {
-    setLoading(true)
+  // `silent` skips the loading toggle so background polls don't blank the
+  // list or flip the Refresh button to "Refreshing…" every 15s — operators
+  // complained the constant flicker was irritating. First-load + the manual
+  // Refresh click still set loading; the new-arrival pulse + the freshness
+  // timestamp signal that data is moving.
+  const fetchData = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true)
     const res  = await authedFetch('/api/consignments?action=branch_overview')
     const json = await res.json()
     const next = json.data || []
@@ -125,7 +130,7 @@ export default function ConsignmentOverview() {
     }
     setData(next)
     setLastRefresh(new Date())
-    setLoading(false)
+    if (!silent) setLoading(false)
   }, [])
 
   // Mount: render Supabase data immediately (don't block on sync). In
@@ -135,11 +140,11 @@ export default function ConsignmentOverview() {
   // overlapping calls). Drops the previous 3-min interval where ops sat on
   // stale stock while new approvals piled up in CRM.
   useEffect(() => {
-    fetchData()
-    triggerSync({ minIntervalMs: 0 }).then(res => { if (res) fetchData() })
+    fetchData()                                                              // first paint — spinner is fine
+    triggerSync({ minIntervalMs: 0 }).then(res => { if (res) fetchData(true) })  // silent: data already on screen
     const interval = setInterval(() => {
       triggerSync()
-      fetchData()
+      fetchData(true)                                                        // silent: background poll
     }, 15 * 1000)
     return () => clearInterval(interval)
   }, [fetchData])
@@ -670,7 +675,7 @@ export default function ConsignmentOverview() {
       {/* ── Grouped view ── default. Folds 73 branches into one card per region. */}
       {canSee('element.consignment-overview.table') && viewMode === 'grouped' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-          {loading ? (
+          {loading && data.length === 0 ? (
             <div style={{ ...card, padding: '80px', display: 'flex', justifyContent: 'center' }}><GoldSpinner size={32} /></div>
           ) : groupedByRegion.length === 0 ? (
             <div style={{ ...card, padding: '80px', textAlign: 'center', color: t.text4, fontSize: '13px' }}>
@@ -900,7 +905,7 @@ export default function ConsignmentOverview() {
       {/* ── Flat table view (legacy / power-user) ── */}
       {canSee('element.consignment-overview.table') && viewMode === 'flat' && (
         <div style={{ ...card, overflow: 'hidden' }}>
-          {loading ? (
+          {loading && data.length === 0 ? (
             <div style={{ padding: '80px', display: 'flex', justifyContent: 'center' }}><GoldSpinner size={32} /></div>
           ) : filtered.length === 0 ? (
             <div style={{ padding: '80px', textAlign: 'center', color: t.text4, fontSize: '13px' }}>
