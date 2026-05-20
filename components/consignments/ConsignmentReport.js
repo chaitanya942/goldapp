@@ -972,38 +972,46 @@ export default function ConsignmentReport() {
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredCaseRows.map((r, i) => (
-                    <tr key={r.id || i} className="cnsrpt-row"
-                      style={{ borderBottom: `1px solid ${t.border}25` }}>
-                      <td style={{ padding: tdPad, color: t.gold, fontFamily: 'monospace', fontWeight: 600, whiteSpace: 'nowrap' }}>{r.application_id || '—'}</td>
-                      <td style={{ padding: tdPad, color: t.text2, whiteSpace: 'nowrap' }}>{r.purchase_date ? fmtDate(r.purchase_date) : '—'}</td>
-                      <td style={{ padding: tdPad, color: t.text1 }}>{r.customer_name || '—'}</td>
-                      <td style={{ padding: tdPad, color: t.text2, whiteSpace: 'nowrap' }}>{r.branch_name || '—'}</td>
-                      <td style={{ padding: tdPad, color: t.text2, fontFamily: 'monospace', textAlign: 'right' }}>{r.gross_weight != null ? Number(r.gross_weight).toFixed(3) : '—'}</td>
-                      <td style={{ padding: tdPad, color: t.text3, fontFamily: 'monospace', textAlign: 'right' }}>{r.stone_weight != null ? Number(r.stone_weight).toFixed(3) : '—'}</td>
-                      <td style={{ padding: tdPad, color: t.text3, fontFamily: 'monospace', textAlign: 'right' }}>{r.wastage != null ? Number(r.wastage).toFixed(3) : '—'}</td>
-                      <td style={{ padding: tdPad, color: t.gold, fontFamily: 'monospace', fontWeight: 600, textAlign: 'right' }}>{r.net_weight != null ? Number(r.net_weight).toFixed(3) : '—'}</td>
-                      <td style={{ padding: tdPad, color: t.text2, fontFamily: 'monospace', textAlign: 'right' }}>{r.total_amount != null ? `₹${Math.round(r.total_amount).toLocaleString('en-IN')}` : '—'}</td>
-                      <td style={{ padding: tdPad, color: t.text3, fontFamily: 'monospace', textAlign: 'right' }}>{r.service_charge_pct != null ? `${Number(r.service_charge_pct).toFixed(2)}%` : '—'}</td>
-                      <td style={{ padding: tdPad, color: t.text3, fontFamily: 'monospace', textAlign: 'right' }}>{r.service_charge_amount_crm != null ? `₹${Math.round(r.service_charge_amount_crm).toLocaleString('en-IN')}` : '—'}</td>
-                      <td style={{ padding: tdPad, color: t.green, fontFamily: 'monospace', fontWeight: 600, textAlign: 'right' }}>{r.final_amount_crm != null ? `₹${Math.round(r.final_amount_crm).toLocaleString('en-IN')}` : '—'}</td>
-                      <td style={{ padding: tdPad }}>
-                        {r.transaction_type ? (
-                          <span style={{
-                            fontSize: '10px', padding: '2px 8px', borderRadius: '4px',
-                            background: r.transaction_type === 'TAKEOVER' ? `${t.purple}18` : `${t.gold}18`,
-                            color:      r.transaction_type === 'TAKEOVER' ? t.purple : t.gold,
-                            fontWeight: 700, letterSpacing: '.02em', whiteSpace: 'nowrap',
-                          }}>{r.transaction_type}</span>
-                        ) : <span style={{ color: t.text4 }}>—</span>}
-                      </td>
-                      <td style={{ padding: tdPad, color: t.text2, fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
-                        {r.dispatched_at
-                          ? new Date(r.dispatched_at).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short' })
-                          : '—'}
-                      </td>
-                    </tr>
-                  ))}
+                  {filteredCaseRows.map((r, i) => {
+                    // Shared baseline so every body cell has EXACTLY the same
+                    // padding/alignment as the header. We dropped the
+                    // .cnsrpt-row class here — its `position: relative` on a
+                    // <tr> was non-standard and Chrome was inflating the row
+                    // box, making cells visually shift relative to the header.
+                    const tdL = { padding: tdPad, verticalAlign: 'middle', textAlign: 'left' }
+                    const tdR = { padding: tdPad, verticalAlign: 'middle', textAlign: 'right', fontFamily: 'monospace' }
+                    return (
+                      <tr key={r.id || i} style={{ borderBottom: `1px solid ${t.border}25` }}>
+                        <td style={{ ...tdL, color: t.gold, fontFamily: 'monospace', fontWeight: 600, whiteSpace: 'nowrap' }}>{r.application_id || '—'}</td>
+                        <td style={{ ...tdL, color: t.text2, whiteSpace: 'nowrap' }}>{r.purchase_date ? fmtDate(r.purchase_date) : '—'}</td>
+                        <td style={{ ...tdL, color: t.text1 }}>{r.customer_name || '—'}</td>
+                        <td style={{ ...tdL, color: t.text2, whiteSpace: 'nowrap' }}>{r.branch_name || '—'}</td>
+                        <td style={{ ...tdR, color: t.text2 }}>{r.gross_weight != null ? Number(r.gross_weight).toFixed(3) : '—'}</td>
+                        <td style={{ ...tdR, color: t.text3 }}>{r.stone_weight != null ? Number(r.stone_weight).toFixed(3) : '—'}</td>
+                        <td style={{ ...tdR, color: t.text3 }}>{r.wastage != null ? Number(r.wastage).toFixed(3) : '—'}</td>
+                        <td style={{ ...tdR, color: t.gold, fontWeight: 600 }}>{r.net_weight != null ? Number(r.net_weight).toFixed(3) : '—'}</td>
+                        <td style={{ ...tdR, color: t.text2 }}>{r.total_amount != null ? `₹${Math.round(r.total_amount).toLocaleString('en-IN')}` : '—'}</td>
+                        <td style={{ ...tdR, color: t.text3 }}>{r.service_charge_pct != null ? `${Number(r.service_charge_pct).toFixed(2)}%` : '—'}</td>
+                        <td style={{ ...tdR, color: t.text3 }}>{r.service_charge_amount_crm != null ? `₹${Math.round(r.service_charge_amount_crm).toLocaleString('en-IN')}` : '—'}</td>
+                        <td style={{ ...tdR, color: t.green, fontWeight: 600 }}>{r.final_amount_crm != null ? `₹${Math.round(r.final_amount_crm).toLocaleString('en-IN')}` : '—'}</td>
+                        <td style={tdL}>
+                          {r.transaction_type ? (
+                            <span style={{
+                              fontSize: '10px', padding: '2px 8px', borderRadius: '4px',
+                              background: r.transaction_type === 'TAKEOVER' ? `${t.purple}18` : `${t.gold}18`,
+                              color:      r.transaction_type === 'TAKEOVER' ? t.purple : t.gold,
+                              fontWeight: 700, letterSpacing: '.02em', whiteSpace: 'nowrap',
+                            }}>{r.transaction_type}</span>
+                          ) : <span style={{ color: t.text4 }}>—</span>}
+                        </td>
+                        <td style={{ ...tdL, color: t.text2, fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
+                          {r.dispatched_at
+                            ? new Date(r.dispatched_at).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short' })
+                            : '—'}
+                        </td>
+                      </tr>
+                    )
+                  })}
                 </tbody>
               </table>
             </div>
