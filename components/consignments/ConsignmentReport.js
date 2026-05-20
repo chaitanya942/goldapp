@@ -77,11 +77,17 @@ export default function ConsignmentReport() {
   const [lastRefresh,  setLastRefresh]  = useState(null)
   const [tick,         setTick]         = useState(0)
   const [toast,        setToast]        = useState(null)
-  // 'flat' (dense sortable table) vs 'grouped' (regions collapsible). Choice
-  // persisted per device so it survives refreshes.
+  // 'branch' (per-branch rollup of in-transit stock, the original view) vs
+  // 'case' (bill-level rows from purchases.stock_status='in_consignment',
+  // filterable by when each bill went into transit). Choice is persisted per
+  // device. Old 'grouped'/'flat' values (from the previous flat-only vs
+  // collapsible-regions toggle) migrate to 'branch' — the branch-wise table
+  // is flat-only now.
   const [viewMode, setViewMode] = useState(() => {
-    if (typeof window === 'undefined') return 'flat'
-    return window.localStorage.getItem('cnsrpt.viewMode') || 'flat'
+    if (typeof window === 'undefined') return 'branch'
+    const v = window.localStorage.getItem('cnsrpt.viewMode')
+    if (v === 'case') return 'case'
+    return 'branch'
   })
   useEffect(() => {
     if (typeof window !== 'undefined') window.localStorage.setItem('cnsrpt.viewMode', viewMode)
@@ -92,6 +98,20 @@ export default function ConsignmentReport() {
   // without having to scan every row.
   const [recentlyChanged, setRecentlyChanged] = useState(() => new Set())
   const prevTodayRef = useRef(new Map())
+
+  // Case-wise view — bill-level rows from purchases (stock_status='in_consignment').
+  // Loaded lazily the first time the user switches to 'case' mode so the
+  // branch-wise rollup doesn't pay for 1000s of unused rows.
+  const [caseData,       setCaseData]       = useState([])
+  const [caseLoading,    setCaseLoading]    = useState(false)
+  const [caseLoaded,     setCaseLoaded]     = useState(false)
+  // "Consignment since" date filter — applied client-side to purchases.dispatched_at
+  // (the moment a bill transitioned at_branch → in_consignment). Default: all.
+  const [caseSinceQuick, setCaseSinceQuick] = useState('all')
+  const [caseSinceFrom,  setCaseSinceFrom]  = useState('')
+  const [caseSinceTo,    setCaseSinceTo]    = useState('')
+  const [caseSortKey,    setCaseSortKey]    = useState('dispatched_at')
+  const [caseSortDir,    setCaseSortDir]    = useState(-1)
 
   const fetchData = useCallback(async () => {
     setLoading(true)
@@ -133,6 +153,27 @@ export default function ConsignmentReport() {
     const interval = setInterval(fetchData, 3 * 60 * 1000)
     return () => clearInterval(interval)
   }, [fetchData])
+
+  // Bill-level fetch — populates the case-wise view. Same endpoint Consignment
+  // Data uses; we ask for it on the first switch to 'case' and refresh from
+  // the Refresh button thereafter.
+  const fetchCaseData = useCallback(async () => {
+    setCaseLoading(true)
+    try {
+      const res  = await authedFetch('/api/consignments?action=in_transit_stock')
+      const json = await res.json()
+      setCaseData(json.data || [])
+      setCaseLoaded(true)
+      setLastRefresh(new Date())
+    } catch (e) {
+      setToast({ msg: e.message || 'Load failed', type: 'error' })
+    }
+    setCaseLoading(false)
+  }, [])
+
+  useEffect(() => {
+    if (viewMode === 'case' && !caseLoaded) fetchCaseData()
+  }, [viewMode, caseLoaded, fetchCaseData])
 
   // Live "X min ago" clock
   useEffect(() => {
@@ -243,6 +284,105 @@ export default function ConsignmentReport() {
       return (av - bv) * sortDir
     })
 
+  // ── Case-wise filtering + sorting ──────────────────────────────────────────
+  // Resolve the active "consignment since" window. Quick chips set a relative
+  // range; the date inputs flip to 'custom' and use caseSinceFrom/To verbatim.
+  // todayIst() returns YYYY-MM-DD in IST so this matches the branch's day.
+  const caseSinceRange = (() => {
+    if (caseSinceQuick === 'custom') return { from: caseSinceFrom || null, to: caseSinceTo || null }
+    const today = istToday()                                     // YYYY-MM-DD (IST)
+    if (caseSinceQuick === 'today')     return { from: today, to: today }
+    if (caseSinceQuick === 'yesterday') {
+      const d = new Date(today); d.setDate(d.getDate() - 1)
+      const y = d.toISOString().slice(0, 10)
+      return { from: y, to: y }
+    }
+    if (caseSinceQuick === 'last7') {
+      const d = new Date(today); d.setDate(d.getDate() - 6)
+      return { from: d.toISOString().slice(0, 10), to: today }
+    }
+    return { from: null, to: null }                              // 'all'
+  })()
+
+  // Map branch_name → region using the branch_overview rollup we already
+  // loaded for the branch-wise view. Lets the region flashcards filter
+  // case-wise rows too without a second branches lookup.
+  const branchToRegion = data.reduce((acc, b) => { acc[b.branch_name] = b.region; return acc }, {})
+
+  const filteredCaseRows = caseData
+    .filter(r => {
+      // Date filter on dispatched_at (the bill's at_branch → in_consignment
+      // transition timestamp). Compare against the IST calendar day so the
+      // 19:30 cutover for Bangalore doesn't bleed into yesterday.
+      if (caseSinceRange.from || caseSinceRange.to) {
+        if (!r.dispatched_at) return false
+        const day = new Date(r.dispatched_at).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' })
+        if (caseSinceRange.from && day < caseSinceRange.from) return false
+        if (caseSinceRange.to   && day > caseSinceRange.to)   return false
+      }
+      // Region chip filters by source branch's region.
+      if (activeRegion && branchToRegion[r.branch_name] !== activeRegion) return false
+      // Search across application_id / customer / branch.
+      if (searchQ) {
+        const hay = `${r.application_id || ''} ${r.customer_name || ''} ${r.branch_name || ''}`.toLowerCase()
+        if (!hay.includes(searchQ)) return false
+      }
+      return true
+    })
+    .slice()
+    .sort((a, b) => {
+      const dir = caseSortDir
+      const av = a?.[caseSortKey]
+      const bv = b?.[caseSortKey]
+      if (av == null && bv == null) return 0
+      if (av == null) return  1 * dir          // nulls land last desc, first asc — feels right for ops
+      if (bv == null) return -1 * dir
+      if (typeof av === 'number' && typeof bv === 'number') return (av - bv) * dir
+      return String(av).localeCompare(String(bv)) * dir
+    })
+
+  function handleCaseSort(key) {
+    if (caseSortKey === key) setCaseSortDir(d => d * -1)
+    else { setCaseSortKey(key); setCaseSortDir(-1) }
+  }
+
+  function exportCaseCsv(rows) {
+    const csvEscape = (v) => {
+      const s = v == null ? '' : String(v)
+      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
+    }
+    const cols = [
+      ['application_id',            'Application ID'],
+      ['purchase_date',             'Purchase Date'],
+      ['customer_name',             'Customer'],
+      ['branch_name',               'Branch'],
+      ['gross_weight',              'Gross Wt (g)'],
+      ['stone_weight',              'Stone (g)'],
+      ['wastage',                   'Wastage (g)'],
+      ['net_weight',                'Net Wt (g)'],
+      ['total_amount',              'Gross Amt'],
+      ['service_charge_pct',        'Svc %'],
+      ['service_charge_amount_crm', 'Svc Amt'],
+      ['final_amount_crm',          'Final Amt'],
+      ['transaction_type',          'Type'],
+      ['dispatched_at',             'Consignment Since'],
+    ]
+    const lines = [cols.map(([, l]) => csvEscape(l)).join(',')]
+    for (const r of rows) {
+      lines.push(cols.map(([k]) => {
+        if (k === 'dispatched_at') return r[k] ? new Date(r[k]).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }) : ''
+        return csvEscape(r[k])
+      }).join(','))
+    }
+    const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' })
+    const url  = URL.createObjectURL(blob)
+    const a    = document.createElement('a')
+    a.href     = url
+    a.download = `consignment-bills_${istToday()}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
   // ── Group filtered rows by region for the collapsible card view.
   const groupedByRegion = regions
     .map(r => ({ region: r, branches: filtered.filter(b => b.region === r) }))
@@ -307,13 +447,13 @@ export default function ConsignmentReport() {
           {/* View-mode segmented toggle */}
           <div style={{ display: 'inline-flex', background: t.card2, border: `1px solid ${t.border}`, borderRadius: '8px', padding: '2px' }}>
             {[
-              { key: 'grouped', label: 'Grouped', icon: '⬡' },
-              { key: 'flat',    label: 'Flat',    icon: '☰' },
+              { key: 'branch', label: 'Branch-wise', icon: '⬡' },
+              { key: 'case',   label: 'Case-wise',   icon: '☰' },
             ].map(v => {
               const active = viewMode === v.key
               return (
                 <button key={v.key} onClick={() => setViewMode(v.key)}
-                  title={v.key === 'grouped' ? 'Group branches by region (collapsible)' : 'Flat table view (sortable)'}
+                  title={v.key === 'branch' ? 'Per-branch rollup of all bills currently in transit' : 'Bill-level rows, filterable by when each bill went into transit'}
                   style={{
                     background: active ? `${t.gold}20` : 'transparent',
                     color: active ? t.gold : t.text3,
@@ -333,10 +473,12 @@ export default function ConsignmentReport() {
               Clear
             </button>
           )}
-          <button onClick={fetchData} disabled={loading}
-            style={{ background: loading ? t.card2 : `${t.gold}15`, border: `1px solid ${loading ? t.border : t.gold}40`, borderRadius: '8px', padding: '7px 16px', fontSize: '12px', color: loading ? t.text4 : t.gold, cursor: loading ? 'default' : 'pointer', fontWeight: 600, transition: 'all .15s', display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <span style={{ display: 'inline-block', animation: loading ? 'spin 1s linear infinite' : 'none', fontSize: '13px' }}>⟳</span>
-            {loading ? 'Refreshing…' : 'Refresh'}
+          <button
+            onClick={() => (viewMode === 'case' ? fetchCaseData() : fetchData())}
+            disabled={viewMode === 'case' ? caseLoading : loading}
+            style={{ background: (viewMode === 'case' ? caseLoading : loading) ? t.card2 : `${t.gold}15`, border: `1px solid ${(viewMode === 'case' ? caseLoading : loading) ? t.border : t.gold}40`, borderRadius: '8px', padding: '7px 16px', fontSize: '12px', color: (viewMode === 'case' ? caseLoading : loading) ? t.text4 : t.gold, cursor: (viewMode === 'case' ? caseLoading : loading) ? 'default' : 'pointer', fontWeight: 600, transition: 'all .15s', display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <span style={{ display: 'inline-block', animation: (viewMode === 'case' ? caseLoading : loading) ? 'spin 1s linear infinite' : 'none', fontSize: '13px' }}>⟳</span>
+            {(viewMode === 'case' ? caseLoading : loading) ? 'Refreshing…' : 'Refresh'}
           </button>
         </div>
       </div>
@@ -502,260 +644,104 @@ export default function ConsignmentReport() {
             style={{ width: '100%', background: t.card2, border: `1px solid ${t.border2}`, borderRadius: '8px', padding: '8px 12px 8px 30px', fontSize: '12px', color: t.text1, outline: 'none', boxSizing: 'border-box' }} />
         </div>
 
-        {/* Quick filter chips — operations questions, not data dimensions */}
-        <div style={{ display: 'flex', gap: '5px', flexWrap: 'wrap' }}>
-          {[
-            { key: 'all',          label: 'All',           color: t.text2  },
-            { key: 'overdue',      label: 'Overdue >7d',   color: t.red    },
-            { key: 'watch',        label: 'Watch 4-7d',    color: t.orange },
-            { key: 'today_active', label: 'Active today',  color: t.blue   },
-          ].map(q => {
-            const active = quickFilter === q.key
-            return (
-              <button key={q.key}
-                onClick={() => setQuickFilter(q.key)}
-                style={{
-                  padding: '6px 12px', borderRadius: '6px',
-                  background: active ? `${q.color}18` : 'transparent',
-                  border: `1px solid ${active ? `${q.color}80` : t.border2}`,
-                  color: active ? q.color : t.text3,
-                  fontSize: '11px', fontWeight: active ? 700 : 500, letterSpacing: '.02em',
-                  cursor: 'pointer', whiteSpace: 'nowrap',
-                  transition: 'all .12s',
-                }}>
-                {q.label}
-              </button>
-            )
-          })}
-        </div>
+        {/* Branch mode: operations age-based quick filters */}
+        {viewMode === 'branch' && (
+          <div style={{ display: 'flex', gap: '5px', flexWrap: 'wrap' }}>
+            {[
+              { key: 'all',          label: 'All',           color: t.text2  },
+              { key: 'overdue',      label: 'Overdue >7d',   color: t.red    },
+              { key: 'watch',        label: 'Watch 4-7d',    color: t.orange },
+              { key: 'today_active', label: 'Active today',  color: t.blue   },
+            ].map(q => {
+              const active = quickFilter === q.key
+              return (
+                <button key={q.key}
+                  onClick={() => setQuickFilter(q.key)}
+                  style={{
+                    padding: '6px 12px', borderRadius: '6px',
+                    background: active ? `${q.color}18` : 'transparent',
+                    border: `1px solid ${active ? `${q.color}80` : t.border2}`,
+                    color: active ? q.color : t.text3,
+                    fontSize: '11px', fontWeight: active ? 700 : 500, letterSpacing: '.02em',
+                    cursor: 'pointer', whiteSpace: 'nowrap',
+                    transition: 'all .12s',
+                  }}>
+                  {q.label}
+                </button>
+              )
+            })}
+          </div>
+        )}
+
+        {/* Case mode: "consignment since" date filter — chips + custom range */}
+        {viewMode === 'case' && (
+          <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
+            <span style={{ fontSize: '10px', color: t.text4, letterSpacing: '.08em', textTransform: 'uppercase', fontWeight: 600 }}>Consignment since</span>
+            {[
+              { key: 'all',       label: 'All' },
+              { key: 'today',     label: 'Today' },
+              { key: 'yesterday', label: 'Yesterday' },
+              { key: 'last7',     label: 'Last 7d' },
+            ].map(q => {
+              const active = caseSinceQuick === q.key
+              return (
+                <button key={q.key}
+                  onClick={() => { setCaseSinceQuick(q.key); setCaseSinceFrom(''); setCaseSinceTo('') }}
+                  style={{
+                    padding: '5px 11px', borderRadius: '6px',
+                    background: active ? `${t.blue}18` : 'transparent',
+                    border: `1px solid ${active ? `${t.blue}80` : t.border2}`,
+                    color: active ? t.blue : t.text3,
+                    fontSize: '11px', fontWeight: active ? 700 : 500,
+                    cursor: 'pointer', whiteSpace: 'nowrap',
+                  }}>
+                  {q.label}
+                </button>
+              )
+            })}
+            <input type="date" value={caseSinceFrom}
+              onChange={e => { setCaseSinceFrom(e.target.value); setCaseSinceQuick('custom') }}
+              style={{ background: t.card2, border: `1px solid ${t.border2}`, borderRadius: '6px', padding: '5px 7px', fontSize: '11px', color: t.text1, fontFamily: 'monospace', outline: 'none' }} />
+            <span style={{ color: t.text4 }}>→</span>
+            <input type="date" value={caseSinceTo}
+              onChange={e => { setCaseSinceTo(e.target.value); setCaseSinceQuick('custom') }}
+              style={{ background: t.card2, border: `1px solid ${t.border2}`, borderRadius: '6px', padding: '5px 7px', fontSize: '11px', color: t.text1, fontFamily: 'monospace', outline: 'none' }} />
+          </div>
+        )}
 
         <div style={{ marginLeft: isMobile ? 0 : 'auto', display: 'flex', gap: '8px', alignItems: 'center' }}>
           <span style={{ fontSize: '11px', color: t.text4 }}>
-            {filtered.length} of {data.length}{isMobile ? ' · swipe' : ''}
+            {viewMode === 'case'
+              ? `${filteredCaseRows.length} of ${caseData.length} bills`
+              : `${filtered.length} of ${data.length}${isMobile ? ' · swipe' : ''}`}
           </span>
-          <button onClick={() => exportCsv(filtered)} title="Download the current view as CSV"
-            style={{
-              padding: '6px 12px', borderRadius: '6px',
-              background: 'transparent', border: `1px solid ${t.border2}`,
-              color: t.text2, fontSize: '11px', fontWeight: 600,
-              cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '5px',
-            }}>
-            ↓ CSV
-          </button>
+          {viewMode === 'branch' && (
+            <button onClick={() => exportCsv(filtered)} title="Download the current view as CSV"
+              style={{
+                padding: '6px 12px', borderRadius: '6px',
+                background: 'transparent', border: `1px solid ${t.border2}`,
+                color: t.text2, fontSize: '11px', fontWeight: 600,
+                cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '5px',
+              }}>
+              ↓ CSV
+            </button>
+          )}
+          {viewMode === 'case' && (
+            <button onClick={() => exportCaseCsv(filteredCaseRows)} title="Download the current bill list as CSV"
+              style={{
+                padding: '6px 12px', borderRadius: '6px',
+                background: 'transparent', border: `1px solid ${t.border2}`,
+                color: t.text2, fontSize: '11px', fontWeight: 600,
+                cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '5px',
+              }}>
+              ↓ CSV
+            </button>
+          )}
         </div>
       </div>
 
-      {/* ── Grouped view ── default. Folds branches into one card per region. */}
-      {viewMode === 'grouped' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-          {loading ? (
-            <div style={{ ...card, padding: '80px', display: 'flex', justifyContent: 'center' }}><GoldSpinner size={32} /></div>
-          ) : groupedByRegion.length === 0 ? (
-            <div style={{ ...card, padding: '80px', textAlign: 'center', color: t.text4, fontSize: '13px' }}>
-              {search || activeRegion ? 'No branches match your filter' : 'No bills currently in transit'}
-            </div>
-          ) : groupedByRegion.map(g => {
-            const rColor    = REGION_COLORS[g.region] || t.text3
-            const collapsed = collapsedRegions.has(g.region)
-            const stats     = regionStats[g.region] || {}
-            const totalsNow = g.branches.reduce((acc, b) => {
-              acc.today_bills  += b.today_bills  || 0
-              acc.today_net_wt += b.today_net_wt || 0
-              acc.older_bills  += b.older_bills  || 0
-              acc.older_net_wt += b.older_net_wt || 0
-              acc.total_value  += (b.today_gross_value || 0) + (b.older_gross_value || 0)
-              return acc
-            }, { today_bills: 0, today_net_wt: 0, older_bills: 0, older_net_wt: 0, total_value: 0 })
-            const totalNetWt   = totalsNow.today_net_wt + totalsNow.older_net_wt
-            const w            = fmtWtCard(totalNetWt)
-            const branchesShown = g.branches.length
-            const hasFreshBills = g.branches.some(b => recentlyChanged.has(b.branch_name))
-
-            return (
-              <div key={g.region} style={{
-                ...card,
-                overflow: 'hidden',
-                borderTop: `3px solid ${rColor}`,
-                boxShadow: hasFreshBills ? `0 0 0 1px ${rColor}40, 0 6px 20px ${rColor}25` : '0 1px 3px rgba(0,0,0,.2)',
-                transition: 'box-shadow .4s, transform .15s',
-              }}>
-                {/* Region header — clicking toggles collapse */}
-                <div onClick={() => toggleRegionCollapsed(g.region)}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: '12px',
-                    padding: '14px 18px', cursor: 'pointer',
-                    background: `linear-gradient(90deg, ${rColor}10, transparent 60%)`,
-                    borderBottom: collapsed ? 'none' : `1px solid ${t.border}`,
-                  }}>
-                  <span style={{
-                    width: '20px', height: '20px', borderRadius: '50%',
-                    background: `${rColor}25`, color: rColor,
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    fontSize: '11px', fontWeight: 700,
-                    transform: collapsed ? 'rotate(-90deg)' : 'rotate(0deg)',
-                    transition: 'transform .2s',
-                  }}>▾</span>
-                  <span style={{ fontSize: '18px' }}>{REGION_ICONS[g.region] || '📍'}</span>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', flexWrap: 'wrap' }}>
-                      <div style={{ fontSize: '15px', fontWeight: 600, color: t.text1 }}>{g.region}</div>
-                      <div style={{ fontSize: '11px', color: t.text4 }}>
-                        <strong style={{ color: t.text2 }}>{branchesShown}</strong>
-                        {stats.branches > branchesShown && <> / {stats.branches}</>} branch{branchesShown !== 1 ? 'es' : ''}
-                        {totalsNow.today_bills > 0 && (
-                          <> · <span style={{ color: t.green, fontWeight: 600 }}>+{totalsNow.today_bills} today</span></>
-                        )}
-                        {hasFreshBills && (
-                          <> · <span style={{ color: rColor, fontWeight: 700, animation: 'pulse 1.4s infinite' }}>● new arrival</span></>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                  {/* Roll-up stats on the right */}
-                  <div style={{ display: 'flex', gap: '18px', alignItems: 'center', flexShrink: 0 }}>
-                    <div style={{ textAlign: 'right' }}>
-                      <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.08em', textTransform: 'uppercase' }}>Net Wt</div>
-                      <div style={{ fontSize: '16px', fontWeight: 600, color: rColor, fontFamily: 'monospace', lineHeight: 1.2 }}>
-                        {w.value}<span style={{ fontSize: '10px', marginLeft: '2px' }}>{w.unit}</span>
-                      </div>
-                    </div>
-                    <div style={{ textAlign: 'right' }}>
-                      <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.08em', textTransform: 'uppercase' }}>Bills</div>
-                      <div style={{ fontSize: '16px', fontWeight: 600, color: t.text1, fontFamily: 'monospace', lineHeight: 1.2 }}>
-                        {totalsNow.today_bills + totalsNow.older_bills || '—'}
-                      </div>
-                    </div>
-                    {!isMobile && totalsNow.total_value > 0 && (
-                      <div style={{ textAlign: 'right' }}>
-                        <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.08em', textTransform: 'uppercase' }}>Value</div>
-                        <div style={{ fontSize: '14px', fontWeight: 600, color: t.gold, fontFamily: 'monospace', lineHeight: 1.2 }}>
-                          {fmtINR(totalsNow.total_value)}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {/* Branches inside this region */}
-                {!collapsed && (
-                  <div>
-                    {g.branches.map((b, i) => {
-                      const hasToday    = (b.today_bills || 0) > 0
-                      const hasPending  = (b.older_bills || 0) > 0
-                      const ageDays     = b.oldest_age_days || 0
-                      const urgentTier  = ageDays > 7 ? 'overdue' : ageDays > 3 ? 'watch' : null
-                      const urgentColor = urgentTier === 'overdue' ? t.red : urgentTier === 'watch' ? t.orange : null
-                      const isFresh     = recentlyChanged.has(b.branch_name)
-                      const totalNet    = (b.today_net_wt || 0) + (b.older_net_wt || 0)
-
-                      return (
-                        <div key={b.branch_name}
-                          className={`cnsrpt-row${isFresh ? ' cnsrpt-row-fresh' : ''}`}
-                          style={{
-                            display: 'grid',
-                            gridTemplateColumns: isMobile
-                              ? '1fr auto'
-                              : 'minmax(180px,1.6fr) repeat(4, minmax(72px, .9fr))',
-                            gap: isMobile ? '6px' : '14px',
-                            alignItems: 'center',
-                            padding: '12px 14px 12px 18px',
-                            borderBottom: i < g.branches.length - 1 ? `1px solid ${t.border}40` : 'none',
-                            borderLeft: `3px solid ${urgentColor || rColor + '60'}`,
-                            position: 'relative',
-                            background: isFresh ? `${rColor}10` : 'transparent',
-                            transition: 'background .25s',
-                          }}>
-                          {/* Branch name + age tier ribbon */}
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
-                            <div style={{ minWidth: 0 }}>
-                              <div style={{ fontSize: '13px', fontWeight: 600, color: t.text1, display: 'flex', alignItems: 'center', gap: '6px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                {b.branch_name}
-                                {isFresh && (
-                                  <span title="New bill arrived since last refresh"
-                                    style={{ display: 'inline-block', width: '7px', height: '7px', borderRadius: '50%', background: rColor, animation: 'pulse 1.4s infinite', flexShrink: 0 }} />
-                                )}
-                                {urgentTier && (
-                                  <span style={{ fontSize: '9px', color: urgentColor, background: `${urgentColor}18`, borderRadius: '4px', padding: '1px 5px', fontWeight: 700, letterSpacing: '.04em', textTransform: 'uppercase', flexShrink: 0 }}>
-                                    {urgentTier === 'overdue' ? `${ageDays}d` : 'watch'}
-                                  </span>
-                                )}
-                              </div>
-                              <div style={{ fontSize: '10px', color: t.text4, marginTop: '2px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                                {b.oldest_date && hasPending && (
-                                  <span title="Oldest in-flight bill date">oldest {fmtDate(b.oldest_date)}</span>
-                                )}
-                              </div>
-                            </div>
-                          </div>
-
-                          {/* Mobile: collapse the rest into one summary line */}
-                          {isMobile ? (
-                            <div style={{ textAlign: 'right', fontFamily: 'monospace' }}>
-                              <div style={{ fontSize: '13px', color: t.gold, fontWeight: 600 }}>{fmt(totalNet, 2)}<span style={{ fontSize: '10px', marginLeft: '2px' }}>g</span></div>
-                              <div style={{ fontSize: '10px', color: t.text3, marginTop: '2px' }}>
-                                {hasToday && <span style={{ color: t.blue, fontWeight: 600 }}>+{b.today_bills} today</span>}
-                                {hasToday && hasPending && <span style={{ color: t.text4 }}> · </span>}
-                                {hasPending && <span style={{ color: t.orange }}>{b.older_bills} in flight</span>}
-                                {!hasToday && !hasPending && <span style={{ color: t.text4 }}>—</span>}
-                              </div>
-                            </div>
-                          ) : (
-                            <>
-                              {/* Today bills */}
-                              <div style={{ textAlign: 'right' }}>
-                                {hasToday ? (
-                                  <span style={{ fontSize: '13px', color: t.blue, fontFamily: 'monospace', fontWeight: 700, background: `${t.blue}15`, padding: '3px 9px', borderRadius: '5px' }}>
-                                    +{b.today_bills}
-                                  </span>
-                                ) : (
-                                  <span style={{ fontSize: '11px', color: t.text4 }}>—</span>
-                                )}
-                                <div style={{ fontSize: '9px', color: t.text4, marginTop: '3px', letterSpacing: '.06em', textTransform: 'uppercase' }}>today</div>
-                              </div>
-                              {/* In-flight bills */}
-                              <div style={{ textAlign: 'right' }}>
-                                {hasPending ? (
-                                  <span style={{ fontSize: '13px', color: t.orange, fontFamily: 'monospace', fontWeight: 700, background: `${t.orange}15`, padding: '3px 9px', borderRadius: '5px' }}>
-                                    {b.older_bills}
-                                  </span>
-                                ) : (
-                                  <span style={{ fontSize: '11px', color: t.text4 }}>—</span>
-                                )}
-                                <div style={{ fontSize: '9px', color: t.text4, marginTop: '3px', letterSpacing: '.06em', textTransform: 'uppercase' }}>in flight</div>
-                              </div>
-                              {/* Total net wt */}
-                              <div style={{ textAlign: 'right' }}>
-                                <span style={{ fontSize: '13px', color: t.gold, fontFamily: 'monospace', fontWeight: 600 }}>
-                                  {fmt(totalNet, 2)}<span style={{ fontSize: '10px', marginLeft: '2px' }}>g</span>
-                                </span>
-                                <div style={{ fontSize: '9px', color: t.text4, marginTop: '3px', letterSpacing: '.06em', textTransform: 'uppercase' }}>net wt</div>
-                              </div>
-                              {/* Total value */}
-                              <div style={{ textAlign: 'right' }}>
-                                {((b.today_gross_value || 0) + (b.older_gross_value || 0)) > 0 ? (
-                                  <span style={{ fontSize: '12px', color: t.text2, fontFamily: 'monospace' }}>
-                                    {fmtINR((b.today_gross_value || 0) + (b.older_gross_value || 0))}
-                                  </span>
-                                ) : (
-                                  <span style={{ fontSize: '11px', color: t.text4 }}>—</span>
-                                )}
-                                <div style={{ fontSize: '9px', color: t.text4, marginTop: '3px', letterSpacing: '.06em', textTransform: 'uppercase' }}>value</div>
-                              </div>
-                            </>
-                          )}
-                        </div>
-                      )
-                    })}
-                  </div>
-                )}
-              </div>
-            )
-          })}
-        </div>
-      )}
-
-      {/* ── Flat table view (legacy / power-user) ── */}
-      {viewMode === 'flat' && (
+      {/* ── Branch-wise table — per-branch rollup of bills in flight ── */}
+      {viewMode === 'branch' && (
         <div style={{ ...card, overflow: 'hidden' }}>
           {loading ? (
             <div style={{ padding: '80px', display: 'flex', justifyContent: 'center' }}><GoldSpinner size={32} /></div>
@@ -953,9 +939,98 @@ export default function ConsignmentReport() {
         </div>
       )}
 
+      {/* ── Case-wise table — bill-level rows for in-transit stock. Same column
+          set the Purchase Data module exposes, filtered by when each bill went
+          into transit (purchases.dispatched_at). Sortable; CSV-exportable. ── */}
+      {viewMode === 'case' && (
+        <div style={{ ...card, overflow: 'hidden' }}>
+          {caseLoading && !caseLoaded ? (
+            <div style={{ padding: '80px', display: 'flex', justifyContent: 'center' }}><GoldSpinner size={32} /></div>
+          ) : filteredCaseRows.length === 0 ? (
+            <div style={{ padding: '80px', textAlign: 'center', color: t.text4, fontSize: '13px' }}>
+              {caseData.length === 0 ? 'No bills currently in transit' : 'No bills match your filter'}
+            </div>
+          ) : (
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px' }}>
+                <thead>
+                  <tr>
+                    {[
+                      { k: 'application_id',            l: 'App ID',            a: 'left'  },
+                      { k: 'purchase_date',             l: 'Purchase',          a: 'left'  },
+                      { k: 'customer_name',             l: 'Customer',          a: 'left'  },
+                      { k: 'branch_name',               l: 'Branch',            a: 'left'  },
+                      { k: 'gross_weight',              l: 'Gross (g)',         a: 'right' },
+                      { k: 'stone_weight',              l: 'Stone (g)',         a: 'right' },
+                      { k: 'wastage',                   l: 'Wastage (g)',       a: 'right' },
+                      { k: 'net_weight',                l: 'Net (g)',           a: 'right' },
+                      { k: 'total_amount',              l: 'Gross Amt',         a: 'right' },
+                      { k: 'service_charge_pct',        l: 'Svc %',             a: 'right' },
+                      { k: 'service_charge_amount_crm', l: 'Svc Amt',           a: 'right' },
+                      { k: 'final_amount_crm',          l: 'Final Amt',         a: 'right' },
+                      { k: 'transaction_type',          l: 'Type',              a: 'left'  },
+                      { k: 'dispatched_at',             l: 'Consignment Since', a: 'left'  },
+                    ].map(col => (
+                      <th key={col.k}
+                        onClick={() => handleCaseSort(col.k)}
+                        style={{
+                          ...thBase, cursor: 'pointer',
+                          textAlign: col.a,
+                          color: caseSortKey === col.k ? t.gold : t.text4,
+                        }}>
+                        {col.l}
+                        <span style={{ color: caseSortKey === col.k ? t.gold : t.text4, fontSize: '10px', marginLeft: '4px' }}>
+                          {caseSortKey === col.k ? (caseSortDir === -1 ? '↓' : '↑') : '⇅'}
+                        </span>
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredCaseRows.map((r, i) => (
+                    <tr key={r.id || i} className="cnsrpt-row"
+                      style={{ borderBottom: `1px solid ${t.border}25` }}>
+                      <td style={{ padding: tdPad, color: t.gold, fontFamily: 'monospace', fontWeight: 600, whiteSpace: 'nowrap' }}>{r.application_id || '—'}</td>
+                      <td style={{ padding: tdPad, color: t.text2, whiteSpace: 'nowrap' }}>{r.purchase_date ? fmtDate(r.purchase_date) : '—'}</td>
+                      <td style={{ padding: tdPad, color: t.text1 }}>{r.customer_name || '—'}</td>
+                      <td style={{ padding: tdPad, color: t.text2, whiteSpace: 'nowrap' }}>{r.branch_name || '—'}</td>
+                      <td style={{ padding: tdPad, color: t.text2, fontFamily: 'monospace', textAlign: 'right' }}>{r.gross_weight != null ? Number(r.gross_weight).toFixed(3) : '—'}</td>
+                      <td style={{ padding: tdPad, color: t.text3, fontFamily: 'monospace', textAlign: 'right' }}>{r.stone_weight != null ? Number(r.stone_weight).toFixed(3) : '—'}</td>
+                      <td style={{ padding: tdPad, color: t.text3, fontFamily: 'monospace', textAlign: 'right' }}>{r.wastage != null ? Number(r.wastage).toFixed(3) : '—'}</td>
+                      <td style={{ padding: tdPad, color: t.gold, fontFamily: 'monospace', fontWeight: 600, textAlign: 'right' }}>{r.net_weight != null ? Number(r.net_weight).toFixed(3) : '—'}</td>
+                      <td style={{ padding: tdPad, color: t.text2, fontFamily: 'monospace', textAlign: 'right' }}>{r.total_amount != null ? `₹${Math.round(r.total_amount).toLocaleString('en-IN')}` : '—'}</td>
+                      <td style={{ padding: tdPad, color: t.text3, fontFamily: 'monospace', textAlign: 'right' }}>{r.service_charge_pct != null ? `${Number(r.service_charge_pct).toFixed(2)}%` : '—'}</td>
+                      <td style={{ padding: tdPad, color: t.text3, fontFamily: 'monospace', textAlign: 'right' }}>{r.service_charge_amount_crm != null ? `₹${Math.round(r.service_charge_amount_crm).toLocaleString('en-IN')}` : '—'}</td>
+                      <td style={{ padding: tdPad, color: t.green, fontFamily: 'monospace', fontWeight: 600, textAlign: 'right' }}>{r.final_amount_crm != null ? `₹${Math.round(r.final_amount_crm).toLocaleString('en-IN')}` : '—'}</td>
+                      <td style={{ padding: tdPad }}>
+                        {r.transaction_type ? (
+                          <span style={{
+                            fontSize: '10px', padding: '2px 8px', borderRadius: '4px',
+                            background: r.transaction_type === 'TAKEOVER' ? `${t.purple}18` : `${t.gold}18`,
+                            color:      r.transaction_type === 'TAKEOVER' ? t.purple : t.gold,
+                            fontWeight: 700, letterSpacing: '.02em', whiteSpace: 'nowrap',
+                          }}>{r.transaction_type}</span>
+                        ) : <span style={{ color: t.text4 }}>—</span>}
+                      </td>
+                      <td style={{ padding: tdPad, color: t.text2, fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
+                        {r.dispatched_at
+                          ? new Date(r.dispatched_at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
+                          : '—'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Footer note */}
       <div style={{ fontSize: '10px', color: t.text4, textAlign: 'right' }}>
-        In-Flight = <code style={{ background: t.card2, padding: '1px 4px', borderRadius: '3px', color: t.text3 }}>stock_status = in_consignment</code> before today · Age alert: &gt;3d orange, &gt;7d red
+        {viewMode === 'case'
+          ? <>Case-wise = <code style={{ background: t.card2, padding: '1px 4px', borderRadius: '3px', color: t.text3 }}>purchases.stock_status = in_consignment</code> · &quot;Consignment since&quot; filters by <code style={{ background: t.card2, padding: '1px 4px', borderRadius: '3px', color: t.text3 }}>dispatched_at</code> (IST)</>
+          : <>In-Flight = <code style={{ background: t.card2, padding: '1px 4px', borderRadius: '3px', color: t.text3 }}>stock_status = in_consignment</code> before today · Age alert: &gt;3d orange, &gt;7d red</>}
       </div>
 
       {toast && <Toast msg={toast.msg} type={toast.type} onDone={() => setToast(null)} />}

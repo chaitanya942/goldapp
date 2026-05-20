@@ -1183,9 +1183,12 @@ export async function GET(req) {
     //    (stamped on consignment approval). We expose it so the Consignment Report can
     //    bucket / filter by bill-level transition date rather than consignment-level
     //    dates (which can drift when bills are cancelled + re-consigned later).
+    // Column list mirrors the Consignment Report case-wise table: same set of
+    // weights / charges the Purchase Data module exposes, plus dispatched_at
+    // (= "consignment since") so ops can bucket by transition date.
     let billsQ = supabase
       .from('purchases')
-      .select('id, sl_no, application_id, branch_name, current_branch, customer_name, purchase_date, gross_weight, net_weight, total_amount, dispatched_at')
+      .select('id, sl_no, application_id, branch_name, current_branch, customer_name, purchase_date, gross_weight, stone_weight, wastage, net_weight, total_amount, service_charge_pct, service_charge_amount_crm, final_amount_crm, transaction_type, dispatched_at')
       .eq('stock_status', 'in_consignment')
       .eq('is_deleted', false)
     // Filter by branch_name (origin) for in-transit so a Kerala user sees their dispatched bills
