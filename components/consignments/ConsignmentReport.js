@@ -365,12 +365,12 @@ export default function ConsignmentReport() {
       ['service_charge_amount_crm', 'Svc Amt'],
       ['final_amount_crm',          'Final Amt'],
       ['transaction_type',          'Type'],
-      ['dispatched_at',             'Consignment Since'],
+      ['dispatched_at',             'Consignment Created On'],
     ]
     const lines = [cols.map(([, l]) => csvEscape(l)).join(',')]
     for (const r of rows) {
       lines.push(cols.map(([k]) => {
-        if (k === 'dispatched_at') return r[k] ? new Date(r[k]).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }) : ''
+        if (k === 'dispatched_at') return r[k] ? new Date(r[k]).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', year: 'numeric' }) : ''
         return csvEscape(r[k])
       }).join(','))
     }
@@ -413,13 +413,54 @@ export default function ConsignmentReport() {
     return <span style={{ color: t.gold, fontSize: '10px', marginLeft: '4px' }}>{sortDir === -1 ? '↓' : '↑'}</span>
   }
 
+  // Shared table cell padding. Headers and body cells use the SAME horizontal
+  // padding so column content lines up edge-to-edge — earlier the 9px/10px
+  // vertical mismatch combined with default verticalAlign read as misaligned.
   const thBase = {
-    padding: '9px 8px', fontSize: '10px', color: t.text4,
+    padding: '10px 12px', fontSize: '10px', color: t.text4,
     letterSpacing: '.06em', textTransform: 'uppercase',
     background: t.card2, borderBottom: `1px solid ${t.border}`,
     whiteSpace: 'nowrap', fontWeight: 600, userSelect: 'none',
+    verticalAlign: 'middle',
   }
-  const tdPad = '10px 8px'
+  const tdPad = '10px 12px'
+
+  // ── Region card stats — driven by the active view ──────────────────────────
+  // Branch-wise: per-branch rollup (unchanged). Case-wise: aggregate over the
+  // currently-filtered bill rows so the "Consignment created on" date filter
+  // also drives the headline cards (otherwise the cards lie when the table is
+  // filtered to today / yesterday / a custom range).
+  const regionStatsView = viewMode === 'case'
+    ? regions.reduce((acc, r) => {
+        const rows         = filteredCaseRows.filter(row => branchToRegion[row.branch_name] === r)
+        const branchNames  = new Set(rows.map(row => row.branch_name))
+        const totalBranches = data.filter(b => b.region === r).length
+        acc[r] = {
+          branches:        totalBranches,
+          active_branches: branchNames.size,
+          total_bills:     rows.length,
+          total_net_wt:    rows.reduce((s, row) => s + Number(row.net_weight || 0), 0),
+          today_bills:     0,  // 'today' is no longer a separate axis once the date filter takes over
+        }
+        return acc
+      }, {})
+    : regionStats
+
+  const allStatsView = viewMode === 'case'
+    ? {
+        allBills:       filteredCaseRows.length,
+        allNetWt:       filteredCaseRows.reduce((s, r) => s + Number(r.net_weight || 0), 0),
+        allTodayBills:  0,
+        activeBranches: new Set(filteredCaseRows.map(r => r.branch_name)).size,
+        totalBranches:  data.length,
+      }
+    : {
+        allBills:       data.reduce((s, b) => s + (b.today_bills || 0) + (b.older_bills || 0), 0),
+        allNetWt:       data.reduce((s, b) => s + (b.today_net_wt || 0) + (b.older_net_wt || 0), 0),
+        allTodayBills:  data.reduce((s, b) => s + (b.today_bills || 0), 0),
+        activeBranches: data.filter(b => ((b.today_net_wt || 0) + (b.older_net_wt || 0)) > 0).length,
+        totalBranches:  data.length,
+      }
 
   return (
     <div style={{ padding: '18px 16px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
@@ -498,10 +539,7 @@ export default function ConsignmentReport() {
 
           {/* All Regions card — hidden for region-restricted users */}
           {!regionAccess.restricted && (() => {
-            const allBills      = data.reduce((s, b) => s + (b.today_bills || 0) + (b.older_bills || 0), 0)
-            const allNetWt      = data.reduce((s, b) => s + (b.today_net_wt || 0) + (b.older_net_wt || 0), 0)
-            const allTodayBills = data.reduce((s, b) => s + (b.today_bills || 0), 0)
-            const activeBranches = data.filter(b => ((b.today_net_wt || 0) + (b.older_net_wt || 0)) > 0).length
+            const { allBills, allNetWt, allTodayBills, activeBranches, totalBranches } = allStatsView
             const w = fmtWtCard(allNetWt)
             const isActive = !activeRegion
             return (
@@ -527,8 +565,8 @@ export default function ConsignmentReport() {
                   <span style={{ fontSize: '12px', fontWeight: 500, color: isActive ? t.gold : t.text3 }}>{w.unit}</span>
                 </div>
                 <div style={{ fontSize: '10px', color: t.text4, display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                  <span title={`${activeBranches} of ${data.length} branches currently have bills in flight`}>
-                    <strong style={{ color: t.text2 }}>{activeBranches}</strong>/{data.length} branches
+                  <span title={`${activeBranches} of ${totalBranches} branches currently have bills in flight`}>
+                    <strong style={{ color: t.text2 }}>{activeBranches}</strong>/{totalBranches} branches
                   </span>
                   <span style={{ color: t.border2 }}>·</span>
                   <span><strong style={{ color: t.text2 }}>{allBills}</strong> bills</span>
@@ -539,7 +577,7 @@ export default function ConsignmentReport() {
           })()}
 
           {regions.map(r => {
-            const stats  = regionStats[r] || {}
+            const stats  = regionStatsView[r] || {}
             const color  = REGION_COLORS[r] || t.text3
             const icon   = REGION_ICONS[r] || '📍'
             const active = activeRegion === r
@@ -579,62 +617,6 @@ export default function ConsignmentReport() {
           })}
         </div>
       )}
-
-      {/* ── KPI Strip — 8 tiles in two semantic groups (Today / In-Flight),
-           bookended by Branches and Total Gross Wt. ── */}
-      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(auto-fit, minmax(160px, 1fr))', gap: '10px' }}>
-
-        {/* Branches */}
-        <div style={{ ...card, padding: '14px 18px' }}>
-          <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: '8px' }}>Branches</div>
-          <div style={{ fontSize: '26px', fontWeight: 200, color: t.text1, fontFamily: 'monospace', lineHeight: 1 }}>{filtered.length}</div>
-          <div style={{ fontSize: '10px', color: t.text4, marginTop: '4px' }}>of {data.length} total</div>
-        </div>
-
-        {/* Today group — bills that transitioned into in_consignment today */}
-        <div style={{ ...card, padding: '14px 18px', borderLeft: `3px solid ${t.blue}`, background: `${t.blue}08` }}>
-          <div style={{ fontSize: '9px', color: t.blue, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: '8px', fontWeight: 600 }}>Today's Bills</div>
-          <div style={{ fontSize: '26px', fontWeight: 200, color: t.blue, fontFamily: 'monospace', lineHeight: 1 }}>{fmtNum(grandToday)}</div>
-          <div style={{ fontSize: '10px', color: `${t.blue}80`, marginTop: '4px' }}>dispatched today</div>
-        </div>
-
-        <div style={{ ...card, padding: '14px 18px', borderLeft: `3px solid ${t.blue}`, background: `${t.blue}08` }}>
-          <div style={{ fontSize: '9px', color: t.blue, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: '8px', fontWeight: 600 }}>Today's Net Wt</div>
-          <div style={{ fontSize: '26px', fontWeight: 200, color: t.blue, fontFamily: 'monospace', lineHeight: 1 }}>{fmt(grandTodayWt, 2)}<span style={{ fontSize: '13px', marginLeft: '3px' }}>g</span></div>
-          <div style={{ fontSize: '10px', color: `${t.blue}80`, marginTop: '4px' }}>net gold dispatched</div>
-        </div>
-
-        <div style={{ ...card, padding: '14px 18px', borderLeft: `3px solid ${t.blue}`, background: `${t.blue}08` }}>
-          <div style={{ fontSize: '9px', color: t.blue, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: '8px', fontWeight: 600 }}>Today's Value</div>
-          <div style={{ fontSize: '22px', fontWeight: 200, color: t.blue, fontFamily: 'monospace', lineHeight: 1 }}>{grandTodayVal ? fmtINR(grandTodayVal) : '—'}</div>
-          <div style={{ fontSize: '10px', color: `${t.blue}80`, marginTop: '4px' }}>dispatch value</div>
-        </div>
-
-        {/* In-flight group — bills already in_consignment from prior days */}
-        <div style={{ ...card, padding: '14px 18px', borderLeft: `3px solid ${t.orange}`, background: `${t.orange}08` }}>
-          <div style={{ fontSize: '9px', color: t.orange, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: '8px', fontWeight: 600 }}>In-Flight Bills</div>
-          <div style={{ fontSize: '26px', fontWeight: 200, color: t.orange, fontFamily: 'monospace', lineHeight: 1 }}>{fmtNum(grandOlder)}</div>
-          <div style={{ fontSize: '10px', color: `${t.orange}80`, marginTop: '4px' }}>in transit, pre-today</div>
-        </div>
-
-        <div style={{ ...card, padding: '14px 18px', borderLeft: `3px solid ${t.orange}`, background: `${t.orange}08` }}>
-          <div style={{ fontSize: '9px', color: t.orange, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: '8px', fontWeight: 600 }}>In-Flight Net Wt</div>
-          <div style={{ fontSize: '26px', fontWeight: 200, color: t.orange, fontFamily: 'monospace', lineHeight: 1 }}>{fmt(grandOlderWt, 2)}<span style={{ fontSize: '13px', marginLeft: '3px' }}>g</span></div>
-          <div style={{ fontSize: '10px', color: `${t.orange}80`, marginTop: '4px' }}>in-flight stock</div>
-        </div>
-
-        <div style={{ ...card, padding: '14px 18px', borderLeft: `3px solid ${t.orange}`, background: `${t.orange}08` }}>
-          <div style={{ fontSize: '9px', color: t.orange, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: '8px', fontWeight: 600 }}>In-Flight Value</div>
-          <div style={{ fontSize: '22px', fontWeight: 200, color: t.orange, fontFamily: 'monospace', lineHeight: 1 }}>{grandOlderVal ? fmtINR(grandOlderVal) : '—'}</div>
-          <div style={{ fontSize: '10px', color: `${t.orange}80`, marginTop: '4px' }}>in-flight capital</div>
-        </div>
-
-        <div style={{ ...card, padding: '14px 18px', borderLeft: `3px solid ${t.gold}`, background: `${t.gold}06` }}>
-          <div style={{ fontSize: '9px', color: t.gold, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: '8px', fontWeight: 600 }}>Total Gross Wt</div>
-          <div style={{ fontSize: '26px', fontWeight: 200, color: t.gold, fontFamily: 'monospace', lineHeight: 1 }}>{fmt(grandGrossWt, 2)}<span style={{ fontSize: '13px', marginLeft: '3px' }}>g</span></div>
-          <div style={{ fontSize: '10px', color: `${t.gold}80`, marginTop: '4px' }}>all in-flight gross</div>
-        </div>
-      </div>
 
       {/* ── Search + quick filters + CSV export ── */}
       <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
@@ -676,7 +658,7 @@ export default function ConsignmentReport() {
         {/* Case mode: "consignment since" date filter — chips + custom range */}
         {viewMode === 'case' && (
           <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
-            <span style={{ fontSize: '10px', color: t.text4, letterSpacing: '.08em', textTransform: 'uppercase', fontWeight: 600 }}>Consignment since</span>
+            <span style={{ fontSize: '10px', color: t.text4, letterSpacing: '.08em', textTransform: 'uppercase', fontWeight: 600 }}>Consignment created on</span>
             {[
               { key: 'all',       label: 'All' },
               { key: 'today',     label: 'Today' },
@@ -969,12 +951,15 @@ export default function ConsignmentReport() {
                       { k: 'service_charge_amount_crm', l: 'Svc Amt',           a: 'right' },
                       { k: 'final_amount_crm',          l: 'Final Amt',         a: 'right' },
                       { k: 'transaction_type',          l: 'Type',              a: 'left'  },
-                      { k: 'dispatched_at',             l: 'Consignment Since', a: 'left'  },
+                      { k: 'dispatched_at',             l: 'Consignment Created On', a: 'left'  },
                     ].map(col => (
                       <th key={col.k}
                         onClick={() => handleCaseSort(col.k)}
                         style={{
-                          ...thBase, cursor: 'pointer',
+                          ...thBase,
+                          padding: '10px 12px',                            // match td exactly so header text and cell text line up
+                          verticalAlign: 'middle',
+                          cursor: 'pointer',
                           textAlign: col.a,
                           color: caseSortKey === col.k ? t.gold : t.text4,
                         }}>
@@ -1014,7 +999,7 @@ export default function ConsignmentReport() {
                       </td>
                       <td style={{ padding: tdPad, color: t.text2, fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
                         {r.dispatched_at
-                          ? new Date(r.dispatched_at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
+                          ? new Date(r.dispatched_at).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short' })
                           : '—'}
                       </td>
                     </tr>
@@ -1029,7 +1014,7 @@ export default function ConsignmentReport() {
       {/* Footer note */}
       <div style={{ fontSize: '10px', color: t.text4, textAlign: 'right' }}>
         {viewMode === 'case'
-          ? <>Case-wise = <code style={{ background: t.card2, padding: '1px 4px', borderRadius: '3px', color: t.text3 }}>purchases.stock_status = in_consignment</code> · &quot;Consignment since&quot; filters by <code style={{ background: t.card2, padding: '1px 4px', borderRadius: '3px', color: t.text3 }}>dispatched_at</code> (IST)</>
+          ? <>Case-wise = <code style={{ background: t.card2, padding: '1px 4px', borderRadius: '3px', color: t.text3 }}>purchases.stock_status = in_consignment</code> · &quot;Consignment created on&quot; filters by <code style={{ background: t.card2, padding: '1px 4px', borderRadius: '3px', color: t.text3 }}>dispatched_at</code> (IST)</>
           : <>In-Flight = <code style={{ background: t.card2, padding: '1px 4px', borderRadius: '3px', color: t.text3 }}>stock_status = in_consignment</code> before today · Age alert: &gt;3d orange, &gt;7d red</>}
       </div>
 
