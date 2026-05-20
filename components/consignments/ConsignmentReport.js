@@ -14,6 +14,7 @@
 // the in-transit report now.
 
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import { useApp, useRegionAccess } from '../../lib/context'
 import GoldSpinner from '../ui/GoldSpinner'
 import Toast from '../ui/Toast'
@@ -112,6 +113,13 @@ export default function ConsignmentReport() {
   const [caseSinceTo,    setCaseSinceTo]    = useState('')
   const [caseSortKey,    setCaseSortKey]    = useState('dispatched_at')
   const [caseSortDir,    setCaseSortDir]    = useState(-1)
+  // Pagination — large filter results (e.g. "All" on 1000+ bills) become a
+  // long scroll; cap visible at casePageSize and let ops page through.
+  const [casePage,        setCasePage]      = useState(1)
+  const [casePageSize,    setCasePageSize]  = useState(100)
+  // Bill journey modal — opens when ops clicks an App ID; fetched lazily.
+  // { purchase_id, application_id, loading, rows, error } | null
+  const [journeyTarget,   setJourneyTarget] = useState(null)
 
   const fetchData = useCallback(async () => {
     setLoading(true)
@@ -148,15 +156,9 @@ export default function ConsignmentReport() {
     setLoading(false)
   }, [])
 
-  useEffect(() => {
-    fetchData()
-    const interval = setInterval(fetchData, 3 * 60 * 1000)
-    return () => clearInterval(interval)
-  }, [fetchData])
-
-  // Bill-level fetch — populates the case-wise view. Same endpoint Consignment
-  // Data uses; we ask for it on the first switch to 'case' and refresh from
-  // the Refresh button thereafter.
+  // Bill-level fetch — drives BOTH the case-wise table and (after grouping
+  // by branch + dispatched_at::date) the new branch-wise table, so both
+  // views share one source of truth. Refreshes every 3 min alongside fetchData.
   const fetchCaseData = useCallback(async () => {
     setCaseLoading(true)
     try {
@@ -172,8 +174,11 @@ export default function ConsignmentReport() {
   }, [])
 
   useEffect(() => {
-    if (viewMode === 'case' && !caseLoaded) fetchCaseData()
-  }, [viewMode, caseLoaded, fetchCaseData])
+    fetchData()
+    fetchCaseData()
+    const interval = setInterval(() => { fetchData(); fetchCaseData() }, 3 * 60 * 1000)
+    return () => clearInterval(interval)
+  }, [fetchData, fetchCaseData])
 
   // Live "X min ago" clock
   useEffect(() => {
@@ -188,27 +193,31 @@ export default function ConsignmentReport() {
     else { setSortKey(key); setSortDir(-1) }
   }
 
-  // CSV export of the current (filtered + sorted) view.
+  // CSV export of the current branch-wise view (one row per branch+date).
   function exportCsv(rows) {
     const csvEscape = (v) => {
       const s = v == null ? '' : String(v)
       return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
     }
     const headers = [
-      'Branch','Region','Total Net Wt (g)',
-      "Today's Bills","Today's Net Wt (g)","Today's Value (₹)",
-      'In-Flight Bills','In-Flight Net Wt (g)','In-Flight Value (₹)',
-      'Oldest Bill (days)','Oldest Bill Date','Total Gross Wt (g)',
+      'Consignment Date', 'Branch', 'Region',
+      'No of Bills', 'Gross (g)', 'Stone (g)', 'Wastage (g)', 'Net (g)',
+      'Amount', 'Service Charge', 'Expected Delivery Date',
     ]
     const lines = [headers.map(csvEscape).join(',')]
-    for (const b of rows) {
-      const totalNet = (Number(b.today_net_wt || 0) + Number(b.older_net_wt || 0)).toFixed(3)
+    for (const g of rows) {
       lines.push([
-        b.branch_name, b.region, totalNet,
-        b.today_bills || 0, Number(b.today_net_wt || 0).toFixed(3), Number(b.today_gross_value || 0).toFixed(2),
-        b.older_bills || 0, Number(b.older_net_wt || 0).toFixed(3), Number(b.older_gross_value || 0).toFixed(2),
-        b.oldest_age_days != null ? b.oldest_age_days : '', b.oldest_date || '',
-        Number(b.total_gross_wt || 0).toFixed(3),
+        g.consignment_date || '',
+        g.branch_name || '',
+        g.region || '',
+        g.bills || 0,
+        Number(g.gross_weight || 0).toFixed(3),
+        Number(g.stone_weight || 0).toFixed(3),
+        Number(g.wastage      || 0).toFixed(3),
+        Number(g.net_weight   || 0).toFixed(3),
+        Number(g.total_amount || 0).toFixed(2),
+        Number(g.svc_charge   || 0).toFixed(2),
+        g.expected_delivery_date || '',
       ].map(csvEscape).join(','))
     }
     const csv = lines.join('\n')
@@ -310,6 +319,100 @@ export default function ConsignmentReport() {
   // case-wise rows too without a second branches lookup.
   const branchToRegion = data.reduce((acc, b) => { acc[b.branch_name] = b.region; return acc }, {})
 
+  // ── Branch-wise aggregated rows ────────────────────────────────────────────
+  // The branch-wise view now groups in-transit bills by (branch, consignment
+  // date) so ops can see at a glance "what UDUPI dispatched on 19 May" as a
+  // single line item. Driven by caseData (same source the case-wise view uses)
+  // so both tables stay in lockstep.
+  //
+  // Expected delivery: dispatched_at + 1 IST day. Branches across India share
+  // a roughly next-day delivery to HO via BVC; refine later if pickup_time +
+  // distance need to drive it per-branch.
+  const branchAggregated = (() => {
+    const groups = new Map()
+    for (const r of caseData) {
+      const branch = r.branch_name || '—'
+      const date = r.dispatched_at
+        ? new Date(r.dispatched_at).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' })
+        : null   // YYYY-MM-DD
+      const key = `${date || '∅'}|${branch}`
+      let g = groups.get(key)
+      if (!g) {
+        g = {
+          key,
+          consignment_date: date,
+          branch_name:      branch,
+          region:           branchToRegion[branch] || null,
+          bills:            0,
+          gross_weight:     0,
+          stone_weight:     0,
+          wastage:          0,
+          net_weight:       0,
+          total_amount:     0,
+          svc_charge:       0,
+        }
+        groups.set(key, g)
+      }
+      g.bills        += 1
+      g.gross_weight += Number(r.gross_weight || 0)
+      g.stone_weight += Number(r.stone_weight || 0)
+      g.wastage      += Number(r.wastage      || 0)
+      g.net_weight   += Number(r.net_weight   || 0)
+      g.total_amount += Number(r.total_amount || 0)
+      g.svc_charge   += Number(r.service_charge_amount_crm || 0)
+    }
+    // Expected delivery — same-day pickup → next IST day at HO.
+    for (const g of groups.values()) {
+      if (!g.consignment_date) { g.expected_delivery_date = null; continue }
+      const [y, m, d] = g.consignment_date.split('-').map(Number)
+      const dt = new Date(Date.UTC(y, m - 1, d + 1))
+      g.expected_delivery_date = dt.toISOString().slice(0, 10)
+    }
+    return Array.from(groups.values())
+  })()
+
+  const filteredBranchRows = (() => {
+    const today = istToday()
+    // Both today and dateStr are YYYY-MM-DD; parsing them as UTC midnight
+    // gives a stable IST-day diff (no DST in India, so no further fuss).
+    const ageDays = (dateStr) => {
+      if (!dateStr) return null
+      return Math.floor((new Date(today) - new Date(dateStr)) / 86400000)
+    }
+    return branchAggregated
+      .filter(g => !activeRegion || g.region === activeRegion)
+      .filter(g => !searchQ || (g.branch_name || '').toLowerCase().includes(searchQ) || (g.region || '').toLowerCase().includes(searchQ))
+      .filter(g => {
+        const age = ageDays(g.consignment_date)
+        switch (quickFilter) {
+          case 'overdue':       return age != null && age > 7
+          case 'watch':         return age != null && age >= 4 && age <= 7
+          case 'today_active':  return age === 0
+          case 'all':
+          default:              return true
+        }
+      })
+      .slice()
+      .sort((a, b) => {
+        let av, bv
+        switch (sortKey) {
+          case 'branch_name':           av = a.branch_name || ''; bv = b.branch_name || ''; return av.localeCompare(bv) * sortDir
+          case 'bills':                 av = a.bills;        bv = b.bills;        break
+          case 'gross_weight':          av = a.gross_weight; bv = b.gross_weight; break
+          case 'stone_weight':          av = a.stone_weight; bv = b.stone_weight; break
+          case 'wastage':               av = a.wastage;      bv = b.wastage;      break
+          case 'net_weight':
+          case 'total_net_wt':          av = a.net_weight;   bv = b.net_weight;   break
+          case 'total_amount':          av = a.total_amount; bv = b.total_amount; break
+          case 'svc_charge':            av = a.svc_charge;   bv = b.svc_charge;   break
+          case 'expected_delivery_date':av = a.expected_delivery_date || ''; bv = b.expected_delivery_date || ''; return av.localeCompare(bv) * sortDir
+          case 'consignment_date':
+          default:                      av = a.consignment_date || ''; bv = b.consignment_date || ''; return av.localeCompare(bv) * sortDir
+        }
+        return (av - bv) * sortDir
+      })
+  })()
+
   const filteredCaseRows = caseData
     .filter(r => {
       // Date filter on dispatched_at (the bill's at_branch → in_consignment
@@ -346,6 +449,28 @@ export default function ConsignmentReport() {
     if (caseSortKey === key) setCaseSortDir(d => d * -1)
     else { setCaseSortKey(key); setCaseSortDir(-1) }
   }
+
+  // Open the bill journey modal for an application_id and fetch its history.
+  // The backend already exposes `bill_journey` — one consignment per row,
+  // ordered earliest first, with status + EWB/IRN + timestamps.
+  async function openJourney(purchaseId, applicationId) {
+    setJourneyTarget({ purchase_id: purchaseId, application_id: applicationId, loading: true, rows: null, error: null })
+    try {
+      const res  = await authedFetch(`/api/consignments?action=bill_journey&purchase_id=${purchaseId}`)
+      const json = await res.json()
+      setJourneyTarget(prev => prev && prev.purchase_id === purchaseId
+        ? { ...prev, loading: false, rows: json.data || [], error: json.error || null }
+        : prev)
+    } catch (e) {
+      setJourneyTarget(prev => prev && prev.purchase_id === purchaseId
+        ? { ...prev, loading: false, rows: [], error: e.message }
+        : prev)
+    }
+  }
+
+  // Reset to page 1 whenever the filter set changes so ops aren't stuck on
+  // page 5 of a result set that only has 2 pages now.
+  useEffect(() => { setCasePage(1) }, [caseSinceQuick, caseSinceFrom, caseSinceTo, activeRegion, search, caseSortKey, caseSortDir])
 
   // Σ totals across the visible case rows — drives the totals row pinned
   // beneath the headers. Note: Svc % can't be summed (it's a per-bill rate),
@@ -714,10 +839,10 @@ export default function ConsignmentReport() {
           <span style={{ fontSize: '11px', color: t.text4 }}>
             {viewMode === 'case'
               ? `${filteredCaseRows.length} of ${caseData.length} bills`
-              : `${filtered.length} of ${data.length}${isMobile ? ' · swipe' : ''}`}
+              : `${filteredBranchRows.length} of ${branchAggregated.length} rows`}
           </span>
           {viewMode === 'branch' && (
-            <button onClick={() => exportCsv(filtered)} title="Download the current view as CSV"
+            <button onClick={() => exportCsv(filteredBranchRows)} title="Download the current view as CSV"
               style={{
                 padding: '6px 12px', borderRadius: '6px',
                 background: 'transparent', border: `1px solid ${t.border2}`,
@@ -744,199 +869,115 @@ export default function ConsignmentReport() {
       {/* ── Branch-wise table — per-branch rollup of bills in flight ── */}
       {viewMode === 'branch' && (
         <div style={{ ...card, overflow: 'hidden' }}>
-          {loading ? (
+          {(caseLoading && !caseLoaded) ? (
             <div style={{ padding: '80px', display: 'flex', justifyContent: 'center' }}><GoldSpinner size={32} /></div>
-          ) : filtered.length === 0 ? (
+          ) : filteredBranchRows.length === 0 ? (
             <div style={{ padding: '80px', textAlign: 'center', color: t.text4, fontSize: '13px' }}>
-              {search || activeRegion ? 'No branches match your filter' : 'No bills currently in transit'}
+              {search || activeRegion || quickFilter !== 'all' ? 'No rows match your filter' : 'No bills currently in transit'}
             </div>
-          ) : (
+          ) : (() => {
+            // New branch-wise view: bills grouped by (branch + dispatched date)
+            // so UDUPI on 19 May and UDUPI on 20 May appear as distinct lines.
+            const padBranch = '8px 10px'
+            const tdL = { padding: padBranch, verticalAlign: 'middle', fontSize: '11px', textAlign: 'left' }
+            const tdR = { padding: padBranch, verticalAlign: 'middle', fontSize: '11px', textAlign: 'right', fontFamily: 'monospace' }
+            const th  = (col) => ({
+              padding: '9px 10px', fontSize: '9px', color: sortKey === col.k ? t.gold : t.text4,
+              letterSpacing: '.04em', textTransform: 'uppercase',
+              background: t.card2, borderBottom: `1px solid ${t.border}`,
+              whiteSpace: 'nowrap', fontWeight: 600, userSelect: 'none',
+              verticalAlign: 'middle', textAlign: col.a, cursor: 'pointer',
+              position: 'sticky', top: 0, zIndex: 2,
+            })
+            const sortIcon = (k) => (
+              <span style={{ color: sortKey === k ? t.gold : t.text4, fontSize: '9px', marginLeft: '3px' }}>
+                {sortKey === k ? (sortDir === -1 ? '↓' : '↑') : '⇅'}
+              </span>
+            )
+            const fmtAmt = (n) => n != null && n !== 0 ? `₹${Math.round(n).toLocaleString('en-IN')}` : (n === 0 ? '₹0' : '—')
+            const fmtWt  = (n) => n != null ? Number(n).toFixed(3) : '—'
+            const fmtCellDate = (d) => {
+              if (!d) return '—'
+              const [y, m, day] = d.split('-')
+              const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+              return `${day} ${months[+m - 1]}`
+            }
+            const totals = filteredBranchRows.reduce((acc, g) => {
+              acc.bills        += g.bills
+              acc.gross_weight += g.gross_weight
+              acc.stone_weight += g.stone_weight
+              acc.wastage      += g.wastage
+              acc.net_weight   += g.net_weight
+              acc.total_amount += g.total_amount
+              acc.svc_charge   += g.svc_charge
+              return acc
+            }, { bills: 0, gross_weight: 0, stone_weight: 0, wastage: 0, net_weight: 0, total_amount: 0, svc_charge: 0 })
+            return (
             <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'auto' }}>
                 <thead>
                   <tr>
-                    <th style={{ ...thBase, cursor: 'pointer', color: sortKey === 'branch_name' ? t.gold : t.text4, paddingLeft: '7px', textAlign: 'left' }}
-                        onClick={() => handleSort('branch_name')}>
-                      Branch <SortIcon col="branch_name" />
-                    </th>
-                    <th style={{ ...thBase, textAlign: 'right', cursor: 'pointer', color: sortKey === 'total_bills' ? t.gold : t.text4 }}
-                        onClick={() => handleSort('total_bills')}
-                        title="Today's bills + older in-flight bills">
-                      Total Bills <SortIcon col="total_bills" />
-                    </th>
-                    <th style={{ ...thBase, textAlign: 'right', cursor: 'pointer', color: sortKey === 'total_net_wt' ? t.gold : t.text4 }}
-                        onClick={() => handleSort('total_net_wt')}>
-                      Total Net Wt <SortIcon col="total_net_wt" />
-                    </th>
-
-                    <th style={{ ...thBase, textAlign: 'right', cursor: 'pointer', color: sortKey === 'today_bills' ? t.blue : t.text4 }}
-                        onClick={() => handleSort('today_bills')}>
-                      Today's Bills <SortIcon col="today_bills" />
-                    </th>
-                    <th style={{ ...thBase, textAlign: 'right', cursor: 'pointer', color: sortKey === 'today_net_wt' ? t.blue : t.text4 }}
-                        onClick={() => handleSort('today_net_wt')}>
-                      Today's Net Wt <SortIcon col="today_net_wt" />
-                    </th>
-                    <th style={{ ...thBase, textAlign: 'right', cursor: 'pointer', color: sortKey === 'today_gross_value' ? t.blue : t.text4 }}
-                        onClick={() => handleSort('today_gross_value')}>
-                      Today's Value <SortIcon col="today_gross_value" />
-                    </th>
-
-                    <th style={{ ...thBase, textAlign: 'right', cursor: 'pointer', color: sortKey === 'older_bills' ? t.orange : t.text4 }}
-                        onClick={() => handleSort('older_bills')}>
-                      In-Flight Bills <SortIcon col="older_bills" />
-                    </th>
-                    <th style={{ ...thBase, textAlign: 'right', cursor: 'pointer', color: sortKey === 'older_net_wt' ? t.orange : t.text4 }}
-                        onClick={() => handleSort('older_net_wt')}>
-                      In-Flight Net Wt <SortIcon col="older_net_wt" />
-                    </th>
-                    <th style={{ ...thBase, textAlign: 'right', cursor: 'pointer', color: sortKey === 'older_gross_value' ? t.orange : t.text4 }}
-                        onClick={() => handleSort('older_gross_value')}>
-                      In-Flight Value <SortIcon col="older_gross_value" />
-                    </th>
-
-                    <th style={{ ...thBase, textAlign: 'center', cursor: 'pointer', color: sortKey === 'oldest_age' ? t.red : t.text4 }}
-                        onClick={() => handleSort('oldest_age')}>
-                      Oldest Bill <SortIcon col="oldest_age" />
-                    </th>
+                    {[
+                      { k: 'consignment_date',       l: 'Consignment Date',    a: 'left'  },
+                      { k: 'branch_name',            l: 'Branch',              a: 'left'  },
+                      { k: 'bills',                  l: 'No of Bills',         a: 'right' },
+                      { k: 'gross_weight',           l: 'Gross Wt (g)',        a: 'right' },
+                      { k: 'stone_weight',           l: 'Stone (g)',           a: 'right' },
+                      { k: 'wastage',                l: 'Wastage (g)',         a: 'right' },
+                      { k: 'net_weight',             l: 'Net Wt (g)',          a: 'right' },
+                      { k: 'total_amount',           l: 'Amount',              a: 'right' },
+                      { k: 'svc_charge',             l: 'Service Charge',      a: 'right' },
+                      { k: 'expected_delivery_date', l: 'Expected Delivery',   a: 'left'  },
+                    ].map(col => (
+                      <th key={col.k} onClick={() => handleSort(col.k)} style={th(col)}>
+                        {col.l}{sortIcon(col.k)}
+                      </th>
+                    ))}
                   </tr>
-
-                  {/* Totals row pinned to the top inside <thead>. */}
-                  <tr style={{ background: `${t.gold}14`, borderTop: `1px solid ${t.border}`, borderBottom: `2px solid ${t.gold}40` }}>
-                    <td style={{ padding: '8px 8px 8px 7px', fontSize: '10px', color: t.text2, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', background: `${t.gold}14`, whiteSpace: 'nowrap' }}>
-                      Σ Totals · {filtered.length}
-                    </td>
-                    <td style={{ padding: '8px 8px', textAlign: 'right', fontSize: '13px', color: t.gold, fontFamily: 'monospace', fontWeight: 700, background: `${t.gold}14` }}>
-                      {(grandToday + grandOlder) || '—'}
-                    </td>
-                    <td style={{ padding: '8px 8px', textAlign: 'right', fontSize: '12px', color: t.gold, fontFamily: 'monospace', fontWeight: 700, background: `${t.gold}14` }}>
-                      {fmt(grandTodayWt + grandOlderWt, 2)}<span style={{ fontSize: '10px', marginLeft: '2px' }}>g</span>
-                    </td>
-                    <td style={{ padding: '8px 8px', textAlign: 'right', fontSize: '13px', color: t.blue, fontFamily: 'monospace', fontWeight: 700, background: `${t.gold}14` }}>
-                      {grandToday || '—'}
-                    </td>
-                    <td style={{ padding: '8px 8px', textAlign: 'right', fontSize: '12px', color: t.blue, fontFamily: 'monospace', fontWeight: 600, background: `${t.gold}14` }}>
-                      {fmt(grandTodayWt, 2)}<span style={{ fontSize: '10px', marginLeft: '2px' }}>g</span>
-                    </td>
-                    <td style={{ padding: '8px 8px', textAlign: 'right', fontSize: '11px', color: t.blue, fontFamily: 'monospace', fontWeight: 700, background: `${t.gold}14` }}>
-                      {grandTodayVal ? fmtINR(grandTodayVal) : '—'}
-                    </td>
-                    <td style={{ padding: '8px 8px', textAlign: 'right', fontSize: '13px', color: t.orange, fontFamily: 'monospace', fontWeight: 700, background: `${t.gold}14` }}>
-                      {grandOlder || '—'}
-                    </td>
-                    <td style={{ padding: '8px 8px', textAlign: 'right', fontSize: '12px', color: t.orange, fontFamily: 'monospace', fontWeight: 600, background: `${t.gold}14` }}>
-                      {fmt(grandOlderWt, 2)}<span style={{ fontSize: '10px', marginLeft: '2px' }}>g</span>
-                    </td>
-                    <td style={{ padding: '8px 8px', textAlign: 'right', fontSize: '11px', color: t.orange, fontFamily: 'monospace', fontWeight: 700, background: `${t.gold}14` }}>
-                      {grandOlderVal ? fmtINR(grandOlderVal) : '—'}
-                    </td>
-                    <td style={{ padding: '8px 8px', background: `${t.gold}14` }} />
+                  {/* Σ TOTALS — pinned just under the headers */}
+                  <tr style={{ background: `${t.gold}0c`, borderBottom: `1px solid ${t.gold}40` }}>
+                    <td style={{ ...tdL, color: t.gold, fontWeight: 700, letterSpacing: '.04em', whiteSpace: 'nowrap' }}>Σ TOTALS</td>
+                    <td style={{ ...tdL, color: t.text3, fontSize: '10px' }}>{filteredBranchRows.length} row{filteredBranchRows.length === 1 ? '' : 's'}</td>
+                    <td style={{ ...tdR, color: t.gold,  fontWeight: 700 }}>{totals.bills}</td>
+                    <td style={{ ...tdR, color: t.text2, fontWeight: 600 }}>{fmtWt(totals.gross_weight)}</td>
+                    <td style={{ ...tdR, color: t.text3 }}>{fmtWt(totals.stone_weight)}</td>
+                    <td style={{ ...tdR, color: t.text3 }}>{fmtWt(totals.wastage)}</td>
+                    <td style={{ ...tdR, color: t.gold,  fontWeight: 700 }}>{fmtWt(totals.net_weight)}</td>
+                    <td style={{ ...tdR, color: t.text2, fontWeight: 600 }}>{fmtAmt(totals.total_amount)}</td>
+                    <td style={{ ...tdR, color: t.text3 }}>{fmtAmt(totals.svc_charge)}</td>
+                    <td style={tdL} />
                   </tr>
                 </thead>
                 <tbody>
-                  {filtered.map((b) => {
-                    const rColor  = REGION_COLORS[b.region] || t.text3
-                    const hasToday  = (b.today_bills  || 0) > 0
-                    const hasPending = (b.older_bills || 0) > 0
-                    const ageDays = b.oldest_age_days || 0
-                    const urgentTier = ageDays > 7 ? 'overdue' : ageDays > 3 ? 'watch' : null
-                    const urgentBg   = urgentTier === 'overdue' ? `${t.red}06`
-                                     : urgentTier === 'watch'   ? `${t.orange}06`
-                                     : 'transparent'
-                    const stripeColor = urgentTier === 'overdue' ? t.red
-                                      : urgentTier === 'watch'   ? t.orange
-                                      : rColor
-                    const glowColor = urgentTier === 'overdue' ? t.red
-                                    : urgentTier === 'watch'   ? t.orange
-                                    : t.gold
+                  {filteredBranchRows.map((g, i) => {
+                    const zebra = i % 2 === 0 ? 'transparent' : `${t.card2}30`
+                    const rColor = REGION_COLORS[g.region] || t.text3
                     return (
-                      <tr key={b.branch_name} className="cnsrpt-flat-row" style={{ borderBottom: `1px solid ${t.border}20`, background: urgentBg, ['--cnsrpt-glow']: glowColor, ['--cnsrpt-stripe']: stripeColor }}>
-                        <td className="cnsrpt-branch-cell">
-                          <div className="cnsrpt-branch-name" style={{ color: t.text1 }}>{b.branch_name}</div>
-                          <div className="cnsrpt-branch-region" style={{ color: rColor }}>{b.region}</div>
+                      <tr key={g.key}
+                        style={{ borderBottom: `1px solid ${t.border}25`, background: zebra, transition: 'background .12s ease' }}
+                        onMouseEnter={e => { e.currentTarget.style.background = `${t.gold}0e` }}
+                        onMouseLeave={e => { e.currentTarget.style.background = zebra }}>
+                        <td style={{ ...tdL, color: t.gold, fontFamily: 'monospace', fontWeight: 600, whiteSpace: 'nowrap' }}>{fmtCellDate(g.consignment_date)}</td>
+                        <td style={tdL}>
+                          <div style={{ color: t.text1, fontWeight: 600 }}>{g.branch_name}</div>
+                          {g.region && <div style={{ fontSize: '10px', color: rColor, marginTop: 1 }}>{g.region}</div>}
                         </td>
-
-                        {/* Total Bills */}
-                        {(() => {
-                          const totalBills = (b.today_bills || 0) + (b.older_bills || 0)
-                          return (
-                            <td style={{ padding: tdPad, textAlign: 'right' }}>
-                              {totalBills
-                                ? <span style={{ fontSize: '13px', color: t.gold, fontFamily: 'monospace', fontWeight: 600 }}>{totalBills}</span>
-                                : <span style={{ fontSize: '11px', color: t.text4 }}>—</span>}
-                            </td>
-                          )
-                        })()}
-
-                        {/* Total Net Wt */}
-                        {(() => {
-                          const total = (b.today_net_wt || 0) + (b.older_net_wt || 0)
-                          return (
-                            <td style={{ padding: tdPad, textAlign: 'right' }}>
-                              <span style={{ fontSize: '13px', color: t.gold, fontFamily: 'monospace', fontWeight: 600 }}>
-                                {fmt(total, 2)}<span style={{ fontSize: '10px', marginLeft: '2px' }}>g</span>
-                              </span>
-                            </td>
-                          )
-                        })()}
-
-                        {/* Today's Bills */}
-                        <td style={{ padding: '11px 14px', textAlign: 'right' }}>
-                          {hasToday
-                            ? <span style={{ fontSize: '13px', color: t.blue, fontFamily: 'monospace', fontWeight: 600 }}>{b.today_bills}</span>
-                            : <span style={{ fontSize: '11px', color: t.text4 }}>—</span>}
-                        </td>
-
-                        {/* Today's Net Wt */}
-                        <td style={{ padding: '11px 14px', textAlign: 'right' }}>
-                          {hasToday
-                            ? <span style={{ fontSize: '13px', color: t.blue, fontFamily: 'monospace' }}>{fmt(b.today_net_wt, 2)}<span style={{ fontSize: '10px', marginLeft: '2px' }}>g</span></span>
-                            : <span style={{ fontSize: '11px', color: t.text4 }}>—</span>}
-                        </td>
-
-                        {/* Today's Value */}
-                        <td style={{ padding: '11px 14px', textAlign: 'right' }}>
-                          {hasToday
-                            ? <span style={{ fontSize: '12px', color: t.blue, fontFamily: 'monospace' }}>{fmtINR(b.today_gross_value)}</span>
-                            : <span style={{ fontSize: '11px', color: t.text4 }}>—</span>}
-                        </td>
-
-                        {/* In-Flight Bills */}
-                        <td style={{ padding: '11px 14px', textAlign: 'right' }}>
-                          {hasPending
-                            ? <span style={{ fontSize: '14px', color: t.orange, fontFamily: 'monospace', fontWeight: 700 }}>{b.older_bills}</span>
-                            : <span style={{ fontSize: '11px', color: t.text4 }}>—</span>}
-                        </td>
-
-                        {/* In-Flight Net Wt */}
-                        <td style={{ padding: '11px 14px', textAlign: 'right' }}>
-                          {hasPending
-                            ? <span style={{ fontSize: '13px', color: t.orange, fontFamily: 'monospace' }}>{fmt(b.older_net_wt, 2)}<span style={{ fontSize: '10px', marginLeft: '2px' }}>g</span></span>
-                            : <span style={{ fontSize: '11px', color: t.text4 }}>—</span>}
-                        </td>
-
-                        {/* In-Flight Value */}
-                        <td style={{ padding: '11px 14px', textAlign: 'right' }}>
-                          {hasPending
-                            ? <span style={{ fontSize: '12px', color: t.orange, fontFamily: 'monospace' }}>{fmtINR(b.older_gross_value)}</span>
-                            : <span style={{ fontSize: '11px', color: t.text4 }}>—</span>}
-                        </td>
-
-                        {/* Oldest Bill */}
-                        <td style={{ padding: tdPad, textAlign: 'center' }}>
-                          <AgeBadge days={b.oldest_age_days} t={t} />
-                          {b.oldest_date && (
-                            <div style={{ fontSize: '10px', color: t.text4, marginTop: '3px' }}>{fmtDate(b.oldest_date)}</div>
-                          )}
-                        </td>
-
+                        <td style={{ ...tdR, color: t.gold, fontWeight: 600 }}>{g.bills}</td>
+                        <td style={{ ...tdR, color: t.text2 }}>{fmtWt(g.gross_weight)}</td>
+                        <td style={{ ...tdR, color: t.text3 }}>{fmtWt(g.stone_weight)}</td>
+                        <td style={{ ...tdR, color: t.text3 }}>{fmtWt(g.wastage)}</td>
+                        <td style={{ ...tdR, color: t.gold, fontWeight: 600 }}>{fmtWt(g.net_weight)}</td>
+                        <td style={{ ...tdR, color: t.text2 }}>{fmtAmt(g.total_amount)}</td>
+                        <td style={{ ...tdR, color: t.text3 }}>{fmtAmt(g.svc_charge)}</td>
+                        <td style={{ ...tdL, color: t.green, fontFamily: 'monospace', whiteSpace: 'nowrap' }}>{fmtCellDate(g.expected_delivery_date)}</td>
                       </tr>
                     )
                   })}
                 </tbody>
               </table>
             </div>
-          )}
+            )
+          })()}
         </div>
       )}
 
@@ -1019,7 +1060,7 @@ export default function ConsignmentReport() {
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredCaseRows.map((r, i) => {
+                  {filteredCaseRows.slice((casePage - 1) * casePageSize, casePage * casePageSize).map((r, i) => {
                     // Light zebra striping — even rows get a hair-thin tint.
                     // No CSS class (avoids the position: relative bug); inline
                     // backgroundColor with a hover overlay via onMouseEnter.
@@ -1029,7 +1070,20 @@ export default function ConsignmentReport() {
                         style={{ borderBottom: `1px solid ${t.border}25`, background: zebraBg, transition: 'background .12s ease' }}
                         onMouseEnter={e => { e.currentTarget.style.background = `${t.gold}0e` }}
                         onMouseLeave={e => { e.currentTarget.style.background = zebraBg }}>
-                        <td style={{ ...caseTdL, color: t.gold, fontFamily: 'monospace', fontWeight: 600, whiteSpace: 'nowrap' }}>{r.application_id || '—'}</td>
+                        <td style={{ ...caseTdL, whiteSpace: 'nowrap' }}>
+                          <span
+                            onClick={() => openJourney(r.id, r.application_id)}
+                            title="View this bill's consignment journey"
+                            style={{ color: t.gold, fontFamily: 'monospace', fontWeight: 600, cursor: 'pointer', borderBottom: `1px dashed ${t.gold}50` }}>
+                            {r.application_id || '—'}
+                          </span>
+                          {r.consignment?.tmp_prf_no && (
+                            <span title={`Consignment ${r.consignment.tmp_prf_no}`}
+                              style={{ marginLeft: 6, fontSize: '9px', color: t.purple, background: `${t.purple}15`, border: `1px solid ${t.purple}30`, borderRadius: 3, padding: '1px 5px', fontFamily: 'monospace', letterSpacing: '.02em' }}>
+                              {r.consignment.tmp_prf_no}
+                            </span>
+                          )}
+                        </td>
                         <td style={{ ...caseTdL, color: t.text2, whiteSpace: 'nowrap' }}>{r.purchase_date ? fmtDate(r.purchase_date) : '—'}</td>
                         <td style={{ ...caseTdL, color: t.text1 }}>{r.customer_name || '—'}</td>
                         <td style={{ ...caseTdL, color: t.text2, whiteSpace: 'nowrap' }}>{r.branch_name || '—'}</td>
@@ -1064,6 +1118,48 @@ export default function ConsignmentReport() {
             </div>
             )
           })()}
+          {/* Pagination — only when there are more rows than one page can hold. */}
+          {filteredCaseRows.length > casePageSize && (() => {
+            const totalPages = Math.ceil(filteredCaseRows.length / casePageSize)
+            const first = (casePage - 1) * casePageSize + 1
+            const last  = Math.min(casePage * casePageSize, filteredCaseRows.length)
+            const btn = (label, disabled, onClick, primary = false) => (
+              <button onClick={onClick} disabled={disabled}
+                style={{
+                  background: disabled ? 'transparent' : (primary ? `${t.gold}15` : t.card2),
+                  border: `1px solid ${disabled ? t.border : (primary ? `${t.gold}50` : t.border2)}`,
+                  color: disabled ? t.text4 : (primary ? t.gold : t.text2),
+                  borderRadius: 6, padding: '5px 11px', fontSize: 11, fontWeight: 600,
+                  cursor: disabled ? 'not-allowed' : 'pointer',
+                }}>{label}</button>
+            )
+            return (
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '10px 14px', borderTop: `1px solid ${t.border}`, flexWrap: 'wrap' }}>
+                <div style={{ fontSize: 11, color: t.text3 }}>
+                  Showing <strong style={{ color: t.text1 }}>{first}–{last}</strong> of <strong style={{ color: t.text1 }}>{filteredCaseRows.length}</strong> bills
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: 10, color: t.text4, marginRight: 4 }}>Per page</span>
+                  {[50, 100, 200].map(n => (
+                    <button key={n} onClick={() => { setCasePageSize(n); setCasePage(1) }}
+                      style={{
+                        background: n === casePageSize ? `${t.gold}18` : 'transparent',
+                        border: `1px solid ${n === casePageSize ? `${t.gold}60` : t.border2}`,
+                        color: n === casePageSize ? t.gold : t.text3,
+                        borderRadius: 5, padding: '3px 9px', fontSize: 10.5,
+                        fontWeight: n === casePageSize ? 700 : 500, cursor: 'pointer',
+                      }}>{n}</button>
+                  ))}
+                  <span style={{ width: 1, height: 14, background: t.border, margin: '0 4px' }} />
+                  {btn('← Prev', casePage === 1, () => setCasePage(p => Math.max(1, p - 1)))}
+                  <span style={{ fontSize: 11, color: t.text2, fontFamily: 'monospace', minWidth: 64, textAlign: 'center' }}>
+                    Page <strong style={{ color: t.gold }}>{casePage}</strong> / {totalPages}
+                  </span>
+                  {btn('Next →', casePage === totalPages, () => setCasePage(p => Math.min(totalPages, p + 1)), true)}
+                </div>
+              </div>
+            )
+          })()}
         </div>
       )}
 
@@ -1075,6 +1171,74 @@ export default function ConsignmentReport() {
       </div>
 
       {toast && <Toast msg={toast.msg} type={toast.type} onDone={() => setToast(null)} />}
+
+      {/* Bill journey modal — every consignment a given bill has been part of,
+          earliest first. Triggered by clicking an App ID in the case-wise table. */}
+      {journeyTarget && typeof document !== 'undefined' && createPortal((
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.72)', zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px', backdropFilter: 'blur(4px)' }}
+          onClick={() => setJourneyTarget(null)}>
+          <div onClick={e => e.stopPropagation()}
+            style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: 12, width: '100%', maxWidth: 720, maxHeight: '85vh', overflow: 'hidden', display: 'flex', flexDirection: 'column', boxShadow: '0 20px 60px rgba(0,0,0,.5)' }}>
+            <div style={{ padding: '16px 22px', borderBottom: `1px solid ${t.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+              <div>
+                <div style={{ fontSize: '.6rem', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: 4 }}>Bill journey</div>
+                <div style={{ fontSize: '15px', color: t.gold, fontFamily: 'monospace', fontWeight: 700 }}>{journeyTarget.application_id}</div>
+              </div>
+              <button onClick={() => setJourneyTarget(null)} aria-label="Close"
+                style={{ background: 'transparent', border: 'none', color: t.text3, fontSize: 18, cursor: 'pointer' }}>✕</button>
+            </div>
+            <div style={{ padding: '14px 22px', flex: 1, overflowY: 'auto' }}>
+              {journeyTarget.loading ? (
+                <div style={{ padding: '40px 0', textAlign: 'center' }}><GoldSpinner size={24} /></div>
+              ) : journeyTarget.error ? (
+                <div style={{ background: `${t.red}10`, border: `1px solid ${t.red}40`, borderRadius: 7, padding: '10px 14px', fontSize: 12, color: t.red }}>{journeyTarget.error}</div>
+              ) : !journeyTarget.rows || journeyTarget.rows.length === 0 ? (
+                <div style={{ padding: '30px 0', textAlign: 'center', color: t.text4, fontSize: 12 }}>This bill hasn't been part of any consignment yet.</div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  {journeyTarget.rows.map((j, i) => {
+                    const isInternal = j.movement_type === 'INTERNAL'
+                    const dest = isInternal ? (j.dest || 'Hub') : 'Head Office'
+                    const docNo = j.eway_bill_no || j.irn || ''
+                    const stripeColor = j.status === 'cancelled' ? t.red
+                                      : j.status === 'received'  ? t.green
+                                      : j.received_at            ? t.green
+                                      : t.gold
+                    return (
+                      <div key={`${j.consignment_id || i}`} style={{ background: t.card2, border: `1px solid ${t.border}`, borderLeft: `3px solid ${stripeColor}`, borderRadius: 8, padding: '11px 14px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+                          <span style={{ fontSize: 13, color: t.gold, fontFamily: 'monospace', fontWeight: 700 }}>{j.tmp_prf_no || '—'}</span>
+                          <span style={{ fontSize: 9, color: isInternal ? t.purple : t.orange, background: `${isInternal ? t.purple : t.orange}15`, borderRadius: 4, padding: '2px 7px', fontWeight: 700, letterSpacing: '.04em' }}>
+                            {isInternal ? 'BRANCH → HUB' : 'BRANCH → HO'}
+                          </span>
+                          <span style={{ fontSize: 9, color: stripeColor, background: `${stripeColor}15`, borderRadius: 4, padding: '2px 7px', fontWeight: 700, letterSpacing: '.04em', textTransform: 'uppercase' }}>{j.status}</span>
+                        </div>
+                        <div style={{ fontSize: 12, color: t.text2, marginTop: 6 }}>
+                          <strong style={{ color: t.text1 }}>{j.source || '—'}</strong>
+                          <span style={{ color: t.text4, margin: '0 6px' }}>→</span>
+                          <span>{dest}</span>
+                        </div>
+                        <div style={{ display: 'flex', gap: 14, marginTop: 6, fontSize: 10, color: t.text4, fontFamily: 'monospace', flexWrap: 'wrap' }}>
+                          <span>Created {j.created_at ? new Date(j.created_at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—'}</span>
+                          {j.received_at && <span style={{ color: t.green }}>Received {new Date(j.received_at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}</span>}
+                          {j.short_reason && <span style={{ color: t.red }}>Short: {j.short_reason}</span>}
+                          {docNo && <span style={{ color: t.text3 }}>· {j.eway_bill_no ? 'EWB' : 'IRN'} {String(docNo).slice(0, 14)}{String(docNo).length > 14 ? '…' : ''}</span>}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+            <div style={{ padding: '11px 22px', borderTop: `1px solid ${t.border}`, display: 'flex', justifyContent: 'flex-end' }}>
+              <button onClick={() => setJourneyTarget(null)}
+                style={{ background: 'transparent', border: `1px solid ${t.border}`, borderRadius: 6, padding: '7px 16px', fontSize: 11, color: t.text3, cursor: 'pointer' }}>
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      ), document.body)}
 
       <style>{`
         @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
