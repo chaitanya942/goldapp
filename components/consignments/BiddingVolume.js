@@ -284,6 +284,62 @@ export default function BiddingVolume() {
   const pipelineOtherG    = activeBookings.filter(b => !b.is_kl).reduce((s, b) => s + pipelineFor(b), 0)
   const pipelineTotalG    = pipelineKLG + pipelineOtherG
 
+  // ── Regional split — Bangalore & Others vs Kerala ─────────────────────────
+  // The two regions have separate supply chains (Bangalore = today's
+  // purchases + outstation transit; Kerala = leaf→hub consolidation) and
+  // separate pipeline mechanics, so the hero strip splits into two rows.
+  // Section 1 is always Bangalore. Sections 2 + 4 contain both regions,
+  // filtered by branch.region. Section 4 is INCLUDED in the regional
+  // Incoming totals (unlike the legacy global incomingNetWt that uses
+  // s1+s2 only) — Section 4 bills physically move EOD and arrive at HO
+  // tomorrow, so they're genuinely part of tomorrow's pool.
+  const s2BranchesAll = supply?.transit_24h?.branches    || supply?.in_transit?.branches || []
+  const s4BranchesAll = supply?.branch_pre_eod?.branches || []
+  const sumWt    = (arr) => arr.reduce((s, b) => s + Number(b.total_net_wt   || 0), 0)
+  const sumGross = (arr) => arr.reduce((s, b) => s + Number(b.total_gross_wt || 0), 0)
+  const sumBills = (arr) => arr.reduce((s, b) => s + Number(b.total_bills    || 0), 0)
+  const isKL = (b) => b.region === 'Kerala'
+
+  // Kerala — no Section 1 (Bangalore-only). S2 + S4 filtered to Kerala.
+  const klSupplyNet   = sumWt(s2BranchesAll.filter(isKL)) + sumWt(s4BranchesAll.filter(isKL))
+  const klSupplyGross = sumGross(s2BranchesAll.filter(isKL)) + sumGross(s4BranchesAll.filter(isKL))
+  const klSupplyBills = sumBills(s2BranchesAll.filter(isKL)) + sumBills(s4BranchesAll.filter(isKL))
+
+  // Others — S1 (all Bangalore) + non-Kerala S2 + non-Kerala S4.
+  const othersSupplyNet   = s1Net   + sumWt(s2BranchesAll.filter(b => !isKL(b)))    + sumWt(s4BranchesAll.filter(b => !isKL(b)))
+  const othersSupplyGross = s1Gross + sumGross(s2BranchesAll.filter(b => !isKL(b))) + sumGross(s4BranchesAll.filter(b => !isKL(b)))
+  const othersSupplyBills = s1Bills + sumBills(s2BranchesAll.filter(b => !isKL(b))) + sumBills(s4BranchesAll.filter(b => !isKL(b)))
+
+  // Gain — Kerala default is 0 % (leaf→hub flow already absorbs refining
+  // loss upstream). Others use the standard 3.5 % (or the operator's
+  // global override, which applies to Others only).
+  const othersGain   = gainOverrideGrams != null
+    ? gainOverrideGrams
+    : othersSupplyNet * (gainRatePct / 100)
+  const klGain       = 0
+
+  // Pending Delivery — global per arrival_date; attributed to Others by
+  // convention (Bangalore-side carry-over is the common case).
+  const othersPending = pendingGrams
+  const klPending     = 0
+
+  // Booked + pipeline — split by is_kl flag on the cal_quotas row.
+  const klBookedQty    = activeBookings.filter(b =>  b.is_kl).reduce((s, b) => s + Number(b.weight || 0), 0)
+  const othersBookedQty = bookedQty - klBookedQty
+  const klBookedValue   = activeBookings.filter(b =>  b.is_kl).reduce((s, b) => s + Number(b.weight || 0) * Number(b.rate || 0), 0)
+  const othersBookedValue = bookedValue - klBookedValue
+  const klBookings      = activeBookings.filter(b =>  b.is_kl).length
+  const othersBookings  = activeBookings.length - klBookings
+
+  // Regional Available / Remaining — same formula as global, applied to
+  // each region's slice.
+  const klAvailable     = klSupplyNet + klGain + klPending
+  const othersAvailable = othersSupplyNet + othersGain + othersPending
+  const klRemaining     = klAvailable     - pipelineKLG
+  const othersRemaining = othersAvailable - pipelineOtherG
+  const klOverbooked      = klAvailable >= 0 && pipelineKLG > 0 && klRemaining < 0
+  const othersOverbooked  = othersAvailable >= 0 && pipelineOtherG > 0 && othersRemaining < 0
+
   const remainingQty    = availablePool - pipelineTotalG
   const bookedPct       = availablePool > 0 ? Math.min(100, (pipelineTotalG / availablePool) * 100) : 0
 
@@ -585,88 +641,161 @@ export default function BiddingVolume() {
           `arrivalDate` state stays (defaults to tomorrow) so downstream
           consumers don't need to change. */}
 
-      {/* ── KPI strip — Incoming + Gain ± Pending = Available; Available − Pipeline
-          = Remaining. The Booked card sits to the right as an informational
-          total (sub shows the pipeline portion). Pipeline Booked is its own
-          card with KL / Others split since those bid against different stock
-          flows. 7 columns now. */}
-      <div className="bidKpi" style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(7, 1fr)', gap: '10px' }}>
-        <KpiCard
-          label="Incoming"
-          value={<AnimatedNumber target={incomingNetWt} decimals={2} suffix=" g"
-                   fromPrevious animateOnMount={false} replayable={false} duration={650} />}
-          sub={`${incomingBills} bill${incomingBills === 1 ? '' : 's'} · gross ${fmt(incomingGrossWt, 2)} g`}
-          accent={t.gold} card={card} t={t} variant="source" />
+      {/* ── KPI strips — split by region so the math doesn't conflate
+          Bangalore/Others (today's purchases + outstation in-transit)
+          with Kerala (leaf → hub consolidation). Each row reads as
+          Incoming + Gain ± Pending = Available · Booked − Pipeline =
+          Remaining. Kerala drops Pending (it's a global, attributed to
+          Others by convention) and Gain (Kerala default is 0). */}
 
-        <GainCard
-          op="+"
-          t={t} card={card}
-          basisGrams={incomingNetWt}
-          gainGrams={gainGrams}
-          ratePct={gainRatePct}
-          overridden={gainOverridden}
-          editing={editingGain}
-          onStartEdit={() => setEditingGain(true)}
-          onSave={(v) => { setGainOverrideGrams(v); setEditingGain(false) }}
-          onResetDefault={() => { setGainOverrideGrams(null); setEditingGain(false) }}
-          onCancel={() => setEditingGain(false)} />
+      {/* Row 1 — Bangalore & Others */}
+      <div>
+        <div style={{ fontSize: 10.5, color: t.text3, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 800, marginBottom: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ width: 6, height: 6, borderRadius: '50%', background: t.gold, display: 'inline-block' }} />
+          Bangalore &amp; Others
+        </div>
+        <div className="bidKpi" style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(7, 1fr)', gap: '10px' }}>
+          <KpiCard
+            label="Incoming"
+            value={<AnimatedNumber target={othersSupplyNet} decimals={2} suffix=" g"
+                     fromPrevious animateOnMount={false} replayable={false} duration={650} />}
+            sub={`${othersSupplyBills} bill${othersSupplyBills === 1 ? '' : 's'} · gross ${fmt(othersSupplyGross, 2)} g`}
+            accent={t.gold} card={card} t={t} variant="source" />
 
-        <PendingCard
-          op={pendingGrams > 0 ? '+' : pendingGrams < 0 ? '−' : '±'}
-          t={t} card={card}
-          grams={pendingGrams}
-          setBy={pendingSetBy}
-          editing={editingPending}
-          saving={savingPending}
-          onStartEdit={() => setEditingPending(true)}
-          onSave={savePending}
-          onClear={() => savePending(0)}
-          onCancel={() => setEditingPending(false)} />
+          <GainCard
+            op="+"
+            t={t} card={card}
+            basisGrams={othersSupplyNet}
+            gainGrams={othersGain}
+            ratePct={gainRatePct}
+            overridden={gainOverridden}
+            editing={editingGain}
+            onStartEdit={() => setEditingGain(true)}
+            onSave={(v) => { setGainOverrideGrams(v); setEditingGain(false) }}
+            onResetDefault={() => { setGainOverrideGrams(null); setEditingGain(false) }}
+            onCancel={() => setEditingGain(false)} />
 
-        <KpiCard
-          op="="
-          label="Available"
-          value={<AnimatedNumber target={availablePool} decimals={2} suffix=" g"
-                   fromPrevious animateOnMount={false} replayable={false} duration={650} />}
-          sub={`${pendingGrams === 0
-            ? 'Incoming + Gain'
-            : `Incoming + Gain ${pendingGrams < 0 ? '−' : '+'} Pending`} · pool for tomorrow's bid`}
-          accent={t.gold} card={card} t={t}
-          variant="result" />
+          <PendingCard
+            op={othersPending > 0 ? '+' : othersPending < 0 ? '−' : '±'}
+            t={t} card={card}
+            grams={othersPending}
+            setBy={pendingSetBy}
+            editing={editingPending}
+            saving={savingPending}
+            onStartEdit={() => setEditingPending(true)}
+            onSave={savePending}
+            onClear={() => savePending(0)}
+            onCancel={() => setEditingPending(false)} />
 
-        <KpiCard
-          op="·"
-          label="Booked"
-          value={<AnimatedNumber target={bookedQty} decimals={2} suffix=" g"
-                   fromPrevious animateOnMount={false} replayable={false} duration={650} />}
-          sub={pipelineTotalG > 0
-            ? `${activeBookings.length} booking${activeBookings.length === 1 ? '' : 's'} · ${fmt(pipelineTotalG, 2)} g still pipeline · ${fmtINR(bookedValue)}`
-            : `${activeBookings.length} booking${activeBookings.length === 1 ? '' : 's'} · ${fmtINR(bookedValue)}`}
-          accent={t.blue} card={card} t={t} variant="consumed" />
+          <KpiCard
+            op="="
+            label="Available"
+            value={<AnimatedNumber target={othersAvailable} decimals={2} suffix=" g"
+                     fromPrevious animateOnMount={false} replayable={false} duration={650} />}
+            sub={`${othersPending === 0
+              ? 'Incoming + Gain'
+              : `Incoming + Gain ${othersPending < 0 ? '−' : '+'} Pending`} · Bangalore + Others pool`}
+            accent={t.gold} card={card} t={t}
+            variant="result" />
 
-        {/* Pipeline Booked — split by region so ops can see whether the
-            remaining pipeline is competing for Kerala hub bills (leaf→hub
-            flow) or Bangalore future purchases. Subtracts from Available
-            to produce Remaining. */}
-        <KpiCard
-          op="−"
-          label="Pipeline Booked"
-          value={<AnimatedNumber target={pipelineTotalG} decimals={2} suffix=" g"
-                   fromPrevious animateOnMount={false} replayable={false} duration={650} />}
-          sub={pipelineTotalG > 0
-            ? (<><span style={{ color: t.purple || '#8c5ac8', fontWeight: 800 }}>KL</span> {fmt(pipelineKLG, 2)} g <span style={{ color: t.text4 }}>·</span> <span style={{ color: t.gold, fontWeight: 800 }}>Others</span> {fmt(pipelineOtherG, 2)} g</>)
-            : 'No pipeline commitments'}
-          accent={t.purple || '#8c5ac8'} card={card} t={t}
-          variant={pipelineTotalG > 0 ? 'consumed' : 'source'} />
+          <KpiCard
+            op="·"
+            label="Booked"
+            value={<AnimatedNumber target={othersBookedQty} decimals={2} suffix=" g"
+                     fromPrevious animateOnMount={false} replayable={false} duration={650} />}
+            sub={pipelineOtherG > 0
+              ? `${othersBookings} booking${othersBookings === 1 ? '' : 's'} · ${fmt(pipelineOtherG, 2)} g still pipeline · ${fmtINR(othersBookedValue)}`
+              : `${othersBookings} booking${othersBookings === 1 ? '' : 's'} · ${fmtINR(othersBookedValue)}`}
+            accent={t.blue} card={card} t={t} variant="consumed" />
 
-        <KpiCard
-          op="="
-          label={poolState.label}
-          value={<AnimatedNumber target={poolState.num} prefix={poolState.prefix} decimals={2} suffix=" g"
-                   fromPrevious animateOnMount={false} replayable={false} duration={650} />}
-          sub={poolState.sub}
-          accent={poolState.accent} card={card} t={t}
-          variant="state" pulse={poolState.alert} />
+          <KpiCard
+            op="−"
+            label="Pipeline Booked"
+            value={<AnimatedNumber target={pipelineOtherG} decimals={2} suffix=" g"
+                     fromPrevious animateOnMount={false} replayable={false} duration={650} />}
+            sub={pipelineOtherG > 0
+              ? 'against tomorrow’s Bangalore purchases'
+              : 'No pipeline commitments'}
+            accent={t.gold} card={card} t={t}
+            variant={pipelineOtherG > 0 ? 'consumed' : 'source'} />
+
+          <KpiCard
+            op="="
+            label={othersOverbooked ? 'Pipeline Over' : 'Remaining'}
+            value={<AnimatedNumber target={Math.abs(othersRemaining)} prefix={othersOverbooked ? '−' : ''} decimals={2} suffix=" g"
+                     fromPrevious animateOnMount={false} replayable={false} duration={650} />}
+            sub={othersOverbooked
+              ? `Pipeline owes ${fmt(Math.abs(othersRemaining), 2)} g more than the pool can supply`
+              : (pipelineOtherG > 0 ? 'After pipeline back-fill' : 'Full pool free · no pipeline commitments')}
+            accent={othersOverbooked ? t.red : t.green} card={card} t={t}
+            variant="state" pulse={othersOverbooked} />
+        </div>
+      </div>
+
+      {/* Row 2 — Kerala */}
+      <div>
+        <div style={{ fontSize: 10.5, color: t.purple || '#8c5ac8', letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 800, marginBottom: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ width: 6, height: 6, borderRadius: '50%', background: t.purple || '#8c5ac8', display: 'inline-block' }} />
+          Kerala
+          <span style={{ color: t.text4, fontWeight: 600, letterSpacing: 0, textTransform: 'none' }}>· leaf → hub flow</span>
+        </div>
+        <div className="bidKpi" style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(6, 1fr)', gap: '10px' }}>
+          <KpiCard
+            label="Incoming"
+            value={<AnimatedNumber target={klSupplyNet} decimals={2} suffix=" g"
+                     fromPrevious animateOnMount={false} replayable={false} duration={650} />}
+            sub={`${klSupplyBills} bill${klSupplyBills === 1 ? '' : 's'} · gross ${fmt(klSupplyGross, 2)} g`}
+            accent={t.purple || '#8c5ac8'} card={card} t={t} variant="source" />
+
+          <KpiCard
+            op="+"
+            label="Gain"
+            value={<AnimatedNumber target={klGain} decimals={2} suffix=" g"
+                     fromPrevious animateOnMount={false} replayable={false} duration={650} />}
+            sub={'Kerala default · 0 %'}
+            accent={t.text3} card={card} t={t} variant="source" />
+
+          <KpiCard
+            op="="
+            label="Available"
+            value={<AnimatedNumber target={klAvailable} decimals={2} suffix=" g"
+                     fromPrevious animateOnMount={false} replayable={false} duration={650} />}
+            sub={'Kerala hub pool for tomorrow’s bid'}
+            accent={t.purple || '#8c5ac8'} card={card} t={t}
+            variant="result" />
+
+          <KpiCard
+            op="·"
+            label="Booked"
+            value={<AnimatedNumber target={klBookedQty} decimals={2} suffix=" g"
+                     fromPrevious animateOnMount={false} replayable={false} duration={650} />}
+            sub={pipelineKLG > 0
+              ? `${klBookings} booking${klBookings === 1 ? '' : 's'} · ${fmt(pipelineKLG, 2)} g still pipeline · ${fmtINR(klBookedValue)}`
+              : `${klBookings} booking${klBookings === 1 ? '' : 's'} · ${fmtINR(klBookedValue)}`}
+            accent={t.blue} card={card} t={t} variant="consumed" />
+
+          <KpiCard
+            op="−"
+            label="Pipeline Booked"
+            value={<AnimatedNumber target={pipelineKLG} decimals={2} suffix=" g"
+                     fromPrevious animateOnMount={false} replayable={false} duration={650} />}
+            sub={pipelineKLG > 0
+              ? 'against today’s leaf → hub flow'
+              : 'No pipeline commitments'}
+            accent={t.purple || '#8c5ac8'} card={card} t={t}
+            variant={pipelineKLG > 0 ? 'consumed' : 'source'} />
+
+          <KpiCard
+            op="="
+            label={klOverbooked ? 'Pipeline Over' : 'Remaining'}
+            value={<AnimatedNumber target={Math.abs(klRemaining)} prefix={klOverbooked ? '−' : ''} decimals={2} suffix=" g"
+                     fromPrevious animateOnMount={false} replayable={false} duration={650} />}
+            sub={klOverbooked
+              ? `Pipeline owes ${fmt(Math.abs(klRemaining), 2)} g more than the hub pool can supply`
+              : (pipelineKLG > 0 ? 'After pipeline back-fill' : 'Full hub pool free · no pipeline commitments')}
+            accent={klOverbooked ? t.red : t.green} card={card} t={t}
+            variant="state" pulse={klOverbooked} />
+        </div>
       </div>
 
       {poolNegative && (
@@ -676,10 +805,16 @@ export default function BiddingVolume() {
         </div>
       )}
 
-      {overbooked && (
+      {othersOverbooked && (
         <div style={{ ...card, padding: '10px 16px', borderColor: `${t.red}55`, background: `${t.red}10`, fontSize: '12px', color: t.red, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}>
           <span style={{ fontSize: 14 }}>⚠</span>
-          Pipeline commitments exceed available pool by <strong>{fmt(Math.abs(remainingQty), 2)} g</strong>. The auto-attacher won't be able to back-fill every booking from today's incoming.
+          <strong>Bangalore &amp; Others</strong> · pipeline commitments exceed the pool by <strong>{fmt(Math.abs(othersRemaining), 2)} g</strong>. The auto-attacher won't be able to back-fill every booking from today's incoming.
+        </div>
+      )}
+      {klOverbooked && (
+        <div style={{ ...card, padding: '10px 16px', borderColor: `${t.red}55`, background: `${t.red}10`, fontSize: '12px', color: t.red, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontSize: 14 }}>⚠</span>
+          <strong>Kerala</strong> · pipeline commitments exceed the hub pool by <strong>{fmt(Math.abs(klRemaining), 2)} g</strong>. More bills need to reach the hubs (or pipeline closes to gain at EOD).
         </div>
       )}
 
