@@ -2358,6 +2358,12 @@ export async function POST(req) {
     // If step 2 errors (column missing), the booking is already created;
     // we log a warning so ops can spot it in Railway logs and run the
     // migration.
+    // Production's `created_by` column on cal_quotas was changed to UUID at
+    // some point (the migration file in this repo still shows TEXT — out of
+    // sync). Postgres rejects emails with "invalid input syntax for type
+    // uuid". To be resilient either way, try the UUID first; if Postgres
+    // complains about UUID type, retry with the email (TEXT) instead.
+    const actorUuid = auth.user?.id || null
     const baseInsert = {
       date,
       party:       String(party).trim(),
@@ -2368,13 +2374,35 @@ export async function POST(req) {
       purity:      purity || null,
       notes:       notes ? String(notes).trim() : null,
       status:      'booked',
-      created_by:  actorEmail,
+      created_by:  actorUuid || actorEmail,
     }
-    const { data, error: insErr } = await supabase
+    let { data, error: insErr } = await supabase
       .from('cal_quotas')
       .insert(baseInsert)
       .select()
       .single()
+    // Fallback: if the schema actually wants TEXT and we sent UUID, retry
+    // with the email. Catches the dev/staging copies that still have the
+    // original TEXT column.
+    if (insErr && /invalid input syntax for type uuid/i.test(insErr.message || '') && actorUuid) {
+      console.warn('[create_booking] UUID rejected, retrying created_by with email (TEXT schema)')
+      const retry = await supabase
+        .from('cal_quotas')
+        .insert({ ...baseInsert, created_by: actorEmail })
+        .select()
+        .single()
+      data = retry.data; insErr = retry.error
+    } else if (insErr && /invalid input syntax for type uuid/i.test(insErr.message || '') && !actorUuid) {
+      // We sent an email and the column is UUID — no UUID available to
+      // retry with. Insert with null so the row still saves; audit lost.
+      console.warn('[create_booking] created_by is UUID but no auth.user.id available — inserting null')
+      const retry = await supabase
+        .from('cal_quotas')
+        .insert({ ...baseInsert, created_by: null })
+        .select()
+        .single()
+      data = retry.data; insErr = retry.error
+    }
     if (insErr) return Response.json({ error: insErr.message }, { status: 500 })
 
     if (hasPipeline) {
