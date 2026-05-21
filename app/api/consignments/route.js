@@ -2590,22 +2590,40 @@ export async function POST(req) {
       return Response.json({ error: 'Fulfilled bookings are immutable.' }, { status: 400 })
     }
 
+    // Production's _by columns on cal_quotas are UUID (same drift as
+    // created_by — see create_booking). Try UUID first, retry with email
+    // if the schema is still TEXT in this environment.
+    const actorUuid = auth.user?.id || null
     const now = new Date().toISOString()
     const upd = { status }
-    if (status === 'confirmed')  { upd.confirmed_at  = now; upd.confirmed_by  = actorEmail }
-    if (status === 'fulfilled')  { upd.fulfilled_at  = now; upd.fulfilled_by  = actorEmail }
+    if (status === 'confirmed')  { upd.confirmed_at  = now; upd.confirmed_by  = actorUuid || actorEmail }
+    if (status === 'fulfilled')  { upd.fulfilled_at  = now; upd.fulfilled_by  = actorUuid || actorEmail }
     if (status === 'cancelled')  {
       upd.cancelled_at = now
-      upd.cancelled_by = actorEmail
+      upd.cancelled_by = actorUuid || actorEmail
       upd.cancellation_reason = reason ? String(reason).trim() : null
     }
 
-    const { data, error: updErr } = await supabase
+    let { data, error: updErr } = await supabase
       .from('cal_quotas')
       .update(upd)
       .eq('id', id)
       .select()
       .single()
+    if (updErr && /invalid input syntax for type uuid/i.test(updErr.message || '') && actorUuid) {
+      console.warn('[update_booking_status] UUID rejected, retrying _by with email (TEXT schema)')
+      const retryUpd = { ...upd }
+      if (status === 'confirmed')  retryUpd.confirmed_by = actorEmail
+      if (status === 'fulfilled')  retryUpd.fulfilled_by = actorEmail
+      if (status === 'cancelled')  retryUpd.cancelled_by = actorEmail
+      const retry = await supabase
+        .from('cal_quotas')
+        .update(retryUpd)
+        .eq('id', id)
+        .select()
+        .single()
+      data = retry.data; updErr = retry.error
+    }
     if (updErr) return Response.json({ error: updErr.message }, { status: 500 })
 
     // Releasing the booking → release the bills it had claimed so they're

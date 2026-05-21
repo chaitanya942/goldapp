@@ -410,6 +410,28 @@ async function runSync(request) {
       console.error('Pipeline auto-attach threw (non-fatal):', paErr.message)
     }
 
+    // EOD pipeline closure — bookings whose arrival_date has already passed
+    // but still have pipeline_remaining_g > 0 get their unfilled grams
+    // converted to realized gain. Runs every sync (cheap WHERE clause is a
+    // no-op until something stale exists). Defined in
+    // sql/cal_quotas_pipeline_phase2.sql.
+    let pipelineClosed = 0
+    let pipelineClosedWeight = 0
+    try {
+      const { data: closeRows, error: closeErr } = await supabaseAdmin.rpc('close_stale_pipelines')
+      if (closeErr) {
+        console.warn('close_stale_pipelines error (non-fatal):', closeErr.message)
+      } else if (Array.isArray(closeRows) && closeRows.length > 0) {
+        for (const row of closeRows) {
+          pipelineClosedWeight += Number(row.remaining_g || 0)
+        }
+        pipelineClosed = closeRows.length
+        console.log(`Pipeline EOD closure: ${pipelineClosed} booking(s), ${pipelineClosedWeight.toFixed(2)}g of unfilled pipeline converted to realized gain`)
+      }
+    } catch (csErr) {
+      console.error('close_stale_pipelines threw (non-fatal):', csErr.message)
+    }
+
     return Response.json({
       success:  errors === 0,
       total:    rows.length,
@@ -423,6 +445,8 @@ async function runSync(request) {
       pipelineAttached,
       pipelineWeight,
       pipelineOvershoot,
+      pipelineClosed,
+      pipelineClosedWeight,
       lastError: lastError ? JSON.stringify(lastError) : null,
       message:  `Upsert ${minDate}→${maxDate}: ${deduped.length} approved bills synced, ${renamed} bill_no renames preserved, ${ghostsMarked} ghost bills marked deleted, ${carriedForward} stock_status carried forward across delete-recreate (${carryAmbiguous} ambiguous skipped, ${errors} errors)`,
     })

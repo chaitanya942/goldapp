@@ -1286,12 +1286,12 @@ function BookingsList({ t, card, bookings, onUpdateStatus, onRequestCancel, onCr
             <tr>
               <th style={{ ...th, width: 36, textAlign: 'center' }}>#</th>
               <th style={th}>Party</th>
-              <th style={{ ...th, textAlign: 'right' }}>Bills (g)</th>
-              <th style={{ ...th, textAlign: 'right', color: t.text4 }} title="Gain applied — default 3.5 % of bills (operator can override)">+ Gain</th>
-              <th style={{ ...th, textAlign: 'right', color: t.text4 }} title="Excess attributed to additional refining gain">+ Add'l</th>
+              <th style={{ ...th, textAlign: 'right' }} title="Net weight of bills currently attached to this booking — grows as the pipeline auto-attacher pulls in new bills">Net Wt (g)</th>
+              <th style={{ ...th, textAlign: 'right', color: t.text4 }} title="Gain applied (operator-set default 3.5 %) plus any realized gain from pipeline overshoot / EOD closure">+ Gain</th>
+              <th style={{ ...th, textAlign: 'right', color: t.text4 }} title="Excess attributed to additional refining gain at booking time">+ Add'l</th>
               <th style={{ ...th, textAlign: 'right', color: t.text4 }} title="Pending delivery carry-over included in this booking">+ Pending</th>
-              <th style={{ ...th, textAlign: 'right', color: t.text4 }} title="Excess attributed to pipeline (auto-attached as bills arrive)">+ Pipeline</th>
-              <th style={{ ...th, textAlign: 'right' }} title="Total committed to the bidder">= Bid Wt</th>
+              <th style={{ ...th, textAlign: 'right', color: t.text4 }} title="Remaining pipeline (live) — decrements as new bills attach, then zeros at EOD with any leftover credited to gain">+ Pipeline</th>
+              <th style={{ ...th, textAlign: 'right' }} title="Total weight committed to the bidder">= Booked Wt</th>
               <th style={{ ...th, textAlign: 'right', color: t.text4 }}>× Rate</th>
               <th style={{ ...th, textAlign: 'right' }}>= Value</th>
               <th style={{ ...th, textAlign: 'center', width: 50 }}>KL</th>
@@ -1302,16 +1302,27 @@ function BookingsList({ t, card, bookings, onUpdateStatus, onRequestCancel, onCr
               const isCancelled = b.status === 'cancelled'
               const total       = Number(b.weight || 0) * Number(b.rate || 0)
               const dotColor    = partyColor(b.party)
-              // Breakdown values — fall back to "—" when the snapshot
-              // isn't available (old bookings before the breakdown
-              // migration). Live bill total uses the purchases join
-              // (attached_net_weight_g) when the original snapshot is
-              // missing, so old bookings still show *something*.
-              const billsG    = b.bills_net_weight_g != null ? Number(b.bills_net_weight_g) : (Number(b.attached_net_weight_g) || null)
+              // Net Weight = LIVE attached bill weight (grows as the
+              // pipeline auto-attacher pulls in incoming purchases).
+              // Falls back to the create-time snapshot if no bills are
+              // attached yet.
+              const billsG    = (Number(b.attached_net_weight_g) > 0
+                                  ? Number(b.attached_net_weight_g)
+                                  : (b.bills_net_weight_g != null ? Number(b.bills_net_weight_g) : null))
               const gainG     = b.gain_applied_g     != null ? Number(b.gain_applied_g)     : null
               const addlG     = b.additional_gain_g  != null ? Number(b.additional_gain_g)  : null
               const pendingG  = b.pending_g          != null ? Number(b.pending_g)          : null
-              const pipelineG = b.pipeline_original_g!= null ? Number(b.pipeline_original_g): null
+              // Pipeline = LIVE remaining (decrements as bills attach,
+              // and gets zeroed when EOD closure converts the leftover
+              // to gain). Falls back to the original commitment if the
+              // remaining column isn't surfaced yet.
+              const pipelineG = b.pipeline_remaining_g != null
+                                  ? Number(b.pipeline_remaining_g)
+                                  : (b.pipeline_original_g != null ? Number(b.pipeline_original_g) : null)
+              // Realized gain (overshoot + EOD-closed leftover) — folds
+              // into the displayed "+ Gain" column so the row's addends
+              // continue to sum to Booked Weight after pipeline activity.
+              const effectiveGainG = (gainG || 0) + Number(b.gain_realized_g || 0)
               const numCell = (val, opts = {}) => {
                 if (val == null) return <span style={{ color: t.text4, fontFamily: 'monospace', fontWeight: 600 }}>—</span>
                 if (val === 0)   return <span style={{ color: t.text4, fontFamily: 'monospace', fontWeight: 600 }}>—</span>
@@ -1375,11 +1386,11 @@ function BookingsList({ t, card, bookings, onUpdateStatus, onRequestCancel, onCr
                       </div>
                     )}
                   </td>
-                  <td style={{ ...td, textAlign: 'right' }}>{numCell(billsG,    { color: t.text1 })}</td>
-                  <td style={{ ...td, textAlign: 'right' }}>{numCell(gainG,     { color: t.orange || '#e58a3b' })}</td>
-                  <td style={{ ...td, textAlign: 'right' }}>{numCell(addlG,     { color: t.orange || '#e58a3b' })}</td>
-                  <td style={{ ...td, textAlign: 'right' }}>{numCell(pendingG,  { color: t.purple || '#8c5ac8' })}</td>
-                  <td style={{ ...td, textAlign: 'right' }}>{numCell(pipelineG, { color: t.purple || '#8c5ac8' })}</td>
+                  <td style={{ ...td, textAlign: 'right' }}>{numCell(billsG,         { color: t.text1 })}</td>
+                  <td style={{ ...td, textAlign: 'right' }}>{numCell(effectiveGainG, { color: t.orange || '#e58a3b' })}</td>
+                  <td style={{ ...td, textAlign: 'right' }}>{numCell(addlG,          { color: t.orange || '#e58a3b' })}</td>
+                  <td style={{ ...td, textAlign: 'right' }}>{numCell(pendingG,       { color: t.purple || '#8c5ac8' })}</td>
+                  <td style={{ ...td, textAlign: 'right' }}>{numCell(pipelineG,      { color: t.purple || '#8c5ac8' })}</td>
                   <td style={{ ...td, textAlign: 'right', fontFamily: 'monospace', color: t.gold, fontWeight: 800, fontSize: 14, whiteSpace: 'nowrap' }}>
                     {fmt(b.weight, 2)}<span style={{ fontSize: 11, color: t.text3, marginLeft: 2, fontWeight: 600 }}>g</span>
                   </td>
