@@ -2060,8 +2060,13 @@ function BookingModal({ t, arrivalDate, availablePool, remainingQty, incomingNet
   // Gains default to 3.5 % of the selected weight (the company's standard
   // refining margin — also the default in the hero Gain card). Operators
   // can override by typing a number; once they do, we stop auto-syncing.
-  const DEFAULT_GAIN_RATE   = 0.035
-  const liveGainRate        = (effectiveGainRate && effectiveGainRate > 0) ? effectiveGainRate : DEFAULT_GAIN_RATE
+  //
+  // Kerala exception — per ops, gains aren't applied to Kerala bookings
+  // by default (the consolidation flow already nets out refining loss
+  // upstream). Default rate = 0 % for Kerala; operator can still type a
+  // value to override.
+  const DEFAULT_GAIN_RATE   = isKerala ? 0 : 0.035
+  const liveGainRate        = (effectiveGainRate && effectiveGainRate > 0 && !isKerala) ? effectiveGainRate : DEFAULT_GAIN_RATE
   const defaultGainGrams    = netFromSelection > 0 ? netFromSelection * liveGainRate : 0
   const [gainsEntry,        setGainsEntry]      = useState(() => defaultGainGrams > 0 ? defaultGainGrams.toFixed(2) : '')
   const [gainsEntryDirty,   setGainsEntryDirty] = useState(false)
@@ -2361,7 +2366,11 @@ function BookingModal({ t, arrivalDate, availablePool, remainingQty, incomingNet
                     onDoubleClick={() => setGainsEntryDirty(false)}
                     placeholder="0.00"
                     inputMode="decimal"
-                    title={gainsEntryDirty ? `Double-click to reset to ${(liveGainRate * 100).toFixed(2)} % default` : `Default: ${(liveGainRate * 100).toFixed(2)} % of selected weight`}
+                    title={
+                      isKerala
+                        ? (gainsEntryDirty ? 'Double-click to reset to 0 (Kerala default)' : 'Kerala default is 0 — type to apply a gain')
+                        : (gainsEntryDirty ? `Double-click to reset to ${(liveGainRate * 100).toFixed(2)} % default` : `Default: ${(liveGainRate * 100).toFixed(2)} % of selected weight`)
+                    }
                     style={{
                       ...inputStyle(t), padding: '5px 10px', fontSize: 13.5,
                       fontFamily: 'monospace', fontWeight: 700,
@@ -2369,9 +2378,15 @@ function BookingModal({ t, arrivalDate, availablePool, remainingQty, incomingNet
                       color: addedGainsW > 0 ? (t.orange || '#e58a3b') : t.text3,
                       borderColor: addedGainsW > 0 ? `${(t.orange || '#e58a3b')}55` : t.border,
                     }} />,
-                  { symbol: '+', editable: true, faded: addedGainsW === 0, hint: gainsEntryDirty
-                      ? `manual override · default ${(liveGainRate * 100).toFixed(2)} %`
-                      : `default ${(liveGainRate * 100).toFixed(2)} % of selected · type to override` })}
+                  { symbol: '+', editable: true, faded: addedGainsW === 0, hint:
+                      isKerala
+                        ? (gainsEntryDirty
+                            ? `manual override · Kerala default is 0`
+                            : `no default for Kerala · type to apply a gain`)
+                        : (gainsEntryDirty
+                            ? `manual override · default ${(liveGainRate * 100).toFixed(2)} %`
+                            : `default ${(liveGainRate * 100).toFixed(2)} % of selected · type to override`)
+                  })}
 
                 {/* + Pending — checkbox decides whether the hero's pending
                     carry-over enters this booking. Value column shows the
