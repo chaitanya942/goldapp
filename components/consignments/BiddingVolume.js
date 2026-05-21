@@ -285,14 +285,18 @@ export default function BiddingVolume() {
   const pipelineTotalG    = pipelineKLG + pipelineOtherG
 
   // ── Regional split — Bangalore & Others vs Kerala ─────────────────────────
-  // The two regions have separate supply chains (Bangalore = today's
-  // purchases + outstation transit; Kerala = leaf→hub consolidation) and
-  // separate pipeline mechanics, so the hero strip splits into two rows.
-  // Section 1 is always Bangalore. Sections 2 + 4 contain both regions,
-  // filtered by branch.region. Section 4 is INCLUDED in the regional
-  // Incoming totals (unlike the legacy global incomingNetWt that uses
-  // s1+s2 only) — Section 4 bills physically move EOD and arrive at HO
-  // tomorrow, so they're genuinely part of tomorrow's pool.
+  // The two regions have separate supply chains and separate pipeline
+  // mechanics, so the hero strip splits into two rows.
+  //
+  // Bangalore & Others Hero = Section 1 (Bangalore today) + non-Kerala
+  // Section 2 (24h transit). Section 4 (branch stock pre-EOD) is NOT
+  // counted in the hero math — those bills only enter the booking when
+  // the operator explicitly picks them. Per ops spec.
+  //
+  // Kerala Hero = Kerala bills wherever they appear in supply — both
+  // Section 2 (rare: Kerala 24h transit) and Section 4 (the common
+  // case: hub at_branch stock waiting for EOD dispatch). Section 1 is
+  // Bangalore-only so it contributes nothing here.
   const s2BranchesAll = supply?.transit_24h?.branches    || supply?.in_transit?.branches || []
   const s4BranchesAll = supply?.branch_pre_eod?.branches || []
   const sumWt    = (arr) => arr.reduce((s, b) => s + Number(b.total_net_wt   || 0), 0)
@@ -300,15 +304,16 @@ export default function BiddingVolume() {
   const sumBills = (arr) => arr.reduce((s, b) => s + Number(b.total_bills    || 0), 0)
   const isKL = (b) => b.region === 'Kerala'
 
-  // Kerala — no Section 1 (Bangalore-only). S2 + S4 filtered to Kerala.
-  const klSupplyNet   = sumWt(s2BranchesAll.filter(isKL)) + sumWt(s4BranchesAll.filter(isKL))
+  // Kerala — S2 Kerala + S4 Kerala (the hubs). Section 1 contributes 0.
+  const klSupplyNet   = sumWt(s2BranchesAll.filter(isKL))    + sumWt(s4BranchesAll.filter(isKL))
   const klSupplyGross = sumGross(s2BranchesAll.filter(isKL)) + sumGross(s4BranchesAll.filter(isKL))
   const klSupplyBills = sumBills(s2BranchesAll.filter(isKL)) + sumBills(s4BranchesAll.filter(isKL))
 
-  // Others — S1 (all Bangalore) + non-Kerala S2 + non-Kerala S4.
-  const othersSupplyNet   = s1Net   + sumWt(s2BranchesAll.filter(b => !isKL(b)))    + sumWt(s4BranchesAll.filter(b => !isKL(b)))
-  const othersSupplyGross = s1Gross + sumGross(s2BranchesAll.filter(b => !isKL(b))) + sumGross(s4BranchesAll.filter(b => !isKL(b)))
-  const othersSupplyBills = s1Bills + sumBills(s2BranchesAll.filter(b => !isKL(b))) + sumBills(s4BranchesAll.filter(b => !isKL(b)))
+  // Others — S1 (all Bangalore) + non-Kerala S2 only. S4 is intentionally
+  // omitted; those bills only count when explicitly selected.
+  const othersSupplyNet   = s1Net   + sumWt(s2BranchesAll.filter(b => !isKL(b)))
+  const othersSupplyGross = s1Gross + sumGross(s2BranchesAll.filter(b => !isKL(b)))
+  const othersSupplyBills = s1Bills + sumBills(s2BranchesAll.filter(b => !isKL(b)))
 
   // Gain — Kerala default is 0 % (leaf→hub flow already absorbs refining
   // loss upstream). Others use the standard 3.5 % (or the operator's
