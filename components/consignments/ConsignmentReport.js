@@ -211,10 +211,10 @@ export default function ConsignmentReport() {
         g.branch_name || '',
         g.region || '',
         g.bills || 0,
-        Number(g.gross_weight || 0).toFixed(3),
-        Number(g.stone_weight || 0).toFixed(3),
-        Number(g.wastage      || 0).toFixed(3),
-        Number(g.net_weight   || 0).toFixed(3),
+        Number(g.gross_weight || 0).toFixed(2),
+        Number(g.stone_weight || 0).toFixed(2),
+        Number(g.wastage      || 0).toFixed(2),
+        Number(g.net_weight   || 0).toFixed(2),
         Number(g.total_amount || 0).toFixed(2),
         Number(g.svc_charge   || 0).toFixed(2),
         g.expected_delivery_date || '',
@@ -372,25 +372,17 @@ export default function ConsignmentReport() {
   })()
 
   const filteredBranchRows = (() => {
-    const today = istToday()
-    // Both today and dateStr are YYYY-MM-DD; parsing them as UTC midnight
-    // gives a stable IST-day diff (no DST in India, so no further fuss).
-    const ageDays = (dateStr) => {
-      if (!dateStr) return null
-      return Math.floor((new Date(today) - new Date(dateStr)) / 86400000)
-    }
     return branchAggregated
       .filter(g => !activeRegion || g.region === activeRegion)
       .filter(g => !searchQ || (g.branch_name || '').toLowerCase().includes(searchQ) || (g.region || '').toLowerCase().includes(searchQ))
       .filter(g => {
-        const age = ageDays(g.consignment_date)
-        switch (quickFilter) {
-          case 'overdue':       return age != null && age > 7
-          case 'watch':         return age != null && age >= 4 && age <= 7
-          case 'today_active':  return age === 0
-          case 'all':
-          default:              return true
+        // Same "Consignment Date" filter the case-wise view uses.
+        if (caseSinceRange.from || caseSinceRange.to) {
+          if (!g.consignment_date) return false
+          if (caseSinceRange.from && g.consignment_date < caseSinceRange.from) return false
+          if (caseSinceRange.to   && g.consignment_date > caseSinceRange.to)   return false
         }
+        return true
       })
       .slice()
       .sort((a, b) => {
@@ -448,6 +440,55 @@ export default function ConsignmentReport() {
   function handleCaseSort(key) {
     if (caseSortKey === key) setCaseSortDir(d => d * -1)
     else { setCaseSortKey(key); setCaseSortDir(-1) }
+  }
+
+  // JPG export — POSTs the currently-filtered rows to the server, which
+  // renders them via @napi-rs/canvas and streams back a JPEG. The two views
+  // share the endpoint; the layout switches on viewMode (case = per-bill
+  // App ID, branch = aggregated No of Bills).
+  function activeFilterLabel() {
+    if (caseSinceQuick === 'all')       return 'All dates'
+    if (caseSinceQuick === 'today')     return 'Today'
+    if (caseSinceQuick === 'yesterday') return 'Yesterday'
+    if (caseSinceQuick === 'last7')     return 'Last 7 days'
+    if (caseSinceQuick === 'custom' && (caseSinceFrom || caseSinceTo)) {
+      return `${caseSinceFrom || '…'} → ${caseSinceTo || '…'}`
+    }
+    return 'All dates'
+  }
+  async function downloadJpg() {
+    const rows = viewMode === 'branch' ? filteredBranchRows : filteredCaseRows
+    if (rows.length === 0) {
+      setToast({ msg: 'Nothing to export — empty filter.', type: 'error' })
+      return
+    }
+    setToast({ msg: 'Generating JPG…', type: 'info' })
+    try {
+      const res = await authedFetch('/api/consignment-in-transit-jpg', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          viewMode,
+          rows,
+          meta: { filter_label: activeFilterLabel(), region: activeRegion || null },
+        }),
+      })
+      if (!res.ok) {
+        let msg = `Download failed: ${res.status}`
+        try { const j = await res.json(); if (j.error) msg = j.error } catch {}
+        setToast({ msg, type: 'error' })
+        return
+      }
+      const blob = await res.blob()
+      const a = document.createElement('a')
+      a.href = URL.createObjectURL(blob)
+      a.download = `ConsignmentReport_${viewMode}_${istToday()}.jpg`
+      a.click()
+      URL.revokeObjectURL(a.href)
+      setToast({ msg: 'JPG ready.', type: 'success' })
+    } catch (e) {
+      setToast({ msg: e.message || 'JPG export failed', type: 'error' })
+    }
   }
 
   // Open the bill journey modal for an application_id and fetch its history.
@@ -770,38 +811,11 @@ export default function ConsignmentReport() {
             style={{ width: '100%', background: t.card2, border: `1px solid ${t.border2}`, borderRadius: '8px', padding: '8px 12px 8px 30px', fontSize: '12px', color: t.text1, outline: 'none', boxSizing: 'border-box' }} />
         </div>
 
-        {/* Branch mode: operations age-based quick filters */}
-        {viewMode === 'branch' && (
-          <div style={{ display: 'flex', gap: '5px', flexWrap: 'wrap' }}>
-            {[
-              { key: 'all',          label: 'All',           color: t.text2  },
-              { key: 'overdue',      label: 'Overdue >7d',   color: t.red    },
-              { key: 'watch',        label: 'Watch 4-7d',    color: t.orange },
-              { key: 'today_active', label: 'Active today',  color: t.blue   },
-            ].map(q => {
-              const active = quickFilter === q.key
-              return (
-                <button key={q.key}
-                  onClick={() => setQuickFilter(q.key)}
-                  style={{
-                    padding: '6px 12px', borderRadius: '6px',
-                    background: active ? `${q.color}18` : 'transparent',
-                    border: `1px solid ${active ? `${q.color}80` : t.border2}`,
-                    color: active ? q.color : t.text3,
-                    fontSize: '11px', fontWeight: active ? 700 : 500, letterSpacing: '.02em',
-                    cursor: 'pointer', whiteSpace: 'nowrap',
-                    transition: 'all .12s',
-                  }}>
-                  {q.label}
-                </button>
-              )
-            })}
-          </div>
-        )}
-
-        {/* Case mode: "consignment since" date filter — chips + custom range */}
-        {viewMode === 'case' && (
-          <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
+        {/* Consignment Date filter — same chips for both branch-wise and
+            case-wise so ops gets one consistent vocabulary. Drives the
+            caseSinceRange that both filteredCaseRows and filteredBranchRows
+            consume. */}
+        <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
             <span style={{ fontSize: '10px', color: t.text4, letterSpacing: '.08em', textTransform: 'uppercase', fontWeight: 600 }}>Consignment date</span>
             {[
               { key: 'all',       label: 'All' },
@@ -832,8 +846,7 @@ export default function ConsignmentReport() {
             <input type="date" value={caseSinceTo}
               onChange={e => { setCaseSinceTo(e.target.value); setCaseSinceQuick('custom') }}
               style={{ background: t.card2, border: `1px solid ${t.border2}`, borderRadius: '6px', padding: '5px 7px', fontSize: '11px', color: t.text1, fontFamily: 'monospace', outline: 'none' }} />
-          </div>
-        )}
+        </div>
 
         <div style={{ marginLeft: isMobile ? 0 : 'auto', display: 'flex', gap: '8px', alignItems: 'center' }}>
           <span style={{ fontSize: '11px', color: t.text4 }}>
@@ -841,28 +854,26 @@ export default function ConsignmentReport() {
               ? `${filteredCaseRows.length} of ${caseData.length} bills`
               : `${filteredBranchRows.length} of ${branchAggregated.length} rows`}
           </span>
-          {viewMode === 'branch' && (
-            <button onClick={() => exportCsv(filteredBranchRows)} title="Download the current view as CSV"
-              style={{
-                padding: '6px 12px', borderRadius: '6px',
-                background: 'transparent', border: `1px solid ${t.border2}`,
-                color: t.text2, fontSize: '11px', fontWeight: 600,
-                cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '5px',
-              }}>
-              ↓ CSV
-            </button>
-          )}
-          {viewMode === 'case' && (
-            <button onClick={() => exportCaseCsv(filteredCaseRows)} title="Download the current bill list as CSV"
-              style={{
-                padding: '6px 12px', borderRadius: '6px',
-                background: 'transparent', border: `1px solid ${t.border2}`,
-                color: t.text2, fontSize: '11px', fontWeight: 600,
-                cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '5px',
-              }}>
-              ↓ CSV
-            </button>
-          )}
+          <button onClick={() => (viewMode === 'branch' ? exportCsv(filteredBranchRows) : exportCaseCsv(filteredCaseRows))}
+            title="Download the current view as CSV"
+            style={{
+              padding: '6px 12px', borderRadius: '6px',
+              background: 'transparent', border: `1px solid ${t.border2}`,
+              color: t.text2, fontSize: '11px', fontWeight: 600,
+              cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '5px',
+            }}>
+            ↓ CSV
+          </button>
+          <button onClick={downloadJpg}
+            title={`Download the current view as JPG (${viewMode === 'branch' ? 'branch-wise rows' : 'per-bill rows'})`}
+            style={{
+              padding: '6px 12px', borderRadius: '6px',
+              background: `${t.gold}10`, border: `1px solid ${t.gold}50`,
+              color: t.gold, fontSize: '11px', fontWeight: 700,
+              cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '5px',
+            }}>
+            ↓ JPG
+          </button>
         </div>
       </div>
 
@@ -894,8 +905,8 @@ export default function ConsignmentReport() {
                 {sortKey === k ? (sortDir === -1 ? '↓' : '↑') : '⇅'}
               </span>
             )
-            const fmtAmt = (n) => n != null && n !== 0 ? `₹${Math.round(n).toLocaleString('en-IN')}` : (n === 0 ? '₹0' : '—')
-            const fmtWt  = (n) => n != null ? Number(n).toFixed(3) : '—'
+            const fmtAmt = (n) => n != null ? `₹${Number(n).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'
+            const fmtWt  = (n) => n != null ? Number(n).toFixed(2) : '—'
             const fmtCellDate = (d) => {
               if (!d) return '—'
               const [y, m, day] = d.split('-')
@@ -1008,8 +1019,8 @@ export default function ConsignmentReport() {
               verticalAlign: 'middle', textAlign: col.a, cursor: 'pointer',
               position: 'sticky', top: 0, zIndex: 2,                        // stays put while you scroll the page
             })
-            const fmtAmt = (n) => n != null ? `₹${Math.round(n).toLocaleString('en-IN')}` : '—'
-            const fmtWt  = (n) => n != null ? Number(n).toFixed(3) : '—'
+            const fmtAmt = (n) => n != null ? `₹${Number(n).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'
+            const fmtWt  = (n) => n != null ? Number(n).toFixed(2) : '—'
             return (
             <div style={{ overflowX: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px', tableLayout: 'auto' }}>
