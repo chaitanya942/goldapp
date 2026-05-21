@@ -7,7 +7,7 @@
 // Creates the branches row if it doesn't exist (e.g. branches discovered via purchases sync).
 
 import { createClient } from '@supabase/supabase-js'
-import { requireAuth, ROLE_GROUPS } from '../../../../lib/apiAuth'
+import { requireAuthForPage } from '../../../../lib/apiAuth'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
@@ -15,7 +15,7 @@ const supabase = createClient(
 )
 
 export async function POST(req) {
-  const auth = await requireAuth(req, { requiredRoles: ROLE_GROUPS.ADMIN })
+  const auth = await requireAuthForPage(req, 'branch-management')
   if (!auth.ok) return auth.response
 
   try {

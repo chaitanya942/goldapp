@@ -8,7 +8,7 @@
 // Admin only.
 
 import { createClient } from '@supabase/supabase-js'
-import { requireAuth, ROLE_GROUPS } from '../../../../lib/apiAuth'
+import { requireAuthForPage } from '../../../../lib/apiAuth'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
@@ -16,7 +16,7 @@ const supabase = createClient(
 )
 
 export async function GET(req) {
-  const auth = await requireAuth(req, { requiredRoles: ROLE_GROUPS.ADMIN })
+  const auth = await requireAuthForPage(req, 'heatmap-insights')
   if (!auth.ok) return auth.response
 
   const { searchParams } = new URL(req.url)

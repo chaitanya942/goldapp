@@ -14,10 +14,13 @@
 //          { kind: 'gstin_add',   state_code, gstin, last_seq? } — new state
 //          { kind: 'gstin_remove', state_code }                  — drop state
 //
-// Restricted to ROLE_GROUPS.ACCOUNTS (super_admin, founders_office, accounts).
+// Gated by the SAME permission as the Company Settings page
+// (page.company-settings) rather than a hardcoded role group, so custom
+// roles ops grant the page to can actually edit it. Previously hardcoded
+// to ROLE_GROUPS.ACCOUNTS.
 
 import { createClient } from '@supabase/supabase-js'
-import { requireAuth, ROLE_GROUPS } from '../../../../lib/apiAuth'
+import { requireAuthForPage } from '../../../../lib/apiAuth'
 import { getCurrentFyCode } from '../../../../lib/consignmentUtils'
 
 const supabase = createClient(
@@ -56,7 +59,7 @@ function buildSequences(stateCodes, seqRows, fy) {
 }
 
 export async function GET(req) {
-  const auth = await requireAuth(req, { requiredRoles: ROLE_GROUPS.ACCOUNTS })
+  const auth = await requireAuthForPage(req, 'company-settings')
   if (!auth.ok) return auth.response
   try {
     const fy = getCurrentFyCode()
@@ -168,7 +171,7 @@ async function writeStateGstin(state_code, gstin /* string | null to remove */) 
 }
 
 export async function POST(req) {
-  const auth = await requireAuth(req, { requiredRoles: ROLE_GROUPS.ACCOUNTS })
+  const auth = await requireAuthForPage(req, 'company-settings')
   if (!auth.ok) return auth.response
   try {
     const body = await req.json()

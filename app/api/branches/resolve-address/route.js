@@ -7,7 +7,7 @@
 // when Geocoding gives ZERO_RESULTS or returns a result with no PIN code.
 // Cheapest path that still produces NIC-compliant addresses (with PIN).
 
-import { requireAuth, ROLE_GROUPS } from '../../../../lib/apiAuth'
+import { requireAuthForPage } from '../../../../lib/apiAuth'
 
 const GEOCODE_URL = 'https://maps.googleapis.com/maps/api/geocode/json'
 const PLACES_TEXT_SEARCH_URL = 'https://places.googleapis.com/v1/places:searchText'
@@ -85,7 +85,7 @@ async function tryPlacesTextSearch(query, apiKey) {
 }
 
 export async function POST(req) {
-  const auth = await requireAuth(req, { requiredRoles: ROLE_GROUPS.ADMIN })
+  const auth = await requireAuthForPage(req, 'branch-management')
   if (!auth.ok) return auth.response
 
   const apiKey = process.env.GOOGLE_MAPS_API_KEY

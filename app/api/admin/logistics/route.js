@@ -8,10 +8,15 @@
 //        Body: { kind: 'update', branch_name, partner, pickup_time,
 //                delivery_tat_hours, pickup_days, contact_name, contact_phone, notes }
 //
-// Restricted to ROLE_GROUPS.ADMIN (super_admin, founders_office, admin).
+// Gated by the SAME permission as the Logistics page (page.logistics)
+// rather than a hardcoded role group — so whichever role ops grants the
+// page to (custom roles included) can actually read/write it. Previously
+// hardcoded to ROLE_GROUPS.ADMIN; non-admin users with page.logistics
+// granted via Role Management would see the page but get 403 from the
+// API and an empty table.
 
 import { createClient } from '@supabase/supabase-js'
-import { requireAuth, ROLE_GROUPS } from '../../../../lib/apiAuth'
+import { requireAuthForPage } from '../../../../lib/apiAuth'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
@@ -23,7 +28,7 @@ const VALID_DAYS   = new Set(['Mon','Tue','Wed','Thu','Fri','Sat','Sun'])
 const HHMM_REGEX   = /^([01]?\d|2[0-3]):[0-5]\d$/
 
 export async function GET(req) {
-  const auth = await requireAuth(req, { requiredRoles: ROLE_GROUPS.ADMIN })
+  const auth = await requireAuthForPage(req, 'logistics')
   if (!auth.ok) return auth.response
   try {
     const { data: branches, error } = await supabase
@@ -42,7 +47,7 @@ export async function GET(req) {
 }
 
 export async function POST(req) {
-  const auth = await requireAuth(req, { requiredRoles: ROLE_GROUPS.ADMIN })
+  const auth = await requireAuthForPage(req, 'logistics')
   if (!auth.ok) return auth.response
   try {
     const body = await req.json()
