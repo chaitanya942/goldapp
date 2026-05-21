@@ -276,14 +276,23 @@ export default function BiddingVolume() {
       }
 
   // Source picker helpers — shared between the inline picker and the modal.
-  const bangBranches = supply?.bangalore?.branches  || []
-  const inTBranches  = supply?.in_transit?.branches || []
+  // Four sections feed the bid:
+  //   1. Bangalore Today           (B: prefix)  selectable
+  //   2. In-Transit 24h TAT        (T: prefix)  selectable — arrives tomorrow
+  //   3. In-Transit 48h TAT                     view-only  — arrives day after
+  //   4. Branch Stock pre-EOD      (P: prefix)  selectable — moves today
+  const bangBranches   = supply?.bangalore?.branches      || []
+  const inTBranches    = supply?.transit_24h?.branches    || supply?.in_transit?.branches || []
+  const t48hBranches   = supply?.transit_48h?.branches    || []
+  const preEodBranches = supply?.branch_pre_eod?.branches || []
+  const dayAfterArrivalDate = supply?.day_after_arrival   || null
   const branchesByKey = useMemo(() => {
     const m = {}
-    for (const b of bangBranches) m[`B:${b.branch_name}`] = { ...b, group: 'bangalore' }
-    for (const b of inTBranches)  m[`T:${b.branch_name}`] = { ...b, group: 'in_transit' }
+    for (const b of bangBranches)   m[`B:${b.branch_name}`] = { ...b, group: 'bangalore' }
+    for (const b of inTBranches)    m[`T:${b.branch_name}`] = { ...b, group: 'transit_24h' }
+    for (const b of preEodBranches) m[`P:${b.branch_name}`] = { ...b, group: 'branch_pre_eod' }
     return m
-  }, [bangBranches, inTBranches])
+  }, [bangBranches, inTBranches, preEodBranches])
   const selectedTotal = useMemo(() => {
     let s = 0
     for (const k of selected) s += Number(branchesByKey[k]?.total_net_wt || 0)
@@ -581,6 +590,44 @@ export default function BiddingVolume() {
         incomingNetWt={incomingNetWt}
         incomingBills={incomingBills}
         arrivalDate={arrivalDate}
+      />
+
+      {/* ── Section 4 · Branch Stock pre-EOD ─────────────────────────────
+          Bills currently at_branch at branches whose pickup is still ahead
+          today, and whose TAT will land them at HO tomorrow. Selectable —
+          counts toward today's bid pool. Kerala restricted to hubs (Vennala
+          By-Pass + Thrissur) by the server. */}
+      <SourceSection
+        t={t} card={card}
+        title="Branch Stock — pickup pending today"
+        subtitle={`Currently at_branch · will move by EOD · arrives at HO ${fmtDate(arrivalDate)}`}
+        accent={t.orange}
+        branches={preEodBranches}
+        total={supply?.branch_pre_eod?.total}
+        prefix="P"
+        selectable
+        selected={selected}
+        branchLocked={branchLocked}
+        onToggleBranch={toggleBranch}
+        onSelectGroup={selectGroupAll}
+        emptyMsg="No eligible branches — every branch with stock has already done today's pickup, or the next pickup is on another day."
+      />
+
+      {/* ── Section 3 · In-Transit · 48h TAT (view only) ─────────────────
+          In-transit bills arriving DAY AFTER the bid date. Shown so ops
+          sees what's coming, but NOT part of tomorrow's bid pool — no
+          checkboxes, dimmed. */}
+      <SourceSection
+        t={t} card={card}
+        title="In-Transit · 48h TAT — view only"
+        subtitle={dayAfterArrivalDate
+          ? `Arriving at HO ${fmtDate(dayAfterArrivalDate)} — not part of today's bidding`
+          : 'Arriving day after tomorrow — not part of today\'s bidding'}
+        accent={t.text4}
+        branches={t48hBranches}
+        total={supply?.transit_48h?.total}
+        selectable={false}
+        emptyMsg="No 48h-TAT bills currently in transit."
       />
 
       {/* ── Bookings list — what's already committed ── */}
@@ -1457,6 +1504,116 @@ function SourcePicker({ t, card, supply, bangBranches, inTBranches, selected, se
       {totalRegions === 0 && (
         <div style={{ padding: '32px 18px', textAlign: 'center', color: t.text4, fontSize: 12 }}>
           No incoming sources for this date.
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Supplementary source section — compact alternative to SourcePicker ──────
+// Used for Section 3 (transit-48h, view-only) and Section 4 (branch-stock
+// pre-EOD, selectable). Same region-grouped branch list pattern, but as a
+// standalone card with its own title/total — keeps the main picker focused on
+// the "primary" 24h-arrival pool while these extras dock below it.
+function SourceSection({
+  t, card, title, subtitle, accent,
+  branches = [], total, prefix, selectable = false,
+  selected, branchLocked, onToggleBranch, onSelectGroup,
+  emptyMsg,
+}) {
+  // Group branches by region in insertion order (already sorted server-side
+  // by total_net_wt within each branch list).
+  const regions = (() => {
+    const m = new Map()
+    for (const b of branches) {
+      const r = b.region || 'Unknown'
+      if (!m.has(r)) m.set(r, [])
+      m.get(r).push(b)
+    }
+    return [...m.entries()]
+  })()
+  const isEmpty = branches.length === 0
+  const totalBills = total?.bills    || 0
+  const totalNet   = total?.net_wt   || 0
+  return (
+    <div style={{ ...card, padding: 0, overflow: 'hidden', borderLeft: `3px solid ${accent || t.gold}` }}>
+      <div style={{ padding: '13px 18px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, borderBottom: `1px solid ${t.border}`, background: `${(accent || t.gold)}06` }}>
+        <div>
+          <div style={{ fontSize: 13, color: t.text1, fontWeight: 600, letterSpacing: '.02em' }}>{title}</div>
+          {subtitle && <div style={{ fontSize: 10.5, color: t.text3, marginTop: 3 }}>{subtitle}</div>}
+        </div>
+        <div style={{ textAlign: 'right' }}>
+          <div style={{ fontSize: 18, color: accent || t.gold, fontFamily: 'monospace', fontWeight: 700, lineHeight: 1 }}>
+            {fmt(totalNet, 2)}<span style={{ fontSize: 11, color: t.text3, marginLeft: 3, fontWeight: 500 }}>g</span>
+          </div>
+          <div style={{ fontSize: 10, color: t.text4, marginTop: 3 }}>{totalBills} bill{totalBills === 1 ? '' : 's'}</div>
+        </div>
+      </div>
+      {isEmpty ? (
+        <div style={{ padding: '22px 18px', textAlign: 'center', color: t.text4, fontSize: 11, lineHeight: 1.6 }}>{emptyMsg || 'Nothing here yet.'}</div>
+      ) : (
+        <div style={{ padding: '6px 0' }}>
+          {regions.map(([region, rows]) => {
+            const rColor = REGION_COLORS[region] || t.text3
+            // Group toggle state — all branches in this region selected?
+            const allOn = selectable && rows.every(b => selected?.has(`${prefix}:${b.branch_name}`))
+            return (
+              <div key={region} style={{ padding: '8px 18px', borderTop: `1px solid ${t.border}30` }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                  <span style={{ fontSize: 10, color: rColor, fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase' }}>{region}</span>
+                  {selectable && rows.length > 1 && (
+                    <button onClick={() => onSelectGroup?.(rows, prefix, allOn)}
+                      style={{ background: 'transparent', border: 'none', color: t.text3, fontSize: 10, fontWeight: 600, cursor: 'pointer', textDecoration: 'underline' }}>
+                      {allOn ? 'Clear region' : 'Select all'}
+                    </button>
+                  )}
+                </div>
+                {rows.map(b => {
+                  const k       = `${prefix || 'X'}:${b.branch_name}`
+                  const checked = selectable && (selected?.has(k) || false)
+                  const locked  = selectable && branchLocked?.(b)
+                  const rowCursor = !selectable ? 'default' : (locked ? 'not-allowed' : 'pointer')
+                  return (
+                    <div key={b.branch_name}
+                      onClick={() => { if (selectable && !locked) onToggleBranch?.(k) }}
+                      style={{
+                        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                        padding: '7px 10px', borderRadius: 6,
+                        background: checked ? `${t.gold}10` : 'transparent',
+                        cursor: rowCursor,
+                        opacity: !selectable ? 0.62 : (locked ? 0.45 : 1),
+                        transition: 'background .12s',
+                      }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        {selectable ? (
+                          <span style={{
+                            width: 14, height: 14, borderRadius: 3,
+                            border: `1.5px solid ${checked ? t.gold : t.border2}`,
+                            background: checked ? t.gold : 'transparent',
+                            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                            color: '#1a0a00', fontSize: 10, fontWeight: 900, flexShrink: 0,
+                          }}>{checked ? '✓' : ''}</span>
+                        ) : (
+                          <span style={{ width: 14, height: 14, borderRadius: 3, border: `1.5px solid ${t.border}`, background: 'transparent', flexShrink: 0 }} />
+                        )}
+                        <span style={{ fontSize: 12, color: t.text1, fontWeight: 500 }}>{b.branch_name}</span>
+                        {b.tat_hours != null && (
+                          <span style={{ fontSize: 9, color: t.text4, background: `${t.text4}14`, borderRadius: 3, padding: '1px 6px' }}>{b.tat_hours}h TAT</span>
+                        )}
+                        {b.pickup_time && (
+                          <span style={{ fontSize: 9, color: t.text4 }}>pickup {b.pickup_time}</span>
+                        )}
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, fontFamily: 'monospace' }}>
+                        <span style={{ fontSize: 12, color: t.gold, fontWeight: 600 }}>{fmt(b.total_net_wt, 2)}<span style={{ fontSize: 10, color: t.text3, marginLeft: 2 }}>g</span></span>
+                        <span style={{ fontSize: 10, color: t.text4 }}>{b.total_bills} bill{b.total_bills === 1 ? '' : 's'}</span>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )
+          })}
         </div>
       )}
     </div>

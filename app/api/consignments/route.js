@@ -432,10 +432,15 @@ export async function GET(req) {
     const arrivalDate    = searchParams.get('date') || addDays(today, 1)  // default: tomorrow IST
     const bangalorePurchaseDate = addDays(arrivalDate, -1)                // bangalore today = arrival - 1
 
-    // Branch metadata — TAT, region, pickup time.
+    const dayAfterArrival = addDays(arrivalDate, 1)
+
+    // Branch metadata — TAT, region, pickup time, pickup_days, is_hub. We
+    // need pickup_days + is_hub now to compute Section 4 (branch-stock-pre-
+    // EOD) eligibility: only branches with a still-ahead pickup today, and
+    // only Kerala hubs (not leaf branches that already consolidate at hub).
     let branchQ = supabase
       .from('branches')
-      .select('name, region, state, delivery_tat_hours, pickup_time, logistics_partner')
+      .select('name, region, state, delivery_tat_hours, pickup_time, pickup_days, is_hub, logistics_partner')
       .eq('is_active', true)
     if (allowedRegions) branchQ = branchQ.in('region', allowedRegions)
     const { data: branchRows, error: bErr } = await branchQ
@@ -445,6 +450,22 @@ export async function GET(req) {
 
     const bangaloreBranchNames = (branchRows || []).filter(b => b.region === 'Bangalore').map(b => b.name)
     const outsideBranchNames   = (branchRows || []).filter(b => b.region !== 'Bangalore').map(b => b.name)
+
+    // Section 4 eligibility: at_branch bills at non-Bangalore branches whose
+    // pickup is STILL AHEAD today, AND whose TAT lets them arrive at HO on
+    // the target arrivalDate (i.e. TAT ≤ 24h for default tomorrow-arrival).
+    // Kerala restriction: only the hub branches (per ops spec — leaf-branch
+    // bills already consolidate at hub before moving to HO).
+    const nowIstHHMM = new Date().toLocaleTimeString('en-GB', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: false })
+    const todayDow   = new Date().toLocaleDateString('en-US', { timeZone: 'Asia/Kolkata', weekday: 'short' })
+    const preEodEligibleBranchNames = (branchRows || []).filter(b => {
+      if (b.region === 'Bangalore')                          return false
+      if (Number(b.delivery_tat_hours || 0) > 24)            return false   // 48h-TAT picked up today arrives day-after, not tomorrow
+      if (b.region === 'Kerala' && !b.is_hub)                return false   // Kerala: hub-only
+      if (!b.pickup_time || !Array.isArray(b.pickup_days))   return false
+      if (!b.pickup_days.includes(todayDow))                 return false
+      return String(b.pickup_time) > nowIstHHMM                              // HH:MM lexical compare is correct for same-day same-format
+    }).map(b => b.name)
 
     // 1) Bangalore — bills purchased on bangalorePurchaseDate, status approved.
     //    Include any stock_status: the time-of-day lifecycle moves them at
@@ -490,13 +511,30 @@ export async function GET(req) {
       const d  = new Date(ms + 5.5 * 3600_000)  // shift to IST
       return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`
     }
-    const inflightForTarget = inflightBills
-      .map(b => {
-        const tat = branchMeta[b.branch_name]?.delivery_tat_hours || 24
-        const arrivalDateIst = istDateOf(b.dispatched_at, tat)
-        return { ...b, _arrival_date: arrivalDateIst, _tat_hours: tat }
-      })
-      .filter(b => b._arrival_date === arrivalDate)
+    const inflightWithArrival = inflightBills.map(b => {
+      const tat = branchMeta[b.branch_name]?.delivery_tat_hours || 24
+      return { ...b, _arrival_date: istDateOf(b.dispatched_at, tat), _tat_hours: tat }
+    })
+    const inflight24h = inflightWithArrival.filter(b => b._arrival_date === arrivalDate)
+    const inflight48h = inflightWithArrival.filter(b => b._arrival_date === dayAfterArrival)
+    // Back-compat alias for the existing UI (renders only the 24h bucket).
+    const inflightForTarget = inflight24h
+
+    // 4) Branch-stock pre-EOD — at_branch bills at eligible branches (defined
+    //    above). Picked up later today, arrives at HO tomorrow → bookable.
+    let preEodBills = []
+    if (preEodEligibleBranchNames.length) {
+      const { data: pb, error: pbErr } = await supabase
+        .from('purchases')
+        .select('id, application_id, branch_name, gross_weight, net_weight, total_amount, purchase_date, stock_status, dispatched_at, crm_status')
+        .in('branch_name', preEodEligibleBranchNames)
+        .eq('stock_status', 'at_branch')
+        .eq('crm_status',   'approved')
+        .eq('is_deleted',   false)
+        .is('booking_id',   null)
+      if (pbErr) return Response.json({ error: pbErr.message }, { status: 500 })
+      preEodBills = pb || []
+    }
 
     // Group by branch for the per-branch breakdown card.
     const groupByBranch = (bills) => {
@@ -528,8 +566,13 @@ export async function GET(req) {
       return Object.values(m).sort((a, b) => b.total_net_wt - a.total_net_wt)
     }
 
-    const bangaloreByBranch = groupByBranch(bangBills)
-    const inflightByBranch  = groupByBranch(inflightForTarget)
+    const bangaloreByBranch  = groupByBranch(bangBills)
+    const transit24hByBranch = groupByBranch(inflight24h)
+    const transit48hByBranch = groupByBranch(inflight48h)
+    const preEodByBranch     = groupByBranch(preEodBills)
+    // Back-compat alias: the older UI reads supply.in_transit and expects
+    // the bookable-tomorrow bucket. Keep it pointing at the 24h transit.
+    const inflightByBranch   = transit24hByBranch
 
     // Section totals + grand total.
     const sumOf = (rows) => rows.reduce((a, r) => ({
@@ -539,14 +582,20 @@ export async function GET(req) {
       amount:   a.amount   + r.total_amount,
     }), { bills: 0, gross_wt: 0, net_wt: 0, amount: 0 })
 
-    const bangTotal     = sumOf(bangaloreByBranch)
-    const inflightTotal = sumOf(inflightByBranch)
-    const grandTotal    = {
-      bills:    bangTotal.bills    + inflightTotal.bills,
-      gross_wt: bangTotal.gross_wt + inflightTotal.gross_wt,
-      net_wt:   bangTotal.net_wt   + inflightTotal.net_wt,
-      amount:   bangTotal.amount   + inflightTotal.amount,
+    const bangTotal       = sumOf(bangaloreByBranch)
+    const transit24hTotal = sumOf(transit24hByBranch)
+    const transit48hTotal = sumOf(transit48hByBranch)
+    const preEodTotal     = sumOf(preEodByBranch)
+    // Bookable pool = sections that can actually arrive at HO on arrivalDate.
+    // Section 3 (transit_48h) is informational only — excluded from grandTotal.
+    const grandTotal = {
+      bills:    bangTotal.bills    + transit24hTotal.bills    + preEodTotal.bills,
+      gross_wt: bangTotal.gross_wt + transit24hTotal.gross_wt + preEodTotal.gross_wt,
+      net_wt:   bangTotal.net_wt   + transit24hTotal.net_wt   + preEodTotal.net_wt,
+      amount:   bangTotal.amount   + transit24hTotal.amount   + preEodTotal.amount,
     }
+    // Back-compat alias for the existing UI (which reads `in_transit.total`).
+    const inflightTotal = transit24hTotal
 
     // Pending Delivery — shared signed carry-over for this arrival date.
     // maybeSingle() so a date with no row just yields 0 (the common case).
@@ -558,16 +607,15 @@ export async function GET(req) {
 
     return Response.json({
       data: {
-        arrival_date:           arrivalDate,
+        arrival_date:            arrivalDate,
+        day_after_arrival:       dayAfterArrival,
         bangalore_purchase_date: bangalorePurchaseDate,
-        bangalore: {
-          branches: bangaloreByBranch,
-          total:    bangTotal,
-        },
-        in_transit: {
-          branches: inflightByBranch,
-          total:    inflightTotal,
-        },
+        bangalore:      { branches: bangaloreByBranch,  total: bangTotal       },
+        transit_24h:    { branches: transit24hByBranch, total: transit24hTotal },
+        transit_48h:    { branches: transit48hByBranch, total: transit48hTotal },   // view-only, NOT part of bookable pool
+        branch_pre_eod: { branches: preEodByBranch,     total: preEodTotal     },
+        // Back-compat for the existing UI — alias of transit_24h.
+        in_transit: { branches: inflightByBranch, total: inflightTotal },
         grand_total: grandTotal,
         pending: {
           grams:      Number(pendingRow?.pending_grams) || 0,
