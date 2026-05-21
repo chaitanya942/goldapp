@@ -2070,36 +2070,42 @@ function BookingModal({ t, arrivalDate, availablePool, remainingQty, incomingNet
   const w = Number(bookingWeight); const r = Number(rate)
   const total = Number.isFinite(w) && Number.isFinite(r) ? w * r : 0
   const wValid = Number.isFinite(w) && w > 0
-  const freePool = remainingQty                                    // pool − already booked
-  const afterFree = wValid ? freePool - w : freePool
-  // wouldOverbook also true when there is NO free pool at all (deficit /
-  // already fully booked) and the operator still enters a weight.
-  const wouldOverbook = wValid && (freePool <= 0 || w > freePool)
-  // Gauge fill: fraction of the free pool this commitment consumes.
-  // Critical edge: when freePool <= 0 the pool is in deficit / fully
-  // booked — any positive commit is 100% over. Show a FULL red bar so the
-  // showpiece conveys "no room" instead of going blank in exactly the
-  // dangerous state (audit should-fix #4).
-  const fillPct = !wValid
-    ? 0
-    : freePool > 0
-      ? Math.min(100, (w / freePool) * 100)
-      : 100
-  const overPct = freePool > 0 && wValid && w > freePool
-    ? Math.min(100, ((w - freePool) / freePool) * 100)
-    : 0
+
+  // Difference vs the operator-built Total Bidding Weight (Selected +
+  // Gains + Pending). When the operator commits MORE than that to a
+  // bidder, the excess has to be attributed to either:
+  //   · additional gain (we'll realize more than the 3.5 % default), or
+  //   · pipeline (book against tomorrow's incoming purchases).
+  // The operator ticks one or both — we record the attribution in the
+  // notes string. No red anywhere; over-bookings are a normal flow.
+  const overBy = wValid && totalBiddingW > 0 ? Math.max(0, w - totalBiddingW) : 0
+  const [attrGain,     setAttrGain]     = useState(false)
+  const [attrPipeline, setAttrPipeline] = useState(false)
+  // Drop attribution if the difference disappears (e.g. operator rounds
+  // back down or adds more gains so the total catches up).
+  useEffect(() => {
+    if (overBy <= 0) {
+      if (attrGain)     setAttrGain(false)
+      if (attrPipeline) setAttrPipeline(false)
+    }
+  }, [overBy]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const submit = async () => {
     if (!party.trim()) return
     if (!Number.isFinite(w) || w <= 0) return
     if (!Number.isFinite(r) || r <= 0) return
+    if (overBy > 0 && !attrGain && !attrPipeline) return
     setBusy(true)
     // Pin the new name into the local roster on submit too — covers the
     // case where the operator skipped the explicit "+ Save" button.
     if (isNewBidder) saveNewBidder()
-    const compositeNotes = selectedBranchNames.length
-      ? `Sources: ${selectedBranchNames.join(', ')}`
-      : null
+    const attrBits = []
+    if (attrGain)     attrBits.push('additional_gain')
+    if (attrPipeline) attrBits.push('pipeline')
+    const compositeNotes = [
+      selectedBranchNames.length ? `Sources: ${selectedBranchNames.join(', ')}` : null,
+      overBy > 0 && attrBits.length ? `Excess ${overBy.toFixed(2)} g · from ${attrBits.join(' + ')}` : null,
+    ].filter(Boolean).join(' · ') || null
     const ok = await onSubmit({
       party:       party.trim(),
       buyer_phone: null,
@@ -2113,7 +2119,7 @@ function BookingModal({ t, arrivalDate, availablePool, remainingQty, incomingNet
     if (!ok) setBusy(false)
   }
 
-  const valid = party.trim() && Number.isFinite(w) && w > 0 && Number.isFinite(r) && r > 0
+  const valid = party.trim() && Number.isFinite(w) && w > 0 && Number.isFinite(r) && r > 0 && (overBy === 0 || attrGain || attrPipeline)
 
   // Portal to document.body — the dashboard <main> uses overflow: clip on
   // its x-axis, which (with overflow-y: auto) creates a clipping/paint
@@ -2294,7 +2300,7 @@ function BookingModal({ t, arrivalDate, availablePool, remainingQty, incomingNet
                   onChange={e => { setBookingWeight(e.target.value.replace(/[^\d.]/g, '')); setBookingWeightDirty(true) }}
                   placeholder="e.g. 1500"
                   inputMode="decimal"
-                  style={{ ...inputStyle(t), fontFamily: 'monospace', fontSize: 17, fontWeight: 800, padding: '10px 12px', color: wouldOverbook ? t.red : t.gold, borderColor: wouldOverbook ? `${t.red}66` : (wValid ? `${t.gold}66` : t.border) }} />
+                  style={{ ...inputStyle(t), fontFamily: 'monospace', fontSize: 17, fontWeight: 800, padding: '10px 12px', color: t.gold, borderColor: wValid ? `${t.gold}66` : t.border }} />
               </label>
 
               {/* Rate */}
@@ -2307,6 +2313,69 @@ function BookingModal({ t, arrivalDate, availablePool, remainingQty, incomingNet
                   style={{ ...inputStyle(t), fontFamily: 'monospace', fontSize: 17, fontWeight: 800, padding: '10px 12px', color: Number(rate) > 0 ? t.blue : t.text3, borderColor: Number(rate) > 0 ? `${t.blue}66` : t.border }} />
               </label>
             </div>
+
+            {/* Excess attribution — appears only when the operator commits
+                MORE to a bidder than the built Total Bidding Weight. Two
+                checkboxes pick where the difference comes from; one of
+                them must be ticked before the booking can be created. */}
+            {overBy > 0 && (() => {
+              const amberTone = t.orange || '#e58a3b'
+              const Box = ({ checked, onClick, accent, label, hint }) => (
+                <button type="button" onClick={onClick}
+                  aria-checked={checked}
+                  style={{
+                    display: 'flex', alignItems: 'flex-start', gap: 10,
+                    padding: '8px 12px',
+                    background: checked ? `${accent}14` : t.card2 || t.card,
+                    border: `1px solid ${checked ? `${accent}66` : t.border}`,
+                    borderRadius: 8, cursor: 'pointer', textAlign: 'left',
+                    transition: 'all .15s ease', minWidth: 0,
+                  }}
+                  onMouseEnter={e => { if (!checked) e.currentTarget.style.background = `${accent}08` }}
+                  onMouseLeave={e => { if (!checked) e.currentTarget.style.background = t.card2 || t.card }}>
+                  <span style={{
+                    width: 18, height: 18, borderRadius: 5, flexShrink: 0, marginTop: 1,
+                    border: `1.8px solid ${checked ? accent : t.border2 || t.border}`,
+                    background: checked ? accent : 'transparent',
+                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                    color: '#fff', fontSize: 11, fontWeight: 900, lineHeight: 1,
+                  }}>{checked ? '✓' : ''}</span>
+                  <span style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ fontSize: 12, fontWeight: 800, color: checked ? accent : t.text1, letterSpacing: '.01em' }}>{label}</div>
+                    <div style={{ fontSize: 10.5, color: t.text3, marginTop: 2, fontWeight: 500, lineHeight: 1.35 }}>{hint}</div>
+                  </span>
+                </button>
+              )
+              const needsAttr = !attrGain && !attrPipeline
+              return (
+                <div style={{
+                  background: `linear-gradient(150deg, ${amberTone}0e, ${amberTone}04 60%, transparent)`,
+                  border: `1px solid ${amberTone}40`,
+                  borderRadius: 12, padding: '12px 14px',
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 10, marginBottom: 8 }}>
+                    <span style={{ fontSize: 10.5, color: amberTone, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 800 }}>
+                      Difference
+                    </span>
+                    <span style={{ fontSize: 17, color: amberTone, fontFamily: 'monospace', fontWeight: 800, letterSpacing: '-.01em' }}>
+                      +{fmt(overBy, 2)}<span style={{ fontSize: 11, color: t.text3, marginLeft: 3 }}>g</span>
+                    </span>
+                  </div>
+                  <div style={{ fontSize: 11, color: t.text3, marginBottom: 8, fontWeight: 600 }}>
+                    Booking weight is {fmt(overBy, 2)} g over the total bidding weight ({fmt(totalBiddingW, 2)} g). Pick where this comes from — tick one or both:
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                    <Box checked={attrGain}     onClick={() => setAttrGain(v => !v)}     accent={t.orange || '#e58a3b'} label="Additional gain"  hint={`Realize more than the ${(liveGainRate * 100).toFixed(2)} % default`} />
+                    <Box checked={attrPipeline} onClick={() => setAttrPipeline(v => !v)} accent={t.purple || '#8c5ac8'} label="Pipeline"          hint="Book against tomorrow's incoming" />
+                  </div>
+                  {needsAttr && (
+                    <div style={{ fontSize: 10.5, color: amberTone, marginTop: 8, fontWeight: 700, letterSpacing: '.01em' }}>
+                      Tick at least one to enable Create Booking.
+                    </div>
+                  )}
+                </div>
+              )
+            })()}
 
             {/* Bidder — last because party gets picked AFTER the rate
                 lands (highest-rate-wins). Dropdown stays collapsed until
@@ -2324,17 +2393,9 @@ function BookingModal({ t, arrivalDate, availablePool, remainingQty, incomingNet
           </div>
         </div>
 
-        {/* Footer — sticky, with inline overbook warning chip when relevant */}
+        {/* Footer — sticky. Over-bookings are handled inline in the body
+            via an attribution panel, so the footer stays clean. */}
         <div style={{ padding: '12px 20px', borderTop: `1px solid ${t.border}`, background: t.card2, flexShrink: 0 }}>
-          {wouldOverbook && (
-            <div style={{
-              display: 'flex', alignItems: 'center', gap: 6, marginBottom: 9,
-              fontSize: 10.5, color: t.red, fontWeight: 700, letterSpacing: '.02em',
-            }}>
-              <span style={{ display: 'inline-block', width: 6, height: 6, borderRadius: '50%', background: t.red }} />
-              Overbook · this exceeds the free pool ({fmt(Math.max(0, freePool), 2)} g)
-            </div>
-          )}
           <div style={{ display: 'flex', gap: 8 }}>
             <button onClick={onClose}
               style={{ flex: 1, background: 'transparent', border: `1px solid ${t.border}`, borderRadius: 8, padding: '11px 14px', fontSize: 12.5, color: t.text2, cursor: 'pointer', fontWeight: 700 }}>
