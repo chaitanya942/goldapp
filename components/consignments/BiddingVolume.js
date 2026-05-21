@@ -830,6 +830,7 @@ export default function BiddingVolume() {
           onSubmit={createBooking}
           onClose={() => setShowBookModal(false)}
           onSuccess={() => setSelected(new Set())}
+          onSubmitGuardFail={(msg) => showToast(msg, 'error')}
         />
       )}
 
@@ -2014,7 +2015,7 @@ function hashAvatarBg(s, t) {
 //
 // Selected sources display: compact by default — chip strip is collapsed
 // to "first 6 + (N more)" so 20+ branches don't blow up the modal height.
-function BookingModal({ t, arrivalDate, availablePool, remainingQty, incomingNetWt, gainGrams, pendingGrams, bookedQty, selected, selectedTotal, billsById, bidders, effectiveGainRate, isKerala, onSubmit, onClose, onSuccess }) {
+function BookingModal({ t, arrivalDate, availablePool, remainingQty, incomingNetWt, gainGrams, pendingGrams, bookedQty, selected, selectedTotal, billsById, bidders, effectiveGainRate, isKerala, onSubmit, onClose, onSuccess, onSubmitGuardFail }) {
   // The quantity committed to a bidder is a *negotiated* figure against the
   // whole available pool (Incoming + Gain ± Pending), not the exact sum of
   // the selected source branches — ops tells a bidder "550 g", a rounded
@@ -2147,10 +2148,35 @@ function BookingModal({ t, arrivalDate, availablePool, remainingQty, incomingNet
   }, [overBy]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const submit = async () => {
-    if (!party.trim()) return
-    if (!Number.isFinite(w) || w <= 0) return
-    if (!Number.isFinite(r) || r <= 0) return
-    if (overBy > 0 && !attrGain && !attrPipeline) return
+    // Loud diagnostics — these logs and the visible bail-toast guarantee
+    // we never have another "I clicked but nothing happened" scenario.
+    // If a guard returns, the operator sees WHY in a toast.
+    console.log('[BookingModal] submit() entered', {
+      party: party.trim() || '(empty)',
+      weight: w, rate: r, overBy,
+      attrGain, attrPipeline,
+      selected_count: selected?.size ?? 0,
+    })
+    if (!party.trim()) {
+      console.warn('[BookingModal] guard: bidder missing')
+      if (onSubmitGuardFail) onSubmitGuardFail('Pick a bidder before creating the booking.')
+      return
+    }
+    if (!Number.isFinite(w) || w <= 0) {
+      console.warn('[BookingModal] guard: invalid weight', w)
+      if (onSubmitGuardFail) onSubmitGuardFail('Bidding weight is missing or invalid.')
+      return
+    }
+    if (!Number.isFinite(r) || r <= 0) {
+      console.warn('[BookingModal] guard: invalid rate', r)
+      if (onSubmitGuardFail) onSubmitGuardFail('Rate is missing or invalid.')
+      return
+    }
+    if (overBy > 0 && !attrGain && !attrPipeline) {
+      console.warn('[BookingModal] guard: overBy attribution required', overBy)
+      if (onSubmitGuardFail) onSubmitGuardFail(`Booking is ${overBy.toFixed(2)} g over total — tick Additional gain or Pipeline first.`)
+      return
+    }
     setBusy(true)
     try {
       // Pin the new name into the local roster on submit too — covers the
