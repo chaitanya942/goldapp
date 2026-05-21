@@ -442,25 +442,40 @@ export default function BiddingVolume() {
 
   // ── Mutations ──────────────────────────────────────────────────────────────
   const createBooking = async (payload) => {
-    // Capture the selected branch names so the API can mark their eligible
     // Bill-level claim: send the exact purchase ids ops selected. The server
     // honours bill_ids verbatim (no branch-wide widening) so partial
     // selections — "3 of 7 bills at Mysore" — are respected at booking time.
     // source_branches is sent alongside for backwards compat + audit context
     // (server falls back to it only when bill_ids is empty).
+    //
+    // The whole flow is wrapped in try/catch so a network blip / JSON parse
+    // error / RBAC 403 always surfaces to ops via toast instead of failing
+    // silently behind a "Creating…" button.
     const billIds = [...selected]
     const sourceBranches = [...new Set(billIds.map(id => billsById[id]?._branch_name).filter(Boolean))]
-    const r = await authedFetch('/api/consignments?action=create_booking', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...payload, date: arrivalDate, bill_ids: billIds, source_branches: sourceBranches }),
-    })
-    const j = await r.json()
-    if (!r.ok || j.error) { showToast(j.error || 'Booking failed', 'error'); return false }
-    showToast('Booking created.', 'success')
-    setShowBookModal(false)
-    setActiveTab('bookings')                          // surface the committed row immediately
-    fetchAll(true)
-    return true
+    try {
+      const r = await authedFetch('/api/consignments?action=create_booking', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...payload, date: arrivalDate, bill_ids: billIds, source_branches: sourceBranches }),
+      })
+      let j = null
+      try { j = await r.json() } catch { /* may be empty body on 5xx */ }
+      if (!r.ok || j?.error) {
+        const msg = j?.error || `Booking failed (HTTP ${r.status})`
+        console.error('[create_booking] server error:', r.status, j)
+        showToast(msg, 'error')
+        return false
+      }
+      showToast('Booking created.', 'success')
+      setShowBookModal(false)
+      setActiveTab('bookings')                        // surface the committed row immediately
+      fetchAll(true)
+      return true
+    } catch (err) {
+      console.error('[create_booking] network/parse error:', err)
+      showToast(err?.message || 'Booking failed — network error', 'error')
+      return false
+    }
   }
 
   const updateStatus = async (id, status, reason) => {
@@ -820,10 +835,11 @@ export default function BiddingVolume() {
         />
       )}
 
-      {/* ── Toast ── */}
+      {/* ── Toast — z-index 2100 puts it ABOVE the booking modal (2000)
+              so error messages stay visible while the modal is open. ── */}
       {toast && (
         <div key={toast.key} className="bidToast" style={{
-          position: 'fixed', bottom: 20, right: 20, zIndex: 100,
+          position: 'fixed', bottom: 20, right: 20, zIndex: 2100,
           background: toast.type === 'error' ? t.red : toast.type === 'success' ? t.green : t.card,
           color: '#fff',
           borderRadius: 10, fontSize: 12, fontWeight: 600,
@@ -2096,27 +2112,34 @@ function BookingModal({ t, arrivalDate, availablePool, remainingQty, incomingNet
     if (!Number.isFinite(r) || r <= 0) return
     if (overBy > 0 && !attrGain && !attrPipeline) return
     setBusy(true)
-    // Pin the new name into the local roster on submit too — covers the
-    // case where the operator skipped the explicit "+ Save" button.
-    if (isNewBidder) saveNewBidder()
-    const attrBits = []
-    if (attrGain)     attrBits.push('additional_gain')
-    if (attrPipeline) attrBits.push('pipeline')
-    const compositeNotes = [
-      selectedBranchNames.length ? `Sources: ${selectedBranchNames.join(', ')}` : null,
-      overBy > 0 && attrBits.length ? `Excess ${overBy.toFixed(2)} g · from ${attrBits.join(' + ')}` : null,
-    ].filter(Boolean).join(' · ') || null
-    const ok = await onSubmit({
-      party:       party.trim(),
-      buyer_phone: null,
-      weight:      w,
-      rate:        r,
-      purity:      null,
-      is_kl:       !!isKerala,
-      notes:       compositeNotes,
-    })
-    if (ok && onSuccess) onSuccess()
-    if (!ok) setBusy(false)
+    try {
+      // Pin the new name into the local roster on submit too — covers the
+      // case where the operator skipped the explicit "+ Save" button.
+      if (isNewBidder) saveNewBidder()
+      const attrBits = []
+      if (attrGain)     attrBits.push('additional_gain')
+      if (attrPipeline) attrBits.push('pipeline')
+      const compositeNotes = [
+        selectedBranchNames.length ? `Sources: ${selectedBranchNames.join(', ')}` : null,
+        overBy > 0 && attrBits.length ? `Excess ${overBy.toFixed(2)} g · from ${attrBits.join(' + ')}` : null,
+      ].filter(Boolean).join(' · ') || null
+      const ok = await onSubmit({
+        party:       party.trim(),
+        buyer_phone: null,
+        weight:      w,
+        rate:        r,
+        purity:      null,
+        is_kl:       !!isKerala,
+        notes:       compositeNotes,
+      })
+      if (ok && onSuccess) onSuccess()
+      if (!ok) setBusy(false)
+    } catch (err) {
+      // Anything thrown inside onSubmit lands here so the button can't get
+      // stuck in "Creating…" with no visible feedback.
+      console.error('[BookingModal] submit threw:', err)
+      setBusy(false)
+    }
   }
 
   const valid = party.trim() && Number.isFinite(w) && w > 0 && Number.isFinite(r) && r > 0 && (overBy === 0 || attrGain || attrPipeline)

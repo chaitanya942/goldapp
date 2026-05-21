@@ -622,6 +622,24 @@ export async function GET(req) {
       .eq('arrival_date', arrivalDate)
       .maybeSingle()
 
+    // Diagnostic snapshot — surfaces *why* Section 4 contains what it
+    // contains. Helps ops debug "hub X isn't showing up" without needing
+    // a DB shell: if the hub appears in eligible_branches but NOT in the
+    // branches with bills, it's a stock-status issue (no at_branch bills
+    // currently at the hub); if it's missing from eligible_branches, the
+    // branch metadata is wrong (is_hub flag, region, etc.).
+    const preEodKeralaHubsEligible = (branchRows || [])
+      .filter(b => b.region === 'Kerala' && b.is_hub)
+      .map(b => b.name)
+    const preEodBranchesWithBills = preEodByBranch.map(b => b.branch_name)
+    const debugSection4 = {
+      eligible_branches:        preEodEligibleBranchNames,
+      eligible_kerala_hubs:     preEodKeralaHubsEligible,
+      branches_with_at_branch_bills: preEodBranchesWithBills,
+      now_ist_hhmm: nowIstHHMM,
+      today_dow:    todayDow,
+    }
+
     return Response.json({
       data: {
         arrival_date:            arrivalDate,
@@ -630,7 +648,7 @@ export async function GET(req) {
         bangalore:      { branches: bangaloreByBranch,  total: bangTotal       },
         transit_24h:    { branches: transit24hByBranch, total: transit24hTotal },
         transit_48h:    { branches: transit48hByBranch, total: transit48hTotal },   // view-only, NOT part of bookable pool
-        branch_pre_eod: { branches: preEodByBranch,     total: preEodTotal     },
+        branch_pre_eod: { branches: preEodByBranch,     total: preEodTotal, _debug: debugSection4 },
         // Back-compat for the existing UI — alias of transit_24h.
         in_transit: { branches: inflightByBranch, total: inflightTotal },
         grand_total: grandTotal,
