@@ -453,11 +453,18 @@ export default function BiddingVolume() {
     // silently behind a "Creating…" button.
     const billIds = [...selected]
     const sourceBranches = [...new Set(billIds.map(id => billsById[id]?._branch_name).filter(Boolean))]
+    // 20-second client timeout so a hung request can never strand the
+    // modal in "Creating…". AbortController fires after the deadline and
+    // the catch surfaces a clear timeout toast.
+    const ctrl = new AbortController()
+    const tid = setTimeout(() => ctrl.abort(), 20_000)
     try {
       const r = await authedFetch('/api/consignments?action=create_booking', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...payload, date: arrivalDate, bill_ids: billIds, source_branches: sourceBranches }),
+        signal: ctrl.signal,
       })
+      clearTimeout(tid)
       let j = null
       try { j = await r.json() } catch { /* may be empty body on 5xx */ }
       if (!r.ok || j?.error) {
@@ -472,8 +479,12 @@ export default function BiddingVolume() {
       fetchAll(true)
       return true
     } catch (err) {
+      clearTimeout(tid)
       console.error('[create_booking] network/parse error:', err)
-      showToast(err?.message || 'Booking failed — network error', 'error')
+      const msg = err?.name === 'AbortError'
+        ? 'Booking timed out (20s) — try again or check the Railway logs.'
+        : (err?.message || 'Booking failed — network error')
+      showToast(msg, 'error')
       return false
     }
   }

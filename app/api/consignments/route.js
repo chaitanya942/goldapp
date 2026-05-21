@@ -707,16 +707,41 @@ export async function GET(req) {
     const date = searchParams.get('date')
     if (!date) return Response.json({ error: 'date required (YYYY-MM-DD)' }, { status: 400 })
 
-    const { data: rows, error: bkErr } = await supabase
-      .from('cal_quotas')
-      .select(`id, date, party, buyer_phone, weight, rate, is_kl, purity, notes,
-               status, created_at, created_by,
-               confirmed_at, confirmed_by, fulfilled_at, fulfilled_by,
-               cancelled_at, cancelled_by, cancellation_reason,
-               pipeline_remaining_g, pipeline_region, pipeline_arrival_date,
-               pipeline_attached_at, gain_realized_g`)
-      .eq('date', date)
-      .order('created_at', { ascending: false })
+    // Try with pipeline columns first. If the migration hasn't run yet
+    // PostgREST returns a "column does not exist" error — fall back to the
+    // original schema so the bookings tab still loads.
+    const fullSelect = `id, date, party, buyer_phone, weight, rate, is_kl, purity, notes,
+                        status, created_at, created_by,
+                        confirmed_at, confirmed_by, fulfilled_at, fulfilled_by,
+                        cancelled_at, cancelled_by, cancellation_reason,
+                        pipeline_remaining_g, pipeline_region, pipeline_arrival_date,
+                        pipeline_attached_at, gain_realized_g`
+    const baseSelect = `id, date, party, buyer_phone, weight, rate, is_kl, purity, notes,
+                        status, created_at, created_by,
+                        confirmed_at, confirmed_by, fulfilled_at, fulfilled_by,
+                        cancelled_at, cancelled_by, cancellation_reason`
+    let rows = null
+    let bkErr = null
+    {
+      const tryFull = await supabase
+        .from('cal_quotas')
+        .select(fullSelect)
+        .eq('date', date)
+        .order('created_at', { ascending: false })
+      if (tryFull.error && /column .* does not exist/i.test(tryFull.error.message || '')) {
+        console.warn('[bidding_bookings] pipeline columns missing — falling back to base select. Run sql/cal_quotas_pipeline_attach.sql.')
+        const tryBase = await supabase
+          .from('cal_quotas')
+          .select(baseSelect)
+          .eq('date', date)
+          .order('created_at', { ascending: false })
+        rows = tryBase.data
+        bkErr = tryBase.error
+      } else {
+        rows = tryFull.data
+        bkErr = tryFull.error
+      }
+    }
     if (bkErr) return Response.json({ error: bkErr.message }, { status: 500 })
 
     // Roll-up — active = booked + confirmed + fulfilled; cancelled excluded.
@@ -2314,26 +2339,49 @@ export async function POST(req) {
       pipelineRegionResolved = regions.length === 1 ? regions[0] : null
     }
 
+    // Two-step insert so the booking still succeeds when the pipeline
+    // migration hasn't been run yet:
+    //   1) base insert — only columns guaranteed by the original schema
+    //   2) follow-up UPDATE for pipeline_* columns, best-effort
+    // If step 2 errors (column missing), the booking is already created;
+    // we log a warning so ops can spot it in Railway logs and run the
+    // migration.
+    const baseInsert = {
+      date,
+      party:       String(party).trim(),
+      buyer_phone: buyer_phone ? String(buyer_phone).trim() : null,
+      weight:      w,
+      rate:        r,
+      is_kl:       !!is_kl,
+      purity:      purity || null,
+      notes:       notes ? String(notes).trim() : null,
+      status:      'booked',
+      created_by:  actorEmail,
+    }
     const { data, error: insErr } = await supabase
       .from('cal_quotas')
-      .insert({
-        date,
-        party:       String(party).trim(),
-        buyer_phone: buyer_phone ? String(buyer_phone).trim() : null,
-        weight:      w,
-        rate:        r,
-        is_kl:       !!is_kl,
-        purity:      purity || null,
-        notes:       notes ? String(notes).trim() : null,
-        status:      'booked',
-        created_by:  actorEmail,
-        pipeline_remaining_g:  hasPipeline ? pipelineGap : 0,
-        pipeline_region:       hasPipeline ? pipelineRegionResolved : null,
-        pipeline_arrival_date: hasPipeline ? date : null,
-      })
+      .insert(baseInsert)
       .select()
       .single()
     if (insErr) return Response.json({ error: insErr.message }, { status: 500 })
+
+    if (hasPipeline) {
+      try {
+        const { error: pipeErr } = await supabase
+          .from('cal_quotas')
+          .update({
+            pipeline_remaining_g:  pipelineGap,
+            pipeline_region:       pipelineRegionResolved,
+            pipeline_arrival_date: date,
+          })
+          .eq('id', data.id)
+        if (pipeErr) {
+          console.warn('[create_booking] pipeline columns update failed (migration may not have run — see sql/cal_quotas_pipeline_attach.sql):', pipeErr.message)
+        }
+      } catch (pipeThrew) {
+        console.warn('[create_booking] pipeline update threw (non-fatal):', pipeThrew?.message)
+      }
+    }
 
     // Mark the source branches' eligible bills as booked. Same eligibility
     // logic as the bidding_volume reader: Bangalore = purchase_date on the
