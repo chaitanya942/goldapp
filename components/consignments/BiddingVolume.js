@@ -22,6 +22,7 @@
 // booking ledger now.
 
 import { useState, useEffect, useCallback, useMemo, useRef, Fragment } from 'react'
+import { createPortal } from 'react-dom'
 import { useApp } from '../../lib/context'
 import GoldSpinner from '../ui/GoldSpinner'
 import AnimatedNumber from '../ui/AnimatedNumber'
@@ -1947,9 +1948,15 @@ function BookingModal({ t, arrivalDate, availablePool, remainingQty, incomingNet
 
   const valid = party.trim() && Number.isFinite(w) && w > 0 && Number.isFinite(r) && r > 0
 
-  return (
+  // Portal to document.body — the dashboard <main> uses overflow: clip on
+  // its x-axis, which (with overflow-y: auto) creates a clipping/paint
+  // context that was swallowing the modal even though it's position: fixed.
+  // Rendering at the body level guarantees the overlay reaches the viewport
+  // edges regardless of where this component lives in the tree.
+  if (typeof document === 'undefined') return null
+  return createPortal((
     <div onClick={onClose} style={{
-      position: 'fixed', inset: 0, zIndex: 100,
+      position: 'fixed', inset: 0, zIndex: 2000,
       background: 'rgba(0,0,0,.6)',
       display: 'flex', alignItems: 'center', justifyContent: 'center',
       padding: 20, overflow: 'auto',
@@ -2149,15 +2156,16 @@ function BookingModal({ t, arrivalDate, availablePool, remainingQty, incomingNet
         </div>
       </div>
     </div>
-  )
+  ), document.body)
 }
 
 function CancelModal({ t, booking, onConfirm, onClose }) {
   const [reason, setReason] = useState('')
   const [busy, setBusy] = useState(false)
-  return (
+  if (typeof document === 'undefined') return null
+  return createPortal((
     <div onClick={onClose} style={{
-      position: 'fixed', inset: 0, zIndex: 100,
+      position: 'fixed', inset: 0, zIndex: 2000,
       background: 'rgba(0,0,0,.55)',
       display: 'flex', alignItems: 'center', justifyContent: 'center',
       padding: 20,
@@ -2187,7 +2195,7 @@ function CancelModal({ t, booking, onConfirm, onClose }) {
         </div>
       </div>
     </div>
-  )
+  ), document.body)
 }
 
 function Field({ label, children }) {
