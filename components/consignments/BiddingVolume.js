@@ -1601,9 +1601,12 @@ function SourceSection({
                         {b.tat_hours != null && (
                           <span title={`Delivery TAT ${b.tat_hours}h`} style={{ fontSize: 10.5, color: t.text3, background: `${t.text4}1c`, border: `1px solid ${t.text4}2e`, borderRadius: 4, padding: '1px 8px', whiteSpace: 'nowrap', fontWeight: 700, letterSpacing: '.03em' }}>{b.tat_hours}h TAT</span>
                         )}
-                        {b.pickup_time && (
-                          <span title="Branch pickup time" style={{ fontSize: 11, color: t.text3, whiteSpace: 'nowrap', fontWeight: 600 }}>· pickup {b.pickup_time}</span>
-                        )}
+                        {/* Pickup time intentionally suppressed — pickups
+                            can run late and we don't want ops to think a
+                            branch is "done" just because the scheduled
+                            time has passed. Eligibility is gated by
+                            pickup_days (today is a pickup day), not by
+                            the clock. */}
                       </div>
                       {/* Col 3: gross weight (muted) */}
                       <span title="Gross weight" style={{ fontSize: 12.5, color: t.text2, fontFamily: 'monospace', textAlign: 'right', fontWeight: 600, whiteSpace: 'nowrap' }}>

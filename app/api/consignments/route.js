@@ -468,10 +468,15 @@ export async function GET(req) {
       // the schedule is implicit ("end of day"); we don't want that to hide
       // them.
       if (b.region === 'Kerala' && b.is_hub) return true
-      // Non-Kerala: include only when today's pickup is still ahead.
-      if (!b.pickup_time || !Array.isArray(b.pickup_days))   return false
+      // Non-Kerala: include branches whose pickup_days lists today. We
+      // intentionally do NOT filter by pickup_time — pickups can run
+      // late, and ops needs to keep seeing the bills sitting at the
+      // branch *after* the scheduled time so delayed pickups aren't
+      // hidden from the bidding pool. pickup_time is treated as
+      // informational only, not a gate.
+      if (!Array.isArray(b.pickup_days))                     return false
       if (!b.pickup_days.includes(todayDow))                 return false
-      return String(b.pickup_time) > nowIstHHMM                              // HH:MM lexical compare is correct for same-day same-format
+      return true
     }).map(b => b.name)
 
     // 1) Bangalore — bills purchased on bangalorePurchaseDate, status approved.
