@@ -1452,7 +1452,14 @@ export async function GET(req) {
 // ── POST handler ──────────────────────────────────────────────────────────────
 export async function POST(req) {
   const body   = await req.json()
-  const { action } = body
+  // Accept `action` from EITHER the URL query string (the convention used
+  // by every Bidding Volume client call — create_booking,
+  // update_booking_status) OR the JSON body (older callers like
+  // set_bidding_pending). Falling back to body keeps backwards compat
+  // while letting query-style calls actually reach their handler — without
+  // this fallback they all silently returned "Invalid action" (HTTP 400).
+  const { searchParams } = new URL(req.url)
+  const action = searchParams.get('action') || body.action
 
   // Bidding Volume writes mutate shared, money/inventory-affecting state
   // (the team-wide Pending pool number; financial booking commitments in
