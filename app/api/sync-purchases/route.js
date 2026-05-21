@@ -381,6 +381,35 @@ async function runSync(request) {
       console.error('Carry-forward error (non-fatal):', cfErr.message)
     }
 
+    // Pipeline auto-attach — runs after every successful sync. Walks open
+    // bookings where pipeline_remaining_g > 0 and attaches freshly-synced
+    // unbooked bills in FIFO purchase order until the gap closes. The last
+    // bill is attached in full even if it overshoots; the overshoot is
+    // credited to the booking's gain_realized_g column. Defined in
+    // sql/cal_quotas_pipeline_attach.sql.
+    //
+    // Non-fatal: if the RPC fails we still return the sync result. The
+    // attacher will retry on the next sync tick (every ~60s via the cron
+    // worker), so a transient blip self-heals.
+    let pipelineAttached = 0
+    let pipelineWeight   = 0
+    let pipelineOvershoot = 0
+    try {
+      const { data: attachRows, error: attachErr } = await supabaseAdmin.rpc('process_pipeline_attachments')
+      if (attachErr) {
+        console.warn('process_pipeline_attachments error (non-fatal):', attachErr.message)
+      } else if (Array.isArray(attachRows) && attachRows.length > 0) {
+        for (const row of attachRows) {
+          pipelineAttached  += Number(row.bills_attached  || 0)
+          pipelineWeight    += Number(row.weight_attached || 0)
+          pipelineOvershoot += Number(row.overshoot_g     || 0)
+        }
+        console.log(`Pipeline auto-attach: ${attachRows.length} booking(s), ${pipelineAttached} bill(s), ${pipelineWeight.toFixed(2)}g attached, ${pipelineOvershoot.toFixed(2)}g overshoot credited as gain`)
+      }
+    } catch (paErr) {
+      console.error('Pipeline auto-attach threw (non-fatal):', paErr.message)
+    }
+
     return Response.json({
       success:  errors === 0,
       total:    rows.length,
@@ -391,6 +420,9 @@ async function runSync(request) {
       ghostsMarked,
       carriedForward,
       carryAmbiguous,
+      pipelineAttached,
+      pipelineWeight,
+      pipelineOvershoot,
       lastError: lastError ? JSON.stringify(lastError) : null,
       message:  `Upsert ${minDate}→${maxDate}: ${deduped.length} approved bills synced, ${renamed} bill_no renames preserved, ${ghostsMarked} ghost bills marked deleted, ${carriedForward} stock_status carried forward across delete-recreate (${carryAmbiguous} ambiguous skipped, ${errors} errors)`,
     })

@@ -712,7 +712,9 @@ export async function GET(req) {
       .select(`id, date, party, buyer_phone, weight, rate, is_kl, purity, notes,
                status, created_at, created_by,
                confirmed_at, confirmed_by, fulfilled_at, fulfilled_by,
-               cancelled_at, cancelled_by, cancellation_reason`)
+               cancelled_at, cancelled_by, cancellation_reason,
+               pipeline_remaining_g, pipeline_region, pipeline_arrival_date,
+               pipeline_attached_at, gain_realized_g`)
       .eq('date', date)
       .order('created_at', { ascending: false })
     if (bkErr) return Response.json({ error: bkErr.message }, { status: 500 })
@@ -2283,7 +2285,8 @@ export async function POST(req) {
   }
 
   if (action === 'create_booking') {
-    const { date, party, buyer_phone, weight, rate, purity, is_kl, notes, source_branches, bill_ids } = body
+    const { date, party, buyer_phone, weight, rate, purity, is_kl, notes, source_branches, bill_ids,
+            pipeline_remaining_g, pipeline_region } = body
     if (!date)   return Response.json({ error: 'date required (YYYY-MM-DD)' }, { status: 400 })
     if (!party || !String(party).trim()) return Response.json({ error: 'Buyer name required' }, { status: 400 })
     const w = Number(weight); const r = Number(rate)
@@ -2291,6 +2294,24 @@ export async function POST(req) {
     if (!Number.isFinite(r) || r <= 0) return Response.json({ error: 'rate must be a positive number' }, { status: 400 })
     if (purity && !['24K', '22K', '18K'].includes(purity)) {
       return Response.json({ error: "purity must be one of '24K', '22K', '18K'" }, { status: 400 })
+    }
+
+    // Pipeline attribution — when the operator commits more weight than the
+    // currently selected bills cover, the excess can be tagged as "pipeline"
+    // and auto-back-filled from incoming purchases as they sync. Server
+    // derives pipeline_region from source_branches if the client didn't
+    // send one (defensive — keeps the column accurate even if older clients
+    // hit this endpoint).
+    const pipelineGap = Number(pipeline_remaining_g)
+    const hasPipeline = Number.isFinite(pipelineGap) && pipelineGap > 0
+    let pipelineRegionResolved = pipeline_region || null
+    if (hasPipeline && !pipelineRegionResolved && Array.isArray(source_branches) && source_branches.length > 0) {
+      const { data: srcBranches } = await supabase
+        .from('branches')
+        .select('region')
+        .in('name', source_branches)
+      const regions = [...new Set((srcBranches || []).map(b => b.region).filter(Boolean))]
+      pipelineRegionResolved = regions.length === 1 ? regions[0] : null
     }
 
     const { data, error: insErr } = await supabase
@@ -2306,6 +2327,9 @@ export async function POST(req) {
         notes:       notes ? String(notes).trim() : null,
         status:      'booked',
         created_by:  actorEmail,
+        pipeline_remaining_g:  hasPipeline ? pipelineGap : 0,
+        pipeline_region:       hasPipeline ? pipelineRegionResolved : null,
+        pipeline_arrival_date: hasPipeline ? date : null,
       })
       .select()
       .single()

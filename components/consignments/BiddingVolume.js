@@ -1296,10 +1296,39 @@ function BookingsList({ t, card, bookings, onUpdateStatus, onRequestCancel, onCr
                       <div style={{ width: 8, height: 8, borderRadius: '50%', background: dotColor, flexShrink: 0 }} />
                       <span style={{ color: t.text1, fontWeight: 700, textDecoration: isCancelled ? 'line-through' : 'none' }}>{b.party}</span>
                     </div>
-                    {(b.purity || b.buyer_phone || b.notes) && (
-                      <div style={{ fontSize: 10.5, color: t.text4, marginTop: 4, marginLeft: 17, display: 'flex', gap: 9, flexWrap: 'wrap', fontWeight: 600 }}>
+                    {(b.purity || b.buyer_phone || b.notes || Number(b.pipeline_remaining_g) > 0 || Number(b.gain_realized_g) > 0) && (
+                      <div style={{ fontSize: 10.5, color: t.text4, marginTop: 4, marginLeft: 17, display: 'flex', gap: 9, flexWrap: 'wrap', fontWeight: 600, alignItems: 'center' }}>
                         {b.purity && <span style={{ color: t.gold }}>{b.purity}</span>}
                         {b.buyer_phone && <span style={{ fontFamily: 'monospace' }}>{b.buyer_phone}</span>}
+                        {/* Pipeline pending — auto-attach worker is still
+                            filling this booking from the CRM. Once 0, the
+                            chip disappears. */}
+                        {Number(b.pipeline_remaining_g) > 0 && (
+                          <span title={`Awaiting ${fmt(b.pipeline_remaining_g, 2)} g of incoming purchases (region: ${b.pipeline_region || '—'})`}
+                            style={{
+                              background: `${t.purple || '#8c5ac8'}18`,
+                              color: t.purple || '#8c5ac8',
+                              border: `1px solid ${t.purple || '#8c5ac8'}40`,
+                              borderRadius: 99, padding: '1px 8px',
+                              fontFamily: 'monospace', fontWeight: 800, letterSpacing: '.02em',
+                            }}>
+                            ⟳ pipeline {fmt(b.pipeline_remaining_g, 2)}g
+                          </span>
+                        )}
+                        {/* Realized gain from pipeline overshoot — last
+                            attached bill exceeded the gap; surplus is gain. */}
+                        {Number(b.gain_realized_g) > 0 && (
+                          <span title={`Pipeline overshoot — ${fmt(b.gain_realized_g, 2)} g credited as gain on this booking`}
+                            style={{
+                              background: `${t.orange || '#e58a3b'}18`,
+                              color: t.orange || '#e58a3b',
+                              border: `1px solid ${t.orange || '#e58a3b'}40`,
+                              borderRadius: 99, padding: '1px 8px',
+                              fontFamily: 'monospace', fontWeight: 800, letterSpacing: '.02em',
+                            }}>
+                            +{fmt(b.gain_realized_g, 2)}g gain
+                          </span>
+                        )}
                         {b.notes && <span title={b.notes} style={{ fontStyle: 'italic' }}>· note</span>}
                       </div>
                     )}
@@ -2123,6 +2152,13 @@ function BookingModal({ t, arrivalDate, availablePool, remainingQty, incomingNet
         selectedBranchNames.length ? `Sources: ${selectedBranchNames.join(', ')}` : null,
         overBy > 0 && attrBits.length ? `Excess ${overBy.toFixed(2)} g · from ${attrBits.join(' + ')}` : null,
       ].filter(Boolean).join(' · ') || null
+      // Pipeline payload — when ops ticks "Pipeline" attribution the
+      // backend stores the gap (in grams) and the bidder's region so the
+      // sync-purchases hook can auto-attach incoming bills until fulfilled.
+      const pipelineRemainingG = attrPipeline && overBy > 0 ? overBy : 0
+      const pipelineRegion = attrPipeline && overBy > 0
+        ? (isKerala ? 'Kerala' : 'Bangalore')      // PHASE 1: Bangalore wires up the attacher; others just persist
+        : null
       const ok = await onSubmit({
         party:       party.trim(),
         buyer_phone: null,
@@ -2131,6 +2167,8 @@ function BookingModal({ t, arrivalDate, availablePool, remainingQty, incomingNet
         purity:      null,
         is_kl:       !!isKerala,
         notes:       compositeNotes,
+        pipeline_remaining_g: pipelineRemainingG,
+        pipeline_region:      pipelineRegion,
       })
       if (ok && onSuccess) onSuccess()
       if (!ok) setBusy(false)
