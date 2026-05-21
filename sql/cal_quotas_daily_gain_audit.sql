@@ -144,9 +144,10 @@ BEGIN
       END;
 
       UPDATE cal_quotas
-         SET gain_applied_g  = new_gain,
-             gain_realized_g = 0,           -- folded into the audited gain_applied_g
-             gain_audited_at = now()
+         SET gain_applied_g    = new_gain,
+             gain_realized_g   = 0,         -- folded into the audited gain_applied_g
+             additional_gain_g = 0,         -- folded into the audited gain_applied_g
+             gain_audited_at   = now()
        WHERE id = booking.id;
     END LOOP;
 

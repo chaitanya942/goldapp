@@ -85,6 +85,11 @@ export default function BiddingVolume() {
   const tomorrow = dateAdd(today, 1)
 
   const [arrivalDate,  setArrivalDate]  = useState(tomorrow)
+  // Bookings tab pivots on bidding day (the date the booking was placed),
+  // separate from arrivalDate. Defaults to today so the freshly-placed
+  // bookings show up. ← / → step through past bidding days; the hero +
+  // Bidding tab stay locked to tomorrow's arrival.
+  const [bookingsDate, setBookingsDate] = useState(today)
   const [supply,       setSupply]       = useState(null)
   const [bookingsResp, setBookingsResp] = useState(null)
   const [loading,      setLoading]      = useState(true)
@@ -161,7 +166,9 @@ export default function BiddingVolume() {
     try {
       const [supR, bkR] = await Promise.all([
         authedFetch(`/api/consignments?action=bidding_volume&date=${arrivalDate}`),
-        authedFetch(`/api/consignments?action=bidding_bookings&date=${arrivalDate}`),
+        // Bookings use bidding_date (created_at IST) — so the operator sees
+        // bookings on the day they were placed, not the arrival day.
+        authedFetch(`/api/consignments?action=bidding_bookings&bidding_date=${bookingsDate}`),
       ])
       const supJ = await supR.json()
       const bkJ  = await bkR.json()
@@ -174,7 +181,7 @@ export default function BiddingVolume() {
     } finally {
       setLoading(false)
     }
-  }, [arrivalDate])
+  }, [arrivalDate, bookingsDate])
 
   useEffect(() => { fetchAll() }, [fetchAll])
 
@@ -630,36 +637,10 @@ export default function BiddingVolume() {
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          {/* Date navigator — ←/→ to scroll through arrival dates so ops
-              can review past bookings (and any future ones). Centre pill
-              shows the active date + day label; clicking it resets to
-              tomorrow (the default "today's bid" view). The full preset
-              picker stays retired — these three controls cover 95 % of
-              the cases without the clutter that confused ops last time. */}
-          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4, background: t.card2 || t.card, border: `1px solid ${t.border}`, borderRadius: 8, padding: 3 }}>
-            <button onClick={() => setArrivalDate(dateAdd(arrivalDate, -1))}
-              title="Previous arrival date (yesterday's bookings)"
-              style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: t.text2, padding: '4px 9px', fontSize: 13, fontWeight: 700, borderRadius: 5 }}>
-              ←
-            </button>
-            <button onClick={() => setArrivalDate(tomorrow)}
-              title={dayDiff === 1 ? 'Showing tomorrow (default)' : 'Reset to tomorrow (default)'}
-              style={{
-                background: dayDiff === 1 ? `${t.gold}1c` : 'transparent',
-                border: 'none', cursor: 'pointer',
-                color: dayDiff === 1 ? t.gold : t.text2,
-                padding: '4px 10px', fontSize: 11, fontWeight: 700,
-                borderRadius: 5, letterSpacing: '.02em',
-                minWidth: 120, textAlign: 'center',
-              }}>
-              {fmtDateShort(arrivalDate)} · <span style={{ opacity: .7 }}>{dayLabel}</span>
-            </button>
-            <button onClick={() => setArrivalDate(dateAdd(arrivalDate, 1))}
-              title="Next arrival date"
-              style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: t.text2, padding: '4px 9px', fontSize: 13, fontWeight: 700, borderRadius: 5 }}>
-              →
-            </button>
-          </div>
+          {/* Date navigator removed from the header — moved next to the
+              Bidding/Bookings tab switcher and now pivots on BIDDING DAY
+              (created_at IST) rather than arrival date, since ops wants
+              to find bookings under the day they were placed. */}
           <button onClick={() => fetchAll()} disabled={loading}
             style={{ background: loading ? t.card2 : 'transparent', border: `1px solid ${t.border}`, borderRadius: '8px', padding: '7px 14px', fontSize: '12px', color: loading ? t.text4 : t.text2, cursor: loading ? 'default' : 'pointer', fontWeight: 500, display: 'flex', alignItems: 'center', gap: 6 }}>
             <span style={{ display: 'inline-block', animation: loading ? 'spin 1s linear infinite' : 'none', fontSize: '13px' }}>⟳</span>
@@ -845,39 +826,83 @@ export default function BiddingVolume() {
         </div>
       )}
 
-      {/* ── Tab navigation — Bidding (source picker) vs Bookings (committed)
-          The hero KPIs above stay visible across both tabs so ops always
-          see Incoming / Available / Booked / Remaining at a glance. */}
-      <div style={{ display: 'inline-flex', alignSelf: 'flex-start', background: t.card2, border: `1px solid ${t.border}`, borderRadius: 10, padding: 3, gap: 2 }}>
-        {[
-          { key: 'bidding',  label: 'Bidding',  icon: '⚖' },
-          { key: 'bookings', label: 'Bookings', icon: '✓', count: activeBookings.length },
-        ].map(tab => {
-          const active = activeTab === tab.key
+      {/* ── Tab nav (Bidding / Bookings) + Bookings-day date nav ──
+          The Bidding tab + the hero strips above always show today's bid
+          (tomorrow's arrival). The Bookings tab pivots on BIDDING DAY —
+          ← / → step through past bidding days so ops can find a booking
+          under the day it was placed (not the next day's arrival). */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+        <div style={{ display: 'inline-flex', background: t.card2, border: `1px solid ${t.border}`, borderRadius: 10, padding: 3, gap: 2 }}>
+          {[
+            { key: 'bidding',  label: 'Bidding',  icon: '⚖' },
+            { key: 'bookings', label: 'Bookings', icon: '✓', count: activeBookings.length },
+          ].map(tab => {
+            const active = activeTab === tab.key
+            return (
+              <button key={tab.key} onClick={() => setActiveTab(tab.key)}
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 7,
+                  padding: '8px 18px', borderRadius: 8,
+                  background: active ? `${t.gold}1f` : 'transparent',
+                  border: `1px solid ${active ? `${t.gold}55` : 'transparent'}`,
+                  color: active ? t.gold : t.text2,
+                  fontSize: 13, fontWeight: active ? 800 : 700, letterSpacing: '.02em',
+                  cursor: 'pointer', transition: 'all .15s',
+                }}>
+                <span style={{ fontSize: 14, opacity: active ? 1 : 0.7 }}>{tab.icon}</span>
+                {tab.label}
+                {tab.count != null && tab.count > 0 && (
+                  <span style={{
+                    fontSize: 10.5, fontWeight: 800, fontFamily: 'monospace',
+                    background: active ? t.gold : `${t.text4}30`,
+                    color: active ? '#1a0a00' : t.text2,
+                    borderRadius: 99, padding: '1px 8px', minWidth: 18, textAlign: 'center',
+                  }}>{tab.count}</span>
+                )}
+              </button>
+            )
+          })}
+        </div>
+
+        {activeTab === 'bookings' && (() => {
+          // Day label for the bookings-date pill — today / yesterday /
+          // N days ago, based on the difference from current IST day.
+          const bDiff = dateDiff(bookingsDate, today)
+          const bLabel = bDiff === 0 ? 'today'
+            : bDiff === -1 ? 'yesterday'
+            : bDiff < 0    ? `${Math.abs(bDiff)} days ago`
+            : bDiff === 1  ? 'tomorrow'
+            : `in ${bDiff} days`
           return (
-            <button key={tab.key} onClick={() => setActiveTab(tab.key)}
-              style={{
-                display: 'inline-flex', alignItems: 'center', gap: 7,
-                padding: '8px 18px', borderRadius: 8,
-                background: active ? `${t.gold}1f` : 'transparent',
-                border: `1px solid ${active ? `${t.gold}55` : 'transparent'}`,
-                color: active ? t.gold : t.text2,
-                fontSize: 13, fontWeight: active ? 800 : 700, letterSpacing: '.02em',
-                cursor: 'pointer', transition: 'all .15s',
-              }}>
-              <span style={{ fontSize: 14, opacity: active ? 1 : 0.7 }}>{tab.icon}</span>
-              {tab.label}
-              {tab.count != null && tab.count > 0 && (
-                <span style={{
-                  fontSize: 10.5, fontWeight: 800, fontFamily: 'monospace',
-                  background: active ? t.gold : `${t.text4}30`,
-                  color: active ? '#1a0a00' : t.text2,
-                  borderRadius: 99, padding: '1px 8px', minWidth: 18, textAlign: 'center',
-                }}>{tab.count}</span>
-              )}
-            </button>
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ fontSize: 10.5, color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 700 }}>Bidding day</span>
+              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4, background: t.card2 || t.card, border: `1px solid ${t.border}`, borderRadius: 8, padding: 3 }}>
+                <button onClick={() => setBookingsDate(dateAdd(bookingsDate, -1))}
+                  title="Previous bidding day"
+                  style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: t.text2, padding: '4px 9px', fontSize: 13, fontWeight: 700, borderRadius: 5 }}>
+                  ←
+                </button>
+                <button onClick={() => setBookingsDate(today)}
+                  title={bDiff === 0 ? 'Showing today (default)' : 'Reset to today (default)'}
+                  style={{
+                    background: bDiff === 0 ? `${t.gold}1c` : 'transparent',
+                    border: 'none', cursor: 'pointer',
+                    color: bDiff === 0 ? t.gold : t.text2,
+                    padding: '4px 10px', fontSize: 11, fontWeight: 700,
+                    borderRadius: 5, letterSpacing: '.02em',
+                    minWidth: 120, textAlign: 'center',
+                  }}>
+                  {fmtDateShort(bookingsDate)} · <span style={{ opacity: .7 }}>{bLabel}</span>
+                </button>
+                <button onClick={() => setBookingsDate(dateAdd(bookingsDate, 1))}
+                  title="Next bidding day"
+                  style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: t.text2, padding: '4px 9px', fontSize: 13, fontWeight: 700, borderRadius: 5 }}>
+                  →
+                </button>
+              </div>
+            </div>
           )
-        })}
+        })()}
       </div>
 
       {/* ─────────────────────────── BIDDING TAB ────────────────────────── */}
@@ -1458,15 +1483,16 @@ function BookingsList({ t, card, bookings, onUpdateStatus, onRequestCancel, onCr
   const billsFor    = (b) => Number(b.attached_net_weight_g) > 0
                               ? Number(b.attached_net_weight_g)
                               : (b.bills_net_weight_g != null ? Number(b.bills_net_weight_g) : 0)
-  const gainFor     = (b) => (Number(b.gain_applied_g) || 0) + (Number(b.gain_realized_g) || 0)
-  const addlFor     = (b) => Number(b.additional_gain_g) || 0
+  // Gain rolls up applied + additional + realized (matches the row's
+  // effectiveGainG formula). Additional Gain no longer has its own
+  // column.
+  const gainFor     = (b) => (Number(b.gain_applied_g) || 0) + (Number(b.additional_gain_g) || 0) + (Number(b.gain_realized_g) || 0)
   const pendingFor  = (b) => Number(b.pending_g) || 0
   const pipelineFor = (b) => Number(b.pipeline_remaining_g) != null
                               ? Number(b.pipeline_remaining_g)
                               : (b.pipeline_original_g != null ? Number(b.pipeline_original_g) : 0)
   const totalBills    = activeRows.reduce((s, b) => s + billsFor(b),    0)
   const totalGain     = activeRows.reduce((s, b) => s + gainFor(b),     0)
-  const totalAddl     = activeRows.reduce((s, b) => s + addlFor(b),     0)
   const totalPending  = activeRows.reduce((s, b) => s + pendingFor(b),  0)
   const totalPipeline = activeRows.reduce((s, b) => s + pipelineFor(b), 0)
 
@@ -1506,20 +1532,19 @@ function BookingsList({ t, card, bookings, onUpdateStatus, onRequestCancel, onCr
       </div>
 
       {/* Bill-style breakdown table.
-            # | Party | Bills | + Gain | + Add'l | + Pending | + Pipeline | = Bid Wt | × Rate | = Value | KL
-          Each addend gets its own column with a visible math operator
-          in the header so the row reads like an order statement.
-          Status + Actions columns intentionally removed (per ops spec —
-          this surface is read-only; cancel/confirm happen elsewhere). */}
+            # | Party | Net Wt | + Gain | + Pending | + Pipeline | = Booked Wt | × Rate | = Value | KL
+          Additional Gain column intentionally dropped — the daily audit
+          folds it into + Gain proportionally so a separate column was
+          double-display. Status + Actions removed (this surface is
+          read-only; cancel/confirm happen elsewhere). */}
       <div style={{ overflowX: 'auto' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 1080 }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 980 }}>
           <thead>
             <tr>
               <th style={{ ...th, width: 36, textAlign: 'center' }}>#</th>
               <th style={th}>Party</th>
               <th style={{ ...th, textAlign: 'right' }} title="Net weight of bills currently attached to this booking — grows as the pipeline auto-attacher pulls in new bills">Net Wt (g)</th>
-              <th style={{ ...th, textAlign: 'right', color: t.text4 }} title="Gain applied (operator-set default 3.5 %) plus any realized gain from pipeline overshoot / EOD closure">+ Gain</th>
-              <th style={{ ...th, textAlign: 'right', color: t.text4 }} title="Excess attributed to additional refining gain at booking time">+ Add'l</th>
+              <th style={{ ...th, textAlign: 'right', color: t.text4 }} title="Gain applied. Before midnight audit: 3.5% estimate (or override) plus any pipeline-overshoot credit. After audit: proportional share of the day's actual realized gain (committed − attached).">+ Gain</th>
               <th style={{ ...th, textAlign: 'right', color: t.text4 }} title="Pending delivery carry-over included in this booking">+ Pending</th>
               <th style={{ ...th, textAlign: 'right', color: t.text4 }} title="Remaining pipeline (live) — decrements as new bills attach, then zeros at EOD with any leftover credited to gain">+ Pipeline</th>
               <th style={{ ...th, textAlign: 'right' }} title="Total weight committed to the bidder">= Booked Wt</th>
@@ -1541,7 +1566,6 @@ function BookingsList({ t, card, bookings, onUpdateStatus, onRequestCancel, onCr
                                   ? Number(b.attached_net_weight_g)
                                   : (b.bills_net_weight_g != null ? Number(b.bills_net_weight_g) : null))
               const gainG     = b.gain_applied_g     != null ? Number(b.gain_applied_g)     : null
-              const addlG     = b.additional_gain_g  != null ? Number(b.additional_gain_g)  : null
               const pendingG  = b.pending_g          != null ? Number(b.pending_g)          : null
               // Pipeline = LIVE remaining (decrements as bills attach,
               // and gets zeroed when EOD closure converts the leftover
@@ -1550,10 +1574,14 @@ function BookingsList({ t, card, bookings, onUpdateStatus, onRequestCancel, onCr
               const pipelineG = b.pipeline_remaining_g != null
                                   ? Number(b.pipeline_remaining_g)
                                   : (b.pipeline_original_g != null ? Number(b.pipeline_original_g) : null)
-              // Realized gain (overshoot + EOD-closed leftover) — folds
-              // into the displayed "+ Gain" column so the row's addends
-              // continue to sum to Booked Weight after pipeline activity.
-              const effectiveGainG = (gainG || 0) + Number(b.gain_realized_g || 0)
+              // Effective + Gain column = applied + additional + realized.
+              // Pre-audit: shows operator's 3.5% estimate + any "additional
+              // gain" attribution + pipeline-overshoot credit. Post-audit:
+              // the row has gain_applied_g = redistributed value and
+              // gain_realized_g = 0 + additional_gain_g = 0, so this becomes
+              // exactly the audited gain. Additional Gain has no separate
+              // column — it folds in here either way.
+              const effectiveGainG = (gainG || 0) + Number(b.additional_gain_g || 0) + Number(b.gain_realized_g || 0)
               const numCell = (val, opts = {}) => {
                 if (val == null) return <span style={{ color: t.text4, fontFamily: 'monospace', fontWeight: 600 }}>—</span>
                 if (val === 0)   return <span style={{ color: t.text4, fontFamily: 'monospace', fontWeight: 600 }}>—</span>
@@ -1636,7 +1664,6 @@ function BookingsList({ t, card, bookings, onUpdateStatus, onRequestCancel, onCr
                   </td>
                   <td style={{ ...td, textAlign: 'right' }}>{numCell(billsG,         { color: t.text1 })}</td>
                   <td style={{ ...td, textAlign: 'right' }}>{numCell(effectiveGainG, { color: t.orange || '#e58a3b' })}</td>
-                  <td style={{ ...td, textAlign: 'right' }}>{numCell(addlG,          { color: t.orange || '#e58a3b' })}</td>
                   <td style={{ ...td, textAlign: 'right' }}>{numCell(pendingG,       { color: t.purple || '#8c5ac8' })}</td>
                   <td style={{ ...td, textAlign: 'right' }}>{numCell(pipelineG,      { color: t.purple || '#8c5ac8' })}</td>
                   <td style={{ ...td, textAlign: 'right', fontFamily: 'monospace', color: t.gold, fontWeight: 800, fontSize: 14, whiteSpace: 'nowrap' }}>
@@ -1674,7 +1701,6 @@ function BookingsList({ t, card, bookings, onUpdateStatus, onRequestCancel, onCr
                   <td colSpan={2} style={{ ...td, fontSize: 11, color: t.gold, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 800 }}>Σ Active total</td>
                   <td style={{ ...td, textAlign: 'right' }}>{totalCell(totalBills,    t.text1)}</td>
                   <td style={{ ...td, textAlign: 'right' }}>{totalCell(totalGain,     t.orange || '#e58a3b')}</td>
-                  <td style={{ ...td, textAlign: 'right' }}>{totalCell(totalAddl,     t.orange || '#e58a3b')}</td>
                   <td style={{ ...td, textAlign: 'right' }}>{totalCell(totalPending,  t.purple || '#8c5ac8')}</td>
                   <td style={{ ...td, textAlign: 'right' }}>{totalCell(totalPipeline, t.purple || '#8c5ac8')}</td>
                   <td style={{ ...td, textAlign: 'right', fontFamily: 'monospace', color: t.gold, fontWeight: 800, fontSize: 14, whiteSpace: 'nowrap' }}>

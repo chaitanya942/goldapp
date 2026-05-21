@@ -12,7 +12,7 @@ import {
 import { logConsignmentEvent } from '../../../lib/consignmentLog'
 import { applyConsignmentApproval } from '../../../lib/consignmentApproval'
 import { requireAuth, requireAuthForPage, ROLE_GROUPS, getRegionFilter, resolveAllowedBranchNames } from '../../../lib/apiAuth'
-import { istToday } from '../../../lib/dateIst'
+import { istToday, istStartOfDayIso, istEndOfDayIso } from '../../../lib/dateIst'
 import { cancelEWayBill, cancelEInvoice } from '../../../lib/clearTaxClient'
 import { REGION_TO_STATE_CODE } from '../../../lib/stateMap'
 
@@ -709,12 +709,15 @@ export async function GET(req) {
   // dimension. Bypass roles (super_admin/founders_office/admin) are
   // unaffected (they see all regions anyway).
   if (action === 'bidding_bookings') {
-    const date = searchParams.get('date')
-    if (!date) return Response.json({ error: 'date required (YYYY-MM-DD)' }, { status: 400 })
+    // Accept either `bidding_date` (NEW: filter by created_at IST date —
+    // the day the booking was placed) or `date` (LEGACY: filter by
+    // cal_quotas.date which is the arrival date). The Bookings tab now
+    // pivots on bidding day so a booking placed on 21 May for arrival
+    // 22 May surfaces under "21 May", not "22 May".
+    const biddingDate = searchParams.get('bidding_date')
+    const date        = searchParams.get('date')
+    if (!biddingDate && !date) return Response.json({ error: 'bidding_date or date required (YYYY-MM-DD)' }, { status: 400 })
 
-    // Try with full breakdown + pipeline columns. If either migration hasn't
-    // run yet PostgREST returns "column does not exist" — fall back so the
-    // bookings tab still loads (with "—" for missing breakdown values).
     const fullSelect = `id, date, party, buyer_phone, weight, rate, is_kl, purity, notes,
                         status, created_at, created_by,
                         confirmed_at, confirmed_by, fulfilled_at, fulfilled_by,
@@ -728,21 +731,29 @@ export async function GET(req) {
                         status, created_at, created_by,
                         confirmed_at, confirmed_by, fulfilled_at, fulfilled_by,
                         cancelled_at, cancelled_by, cancellation_reason`
+
+    // Build the query — bidding_date filters by created_at IST, date by
+    // arrival.
+    const applyFilter = (q) => {
+      if (biddingDate) {
+        return q
+          .gte('created_at', istStartOfDayIso(biddingDate))
+          .lt('created_at',  istEndOfDayIso(biddingDate))
+      }
+      return q.eq('date', date)
+    }
+
     let rows = null
     let bkErr = null
     {
-      const tryFull = await supabase
-        .from('cal_quotas')
-        .select(fullSelect)
-        .eq('date', date)
-        .order('created_at', { ascending: true })
+      const tryFull = await applyFilter(
+        supabase.from('cal_quotas').select(fullSelect)
+      ).order('created_at', { ascending: true })
       if (tryFull.error && /column .* does not exist/i.test(tryFull.error.message || '')) {
         console.warn('[bidding_bookings] breakdown/pipeline columns missing — falling back to base select. Run sql/cal_quotas_breakdown.sql + sql/cal_quotas_pipeline_attach.sql.')
-        const tryBase = await supabase
-          .from('cal_quotas')
-          .select(baseSelect)
-          .eq('date', date)
-          .order('created_at', { ascending: true })
+        const tryBase = await applyFilter(
+          supabase.from('cal_quotas').select(baseSelect)
+        ).order('created_at', { ascending: true })
         rows = tryBase.data
         bkErr = tryBase.error
       } else {
