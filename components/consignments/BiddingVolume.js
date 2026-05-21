@@ -253,19 +253,50 @@ export default function BiddingVolume() {
   const pendingSetBy    = supply?.pending?.updated_by || null
 
   const availablePool   = incomingNetWt + gainGrams + pendingGrams
-  const remainingQty    = availablePool - bookedQty
-  const bookedPct       = availablePool > 0 ? Math.min(100, (bookedQty / availablePool) * 100) : 0
+
+  // Pipeline-booked aggregate — the portion of existing bookings still
+  // owed against FUTURE incoming bills (decrements as pipeline auto-
+  // attach fires). For old bookings without the breakdown columns we
+  // derive from (weight − attached_bills − gain − pending).
+  //
+  // Why this matters: the older math (Available − Booked) double-
+  // counted attached bills. When a bill gets attached to a booking,
+  // Incoming already excludes it (booking_id IS NOT NULL filter) AND
+  // the booking's full committed weight was being subtracted again —
+  // making the pool look overbooked by exactly the attached weight.
+  //
+  // Correct math:
+  //   Available − Pipeline_remaining = Remaining (capacity for new bookings)
+  // The attached portion is already netted out of Incoming, so the only
+  // future claim on Available is the uncovered pipeline.
+  const pipelineFor = (b) => {
+    const r = Number(b.pipeline_remaining_g)
+    if (Number.isFinite(r) && r >= 0) return r
+    const o = Number(b.pipeline_original_g)
+    if (Number.isFinite(o) && o >= 0) return o
+    const w       = Number(b.weight || 0)
+    const bills   = Number(b.bills_net_weight_g) || Number(b.attached_net_weight_g) || 0
+    const gain    = Number(b.gain_applied_g) || 0
+    const pending = Number(b.pending_g) || 0
+    return Math.max(0, w - bills - gain - pending)
+  }
+  const pipelineKLG       = activeBookings.filter(b => b.is_kl).reduce((s, b) => s + pipelineFor(b), 0)
+  const pipelineOtherG    = activeBookings.filter(b => !b.is_kl).reduce((s, b) => s + pipelineFor(b), 0)
+  const pipelineTotalG    = pipelineKLG + pipelineOtherG
+
+  const remainingQty    = availablePool - pipelineTotalG
+  const bookedPct       = availablePool > 0 ? Math.min(100, (pipelineTotalG / availablePool) * 100) : 0
 
   // Two distinct deficit states — they were conflated before, which made a
   // −Pending with zero bookings wrongly read as "Bookings exceed pool":
   //   poolNegative — the pool itself is underwater because the Pending
   //                  pull-back exceeds Incoming + Gain. Independent of
   //                  bookings; there's simply nothing to bid.
-  //   overbooked   — the pool is non-negative but commitments exceed it
-  //                  (genuine overbooking). Only meaningful when something
-  //                  is actually booked.
+  //   overbooked   — pipeline commitments exceed what the current pool
+  //                  can absorb. Real overbook risk now that the math
+  //                  ignores the already-attached bills.
   const poolNegative    = availablePool < 0
-  const overbooked      = !poolNegative && bookedQty > 0 && remainingQty < 0
+  const overbooked      = !poolNegative && pipelineTotalG > 0 && remainingQty < 0
 
   // Single source for the last tile + the alert banner so they never
   // disagree.
@@ -278,15 +309,17 @@ export default function BiddingVolume() {
       }
     : overbooked
     ? {
-        label:  'Overbooked',
+        label:  'Pipeline Over',
         num:    Math.abs(remainingQty), prefix: '−',
-        sub:    `${fmt(Math.abs(remainingQty), 2)} g past available pool`,
+        sub:    `Pipeline owes ${fmt(Math.abs(remainingQty), 2)} g more than the pool can supply`,
         accent: t.red, alert: true,
       }
     : {
         label:  'Remaining',
         num:    remainingQty, prefix: '',
-        sub:    `${availablePool > 0 ? Math.round(100 - bookedPct) : 0}% of available free`,
+        sub:    pipelineTotalG > 0
+                  ? `After pipeline back-fill · ${availablePool > 0 ? Math.round(100 - bookedPct) : 0}% of pool free`
+                  : `Full pool free · no pipeline commitments`,
         accent: t.green, alert: false,
       }
 
@@ -552,11 +585,12 @@ export default function BiddingVolume() {
           `arrivalDate` state stays (defaults to tomorrow) so downstream
           consumers don't need to change. */}
 
-      {/* ── KPI strip — Incoming + Gain ± Pending = Available; Available − Booked
-          = Remaining. Order reads left-to-right as the equation. Operator-
-          input tiles (Gain override, Pending Delivery, Booked) sit between
-          the computed totals. 6 columns now. */}
-      <div className="bidKpi" style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(6, 1fr)', gap: '10px' }}>
+      {/* ── KPI strip — Incoming + Gain ± Pending = Available; Available − Pipeline
+          = Remaining. The Booked card sits to the right as an informational
+          total (sub shows the pipeline portion). Pipeline Booked is its own
+          card with KL / Others split since those bid against different stock
+          flows. 7 columns now. */}
+      <div className="bidKpi" style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(7, 1fr)', gap: '10px' }}>
         <KpiCard
           label="Incoming"
           value={<AnimatedNumber target={incomingNetWt} decimals={2} suffix=" g"
@@ -601,12 +635,29 @@ export default function BiddingVolume() {
           variant="result" />
 
         <KpiCard
-          op="−"
+          op="·"
           label="Booked"
           value={<AnimatedNumber target={bookedQty} decimals={2} suffix=" g"
                    fromPrevious animateOnMount={false} replayable={false} duration={650} />}
-          sub={`${activeBookings.length} booking${activeBookings.length === 1 ? '' : 's'} · ${fmtINR(bookedValue)}`}
+          sub={pipelineTotalG > 0
+            ? `${activeBookings.length} booking${activeBookings.length === 1 ? '' : 's'} · ${fmt(pipelineTotalG, 2)} g still pipeline · ${fmtINR(bookedValue)}`
+            : `${activeBookings.length} booking${activeBookings.length === 1 ? '' : 's'} · ${fmtINR(bookedValue)}`}
           accent={t.blue} card={card} t={t} variant="consumed" />
+
+        {/* Pipeline Booked — split by region so ops can see whether the
+            remaining pipeline is competing for Kerala hub bills (leaf→hub
+            flow) or Bangalore future purchases. Subtracts from Available
+            to produce Remaining. */}
+        <KpiCard
+          op="−"
+          label="Pipeline Booked"
+          value={<AnimatedNumber target={pipelineTotalG} decimals={2} suffix=" g"
+                   fromPrevious animateOnMount={false} replayable={false} duration={650} />}
+          sub={pipelineTotalG > 0
+            ? (<><span style={{ color: t.purple || '#8c5ac8', fontWeight: 800 }}>KL</span> {fmt(pipelineKLG, 2)} g <span style={{ color: t.text4 }}>·</span> <span style={{ color: t.gold, fontWeight: 800 }}>Others</span> {fmt(pipelineOtherG, 2)} g</>)
+            : 'No pipeline commitments'}
+          accent={t.purple || '#8c5ac8'} card={card} t={t}
+          variant={pipelineTotalG > 0 ? 'consumed' : 'source'} />
 
         <KpiCard
           op="="
@@ -628,7 +679,7 @@ export default function BiddingVolume() {
       {overbooked && (
         <div style={{ ...card, padding: '10px 16px', borderColor: `${t.red}55`, background: `${t.red}10`, fontSize: '12px', color: t.red, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}>
           <span style={{ fontSize: 14 }}>⚠</span>
-          Bookings exceed available pool by <strong>{fmt(Math.abs(remainingQty), 2)} g</strong>. Consider deferring some or sourcing additional supply.
+          Pipeline commitments exceed available pool by <strong>{fmt(Math.abs(remainingQty), 2)} g</strong>. The auto-attacher won't be able to back-fill every booking from today's incoming.
         </div>
       )}
 
