@@ -1186,128 +1186,160 @@ function PendingCard({ op, t, card, grams, setBy, editing, saving, onStartEdit, 
 }
 
 // ── Bookings list ────────────────────────────────────────────────────────────
+// Table layout matches Sales → Cal Table → Quotas exactly so ops sees the
+// same view in both places: # · Party · Weight · Rate · KL · Status. Adds
+// an Actions column on the right (Confirm / Fulfill / Cancel) because the
+// transitions live here in the Bidding module. Active total pinned in the
+// footer just like Cal Table.
+//
+// Party colour mapping is deterministic (mirrors lib in CalTable.js) — same
+// party gets the same dot colour across both screens for visual continuity.
+const _bookingPartyColors = ['#c9a84c','#4a9fd4','#3aaa6a','#8c5ac8','#e05555','#e09040','#2a9d8f','#e76f51','#457b9d','#6a994e']
+const _bookingPartyCache  = {}
+let   _bookingPartyIdx    = 0
+const partyColor = (name) => {
+  const k = String(name || '').trim().toLowerCase()
+  if (!_bookingPartyCache[k]) _bookingPartyCache[k] = _bookingPartyColors[_bookingPartyIdx++ % _bookingPartyColors.length]
+  return _bookingPartyCache[k]
+}
+
 function BookingsList({ t, card, bookings, onUpdateStatus, onRequestCancel, onCreate }) {
   const [hideCancelled, setHideCancelled] = useState(true)
-  const visible = hideCancelled ? bookings.filter(b => b.status !== 'cancelled') : bookings
+  const visible       = hideCancelled ? bookings.filter(b => b.status !== 'cancelled') : bookings
+  const activeRows    = visible.filter(b => b.status !== 'cancelled')
+  const activeWeight  = activeRows.reduce((s, b) => s + Number(b.weight || 0), 0)
+  const activeValue   = activeRows.reduce((s, b) => s + Number(b.weight || 0) * Number(b.rate || 0), 0)
 
   if (bookings.length === 0) {
-    // Empty state — no explicit + New Booking CTA here; the booking flow
-    // is selection-first. Pick branches above to start; the CTA appears
-    // in the sources card once anything is ticked.
     return (
-      <div style={{ ...card, padding: '36px 24px', textAlign: 'center' }}>
-        <div style={{ fontSize: '14px', color: t.text1, fontWeight: 600 }}>No bookings yet for this date</div>
-        <div style={{ fontSize: '11.5px', color: t.text4, marginTop: 6, maxWidth: 420, marginLeft: 'auto', marginRight: 'auto', lineHeight: 1.6 }}>
-          Tick branches in <strong style={{ color: t.text3 }}>Incoming Sources</strong> above to start a booking. Bookings also appear in <strong style={{ color: t.text3 }}>Sales → Cal Table → Quotas</strong> on the same date.
+      <div style={{ ...card, padding: '40px 24px', textAlign: 'center' }}>
+        <div style={{ fontSize: 15, color: t.text1, fontWeight: 700 }}>No bookings yet for this date</div>
+        <div style={{ fontSize: 12.5, color: t.text3, marginTop: 8, maxWidth: 460, marginLeft: 'auto', marginRight: 'auto', lineHeight: 1.6, fontWeight: 500 }}>
+          Tick bills in the <strong style={{ color: t.text2 }}>Bidding</strong> tab to start a booking.
+          Bookings also appear in <strong style={{ color: t.text2 }}>Sales → Cal Table → Quotas</strong> on the same date.
         </div>
       </div>
     )
   }
 
+  const th = {
+    padding: '11px 14px', fontSize: 10, color: t.text3,
+    letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 800,
+    background: t.card2, borderBottom: `1px solid ${t.border}`,
+    whiteSpace: 'nowrap', userSelect: 'none',
+  }
+  const td = {
+    padding: '12px 14px', fontSize: 13, color: t.text2,
+    verticalAlign: 'middle',
+  }
   return (
     <div style={{ ...card, overflow: 'hidden' }}>
       <div style={{ padding: '12px 18px', borderBottom: `1px solid ${t.border}`, display: 'flex', alignItems: 'center', gap: 12 }}>
-        <div style={{ fontSize: '13px', fontWeight: 700, color: t.text1 }}>Bookings <span style={{ color: t.text4, fontWeight: 500 }}>({visible.length})</span></div>
+        <div style={{ fontSize: 14, fontWeight: 800, color: t.text1, letterSpacing: '.01em' }}>
+          Bookings <span style={{ color: t.text3, fontWeight: 700 }}>({visible.length})</span>
+        </div>
         <div style={{ flex: 1 }} />
-        <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11, color: t.text3, cursor: 'pointer' }}>
+        <label style={{ display: 'inline-flex', alignItems: 'center', gap: 7, fontSize: 12, color: t.text2, cursor: 'pointer', fontWeight: 600 }}>
           <input type="checkbox" checked={hideCancelled} onChange={e => setHideCancelled(e.target.checked)} />
           Hide cancelled
         </label>
       </div>
-      <div>
-        {visible.map((b, i) => (
-          <BookingRow
-            key={b.id} b={b} t={t}
-            isLast={i === visible.length - 1}
-            onUpdateStatus={onUpdateStatus}
-            onRequestCancel={onRequestCancel}
-          />
-        ))}
-      </div>
-    </div>
-  )
-}
 
-function BookingRow({ b, t, isLast, onUpdateStatus, onRequestCancel }) {
-  const meta = STATUS_META[b.status] || STATUS_META.booked
-  const isCancelled = b.status === 'cancelled'
-  const isFulfilled = b.status === 'fulfilled'
-  const isTerminal  = isCancelled || isFulfilled
-  const total = Number(b.weight || 0) * Number(b.rate || 0)
-  return (
-    <div style={{
-      padding: '14px 18px',
-      borderBottom: isLast ? 'none' : `1px solid ${t.border}40`,
-      borderLeft: `3px solid ${meta.color}`,
-      display: 'grid',
-      gridTemplateColumns: 'minmax(180px, 1.6fr) repeat(3, minmax(70px, 0.9fr)) minmax(110px, 1fr) auto',
-      gap: 14,
-      alignItems: 'center',
-      background: isCancelled ? `${t.text4}06` : 'transparent',
-      opacity: isCancelled ? 0.7 : 1,
-    }}>
-      {/* Party + audit */}
-      <div style={{ minWidth: 0 }}>
-        <div style={{ fontSize: '13.5px', color: t.text1, fontWeight: 700, letterSpacing: '-.005em' }}>{b.party}</div>
-        <div style={{ fontSize: '10px', color: t.text4, marginTop: 3, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          {b.purity && <span style={{ color: t.gold, fontWeight: 600 }}>{b.purity}</span>}
-          {b.is_kl && <span style={{ color: t.purple, fontWeight: 600 }}>KL</span>}
-          {b.buyer_phone && <span style={{ fontFamily: 'monospace' }}>{b.buyer_phone}</span>}
-          {b.notes && <span style={{ fontStyle: 'italic' }} title={b.notes}>· note</span>}
-        </div>
-      </div>
-
-      {/* Weight */}
-      <div style={{ textAlign: 'right' }}>
-        <div style={{ fontSize: '14px', color: t.gold, fontWeight: 700, fontFamily: 'monospace' }}>
-          {fmt(b.weight, 3)}<span style={{ fontSize: 10, marginLeft: 2 }}>g</span>
-        </div>
-        <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.06em', textTransform: 'uppercase', marginTop: 2 }}>weight</div>
-      </div>
-      {/* Rate */}
-      <div style={{ textAlign: 'right' }}>
-        <div style={{ fontSize: '13px', color: t.text2, fontFamily: 'monospace', fontWeight: 600 }}>
-          ₹{fmtNum(Math.round(b.rate))}
-        </div>
-        <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.06em', textTransform: 'uppercase', marginTop: 2 }}>per g</div>
-      </div>
-      {/* Total value */}
-      <div style={{ textAlign: 'right' }}>
-        <div style={{ fontSize: '13.5px', color: t.blue, fontFamily: 'monospace', fontWeight: 700 }}>
-          {fmtINR(total)}
-        </div>
-        <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.06em', textTransform: 'uppercase', marginTop: 2 }}>value</div>
-      </div>
-
-      {/* Status + audit */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 10, color: t.text4 }}>
-        <span style={{ fontSize: 9.5, color: meta.color, background: `${meta.color}18`, border: `1px solid ${meta.color}40`, borderRadius: 99, padding: '2px 9px', fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase', alignSelf: 'flex-start' }}>{meta.label}</span>
-        {b.created_at && (
-          <span title={`Created by ${b.created_by || 'unknown'} on ${fmtTS(b.created_at)}`}>
-            {fmtTS(b.created_at)}
-          </span>
-        )}
-        {b.cancelled_at && (
-          <span style={{ color: t.red }} title={b.cancellation_reason || ''}>
-            cancelled {fmtTS(b.cancelled_at)}
-          </span>
-        )}
-        {b.fulfilled_at && (
-          <span style={{ color: t.green }}>fulfilled {fmtTS(b.fulfilled_at)}</span>
-        )}
-      </div>
-
-      {/* Actions */}
-      <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
-        {!isTerminal && b.status === 'booked' && (
-          <ActionPill label="Confirm" color={t.blue} onClick={() => onUpdateStatus(b.id, 'confirmed')} t={t} />
-        )}
-        {!isTerminal && (b.status === 'booked' || b.status === 'confirmed') && (
-          <ActionPill label="Fulfill" color={t.green} onClick={() => onUpdateStatus(b.id, 'fulfilled')} t={t} />
-        )}
-        {!isTerminal && (
-          <ActionPill label="Cancel" color={t.red} onClick={() => onRequestCancel(b)} t={t} subtle />
-        )}
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead>
+            <tr>
+              <th style={{ ...th, width: 40, textAlign: 'center' }}>#</th>
+              <th style={th}>Party</th>
+              <th style={{ ...th, textAlign: 'right' }}>Weight (g)</th>
+              <th style={{ ...th, textAlign: 'right' }}>Rate (₹/g)</th>
+              <th style={{ ...th, textAlign: 'right' }}>Value</th>
+              <th style={{ ...th, textAlign: 'center', width: 60 }}>KL</th>
+              <th style={{ ...th, textAlign: 'center', width: 120 }}>Status</th>
+              <th style={{ ...th, textAlign: 'right', width: 240 }}>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {visible.map((b, i) => {
+              const meta        = STATUS_META[b.status] || STATUS_META.booked
+              const isCancelled = b.status === 'cancelled'
+              const isFulfilled = b.status === 'fulfilled'
+              const isTerminal  = isCancelled || isFulfilled
+              const total       = Number(b.weight || 0) * Number(b.rate || 0)
+              const dotColor    = partyColor(b.party)
+              return (
+                <tr key={b.id}
+                  style={{
+                    background: i % 2 === 1 ? `${t.card2}40` : 'transparent',
+                    opacity: isCancelled ? 0.55 : 1,
+                  }}>
+                  <td style={{ ...td, textAlign: 'center', color: t.text4, fontFamily: 'monospace', fontSize: 12, fontWeight: 700 }}>{i + 1}</td>
+                  <td style={td}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+                      <div style={{ width: 8, height: 8, borderRadius: '50%', background: dotColor, flexShrink: 0 }} />
+                      <span style={{ color: t.text1, fontWeight: 700, textDecoration: isCancelled ? 'line-through' : 'none' }}>{b.party}</span>
+                    </div>
+                    {(b.purity || b.buyer_phone || b.notes) && (
+                      <div style={{ fontSize: 10.5, color: t.text4, marginTop: 4, marginLeft: 17, display: 'flex', gap: 9, flexWrap: 'wrap', fontWeight: 600 }}>
+                        {b.purity && <span style={{ color: t.gold }}>{b.purity}</span>}
+                        {b.buyer_phone && <span style={{ fontFamily: 'monospace' }}>{b.buyer_phone}</span>}
+                        {b.notes && <span title={b.notes} style={{ fontStyle: 'italic' }}>· note</span>}
+                      </div>
+                    )}
+                  </td>
+                  <td style={{ ...td, textAlign: 'right', fontFamily: 'monospace', color: t.gold, fontWeight: 800, fontSize: 14 }}>
+                    {fmt(b.weight, 2)}
+                  </td>
+                  <td style={{ ...td, textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: t.text2 }}>
+                    ₹{Number(b.rate || 0).toLocaleString('en-IN')}
+                  </td>
+                  <td style={{ ...td, textAlign: 'right', fontFamily: 'monospace', color: t.blue, fontWeight: 700 }}>
+                    {fmtINR(total)}
+                  </td>
+                  <td style={{ ...td, textAlign: 'center' }}>
+                    {b.is_kl && (
+                      <span style={{ background: `${t.purple}1f`, color: t.purple, borderRadius: 4, padding: '2px 9px', fontSize: 10, fontWeight: 800, letterSpacing: '.04em' }}>KL</span>
+                    )}
+                  </td>
+                  <td style={{ ...td, textAlign: 'center' }}>
+                    <span style={{ background: `${meta.color}1c`, color: meta.color, border: `1px solid ${meta.color}55`, borderRadius: 99, padding: '3px 11px', fontSize: 10, fontWeight: 800, letterSpacing: '.08em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>{meta.label}</span>
+                  </td>
+                  <td style={{ ...td, textAlign: 'right' }}>
+                    <div style={{ display: 'inline-flex', gap: 6, justifyContent: 'flex-end' }}>
+                      {!isTerminal && b.status === 'booked' && (
+                        <ActionPill label="Confirm" color={t.blue} onClick={() => onUpdateStatus(b.id, 'confirmed')} t={t} />
+                      )}
+                      {!isTerminal && (b.status === 'booked' || b.status === 'confirmed') && (
+                        <ActionPill label="Fulfill" color={t.green} onClick={() => onUpdateStatus(b.id, 'fulfilled')} t={t} />
+                      )}
+                      {!isTerminal && (
+                        <ActionPill label="Cancel" color={t.red} onClick={() => onRequestCancel(b)} t={t} subtle />
+                      )}
+                    </div>
+                    {b.created_at && (
+                      <div style={{ fontSize: 9.5, color: t.text4, marginTop: 5, fontFamily: 'monospace', fontWeight: 600 }} title={`Created by ${b.created_by || 'unknown'}`}>
+                        {fmtTS(b.created_at)}
+                      </div>
+                    )}
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+          {activeRows.length > 0 && (
+            <tfoot>
+              <tr style={{ background: `${t.gold}0d`, borderTop: `2px solid ${t.gold}55` }}>
+                <td colSpan={2} style={{ ...td, fontSize: 11, color: t.gold, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 800 }}>Active total</td>
+                <td style={{ ...td, textAlign: 'right', fontFamily: 'monospace', color: t.gold, fontWeight: 800, fontSize: 14 }}>
+                  {fmt(activeWeight, 2)}<span style={{ fontSize: 11, marginLeft: 2, color: t.text3 }}>g</span>
+                </td>
+                <td style={td} />
+                <td style={{ ...td, textAlign: 'right', fontFamily: 'monospace', color: t.blue, fontWeight: 800 }}>{fmtINR(activeValue)}</td>
+                <td colSpan={3} style={td} />
+              </tr>
+            </tfoot>
+          )}
+        </table>
       </div>
     </div>
   )
