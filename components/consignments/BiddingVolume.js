@@ -629,10 +629,37 @@ export default function BiddingVolume() {
             (<strong style={{ color: t.text1 }}>{fmtDate(arrivalDate)}</strong>)
           </div>
         </div>
-        <div style={{ display: 'flex', gap: 8 }}>
-          {/* Top-right "+ New Booking" CTA removed — booking flow is now
-              source-pick first. The Book CTA surfaces inside the Incoming
-              Sources card as soon as any branch is checked. */}
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          {/* Date navigator — ←/→ to scroll through arrival dates so ops
+              can review past bookings (and any future ones). Centre pill
+              shows the active date + day label; clicking it resets to
+              tomorrow (the default "today's bid" view). The full preset
+              picker stays retired — these three controls cover 95 % of
+              the cases without the clutter that confused ops last time. */}
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4, background: t.card2 || t.card, border: `1px solid ${t.border}`, borderRadius: 8, padding: 3 }}>
+            <button onClick={() => setArrivalDate(dateAdd(arrivalDate, -1))}
+              title="Previous arrival date (yesterday's bookings)"
+              style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: t.text2, padding: '4px 9px', fontSize: 13, fontWeight: 700, borderRadius: 5 }}>
+              ←
+            </button>
+            <button onClick={() => setArrivalDate(tomorrow)}
+              title={dayDiff === 1 ? 'Showing tomorrow (default)' : 'Reset to tomorrow (default)'}
+              style={{
+                background: dayDiff === 1 ? `${t.gold}1c` : 'transparent',
+                border: 'none', cursor: 'pointer',
+                color: dayDiff === 1 ? t.gold : t.text2,
+                padding: '4px 10px', fontSize: 11, fontWeight: 700,
+                borderRadius: 5, letterSpacing: '.02em',
+                minWidth: 120, textAlign: 'center',
+              }}>
+              {fmtDateShort(arrivalDate)} · <span style={{ opacity: .7 }}>{dayLabel}</span>
+            </button>
+            <button onClick={() => setArrivalDate(dateAdd(arrivalDate, 1))}
+              title="Next arrival date"
+              style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: t.text2, padding: '4px 9px', fontSize: 13, fontWeight: 700, borderRadius: 5 }}>
+              →
+            </button>
+          </div>
           <button onClick={() => fetchAll()} disabled={loading}
             style={{ background: loading ? t.card2 : 'transparent', border: `1px solid ${t.border}`, borderRadius: '8px', padding: '7px 14px', fontSize: '12px', color: loading ? t.text4 : t.text2, cursor: loading ? 'default' : 'pointer', fontWeight: 500, display: 'flex', alignItems: 'center', gap: 6 }}>
             <span style={{ display: 'inline-block', animation: loading ? 'spin 1s linear infinite' : 'none', fontSize: '13px' }}>⟳</span>
@@ -640,11 +667,6 @@ export default function BiddingVolume() {
           </button>
         </div>
       </div>
-
-      {/* Date controls removed — the bid window is always today → tomorrow's
-          HO arrival. Custom dates confused ops more than they helped. The
-          `arrivalDate` state stays (defaults to tomorrow) so downstream
-          consumers don't need to change. */}
 
       {/* ── KPI strips — split by region so the math doesn't conflate
           Bangalore/Others (today's purchases + outstation in-transit)
