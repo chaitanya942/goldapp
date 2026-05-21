@@ -1,8 +1,9 @@
 -- ─────────────────────────────────────────────────────────────────────────────
 -- Daily gain audit — redistribute realized gain across non-Kerala bookings
 -- ─────────────────────────────────────────────────────────────────────────────
--- At midnight IST, for each PAST arrival_date that still has non-Kerala
--- bookings without a gain_audited_at timestamp:
+-- Fires from the 60 s sync cron. For each non-Kerala booking whose
+-- arrival_date is today-or-earlier AND whose pipeline is settled
+-- (pipeline_remaining_g = 0, i.e. all attached bills + EOD closure done):
 --
 --   total_committed = SUM(cal_quotas.weight)             (what we promised)
 --   total_attached  = SUM(purchases.net_weight)          (what physically arrived)
@@ -10,16 +11,25 @@
 --
 -- The estimated 3.5 % gain on each booking was just that — an estimate.
 -- The real gain only materializes once bills physically land. So at end of
--- day we redistribute actual_gain proportionally by each booking's attached
--- weight, replacing gain_applied_g with the audited value and zeroing
--- gain_realized_g (its contribution is now folded in).
+-- the bidding day we redistribute actual_gain proportionally by each
+-- booking's attached weight, replacing gain_applied_g with the audited
+-- value and zeroing gain_realized_g (its contribution is now folded in).
 --
 -- Booked weight and net weight stay UNCHANGED — only gain shifts.
 -- Kerala (is_kl=true) bookings are excluded — their gain stays 0 by default
 -- (the leaf→hub consolidation already absorbs refining loss upstream).
 --
--- Idempotent. The gain_audited_at sentinel prevents double-auditing the
--- same booking on subsequent sync ticks.
+-- Trigger details (corrected):
+--   · date <= today_ist  — arrival day is today or in the past. The first
+--                          midnight tick at 00:00 of arrival_date catches
+--                          same-day bookings whose pipeline already settled.
+--   · pipeline_remaining_g = 0 — only audit bookings that are no longer
+--                                  waiting for more bills. Pipeline-active
+--                                  bookings are skipped until close_stale_
+--                                  pipelines() zeros them (next EOD).
+--   · gain_audited_at IS NULL — never double-audit.
+--
+-- Idempotent. Safe to re-run.
 -- ─────────────────────────────────────────────────────────────────────────────
 
 BEGIN;
@@ -31,7 +41,8 @@ CREATE INDEX IF NOT EXISTS idx_cal_quotas_unaudited_past
   ON cal_quotas (date)
   WHERE gain_audited_at IS NULL
     AND is_kl = false
-    AND status <> 'cancelled';
+    AND status <> 'cancelled'
+    AND pipeline_remaining_g = 0;
 
 
 CREATE OR REPLACE FUNCTION audit_daily_gain()
@@ -55,15 +66,20 @@ DECLARE
 BEGIN
   today_ist := (now() AT TIME ZONE 'Asia/Kolkata')::date;
 
-  -- Iterate distinct un-audited PAST dates. The partial index above keeps
-  -- this O(n) in the unaudited set, no full-table scan.
+  -- Iterate distinct dates with un-audited settled non-Kerala bookings.
+  -- date <= today_ist so the audit fires the moment arrival day begins
+  -- (00:00 IST) for any booking whose pipeline already cleared. The
+  -- pipeline_remaining_g = 0 gate ensures we don't audit a row that's
+  -- still expecting bills — that one waits for close_stale_pipelines()
+  -- to zero its pipeline first.
   FOR d IN
     SELECT DISTINCT q.date
       FROM cal_quotas q
-     WHERE q.date < today_ist
+     WHERE q.date <= today_ist
        AND q.is_kl = false
        AND q.status <> 'cancelled'
        AND q.gain_audited_at IS NULL
+       AND q.pipeline_remaining_g = 0
      ORDER BY q.date ASC
   LOOP
     SELECT COUNT(*)::INT, COALESCE(SUM(q.weight), 0)
@@ -71,7 +87,9 @@ BEGIN
       FROM cal_quotas q
      WHERE q.date = d
        AND q.is_kl = false
-       AND q.status <> 'cancelled';
+       AND q.status <> 'cancelled'
+       AND q.gain_audited_at IS NULL
+       AND q.pipeline_remaining_g = 0;
 
     SELECT COALESCE(SUM(p.net_weight), 0)
       INTO nattached
@@ -79,7 +97,9 @@ BEGIN
       JOIN cal_quotas q ON q.id = p.booking_id
      WHERE q.date = d
        AND q.is_kl = false
-       AND q.status <> 'cancelled';
+       AND q.status <> 'cancelled'
+       AND q.gain_audited_at IS NULL
+       AND q.pipeline_remaining_g = 0;
 
     -- Edge case: no bills attached (all pipeline never filled). Mark
     -- audited with the existing gain values intact — there's no
@@ -89,7 +109,9 @@ BEGIN
          SET gain_audited_at = now()
        WHERE date = d
          AND is_kl = false
-         AND status <> 'cancelled';
+         AND status <> 'cancelled'
+         AND gain_audited_at IS NULL
+         AND pipeline_remaining_g = 0;
       audit_date   := d;
       bookings     := nbookings;
       committed_g  := ncommitted;
@@ -108,6 +130,8 @@ BEGIN
        WHERE q.date = d
          AND q.is_kl = false
          AND q.status <> 'cancelled'
+         AND q.gain_audited_at IS NULL
+         AND q.pipeline_remaining_g = 0
     LOOP
       SELECT COALESCE(SUM(p.net_weight), 0)
         INTO booking_attached
