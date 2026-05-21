@@ -2265,7 +2265,7 @@ export async function POST(req) {
   }
 
   if (action === 'create_booking') {
-    const { date, party, buyer_phone, weight, rate, purity, is_kl, notes, source_branches } = body
+    const { date, party, buyer_phone, weight, rate, purity, is_kl, notes, source_branches, bill_ids } = body
     if (!date)   return Response.json({ error: 'date required (YYYY-MM-DD)' }, { status: 400 })
     if (!party || !String(party).trim()) return Response.json({ error: 'Buyer name required' }, { status: 400 })
     const w = Number(weight); const r = Number(rate)
@@ -2299,7 +2299,22 @@ export async function POST(req) {
     // in_consignment whose computed arrival lands on the booking date.
     // Errors here are logged but don't fail the booking (the audit row is
     // already created; an admin can rerun the link if needed).
-    if (Array.isArray(source_branches) && source_branches.length > 0) {
+    // Bill-level claim — if the UI sent explicit bill_ids, use them and skip
+    // the legacy branch-wide claim. This makes the booking honor partial
+    // selections (e.g. "3 of 7 bills at Mysore") without claiming the bills
+    // ops didn't pick.
+    if (Array.isArray(bill_ids) && bill_ids.length > 0) {
+      try {
+        const bookedAt = new Date().toISOString()
+        await supabase
+          .from('purchases')
+          .update({ booking_id: data.id, booked_at: bookedAt })
+          .in('id', bill_ids)
+          .is('booking_id', null)        // never re-claim a bill that's already booked
+      } catch (linkErr) {
+        console.error('[create_booking] bill_ids claim failed:', linkErr?.message)
+      }
+    } else if (Array.isArray(source_branches) && source_branches.length > 0) {
       try {
         const { data: branchRows } = await supabase
           .from('branches')

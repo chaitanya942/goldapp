@@ -214,9 +214,20 @@ export default function BiddingVolume() {
   //   remaining     = available - booked           (still bookable)
   // When remaining < 0, ops has overbooked; UI flags it but lets the booking
   // through (operator may have committed against shipments not yet visible).
-  const incomingNetWt   = supply?.grand_total?.net_wt    || 0
-  const incomingGrossWt = supply?.grand_total?.gross_wt  || 0
-  const incomingBills   = supply?.grand_total?.bills     || 0
+  // Incoming = Section 1 (Bangalore today) + Section 2 (24h transit, arrives
+  // tomorrow). Section 4 (Branch Stock pre-EOD) is OPTIONAL — only enters
+  // the booking math when ops explicitly selects bills from it, so it's not
+  // part of the default Incoming surface. Section 3 (48h transit) is
+  // view-only and never counts.
+  const s1Net   = supply?.bangalore?.total?.net_wt    || 0
+  const s2Net   = supply?.transit_24h?.total?.net_wt  || supply?.in_transit?.total?.net_wt  || 0
+  const s1Gross = supply?.bangalore?.total?.gross_wt  || 0
+  const s2Gross = supply?.transit_24h?.total?.gross_wt|| supply?.in_transit?.total?.gross_wt|| 0
+  const s1Bills = supply?.bangalore?.total?.bills     || 0
+  const s2Bills = supply?.transit_24h?.total?.bills   || supply?.in_transit?.total?.bills   || 0
+  const incomingNetWt   = s1Net   + s2Net
+  const incomingGrossWt = s1Gross + s2Gross
+  const incomingBills   = s1Bills + s2Bills
 
   const bookings        = bookingsResp?.bookings || []
   const activeBookings  = useMemo(() => bookings.filter(b => b.status !== 'cancelled'), [bookings])
@@ -286,60 +297,109 @@ export default function BiddingVolume() {
   const t48hBranches   = supply?.transit_48h?.branches    || []
   const preEodBranches = supply?.branch_pre_eod?.branches || []
   const dayAfterArrivalDate = supply?.day_after_arrival   || null
+  // Branch metadata lookup — used for region/Kerala-locking helpers + the
+  // booking modal's chip display. Keyed by branch_name (no prefix needed now
+  // that the selection is bill-level).
   const branchesByKey = useMemo(() => {
     const m = {}
-    for (const b of bangBranches)   m[`B:${b.branch_name}`] = { ...b, group: 'bangalore' }
-    for (const b of inTBranches)    m[`T:${b.branch_name}`] = { ...b, group: 'transit_24h' }
-    for (const b of preEodBranches) m[`P:${b.branch_name}`] = { ...b, group: 'branch_pre_eod' }
+    for (const b of bangBranches)   m[b.branch_name] = { ...b, group: 'bangalore' }
+    for (const b of inTBranches)    m[b.branch_name] = { ...b, group: 'transit_24h' }
+    for (const b of preEodBranches) m[b.branch_name] = { ...b, group: 'branch_pre_eod' }
     return m
   }, [bangBranches, inTBranches, preEodBranches])
+
+  // Bill-level catalogue across the three SELECTABLE sections (Section 3 is
+  // view-only). Indexed by bill.id so the source of truth for booking math
+  // is the individual purchase row, not the branch summary.
+  const billsById = useMemo(() => {
+    const m = {}
+    const collect = (branches, group) => {
+      for (const b of branches || []) {
+        for (const bill of b.bills || []) {
+          m[bill.id] = { ...bill, _branch_name: b.branch_name, _region: b.region || null, _group: group }
+        }
+      }
+    }
+    collect(bangBranches,   'bangalore')
+    collect(inTBranches,    'transit_24h')
+    collect(preEodBranches, 'branch_pre_eod')
+    return m
+  }, [bangBranches, inTBranches, preEodBranches])
+
   const selectedTotal = useMemo(() => {
     let s = 0
-    for (const k of selected) s += Number(branchesByKey[k]?.total_net_wt || 0)
+    for (const id of selected) s += Number(billsById[id]?.net_weight || 0)
     return s
-  }, [selected, branchesByKey])
-  const toggleBranch = (k) => setSelected(prev => {
+  }, [selected, billsById])
+
+  // Single-bill toggle (used by the drill-down checkbox).
+  const toggleBill = (billId) => setSelected(prev => {
     const next = new Set(prev)
-    if (next.has(k)) next.delete(k); else next.add(k)
+    if (next.has(billId)) next.delete(billId); else next.add(billId)
     return next
   })
-  const selectGroupAll = (rows, prefix, allOn) => setSelected(prev => {
-    const next = new Set(prev)
-    for (const b of rows) {
-      const k = `${prefix}:${b.branch_name}`
-      if (allOn) next.delete(k); else next.add(k)
-    }
+  // Tri-state branch toggle — checking a branch row selects every one of its
+  // bills; clicking again clears them. If only some of the branch's bills
+  // are currently selected, the click promotes to ALL (most useful default).
+  const branchSelectionState = (branch) => {
+    const bills = branch?.bills || []
+    if (!bills.length) return 'none'
+    let sel = 0
+    for (const b of bills) if (selected.has(b.id)) sel++
+    if (sel === 0)            return 'none'
+    if (sel === bills.length) return 'all'
+    return 'partial'
+  }
+  const toggleBranchAll = (branch) => setSelected(prev => {
+    const next  = new Set(prev)
+    const bills = branch?.bills || []
+    const state = (() => {
+      if (!bills.length) return 'none'
+      let sel = 0
+      for (const b of bills) if (prev.has(b.id)) sel++
+      if (sel === 0)            return 'none'
+      if (sel === bills.length) return 'all'
+      return 'partial'
+    })()
+    if (state === 'all') for (const b of bills) next.delete(b.id)
+    else                 for (const b of bills) next.add(b.id)
+    return next
+  })
+  // Region select-all — operates on every bill under every branch of the
+  // region. Used by the "Select all" link in each region header.
+  const toggleRegionAll = (branchRows) => setSelected(prev => {
+    const next   = new Set(prev)
+    const allIds = branchRows.flatMap(r => (r.bills || []).map(b => b.id))
+    if (!allIds.length) return next
+    const allOn = allIds.every(id => next.has(id))
+    if (allOn) for (const id of allIds) next.delete(id)
+    else       for (const id of allIds) next.add(id)
     return next
   })
 
-  // Kerala (KL) no-mix rule — Kerala bookings must be exclusive. The mode is
-  // 'kerala' if any selected branch is Kerala, 'other' if any non-Kerala
-  // branch is selected, or null when nothing is picked. Branches outside
-  // the current mode are disabled in the source picker to prevent
-  // accidental mixed selection.
-  const isKerala = (b) => b?.region === 'Kerala'
+  // Kerala (KL) no-mix rule — Kerala bookings must be exclusive. With
+  // bill-level selection, look at the BILL's branch's region (cached on the
+  // bill as `_region` by billsById). Locking a branch is now "would any of
+  // its bills violate the current selection mode".
+  const isKeralaBill = (id) => billsById[id]?._region === 'Kerala'
+  const isKeralaBranch = (b)  => b?.region === 'Kerala'
   const selectionMode = useMemo(() => {
     let hasKerala = false, hasOther = false
-    for (const k of selected) {
-      const b = branchesByKey[k]
-      if (!b) continue
-      if (isKerala(b)) hasKerala = true
-      else             hasOther  = true
+    for (const id of selected) {
+      if (isKeralaBill(id)) hasKerala = true
+      else                  hasOther  = true
     }
-    if (hasKerala && hasOther) return 'mixed' // shouldn't happen — picker prevents it
+    if (hasKerala && hasOther) return 'mixed'
     if (hasKerala) return 'kerala'
     if (hasOther)  return 'other'
     return null
-  }, [selected, branchesByKey])
-  // A branch is locked when the current selection mode disallows it.
+  }, [selected, billsById])
   const branchLocked = (b) => {
     if (!selectionMode) return false
-    if (selectionMode === 'kerala') return !isKerala(b)
-    if (selectionMode === 'other')  return  isKerala(b)
+    if (selectionMode === 'kerala') return !isKeralaBranch(b)
+    if (selectionMode === 'other')  return  isKeralaBranch(b)
     return false
   }
-  // Auto-derived KL flag for the booking insert. CalTable's allocation
-  // reads is_kl to keep Kerala buyers paired with Kerala bars.
   const selectionIsKerala = selectionMode === 'kerala'
 
   // ── Date label ─────────────────────────────────────────────────────────────
@@ -379,14 +439,16 @@ export default function BiddingVolume() {
   // ── Mutations ──────────────────────────────────────────────────────────────
   const createBooking = async (payload) => {
     // Capture the selected branch names so the API can mark their eligible
-    // bills with the booking id (purchases.booking_id). Sending names
-    // rather than bill ids keeps the request body small; the server
-    // re-derives eligibility using the same rule the bidding-volume reader
-    // applies.
-    const sourceBranches = [...selected].map(k => branchesByKey[k]?.branch_name).filter(Boolean)
+    // Bill-level claim: send the exact purchase ids ops selected. The server
+    // honours bill_ids verbatim (no branch-wide widening) so partial
+    // selections — "3 of 7 bills at Mysore" — are respected at booking time.
+    // source_branches is sent alongside for backwards compat + audit context
+    // (server falls back to it only when bill_ids is empty).
+    const billIds = [...selected]
+    const sourceBranches = [...new Set(billIds.map(id => billsById[id]?._branch_name).filter(Boolean))]
     const r = await authedFetch('/api/consignments?action=create_booking', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...payload, date: arrivalDate, source_branches: sourceBranches }),
+      body: JSON.stringify({ ...payload, date: arrivalDate, bill_ids: billIds, source_branches: sourceBranches }),
     })
     const j = await r.json()
     if (!r.ok || j.error) { showToast(j.error || 'Booking failed', 'error'); return false }
@@ -559,8 +621,10 @@ export default function BiddingVolume() {
         selectable
         selected={selected}
         branchLocked={branchLocked}
-        onToggleBranch={toggleBranch}
-        onSelectGroup={selectGroupAll}
+        onToggleBill={toggleBill}
+        onToggleBranchAll={toggleBranchAll}
+        onToggleRegionAll={toggleRegionAll}
+        branchSelectionState={branchSelectionState}
         emptyMsg="No Bangalore purchases recorded today yet."
       />
 
@@ -578,8 +642,10 @@ export default function BiddingVolume() {
         selectable
         selected={selected}
         branchLocked={branchLocked}
-        onToggleBranch={toggleBranch}
-        onSelectGroup={selectGroupAll}
+        onToggleBill={toggleBill}
+        onToggleBranchAll={toggleBranchAll}
+        onToggleRegionAll={toggleRegionAll}
+        branchSelectionState={branchSelectionState}
         emptyMsg="No 24h-TAT bills currently in transit."
       />
 
@@ -614,8 +680,10 @@ export default function BiddingVolume() {
         selectable
         selected={selected}
         branchLocked={branchLocked}
-        onToggleBranch={toggleBranch}
-        onSelectGroup={selectGroupAll}
+        onToggleBill={toggleBill}
+        onToggleBranchAll={toggleBranchAll}
+        onToggleRegionAll={toggleRegionAll}
+        branchSelectionState={branchSelectionState}
         emptyMsg="No eligible branches — either pickups already happened today, or no eligible branches scheduled today."
       />
 
@@ -633,19 +701,19 @@ export default function BiddingVolume() {
           backdropFilter: 'blur(8px)',
         }}>
           <div>
-            <div style={{ fontSize: 10, color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 700 }}>Selected</div>
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginTop: 2 }}>
-              <span style={{ fontSize: 22, color: t.gold, fontFamily: 'monospace', fontWeight: 300, letterSpacing: '-.01em' }}>{fmt(selectedTotal, 2)}</span>
-              <span style={{ fontSize: 11, color: t.text3 }}>g · {selected.size} branch{selected.size === 1 ? '' : 'es'}</span>
+            <div style={{ fontSize: 11, color: t.text3, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 800 }}>Selected</div>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 7, marginTop: 3 }}>
+              <span style={{ fontSize: 26, color: t.gold, fontFamily: 'monospace', fontWeight: 700, letterSpacing: '-.01em' }}>{fmt(selectedTotal, 2)}</span>
+              <span style={{ fontSize: 13, color: t.text2, fontWeight: 700 }}>g · {selected.size} bill{selected.size === 1 ? '' : 's'}</span>
             </div>
           </div>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: 9, alignItems: 'center' }}>
             <button onClick={() => setSelected(new Set())}
-              style={{ background: 'transparent', border: `1px solid ${t.border}`, borderRadius: 8, padding: '7px 14px', fontSize: 11, color: t.text3, fontWeight: 600, cursor: 'pointer' }}>
+              style={{ background: 'transparent', border: `1px solid ${t.border2}`, borderRadius: 8, padding: '8px 16px', fontSize: 12, color: t.text2, fontWeight: 700, cursor: 'pointer' }}>
               Clear
             </button>
             <button onClick={() => setShowBookModal(true)}
-              style={{ background: t.gold, color: '#1a0a00', border: 'none', borderRadius: 8, padding: '9px 22px', fontSize: 12, fontWeight: 800, cursor: 'pointer', letterSpacing: '.02em', boxShadow: `0 3px 12px ${t.gold}66` }}>
+              style={{ background: t.gold, color: '#1a0a00', border: 'none', borderRadius: 8, padding: '10px 24px', fontSize: 13, fontWeight: 900, cursor: 'pointer', letterSpacing: '.02em', boxShadow: `0 3px 12px ${t.gold}66` }}>
               Book Selected →
             </button>
           </div>
@@ -681,11 +749,10 @@ export default function BiddingVolume() {
           bookedQty={bookedQty}
           selected={selected}
           selectedTotal={selectedTotal}
-          branchesByKey={branchesByKey}
+          billsById={billsById}
           bidders={bidders}
           effectiveGainRate={effectiveGainRate}
           isKerala={selectionIsKerala}
-          onUnselect={(k) => toggleBranch(k)}
           onSubmit={createBooking}
           onClose={() => setShowBookModal(false)}
           onSuccess={() => setSelected(new Set())}
@@ -1232,8 +1299,9 @@ function ActionPill({ label, color, onClick, t, subtle = false }) {
 // dimmed with no checkboxes — they're informational.
 function SourceSection({
   t, card, index, icon, title, subtitle, accent,
-  branches = [], total, prefix, selectable = false, viewOnly = false,
-  selected, branchLocked, onToggleBranch, onSelectGroup,
+  branches = [], total, selectable = false, viewOnly = false,
+  selected, branchLocked,
+  onToggleBill, onToggleBranchAll, onToggleRegionAll, branchSelectionState,
   emptyMsg,
 }) {
   const tone = accent || t.gold
@@ -1288,116 +1356,128 @@ function SourceSection({
         {/* faint hairline glow at the top edge */}
         <div aria-hidden style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 1, background: `linear-gradient(90deg, ${tone}70 0%, transparent 65%)`, pointerEvents: 'none' }} />
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
-          {/* Index chip — 1..4. Pure number, no border, large gold tone. */}
+          {/* Index chip — 1..4. Pure number, no border, large accent tone. */}
           <div style={{
-            width: 34, height: 34, borderRadius: 10,
-            background: `${tone}1f`,
-            border: `1px solid ${tone}44`,
+            width: 38, height: 38, borderRadius: 11,
+            background: `${tone}24`,
+            border: `1.5px solid ${tone}55`,
             display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
             flexShrink: 0,
           }}>
-            <span style={{ fontSize: 15, color: tone, fontFamily: 'monospace', fontWeight: 700, letterSpacing: '-.02em' }}>0{index}</span>
+            <span style={{ fontSize: 17, color: tone, fontFamily: 'monospace', fontWeight: 800, letterSpacing: '-.02em' }}>0{index}</span>
           </div>
           <div style={{ minWidth: 0 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              {icon && <span style={{ fontSize: 14, opacity: .85 }}>{icon}</span>}
-              <span style={{ fontSize: 15, color: t.text1, fontWeight: 600, letterSpacing: '.01em', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{title}</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+              {icon && <span style={{ fontSize: 16, opacity: .95 }}>{icon}</span>}
+              <span style={{ fontSize: 16, color: t.text1, fontWeight: 800, letterSpacing: '.01em', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{title}</span>
               {viewOnly && (
-                <span style={{ fontSize: 9, color: t.text4, background: `${t.text4}1c`, border: `1px solid ${t.text4}30`, borderRadius: 4, padding: '1px 7px', fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase' }}>view</span>
+                <span style={{ fontSize: 10, color: t.text3, background: `${t.text4}24`, border: `1px solid ${t.text4}40`, borderRadius: 4, padding: '2px 8px', fontWeight: 800, letterSpacing: '.08em', textTransform: 'uppercase' }}>view</span>
               )}
             </div>
-            {subtitle && <div style={{ fontSize: 11, color: t.text3, marginTop: 4, lineHeight: 1.5 }}>{subtitle}</div>}
+            {subtitle && <div style={{ fontSize: 12, color: t.text2, marginTop: 5, lineHeight: 1.5, fontWeight: 500 }}>{subtitle}</div>}
           </div>
         </div>
         <div style={{ textAlign: 'right', flexShrink: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: 4, justifyContent: 'flex-end' }}>
-            <span style={{ fontSize: 22, color: tone, fontFamily: 'monospace', fontWeight: 300, lineHeight: 1, letterSpacing: '-.01em' }}>{fmt(totalNet, 2)}</span>
-            <span style={{ fontSize: 11, color: t.text3, fontWeight: 500 }}>g</span>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 5, justifyContent: 'flex-end' }}>
+            <span style={{ fontSize: 26, color: tone, fontFamily: 'monospace', fontWeight: 700, lineHeight: 1, letterSpacing: '-.01em' }}>{fmt(totalNet, 2)}</span>
+            <span style={{ fontSize: 13, color: t.text2, fontWeight: 700 }}>g</span>
           </div>
-          <div style={{ fontSize: 10, color: t.text4, marginTop: 4, letterSpacing: '.04em' }}>{totalBills} bill{totalBills === 1 ? '' : 's'}</div>
+          <div style={{ fontSize: 11, color: t.text3, marginTop: 5, letterSpacing: '.04em', fontWeight: 700 }}>{totalBills} bill{totalBills === 1 ? '' : 's'}</div>
         </div>
       </div>
 
       {/* Body */}
       {isEmpty ? (
-        <div style={{ padding: '34px 22px', textAlign: 'center', color: t.text4, fontSize: 11.5, lineHeight: 1.6 }}>
-          <div style={{ fontSize: 24, opacity: .35, marginBottom: 6 }}>{icon || '·'}</div>
+        <div style={{ padding: '34px 22px', textAlign: 'center', color: t.text3, fontSize: 13, lineHeight: 1.6, fontWeight: 600 }}>
+          <div style={{ fontSize: 28, opacity: .35, marginBottom: 7 }}>{icon || '·'}</div>
           {emptyMsg || 'Nothing here yet.'}
         </div>
       ) : (
         <div style={{ padding: '4px 0' }}>
           {regions.map(([region, rows]) => {
             const rColor = REGION_COLORS[region] || t.text3
-            const allOn  = selectable && rows.every(b => selected?.has(`${prefix}:${b.branch_name}`))
+            // Region tri-state: 'all' if every bill in the region is selected,
+            // 'none' if zero, 'partial' otherwise.
+            const regionState = (() => {
+              if (!selectable) return 'none'
+              const all = rows.flatMap(r => r.bills || [])
+              if (!all.length) return 'none'
+              let sel = 0
+              for (const b of all) if (selected?.has(b.id)) sel++
+              if (sel === 0)         return 'none'
+              if (sel === all.length) return 'all'
+              return 'partial'
+            })()
             return (
-              <div key={region} style={{ padding: '10px 20px', borderTop: `1px solid ${t.border}25` }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, fontSize: 10, color: rColor, fontWeight: 700, letterSpacing: '.1em', textTransform: 'uppercase' }}>
-                    <span style={{ width: 5, height: 5, borderRadius: '50%', background: rColor, display: 'inline-block' }} />
+              <div key={region} style={{ padding: '11px 20px', borderTop: `1px solid ${t.border}25` }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 7 }}>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, fontSize: 11, color: rColor, fontWeight: 800, letterSpacing: '.1em', textTransform: 'uppercase' }}>
+                    <span style={{ width: 6, height: 6, borderRadius: '50%', background: rColor, display: 'inline-block' }} />
                     {region}
                   </span>
-                  {selectable && rows.length > 1 && (
-                    <button onClick={() => onSelectGroup?.(rows, prefix, allOn)}
-                      style={{ background: 'transparent', border: 'none', color: allOn ? rColor : t.text3, fontSize: 10, fontWeight: 600, cursor: 'pointer', letterSpacing: '.02em' }}>
-                      {allOn ? 'Clear region' : 'Select all'}
+                  {selectable && rows.length >= 1 && (
+                    <button onClick={() => onToggleRegionAll?.(rows)}
+                      style={{ background: regionState === 'none' ? 'transparent' : `${rColor}14`, border: `1px solid ${regionState === 'none' ? t.border2 : `${rColor}55`}`, borderRadius: 6, color: regionState === 'none' ? t.text3 : rColor, fontSize: 11, fontWeight: 700, cursor: 'pointer', letterSpacing: '.02em', padding: '3px 10px' }}>
+                      {regionState === 'all' ? 'Clear region' : regionState === 'partial' ? 'Select rest' : 'Select all'}
                     </button>
                   )}
                 </div>
                 {rows.map(b => {
-                  const k         = `${prefix || 'X'}:${b.branch_name}`
-                  const checked   = selectable && (selected?.has(k) || false)
+                  const billRows  = Array.isArray(b.bills) ? b.bills : []
+                  const branchSt  = selectable ? (branchSelectionState?.(b) || 'none') : 'none'
+                  const checked   = branchSt === 'all'
+                  const partial   = branchSt === 'partial'
                   const locked    = selectable && branchLocked?.(b)
                   const rowCursor = !selectable ? 'default' : (locked ? 'not-allowed' : 'pointer')
                   const expanded  = openBranches.has(b.branch_name)
-                  const billRows  = Array.isArray(b.bills) ? b.bills : []
                   return (
                     <Fragment key={b.branch_name}>
                     <div
-                      onClick={() => { if (selectable && !locked) onToggleBranch?.(k) }}
+                      onClick={() => { if (selectable && !locked) onToggleBranchAll?.(b) }}
                       onMouseEnter={(e) => { if (selectable && !locked) e.currentTarget.style.background = `${tone}0a` }}
-                      onMouseLeave={(e) => { e.currentTarget.style.background = checked ? `${tone}12` : 'transparent' }}
+                      onMouseLeave={(e) => { e.currentTarget.style.background = (checked || partial) ? `${tone}12` : 'transparent' }}
                       style={{
                         display: 'grid', gridTemplateColumns: rowGrid, alignItems: 'center',
                         columnGap: 14,
-                        padding: '9px 11px', borderRadius: 8,
-                        background: checked ? `${tone}12` : 'transparent',
+                        padding: '10px 11px', borderRadius: 8,
+                        background: (checked || partial) ? `${tone}12` : 'transparent',
                         cursor: rowCursor,
-                        opacity: !selectable ? 0.72 : (locked ? 0.42 : 1),
+                        opacity: !selectable ? 0.78 : (locked ? 0.42 : 1),
                         transition: 'background .15s ease',
                       }}>
-                      {/* Col 1: checkbox / placeholder */}
+                      {/* Col 1: checkbox — tri-state when partial */}
                       {selectable ? (
                         <span style={{
-                          width: 15, height: 15, borderRadius: 4,
-                          border: `1.5px solid ${checked ? tone : t.border2}`,
-                          background: checked ? tone : 'transparent',
+                          width: 16, height: 16, borderRadius: 4,
+                          border: `1.5px solid ${(checked || partial) ? tone : t.border2}`,
+                          background: checked ? tone : (partial ? `${tone}55` : 'transparent'),
                           display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                          color: '#1a0a00', fontSize: 10, fontWeight: 900,
+                          color: checked ? '#1a0a00' : tone, fontSize: 11, fontWeight: 900,
                           transition: 'all .12s ease',
-                        }}>{checked ? '✓' : ''}</span>
+                        }}>{checked ? '✓' : (partial ? '–' : '')}</span>
                       ) : (
-                        <span style={{ width: 15, height: 15, borderRadius: 4, border: `1.5px dashed ${t.border}`, background: 'transparent' }} />
+                        <span style={{ width: 16, height: 16, borderRadius: 4, border: `1.5px dashed ${t.border}`, background: 'transparent' }} />
                       )}
                       {/* Col 2: branch name + meta chips */}
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-                        <span style={{ fontSize: 12.5, color: t.text1, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{b.branch_name}</span>
+                        <span style={{ fontSize: 13.5, color: t.text1, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{b.branch_name}</span>
                         {b.tat_hours != null && (
-                          <span title={`Delivery TAT ${b.tat_hours}h`} style={{ fontSize: 9, color: t.text4, background: `${t.text4}16`, border: `1px solid ${t.text4}26`, borderRadius: 4, padding: '1px 7px', whiteSpace: 'nowrap', fontWeight: 600, letterSpacing: '.04em' }}>{b.tat_hours}h TAT</span>
+                          <span title={`Delivery TAT ${b.tat_hours}h`} style={{ fontSize: 10.5, color: t.text3, background: `${t.text4}1c`, border: `1px solid ${t.text4}2e`, borderRadius: 4, padding: '1px 8px', whiteSpace: 'nowrap', fontWeight: 700, letterSpacing: '.03em' }}>{b.tat_hours}h TAT</span>
                         )}
                         {b.pickup_time && (
-                          <span title="Branch pickup time" style={{ fontSize: 10, color: t.text4, whiteSpace: 'nowrap' }}>· pickup {b.pickup_time}</span>
+                          <span title="Branch pickup time" style={{ fontSize: 11, color: t.text3, whiteSpace: 'nowrap', fontWeight: 600 }}>· pickup {b.pickup_time}</span>
                         )}
                       </div>
                       {/* Col 3: gross weight (muted) */}
-                      <span title="Gross weight" style={{ fontSize: 11.5, color: t.text3, fontFamily: 'monospace', textAlign: 'right', fontWeight: 500, whiteSpace: 'nowrap' }}>
-                        {fmt(b.total_gross_wt, 2)}<span style={{ fontSize: 9, color: t.text4, marginLeft: 2 }}>g gross</span>
+                      <span title="Gross weight" style={{ fontSize: 12.5, color: t.text2, fontFamily: 'monospace', textAlign: 'right', fontWeight: 600, whiteSpace: 'nowrap' }}>
+                        {fmt(b.total_gross_wt, 2)}<span style={{ fontSize: 10, color: t.text4, marginLeft: 2, fontWeight: 600 }}>g gross</span>
                       </span>
                       {/* Col 4: net weight (primary, accent-coloured) */}
-                      <span title="Net weight" style={{ fontSize: 13.5, color: tone, fontFamily: 'monospace', textAlign: 'right', fontWeight: 700, whiteSpace: 'nowrap', letterSpacing: '-.01em' }}>
-                        {fmt(b.total_net_wt, 2)}<span style={{ fontSize: 10, color: t.text3, marginLeft: 2, fontWeight: 500 }}>g</span>
+                      <span title="Net weight" style={{ fontSize: 15, color: tone, fontFamily: 'monospace', textAlign: 'right', fontWeight: 800, whiteSpace: 'nowrap', letterSpacing: '-.01em' }}>
+                        {fmt(b.total_net_wt, 2)}<span style={{ fontSize: 11, color: t.text3, marginLeft: 2, fontWeight: 600 }}>g</span>
                       </span>
                       {/* Col 5: bill count */}
-                      <span style={{ fontSize: 10.5, color: t.text4, textAlign: 'right', fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
+                      <span style={{ fontSize: 12, color: t.text2, textAlign: 'right', fontFamily: 'monospace', whiteSpace: 'nowrap', fontWeight: 700 }}>
                         {b.total_bills} bill{b.total_bills === 1 ? '' : 's'}
                       </span>
                       {/* Col 6: expand caret — clickable independently of the row click */}
@@ -1406,10 +1486,10 @@ function SourceSection({
                         title={expanded ? 'Hide bills' : 'Show bills'}
                         style={{
                           display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                          width: 22, height: 22, borderRadius: 5, cursor: 'pointer',
-                          color: expanded ? tone : t.text4, fontSize: 12, fontWeight: 700,
-                          background: expanded ? `${tone}14` : 'transparent',
-                          border: `1px solid ${expanded ? `${tone}55` : 'transparent'}`,
+                          width: 24, height: 24, borderRadius: 6, cursor: 'pointer',
+                          color: expanded ? tone : t.text3, fontSize: 13, fontWeight: 800,
+                          background: expanded ? `${tone}18` : 'transparent',
+                          border: `1px solid ${expanded ? `${tone}66` : 'transparent'}`,
                           transition: 'all .15s ease',
                           opacity: billRows.length === 0 ? 0.25 : 1,
                           pointerEvents: billRows.length === 0 ? 'none' : 'auto',
@@ -1421,38 +1501,76 @@ function SourceSection({
                     {/* Bill-level drill-down — appears under the branch row */}
                     {expanded && billRows.length > 0 && (
                       <div style={{
-                        marginLeft: 30, marginTop: 2, marginBottom: 6,
-                        paddingLeft: 12, paddingTop: 4, paddingBottom: 4,
-                        borderLeft: `2px solid ${tone}33`,
+                        marginLeft: 30, marginTop: 2, marginBottom: 8,
+                        paddingLeft: 12, paddingTop: 5, paddingBottom: 5,
+                        borderLeft: `2px solid ${tone}40`,
                       }}>
-                        {/* tiny header to anchor the columns */}
-                        <div style={{
-                          display: 'grid',
-                          gridTemplateColumns: '120px minmax(0, 1fr) 90px 90px 110px',
-                          columnGap: 14, padding: '3px 8px',
-                          fontSize: 9, color: t.text4, letterSpacing: '.08em', textTransform: 'uppercase', fontWeight: 700,
-                        }}>
-                          <span>App ID</span>
-                          <span>Customer</span>
-                          <span style={{ textAlign: 'right' }}>Gross</span>
-                          <span style={{ textAlign: 'right' }}>Net</span>
-                          <span style={{ textAlign: 'right' }}>Amount</span>
-                        </div>
-                        {billRows.map((bill, idx) => (
-                          <div key={bill.id ?? idx} style={{
-                            display: 'grid',
-                            gridTemplateColumns: '120px minmax(0, 1fr) 90px 90px 110px',
-                            columnGap: 14, padding: '4px 8px', borderRadius: 5,
-                            background: idx % 2 === 1 ? `${t.card2}40` : 'transparent',
-                            fontFamily: 'monospace', fontSize: 11,
-                          }}>
-                            <span style={{ color: t.gold, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{bill.application_id || '—'}</span>
-                            <span style={{ color: t.text2, fontFamily: 'inherit', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{bill.customer_name || '—'}</span>
-                            <span style={{ color: t.text3, textAlign: 'right' }}>{fmt(bill.gross_weight, 2)}<span style={{ fontSize: 9, color: t.text4, marginLeft: 2 }}>g</span></span>
-                            <span style={{ color: tone, textAlign: 'right', fontWeight: 600 }}>{fmt(bill.net_weight, 2)}<span style={{ fontSize: 9, color: t.text4, marginLeft: 2 }}>g</span></span>
-                            <span style={{ color: t.blue, textAlign: 'right' }}>{bill.total_amount != null ? `₹${Math.round(Number(bill.total_amount)).toLocaleString('en-IN')}` : '—'}</span>
-                          </div>
-                        ))}
+                        {/* Drill-down grid layout — checkbox column added at the
+                            front so individual bills can be ticked/unticked.
+                            Section 3 (viewOnly) renders the bills sans checkbox. */}
+                        {(() => {
+                          const billCols = selectable
+                            ? '20px 130px minmax(0, 1fr) 100px 100px 130px'
+                            : '130px minmax(0, 1fr) 100px 100px 130px'
+                          const headerCols = (
+                            <>
+                              {selectable && <span />}
+                              <span>App ID</span>
+                              <span>Customer</span>
+                              <span style={{ textAlign: 'right' }}>Gross</span>
+                              <span style={{ textAlign: 'right' }}>Net</span>
+                              <span style={{ textAlign: 'right' }}>Amount</span>
+                            </>
+                          )
+                          return (
+                            <>
+                              <div style={{
+                                display: 'grid',
+                                gridTemplateColumns: billCols,
+                                columnGap: 14, padding: '4px 8px',
+                                fontSize: 10, color: t.text3, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 800,
+                              }}>
+                                {headerCols}
+                              </div>
+                              {billRows.map((bill, idx) => {
+                                const billChecked = selectable && selected?.has(bill.id)
+                                return (
+                                  <div key={bill.id ?? idx}
+                                    onClick={() => { if (selectable && !locked) onToggleBill?.(bill.id) }}
+                                    onMouseEnter={(e) => { if (selectable && !locked) e.currentTarget.style.background = `${tone}10` }}
+                                    onMouseLeave={(e) => { e.currentTarget.style.background = billChecked ? `${tone}1c` : (idx % 2 === 1 ? `${t.card2}40` : 'transparent') }}
+                                    style={{
+                                      display: 'grid',
+                                      gridTemplateColumns: billCols,
+                                      alignItems: 'center',
+                                      columnGap: 14, padding: '5px 8px', borderRadius: 5,
+                                      background: billChecked ? `${tone}1c` : (idx % 2 === 1 ? `${t.card2}40` : 'transparent'),
+                                      fontFamily: 'monospace', fontSize: 12,
+                                      cursor: selectable ? (locked ? 'not-allowed' : 'pointer') : 'default',
+                                      opacity: selectable && locked ? 0.45 : 1,
+                                      transition: 'background .12s ease',
+                                    }}>
+                                    {selectable && (
+                                      <span style={{
+                                        width: 14, height: 14, borderRadius: 3,
+                                        border: `1.5px solid ${billChecked ? tone : t.border2}`,
+                                        background: billChecked ? tone : 'transparent',
+                                        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                                        color: '#1a0a00', fontSize: 9, fontWeight: 900,
+                                        transition: 'all .12s ease',
+                                      }}>{billChecked ? '✓' : ''}</span>
+                                    )}
+                                    <span style={{ color: t.gold, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{bill.application_id || '—'}</span>
+                                    <span style={{ color: t.text1, fontFamily: 'inherit', fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{bill.customer_name || '—'}</span>
+                                    <span style={{ color: t.text2, textAlign: 'right', fontWeight: 600 }}>{fmt(bill.gross_weight, 2)}<span style={{ fontSize: 10, color: t.text4, marginLeft: 2, fontWeight: 600 }}>g</span></span>
+                                    <span style={{ color: tone, textAlign: 'right', fontWeight: 800 }}>{fmt(bill.net_weight, 2)}<span style={{ fontSize: 10, color: t.text3, marginLeft: 2, fontWeight: 600 }}>g</span></span>
+                                    <span style={{ color: t.blue, textAlign: 'right', fontWeight: 700 }}>{bill.total_amount != null ? `₹${Math.round(Number(bill.total_amount)).toLocaleString('en-IN')}` : '—'}</span>
+                                  </div>
+                                )
+                              })}
+                            </>
+                          )
+                        })()}
                       </div>
                     )}
                     </Fragment>
@@ -1608,7 +1726,7 @@ function hashAvatarBg(s, t) {
 //
 // Selected sources display: compact by default — chip strip is collapsed
 // to "first 6 + (N more)" so 20+ branches don't blow up the modal height.
-function BookingModal({ t, arrivalDate, availablePool, remainingQty, incomingNetWt, gainGrams, pendingGrams, bookedQty, selected, selectedTotal, branchesByKey, bidders, effectiveGainRate, isKerala, onUnselect, onSubmit, onClose, onSuccess }) {
+function BookingModal({ t, arrivalDate, availablePool, remainingQty, incomingNetWt, gainGrams, pendingGrams, bookedQty, selected, selectedTotal, billsById, bidders, effectiveGainRate, isKerala, onSubmit, onClose, onSuccess }) {
   // The quantity committed to a bidder is a *negotiated* figure against the
   // whole available pool (Incoming + Gain ± Pending), not the exact sum of
   // the selected source branches — ops tells a bidder "550 g", a rounded
@@ -1694,11 +1812,18 @@ function BookingModal({ t, arrivalDate, availablePool, remainingQty, incomingNet
     setBookingWeight(defaultBookingWeight > 0 ? defaultBookingWeight.toFixed(2) : '')
   }, [defaultBookingWeight, bookingWeightDirty])
 
-  // selectedRows is still needed by submit() to compose the "Sources: …"
-  // note saved with the booking — the branches just no longer get their
-  // own visual block in the modal (per ops: selection happens in the
-  // Incoming Sources picker, the modal is about the commitment).
-  const selectedRows = [...selected].map(k => ({ k, b: branchesByKey[k] })).filter(x => x.b)
+  // Unique branch names underlying the bill-level selection — used only to
+  // compose the "Sources: …" audit note on submit. Selection itself
+  // happens in the source-picker cards on the page; the modal is purely
+  // the commitment step.
+  const selectedBranchNames = (() => {
+    const s = new Set()
+    for (const id of selected) {
+      const n = billsById?.[id]?._branch_name
+      if (n) s.add(n)
+    }
+    return [...s].sort()
+  })()
 
   const w = Number(bookingWeight); const r = Number(rate)
   const total = Number.isFinite(w) && Number.isFinite(r) ? w * r : 0
@@ -1730,9 +1855,8 @@ function BookingModal({ t, arrivalDate, availablePool, remainingQty, incomingNet
     // Pin the new name into the local roster on submit too — covers the
     // case where the operator skipped the explicit "+ Save" button.
     if (isNewBidder) saveNewBidder()
-    const selectedBranchList = selectedRows.map(({ b }) => b.branch_name)
-    const compositeNotes = selectedBranchList.length
-      ? `Sources: ${selectedBranchList.join(', ')}`
+    const compositeNotes = selectedBranchNames.length
+      ? `Sources: ${selectedBranchNames.join(', ')}`
       : null
     const ok = await onSubmit({
       party:       party.trim(),
