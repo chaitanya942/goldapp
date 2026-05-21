@@ -91,6 +91,9 @@ export default function BiddingVolume() {
   const [showBookModal, setShowBookModal] = useState(false)
   const [cancelTarget, setCancelTarget] = useState(null)
   const [toast,        setToast]        = useState(null)
+  // 'bidding' = source picker (sections 1-4); 'bookings' = committed bookings
+  // list. Tabbed so the page doesn't try to be both at once.
+  const [activeTab,    setActiveTab]    = useState('bidding')
   // Source selection — branches the ops team has ticked from the inline
   // picker. Keys are `B:<branch_name>` for Bangalore, `T:<branch_name>` for
   // outside in-transit. Lifted to the parent so the contextual CTA, the
@@ -454,6 +457,7 @@ export default function BiddingVolume() {
     if (!r.ok || j.error) { showToast(j.error || 'Booking failed', 'error'); return false }
     showToast('Booking created.', 'success')
     setShowBookModal(false)
+    setActiveTab('bookings')                          // surface the committed row immediately
     fetchAll(true)
     return true
   }
@@ -601,6 +605,44 @@ export default function BiddingVolume() {
         </div>
       )}
 
+      {/* ── Tab navigation — Bidding (source picker) vs Bookings (committed)
+          The hero KPIs above stay visible across both tabs so ops always
+          see Incoming / Available / Booked / Remaining at a glance. */}
+      <div style={{ display: 'inline-flex', alignSelf: 'flex-start', background: t.card2, border: `1px solid ${t.border}`, borderRadius: 10, padding: 3, gap: 2 }}>
+        {[
+          { key: 'bidding',  label: 'Bidding',  icon: '⚖' },
+          { key: 'bookings', label: 'Bookings', icon: '✓', count: activeBookings.length },
+        ].map(tab => {
+          const active = activeTab === tab.key
+          return (
+            <button key={tab.key} onClick={() => setActiveTab(tab.key)}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 7,
+                padding: '8px 18px', borderRadius: 8,
+                background: active ? `${t.gold}1f` : 'transparent',
+                border: `1px solid ${active ? `${t.gold}55` : 'transparent'}`,
+                color: active ? t.gold : t.text2,
+                fontSize: 13, fontWeight: active ? 800 : 700, letterSpacing: '.02em',
+                cursor: 'pointer', transition: 'all .15s',
+              }}>
+              <span style={{ fontSize: 14, opacity: active ? 1 : 0.7 }}>{tab.icon}</span>
+              {tab.label}
+              {tab.count != null && tab.count > 0 && (
+                <span style={{
+                  fontSize: 10.5, fontWeight: 800, fontFamily: 'monospace',
+                  background: active ? t.gold : `${t.text4}30`,
+                  color: active ? '#1a0a00' : t.text2,
+                  borderRadius: 99, padding: '1px 8px', minWidth: 18, textAlign: 'center',
+                }}>{tab.count}</span>
+              )}
+            </button>
+          )
+        })}
+      </div>
+
+      {/* ─────────────────────────── BIDDING TAB ────────────────────────── */}
+      {activeTab === 'bidding' && (<>
+
       {/* ── Four source sections, always rendered in this fixed order ──
           even when empty. Bangalore on top because that's the largest pool;
           48h-TAT view-only and pre-EOD pickup-pending at the bottom. */}
@@ -720,18 +762,23 @@ export default function BiddingVolume() {
         </div>
       )}
 
-      {/* ── Bookings list — what's already committed ── */}
-      <BookingsList
-        t={t} card={card}
-        bookings={bookings}
-        onUpdateStatus={updateStatus}
-        onRequestCancel={(b) => setCancelTarget(b)}
-        onCreate={() => setShowBookModal(true)}
-      />
+      </>)}
 
-      <div style={{ fontSize: '10px', color: t.text4, textAlign: 'right' }}>
-        Bookings stored in <code style={{ background: t.card2, padding: '1px 4px', borderRadius: '3px', color: t.text3 }}>cal_quotas</code> — also visible in Sales → Cal Table → Quotas on the same date.
-      </div>
+      {/* ────────────────────────── BOOKINGS TAB ────────────────────────── */}
+      {activeTab === 'bookings' && (
+        <>
+          <BookingsList
+            t={t} card={card}
+            bookings={bookings}
+            onUpdateStatus={updateStatus}
+            onRequestCancel={(b) => setCancelTarget(b)}
+            onCreate={() => { setActiveTab('bidding') }}
+          />
+          <div style={{ fontSize: '10px', color: t.text4, textAlign: 'right' }}>
+            Bookings stored in <code style={{ background: t.card2, padding: '1px 4px', borderRadius: '3px', color: t.text3 }}>cal_quotas</code> — also visible in Sales → Cal Table → Quotas on the same date.
+          </div>
+        </>
+      )}
 
       {/* ── Booking form modal — bidder/weight/rate only. Source selection
             is on the page; the modal displays selected branches as a
