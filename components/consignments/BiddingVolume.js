@@ -1976,30 +1976,30 @@ function BookingModal({ t, arrivalDate, availablePool, remainingQty, incomingNet
       animation: 'bidModalOverlayIn .18s ease',
     }}>
       <div onClick={e => e.stopPropagation()} style={{
-        width: '100%', maxWidth: 460, maxHeight: '90vh', overflow: 'auto',
+        width: '100%', maxWidth: 580, maxHeight: '92vh',
         background: t.card, border: `1px solid ${t.border}`,
         borderRadius: 16,
         boxShadow: '0 20px 60px rgba(0,0,0,.4)',
         display: 'flex', flexDirection: 'column',
         animation: 'bidModalIn .25s cubic-bezier(.34,1.2,.64,1)',
       }}>
-        {/* Header */}
-        <div style={{ padding: '20px 22px 14px', borderBottom: `1px solid ${t.border}` }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-            <div>
-              <div style={{ fontSize: 16, fontWeight: 700, color: t.text1, letterSpacing: '-.01em' }}>New Booking</div>
-              <div style={{ fontSize: 11, color: t.text4, marginTop: 3 }}>Arrival · {fmtDate(arrivalDate)}</div>
-            </div>
-            {isKerala && (
-              <span style={{ fontSize: 9.5, color: t.green, background: `${t.green}18`, border: `1px solid ${t.green}40`, borderRadius: 99, padding: '3px 10px', fontWeight: 800, letterSpacing: '.08em' }}>
-                KL · KERALA
-              </span>
-            )}
+        {/* Header — compact single row: title · arrival pill · KL badge */}
+        <div style={{ padding: '14px 20px', borderBottom: `1px solid ${t.border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexShrink: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+            <div style={{ fontSize: 16, fontWeight: 800, color: t.text1, letterSpacing: '-.01em' }}>New Booking</div>
+            <span style={{ fontSize: 10.5, color: t.text3, background: `${t.gold}10`, border: `1px solid ${t.gold}28`, borderRadius: 99, padding: '3px 10px', fontWeight: 700, letterSpacing: '.04em', whiteSpace: 'nowrap' }}>
+              Arrival · {fmtDate(arrivalDate)}
+            </span>
           </div>
+          {isKerala && (
+            <span style={{ fontSize: 9.5, color: t.green, background: `${t.green}18`, border: `1px solid ${t.green}40`, borderRadius: 99, padding: '3px 10px', fontWeight: 800, letterSpacing: '.08em', whiteSpace: 'nowrap' }}>
+              KL · KERALA
+            </span>
+          )}
         </div>
 
-        {/* Body */}
-        <div style={{ padding: '20px 22px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+        {/* Body — scrolls only if absolutely needed; sized to fit ≥720 px viewports */}
+        <div style={{ padding: '14px 20px', display: 'flex', flexDirection: 'column', gap: 12, overflowY: 'auto', flex: 1 }}>
 
           {/* ── Weight build-up — Selected + (optional Gains) + (optional
               Pending) = Total Bidding Weight. Each addend is on its own
@@ -2011,14 +2011,14 @@ function BookingModal({ t, arrivalDate, availablePool, remainingQty, incomingNet
             // Row helper — leading slot can render either a plain operator
             // glyph (+/=) or a custom node (the checkbox on the pending row).
             const row = (label, value, opts = {}) => (
-              <div style={{ display: 'grid', gridTemplateColumns: `28px minmax(0,1fr) ${opts.editable ? '116px' : '120px'}`, alignItems: 'center', gap: 10, padding: '7px 0' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: `24px minmax(0,1fr) ${opts.editable ? '116px' : '128px'}`, alignItems: 'center', gap: 10, padding: '4px 0' }}>
                 {opts.symbolNode != null
                   ? <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>{opts.symbolNode}</span>
-                  : <span style={{ fontSize: 18, color: opts.faded ? t.text4 : t.text2, fontWeight: 800, textAlign: 'center', fontFamily: 'monospace' }}>{opts.symbol || ''}</span>
+                  : <span style={{ fontSize: 16, color: opts.faded ? t.text4 : t.text2, fontWeight: 800, textAlign: 'center', fontFamily: 'monospace' }}>{opts.symbol || ''}</span>
                 }
                 <div style={{ minWidth: 0 }}>
                   <div style={{ fontSize: 11, color: t.text3, letterSpacing: '.08em', textTransform: 'uppercase', fontWeight: 700 }}>{label}</div>
-                  {opts.hint && <div style={{ fontSize: 10.5, color: t.text4, marginTop: 2, fontWeight: 500 }}>{opts.hint}</div>}
+                  {opts.hint && <div style={{ fontSize: 10, color: t.text4, marginTop: 1, fontWeight: 500, lineHeight: 1.35 }}>{opts.hint}</div>}
                 </div>
                 {value}
               </div>
@@ -2047,14 +2047,14 @@ function BookingModal({ t, arrivalDate, availablePool, remainingQty, incomingNet
               <div style={{
                 background: `linear-gradient(150deg, ${t.gold}10, ${t.gold}04 55%, transparent)`,
                 border: `1px solid ${t.gold}30`,
-                borderRadius: 14, padding: '14px 18px',
+                borderRadius: 12, padding: '10px 14px',
               }}>
                 {/* Selected weight — read-only, from selection */}
                 {row('Selected weight',
                   <span style={{ textAlign: 'right', color: t.text1, fontSize: 16, fontWeight: 800, fontFamily: 'monospace' }}>{fmt(netFromSelection, 2)}<span style={{ fontSize: 11, color: t.text3, marginLeft: 3 }}>g</span></span>,
                   { hint: `${selected.size} bill${selected.size === 1 ? '' : 's'} ticked`, symbol: '' })}
 
-                <div style={{ height: 1, background: `${t.border}80` }} />
+                <div style={{ height: 1, background: `${t.border}60`, margin: '2px 0' }} />
 
                 {/* + Gains — defaults to 3.5 % of selected, overrideable */}
                 {row('Add gains',
@@ -2065,15 +2065,15 @@ function BookingModal({ t, arrivalDate, availablePool, remainingQty, incomingNet
                     inputMode="decimal"
                     title={gainsEntryDirty ? `Double-click to reset to ${(liveGainRate * 100).toFixed(2)} % default` : `Default: ${(liveGainRate * 100).toFixed(2)} % of selected weight`}
                     style={{
-                      ...inputStyle(t), padding: '6px 10px', fontSize: 14,
+                      ...inputStyle(t), padding: '5px 10px', fontSize: 13.5,
                       fontFamily: 'monospace', fontWeight: 700,
                       textAlign: 'right',
                       color: addedGainsW > 0 ? (t.orange || '#e58a3b') : t.text3,
                       borderColor: addedGainsW > 0 ? `${(t.orange || '#e58a3b')}55` : t.border,
                     }} />,
                   { symbol: '+', faded: addedGainsW === 0, hint: gainsEntryDirty
-                      ? `manual override · default is ${(liveGainRate * 100).toFixed(2)} % of selected`
-                      : `default ${(liveGainRate * 100).toFixed(2)} % of selected weight · override by typing` })}
+                      ? `manual override · default ${(liveGainRate * 100).toFixed(2)} %`
+                      : `default ${(liveGainRate * 100).toFixed(2)} % of selected · type to override` })}
 
                 {/* + Pending — checkbox decides whether the hero's pending
                     carry-over enters this booking. Value column shows the
@@ -2091,10 +2091,10 @@ function BookingModal({ t, arrivalDate, availablePool, remainingQty, incomingNet
                     <span style={{ fontSize: 10, color: t.text4, marginLeft: 3, fontWeight: 600 }}>g</span>
                   </span>,
                   { symbolNode: pendingCheckbox, hint: pendingAvailable
-                      ? (includePending ? 'included — uncheck to remove from this booking' : 'tick to include in this booking')
+                      ? (includePending ? 'included — uncheck to remove' : 'tick to include in this booking')
                       : 'no carry-over for this date' })}
 
-                <div style={{ height: 1, background: `${t.gold}55`, marginTop: 4 }} />
+                <div style={{ height: 1, background: `${t.gold}55`, margin: '4px 0 0' }} />
 
                 {/* = Total Bidding Weight — computed, large */}
                 {row('Total bidding weight',
@@ -2106,44 +2106,70 @@ function BookingModal({ t, arrivalDate, availablePool, remainingQty, incomingNet
             )
           })()}
 
-          {/* Staggered field reveal — weight first, then rate, then bidder
-              (party gets picked AFTER the rate is known: whichever bidder
-              gives the highest rate at that weight wins). */}
-          <div className="bidStagger" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          {/* Inputs row — Bidding Weight + Rate side-by-side. Weight defaults
+              to the breakdown's total (operator can round 1457 → 1500). Rate
+              is per-gram. Total Value renders inline in the footer button so
+              we don't waste a card on it. */}
+          <div className="bidStagger" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
 
-            {/* Bidding weight — defaults to the breakdown's total; the
-                operator can round (1457 → 1500) before committing. */}
-            <Field label="Bidding weight (round-off / override)">
-              <input value={bookingWeight} className="bidInput"
-                onChange={e => { setBookingWeight(e.target.value.replace(/[^\d.]/g, '')); setBookingWeightDirty(true) }}
-                placeholder="e.g. 1500"
-                inputMode="decimal"
-                style={{ ...inputStyle(t), fontFamily: 'monospace', fontSize: 19, fontWeight: 800, padding: '13px 14px', color: wouldOverbook ? t.red : t.gold, borderColor: wouldOverbook ? `${t.red}66` : (wValid ? `${t.gold}66` : t.border) }} />
-              <div style={{ fontSize: 10.5, color: t.text3, marginTop: 7, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', fontWeight: 600 }}>
-                {totalBiddingW > 0 && Math.abs(Number(bookingWeight || 0) - totalBiddingW) > 0.005 && (
-                  <button type="button"
-                    onClick={() => { setBookingWeight(totalBiddingW.toFixed(2)); setBookingWeightDirty(true) }}
-                    style={{
-                      background: `${t.gold}18`, border: `1px solid ${t.gold}55`,
-                      borderRadius: 99, padding: '3px 11px', fontSize: 10.5, fontWeight: 800,
-                      color: t.gold, cursor: 'pointer', letterSpacing: '.02em',
-                      transition: 'background .15s ease',
-                    }}
-                    onMouseEnter={e => { e.currentTarget.style.background = `${t.gold}28` }}
-                    onMouseLeave={e => { e.currentTarget.style.background = `${t.gold}18` }}>
-                    reset to total · {fmt(totalBiddingW, 2)} g
-                  </button>
-                )}
-                <span>round to the figure committed to the bidder</span>
-              </div>
-            </Field>
+            <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: 12 }}>
+              {/* Bidding weight */}
+              <label style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                  <span style={{ fontSize: 9.5, color: 'rgba(255,255,255,.4)', letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 700 }}>Bidding weight · round-off</span>
+                  {totalBiddingW > 0 && Math.abs(Number(bookingWeight || 0) - totalBiddingW) > 0.005 && (
+                    <button type="button"
+                      onClick={() => { setBookingWeight(totalBiddingW.toFixed(2)); setBookingWeightDirty(true) }}
+                      title={`Reset to total · ${fmt(totalBiddingW, 2)} g`}
+                      style={{
+                        background: `${t.gold}18`, border: `1px solid ${t.gold}55`,
+                        borderRadius: 99, padding: '2px 8px', fontSize: 9.5, fontWeight: 800,
+                        color: t.gold, cursor: 'pointer', letterSpacing: '.02em',
+                        transition: 'background .15s ease', whiteSpace: 'nowrap',
+                      }}
+                      onMouseEnter={e => { e.currentTarget.style.background = `${t.gold}28` }}
+                      onMouseLeave={e => { e.currentTarget.style.background = `${t.gold}18` }}>
+                      ↺ reset · {fmt(totalBiddingW, 2)} g
+                    </button>
+                  )}
+                </span>
+                <input value={bookingWeight} className="bidInput"
+                  onChange={e => { setBookingWeight(e.target.value.replace(/[^\d.]/g, '')); setBookingWeightDirty(true) }}
+                  placeholder="e.g. 1500"
+                  inputMode="decimal"
+                  style={{ ...inputStyle(t), fontFamily: 'monospace', fontSize: 17, fontWeight: 800, padding: '10px 12px', color: wouldOverbook ? t.red : t.gold, borderColor: wouldOverbook ? `${t.red}66` : (wValid ? `${t.gold}66` : t.border) }} />
+              </label>
 
-            <Field label="Rate (₹/g)">
-              <input value={rate} className="bidInput"
-                onChange={e => setRate(e.target.value.replace(/[^\d.]/g, ''))}
-                placeholder="7250.00"
-                style={{ ...inputStyle(t), fontFamily: 'monospace', fontWeight: 700 }} />
-            </Field>
+              {/* Rate */}
+              <label style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                <span style={{ fontSize: 9.5, color: 'rgba(255,255,255,.4)', letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 700 }}>Rate · ₹ / g</span>
+                <input value={rate} className="bidInput"
+                  onChange={e => setRate(e.target.value.replace(/[^\d.]/g, ''))}
+                  placeholder="7250.00"
+                  inputMode="decimal"
+                  style={{ ...inputStyle(t), fontFamily: 'monospace', fontSize: 17, fontWeight: 800, padding: '10px 12px', color: Number(rate) > 0 ? t.blue : t.text3, borderColor: Number(rate) > 0 ? `${t.blue}66` : t.border }} />
+              </label>
+            </div>
+
+            {/* Live equation — Weight × Rate = ₹ Total. Subtle inline strip
+                (replaces the bulky Total Value card). */}
+            <div style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
+              background: total > 0 ? `linear-gradient(90deg, ${t.blue}10, ${t.blue}04)` : t.card2,
+              border: `1px solid ${total > 0 ? `${t.blue}30` : t.border}`,
+              borderRadius: 10, padding: '8px 14px',
+              transition: 'background .25s ease, border-color .25s ease',
+            }}>
+              <span style={{ fontSize: 11, color: t.text3, fontFamily: 'monospace', fontWeight: 700 }}>
+                {wValid ? fmt(w, 2) : '—'} <span style={{ color: t.text4 }}>g</span>
+                <span style={{ color: t.text4, margin: '0 6px' }}>×</span>
+                {Number(rate) > 0 ? `₹${fmt(Number(rate), 2)}` : '—'}
+                <span style={{ color: t.text4, margin: '0 6px' }}>=</span>
+              </span>
+              <span key={Math.round(total)} style={{ fontSize: 18, color: total > 0 ? t.blue : t.text4, fontFamily: 'monospace', fontWeight: 800, letterSpacing: '-.015em', animation: total > 0 ? 'bidFadeIn .22s ease' : 'none' }}>
+                {total > 0 ? fmtINR(total) : '—'}
+              </span>
+            </div>
 
             {/* Bidder — last because party gets picked AFTER the rate
                 lands (highest-rate-wins). Dropdown stays collapsed until
@@ -2158,41 +2184,45 @@ function BookingModal({ t, arrivalDate, availablePool, remainingQty, incomingNet
               />
             </Field>
 
-            {/* Total Value — prominent, eases when it changes */}
-            <div style={{
-              background: total > 0 ? `linear-gradient(135deg, ${t.blue}14, ${t.blue}05)` : t.card2,
-              border: `1px solid ${total > 0 ? `${t.blue}38` : t.border}`,
-              borderRadius: 12, padding: '14px 16px',
-              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-              transition: 'background .25s ease, border-color .25s ease',
-            }}>
-              <span style={{ fontSize: 10, color: t.text4, letterSpacing: '.16em', textTransform: 'uppercase', fontWeight: 700 }}>Total Value</span>
-              <span key={Math.round(total)} style={{ fontSize: 22, color: total > 0 ? t.blue : t.text4, fontFamily: 'monospace', fontWeight: 700, letterSpacing: '-.015em', animation: total > 0 ? 'bidFadeIn .22s ease' : 'none' }}>
-                {total > 0 ? fmtINR(total) : '—'}
-              </span>
-            </div>
-
           </div>
         </div>
 
-        {/* Footer */}
-        <div style={{ padding: '14px 22px', borderTop: `1px solid ${t.border}`, display: 'flex', gap: 8, background: t.card2 }}>
-          <button onClick={onClose}
-            style={{ flex: 1, background: 'transparent', border: `1px solid ${t.border}`, borderRadius: 8, padding: '10px 14px', fontSize: 12.5, color: t.text2, cursor: 'pointer', fontWeight: 600 }}>
-            Cancel
-          </button>
-          <button onClick={submit} disabled={!valid || busy}
-            style={{
-              flex: 2,
-              background: valid && !busy ? t.gold : t.card2,
-              color: valid && !busy ? '#1a0a00' : t.text4,
-              border: 'none', borderRadius: 8, padding: '10px 14px',
-              fontSize: 12.5, fontWeight: 700, letterSpacing: '.03em',
-              cursor: valid && !busy ? 'pointer' : 'not-allowed',
-              boxShadow: valid && !busy ? `0 1px 4px ${t.gold}50` : 'none',
+        {/* Footer — sticky, with inline overbook warning chip when relevant */}
+        <div style={{ padding: '12px 20px', borderTop: `1px solid ${t.border}`, background: t.card2, flexShrink: 0 }}>
+          {wouldOverbook && (
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 6, marginBottom: 9,
+              fontSize: 10.5, color: t.red, fontWeight: 700, letterSpacing: '.02em',
             }}>
-            {busy ? 'Creating…' : `Create Booking · ${total > 0 ? fmtINR(total) : ''}`}
-          </button>
+              <span style={{ display: 'inline-block', width: 6, height: 6, borderRadius: '50%', background: t.red }} />
+              Overbook · this exceeds the free pool ({fmt(Math.max(0, freePool), 2)} g)
+            </div>
+          )}
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button onClick={onClose}
+              style={{ flex: 1, background: 'transparent', border: `1px solid ${t.border}`, borderRadius: 8, padding: '11px 14px', fontSize: 12.5, color: t.text2, cursor: 'pointer', fontWeight: 700 }}>
+              Cancel
+            </button>
+            <button onClick={submit} disabled={!valid || busy}
+              style={{
+                flex: 2.4,
+                background: valid && !busy ? t.gold : t.card2,
+                color: valid && !busy ? '#1a0a00' : t.text4,
+                border: 'none', borderRadius: 8, padding: '11px 14px',
+                fontSize: 13, fontWeight: 800, letterSpacing: '.03em',
+                cursor: valid && !busy ? 'pointer' : 'not-allowed',
+                boxShadow: valid && !busy ? `0 2px 8px ${t.gold}50` : 'none',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+              }}>
+              {busy
+                ? 'Creating…'
+                : (<>
+                    <span>Create Booking</span>
+                    {total > 0 && <span style={{ fontFamily: 'monospace', fontWeight: 900, opacity: .85 }}>· {fmtINR(total)}</span>}
+                  </>)
+              }
+            </button>
+          </div>
         </div>
       </div>
     </div>
