@@ -712,15 +712,17 @@ export async function GET(req) {
     const date = searchParams.get('date')
     if (!date) return Response.json({ error: 'date required (YYYY-MM-DD)' }, { status: 400 })
 
-    // Try with pipeline columns first. If the migration hasn't run yet
-    // PostgREST returns a "column does not exist" error — fall back to the
-    // original schema so the bookings tab still loads.
+    // Try with full breakdown + pipeline columns. If either migration hasn't
+    // run yet PostgREST returns "column does not exist" — fall back so the
+    // bookings tab still loads (with "—" for missing breakdown values).
     const fullSelect = `id, date, party, buyer_phone, weight, rate, is_kl, purity, notes,
                         status, created_at, created_by,
                         confirmed_at, confirmed_by, fulfilled_at, fulfilled_by,
                         cancelled_at, cancelled_by, cancellation_reason,
                         pipeline_remaining_g, pipeline_region, pipeline_arrival_date,
-                        pipeline_attached_at, gain_realized_g`
+                        pipeline_attached_at, gain_realized_g,
+                        bills_net_weight_g, gain_applied_g, pending_g,
+                        additional_gain_g, pipeline_original_g`
     const baseSelect = `id, date, party, buyer_phone, weight, rate, is_kl, purity, notes,
                         status, created_at, created_by,
                         confirmed_at, confirmed_by, fulfilled_at, fulfilled_by,
@@ -734,7 +736,7 @@ export async function GET(req) {
         .eq('date', date)
         .order('created_at', { ascending: false })
       if (tryFull.error && /column .* does not exist/i.test(tryFull.error.message || '')) {
-        console.warn('[bidding_bookings] pipeline columns missing — falling back to base select. Run sql/cal_quotas_pipeline_attach.sql.')
+        console.warn('[bidding_bookings] breakdown/pipeline columns missing — falling back to base select. Run sql/cal_quotas_breakdown.sql + sql/cal_quotas_pipeline_attach.sql.')
         const tryBase = await supabase
           .from('cal_quotas')
           .select(baseSelect)
@@ -748,6 +750,28 @@ export async function GET(req) {
       }
     }
     if (bkErr) return Response.json({ error: bkErr.message }, { status: 500 })
+
+    // For each booking, also surface the live sum of attached bill weights
+    // (purchases.net_weight WHERE booking_id = row.id). This lets the UI
+    // distinguish "snapshot at creation" (bills_net_weight_g) from "live
+    // sum after pipeline attachments" (attached_net_weight_g).
+    if (rows && rows.length > 0) {
+      const ids = rows.map(r => r.id)
+      const { data: agg } = await supabase
+        .from('purchases')
+        .select('booking_id, net_weight')
+        .in('booking_id', ids)
+      const sumByBooking = {}
+      const countByBooking = {}
+      for (const p of agg || []) {
+        sumByBooking[p.booking_id]   = (sumByBooking[p.booking_id]   || 0) + Number(p.net_weight || 0)
+        countByBooking[p.booking_id] = (countByBooking[p.booking_id] || 0) + 1
+      }
+      for (const r of rows) {
+        r.attached_net_weight_g = sumByBooking[r.id]   || 0
+        r.attached_bills_count  = countByBooking[r.id] || 0
+      }
+    }
 
     // Roll-up — active = booked + confirmed + fulfilled; cancelled excluded.
     const active = (rows || []).filter(r => r.status !== 'cancelled')
@@ -2323,7 +2347,11 @@ export async function POST(req) {
 
   if (action === 'create_booking') {
     const { date, party, buyer_phone, weight, rate, purity, is_kl, notes, source_branches, bill_ids,
-            pipeline_remaining_g, pipeline_region } = body
+            pipeline_remaining_g, pipeline_region,
+            // Breakdown components — snapshots of what built the committed
+            // weight on the modal at creation time. Optional; old clients
+            // can omit them and the booking still saves.
+            bills_net_weight_g, gain_applied_g, pending_g, additional_gain_g, pipeline_original_g } = body
     if (!date)   return Response.json({ error: 'date required (YYYY-MM-DD)' }, { status: 400 })
     if (!party || !String(party).trim()) return Response.json({ error: 'Buyer name required' }, { status: 400 })
     const w = Number(weight); const r = Number(rate)
@@ -2420,6 +2448,31 @@ export async function POST(req) {
         }
       } catch (pipeThrew) {
         console.warn('[create_booking] pipeline update threw (non-fatal):', pipeThrew?.message)
+      }
+    }
+
+    // Breakdown components — best-effort snapshot of how the committed
+    // weight was built. Lets the Bookings tab render a bill-style row
+    // without parsing notes. If the breakdown migration hasn't run,
+    // the UPDATE quietly fails and the booking is still saved (UI just
+    // shows "—" for the breakdown columns on this row).
+    const breakdownPayload = {}
+    if (Number.isFinite(Number(bills_net_weight_g)))  breakdownPayload.bills_net_weight_g  = Number(bills_net_weight_g)
+    if (Number.isFinite(Number(gain_applied_g)))      breakdownPayload.gain_applied_g      = Number(gain_applied_g)
+    if (Number.isFinite(Number(pending_g)))           breakdownPayload.pending_g           = Number(pending_g)
+    if (Number.isFinite(Number(additional_gain_g)))   breakdownPayload.additional_gain_g   = Number(additional_gain_g)
+    if (Number.isFinite(Number(pipeline_original_g))) breakdownPayload.pipeline_original_g = Number(pipeline_original_g)
+    if (Object.keys(breakdownPayload).length > 0) {
+      try {
+        const { error: brkErr } = await supabase
+          .from('cal_quotas')
+          .update(breakdownPayload)
+          .eq('id', data.id)
+        if (brkErr) {
+          console.warn('[create_booking] breakdown columns update failed (run sql/cal_quotas_breakdown.sql):', brkErr.message)
+        }
+      } catch (brkThrew) {
+        console.warn('[create_booking] breakdown update threw (non-fatal):', brkThrew?.message)
       }
     }
 

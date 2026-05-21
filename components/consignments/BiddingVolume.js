@@ -1274,28 +1274,53 @@ function BookingsList({ t, card, bookings, onUpdateStatus, onRequestCancel, onCr
         </label>
       </div>
 
+      {/* Bill-style breakdown table.
+            # | Party | Bills | + Gain | + Add'l | + Pending | + Pipeline | = Bid Wt | × Rate | = Value | KL
+          Each addend gets its own column with a visible math operator
+          in the header so the row reads like an order statement.
+          Status + Actions columns intentionally removed (per ops spec —
+          this surface is read-only; cancel/confirm happen elsewhere). */}
       <div style={{ overflowX: 'auto' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 1080 }}>
           <thead>
             <tr>
-              <th style={{ ...th, width: 40, textAlign: 'center' }}>#</th>
+              <th style={{ ...th, width: 36, textAlign: 'center' }}>#</th>
               <th style={th}>Party</th>
-              <th style={{ ...th, textAlign: 'right' }}>Weight (g)</th>
-              <th style={{ ...th, textAlign: 'right' }}>Rate (₹/g)</th>
-              <th style={{ ...th, textAlign: 'right' }}>Value</th>
-              <th style={{ ...th, textAlign: 'center', width: 60 }}>KL</th>
-              <th style={{ ...th, textAlign: 'center', width: 120 }}>Status</th>
-              <th style={{ ...th, textAlign: 'right', width: 240 }}>Actions</th>
+              <th style={{ ...th, textAlign: 'right' }}>Bills (g)</th>
+              <th style={{ ...th, textAlign: 'right', color: t.text4 }} title="Gain applied — default 3.5 % of bills (operator can override)">+ Gain</th>
+              <th style={{ ...th, textAlign: 'right', color: t.text4 }} title="Excess attributed to additional refining gain">+ Add'l</th>
+              <th style={{ ...th, textAlign: 'right', color: t.text4 }} title="Pending delivery carry-over included in this booking">+ Pending</th>
+              <th style={{ ...th, textAlign: 'right', color: t.text4 }} title="Excess attributed to pipeline (auto-attached as bills arrive)">+ Pipeline</th>
+              <th style={{ ...th, textAlign: 'right' }} title="Total committed to the bidder">= Bid Wt</th>
+              <th style={{ ...th, textAlign: 'right', color: t.text4 }}>× Rate</th>
+              <th style={{ ...th, textAlign: 'right' }}>= Value</th>
+              <th style={{ ...th, textAlign: 'center', width: 50 }}>KL</th>
             </tr>
           </thead>
           <tbody>
             {visible.map((b, i) => {
-              const meta        = STATUS_META[b.status] || STATUS_META.booked
               const isCancelled = b.status === 'cancelled'
-              const isFulfilled = b.status === 'fulfilled'
-              const isTerminal  = isCancelled || isFulfilled
               const total       = Number(b.weight || 0) * Number(b.rate || 0)
               const dotColor    = partyColor(b.party)
+              // Breakdown values — fall back to "—" when the snapshot
+              // isn't available (old bookings before the breakdown
+              // migration). Live bill total uses the purchases join
+              // (attached_net_weight_g) when the original snapshot is
+              // missing, so old bookings still show *something*.
+              const billsG    = b.bills_net_weight_g != null ? Number(b.bills_net_weight_g) : (Number(b.attached_net_weight_g) || null)
+              const gainG     = b.gain_applied_g     != null ? Number(b.gain_applied_g)     : null
+              const addlG     = b.additional_gain_g  != null ? Number(b.additional_gain_g)  : null
+              const pendingG  = b.pending_g          != null ? Number(b.pending_g)          : null
+              const pipelineG = b.pipeline_original_g!= null ? Number(b.pipeline_original_g): null
+              const numCell = (val, opts = {}) => {
+                if (val == null) return <span style={{ color: t.text4, fontFamily: 'monospace', fontWeight: 600 }}>—</span>
+                if (val === 0)   return <span style={{ color: t.text4, fontFamily: 'monospace', fontWeight: 600 }}>—</span>
+                return (
+                  <span style={{ fontFamily: 'monospace', color: opts.color || t.text2, fontWeight: opts.weight || 700, fontSize: opts.size || 12.5, whiteSpace: 'nowrap' }}>
+                    {fmt(val, 2)}<span style={{ fontSize: 10, color: t.text4, marginLeft: 1.5, fontWeight: 600 }}>g</span>
+                  </span>
+                )
+              }
               return (
                 <tr key={b.id}
                   style={{
@@ -1308,7 +1333,7 @@ function BookingsList({ t, card, bookings, onUpdateStatus, onRequestCancel, onCr
                       <div style={{ width: 8, height: 8, borderRadius: '50%', background: dotColor, flexShrink: 0 }} />
                       <span style={{ color: t.text1, fontWeight: 700, textDecoration: isCancelled ? 'line-through' : 'none' }}>{b.party}</span>
                     </div>
-                    {(b.purity || b.buyer_phone || b.notes || Number(b.pipeline_remaining_g) > 0 || Number(b.gain_realized_g) > 0) && (
+                    {(b.purity || b.buyer_phone || b.notes || Number(b.pipeline_remaining_g) > 0 || Number(b.gain_realized_g) > 0 || b.created_at) && (
                       <div style={{ fontSize: 10.5, color: t.text4, marginTop: 4, marginLeft: 17, display: 'flex', gap: 9, flexWrap: 'wrap', fontWeight: 600, alignItems: 'center' }}>
                         {b.purity && <span style={{ color: t.gold }}>{b.purity}</span>}
                         {b.buyer_phone && <span style={{ fontFamily: 'monospace' }}>{b.buyer_phone}</span>}
@@ -1324,7 +1349,7 @@ function BookingsList({ t, card, bookings, onUpdateStatus, onRequestCancel, onCr
                               borderRadius: 99, padding: '1px 8px',
                               fontFamily: 'monospace', fontWeight: 800, letterSpacing: '.02em',
                             }}>
-                            ⟳ pipeline {fmt(b.pipeline_remaining_g, 2)}g
+                            ⟳ pipeline {fmt(b.pipeline_remaining_g, 2)}g owed
                           </span>
                         )}
                         {/* Realized gain from pipeline overshoot — last
@@ -1338,47 +1363,36 @@ function BookingsList({ t, card, bookings, onUpdateStatus, onRequestCancel, onCr
                               borderRadius: 99, padding: '1px 8px',
                               fontFamily: 'monospace', fontWeight: 800, letterSpacing: '.02em',
                             }}>
-                            +{fmt(b.gain_realized_g, 2)}g gain
+                            +{fmt(b.gain_realized_g, 2)}g realized gain
                           </span>
                         )}
-                        {b.notes && <span title={b.notes} style={{ fontStyle: 'italic' }}>· note</span>}
+                        {b.created_at && (
+                          <span title={`Created by ${b.created_by || 'unknown'}`} style={{ fontFamily: 'monospace' }}>
+                            {fmtTS(b.created_at)}
+                          </span>
+                        )}
+                        {b.notes && <span title={b.notes} style={{ fontStyle: 'italic', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>· {b.notes}</span>}
                       </div>
                     )}
                   </td>
-                  <td style={{ ...td, textAlign: 'right', fontFamily: 'monospace', color: t.gold, fontWeight: 800, fontSize: 14 }}>
-                    {fmt(b.weight, 2)}
+                  <td style={{ ...td, textAlign: 'right' }}>{numCell(billsG,    { color: t.text1 })}</td>
+                  <td style={{ ...td, textAlign: 'right' }}>{numCell(gainG,     { color: t.orange || '#e58a3b' })}</td>
+                  <td style={{ ...td, textAlign: 'right' }}>{numCell(addlG,     { color: t.orange || '#e58a3b' })}</td>
+                  <td style={{ ...td, textAlign: 'right' }}>{numCell(pendingG,  { color: t.purple || '#8c5ac8' })}</td>
+                  <td style={{ ...td, textAlign: 'right' }}>{numCell(pipelineG, { color: t.purple || '#8c5ac8' })}</td>
+                  <td style={{ ...td, textAlign: 'right', fontFamily: 'monospace', color: t.gold, fontWeight: 800, fontSize: 14, whiteSpace: 'nowrap' }}>
+                    {fmt(b.weight, 2)}<span style={{ fontSize: 11, color: t.text3, marginLeft: 2, fontWeight: 600 }}>g</span>
                   </td>
-                  <td style={{ ...td, textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: t.text2 }}>
+                  <td style={{ ...td, textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: t.text2, whiteSpace: 'nowrap' }}>
                     ₹{Number(b.rate || 0).toLocaleString('en-IN')}
                   </td>
-                  <td style={{ ...td, textAlign: 'right', fontFamily: 'monospace', color: t.blue, fontWeight: 700 }}>
+                  <td style={{ ...td, textAlign: 'right', fontFamily: 'monospace', color: t.blue, fontWeight: 800, whiteSpace: 'nowrap' }}>
                     {fmtINR(total)}
                   </td>
                   <td style={{ ...td, textAlign: 'center' }}>
-                    {b.is_kl && (
-                      <span style={{ background: `${t.purple}1f`, color: t.purple, borderRadius: 4, padding: '2px 9px', fontSize: 10, fontWeight: 800, letterSpacing: '.04em' }}>KL</span>
-                    )}
-                  </td>
-                  <td style={{ ...td, textAlign: 'center' }}>
-                    <span style={{ background: `${meta.color}1c`, color: meta.color, border: `1px solid ${meta.color}55`, borderRadius: 99, padding: '3px 11px', fontSize: 10, fontWeight: 800, letterSpacing: '.08em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>{meta.label}</span>
-                  </td>
-                  <td style={{ ...td, textAlign: 'right' }}>
-                    <div style={{ display: 'inline-flex', gap: 6, justifyContent: 'flex-end' }}>
-                      {!isTerminal && b.status === 'booked' && (
-                        <ActionPill label="Confirm" color={t.blue} onClick={() => onUpdateStatus(b.id, 'confirmed')} t={t} />
-                      )}
-                      {!isTerminal && (b.status === 'booked' || b.status === 'confirmed') && (
-                        <ActionPill label="Fulfill" color={t.green} onClick={() => onUpdateStatus(b.id, 'fulfilled')} t={t} />
-                      )}
-                      {!isTerminal && (
-                        <ActionPill label="Cancel" color={t.red} onClick={() => onRequestCancel(b)} t={t} subtle />
-                      )}
-                    </div>
-                    {b.created_at && (
-                      <div style={{ fontSize: 9.5, color: t.text4, marginTop: 5, fontFamily: 'monospace', fontWeight: 600 }} title={`Created by ${b.created_by || 'unknown'}`}>
-                        {fmtTS(b.created_at)}
-                      </div>
-                    )}
+                    {b.is_kl
+                      ? <span style={{ background: `${t.purple}1f`, color: t.purple, borderRadius: 4, padding: '2px 9px', fontSize: 10, fontWeight: 800, letterSpacing: '.04em' }}>KL</span>
+                      : <span style={{ color: t.text4 }}>—</span>}
                   </td>
                 </tr>
               )
@@ -1387,13 +1401,13 @@ function BookingsList({ t, card, bookings, onUpdateStatus, onRequestCancel, onCr
           {activeRows.length > 0 && (
             <tfoot>
               <tr style={{ background: `${t.gold}0d`, borderTop: `2px solid ${t.gold}55` }}>
-                <td colSpan={2} style={{ ...td, fontSize: 11, color: t.gold, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 800 }}>Active total</td>
-                <td style={{ ...td, textAlign: 'right', fontFamily: 'monospace', color: t.gold, fontWeight: 800, fontSize: 14 }}>
+                <td colSpan={7} style={{ ...td, fontSize: 11, color: t.gold, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 800 }}>Σ Active total</td>
+                <td style={{ ...td, textAlign: 'right', fontFamily: 'monospace', color: t.gold, fontWeight: 800, fontSize: 14, whiteSpace: 'nowrap' }}>
                   {fmt(activeWeight, 2)}<span style={{ fontSize: 11, marginLeft: 2, color: t.text3 }}>g</span>
                 </td>
                 <td style={td} />
-                <td style={{ ...td, textAlign: 'right', fontFamily: 'monospace', color: t.blue, fontWeight: 800 }}>{fmtINR(activeValue)}</td>
-                <td colSpan={3} style={td} />
+                <td style={{ ...td, textAlign: 'right', fontFamily: 'monospace', color: t.blue, fontWeight: 800, whiteSpace: 'nowrap' }}>{fmtINR(activeValue)}</td>
+                <td style={td} />
               </tr>
             </tfoot>
           )}
@@ -2199,6 +2213,9 @@ function BookingModal({ t, arrivalDate, availablePool, remainingQty, incomingNet
       const pipelineRegion = attrPipeline && overBy > 0
         ? (isKerala ? 'Kerala' : 'Bangalore')      // PHASE 1: Bangalore wires up the attacher; others just persist
         : null
+      // Breakdown payload — snapshot of how the committed weight was
+      // built so the Bookings tab can render it bill-style without
+      // parsing the notes string.
       const ok = await onSubmit({
         party:       party.trim(),
         buyer_phone: null,
@@ -2209,6 +2226,12 @@ function BookingModal({ t, arrivalDate, availablePool, remainingQty, incomingNet
         notes:       compositeNotes,
         pipeline_remaining_g: pipelineRemainingG,
         pipeline_region:      pipelineRegion,
+        // Breakdown — each component of the operator-built total.
+        bills_net_weight_g:   Number(netFromSelection.toFixed(3)),
+        gain_applied_g:       Number(addedGainsW.toFixed(3)),
+        pending_g:            Number(addedPendingW.toFixed(3)),
+        additional_gain_g:    attrGain && overBy > 0 && !attrPipeline ? Number(overBy.toFixed(3)) : 0,
+        pipeline_original_g:  attrPipeline && overBy > 0 ? Number(overBy.toFixed(3)) : 0,
       })
       if (ok && onSuccess) onSuccess()
       if (!ok) setBusy(false)
