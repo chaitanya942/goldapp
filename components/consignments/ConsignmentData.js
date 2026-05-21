@@ -970,7 +970,42 @@ export default function ConsignmentData() {
                     ? 'No active consignments. Use Branch Stock → Move to create one.'
                     : 'No consignments match the filters'}
                 </td></tr>
-              ) : filteredCons.map(c => {
+              ) : <>
+                {/* Σ Totals row — sits immediately below the column headers
+                    and reflects the *filtered* set so it stays accurate as
+                    type/region/date/search filters change. Single row, gold
+                    accent, no expansion. */}
+                {(() => {
+                  const tot = filteredCons.reduce((acc, c) => {
+                    acc.bills  += Number(c.total_bills  || 0)
+                    acc.netWt  += Number(c.total_net_wt || 0)
+                    acc.amount += Number(c.total_amount || 0)
+                    return acc
+                  }, { bills: 0, netWt: 0, amount: 0 })
+                  return (
+                    <tr style={{
+                      background: `${t.gold}10`,
+                      borderTop:    `1px solid ${t.gold}30`,
+                      borderBottom: `1px solid ${t.gold}40`,
+                    }}>
+                      <td style={{ padding: '10px 14px 10px 11px', fontSize: '10px', color: t.gold, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 800, boxShadow: `inset 3px 0 0 ${t.gold}` }}>
+                        Σ Totals
+                      </td>
+                      <td />
+                      <td style={{ padding: '10px 14px', fontSize: '11px', color: t.text3, fontWeight: 600 }}>
+                        {filteredCons.length} consignment{filteredCons.length === 1 ? '' : 's'}
+                      </td>
+                      <td style={{ padding: '10px 14px', fontSize: '12px', color: t.text1, textAlign: 'right', fontFamily: 'monospace', fontWeight: 800 }}>{fmt(tot.bills)}</td>
+                      <td style={{ padding: '10px 14px', fontSize: '13px', color: t.gold, textAlign: 'right', fontFamily: 'monospace', fontWeight: 800, whiteSpace: 'nowrap' }}>{fmtWt(tot.netWt)}</td>
+                      <td style={{ padding: '10px 14px', fontSize: '12px', color: t.blue, textAlign: 'right', fontFamily: 'monospace', fontWeight: 800, whiteSpace: 'nowrap' }}>₹{fmt(Math.round(tot.amount))}</td>
+                      <td />
+                      <td />
+                      <td />
+                      <td />
+                    </tr>
+                  )
+                })()}
+                {filteredCons.map(c => {
                 const isType = c.movement_type === 'INTERNAL'
                 const tColor = isType ? t.purple : t.orange
                 const isNew  = lastConsignment?.id === c.id
@@ -1257,6 +1292,7 @@ export default function ConsignmentData() {
                   </React.Fragment>
                 )
               })}
+              </>}
             </tbody>
           </table>
         </div>
