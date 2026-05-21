@@ -1813,12 +1813,25 @@ function BookingModal({ t, arrivalDate, availablePool, remainingQty, incomingNet
   // only a one-tap *suggestion* to pre-fill the field; the operator types
   // whatever they actually committed.
   const netFromSelection = selectedTotal
-  // Operator-driven weight build-up: Selected + (optional) manual Gains
+  // Operator-driven weight build-up: Selected + (optional) Gains
   // + (optional) Pending from hero = Total Bidding Weight. The Bidding
   // Weight input below this defaults to that total but is editable so
   // ops can round (1457 → 1500) before committing to a bidder.
-  const [gainsEntry,     setGainsEntry]     = useState('')
-  const [includePending, setIncludePending] = useState(false)
+  //
+  // Gains default to 3.5 % of the selected weight (the company's standard
+  // refining margin — also the default in the hero Gain card). Operators
+  // can override by typing a number; once they do, we stop auto-syncing.
+  const DEFAULT_GAIN_RATE   = 0.035
+  const liveGainRate        = (effectiveGainRate && effectiveGainRate > 0) ? effectiveGainRate : DEFAULT_GAIN_RATE
+  const defaultGainGrams    = netFromSelection > 0 ? netFromSelection * liveGainRate : 0
+  const [gainsEntry,        setGainsEntry]      = useState(() => defaultGainGrams > 0 ? defaultGainGrams.toFixed(2) : '')
+  const [gainsEntryDirty,   setGainsEntryDirty] = useState(false)
+  const [includePending,    setIncludePending]  = useState(false)
+  // Auto-sync the gains field to the live default until the operator edits.
+  useEffect(() => {
+    if (gainsEntryDirty) return
+    setGainsEntry(defaultGainGrams > 0 ? defaultGainGrams.toFixed(2) : '')
+  }, [defaultGainGrams, gainsEntryDirty])
   const addedGainsW   = (() => { const n = Number(gainsEntry); return Number.isFinite(n) && n > 0 ? n : 0 })()
   const addedPendingW = includePending ? Number(pendingGrams || 0) : 0
   const totalBiddingW = Math.max(0, netFromSelection + addedGainsW + addedPendingW)
@@ -1995,15 +2008,40 @@ function BookingModal({ t, arrivalDate, availablePool, remainingQty, incomingNet
               the booking; it pre-fills from the total but can be rounded. */}
           {(() => {
             const pendingAvailable = Number(pendingGrams || 0) !== 0
+            // Row helper — leading slot can render either a plain operator
+            // glyph (+/=) or a custom node (the checkbox on the pending row).
             const row = (label, value, opts = {}) => (
               <div style={{ display: 'grid', gridTemplateColumns: `28px minmax(0,1fr) ${opts.editable ? '116px' : '120px'}`, alignItems: 'center', gap: 10, padding: '7px 0' }}>
-                <span style={{ fontSize: 18, color: opts.faded ? t.text4 : t.text2, fontWeight: 800, textAlign: 'center', fontFamily: 'monospace' }}>{opts.symbol || ''}</span>
+                {opts.symbolNode != null
+                  ? <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>{opts.symbolNode}</span>
+                  : <span style={{ fontSize: 18, color: opts.faded ? t.text4 : t.text2, fontWeight: 800, textAlign: 'center', fontFamily: 'monospace' }}>{opts.symbol || ''}</span>
+                }
                 <div style={{ minWidth: 0 }}>
                   <div style={{ fontSize: 11, color: t.text3, letterSpacing: '.08em', textTransform: 'uppercase', fontWeight: 700 }}>{label}</div>
                   {opts.hint && <div style={{ fontSize: 10.5, color: t.text4, marginTop: 2, fontWeight: 500 }}>{opts.hint}</div>}
                 </div>
                 {value}
               </div>
+            )
+            const purpleTone = t.purple || '#8c5ac8'
+            const pendingCheckbox = (
+              <button type="button"
+                onClick={() => pendingAvailable && setIncludePending(v => !v)}
+                disabled={!pendingAvailable}
+                aria-checked={includePending}
+                title={pendingAvailable
+                  ? (includePending ? 'Exclude pending from this booking' : 'Include pending in this booking')
+                  : 'No carry-over for this date'}
+                style={{
+                  width: 20, height: 20, borderRadius: 5, padding: 0,
+                  border: `1.8px solid ${includePending ? purpleTone : (pendingAvailable ? t.border2 : t.border)}`,
+                  background: includePending ? purpleTone : 'transparent',
+                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                  cursor: pendingAvailable ? 'pointer' : 'not-allowed',
+                  opacity: pendingAvailable ? 1 : 0.5,
+                  color: '#fff', fontSize: 12, fontWeight: 900, lineHeight: 1,
+                  transition: 'all .12s ease',
+                }}>{includePending ? '✓' : ''}</button>
             )
             return (
               <div style={{
@@ -2018,12 +2056,14 @@ function BookingModal({ t, arrivalDate, availablePool, remainingQty, incomingNet
 
                 <div style={{ height: 1, background: `${t.border}80` }} />
 
-                {/* + Gains — manual entry, optional */}
-                {row('Add gains (optional)',
+                {/* + Gains — defaults to 3.5 % of selected, overrideable */}
+                {row('Add gains',
                   <input type="number" step="0.01" min="0" value={gainsEntry}
-                    onChange={e => setGainsEntry(e.target.value)}
+                    onChange={e => { setGainsEntry(e.target.value); setGainsEntryDirty(true) }}
+                    onDoubleClick={() => setGainsEntryDirty(false)}
                     placeholder="0.00"
                     inputMode="decimal"
+                    title={gainsEntryDirty ? `Double-click to reset to ${(liveGainRate * 100).toFixed(2)} % default` : `Default: ${(liveGainRate * 100).toFixed(2)} % of selected weight`}
                     style={{
                       ...inputStyle(t), padding: '6px 10px', fontSize: 14,
                       fontFamily: 'monospace', fontWeight: 700,
@@ -2031,28 +2071,28 @@ function BookingModal({ t, arrivalDate, availablePool, remainingQty, incomingNet
                       color: addedGainsW > 0 ? (t.orange || '#e58a3b') : t.text3,
                       borderColor: addedGainsW > 0 ? `${(t.orange || '#e58a3b')}55` : t.border,
                     }} />,
-                  { symbol: '+', faded: addedGainsW === 0, hint: 'expected refining gain in grams' })}
+                  { symbol: '+', faded: addedGainsW === 0, hint: gainsEntryDirty
+                      ? `manual override · default is ${(liveGainRate * 100).toFixed(2)} % of selected`
+                      : `default ${(liveGainRate * 100).toFixed(2)} % of selected weight · override by typing` })}
 
-                {/* + Pending — toggleable, value comes from hero card */}
+                {/* + Pending — checkbox decides whether the hero's pending
+                    carry-over enters this booking. Value column shows the
+                    signed amount in muted text. */}
                 {row('Add pending delivery',
-                  <button type="button"
-                    onClick={() => setIncludePending(v => !v)}
-                    disabled={!pendingAvailable}
-                    style={{
-                      textAlign: 'right',
-                      background: includePending ? `${t.purple || '#8c5ac8'}1c` : t.card2,
-                      border: `1px solid ${includePending ? `${t.purple || '#8c5ac8'}66` : t.border}`,
-                      borderRadius: 8, padding: '6px 10px',
-                      color: includePending ? (t.purple || '#8c5ac8') : t.text3,
-                      fontSize: 14, fontWeight: 700, fontFamily: 'monospace',
-                      cursor: pendingAvailable ? 'pointer' : 'not-allowed',
-                      opacity: pendingAvailable ? 1 : 0.5,
-                      letterSpacing: '-.005em',
-                      whiteSpace: 'nowrap',
-                    }}>
-                    {includePending ? `+${fmt(Math.abs(pendingGrams), 2)}` : (pendingAvailable ? `${pendingGrams > 0 ? '+' : '−'}${fmt(Math.abs(pendingGrams), 2)}` : '0.00')}<span style={{ fontSize: 10, color: t.text4, marginLeft: 3, fontWeight: 600 }}>g</span>
-                  </button>,
-                  { symbol: '+', faded: !includePending, hint: pendingAvailable ? `click to ${includePending ? 'exclude' : 'include'} (same value as hero card)` : 'no carry-over for this date' })}
+                  <span style={{
+                    textAlign: 'right',
+                    fontSize: 14, fontFamily: 'monospace', fontWeight: 700,
+                    color: includePending ? purpleTone : t.text3,
+                    opacity: pendingAvailable ? 1 : 0.5,
+                  }}>
+                    {includePending
+                      ? `${pendingGrams > 0 ? '+' : pendingGrams < 0 ? '−' : ''}${fmt(Math.abs(pendingGrams), 2)}`
+                      : (pendingAvailable ? `${pendingGrams > 0 ? '+' : '−'}${fmt(Math.abs(pendingGrams), 2)}` : '0.00')}
+                    <span style={{ fontSize: 10, color: t.text4, marginLeft: 3, fontWeight: 600 }}>g</span>
+                  </span>,
+                  { symbolNode: pendingCheckbox, hint: pendingAvailable
+                      ? (includePending ? 'included — uncheck to remove from this booking' : 'tick to include in this booking')
+                      : 'no carry-over for this date' })}
 
                 <div style={{ height: 1, background: `${t.gold}55`, marginTop: 4 }} />
 
