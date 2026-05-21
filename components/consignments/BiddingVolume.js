@@ -1429,6 +1429,24 @@ function BookingsList({ t, card, bookings, onUpdateStatus, onRequestCancel, onCr
   const activeRows    = visible.filter(b => b.status !== 'cancelled')
   const activeWeight  = activeRows.reduce((s, b) => s + Number(b.weight || 0), 0)
   const activeValue   = activeRows.reduce((s, b) => s + Number(b.weight || 0) * Number(b.rate || 0), 0)
+  // Column-wise totals across active rows — same fallback logic as the
+  // numCell helper inside the row map so the footer numbers match what
+  // ops sees in the body cells (including the live attached_net_weight
+  // fallback for old bookings without bills_net_weight_g).
+  const billsFor    = (b) => Number(b.attached_net_weight_g) > 0
+                              ? Number(b.attached_net_weight_g)
+                              : (b.bills_net_weight_g != null ? Number(b.bills_net_weight_g) : 0)
+  const gainFor     = (b) => (Number(b.gain_applied_g) || 0) + (Number(b.gain_realized_g) || 0)
+  const addlFor     = (b) => Number(b.additional_gain_g) || 0
+  const pendingFor  = (b) => Number(b.pending_g) || 0
+  const pipelineFor = (b) => Number(b.pipeline_remaining_g) != null
+                              ? Number(b.pipeline_remaining_g)
+                              : (b.pipeline_original_g != null ? Number(b.pipeline_original_g) : 0)
+  const totalBills    = activeRows.reduce((s, b) => s + billsFor(b),    0)
+  const totalGain     = activeRows.reduce((s, b) => s + gainFor(b),     0)
+  const totalAddl     = activeRows.reduce((s, b) => s + addlFor(b),     0)
+  const totalPending  = activeRows.reduce((s, b) => s + pendingFor(b),  0)
+  const totalPipeline = activeRows.reduce((s, b) => s + pipelineFor(b), 0)
 
   if (bookings.length === 0) {
     return (
@@ -1600,19 +1618,36 @@ function BookingsList({ t, card, bookings, onUpdateStatus, onRequestCancel, onCr
               )
             })}
           </tbody>
-          {activeRows.length > 0 && (
-            <tfoot>
-              <tr style={{ background: `${t.gold}0d`, borderTop: `2px solid ${t.gold}55` }}>
-                <td colSpan={7} style={{ ...td, fontSize: 11, color: t.gold, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 800 }}>Σ Active total</td>
-                <td style={{ ...td, textAlign: 'right', fontFamily: 'monospace', color: t.gold, fontWeight: 800, fontSize: 14, whiteSpace: 'nowrap' }}>
-                  {fmt(activeWeight, 2)}<span style={{ fontSize: 11, marginLeft: 2, color: t.text3 }}>g</span>
-                </td>
-                <td style={td} />
-                <td style={{ ...td, textAlign: 'right', fontFamily: 'monospace', color: t.blue, fontWeight: 800, whiteSpace: 'nowrap' }}>{fmtINR(activeValue)}</td>
-                <td style={td} />
-              </tr>
-            </tfoot>
-          )}
+          {activeRows.length > 0 && (() => {
+            // Per-cell total renderer — keeps the same "—" empty state
+            // styling so totals visually align with their column body
+            // cells.
+            const totalCell = (val, color) => (
+              val > 0
+                ? <span style={{ fontFamily: 'monospace', color, fontWeight: 800, fontSize: 13, whiteSpace: 'nowrap' }}>
+                    {fmt(val, 2)}<span style={{ fontSize: 10, color: t.text4, marginLeft: 1.5, fontWeight: 600 }}>g</span>
+                  </span>
+                : <span style={{ color: t.text4, fontFamily: 'monospace', fontWeight: 600 }}>—</span>
+            )
+            return (
+              <tfoot>
+                <tr style={{ background: `${t.gold}0d`, borderTop: `2px solid ${t.gold}55` }}>
+                  <td colSpan={2} style={{ ...td, fontSize: 11, color: t.gold, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 800 }}>Σ Active total</td>
+                  <td style={{ ...td, textAlign: 'right' }}>{totalCell(totalBills,    t.text1)}</td>
+                  <td style={{ ...td, textAlign: 'right' }}>{totalCell(totalGain,     t.orange || '#e58a3b')}</td>
+                  <td style={{ ...td, textAlign: 'right' }}>{totalCell(totalAddl,     t.orange || '#e58a3b')}</td>
+                  <td style={{ ...td, textAlign: 'right' }}>{totalCell(totalPending,  t.purple || '#8c5ac8')}</td>
+                  <td style={{ ...td, textAlign: 'right' }}>{totalCell(totalPipeline, t.purple || '#8c5ac8')}</td>
+                  <td style={{ ...td, textAlign: 'right', fontFamily: 'monospace', color: t.gold, fontWeight: 800, fontSize: 14, whiteSpace: 'nowrap' }}>
+                    {fmt(activeWeight, 2)}<span style={{ fontSize: 11, marginLeft: 2, color: t.text3 }}>g</span>
+                  </td>
+                  <td style={td} />
+                  <td style={{ ...td, textAlign: 'right', fontFamily: 'monospace', color: t.blue, fontWeight: 800, whiteSpace: 'nowrap' }}>{fmtINR(activeValue)}</td>
+                  <td style={td} />
+                </tr>
+              </tfoot>
+            )
+          })()}
         </table>
       </div>
     </div>
