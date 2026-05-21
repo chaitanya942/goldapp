@@ -21,7 +21,7 @@
 // collapsed section at the bottom since the primary use case is the
 // booking ledger now.
 
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef, Fragment } from 'react'
 import { useApp } from '../../lib/context'
 import GoldSpinner from '../ui/GoldSpinner'
 import AnimatedNumber from '../ui/AnimatedNumber'
@@ -1237,6 +1237,15 @@ function SourceSection({
   emptyMsg,
 }) {
   const tone = accent || t.gold
+  // Per-branch expand state for the bill drill-down. Keyed by branch_name
+  // within this section — collapses on rerender if the branch disappears.
+  const [openBranches, setOpenBranches] = useState(() => new Set())
+  const toggleBranchExpand = (name) => setOpenBranches(prev => {
+    const next = new Set(prev)
+    if (next.has(name)) next.delete(name); else next.add(name)
+    return next
+  })
+
   // Group branches by region in insertion order (server already sorted by
   // total_net_wt within each branch list).
   const regions = (() => {
@@ -1251,6 +1260,12 @@ function SourceSection({
   const isEmpty   = branches.length === 0
   const totalBills = total?.bills  || 0
   const totalNet   = total?.net_wt || 0
+
+  // Shared row grid — fills the horizontal extent so the columns align
+  // across every branch in every section. Left column flexes; the right
+  // three numeric columns + the caret are fixed.
+  //   [checkbox] [name + chips ...........]  [gross]  [net]  [bills]  [▾]
+  const rowGrid = '20px minmax(0, 1fr) 92px 100px 70px 22px'
 
   return (
     <div style={{
@@ -1333,33 +1348,39 @@ function SourceSection({
                   const checked   = selectable && (selected?.has(k) || false)
                   const locked    = selectable && branchLocked?.(b)
                   const rowCursor = !selectable ? 'default' : (locked ? 'not-allowed' : 'pointer')
+                  const expanded  = openBranches.has(b.branch_name)
+                  const billRows  = Array.isArray(b.bills) ? b.bills : []
                   return (
-                    <div key={b.branch_name}
+                    <Fragment key={b.branch_name}>
+                    <div
                       onClick={() => { if (selectable && !locked) onToggleBranch?.(k) }}
                       onMouseEnter={(e) => { if (selectable && !locked) e.currentTarget.style.background = `${tone}0a` }}
                       onMouseLeave={(e) => { e.currentTarget.style.background = checked ? `${tone}12` : 'transparent' }}
                       style={{
-                        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                        display: 'grid', gridTemplateColumns: rowGrid, alignItems: 'center',
+                        columnGap: 14,
                         padding: '9px 11px', borderRadius: 8,
                         background: checked ? `${tone}12` : 'transparent',
                         cursor: rowCursor,
-                        opacity: !selectable ? 0.6 : (locked ? 0.42 : 1),
+                        opacity: !selectable ? 0.72 : (locked ? 0.42 : 1),
                         transition: 'background .15s ease',
                       }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 11, minWidth: 0 }}>
-                        {selectable ? (
-                          <span style={{
-                            width: 15, height: 15, borderRadius: 4,
-                            border: `1.5px solid ${checked ? tone : t.border2}`,
-                            background: checked ? tone : 'transparent',
-                            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                            color: '#1a0a00', fontSize: 10, fontWeight: 900, flexShrink: 0,
-                            transition: 'all .12s ease',
-                          }}>{checked ? '✓' : ''}</span>
-                        ) : (
-                          <span style={{ width: 15, height: 15, borderRadius: 4, border: `1.5px dashed ${t.border}`, background: 'transparent', flexShrink: 0 }} />
-                        )}
-                        <span style={{ fontSize: 12.5, color: t.text1, fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{b.branch_name}</span>
+                      {/* Col 1: checkbox / placeholder */}
+                      {selectable ? (
+                        <span style={{
+                          width: 15, height: 15, borderRadius: 4,
+                          border: `1.5px solid ${checked ? tone : t.border2}`,
+                          background: checked ? tone : 'transparent',
+                          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                          color: '#1a0a00', fontSize: 10, fontWeight: 900,
+                          transition: 'all .12s ease',
+                        }}>{checked ? '✓' : ''}</span>
+                      ) : (
+                        <span style={{ width: 15, height: 15, borderRadius: 4, border: `1.5px dashed ${t.border}`, background: 'transparent' }} />
+                      )}
+                      {/* Col 2: branch name + meta chips */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                        <span style={{ fontSize: 12.5, color: t.text1, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{b.branch_name}</span>
                         {b.tat_hours != null && (
                           <span title={`Delivery TAT ${b.tat_hours}h`} style={{ fontSize: 9, color: t.text4, background: `${t.text4}16`, border: `1px solid ${t.text4}26`, borderRadius: 4, padding: '1px 7px', whiteSpace: 'nowrap', fontWeight: 600, letterSpacing: '.04em' }}>{b.tat_hours}h TAT</span>
                         )}
@@ -1367,11 +1388,74 @@ function SourceSection({
                           <span title="Branch pickup time" style={{ fontSize: 10, color: t.text4, whiteSpace: 'nowrap' }}>· pickup {b.pickup_time}</span>
                         )}
                       </div>
-                      <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, fontFamily: 'monospace', flexShrink: 0 }}>
-                        <span style={{ fontSize: 13, color: tone, fontWeight: 700 }}>{fmt(b.total_net_wt, 2)}<span style={{ fontSize: 10, color: t.text3, marginLeft: 2, fontWeight: 500 }}>g</span></span>
-                        <span style={{ fontSize: 10, color: t.text4, minWidth: 50, textAlign: 'right' }}>{b.total_bills} bill{b.total_bills === 1 ? '' : 's'}</span>
-                      </div>
+                      {/* Col 3: gross weight (muted) */}
+                      <span title="Gross weight" style={{ fontSize: 11.5, color: t.text3, fontFamily: 'monospace', textAlign: 'right', fontWeight: 500, whiteSpace: 'nowrap' }}>
+                        {fmt(b.total_gross_wt, 2)}<span style={{ fontSize: 9, color: t.text4, marginLeft: 2 }}>g gross</span>
+                      </span>
+                      {/* Col 4: net weight (primary, accent-coloured) */}
+                      <span title="Net weight" style={{ fontSize: 13.5, color: tone, fontFamily: 'monospace', textAlign: 'right', fontWeight: 700, whiteSpace: 'nowrap', letterSpacing: '-.01em' }}>
+                        {fmt(b.total_net_wt, 2)}<span style={{ fontSize: 10, color: t.text3, marginLeft: 2, fontWeight: 500 }}>g</span>
+                      </span>
+                      {/* Col 5: bill count */}
+                      <span style={{ fontSize: 10.5, color: t.text4, textAlign: 'right', fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
+                        {b.total_bills} bill{b.total_bills === 1 ? '' : 's'}
+                      </span>
+                      {/* Col 6: expand caret — clickable independently of the row click */}
+                      <span
+                        onClick={(e) => { e.stopPropagation(); toggleBranchExpand(b.branch_name) }}
+                        title={expanded ? 'Hide bills' : 'Show bills'}
+                        style={{
+                          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                          width: 22, height: 22, borderRadius: 5, cursor: 'pointer',
+                          color: expanded ? tone : t.text4, fontSize: 12, fontWeight: 700,
+                          background: expanded ? `${tone}14` : 'transparent',
+                          border: `1px solid ${expanded ? `${tone}55` : 'transparent'}`,
+                          transition: 'all .15s ease',
+                          opacity: billRows.length === 0 ? 0.25 : 1,
+                          pointerEvents: billRows.length === 0 ? 'none' : 'auto',
+                        }}>
+                        {expanded ? '▾' : '▸'}
+                      </span>
                     </div>
+
+                    {/* Bill-level drill-down — appears under the branch row */}
+                    {expanded && billRows.length > 0 && (
+                      <div style={{
+                        marginLeft: 30, marginTop: 2, marginBottom: 6,
+                        paddingLeft: 12, paddingTop: 4, paddingBottom: 4,
+                        borderLeft: `2px solid ${tone}33`,
+                      }}>
+                        {/* tiny header to anchor the columns */}
+                        <div style={{
+                          display: 'grid',
+                          gridTemplateColumns: '120px minmax(0, 1fr) 90px 90px 110px',
+                          columnGap: 14, padding: '3px 8px',
+                          fontSize: 9, color: t.text4, letterSpacing: '.08em', textTransform: 'uppercase', fontWeight: 700,
+                        }}>
+                          <span>App ID</span>
+                          <span>Customer</span>
+                          <span style={{ textAlign: 'right' }}>Gross</span>
+                          <span style={{ textAlign: 'right' }}>Net</span>
+                          <span style={{ textAlign: 'right' }}>Amount</span>
+                        </div>
+                        {billRows.map((bill, idx) => (
+                          <div key={bill.id ?? idx} style={{
+                            display: 'grid',
+                            gridTemplateColumns: '120px minmax(0, 1fr) 90px 90px 110px',
+                            columnGap: 14, padding: '4px 8px', borderRadius: 5,
+                            background: idx % 2 === 1 ? `${t.card2}40` : 'transparent',
+                            fontFamily: 'monospace', fontSize: 11,
+                          }}>
+                            <span style={{ color: t.gold, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{bill.application_id || '—'}</span>
+                            <span style={{ color: t.text2, fontFamily: 'inherit', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{bill.customer_name || '—'}</span>
+                            <span style={{ color: t.text3, textAlign: 'right' }}>{fmt(bill.gross_weight, 2)}<span style={{ fontSize: 9, color: t.text4, marginLeft: 2 }}>g</span></span>
+                            <span style={{ color: tone, textAlign: 'right', fontWeight: 600 }}>{fmt(bill.net_weight, 2)}<span style={{ fontSize: 9, color: t.text4, marginLeft: 2 }}>g</span></span>
+                            <span style={{ color: t.blue, textAlign: 'right' }}>{bill.total_amount != null ? `₹${Math.round(Number(bill.total_amount)).toLocaleString('en-IN')}` : '—'}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    </Fragment>
                   )
                 })}
               </div>

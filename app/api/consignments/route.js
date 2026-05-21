@@ -461,7 +461,14 @@ export async function GET(req) {
     const preEodEligibleBranchNames = (branchRows || []).filter(b => {
       if (b.region === 'Bangalore')                          return false
       if (Number(b.delivery_tat_hours || 0) > 24)            return false   // 48h-TAT picked up today arrives day-after, not tomorrow
-      if (b.region === 'Kerala' && !b.is_hub)                return false   // Kerala: hub-only
+      if (b.region === 'Kerala' && !b.is_hub)                return false   // Kerala: hub-only (leaves consolidate at hub first)
+      // Kerala hubs are ALWAYS included — they receive transferred bills
+      // from leaf branches throughout the day and dispatch to HO at EOD.
+      // The logistics module often leaves their pickup_time blank because
+      // the schedule is implicit ("end of day"); we don't want that to hide
+      // them.
+      if (b.region === 'Kerala' && b.is_hub) return true
+      // Non-Kerala: include only when today's pickup is still ahead.
       if (!b.pickup_time || !Array.isArray(b.pickup_days))   return false
       if (!b.pickup_days.includes(todayDow))                 return false
       return String(b.pickup_time) > nowIstHHMM                              // HH:MM lexical compare is correct for same-day same-format
@@ -476,7 +483,7 @@ export async function GET(req) {
     if (bangaloreBranchNames.length) {
       const { data: bb, error: bbErr } = await supabase
         .from('purchases')
-        .select('id, application_id, branch_name, gross_weight, net_weight, total_amount, purchase_date, stock_status, dispatched_at, crm_status')
+        .select('id, application_id, branch_name, customer_name, gross_weight, net_weight, total_amount, purchase_date, stock_status, dispatched_at, crm_status')
         .in('branch_name', bangaloreBranchNames)
         .gte('purchase_date', bangalorePurchaseDate)
         .lt('purchase_date',  addDays(bangalorePurchaseDate, 1))
@@ -495,7 +502,7 @@ export async function GET(req) {
     if (outsideBranchNames.length) {
       const { data: ib, error: ibErr } = await supabase
         .from('purchases')
-        .select('id, application_id, branch_name, gross_weight, net_weight, total_amount, purchase_date, dispatched_at, stock_status, crm_status')
+        .select('id, application_id, branch_name, customer_name, gross_weight, net_weight, total_amount, purchase_date, dispatched_at, stock_status, crm_status')
         .in('branch_name', outsideBranchNames)
         .eq('stock_status', 'in_consignment')
         .eq('is_deleted', false)
@@ -522,18 +529,28 @@ export async function GET(req) {
 
     // 4) Branch-stock pre-EOD — at_branch bills at eligible branches (defined
     //    above). Picked up later today, arrives at HO tomorrow → bookable.
+    //
+    // Kerala hubs (Vennala / Thrissur) accept transferred-in bills from leaf
+    // branches — those have purchases.current_branch = <hub_name> but
+    // purchases.branch_name = <original leaf>. We want them counted at the
+    // hub, so filter by current_branch when it's set, fall back to
+    // branch_name when it's null (the common case for un-transferred bills
+    // at non-Kerala branches).
     let preEodBills = []
     if (preEodEligibleBranchNames.length) {
+      const list = preEodEligibleBranchNames.map(n => `"${n}"`).join(',')
       const { data: pb, error: pbErr } = await supabase
         .from('purchases')
-        .select('id, application_id, branch_name, gross_weight, net_weight, total_amount, purchase_date, stock_status, dispatched_at, crm_status')
-        .in('branch_name', preEodEligibleBranchNames)
+        .select('id, application_id, branch_name, current_branch, customer_name, gross_weight, net_weight, total_amount, purchase_date, stock_status, dispatched_at, crm_status')
+        .or(`current_branch.in.(${list}),and(current_branch.is.null,branch_name.in.(${list}))`)
         .eq('stock_status', 'at_branch')
         .eq('crm_status',   'approved')
         .eq('is_deleted',   false)
         .is('booking_id',   null)
       if (pbErr) return Response.json({ error: pbErr.message }, { status: 500 })
-      preEodBills = pb || []
+      // Re-key each bill to the effective owner branch so groupByBranch puts
+      // transferred bills under the receiving hub, not the original source.
+      preEodBills = (pb || []).map(b => ({ ...b, branch_name: b.current_branch || b.branch_name }))
     }
 
     // Group by branch for the per-branch breakdown card.
