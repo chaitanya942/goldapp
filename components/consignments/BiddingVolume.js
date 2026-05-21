@@ -1671,119 +1671,273 @@ function SourceSection({
 // dynamic "+ Add '<typed>'" row when the operator types a name that's not
 // in the roster). Native datalist couldn't surface the add-new affordance
 // inside the drop-down itself, which is what the ops team asked for.
+// Advanced bidder picker. The anchor is a button that shows an avatar +
+// the picked bidder (or a placeholder); clicking opens a popover with a
+// sticky search box, a "Recent" section (last 4 picks from localStorage),
+// the full bidder list, and an "Add new" row if the search term doesn't
+// match any existing bidder. Keyboard: ↑/↓ to highlight, Enter to pick,
+// Esc to close.
 function BidderCombobox({ t, value, onChange, options, onAddNew }) {
-  const [open, setOpen] = useState(false)
-  const wrapRef = useRef(null)
+  const [open, setOpen]           = useState(false)
+  const [query, setQuery]         = useState('')
+  const [highlight, setHighlight] = useState(0)
+  const [recent, setRecent] = useState(() => {
+    if (typeof window === 'undefined') return []
+    try { return JSON.parse(window.localStorage.getItem('bidding.recentBidders') || '[]') } catch { return [] }
+  })
+  const wrapRef   = useRef(null)
+  const searchRef = useRef(null)
 
-  // Close when clicking outside.
+  // Close on outside click. Reset the search on close so the next open
+  // starts fresh.
   useEffect(() => {
-    if (!open) return
+    if (!open) { setQuery(''); setHighlight(0); return }
     const onDoc = (e) => { if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false) }
     document.addEventListener('mousedown', onDoc)
+    // Auto-focus search when popover opens (user can immediately filter).
+    queueMicrotask(() => searchRef.current?.focus())
     return () => document.removeEventListener('mousedown', onDoc)
   }, [open])
 
-  const query = value.trim().toLowerCase()
+  // Filter + section logic. "Recent" only surfaces names still present in
+  // the live options roster (stale recents would be confusing).
+  const q = query.trim().toLowerCase()
   const filtered = useMemo(() => {
-    if (!query) return options
-    return options.filter(o => o.toLowerCase().includes(query))
-  }, [options, query])
-  const isNew = value.trim().length > 0 && !options.some(o => o.toLowerCase() === query)
+    if (!q) return options
+    return options.filter(o => o.toLowerCase().includes(q))
+  }, [options, q])
+  const recentInOptions = useMemo(() => {
+    const inSet = new Set(filtered.map(o => o.toLowerCase()))
+    return recent.filter(r => inSet.has(r.toLowerCase()))
+  }, [recent, filtered])
+  // "All" excludes recents to avoid duplicates when no search term.
+  const recentSet = new Set(recentInOptions.map(r => r.toLowerCase()))
+  const rest      = filtered.filter(o => !recentSet.has(o.toLowerCase()))
+  const flat      = [...recentInOptions, ...rest]
+  const isExactMatch = q.length > 0 && options.some(o => o.toLowerCase() === q)
+  const isNew        = q.length > 0 && !isExactMatch
+
+  // Highlight stays within range as the filtered list shrinks/grows.
+  useEffect(() => { setHighlight(0) }, [q])
+
+  const pick = (name) => {
+    onChange(name)
+    setOpen(false)
+    setQuery('')
+    if (typeof window === 'undefined') return
+    const next = [name, ...recent.filter(r => r.toLowerCase() !== name.toLowerCase())].slice(0, 4)
+    setRecent(next)
+    try { window.localStorage.setItem('bidding.recentBidders', JSON.stringify(next)) } catch {}
+  }
+
+  const onKey = (e) => {
+    if (e.key === 'Escape')         { e.preventDefault(); setOpen(false) }
+    else if (e.key === 'ArrowDown') { e.preventDefault(); setHighlight(h => Math.min(flat.length - 1 + (isNew ? 1 : 0), h + 1)) }
+    else if (e.key === 'ArrowUp')   { e.preventDefault(); setHighlight(h => Math.max(0, h - 1)) }
+    else if (e.key === 'Enter') {
+      e.preventDefault()
+      // If highlight is on the "+ Add new" row (last index when isNew)
+      if (isNew && highlight === flat.length) {
+        if (onAddNew) onAddNew(query.trim())
+        pick(query.trim())
+        return
+      }
+      const pickName = flat[highlight]
+      if (pickName) pick(pickName)
+    }
+  }
+
+  // Anchor — when empty, shows placeholder. When set, shows avatar pill +
+  // bidder name + clear button. Single click opens the popover.
+  const avatar = value ? (
+    <span style={{
+      width: 22, height: 22, borderRadius: '50%',
+      background: hashAvatarBg(value, t), color: '#fff',
+      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+      fontSize: 11, fontWeight: 800, flexShrink: 0,
+      boxShadow: `0 0 0 2px ${t.card}`,
+    }}>{value[0].toUpperCase()}</span>
+  ) : (
+    <span style={{
+      width: 22, height: 22, borderRadius: '50%',
+      background: `${t.text4}18`, border: `1px dashed ${t.border2 || t.border}`,
+      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+      fontSize: 11, color: t.text4, fontWeight: 800, flexShrink: 0,
+    }}>?</span>
+  )
 
   return (
     <div ref={wrapRef} style={{ position: 'relative' }}>
-      <div style={{ position: 'relative' }}>
-        <input value={value}
-          onChange={e => { onChange(e.target.value); if (!open) setOpen(true) }}
-          placeholder="Select or type bidder name"
-          style={{ ...inputStyle(t), paddingRight: 32 }} />
-        <button type="button" onClick={() => setOpen(o => !o)}
-          style={{
-            position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)',
-            background: 'transparent', border: 'none', color: t.text3,
-            cursor: 'pointer', padding: '4px 6px', borderRadius: 4,
-            fontSize: 10, lineHeight: 1,
-            transition: 'transform .2s, color .2s',
-          }}
-          onMouseEnter={e => { e.currentTarget.style.color = t.gold }}
-          onMouseLeave={e => { e.currentTarget.style.color = t.text3 }}>
-          <span style={{ display: 'inline-block', transform: open ? 'rotate(180deg)' : 'rotate(0)', transition: 'transform .2s' }}>▾</span>
-        </button>
-      </div>
+      <button type="button"
+        onClick={() => setOpen(o => !o)}
+        style={{
+          width: '100%', display: 'flex', alignItems: 'center', gap: 10,
+          background: t.card2 || t.card, border: `1px solid ${value ? `${t.gold}55` : t.border}`,
+          borderRadius: 8, padding: '8px 10px 8px 8px',
+          cursor: 'pointer', color: t.text1, textAlign: 'left',
+          transition: 'border-color .15s ease, background .15s ease',
+        }}
+        onMouseEnter={e => { e.currentTarget.style.borderColor = `${t.gold}66` }}
+        onMouseLeave={e => { e.currentTarget.style.borderColor = value ? `${t.gold}55` : t.border }}>
+        {avatar}
+        <span style={{ flex: 1, minWidth: 0, fontSize: 13.5, fontWeight: value ? 700 : 500, color: value ? t.text1 : t.text4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {value || 'Pick a bidder…'}
+        </span>
+        {value && (
+          <span role="button" tabIndex={-1}
+            onClick={e => { e.stopPropagation(); onChange(''); }}
+            style={{
+              fontSize: 11, color: t.text4, padding: '2px 6px',
+              border: `1px solid ${t.border}`, borderRadius: 99,
+              background: 'transparent', cursor: 'pointer',
+              transition: 'color .15s ease, background .15s ease',
+            }}
+            onMouseEnter={e => { e.currentTarget.style.color = t.red; e.currentTarget.style.background = `${t.red}10` }}
+            onMouseLeave={e => { e.currentTarget.style.color = t.text4; e.currentTarget.style.background = 'transparent' }}>
+            ✕ clear
+          </span>
+        )}
+        <span style={{ color: t.text3, fontSize: 10, marginLeft: 2, transform: open ? 'rotate(180deg)' : 'rotate(0)', transition: 'transform .2s' }}>▾</span>
+      </button>
+
       {open && (
         <div style={{
-          position: 'absolute', left: 0, right: 0, top: 'calc(100% + 4px)',
+          position: 'absolute', left: 0, right: 0, top: 'calc(100% + 6px)',
           background: t.card, border: `1px solid ${t.border}`,
-          borderRadius: 8, boxShadow: '0 10px 30px rgba(0,0,0,.3)',
-          maxHeight: 240, overflowY: 'auto', zIndex: 200,
+          borderRadius: 10, boxShadow: '0 16px 40px rgba(0,0,0,.45)',
+          maxHeight: 320, overflow: 'hidden', zIndex: 200,
+          display: 'flex', flexDirection: 'column',
           animation: 'bidRowIn .15s cubic-bezier(.4,0,.2,1)',
         }}>
-          {/* Add-new row sits at the very top so it's always reachable */}
-          {isNew && (
-            <button type="button"
-              onClick={() => { if (onAddNew) onAddNew(value.trim()); setOpen(false) }}
+          {/* Sticky search */}
+          <div style={{ padding: '8px 10px', borderBottom: `1px solid ${t.border}`, background: t.card }}>
+            <input ref={searchRef} value={query}
+              onChange={e => setQuery(e.target.value)}
+              onKeyDown={onKey}
+              placeholder="Search or add new…"
               style={{
-                width: '100%', textAlign: 'left',
-                background: `${t.green}10`,
-                border: 'none', borderBottom: `1px solid ${t.border}`,
-                padding: '10px 14px',
-                fontSize: 12, color: t.green, fontWeight: 700,
-                cursor: 'pointer',
-                display: 'flex', alignItems: 'center', gap: 8,
-              }}
-              onMouseEnter={e => { e.currentTarget.style.background = `${t.green}20` }}
-              onMouseLeave={e => { e.currentTarget.style.background = `${t.green}10` }}>
-              <span style={{ fontSize: 14, lineHeight: 1 }}>+</span>
-              Add “{value.trim()}” as new bidder
-            </button>
-          )}
-          {!isNew && (
-            <div style={{
-              padding: '8px 14px',
-              fontSize: 9.5, color: t.text4,
-              letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 700,
-              borderBottom: `1px solid ${t.border}`, background: `${t.text4}06`,
-            }}>
-              {filtered.length} {filtered.length === 1 ? 'bidder' : 'bidders'} · type to add new
-            </div>
-          )}
-          {filtered.length === 0 && !isNew && (
-            <div style={{ padding: '20px 14px', fontSize: 11, color: t.text4, textAlign: 'center', fontStyle: 'italic' }}>
-              No bidders yet — type a name above to add one
-            </div>
-          )}
-          {filtered.map((o, i) => {
-            const isSelected = o === value
-            return (
-              <button key={o} type="button"
-                onClick={() => { onChange(o); setOpen(false) }}
+                width: '100%', boxSizing: 'border-box',
+                background: t.card2 || t.card, border: `1px solid ${t.border}`,
+                borderRadius: 7, padding: '7px 10px', fontSize: 12.5, color: t.text1,
+                outline: 'none',
+                fontWeight: 600,
+              }} />
+          </div>
+
+          <div style={{ overflowY: 'auto', maxHeight: 240 }}>
+            {/* Recent — only when present and no search query */}
+            {!q && recentInOptions.length > 0 && (
+              <>
+                <div style={{ padding: '6px 12px 4px', fontSize: 9, color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 800, background: `${t.text4}06` }}>
+                  Recent
+                </div>
+                {recentInOptions.map((o, i) => {
+                  const idx = i
+                  const isSelected = o === value
+                  const isHL       = idx === highlight
+                  return (
+                    <BidderRow key={`r-${o}`} t={t} name={o}
+                      isSelected={isSelected} isHL={isHL}
+                      onPick={() => pick(o)} />
+                  )
+                })}
+              </>
+            )}
+
+            {/* All bidders */}
+            {rest.length > 0 && (
+              <>
+                <div style={{ padding: '6px 12px 4px', fontSize: 9, color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 800, background: `${t.text4}06` }}>
+                  {q ? `${filtered.length} match${filtered.length === 1 ? '' : 'es'}` : 'All bidders'}
+                </div>
+                {rest.map((o, i) => {
+                  const idx = recentInOptions.length + i
+                  const isSelected = o === value
+                  const isHL       = idx === highlight
+                  return (
+                    <BidderRow key={`a-${o}`} t={t} name={o}
+                      isSelected={isSelected} isHL={isHL}
+                      onPick={() => pick(o)} />
+                  )
+                })}
+              </>
+            )}
+
+            {/* Empty state when nothing matches and no new-name to add */}
+            {flat.length === 0 && !isNew && (
+              <div style={{ padding: '24px 14px', fontSize: 11.5, color: t.text4, textAlign: 'center', fontStyle: 'italic' }}>
+                No bidders yet — type a name above to add one
+              </div>
+            )}
+
+            {/* Add-new — green row at the bottom of results */}
+            {isNew && (
+              <button type="button"
+                onClick={() => { if (onAddNew) onAddNew(query.trim()); pick(query.trim()) }}
                 style={{
                   width: '100%', textAlign: 'left',
-                  background: isSelected ? `${t.gold}15` : 'transparent',
-                  border: 'none', borderBottom: i === filtered.length - 1 ? 'none' : `1px solid ${t.border}30`,
-                  padding: '9px 14px',
-                  fontSize: 12, color: isSelected ? t.gold : t.text2,
-                  fontWeight: isSelected ? 700 : 500,
+                  background: highlight === flat.length ? `${t.green}25` : `${t.green}10`,
+                  border: 'none', borderTop: `1px solid ${t.border}`,
+                  padding: '10px 14px',
+                  fontSize: 12.5, color: t.green, fontWeight: 800,
                   cursor: 'pointer',
-                  display: 'flex', alignItems: 'center', gap: 8,
-                  transition: 'background .1s',
+                  display: 'flex', alignItems: 'center', gap: 10,
                 }}
-                onMouseEnter={e => { if (!isSelected) e.currentTarget.style.background = `${t.text4}10` }}
-                onMouseLeave={e => { if (!isSelected) e.currentTarget.style.background = 'transparent' }}>
+                onMouseEnter={e => { e.currentTarget.style.background = `${t.green}25` }}
+                onMouseLeave={e => { e.currentTarget.style.background = highlight === flat.length ? `${t.green}25` : `${t.green}10` }}>
                 <span style={{
-                  width: 18, height: 18, borderRadius: '50%',
-                  background: hashAvatarBg(o, t), color: '#fff',
+                  width: 22, height: 22, borderRadius: '50%',
+                  background: t.green, color: '#fff',
                   display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                  fontSize: 9, fontWeight: 700,
-                }}>{o[0].toUpperCase()}</span>
-                {o}
-                {isSelected && <span style={{ marginLeft: 'auto', color: t.gold, fontSize: 11 }}>✓</span>}
+                  fontSize: 13, fontWeight: 800, lineHeight: 1,
+                }}>+</span>
+                <span>Add “<span style={{ fontWeight: 900 }}>{query.trim()}</span>” as new bidder</span>
               </button>
-            )
-          })}
+            )}
+          </div>
+
+          {/* Footer hint — keyboard shortcuts */}
+          <div style={{
+            padding: '6px 12px', fontSize: 10, color: t.text4,
+            borderTop: `1px solid ${t.border}`, background: t.card2 || t.card,
+            display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap',
+          }}>
+            <span>↑↓ navigate · <kbd style={{ fontFamily: 'monospace', background: `${t.text4}15`, padding: '1px 5px', borderRadius: 3 }}>↵</kbd> pick · <kbd style={{ fontFamily: 'monospace', background: `${t.text4}15`, padding: '1px 5px', borderRadius: 3 }}>Esc</kbd> close</span>
+            <span style={{ fontWeight: 700 }}>{options.length} total</span>
+          </div>
         </div>
       )}
     </div>
+  )
+}
+
+// Single row inside the bidder popover. Pulled out so the recent + all
+// sections render identically.
+function BidderRow({ t, name, isSelected, isHL, onPick }) {
+  return (
+    <button type="button" onClick={onPick}
+      style={{
+        width: '100%', textAlign: 'left',
+        background: isHL ? `${t.gold}1c` : (isSelected ? `${t.gold}10` : 'transparent'),
+        border: 'none', borderLeft: isHL ? `3px solid ${t.gold}` : '3px solid transparent',
+        padding: '8px 12px',
+        fontSize: 12.5, color: isSelected ? t.gold : t.text1,
+        fontWeight: isSelected ? 800 : 600,
+        cursor: 'pointer',
+        display: 'flex', alignItems: 'center', gap: 10,
+        transition: 'background .1s',
+      }}
+      onMouseEnter={e => { if (!isHL && !isSelected) e.currentTarget.style.background = `${t.text4}10` }}
+      onMouseLeave={e => { if (!isHL && !isSelected) e.currentTarget.style.background = 'transparent' }}>
+      <span style={{
+        width: 22, height: 22, borderRadius: '50%',
+        background: hashAvatarBg(name, t), color: '#fff',
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+        fontSize: 11, fontWeight: 800, flexShrink: 0,
+      }}>{name[0].toUpperCase()}</span>
+      <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</span>
+      {isSelected && <span style={{ color: t.gold, fontSize: 12 }}>✓</span>}
+    </button>
   )
 }
 
@@ -2011,7 +2165,7 @@ function BookingModal({ t, arrivalDate, availablePool, remainingQty, incomingNet
             // Row helper — leading slot can render either a plain operator
             // glyph (+/=) or a custom node (the checkbox on the pending row).
             const row = (label, value, opts = {}) => (
-              <div style={{ display: 'grid', gridTemplateColumns: `24px minmax(0,1fr) ${opts.editable ? '116px' : '128px'}`, alignItems: 'center', gap: 10, padding: '4px 0' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: `24px minmax(0,1fr) ${opts.editable ? '92px' : '128px'}`, alignItems: 'center', gap: 10, padding: '4px 0' }}>
                 {opts.symbolNode != null
                   ? <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>{opts.symbolNode}</span>
                   : <span style={{ fontSize: 16, color: opts.faded ? t.text4 : t.text2, fontWeight: 800, textAlign: 'center', fontFamily: 'monospace' }}>{opts.symbol || ''}</span>
@@ -2056,10 +2210,13 @@ function BookingModal({ t, arrivalDate, availablePool, remainingQty, incomingNet
 
                 <div style={{ height: 1, background: `${t.border}60`, margin: '2px 0' }} />
 
-                {/* + Gains — defaults to 3.5 % of selected, overrideable */}
+                {/* + Gains — defaults to 3.5 % of selected, overrideable.
+                    type="text" + inputMode="decimal" so we don't get the
+                    browser's native up/down spinner (which made the field
+                    feel chunky). */}
                 {row('Add gains',
-                  <input type="number" step="0.01" min="0" value={gainsEntry}
-                    onChange={e => { setGainsEntry(e.target.value); setGainsEntryDirty(true) }}
+                  <input type="text" value={gainsEntry}
+                    onChange={e => { setGainsEntry(e.target.value.replace(/[^\d.]/g, '')); setGainsEntryDirty(true) }}
                     onDoubleClick={() => setGainsEntryDirty(false)}
                     placeholder="0.00"
                     inputMode="decimal"
@@ -2071,7 +2228,7 @@ function BookingModal({ t, arrivalDate, availablePool, remainingQty, incomingNet
                       color: addedGainsW > 0 ? (t.orange || '#e58a3b') : t.text3,
                       borderColor: addedGainsW > 0 ? `${(t.orange || '#e58a3b')}55` : t.border,
                     }} />,
-                  { symbol: '+', faded: addedGainsW === 0, hint: gainsEntryDirty
+                  { symbol: '+', editable: true, faded: addedGainsW === 0, hint: gainsEntryDirty
                       ? `manual override · default ${(liveGainRate * 100).toFixed(2)} %`
                       : `default ${(liveGainRate * 100).toFixed(2)} % of selected · type to override` })}
 
@@ -2151,26 +2308,6 @@ function BookingModal({ t, arrivalDate, availablePool, remainingQty, incomingNet
               </label>
             </div>
 
-            {/* Live equation — Weight × Rate = ₹ Total. Subtle inline strip
-                (replaces the bulky Total Value card). */}
-            <div style={{
-              display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
-              background: total > 0 ? `linear-gradient(90deg, ${t.blue}10, ${t.blue}04)` : t.card2,
-              border: `1px solid ${total > 0 ? `${t.blue}30` : t.border}`,
-              borderRadius: 10, padding: '8px 14px',
-              transition: 'background .25s ease, border-color .25s ease',
-            }}>
-              <span style={{ fontSize: 11, color: t.text3, fontFamily: 'monospace', fontWeight: 700 }}>
-                {wValid ? fmt(w, 2) : '—'} <span style={{ color: t.text4 }}>g</span>
-                <span style={{ color: t.text4, margin: '0 6px' }}>×</span>
-                {Number(rate) > 0 ? `₹${fmt(Number(rate), 2)}` : '—'}
-                <span style={{ color: t.text4, margin: '0 6px' }}>=</span>
-              </span>
-              <span key={Math.round(total)} style={{ fontSize: 18, color: total > 0 ? t.blue : t.text4, fontFamily: 'monospace', fontWeight: 800, letterSpacing: '-.015em', animation: total > 0 ? 'bidFadeIn .22s ease' : 'none' }}>
-                {total > 0 ? fmtINR(total) : '—'}
-              </span>
-            </div>
-
             {/* Bidder — last because party gets picked AFTER the rate
                 lands (highest-rate-wins). Dropdown stays collapsed until
                 the operator clicks the caret or starts typing. */}
@@ -2218,7 +2355,7 @@ function BookingModal({ t, arrivalDate, availablePool, remainingQty, incomingNet
                 ? 'Creating…'
                 : (<>
                     <span>Create Booking</span>
-                    {total > 0 && <span style={{ fontFamily: 'monospace', fontWeight: 900, opacity: .85 }}>· {fmtINR(total)}</span>}
+                    {wValid && <span style={{ fontFamily: 'monospace', fontWeight: 900, opacity: .85 }}>· {fmt(w, 2)} g</span>}
                   </>)
               }
             </button>
