@@ -1591,6 +1591,23 @@ function BookingsList({ t, card, bookings, onUpdateStatus, onRequestCancel, onCr
                             {fmtTS(b.created_at)}
                           </span>
                         )}
+                        {/* Audited — gain has been finalized by the daily
+                            midnight audit (committed − attached redistributed
+                            proportionally by net weight). Once set, the
+                            Gain column reflects the audited value, not the
+                            3.5% estimate. */}
+                        {b.gain_audited_at && (
+                          <span title={`Daily gain audit run ${fmtTS(b.gain_audited_at)} — gain redistributed proportionally across this date's non-Kerala bookings`}
+                            style={{
+                              background: `${t.green}18`,
+                              color: t.green,
+                              border: `1px solid ${t.green}40`,
+                              borderRadius: 99, padding: '1px 8px',
+                              fontFamily: 'monospace', fontWeight: 800, letterSpacing: '.02em',
+                            }}>
+                            ✓ gain audited
+                          </span>
+                        )}
                         {b.notes && <span title={b.notes} style={{ fontStyle: 'italic', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>· {b.notes}</span>}
                       </div>
                     )}

@@ -722,7 +722,8 @@ export async function GET(req) {
                         pipeline_remaining_g, pipeline_region, pipeline_arrival_date,
                         pipeline_attached_at, gain_realized_g,
                         bills_net_weight_g, gain_applied_g, pending_g,
-                        additional_gain_g, pipeline_original_g`
+                        additional_gain_g, pipeline_original_g,
+                        gain_audited_at`
     const baseSelect = `id, date, party, buyer_phone, weight, rate, is_kl, purity, notes,
                         status, created_at, created_by,
                         confirmed_at, confirmed_by, fulfilled_at, fulfilled_by,
@@ -734,14 +735,14 @@ export async function GET(req) {
         .from('cal_quotas')
         .select(fullSelect)
         .eq('date', date)
-        .order('created_at', { ascending: false })
+        .order('created_at', { ascending: true })
       if (tryFull.error && /column .* does not exist/i.test(tryFull.error.message || '')) {
         console.warn('[bidding_bookings] breakdown/pipeline columns missing — falling back to base select. Run sql/cal_quotas_breakdown.sql + sql/cal_quotas_pipeline_attach.sql.')
         const tryBase = await supabase
           .from('cal_quotas')
           .select(baseSelect)
           .eq('date', date)
-          .order('created_at', { ascending: false })
+          .order('created_at', { ascending: true })
         rows = tryBase.data
         bkErr = tryBase.error
       } else {
@@ -1018,7 +1019,7 @@ export async function GET(req) {
         .select('consignment_id, event_type, actor_email, created_at')
         .in('consignment_id', ids)
         .in('event_type', ['ewb_generated', 'einvoice_generated'])
-        .order('created_at', { ascending: false })
+        .order('created_at', { ascending: true })
       for (const e of events || []) {
         const map = e.event_type === 'ewb_generated' ? actorByEwb : actorByEi
         if (!map.has(e.consignment_id)) map.set(e.consignment_id, e.actor_email)

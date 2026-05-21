@@ -432,6 +432,29 @@ async function runSync(request) {
       console.error('close_stale_pipelines threw (non-fatal):', csErr.message)
     }
 
+    // Daily gain audit — runs after pipeline closure. For each past
+    // arrival_date with un-audited non-Kerala bookings, redistributes the
+    // total realized gain (committed − attached) proportionally across
+    // each booking's net weight. Defined in
+    // sql/cal_quotas_daily_gain_audit.sql. Idempotent: once a booking
+    // has gain_audited_at set, it's skipped on future ticks.
+    let gainAuditDates = 0
+    let gainAuditBookings = 0
+    try {
+      const { data: auditRows, error: auditErr } = await supabaseAdmin.rpc('audit_daily_gain')
+      if (auditErr) {
+        console.warn('audit_daily_gain error (non-fatal):', auditErr.message)
+      } else if (Array.isArray(auditRows) && auditRows.length > 0) {
+        for (const row of auditRows) {
+          gainAuditBookings += Number(row.bookings || 0)
+        }
+        gainAuditDates = auditRows.length
+        console.log(`Daily gain audit: ${gainAuditDates} date(s), ${gainAuditBookings} non-Kerala booking(s) finalized`)
+      }
+    } catch (gaErr) {
+      console.error('audit_daily_gain threw (non-fatal):', gaErr.message)
+    }
+
     return Response.json({
       success:  errors === 0,
       total:    rows.length,
@@ -447,6 +470,8 @@ async function runSync(request) {
       pipelineOvershoot,
       pipelineClosed,
       pipelineClosedWeight,
+      gainAuditDates,
+      gainAuditBookings,
       lastError: lastError ? JSON.stringify(lastError) : null,
       message:  `Upsert ${minDate}→${maxDate}: ${deduped.length} approved bills synced, ${renamed} bill_no renames preserved, ${ghostsMarked} ghost bills marked deleted, ${carriedForward} stock_status carried forward across delete-recreate (${carryAmbiguous} ambiguous skipped, ${errors} errors)`,
     })
