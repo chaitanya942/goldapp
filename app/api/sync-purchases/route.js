@@ -381,34 +381,12 @@ async function runSync(request) {
       console.error('Carry-forward error (non-fatal):', cfErr.message)
     }
 
-    // Pipeline auto-attach — runs after every successful sync. Walks open
-    // bookings where pipeline_remaining_g > 0 and attaches freshly-synced
-    // unbooked bills in FIFO purchase order until the gap closes. The last
-    // bill is attached in full even if it overshoots; the overshoot is
-    // credited to the booking's gain_realized_g column. Defined in
-    // sql/cal_quotas_pipeline_attach.sql.
-    //
-    // Non-fatal: if the RPC fails we still return the sync result. The
-    // attacher will retry on the next sync tick (every ~60s via the cron
-    // worker), so a transient blip self-heals.
-    let pipelineAttached = 0
-    let pipelineWeight   = 0
-    let pipelineOvershoot = 0
-    try {
-      const { data: attachRows, error: attachErr } = await supabaseAdmin.rpc('process_pipeline_attachments')
-      if (attachErr) {
-        console.warn('process_pipeline_attachments error (non-fatal):', attachErr.message)
-      } else if (Array.isArray(attachRows) && attachRows.length > 0) {
-        for (const row of attachRows) {
-          pipelineAttached  += Number(row.bills_attached  || 0)
-          pipelineWeight    += Number(row.weight_attached || 0)
-          pipelineOvershoot += Number(row.overshoot_g     || 0)
-        }
-        console.log(`Pipeline auto-attach: ${attachRows.length} booking(s), ${pipelineAttached} bill(s), ${pipelineWeight.toFixed(2)}g attached, ${pipelineOvershoot.toFixed(2)}g overshoot credited as gain`)
-      }
-    } catch (paErr) {
-      console.error('Pipeline auto-attach threw (non-fatal):', paErr.message)
-    }
+    // Order matters: close stale pipelines FIRST, then auto-attach. A
+    // booking whose arrival_date has already passed must have its leftover
+    // pipeline converted to gain before the attacher runs — otherwise
+    // today's freshly-synced bills get stolen to back-fill a dead booking.
+    // (The attacher also has its own arrival_date >= today guard from
+    // sql/cal_quotas_pipeline_phase4.sql — this ordering is belt-and-braces.)
 
     // EOD pipeline closure — bookings whose arrival_date has already passed
     // but still have pipeline_remaining_g > 0 get their unfilled grams
@@ -430,6 +408,34 @@ async function runSync(request) {
       }
     } catch (csErr) {
       console.error('close_stale_pipelines threw (non-fatal):', csErr.message)
+    }
+
+    // Pipeline auto-attach — walks open bookings (arrival_date today or
+    // later) where pipeline_remaining_g > 0 and attaches freshly-synced
+    // unbooked bills in FIFO purchase order until the gap closes. The last
+    // bill is attached in full even if it overshoots; the overshoot is
+    // credited to gain_realized_g. Defined in
+    // sql/cal_quotas_pipeline_phase4.sql.
+    //
+    // Non-fatal: if the RPC fails we still return the sync result. The
+    // attacher retries on the next sync tick, so a transient blip self-heals.
+    let pipelineAttached = 0
+    let pipelineWeight   = 0
+    let pipelineOvershoot = 0
+    try {
+      const { data: attachRows, error: attachErr } = await supabaseAdmin.rpc('process_pipeline_attachments')
+      if (attachErr) {
+        console.warn('process_pipeline_attachments error (non-fatal):', attachErr.message)
+      } else if (Array.isArray(attachRows) && attachRows.length > 0) {
+        for (const row of attachRows) {
+          pipelineAttached  += Number(row.bills_attached  || 0)
+          pipelineWeight    += Number(row.weight_attached || 0)
+          pipelineOvershoot += Number(row.overshoot_g     || 0)
+        }
+        console.log(`Pipeline auto-attach: ${attachRows.length} booking(s), ${pipelineAttached} bill(s), ${pipelineWeight.toFixed(2)}g attached, ${pipelineOvershoot.toFixed(2)}g overshoot credited as gain`)
+      }
+    } catch (paErr) {
+      console.error('Pipeline auto-attach threw (non-fatal):', paErr.message)
     }
 
     // Daily gain audit — runs after pipeline closure. For each past
