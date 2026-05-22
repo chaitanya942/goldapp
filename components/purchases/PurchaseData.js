@@ -230,10 +230,13 @@ export default function PurchaseData() {
     if (data) { setCache(`pd:kpis:${crmStatus}`, data); setKpis(data) }
   }
 
-  const buildQuery = (forExport = false) => {
-    let q = forExport
-      ? supabase.from('purchases').select('*')
-      : supabase.from('purchases').select('*', { count: 'exact' })
+  // withCount=true asks Postgres for an exact COUNT — the expensive part of a
+  // paginated query. Callers that only need rows (export, delete, forward
+  // pagination) leave it off.
+  const buildQuery = (withCount = false) => {
+    let q = withCount
+      ? supabase.from('purchases').select('*', { count: 'exact' })
+      : supabase.from('purchases').select('*')
     q = q.eq('is_deleted', false).neq('crm_status', 'deleted')
     if (search)            q = q.or(`customer_name.ilike.%${search}%,application_id.ilike.%${search}%,branch_name.ilike.%${search}%`)
     if (filterCrmStatus)   q = q.eq('crm_status', filterCrmStatus)
@@ -257,7 +260,11 @@ export default function PurchaseData() {
     const from = pageNum * PAGE_SIZE
     const to   = from + PAGE_SIZE - 1
     const asc  = sortDir === 'asc'
-    let q = buildQuery().order(sortCol, { ascending: asc, nullsFirst: false })
+    // Only ask for an exact COUNT on page 0. Every filter change resets to
+    // page 0, so the count is always fresh there; plain forward pagination
+    // reuses it — the filtered set hasn't changed, so re-counting is wasted.
+    const withCount = pageNum === 0
+    let q = buildQuery(withCount).order(sortCol, { ascending: asc, nullsFirst: false })
     if (sortCol !== 'transaction_time') q = q.order('transaction_time', { ascending: false, nullsFirst: false })
     const { data, count, error } = await q.range(from, to)
     if (seq !== reqSeqRef.current) return   // a newer request superseded this one — drop it
@@ -268,38 +275,36 @@ export default function PurchaseData() {
     }
     const cacheKey      = pageCacheKey({ page: pageNum, search, filterCrmStatus, filterCrmSource, filterStatus, filterBranch, filterTxn, fromDate, toDate, dispatchedFrom, dispatchedTo, sortCol, sortDir })
     const resolvedCount = (count !== null && count !== undefined) ? count : totalCount
-    if (data) {
-      setPurchases(data)
-      // Cache the page result right away so a re-open paints instantly,
-      // even before the second (both-CRMs) query resolves.
-      setCache(cacheKey, { purchases: data, totalCount: resolvedCount, bothCrmIds: new Set() })
-      // Flag application_ids that genuinely exist in BOTH CRMs — i.e. the
-      // set of distinct crm_source values for that id has size > 1. (The
-      // old logic counted rows, so two old_crm rows for one id falsely
-      // read as "both".)
-      const ids = data.map(r => r.application_id).filter(Boolean)
-      if (ids.length) {
-        const { data: both } = await supabase
-          .from('purchases')
-          .select('application_id, crm_source')
-          .in('application_id', ids)
-          .eq('is_deleted', false)
-          .neq('crm_status', 'deleted')
-        if (seq !== reqSeqRef.current) return
-        if (both) {
-          const sources = {}
-          both.forEach(r => {
-            ;(sources[r.application_id] ||= new Set()).add(r.crm_source)
-          })
-          const bothSet = new Set(Object.keys(sources).filter(id => sources[id].size > 1))
-          setBothCrmIds(bothSet)
-          setCache(cacheKey, { purchases: data, totalCount: resolvedCount, bothCrmIds: bothSet })
-        }
-      }
-    }
+    setPurchases(data || [])
     if (count !== null && count !== undefined) setTotalCount(count)
     setSelectedIds(new Set())
+    // Reveal the table now — don't make the user wait on the secondary
+    // "Both CRMs" badge query below.
     setLoading(false)
+    setCache(cacheKey, { purchases: data || [], totalCount: resolvedCount, bothCrmIds: new Set() })
+
+    // Flag application_ids that genuinely exist in BOTH CRMs — i.e. the set
+    // of distinct crm_source values for that id has size > 1. Runs after the
+    // table is already visible.
+    const ids = (data || []).map(r => r.application_id).filter(Boolean)
+    if (ids.length) {
+      const { data: both } = await supabase
+        .from('purchases')
+        .select('application_id, crm_source')
+        .in('application_id', ids)
+        .eq('is_deleted', false)
+        .neq('crm_status', 'deleted')
+      if (seq !== reqSeqRef.current) return
+      if (both) {
+        const sources = {}
+        both.forEach(r => {
+          ;(sources[r.application_id] ||= new Set()).add(r.crm_source)
+        })
+        const bothSet = new Set(Object.keys(sources).filter(id => sources[id].size > 1))
+        setBothCrmIds(bothSet)
+        setCache(cacheKey, { purchases: data || [], totalCount: resolvedCount, bothCrmIds: bothSet })
+      }
+    }
   }
 
   const handleSort = (col) => {
@@ -328,7 +333,7 @@ export default function PurchaseData() {
       let allRows = [], from = 0
       const CHUNK = 1000
       while (true) {
-        const { data } = await buildQuery(true)
+        const { data } = await buildQuery()
           .order('purchase_date', { ascending: false })
           .range(from, from + CHUNK - 1)
         if (!data || data.length === 0) break
@@ -358,7 +363,7 @@ export default function PurchaseData() {
     setDeleting(true)
     if (deleteAllMode) {
       while (true) {
-        const { data } = await buildQuery(true).select('id').limit(500)
+        const { data } = await buildQuery().select('id').limit(500)
         if (!data || data.length === 0) break
         const ids = data.map(r => r.id)
         for (let i = 0; i < ids.length; i += 100)
