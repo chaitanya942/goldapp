@@ -5,6 +5,7 @@ import { useApp } from '../../../lib/context'
 import GoldSpinner from '../../ui/GoldSpinner'
 import { CONSIGNMENT_THEMES as THEMES } from '../../../lib/consignmentTheme'
 import { authedFetch } from '../../../lib/authedFetch'
+import { getCache, setCache } from '../../../lib/moduleCache'
 
 const TABS = [
   { id: 'overview',   label: 'Overview',         icon: '◈' },
@@ -78,16 +79,16 @@ function MiniBar({ value, max, color, height = 4 }) {
 // TAB: OVERVIEW
 // ─────────────────────────────────────────────────────────────────────────────
 function OverviewTab({ t, canSeeAlerts = true }) {
-  const [data, setData]   = useState(null)
-  const [loading, setLoading] = useState(true)
+  const [data, setData]   = useState(() => getCache('pi:overview') ?? null)
+  const [loading, setLoading] = useState(() => !getCache('pi:overview'))
 
   useEffect(() => {
     authedFetch('/api/purchase-intelligence?action=overview')
-      .then(r => r.json()).then(d => { setData(d); setLoading(false) })
+      .then(r => r.json()).then(d => { setCache('pi:overview', d); setData(d); setLoading(false) })
       .catch(() => setLoading(false))
   }, [])
 
-  if (loading) return <div style={{ display:'flex', justifyContent:'center', padding:'80px' }}><GoldSpinner size={32}/></div>
+  if (loading && !data) return <div style={{ display:'flex', justifyContent:'center', padding:'80px' }}><GoldSpinner size={32}/></div>
   if (!data)   return null
 
   const { funnel, branchActivity, pendingAging, highRejBranches, walkinFunnel } = data
@@ -258,8 +259,8 @@ function OverviewTab({ t, canSeeAlerts = true }) {
 // TAB: BRANCH MATRIX
 // ─────────────────────────────────────────────────────────────────────────────
 function BranchMatrixTab({ t }) {
-  const [branches, setBranches] = useState([])
-  const [loading, setLoading]   = useState(true)
+  const [branches, setBranches] = useState(() => getCache('pi:branch-matrix') ?? [])
+  const [loading, setLoading]   = useState(() => !getCache('pi:branch-matrix'))
   const [search, setSearch]     = useState('')
   const [sortKey, setSortKey]   = useState('days_since_purchase')
   const [sortDir, setSortDir]   = useState(1)   // 1=asc, -1=desc
@@ -268,7 +269,7 @@ function BranchMatrixTab({ t }) {
   useEffect(() => {
     authedFetch('/api/purchase-intelligence?action=branch-matrix')
       .then(r => r.json())
-      .then(d => { setBranches(d.branches || []); setLoading(false) })
+      .then(d => { setCache('pi:branch-matrix', d.branches || []); setBranches(d.branches || []); setLoading(false) })
       .catch(() => setLoading(false))
   }, [])
 
@@ -319,7 +320,7 @@ function BranchMatrixTab({ t }) {
         <input style={{ ...inp, width:'200px', marginLeft:'auto' }} placeholder="Search branch..." value={search} onChange={e => setSearch(e.target.value)} />
       </div>
 
-      {loading ? <div style={{ display:'flex', justifyContent:'center', padding:'64px' }}><GoldSpinner size={32}/></div> : (
+      {loading && !branches.length ? <div style={{ display:'flex', justifyContent:'center', padding:'64px' }}><GoldSpinner size={32}/></div> : (
         <div style={{ overflowX:'auto', borderRadius:'12px', border:`1px solid ${t.border}` }}>
           <table style={{ width:'100%', borderCollapse:'collapse', minWidth:'900px' }}>
             <thead>
@@ -401,8 +402,9 @@ function BranchMatrixTab({ t }) {
 // TAB: REPEAT CUSTOMERS
 // ─────────────────────────────────────────────────────────────────────────────
 function RepeatCustomersTab({ t }) {
-  const [data, setData]       = useState({ rows:[], total:0, stats:null })
-  const [loading, setLoading] = useState(true)
+  const _cachedRepeat = getCache('pi:repeat:2||0')
+  const [data, setData]       = useState(_cachedRepeat ?? { rows:[], total:0, stats:null })
+  const [loading, setLoading] = useState(!_cachedRepeat)
   const [minVisits, setMinVisits] = useState(2)
   const [search, setSearch]   = useState('')
   const [page, setPage]       = useState(0)
@@ -414,7 +416,9 @@ function RepeatCustomersTab({ t }) {
     if (search) params.set('search', search)
     try {
       const d = await authedFetch(`/api/purchase-intelligence?${params}`).then(r => r.json())
-      setData({ rows: d.rows||[], total: d.total||0, stats: d.stats||null })
+      const result = { rows: d.rows||[], total: d.total||0, stats: d.stats||null }
+      setCache(`pi:repeat:${minVisits}|${search}|${p}`, result)
+      setData(result)
     } catch(e) { console.error(e) } finally { setLoading(false) }
   }, [minVisits, search])
 
@@ -463,7 +467,7 @@ function RepeatCustomersTab({ t }) {
           style={{ background:'none', border:`1px solid ${t.border}`, borderRadius:'5px', padding:'3px 10px', color:page>=totalPages-1?t.text4:t.text2, cursor:page>=totalPages-1?'not-allowed':'pointer' }}>→</button>
       </div>
 
-      {loading ? <div style={{ display:'flex', justifyContent:'center', padding:'64px' }}><GoldSpinner size={32}/></div> : (
+      {loading && !rows.length ? <div style={{ display:'flex', justifyContent:'center', padding:'64px' }}><GoldSpinner size={32}/></div> : (
         <div style={{ overflowX:'auto', borderRadius:'12px', border:`1px solid ${t.border}` }}>
           <table style={{ width:'100%', borderCollapse:'collapse', minWidth:'800px' }}>
             <thead>
@@ -519,18 +523,18 @@ function RepeatCustomersTab({ t }) {
 // TAB: PENDING AGING
 // ─────────────────────────────────────────────────────────────────────────────
 function PendingAgingTab({ t }) {
-  const [data, setData]     = useState(null)
-  const [loading, setLoading] = useState(true)
+  const [data, setData]     = useState(() => getCache('pi:pending-aging') ?? null)
+  const [loading, setLoading] = useState(() => !getCache('pi:pending-aging'))
   const [search, setSearch] = useState('')
   const [minDays, setMinDays] = useState(0)
 
   useEffect(() => {
     authedFetch('/api/purchase-intelligence?action=pending-aging')
-      .then(r => r.json()).then(d => { setData(d); setLoading(false) })
+      .then(r => r.json()).then(d => { setCache('pi:pending-aging', d); setData(d); setLoading(false) })
       .catch(() => setLoading(false))
   }, [])
 
-  if (loading) return <div style={{ display:'flex', justifyContent:'center', padding:'64px' }}><GoldSpinner size={32}/></div>
+  if (loading && !data) return <div style={{ display:'flex', justifyContent:'center', padding:'64px' }}><GoldSpinner size={32}/></div>
   if (!data) return null
 
   const { rows, agingSummary: ag, byBranch } = data
@@ -626,16 +630,16 @@ function PendingAgingTab({ t }) {
 // TAB: PIPELINE INTELLIGENCE
 // ─────────────────────────────────────────────────────────────────────────────
 function PipelineTab({ t }) {
-  const [data, setData]     = useState(null)
-  const [loading, setLoading] = useState(true)
+  const [data, setData]     = useState(() => getCache('pi:pipeline-intel') ?? null)
+  const [loading, setLoading] = useState(() => !getCache('pi:pipeline-intel'))
 
   useEffect(() => {
     authedFetch('/api/purchase-intelligence?action=pipeline-intel')
-      .then(r => r.json()).then(d => { setData(d); setLoading(false) })
+      .then(r => r.json()).then(d => { setCache('pi:pipeline-intel', d); setData(d); setLoading(false) })
       .catch(() => setLoading(false))
   }, [])
 
-  if (loading) return <div style={{ display:'flex', justifyContent:'center', padding:'64px' }}><GoldSpinner size={32}/></div>
+  if (loading && !data) return <div style={{ display:'flex', justifyContent:'center', padding:'64px' }}><GoldSpinner size={32}/></div>
   if (!data) return null
 
   const { funnel: f, pipelineAging: pa, sourceDist, branchConv } = data

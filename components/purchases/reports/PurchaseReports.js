@@ -15,6 +15,12 @@ import ReportComparePeriods from './ReportComparePeriods'
 import ReportUnderperformers from './ReportUnderperformers'
 import { authedFetch } from '../../../lib/authedFetch'
 import { istNow, istStr } from '../../../lib/dateIst'
+import { getCache, setCache } from '../../../lib/moduleCache'
+
+// Cache key for the report aggregates — keyed by every filter that changes
+// the payload, so re-opening Analytics with the same filters paints instantly.
+const reportSig = (fromDate, toDate, filterBranch, filterTxn, filterRegion) =>
+  `pr:${fromDate}|${toDate}|${filterBranch}|${filterTxn}|${filterRegion}`
 
 const SECTIONS = [
   { key: 'charts',         label: 'Trends',         icon: '↗' },
@@ -209,35 +215,44 @@ export default function PurchaseReports() {
 
   const _now = istNow()
   const _mtdFrom = `${_now.getFullYear()}-${String(_now.getMonth()+1).padStart(2,'0')}-01`
+  // Seed all aggregate slices from the in-memory cache (stale-while-revalidate)
+  // so re-opening Analytics paints instantly; fetchAll still refreshes.
+  const _defaultRegion = regionAccess.single ? regionAccess.regions[0] : ''
+  const _cachedReport  = getCache(reportSig(_mtdFrom, istStr(_now), '', '', _defaultRegion))
   const [fromDate,      setFromDate]      = useState(_mtdFrom)
   const [toDate,        setToDate]        = useState(istStr(_now))
   const [filterBranch,  setFilterBranch]  = useState('')
   const [filterTxn,     setFilterTxn]     = useState('')
   // If the user is restricted to one region, lock filterRegion to that region.
-  const [filterRegion,  setFilterRegion]  = useState(regionAccess.single ? regionAccess.regions[0] : '')
-  const [kpis,          setKpis]          = useState(null)
-  const [trend,         setTrend]         = useState([])
-  const [monthly,       setMonthly]       = useState([])
-  const [branchData,    setBranchData]    = useState([])
+  const [filterRegion,  setFilterRegion]  = useState(_defaultRegion)
+  const [kpis,          setKpis]          = useState(_cachedReport?.kpis ?? null)
+  const [trend,         setTrend]         = useState(_cachedReport?.trend ?? [])
+  const [monthly,       setMonthly]       = useState(_cachedReport?.monthly ?? [])
+  const [branchData,    setBranchData]    = useState(_cachedReport?.branchData ?? [])
   const [stateData,     setStateData]     = useState([])
-  const [dowData,       setDowData]       = useState([])
-  const [purityDist,    setPurityDist]    = useState([])
-  const [weightBuckets, setWeightBuckets] = useState([])
-  const [regionSplit,   setRegionSplit]   = useState([])
-  const [monthHalf,     setMonthHalf]     = useState([])
-  const [timeOfDay,     setTimeOfDay]     = useState([])
-  const [topBills,      setTopBills]      = useState([])
+  const [dowData,       setDowData]       = useState(_cachedReport?.dowData ?? [])
+  const [purityDist,    setPurityDist]    = useState(_cachedReport?.purityDist ?? [])
+  const [weightBuckets, setWeightBuckets] = useState(_cachedReport?.weightBuckets ?? [])
+  const [regionSplit,   setRegionSplit]   = useState(_cachedReport?.regionSplit ?? [])
+  const [monthHalf,     setMonthHalf]     = useState(_cachedReport?.monthHalf ?? [])
+  const [timeOfDay,     setTimeOfDay]     = useState(_cachedReport?.timeOfDay ?? [])
+  const [topBills,      setTopBills]      = useState(_cachedReport?.topBills ?? [])
+  const [hourlyTrend,   setHourlyTrend]   = useState(_cachedReport?.hourlyTrend ?? [])
   const [branches,      setBranches]      = useState([])
   const [allBranchMeta, setAllBranchMeta] = useState([])
   const [regions,       setRegions]       = useState([])
-  const [loading,       setLoading]       = useState(true)
+  const [loading,       setLoading]       = useState(!_cachedReport)
   const [activeSection, setActiveSection] = useState(null)
   const [exporting,     setExporting]     = useState(false)
   const [selectedKpi,   setSelectedKpi]   = useState(null)
-  const [hourlyTrend,   setHourlyTrend]   = useState([])
   const [error,         setError]         = useState(null)
   const [isMobile,      setIsMobile]      = useState(false)
   const [lastSyncAt,    setLastSyncAt]    = useState(null)
+
+  // "First load" = loading with nothing to show yet. During a background
+  // refresh (loading but kpis already present from cache) we keep the stale
+  // data on screen instead of flashing skeletons.
+  const firstLoad = loading && !kpis
 
   useEffect(() => {
     const check = () => setIsMobile(window.innerWidth < 768)
@@ -310,15 +325,18 @@ export default function PurchaseReports() {
       const agg = await res.json()
       if (agg.error) throw new Error(agg.error)
 
+      const sig = reportSig(fromDate, toDate, filterBranch, filterTxn, filterRegion)
       if (agg.empty || !agg.kpis) {
         setKpis(null); setTrend([]); setBranchData([]); setStateData([])
         setMonthly([]); setDowData([]); setPurityDist([]); setWeightBuckets([])
         setRegionSplit([]); setMonthHalf([]); setTimeOfDay([]); setTopBills([])
         setHourlyTrend([])
+        setCache(sig, agg)
         setLoading(false)
         return
       }
 
+      setCache(sig, agg)
       setKpis(agg.kpis)
       setTrend(agg.trend)
       setMonthly(agg.monthly)
@@ -552,26 +570,26 @@ export default function PurchaseReports() {
       {/* ROW 1 — Volume (4 cols). Cards whose label is in DRILL_MAP open
           the per-branch drill modal on click. */}
       <div style={gridRow4}>
-        <KpiCard label="Total Transactions"    color={t.gold}  loading={loading}
+        <KpiCard label="Total Transactions"    color={t.gold}  loading={firstLoad}
           value={Number(k?.total_count || 0).toLocaleString('en-IN')}
           onClick={() => setSelectedKpi('Total Transactions')} />
-        <KpiCard label="Gross Weight"          color={t.text1} loading={loading}
+        <KpiCard label="Gross Weight"          color={t.text1} loading={firstLoad}
           value={`${fmt(k?.total_gross)}g`}
           onClick={() => setSelectedKpi('Gross Weight')} />
-        <KpiCard label="Avg Stone & Wastage / Bill" color={t.text2} loading={loading}
+        <KpiCard label="Avg Stone & Wastage / Bill" color={t.text2} loading={firstLoad}
           value={`${fmt(k?.avg_stone_wastage_bill)}g`}
           sub="avg deduction per transaction" />
-        <KpiCard label="Net Weight"            color={t.gold}  loading={loading}
+        <KpiCard label="Net Weight"            color={t.gold}  loading={firstLoad}
           value={`${fmt(k?.total_net)}g`}
           onClick={() => setSelectedKpi('Net Weight')} />
       </div>
 
       {/* ROW 2 — Quality + Split (5 cols) */}
       <div style={gridRow5}>
-        <KpiCard label="Stone & Wastage %" color={t.orange} loading={loading}
+        <KpiCard label="Stone & Wastage %" color={t.orange} loading={firstLoad}
           value={`${Number(k?.stone_wastage_pct || 0).toFixed(2)}%`}
           sub="of gross weight" />
-        <KpiCard label="Avg Purity %" color={t.purple} loading={loading}
+        <KpiCard label="Avg Purity %" color={t.purple} loading={firstLoad}
           value={`${Number(k?.avg_purity || 0).toFixed(2)}%`}
           sub="weighted by net weight"
           onClick={() => setSelectedKpi('Avg Purity %')} />
@@ -579,33 +597,33 @@ export default function PurchaseReports() {
           title="Physical and Takeover (Bills)"
           leftLabel="Physical"  leftValue={Number(k?.physical_count || 0).toLocaleString('en-IN')}  leftColor={t.gold}  leftSub={`Physical · ${phPct}%`}
           rightLabel="Takeover" rightValue={Number(k?.takeover_count || 0).toLocaleString('en-IN')} rightColor={t.blue} rightSub={`Takeover · ${tkPct}%`}
-          loading={loading} t={t}
+          loading={firstLoad} t={t}
         />
         <SplitCard
           title="Physical and Takeover (Net Weight)"
           leftLabel="Physical"  leftValue={`${fmt(k?.physical_net)}g`}  leftColor={t.gold}  leftSub={`Physical · ${phNwPct}%`}
           rightLabel="Takeover" rightValue={`${fmt(k?.takeover_net)}g`} rightColor={t.blue} rightSub={`Takeover · ${tkNwPct}%`}
-          loading={loading} t={t}
+          loading={firstLoad} t={t}
         />
-        <KpiCard label="Avg Net Wt / Bill" color={t.blue} loading={loading}
+        <KpiCard label="Avg Net Wt / Bill" color={t.blue} loading={firstLoad}
           value={`${fmt(k?.avg_net_per_txn)}g`}
           onClick={() => setSelectedKpi('Avg Net Wt / Bill')} />
       </div>
 
       {/* ROW 3 — Value (5 cols) */}
       <div style={gridRow5b}>
-        <KpiCard label="Avg Service Charge %" color={t.text2} loading={loading}
+        <KpiCard label="Avg Service Charge %" color={t.text2} loading={firstLoad}
           value={`${Number(k?.avg_service_charge_pct || 0).toFixed(2)}%`} />
-        <KpiCard label="Gross Purchase Value" color={t.green} loading={loading}
+        <KpiCard label="Gross Purchase Value" color={t.green} loading={firstLoad}
           value={fmtVal(k?.total_value)}
           onClick={() => setSelectedKpi('Gross Purchase Value')} />
-        <KpiCard label="Avg Rate / Gram" color={t.green} loading={loading}
+        <KpiCard label="Avg Rate / Gram" color={t.green} loading={firstLoad}
           value={fmtVal(k?.avg_rate_per_gram)}
           sub="gross value ÷ net weight"
           onClick={() => setSelectedKpi('Avg Rate / Gram')} />
-        <KpiCard label="Transacted Branches" color={t.blue} loading={loading}
+        <KpiCard label="Transacted Branches" color={t.blue} loading={firstLoad}
           value={Number(k?.branch_count || 0).toLocaleString('en-IN')} />
-        <KpiCard label="Business Days" color={t.text2} loading={loading}
+        <KpiCard label="Business Days" color={t.text2} loading={firstLoad}
           value={Number(k?.business_days || 0).toLocaleString('en-IN')}
           sub="unique trading days" />
       </div>
@@ -653,14 +671,14 @@ export default function PurchaseReports() {
       )}
 
       {/* GA-STYLE COMPARE — always visible at top of sections (skipped when drilling into a single section) */}
-      {!loading && !error && !activeSection && (
+      {!firstLoad && !error && !activeSection && (
         <div style={{ marginBottom: '14px' }}>
           <ReportComparePeriods t={t} isMobile={isMobile} fromDate={fromDate} toDate={toDate} filterBranch={filterBranch} filterRegion={filterRegion} filterTxn={filterTxn} branches={allBranchMeta} />
         </div>
       )}
 
       {/* SECTIONS */}
-      {!loading && !error && (
+      {!firstLoad && !error && (
         <>
           {showSection('charts')          && <ReportCharts          trend={trend} monthly={monthly} dowData={dowData} hourlyTrend={hourlyTrend} isSingleDay={fromDate && toDate && fromDate === toDate} t={t} fromDate={fromDate} filterBranch={filterBranch} filterTxn={filterTxn} />}
           {showSection('distribution')    && <ReportDistribution    kpis={kpis} purityDist={purityDist} weightBuckets={weightBuckets} regionSplit={regionSplit} monthHalf={monthHalf} timeOfDay={timeOfDay} t={t} />}
@@ -672,7 +690,7 @@ export default function PurchaseReports() {
         </>
       )}
 
-      {loading && (
+      {firstLoad && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '12px' }}>
           {[0, 1, 2, 3].map(i => (
             <div key={i} style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: '14px', height: '200px', animation: 'shimmer 1.5s infinite' }} />

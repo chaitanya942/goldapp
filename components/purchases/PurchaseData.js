@@ -3,10 +3,23 @@
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../../lib/supabase'
 import { useApp } from '../../lib/context'
-import GoldSpinner from '../ui/GoldSpinner'
 import Badge from '../ui/Badge'
 import { CONSIGNMENT_THEMES as THEMES } from '../../lib/consignmentTheme'
 import { istNow, istStr } from '../../lib/dateIst'
+import { getCache, setCache } from '../../lib/moduleCache'
+
+// Cache key for a page query — covers every input that changes the result set,
+// so a re-open with the same filters paints instantly from memory.
+function pageCacheKey(p) {
+  return `pd:page:${p.page}|${p.search}|${p.filterCrmStatus}|${p.filterCrmSource}|${p.filterStatus}|${p.filterBranch}|${p.filterTxn}|${p.fromDate}|${p.toDate}|${p.dispatchedFrom}|${p.dispatchedTo}|${p.sortCol}|${p.sortDir}`
+}
+// Default (no-filter, page 0) key — what the user sees when they first open
+// the module. Seeding state from this makes the common re-open instant.
+const DEFAULT_PAGE_KEY = pageCacheKey({
+  page: 0, search: '', filterCrmStatus: '', filterCrmSource: '', filterStatus: '',
+  filterBranch: '', filterTxn: '', fromDate: '', toDate: '', dispatchedFrom: '',
+  dispatchedTo: '', sortCol: 'purchase_date', sortDir: 'desc',
+})
 
 const STATUS_COLORS = {
   at_branch:        { color: '#3a8fbf', label: 'At Branch' },
@@ -97,6 +110,31 @@ async function exportXLSX(rows, filename) {
   window.XLSX.writeFile(wb, filename)
 }
 
+// ── SKELETON PLACEHOLDERS (first load, no cache yet) ────────────────────────
+function Skel({ t, h = 16, w = '100%', r = 8, style = {} }) {
+  return (
+    <div style={{
+      height: h, width: w, borderRadius: r, flexShrink: 0,
+      background: `linear-gradient(90deg, ${t.card} 25%, ${t.border} 50%, ${t.card} 75%)`,
+      backgroundSize: '200% 100%', animation: 'shimmer 1.4s ease-in-out infinite',
+      ...style,
+    }} />
+  )
+}
+
+function PurchaseDataSkeleton({ t }) {
+  return (
+    <div style={{ border: `1px solid ${t.border}`, borderRadius: '10px', overflow: 'hidden' }}>
+      <Skel t={t} h={40} r={0} />
+      {Array.from({ length: 14 }).map((_, i) => (
+        <div key={i} style={{ padding: '9px 14px', borderTop: `1px solid ${t.border}40` }}>
+          <Skel t={t} h={18} r={5} />
+        </div>
+      ))}
+    </div>
+  )
+}
+
 export default function PurchaseData() {
   const { theme, userProfile } = useApp()
   const t = THEMES[theme] || THEMES.dark
@@ -109,9 +147,12 @@ export default function PurchaseData() {
     return () => window.removeEventListener('resize', check)
   }, [])
 
-  const [purchases, setPurchases]     = useState([])
+  // Seed from the in-memory cache (stale-while-revalidate) so a re-open of the
+  // module paints instantly; the load effect still refreshes in the background.
+  const cachedPage = getCache(DEFAULT_PAGE_KEY)
+  const [purchases, setPurchases]     = useState(cachedPage?.purchases ?? [])
   const [allBranches, setAllBranches] = useState([])
-  const [loading, setLoading]         = useState(false)
+  const [loading, setLoading]         = useState(!cachedPage)
   const [exporting, setExporting]     = useState(false)
   const [search, setSearch]           = useState('')   // debounced — drives the query
   const [searchInput, setSearchInput] = useState('')   // immediate — bound to the input
@@ -130,14 +171,14 @@ export default function PurchaseData() {
   const [dispatchedTo,   setDispatchedTo]   = useState('')
 
   const [page, setPage]             = useState(0)
-  const [totalCount, setTotalCount] = useState(0)
+  const [totalCount, setTotalCount] = useState(cachedPage?.totalCount ?? 0)
   const PAGE_SIZE = 100
 
   const [sortCol, setSortCol] = useState('purchase_date')
   const [sortDir, setSortDir] = useState('desc')
 
-  const [kpis, setKpis] = useState(null)
-  const [bothCrmIds, setBothCrmIds] = useState(new Set())
+  const [kpis, setKpis] = useState(() => getCache('pd:kpis:') ?? null)
+  const [bothCrmIds, setBothCrmIds] = useState(cachedPage?.bothCrmIds ?? new Set())
   const [loadError, setLoadError]   = useState(null)
   // Bumped by load() to force a reload even when page/filters are unchanged
   // (e.g. after a delete). Drives the page + KPI effects.
@@ -170,7 +211,7 @@ export default function PurchaseData() {
 
   const loadKpis = async (crmStatus = '') => {
     const { data } = await supabase.rpc('get_purchase_kpis', { p_crm_status: crmStatus || null })
-    if (data) setKpis(data)
+    if (data) { setCache(`pd:kpis:${crmStatus}`, data); setKpis(data) }
   }
 
   const buildQuery = (forExport = false) => {
@@ -209,8 +250,13 @@ export default function PurchaseData() {
       setLoading(false)
       return
     }
+    const cacheKey      = pageCacheKey({ page: pageNum, search, filterCrmStatus, filterCrmSource, filterStatus, filterBranch, filterTxn, fromDate, toDate, dispatchedFrom, dispatchedTo, sortCol, sortDir })
+    const resolvedCount = (count !== null && count !== undefined) ? count : totalCount
     if (data) {
       setPurchases(data)
+      // Cache the page result right away so a re-open paints instantly,
+      // even before the second (both-CRMs) query resolves.
+      setCache(cacheKey, { purchases: data, totalCount: resolvedCount, bothCrmIds: new Set() })
       // Flag application_ids that genuinely exist in BOTH CRMs — i.e. the
       // set of distinct crm_source values for that id has size > 1. (The
       // old logic counted rows, so two old_crm rows for one id falsely
@@ -229,7 +275,9 @@ export default function PurchaseData() {
           both.forEach(r => {
             ;(sources[r.application_id] ||= new Set()).add(r.crm_source)
           })
-          setBothCrmIds(new Set(Object.keys(sources).filter(id => sources[id].size > 1)))
+          const bothSet = new Set(Object.keys(sources).filter(id => sources[id].size > 1))
+          setBothCrmIds(bothSet)
+          setCache(cacheKey, { purchases: data, totalCount: resolvedCount, bothCrmIds: bothSet })
         }
       }
     }
@@ -394,6 +442,11 @@ export default function PurchaseData() {
       </div>
 
       {/* KPI CARDS */}
+      {!kpis && loading && (
+        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(4, 1fr)', gap: '14px', marginBottom: '28px' }}>
+          {Array.from({ length: 8 }).map((_, i) => <Skel key={i} t={t} h={92} r={10} />)}
+        </div>
+      )}
       {kpis && (() => {
         const fmtD = (d) => d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'
         const dateRange = kpis.min_date
@@ -579,9 +632,11 @@ export default function PurchaseData() {
       )}
 
       {/* TABLE / CARDS */}
-      {loading ? (
-        <div style={{ display: 'flex', justifyContent: 'center', padding: '48px' }}><GoldSpinner size={32} /></div>
-      ) : isMobile ? (
+      {loading && purchases.length === 0 ? (
+        <PurchaseDataSkeleton t={t} isMobile={isMobile} />
+      ) : (
+      <div style={{ opacity: loading ? 0.5 : 1, transition: 'opacity .2s', pointerEvents: loading ? 'none' : 'auto' }}>
+      {isMobile ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
           {purchases.length === 0 ? (
             <div style={{ textAlign: 'center', color: t.text4, padding: '48px', fontSize: '.75rem' }}>
@@ -764,6 +819,8 @@ export default function PurchaseData() {
             </tbody>
           </table>
         </div>
+      )}
+      </div>
       )}
     </div>
   )

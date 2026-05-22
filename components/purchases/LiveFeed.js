@@ -2,9 +2,9 @@
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useApp, useRegionAccess } from '../../lib/context'
-import GoldSpinner from '../ui/GoldSpinner'
 import { authedFetch } from '../../lib/authedFetch'
 import { istToday } from '../../lib/dateIst'
+import { getCache, setCache } from '../../lib/moduleCache'
 
 const REFRESH_SECS = 60
 
@@ -127,6 +127,33 @@ function Mono({ children, size = '1.2rem', color, weight = 200, style = {} }) {
   )
 }
 
+/* ── Skeleton placeholder (first load, no cache yet) ── */
+function Skel({ t, w = '100%', h = 16, r = 8, style = {} }) {
+  return (
+    <div style={{
+      width: w, height: h, borderRadius: r, flexShrink: 0,
+      background: `linear-gradient(90deg, ${t.card} 25%, ${t.card2} 50%, ${t.card} 75%)`,
+      backgroundSize: '200% 100%', animation: 'shimmer 1.4s ease-in-out infinite',
+      ...style,
+    }} />
+  )
+}
+
+function LiveFeedSkeleton({ t, isMobile }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+      <Skel t={t} h={8} r={100} />
+      <Skel t={t} h={isMobile ? 280 : 156} r={16} />
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        {[0, 1, 2, 3].map(i => <Skel key={i} t={t} h={74} r={14} style={{ flex: 1, minWidth: 110 }} />)}
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {[0, 1, 2, 3, 4, 5, 6].map(i => <Skel key={i} t={t} h={40} r={8} />)}
+      </div>
+    </div>
+  )
+}
+
 /* ════════════════════════════════════════════════════ */
 /*                  MAIN COMPONENT                    */
 /* ════════════════════════════════════════════════════ */
@@ -159,9 +186,11 @@ export default function LiveFeed() {
   useEffect(() => {
     if (regionAccess.single) setRegionFilter(regionAccess.regions[0])
   }, [regionAccess.single, regionAccess.regions])
-  const [data,          setData]          = useState(null)
+  // Seed from the in-memory cache so a re-open paints instantly (stale-while-
+  // revalidate) — the load effect still fires a fresh fetch in the background.
+  const [data,          setData]          = useState(() => getCache(`livefeed:${todayIST}`) ?? null)
   const [loadError,     setLoadError]     = useState(null)
-  const [loading,       setLoading]       = useState(true)
+  const [loading,       setLoading]       = useState(() => !getCache(`livefeed:${todayIST}`))
   const [lastUpdated,   setLastUpdated]   = useState(null)
   const [countdown,     setCountdown]     = useState(REFRESH_SECS)
 
@@ -185,6 +214,7 @@ export default function LiveFeed() {
       const json = await res.json()
       if (seq !== loadSeqRef.current) return  // superseded by a newer load
       if (json.error) throw new Error(json.error)
+      setCache(`livefeed:${d}`, json)
       setData(json)
       setLastUpdated(new Date())
     } catch (e) {
@@ -397,7 +427,7 @@ export default function LiveFeed() {
           {/* Date picker */}
           {canSee('livefeed.date_picker') && (
             <input type="date" value={viewDate}
-              onChange={e => { setViewDate(e.target.value); setRegionFilter(''); setNewEventCount(0) }}
+              onChange={e => { const nd = e.target.value; setViewDate(nd); setRegionFilter(''); setNewEventCount(0); setData(getCache(`livefeed:${nd}`) ?? null) }}
               style={{ background: t.card, color: t.text2, border: `1px solid ${t.border}`, borderRadius: 6, padding: '5px 8px', fontSize: '.68rem', fontFamily: 'ui-monospace, monospace', outline: 'none', cursor: 'pointer', maxWidth: isMobile ? 130 : 'none' }}
             />
           )}
@@ -478,10 +508,7 @@ export default function LiveFeed() {
           </div>
         )}
         {loading && !data ? (
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: 400, gap: 16 }}>
-            <GoldSpinner size={40} />
-            <span style={{ fontSize: '.72rem', color: t.text3 }}>Loading live data...</span>
-          </div>
+          <LiveFeedSkeleton t={t} isMobile={isMobile} />
         ) : crmTab === 'old' ? (
           <div style={{ opacity: loading && data ? 0.6 : 1, transition: 'opacity .3s' }}>
             <OldCrmTab t={t} isMobile={isMobile} summary={effectiveSummary} walkinSummary={effectiveWalkinSummary}
