@@ -19,6 +19,8 @@ import RoleManagement from '../../components/admin/RoleManagement'
 import HeatmapInsights from '../../components/admin/HeatmapInsights'
 import DynamicDashboard from '../../components/dashboard/DynamicDashboard'
 import PurchaseHub   from '../../components/purchases/PurchaseHub'
+import LiveFeed      from '../../components/purchases/LiveFeed'
+import PurchaseData  from '../../components/purchases/PurchaseData'
 import BottomNav from '../../components/BottomNav'
 import MobileMenu from '../../components/MobileMenu'
 import ReportsHub    from '../../components/purchases/ReportsHub'
@@ -193,7 +195,7 @@ function DashboardShell() {
         // Super admin's own session → full DashboardHome (unrestricted overview)
         if (role === 'super_admin' && !previewRole) return <DashboardHome />
 
-        const hasPurchase  = canSee('purchase-data') || canSee('purchase-reports')
+        const hasPurchase  = canSee('purchase-live') || canSee('purchase-data') || canSee('purchase-reports')
         const hasTelesales = canSee('inbound-bot')
 
         // Telesales-only → dedicated rich dashboard (charts, filters, call log)
@@ -203,7 +205,11 @@ function DashboardShell() {
         // each section renders only the widgets their element-level permissions allow
         return <DynamicDashboard />
       }
-      case 'purchase-data':     return <PurchaseHub />
+      // Purchase module split into 3 sub-modules. PurchaseHub (the old
+      // Live-Feed + Purchase-Data tab wrapper) is retired but kept in the
+      // tree — see components/purchases/PurchaseHub.js.
+      case 'purchase-live':     return <LiveFeed />
+      case 'purchase-data':     return <PurchaseData />
       case 'purchase-reports':  return <ReportsHub />
       case 'consignment-overview': return <ConsignmentOverview />
       case 'consignment-data':       return <ConsignmentData />
