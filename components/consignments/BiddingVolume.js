@@ -2567,7 +2567,7 @@ function BookingModal({ t, arrivalDate, availablePool, remainingQty, incomingNet
       animation: 'bidModalOverlayIn .18s ease',
     }}>
       <div onClick={e => e.stopPropagation()} style={{
-        width: '100%', maxWidth: 580, maxHeight: '92vh',
+        width: '100%', maxWidth: 660, maxHeight: '92vh',
         background: t.card, border: `1px solid ${t.border}`,
         borderRadius: 16,
         boxShadow: '0 20px 60px rgba(0,0,0,.4)',
@@ -2819,8 +2819,9 @@ function BookingModal({ t, arrivalDate, availablePool, remainingQty, incomingNet
             })()}
 
             {/* Bidder — last because party gets picked AFTER the rate
-                lands (highest-rate-wins). Dropdown stays collapsed until
-                the operator clicks the caret or starts typing. */}
+                lands (highest-rate-wins). The combobox stays collapsed;
+                a quick-pick chip row underneath shows every party name
+                at a glance so ops doesn't have to open the dropdown. */}
             <Field label="Bidder">
               <BidderCombobox
                 t={t}
@@ -2829,6 +2830,34 @@ function BookingModal({ t, arrivalDate, availablePool, remainingQty, incomingNet
                 options={allBidders}
                 onAddNew={(name) => { setParty(name); saveNewBidder() }}
               />
+              {allBidders.length > 0 && (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
+                  {allBidders.map(b => {
+                    const picked = b.toLowerCase() === party.trim().toLowerCase()
+                    return (
+                      <button key={b} type="button"
+                        onClick={() => setParty(picked ? '' : b)}
+                        title={picked ? `${b} — click to clear` : `Pick ${b}`}
+                        style={{
+                          display: 'inline-flex', alignItems: 'center', gap: 6,
+                          background: picked ? `${t.gold}1f` : (t.card2 || t.card),
+                          border: `1px solid ${picked ? `${t.gold}66` : t.border}`,
+                          borderRadius: 99, padding: '4px 10px 4px 5px',
+                          cursor: 'pointer', transition: 'all .12s ease',
+                        }}>
+                        <span style={{
+                          width: 18, height: 18, borderRadius: '50%',
+                          background: hashAvatarBg(b, t), color: '#fff',
+                          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                          fontSize: 9.5, fontWeight: 800, flexShrink: 0,
+                        }}>{b[0].toUpperCase()}</span>
+                        <span style={{ fontSize: 12, fontWeight: picked ? 800 : 600, color: picked ? t.gold : t.text2, whiteSpace: 'nowrap' }}>{b}</span>
+                        {picked && <span style={{ fontSize: 10, color: t.gold }}>✓</span>}
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
             </Field>
 
           </div>
