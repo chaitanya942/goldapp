@@ -76,7 +76,7 @@ export async function GET(req) {
     // Region scoping applied here so downstream summary only includes user's branches.
     let branchesQ = supabase
       .from('branches')
-      .select('name, region, state, model_type, pickup_time')
+      .select('name, region, state, model_type, pickup_time, pickup_days')
       .eq('is_active', true)
     if (allowedRegions) branchesQ = branchesQ.in('region', allowedRegions)
     const { data: branches, error: bErr } = await branchesQ
@@ -84,7 +84,7 @@ export async function GET(req) {
 
     const branchMeta = {}
     for (const b of branches || []) {
-      branchMeta[b.name] = { region: b.region || 'Unknown', state: b.state, model_type: b.model_type, pickup_time: b.pickup_time || null }
+      branchMeta[b.name] = { region: b.region || 'Unknown', state: b.state, model_type: b.model_type, pickup_time: b.pickup_time || null, pickup_days: Array.isArray(b.pickup_days) ? b.pickup_days : null }
     }
     const outsideBranches = new Set(
       (branches || []).filter(b => b.model_type === 'outside_bangalore').map(b => b.name)
@@ -120,9 +120,10 @@ export async function GET(req) {
     // include_bangalore_today flag is set (Dashboard's Consignment Overview).
     const summary = {}
     const populateZeroRow = (branchName) => {
-      const meta = branchMeta[branchName] || { region: 'Unknown', pickup_time: null }
+      const meta = branchMeta[branchName] || { region: 'Unknown', pickup_time: null, pickup_days: null }
       summary[branchName] = {
         branch_name: branchName, region: meta.region, pickup_time: meta.pickup_time,
+        pickup_days: meta.pickup_days,
         last_moved_at: lastMovedByBranch[branchName] || null,
         total_bills: 0, today_bills: 0, older_bills: 0,
         today_net_wt: 0, older_net_wt: 0,

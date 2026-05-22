@@ -183,8 +183,11 @@ export default function ConsignmentOverview() {
   const pickupAlerts = (() => {
     const now = istNow()
     const currentMins = now.getUTCHours() * 60 + now.getUTCMinutes()
+    const todayDow = new Date().toLocaleDateString('en-US', { timeZone: 'Asia/Kolkata', weekday: 'short' })
     return data
       .filter(b => b.pickup_time && !dismissedPickups[b.branch_name])
+      // Skip branches that don't pick up today (pickup_days set, today out).
+      .filter(b => !(Array.isArray(b.pickup_days) && b.pickup_days.length > 0 && !b.pickup_days.includes(todayDow)))
       .map(b => {
         const [hh, mm] = String(b.pickup_time).split(':').map(Number)
         if (Number.isNaN(hh) || Number.isNaN(mm)) return null
@@ -236,11 +239,19 @@ export default function ConsignmentOverview() {
     if (!data.length) return
     const now = istNow()
     const currentMins = now.getUTCHours() * 60 + now.getUTCMinutes()
+    // Today's weekday in IST (Mon/Tue/…) — used to suppress notifications
+    // for branches that don't pick up today.
+    const todayDow = new Date().toLocaleDateString('en-US', { timeZone: 'Asia/Kolkata', weekday: 'short' })
     const fresh = []
     let logChanged = false
 
     for (const b of data) {
       if (!b.pickup_time) continue
+      // Only notify when today is actually a pickup day for the branch.
+      // pickup_days set + today excluded → skip. Missing pickup_days → we
+      // can't tell, so fall through (treat as daily pickup) rather than
+      // hiding the alert on a config gap.
+      if (Array.isArray(b.pickup_days) && b.pickup_days.length > 0 && !b.pickup_days.includes(todayDow)) continue
       const [hh, mm] = String(b.pickup_time).split(':').map(Number)
       if (Number.isNaN(hh) || Number.isNaN(mm)) continue
       const mins = (hh * 60 + mm) - currentMins
@@ -559,23 +570,34 @@ export default function ConsignmentOverview() {
           {pickupNotifs.map(n => {
             const urgent = n.kind === '15min'
             const accent = urgent ? t.red : t.orange
+            // Same action as the row's Move button — deep-link to
+            // Consignment Data with the branch pre-selected, then drop
+            // the popup.
+            const goMove = () => {
+              setConsignmentDeepLink({ branch: n.branch, region: n.region })
+              setActiveNav('consignment-data')
+              dismissNotif(n.id)
+            }
             return (
-              <div key={n.id} style={{
-                pointerEvents: 'auto',
-                background: t.card,
-                border: `1px solid ${accent}66`,
-                borderLeft: `4px solid ${accent}`,
-                borderRadius: 12,
-                boxShadow: '0 14px 40px rgba(0,0,0,.4)',
-                padding: '13px 15px',
-                animation: 'cnsPickupPopIn .3s cubic-bezier(.34,1.2,.64,1)',
-              }}>
+              <div key={n.id}
+                onClick={goMove}
+                title={`Move ${n.branch} stock — create consignment`}
+                style={{
+                  pointerEvents: 'auto', cursor: 'pointer',
+                  background: t.card,
+                  border: `1px solid ${accent}66`,
+                  borderLeft: `4px solid ${accent}`,
+                  borderRadius: 12,
+                  boxShadow: '0 14px 40px rgba(0,0,0,.4)',
+                  padding: '13px 15px',
+                  animation: 'cnsPickupPopIn .3s cubic-bezier(.34,1.2,.64,1)',
+                }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 8 }}>
                   <span style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 10.5, fontWeight: 800, letterSpacing: '.07em', textTransform: 'uppercase', color: accent }}>
                     <span style={{ fontSize: 14, animation: urgent ? 'pulse 1.1s infinite' : 'none' }}>{urgent ? '⚠' : '⏰'}</span>
                     {urgent ? 'Pickup reminder · 15 min' : 'Pickup approaching · 30 min'}
                   </span>
-                  <button onClick={() => dismissNotif(n.id)}
+                  <button onClick={(e) => { e.stopPropagation(); dismissNotif(n.id) }}
                     title="Dismiss"
                     style={{ background: 'none', border: 'none', color: t.text4, cursor: 'pointer', fontSize: 17, lineHeight: 1, padding: 0 }}>
                     ×
@@ -600,6 +622,18 @@ export default function ConsignmentOverview() {
                     No consignment created yet — move the stock before pickup.
                   </div>
                 )}
+                {/* Move button — same deep-link as the branch-row CTA. */}
+                <button onClick={(e) => { e.stopPropagation(); goMove() }}
+                  style={{
+                    marginTop: 11, width: '100%',
+                    background: accent, color: '#fff',
+                    border: 'none', borderRadius: 8,
+                    padding: '9px 14px', fontSize: 12.5, fontWeight: 800,
+                    letterSpacing: '.03em', cursor: 'pointer',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                  }}>
+                  Move stock → create consignment
+                </button>
               </div>
             )
           })}
