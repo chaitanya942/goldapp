@@ -10,13 +10,16 @@ import RejectedBills         from './RejectedBills'
 import BlacklistedCustomers  from './BlacklistedCustomers'
 import { CONSIGNMENT_THEMES as THEMES } from '../../lib/consignmentTheme'
 
+// Walk-in / Pending / Rejected / Blacklisted are hidden from production
+// for now. Their components + render branches below are left intact —
+// re-add the entries here to bring a tab back.
 const TABS = [
   { id: 'live',        label: 'Live Feed',    icon: '●', accentFn: t => t.green  },
   { id: 'approved',    label: 'Purchase Data',icon: '✓', accentFn: t => t.gold   },
-  { id: 'walkin',      label: 'Walk-in',      icon: '→', accentFn: t => t.blue   },
-  { id: 'pending',     label: 'Pending',      icon: '⏳',accentFn: t => t.orange },
-  { id: 'rejected',    label: 'Rejected',     icon: '✕', accentFn: t => t.red    },
-  { id: 'blacklisted', label: 'Blacklisted',  icon: '⊘', accentFn: t => t.red    },
+  // { id: 'walkin',      label: 'Walk-in',      icon: '→', accentFn: t => t.blue   },
+  // { id: 'pending',     label: 'Pending',      icon: '⏳',accentFn: t => t.orange },
+  // { id: 'rejected',    label: 'Rejected',     icon: '✕', accentFn: t => t.red    },
+  // { id: 'blacklisted', label: 'Blacklisted',  icon: '⊘', accentFn: t => t.red    },
 ]
 
 export default function PurchaseHub() {
