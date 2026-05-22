@@ -185,6 +185,32 @@ export default function BiddingVolume() {
 
   useEffect(() => { fetchAll() }, [fetchAll])
 
+  // ── Auto-refresh poll ──────────────────────────────────────────────────────
+  // The page silently re-fetches supply + bookings every 30 s so the numbers
+  // stay live without the operator hitting Refresh. PAUSED whenever a bill
+  // selection or a modal is in progress — refreshing the data underneath an
+  // operator mid-booking would shift the very rows they're acting on. The
+  // moment they finish (clear the selection / close the modal) polling
+  // resumes with an immediate catch-up fetch so they're not stuck on stale
+  // numbers for up to 30 s.
+  const pollPaused = selected.size > 0 || showBookModal || cancelTarget != null || editingGain || editingPending
+  const pollPausedRef = useRef(pollPaused)
+  const wasPausedRef   = useRef(pollPaused)
+  useEffect(() => {
+    pollPausedRef.current = pollPaused
+    // paused → active transition: catch up right away.
+    if (wasPausedRef.current && !pollPaused) fetchAll(true)
+    wasPausedRef.current = pollPaused
+  }, [pollPaused, fetchAll])
+  useEffect(() => {
+    const id = setInterval(() => {
+      if (pollPausedRef.current) return
+      if (typeof document !== 'undefined' && document.hidden) return  // skip when tab backgrounded
+      fetchAll(true)                                                   // silent — keeps numbers on screen
+    }, 30000)
+    return () => clearInterval(id)
+  }, [fetchAll])
+
   // Persist Pending Delivery for this arrival date, then refetch so the
   // recomputed pool (and every other device on next poll) reflects it.
   const savePending = useCallback(async (gramsRaw) => {
