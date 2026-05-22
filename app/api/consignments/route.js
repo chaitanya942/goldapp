@@ -727,7 +727,7 @@ export async function GET(req) {
                         pipeline_attached_at, gain_realized_g,
                         bills_net_weight_g, gain_applied_g, pending_g,
                         additional_gain_g, pipeline_original_g,
-                        gain_audited_at, gain_rate`
+                        gain_audited_at, gain_rate, pipeline_closed_at`
     const baseSelect = `id, date, party, buyer_phone, weight, rate, is_kl, purity, notes,
                         status, created_at, created_by,
                         confirmed_at, confirmed_by, fulfilled_at, fulfilled_by,
@@ -805,7 +805,9 @@ export async function GET(req) {
         const pending = Number(r.pending_g || 0)
         const attached = Number(r.attached_net_weight_g || 0)
         const sourced  = attached + pending
-        const settled  = !!(r.date && String(r.date) < todayIst)   // arrival day has passed
+        // Settled = arrival day passed OR ops manually closed a small
+        // residual pipeline. Either way the leftover folds into gain.
+        const settled  = !!(r.date && String(r.date) < todayIst) || !!r.pipeline_closed_at
         r.gain_rate_effective = rate
         r.sourced_net_g       = sourced
         r.is_settled          = settled
@@ -1543,7 +1545,7 @@ export async function POST(req) {
   // can see the Bidding Volume page (page.consignment-bidding) rather than
   // a hardcoded role group — so the gate can never lock out whichever role
   // ops actually grant the page to (the KT §VII trap-2 lesson).
-  const BIDDING_WRITES = new Set(['set_bidding_pending', 'create_booking', 'update_booking_status'])
+  const BIDDING_WRITES = new Set(['set_bidding_pending', 'create_booking', 'update_booking_status', 'close_booking_pipeline'])
   let auth
   if (BIDDING_WRITES.has(action)) {
     auth = await requireAuthForPage(req, 'consignment-bidding')
@@ -2870,6 +2872,50 @@ export async function POST(req) {
       .eq('id', consignment_id)
 
     return Response.json({ success: true })
+  }
+
+  // ── Close a small residual pipeline → gain ────────────────────────────────
+  // Ops-triggered: a live booking with a tiny pipeline residual the
+  // no-overshoot attacher can't fill gets settled on the spot. The residual
+  // folds into gain (same as the EOD settle). Guarded server-side to a
+  // sub-10 g residual so a large open pipeline can't be closed by accident.
+  if (action === 'close_booking_pipeline') {
+    const { id } = body
+    if (!id) return Response.json({ error: 'booking id required' }, { status: 400 })
+
+    const { data: bk, error: bkErr } = await supabase
+      .from('cal_quotas')
+      .select('id, weight, gain_rate, pending_g, is_kl, status, pipeline_closed_at')
+      .eq('id', id)
+      .single()
+    if (bkErr || !bk) return Response.json({ error: 'Booking not found' }, { status: 404 })
+    if (bk.status === 'cancelled') return Response.json({ error: 'Booking is cancelled' }, { status: 400 })
+    if (bk.pipeline_closed_at)     return Response.json({ error: 'Pipeline already closed' }, { status: 400 })
+
+    // Compute the live residual: weight − sourced_net × (1 + rate).
+    const { data: agg } = await supabase
+      .from('purchases')
+      .select('net_weight')
+      .eq('booking_id', id)
+    const attached = (agg || []).reduce((s, p) => s + Number(p.net_weight || 0), 0)
+    const rate     = bk.gain_rate != null ? Number(bk.gain_rate) : (bk.is_kl ? 0 : 0.035)
+    const sourced  = attached + Number(bk.pending_g || 0)
+    const residual = Number(bk.weight || 0) - sourced * (1 + rate)
+
+    if (residual <= 0) {
+      return Response.json({ error: 'No residual pipeline to close' }, { status: 400 })
+    }
+    if (residual >= 10) {
+      return Response.json({ error: `Residual is ${residual.toFixed(2)} g — only sub-10 g residuals can be closed manually.` }, { status: 400 })
+    }
+
+    const { error: updErr } = await supabase
+      .from('cal_quotas')
+      .update({ pipeline_closed_at: new Date().toISOString(), pipeline_remaining_g: 0 })
+      .eq('id', id)
+    if (updErr) return Response.json({ error: updErr.message }, { status: 500 })
+
+    return Response.json({ data: { closed: true, residual_g: Number(residual.toFixed(3)) } })
   }
 
   return Response.json({ error: 'Invalid action' }, { status: 400 })

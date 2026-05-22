@@ -620,6 +620,19 @@ export default function BiddingVolume() {
     return true
   }
 
+  // Close a sub-10 g residual pipeline → folds into gain immediately.
+  const closeBookingPipeline = async (id) => {
+    const r = await authedFetch('/api/consignments?action=close_booking_pipeline', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id }),
+    })
+    const j = await r.json()
+    if (!r.ok || j.error) { showToast(j.error || 'Could not close pipeline', 'error'); return false }
+    showToast(`Residual ${fmt(j.data?.residual_g || 0, 2)} g closed to gain.`, 'success')
+    fetchAll(true)
+    return true
+  }
+
   // ── Loading / error ────────────────────────────────────────────────────────
   if (loading && !supply) return <div style={{ padding: 80, display: 'flex', justifyContent: 'center' }}><GoldSpinner size={32} /></div>
 
@@ -1055,6 +1068,7 @@ export default function BiddingVolume() {
             bookings={bookings}
             onUpdateStatus={updateStatus}
             onRequestCancel={(b) => setCancelTarget(b)}
+            onClosePipeline={closeBookingPipeline}
             onCreate={() => { setActiveTab('bidding') }}
           />
           <div style={{ fontSize: '10px', color: t.text4, textAlign: 'right' }}>
@@ -1488,7 +1502,7 @@ const partyColor = (name) => {
   return _bookingPartyCache[k]
 }
 
-function BookingsList({ t, card, bookings, onUpdateStatus, onRequestCancel, onCreate }) {
+function BookingsList({ t, card, bookings, onUpdateStatus, onRequestCancel, onClosePipeline, onCreate }) {
   const [hideCancelled, setHideCancelled] = useState(true)
   const visible       = hideCancelled ? bookings.filter(b => b.status !== 'cancelled') : bookings
   const activeRows    = visible.filter(b => b.status !== 'cancelled')
@@ -1616,17 +1630,35 @@ function BookingsList({ t, card, bookings, onUpdateStatus, onRequestCancel, onCr
                         {/* Pipeline still owed — auto-attacher will keep
                             filling it (with fitting bills only) until the
                             arrival day passes, when the leftover folds into
-                            gain. */}
+                            gain. A sub-10 g residual can be closed on the
+                            spot via the inline button. */}
                         {pipelineG > 0 && !isSettled && (
-                          <span title={`Awaiting ${fmt(pipelineG, 2)} g of incoming purchases (region: ${b.pipeline_region || '—'})`}
-                            style={{
-                              background: `${t.purple || '#8c5ac8'}18`,
-                              color: t.purple || '#8c5ac8',
-                              border: `1px solid ${t.purple || '#8c5ac8'}40`,
-                              borderRadius: 99, padding: '1px 8px',
-                              fontFamily: 'monospace', fontWeight: 800, letterSpacing: '.02em',
-                            }}>
-                            ⟳ pipeline {fmt(pipelineG, 2)}g owed
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 0 }}>
+                            <span title={`Awaiting ${fmt(pipelineG, 2)} g of incoming purchases (region: ${b.pipeline_region || '—'})`}
+                              style={{
+                                background: `${t.purple || '#8c5ac8'}18`,
+                                color: t.purple || '#8c5ac8',
+                                border: `1px solid ${t.purple || '#8c5ac8'}40`,
+                                borderRadius: pipelineG < 10 && onClosePipeline ? '99px 0 0 99px' : 99,
+                                padding: '1px 8px',
+                                fontFamily: 'monospace', fontWeight: 800, letterSpacing: '.02em',
+                              }}>
+                              ⟳ pipeline {fmt(pipelineG, 2)}g owed
+                            </span>
+                            {pipelineG < 10 && onClosePipeline && (
+                              <button type="button"
+                                onClick={() => onClosePipeline(b.id)}
+                                title={`Close this ${fmt(pipelineG, 2)} g residual — folds straight into gain`}
+                                style={{
+                                  background: t.gold, color: '#1a0a00',
+                                  border: 'none', borderRadius: '0 99px 99px 0',
+                                  padding: '2px 9px', fontSize: 10, fontWeight: 800,
+                                  letterSpacing: '.03em', cursor: 'pointer',
+                                  textTransform: 'uppercase',
+                                }}>
+                                close → gain
+                              </button>
+                            )}
                           </span>
                         )}
                         {/* Settled — arrival day has passed; gain is final
