@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import { useApp, useRegionAccess } from '../../lib/context'
 import GoldSpinner from '../ui/GoldSpinner'
 import { authedFetch, prefetch } from '../../lib/authedFetch'
@@ -195,6 +196,89 @@ export default function ConsignmentOverview() {
       .sort((a, b) => a.mins - b.mins)
       .slice(0, 5)
   })()
+
+  // ── Pickup popup notifications ────────────────────────────────────────────
+  // Beyond the passive banner above, ops wanted an active popup:
+  //   · 30 min before pickup — heads-up popup (always fires once)
+  //   · 15 min before pickup — reminder popup, fires ONLY when the branch
+  //     still has at_branch stock (i.e. no consignment created since the
+  //     30-min alert). If stock = 0 the move already happened → no reminder.
+  // Each fire is logged per-branch-per-day in localStorage so it can't
+  // repeat. Browser Notification API fires alongside (if permission granted)
+  // so the alert lands even when the tab is in the background.
+  const pickupLogRef = useRef({})
+  const [pickupNotifs, setPickupNotifs] = useState([])
+  useEffect(() => {
+    try { pickupLogRef.current = JSON.parse(window.localStorage.getItem(`pickup-notif-${istToday()}`) || '{}') } catch {}
+    // Ask for browser-notification permission once, up front.
+    if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'default') {
+      try { Notification.requestPermission() } catch {}
+    }
+  }, [])
+
+  const fireBrowserNotif = (n) => {
+    if (typeof window === 'undefined' || !('Notification' in window) || Notification.permission !== 'granted') return
+    const title = n.kind === '30min'
+      ? `Pickup in ~30 min · ${n.branch}`
+      : `Pickup reminder (15 min) · ${n.branch}`
+    try {
+      new Notification(title, {
+        body: `${n.netWt.toFixed(2)} g net · pickup at ${n.pickup_time}`
+          + (n.kind === '15min' ? '\nConsignment not created yet — move the stock now.' : ''),
+        tag: n.id,
+        requireInteraction: n.kind === '15min',
+      })
+    } catch {}
+  }
+
+  // Trigger evaluation — runs every 30 s tick and on every data refresh.
+  useEffect(() => {
+    if (!data.length) return
+    const now = istNow()
+    const currentMins = now.getUTCHours() * 60 + now.getUTCMinutes()
+    const fresh = []
+    let logChanged = false
+
+    for (const b of data) {
+      if (!b.pickup_time) continue
+      const [hh, mm] = String(b.pickup_time).split(':').map(Number)
+      if (Number.isNaN(hh) || Number.isNaN(mm)) continue
+      const mins = (hh * 60 + mm) - currentMins
+      if (mins <= 0) continue
+      const netWt = Number(b.today_net_wt || 0) + Number(b.older_net_wt || 0)
+      if (netWt <= 0) continue                       // nothing at the branch → nothing to pick up
+
+      const log = pickupLogRef.current[b.branch_name] || {}
+
+      // 30-min heads-up — fires once when the branch enters the (15, 30] window.
+      if (mins > 15 && mins <= 30 && !log.n30) {
+        fresh.push({ branch: b.branch_name, region: b.region, netWt, pickup_time: b.pickup_time, mins, kind: '30min', id: `${b.branch_name}-30` })
+        pickupLogRef.current[b.branch_name] = { ...log, n30: true }
+        logChanged = true
+      }
+      // 15-min reminder — fires once in the (0, 15] window. The netWt > 0
+      // guard above already means "no consignment created yet", so this is
+      // exactly the "no action taken" reminder ops asked for.
+      else if (mins > 0 && mins <= 15 && !log.n15) {
+        fresh.push({ branch: b.branch_name, region: b.region, netWt, pickup_time: b.pickup_time, mins, kind: '15min', id: `${b.branch_name}-15` })
+        pickupLogRef.current[b.branch_name] = { ...(pickupLogRef.current[b.branch_name] || {}), n15: true }
+        logChanged = true
+      }
+    }
+
+    if (fresh.length) {
+      setPickupNotifs(prev => {
+        const seen = new Set(prev.map(p => p.id))
+        return [...prev, ...fresh.filter(f => !seen.has(f.id))]
+      })
+      fresh.forEach(fireBrowserNotif)
+    }
+    if (logChanged) {
+      try { window.localStorage.setItem(`pickup-notif-${istToday()}`, JSON.stringify(pickupLogRef.current)) } catch {}
+    }
+  }, [tick, data])  // eslint-disable-line react-hooks/exhaustive-deps
+
+  const dismissNotif = (id) => setPickupNotifs(prev => prev.filter(n => n.id !== id))
 
   // ── Column sort toggle ────────────────────────────────────────────────────
   function handleSort(key) {
@@ -462,6 +546,72 @@ export default function ConsignmentOverview() {
           </div>
         </div>
       )}
+
+      {/* ── Pickup popup notifications — portaled stack, top-right.
+           30-min heads-up + 15-min "no consignment yet" reminder.
+           Each card shows branch · net weight · pickup time. */}
+      {typeof document !== 'undefined' && pickupNotifs.length > 0 && createPortal((
+        <div style={{
+          position: 'fixed', top: 18, right: 18, zIndex: 3000,
+          display: 'flex', flexDirection: 'column', gap: 10,
+          maxWidth: 340, pointerEvents: 'none',
+        }}>
+          {pickupNotifs.map(n => {
+            const urgent = n.kind === '15min'
+            const accent = urgent ? t.red : t.orange
+            return (
+              <div key={n.id} style={{
+                pointerEvents: 'auto',
+                background: t.card,
+                border: `1px solid ${accent}66`,
+                borderLeft: `4px solid ${accent}`,
+                borderRadius: 12,
+                boxShadow: '0 14px 40px rgba(0,0,0,.4)',
+                padding: '13px 15px',
+                animation: 'cnsPickupPopIn .3s cubic-bezier(.34,1.2,.64,1)',
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 8 }}>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 10.5, fontWeight: 800, letterSpacing: '.07em', textTransform: 'uppercase', color: accent }}>
+                    <span style={{ fontSize: 14, animation: urgent ? 'pulse 1.1s infinite' : 'none' }}>{urgent ? '⚠' : '⏰'}</span>
+                    {urgent ? 'Pickup reminder · 15 min' : 'Pickup approaching · 30 min'}
+                  </span>
+                  <button onClick={() => dismissNotif(n.id)}
+                    title="Dismiss"
+                    style={{ background: 'none', border: 'none', color: t.text4, cursor: 'pointer', fontSize: 17, lineHeight: 1, padding: 0 }}>
+                    ×
+                  </button>
+                </div>
+                <div style={{ fontSize: 15, fontWeight: 800, color: t.text1, letterSpacing: '-.01em' }}>{n.branch}</div>
+                {n.region && <div style={{ fontSize: 10.5, color: t.text4, marginTop: 1, fontWeight: 600 }}>{n.region}</div>}
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: 14, marginTop: 9 }}>
+                  <div>
+                    <div style={{ fontSize: 9, color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 700 }}>Net weight</div>
+                    <div style={{ fontSize: 16, fontWeight: 800, color: t.gold, fontFamily: 'monospace' }}>
+                      {n.netWt.toFixed(2)}<span style={{ fontSize: 10, color: t.text3, marginLeft: 2 }}>g</span>
+                    </div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 9, color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 700 }}>Pickup time</div>
+                    <div style={{ fontSize: 16, fontWeight: 800, color: accent, fontFamily: 'monospace' }}>{n.pickup_time}</div>
+                  </div>
+                </div>
+                {urgent && (
+                  <div style={{ fontSize: 10.5, color: accent, marginTop: 9, fontWeight: 700, lineHeight: 1.4 }}>
+                    No consignment created yet — move the stock before pickup.
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      ), document.body)}
+
+      <style>{`
+        @keyframes cnsPickupPopIn {
+          from { opacity: 0; transform: translateX(24px); }
+          to   { opacity: 1; transform: translateX(0); }
+        }
+      `}</style>
 
       {/* ── Region Flashcards — horizontal scroll-snap on mobile ── */}
       {/* Hidden entirely when user is restricted to a single region (one card = no value) */}
