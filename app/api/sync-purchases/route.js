@@ -381,84 +381,35 @@ async function runSync(request) {
       console.error('Carry-forward error (non-fatal):', cfErr.message)
     }
 
-    // Order matters: close stale pipelines FIRST, then auto-attach. A
-    // booking whose arrival_date has already passed must have its leftover
-    // pipeline converted to gain before the attacher runs — otherwise
-    // today's freshly-synced bills get stolen to back-fill a dead booking.
-    // (The attacher also has its own arrival_date >= today guard from
-    // sql/cal_quotas_pipeline_phase4.sql — this ordering is belt-and-braces.)
-
-    // EOD pipeline closure — bookings whose arrival_date has already passed
-    // but still have pipeline_remaining_g > 0 get their unfilled grams
-    // converted to realized gain. Runs every sync (cheap WHERE clause is a
-    // no-op until something stale exists). Defined in
-    // sql/cal_quotas_pipeline_phase2.sql.
-    let pipelineClosed = 0
-    let pipelineClosedWeight = 0
-    try {
-      const { data: closeRows, error: closeErr } = await supabaseAdmin.rpc('close_stale_pipelines')
-      if (closeErr) {
-        console.warn('close_stale_pipelines error (non-fatal):', closeErr.message)
-      } else if (Array.isArray(closeRows) && closeRows.length > 0) {
-        for (const row of closeRows) {
-          pipelineClosedWeight += Number(row.remaining_g || 0)
-        }
-        pipelineClosed = closeRows.length
-        console.log(`Pipeline EOD closure: ${pipelineClosed} booking(s), ${pipelineClosedWeight.toFixed(2)}g of unfilled pipeline converted to realized gain`)
-      }
-    } catch (csErr) {
-      console.error('close_stale_pipelines threw (non-fatal):', csErr.message)
-    }
-
-    // Pipeline auto-attach — walks open bookings (arrival_date today or
-    // later) where pipeline_remaining_g > 0 and attaches freshly-synced
-    // unbooked bills in FIFO purchase order until the gap closes. The last
-    // bill is attached in full even if it overshoots; the overshoot is
-    // credited to gain_realized_g. Defined in
-    // sql/cal_quotas_pipeline_phase4.sql.
+    // Pipeline auto-attach — walks LIVE bookings (arrival_date today or
+    // later) and attaches freshly-synced unbooked bills FIFO, but ONLY
+    // bills that fit the remaining gap (target_net − sourced_net). A bill
+    // too big is skipped and left unbooked — no overshoot. Defined in
+    // sql/cal_quotas_gain_model.sql.
+    //
+    // close_stale_pipelines() and audit_daily_gain() are no longer called:
+    // the new gain model derives gain = net × rate exactly (and folds the
+    // small EOD leftover in automatically once arrival_date passes), so
+    // there's nothing to close or redistribute. Those functions remain
+    // defined in the DB but unused.
     //
     // Non-fatal: if the RPC fails we still return the sync result. The
     // attacher retries on the next sync tick, so a transient blip self-heals.
     let pipelineAttached = 0
     let pipelineWeight   = 0
-    let pipelineOvershoot = 0
     try {
       const { data: attachRows, error: attachErr } = await supabaseAdmin.rpc('process_pipeline_attachments')
       if (attachErr) {
         console.warn('process_pipeline_attachments error (non-fatal):', attachErr.message)
       } else if (Array.isArray(attachRows) && attachRows.length > 0) {
         for (const row of attachRows) {
-          pipelineAttached  += Number(row.bills_attached  || 0)
-          pipelineWeight    += Number(row.weight_attached || 0)
-          pipelineOvershoot += Number(row.overshoot_g     || 0)
+          pipelineAttached += Number(row.bills_attached  || 0)
+          pipelineWeight   += Number(row.weight_attached || 0)
         }
-        console.log(`Pipeline auto-attach: ${attachRows.length} booking(s), ${pipelineAttached} bill(s), ${pipelineWeight.toFixed(2)}g attached, ${pipelineOvershoot.toFixed(2)}g overshoot credited as gain`)
+        console.log(`Pipeline auto-attach: ${attachRows.length} booking(s), ${pipelineAttached} bill(s), ${pipelineWeight.toFixed(2)}g attached (no-overshoot)`)
       }
     } catch (paErr) {
       console.error('Pipeline auto-attach threw (non-fatal):', paErr.message)
-    }
-
-    // Daily gain audit — runs after pipeline closure. For each past
-    // arrival_date with un-audited non-Kerala bookings, redistributes the
-    // total realized gain (committed − attached) proportionally across
-    // each booking's net weight. Defined in
-    // sql/cal_quotas_daily_gain_audit.sql. Idempotent: once a booking
-    // has gain_audited_at set, it's skipped on future ticks.
-    let gainAuditDates = 0
-    let gainAuditBookings = 0
-    try {
-      const { data: auditRows, error: auditErr } = await supabaseAdmin.rpc('audit_daily_gain')
-      if (auditErr) {
-        console.warn('audit_daily_gain error (non-fatal):', auditErr.message)
-      } else if (Array.isArray(auditRows) && auditRows.length > 0) {
-        for (const row of auditRows) {
-          gainAuditBookings += Number(row.bookings || 0)
-        }
-        gainAuditDates = auditRows.length
-        console.log(`Daily gain audit: ${gainAuditDates} date(s), ${gainAuditBookings} non-Kerala booking(s) finalized`)
-      }
-    } catch (gaErr) {
-      console.error('audit_daily_gain threw (non-fatal):', gaErr.message)
     }
 
     return Response.json({
@@ -473,11 +424,6 @@ async function runSync(request) {
       carryAmbiguous,
       pipelineAttached,
       pipelineWeight,
-      pipelineOvershoot,
-      pipelineClosed,
-      pipelineClosedWeight,
-      gainAuditDates,
-      gainAuditBookings,
       lastError: lastError ? JSON.stringify(lastError) : null,
       message:  `Upsert ${minDate}→${maxDate}: ${deduped.length} approved bills synced, ${renamed} bill_no renames preserved, ${ghostsMarked} ghost bills marked deleted, ${carriedForward} stock_status carried forward across delete-recreate (${carryAmbiguous} ambiguous skipped, ${errors} errors)`,
     })

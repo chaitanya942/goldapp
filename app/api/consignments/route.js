@@ -727,7 +727,7 @@ export async function GET(req) {
                         pipeline_attached_at, gain_realized_g,
                         bills_net_weight_g, gain_applied_g, pending_g,
                         additional_gain_g, pipeline_original_g,
-                        gain_audited_at`
+                        gain_audited_at, gain_rate`
     const baseSelect = `id, date, party, buyer_phone, weight, rate, is_kl, purity, notes,
                         status, created_at, created_by,
                         confirmed_at, confirmed_by, fulfilled_at, fulfilled_by,
@@ -783,6 +783,39 @@ export async function GET(req) {
       for (const r of rows) {
         r.attached_net_weight_g = sumByBooking[r.id]   || 0
         r.attached_bills_count  = countByBooking[r.id] || 0
+      }
+    }
+
+    // ── Derived gain + pipeline (the new gain model) ──────────────────────────
+    // gain and pipeline are no longer drifting stored addends — they're
+    // computed fresh from weight, gain_rate, pending and the live attached
+    // net weight:
+    //   sourced_net = attached + pending
+    //   while arrival_date >= today (live):
+    //     derived_gain     = sourced_net × gain_rate          (clean 3.5 %)
+    //     derived_pipeline = weight − sourced_net × (1+rate)
+    //   once arrival_date < today (settled — EOD leftover folds in):
+    //     derived_gain     = weight − sourced_net
+    //     derived_pipeline = 0
+    {
+      const todayIst = istToday()
+      for (const r of rows || []) {
+        const W       = Number(r.weight || 0)
+        const rate    = r.gain_rate != null ? Number(r.gain_rate) : (r.is_kl ? 0 : 0.035)
+        const pending = Number(r.pending_g || 0)
+        const attached = Number(r.attached_net_weight_g || 0)
+        const sourced  = attached + pending
+        const settled  = !!(r.date && String(r.date) < todayIst)   // arrival day has passed
+        r.gain_rate_effective = rate
+        r.sourced_net_g       = sourced
+        r.is_settled          = settled
+        if (settled) {
+          r.derived_gain_g     = Math.max(0, W - sourced)
+          r.derived_pipeline_g = 0
+        } else {
+          r.derived_gain_g     = sourced * rate
+          r.derived_pipeline_g = Math.max(0, W - sourced * (1 + rate))
+        }
       }
     }
 
@@ -2475,6 +2508,11 @@ export async function POST(req) {
     if (Number.isFinite(Number(pending_g)))           breakdownPayload.pending_g           = Number(pending_g)
     if (Number.isFinite(Number(additional_gain_g)))   breakdownPayload.additional_gain_g   = Number(additional_gain_g)
     if (Number.isFinite(Number(pipeline_original_g))) breakdownPayload.pipeline_original_g = Number(pipeline_original_g)
+    // gain_rate — the booking's refining-margin rate. Kerala = 0,
+    // everything else the 3.5 % standard. The new gain model derives
+    // gain = sourced_net × gain_rate, so this is the single number that
+    // ties net weight to bid weight.
+    breakdownPayload.gain_rate = is_kl ? 0 : 0.035
     if (Object.keys(breakdownPayload).length > 0) {
       try {
         const { error: brkErr } = await supabase

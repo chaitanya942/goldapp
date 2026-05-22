@@ -299,20 +299,12 @@ export default function BiddingVolume() {
   // making the pool look overbooked by exactly the attached weight.
   //
   // Correct math:
-  //   Available − Pipeline_remaining = Remaining (capacity for new bookings)
+  //   Available − Pipeline = Remaining (capacity for new bookings)
   // The attached portion is already netted out of Incoming, so the only
-  // future claim on Available is the uncovered pipeline.
-  const pipelineFor = (b) => {
-    const r = Number(b.pipeline_remaining_g)
-    if (Number.isFinite(r) && r >= 0) return r
-    const o = Number(b.pipeline_original_g)
-    if (Number.isFinite(o) && o >= 0) return o
-    const w       = Number(b.weight || 0)
-    const bills   = Number(b.bills_net_weight_g) || Number(b.attached_net_weight_g) || 0
-    const gain    = Number(b.gain_applied_g) || 0
-    const pending = Number(b.pending_g) || 0
-    return Math.max(0, w - bills - gain - pending)
-  }
+  // future claim on Available is the uncovered pipeline. Pipeline comes
+  // straight from the API's derived gain model (derived_pipeline_g) —
+  // 0 once a booking's arrival day has passed.
+  const pipelineFor = (b) => Number(b.derived_pipeline_g) || 0
   const pipelineKLG       = activeBookings.filter(b => b.is_kl).reduce((s, b) => s + pipelineFor(b), 0)
   const pipelineOtherG    = activeBookings.filter(b => !b.is_kl).reduce((s, b) => s + pipelineFor(b), 0)
   const pipelineTotalG    = pipelineKLG + pipelineOtherG
@@ -1502,21 +1494,18 @@ function BookingsList({ t, card, bookings, onUpdateStatus, onRequestCancel, onCr
   const activeRows    = visible.filter(b => b.status !== 'cancelled')
   const activeWeight  = activeRows.reduce((s, b) => s + Number(b.weight || 0), 0)
   const activeValue   = activeRows.reduce((s, b) => s + Number(b.weight || 0) * Number(b.rate || 0), 0)
-  // Column-wise totals across active rows — same fallback logic as the
-  // numCell helper inside the row map so the footer numbers match what
-  // ops sees in the body cells (including the live attached_net_weight
-  // fallback for old bookings without bills_net_weight_g).
+  // Column-wise totals across active rows. Gain + Pipeline come straight
+  // from the API's derived gain model (derived_gain_g / derived_pipeline_g)
+  // — gain = sourced_net × rate while live, = weight − sourced once the
+  // arrival day passes. Net Wt = live attached weight. Old bookings made
+  // before the migration still have derived_* computed by the API's
+  // fallback, so these reads are safe either way.
   const billsFor    = (b) => Number(b.attached_net_weight_g) > 0
                               ? Number(b.attached_net_weight_g)
                               : (b.bills_net_weight_g != null ? Number(b.bills_net_weight_g) : 0)
-  // Gain rolls up applied + additional + realized (matches the row's
-  // effectiveGainG formula). Additional Gain no longer has its own
-  // column.
-  const gainFor     = (b) => (Number(b.gain_applied_g) || 0) + (Number(b.additional_gain_g) || 0) + (Number(b.gain_realized_g) || 0)
+  const gainFor     = (b) => Number(b.derived_gain_g)     || 0
   const pendingFor  = (b) => Number(b.pending_g) || 0
-  const pipelineFor = (b) => Number(b.pipeline_remaining_g) != null
-                              ? Number(b.pipeline_remaining_g)
-                              : (b.pipeline_original_g != null ? Number(b.pipeline_original_g) : 0)
+  const pipelineFor = (b) => Number(b.derived_pipeline_g) || 0
   const totalBills    = activeRows.reduce((s, b) => s + billsFor(b),    0)
   const totalGain     = activeRows.reduce((s, b) => s + gainFor(b),     0)
   const totalPending  = activeRows.reduce((s, b) => s + pendingFor(b),  0)
@@ -1570,9 +1559,9 @@ function BookingsList({ t, card, bookings, onUpdateStatus, onRequestCancel, onCr
               <th style={{ ...th, width: 36, textAlign: 'center' }}>#</th>
               <th style={th}>Party</th>
               <th style={{ ...th, textAlign: 'right' }} title="Net weight of bills currently attached to this booking — grows as the pipeline auto-attacher pulls in new bills">Net Wt (g)</th>
-              <th style={{ ...th, textAlign: 'right', color: t.text4 }} title="Gain applied. Before midnight audit: 3.5% estimate (or override) plus any pipeline-overshoot credit. After audit: proportional share of the day's actual realized gain (committed − attached).">+ Gain</th>
+              <th style={{ ...th, textAlign: 'right', color: t.text4 }} title="Refining gain = net weight × gain rate (3.5%, or 0 for Kerala). While the booking is live it tracks net weight exactly; once the arrival day passes any small leftover pipeline folds in.">+ Gain</th>
               <th style={{ ...th, textAlign: 'right', color: t.text4 }} title="Pending delivery carry-over included in this booking">+ Pending</th>
-              <th style={{ ...th, textAlign: 'right', color: t.text4 }} title="Remaining pipeline (live) — decrements as new bills attach, then zeros at EOD with any leftover credited to gain">+ Pipeline</th>
+              <th style={{ ...th, textAlign: 'right', color: t.text4 }} title="Pipeline = bid weight not yet covered by attached bills + their gain. Decrements as fitting bills attach; zeros once the arrival day passes (leftover → gain).">+ Pipeline</th>
               <th style={{ ...th, textAlign: 'right' }} title="Total weight committed to the bidder">= Booked Wt</th>
               <th style={{ ...th, textAlign: 'right', color: t.text4 }}>× Rate</th>
               <th style={{ ...th, textAlign: 'right' }}>= Value</th>
@@ -1591,23 +1580,14 @@ function BookingsList({ t, card, bookings, onUpdateStatus, onRequestCancel, onCr
               const billsG    = (Number(b.attached_net_weight_g) > 0
                                   ? Number(b.attached_net_weight_g)
                                   : (b.bills_net_weight_g != null ? Number(b.bills_net_weight_g) : null))
-              const gainG     = b.gain_applied_g     != null ? Number(b.gain_applied_g)     : null
               const pendingG  = b.pending_g          != null ? Number(b.pending_g)          : null
-              // Pipeline = LIVE remaining (decrements as bills attach,
-              // and gets zeroed when EOD closure converts the leftover
-              // to gain). Falls back to the original commitment if the
-              // remaining column isn't surfaced yet.
-              const pipelineG = b.pipeline_remaining_g != null
-                                  ? Number(b.pipeline_remaining_g)
-                                  : (b.pipeline_original_g != null ? Number(b.pipeline_original_g) : null)
-              // Effective + Gain column = applied + additional + realized.
-              // Pre-audit: shows operator's 3.5% estimate + any "additional
-              // gain" attribution + pipeline-overshoot credit. Post-audit:
-              // the row has gain_applied_g = redistributed value and
-              // gain_realized_g = 0 + additional_gain_g = 0, so this becomes
-              // exactly the audited gain. Additional Gain has no separate
-              // column — it folds in here either way.
-              const effectiveGainG = (gainG || 0) + Number(b.additional_gain_g || 0) + Number(b.gain_realized_g || 0)
+              // Gain + Pipeline come from the derived gain model (API).
+              //   live:    gain = sourced_net × rate (clean 3.5 %),
+              //            pipeline = weight − sourced_net × (1+rate)
+              //   settled: gain = weight − sourced_net, pipeline = 0
+              const effectiveGainG = Number(b.derived_gain_g)     || 0
+              const pipelineG      = Number(b.derived_pipeline_g) || 0
+              const isSettled      = !!b.is_settled
               const numCell = (val, opts = {}) => {
                 if (val == null) return <span style={{ color: t.text4, fontFamily: 'monospace', fontWeight: 600 }}>—</span>
                 if (val === 0)   return <span style={{ color: t.text4, fontFamily: 'monospace', fontWeight: 600 }}>—</span>
@@ -1629,15 +1609,16 @@ function BookingsList({ t, card, bookings, onUpdateStatus, onRequestCancel, onCr
                       <div style={{ width: 8, height: 8, borderRadius: '50%', background: dotColor, flexShrink: 0 }} />
                       <span style={{ color: t.text1, fontWeight: 700, textDecoration: isCancelled ? 'line-through' : 'none' }}>{b.party}</span>
                     </div>
-                    {(b.purity || b.buyer_phone || b.notes || Number(b.pipeline_remaining_g) > 0 || Number(b.gain_realized_g) > 0 || b.created_at) && (
+                    {(b.purity || b.buyer_phone || b.notes || pipelineG > 0 || b.created_at) && (
                       <div style={{ fontSize: 10.5, color: t.text4, marginTop: 4, marginLeft: 17, display: 'flex', gap: 9, flexWrap: 'wrap', fontWeight: 600, alignItems: 'center' }}>
                         {b.purity && <span style={{ color: t.gold }}>{b.purity}</span>}
                         {b.buyer_phone && <span style={{ fontFamily: 'monospace' }}>{b.buyer_phone}</span>}
-                        {/* Pipeline pending — auto-attach worker is still
-                            filling this booking from the CRM. Once 0, the
-                            chip disappears. */}
-                        {Number(b.pipeline_remaining_g) > 0 && (
-                          <span title={`Awaiting ${fmt(b.pipeline_remaining_g, 2)} g of incoming purchases (region: ${b.pipeline_region || '—'})`}
+                        {/* Pipeline still owed — auto-attacher will keep
+                            filling it (with fitting bills only) until the
+                            arrival day passes, when the leftover folds into
+                            gain. */}
+                        {pipelineG > 0 && !isSettled && (
+                          <span title={`Awaiting ${fmt(pipelineG, 2)} g of incoming purchases (region: ${b.pipeline_region || '—'})`}
                             style={{
                               background: `${t.purple || '#8c5ac8'}18`,
                               color: t.purple || '#8c5ac8',
@@ -1645,35 +1626,13 @@ function BookingsList({ t, card, bookings, onUpdateStatus, onRequestCancel, onCr
                               borderRadius: 99, padding: '1px 8px',
                               fontFamily: 'monospace', fontWeight: 800, letterSpacing: '.02em',
                             }}>
-                            ⟳ pipeline {fmt(b.pipeline_remaining_g, 2)}g owed
+                            ⟳ pipeline {fmt(pipelineG, 2)}g owed
                           </span>
                         )}
-                        {/* Realized gain from pipeline overshoot — last
-                            attached bill exceeded the gap; surplus is gain. */}
-                        {Number(b.gain_realized_g) > 0 && (
-                          <span title={`Pipeline overshoot — ${fmt(b.gain_realized_g, 2)} g credited as gain on this booking`}
-                            style={{
-                              background: `${t.orange || '#e58a3b'}18`,
-                              color: t.orange || '#e58a3b',
-                              border: `1px solid ${t.orange || '#e58a3b'}40`,
-                              borderRadius: 99, padding: '1px 8px',
-                              fontFamily: 'monospace', fontWeight: 800, letterSpacing: '.02em',
-                            }}>
-                            +{fmt(b.gain_realized_g, 2)}g realized gain
-                          </span>
-                        )}
-                        {b.created_at && (
-                          <span title={`Created by ${b.created_by || 'unknown'}`} style={{ fontFamily: 'monospace' }}>
-                            {fmtTS(b.created_at)}
-                          </span>
-                        )}
-                        {/* Audited — gain has been finalized by the daily
-                            midnight audit (committed − attached redistributed
-                            proportionally by net weight). Once set, the
-                            Gain column reflects the audited value, not the
-                            3.5% estimate. */}
-                        {b.gain_audited_at && (
-                          <span title={`Daily gain audit run ${fmtTS(b.gain_audited_at)} — gain redistributed proportionally across this date's non-Kerala bookings`}
+                        {/* Settled — arrival day has passed; gain is final
+                            (net × rate plus any small EOD leftover). */}
+                        {isSettled && (
+                          <span title="Arrival day passed — gain finalised (net × rate, plus any leftover pipeline folded in)"
                             style={{
                               background: `${t.green}18`,
                               color: t.green,
@@ -1681,7 +1640,12 @@ function BookingsList({ t, card, bookings, onUpdateStatus, onRequestCancel, onCr
                               borderRadius: 99, padding: '1px 8px',
                               fontFamily: 'monospace', fontWeight: 800, letterSpacing: '.02em',
                             }}>
-                            ✓ gain audited
+                            ✓ settled
+                          </span>
+                        )}
+                        {b.created_at && (
+                          <span title={`Created by ${b.created_by || 'unknown'}`} style={{ fontFamily: 'monospace' }}>
+                            {fmtTS(b.created_at)}
                           </span>
                         )}
                         {b.notes && <span title={b.notes} style={{ fontStyle: 'italic', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>· {b.notes}</span>}
