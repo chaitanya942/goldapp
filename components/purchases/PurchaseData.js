@@ -190,6 +190,9 @@ export default function PurchaseData() {
 
   const [selectedIds, setSelectedIds]             = useState(new Set())
   const [hoveredId, setHoveredId]                 = useState(null)
+  // Set by the Supabase Realtime subscription when a row changes in the
+  // `purchases` table while the user is viewing — drives a "refresh" nudge.
+  const [hasLiveUpdate, setHasLiveUpdate]         = useState(false)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [deleteAllMode, setDeleteAllMode]         = useState(false)
   const [deleting, setDeleting]                   = useState(false)
@@ -197,6 +200,19 @@ export default function PurchaseData() {
   useEffect(() => {
     supabase.from('branches').select('name').eq('is_active', true).order('name')
       .then(({ data }) => { if (data) setAllBranches(data.map(b => b.name)) })
+  }, [])
+
+  // Supabase Realtime — any insert/update/delete on `purchases` (e.g. the
+  // 60s CRM sync landing new bills) flips on a "new data" nudge instead of
+  // silently mutating the page the user is reading/filtering/scrolling.
+  // Requires: `alter publication supabase_realtime add table purchases;`
+  useEffect(() => {
+    const channel = supabase
+      .channel('purchases-live')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'purchases' },
+        () => setHasLiveUpdate(true))
+      .subscribe()
+    return () => { supabase.removeChannel(channel) }
   }, [])
 
   // Debounce the search box — commit to `search` (which drives the query)
@@ -297,7 +313,7 @@ export default function PurchaseData() {
   // Force a reload without changing page/filters (used after deletes).
   // setPage(0) + the nonce bump make the page effect fire exactly once;
   // the KPI effect also keys off refreshNonce.
-  const load = () => { setPage(0); setRefreshNonce(n => n + 1) }
+  const load = () => { setPage(0); setRefreshNonce(n => n + 1); setHasLiveUpdate(false) }
 
   // Quick filter functions
   const setToday = () => { const d = istStr(); setFromDate(d); setToDate(d); setPage(0) }
@@ -604,6 +620,13 @@ export default function PurchaseData() {
 
       {/* PAGINATION INFO */}
       <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '12px', marginBottom: '12px', fontSize: '.7rem', color: t.text3 }}>
+        {hasLiveUpdate && (
+          <button onClick={load}
+            style={{ marginRight: 'auto', display: 'flex', alignItems: 'center', gap: '6px', padding: '4px 12px', borderRadius: '100px', cursor: 'pointer', border: `1px solid ${t.green}66`, background: `${t.green}1a`, color: t.green, fontSize: '.66rem', fontWeight: 600, letterSpacing: '.02em' }}>
+            <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: t.green }} />
+            New data synced — refresh
+          </button>
+        )}
         {selectedIds.size > 0 && <span style={{ color: t.gold }}>{selectedIds.size} selected</span>}
         <span>Showing {totalCount === 0 ? 0 : page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, totalCount).toLocaleString('en-IN')} of {totalCount.toLocaleString('en-IN')} records</span>
         <span style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
