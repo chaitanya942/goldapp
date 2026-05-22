@@ -2575,7 +2575,7 @@ function BookingModal({ t, arrivalDate, availablePool, remainingQty, incomingNet
         animation: 'bidModalIn .25s cubic-bezier(.34,1.2,.64,1)',
       }}>
         {/* Header — compact single row: title · arrival pill · KL badge */}
-        <div style={{ padding: '14px 20px', borderBottom: `1px solid ${t.border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexShrink: 0 }}>
+        <div style={{ padding: '18px 24px', borderBottom: `1px solid ${t.border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexShrink: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
             <div style={{ fontSize: 16, fontWeight: 800, color: t.text1, letterSpacing: '-.01em' }}>New Booking</div>
             <span style={{ fontSize: 10.5, color: t.text3, background: `${t.gold}10`, border: `1px solid ${t.gold}28`, borderRadius: 99, padding: '3px 10px', fontWeight: 700, letterSpacing: '.04em', whiteSpace: 'nowrap' }}>
@@ -2590,7 +2590,7 @@ function BookingModal({ t, arrivalDate, availablePool, remainingQty, incomingNet
         </div>
 
         {/* Body — scrolls only if absolutely needed; sized to fit ≥720 px viewports */}
-        <div style={{ padding: '14px 20px', display: 'flex', flexDirection: 'column', gap: 12, overflowY: 'auto', flex: 1 }}>
+        <div style={{ padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 18, overflowY: 'auto', flex: 1 }}>
 
           {/* ── Weight build-up — Selected + (optional Gains) + (optional
               Pending) = Total Bidding Weight. Each addend is on its own
@@ -2602,7 +2602,7 @@ function BookingModal({ t, arrivalDate, availablePool, remainingQty, incomingNet
             // Row helper — leading slot can render either a plain operator
             // glyph (+/=) or a custom node (the checkbox on the pending row).
             const row = (label, value, opts = {}) => (
-              <div style={{ display: 'grid', gridTemplateColumns: `24px minmax(0,1fr) ${opts.editable ? '92px' : '128px'}`, alignItems: 'center', gap: 10, padding: '4px 0' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: `24px minmax(0,1fr) ${opts.editable ? '92px' : '128px'}`, alignItems: 'center', gap: 10, padding: '8px 0' }}>
                 {opts.symbolNode != null
                   ? <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>{opts.symbolNode}</span>
                   : <span style={{ fontSize: 16, color: opts.faded ? t.text4 : t.text2, fontWeight: 800, textAlign: 'center', fontFamily: 'monospace' }}>{opts.symbol || ''}</span>
@@ -2638,7 +2638,7 @@ function BookingModal({ t, arrivalDate, availablePool, remainingQty, incomingNet
               <div style={{
                 background: `linear-gradient(150deg, ${t.gold}10, ${t.gold}04 55%, transparent)`,
                 border: `1px solid ${t.gold}30`,
-                borderRadius: 12, padding: '10px 14px',
+                borderRadius: 12, padding: '16px 18px',
               }}>
                 {/* Selected weight — read-only, from selection */}
                 {row('Selected weight',
@@ -2714,9 +2714,9 @@ function BookingModal({ t, arrivalDate, availablePool, remainingQty, incomingNet
               to the breakdown's total (operator can round 1457 → 1500). Rate
               is per-gram. Total Value renders inline in the footer button so
               we don't waste a card on it. */}
-          <div className="bidStagger" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div className="bidStagger" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: 12 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: 14 }}>
               {/* Bidding weight */}
               <label style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
                 <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
@@ -2865,7 +2865,7 @@ function BookingModal({ t, arrivalDate, availablePool, remainingQty, incomingNet
 
         {/* Footer — sticky. Over-bookings are handled inline in the body
             via an attribution panel, so the footer stays clean. */}
-        <div style={{ padding: '12px 20px', borderTop: `1px solid ${t.border}`, background: t.card2, flexShrink: 0 }}>
+        <div style={{ padding: '16px 24px', borderTop: `1px solid ${t.border}`, background: t.card2, flexShrink: 0 }}>
           <div style={{ display: 'flex', gap: 8 }}>
             <button onClick={onClose}
               style={{ flex: 1, background: 'transparent', border: `1px solid ${t.border}`, borderRadius: 8, padding: '11px 14px', fontSize: 12.5, color: t.text2, cursor: 'pointer', fontWeight: 700 }}>
