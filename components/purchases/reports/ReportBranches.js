@@ -415,6 +415,17 @@ function ScatterChart({ branchData, t, fromDate, toDate, filterTxn }) {
   const regionColors = buildRegionColors(regions)
 
   const points  = (branchData || []).filter(b => b.total_net > 0 && b.avg_purity > 0)
+
+  // Empty guard — Math.max/min of an empty array is ±Infinity, which
+  // renders NaN coordinates and a broken SVG. Bail to an empty state.
+  if (points.length === 0) {
+    return (
+      <div style={{ padding: '40px 24px', textAlign: 'center', color: t.text3, fontSize: '12px' }}>
+        No branch data with net weight &amp; purity in this range.
+      </div>
+    )
+  }
+
   const maxTxns = Math.max(...points.map(b => Number(b.txn_count)))
 
   const minPurity = Math.min(...points.map(b => Number(b.avg_purity)))

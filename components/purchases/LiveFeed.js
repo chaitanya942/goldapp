@@ -127,18 +127,6 @@ function Mono({ children, size = '1.2rem', color, weight = 200, style = {} }) {
   )
 }
 
-function Pill({ label, value, color, bg }) {
-  return (
-    <span style={{
-      display: 'inline-flex', alignItems: 'center', gap: 5, padding: '3px 10px',
-      borderRadius: 20, background: bg, fontSize: '.62rem', color, fontWeight: 500,
-    }}>
-      <span style={{ width: 6, height: 6, borderRadius: '50%', background: color }} />
-      {label}: {value}
-    </span>
-  )
-}
-
 /* ════════════════════════════════════════════════════ */
 /*                  MAIN COMPONENT                    */
 /* ════════════════════════════════════════════════════ */
@@ -180,24 +168,31 @@ export default function LiveFeed() {
   const timerRef = useRef(null)
   const countRef = useRef(null)
   const prevTlCountRef = useRef(0)
+  // Monotonic request id — load() stamps each call and ignores any response
+  // whose stamp is stale, so a slow earlier fetch (or a fast date switch)
+  // can't overwrite a newer one.
+  const loadSeqRef = useRef(0)
   const [newEventCount, setNewEventCount] = useState(0)
 
   /* ── Load data ── */
   const load = useCallback(async (date) => {
     const d = date || viewDate
+    const seq = ++loadSeqRef.current
     try {
       setLoading(true)
       setLoadError(null)
       const res = await authedFetch(`/api/crm-purchases?action=live&date=${d}`)
       const json = await res.json()
+      if (seq !== loadSeqRef.current) return  // superseded by a newer load
       if (json.error) throw new Error(json.error)
       setData(json)
       setLastUpdated(new Date())
     } catch (e) {
+      if (seq !== loadSeqRef.current) return
       console.error('LiveFeed load error:', e)
       setLoadError(e.message)
     } finally {
-      setLoading(false)
+      if (seq === loadSeqRef.current) setLoading(false)
     }
   }, [viewDate])
 
@@ -236,6 +231,14 @@ export default function LiveFeed() {
   const regions = regionAccess.restricted
     ? rawRegions.filter(r => regionAccess.regions.includes(r))
     : rawRegions
+  // If the active region filter no longer exists in the loaded data (e.g.
+  // after switching to a date with different branches), drop back to "All"
+  // so the screen doesn't get stuck showing an empty filtered view.
+  useEffect(() => {
+    if (regionFilter && !regionAccess.single && rawRegions.length && !regions.includes(regionFilter)) {
+      setRegionFilter('')
+    }
+  }, [regionFilter, regionAccess.single, rawRegions.length, regions])
   const goldPipeline = data?.goldPipeline || {}
   const kycRows      = data?.kycRows      || []
   const takeoverRows = data?.takeoverRows || []
@@ -394,7 +397,7 @@ export default function LiveFeed() {
           {/* Date picker */}
           {canSee('livefeed.date_picker') && (
             <input type="date" value={viewDate}
-              onChange={e => { setViewDate(e.target.value); setRegionFilter(''); setNewEventCount(0); load(e.target.value) }}
+              onChange={e => { setViewDate(e.target.value); setRegionFilter(''); setNewEventCount(0) }}
               style={{ background: t.card, color: t.text2, border: `1px solid ${t.border}`, borderRadius: 6, padding: '5px 8px', fontSize: '.68rem', fontFamily: 'ui-monospace, monospace', outline: 'none', cursor: 'pointer', maxWidth: isMobile ? 130 : 'none' }}
             />
           )}
@@ -812,7 +815,7 @@ function OldCrmTab({
                   display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center',
                   padding:'14px 24px', borderRight:`1px solid ${t.border}`,
                   gap:4, minWidth:110, flex:1,
-                  borderTop:`3px solid ${isActive ? s.color : s.color}`,
+                  borderTop:`3px solid ${s.color}`,
                   background: isActive ? `${s.color}18` : `linear-gradient(180deg, ${s.color}08 0%, transparent 60%)`,
                   cursor: clickable ? 'pointer' : 'default',
                   transition: 'background .15s',
@@ -888,7 +891,6 @@ function OldCrmTab({
                     onClick={s.key ? () => toggleMetric(s.key) : undefined}
                     style={{
                       flex:1, minWidth:100,
-                      background:`linear-gradient(160deg, ${t.card2} 0%, ${t.card} 100%)`,
                       border:`1px solid ${s.color}25`,
                       borderTop:`2px solid ${isActive ? s.color : s.color + '80'}`,
                       borderRadius:12,
@@ -1151,7 +1153,7 @@ function OldCrmTab({
 /* ════════════════════════════════════════════════════════════════ */
 
 /* ── Hero Number (clickable) ── */
-function HeroNum({ label, value, color, t, small, muted, onClick, active, weight, breakdown }) {
+function HeroNum({ label, value, color, t, small, muted, onClick, active, weight }) {
   return (
     <div
       onClick={onClick}
@@ -1185,17 +1187,6 @@ function HeroNum({ label, value, color, t, small, muted, onClick, active, weight
         }}>
           {fmtWt(weight)}
         </span>
-      )}
-      {breakdown && (
-        <div style={{ display:'flex', alignItems:'center', gap:5, marginTop:6, padding:'3px 7px', background:t.card2, border:`1px solid ${t.border}`, borderRadius:5 }}>
-          {breakdown.map((item, i) => (
-            <span key={i} style={{ display:'flex', alignItems:'center', gap:3 }}>
-              {i > 0 && <span style={{ color:t.border2, fontSize:'.45rem' }}>|</span>}
-              <span style={{ fontSize:'.58rem', fontFamily:'ui-monospace,monospace', fontWeight:700, color:item.color }}>{item.value}</span>
-              <span style={{ fontSize:'.45rem', color:t.text4 }}>{item.label}</span>
-            </span>
-          ))}
-        </div>
       )}
       {active && (
         <span style={{ width: 20, height: 2, borderRadius: 1, background: color, marginTop: 5, display: 'block' }} />

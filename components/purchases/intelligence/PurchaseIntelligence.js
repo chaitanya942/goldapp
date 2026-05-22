@@ -773,12 +773,11 @@ export default function PurchaseIntelligence() {
 
   return (
     <div style={{ minHeight:'100vh', background:t.bg }}>
-      {/* PAGE HEADER */}
-      <div style={{ padding:'24px 32px 0', borderBottom:`1px solid ${t.border}`, background:t.card }}>
-        <div style={{ fontSize:'.58rem', color:t.text4, letterSpacing:'.18em', textTransform:'uppercase', marginBottom:'4px' }}>Purchase · Intelligence</div>
-        <div style={{ fontSize:'1.7rem', fontWeight:200, color:t.text1, marginBottom:'16px' }}>Purchase Intelligence</div>
-
-        {/* TAB BAR */}
+      {/* Sub-tab bar only — ReportsHub already owns the page-level chrome
+          (the Analytics / Intelligence tabs). The old standalone
+          "Purchase Intelligence" title block was removed to kill the
+          double-header. */}
+      <div style={{ padding:'14px 32px 0', borderBottom:`1px solid ${t.border}`, background:t.card }}>
         <div style={{ display:'flex', gap:'0' }}>
           {visibleTabs.map(tab => (
             <button key={tab.id} onClick={() => setActiveTab(tab.id)}

@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../../../lib/supabase'
 import { fmt } from './reportUtils'
-import { istDaysAgo as daysBack } from '../../../lib/dateIst'
+import { istDaysAgo as daysBack, istStr } from '../../../lib/dateIst'
 
 // Aggregate purchases over the last N days, group by branch, return worst-N branches.
 // "Underperformer" = active branches (≥1 bill in window) sorted by lowest net weight,
@@ -122,7 +122,7 @@ export default function ReportUnderperformers({ t, isMobile, filterRegion, branc
                   <div style={{ position: 'absolute', inset: 0, background: `linear-gradient(90deg, ${t.red}10 ${pct}%, transparent ${pct}%)`, borderRadius: '6px', pointerEvents: 'none' }} />
                   <span style={{ fontSize: '11px', color: t.red, fontWeight: 700, textAlign: 'center', position: 'relative' }}>{i + 1}</span>
                   <span style={{ fontSize: '12px', color: t.text1, fontWeight: 500, position: 'relative', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.branch}</span>
-                  <span style={{ fontSize: '11px', color: t.gold, fontFamily: 'monospace', textAlign: 'right', position: 'relative' }}>{fmt(b.net_wt, 1)}g</span>
+                  <span style={{ fontSize: '11px', color: t.gold, fontFamily: 'monospace', textAlign: 'right', position: 'relative' }}>{fmt(b.net_wt)}g</span>
                   <span style={{ fontSize: '11px', color: t.blue, fontFamily: 'monospace', textAlign: 'right', position: 'relative' }}>{b.txn_count}</span>
                   {!isMobile && <span style={{ fontSize: '10px', color: t.text3, textAlign: 'right', position: 'relative', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.region}</span>}
                 </div>

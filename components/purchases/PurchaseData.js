@@ -1,11 +1,11 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../../lib/supabase'
 import { useApp } from '../../lib/context'
 import GoldSpinner from '../ui/GoldSpinner'
 import Badge from '../ui/Badge'
-import { CONSIGNMENT_THEMES as THEMES, useMobile } from '../../lib/consignmentTheme'
+import { CONSIGNMENT_THEMES as THEMES } from '../../lib/consignmentTheme'
 import { istNow, istStr } from '../../lib/dateIst'
 
 const STATUS_COLORS = {
@@ -113,7 +113,8 @@ export default function PurchaseData() {
   const [allBranches, setAllBranches] = useState([])
   const [loading, setLoading]         = useState(false)
   const [exporting, setExporting]     = useState(false)
-  const [search, setSearch]           = useState('')
+  const [search, setSearch]           = useState('')   // debounced — drives the query
+  const [searchInput, setSearchInput] = useState('')   // immediate — bound to the input
   const [filterCrmStatus, setFilterCrmStatus] = useState('')
   const [filterCrmSource, setFilterCrmSource] = useState('')
   const [filterStatus, setFilterStatus] = useState('')
@@ -137,8 +138,17 @@ export default function PurchaseData() {
 
   const [kpis, setKpis] = useState(null)
   const [bothCrmIds, setBothCrmIds] = useState(new Set())
+  const [loadError, setLoadError]   = useState(null)
+  // Bumped by load() to force a reload even when page/filters are unchanged
+  // (e.g. after a delete). Drives the page + KPI effects.
+  const [refreshNonce, setRefreshNonce] = useState(0)
+  // Monotonic request id — loadPage stamps each call and ignores any
+  // response whose stamp is stale, so a slow earlier query can't overwrite
+  // a newer one when filters are typed quickly.
+  const reqSeqRef = useRef(0)
 
   const [selectedIds, setSelectedIds]             = useState(new Set())
+  const [hoveredId, setHoveredId]                 = useState(null)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [deleteAllMode, setDeleteAllMode]         = useState(false)
   const [deleting, setDeleting]                   = useState(false)
@@ -148,8 +158,15 @@ export default function PurchaseData() {
       .then(({ data }) => { if (data) setAllBranches(data.map(b => b.name)) })
   }, [])
 
-  useEffect(() => { loadPage(page) }, [page, search, filterCrmStatus, filterCrmSource, filterStatus, filterBranch, filterTxn, fromDate, toDate, dispatchedFrom, dispatchedTo, sortCol, sortDir])
-  useEffect(() => { loadKpis(filterCrmStatus) }, [filterCrmStatus])
+  // Debounce the search box — commit to `search` (which drives the query)
+  // 300 ms after the last keystroke instead of firing a query per key.
+  useEffect(() => {
+    const id = setTimeout(() => { setSearch(searchInput); setPage(0) }, 300)
+    return () => clearTimeout(id)
+  }, [searchInput])
+
+  useEffect(() => { loadPage(page) }, [page, search, filterCrmStatus, filterCrmSource, filterStatus, filterBranch, filterTxn, fromDate, toDate, dispatchedFrom, dispatchedTo, sortCol, sortDir, refreshNonce])
+  useEffect(() => { loadKpis(filterCrmStatus) }, [filterCrmStatus, refreshNonce])
 
   const loadKpis = async (crmStatus = '') => {
     const { data } = await supabase.rpc('get_purchase_kpis', { p_crm_status: crmStatus || null })
@@ -177,50 +194,69 @@ export default function PurchaseData() {
   }
 
   const loadPage = async (pageNum) => {
+    const seq = ++reqSeqRef.current        // stamp this request
     setLoading(true)
+    setLoadError(null)
     const from = pageNum * PAGE_SIZE
     const to   = from + PAGE_SIZE - 1
     const asc  = sortDir === 'asc'
     let q = buildQuery().order(sortCol, { ascending: asc, nullsFirst: false })
     if (sortCol !== 'transaction_time') q = q.order('transaction_time', { ascending: false, nullsFirst: false })
-    const { data, count } = await q.range(from, to)
+    const { data, count, error } = await q.range(from, to)
+    if (seq !== reqSeqRef.current) return   // a newer request superseded this one — drop it
+    if (error) {
+      setLoadError(error.message || 'Failed to load purchases')
+      setLoading(false)
+      return
+    }
     if (data) {
       setPurchases(data)
-      // Find which app IDs exist in both CRMs
-      const ids = data.map(r => r.application_id)
+      // Flag application_ids that genuinely exist in BOTH CRMs — i.e. the
+      // set of distinct crm_source values for that id has size > 1. (The
+      // old logic counted rows, so two old_crm rows for one id falsely
+      // read as "both".)
+      const ids = data.map(r => r.application_id).filter(Boolean)
       if (ids.length) {
         const { data: both } = await supabase
           .from('purchases')
-          .select('application_id')
+          .select('application_id, crm_source')
           .in('application_id', ids)
           .eq('is_deleted', false)
           .neq('crm_status', 'deleted')
+        if (seq !== reqSeqRef.current) return
         if (both) {
-          const counts = {}
-          both.forEach(r => { counts[r.application_id] = (counts[r.application_id] || 0) + 1 })
-          setBothCrmIds(new Set(Object.keys(counts).filter(id => counts[id] > 1)))
+          const sources = {}
+          both.forEach(r => {
+            ;(sources[r.application_id] ||= new Set()).add(r.crm_source)
+          })
+          setBothCrmIds(new Set(Object.keys(sources).filter(id => sources[id].size > 1)))
         }
       }
     }
-    if (count !== null) setTotalCount(count)
+    if (count !== null && count !== undefined) setTotalCount(count)
     setSelectedIds(new Set())
     setLoading(false)
   }
 
   const handleSort = (col) => {
     if (sortCol === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
-    else { setSortCol(col); setSortDir('asc') }
+    // New column → default to descending (most-recent / largest first) —
+    // ascending on a date column jumps to the oldest record, never useful.
+    else { setSortCol(col); setSortDir('desc') }
     setPage(0)
   }
 
-  const load = () => { setPage(0); loadKpis(filterCrmStatus); loadPage(0) }
+  // Force a reload without changing page/filters (used after deletes).
+  // setPage(0) + the nonce bump make the page effect fire exactly once;
+  // the KPI effect also keys off refreshNonce.
+  const load = () => { setPage(0); setRefreshNonce(n => n + 1) }
 
   // Quick filter functions
   const setToday = () => { const d = istStr(); setFromDate(d); setToDate(d); setPage(0) }
   const setYesterday = () => { const d = istNow(); d.setDate(d.getDate() - 1); const s = istStr(d); setFromDate(s); setToDate(s); setPage(0) }
   const setThisWeek = () => { const to = istNow(); const fr = istNow(); fr.setDate(fr.getDate() - 7); setToDate(istStr(to)); setFromDate(istStr(fr)); setPage(0) }
   const setThisMonth = () => { const now = istNow(); setFromDate(`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-01`); setToDate(istStr(now)); setPage(0) }
-  const clearFilters = () => { setFromDate(''); setToDate(''); setDispatchedFrom(''); setDispatchedTo(''); setFilterBranch(''); setFilterStatus(''); setFilterTxn(''); setSearch(''); setFilterCrmStatus(''); setFilterCrmSource(''); setPage(0) }
+  const clearFilters = () => { setFromDate(''); setToDate(''); setDispatchedFrom(''); setDispatchedTo(''); setFilterBranch(''); setFilterStatus(''); setFilterTxn(''); setSearch(''); setSearchInput(''); setFilterCrmStatus(''); setFilterCrmSource(''); setPage(0) }
 
   const handleExport = async (format) => {
     setExporting(true)
@@ -296,7 +332,7 @@ export default function PurchaseData() {
     btnDangerSolid: { background: t.red, color: '#fff', border: 'none', borderRadius: '7px', padding: '9px 20px', fontSize: '.72rem', fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase', cursor: 'pointer' },
     card:           { background: t.card, border: `1px solid ${t.border}`, borderRadius: '10px', padding: '24px', marginBottom: '24px' },
     tblWrap:        { overflowX: 'auto', borderRadius: '10px', border: `1px solid ${t.border}` },
-    th:             { padding: '10px 14px', fontSize: '.58rem', color: t.text3, letterSpacing: '.1em', textTransform: 'uppercase', textAlign: 'left', borderBottom: `1px solid ${t.border}`, background: t.card, fontWeight: 400, whiteSpace: 'nowrap' },
+    th:             { padding: '10px 14px', fontSize: '.58rem', color: t.text3, letterSpacing: '.1em', textTransform: 'uppercase', textAlign: 'left', borderBottom: `1px solid ${t.border}`, background: t.card, fontWeight: 400, whiteSpace: 'nowrap', position: 'sticky', top: 0, zIndex: 2 },
     td:             { padding: '10px 14px', fontSize: '.72rem', color: t.text1, borderBottom: `1px solid ${t.border}20`, whiteSpace: 'nowrap' },
     select:         { background: t.card, border: `1px solid ${t.border}`, borderRadius: '6px', padding: '7px 10px', color: t.text1, fontSize: '.72rem', cursor: 'pointer' },
     input:          { background: t.card, border: `1px solid ${t.border}`, borderRadius: '7px', padding: '8px 14px', color: t.text1, fontSize: '.75rem', outline: 'none', width: isMobile ? '100%' : '240px' },
@@ -473,7 +509,7 @@ export default function PurchaseData() {
 
       {/* FILTERS */}
       <div style={{ display: 'flex', gap: '10px', marginBottom: '16px', flexWrap: 'wrap', alignItems: 'center' }}>
-        <input style={s.input} placeholder="Search customer, app ID, branch..." value={search} onChange={e => { setSearch(e.target.value); setPage(0) }} />
+        <input style={s.input} placeholder="Search customer, app ID, branch..." value={searchInput} onChange={e => setSearchInput(e.target.value)} />
         <select style={s.select} value={filterBranch} onChange={e => { setFilterBranch(e.target.value); setPage(0) }}>
           <option value="">All Branches</option>
           {allBranches.map(b => <option key={b} value={b}>{b}</option>)}
@@ -525,6 +561,22 @@ export default function PurchaseData() {
             style={{ background: 'none', border: `1px solid ${t.border}`, borderRadius: '5px', padding: '3px 10px', color: page >= totalPages - 1 ? t.text4 : t.text2, cursor: page >= totalPages - 1 ? 'not-allowed' : 'pointer', fontSize: '.7rem' }}>→</button>
         </span>
       </div>
+
+      {/* LOAD ERROR */}
+      {loadError && !loading && (
+        <div style={{
+          background: `${t.red}12`, border: `1px solid ${t.red}40`, borderRadius: '8px',
+          padding: '12px 16px', marginBottom: '16px', display: 'flex', alignItems: 'center',
+          justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap',
+        }}>
+          <span style={{ fontSize: '.74rem', color: t.red }}>
+            ⚠ Couldn't load purchases — {loadError}
+          </span>
+          <button style={{ ...s.btnSmall, color: t.red, borderColor: `${t.red}60` }} onClick={load}>
+            Retry
+          </button>
+        </div>
+      )}
 
       {/* TABLE / CARDS */}
       {loading ? (
@@ -625,10 +677,15 @@ export default function PurchaseData() {
               {purchases.map((p) => {
                 const status     = STATUS_COLORS[p.stock_status] || { color: t.text3, label: p.stock_status }
                 const isSelected = selectedIds.has(p.id)
+                const isHovered  = hoveredId === p.id
                 return (
-                  <tr key={p.id} style={{
-                    background: isSelected ? `${t.gold}12` : 'transparent',
+                  <tr key={p.id}
+                    onMouseEnter={() => setHoveredId(p.id)}
+                    onMouseLeave={() => setHoveredId(null)}
+                    style={{
+                    background: isSelected ? `${t.gold}12` : isHovered ? `${t.text1}08` : 'transparent',
                     outline: isSelected ? `1px solid ${t.gold}30` : 'none',
+                    transition: 'background .12s',
                   }}>
                     {isSuperAdmin && (
                       <td style={{ ...s.td, textAlign: 'center', padding: '10px 8px' }}>

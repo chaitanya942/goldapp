@@ -46,16 +46,20 @@ const EXPORT_COLS = [
 ]
 
 // ── KPI CARD ──
+// KPI → per-branch drill. `get(b)` reads/derives the metric off a
+// branchData aggregate row (fields: txn_count, total_gross, total_net,
+// total_value, avg_purity). Only KPIs that have a meaningful per-branch
+// breakdown are listed — Stone&Wastage, Service Charge %, Transacted
+// Branches and Business Days have no per-branch aggregate field, so
+// their cards aren't drillable.
 const DRILL_MAP = {
-  'Total Transactions':    { field: 'total_count',          fmt: v => Number(v||0).toLocaleString('en-IN'),  col: 'Bills' },
-  'Gross Weight':          { field: 'total_gross',          fmt: v => `${fmt(v)}g`,                          col: 'Gross Wt' },
-  'Net Weight':            { field: 'total_net',            fmt: v => `${fmt(v)}g`,                          col: 'Net Wt' },
-  'Avg Purity %':          { field: 'avg_purity',           fmt: v => `${Number(v||0).toFixed(2)}%`,         col: 'Avg Purity' },
-  'Gross Purchase Value':  { field: 'total_value',          fmt: v => fmtVal(v),                             col: 'Value' },
-  'Avg Net Wt / Bill':     { field: 'avg_net_per_txn',      fmt: v => `${fmt(v)}g`,                         col: 'Avg Net Wt' },
-  'Avg Service Charge %':  { field: 'avg_service_charge_pct', fmt: v => `${Number(v||0).toFixed(2)}%`,      col: 'Avg Svc %' },
-  'Avg Rate / Gram':       { field: 'avg_rate_per_gram',    fmt: v => fmtVal(v),                             col: 'Rate/g' },
-  'Transacted Branches':   { field: 'total_count',          fmt: v => Number(v||0).toLocaleString('en-IN'),  col: 'Bills' },
+  'Total Transactions':   { get: b => Number(b.txn_count || 0),    fmt: v => Number(v||0).toLocaleString('en-IN'), col: 'Bills' },
+  'Gross Weight':         { get: b => Number(b.total_gross || 0),  fmt: v => `${fmt(v)}g`,                         col: 'Gross Wt' },
+  'Net Weight':           { get: b => Number(b.total_net || 0),    fmt: v => `${fmt(v)}g`,                         col: 'Net Wt' },
+  'Avg Purity %':         { get: b => Number(b.avg_purity || 0),   fmt: v => `${Number(v||0).toFixed(2)}%`,        col: 'Avg Purity' },
+  'Gross Purchase Value': { get: b => Number(b.total_value || 0),  fmt: v => fmtVal(v),                            col: 'Value' },
+  'Avg Net Wt / Bill':    { get: b => Number(b.txn_count) > 0 ? Number(b.total_net) / Number(b.txn_count) : 0, fmt: v => `${fmt(v)}g`, col: 'Avg Net Wt' },
+  'Avg Rate / Gram':      { get: b => Number(b.total_net) > 0 ? Number(b.total_value) / Number(b.total_net) : 0, fmt: v => fmtVal(v),   col: 'Rate/g' },
 }
 
 function KpiCard({ label, value, sub, color, loading, onClick }) {
@@ -545,17 +549,21 @@ export default function PurchaseReports() {
         )}
       </div>
 
-      {/* ROW 1 — Volume (4 cols) */}
+      {/* ROW 1 — Volume (4 cols). Cards whose label is in DRILL_MAP open
+          the per-branch drill modal on click. */}
       <div style={gridRow4}>
         <KpiCard label="Total Transactions"    color={t.gold}  loading={loading}
-          value={Number(k?.total_count || 0).toLocaleString('en-IN')} />
+          value={Number(k?.total_count || 0).toLocaleString('en-IN')}
+          onClick={() => setSelectedKpi('Total Transactions')} />
         <KpiCard label="Gross Weight"          color={t.text1} loading={loading}
-          value={`${fmt(k?.total_gross)}g`} />
+          value={`${fmt(k?.total_gross)}g`}
+          onClick={() => setSelectedKpi('Gross Weight')} />
         <KpiCard label="Avg Stone & Wastage / Bill" color={t.text2} loading={loading}
           value={`${fmt(k?.avg_stone_wastage_bill)}g`}
           sub="avg deduction per transaction" />
         <KpiCard label="Net Weight"            color={t.gold}  loading={loading}
-          value={`${fmt(k?.total_net)}g`} />
+          value={`${fmt(k?.total_net)}g`}
+          onClick={() => setSelectedKpi('Net Weight')} />
       </div>
 
       {/* ROW 2 — Quality + Split (5 cols) */}
@@ -565,7 +573,8 @@ export default function PurchaseReports() {
           sub="of gross weight" />
         <KpiCard label="Avg Purity %" color={t.purple} loading={loading}
           value={`${Number(k?.avg_purity || 0).toFixed(2)}%`}
-          sub="weighted by net weight" />
+          sub="weighted by net weight"
+          onClick={() => setSelectedKpi('Avg Purity %')} />
         <SplitCard
           title="Physical and Takeover (Bills)"
           leftLabel="Physical"  leftValue={Number(k?.physical_count || 0).toLocaleString('en-IN')}  leftColor={t.gold}  leftSub={`Physical · ${phPct}%`}
@@ -579,7 +588,8 @@ export default function PurchaseReports() {
           loading={loading} t={t}
         />
         <KpiCard label="Avg Net Wt / Bill" color={t.blue} loading={loading}
-          value={`${fmt(k?.avg_net_per_txn)}g`} />
+          value={`${fmt(k?.avg_net_per_txn)}g`}
+          onClick={() => setSelectedKpi('Avg Net Wt / Bill')} />
       </div>
 
       {/* ROW 3 — Value (5 cols) */}
@@ -587,10 +597,12 @@ export default function PurchaseReports() {
         <KpiCard label="Avg Service Charge %" color={t.text2} loading={loading}
           value={`${Number(k?.avg_service_charge_pct || 0).toFixed(2)}%`} />
         <KpiCard label="Gross Purchase Value" color={t.green} loading={loading}
-          value={fmtVal(k?.total_value)} />
+          value={fmtVal(k?.total_value)}
+          onClick={() => setSelectedKpi('Gross Purchase Value')} />
         <KpiCard label="Avg Rate / Gram" color={t.green} loading={loading}
           value={fmtVal(k?.avg_rate_per_gram)}
-          sub="gross value ÷ net weight" />
+          sub="gross value ÷ net weight"
+          onClick={() => setSelectedKpi('Avg Rate / Gram')} />
         <KpiCard label="Transacted Branches" color={t.blue} loading={loading}
           value={Number(k?.branch_count || 0).toLocaleString('en-IN')} />
         <KpiCard label="Business Days" color={t.text2} loading={loading}
@@ -673,9 +685,10 @@ export default function PurchaseReports() {
         const drill = DRILL_MAP[selectedKpi]
         if (!drill || !branchData.length) return null
         const sorted = [...branchData]
-          .filter(b => b[drill.field] != null && Number(b[drill.field]) > 0)
-          .sort((a, b) => Number(b[drill.field] || 0) - Number(a[drill.field] || 0))
-        const maxVal = Number(sorted[0]?.[drill.field] || 0)
+          .map(b => ({ ...b, _drillVal: drill.get(b) }))
+          .filter(b => b._drillVal > 0)
+          .sort((a, b) => b._drillVal - a._drillVal)
+        const maxVal = Number(sorted[0]?._drillVal || 0)
         return (
           <GoldModal open={true} onClose={() => setSelectedKpi(null)} title={selectedKpi} width={520}>
             <div style={{ fontSize: 10, color: t.text3, letterSpacing: '.1em', marginBottom: 16 }}>
@@ -683,18 +696,18 @@ export default function PurchaseReports() {
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {sorted.map((b, i) => {
-                const val = Number(b[drill.field] || 0)
+                const val = b._drillVal
                 const pct = maxVal > 0 ? (val / maxVal) * 100 : 0
                 return (
                   <div key={b.branch_name} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                     <div style={{ fontSize: 10, color: t.text3, width: 16, textAlign: 'right', flexShrink: 0 }}>{i + 1}</div>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                        <span style={{ fontSize: 11, color: '#e8d9b0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.branch_name}</span>
-                        <span style={{ fontSize: 11, color: '#C9A84C', fontVariantNumeric: 'tabular-nums', flexShrink: 0, marginLeft: 8 }}>{drill.fmt(b[drill.field])}</span>
+                        <span style={{ fontSize: 11, color: t.text1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.branch_name}</span>
+                        <span style={{ fontSize: 11, color: t.gold, fontVariantNumeric: 'tabular-nums', flexShrink: 0, marginLeft: 8 }}>{drill.fmt(val)}</span>
                       </div>
-                      <div style={{ height: 3, background: 'rgba(201,168,76,0.1)', borderRadius: 2, overflow: 'hidden' }}>
-                        <div style={{ width: `${pct}%`, height: '100%', background: 'linear-gradient(90deg, #8B6914, #FFD700)', borderRadius: 2, transition: 'width .6s ease' }} />
+                      <div style={{ height: 3, background: `${t.gold}1a`, borderRadius: 2, overflow: 'hidden' }}>
+                        <div style={{ width: `${pct}%`, height: '100%', background: `linear-gradient(90deg, ${t.gold}99, ${t.gold})`, borderRadius: 2, transition: 'width .6s ease' }} />
                       </div>
                     </div>
                   </div>
