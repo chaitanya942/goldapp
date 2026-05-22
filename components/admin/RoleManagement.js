@@ -49,33 +49,32 @@ const PERM_TREE = [
     label: 'Purchases', icon: '◉',
     children: [
       {
-        key: 'page.purchase-data', label: 'Purchase Data',
+        // Live Data Feed — its own sub-module since the Purchase split.
+        // The livefeed.* element toggles moved here from the old
+        // tab.purchase-data.live node.
+        key: 'page.purchase-live', label: 'Live Data Feed',
         children: [
-          {
-            key: 'tab.purchase-data.live', label: 'Live Feed',
-            children: [
-              { key: 'livefeed.summary_bar',      label: 'Summary Bar',       desc: 'Top strip: total customers, weight, value' },
-              { key: 'livefeed.customer_journey',  label: 'Customer Journey',  desc: 'Walk-in → Billed → Purchased funnel' },
-              { key: 'livefeed.weight_flow',       label: 'Gold Weight Flow',  desc: 'Weight breakdown strip by type' },
-              { key: 'livefeed.region_filter',     label: 'Region Filter',     desc: 'Dropdown to filter by region' },
-              { key: 'livefeed.region_breakdown',  label: 'Region Breakdown',  desc: 'Region-wise stats table' },
-              { key: 'livefeed.detail_table',      label: 'Detail Drill-down', desc: 'Expandable records table' },
-              { key: 'livefeed.timeline',          label: 'Live Timeline',     desc: 'Real-time event feed' },
-              { key: 'livefeed.date_picker',       label: 'Date Picker',       desc: 'View historical dates' },
-              { key: 'livefeed.old_crm_tab',       label: 'Old CRM Tab',       desc: 'Old CRM pipeline data' },
-              { key: 'livefeed.new_crm_tab',       label: 'New CRM Tab',       desc: 'New CRM pipeline data' },
-              { key: 'livefeed.csv_export',        label: 'CSV Export',        desc: 'Download CSV from tables' },
-            ],
-          },
-          { key: 'tab.purchase-data.approved',    label: 'Purchase Data',   desc: 'Approved purchase records table' },
-          { key: 'tab.purchase-data.walkin',      label: 'Walk-in',         desc: 'Walk-in pipeline view' },
-          { key: 'tab.purchase-data.pending',     label: 'Pending',         desc: 'Bills awaiting approval' },
-          { key: 'tab.purchase-data.rejected',    label: 'Rejected',        desc: 'Rejected bill records' },
-          { key: 'tab.purchase-data.blacklisted', label: 'Blacklisted',     desc: 'Blacklisted customer list' },
+          { key: 'livefeed.summary_bar',      label: 'Summary Bar',       desc: 'Top strip: total customers, weight, value' },
+          { key: 'livefeed.customer_journey',  label: 'Customer Journey',  desc: 'Walk-in → Billed → Purchased funnel' },
+          { key: 'livefeed.weight_flow',       label: 'Gold Weight Flow',  desc: 'Weight breakdown strip by type' },
+          { key: 'livefeed.region_filter',     label: 'Region Filter',     desc: 'Dropdown to filter by region' },
+          { key: 'livefeed.region_breakdown',  label: 'Region Breakdown',  desc: 'Region-wise stats table' },
+          { key: 'livefeed.detail_table',      label: 'Detail Drill-down', desc: 'Expandable records table' },
+          { key: 'livefeed.timeline',          label: 'Live Timeline',     desc: 'Real-time event feed' },
+          { key: 'livefeed.date_picker',       label: 'Date Picker',       desc: 'View historical dates' },
+          { key: 'livefeed.old_crm_tab',       label: 'Old CRM Tab',       desc: 'Old CRM pipeline data' },
+          { key: 'livefeed.new_crm_tab',       label: 'New CRM Tab',       desc: 'New CRM pipeline data' },
+          { key: 'livefeed.csv_export',        label: 'CSV Export',        desc: 'Download CSV from tables' },
         ],
       },
       {
-        key: 'page.purchase-reports', label: 'Purchase Reports',
+        // Master Purchase Data — the approved purchase records table,
+        // now its own page (was the tab.purchase-data.approved tab).
+        key: 'page.purchase-data', label: 'Master Purchase Data',
+        desc: 'Approved purchase records table',
+      },
+      {
+        key: 'page.purchase-reports', label: 'Purchase Reports & Analytics',
         children: [
           {
             key: 'tab.purchase-reports.analytics', label: 'Analytics',
