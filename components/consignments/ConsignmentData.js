@@ -1112,7 +1112,13 @@ export default function ConsignmentData() {
                       ['--cdata-glow']:   isRejectedRow ? t.red : isNew ? t.green : t.gold,
                     }}>
                     <td style={{ paddingTop: '11px', paddingRight: '14px', paddingBottom: '11px', paddingLeft: '11px', fontSize: '12px', color: t.gold, fontWeight: 700, fontFamily: 'monospace', whiteSpace: 'nowrap', boxShadow: 'inset 3px 0 0 var(--cdata-stripe)' }}>
-                      {c.tmp_prf_no}
+                      <button type="button" onClick={() => setActivityId(c.id)}
+                        title="View full activity log — every event from creation through dispatch"
+                        style={{ background: 'transparent', border: 'none', padding: 0, font: 'inherit', color: t.gold, fontWeight: 700, fontFamily: 'monospace', cursor: 'pointer' }}
+                        onMouseEnter={e => { e.currentTarget.style.textDecoration = 'underline' }}
+                        onMouseLeave={e => { e.currentTarget.style.textDecoration = 'none' }}>
+                        {c.tmp_prf_no}
+                      </button>
                       {isNew && <span style={{ marginLeft: 6, fontSize: 9, color: t.green, background: `${t.green}20`, padding: '1px 6px', borderRadius: 4, fontWeight: 600 }}>NEW</span>}
                       {c.approval_status === 'pending' && (
                         showEwb && !c.eway_bill_no ? (
@@ -1122,11 +1128,19 @@ export default function ConsignmentData() {
                             style={{ marginLeft: 6, fontSize: 9, color: t.gold, background: `${t.gold}20`, padding: '1px 6px', borderRadius: 4, fontWeight: 600 }}>
                             EWB PENDING
                           </span>
+                        ) : showEinvoice && !c.irn ? (
+                          // E-Invoice route — ops self-service (same model as EWB).
+                          <span title="Action needed: Preview & Generate the E-Invoice on this row. Generating it dispatches the consignment automatically — no accounts approval involved."
+                            style={{ marginLeft: 6, fontSize: 9, color: t.purple, background: `${t.purple}20`, padding: '1px 6px', borderRadius: 4, fontWeight: 600 }}>
+                            E-INVOICE PENDING
+                          </span>
                         ) : (
-                          // E-Invoice route — accounts still generate & approve.
-                          <span title="Awaiting accounts: they generate the E-Invoice and approve dispatch. Report / voucher / challan can be downloaded now."
+                          // Doc already generated but auto-approve hasn't landed yet.
+                          // Rare — surfaces only when the post-generation approval
+                          // step errored (see auto_approve_warning on the response).
+                          <span title="Document generated; auto-approval is finalising. Refresh in a moment."
                             style={{ marginLeft: 6, fontSize: 9, color: t.orange, background: `${t.orange}20`, padding: '1px 6px', borderRadius: 4, fontWeight: 600 }}>
-                            IN REVIEW
+                            FINALISING
                           </span>
                         )
                       )}
@@ -1167,8 +1181,8 @@ export default function ConsignmentData() {
                               title={reportDone ? 'Re-download Consignee Report' : 'Step 1 — Consignee Report (item-wise summary)'}
                               style={{
                                 background: reportDone ? 'transparent' : t.gold,
-                                color: reportDone ? t.purple : (t.goldText || '#1a0a00'),
-                                border: reportDone ? `1px solid ${t.purple}50` : 'none',
+                                color: reportDone ? t.green : (t.goldText || '#1a0a00'),
+                                border: reportDone ? `1px solid ${t.green}55` : 'none',
                                 borderRadius: '5px', padding: '4px 12px', fontSize: '10px',
                                 fontWeight: 600, cursor: 'pointer',
                                 opacity: downloadingId === c.id + ':report' ? 0.6 : 1,
@@ -1253,7 +1267,7 @@ export default function ConsignmentData() {
                                     {downloadingId === c.id + ':einv' ? '…' : 'PDF'}
                                   </button>
                                 ) : (
-                                  <span title="PDF unlocks once accounts approves." style={{ fontSize: '10px', color: t.text4, fontStyle: 'italic' }}>locked</span>
+                                  <span title="PDF locked — auto-approval is finalising. Refresh in a moment." style={{ fontSize: '10px', color: t.text4, fontStyle: 'italic' }}>locked</span>
                                 )}
                                 <span style={{ fontSize: '10px', color: t.purple, background: `${t.purple}22`, border: `1px solid ${t.purple}55`, borderRadius: '4px', padding: '1px 8px', fontWeight: 700, letterSpacing: '.06em' }}>E-Invoice</span>
                               </div>
@@ -1363,7 +1377,11 @@ export default function ConsignmentData() {
                               <span style={{ color: t.text2 }}>{c.rejection_reason || '(no reason given)'}</span>
                             </div>
                             <div style={{ fontSize: 11, color: t.text3, marginTop: 6, lineHeight: 1.5 }}>
-                              The bills are already free — fix the data and re-create the consignment from <strong style={{ color: t.text2 }}>Branch Stock</strong>. This row will auto-hide after 7 days; full audit stays in <strong style={{ color: t.text2 }}>Activity</strong>.
+                              The bills are already free — fix the data and re-create the consignment from <strong style={{ color: t.text2 }}>Branch Stock</strong>. This row will auto-hide after 7 days; full audit stays in{' '}
+                              <button type="button" onClick={() => setActivityId(c.id)}
+                                style={{ background: 'transparent', border: 'none', padding: 0, font: 'inherit', color: t.text2, fontWeight: 700, textDecoration: 'underline', cursor: 'pointer' }}>
+                                Activity
+                              </button>.
                             </div>
                           </div>
                         </div>
@@ -1482,9 +1500,9 @@ export default function ConsignmentData() {
               ) : null
               return (
                 <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                  <Chip label="approved"  count={approved} color={t.green}  title="Accounts-approved consignments still in transit" />
-                  <Chip label="in review" count={inReview} color={t.orange} title="Awaiting accounts approval" />
-                  <Chip label="rejected"  count={rejected} color={t.red}    title="Accounts pushed back — fix and re-create" />
+                  <Chip label="approved" count={approved} color={t.green}  title="Approved consignments still in transit" />
+                  <Chip label="pending"  count={inReview} color={t.orange} title="Action needed — Preview & Generate the EWB / E-Invoice on these rows" />
+                  <Chip label="rejected" count={rejected} color={t.red}    title="Accounts pushed back — fix the data and re-create" />
                 </div>
               )
             })()}
