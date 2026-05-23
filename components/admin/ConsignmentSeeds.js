@@ -20,6 +20,36 @@ export default function ConsignmentSeeds() {
   const [message, setMessage]     = useState(null)
   const [collapsed, setCollapsed] = useState({})
   const [search, setSearch]       = useState('')
+  const [exporting, setExporting] = useState(false)
+
+  // One-shot bulk download of every old-CRM transaction since 2021-03-01.
+  // Uses authedFetch so the user's session token is attached — direct browser
+  // navigation to /api/crm-export-all would 401 (no Authorization header).
+  async function downloadCrmExport() {
+    setExporting(true)
+    setMessage(null)
+    try {
+      const res = await authedFetch('/api/crm-export-all')
+      if (!res.ok) {
+        let msg = `Export failed: ${res.status}`
+        try { const j = await res.json(); if (j.error) msg = j.error } catch {}
+        setMessage({ type: 'error', text: msg })
+        return
+      }
+      const blob = await res.blob()
+      const a    = document.createElement('a')
+      a.href     = URL.createObjectURL(blob)
+      a.download = `old-crm-export_from-2021-03-01_${new Date().toISOString().slice(0,10)}.csv`
+      a.click()
+      URL.revokeObjectURL(a.href)
+      setMessage({ type: 'success', text: 'Export downloaded. Open in Excel via Data → From Text/CSV (Text type for phone/PAN columns).' })
+      setTimeout(() => setMessage(null), 6000)
+    } catch (e) {
+      setMessage({ type: 'error', text: e?.message || 'Export failed' })
+    } finally {
+      setExporting(false)
+    }
+  }
 
   useEffect(() => { fetchSeeds() }, [])
 
@@ -118,7 +148,14 @@ export default function ConsignmentSeeds() {
           <div style={{ fontSize: '1.3rem', fontWeight: 300, color: t.text1 }}>Consignment Number Seeds</div>
           <div style={{ fontSize: '11px', color: t.text3, marginTop: '2px' }}>Manage initial sequence numbers for all outside-Bangalore branches</div>
         </div>
-        <button onClick={fetchSeeds} style={{ background: 'transparent', border: `1px solid ${t.border}`, borderRadius: '7px', padding: '6px 14px', fontSize: '12px', color: t.text3, cursor: 'pointer' }}>⟳ Refresh</button>
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          <button onClick={downloadCrmExport} disabled={exporting}
+            title="One-shot CSV download of every old-CRM transaction since 2021-03-01 (admin-only)"
+            style={{ background: exporting ? t.card2 : `${t.blue}15`, border: `1px solid ${t.blue}50`, borderRadius: '7px', padding: '6px 14px', fontSize: '12px', color: t.blue, cursor: exporting ? 'default' : 'pointer', fontWeight: 600 }}>
+            {exporting ? 'Exporting… (may take a few minutes)' : '↓ Download old-CRM CSV (since Mar 2021)'}
+          </button>
+          <button onClick={fetchSeeds} style={{ background: 'transparent', border: `1px solid ${t.border}`, borderRadius: '7px', padding: '6px 14px', fontSize: '12px', color: t.text3, cursor: 'pointer' }}>⟳ Refresh</button>
+        </div>
       </div>
 
       {/* Message */}
