@@ -478,14 +478,8 @@ export default function ConsignmentReport() {
       ['customer_name',             'Customer'],
       ['branch_name',               'Branch'],
       ['gross_weight',              'Gross Wt (g)'],
-      ['stone_weight',              'Stone (g)'],
-      ['wastage',                   'Wastage (g)'],
       ['net_weight',                'Net Wt (g)'],
       ['total_amount',              'Gross Amt'],
-      ['service_charge_pct',        'Svc %'],
-      ['service_charge_amount_crm', 'Svc Amt'],
-      ['final_amount_crm',          'Final Amt'],
-      ['transaction_type',          'Type'],
       ['dispatched_at',             'Consignment Date'],
       ['stock_status',              'Current Status'],
     ]
@@ -548,7 +542,16 @@ export default function ConsignmentReport() {
   }), [caseData])
 
   return (
-    <div style={{ padding: '18px 16px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+    <div style={{ padding: '18px 16px', display: 'flex', flexDirection: 'column', gap: '16px', position: 'relative' }}>
+
+      {/* Top loading bar — visible the whole time a fetch is in flight.
+          Lets ops see that a date change is processing, instead of staring
+          at stale data and wondering. */}
+      {caseLoading && caseLoaded && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, height: 2, zIndex: 200, overflow: 'hidden', background: 'transparent', pointerEvents: 'none' }}>
+          <div style={{ height: '100%', width: '60%', background: `linear-gradient(90deg, transparent, ${t.gold}, transparent)`, animation: 'cnsrptLoadBar 1.1s ease infinite' }} />
+        </div>
+      )}
 
       {/* ── Header ── */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
@@ -558,11 +561,13 @@ export default function ConsignmentReport() {
           </div>
           <div style={{ fontSize: '11px', color: t.text3, marginTop: '4px' }}>
             What dispatched on {activeFilterLabel().toLowerCase()} · {viewMode === 'branch' ? 'per-branch rollup' : 'bill-level'}
-            {lastRefresh && (
-              <span style={{ color: minsAgo === 0 ? t.green : t.text4, marginLeft: '6px' }}>
-                · {minsAgo === 0 ? 'just refreshed' : `${minsAgo}m ago`} · {lastRefresh.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}
-              </span>
-            )}
+            {caseLoading
+              ? <span style={{ color: t.gold, marginLeft: '6px' }}>· loading…</span>
+              : lastRefresh && (
+                <span style={{ color: minsAgo === 0 ? t.green : t.text4, marginLeft: '6px' }}>
+                  · {minsAgo === 0 ? 'just refreshed' : `${minsAgo}m ago`} · {lastRefresh.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}
+                </span>
+              )}
           </div>
         </div>
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
@@ -792,7 +797,7 @@ export default function ConsignmentReport() {
 
       {/* ── Branch-wise table — per-branch rollup of bills in flight ── */}
       {viewMode === 'branch' && (
-        <div style={{ ...card, overflow: 'hidden' }}>
+        <div style={{ ...card, overflow: 'hidden', opacity: (caseLoading && caseLoaded) ? 0.55 : 1, transition: 'opacity .2s', pointerEvents: (caseLoading && caseLoaded) ? 'none' : 'auto' }}>
           {(caseLoading && !caseLoaded) ? (
             <div style={{ padding: '80px', display: 'flex', justifyContent: 'center' }}><GoldSpinner size={32} /></div>
           ) : filteredBranchRows.length === 0 ? (
@@ -909,7 +914,7 @@ export default function ConsignmentReport() {
           set the Purchase Data module exposes, filtered by when each bill went
           into transit (purchases.dispatched_at). Sortable; CSV-exportable. ── */}
       {viewMode === 'case' && (
-        <div style={{ ...card, overflow: 'hidden' }}>
+        <div style={{ ...card, overflow: 'hidden', opacity: (caseLoading && caseLoaded) ? 0.55 : 1, transition: 'opacity .2s', pointerEvents: (caseLoading && caseLoaded) ? 'none' : 'auto' }}>
           {caseLoading && !caseLoaded ? (
             <div style={{ padding: '80px', display: 'flex', justifyContent: 'center' }}><GoldSpinner size={32} /></div>
           ) : filteredCaseRows.length === 0 ? (
@@ -945,14 +950,8 @@ export default function ConsignmentReport() {
                       { k: 'customer_name',             l: 'Customer',   a: 'left'  },
                       { k: 'branch_name',               l: 'Branch',     a: 'left'  },
                       { k: 'gross_weight',              l: 'Gross (g)',  a: 'right' },
-                      { k: 'stone_weight',              l: 'Stone (g)',  a: 'right' },
-                      { k: 'wastage',                   l: 'Wastage (g)',a: 'right' },
                       { k: 'net_weight',                l: 'Net (g)',    a: 'right' },
                       { k: 'total_amount',              l: 'Gross Amt',  a: 'right' },
-                      { k: 'service_charge_pct',        l: 'Svc %',      a: 'right' },
-                      { k: 'service_charge_amount_crm', l: 'Svc Amt',    a: 'right' },
-                      { k: 'final_amount_crm',          l: 'Final Amt',  a: 'right' },
-                      { k: 'transaction_type',          l: 'Type',       a: 'left'  },
                       { k: 'dispatched_at',             l: 'Consignment Date', a: 'left' },
                       { k: 'stock_status',              l: 'Status',     a: 'left'  },
                     ].map(col => (
@@ -973,14 +972,8 @@ export default function ConsignmentReport() {
                     <td style={{ ...caseTdL, color: t.text3, fontSize: '10px' }}>{caseTotals.bills} bill{caseTotals.bills === 1 ? '' : 's'}</td>
                     <td style={caseTdL} />
                     <td style={{ ...caseTdR, color: t.text2, fontWeight: 600 }}>{fmtWt(caseTotals.gross_weight)}</td>
-                    <td style={{ ...caseTdR, color: t.text3 }}>{fmtWt(caseTotals.stone_weight)}</td>
-                    <td style={{ ...caseTdR, color: t.text3 }}>{fmtWt(caseTotals.wastage)}</td>
                     <td style={{ ...caseTdR, color: t.gold,  fontWeight: 700 }}>{fmtWt(caseTotals.net_weight)}</td>
                     <td style={{ ...caseTdR, color: t.text2, fontWeight: 600 }}>{fmtAmt(caseTotals.gross_amt)}</td>
-                    <td style={{ ...caseTdR, color: t.text4 }} title="Weighted average across visible rows (Σ Svc Amt / Σ Gross Amt × 100)">~{caseAvgSvcPct.toFixed(2)}%</td>
-                    <td style={{ ...caseTdR, color: t.text3 }}>{fmtAmt(caseTotals.svc_amt)}</td>
-                    <td style={{ ...caseTdR, color: t.green, fontWeight: 700 }}>{fmtAmt(caseTotals.final_amt)}</td>
-                    <td style={caseTdL} />
                     <td style={caseTdL} />
                     <td style={caseTdL} />
                   </tr>
@@ -1014,23 +1007,8 @@ export default function ConsignmentReport() {
                         <td style={{ ...caseTdL, color: t.text1 }}>{r.customer_name || '—'}</td>
                         <td style={{ ...caseTdL, color: t.text2, whiteSpace: 'nowrap' }}>{r.branch_name || '—'}</td>
                         <td style={{ ...caseTdR, color: t.text2 }}>{fmtWt(r.gross_weight)}</td>
-                        <td style={{ ...caseTdR, color: t.text3 }}>{fmtWt(r.stone_weight)}</td>
-                        <td style={{ ...caseTdR, color: t.text3 }}>{fmtWt(r.wastage)}</td>
                         <td style={{ ...caseTdR, color: t.gold, fontWeight: 600 }}>{fmtWt(r.net_weight)}</td>
                         <td style={{ ...caseTdR, color: t.text2 }}>{fmtAmt(r.total_amount)}</td>
-                        <td style={{ ...caseTdR, color: t.text3 }}>{r.service_charge_pct != null ? `${Number(r.service_charge_pct).toFixed(2)}%` : '—'}</td>
-                        <td style={{ ...caseTdR, color: t.text3 }}>{fmtAmt(r.service_charge_amount_crm)}</td>
-                        <td style={{ ...caseTdR, color: t.green, fontWeight: 600 }}>{fmtAmt(r.final_amount_crm)}</td>
-                        <td style={caseTdL}>
-                          {r.transaction_type ? (
-                            <span style={{
-                              fontSize: '9.5px', padding: '2px 7px', borderRadius: '4px',
-                              background: r.transaction_type === 'TAKEOVER' ? `${t.purple}18` : `${t.gold}18`,
-                              color:      r.transaction_type === 'TAKEOVER' ? t.purple : t.gold,
-                              fontWeight: 700, letterSpacing: '.02em', whiteSpace: 'nowrap',
-                            }}>{r.transaction_type}</span>
-                          ) : <span style={{ color: t.text4 }}>—</span>}
-                        </td>
                         <td style={{ ...caseTdL, color: t.text2, fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
                           {r.dispatched_at
                             ? new Date(r.dispatched_at).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short' })
@@ -1193,6 +1171,11 @@ export default function ConsignmentReport() {
       <style>{`
         @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
         @keyframes spin  { to{transform:rotate(360deg)} }
+        @keyframes cnsrptLoadBar {
+          0%   { transform: translateX(-100%) }
+          60%  { transform: translateX(0%)    }
+          100% { transform: translateX(100%)  }
+        }
         .cnsrpt-flat-row { transition: background .15s ease, box-shadow .25s ease; }
         .cnsrpt-flat-row:hover {
           background: color-mix(in srgb, var(--cnsrpt-glow) 6%, transparent) !important;
