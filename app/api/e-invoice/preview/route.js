@@ -3,7 +3,7 @@
 
 import { createClient } from '@supabase/supabase-js'
 import { buildEInvoicePayload } from '../../../../lib/clearTaxClient'
-import { requireAuth, ROLE_GROUPS } from '../../../../lib/apiAuth'
+import { requireAuthForPage } from '../../../../lib/apiAuth'
 import { loadConsignmentForGeneration } from '../../../../lib/consignmentSnapshot'
 import { checkWorkflow } from '../../../../lib/workflowGate'
 import { peekEInvoiceDocNo, getCurrentFyCode } from '../../../../lib/consignmentUtils'
@@ -22,7 +22,9 @@ const supabase = createClient(
 )
 
 export async function GET(req) {
-  const auth = await requireAuth(req, { requiredRoles: ROLE_GROUPS.ACCOUNTS })
+  // E-Invoice preview is now ops self-service alongside generate — anyone
+  // with Consignment Data access may preview before firing IRP.
+  const auth = await requireAuthForPage(req, 'consignment-data')
   if (!auth.ok) return auth.response
 
   const { searchParams } = new URL(req.url)

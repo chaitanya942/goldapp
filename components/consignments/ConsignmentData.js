@@ -10,6 +10,7 @@ import Toast from '../ui/Toast'
 import { openConfirm } from '../ui/ConfirmDialog'
 import { authedFetch } from '../../lib/authedFetch'
 import { triggerSync } from '../../lib/triggerSync'
+import { getCache, setCache } from '../../lib/moduleCache'
 import { CONSIGNMENT_THEMES as THEMES, REGION_COLORS, useMobile } from '../../lib/consignmentTheme'
 import { WorkflowStrip, canActOnStep } from './workflowParts'
 import PreviewModal from './PreviewModal'
@@ -68,14 +69,17 @@ export default function ConsignmentData() {
 
   // Mode: null = Active Consignments list,  { type:'branch', branch, fromRegion } = bill picker
   const [nav,                 setNav]                = useState(null)
-  const [purchases,           setPurchases]          = useState([])
+  // Seed from in-memory cache (stale-while-revalidate) so a re-open paints
+  // the previous list instantly while a fresh fetch + Realtime sub take over.
+  const _cdCached = getCache('cd:fetchAll')
+  const [purchases,           setPurchases]          = useState(_cdCached?.purchases       ?? [])
   // Branch-specific bill list, populated when entering a branch view.
   // Decoupled from `purchases` so fetchAll (no-branch) can't race-overwrite.
   const [branchBillsState,    setBranchBillsState]   = useState(null)
-  const [consignments,        setConsignments]       = useState([])
-  const [branches,            setBranches]           = useState([])
-  const [unknownBranches,     setUnknownBranches]    = useState([])
-  const [loading,             setLoading]            = useState(true)
+  const [consignments,        setConsignments]       = useState(_cdCached?.consignments    ?? [])
+  const [branches,            setBranches]           = useState(_cdCached?.branches        ?? [])
+  const [unknownBranches,     setUnknownBranches]    = useState(_cdCached?.unknownBranches ?? [])
+  const [loading,             setLoading]            = useState(!_cdCached)
   const [selected,            setSelected]           = useState(new Set())
   // Default sort: oldest first. Operations should dispatch ageing bills before
   // fresh ones (FIFO + risk-management) — surface them at the top.
@@ -140,9 +144,13 @@ export default function ConsignmentData() {
   // consignment server-side. null = closed.
   //   { c, loading, data, audit, error, generating }
   const [ewbModal, setEwbModal] = useState(null)
+  // E-Invoice preview/generate modal — same shape + same flow as EWB. Ops
+  // can now generate the IRN themselves from the row's "Preview & Generate"
+  // button; the server auto-approves on success (mirrors the EWB pattern).
+  const [einvoiceModal, setEinvoiceModal] = useState(null)
 
-  const fetchAll = useCallback(async () => {
-    setLoading(true)
+  const fetchAll = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true)
     const [p, b, c, u] = await Promise.all([
       authedFetch('/api/consignments?action=stock_in_branch').then(r => r.json()),
       authedFetch('/api/consignments?action=branches').then(r => r.json()),
@@ -160,7 +168,7 @@ export default function ConsignmentData() {
     //   - approval_status='rejected' rows even though the reject flow auto-sets
     //     status='cancelled' — operations needs to see them and the rejection
     //     reason. They stay visible until ops re-creates or 7d passes.
-    setConsignments((c.data || []).filter(x => {
+    const filteredConsignments = (c.data || []).filter(x => {
       if (x.status === 'seed') return false
       const isRejected = x.approval_status === 'rejected'
       if (x.status === 'cancelled' && !isRejected) return false
@@ -184,9 +192,19 @@ export default function ConsignmentData() {
         if (ageMs > 24 * 3600 * 1000) return false
       }
       return true
-    }))
+    })
+    setConsignments(filteredConsignments)
     setUnknownBranches(u.data || [])
-    setLoading(false)
+    // Cache the *filtered* consignments (the same shape consumers expect) so a
+    // re-open hydrates state instantly. Cutoff windows will be a few minutes
+    // stale at most — the very next fetchAll (fires on mount) corrects them.
+    setCache('cd:fetchAll', {
+      purchases:       p.data || [],
+      branches:        b.data || [],
+      consignments:    filteredConsignments,
+      unknownBranches: u.data || [],
+    })
+    if (!silent) setLoading(false)
   }, [])
 
   // Render the bill picker immediately (don't block on sync). In parallel,
@@ -194,13 +212,19 @@ export default function ConsignmentData() {
   // it resolves, refetch silently to surface them. Previously fetchAll
   // waited for sync to complete — adding 1–3s to the page open.
   useEffect(() => {
-    fetchAll()
-    triggerSync({ minIntervalMs: 0 }).then(res => { if (res) fetchAll() })
+    // If we already painted from cache, refresh silently — don't flip the
+    // screen back to a spinner just because a re-open kicked a refetch.
+    const haveCache = !!getCache('cd:fetchAll')
+    fetchAll(haveCache)
+    triggerSync({ minIntervalMs: 0 }).then(res => { if (res) fetchAll(true) })
   }, [fetchAll])
 
   // Realtime: when accounts approves/rejects a consignment, the badge and
   // download buttons in this view update without the user refreshing.
   useEffect(() => {
+    // Coalesce INSERT bursts (e.g. an external sync landing many at once)
+    // into one debounced silent refetch instead of N round-trips.
+    let insertTimer = null
     const channel = supabaseClient
       .channel('consignment-approval-updates')
       .on('postgres_changes',
@@ -216,9 +240,16 @@ export default function ConsignmentData() {
             setToast({ msg: `${row.tmp_prf_no} rejected: ${row.rejection_reason || 'no reason given'}`, type: 'error' })
           }
         })
+      .on('postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'consignments' },
+        () => {
+          // New row needs the filter pass + branch joins, so just refetch silently.
+          if (insertTimer) clearTimeout(insertTimer)
+          insertTimer = setTimeout(() => fetchAll(true), 800)
+        })
       .subscribe()
-    return () => { supabaseClient.removeChannel(channel) }
-  }, [])
+    return () => { if (insertTimer) clearTimeout(insertTimer); supabaseClient.removeChannel(channel) }
+  }, [fetchAll])
 
   // Deep-link from Branch Stock Overview → enter bill-picker mode for that branch
   useEffect(() => {
@@ -402,6 +433,56 @@ export default function ConsignmentData() {
       })
     } catch (e) {
       setEwbModal(m => (m && m.c.id === c.id ? { ...m, loading: false, error: e.message } : m))
+    }
+  }
+
+  // ── E-Invoice ops self-service (mirror of EWB) ──────────────────────────
+  // Open the preview: fetches the exact IRP payload + cross-doc audit in
+  // parallel. The audit endpoint may 403 for non-accounts users — the
+  // PreviewModal renders fine without it.
+  async function openEinvoicePreview(c) {
+    setEinvoiceModal({ c, loading: true, data: null, audit: null, error: null, generating: false })
+    try {
+      const [pr, ar] = await Promise.all([
+        authedFetch(`/api/e-invoice/preview?id=${c.id}`),
+        authedFetch(`/api/consignments/document-audit?id=${c.id}`),
+      ])
+      const pj = await pr.json()
+      const aj = await ar.json().catch(() => null)
+      setEinvoiceModal(m => {
+        if (!m || m.c.id !== c.id) return m
+        if (!pr.ok || pj.error) return { ...m, loading: false, error: pj.error || 'Preview failed' }
+        return { ...m, loading: false, data: pj, audit: ar.ok ? aj : null }
+      })
+    } catch (e) {
+      setEinvoiceModal(m => (m && m.c.id === c.id ? { ...m, loading: false, error: e.message } : m))
+    }
+  }
+
+  // Fires the actual E-Invoice generation on IRP. On success the server also
+  // auto-approves the consignment (same shared helper EWB uses).
+  async function confirmGenerateEinvoice() {
+    if (!einvoiceModal?.c) return
+    const c = einvoiceModal.c
+    setEinvoiceModal(m => m ? { ...m, generating: true, error: null } : null)
+    try {
+      const r = await authedFetch('/api/e-invoice/generate', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ consignment_id: c.id }),
+      })
+      const j = await r.json()
+      if (!r.ok || j.error) {
+        setEinvoiceModal(m => m ? { ...m, generating: false, error: j.error || 'Generation failed' } : null)
+        return
+      }
+      const warn = j.auto_approve_warning
+        ? ` (auto-approve needs attention: ${j.auto_approve_warning})`
+        : ''
+      try { await fetchAll() } catch {}
+      setEinvoiceModal(null)
+      setToast({ msg: `E-Invoice ${j.doc_no || ''} generated.${warn}`, type: warn ? 'error' : 'success' })
+    } catch (e) {
+      setEinvoiceModal(m => m ? { ...m, generating: false, error: e.message } : null)
     }
   }
 
@@ -831,63 +912,54 @@ export default function ConsignmentData() {
           </button>
         )
         return (
-          <div style={{ ...card, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-            {/* Row 1 — search + date */}
-            <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }}>
-              <div style={{ position: 'relative', flex: 1, minWidth: '220px' }}>
-                <span style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: t.text4, fontSize: '13px', pointerEvents: 'none' }}>⌕</span>
-                <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search TMP PRF, Challan, Branch…"
-                  style={{ width: '100%', background: t.card2, border: `1px solid ${t.border2}`, borderRadius: '7px', padding: '8px 10px 8px 28px', fontSize: '12px', color: t.text1, outline: 'none', boxSizing: 'border-box' }} />
-              </div>
-              <div style={{ display: 'flex', gap: '4px', alignItems: 'center', flexWrap: 'wrap' }}>
-                <span style={{ fontSize: '10px', color: t.text4, letterSpacing: '.06em', textTransform: 'uppercase', fontWeight: 600, marginRight: '2px' }}>Created</span>
-                <Chip active={!dateFrom && !dateTo}        color={t.gold}  onClick={() => setPreset('all')}>All</Chip>
-                <Chip active={datePresetActive === 'today'}     color={t.blue}   onClick={() => setPreset('today')}>Today</Chip>
-                <Chip active={datePresetActive === 'yesterday'} color={t.purple} onClick={() => setPreset('yesterday')}>Yesterday</Chip>
-                <Chip active={datePresetActive === 'last7'}     color={t.orange} onClick={() => setPreset('last7')}>Last 7d</Chip>
-                <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} max={dateTo || undefined}
-                  title="From (inclusive)"
-                  style={{ background: t.card2, border: `1px solid ${t.border2}`, borderRadius: '7px', padding: '6px 8px', fontSize: '11px', color: t.text2, outline: 'none', colorScheme: 'dark' }} />
-                <span style={{ color: t.text4, fontSize: '11px' }}>→</span>
-                <input type="date" value={dateTo}   onChange={e => setDateTo(e.target.value)}   min={dateFrom || undefined}
-                  title="To (inclusive)"
-                  style={{ background: t.card2, border: `1px solid ${t.border2}`, borderRadius: '7px', padding: '6px 8px', fontSize: '11px', color: t.text2, outline: 'none', colorScheme: 'dark' }} />
-              </div>
+          <div style={{ ...card, padding: '12px 14px', display: 'flex', gap: '16px', flexWrap: 'wrap', alignItems: 'center', rowGap: '10px' }}>
+            {/* Type */}
+            <div style={{ display: 'flex', gap: '4px', alignItems: 'center', flexWrap: 'wrap' }}>
+              <span style={{ fontSize: '10px', color: t.text4, letterSpacing: '.06em', textTransform: 'uppercase', fontWeight: 600, marginRight: '2px' }}>Type</span>
+              <Chip active={!filterType}                color={t.gold}   onClick={() => setFilterType('')}>All</Chip>
+              <Chip active={filterType === 'EXTERNAL'} color={t.orange} onClick={() => setFilterType(filterType === 'EXTERNAL' ? '' : 'EXTERNAL')}>Branch → HO</Chip>
+              <Chip active={filterType === 'INTERNAL'} color={t.purple} onClick={() => setFilterType(filterType === 'INTERNAL' ? '' : 'INTERNAL')}>Branch → Hub</Chip>
             </div>
-
-            {/* Row 2 — type chips + region multi-select chips + clear + count */}
-            <div style={{ display: 'flex', gap: '14px', flexWrap: 'wrap', alignItems: 'center' }}>
-              <div style={{ display: 'flex', gap: '4px', alignItems: 'center', flexWrap: 'wrap' }}>
-                <span style={{ fontSize: '10px', color: t.text4, letterSpacing: '.06em', textTransform: 'uppercase', fontWeight: 600, marginRight: '2px' }}>Type</span>
-                <Chip active={!filterType}                color={t.gold}   onClick={() => setFilterType('')}>All</Chip>
-                <Chip active={filterType === 'EXTERNAL'} color={t.orange} onClick={() => setFilterType(filterType === 'EXTERNAL' ? '' : 'EXTERNAL')}>Branch → HO</Chip>
-                <Chip active={filterType === 'INTERNAL'} color={t.purple} onClick={() => setFilterType(filterType === 'INTERNAL' ? '' : 'INTERNAL')}>Branch → Hub</Chip>
-              </div>
-              <div style={{ display: 'flex', gap: '4px', alignItems: 'center', flexWrap: 'wrap' }}>
-                <span style={{ fontSize: '10px', color: t.text4, letterSpacing: '.06em', textTransform: 'uppercase', fontWeight: 600, marginRight: '2px' }}>Region</span>
-                <Chip active={filterRegions.size === 0} color={t.gold} onClick={() => setFilterRegions(new Set())}>All</Chip>
-                {allRegions.map(r => {
-                  const active = filterRegions.has(r)
-                  const color  = REGION_COLORS[r] || t.text3
-                  return (
-                    <Chip key={r} active={active} color={color}
-                      onClick={() => setFilterRegions(prev => {
-                        const next = new Set(prev)
-                        if (next.has(r)) next.delete(r); else next.add(r)
-                        return next
-                      })}>
-                      {active && <span style={{ fontSize: '11px' }}>✓</span>}{r}
-                    </Chip>
-                  )
-                })}
-              </div>
-              {hasFilters && (
-                <button onClick={() => { setFilterType(''); setFilterRegions(new Set()); setSearch(''); setDateFrom(''); setDateTo('') }}
-                  style={{ ...btnOut, padding: '5px 11px', fontSize: '11px' }}>Clear all</button>
-              )}
-              <div style={{ marginLeft: 'auto', fontSize: '11px', color: t.text4 }}>
-                <strong style={{ color: t.text2, fontFamily: 'monospace' }}>{filteredCons.length}</strong> of {consignments.length}
-              </div>
+            {/* Region */}
+            <div style={{ display: 'flex', gap: '4px', alignItems: 'center', flexWrap: 'wrap' }}>
+              <span style={{ fontSize: '10px', color: t.text4, letterSpacing: '.06em', textTransform: 'uppercase', fontWeight: 600, marginRight: '2px' }}>Region</span>
+              <Chip active={filterRegions.size === 0} color={t.gold} onClick={() => setFilterRegions(new Set())}>All</Chip>
+              {allRegions.map(r => {
+                const active = filterRegions.has(r)
+                const color  = REGION_COLORS[r] || t.text3
+                return (
+                  <Chip key={r} active={active} color={color}
+                    onClick={() => setFilterRegions(prev => {
+                      const next = new Set(prev)
+                      if (next.has(r)) next.delete(r); else next.add(r)
+                      return next
+                    })}>
+                    {active && <span style={{ fontSize: '11px' }}>✓</span>}{r}
+                  </Chip>
+                )
+              })}
+            </div>
+            {/* Created */}
+            <div style={{ display: 'flex', gap: '4px', alignItems: 'center', flexWrap: 'wrap' }}>
+              <span style={{ fontSize: '10px', color: t.text4, letterSpacing: '.06em', textTransform: 'uppercase', fontWeight: 600, marginRight: '2px' }}>Created</span>
+              <Chip active={!dateFrom && !dateTo}             color={t.gold}   onClick={() => setPreset('all')}>All</Chip>
+              <Chip active={datePresetActive === 'today'}     color={t.blue}   onClick={() => setPreset('today')}>Today</Chip>
+              <Chip active={datePresetActive === 'yesterday'} color={t.purple} onClick={() => setPreset('yesterday')}>Yesterday</Chip>
+              <Chip active={datePresetActive === 'last7'}     color={t.orange} onClick={() => setPreset('last7')}>Last 7d</Chip>
+              <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} max={dateTo || undefined}
+                title="From (inclusive)"
+                style={{ background: t.card2, border: `1px solid ${t.border2}`, borderRadius: '7px', padding: '6px 8px', fontSize: '11px', color: t.text2, outline: 'none', colorScheme: 'dark' }} />
+              <span style={{ color: t.text4, fontSize: '11px' }}>→</span>
+              <input type="date" value={dateTo}   onChange={e => setDateTo(e.target.value)}   min={dateFrom || undefined}
+                title="To (inclusive)"
+                style={{ background: t.card2, border: `1px solid ${t.border2}`, borderRadius: '7px', padding: '6px 8px', fontSize: '11px', color: t.text2, outline: 'none', colorScheme: 'dark' }} />
+            </div>
+            {hasFilters && (
+              <button onClick={() => { setFilterType(''); setFilterRegions(new Set()); setSearch(''); setDateFrom(''); setDateTo('') }}
+                style={{ ...btnOut, padding: '5px 11px', fontSize: '11px' }}>Clear all</button>
+            )}
+            <div style={{ marginLeft: 'auto', fontSize: '11px', color: t.text4 }}>
+              <strong style={{ color: t.text2, fontFamily: 'monospace' }}>{filteredCons.length}</strong> of {consignments.length}
             </div>
           </div>
         )
@@ -1187,11 +1259,26 @@ export default function ConsignmentData() {
                               </div>
                             )
                           }
+                          // E-Invoice is ops self-service now (same pattern as EWB)
+                          // — show the Preview/Generate action unless the row is
+                          // already dead (rejected / cancelled / cancel requested).
+                          const blocked = c.approval_status === 'rejected'
+                            || c.status === 'cancelled'
+                            || !!c.cancellation_requested_at
+                          if (blocked) {
+                            return (
+                              <span title="E-Invoice unavailable — consignment is rejected or cancelled."
+                                style={{ fontSize: '10px', color: t.text4, fontStyle: 'italic' }}>
+                                —
+                              </span>
+                            )
+                          }
                           return (
-                            <span title="Accounts will generate the E-Invoice on IRP during their review."
-                              style={{ fontSize: '10px', color: t.text4, fontStyle: 'italic' }}>
-                              accounts to generate E-Invoice
-                            </span>
+                            <button onClick={() => openEinvoicePreview(c)} disabled={!!downloadingId}
+                              title="Preview the E-Invoice payload, then generate it on IRP. Generating dispatches the consignment."
+                              style={{ background: t.purple, color: '#fff', border: 'none', borderRadius: '6px', padding: '4px 12px', fontSize: '10px', fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                              Preview &amp; Generate E-Invoice
+                            </button>
                           )
                         }
                         // Neither applies (e.g. INTERNAL Branch→Hub uses Issue Voucher only)
@@ -1458,6 +1545,25 @@ export default function ConsignmentData() {
           t={t}
           onClose={() => { if (!ewbModal.generating) setEwbModal(null) }}
           onConfirm={confirmGenerateEwb}
+        />
+      )}
+
+      {/* E-Invoice preview/generate modal — same shared PreviewModal as EWB,
+          parameterised via type='einvoice'. */}
+      {einvoiceModal && (
+        <PreviewModal
+          state={{
+            type:        'einvoice',
+            consignment: einvoiceModal.c,
+            loading:     einvoiceModal.loading,
+            data:        einvoiceModal.data,
+            audit:       einvoiceModal.audit,
+            generating:  einvoiceModal.generating,
+            error:       einvoiceModal.error,
+          }}
+          t={t}
+          onClose={() => { if (!einvoiceModal.generating) setEinvoiceModal(null) }}
+          onConfirm={confirmGenerateEinvoice}
         />
       )}
 

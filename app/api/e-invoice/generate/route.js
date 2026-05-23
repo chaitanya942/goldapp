@@ -6,7 +6,8 @@
 import { createClient } from '@supabase/supabase-js'
 import { generateEInvoice } from '../../../../lib/clearTaxClient'
 import { logConsignmentEvent } from '../../../../lib/consignmentLog'
-import { requireAuth, ROLE_GROUPS } from '../../../../lib/apiAuth'
+import { requireAuthForPage } from '../../../../lib/apiAuth'
+import { applyConsignmentApproval } from '../../../../lib/consignmentApproval'
 import { loadConsignmentForGeneration } from '../../../../lib/consignmentSnapshot'
 import { checkWorkflow } from '../../../../lib/workflowGate'
 import { nextEInvoiceDocNo, getCurrentFyCode } from '../../../../lib/consignmentUtils'
@@ -26,9 +27,12 @@ const supabase = createClient(
 )
 
 export async function POST(req) {
-  // Accounts owns GST documents — they generate as part of approval review.
-  // Operations can no longer generate; they only download once approved.
-  const auth = await requireAuth(req, { requiredRoles: ROLE_GROUPS.ACCOUNTS })
+  // E-Invoice is now operations self-service (mirrors EWB): anyone who can
+  // see the Consignment Data module may generate it. Generating IS the
+  // dispatch decision — on success this route auto-approves the consignment
+  // and moves stock (see the applyConsignmentApproval call below), so
+  // accounts is no longer in the E-Invoice path.
+  const auth = await requireAuthForPage(req, 'consignment-data')
   if (!auth.ok) return auth.response
   try {
     const { consignment_id } = await req.json()
@@ -122,7 +126,36 @@ export async function POST(req) {
       details:     { irn, ack_no: ackNo, ack_dt: ackDt, doc_no: einvoiceDocNo },
     })
 
-    return Response.json({ success: true, irn, ack_no: ackNo, ack_dt: ackDt, doc_no: einvoiceDocNo })
+    // ── Auto-approve + dispatch ──────────────────────────────────────────
+    // E-Invoice is now ops self-service (same model as EWB). Generating the
+    // legally-binding doc on IRP IS the dispatch decision, so we run the SAME
+    // approval transition accounts used to do (mark approved, move linked
+    // bills' stock, log the event) via the shared helper.
+    //
+    // Wrapped: the E-Invoice is already on IRP's books at this point, so a
+    // hiccup here must NOT 500 the request (that would hide a real IRN).
+    // We surface a warning instead so ops/accounts can reconcile.
+    let autoApproveWarning = null
+    try {
+      const appr = await applyConsignmentApproval(supabase, {
+        id:           consignment_id,
+        approverEmail: auth.profile?.email || auth.user?.email || 'system',
+        eventType:    'approved_on_einvoice_generate',
+        note:         'Auto-approved on E-Invoice generation (operations self-service)',
+      })
+      if (appr?.error) {
+        autoApproveWarning = appr.error.message || String(appr.error)
+        console.error('[E-Invoice] auto-approve failed after generation:', consignment_id, autoApproveWarning)
+      }
+    } catch (e) {
+      autoApproveWarning = e?.message || String(e)
+      console.error('[E-Invoice] auto-approve threw after generation:', consignment_id, autoApproveWarning)
+    }
+
+    return Response.json({
+      success: true, irn, ack_no: ackNo, ack_dt: ackDt, doc_no: einvoiceDocNo,
+      ...(autoApproveWarning ? { auto_approve_warning: autoApproveWarning } : {}),
+    })
   } catch (err) {
     console.error('E-Invoice generate error:', err)
     // Debug payloads stay server-side only (see ctaxLog in lib/clearTaxClient.js).
