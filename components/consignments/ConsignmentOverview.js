@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import { useApp, useRegionAccess } from '../../lib/context'
 import GoldSpinner from '../ui/GoldSpinner'
@@ -103,6 +103,15 @@ export default function ConsignmentOverview() {
   // notices without staring at the table.
   const [recentlyChanged, setRecentlyChanged] = useState(() => new Set())
   const prevTodayRef = useRef(new Map())
+  // Surfaced in a banner when /api/consignments throws or returns an error
+  // payload — used to be silently swallowed (spinner stuck forever, or data
+  // wiped to []).
+  const [loadError, setLoadError] = useState(null)
+  // Realtime channel state — drives the LIVE pill's colour so the user can
+  // tell at a glance whether updates are actually flowing.
+  // 'connecting' (default) → 'connected' once the channel subscribes, or
+  // 'error' / 'closed' on failure.
+  const [rtState, setRtState] = useState('connecting')
 
   // `silent` skips the loading toggle so background polls don't blank the
   // list or flip the Refresh button to "Refreshing…" every 15s — operators
@@ -111,32 +120,42 @@ export default function ConsignmentOverview() {
   // timestamp signal that data is moving.
   const fetchData = useCallback(async (silent = false) => {
     if (!silent) setLoading(true)
-    const res  = await authedFetch('/api/consignments?action=branch_overview')
-    const json = await res.json()
-    const next = json.data || []
-    // Detect branches whose today_bills count rose since the last poll — flash
-    // them so the operator notices new arrivals without scanning every row.
-    // Use undefined as the "never seen" sentinel so first load doesn't light
-    // every branch and a 0 → 1 transition still pulses.
-    const prev = prevTodayRef.current
-    const isFirstLoad = prev.size === 0
-    const justChanged = new Set()
-    for (const row of next) {
-      const before = prev.get(row.branch_name)
-      const now = row.today_bills || 0
-      if (!isFirstLoad && before != null && now > before) {
-        justChanged.add(row.branch_name)
+    try {
+      const res  = await authedFetch('/api/consignments?action=branch_overview')
+      const json = await res.json()
+      // The API returns {data, error} even on 200 when the RPC is missing —
+      // surface that instead of silently wiping the screen to "No stock".
+      if (json.error) throw new Error(json.error)
+      const next = json.data || []
+      // Detect branches whose today_bills count rose since the last poll —
+      // flash them so the operator notices new arrivals without scanning every
+      // row. Use undefined as the "never seen" sentinel so first load doesn't
+      // light every branch and a 0 → 1 transition still pulses.
+      const prev = prevTodayRef.current
+      const isFirstLoad = prev.size === 0
+      const justChanged = new Set()
+      for (const row of next) {
+        const before = prev.get(row.branch_name)
+        const now = row.today_bills || 0
+        if (!isFirstLoad && before != null && now > before) {
+          justChanged.add(row.branch_name)
+        }
+        prev.set(row.branch_name, now)
       }
-      prev.set(row.branch_name, now)
+      if (justChanged.size) {
+        setRecentlyChanged(justChanged)
+        setTimeout(() => setRecentlyChanged(new Set()), 6000)
+      }
+      setCache('co:branch-overview', next)
+      setData(next)
+      setLastRefresh(new Date())
+      setLoadError(null)
+    } catch (e) {
+      console.error('[branch-overview] load failed:', e)
+      setLoadError(e?.message || 'Failed to load branch stock')
+    } finally {
+      if (!silent) setLoading(false)
     }
-    if (justChanged.size) {
-      setRecentlyChanged(justChanged)
-      setTimeout(() => setRecentlyChanged(new Set()), 6000)
-    }
-    setCache('co:branch-overview', next)
-    setData(next)
-    setLastRefresh(new Date())
-    if (!silent) setLoading(false)
   }, [])
 
   // Mount: render Supabase data immediately (don't block on sync). In
@@ -170,7 +189,14 @@ export default function ConsignmentOverview() {
         if (timer) clearTimeout(timer)
         timer = setTimeout(() => fetchData(true), 1200)
       })
-      .subscribe()
+      .subscribe((status) => {
+        // SUBSCRIBED → green; CHANNEL_ERROR / TIMED_OUT / CLOSED → amber/red so
+        // the operator can see when "live" stops being live (e.g. wifi drop).
+        if (status === 'SUBSCRIBED')      setRtState('connected')
+        else if (status === 'CLOSED')     setRtState('closed')
+        else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') setRtState('error')
+        else setRtState('connecting')
+      })
     return () => { if (timer) clearTimeout(timer); supabase.removeChannel(channel) }
   }, [fetchData])
 
@@ -204,7 +230,7 @@ export default function ConsignmentOverview() {
 
   // Re-evaluated every render — cheap (≤73 branches) and `tick` ensures it
   // refreshes every 30s. Keep this list short by capping at the 5 most-imminent.
-  const pickupAlerts = (() => {
+  const pickupAlerts = useMemo(() => {
     const now = istNow()
     const currentMins = now.getUTCHours() * 60 + now.getUTCMinutes()
     const todayDow = new Date().toLocaleDateString('en-US', { timeZone: 'Asia/Kolkata', weekday: 'short' })
@@ -222,7 +248,8 @@ export default function ConsignmentOverview() {
       .filter(Boolean)
       .sort((a, b) => a.mins - b.mins)
       .slice(0, 5)
-  })()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data, dismissedPickups, tick])
 
   // ── Pickup popup notifications ────────────────────────────────────────────
   // Beyond the passive banner above, ops wanted an active popup:
@@ -242,6 +269,31 @@ export default function ConsignmentOverview() {
       try { Notification.requestPermission() } catch {}
     }
   }, [])
+
+  // Short two-tone chime for the 15-min urgent reminder. Synthesised via Web
+  // Audio so we don't ship an audio asset, and so it works even when the OS
+  // notification sound is muted. Wrapped in try/catch — some browsers throw
+  // until the user has interacted with the page.
+  const playChime = () => {
+    try {
+      const Ctx = window.AudioContext || window.webkitAudioContext
+      if (!Ctx) return
+      const ctx = new Ctx()
+      const beep = (freq, t0, dur) => {
+        const osc = ctx.createOscillator(), gain = ctx.createGain()
+        osc.frequency.value = freq
+        osc.type = 'sine'
+        osc.connect(gain).connect(ctx.destination)
+        gain.gain.setValueAtTime(0.0001, ctx.currentTime + t0)
+        gain.gain.exponentialRampToValueAtTime(0.18, ctx.currentTime + t0 + 0.02)
+        gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + t0 + dur)
+        osc.start(ctx.currentTime + t0)
+        osc.stop(ctx.currentTime + t0 + dur + 0.05)
+      }
+      beep(880, 0,    0.18)
+      beep(660, 0.22, 0.28)
+    } catch {}
+  }
 
   const fireBrowserNotif = (n) => {
     if (typeof window === 'undefined' || !('Notification' in window) || Notification.permission !== 'granted') return
@@ -307,6 +359,9 @@ export default function ConsignmentOverview() {
         return [...prev, ...fresh.filter(f => !seen.has(f.id))]
       })
       fresh.forEach(fireBrowserNotif)
+      // Audible chime only for the urgent 15-min reminders — the 30-min
+      // heads-up is informational so we don't want to startle ops every time.
+      if (fresh.some(f => f.kind === '15min')) playChime()
     }
     if (logChanged) {
       try { window.localStorage.setItem(`pickup-notif-${istToday()}`, JSON.stringify(pickupLogRef.current)) } catch {}
@@ -362,12 +417,14 @@ export default function ConsignmentOverview() {
   // Custom order — Rest of Karnataka first, then Kerala / AP / Telangana.
   // Anything outside the canonical order gets appended alphabetically so a
   // newly-added region doesn't silently disappear.
-  const allRegions = [...new Set(data.map(b => b.region).filter(Boolean))]
-  const regions = [
-    ...REGION_ORDER.filter(r => allRegions.includes(r)),
-    ...allRegions.filter(r => !REGION_ORDER.includes(r)).sort(),
-  ]
-  const regionStats = regions.reduce((acc, r) => {
+  const regions = useMemo(() => {
+    const all = [...new Set(data.map(b => b.region).filter(Boolean))]
+    return [
+      ...REGION_ORDER.filter(r => all.includes(r)),
+      ...all.filter(r => !REGION_ORDER.includes(r)).sort(),
+    ]
+  }, [data])
+  const regionStats = useMemo(() => regions.reduce((acc, r) => {
     const bs = data.filter(b => b.region === r)
     const today_bills  = bs.reduce((s, b) => s + (b.today_bills   || 0), 0)
     const older_bills  = bs.reduce((s, b) => s + (b.older_bills   || 0), 0)
@@ -382,7 +439,7 @@ export default function ConsignmentOverview() {
       gross_wt:     bs.reduce((s, b) => s + b.total_gross_wt, 0),
     }
     return acc
-  }, {})
+  }, {}), [data, regions])
 
   // Always display weights in grams (no kg conversion). Comma-grouped, two
   // decimals so the operations team sees the exact figure (rounding to
@@ -395,49 +452,53 @@ export default function ConsignmentOverview() {
   // ── Filtered + sorted ─────────────────────────────────────────────────────
   // Search now matches branch OR region (so typing 'kerala' narrows to all
   // Kerala branches without having to click the region card).
-  const searchQ = (search || '').toLowerCase()
-  const filtered = data
-    // Hide branches with zero stock — empty rows are noise. The flash cards
-    // above show 'X / Y branches' so the operator knows how many are hidden.
-    .filter(b => ((b.today_net_wt || 0) + (b.older_net_wt || 0)) > 0)
-    .filter(b => !activeRegion || b.region === activeRegion)
-    .filter(b => !searchQ || (b.branch_name || '').toLowerCase().includes(searchQ) || (b.region || '').toLowerCase().includes(searchQ))
-    .filter(b => {
-      // Quick-filter chips applied on top of search/region. Each chip targets
-      // a real operations question — "what needs attention now?".
-      const age = b.oldest_age_days || 0
-      const moved = b.last_moved_days_ago
-      switch (quickFilter) {
-        case 'overdue':       return age > 7
-        case 'watch':         return age > 3 && age <= 7
-        case 'today_active':  return (b.today_bills || 0) > 0
-        case 'no_movement':   return moved == null || moved > 30
-        case 'all':
-        default:              return true
-      }
-    })
-    .slice()
-    .sort((a, b) => {
-      let av = 0, bv = 0
-      if (sortKey === 'branch_name')        { av = a.branch_name || ''; bv = b.branch_name || ''; return av.localeCompare(bv) * sortDir }
-      if (sortKey === 'today_bills')        { av = a.today_bills  || 0; bv = b.today_bills  || 0 }
-      if (sortKey === 'today_net_wt')       { av = a.today_net_wt || 0; bv = b.today_net_wt || 0 }
-      if (sortKey === 'today_gross_value')  { av = a.today_gross_value || 0; bv = b.today_gross_value || 0 }
-      if (sortKey === 'older_bills')        { av = a.older_bills  || 0; bv = b.older_bills  || 0 }
-      if (sortKey === 'older_net_wt')       { av = a.older_net_wt || 0; bv = b.older_net_wt || 0 }
-      if (sortKey === 'older_gross_value')  { av = a.older_gross_value || 0; bv = b.older_gross_value || 0 }
-      if (sortKey === 'oldest_age')         { av = a.oldest_age_days || 0; bv = b.oldest_age_days || 0 }
-      if (sortKey === 'last_moved_days_ago'){ av = a.last_moved_days_ago == null ? 99999 : a.last_moved_days_ago; bv = b.last_moved_days_ago == null ? 99999 : b.last_moved_days_ago }
-      if (sortKey === 'total_net_wt')       { av = (a.today_net_wt || 0) + (a.older_net_wt || 0); bv = (b.today_net_wt || 0) + (b.older_net_wt || 0) }
-      if (sortKey === 'total_bills')        { av = (a.today_bills  || 0) + (a.older_bills  || 0); bv = (b.today_bills  || 0) + (b.older_bills  || 0) }
-      return (av - bv) * sortDir
-    })
+  const filtered = useMemo(() => {
+    const searchQ = (search || '').toLowerCase()
+    return data
+      // Hide branches with zero stock — empty rows are noise. The flash cards
+      // above show 'X / Y branches' so the operator knows how many are hidden.
+      .filter(b => ((b.today_net_wt || 0) + (b.older_net_wt || 0)) > 0)
+      .filter(b => !activeRegion || b.region === activeRegion)
+      .filter(b => !searchQ || (b.branch_name || '').toLowerCase().includes(searchQ) || (b.region || '').toLowerCase().includes(searchQ))
+      .filter(b => {
+        // Quick-filter chips applied on top of search/region. Each chip targets
+        // a real operations question — "what needs attention now?".
+        const age = b.oldest_age_days || 0
+        const moved = b.last_moved_days_ago
+        switch (quickFilter) {
+          case 'overdue':       return age > 7
+          case 'watch':         return age > 3 && age <= 7
+          case 'today_active':  return (b.today_bills || 0) > 0
+          case 'no_movement':   return moved == null || moved > 30
+          case 'all':
+          default:              return true
+        }
+      })
+      .slice()
+      .sort((a, b) => {
+        let av = 0, bv = 0
+        if (sortKey === 'branch_name')        { av = a.branch_name || ''; bv = b.branch_name || ''; return av.localeCompare(bv) * sortDir }
+        if (sortKey === 'today_bills')        { av = a.today_bills  || 0; bv = b.today_bills  || 0 }
+        if (sortKey === 'today_net_wt')       { av = a.today_net_wt || 0; bv = b.today_net_wt || 0 }
+        if (sortKey === 'today_gross_value')  { av = a.today_gross_value || 0; bv = b.today_gross_value || 0 }
+        if (sortKey === 'older_bills')        { av = a.older_bills  || 0; bv = b.older_bills  || 0 }
+        if (sortKey === 'older_net_wt')       { av = a.older_net_wt || 0; bv = b.older_net_wt || 0 }
+        if (sortKey === 'older_gross_value')  { av = a.older_gross_value || 0; bv = b.older_gross_value || 0 }
+        if (sortKey === 'oldest_age')         { av = a.oldest_age_days || 0; bv = b.oldest_age_days || 0 }
+        if (sortKey === 'last_moved_days_ago'){ av = a.last_moved_days_ago == null ? 99999 : a.last_moved_days_ago; bv = b.last_moved_days_ago == null ? 99999 : b.last_moved_days_ago }
+        if (sortKey === 'total_net_wt')       { av = (a.today_net_wt || 0) + (a.older_net_wt || 0); bv = (b.today_net_wt || 0) + (b.older_net_wt || 0) }
+        if (sortKey === 'total_bills')        { av = (a.today_bills  || 0) + (a.older_bills  || 0); bv = (b.today_bills  || 0) + (b.older_bills  || 0) }
+        return (av - bv) * sortDir
+      })
+  }, [data, activeRegion, search, quickFilter, sortKey, sortDir])
 
   // ── Group filtered rows by region for the collapsible card view. Keys keep
   // the canonical REGION_ORDER so cards render Karnataka → Kerala → AP → Telangana.
-  const groupedByRegion = regions
-    .map(r => ({ region: r, branches: filtered.filter(b => b.region === r) }))
-    .filter(g => g.branches.length > 0)
+  const groupedByRegion = useMemo(() =>
+    regions
+      .map(r => ({ region: r, branches: filtered.filter(b => b.region === r) }))
+      .filter(g => g.branches.length > 0)
+  , [regions, filtered])
 
   function toggleRegionCollapsed(r) {
     setCollapsedRegions(prev => {
@@ -449,13 +510,19 @@ export default function ConsignmentOverview() {
   }
 
   // ── Grand totals ──────────────────────────────────────────────────────────
-  const grandToday    = filtered.reduce((s, b) => s + (b.today_bills        || 0), 0)
-  const grandTodayWt  = filtered.reduce((s, b) => s + (b.today_net_wt       || 0), 0)
-  const grandTodayVal = filtered.reduce((s, b) => s + (b.today_gross_value  || 0), 0)
-  const grandOlder    = filtered.reduce((s, b) => s + (b.older_bills        || 0), 0)
-  const grandOlderWt  = filtered.reduce((s, b) => s + (b.older_net_wt       || 0), 0)
-  const grandOlderVal = filtered.reduce((s, b) => s + (b.older_gross_value  || 0), 0)
-  const grandGrossWt  = filtered.reduce((s, b) => s + (b.total_gross_wt     || 0), 0)
+  const { grandToday, grandTodayWt, grandTodayVal, grandOlder, grandOlderWt, grandOlderVal, grandGrossWt } = useMemo(() => {
+    const acc = { grandToday: 0, grandTodayWt: 0, grandTodayVal: 0, grandOlder: 0, grandOlderWt: 0, grandOlderVal: 0, grandGrossWt: 0 }
+    for (const b of filtered) {
+      acc.grandToday    += b.today_bills        || 0
+      acc.grandTodayWt  += b.today_net_wt       || 0
+      acc.grandTodayVal += b.today_gross_value  || 0
+      acc.grandOlder    += b.older_bills        || 0
+      acc.grandOlderWt  += b.older_net_wt       || 0
+      acc.grandOlderVal += b.older_gross_value  || 0
+      acc.grandGrossWt  += b.total_gross_wt     || 0
+    }
+    return acc
+  }, [filtered])
 
   // ── Styles ────────────────────────────────────────────────────────────────
   const card = { background: t.card, border: `1px solid ${t.border}`, borderRadius: '12px' }
@@ -482,10 +549,21 @@ export default function ConsignmentOverview() {
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
             <div style={{ fontSize: '1.4rem', fontWeight: 300, color: t.text1, letterSpacing: '.03em' }}>Branch Stock Overview</div>
-            <span style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '10px', color: t.green, background: `${t.green}15`, borderRadius: '20px', padding: '3px 10px', fontWeight: 600 }}>
-              <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: t.green, display: 'inline-block', animation: 'pulse 2s infinite' }} />
-              LIVE
-            </span>
+            {(() => {
+              const isLive   = rtState === 'connected'
+              const isErr    = rtState === 'error' || rtState === 'closed'
+              const c        = isLive ? t.green : isErr ? t.red : t.orange
+              const label    = isLive ? 'LIVE' : isErr ? 'OFFLINE' : 'CONNECTING'
+              const tip      = isLive ? 'Realtime channel connected — new bills push instantly'
+                            : isErr  ? 'Realtime channel dropped — refreshes still run on the 15s poll'
+                            :          'Connecting to realtime channel…'
+              return (
+                <span title={tip} style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '10px', color: c, background: `${c}15`, borderRadius: '20px', padding: '3px 10px', fontWeight: 600 }}>
+                  <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: c, display: 'inline-block', animation: isLive ? 'pulse 2s infinite' : 'none' }} />
+                  {label}
+                </span>
+              )
+            })()}
           </div>
           <div style={{ fontSize: '11px', color: t.text3, marginTop: '4px' }}>
             Outside-Bangalore branches ·
@@ -534,6 +612,25 @@ export default function ConsignmentOverview() {
           </button>
         </div>
       </div>
+
+      {/* ── Load error banner — surfaces auth/network/RPC failures that used
+           to silently leave a stuck spinner or empty list. */}
+      {loadError && (
+        <div style={{
+          background: `${t.red}12`, border: `1px solid ${t.red}40`,
+          borderLeft: `4px solid ${t.red}`, borderRadius: '8px',
+          padding: '10px 14px', display: 'flex', alignItems: 'center',
+          justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap',
+        }}>
+          <span style={{ fontSize: '12px', color: t.red, fontWeight: 600 }}>
+            ⚠ Couldn't load branch stock — {loadError}
+          </span>
+          <button onClick={() => fetchData()}
+            style={{ background: 'transparent', border: `1px solid ${t.red}80`, color: t.red, borderRadius: '6px', padding: '5px 12px', fontSize: '11px', fontWeight: 700, cursor: 'pointer' }}>
+            Retry
+          </button>
+        </div>
+      )}
 
       {/* ── Pickup alerts — sticky banner, surfaces branches within 30 min
            of scheduled pickup so the ops team can prep. Dismissible per
