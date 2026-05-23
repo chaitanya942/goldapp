@@ -190,8 +190,8 @@ export default function ConsignmentReport() {
     }
     const headers = [
       'Consignment Date', 'Branch', 'Region',
-      'No of Bills', 'Gross (g)', 'Stone (g)', 'Wastage (g)', 'Net (g)',
-      'Amount', 'Service Charge', 'Expected Delivery Date',
+      'No of Bills', 'Gross (g)', 'Net (g)',
+      'Amount', 'Expected Delivery Date',
     ]
     const lines = [headers.map(csvEscape).join(',')]
     for (const g of rows) {
@@ -201,11 +201,8 @@ export default function ConsignmentReport() {
         g.region || '',
         g.bills || 0,
         Number(g.gross_weight || 0).toFixed(2),
-        Number(g.stone_weight || 0).toFixed(2),
-        Number(g.wastage      || 0).toFixed(2),
         Number(g.net_weight   || 0).toFixed(2),
         Number(g.total_amount || 0).toFixed(2),
-        Number(g.svc_charge   || 0).toFixed(2),
         g.expected_delivery_date || '',
       ].map(csvEscape).join(','))
     }
@@ -807,73 +804,76 @@ export default function ConsignmentReport() {
           ) : (() => {
             // New branch-wise view: bills grouped by (branch + dispatched date)
             // so UDUPI on 19 May and UDUPI on 20 May appear as distinct lines.
-            const padBranch = '8px 10px'
-            const tdL = { padding: padBranch, verticalAlign: 'middle', fontSize: '11px', textAlign: 'left' }
-            const tdR = { padding: padBranch, verticalAlign: 'middle', fontSize: '11px', textAlign: 'right', fontFamily: 'monospace' }
+            // Matches the case-wise table's density + typography for visual
+            // consistency between the two view modes.
+            const padBranch = '11px 14px'
+            const tdL = { padding: padBranch, verticalAlign: 'middle', fontSize: '13px', textAlign: 'left' }
+            const tdR = { padding: padBranch, verticalAlign: 'middle', fontSize: '13px', textAlign: 'right', fontFamily: 'monospace' }
+            const tdC = { padding: padBranch, verticalAlign: 'middle', fontSize: '13px', textAlign: 'center', fontFamily: 'monospace' }
             const th  = (col) => ({
-              padding: '9px 10px', fontSize: '9px', color: sortKey === col.k ? t.gold : t.text4,
+              padding: '11px 14px', fontSize: '10.5px', color: sortKey === col.k ? t.gold : t.text4,
               letterSpacing: '.04em', textTransform: 'uppercase',
               background: t.card2, borderBottom: `1px solid ${t.border}`,
               whiteSpace: 'nowrap', fontWeight: 600, userSelect: 'none',
               verticalAlign: 'middle', textAlign: col.a, cursor: 'pointer',
               position: 'sticky', top: 0, zIndex: 2,
             })
-            const sortIcon = (k) => (
-              <span style={{ color: sortKey === k ? t.gold : t.text4, fontSize: '9px', marginLeft: '3px' }}>
-                {sortKey === k ? (sortDir === -1 ? '↓' : '↑') : '⇅'}
-              </span>
-            )
             const fmtAmt = (n) => n != null ? `₹${Number(n).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'
             const fmtWt  = (n) => n != null ? Number(n).toFixed(2) : '—'
+            // DD-MMM-YYYY (e.g. "23-May-2026") — same format the case-wise
+            // view uses so the two tables read identically.
             const fmtCellDate = (d) => {
               if (!d) return '—'
               const [y, m, day] = d.split('-')
               const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-              return `${day} ${months[+m - 1]}`
+              return `${day}-${months[+m - 1]}-${y}`
             }
             const totals = filteredBranchRows.reduce((acc, g) => {
               acc.bills        += g.bills
               acc.gross_weight += g.gross_weight
-              acc.stone_weight += g.stone_weight
-              acc.wastage      += g.wastage
               acc.net_weight   += g.net_weight
               acc.total_amount += g.total_amount
-              acc.svc_charge   += g.svc_charge
               return acc
-            }, { bills: 0, gross_weight: 0, stone_weight: 0, wastage: 0, net_weight: 0, total_amount: 0, svc_charge: 0 })
+            }, { bills: 0, gross_weight: 0, net_weight: 0, total_amount: 0 })
             return (
             <div style={{ overflowX: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'auto' }}>
                 <thead>
                   <tr>
                     {[
-                      { k: 'consignment_date',       l: 'Consignment Date',    a: 'left'  },
-                      { k: 'branch_name',            l: 'Branch',              a: 'left'  },
-                      { k: 'bills',                  l: 'No of Bills',         a: 'right' },
-                      { k: 'gross_weight',           l: 'Gross Wt (g)',        a: 'right' },
-                      { k: 'stone_weight',           l: 'Stone (g)',           a: 'right' },
-                      { k: 'wastage',                l: 'Wastage (g)',         a: 'right' },
-                      { k: 'net_weight',             l: 'Net Wt (g)',          a: 'right' },
-                      { k: 'total_amount',           l: 'Amount',              a: 'right' },
-                      { k: 'svc_charge',             l: 'Service Charge',      a: 'right' },
-                      { k: 'expected_delivery_date', l: 'Expected Delivery',   a: 'left'  },
-                    ].map(col => (
-                      <th key={col.k} onClick={() => handleSort(col.k)} style={th(col)}>
-                        {col.l}{sortIcon(col.k)}
-                      </th>
-                    ))}
+                      { k: 'consignment_date',       l: 'Consignment Date',  a: 'center' },
+                      { k: 'branch_name',            l: 'Branch',            a: 'left'   },
+                      { k: 'bills',                  l: 'No of Bills',       a: 'right'  },
+                      { k: 'gross_weight',           l: 'Gross Wt (g)',      a: 'right'  },
+                      { k: 'net_weight',             l: 'Net Wt (g)',        a: 'right'  },
+                      { k: 'total_amount',           l: 'Amount',            a: 'right'  },
+                      { k: 'expected_delivery_date', l: 'Expected Delivery', a: 'center' },
+                    ].map(col => {
+                      // Sort arrow on the leading side for right-aligned columns
+                      // so the label sits flush with the values below. Same
+                      // pattern the case-wise table uses.
+                      const arrow = (
+                        <span style={{ color: sortKey === col.k ? t.gold : t.text4, fontSize: '10px' }}>
+                          {sortKey === col.k ? (sortDir === -1 ? '↓' : '↑') : '⇅'}
+                        </span>
+                      )
+                      return (
+                        <th key={col.k} onClick={() => handleSort(col.k)} style={th(col)}>
+                          {col.a === 'right'
+                            ? <><span style={{ marginRight: '3px' }}>{arrow}</span>{col.l}</>
+                            : <>{col.l}<span style={{ marginLeft: '3px' }}>{arrow}</span></>}
+                        </th>
+                      )
+                    })}
                   </tr>
                   {/* Σ TOTALS — pinned just under the headers */}
                   <tr style={{ background: `${t.gold}0c`, borderBottom: `1px solid ${t.gold}40` }}>
                     <td style={{ ...tdL, color: t.gold, fontWeight: 700, letterSpacing: '.04em', whiteSpace: 'nowrap' }}>Σ TOTALS</td>
-                    <td style={{ ...tdL, color: t.text3, fontSize: '10px' }}>{filteredBranchRows.length} row{filteredBranchRows.length === 1 ? '' : 's'}</td>
+                    <td style={{ ...tdL, color: t.text3, fontSize: '11px' }}>{filteredBranchRows.length} row{filteredBranchRows.length === 1 ? '' : 's'}</td>
                     <td style={{ ...tdR, color: t.gold,  fontWeight: 700 }}>{totals.bills}</td>
                     <td style={{ ...tdR, color: t.text2, fontWeight: 600 }}>{fmtWt(totals.gross_weight)}</td>
-                    <td style={{ ...tdR, color: t.text3 }}>{fmtWt(totals.stone_weight)}</td>
-                    <td style={{ ...tdR, color: t.text3 }}>{fmtWt(totals.wastage)}</td>
                     <td style={{ ...tdR, color: t.gold,  fontWeight: 700 }}>{fmtWt(totals.net_weight)}</td>
                     <td style={{ ...tdR, color: t.text2, fontWeight: 600 }}>{fmtAmt(totals.total_amount)}</td>
-                    <td style={{ ...tdR, color: t.text3 }}>{fmtAmt(totals.svc_charge)}</td>
                     <td style={tdL} />
                   </tr>
                 </thead>
@@ -886,19 +886,16 @@ export default function ConsignmentReport() {
                         style={{ borderBottom: `1px solid ${t.border}25`, background: zebra, transition: 'background .12s ease' }}
                         onMouseEnter={e => { e.currentTarget.style.background = `${t.gold}0e` }}
                         onMouseLeave={e => { e.currentTarget.style.background = zebra }}>
-                        <td style={{ ...tdL, color: t.gold, fontFamily: 'monospace', fontWeight: 600, whiteSpace: 'nowrap' }}>{fmtCellDate(g.consignment_date)}</td>
+                        <td style={{ ...tdC, color: t.gold, fontWeight: 600, whiteSpace: 'nowrap' }}>{fmtCellDate(g.consignment_date)}</td>
                         <td style={tdL}>
                           <div style={{ color: t.text1, fontWeight: 600 }}>{g.branch_name}</div>
-                          {g.region && <div style={{ fontSize: '10px', color: rColor, marginTop: 1 }}>{g.region}</div>}
+                          {g.region && <div style={{ fontSize: '11px', color: rColor, marginTop: 1 }}>{g.region}</div>}
                         </td>
                         <td style={{ ...tdR, color: t.gold, fontWeight: 600 }}>{g.bills}</td>
                         <td style={{ ...tdR, color: t.text2 }}>{fmtWt(g.gross_weight)}</td>
-                        <td style={{ ...tdR, color: t.text3 }}>{fmtWt(g.stone_weight)}</td>
-                        <td style={{ ...tdR, color: t.text3 }}>{fmtWt(g.wastage)}</td>
                         <td style={{ ...tdR, color: t.gold, fontWeight: 600 }}>{fmtWt(g.net_weight)}</td>
                         <td style={{ ...tdR, color: t.text2 }}>{fmtAmt(g.total_amount)}</td>
-                        <td style={{ ...tdR, color: t.text3 }}>{fmtAmt(g.svc_charge)}</td>
-                        <td style={{ ...tdL, color: t.green, fontFamily: 'monospace', whiteSpace: 'nowrap' }}>{fmtCellDate(g.expected_delivery_date)}</td>
+                        <td style={{ ...tdC, color: t.green, whiteSpace: 'nowrap' }}>{fmtCellDate(g.expected_delivery_date)}</td>
                       </tr>
                     )
                   })}
