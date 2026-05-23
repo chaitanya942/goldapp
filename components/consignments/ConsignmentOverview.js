@@ -5,7 +5,9 @@ import { createPortal } from 'react-dom'
 import { useApp, useRegionAccess } from '../../lib/context'
 import GoldSpinner from '../ui/GoldSpinner'
 import { authedFetch, prefetch } from '../../lib/authedFetch'
+import { supabase } from '../../lib/supabase'
 import { triggerSync } from '../../lib/triggerSync'
+import { getCache, setCache } from '../../lib/moduleCache'
 import { CONSIGNMENT_THEMES as THEMES, REGION_COLORS, useMobile } from '../../lib/consignmentTheme'
 import { istToday, istNow } from '../../lib/dateIst'
 
@@ -68,8 +70,10 @@ export default function ConsignmentOverview() {
   const t = THEMES[theme]
   const isMobile = useMobile()
 
-  const [data,         setData]         = useState([])
-  const [loading,      setLoading]      = useState(true)
+  // Seed from in-memory cache so a re-open paints instantly while a fresh
+  // fetch runs silently in the background (stale-while-revalidate).
+  const [data,         setData]         = useState(() => getCache('co:branch-overview') ?? [])
+  const [loading,      setLoading]      = useState(() => !getCache('co:branch-overview'))
   const [search,       setSearch]       = useState('')
   const [activeRegion, setActiveRegion] = useState(null)
   // Default sort: total net weight desc (largest stockholders first). Management
@@ -129,6 +133,7 @@ export default function ConsignmentOverview() {
       setRecentlyChanged(justChanged)
       setTimeout(() => setRecentlyChanged(new Set()), 6000)
     }
+    setCache('co:branch-overview', next)
     setData(next)
     setLastRefresh(new Date())
     if (!silent) setLoading(false)
@@ -141,13 +146,32 @@ export default function ConsignmentOverview() {
   // overlapping calls). Drops the previous 3-min interval where ops sat on
   // stale stock while new approvals piled up in CRM.
   useEffect(() => {
-    fetchData()                                                              // first paint — spinner is fine
+    // If we already have cached rows from a previous mount, refresh silently
+    // so the screen never flips to a spinner on re-open.
+    const haveCache = !!getCache('co:branch-overview')
+    fetchData(haveCache)
     triggerSync({ minIntervalMs: 0 }).then(res => { if (res) fetchData(true) })  // silent: data already on screen
     const interval = setInterval(() => {
       triggerSync()
       fetchData(true)                                                        // silent: background poll
     }, 15 * 1000)
     return () => clearInterval(interval)
+  }, [fetchData])
+
+  // Supabase Realtime — the 60s cron sync writes new/updated bills into
+  // `purchases`; subscribing here closes the 0–15s gap between the sync
+  // landing and the next UI poll picking it up. A burst of upserts triggers
+  // one debounced refetch so we don't hammer the RPC for every row.
+  useEffect(() => {
+    let timer = null
+    const channel = supabase
+      .channel('co-branch-overview-live')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'purchases' }, () => {
+        if (timer) clearTimeout(timer)
+        timer = setTimeout(() => fetchData(true), 1200)
+      })
+      .subscribe()
+    return () => { if (timer) clearTimeout(timer); supabase.removeChannel(channel) }
   }, [fetchData])
 
   // Live "X min ago" clock — also drives the pickup-alert recomputation.
