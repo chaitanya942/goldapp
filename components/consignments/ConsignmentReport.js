@@ -841,13 +841,13 @@ export default function ConsignmentReport() {
                 <thead>
                   <tr>
                     {[
-                      { k: 'consignment_date',       l: 'Consignment Date',  a: 'center' },
+                      { k: 'consignment_date',       l: 'Consignment Date',  a: 'left'   },
                       { k: 'branch_name',            l: 'Branch',            a: 'left'   },
                       { k: 'bills',                  l: 'No of Bills',       a: 'right'  },
                       { k: 'gross_weight',           l: 'Gross Wt (g)',      a: 'right'  },
                       { k: 'net_weight',             l: 'Net Wt (g)',        a: 'right'  },
                       { k: 'total_amount',           l: 'Amount',            a: 'right'  },
-                      { k: 'expected_delivery_date', l: 'Expected Delivery', a: 'center' },
+                      { k: 'expected_delivery_date', l: 'Expected Delivery', a: 'left'   },
                     ].map(col => {
                       // Sort arrow on the leading side for right-aligned columns
                       // so the label sits flush with the values below. Same
@@ -866,10 +866,17 @@ export default function ConsignmentReport() {
                       )
                     })}
                   </tr>
-                  {/* Σ TOTALS — pinned just under the headers */}
+                  {/* Σ TOTALS — pinned just under the headers. Row count is
+                      inlined with the Σ label in the first cell so col 2 stays
+                      clean for the actual branch / total summary. */}
                   <tr style={{ background: `${t.gold}0c`, borderBottom: `1px solid ${t.gold}40` }}>
-                    <td style={{ ...tdL, color: t.gold, fontWeight: 700, letterSpacing: '.04em', whiteSpace: 'nowrap' }}>Σ TOTALS</td>
-                    <td style={{ ...tdL, color: t.text3, fontSize: '11px' }}>{filteredBranchRows.length} row{filteredBranchRows.length === 1 ? '' : 's'}</td>
+                    <td style={{ ...tdL, color: t.gold, fontWeight: 700, letterSpacing: '.04em', whiteSpace: 'nowrap' }}>
+                      Σ TOTALS
+                      <span style={{ color: t.text3, fontWeight: 500, marginLeft: 8, letterSpacing: 0, fontSize: '11px' }}>
+                        · {filteredBranchRows.length} row{filteredBranchRows.length === 1 ? '' : 's'}
+                      </span>
+                    </td>
+                    <td style={tdL} />
                     <td style={{ ...tdR, color: t.gold,  fontWeight: 700 }}>{totals.bills}</td>
                     <td style={{ ...tdR, color: t.text2, fontWeight: 600 }}>{fmtWt(totals.gross_weight)}</td>
                     <td style={{ ...tdR, color: t.gold,  fontWeight: 700 }}>{fmtWt(totals.net_weight)}</td>
@@ -886,7 +893,7 @@ export default function ConsignmentReport() {
                         style={{ borderBottom: `1px solid ${t.border}25`, background: zebra, transition: 'background .12s ease' }}
                         onMouseEnter={e => { e.currentTarget.style.background = `${t.gold}0e` }}
                         onMouseLeave={e => { e.currentTarget.style.background = zebra }}>
-                        <td style={{ ...tdC, color: t.gold, fontWeight: 600, whiteSpace: 'nowrap' }}>{fmtCellDate(g.consignment_date)}</td>
+                        <td style={{ ...tdL, color: t.gold, fontFamily: 'monospace', fontWeight: 600, whiteSpace: 'nowrap' }}>{fmtCellDate(g.consignment_date)}</td>
                         <td style={tdL}>
                           <div style={{ color: t.text1, fontWeight: 600 }}>{g.branch_name}</div>
                           {g.region && <div style={{ fontSize: '11px', color: rColor, marginTop: 1 }}>{g.region}</div>}
@@ -895,7 +902,7 @@ export default function ConsignmentReport() {
                         <td style={{ ...tdR, color: t.text2 }}>{fmtWt(g.gross_weight)}</td>
                         <td style={{ ...tdR, color: t.gold, fontWeight: 600 }}>{fmtWt(g.net_weight)}</td>
                         <td style={{ ...tdR, color: t.text2 }}>{fmtAmt(g.total_amount)}</td>
-                        <td style={{ ...tdC, color: t.green, whiteSpace: 'nowrap' }}>{fmtCellDate(g.expected_delivery_date)}</td>
+                        <td style={{ ...tdL, color: t.green, fontFamily: 'monospace', whiteSpace: 'nowrap' }}>{fmtCellDate(g.expected_delivery_date)}</td>
                       </tr>
                     )
                   })}
