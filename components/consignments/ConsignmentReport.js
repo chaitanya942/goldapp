@@ -925,12 +925,12 @@ export default function ConsignmentReport() {
             // Case-wise table — tighter than the branch-wise rollup so all 14
             // columns fit a 1440px+ viewport without horizontal scroll. Smaller
             // viewports still get the overflow-x scroll fallback below.
-            const caseTdPad = '7px 8px'
+            const caseTdPad = '9px 12px'
             const caseTd    = { padding: caseTdPad, verticalAlign: 'middle', fontSize: '10.5px' }
             const caseTdL   = { ...caseTd, textAlign: 'left' }
             const caseTdR   = { ...caseTd, textAlign: 'right', fontFamily: 'monospace' }
             const caseTh    = (col) => ({
-              padding: '8px 8px', fontSize: '9px', color: caseSortKey === col.k ? t.gold : t.text4,
+              padding: '9px 12px', fontSize: '9px', color: caseSortKey === col.k ? t.gold : t.text4,
               letterSpacing: '.04em', textTransform: 'uppercase',
               background: t.card2, borderBottom: `1px solid ${t.border}`,
               whiteSpace: 'nowrap', fontWeight: 600, userSelect: 'none',
@@ -954,14 +954,26 @@ export default function ConsignmentReport() {
                       { k: 'total_amount',              l: 'Gross Amt',  a: 'right' },
                       { k: 'dispatched_at',             l: 'Consignment Date', a: 'left' },
                       { k: 'stock_status',              l: 'Status',     a: 'left'  },
-                    ].map(col => (
-                      <th key={col.k} onClick={() => handleCaseSort(col.k)} style={caseTh(col)}>
-                        {col.l}
-                        <span style={{ color: caseSortKey === col.k ? t.gold : t.text4, fontSize: '9px', marginLeft: '3px' }}>
+                    ].map(col => {
+                      // Put the sort arrow on the *leading* side of the label
+                      // — right-aligned columns get the arrow before the label
+                      // so the label text still sits flush at the column's
+                      // right edge, lined up with the right-aligned values
+                      // below. Left-aligned columns keep the arrow after the
+                      // label so the label sits flush at the left edge.
+                      const arrow = (
+                        <span style={{ color: caseSortKey === col.k ? t.gold : t.text4, fontSize: '9px' }}>
                           {caseSortKey === col.k ? (caseSortDir === -1 ? '↓' : '↑') : '⇅'}
                         </span>
-                      </th>
-                    ))}
+                      )
+                      return (
+                        <th key={col.k} onClick={() => handleCaseSort(col.k)} style={caseTh(col)}>
+                          {col.a === 'right'
+                            ? <><span style={{ marginRight: '3px' }}>{arrow}</span>{col.l}</>
+                            : <>{col.l}<span style={{ marginLeft: '3px' }}>{arrow}</span></>}
+                        </th>
+                      )
+                    })}
                   </tr>
                   {/* Σ TOTALS — pinned just under the headers. Sums across
                       the currently-filtered rows; Svc % is a weighted avg
@@ -996,12 +1008,6 @@ export default function ConsignmentReport() {
                             style={{ color: t.gold, fontFamily: 'monospace', fontWeight: 600, cursor: 'pointer', borderBottom: `1px dashed ${t.gold}50` }}>
                             {r.application_id || '—'}
                           </span>
-                          {r.consignment?.tmp_prf_no && (
-                            <span title={`Consignment ${r.consignment.tmp_prf_no}`}
-                              style={{ marginLeft: 6, fontSize: '9px', color: t.purple, background: `${t.purple}15`, border: `1px solid ${t.purple}30`, borderRadius: 3, padding: '1px 5px', fontFamily: 'monospace', letterSpacing: '.02em' }}>
-                              {r.consignment.tmp_prf_no}
-                            </span>
-                          )}
                         </td>
                         <td style={{ ...caseTdL, color: t.text2, whiteSpace: 'nowrap' }}>{r.purchase_date ? fmtDate(r.purchase_date) : '—'}</td>
                         <td style={{ ...caseTdL, color: t.text1 }}>{r.customer_name || '—'}</td>
