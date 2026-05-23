@@ -925,12 +925,15 @@ export default function ConsignmentReport() {
             // Case-wise table — tighter than the branch-wise rollup so all 14
             // columns fit a 1440px+ viewport without horizontal scroll. Smaller
             // viewports still get the overflow-x scroll fallback below.
-            const caseTdPad = '9px 12px'
-            const caseTd    = { padding: caseTdPad, verticalAlign: 'middle', fontSize: '10.5px' }
+            // Bumped cell + header font sizes so the 9-column table fills
+            // wide viewports comfortably without giant gaps between columns.
+            const caseTdPad = '11px 14px'
+            const caseTd    = { padding: caseTdPad, verticalAlign: 'middle', fontSize: '13px' }
             const caseTdL   = { ...caseTd, textAlign: 'left' }
             const caseTdR   = { ...caseTd, textAlign: 'right', fontFamily: 'monospace' }
+            const caseTdC   = { ...caseTd, textAlign: 'center', fontFamily: 'monospace' }
             const caseTh    = (col) => ({
-              padding: '9px 12px', fontSize: '9px', color: caseSortKey === col.k ? t.gold : t.text4,
+              padding: '11px 14px', fontSize: '10.5px', color: caseSortKey === col.k ? t.gold : t.text4,
               letterSpacing: '.04em', textTransform: 'uppercase',
               background: t.card2, borderBottom: `1px solid ${t.border}`,
               whiteSpace: 'nowrap', fontWeight: 600, userSelect: 'none',
@@ -952,7 +955,7 @@ export default function ConsignmentReport() {
                       { k: 'gross_weight',              l: 'Gross (g)',  a: 'right' },
                       { k: 'net_weight',                l: 'Net (g)',    a: 'right' },
                       { k: 'total_amount',              l: 'Gross Amt',  a: 'right' },
-                      { k: 'dispatched_at',             l: 'Consignment Date', a: 'left' },
+                      { k: 'dispatched_at',             l: 'Consignment Date', a: 'center' },
                       { k: 'stock_status',              l: 'Status',     a: 'left'  },
                     ].map(col => {
                       // Put the sort arrow on the *leading* side of the label
@@ -1015,9 +1018,9 @@ export default function ConsignmentReport() {
                         <td style={{ ...caseTdR, color: t.text2 }}>{fmtWt(r.gross_weight)}</td>
                         <td style={{ ...caseTdR, color: t.gold, fontWeight: 600 }}>{fmtWt(r.net_weight)}</td>
                         <td style={{ ...caseTdR, color: t.text2 }}>{fmtAmt(r.total_amount)}</td>
-                        <td style={{ ...caseTdL, color: t.text2, fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
+                        <td style={{ ...caseTdC, color: t.text2, whiteSpace: 'nowrap' }}>
                           {r.dispatched_at
-                            ? new Date(r.dispatched_at).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short' })
+                            ? new Date(r.dispatched_at).toLocaleDateString('en-GB', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', year: 'numeric' }).replace(/ /g, '-')
                             : '—'}
                         </td>
                         <td style={caseTdL}>
