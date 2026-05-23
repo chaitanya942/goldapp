@@ -229,15 +229,23 @@ export default function ConsignmentReport() {
   // Pre-lowered search term — shared by all filter passes below.
   const searchQ = useMemo(() => (search || '').toLowerCase(), [search])
 
-  // ── Region discovery (derived from caseData, which has `region` attached
-  //     by the API). No separate branches fetch needed.
+  // ── Region discovery. Always render cards for the 4 canonical regions even
+  //     when a date window has zero dispatches from one of them — ops wants
+  //     a consistent "scan all regions at a glance" view. Extras seen in the
+  //     data (e.g. Bangalore via the 19:30 IST lifecycle) are appended.
+  //     Region-restricted users only see their allowed set.
   const regions = useMemo(() => {
-    const all = [...new Set(caseData.map(b => b.region).filter(Boolean))]
+    const baseRegions = ['Rest of Karnataka', 'Kerala', 'Andhra Pradesh', 'Telangana']
+    const dataRegions = [...new Set(caseData.map(b => b.region).filter(Boolean))]
+    const all = [...new Set([...baseRegions, ...dataRegions])]
+    const visible = regionAccess.restricted
+      ? all.filter(r => regionAccess.regions.includes(r))
+      : all
     return [
-      ...REGION_ORDER.filter(r => all.includes(r)),
-      ...all.filter(r => !REGION_ORDER.includes(r)).sort(),
+      ...REGION_ORDER.filter(r => visible.includes(r)),
+      ...visible.filter(r => !REGION_ORDER.includes(r)).sort(),
     ]
-  }, [caseData])
+  }, [caseData, regionAccess.restricted, regionAccess.regions])
 
   // Map branch_name → region for callers that don't have the bill row handy
   // (kept for backwards compatibility with the case-row filter logic).
@@ -516,10 +524,12 @@ export default function ConsignmentReport() {
   }
   const tdPad = '10px 12px'
 
-  // ── Region card stats — both views derive from the *date-filtered* bill
-  //     rows so the flashcards never lie about what's in the table below.
+  // ── Region card stats — derived from the *date-filtered* caseData (not the
+  //     region-filtered rows). That way clicking "Rest of Karnataka" filters
+  //     the table below but each region card keeps showing its own region's
+  //     totals for the date window. "All Regions" stays at the grand total.
   const regionStatsView = useMemo(() => regions.reduce((acc, r) => {
-    const rows        = filteredCaseRows.filter(row => row.region === r)
+    const rows        = caseData.filter(row => row.region === r)
     const branchNames = new Set(rows.map(row => row.branch_name))
     acc[r] = {
       branches:        branchNames.size,
@@ -528,14 +538,14 @@ export default function ConsignmentReport() {
       total_net_wt:    rows.reduce((s, row) => s + Number(row.net_weight || 0), 0),
     }
     return acc
-  }, {}), [regions, filteredCaseRows])
+  }, {}), [regions, caseData])
 
   const allStatsView = useMemo(() => ({
-    allBills:       filteredCaseRows.length,
-    allNetWt:       filteredCaseRows.reduce((s, r) => s + Number(r.net_weight || 0), 0),
-    activeBranches: new Set(filteredCaseRows.map(r => r.branch_name)).size,
+    allBills:       caseData.length,
+    allNetWt:       caseData.reduce((s, r) => s + Number(r.net_weight || 0), 0),
+    activeBranches: new Set(caseData.map(r => r.branch_name)).size,
     totalBranches:  new Set(caseData.map(r => r.branch_name)).size,
-  }), [filteredCaseRows, caseData])
+  }), [caseData])
 
   return (
     <div style={{ padding: '18px 16px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
