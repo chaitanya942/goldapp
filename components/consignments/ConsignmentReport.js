@@ -374,7 +374,7 @@ export default function ConsignmentReport() {
     else { setCaseSortKey(key); setCaseSortDir(-1) }
   }
 
-  // JPG export — POSTs the currently-filtered rows to the server, which
+  // PNG export — POSTs the currently-filtered rows to the server, which
   // renders them via @napi-rs/canvas and streams back a JPEG. The two views
   // share the endpoint; the layout switches on viewMode (case = per-bill
   // App ID, branch = aggregated No of Bills).
@@ -394,7 +394,7 @@ export default function ConsignmentReport() {
       setToast({ msg: 'Nothing to export — empty filter.', type: 'error' })
       return
     }
-    setToast({ msg: 'Generating JPG…', type: 'info' })
+    setToast({ msg: 'Generating image…', type: 'info' })
     try {
       const res = await authedFetch('/api/consignment-in-transit-jpg', {
         method: 'POST',
@@ -414,12 +414,12 @@ export default function ConsignmentReport() {
       const blob = await res.blob()
       const a = document.createElement('a')
       a.href = URL.createObjectURL(blob)
-      a.download = `ConsignmentReport_${viewMode}_${istToday()}.jpg`
+      a.download = `ConsignmentReport_${viewMode}_${istToday()}.png`
       a.click()
       URL.revokeObjectURL(a.href)
-      setToast({ msg: 'JPG ready.', type: 'success' })
+      setToast({ msg: 'Image ready.', type: 'success' })
     } catch (e) {
-      setToast({ msg: e.message || 'JPG export failed', type: 'error' })
+      setToast({ msg: e.message || 'Image export failed', type: 'error' })
     }
   }
 
@@ -780,14 +780,14 @@ export default function ConsignmentReport() {
             ↓ CSV
           </button>
           <button onClick={downloadJpg}
-            title={`Download the current view as JPG (${viewMode === 'branch' ? 'branch-wise rows' : 'per-bill rows'})`}
+            title={`Download the current view as PNG (${viewMode === 'branch' ? 'branch-wise rows' : 'per-bill rows'})`}
             style={{
               padding: '6px 12px', borderRadius: '6px',
               background: `${t.gold}10`, border: `1px solid ${t.gold}50`,
               color: t.gold, fontSize: '11px', fontWeight: 700,
               cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '5px',
             }}>
-            ↓ JPG
+            ↓ PNG
           </button>
         </div>
       </div>

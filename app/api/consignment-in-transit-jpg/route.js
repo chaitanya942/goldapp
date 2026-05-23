@@ -1,10 +1,15 @@
 // app/api/consignment-in-transit-jpg/route.js
 //
 // POST { viewMode: 'branch'|'case', rows: [...], meta?: {...} }
-//   → JPEG image of the in-transit Consignment Report.
+//   → PNG image of the Consignment Report.
+//
+// Returns PNG (lossless) rather than JPEG — text-heavy reports get visible
+// chroma-subsampling ghosting on JPEG bodies, no matter the quality setting.
+// The endpoint URL keeps the `-jpg` slug for backward compatibility with the
+// client button; the downloaded file is .png and the Content-Type matches.
 //
 // Rows are passed verbatim from the client (already filtered + sorted) so the
-// JPG matches what ops sees on screen. No DB roundtrip on the server side
+// image matches what ops sees on screen. No DB roundtrip on the server side
 // beyond auth — the same in_transit_stock pull that drives the UI is reused.
 
 import { requireAuth } from '../../../lib/apiAuth'
@@ -30,7 +35,7 @@ export async function POST(req) {
   }
 
   try {
-    const jpegBuffer = await generateInTransitJpg({
+    const pngBuffer = await generateInTransitJpg({
       viewMode,
       rows,
       meta: {
@@ -39,14 +44,14 @@ export async function POST(req) {
         generated_by: auth.profile?.email || auth.user?.email || null,
       },
     })
-    return new Response(jpegBuffer, {
+    return new Response(pngBuffer, {
       headers: {
-        'Content-Type':        'image/jpeg',
-        'Content-Disposition': `attachment; filename="ConsignmentReport_${viewMode}_${new Date().toISOString().slice(0, 10)}.jpg"`,
+        'Content-Type':        'image/png',
+        'Content-Disposition': `attachment; filename="ConsignmentReport_${viewMode}_${new Date().toISOString().slice(0, 10)}.png"`,
       },
     })
   } catch (err) {
-    console.error('in-transit JPG generation error:', err)
-    return Response.json({ error: err.message || 'Failed to generate JPG' }, { status: 500 })
+    console.error('Consignment Report image generation error:', err)
+    return Response.json({ error: err.message || 'Failed to generate report image' }, { status: 500 })
   }
 }
