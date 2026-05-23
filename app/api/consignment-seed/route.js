@@ -26,11 +26,15 @@ export async function GET(req) {
         .order('region')
         .order('name'),
 
-      // 2. All consignments — just the columns we need to derive per-branch max tmp_prf_no
+      // 2. All consignments — just the columns we need to derive per-branch
+      // max tmp_prf_no. Exclude cancelled rows so the "last used" shown on
+      // the seeds page matches what the next-number generator will see: a
+      // cancellation gives the number back to the pool.
       supabase
         .from('consignments')
-        .select('branch_name, tmp_prf_no, challan_no, branch_code')
+        .select('branch_name, tmp_prf_no, challan_no, branch_code, status')
         .not('tmp_prf_no', 'is', null)
+        .neq('status', 'cancelled')
         .order('tmp_prf_no', { ascending: false }),
 
       // 3. Global max external_no (seed floor: 001903)
@@ -78,6 +82,11 @@ export async function GET(req) {
 
 // POST: Manually set seed consignment for a branch — changes the next
 // number issued. Allowed for any role granted page.consignment-seeds.
+//
+// Ops only need to set the TMP PRF (the "tamper-proof" number). external_no
+// and challan_no on a seed row are placeholders; the live external_no
+// sequence skips status='seed' rows so these values never bleed into a
+// real consignment's challan. Both are auto-generated if not provided.
 export async function POST(req) {
   const auth = await requireAuthForPage(req, 'consignment-seeds')
   if (!auth.ok) return auth.response
@@ -85,17 +94,20 @@ export async function POST(req) {
     const body = await req.json()
     const { branch_name, tmp_prf_no, external_no, challan_no, state_code, branch_code } = body
 
-    if (!branch_name || !tmp_prf_no || !external_no) {
-      return Response.json({ error: 'Missing required fields' }, { status: 400 })
+    if (!branch_name || !tmp_prf_no) {
+      return Response.json({ error: 'branch_name and tmp_prf_no are required' }, { status: 400 })
     }
 
-    const challanFinal = challan_no || `SEED-${branch_name}`
+    // Placeholder values — these only live on this seed row and never form
+    // a real challan. The TMP PRF the user actually cares about is set above.
+    const externalNoFinal = external_no || `SEED-${branch_name}-${tmp_prf_no}`
+    const challanFinal    = challan_no  || `SEED-${branch_name}-${tmp_prf_no}`
     const { data, error } = await supabase
       .from('consignments')
       .insert({
         consignment_no: challanFinal,                 // NOT NULL — mirror challan_no
         tmp_prf_no,
-        external_no,
+        external_no:   externalNoFinal,
         internal_no:   null,
         challan_no:    challanFinal,
         branch_name,

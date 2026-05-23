@@ -16,7 +16,6 @@ export default function ConsignmentSeeds() {
   const t = THEMES[theme]
 
   const [loading, setLoading]       = useState(true)
-  const [lastExtNo, setLastExtNo]   = useState('')
   const [branches, setBranches]     = useState([])
   const [message, setMessage]     = useState(null)
   const [collapsed, setCollapsed] = useState({})
@@ -28,32 +27,38 @@ export default function ConsignmentSeeds() {
     setLoading(true)
     const res  = await authedFetch('/api/consignment-seed')
     const data = await res.json()
-    setLastExtNo(data.last_external_no || '000000')
     setBranches(data.branches || [])
     setLoading(false)
   }
 
+  // One-prompt seed flow. Ops only need to set the TMP PRF (the "tamper-proof"
+  // number) for a branch — external_no is a server-side placeholder that
+  // never surfaces. Modal title and message show the *current* last-used value
+  // so they know what they're modifying.
   async function setSeed(branch) {
-    const newExtNo = await openPrompt({
-      title: `Seed external number for ${branch.branch_name}`,
-      message: 'Enter the last used External No. The next consignment from this branch will increment from this value.',
-      defaultValue: branch.last_external_no || '',
-      placeholder: 'e.g. 000123',
-      rows: 1,
-      maxLength: 20,
-      confirmLabel: 'Next',
-    })
-    if (!newExtNo) return
+    const current = branch.last_tmp_prf_no && branch.last_tmp_prf_no !== '—'
+      ? branch.last_tmp_prf_no
+      : null
     const newTmpPrf = await openPrompt({
-      title: `Seed TMP PRF for ${branch.branch_name}`,
-      message: 'Enter the last used TMP PRF No (8 chars, e.g. WG000045). The next PRF will increment from this value.',
-      defaultValue: branch.last_tmp_prf_no === '—' ? 'WG000000' : branch.last_tmp_prf_no,
-      placeholder: 'WG000000',
-      rows: 1,
-      maxLength: 20,
-      confirmLabel: 'Save seed',
+      title:        `Edit last used TMP PRF for ${branch.branch_name}`,
+      message:      current
+        ? `Current last used: ${current}\n\nEnter the new last used TMP PRF. The next consignment from this branch will use the number right after this value.`
+        : `No TMP PRF set yet for this branch.\n\nEnter the last used TMP PRF (e.g. WG000022). The next consignment will use the number right after this value.`,
+      defaultValue: current || 'WG000000',
+      placeholder:  'WG000022',
+      rows:         1,
+      maxLength:    20,
+      confirmLabel: 'Save',
     })
     if (!newTmpPrf) return
+
+    // Light validation — the value must look like WG followed by digits.
+    const normalised = String(newTmpPrf).trim().toUpperCase()
+    if (!/^WG\d{1,8}$/.test(normalised)) {
+      setMessage({ type: 'error', text: 'TMP PRF must look like WG followed by digits (e.g. WG000022).' })
+      setTimeout(() => setMessage(null), 4000)
+      return
+    }
 
     setLoading(true)
     const res = await authedFetch('/api/consignment-seed', {
@@ -61,16 +66,15 @@ export default function ConsignmentSeeds() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         branch_name: branch.branch_name,
-        tmp_prf_no:  newTmpPrf,
-        external_no: newExtNo,
-        challan_no:  `SEED-${branch.branch_name}-${newExtNo}`,
+        tmp_prf_no:  normalised,
+        // external_no + challan_no left blank — server fills with placeholders
         state_code:  branch.branch_code?.substring(0, 2) || 'KA',
         branch_code: branch.branch_code,
       }),
     })
     const result = await res.json()
     if (result.success) {
-      setMessage({ type: 'success', text: `Seed updated for ${branch.branch_name}` })
+      setMessage({ type: 'success', text: `TMP PRF for ${branch.branch_name} updated to ${normalised}` })
       fetchSeeds()
     } else {
       setMessage({ type: 'error', text: result.error })
@@ -101,7 +105,6 @@ export default function ConsignmentSeeds() {
 
   const seeded    = branches.filter(b => b.last_tmp_prf_no !== '—').length
   const pending   = branches.length - seeded
-  const nextExtNo = nextNo(lastExtNo)
 
   const card    = { background: t.card, border: `1px solid ${t.border}`, borderRadius: '10px' }
   const btnGold = { background: t.gold, color: '#1a0a00', border: 'none', borderRadius: '7px', padding: '4px 10px', fontSize: '11px', fontWeight: 700, cursor: 'pointer' }
@@ -125,7 +128,10 @@ export default function ConsignmentSeeds() {
         </div>
       )}
 
-      {/* Stats bar */}
+      {/* Stats bar — focused on what ops needs: how many branches need a seed,
+          how many are done. The legacy "Next External No — Global" card was
+          dropped: the external sequence is server-managed and not something
+          ops should be looking at on this page. */}
       <div style={{ display: 'flex', gap: '10px' }}>
         {[
           { label: 'Total Branches', value: branches.length, color: t.gold },
@@ -137,11 +143,6 @@ export default function ConsignmentSeeds() {
             <div style={{ fontSize: '22px', fontWeight: 600, color, marginTop: '4px' }}>{value}</div>
           </div>
         ))}
-        <div style={{ flex: 2, background: t.card2, border: `1px solid ${t.blue}40`, borderRadius: '8px', padding: '12px 16px' }}>
-          <div style={{ fontSize: '10px', color: t.text4, letterSpacing: '.08em', textTransform: 'uppercase', fontWeight: 600 }}>Next External No — Global</div>
-          <div style={{ fontSize: '20px', fontWeight: 700, color: t.blue, fontFamily: 'monospace', marginTop: '4px' }}>{nextExtNo}</div>
-          <div style={{ fontSize: '10px', color: t.text4, marginTop: '2px' }}>Last used: {lastExtNo} · forms the challan suffix</div>
-        </div>
       </div>
 
       {/* Table card */}
@@ -166,7 +167,7 @@ export default function ConsignmentSeeds() {
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead style={{ position: 'sticky', top: 0, zIndex: 1 }}>
                 <tr>
-                  {['Branch', 'Last TMP PRF', 'Next TMP PRF', 'Last Challan No', 'Action'].map(h => (
+                  {['Branch', 'Last TMP PRF', 'Next TMP PRF', 'Action'].map(h => (
                     <th key={h} style={{ padding: '9px 12px', fontSize: '10px', color: t.text4, letterSpacing: '.08em', textTransform: 'uppercase', textAlign: 'left', background: t.card2, borderBottom: `1px solid ${t.border}`, fontWeight: 600, whiteSpace: 'nowrap' }}>{h}</th>
                   ))}
                 </tr>
@@ -180,7 +181,7 @@ export default function ConsignmentSeeds() {
                     <React.Fragment key={region}>
                       {/* Region header */}
                       <tr onClick={() => toggleRegion(region)} style={{ cursor: 'pointer', userSelect: 'none' }}>
-                        <td colSpan={5} style={{ padding: '8px 12px', background: `${t.gold}14`, borderBottom: `1px solid ${t.border}`, borderTop: `1px solid ${t.border}` }}>
+                        <td colSpan={4} style={{ padding: '8px 12px', background: `${t.gold}14`, borderBottom: `1px solid ${t.border}`, borderTop: `1px solid ${t.border}` }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                             <span style={{ fontSize: '10px', color: t.gold }}>{isCollapsed ? '▶' : '▼'}</span>
                             <span style={{ fontSize: '11px', fontWeight: 700, color: t.gold, letterSpacing: '.1em', textTransform: 'uppercase' }}>{region}</span>
@@ -209,9 +210,11 @@ export default function ConsignmentSeeds() {
                             </td>
                             <td style={{ padding: '9px 12px', fontSize: '12px', color: t.gold,  fontFamily: 'monospace', fontWeight: 600 }}>{b.last_tmp_prf_no}</td>
                             <td style={{ padding: '9px 12px', fontSize: '12px', color: t.green, fontFamily: 'monospace', fontWeight: 600 }}>{nextBranchTmp}</td>
-                            <td style={{ padding: '9px 12px', fontSize: '11px', color: t.text3, maxWidth: '260px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.last_challan_no}</td>
                             <td style={{ padding: '9px 12px' }}>
-                              <button onClick={() => setSeed(b)} style={btnGold}>Set Seed</button>
+                              <button onClick={() => setSeed(b)} style={btnGold}
+                                title={isSeeded ? `Change the last used TMP PRF (currently ${b.last_tmp_prf_no})` : 'Set the last used TMP PRF for this branch'}>
+                                {isSeeded ? 'Edit' : 'Set Seed'}
+                              </button>
                             </td>
                           </tr>
                         )
