@@ -13,14 +13,16 @@
 // Branch Stock Overview module already covers it. This page is purely
 // the in-transit report now.
 
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import { useApp, useRegionAccess } from '../../lib/context'
 import GoldSpinner from '../ui/GoldSpinner'
 import Toast from '../ui/Toast'
 import { authedFetch } from '../../lib/authedFetch'
+import { supabase } from '../../lib/supabase'
 import { CONSIGNMENT_THEMES as THEMES, REGION_COLORS, useMobile } from '../../lib/consignmentTheme'
 import { istToday } from '../../lib/dateIst'
+import { getCache, setCache } from '../../lib/moduleCache'
 
 const REGION_ICONS = {
   'Rest of Karnataka': '🏛',
@@ -67,8 +69,14 @@ export default function ConsignmentReport() {
   const t = THEMES[theme]
   const isMobile = useMobile()
 
-  const [data,         setData]         = useState([])
-  const [loading,      setLoading]      = useState(true)
+  // Seed from in-memory cache so a re-open paints the previous in-transit
+  // list instantly while a silent refetch runs in the background.
+  const [data,         setData]         = useState(() => getCache('cr:branch_overview') ?? [])
+  const [loading,      setLoading]      = useState(() => !getCache('cr:branch_overview'))
+  const [loadError,    setLoadError]    = useState(null)
+  // Realtime channel state — drives the IN TRANSIT pill so ops can tell at a
+  // glance whether updates are flowing.
+  const [rtState,      setRtState]      = useState('connecting')
   const [search,       setSearch]       = useState('')
   const [activeRegion, setActiveRegion] = useState(null)
   // Default sort: total net weight desc (largest in-flight exposures first).
@@ -103,9 +111,9 @@ export default function ConsignmentReport() {
   // Case-wise view — bill-level rows from purchases (stock_status='in_consignment').
   // Loaded lazily the first time the user switches to 'case' mode so the
   // branch-wise rollup doesn't pay for 1000s of unused rows.
-  const [caseData,       setCaseData]       = useState([])
+  const [caseData,       setCaseData]       = useState(() => getCache('cr:in_transit_stock') ?? [])
   const [caseLoading,    setCaseLoading]    = useState(false)
-  const [caseLoaded,     setCaseLoaded]     = useState(false)
+  const [caseLoaded,     setCaseLoaded]     = useState(() => !!getCache('cr:in_transit_stock'))
   // "Consignment since" date filter — applied client-side to purchases.dispatched_at
   // (the moment a bill transitioned at_branch → in_consignment). Default: all.
   const [caseSinceQuick, setCaseSinceQuick] = useState('all')
@@ -121,14 +129,17 @@ export default function ConsignmentReport() {
   // { purchase_id, application_id, loading, rows, error } | null
   const [journeyTarget,   setJourneyTarget] = useState(null)
 
-  const fetchData = useCallback(async () => {
-    setLoading(true)
+  const fetchData = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true)
     try {
       // Same RPC the dashboard's Consignment Overview reads — branch-level
       // roll-up for status=in_consignment. include_bangalore=true so the
       // 19:30+ IST Bangalore lifecycle window appears here too.
       const res  = await authedFetch('/api/consignments?action=branch_overview&status=in_consignment&include_bangalore=true')
       const json = await res.json()
+      // The API returns {data, error} even on 200 when the RPC is missing —
+      // surface that instead of silently showing "no rows".
+      if (json.error) throw new Error(json.error)
       const next = json.data || []
       // Detect branches whose today_bills count rose since the last poll —
       // flash them briefly. undefined sentinel so first load doesn't light
@@ -148,36 +159,72 @@ export default function ConsignmentReport() {
         setRecentlyChanged(justChanged)
         setTimeout(() => setRecentlyChanged(new Set()), 6000)
       }
+      setCache('cr:branch_overview', next)
       setData(next)
       setLastRefresh(new Date())
+      setLoadError(null)
     } catch (e) {
-      setToast({ msg: e.message || 'Load failed', type: 'error' })
+      console.error('[consignment-report] load failed:', e)
+      setLoadError(e?.message || 'Load failed')
     }
-    setLoading(false)
+    if (!silent) setLoading(false)
   }, [])
 
   // Bill-level fetch — drives BOTH the case-wise table and (after grouping
   // by branch + dispatched_at::date) the new branch-wise table, so both
   // views share one source of truth. Refreshes every 3 min alongside fetchData.
-  const fetchCaseData = useCallback(async () => {
-    setCaseLoading(true)
+  const fetchCaseData = useCallback(async (silent = false) => {
+    if (!silent) setCaseLoading(true)
     try {
       const res  = await authedFetch('/api/consignments?action=in_transit_stock')
       const json = await res.json()
-      setCaseData(json.data || [])
+      if (json.error) throw new Error(json.error)
+      const next = json.data || []
+      setCache('cr:in_transit_stock', next)
+      setCaseData(next)
       setCaseLoaded(true)
       setLastRefresh(new Date())
+      setLoadError(null)
     } catch (e) {
-      setToast({ msg: e.message || 'Load failed', type: 'error' })
+      console.error('[consignment-report] case-load failed:', e)
+      setLoadError(e?.message || 'Load failed')
     }
-    setCaseLoading(false)
+    if (!silent) setCaseLoading(false)
   }, [])
 
   useEffect(() => {
-    fetchData()
-    fetchCaseData()
-    const interval = setInterval(() => { fetchData(); fetchCaseData() }, 3 * 60 * 1000)
+    // If we already have cached rows from a previous mount, refresh silently
+    // so the screen never flips back to the spinner on re-open.
+    const haveOverview   = !!getCache('cr:branch_overview')
+    const haveTransit    = !!getCache('cr:in_transit_stock')
+    fetchData(haveOverview)
+    fetchCaseData(haveTransit)
+    // Backup poll every 3 min — Realtime is the primary update path.
+    const interval = setInterval(() => { fetchData(true); fetchCaseData(true) }, 3 * 60 * 1000)
     return () => clearInterval(interval)
+  }, [fetchData, fetchCaseData])
+
+  // Supabase Realtime — bills transitioning to/from in_consignment, or
+  // consignments approved/cancelled, change the in-transit view immediately.
+  // A burst of upserts (e.g. one consignment containing 50 bills) coalesces
+  // into a single debounced silent refetch.
+  useEffect(() => {
+    let timer = null
+    const trigger = () => {
+      if (timer) clearTimeout(timer)
+      timer = setTimeout(() => { fetchData(true); fetchCaseData(true) }, 1200)
+    }
+    const channel = supabase
+      .channel('cr-in-transit-live')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'purchases'    }, trigger)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'consignments' }, trigger)
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED')      setRtState('connected')
+        else if (status === 'CLOSED')     setRtState('closed')
+        else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') setRtState('error')
+        else setRtState('connecting')
+      })
+    return () => { if (timer) clearTimeout(timer); supabase.removeChannel(channel) }
   }, [fetchData, fetchCaseData])
 
   // Live "X min ago" clock
@@ -231,12 +278,14 @@ export default function ConsignmentReport() {
   }
 
   // ── Region summary ────────────────────────────────────────────────────────
-  const allRegions = [...new Set(data.map(b => b.region).filter(Boolean))]
-  const regions = [
-    ...REGION_ORDER.filter(r => allRegions.includes(r)),
-    ...allRegions.filter(r => !REGION_ORDER.includes(r)).sort(),
-  ]
-  const regionStats = regions.reduce((acc, r) => {
+  const regions = useMemo(() => {
+    const all = [...new Set(data.map(b => b.region).filter(Boolean))]
+    return [
+      ...REGION_ORDER.filter(r => all.includes(r)),
+      ...all.filter(r => !REGION_ORDER.includes(r)).sort(),
+    ]
+  }, [data])
+  const regionStats = useMemo(() => regions.reduce((acc, r) => {
     const bs = data.filter(b => b.region === r)
     const today_bills  = bs.reduce((s, b) => s + (b.today_bills   || 0), 0)
     const older_bills  = bs.reduce((s, b) => s + (b.older_bills   || 0), 0)
@@ -251,7 +300,7 @@ export default function ConsignmentReport() {
       gross_wt:     bs.reduce((s, b) => s + (b.total_gross_wt || 0), 0),
     }
     return acc
-  }, {})
+  }, {}), [data, regions])
 
   // Always display weights in grams (no kg conversion). Comma-grouped, 2-dp
   // so ops see sub-gram precision on the headline cards.
@@ -261,44 +310,48 @@ export default function ConsignmentReport() {
   })
 
   // ── Filtered + sorted ─────────────────────────────────────────────────────
-  const searchQ = (search || '').toLowerCase()
-  const filtered = data
-    // Hide branches with zero in-flight stock — keeps the table focused.
-    .filter(b => ((b.today_net_wt || 0) + (b.older_net_wt || 0)) > 0)
-    .filter(b => !activeRegion || b.region === activeRegion)
-    .filter(b => !searchQ || (b.branch_name || '').toLowerCase().includes(searchQ) || (b.region || '').toLowerCase().includes(searchQ))
-    .filter(b => {
-      // Quick-filter chips — operations questions, not data dimensions.
-      const age = b.oldest_age_days || 0
-      switch (quickFilter) {
-        case 'overdue':       return age > 7
-        case 'watch':         return age > 3 && age <= 7
-        case 'today_active':  return (b.today_bills || 0) > 0
-        case 'all':
-        default:              return true
-      }
-    })
-    .slice()
-    .sort((a, b) => {
-      let av = 0, bv = 0
-      if (sortKey === 'branch_name')        { av = a.branch_name || ''; bv = b.branch_name || ''; return av.localeCompare(bv) * sortDir }
-      if (sortKey === 'today_bills')        { av = a.today_bills  || 0; bv = b.today_bills  || 0 }
-      if (sortKey === 'today_net_wt')       { av = a.today_net_wt || 0; bv = b.today_net_wt || 0 }
-      if (sortKey === 'today_gross_value')  { av = a.today_gross_value || 0; bv = b.today_gross_value || 0 }
-      if (sortKey === 'older_bills')        { av = a.older_bills  || 0; bv = b.older_bills  || 0 }
-      if (sortKey === 'older_net_wt')       { av = a.older_net_wt || 0; bv = b.older_net_wt || 0 }
-      if (sortKey === 'older_gross_value')  { av = a.older_gross_value || 0; bv = b.older_gross_value || 0 }
-      if (sortKey === 'oldest_age')         { av = a.oldest_age_days || 0; bv = b.oldest_age_days || 0 }
-      if (sortKey === 'total_net_wt')       { av = (a.today_net_wt || 0) + (a.older_net_wt || 0); bv = (b.today_net_wt || 0) + (b.older_net_wt || 0) }
-      if (sortKey === 'total_bills')        { av = (a.today_bills  || 0) + (a.older_bills  || 0); bv = (b.today_bills  || 0) + (b.older_bills  || 0) }
-      return (av - bv) * sortDir
-    })
+  // Pre-lowered search term — shared by all three filter passes below
+  // (branch-rollup, branch-aggregated, case-wise).
+  const searchQ = useMemo(() => (search || '').toLowerCase(), [search])
+  const filtered = useMemo(() => {
+    return data
+      // Hide branches with zero in-flight stock — keeps the table focused.
+      .filter(b => ((b.today_net_wt || 0) + (b.older_net_wt || 0)) > 0)
+      .filter(b => !activeRegion || b.region === activeRegion)
+      .filter(b => !searchQ || (b.branch_name || '').toLowerCase().includes(searchQ) || (b.region || '').toLowerCase().includes(searchQ))
+      .filter(b => {
+        // Quick-filter chips — operations questions, not data dimensions.
+        const age = b.oldest_age_days || 0
+        switch (quickFilter) {
+          case 'overdue':       return age > 7
+          case 'watch':         return age > 3 && age <= 7
+          case 'today_active':  return (b.today_bills || 0) > 0
+          case 'all':
+          default:              return true
+        }
+      })
+      .slice()
+      .sort((a, b) => {
+        let av = 0, bv = 0
+        if (sortKey === 'branch_name')        { av = a.branch_name || ''; bv = b.branch_name || ''; return av.localeCompare(bv) * sortDir }
+        if (sortKey === 'today_bills')        { av = a.today_bills  || 0; bv = b.today_bills  || 0 }
+        if (sortKey === 'today_net_wt')       { av = a.today_net_wt || 0; bv = b.today_net_wt || 0 }
+        if (sortKey === 'today_gross_value')  { av = a.today_gross_value || 0; bv = b.today_gross_value || 0 }
+        if (sortKey === 'older_bills')        { av = a.older_bills  || 0; bv = b.older_bills  || 0 }
+        if (sortKey === 'older_net_wt')       { av = a.older_net_wt || 0; bv = b.older_net_wt || 0 }
+        if (sortKey === 'older_gross_value')  { av = a.older_gross_value || 0; bv = b.older_gross_value || 0 }
+        if (sortKey === 'oldest_age')         { av = a.oldest_age_days || 0; bv = b.oldest_age_days || 0 }
+        if (sortKey === 'total_net_wt')       { av = (a.today_net_wt || 0) + (a.older_net_wt || 0); bv = (b.today_net_wt || 0) + (b.older_net_wt || 0) }
+        if (sortKey === 'total_bills')        { av = (a.today_bills  || 0) + (a.older_bills  || 0); bv = (b.today_bills  || 0) + (b.older_bills  || 0) }
+        return (av - bv) * sortDir
+      })
+  }, [data, activeRegion, searchQ, quickFilter, sortKey, sortDir])
 
   // ── Case-wise filtering + sorting ──────────────────────────────────────────
   // Resolve the active "consignment since" window. Quick chips set a relative
   // range; the date inputs flip to 'custom' and use caseSinceFrom/To verbatim.
   // todayIst() returns YYYY-MM-DD in IST so this matches the branch's day.
-  const caseSinceRange = (() => {
+  const caseSinceRange = useMemo(() => {
     if (caseSinceQuick === 'custom') return { from: caseSinceFrom || null, to: caseSinceTo || null }
     const today = istToday()                                     // YYYY-MM-DD (IST)
     if (caseSinceQuick === 'today')     return { from: today, to: today }
@@ -312,12 +365,14 @@ export default function ConsignmentReport() {
       return { from: d.toISOString().slice(0, 10), to: today }
     }
     return { from: null, to: null }                              // 'all'
-  })()
+  }, [caseSinceQuick, caseSinceFrom, caseSinceTo])
 
   // Map branch_name → region using the branch_overview rollup we already
   // loaded for the branch-wise view. Lets the region flashcards filter
   // case-wise rows too without a second branches lookup.
-  const branchToRegion = data.reduce((acc, b) => { acc[b.branch_name] = b.region; return acc }, {})
+  const branchToRegion = useMemo(() =>
+    data.reduce((acc, b) => { acc[b.branch_name] = b.region; return acc }, {})
+  , [data])
 
   // ── Branch-wise aggregated rows ────────────────────────────────────────────
   // The branch-wise view now groups in-transit bills by (branch, consignment
@@ -328,7 +383,7 @@ export default function ConsignmentReport() {
   // Expected delivery: dispatched_at + 1 IST day. Branches across India share
   // a roughly next-day delivery to HO via BVC; refine later if pickup_time +
   // distance need to drive it per-branch.
-  const branchAggregated = (() => {
+  const branchAggregated = useMemo(() => {
     const groups = new Map()
     for (const r of caseData) {
       const branch = r.branch_name || '—'
@@ -369,9 +424,9 @@ export default function ConsignmentReport() {
       g.expected_delivery_date = dt.toISOString().slice(0, 10)
     }
     return Array.from(groups.values())
-  })()
+  }, [caseData, branchToRegion])
 
-  const filteredBranchRows = (() => {
+  const filteredBranchRows = useMemo(() => {
     return branchAggregated
       .filter(g => !activeRegion || g.region === activeRegion)
       .filter(g => !searchQ || (g.branch_name || '').toLowerCase().includes(searchQ) || (g.region || '').toLowerCase().includes(searchQ))
@@ -403,9 +458,9 @@ export default function ConsignmentReport() {
         }
         return (av - bv) * sortDir
       })
-  })()
+  }, [branchAggregated, activeRegion, searchQ, caseSinceRange, sortKey, sortDir])
 
-  const filteredCaseRows = caseData
+  const filteredCaseRows = useMemo(() => caseData
     .filter(r => {
       // Date filter on dispatched_at (the bill's at_branch → in_consignment
       // transition timestamp). Compare against the IST calendar day so the
@@ -436,6 +491,7 @@ export default function ConsignmentReport() {
       if (typeof av === 'number' && typeof bv === 'number') return (av - bv) * dir
       return String(av).localeCompare(String(bv)) * dir
     })
+  , [caseData, caseSinceRange, activeRegion, searchQ, branchToRegion, caseSortKey, caseSortDir])
 
   function handleCaseSort(key) {
     if (caseSortKey === key) setCaseSortDir(d => d * -1)
@@ -516,7 +572,7 @@ export default function ConsignmentReport() {
   // Σ totals across the visible case rows — drives the totals row pinned
   // beneath the headers. Note: Svc % can't be summed (it's a per-bill rate),
   // so we show a weighted average instead — Σ(svc_amt) / Σ(gross_amt) × 100.
-  const caseTotals = filteredCaseRows.reduce((acc, r) => {
+  const caseTotals = useMemo(() => filteredCaseRows.reduce((acc, r) => {
     acc.bills        += 1
     acc.gross_weight += Number(r.gross_weight || 0)
     acc.stone_weight += Number(r.stone_weight || 0)
@@ -527,6 +583,7 @@ export default function ConsignmentReport() {
     acc.final_amt    += Number(r.final_amount_crm || 0)
     return acc
   }, { bills: 0, gross_weight: 0, stone_weight: 0, wastage: 0, net_weight: 0, gross_amt: 0, svc_amt: 0, final_amt: 0 })
+  , [filteredCaseRows])
   const caseAvgSvcPct = caseTotals.gross_amt > 0
     ? (caseTotals.svc_amt / caseTotals.gross_amt) * 100
     : 0
@@ -615,7 +672,7 @@ export default function ConsignmentReport() {
   // currently-filtered bill rows so the "Consignment created on" date filter
   // also drives the headline cards (otherwise the cards lie when the table is
   // filtered to today / yesterday / a custom range).
-  const regionStatsView = viewMode === 'case'
+  const regionStatsView = useMemo(() => viewMode === 'case'
     ? regions.reduce((acc, r) => {
         const rows         = filteredCaseRows.filter(row => branchToRegion[row.branch_name] === r)
         const branchNames  = new Set(rows.map(row => row.branch_name))
@@ -630,8 +687,9 @@ export default function ConsignmentReport() {
         return acc
       }, {})
     : regionStats
+  , [viewMode, regions, filteredCaseRows, branchToRegion, data, regionStats])
 
-  const allStatsView = viewMode === 'case'
+  const allStatsView = useMemo(() => viewMode === 'case'
     ? {
         allBills:       filteredCaseRows.length,
         allNetWt:       filteredCaseRows.reduce((s, r) => s + Number(r.net_weight || 0), 0),
@@ -646,6 +704,7 @@ export default function ConsignmentReport() {
         activeBranches: data.filter(b => ((b.today_net_wt || 0) + (b.older_net_wt || 0)) > 0).length,
         totalBranches:  data.length,
       }
+  , [viewMode, filteredCaseRows, data])
 
   return (
     <div style={{ padding: '18px 16px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
@@ -655,10 +714,23 @@ export default function ConsignmentReport() {
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
             <div style={{ fontSize: '1.4rem', fontWeight: 300, color: t.text1, letterSpacing: '.03em' }}>Consignment Report</div>
-            <span style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '10px', color: t.blue, background: `${t.blue}15`, borderRadius: '20px', padding: '3px 10px', fontWeight: 600 }}>
-              <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: t.blue, display: 'inline-block', animation: 'pulse 2s infinite' }} />
-              IN TRANSIT
-            </span>
+            {(() => {
+              // Pill colour tracks the Realtime channel state so the operator can
+              // see at a glance whether live updates are flowing.
+              const isLive = rtState === 'connected'
+              const isErr  = rtState === 'error' || rtState === 'closed'
+              const c      = isLive ? t.green : isErr ? t.red : t.orange
+              const label  = isLive ? 'LIVE · IN TRANSIT' : isErr ? 'OFFLINE' : 'CONNECTING'
+              const tip    = isLive ? 'Realtime channel connected — dispatches and receipts update instantly'
+                          : isErr  ? 'Realtime channel dropped — refreshes still run on the 3-min poll'
+                          :          'Connecting to realtime channel…'
+              return (
+                <span title={tip} style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '10px', color: c, background: `${c}15`, borderRadius: '20px', padding: '3px 10px', fontWeight: 600 }}>
+                  <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: c, display: 'inline-block', animation: isLive ? 'pulse 2s infinite' : 'none' }} />
+                  {label}
+                </span>
+              )
+            })()}
           </div>
           <div style={{ fontSize: '11px', color: t.text3, marginTop: '4px' }}>
             Bills currently in flight · branch-level roll-up
@@ -708,6 +780,25 @@ export default function ConsignmentReport() {
           </button>
         </div>
       </div>
+
+      {/* ── Load error banner — surfaces the json.error payload + network
+           failures that used to be silently swallowed into an empty table. */}
+      {loadError && (
+        <div style={{
+          background: `${t.red}12`, border: `1px solid ${t.red}40`,
+          borderLeft: `4px solid ${t.red}`, borderRadius: '8px',
+          padding: '10px 14px', display: 'flex', alignItems: 'center',
+          justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap',
+        }}>
+          <span style={{ fontSize: '12px', color: t.red, fontWeight: 600 }}>
+            ⚠ Couldn't load report — {loadError}
+          </span>
+          <button onClick={() => { fetchData(); fetchCaseData() }}
+            style={{ background: 'transparent', border: `1px solid ${t.red}80`, color: t.red, borderRadius: '6px', padding: '5px 12px', fontSize: '11px', fontWeight: 700, cursor: 'pointer' }}>
+            Retry
+          </button>
+        </div>
+      )}
 
       {/* ── Region Flashcards ── */}
       {!regionAccess.single && (
