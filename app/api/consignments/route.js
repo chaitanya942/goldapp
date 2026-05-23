@@ -1373,17 +1373,46 @@ export async function GET(req) {
     // Column list mirrors the Consignment Report case-wise table: same set of
     // weights / charges the Purchase Data module exposes, plus dispatched_at
     // (= "consignment since") so ops can bucket by transition date.
+    // Optional date-range mode — when `from` / `to` (YYYY-MM-DD in IST) are
+    // supplied, return ALL bills dispatched in that window regardless of their
+    // current stock_status. The Consignment Report uses this to show "what
+    // moved on a particular date" — a bill received last week still appears
+    // when its dispatch date is in the window. Without the params we fall
+    // back to the original "currently in transit" snapshot.
+    const fromDate = searchParams.get('from')
+    const toDate   = searchParams.get('to')
+    const isDateRange = !!(fromDate || toDate)
+
     let billsQ = supabase
       .from('purchases')
-      .select('id, sl_no, application_id, branch_name, current_branch, customer_name, purchase_date, gross_weight, stone_weight, wastage, net_weight, total_amount, service_charge_pct, service_charge_amount_crm, final_amount_crm, transaction_type, dispatched_at')
-      .eq('stock_status', 'in_consignment')
+      .select('id, sl_no, application_id, branch_name, current_branch, customer_name, purchase_date, gross_weight, stone_weight, wastage, net_weight, total_amount, service_charge_pct, service_charge_amount_crm, final_amount_crm, transaction_type, dispatched_at, received_at, stock_status')
       .eq('is_deleted', false)
-    // Filter by branch_name (origin) for in-transit so a Kerala user sees their dispatched bills
+    if (isDateRange) {
+      // dispatched_at is TIMESTAMPTZ — convert YYYY-MM-DD (IST) to UTC instants
+      // at IST midnight bounds so the day comparison aligns with the operator's
+      // calendar instead of UTC.
+      if (fromDate) billsQ = billsQ.gte('dispatched_at', `${fromDate}T00:00:00+05:30`)
+      if (toDate)   billsQ = billsQ.lte('dispatched_at', `${toDate}T23:59:59+05:30`)
+      // Exclude bills that were never dispatched (still at_branch or returned).
+      billsQ = billsQ.not('dispatched_at', 'is', null)
+    } else {
+      billsQ = billsQ.eq('stock_status', 'in_consignment')
+    }
+    // Filter by branch_name (origin) so a region-restricted user only sees their bills.
     if (allowedBranches) billsQ = billsQ.in('branch_name', allowedBranches)
     const { data: bills, error: be } = await billsQ
 
     if (be) return Response.json({ error: be.message }, { status: 500 })
     if (!bills?.length) return Response.json({ data: [] })
+
+    // Attach branch region to each bill so the client doesn't need a second
+    // lookup. Bangalore included — date-range mode covers it via the 19:30 IST
+    // lifecycle and direct-to-HO Bangalore dispatches.
+    const branchNames = [...new Set(bills.map(b => b.branch_name).filter(Boolean))]
+    const { data: brRows } = branchNames.length
+      ? await supabase.from('branches').select('name, region').in('name', branchNames)
+      : { data: [] }
+    const regionByBranch = Object.fromEntries((brRows || []).map(b => [b.name, b.region]))
 
     // 2. For each bill, look up the most recent dispatched consignment that links it.
     //    A bill might appear in multiple consignment_items rows historically (cancelled
@@ -1412,6 +1441,7 @@ export async function GET(req) {
       const c = consByPurchase[b.id]
       return {
         ...b,
+        region: regionByBranch[b.branch_name] || null,
         consignment: c ? {
           id: c.id, tmp_prf_no: c.tmp_prf_no,
           source: c.branch_name, dest: c.dest_branch,
