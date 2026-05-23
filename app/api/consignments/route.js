@@ -1385,7 +1385,7 @@ export async function GET(req) {
 
     let billsQ = supabase
       .from('purchases')
-      .select('id, sl_no, application_id, branch_name, current_branch, customer_name, purchase_date, gross_weight, stone_weight, wastage, net_weight, total_amount, service_charge_pct, service_charge_amount_crm, final_amount_crm, transaction_type, dispatched_at, received_at, stock_status')
+      .select('id, sl_no, application_id, branch_name, current_branch, customer_name, purchase_date, gross_weight, stone_weight, wastage, net_weight, total_amount, service_charge_pct, service_charge_amount_crm, final_amount_crm, transaction_type, dispatched_at, stock_status')
       .eq('is_deleted', false)
     if (isDateRange) {
       // dispatched_at is TIMESTAMPTZ — convert YYYY-MM-DD (IST) to UTC instants

@@ -1032,9 +1032,6 @@ export default function ConsignmentReport() {
                             // the historical report. A bill dispatched 5 days
                             // ago may now be received / melted / sold.
                             const s = r.stock_status
-                            const tip = s === 'at_ho' && r.received_at
-                              ? `Received at HO · ${new Date(r.received_at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}`
-                              : ''
                             const cfg =
                               s === 'in_consignment'   ? { c: t.blue,    l: 'In transit' } :
                               s === 'at_ho'            ? { c: t.green,   l: 'Received'   } :
@@ -1044,7 +1041,7 @@ export default function ConsignmentReport() {
                               s === 'at_branch'        ? { c: t.text4,   l: 'Back at branch' } :
                                                          { c: t.text4,   l: s || '—'     }
                             return (
-                              <span title={tip} style={{
+                              <span style={{
                                 fontSize: '9.5px', padding: '2px 7px', borderRadius: '4px',
                                 background: `${cfg.c}18`, color: cfg.c,
                                 fontWeight: 700, letterSpacing: '.02em', whiteSpace: 'nowrap',
