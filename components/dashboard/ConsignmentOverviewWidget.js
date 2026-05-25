@@ -417,7 +417,15 @@ function ConsSection({ t, title, subtitle, accent, regions, getTotals, getBranch
                   background: open ? `linear-gradient(90deg, ${color}18 0%, ${color}06 50%, transparent 100%)` : 'transparent',
                   border: 'none', cursor: 'pointer',
                   padding: '15px 16px 13px 20px',
-                  display: 'flex', alignItems: 'center', gap: 10,
+                  // CSS grid with FIXED column widths — every cell (br, bills,
+                  // net wt, age badge, % pill) has a deterministic width so
+                  // digits line up vertically across rows. The age-badge
+                  // column is reserved even when the badge is absent so the
+                  // % pill never shifts position.
+                  display: 'grid',
+                  gridTemplateColumns: '10px 1fr 58px 76px 84px 40px 52px 14px',
+                  columnGap: 8,
+                  alignItems: 'center',
                   transition: 'background .18s, transform .12s',
                   ['--region-color']: color,
                 }}>
@@ -426,37 +434,45 @@ function ConsSection({ t, title, subtitle, accent, regions, getTotals, getBranch
                   background: `linear-gradient(180deg, ${color} 0%, ${color}60 100%)`,
                   boxShadow: `0 0 8px ${color}40`,
                 }} />
+                {/* col 1: dot */}
                 <span style={{
                   width: 10, height: 10, borderRadius: '50%',
-                  background: color, flexShrink: 0,
+                  background: color,
                   boxShadow: `0 0 0 3px ${color}25, 0 0 8px ${color}50`,
                 }} />
-                <span style={{ fontSize: 13.5, color: t.text1, fontWeight: 600, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', letterSpacing: '-.005em' }}>{r}</span>
-                {/* Fixed-width metric columns so digits line up vertically
-                    across regions regardless of region name length. */}
-                <span style={{ display: 'inline-flex', alignItems: 'baseline', fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
-                  <span style={{ minWidth: 56, textAlign: 'right' }}>
-                    <strong style={{ color: t.text1, fontSize: 13, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{tot.branchCount}</strong>
-                    <span style={{ color: t.text4, fontSize: 10, marginLeft: 3 }}>br</span>
-                  </span>
-                  <span style={{ minWidth: 72, textAlign: 'right' }}>
-                    <strong style={{ color: t.text1, fontSize: 13, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{tot.bills}</strong>
-                    <span style={{ color: t.text4, fontSize: 10, marginLeft: 3 }}>bills</span>
-                  </span>
-                  <span style={{ minWidth: 78, textAlign: 'right', color: t.gold, fontSize: 13.5, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
-                    {fmtWt(tot.netWt)}
+                {/* col 2: region name (ellipsis) */}
+                <span style={{ fontSize: 13.5, color: t.text1, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', letterSpacing: '-.005em', minWidth: 0 }}>{r}</span>
+                {/* col 3: br count */}
+                <span style={{ fontFamily: 'monospace', textAlign: 'right', whiteSpace: 'nowrap' }}>
+                  <strong style={{ color: t.text1, fontSize: 13, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{tot.branchCount}</strong>
+                  <span style={{ color: t.text4, fontSize: 10, marginLeft: 3 }}>br</span>
+                </span>
+                {/* col 4: bills count */}
+                <span style={{ fontFamily: 'monospace', textAlign: 'right', whiteSpace: 'nowrap' }}>
+                  <strong style={{ color: t.text1, fontSize: 13, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{tot.bills}</strong>
+                  <span style={{ color: t.text4, fontSize: 10, marginLeft: 3 }}>bills</span>
+                </span>
+                {/* col 5: net wt (right-aligned) */}
+                <span style={{ textAlign: 'right', color: t.gold, fontFamily: 'monospace', fontSize: 13.5, fontWeight: 700, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
+                  {fmtWt(tot.netWt)}
+                </span>
+                {/* col 6: age badge (slot is always reserved, content optional) */}
+                <span style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                  {tot.maxOldestDays > 7 && (
+                    <span title={`Oldest bill in this region is ${tot.maxOldestDays} days old`}
+                      style={{ fontSize: 9.5, color: t.red, background: `${t.red}15`, border: `1px solid ${t.red}45`, padding: '2px 7px', borderRadius: 99, fontWeight: 700, fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
+                      {tot.maxOldestDays}d
+                    </span>
+                  )}
+                </span>
+                {/* col 7: % pill */}
+                <span style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                  <span style={{ fontSize: 10, color, fontFamily: 'monospace', fontWeight: 700, background: `${color}15`, padding: '2px 8px', borderRadius: 99, border: `1px solid ${color}30`, whiteSpace: 'nowrap' }}>
+                    {(share * 100).toFixed(0)}%
                   </span>
                 </span>
-                {tot.maxOldestDays > 7 && (
-                  <span title={`Oldest bill in this region is ${tot.maxOldestDays} days old`}
-                    style={{ fontSize: 9.5, color: t.red, background: `${t.red}15`, border: `1px solid ${t.red}45`, padding: '2px 7px', borderRadius: 99, fontWeight: 700, fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
-                    {tot.maxOldestDays}d
-                  </span>
-                )}
-                <span style={{ fontSize: 10, color, fontFamily: 'monospace', fontWeight: 700, background: `${color}15`, padding: '2px 8px', borderRadius: 99, border: `1px solid ${color}30`, whiteSpace: 'nowrap' }}>
-                  {(share * 100).toFixed(0)}%
-                </span>
-                <span style={{ fontSize: 10, color: t.text4, transform: open ? 'rotate(0)' : 'rotate(-90deg)', transition: 'transform .25s', marginLeft: 2 }}>▾</span>
+                {/* col 8: chevron */}
+                <span style={{ fontSize: 10, color: t.text4, transform: open ? 'rotate(0)' : 'rotate(-90deg)', transition: 'transform .25s', textAlign: 'center' }}>▾</span>
                 <span style={{
                   position: 'absolute', bottom: 0, left: 3,
                   height: 3, width: `${share * 100}%`,
