@@ -13,13 +13,10 @@ import { useEffect, useState } from 'react'
 import { authedFetch } from '../../lib/authedFetch'
 import { istToday } from '../../lib/dateIst'
 
-const fmtWt  = (g) => `${Number(g || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} g`
-const fmtAmt = (n) => {
-  const v = Number(n || 0)
-  if (v >= 1e7) return `₹${(v / 1e7).toFixed(2)} Cr`
-  if (v >= 1e5) return `₹${(v / 1e5).toFixed(2)} L`
-  return `₹${Math.round(v).toLocaleString('en-IN')}`
-}
+const fmtWt   = (g) => `${Number(g || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} g`
+// Bid rate is ₹ per gram — keep full integer precision (no Cr/L compression)
+// so ops sees the exact rate they bid at.
+const fmtRate = (n) => `₹${Math.round(Number(n || 0)).toLocaleString('en-IN')}`
 
 export default function TodaysBookingsWidget({ t, isMobile, setActiveNav }) {
   const [rows,    setRows]    = useState(null)
@@ -49,9 +46,13 @@ export default function TodaysBookingsWidget({ t, isMobile, setActiveNav }) {
     return () => { cancelled = true }
   }, [])
 
-  // Totals over the visible (non-cancelled) rows.
-  const totalWt  = (rows || []).reduce((s, r) => s + (Number(r.weight) || 0), 0)
-  const totalAmt = (rows || []).reduce((s, r) => s + (Number(r.weight) || 0) * (Number(r.rate) || 0), 0)
+  // Totals over the visible (non-cancelled) rows. Rate is a per-gram value
+  // so its "total" is a weighted average (Σ(weight × rate) / Σ(weight)) —
+  // a plain sum of rates would be meaningless. Falls back to 0 when there
+  // are no rows.
+  const totalWt    = (rows || []).reduce((s, r) => s + (Number(r.weight) || 0), 0)
+  const totalValue = (rows || []).reduce((s, r) => s + (Number(r.weight) || 0) * (Number(r.rate) || 0), 0)
+  const avgRate    = totalWt > 0 ? totalValue / totalWt : 0
 
   const card = { background: t.card, border: `1px solid ${t.border}`, borderRadius: 14, overflow: 'hidden' }
 
@@ -110,30 +111,31 @@ export default function TodaysBookingsWidget({ t, isMobile, setActiveNav }) {
               <tr>
                 <th style={thStyle(t, 'left')}>Party</th>
                 <th style={thStyle(t, 'right')}>Bid Weight</th>
-                <th style={thStyle(t, 'right')}>Bid Amount</th>
+                <th style={thStyle(t, 'right')}>Bid Rate</th>
               </tr>
             </thead>
             <tbody>
-              {rows.map(r => {
-                const amt = (Number(r.weight) || 0) * (Number(r.rate) || 0)
-                return (
-                  <tr key={r.id} style={{ borderBottom: `1px solid ${t.border}25` }}>
-                    <td style={tdStyle(t, 'left', { fontWeight: 600, color: t.text1 })}>
-                      {r.party || '—'}
-                      {r.is_kl && <span style={{ marginLeft: 6, fontSize: 9, color: t.green, background: `${t.green}18`, padding: '1px 5px', borderRadius: 3, fontWeight: 700, letterSpacing: '.04em' }}>KL</span>}
-                    </td>
-                    <td style={tdStyle(t, 'right', { color: t.gold, fontFamily: 'monospace', fontWeight: 600 })}>{fmtWt(r.weight)}</td>
-                    <td style={tdStyle(t, 'right', { color: t.text2, fontFamily: 'monospace' })}>{fmtAmt(amt)}</td>
-                  </tr>
-                )
-              })}
-              {/* Totals */}
+              {rows.map(r => (
+                <tr key={r.id} style={{ borderBottom: `1px solid ${t.border}25` }}>
+                  <td style={tdStyle(t, 'left', { fontWeight: 600, color: t.text1 })}>
+                    {r.party || '—'}
+                    {r.is_kl && <span style={{ marginLeft: 6, fontSize: 9, color: t.green, background: `${t.green}18`, padding: '1px 5px', borderRadius: 3, fontWeight: 700, letterSpacing: '.04em' }}>KL</span>}
+                  </td>
+                  <td style={tdStyle(t, 'right', { color: t.gold, fontFamily: 'monospace', fontWeight: 600 })}>{fmtWt(r.weight)}</td>
+                  <td style={tdStyle(t, 'right', { color: t.text2, fontFamily: 'monospace' })}>{fmtRate(r.rate)}<span style={{ color: t.text4, fontSize: 10, marginLeft: 2 }}>/g</span></td>
+                </tr>
+              ))}
+              {/* Totals — weight totals; rate is a weighted average tagged "avg" so it
+                  doesn't read as a sum. */}
               <tr style={{ background: `${t.gold}10`, borderTop: `1px solid ${t.gold}40` }}>
                 <td style={tdStyle(t, 'left', { color: t.gold, fontWeight: 800, letterSpacing: '.04em', textTransform: 'uppercase', fontSize: 11 })}>
                   Total
                 </td>
                 <td style={tdStyle(t, 'right', { color: t.gold, fontFamily: 'monospace', fontWeight: 800 })}>{fmtWt(totalWt)}</td>
-                <td style={tdStyle(t, 'right', { color: t.green, fontFamily: 'monospace', fontWeight: 800 })}>{fmtAmt(totalAmt)}</td>
+                <td style={tdStyle(t, 'right', { color: t.green, fontFamily: 'monospace', fontWeight: 800 })}>
+                  <span style={{ color: t.text4, fontSize: 10, fontWeight: 600, marginRight: 3 }}>avg</span>
+                  {fmtRate(avgRate)}<span style={{ color: t.text4, fontSize: 10, marginLeft: 2 }}>/g</span>
+                </td>
               </tr>
             </tbody>
           </table>
