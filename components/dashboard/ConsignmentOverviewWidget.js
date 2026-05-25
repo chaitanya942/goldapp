@@ -120,15 +120,66 @@ export default function ConsignmentOverviewWidget({ t, isMobile, setActiveNav })
   const stockRegions   = Object.keys(stockByRegion).sort()
   const transitRegions = Object.keys(transitByRegion).sort()
 
+  // Top-strap totals — sum the (already region-filtered) rows so the
+  // headline numbers move when the user clicks a distribution-bar segment.
+  const sumTotals = (rows) => rows.reduce((acc, b) => {
+    acc.netWt    += (b.today_net_wt || 0) + (b.older_net_wt || 0)
+    acc.bills    += (b.today_bills  || 0) + (b.older_bills  || 0)
+    acc.branches += 1
+    return acc
+  }, { netWt: 0, bills: 0, branches: 0 })
+  const totalStock   = sumTotals(stockFiltered)
+  const totalTransit = sumTotals(transitFiltered)
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-      {/* Region filter chips */}
-      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
-        <span style={{ fontSize: 10, color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 700, marginRight: 4 }}>Region</span>
-        <FilterPill active={filterRegion === 'all'} color={t.gold} onClick={() => setFilterRegion('all')} t={t}>All</FilterPill>
-        {allRegions.map(r => (
-          <FilterPill key={r} active={filterRegion === r} color={REGION_COLORS_DASH[r] || t.gold} onClick={() => setFilterRegion(r)} t={t}>{r}</FilterPill>
-        ))}
+      {/* Totals strap — replaces the old region filter chip row. Per-region
+          filtering still works via clicking a distribution-bar segment inside
+          either ConsSection (onSegmentClick → setFilterRegion). */}
+      <div style={{
+        display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr',
+        gap: 10,
+      }}>
+        <button onClick={setActiveNav ? () => setActiveNav('consignment-overview') : undefined}
+          title={setActiveNav ? 'Open Branch Stock' : ''}
+          style={{
+            textAlign: 'left', cursor: setActiveNav ? 'pointer' : 'default',
+            background: `linear-gradient(135deg, ${t.orange}10 0%, ${t.orange}04 100%)`,
+            border: `1px solid ${t.orange}40`, borderRadius: 10,
+            padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 4,
+          }}>
+          <span style={{ fontSize: 10, color: t.orange, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 800 }}>
+            Total Branch in Stock
+          </span>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 18, color: t.text1, fontWeight: 800, fontFamily: 'monospace', fontVariantNumeric: 'tabular-nums' }}>
+              {fmtWt(totalStock.netWt)}
+            </span>
+            <span style={{ fontSize: 11, color: t.text3, fontFamily: 'monospace' }}>
+              · {totalStock.branches} br · {totalStock.bills} bills
+            </span>
+          </div>
+        </button>
+        <button onClick={setActiveNav ? () => setActiveNav('consignment-report') : undefined}
+          title={setActiveNav ? 'Open Consignment Report' : ''}
+          style={{
+            textAlign: 'left', cursor: setActiveNav ? 'pointer' : 'default',
+            background: `linear-gradient(135deg, ${t.blue}10 0%, ${t.blue}04 100%)`,
+            border: `1px solid ${t.blue}40`, borderRadius: 10,
+            padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 4,
+          }}>
+          <span style={{ fontSize: 10, color: t.blue, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 800 }}>
+            Total In Transit
+          </span>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 18, color: t.text1, fontWeight: 800, fontFamily: 'monospace', fontVariantNumeric: 'tabular-nums' }}>
+              {fmtWt(totalTransit.netWt)}
+            </span>
+            <span style={{ fontSize: 11, color: t.text3, fontFamily: 'monospace' }}>
+              · {totalTransit.branches} br · {totalTransit.bills} bills
+            </span>
+          </div>
+        </button>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 14 }}>
@@ -381,16 +432,18 @@ function ConsSection({ t, title, subtitle, accent, regions, getTotals, getBranch
                   boxShadow: `0 0 0 3px ${color}25, 0 0 8px ${color}50`,
                 }} />
                 <span style={{ fontSize: 13.5, color: t.text1, fontWeight: 600, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', letterSpacing: '-.005em' }}>{r}</span>
-                <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: 14, fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
-                  <span>
+                {/* Fixed-width metric columns so digits line up vertically
+                    across regions regardless of region name length. */}
+                <span style={{ display: 'inline-flex', alignItems: 'baseline', fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
+                  <span style={{ minWidth: 56, textAlign: 'right' }}>
                     <strong style={{ color: t.text1, fontSize: 13, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{tot.branchCount}</strong>
                     <span style={{ color: t.text4, fontSize: 10, marginLeft: 3 }}>br</span>
                   </span>
-                  <span>
+                  <span style={{ minWidth: 72, textAlign: 'right' }}>
                     <strong style={{ color: t.text1, fontSize: 13, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{tot.bills}</strong>
                     <span style={{ color: t.text4, fontSize: 10, marginLeft: 3 }}>bills</span>
                   </span>
-                  <span style={{ color: t.gold, fontSize: 13.5, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
+                  <span style={{ minWidth: 78, textAlign: 'right', color: t.gold, fontSize: 13.5, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
                     {fmtWt(tot.netWt)}
                   </span>
                 </span>
