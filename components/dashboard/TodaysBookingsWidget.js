@@ -33,8 +33,16 @@ export default function TodaysBookingsWidget({ t, isMobile, setActiveNav }) {
       .then(j => {
         if (cancelled) return
         if (j.error) { setLoadErr(j.error); return }
+        // API returns { data: { bookings: [...], ... } }. Be defensive against
+        // older shapes too (top-level bookings/rows) — but always coerce to
+        // an array before calling .filter() so a wrapper object can't 500 us.
+        const raw = Array.isArray(j.data?.bookings) ? j.data.bookings
+                  : Array.isArray(j.bookings)      ? j.bookings
+                  : Array.isArray(j.rows)          ? j.rows
+                  : Array.isArray(j.data)          ? j.data
+                  : []
         // Drop cancelled bookings — totals should reflect what's live.
-        const live = (j.bookings || j.data || j.rows || []).filter(b => b.status !== 'cancelled')
+        const live = raw.filter(b => b.status !== 'cancelled')
         setRows(live)
       })
       .catch(e => { if (!cancelled) setLoadErr(e?.message || 'Load failed') })
