@@ -808,14 +808,19 @@ export async function GET(req) {
         // Settled = arrival day passed OR ops manually closed a small
         // residual pipeline. Either way the leftover folds into gain.
         const settled  = !!(r.date && String(r.date) < todayIst) || !!r.pipeline_closed_at
+        // additional_gain_g — incremental gain added outside the rate-based
+        // formula (e.g. when the weight column was floored to an integer and
+        // the fractional remainder was parked here, or when a small residual
+        // pipeline was closed by ops). Always added to the displayed gain.
+        const additional = Number(r.additional_gain_g || 0)
         r.gain_rate_effective = rate
         r.sourced_net_g       = sourced
         r.is_settled          = settled
         if (settled) {
-          r.derived_gain_g     = Math.max(0, W - sourced)
+          r.derived_gain_g     = Math.max(0, W - sourced) + additional
           r.derived_pipeline_g = 0
         } else {
-          r.derived_gain_g     = sourced * rate
+          r.derived_gain_g     = sourced * rate + additional
           r.derived_pipeline_g = Math.max(0, W - sourced * (1 + rate))
         }
       }
