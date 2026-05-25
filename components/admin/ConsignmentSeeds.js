@@ -25,6 +25,32 @@ export default function ConsignmentSeeds() {
   // One-shot bulk download of every old-CRM transaction since 2021-03-01.
   // Uses authedFetch so the user's session token is attached — direct browser
   // navigation to /api/crm-export-all would 401 (no Authorization header).
+  // One-shot diagnostic — dump the column list of old-CRM transac_tbl
+  // straight into the message banner so we can see the exact field names
+  // (PAN / bank / payment ref live in a different column name per CRM).
+  async function discoverCrmColumns() {
+    setExporting(true)
+    setMessage(null)
+    try {
+      const res = await authedFetch('/api/crm-transac-columns')
+      const j   = await res.json()
+      if (!res.ok || j.error) {
+        setMessage({ type: 'error', text: j.error || `Discover failed: ${res.status}` })
+        return
+      }
+      // Make the column list visible in the page banner, AND copy a clean
+      // text version to clipboard so it's easy to paste back.
+      const names = (j.columns || []).map(c => `${c.field}  (${c.type})`).join('\n')
+      try { await navigator.clipboard.writeText(names) } catch {}
+      setMessage({ type: 'success', text: `transac_tbl has ${j.columns?.length || 0} columns — list copied to clipboard. Open the browser console (F12) to see the full JSON (sample row included).` })
+      console.log('[crm-transac-columns]', j)
+    } catch (e) {
+      setMessage({ type: 'error', text: e?.message || 'Discover failed' })
+    } finally {
+      setExporting(false)
+    }
+  }
+
   async function downloadCrmExport() {
     setExporting(true)
     setMessage(null)
@@ -149,10 +175,15 @@ export default function ConsignmentSeeds() {
           <div style={{ fontSize: '11px', color: t.text3, marginTop: '2px' }}>Manage initial sequence numbers for all outside-Bangalore branches</div>
         </div>
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          <button onClick={discoverCrmColumns} disabled={exporting}
+            title="Dump the column list of old-CRM transac_tbl so we can wire PAN / bank / payment-ref into the sync"
+            style={{ background: 'transparent', border: `1px solid ${t.purple}50`, borderRadius: '7px', padding: '6px 14px', fontSize: '12px', color: t.purple, cursor: exporting ? 'default' : 'pointer', fontWeight: 600 }}>
+            ⌕ Discover CRM columns
+          </button>
           <button onClick={downloadCrmExport} disabled={exporting}
             title="One-shot CSV download of every old-CRM transaction since 2021-03-01 (admin-only)"
             style={{ background: exporting ? t.card2 : `${t.blue}15`, border: `1px solid ${t.blue}50`, borderRadius: '7px', padding: '6px 14px', fontSize: '12px', color: t.blue, cursor: exporting ? 'default' : 'pointer', fontWeight: 600 }}>
-            {exporting ? 'Exporting… (may take a few minutes)' : '↓ Download old-CRM CSV (since Mar 2021)'}
+            {exporting ? 'Working… (may take a few minutes)' : '↓ Download old-CRM CSV (since Mar 2021)'}
           </button>
           <button onClick={fetchSeeds} style={{ background: 'transparent', border: `1px solid ${t.border}`, borderRadius: '7px', padding: '6px 14px', fontSize: '12px', color: t.text3, cursor: 'pointer' }}>⟳ Refresh</button>
         </div>
