@@ -13,6 +13,7 @@ import {
 import { CONSIGNMENT_THEMES as THEMES } from '../../lib/consignmentTheme'
 import { istNow, istStr, istDaysAgo as daysBack } from '../../lib/dateIst'
 import ConsignmentOverviewWidget from './ConsignmentOverviewWidget'
+import TodaysBookingsWidget from './TodaysBookingsWidget'
 import LiveFeedFlashcards from './LiveFeedFlashcards'
 
 // ── Date helpers ──────────────────────────────────────────────────────────────
@@ -956,9 +957,10 @@ export default function DynamicDashboard() {
   const hasPurchase    = canSee('purchase-data') || canSee('purchase-reports')
   const hasTelesales   = canSee('inbound-bot')
   const hasConsignment = canSee('consignment-overview') || canSee('consignment-data') || canSee('consignment-report') || canSee('consignment-summary')
+  const hasBidding     = canSee('consignment-bidding')
   const hasAdmin       = canSee('user-management') || canSee('branch-management')
   const hasRates       = canSee('live-market-rates') || canSee('cal-table')
-  const hasAnything    = hasPurchase || hasTelesales || hasConsignment || hasAdmin || hasRates
+  const hasAnything    = hasPurchase || hasTelesales || hasConsignment || hasBidding || hasAdmin || hasRates
 
   // Section open/closed state — persisted per device. Defaults to all open
   // so first-time users see everything; their collapse choices stick.
@@ -1037,10 +1039,28 @@ export default function DynamicDashboard() {
       {hasConsignment && canSee('consignment-report') ? (
         <CollapsibleSection icon="📦" label="Consignment Overview" color={t.orange} t={t} expanded={sectionOpen.consignment} onToggle={() => toggleSection('consignment')}>
           <ConsignmentOverviewWidget t={t} isMobile={isMobile} setActiveNav={setActiveNav} />
+          {/* Today's bookings panel — anyone who can see Bidding Volume sees
+              today's bids inline on the dashboard. */}
+          {canSee('consignment-bidding') && (
+            <div style={{ marginTop: 14 }}>
+              <TodaysBookingsWidget t={t} isMobile={isMobile} setActiveNav={setActiveNav} />
+            </div>
+          )}
         </CollapsibleSection>
       ) : hasConsignment ? (
         <CollapsibleSection icon="📦" label="Branch Stock" color={t.orange} t={t} expanded={sectionOpen.consignment} onToggle={() => toggleSection('consignment')}>
           <ConsignmentSection t={t} setActiveNav={setActiveNav} canSee={canSee} />
+          {canSee('consignment-bidding') && (
+            <div style={{ marginTop: 14 }}>
+              <TodaysBookingsWidget t={t} isMobile={isMobile} setActiveNav={setActiveNav} />
+            </div>
+          )}
+        </CollapsibleSection>
+      ) : canSee('consignment-bidding') ? (
+        // No consignment access but bidding access — still surface today's
+        // bookings under its own collapsible section.
+        <CollapsibleSection icon="📦" label="Today's Bookings" color={t.purple} t={t} expanded={sectionOpen.consignment} onToggle={() => toggleSection('consignment')}>
+          <TodaysBookingsWidget t={t} isMobile={isMobile} setActiveNav={setActiveNav} />
         </CollapsibleSection>
       ) : null}
 

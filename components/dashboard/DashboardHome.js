@@ -11,6 +11,7 @@ import { triggerSync } from '../../lib/triggerSync'
 import { CONSIGNMENT_THEMES as THEMES } from '../../lib/consignmentTheme'
 import { istNow, istStr, fromUtcDate } from '../../lib/dateIst'
 import LiveFeedFlashcards from './LiveFeedFlashcards'
+import TodaysBookingsWidget from './TodaysBookingsWidget'
 
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
 const fmtDate = (iso) => { if (!iso) return ''; const [y,m,d] = iso.split('-'); return `${d}-${MONTHS[+m-1]}-${y}` }
@@ -1703,6 +1704,13 @@ export default function DashboardHome() {
           {consignOpen && (
             <div style={{ padding: isMobile ? '16px 14px 20px' : '24px 28px 28px' }}>
               <ConsignmentBalanceView t={t} stats={consignStats} isMobile={isMobile} setActiveNav={setActiveNav} />
+              {/* Today's bookings panel — anyone who can see Bidding Volume
+                  gets today's bids inline on the dashboard. */}
+              {canSee('consignment-bidding') && (
+                <div style={{ marginTop: isMobile ? 14 : 20 }}>
+                  <TodaysBookingsWidget t={t} isMobile={isMobile} setActiveNav={setActiveNav} />
+                </div>
+              )}
             </div>
           )}
         </div>

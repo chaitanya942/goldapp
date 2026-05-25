@@ -543,6 +543,25 @@ export default function ConsignmentApprovals() {
         body: JSON.stringify({ consignment_id: c.id, reason_code: reasonCode, remark }),
       })
       const j = await r.json()
+      // 409 from our cancel route = "NIC/IRP returned 107 — not recognised at
+      // the portal". Local state has NOT been cleared. We surface a verify-
+      // on-portal warning instead of a green success toast so the operator
+      // doesn't assume the doc is gone from the gov portal when it might
+      // still be active there (the bug accounts caught).
+      if (r.status === 409 && j.verification_required) {
+        setCancelModal(m => m ? {
+          ...m,
+          busy: false,
+          error: null,
+          verifyOnPortal: {
+            url:    j.portal_url,
+            docNo:  j.ewb_no || j.irn,
+            label:  type === 'ewb' ? 'NIC E-Way Bill portal' : 'IRP E-Invoice portal',
+            message: j.error,
+          },
+        } : null)
+        return
+      }
       if (!r.ok || j.error) {
         // Detect 24h-past errors so we can offer the credit-note alternative (IRN only).
         // NIC error phrasings vary across EWB and IRP responses — match permissively but require an explicit signal.
@@ -2882,7 +2901,7 @@ function AddStateForm({ t, availableStates, busyKey, onAdd, onCancel }) {
 // we offer Credit Note (E-Invoice only) as the GST-compliant alternative.
 // ─────────────────────────────────────────────────────────────────────────────
 function CancelModal({ state, t, onChange, onClose, onConfirm, onCreditNote }) {
-  const { type, consignment: c, reasonCode, remark, busy, error, suggestCreditNote, ewbPast24h } = state
+  const { type, consignment: c, reasonCode, remark, busy, error, suggestCreditNote, ewbPast24h, verifyOnPortal } = state
   const isEwb = type === 'ewb'
   const docName = isEwb ? 'E-Way Bill' : 'E-Invoice'
   const docNo = isEwb ? c.eway_bill_no : c.irn
@@ -2960,6 +2979,30 @@ function CancelModal({ state, t, onChange, onClose, onConfirm, onCreditNote }) {
               </div>
               <div style={{ fontSize: '10px', color: t.text3, lineHeight: 1.5 }}>
                 Action: log this EWB number with accounts. They'll record it in the GSTR-1 reconciliation as an issued-but-unused EWB. Since EWBs don't drive tax computation, there's no GST impact — only documentation.
+              </div>
+            </div>
+          )}
+
+          {/* Verify-on-portal warning — fires when NIC/IRP returns 107
+              ("not recognised"). Local state was NOT cleaned up so the
+              operator must confirm on the gov portal before proceeding. */}
+          {verifyOnPortal && (
+            <div style={{ background: `${t.orange}10`, border: `2px solid ${t.orange}80`, borderRadius: '8px', padding: '14px', marginTop: '14px' }}>
+              <div style={{ fontSize: '12px', color: t.orange, fontWeight: 700, marginBottom: '6px' }}>
+                ⚠ Verify on {verifyOnPortal.label}
+              </div>
+              <div style={{ fontSize: '11px', color: t.text2, lineHeight: 1.6, marginBottom: '10px' }}>
+                {verifyOnPortal.message}
+              </div>
+              <div style={{ fontSize: '11px', color: t.text2, marginBottom: '6px' }}>
+                Document number: <strong style={{ color: t.text1, fontFamily: 'monospace' }}>{verifyOnPortal.docNo}</strong>
+              </div>
+              <a href={verifyOnPortal.url} target="_blank" rel="noopener noreferrer"
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: '11px', fontWeight: 700, color: t.orange, textDecoration: 'underline', marginTop: 4 }}>
+                Open {verifyOnPortal.label} ↗
+              </a>
+              <div style={{ fontSize: '10px', color: t.text3, marginTop: 10, lineHeight: 1.5 }}>
+                <strong>Important:</strong> the app has NOT modified the local consignment record — the EWB / IRN is still attached. If the gov portal shows it active, the cancel did not happen and may be a GSTIN-mismatch. If the portal shows it already cancelled, contact admin to clear the local state manually.
               </div>
             </div>
           )}

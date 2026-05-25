@@ -50,19 +50,43 @@ export async function POST(req) {
       gstinOverride: gstinFor,
     })
 
-    // Soft-success: NIC returned 107 ("EWB missing") after retries — usually
-    // a prior attempt cancelled it or it's no longer recognised at NIC.
-    // Proceed with local cleanup; audit log captures the discrepancy.
+    // 107 from NIC ("EWB not recognised") is NOT a proof of cancellation —
+    // it can also mean the EWB exists at NIC under a different GSTIN, or
+    // that our request never reached the portal cleanly. Treating 107 as
+    // success previously let local state get cleared while the EWB stayed
+    // active on the gov portal (the bug accounts spotted).
+    //
+    // Now: refuse to touch local state. Surface a verification banner so
+    // the operator confirms on ewaybillgst.gov.in before clearing anything.
     const ewbNotFound = !!result?.ewb_not_found
-
-    // Trust the library: cancelEWayBill throws if NIC's govt_response.Success
-    // isn't 'Y' (or if HTTP fails). If we're past that throw, NIC accepted.
-    // Capture whatever ack shape NIC returned for the audit log — varies by
-    // tenant (sometimes top-level, sometimes wrapped under data/response).
-    const govtResp = result?.govt_response || result?.data?.govt_response || result?.response?.govt_response || result
-
     const cancelledEwb = consignment.eway_bill_no
     const actorEmail   = auth.profile?.email || auth.user?.email || 'unknown'
+
+    if (ewbNotFound) {
+      await logConsignmentEvent(supabase, {
+        consignment_id,
+        event_type:  'ewb_cancel_not_recognised_at_nic',
+        actor_email: actorEmail,
+        details: {
+          ewb_no:      cancelledEwb,
+          reason_code: reason_code || '1',
+          remark:      remark      || 'Duplicate Entry',
+          nic_raw:     result?.raw || result,
+          warning:     'NIC returned 107 (EWB not recognised). Local state NOT modified. Verify on ewaybillgst.gov.in before retrying or clearing manually.',
+        },
+      })
+      return Response.json({
+        success: false,
+        verification_required: true,
+        ewb_no: cancelledEwb,
+        portal_url: 'https://ewaybillgst.gov.in/',
+        error: 'NIC says this E-Way Bill is not recognised. The cancel did NOT confirm. Verify on the NIC portal — if it shows as active there, the GSTIN may not match the one that issued it; if it shows already cancelled, contact admin to clear local state manually.',
+      }, { status: 409 })
+    }
+
+    // Real success — NIC accepted with Success='Y'. Capture whatever ack
+    // shape NIC returned for the audit log (varies by tenant).
+    const govtResp = result?.govt_response || result?.data?.govt_response || result?.response?.govt_response || result
     const REJECTION_REASON = 'Rejected because of cancellation of EWB'
 
     // Cancelling the EWB voids the consignment as a whole. Operator's only path
@@ -102,9 +126,6 @@ export async function POST(req) {
 
     await logConsignmentEvent(supabase, {
       consignment_id,
-      // Use the standard event_type either way so the Cancellations tab
-      // picks it up; the not_active_at_nic flag (if set) preserves the
-      // distinction for audit reviewers.
       event_type:  'ewb_cancelled',
       actor_email: actorEmail,
       details:     {
@@ -113,14 +134,10 @@ export async function POST(req) {
         remark:      remark      || 'Duplicate Entry',
         nic_ack:     govtResp,
         auto_rejected: true,
-        ...(ewbNotFound ? {
-          not_active_at_nic: true,
-          not_active_reason: 'NIC returned 107 (EWB not recognised) — treated as already cancelled upstream',
-        } : {}),
       },
     })
 
-    return Response.json({ success: true, ewb_not_found: ewbNotFound })
+    return Response.json({ success: true })
   } catch (err) {
     console.error('E-Way Bill cancel error:', err)
     return Response.json({ error: err.message || 'Failed to cancel E-Way Bill' }, { status: 500 })

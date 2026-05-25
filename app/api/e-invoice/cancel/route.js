@@ -53,20 +53,43 @@ export async function POST(req) {
       gstinOverride: gstinFor,
     })
 
-    // Soft-success: cancelEInvoice returns { irp_not_found: true } when IRP
-    // replies 107 after retries — usually means a prior attempt already
-    // cancelled it (or the IRN was never actually persisted at IRP). The
-    // audit log records the discrepancy; downstream cleanup runs normally.
-    const irpNotFound = !!result?.irp_not_found
-
-    // Trust the library: cancelEInvoice throws if IRP's govt_response.Success
-    // isn't 'Y' (or if HTTP fails). If we're past that throw, IRP accepted.
-    // Capture whatever ack shape IRP returned for the audit log — varies by
-    // tenant (sometimes top-level, sometimes wrapped under data/response).
-    const govtResp = result?.govt_response || result?.data?.govt_response || result?.response?.govt_response || result
-
+    // 107 from IRP ("IRN not recognised") is NOT a proof of cancellation —
+    // it can also mean the IRN exists at IRP under a different GSTIN, or
+    // that our request never reached IRP cleanly. Treating 107 as success
+    // previously let local state get cleared while the IRN stayed active
+    // on the gov portal.
+    //
+    // Now: refuse to touch local state. Surface a verification banner so
+    // the operator confirms on einvoice1.gst.gov.in before clearing
+    // anything.
+    const irpNotFound  = !!result?.irp_not_found
     const cancelledIrn = consignment.irn
     const actorEmail   = auth.profile?.email || auth.user?.email || 'unknown'
+
+    if (irpNotFound) {
+      await logConsignmentEvent(supabase, {
+        consignment_id,
+        event_type:  'einvoice_cancel_not_recognised_at_irp',
+        actor_email: actorEmail,
+        details: {
+          irn:         cancelledIrn,
+          reason_code: reason_code || '1',
+          remark:      remark      || 'Duplicate',
+          irp_raw:     result?.raw || result,
+          warning:     'IRP returned 107 (IRN not recognised). Local state NOT modified. Verify on einvoice1.gst.gov.in before retrying or clearing manually.',
+        },
+      })
+      return Response.json({
+        success: false,
+        verification_required: true,
+        irn: cancelledIrn,
+        portal_url: 'https://einvoice1.gst.gov.in/',
+        error: 'IRP says this E-Invoice is not recognised. The cancel did NOT confirm. Verify on the IRP portal — if it shows as active there, the GSTIN may not match the one that issued it; if it shows already cancelled, contact admin to clear local state manually.',
+      }, { status: 409 })
+    }
+
+    // Real success — IRP accepted with Success='Y'.
+    const govtResp = result?.govt_response || result?.data?.govt_response || result?.response?.govt_response || result
     const REJECTION_REASON = 'Rejected because of cancellation of E-Invoice'
 
     // Cancelling the E-Invoice voids the consignment as a whole — same semantics
@@ -98,9 +121,6 @@ export async function POST(req) {
 
     await logConsignmentEvent(supabase, {
       consignment_id,
-      // Use the standard event_type either way so the Cancellations tab
-      // picks it up; the not_active_at_irp flag (if set) preserves the
-      // distinction for audit reviewers.
       event_type:  'einvoice_cancelled',
       actor_email: actorEmail,
       details:     {
@@ -109,14 +129,10 @@ export async function POST(req) {
         remark:      remark      || 'Duplicate',
         irp_ack:     govtResp,
         auto_rejected: true,
-        ...(irpNotFound ? {
-          not_active_at_irp: true,
-          not_active_reason: 'IRP returned 107 (IRN not recognised) — treated as already cancelled upstream',
-        } : {}),
       },
     })
 
-    return Response.json({ success: true, irp_not_found: irpNotFound })
+    return Response.json({ success: true })
   } catch (err) {
     console.error('E-Invoice cancel error:', err)
     return Response.json({ error: err.message || 'Failed to cancel E-Invoice' }, { status: 500 })
