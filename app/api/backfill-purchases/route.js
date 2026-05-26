@@ -133,7 +133,10 @@ export async function POST(request) {
     branches.forEach(b => { branchMap[b.brnch_id] = b.brnch_name?.trim() })
 
     // ── Get existing application_ids from Supabase ────────
-    const crmAppIds = rows.map(r => String(r.application_id)?.trim())
+    // CRM stores bare bill_nos; Supabase stores them prefixed with "WGKA",
+    // matching what the record mapper below produces. Use the prefixed form
+    // here so the lookup actually matches rows already in the table.
+    const crmAppIds = rows.map(r => `WGKA${String(r.application_id).trim()}`)
     const existingIds = new Set()
     const FETCH_CHUNK = 500
     for (let i = 0; i < crmAppIds.length; i += FETCH_CHUNK) {
