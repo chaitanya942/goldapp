@@ -68,6 +68,34 @@ function smartDedup(records) {
   return result
 }
 
+// ── Auto-detect optional CRM columns ─────────────────────────────────────────
+// CRM tenants use different column names for the same logical field — PAN
+// might be cust_pan / pan_no / pancard / pan, bank might be bnk_name / bank
+// / bank_name, payment reference might be pymt_ref / txn_ref / utr_no etc.
+// Probe the live schema with one DESCRIBE call and return per-target SELECT
+// expressions that pick the matching column or NULL if none of the candidates
+// exist. Avoids hardcoding wrong names and silently sync'ing nulls forever.
+export async function detectExtraColumns(conn) {
+  let cols = new Set()
+  try {
+    const [rows] = await conn.execute('DESCRIBE `transac_tbl`')
+    cols = new Set(rows.map(r => r.Field))
+  } catch (err) {
+    console.warn('[sync] detectExtraColumns DESCRIBE failed — defaulting to NULL:', err.message)
+  }
+  const pick = (...candidates) => {
+    for (const c of candidates) {
+      if (cols.has(c)) return `t.\`${c}\``
+    }
+    return 'NULL'
+  }
+  return {
+    panSelect:  pick('cust_pan', 'pan_no', 'pan', 'pancard', 'cust_pan_no', 'cust_pancard'),
+    bankSelect: pick('bank_name', 'bnk_name', 'bank', 'cust_bank', 'cust_bank_name'),
+    refSelect:  pick('pymt_ref', 'payment_ref', 'payment_reference', 'txn_ref', 'utr_no', 'utr', 'ref_no', 'transaction_reference', 'pmt_ref'),
+  }
+}
+
 // Extracted sync body — callable from both the user POST handler (auth-gated)
 // and the cron GET handler (CRON_SECRET-gated). Keeps the recursive call from
 // the GET path working without it tripping the user-auth check.
@@ -88,6 +116,13 @@ async function runSync(request) {
     // ── Cutoff = daysBack days ago (or 30 days ago as absolute fallback) ─────
     const cutoff = new Date(Date.now() - daysBack * 86400000).toISOString().split('T')[0]
 
+    // ── Auto-detect optional CRM columns (PAN / bank / payment ref) ──────────
+    // Naming varies across CRM tenants (cust_pan vs pan_no vs pancard, etc).
+    // Probing the live schema once per sync lets us select the right column
+    // without hardcoding-and-praying. If the column doesn't exist, we select
+    // NULL so the SELECT still parses.
+    const extraCols = await detectExtraColumns(conn)
+
     // ── Pull only approved records from CRM ──────────────────────────────────
     const [rows] = await conn.execute(`
       SELECT
@@ -102,6 +137,9 @@ async function runSync(request) {
         t.type_gold                   AS transaction_type,
         t.serv_chr                    AS service_charge_pct,
         t.finl_amnt                   AS final_amount_crm,
+        ${extraCols.panSelect}        AS pan_number,
+        ${extraCols.bankSelect}       AS bank_name,
+        ${extraCols.refSelect}        AS payment_reference,
         GROUP_CONCAT(o.grms_wet   ORDER BY o.id) AS gross_weight_str,
         GROUP_CONCAT(o.stnt_wet   ORDER BY o.id) AS stone_weight_str,
         GROUP_CONCAT(o.wastag_wet ORDER BY o.id) AS wastage_str,
@@ -174,6 +212,9 @@ async function runSync(request) {
         service_charge_pct:         svcPct,
         service_charge_amount_crm:  svcAmount,
         service_charge_amount_calc: svcAmount,
+        pan_number:                 (r.pan_number        || '').toString().trim() || null,
+        bank_name:                  (r.bank_name         || '').toString().trim() || null,
+        payment_reference:          (r.payment_reference || '').toString().trim() || null,
         net_weight_mismatch:        false,
         service_charge_mismatch:    false,
         final_amount_mismatch:      false,

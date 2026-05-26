@@ -1,6 +1,7 @@
 import mysql from 'mysql2/promise'
 import { createClient } from '@supabase/supabase-js'
 import { requireAuth, ROLE_GROUPS } from '../../../lib/apiAuth'
+import { detectExtraColumns } from '../sync-purchases/route'
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
@@ -89,6 +90,9 @@ export async function POST(request) {
       password: process.env.CRM_DB_PASSWORD,
     })
 
+    // CRM column naming varies — auto-detect PAN / bank / payment-ref columns.
+    const extraCols = await detectExtraColumns(conn)
+
     // ── Pull ALL records for the given date range ─────────
     const [rows] = await conn.execute(`
       SELECT
@@ -103,6 +107,9 @@ export async function POST(request) {
         t.type_gold                   AS transaction_type,
         t.serv_chr                    AS service_charge_pct,
         t.finl_amnt                   AS final_amount_crm,
+        ${extraCols.panSelect}        AS pan_number,
+        ${extraCols.bankSelect}       AS bank_name,
+        ${extraCols.refSelect}        AS payment_reference,
         GROUP_CONCAT(o.grms_wet   ORDER BY o.id) AS gross_weight_str,
         GROUP_CONCAT(o.stnt_wet   ORDER BY o.id) AS stone_weight_str,
         GROUP_CONCAT(o.wastag_wet ORDER BY o.id) AS wastage_str,
@@ -192,6 +199,9 @@ export async function POST(request) {
         stock_status:               'at_branch',
         is_duplicate:               false,
         is_deleted:                 false,
+        pan_number:                 (r.pan_number        || '').toString().trim() || null,
+        bank_name:                  (r.bank_name         || '').toString().trim() || null,
+        payment_reference:          (r.payment_reference || '').toString().trim() || null,
       }
     })
 

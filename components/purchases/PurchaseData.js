@@ -71,6 +71,9 @@ const EXPORT_COLS = [
   { key: 'final_amount_crm',          label: 'Final Amt (₹)' },
   { key: 'transaction_type',          label: 'Type' },
   { key: 'stock_status',              label: 'Status' },
+  { key: 'pan_number',                label: 'PAN' },
+  { key: 'bank_name',                 label: 'Bank' },
+  { key: 'payment_reference',         label: 'Payment Ref' },
   { key: 'dispatched_at',             label: 'In Consignment Since' },
   { key: 'received_at',               label: 'Received At HO' },
 ]
