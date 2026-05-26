@@ -242,27 +242,29 @@ export async function POST(request) {
       }
     }
 
-    // ── UPDATE existing rows — ONLY the 3 new fields. Never touches
-    // stock_status, dispatched_at, current_branch, customer_name, weights,
-    // etc. — those are managed by the regular sync and consignment flow.
+    // ── UPDATE existing rows — bulk-patch via the SQL RPC
+    // (bulk_patch_purchases_proofs). One round-trip per 500-row batch instead
+    // of one per row — ~100× faster. The function only touches the four CRM
+    // fields below and uses COALESCE so missing values never overwrite
+    // existing data. Other columns (stock_status, dispatched_at, etc.) are
+    // never read or written.
     let updated = 0, updateErrors = 0
-    for (const meta of existingMetas) {
-      const patch = {}
-      if (meta.id_proof_types)    patch.id_proof_types    = meta.id_proof_types
-      if (meta.id_proof_numbers)  patch.id_proof_numbers  = meta.id_proof_numbers
-      if (meta.bank_name)         patch.bank_name         = meta.bank_name
-      if (meta.payment_reference) patch.payment_reference = meta.payment_reference
-      if (!Object.keys(patch).length) continue
-
-      const { error } = await supabaseAdmin
-        .from('purchases')
-        .update(patch)
-        .eq('application_id', meta.application_id)
+    const PATCH_BATCH = 500
+    for (let i = 0; i < existingMetas.length; i += PATCH_BATCH) {
+      const batch = existingMetas.slice(i, i + PATCH_BATCH).map(m => ({
+        application_id:    m.application_id,
+        id_proof_types:    m.id_proof_types    || null,
+        id_proof_numbers:  m.id_proof_numbers  || null,
+        bank_name:         m.bank_name         || null,
+        payment_reference: m.payment_reference || null,
+      }))
+      const { data, error } = await supabaseAdmin.rpc('bulk_patch_purchases_proofs', { records: batch })
       if (error) {
-        updateErrors += 1
+        console.error('Backfill bulk-patch error:', JSON.stringify(error, null, 2))
+        updateErrors += batch.length
         if (!lastError) lastError = error
       } else {
-        updated += 1
+        updated += (typeof data === 'number') ? data : batch.length
       }
     }
 
