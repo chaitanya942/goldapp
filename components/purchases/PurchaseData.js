@@ -736,6 +736,9 @@ export default function PurchaseData() {
                   { label: 'Final Amt', col: 'final_amount_crm' },
                   { label: 'Type',      col: 'transaction_type' },
                   { label: 'Status',               col: 'stock_status' },
+                  { label: 'PAN',                  col: 'pan_number' },
+                  { label: 'Bank',                 col: 'bank_name' },
+                  { label: 'Payment Ref',          col: 'payment_reference' },
                   { label: 'In Consignment Since', col: 'dispatched_at' },
                   { label: 'Received At HO',       col: 'received_at' },
                   { label: 'CRM',                  col: 'crm_status' },
@@ -808,6 +811,9 @@ export default function PurchaseData() {
                         }
                       />
                     </td>
+                    <td style={{ ...s.td, color: t.text2, fontFamily: 'monospace', fontSize: '.68rem' }}>{p.pan_number || <span style={{ color: t.text4 }}>—</span>}</td>
+                    <td style={{ ...s.td, color: t.text2 }}>{p.bank_name || <span style={{ color: t.text4 }}>—</span>}</td>
+                    <td style={{ ...s.td, color: t.text2, fontFamily: 'monospace', fontSize: '.68rem' }}>{p.payment_reference || <span style={{ color: t.text4 }}>—</span>}</td>
                     {/* purchases.dispatched_at — stamped at consignment approval, the
                         moment this bill transitioned at_branch → in_consignment.
                         Cleared when the consignment is cancelled and the bill
@@ -843,7 +849,7 @@ export default function PurchaseData() {
                 )
               })}
               {purchases.length === 0 && (
-                <tr><td colSpan={isSuperAdmin ? 22 : 21} style={{ ...s.td, textAlign: 'center', color: t.text4, padding: '48px' }}>
+                <tr><td colSpan={isSuperAdmin ? 25 : 24} style={{ ...s.td, textAlign: 'center', color: t.text4, padding: '48px' }}>
                   {(search || filterStatus || filterBranch || filterCrmStatus || filterTxn || fromDate || toDate || dispatchedFrom || dispatchedTo) ? 'No records match your filters' : 'No purchase data yet. Syncing from CRM in the background.'}
                 </td></tr>
               )}
