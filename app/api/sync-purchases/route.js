@@ -68,35 +68,54 @@ function smartDedup(records) {
   return result
 }
 
-// ── Look up PAN + customer bank for a set of CRM kyc_ids ────────────────────
-// PAN lives in `aadhar_valid.pan_number` (linked by kyc_id) — partial coverage,
-// many older customers never had it captured. Bank name lives in `bank_details`
-// (one row per customer bank account, also linked by kyc_id). We pick the most
-// recent bank_details row per kyc_id. Payment reference comes directly off
-// transac_tbl.pmt_refno (already in the main SELECT, no lookup needed).
+// ── Look up ID proofs + customer bank for a set of CRM kyc_ids ──────────────
+// Proofs live in `cust_addr_tbl` (linked by `custspt_id = transac_tbl.kyc_id`).
+// A single customer can have multiple rows there — same Aadhaar repeated, or
+// genuinely different docs (aadhar + PAN + DL). We dedupe on (proof, proof_num)
+// pairs, so each distinct doc shows up exactly once.
 //
-// Returns { panMap, bankMap } keyed on String(kyc_id). Both maps may be empty
-// if the CRM has no matching rows.
+// Bank name lives in `bank_details` — we pick the most recent row per kyc_id.
+// Payment reference is on transac_tbl.pmt_refno (already in main SELECT).
+//
+// Returns { proofMap, bankMap } keyed on String(kyc_id).
+//   proofMap: Map<kyc_id, { types: string, numbers: string }> (CSV strings, same order)
+//   bankMap:  Map<kyc_id, string>
 export async function fetchKycMetaMaps(conn, kycIds) {
-  const panMap  = new Map()
-  const bankMap = new Map()
-  const unique  = [...new Set(kycIds.map(k => String(k).trim()).filter(Boolean))]
-  if (!unique.length) return { panMap, bankMap }
+  const proofMap = new Map()
+  const bankMap  = new Map()
+  const unique   = [...new Set(kycIds.map(k => String(k).trim()).filter(Boolean))]
+  if (!unique.length) return { proofMap, bankMap }
+
+  // Buffer raw (type, number) pairs per kyc_id while we walk chunks, then
+  // dedupe + serialize to CSV at the end. Using a Set per kyc keeps it O(1)
+  // membership-check without an N² pass.
+  const rawProofs = new Map()   // kyc_id → Set<"type|number">
 
   const CHUNK = 1000
   for (let i = 0; i < unique.length; i += CHUNK) {
     const chunk = unique.slice(i, i + CHUNK)
     const ph    = chunk.map(() => '?').join(',')
 
-    const [panRows] = await conn.execute(
-      `SELECT kyc_id, pan_number FROM aadhar_valid
-       WHERE kyc_id IN (${ph}) AND pan_number IS NOT NULL AND pan_number != ''`,
+    const [proofRows] = await conn.execute(
+      `SELECT custspt_id, proof, proof_num FROM cust_addr_tbl
+       WHERE custspt_id IN (${ph})
+         AND proof IS NOT NULL AND proof != ''
+         AND proof_num IS NOT NULL AND proof_num != ''`,
       chunk
     )
-    panRows.forEach(r => panMap.set(String(r.kyc_id), String(r.pan_number).trim()))
+    for (const r of proofRows) {
+      const kyc  = String(r.custspt_id).trim()
+      const type = String(r.proof).trim().toLowerCase()
+      const num  = String(r.proof_num).trim()
+      // Drop the obvious placeholder rows (all 9s, all 0s, etc.).
+      if (!num || /^9{8,}$/.test(num) || /^0+$/.test(num)) continue
+      const key = `${type}|${num}`
+      if (!rawProofs.has(kyc)) rawProofs.set(kyc, new Set())
+      rawProofs.get(kyc).add(key)
+    }
 
     // Most-recent bank per kyc_id (inner subquery picks MAX(id) per group,
-    // then we self-join to recover bank_nme for that row).
+    // then self-join recovers bank_nme for that row).
     const [bankRows] = await conn.execute(
       `SELECT b1.kyc_id, b1.bank_nme FROM bank_details b1
        INNER JOIN (
@@ -109,7 +128,15 @@ export async function fetchKycMetaMaps(conn, kycIds) {
     bankRows.forEach(r => bankMap.set(String(r.kyc_id), String(r.bank_nme).trim()))
   }
 
-  return { panMap, bankMap }
+  // Serialize the deduped (type, number) set per kyc_id into parallel CSVs.
+  for (const [kyc, keySet] of rawProofs.entries()) {
+    const pairs   = [...keySet].map(k => k.split('|'))
+    const types   = pairs.map(p => p[0]).join(', ')
+    const numbers = pairs.map(p => p[1]).join(', ')
+    proofMap.set(kyc, { types, numbers })
+  }
+
+  return { proofMap, bankMap }
 }
 
 // Extracted sync body — callable from both the user POST handler (auth-gated)
@@ -164,8 +191,8 @@ async function runSync(request) {
       GROUP BY t.id
     `, [cutoff])
 
-    // PAN + bank lookups for the kyc_ids in this batch.
-    const { panMap, bankMap } = await fetchKycMetaMaps(conn, rows.map(r => r.kyc_id))
+    // ID proof + bank lookups for the kyc_ids in this batch.
+    const { proofMap, bankMap } = await fetchKycMetaMaps(conn, rows.map(r => r.kyc_id))
 
     if (!rows.length) {
       return Response.json({ success: true, message: 'No approved records in CRM window', synced: 0, newCount: 0 })
@@ -227,7 +254,8 @@ async function runSync(request) {
         service_charge_pct:         svcPct,
         service_charge_amount_crm:  svcAmount,
         service_charge_amount_calc: svcAmount,
-        pan_number:                 panMap.get(String(r.kyc_id || '').trim()) || null,
+        id_proof_types:             proofMap.get(String(r.kyc_id || '').trim())?.types   || null,
+        id_proof_numbers:           proofMap.get(String(r.kyc_id || '').trim())?.numbers || null,
         bank_name:                  bankMap.get(String(r.kyc_id || '').trim()) || null,
         payment_reference:          (r.payment_reference || '').toString().trim() || null,
         net_weight_mismatch:        false,

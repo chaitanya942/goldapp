@@ -124,8 +124,8 @@ export async function POST(request) {
       return Response.json({ success: true, message: `No records found between ${from} and ${to}`, total: 0, synced: 0 })
     }
 
-    // PAN + bank lookups for every kyc_id in scope.
-    const { panMap, bankMap } = await fetchKycMetaMaps(conn, rows.map(r => r.kyc_id))
+    // ID proof + bank lookups for every kyc_id in scope.
+    const { proofMap, bankMap } = await fetchKycMetaMaps(conn, rows.map(r => r.kyc_id))
 
     // ── Branch lookup ─────────────────────────────────────
     const [branches] = await conn.execute(`SELECT brnch_id, brnch_name FROM branch_tbl`)
@@ -200,7 +200,8 @@ export async function POST(request) {
         stock_status:               'at_branch',
         is_duplicate:               false,
         is_deleted:                 false,
-        pan_number:                 panMap.get(String(r.kyc_id || '').trim()) || null,
+        id_proof_types:             proofMap.get(String(r.kyc_id || '').trim())?.types   || null,
+        id_proof_numbers:           proofMap.get(String(r.kyc_id || '').trim())?.numbers || null,
         bank_name:                  bankMap.get(String(r.kyc_id || '').trim()) || null,
         payment_reference:          (r.payment_reference || '').toString().trim() || null,
       }
@@ -211,10 +212,11 @@ export async function POST(request) {
     const newRecords    = deduped.filter(r => !existingIds.has(r.application_id))
     const existingMetas = deduped
       .filter(r => existingIds.has(r.application_id))
-      .filter(r => r.pan_number || r.bank_name || r.payment_reference)
+      .filter(r => r.id_proof_types || r.id_proof_numbers || r.bank_name || r.payment_reference)
       .map(r => ({
         application_id:    r.application_id,
-        pan_number:        r.pan_number,
+        id_proof_types:    r.id_proof_types,
+        id_proof_numbers:  r.id_proof_numbers,
         bank_name:         r.bank_name,
         payment_reference: r.payment_reference,
       }))
@@ -243,7 +245,8 @@ export async function POST(request) {
     let updated = 0, updateErrors = 0
     for (const meta of existingMetas) {
       const patch = {}
-      if (meta.pan_number)        patch.pan_number        = meta.pan_number
+      if (meta.id_proof_types)    patch.id_proof_types    = meta.id_proof_types
+      if (meta.id_proof_numbers)  patch.id_proof_numbers  = meta.id_proof_numbers
       if (meta.bank_name)         patch.bank_name         = meta.bank_name
       if (meta.payment_reference) patch.payment_reference = meta.payment_reference
       if (!Object.keys(patch).length) continue

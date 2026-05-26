@@ -71,7 +71,8 @@ const EXPORT_COLS = [
   { key: 'final_amount_crm',          label: 'Final Amt (₹)' },
   { key: 'transaction_type',          label: 'Type' },
   { key: 'stock_status',              label: 'Status' },
-  { key: 'pan_number',                label: 'PAN' },
+  { key: 'id_proof_types',            label: 'ID Type' },
+  { key: 'id_proof_numbers',          label: 'ID Number' },
   { key: 'bank_name',                 label: 'Bank' },
   { key: 'payment_reference',         label: 'Payment Ref' },
   { key: 'dispatched_at',             label: 'In Consignment Since' },
@@ -736,7 +737,8 @@ export default function PurchaseData() {
                   { label: 'Final Amt', col: 'final_amount_crm' },
                   { label: 'Type',      col: 'transaction_type' },
                   { label: 'Status',               col: 'stock_status' },
-                  { label: 'PAN',                  col: 'pan_number' },
+                  { label: 'ID Type',              col: 'id_proof_types' },
+                  { label: 'ID Number',            col: 'id_proof_numbers' },
                   { label: 'Bank',                 col: 'bank_name' },
                   { label: 'Payment Ref',          col: 'payment_reference' },
                   { label: 'In Consignment Since', col: 'dispatched_at' },
@@ -811,7 +813,8 @@ export default function PurchaseData() {
                         }
                       />
                     </td>
-                    <td style={{ ...s.td, color: t.text2, fontFamily: 'monospace', fontSize: '.68rem' }}>{p.pan_number || <span style={{ color: t.text4 }}>—</span>}</td>
+                    <td style={{ ...s.td, color: t.text3, fontSize: '.68rem', whiteSpace: 'normal', maxWidth: '160px' }}>{p.id_proof_types || <span style={{ color: t.text4 }}>—</span>}</td>
+                    <td style={{ ...s.td, color: t.text2, fontFamily: 'monospace', fontSize: '.68rem', whiteSpace: 'normal', maxWidth: '200px', wordBreak: 'break-all' }}>{p.id_proof_numbers || <span style={{ color: t.text4 }}>—</span>}</td>
                     <td style={{ ...s.td, color: t.text2 }}>{p.bank_name || <span style={{ color: t.text4 }}>—</span>}</td>
                     <td style={{ ...s.td, color: t.text2, fontFamily: 'monospace', fontSize: '.68rem' }}>{p.payment_reference || <span style={{ color: t.text4 }}>—</span>}</td>
                     {/* purchases.dispatched_at — stamped at consignment approval, the
@@ -849,7 +852,7 @@ export default function PurchaseData() {
                 )
               })}
               {purchases.length === 0 && (
-                <tr><td colSpan={isSuperAdmin ? 25 : 24} style={{ ...s.td, textAlign: 'center', color: t.text4, padding: '48px' }}>
+                <tr><td colSpan={isSuperAdmin ? 26 : 25} style={{ ...s.td, textAlign: 'center', color: t.text4, padding: '48px' }}>
                   {(search || filterStatus || filterBranch || filterCrmStatus || filterTxn || fromDate || toDate || dispatchedFrom || dispatchedTo) ? 'No records match your filters' : 'No purchase data yet. Syncing from CRM in the background.'}
                 </td></tr>
               )}
