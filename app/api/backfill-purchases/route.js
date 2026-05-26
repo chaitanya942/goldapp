@@ -1,7 +1,7 @@
 import mysql from 'mysql2/promise'
 import { createClient } from '@supabase/supabase-js'
 import { requireAuth, ROLE_GROUPS } from '../../../lib/apiAuth'
-import { detectExtraColumns } from '../sync-purchases/route'
+import { fetchKycMetaMaps } from '../sync-purchases/route'
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
@@ -90,14 +90,14 @@ export async function POST(request) {
       password: process.env.CRM_DB_PASSWORD,
     })
 
-    // CRM column naming varies — auto-detect PAN / bank / payment-ref columns.
-    const extraCols = await detectExtraColumns(conn)
-
     // ── Pull ALL records for the given date range ─────────
+    // pmt_refno is on transac_tbl directly; PAN + customer bank live in joined
+    // tables and are looked up below via fetchKycMetaMaps.
     const [rows] = await conn.execute(`
       SELECT
         t.id                          AS txn_id,
         t.bill_no                     AS application_id,
+        t.kyc_id                      AS kyc_id,
         t.trxn_status                 AS crm_status,
         t.date                        AS purchase_date,
         t.time                        AS transaction_time,
@@ -107,9 +107,7 @@ export async function POST(request) {
         t.type_gold                   AS transaction_type,
         t.serv_chr                    AS service_charge_pct,
         t.finl_amnt                   AS final_amount_crm,
-        ${extraCols.panSelect}        AS pan_number,
-        ${extraCols.bankSelect}       AS bank_name,
-        ${extraCols.refSelect}        AS payment_reference,
+        t.pmt_refno                   AS payment_reference,
         GROUP_CONCAT(o.grms_wet   ORDER BY o.id) AS gross_weight_str,
         GROUP_CONCAT(o.stnt_wet   ORDER BY o.id) AS stone_weight_str,
         GROUP_CONCAT(o.wastag_wet ORDER BY o.id) AS wastage_str,
@@ -125,6 +123,9 @@ export async function POST(request) {
     if (!rows.length) {
       return Response.json({ success: true, message: `No records found between ${from} and ${to}`, total: 0, synced: 0 })
     }
+
+    // PAN + bank lookups for every kyc_id in scope.
+    const { panMap, bankMap } = await fetchKycMetaMaps(conn, rows.map(r => r.kyc_id))
 
     // ── Branch lookup ─────────────────────────────────────
     const [branches] = await conn.execute(`SELECT brnch_id, brnch_name FROM branch_tbl`)
@@ -199,26 +200,26 @@ export async function POST(request) {
         stock_status:               'at_branch',
         is_duplicate:               false,
         is_deleted:                 false,
-        pan_number:                 (r.pan_number        || '').toString().trim() || null,
-        bank_name:                  (r.bank_name         || '').toString().trim() || null,
+        pan_number:                 panMap.get(String(r.kyc_id || '').trim()) || null,
+        bank_name:                  bankMap.get(String(r.kyc_id || '').trim()) || null,
         payment_reference:          (r.payment_reference || '').toString().trim() || null,
       }
     })
 
-    // ── Smart dedup then filter to only NEW records ────────
-    const deduped = smartDedup(allRecords).map(({ _txn_id, ...r }) => r)
-    const newRecords = deduped.filter(r => !existingIds.has(r.application_id))
+    // ── Smart dedup, split into insert (new) vs update (existing) ──────────
+    const deduped       = smartDedup(allRecords).map(({ _txn_id, ...r }) => r)
+    const newRecords    = deduped.filter(r => !existingIds.has(r.application_id))
+    const existingMetas = deduped
+      .filter(r => existingIds.has(r.application_id))
+      .filter(r => r.pan_number || r.bank_name || r.payment_reference)
+      .map(r => ({
+        application_id:    r.application_id,
+        pan_number:        r.pan_number,
+        bank_name:         r.bank_name,
+        payment_reference: r.payment_reference,
+      }))
 
-    if (!newRecords.length) {
-      return Response.json({
-        success:  true,
-        total:    rows.length,
-        synced:   0,
-        message:  `All ${rows.length} records for ${from} → ${to} already exist in Supabase`,
-      })
-    }
-
-    // ── Insert in batches of 100 ──────────────────────────
+    // ── Insert NEW rows in batches of 100 ──────────────────
     const BATCH = 100
     let synced = 0, errors = 0, lastError = null
 
@@ -228,7 +229,7 @@ export async function POST(request) {
         .from('purchases')
         .insert(batch)
       if (error) {
-        console.error('Backfill error:', JSON.stringify(error, null, 2))
+        console.error('Backfill insert error:', JSON.stringify(error, null, 2))
         lastError = error
         errors += batch.length
       } else {
@@ -236,14 +237,38 @@ export async function POST(request) {
       }
     }
 
+    // ── UPDATE existing rows — ONLY the 3 new fields. Never touches
+    // stock_status, dispatched_at, current_branch, customer_name, weights,
+    // etc. — those are managed by the regular sync and consignment flow.
+    let updated = 0, updateErrors = 0
+    for (const meta of existingMetas) {
+      const patch = {}
+      if (meta.pan_number)        patch.pan_number        = meta.pan_number
+      if (meta.bank_name)         patch.bank_name         = meta.bank_name
+      if (meta.payment_reference) patch.payment_reference = meta.payment_reference
+      if (!Object.keys(patch).length) continue
+
+      const { error } = await supabaseAdmin
+        .from('purchases')
+        .update(patch)
+        .eq('application_id', meta.application_id)
+      if (error) {
+        updateErrors += 1
+        if (!lastError) lastError = error
+      } else {
+        updated += 1
+      }
+    }
+
     return Response.json({
-      success:  errors === 0,
+      success:  errors === 0 && updateErrors === 0,
       total:    rows.length,
       newCount: newRecords.length,
       synced,
-      errors,
+      updated,
+      errors:   errors + updateErrors,
       lastError: lastError ? JSON.stringify(lastError) : null,
-      message:  `${from} → ${to}: ${synced} records inserted (${errors} errors)`,
+      message:  `${from} → ${to}: ${synced} inserted, ${updated} existing rows patched (${errors + updateErrors} errors)`,
     })
 
   } catch (err) {

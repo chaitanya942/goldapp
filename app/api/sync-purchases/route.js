@@ -68,32 +68,48 @@ function smartDedup(records) {
   return result
 }
 
-// ── Auto-detect optional CRM columns ─────────────────────────────────────────
-// CRM tenants use different column names for the same logical field — PAN
-// might be cust_pan / pan_no / pancard / pan, bank might be bnk_name / bank
-// / bank_name, payment reference might be pymt_ref / txn_ref / utr_no etc.
-// Probe the live schema with one DESCRIBE call and return per-target SELECT
-// expressions that pick the matching column or NULL if none of the candidates
-// exist. Avoids hardcoding wrong names and silently sync'ing nulls forever.
-export async function detectExtraColumns(conn) {
-  let cols = new Set()
-  try {
-    const [rows] = await conn.execute('DESCRIBE `transac_tbl`')
-    cols = new Set(rows.map(r => r.Field))
-  } catch (err) {
-    console.warn('[sync] detectExtraColumns DESCRIBE failed — defaulting to NULL:', err.message)
+// ── Look up PAN + customer bank for a set of CRM kyc_ids ────────────────────
+// PAN lives in `aadhar_valid.pan_number` (linked by kyc_id) — partial coverage,
+// many older customers never had it captured. Bank name lives in `bank_details`
+// (one row per customer bank account, also linked by kyc_id). We pick the most
+// recent bank_details row per kyc_id. Payment reference comes directly off
+// transac_tbl.pmt_refno (already in the main SELECT, no lookup needed).
+//
+// Returns { panMap, bankMap } keyed on String(kyc_id). Both maps may be empty
+// if the CRM has no matching rows.
+export async function fetchKycMetaMaps(conn, kycIds) {
+  const panMap  = new Map()
+  const bankMap = new Map()
+  const unique  = [...new Set(kycIds.map(k => String(k).trim()).filter(Boolean))]
+  if (!unique.length) return { panMap, bankMap }
+
+  const CHUNK = 1000
+  for (let i = 0; i < unique.length; i += CHUNK) {
+    const chunk = unique.slice(i, i + CHUNK)
+    const ph    = chunk.map(() => '?').join(',')
+
+    const [panRows] = await conn.execute(
+      `SELECT kyc_id, pan_number FROM aadhar_valid
+       WHERE kyc_id IN (${ph}) AND pan_number IS NOT NULL AND pan_number != ''`,
+      chunk
+    )
+    panRows.forEach(r => panMap.set(String(r.kyc_id), String(r.pan_number).trim()))
+
+    // Most-recent bank per kyc_id (inner subquery picks MAX(id) per group,
+    // then we self-join to recover bank_nme for that row).
+    const [bankRows] = await conn.execute(
+      `SELECT b1.kyc_id, b1.bank_nme FROM bank_details b1
+       INNER JOIN (
+         SELECT kyc_id, MAX(id) AS max_id FROM bank_details
+         WHERE kyc_id IN (${ph}) AND bank_nme IS NOT NULL AND bank_nme != ''
+         GROUP BY kyc_id
+       ) b2 ON b1.id = b2.max_id`,
+      chunk
+    )
+    bankRows.forEach(r => bankMap.set(String(r.kyc_id), String(r.bank_nme).trim()))
   }
-  const pick = (...candidates) => {
-    for (const c of candidates) {
-      if (cols.has(c)) return `t.\`${c}\``
-    }
-    return 'NULL'
-  }
-  return {
-    panSelect:  pick('cust_pan', 'pan_no', 'pan', 'pancard', 'cust_pan_no', 'cust_pancard'),
-    bankSelect: pick('bank_name', 'bnk_name', 'bank', 'cust_bank', 'cust_bank_name'),
-    refSelect:  pick('pymt_ref', 'payment_ref', 'payment_reference', 'txn_ref', 'utr_no', 'utr', 'ref_no', 'transaction_reference', 'pmt_ref'),
-  }
+
+  return { panMap, bankMap }
 }
 
 // Extracted sync body — callable from both the user POST handler (auth-gated)
@@ -116,18 +132,16 @@ async function runSync(request) {
     // ── Cutoff = daysBack days ago (or 30 days ago as absolute fallback) ─────
     const cutoff = new Date(Date.now() - daysBack * 86400000).toISOString().split('T')[0]
 
-    // ── Auto-detect optional CRM columns (PAN / bank / payment ref) ──────────
-    // Naming varies across CRM tenants (cust_pan vs pan_no vs pancard, etc).
-    // Probing the live schema once per sync lets us select the right column
-    // without hardcoding-and-praying. If the column doesn't exist, we select
-    // NULL so the SELECT still parses.
-    const extraCols = await detectExtraColumns(conn)
-
     // ── Pull only approved records from CRM ──────────────────────────────────
+    // pmt_refno comes directly off transac_tbl. PAN + customer bank live in
+    // joined tables (aadhar_valid, bank_details) and are looked up separately
+    // below via fetchKycMetaMaps — doing them as scalar subqueries in this
+    // SELECT was too slow.
     const [rows] = await conn.execute(`
       SELECT
         t.id                          AS txn_id,
         t.bill_no                     AS application_id,
+        t.kyc_id                      AS kyc_id,
         t.trxn_status                 AS crm_status,
         t.date                        AS purchase_date,
         t.time                        AS transaction_time,
@@ -137,9 +151,7 @@ async function runSync(request) {
         t.type_gold                   AS transaction_type,
         t.serv_chr                    AS service_charge_pct,
         t.finl_amnt                   AS final_amount_crm,
-        ${extraCols.panSelect}        AS pan_number,
-        ${extraCols.bankSelect}       AS bank_name,
-        ${extraCols.refSelect}        AS payment_reference,
+        t.pmt_refno                   AS payment_reference,
         GROUP_CONCAT(o.grms_wet   ORDER BY o.id) AS gross_weight_str,
         GROUP_CONCAT(o.stnt_wet   ORDER BY o.id) AS stone_weight_str,
         GROUP_CONCAT(o.wastag_wet ORDER BY o.id) AS wastage_str,
@@ -151,6 +163,9 @@ async function runSync(request) {
       WHERE t.trxn_status = 'approved' AND t.date >= ?
       GROUP BY t.id
     `, [cutoff])
+
+    // PAN + bank lookups for the kyc_ids in this batch.
+    const { panMap, bankMap } = await fetchKycMetaMaps(conn, rows.map(r => r.kyc_id))
 
     if (!rows.length) {
       return Response.json({ success: true, message: 'No approved records in CRM window', synced: 0, newCount: 0 })
@@ -212,8 +227,8 @@ async function runSync(request) {
         service_charge_pct:         svcPct,
         service_charge_amount_crm:  svcAmount,
         service_charge_amount_calc: svcAmount,
-        pan_number:                 (r.pan_number        || '').toString().trim() || null,
-        bank_name:                  (r.bank_name         || '').toString().trim() || null,
+        pan_number:                 panMap.get(String(r.kyc_id || '').trim()) || null,
+        bank_name:                  bankMap.get(String(r.kyc_id || '').trim()) || null,
         payment_reference:          (r.payment_reference || '').toString().trim() || null,
         net_weight_mismatch:        false,
         service_charge_mismatch:    false,
