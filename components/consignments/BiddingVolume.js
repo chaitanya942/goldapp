@@ -500,6 +500,46 @@ export default function BiddingVolume() {
     return next
   })
 
+  // Auto-select bills totaling the target weight from a pool. Wired to the
+  // Remaining KPI tiles — clicking "Remaining" picks bills FIFO-style until
+  // the cumulative net weight hits the target, then the operator clicks
+  // "Book Selected" to open the booking modal. Pools are mutually exclusive
+  // (Kerala vs Bangalore-and-Others) because the booking modal can only
+  // handle one pool at a time, so the new selection REPLACES the current one.
+  // Order of preference for picking:
+  //   1. Section 1 (Bangalore today) — freshest, prefer to bid against this first
+  //   2. Section 2 (24h transit)    — already in motion
+  //   3. Section 4 (branch pre-EOD) — last, since these still need pickup
+  // Within each section: branch name alphabetical, then purchase_date oldest first.
+  const autoSelectRemaining = useCallback((pool, target) => {
+    if (!Number.isFinite(target) || target <= 0) return
+    const sectionOrder = { bangalore: 1, transit_24h: 2, branch_pre_eod: 3 }
+    const eligible = []
+    for (const id of Object.keys(billsById)) {
+      const bill = billsById[id]
+      const isKerala = bill._region === 'Kerala'
+      if (pool === 'kerala'           && !isKerala) continue
+      if (pool === 'bangalore_others' &&  isKerala) continue
+      eligible.push(bill)
+    }
+    eligible.sort((a, b) => {
+      const sa = sectionOrder[a._group] ?? 99
+      const sb = sectionOrder[b._group] ?? 99
+      if (sa !== sb) return sa - sb
+      const bn = (a._branch_name || '').localeCompare(b._branch_name || '')
+      if (bn !== 0) return bn
+      return (a.purchase_date || '').localeCompare(b.purchase_date || '')
+    })
+    const chosen = new Set()
+    let sum = 0
+    for (const bill of eligible) {
+      if (sum >= target) break
+      chosen.add(bill.id)
+      sum += Number(bill.net_weight || 0)
+    }
+    setSelected(chosen)
+  }, [billsById])
+
   // Kerala (KL) no-mix rule — Kerala bookings must be exclusive. With
   // bill-level selection, look at the BILL's branch's region (cached on the
   // bill as `_region` by billsById). Locking a branch is now "would any of
@@ -767,7 +807,10 @@ export default function BiddingVolume() {
               ? `Pipeline owes ${fmt(Math.abs(othersRemaining), 2)} g more than the pool can supply`
               : (pipelineOtherG > 0 ? 'After pipeline back-fill' : 'Full pool free · no pipeline commitments')}
             accent={othersOverbooked ? t.red : t.green} card={card} t={t}
-            variant="state" pulse={othersOverbooked} />
+            variant="state" pulse={othersOverbooked}
+            onClick={!othersOverbooked && othersRemaining > 0 ? () => autoSelectRemaining('bangalore_others', othersRemaining) : null}
+            actionHint={!othersOverbooked && othersRemaining > 0 ? 'Click to auto-select bills' : null}
+          />
         </div>
       </div>
 
@@ -833,7 +876,10 @@ export default function BiddingVolume() {
               ? `Pipeline owes ${fmt(Math.abs(klRemaining), 2)} g more than the hub pool can supply`
               : (pipelineKLG > 0 ? 'After pipeline back-fill' : 'Full hub pool free · no pipeline commitments')}
             accent={klOverbooked ? t.red : t.green} card={card} t={t}
-            variant="state" pulse={klOverbooked} />
+            variant="state" pulse={klOverbooked}
+            onClick={!klOverbooked && klRemaining > 0 ? () => autoSelectRemaining('kerala', klRemaining) : null}
+            actionHint={!klOverbooked && klRemaining > 0 ? 'Click to auto-select bills' : null}
+          />
         </div>
       </div>
 
@@ -1197,16 +1243,21 @@ export default function BiddingVolume() {
 //   state   → Remaining / Pool Deficit / Overbooked (the outcome)
 // `op` is the dim equation operator shown before the label (+ ± = −).
 // Hover lifts the card, brightens the border, and blooms a corner glow.
-function KpiCard({ label, value, sub, accent, card, t, op, variant = 'source', pulse = false, big = false }) {
+function KpiCard({ label, value, sub, accent, card, t, op, variant = 'source', pulse = false, big = false, onClick = null, actionHint = null }) {
   const [hov, setHov] = useState(false)
   const isResult = variant === 'result'
   const isState  = variant === 'state'
   const lit      = isResult || (isState && pulse)         // tinted at rest
-  const glow     = hov ? '28' : lit ? '14' : '00'
+  const glow     = hov && onClick ? '38' : hov ? '28' : lit ? '14' : '00'
+  const clickable = !!onClick
   return (
     <div
       onMouseEnter={() => setHov(true)}
       onMouseLeave={() => setHov(false)}
+      onClick={clickable ? onClick : undefined}
+      role={clickable ? 'button' : undefined}
+      tabIndex={clickable ? 0 : undefined}
+      onKeyDown={clickable ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick() } } : undefined}
       style={{
         position: 'relative', overflow: 'hidden',
         background: lit
@@ -1218,8 +1269,9 @@ function KpiCard({ label, value, sub, accent, card, t, op, variant = 'source', p
         padding: isResult ? '16px 18px' : '14px 18px',
         transform: hov ? 'translateY(-3px)' : 'translateY(0)',
         boxShadow: hov
-          ? `0 9px 24px ${accent}26`
+          ? clickable ? `0 12px 28px ${accent}40, 0 0 0 1px ${accent}50 inset` : `0 9px 24px ${accent}26`
           : isResult ? `0 1px 0 ${accent}1f inset` : 'none',
+        cursor: clickable ? 'pointer' : 'default',
         transition: 'transform .18s cubic-bezier(.34,1.1,.64,1), box-shadow .2s ease, border-color .2s ease, background .25s ease',
       }}>
       <div aria-hidden style={{
@@ -1243,6 +1295,19 @@ function KpiCard({ label, value, sub, accent, card, t, op, variant = 'source', p
         animation: pulse ? 'pulse 1.4s infinite' : 'none',
       }}>{value}</div>
       {sub && <div style={{ position: 'relative', fontSize: 10, color: t.text4, marginTop: 6, lineHeight: 1.4 }}>{sub}</div>}
+      {clickable && actionHint && (
+        <div style={{
+          position: 'relative',
+          fontSize: 10, fontWeight: 700,
+          color: hov ? accent : `${accent}b0`,
+          letterSpacing: '.04em',
+          marginTop: 8,
+          display: 'inline-flex', alignItems: 'center', gap: 4,
+          transition: 'color .15s ease',
+        }}>
+          {actionHint} <span style={{ fontSize: 12 }}>→</span>
+        </div>
+      )}
     </div>
   )
 }

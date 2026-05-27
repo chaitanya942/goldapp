@@ -542,9 +542,30 @@ export async function GET(req) {
     // hub, so filter by current_branch when it's set, fall back to
     // branch_name when it's null (the common case for un-transferred bills
     // at non-Kerala branches).
-    let preEodBills = []
+    //
+    // POST-DISPATCH EXCLUSION: once a branch has already created a non-cancelled
+    // consignment today, any NEW at_branch bills there are for tomorrow's
+    // dispatch — not today's — so the branch is hidden from section 4 for the
+    // remainder of the day. This prevents double-booking: yesterday a branch
+    // could have a consignment dispatched at 4:30 PM and a new purchase land
+    // at 5 PM, and section 4 would still surface that bill as "pickup-pending
+    // today" even though logically it belongs to tomorrow's bid.
+    let postDispatchedBranches = new Set()
     if (preEodEligibleBranchNames.length) {
-      const list = preEodEligibleBranchNames.map(n => `"${n}"`).join(',')
+      const { data: todaysDispatches } = await supabase
+        .from('consignments')
+        .select('branch_name')
+        .gte('created_at', `${bangalorePurchaseDate}T00:00:00+05:30`)
+        .lte('created_at', `${bangalorePurchaseDate}T23:59:59+05:30`)
+        .neq('status', 'cancelled')
+        .in('branch_name', preEodEligibleBranchNames)
+      postDispatchedBranches = new Set((todaysDispatches || []).map(c => c.branch_name))
+    }
+    const preEodEligibleAfterDispatch = preEodEligibleBranchNames.filter(n => !postDispatchedBranches.has(n))
+
+    let preEodBills = []
+    if (preEodEligibleAfterDispatch.length) {
+      const list = preEodEligibleAfterDispatch.map(n => `"${n}"`).join(',')
       const { data: pb, error: pbErr } = await supabase
         .from('purchases')
         .select('id, application_id, branch_name, current_branch, customer_name, gross_weight, net_weight, total_amount, purchase_date, stock_status, dispatched_at, crm_status')
@@ -556,7 +577,12 @@ export async function GET(req) {
       if (pbErr) return Response.json({ error: pbErr.message }, { status: 500 })
       // Re-key each bill to the effective owner branch so groupByBranch puts
       // transferred bills under the receiving hub, not the original source.
-      preEodBills = (pb || []).map(b => ({ ...b, branch_name: b.current_branch || b.branch_name }))
+      // Also re-check the post-dispatch set against the resolved owner — a
+      // bill at a leaf branch transferred to a hub that has already dispatched
+      // today must be excluded the same way.
+      preEodBills = (pb || [])
+        .map(b => ({ ...b, branch_name: b.current_branch || b.branch_name }))
+        .filter(b => !postDispatchedBranches.has(b.branch_name))
     }
 
     // Group by branch for the per-branch breakdown card.
@@ -642,6 +668,8 @@ export async function GET(req) {
       eligible_branches:        preEodEligibleBranchNames,
       eligible_kerala_hubs:     preEodKeralaHubsEligible,
       branches_with_at_branch_bills: preEodBranchesWithBills,
+      post_dispatched_today:    [...postDispatchedBranches],
+      eligible_after_dispatch:  preEodEligibleAfterDispatch,
       now_ist_hhmm: nowIstHHMM,
       today_dow:    todayDow,
     }
