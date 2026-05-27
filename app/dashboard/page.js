@@ -29,6 +29,7 @@ import ConsignmentData from '../../components/consignments/ConsignmentData'
 import ConsignmentReport from '../../components/consignments/ConsignmentReport'
 import BiddingVolume from '../../components/consignments/BiddingVolume'
 import CollectionAudit from '../../components/consignments/CollectionAudit'
+import AuditReport from '../../components/consignments/AuditReport'
 import ConsignmentAnalytics from '../../components/consignments/ConsignmentAnalytics'
 import ConsignmentApprovals from '../../components/consignments/ConsignmentApprovals'
 import CalTable from '../../components/sales/CalTable'
@@ -218,7 +219,8 @@ function DashboardShell() {
       case 'consignment-report':     return <ConsignmentReport />
       case 'consignment-summary':    return <ConsignmentReport />
       case 'consignment-bidding':    return <BiddingVolume />
-      case 'collection-audit':       return <CollectionAudit />
+      case 'audit-data':             return <CollectionAudit />
+      case 'audit-report':            return <AuditReport />
       case 'consignment-analytics':  return <ConsignmentAnalytics />
       case 'melting':             return <ComingSoon title="Melting" />
       case 'sales':               return <ComingSoon title="Sales" />

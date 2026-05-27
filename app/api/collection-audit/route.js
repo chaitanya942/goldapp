@@ -29,13 +29,51 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY || 'placeholder',
 )
 
-// ── GET: list everything pending audit ──────────────────────────────────────
+// ── GET: list pending bills (default) OR historical audits (?mode=history) ──
 export async function GET(req) {
   const auth = await requireAuth(req, { requiredRoles: ROLE_GROUPS.AUDIT })
   if (!auth.ok) return auth.response
 
+  const url  = new URL(req.url)
+  const mode = url.searchParams.get('mode') || 'pending'
+
+  // ── History mode: paginated list of every audited bill in the window ──
+  // Used by the Audit Report page to power KPIs + per-auditor/per-branch
+  // breakdowns. Filters by audited_at, not purchase_date.
+  if (mode === 'history') {
+    const from = url.searchParams.get('from')   // YYYY-MM-DD inclusive
+    const to   = url.searchParams.get('to')     // YYYY-MM-DD inclusive
+    const COLS = 'id, application_id, customer_name, branch_name, purchase_date, gross_weight, net_weight, total_amount, audit_gross_weight, audit_discrepancy_g, audited_at, audited_by, audit_remark, stock_status'
+
+    let q = supabase
+      .from('purchases')
+      .select(COLS)
+      .not('audited_at', 'is', null)
+      .order('audited_at', { ascending: false })
+      .limit(2000)
+    if (from) q = q.gte('audited_at', `${from}T00:00:00+05:30`)
+    if (to)   q = q.lte('audited_at', `${to}T23:59:59+05:30`)
+    const { data, error } = await q
+    if (error) return Response.json({ error: error.message }, { status: 500 })
+
+    // Resolve auditor emails for display — single user_profiles lookup.
+    const userIds = [...new Set((data || []).map(r => r.audited_by).filter(Boolean))]
+    let emailByUid = new Map()
+    if (userIds.length) {
+      const { data: profiles } = await supabase
+        .from('user_profiles')
+        .select('id, email, full_name')
+        .in('id', userIds)
+      emailByUid = new Map((profiles || []).map(p => [p.id, p.email || p.full_name || '—']))
+    }
+    return Response.json({
+      rows: (data || []).map(r => ({ ...r, audited_by_email: emailByUid.get(r.audited_by) || '—' })),
+    })
+  }
+
+  // ── Default: pending audit queue (the original AuditData screen) ──
   // Bangalore-branch identification — every branch carries region; KA-Bangalore
-  // ones have region='Bangalore'. The Collection Audit screen surfaces their
+  // ones have region='Bangalore'. The Audit Data screen surfaces their
   // at_branch bills directly (no consignment wrapping for intrastate moves).
   const { data: branches } = await supabase.from('branches').select('name, region')
   const bangaloreNames = (branches || []).filter(b => b.region === 'Bangalore').map(b => b.name)
