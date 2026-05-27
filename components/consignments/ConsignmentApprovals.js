@@ -101,9 +101,6 @@ export default function ConsignmentApprovals() {
   const [approvedFrom,  setApprovedFrom]  = useState('')      // YYYY-MM-DD, '' = no floor
   const [approvedTo,    setApprovedTo]    = useState('')      // YYYY-MM-DD, '' = no ceiling
   const [approvedDoc,   setApprovedDoc]   = useState('all')   // 'all' | 'ewb' | 'einv'
-  const [efficiency,    setEfficiency]    = useState({ users: [] })
-  const [effFrom,       setEffFrom]       = useState(() => istDaysAgo(6))
-  const [effTo,         setEffTo]         = useState(() => istToday())
   const [settings,      setSettings]      = useState(null)
   const [settingsBusy,  setSettingsBusy]  = useState(null)  // 'seq:KL' | 'gstin:KA' etc.
   const [settingsToast, setSettingsToast] = useState(null)
@@ -177,24 +174,14 @@ export default function ConsignmentApprovals() {
     setLoading(false)
   }, [])
 
-  // Efficiency: per-user accounts performance over a date window.
-  const fetchEfficiency = useCallback(async (from, to, silent = false) => {
-    if (!silent) setLoading(true)
-    const r = await authedFetch(`/api/consignments?action=user_efficiency&from=${from}&to=${to}`)
-    const j = await r.json()
-    setEfficiency({ users: j.users || [] })
-    setLoading(false)
-  }, [])
-
   // Initial fetch + refetch when the user switches tabs.
   useEffect(() => {
     if (tab === 'cancel_requests')         fetchCancelRequests()
     else if (tab === 'cancellations')      fetchCancellations()
     else if (tab === 'reports')            fetchReport(reportFrom, reportTo)
-    else if (tab === 'efficiency')         fetchEfficiency(effFrom, effTo)
     else if (tab === 'settings')           fetchSettings()
     else                                   fetchHistory(tab)
-  }, [tab, fetchHistory, fetchCancelRequests, fetchCancellations, fetchReport, fetchEfficiency, fetchSettings, reportFrom, reportTo, effFrom, effTo])
+  }, [tab, fetchHistory, fetchCancelRequests, fetchCancellations, fetchReport, fetchSettings, reportFrom, reportTo])
 
   // Save a single E-Invoice sequence row (state + last_seq).
   const saveSeq = useCallback(async (state_code, fy_code, last_seq) => {
@@ -557,7 +544,6 @@ export default function ConsignmentApprovals() {
             if (tab === 'cancel_requests')       fetchCancelRequests(false)
             else if (tab === 'cancellations')    fetchCancellations(false)
             else if (tab === 'reports')          fetchReport(reportFrom, reportTo, false)
-            else if (tab === 'efficiency')       fetchEfficiency(effFrom, effTo, false)
             else if (tab === 'settings')         fetchSettings(false)
             else                                 fetchHistory(tab, false)
           }} style={btnOut}>Refresh</button>
@@ -572,7 +558,6 @@ export default function ConsignmentApprovals() {
           { id: 'rejected',        label: 'Rejected',        color: t.red    },
           { id: 'cancellations',   label: 'Cancellations',   color: t.purple },
           { id: 'reports',         label: 'Reports',         color: t.blue   },
-          { id: 'efficiency',      label: 'Efficiency',      color: t.gold   },
           { id: 'settings',        label: 'Settings',        color: t.text2  },
         ].map(o => {
           const active = tab === o.id
@@ -854,14 +839,6 @@ export default function ConsignmentApprovals() {
           reportFrom={reportFrom} setReportFrom={setReportFrom}
           reportTo={reportTo}     setReportTo={setReportTo}
           fetchReport={fetchReport}
-        />
-      ) : tab === 'efficiency' ? (
-        <EfficiencyTab
-          t={t} card={card}
-          users={efficiency.users}
-          from={effFrom} setFrom={setEffFrom}
-          to={effTo}     setTo={setEffTo}
-          fetchEfficiency={fetchEfficiency}
         />
       ) : tab === 'settings' ? (
         <SettingsTab
@@ -1393,8 +1370,6 @@ function ReportKpi({ t, label, primary, sub, accent, mono, small }) {
 }
 
 
-// Efficiency tab — per-user accounts performance over a date window.
-// Date controls + KPI band + sortable user table + CSV export.
 // Polished card for the Approved / Rejected history list. Wraps every doc
 // in a consistent layout: identity badges, source→dest hero, stats pills,
 // audit avatars, doc-action chips, and (on Approved) live cancel countdowns.
@@ -1792,301 +1767,6 @@ function HistoryCard({ c, t, card, isApproved, previewDoc, showToast, openCancel
             />
           )}
         </div>
-      </div>
-    </div>
-  )
-}
-
-// Count cell with an inline horizontal bar tinted to the column accent.
-// Bar width = count / column-max × 100%. Anchors right so high-count rows
-// visually 'lean toward' the number. Zero counts dim out so the live numbers
-// pop on a busy table.
-function BarCell({ t, count, pct, accent, td }) {
-  const isZero = !count
-  return (
-    <td style={{ ...td, position: 'relative', textAlign: 'right' }}>
-      {!isZero && (
-        <div style={{
-          position: 'absolute',
-          right:    '8px',
-          top:      '50%',
-          transform: 'translateY(-50%)',
-          width:    `calc(${pct}% - 16px)`,
-          maxWidth: 'calc(100% - 16px)',
-          height:   '4px',
-          background: `${accent}30`,
-          borderRadius: '2px',
-          pointerEvents: 'none',
-        }} />
-      )}
-      <span style={{
-        position: 'relative',
-        color:    isZero ? t.text4 : accent,
-        fontFamily: 'monospace',
-        fontWeight: isZero ? 400 : 700,
-        fontSize:   isZero ? '12px' : '14px',
-      }}>
-        {isZero ? '—' : count}
-      </span>
-    </td>
-  )
-}
-
-function EfficiencyTab({ t, card, users, from, setFrom, to, setTo, fetchEfficiency }) {
-  const today      = istToday()
-  const yesterday  = istDaysAgo(1)
-  const last7      = istDaysAgo(6)
-  const monthStart = today.slice(0, 8) + '01'
-  const now        = new Date()
-  const fyYear     = now.getMonth() + 1 >= 4 ? now.getFullYear() : now.getFullYear() - 1
-  const fyStart    = `${fyYear}-04-01`
-  const presets = [
-    { label: 'Today',       from: today,      to: today },
-    { label: 'Yesterday',   from: yesterday,  to: yesterday },
-    { label: 'Last 7 days', from: last7,      to: today },
-    { label: 'This month',  from: monthStart, to: today },
-    { label: 'This FY',     from: fyStart,    to: today },
-  ]
-  const isPresetActive = (p) => p.from === from && p.to === to
-  const applyPreset = (p) => { setFrom(p.from); setTo(p.to); fetchEfficiency(p.from, p.to, false) }
-
-  const [sortBy, setSortBy] = useState('total')   // total | approved | rejected | cancelled | avg
-  const [sortDir, setSortDir] = useState('desc')
-
-  const sortKey = (u) => ({
-    total:     (u.approved_count || 0) + (u.rejected_count || 0) + (u.cancelled_count || 0),
-    approved:  u.approved_count || 0,
-    rejected:  u.rejected_count || 0,
-    cancelled: u.cancelled_count || 0,
-    avg:       u.avg_min ?? Number.MAX_SAFE_INTEGER,   // null avgs sort last
-  })[sortBy] ?? 0
-  const sortedUsers = [...users].sort((a, b) => {
-    const da = sortKey(a); const db = sortKey(b)
-    return sortDir === 'asc' ? da - db : db - da
-  })
-  const toggleSort = (k) => {
-    if (sortBy === k) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
-    else { setSortBy(k); setSortDir(k === 'avg' ? 'asc' : 'desc') }   // avg defaults asc (faster first)
-  }
-  const sortIndicator = (k) => sortBy === k ? (sortDir === 'desc' ? ' ↓' : ' ↑') : ''
-
-  // Time colour: matches the > 5min red rule on Approved tab cards.
-  // ≤ 5min muted (default), > 5min red.
-  const timeColor = (mins) => {
-    if (mins == null) return t.text4
-    return mins > 5 ? t.red : t.text2
-  }
-
-  // Avatar colour pulls from the shared hashAvatarColor helper so the same
-  // person carries the same colour across Efficiency table, Approved cards,
-  // and any future avatar usage.
-  const avatarColor = (email) => hashAvatarColor(email, t)
-
-  // Maxes per column for the inline proportional bars. Floor at 1 so a
-  // single-row table doesn't divide by zero.
-  const maxApproved  = Math.max(1, ...users.map(u => u.approved_count  || 0))
-  const maxRejected  = Math.max(1, ...users.map(u => u.rejected_count  || 0))
-  const maxCancelled = Math.max(1, ...users.map(u => u.cancelled_count || 0))
-
-  // Top performer for the ★ Fastest ribbon — lowest avg with ≥3 samples to
-  // discount single-decision winners.
-  const fastestUser = users
-    .filter(u => ((u.approved_count || 0) + (u.rejected_count || 0)) >= 3 && u.avg_min != null)
-    .sort((a, b) => a.avg_min - b.avg_min)[0]
-
-  // Team totals row — sum counts, weight-average the avg across all users
-  // (weighted by their decision count), and overall min/max.
-  const teamTotal = users.reduce((acc, u) => {
-    acc.approved  += u.approved_count  || 0
-    acc.rejected  += u.rejected_count  || 0
-    acc.cancelled += u.cancelled_count || 0
-    const decisions = (u.approved_count || 0) + (u.rejected_count || 0)
-    if (u.avg_min != null && decisions > 0) {
-      acc.avgWeightedSum += u.avg_min * decisions
-      acc.avgWeightedDen += decisions
-    }
-    if (u.min_min != null) acc.minMin = acc.minMin == null ? u.min_min : Math.min(acc.minMin, u.min_min)
-    if (u.max_min != null) acc.maxMax = acc.maxMax == null ? u.max_min : Math.max(acc.maxMax, u.max_min)
-    return acc
-  }, { approved: 0, rejected: 0, cancelled: 0, avgWeightedSum: 0, avgWeightedDen: 0, minMin: null, maxMax: null })
-  const teamAvg = teamTotal.avgWeightedDen > 0 ? Math.round(teamTotal.avgWeightedSum / teamTotal.avgWeightedDen) : null
-
-  // CSV export — one row per user, 7 columns.
-  const dateTag = from === to ? from : `${from}_to_${to}`
-  const exportCsv = () => {
-    if (!users.length) return
-    const rows = users.map(u => ({
-      User:        u.email,
-      'Avg (m)':   u.avg_min ?? '',
-      'Min (m)':   u.min_min ?? '',
-      'Max (m)':   u.max_min ?? '',
-      Approved:    u.approved_count,
-      Rejected:    u.rejected_count,
-      Cancelled:   u.cancelled_count,
-    }))
-    const headers = Object.keys(rows[0])
-    const escape  = (v) => /[",\n]/.test(String(v ?? '')) ? `"${String(v).replace(/"/g, '""')}"` : String(v ?? '')
-    const csv = [headers.join(','), ...rows.map(r => headers.map(h => escape(r[h])).join(','))].join('\n')
-    const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' })
-    const url  = URL.createObjectURL(blob)
-    const a    = document.createElement('a')
-    a.href = url
-    a.download = `efficiency_${dateTag}.csv`
-    document.body.appendChild(a); a.click(); a.remove()
-    setTimeout(() => URL.revokeObjectURL(url), 1000)
-  }
-
-  const windowLabel = from === to
-    ? new Date(from).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
-    : `${new Date(from).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })} → ${new Date(to).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}`
-
-  const th = { padding: '11px 14px', textAlign: 'left', fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', borderBottom: `1px solid ${t.border}`, fontWeight: 600, whiteSpace: 'nowrap', cursor: 'pointer', userSelect: 'none' }
-  const thStatic = { ...th, cursor: 'default' }
-  const td = { padding: '12px 14px', verticalAlign: 'middle', fontSize: '12px' }
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-      {/* Date controls */}
-      <div style={{ ...card }}>
-        <div style={{ padding: '14px 18px', display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap' }}>
-          <div>
-            <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 600 }}>Reporting window</div>
-            <div style={{ fontSize: '14px', color: t.text1, fontWeight: 600, marginTop: '3px', fontFamily: 'monospace', letterSpacing: '-.01em' }}>{windowLabel}</div>
-          </div>
-          <div style={{ width: '1px', height: '32px', background: t.border }} />
-          <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-            {presets.map(p => {
-              const active = isPresetActive(p)
-              return (
-                <button key={p.label} onClick={() => applyPreset(p)}
-                  style={{ background: active ? t.gold : 'transparent', color: active ? '#1a0a00' : t.text3,
-                    border: `1px solid ${active ? t.gold : t.border}`, boxShadow: active ? `0 1px 4px ${t.gold}40` : 'none',
-                    borderRadius: '16px', padding: '5px 14px', fontSize: '11px', fontWeight: 600, cursor: 'pointer', transition: 'all .15s ease' }}>
-                  {p.label}
-                </button>
-              )
-            })}
-          </div>
-          <div style={{ flex: 1 }} />
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <input type="date" value={from} onChange={e => setFrom(e.target.value)} max={today}
-              style={{ background: t.card2 || t.card, border: `1px solid ${t.border}`, borderRadius: '7px', padding: '6px 10px', fontSize: '12px', color: t.text1, fontFamily: 'monospace', outline: 'none' }} />
-            <span style={{ fontSize: '11px', color: t.text4 }}>→</span>
-            <input type="date" value={to} onChange={e => setTo(e.target.value)} max={today}
-              style={{ background: t.card2 || t.card, border: `1px solid ${t.border}`, borderRadius: '7px', padding: '6px 10px', fontSize: '12px', color: t.text1, fontFamily: 'monospace', outline: 'none' }} />
-            <button onClick={() => fetchEfficiency(from, to, false)}
-              style={{ background: t.gold, color: '#1a0a00', border: 'none', borderRadius: '7px', padding: '7px 16px', fontSize: '11px', fontWeight: 700, cursor: 'pointer', boxShadow: `0 1px 4px ${t.gold}50` }}>
-              Run
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* User table */}
-      <div style={{ ...card, overflow: 'hidden' }}>
-        <div style={{ padding: '14px 18px', borderBottom: `1px solid ${t.border}`, display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <div>
-            <div style={{ fontSize: '13px', color: t.text1, fontWeight: 600 }}>Per-user activity</div>
-            <div style={{ fontSize: '10px', color: t.text4, marginTop: '2px' }}>Time = created → decision (same number shown as the &quot;in Xm&quot; pill on Approved cards). Avg/min/max across approved + rejected.</div>
-          </div>
-          <div style={{ flex: 1 }} />
-          {users.length > 0 && (
-            <button onClick={exportCsv}
-              style={{ background: 'transparent', color: t.text2, border: `1px solid ${t.border}`, borderRadius: '7px', padding: '6px 12px', fontSize: '11px', fontWeight: 600, cursor: 'pointer' }}>
-              Export CSV
-            </button>
-          )}
-        </div>
-        {users.length === 0 ? (
-          <div style={{ padding: '40px 20px', textAlign: 'center', fontSize: '12px', color: t.text4 }}>No accounts activity in this window.</div>
-        ) : (
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
-              <thead>
-                <tr style={{ background: t.card2 || t.card }}>
-                  <th style={thStatic}>User</th>
-                  <th style={{ ...th, textAlign: 'right' }} onClick={() => toggleSort('avg')}       title="Click to sort">Average{sortIndicator('avg')}</th>
-                  <th style={{ ...thStatic, textAlign: 'right' }}>Minimum</th>
-                  <th style={{ ...thStatic, textAlign: 'right' }}>Maximum</th>
-                  <th style={{ ...th, textAlign: 'right' }} onClick={() => toggleSort('approved')}  title="Click to sort">Approved{sortIndicator('approved')}</th>
-                  <th style={{ ...th, textAlign: 'right' }} onClick={() => toggleSort('rejected')}  title="Click to sort">Rejected{sortIndicator('rejected')}</th>
-                  <th style={{ ...th, textAlign: 'right' }} onClick={() => toggleSort('cancelled')} title="Click to sort">Cancelled{sortIndicator('cancelled')}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {sortedUsers.map((u, i) => {
-                  const isFastest = fastestUser && u.email === fastestUser.email
-                  const initial   = (u.email || '?')[0].toUpperCase()
-                  const aPct = ((u.approved_count  || 0) / maxApproved)  * 100
-                  const rPct = ((u.rejected_count  || 0) / maxRejected)  * 100
-                  const cPct = ((u.cancelled_count || 0) / maxCancelled) * 100
-                  return (
-                    <tr key={u.email}
-                      style={{
-                        borderBottom: `1px solid ${t.border}25`,
-                        background:   i % 2 ? `${t.text4}05` : 'transparent',
-                        borderLeft:   isFastest ? `3px solid ${t.gold}` : '3px solid transparent',
-                        transition:   'background .15s ease',
-                      }}
-                      onMouseEnter={e => e.currentTarget.style.background = `${t.gold}0A`}
-                      onMouseLeave={e => e.currentTarget.style.background = i % 2 ? `${t.text4}05` : 'transparent'}>
-                      {/* User column — avatar + email + ★ Fastest ribbon when applicable. */}
-                      <td style={{ ...td }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                          <span style={{
-                            width: '28px', height: '28px', borderRadius: '50%',
-                            background: avatarColor(u.email), color: '#fff',
-                            fontSize: '12px', fontWeight: 700, display: 'flex',
-                            alignItems: 'center', justifyContent: 'center',
-                            flexShrink: 0, fontFamily: 'inherit',
-                          }}>{initial}</span>
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', minWidth: 0 }}>
-                            <span style={{ color: t.text1, fontWeight: 600, fontSize: '12px' }}>{u.email}</span>
-                            {isFastest && (
-                              <span style={{
-                                alignSelf: 'flex-start',
-                                fontSize: '9px', color: t.gold, background: `${t.gold}15`,
-                                border: `1px solid ${t.gold}40`,
-                                borderRadius: '10px', padding: '1px 8px',
-                                fontWeight: 600, letterSpacing: '.05em',
-                              }} title={`Fastest avg in this window — ${u.avg_min}m across ${(u.approved_count || 0) + (u.rejected_count || 0)} decisions`}>
-                                ★ FASTEST
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                      </td>
-                      <td style={{ ...td, color: timeColor(u.avg_min), textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, fontSize: '14px' }}>
-                        {u.avg_min != null ? `${u.avg_min}m` : <span style={{ color: t.text4 }}>—</span>}
-                      </td>
-                      <td style={{ ...td, color: u.min_min != null ? t.text3 : t.text4, textAlign: 'right', fontFamily: 'monospace', fontSize: '13px' }}>
-                        {u.min_min != null ? `${u.min_min}m` : '—'}
-                      </td>
-                      <td style={{ ...td, color: timeColor(u.max_min), textAlign: 'right', fontFamily: 'monospace', fontSize: '13px' }}>
-                        {u.max_min != null ? `${u.max_min}m` : '—'}
-                      </td>
-                      <BarCell t={t} count={u.approved_count}  pct={aPct} accent={t.green}  td={td} />
-                      <BarCell t={t} count={u.rejected_count}  pct={rPct} accent={t.red}    td={td} />
-                      <BarCell t={t} count={u.cancelled_count} pct={cPct} accent={t.orange} td={td} />
-                    </tr>
-                  )
-                })}
-                {/* Team totals row */}
-                {sortedUsers.length > 1 && (
-                  <tr style={{ borderTop: `2px solid ${t.gold}40`, background: `${t.gold}08` }}>
-                    <td style={{ ...td, color: t.gold, fontWeight: 700, fontSize: '11px', letterSpacing: '.1em', textTransform: 'uppercase' }}>Team total</td>
-                    <td style={{ ...td, color: timeColor(teamAvg),   textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, fontSize: '14px' }}>{teamAvg != null ? `${teamAvg}m` : '—'}</td>
-                    <td style={{ ...td, color: t.text3,              textAlign: 'right', fontFamily: 'monospace', fontSize: '13px' }}>{teamTotal.minMin != null ? `${teamTotal.minMin}m` : '—'}</td>
-                    <td style={{ ...td, color: timeColor(teamTotal.maxMax), textAlign: 'right', fontFamily: 'monospace', fontSize: '13px' }}>{teamTotal.maxMax != null ? `${teamTotal.maxMax}m` : '—'}</td>
-                    <td style={{ ...td, color: t.green,  textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, fontSize: '14px' }}>{teamTotal.approved}</td>
-                    <td style={{ ...td, color: t.red,    textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, fontSize: '14px' }}>{teamTotal.rejected}</td>
-                    <td style={{ ...td, color: t.orange, textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, fontSize: '14px' }}>{teamTotal.cancelled}</td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        )}
       </div>
     </div>
   )
