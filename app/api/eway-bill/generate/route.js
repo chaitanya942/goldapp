@@ -84,8 +84,10 @@ export async function POST(req) {
     }
 
     // Atomic lock — only one in-flight EWB generation per consignment.
-    // The update succeeds only if ewb_generation_started_at is NULL or older than 5 min (stale).
-    const lockCutoff = new Date(Date.now() - 5 * 60 * 1000).toISOString()
+    // The update succeeds only if ewb_generation_started_at is NULL or older
+    // than 90s (stale — longer than any legit ClearTax call at the 60s timeout,
+    // but short enough that a killed Node process doesn't trap users for 5 min).
+    const lockCutoff = new Date(Date.now() - 90 * 1000).toISOString()
     const { data: lockRow, error: lockErr } = await supabase
       .from('consignments')
       .update({ ewb_generation_started_at: new Date().toISOString() })
