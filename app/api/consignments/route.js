@@ -1443,14 +1443,17 @@ export async function GET(req) {
     if (be) return Response.json({ error: be.message }, { status: 500 })
     if (!bills?.length) return Response.json({ data: [] })
 
-    // Attach branch region to each bill so the client doesn't need a second
-    // lookup. Bangalore included — date-range mode covers it via the 19:30 IST
-    // lifecycle and direct-to-HO Bangalore dispatches.
+    // Attach branch region + delivery TAT to each bill so the client doesn't
+    // need a second lookup. Bangalore included — date-range mode covers it
+    // via the 19:30 IST lifecycle and direct-to-HO Bangalore dispatches.
+    // delivery_tat_hours drives the Expected Delivery column in the Consignment
+    // Report: 24h-TAT → next IST day, 48h-TAT → day after, etc.
     const branchNames = [...new Set(bills.map(b => b.branch_name).filter(Boolean))]
     const { data: brRows } = branchNames.length
-      ? await supabase.from('branches').select('name, region').in('name', branchNames)
+      ? await supabase.from('branches').select('name, region, delivery_tat_hours').in('name', branchNames)
       : { data: [] }
     const regionByBranch = Object.fromEntries((brRows || []).map(b => [b.name, b.region]))
+    const tatByBranch    = Object.fromEntries((brRows || []).map(b => [b.name, Number(b.delivery_tat_hours) || null]))
 
     // 2. For each bill, look up the most recent dispatched consignment that links it.
     //    A bill might appear in multiple consignment_items rows historically (cancelled
@@ -1480,6 +1483,7 @@ export async function GET(req) {
       return {
         ...b,
         region: regionByBranch[b.branch_name] || null,
+        delivery_tat_hours: tatByBranch[b.branch_name] ?? null,
         consignment: c ? {
           id: c.id, tmp_prf_no: c.tmp_prf_no,
           source: c.branch_name, dest: c.dest_branch,

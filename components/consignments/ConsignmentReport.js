@@ -70,7 +70,19 @@ export default function ConsignmentReport() {
 
   const [loadError,    setLoadError]    = useState(null)
   const [search,       setSearch]       = useState('')
-  const [activeRegion, setActiveRegion] = useState(null)
+  // Multi-select region filter. Empty Set = "All regions" (no filter).
+  // Clicking the "All regions" card clears the Set; clicking individual
+  // region cards toggles them in/out of the Set. CSV + PNG exports honour
+  // the same filter via filteredBranchRows / filteredCaseRows.
+  const [activeRegions, setActiveRegions] = useState(() => new Set())
+  const toggleRegion = (r) => setActiveRegions(prev => {
+    const next = new Set(prev)
+    if (next.has(r)) next.delete(r); else next.add(r)
+    return next
+  })
+  const clearRegions = () => setActiveRegions(new Set())
+  // Convenience flags for the old `activeRegion ? ...` patterns.
+  const hasRegionFilter = activeRegions.size > 0
   // Default sort: total net weight desc (largest exposures first).
   const [sortKey,      setSortKey]      = useState('total_net_wt')
   const [sortDir,      setSortDir]      = useState(-1)
@@ -191,7 +203,7 @@ export default function ConsignmentReport() {
     const headers = [
       'Consignment Date', 'Branch', 'Region',
       'No of Bills', 'Gross (g)', 'Net (g)',
-      'Amount', 'Expected Delivery Date',
+      'Amount', 'TAT (hours)', 'Expected Delivery Date',
     ]
     const lines = [headers.map(csvEscape).join(',')]
     for (const g of rows) {
@@ -203,6 +215,7 @@ export default function ConsignmentReport() {
         Number(g.gross_weight || 0).toFixed(2),
         Number(g.net_weight   || 0).toFixed(2),
         Number(g.total_amount || 0).toFixed(2),
+        g.delivery_tat_hours || 24,
         g.expected_delivery_date || '',
       ].map(csvEscape).join(','))
     }
@@ -292,19 +305,32 @@ export default function ConsignmentReport() {
       g.total_amount += Number(r.total_amount || 0)
       g.svc_charge   += Number(r.service_charge_amount_crm || 0)
     }
-    // Expected delivery — same-day pickup → next IST day at HO.
+    // Per-branch TAT lookup — pulled from the bill rows so we don't need a
+    // separate /branches fetch. 24h-TAT branches deliver next IST day,
+    // 48h-TAT branches the day after, etc. Default to 24h if the API
+    // didn't return delivery_tat_hours (rare — usually means stale row).
+    const tatByBranch = {}
+    for (const r of caseData) {
+      if (r.branch_name && r.delivery_tat_hours != null) {
+        tatByBranch[r.branch_name] = Number(r.delivery_tat_hours)
+      }
+    }
+    // Expected delivery — dispatch IST day + ceil(TAT_hours / 24).
     for (const g of groups.values()) {
       if (!g.consignment_date) { g.expected_delivery_date = null; continue }
+      const tatHours = tatByBranch[g.branch_name] || 24
+      const daysToAdd = Math.max(1, Math.ceil(tatHours / 24))
       const [y, m, d] = g.consignment_date.split('-').map(Number)
-      const dt = new Date(Date.UTC(y, m - 1, d + 1))
+      const dt = new Date(Date.UTC(y, m - 1, d + daysToAdd))
       g.expected_delivery_date = dt.toISOString().slice(0, 10)
+      g.delivery_tat_hours = tatHours   // surface on the row for the cell badge
     }
     return Array.from(groups.values())
   }, [caseData, branchToRegion])
 
   const filteredBranchRows = useMemo(() => {
     return branchAggregated
-      .filter(g => !activeRegion || g.region === activeRegion)
+      .filter(g => !hasRegionFilter || activeRegions.has(g.region))
       .filter(g => !searchQ || (g.branch_name || '').toLowerCase().includes(searchQ) || (g.region || '').toLowerCase().includes(searchQ))
       .filter(g => {
         // Same "Consignment Date" filter the case-wise view uses.
@@ -334,7 +360,7 @@ export default function ConsignmentReport() {
         }
         return (av - bv) * sortDir
       })
-  }, [branchAggregated, activeRegion, searchQ, caseSinceRange, sortKey, sortDir])
+  }, [branchAggregated, activeRegions, hasRegionFilter, searchQ, caseSinceRange, sortKey, sortDir])
 
   const filteredCaseRows = useMemo(() => caseData
     .filter(r => {
@@ -347,8 +373,8 @@ export default function ConsignmentReport() {
         if (caseSinceRange.from && day < caseSinceRange.from) return false
         if (caseSinceRange.to   && day > caseSinceRange.to)   return false
       }
-      // Region chip filters by source branch's region.
-      if (activeRegion && branchToRegion[r.branch_name] !== activeRegion) return false
+      // Region chip filters by source branch's region (multi-select).
+      if (hasRegionFilter && !activeRegions.has(branchToRegion[r.branch_name])) return false
       // Search across application_id / customer / branch.
       if (searchQ) {
         const hay = `${r.application_id || ''} ${r.customer_name || ''} ${r.branch_name || ''}`.toLowerCase()
@@ -367,7 +393,7 @@ export default function ConsignmentReport() {
       if (typeof av === 'number' && typeof bv === 'number') return (av - bv) * dir
       return String(av).localeCompare(String(bv)) * dir
     })
-  , [caseData, caseSinceRange, activeRegion, searchQ, branchToRegion, caseSortKey, caseSortDir])
+  , [caseData, caseSinceRange, activeRegions, hasRegionFilter, searchQ, branchToRegion, caseSortKey, caseSortDir])
 
   function handleCaseSort(key) {
     if (caseSortKey === key) setCaseSortDir(d => d * -1)
@@ -402,7 +428,7 @@ export default function ConsignmentReport() {
         body: JSON.stringify({
           viewMode,
           rows,
-          meta: { filter_label: activeFilterLabel(), region: activeRegion || null },
+          meta: { filter_label: activeFilterLabel(), region: hasRegionFilter ? [...activeRegions].join(' + ') : null },
         }),
       })
       if (!res.ok) {
@@ -443,7 +469,7 @@ export default function ConsignmentReport() {
 
   // Reset to page 1 whenever the filter set changes so ops aren't stuck on
   // page 5 of a result set that only has 2 pages now.
-  useEffect(() => { setCasePage(1) }, [caseSinceQuick, caseSinceFrom, caseSinceTo, activeRegion, search, caseSortKey, caseSortDir])
+  useEffect(() => { setCasePage(1) }, [caseSinceQuick, caseSinceFrom, caseSinceTo, activeRegions, search, caseSortKey, caseSortDir])
 
   // Σ totals across the visible case rows — drives the totals row pinned
   // beneath the headers. Note: Svc % can't be summed (it's a per-bill rate),
@@ -591,8 +617,8 @@ export default function ConsignmentReport() {
               )
             })}
           </div>
-          {(activeRegion || search) && (
-            <button onClick={() => { setActiveRegion(null); setSearch('') }}
+          {(hasRegionFilter || search) && (
+            <button onClick={() => { clearRegions(); setSearch('') }}
               style={{ background: 'transparent', border: `1px solid ${t.border2}`, borderRadius: '8px', padding: '7px 13px', fontSize: '11px', color: t.text3, cursor: 'pointer' }}>
               Clear
             </button>
@@ -643,9 +669,9 @@ export default function ConsignmentReport() {
           {!regionAccess.restricted && (() => {
             const { allBills, allNetWt, activeBranches, totalBranches } = allStatsView
             const w = fmtWtCard(allNetWt)
-            const isActive = !activeRegion
+            const isActive = !hasRegionFilter
             return (
-              <div onClick={() => setActiveRegion(null)}
+              <div onClick={clearRegions}
                 style={{
                   background: isActive ? `linear-gradient(145deg, ${t.gold}18, ${t.gold}06)` : `linear-gradient(145deg, ${t.card}, ${t.card2})`,
                   border: `1px solid ${isActive ? t.gold + '60' : t.border}`,
@@ -681,10 +707,10 @@ export default function ConsignmentReport() {
             const stats  = regionStatsView[r] || {}
             const color  = REGION_COLORS[r] || t.text3
             const icon   = REGION_ICONS[r] || '📍'
-            const active = activeRegion === r
+            const active = activeRegions.has(r)
             const w      = fmtWtCard(stats.total_net_wt)
             return (
-              <div key={r} onClick={() => setActiveRegion(active ? null : r)}
+              <div key={r} onClick={() => toggleRegion(r)}
                 style={{
                   background: active ? `linear-gradient(145deg, ${color}18, ${color}06)` : `linear-gradient(145deg, ${t.card}, ${t.card2})`,
                   border: `1px solid ${active ? color + '60' : t.border}`,
@@ -799,7 +825,7 @@ export default function ConsignmentReport() {
             <div style={{ padding: '80px', display: 'flex', justifyContent: 'center' }}><GoldSpinner size={32} /></div>
           ) : filteredBranchRows.length === 0 ? (
             <div style={{ padding: '80px', textAlign: 'center', color: t.text4, fontSize: '13px' }}>
-              {search || activeRegion ? 'No rows match your filter' : `No bills dispatched in ${activeFilterLabel().toLowerCase()}`}
+              {search || hasRegionFilter ? 'No rows match your filter' : `No bills dispatched in ${activeFilterLabel().toLowerCase()}`}
             </div>
           ) : (() => {
             // New branch-wise view: bills grouped by (branch + dispatched date)
@@ -902,7 +928,14 @@ export default function ConsignmentReport() {
                         <td style={{ ...tdR, color: t.text2 }}>{fmtWt(g.gross_weight)}</td>
                         <td style={{ ...tdR, color: t.gold, fontWeight: 600 }}>{fmtWt(g.net_weight)}</td>
                         <td style={{ ...tdR, color: t.text2 }}>{fmtAmt(g.total_amount)}</td>
-                        <td style={{ ...tdL, color: t.green, fontFamily: 'monospace', whiteSpace: 'nowrap' }}>{fmtCellDate(g.expected_delivery_date)}</td>
+                        <td style={{ ...tdL, color: t.green, fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
+                          {fmtCellDate(g.expected_delivery_date)}
+                          {g.delivery_tat_hours > 24 && (
+                            <span style={{ marginLeft: 6, fontSize: 9, color: t.orange, background: `${t.orange}18`, borderRadius: 4, padding: '1px 5px', fontWeight: 700, letterSpacing: '.04em' }}>
+                              {g.delivery_tat_hours}h
+                            </span>
+                          )}
+                        </td>
                       </tr>
                     )
                   })}
