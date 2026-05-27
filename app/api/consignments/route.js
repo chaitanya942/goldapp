@@ -2463,7 +2463,7 @@ export async function POST(req) {
 
   if (action === 'create_booking') {
     const { date, party, buyer_phone, weight, rate, purity, is_kl, notes, source_branches, bill_ids,
-            pipeline_remaining_g, pipeline_region,
+            pipeline_remaining_g, pipeline_region, pipeline_include_in_transit,
             // Breakdown components — snapshots of what built the committed
             // weight on the modal at creation time. Optional; old clients
             // can omit them and the booking still saves.
@@ -2554,9 +2554,14 @@ export async function POST(req) {
         const { error: pipeErr } = await supabase
           .from('cal_quotas')
           .update({
-            pipeline_remaining_g:  pipelineGap,
-            pipeline_region:       pipelineRegionResolved,
-            pipeline_arrival_date: date,
+            pipeline_remaining_g:        pipelineGap,
+            pipeline_region:             pipelineRegionResolved,
+            pipeline_arrival_date:       date,
+            // New: opt-in flag so the auto-attacher also pulls outstation
+            // 24h-transit bills (sql/cal_quotas_pipeline_in_transit.sql).
+            // Only meaningful for non-Kerala bookings; safely defaults to
+            // false when the client omits it.
+            pipeline_include_in_transit: !!pipeline_include_in_transit,
           })
           .eq('id', data.id)
         if (pipeErr) {

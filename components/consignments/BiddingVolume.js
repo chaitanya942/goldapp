@@ -2549,6 +2549,15 @@ function BookingModal({ t, arrivalDate, availablePool, remainingQty, incomingNet
   const overBy = wValid && totalBiddingW > 0 ? Math.max(0, w - totalBiddingW) : 0
   const [attrGain,     setAttrGain]     = useState(false)
   const [attrPipeline, setAttrPipeline] = useState(false)
+  // Opt-in: when ticked, the pipeline auto-attacher will also draw from
+  // outstation 24h-transit bills (non-Kerala) arriving on the booking's
+  // arrival date — not just tomorrow's Bangalore purchases. Hidden until
+  // the operator actually attributes excess to pipeline; auto-cleared if
+  // they untick pipeline or switch to a Kerala booking.
+  const [pipelineIncludeInTransit, setPipelineIncludeInTransit] = useState(false)
+  useEffect(() => {
+    if (!attrPipeline || isKerala) setPipelineIncludeInTransit(false)
+  }, [attrPipeline, isKerala])
   // Drop attribution if the difference disappears (e.g. operator rounds
   // back down or adds more gains so the total catches up).
   useEffect(() => {
@@ -2618,8 +2627,9 @@ function BookingModal({ t, arrivalDate, availablePool, remainingQty, incomingNet
         purity:      null,
         is_kl:       !!isKerala,
         notes:       compositeNotes,
-        pipeline_remaining_g: pipelineRemainingG,
-        pipeline_region:      pipelineRegion,
+        pipeline_remaining_g:        pipelineRemainingG,
+        pipeline_region:             pipelineRegion,
+        pipeline_include_in_transit: !!(attrPipeline && overBy > 0 && !isKerala && pipelineIncludeInTransit),
         // Breakdown — each component of the operator-built total.
         bills_net_weight_g:   Number(netFromSelection.toFixed(3)),
         gain_applied_g:       Number(addedGainsW.toFixed(3)),
@@ -2896,6 +2906,40 @@ function BookingModal({ t, arrivalDate, availablePool, remainingQty, incomingNet
                     <Box checked={attrGain}     onClick={() => setAttrGain(v => !v)}     accent={t.orange || '#e58a3b'} label="Additional gain"  hint={`Realize more than the ${(liveGainRate * 100).toFixed(2)} % default`} />
                     <Box checked={attrPipeline} onClick={() => setAttrPipeline(v => !v)} accent={t.purple || '#8c5ac8'} label="Pipeline"          hint="Book against tomorrow's incoming" />
                   </div>
+                  {/* Sub-option: when pipeline is ticked AND it's not a Kerala
+                      booking, allow the auto-attacher to also pull from
+                      outstation 24h-transit bills arriving on the booking's
+                      arrival date. Off by default — opt-in per booking. */}
+                  {attrPipeline && !isKerala && (
+                    <div
+                      onClick={() => setPipelineIncludeInTransit(v => !v)}
+                      style={{
+                        marginTop: 10,
+                        padding: '10px 12px',
+                        borderRadius: 10,
+                        background: pipelineIncludeInTransit ? `${t.purple || '#8c5ac8'}14` : 'transparent',
+                        border: `1px solid ${pipelineIncludeInTransit ? `${t.purple || '#8c5ac8'}55` : t.border}`,
+                        display: 'flex', alignItems: 'center', gap: 10,
+                        cursor: 'pointer',
+                        transition: 'background .15s ease, border-color .15s ease',
+                      }}>
+                      <div style={{
+                        width: 18, height: 18, borderRadius: 5, flexShrink: 0,
+                        background: pipelineIncludeInTransit ? (t.purple || '#8c5ac8') : 'transparent',
+                        border: `1.5px solid ${pipelineIncludeInTransit ? (t.purple || '#8c5ac8') : t.border2}`,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        color: '#fff', fontSize: 12, fontWeight: 900,
+                      }}>{pipelineIncludeInTransit ? '✓' : ''}</div>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: 12, color: t.text1, fontWeight: 700 }}>
+                          Also use Section 2 (24h in-transit) bills for back-fill
+                        </div>
+                        <div style={{ fontSize: 10.5, color: t.text3, marginTop: 2, lineHeight: 1.45 }}>
+                          By default pipeline only consumes tomorrow's Bangalore purchases. Tick this to also count outstation bills already in transit and arriving on this booking's date.
+                        </div>
+                      </div>
+                    </div>
+                  )}
                   {needsAttr && (
                     <div style={{ fontSize: 10.5, color: amberTone, marginTop: 8, fontWeight: 700, letterSpacing: '.01em' }}>
                       Tick at least one to enable Create Booking.
