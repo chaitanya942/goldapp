@@ -78,9 +78,15 @@ export async function GET(req) {
   const { data: branches } = await supabase.from('branches').select('name, region')
   const bangaloreNames = (branches || []).filter(b => b.region === 'Bangalore').map(b => b.name)
 
-  // SELECT clause shared between the two pools — only the columns the auditor
-  // sees on screen so the payload stays small.
-  const COLS = 'id, application_id, customer_name, branch_name, purchase_date, gross_weight, net_weight, total_amount, audit_gross_weight, audit_discrepancy_g, audited_at, audit_remark, stock_status, dispatched_at, crm_status, is_deleted'
+  // BLIND-AUDIT MODE: deliberately omit gross_weight / net_weight / total_amount
+  // / audit_discrepancy_g from the queue payload. The auditor must weigh the
+  // bill on the scale and type what they see — not rubber-stamp by copying the
+  // CRM number off the screen. audit_discrepancy_g is omitted because it would
+  // let a re-auditor compute the CRM gross (measured − discrepancy). We do
+  // keep audit_gross_weight / audit_remark / audited_at so re-auditors have
+  // context on the previous reading + reason it was kept pending.
+  // The POST handler reveals the actual CRM gross only after a submission.
+  const COLS = 'id, application_id, customer_name, branch_name, purchase_date, transaction_time, transaction_type, audit_gross_weight, audited_at, audit_remark, stock_status, dispatched_at'
 
   // ── Bangalore pool: at_branch + from a Bangalore branch ─────────────────
   let bangalore = []
@@ -193,16 +199,30 @@ export async function POST(req) {
   if (action === 'keep_pending') {
     const { error } = await supabase.from('purchases').update(auditFields).eq('id', purchase_id)
     if (error) return Response.json({ error: error.message }, { status: 500 })
-    return Response.json({ success: true, action: 'keep_pending', discrepancy_g: diff })
+    return Response.json({
+      success:       true,
+      action:        'keep_pending',
+      discrepancy_g: diff,
+      crm_gross:     Number(bill.gross_weight || 0),
+      measured,
+    })
   }
 
   // ── 'receive' path ──
   // Reject exact-match policy violations only for the no-remark case. With a
-  // remark the auditor has consciously accepted the discrepancy.
+  // remark the auditor has consciously accepted the discrepancy. The error
+  // payload deliberately reveals CRM gross now — the auditor has just made a
+  // blind measurement, so showing it lets them resolve the discrepancy.
   if (diff !== 0 && !remark) {
+    // Write the measurement now so the discrepancy badge surfaces in the
+    // queue even if the auditor closes the modal without picking a path.
+    await supabase.from('purchases').update(auditFields).eq('id', purchase_id)
     return Response.json({
-      error: 'Gross weight does not match CRM. Provide an audit_remark to accept the discrepancy or use action="keep_pending".',
-      discrepancy_g: diff,
+      error:          'Gross weight does not match CRM. Provide an audit_remark to accept the discrepancy or click "Keep Pending".',
+      discrepancy_g:  diff,
+      crm_gross:      Number(bill.gross_weight || 0),
+      measured,
+      requires_remark: true,
     }, { status: 400 })
   }
 
@@ -255,9 +275,11 @@ export async function POST(req) {
   }
 
   return Response.json({
-    success:            true,
-    action:             'receive',
-    discrepancy_g:      diff,
+    success:              true,
+    action:               'receive',
+    discrepancy_g:        diff,
+    crm_gross:            Number(bill.gross_weight || 0),
+    measured,
     consignment_received: consignmentReceived,
   })
 }
