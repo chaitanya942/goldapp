@@ -394,11 +394,49 @@ export default function ConsignmentApprovals() {
           || msg.includes('not allowed') && msg.includes('cancel')
         const isPast24h = type === 'irn' && matchesWindow
         const isEwbPast24h = type === 'ewb' && matchesWindow
+
+        // For E-Invoice past 24h, auto-chain credit-note generation — accounts
+        // asked for a single-click flow. If the credit note also fails, fall
+        // back to the manual button (suggestCreditNote: true) with the error.
+        if (isPast24h) {
+          setCancelModal(m => m ? { ...m, busy: true, error: null, autoCreditNote: true } : null)
+          try {
+            const cnRes = await authedFetch('/api/e-invoice/credit-note', {
+              method:  'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body:    JSON.stringify({ consignment_id: c.id, remark: remark || 'Reversal — wrong invoice issued' }),
+            })
+            const cnJson = await cnRes.json()
+            if (!cnRes.ok || cnJson.error) {
+              setCancelModal(m => m ? {
+                ...m,
+                busy: false,
+                error: `Past 24h cancel window. Auto credit-note also failed: ${cnJson.error || 'unknown'}. Click "Generate Credit Note" to retry.`,
+                suggestCreditNote: true,
+              } : null)
+              return
+            }
+            showToast(`Past 24h window — Credit Note ${cnJson.irn || ''} auto-generated. Original IRN remains on NIC books; both appear in GSTR-1.`, 'success')
+            setCancelModal(null)
+            if (tab === 'cancellations') fetchCancellations(true)
+            else fetchHistory(tab, true)
+            return
+          } catch (cnErr) {
+            setCancelModal(m => m ? {
+              ...m,
+              busy: false,
+              error: `Past 24h cancel window. Auto credit-note failed: ${cnErr.message}. Click "Generate Credit Note" to retry.`,
+              suggestCreditNote: true,
+            } : null)
+            return
+          }
+        }
+
         setCancelModal(m => m ? {
           ...m,
           busy: false,
           error: j.error || 'Cancel failed',
-          suggestCreditNote: isPast24h,
+          suggestCreditNote: false,
           ewbPast24h: isEwbPast24h,
         } : null)
         return
