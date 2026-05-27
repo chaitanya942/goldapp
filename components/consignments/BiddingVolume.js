@@ -506,17 +506,28 @@ export default function BiddingVolume() {
   // "Book Selected" to open the booking modal. Pools are mutually exclusive
   // (Kerala vs Bangalore-and-Others) because the booking modal can only
   // handle one pool at a time, so the new selection REPLACES the current one.
-  // Order of preference for picking:
-  //   1. Section 1 (Bangalore today) — freshest, prefer to bid against this first
-  //   2. Section 2 (24h transit)    — already in motion
-  //   3. Section 4 (branch pre-EOD) — last, since these still need pickup
+  //
+  // Section 4 (Branch Stock — pickup pending today) is INTENTIONALLY excluded
+  // from auto-select. Those bills haven't been physically picked up yet, so
+  // their arrival on the bid date is contingent on the pickup actually
+  // running. Ops manually ticks Section 4 branches when they want to commit
+  // against them — the safe-by-default behaviour is to only auto-select from
+  // Section 1 (Bangalore today, certain) and Section 2 (already in transit,
+  // certain). If Sections 1 + 2 don't cover the full Remaining target,
+  // auto-select underbooks and ops adds Section 4 picks manually.
+  //
+  // Order of preference:
+  //   1. Section 1 (Bangalore today)  — freshest, bid against this first
+  //   2. Section 2 (24h transit)     — already in motion
   // Within each section: branch name alphabetical, then purchase_date oldest first.
   const autoSelectRemaining = useCallback((pool, target) => {
     if (!Number.isFinite(target) || target <= 0) return
-    const sectionOrder = { bangalore: 1, transit_24h: 2, branch_pre_eod: 3 }
+    const sectionOrder = { bangalore: 1, transit_24h: 2 }
     const eligible = []
     for (const id of Object.keys(billsById)) {
       const bill = billsById[id]
+      // Section 4 explicitly excluded — manual tick only.
+      if (bill._group === 'branch_pre_eod') continue
       const isKerala = bill._region === 'Kerala'
       if (pool === 'kerala'           && !isKerala) continue
       if (pool === 'bangalore_others' &&  isKerala) continue
