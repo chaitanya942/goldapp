@@ -3,23 +3,18 @@
 // Audit Data — blind-audit workflow for HO intake.
 //
 // Two-level drill-down:
-//   Level 0  Branch cards (two pools: Outstation in-transit, Bangalore pending).
-//            Each card shows bill count + oldest-age badge. NO weights, NO values.
-//   Level 1  Bills from the selected branch. Bare-minimum identity columns
-//            (App ID, Customer, Purchase Date, Age). NO weights, NO values.
+//   Level 0  Branch cards (Outstation in-transit + Bangalore pending).
+//            Each card surfaces bill count + oldest-age + discrepancy chips.
+//            No weights, no values anywhere.
+//   Level 1  Bills from the selected branch as cards (not a table) so each
+//            bill has breathing room. Outstation bills stay grouped under
+//            their TMP_PRF header for visual structure.
 //
-// Blind audit modal: auditor types the measured gross weight on the scale and
-// hits Submit. The CRM gross is NEVER revealed in the queue or in the modal
-// pre-submission — it surfaces only in the POST response, AFTER the auditor
-// has committed their reading. This makes rubber-stamping ("read CRM number,
-// type it in, click match") structurally impossible.
-//
-// If the first submission is an exact match → bill is auto-marked received,
-// modal closes with a ✓ toast.
-// If it's a discrepancy → the POST returns 400 with crm_gross + measured +
-// discrepancy_g revealed; modal flips into "discrepancy mode": shows the
-// comparison, requires an audit remark, lets the auditor pick
-// Accept & Mark Received  OR  Keep Pending for follow-up.
+// Blind audit modal: auditor types the measured gross weight and hits Submit.
+// CRM gross is NEVER revealed pre-submission. The POST response either:
+//   - flips stock_status to at_ho on exact match (auto-receive, modal closes), or
+//   - returns 400 with crm_gross + diff so the modal can flip into "discrepancy
+//     resolution" mode (3-tile comparison + remark + accept/keep-pending).
 
 import { useState, useEffect, useCallback, useMemo, Fragment } from 'react'
 import { createPortal } from 'react-dom'
@@ -29,9 +24,8 @@ import Toast from '../ui/Toast'
 import { authedFetch } from '../../lib/authedFetch'
 import { CONSIGNMENT_THEMES as THEMES } from '../../lib/consignmentTheme'
 
-const fmt    = (n) => n != null ? Number(n).toLocaleString('en-IN') : '—'
-const fmtWt  = (n) => n != null ? `${Number(n).toFixed(3)}g` : '—'
-const fmtDate= (d) => d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: '2-digit' }) : '—'
+const fmtWt   = (n) => n != null ? `${Number(n).toFixed(3)}g` : '—'
+const fmtDate = (d) => d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: '2-digit' }) : '—'
 
 function ageBadge(d, t) {
   if (!d) return { label: '—', color: t.text4, bg: 'transparent' }
@@ -63,9 +57,9 @@ export default function CollectionAudit() {
 
   const [loading,    setLoading]    = useState(true)
   const [bangalore,  setBangalore]  = useState([])
-  const [outstation, setOutstation] = useState([])    // [{ consignment, bills: [] }, ...]
+  const [outstation, setOutstation] = useState([])
   const [activeBill, setActiveBill] = useState(null)
-  const [drillBranch, setDrillBranch] = useState(null) // { name, pool: 'outstation' | 'bangalore' } | null
+  const [drillBranch, setDrillBranch] = useState(null)   // { name, pool } | null
   const [toast,      setToast]      = useState(null)
 
   const fetchAll = useCallback(async () => {
@@ -84,107 +78,109 @@ export default function CollectionAudit() {
 
   useEffect(() => { fetchAll() }, [fetchAll])
 
-  // ── Aggregate bills by source branch for the Level-0 cards ──
+  // Aggregate bills by source branch.
   const outstationByBranch = useMemo(() => {
     const m = new Map()
     for (const g of outstation) {
-      const branchName = g.consignment?.branch_name || '—'
-      if (!m.has(branchName)) {
-        m.set(branchName, { branch: branchName, region: null, consignments: [], bills: [] })
-      }
-      const entry = m.get(branchName)
+      const k = g.consignment?.branch_name || '—'
+      if (!m.has(k)) m.set(k, { branch: k, consignments: [], bills: [] })
+      const entry = m.get(k)
       entry.consignments.push(g.consignment)
       entry.bills.push(...g.bills.map(b => ({ ...b, _consignment: g.consignment })))
     }
-    return [...m.values()].sort((a, b) => {
-      const aT = oldestAge(a.consignments, 'dispatched_at') ?? Infinity
-      const bT = oldestAge(b.consignments, 'dispatched_at') ?? Infinity
-      return aT - bT
-    })
+    return [...m.values()].sort((a, b) => (oldestAge(a.consignments, 'dispatched_at') ?? Infinity) - (oldestAge(b.consignments, 'dispatched_at') ?? Infinity))
   }, [outstation])
 
   const bangaloreByBranch = useMemo(() => {
     const m = new Map()
     for (const b of bangalore) {
-      const key = b.branch_name || '—'
-      if (!m.has(key)) m.set(key, { branch: key, bills: [] })
-      m.get(key).bills.push(b)
+      const k = b.branch_name || '—'
+      if (!m.has(k)) m.set(k, { branch: k, bills: [] })
+      m.get(k).bills.push(b)
     }
-    return [...m.values()].sort((a, b) => {
-      const aT = oldestAge(a.bills, 'purchase_date') ?? Infinity
-      const bT = oldestAge(b.bills, 'purchase_date') ?? Infinity
-      return aT - bT
-    })
+    return [...m.values()].sort((a, b) => (oldestAge(a.bills, 'purchase_date') ?? Infinity) - (oldestAge(b.bills, 'purchase_date') ?? Infinity))
   }, [bangalore])
 
-  // KPI counts only — no weights, no values (blind-audit rule).
   const kpis = {
     outstationBranches: outstationByBranch.length,
     outstationBills:    outstationByBranch.reduce((s, b) => s + b.bills.length, 0),
     bangaloreBranches:  bangaloreByBranch.length,
     bangaloreBills:     bangaloreByBranch.reduce((s, b) => s + b.bills.length, 0),
-    discrepancies:      [...bangalore, ...outstation.flatMap(g => g.bills)]
-                          .filter(b => b.audit_gross_weight != null).length,
+    discrepancies:      [...bangalore, ...outstation.flatMap(g => g.bills)].filter(b => b.audit_gross_weight != null).length,
   }
-
-  // ── Styles ──
-  const s = {
-    wrap:      { padding: '18px 22px', display: 'flex', flexDirection: 'column', gap: '14px', maxWidth: '1400px', margin: '0 auto' },
-    title:     { fontSize: '1.35rem', fontWeight: 300, color: t.text1, letterSpacing: '.02em' },
-    sub:       { fontSize: '11px', color: t.text3 },
-    card:      { background: t.card, border: `1px solid ${t.border}`, borderRadius: '12px', overflow: 'hidden' },
-    badge:     (color) => ({ fontSize: '9px', color, background: `${color}18`, borderRadius: '5px', padding: '4px 9px', fontWeight: 700, letterSpacing: '.08em' }),
-    th:        { padding: '11px 14px', textAlign: 'left', fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', borderBottom: `1px solid ${t.border}`, fontWeight: 600, whiteSpace: 'nowrap' },
-    td:        { padding: '12px 14px', fontSize: '12px', color: t.text2, borderBottom: `1px solid ${t.border}25`, whiteSpace: 'nowrap', verticalAlign: 'middle' },
-    btnGold:   { background: t.gold, color: '#1a0a00', border: 'none', borderRadius: '7px', padding: '8px 16px', fontSize: '11px', fontWeight: 700, cursor: 'pointer', letterSpacing: '.02em' },
-    btnOut:    { background: 'transparent', border: `1px solid ${t.border}`, borderRadius: '7px', padding: '6px 12px', fontSize: '11px', color: t.text3, cursor: 'pointer' },
-  }
+  const totalBills    = kpis.outstationBills + kpis.bangaloreBills
+  const totalBranches = kpis.outstationBranches + kpis.bangaloreBranches
 
   return (
-    <div style={s.wrap}>
+    <div style={{ padding: '24px 28px', maxWidth: '1400px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '20px' }}>
       {toast && <Toast key={toast.key} msg={toast.msg} type={toast.type} onDone={() => setToast(null)} />}
 
-      {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px' }}>
-        <div>
-          <div style={s.title}>Audit Data</div>
-          <div style={{ ...s.sub, marginTop: '2px' }}>
-            Drill into a branch, weigh each inbound bill, and match against CRM gross — blind.
+      {/* ─── Hero header ─── */}
+      <div style={{
+        background:  `linear-gradient(135deg, ${t.card} 0%, ${t.card2 || t.card} 100%)`,
+        border:      `1px solid ${t.border}`,
+        borderRadius: '14px',
+        padding:     '24px 28px',
+        display:     'flex',
+        alignItems:  'center',
+        justifyContent: 'space-between',
+        gap:         '20px',
+        flexWrap:    'wrap',
+        position:    'relative',
+        overflow:    'hidden',
+      }}>
+        {/* Subtle gold sheen */}
+        <div style={{ position: 'absolute', top: '-50%', right: '-10%', width: '50%', height: '200%', background: `radial-gradient(ellipse at center, ${t.gold}10 0%, transparent 70%)`, pointerEvents: 'none' }} />
+        <div style={{ display: 'flex', alignItems: 'center', gap: '20px', zIndex: 1 }}>
+          {/* Scale icon */}
+          <div style={{
+            width: '54px', height: '54px', borderRadius: '14px',
+            background: `linear-gradient(135deg, ${t.gold}25, ${t.gold}10)`,
+            border:     `1px solid ${t.gold}40`,
+            display:    'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize:   '26px',
+          }}>
+            ⚖
+          </div>
+          <div>
+            <div style={{ fontSize: '1.6rem', fontWeight: 300, color: t.text1, letterSpacing: '.02em', lineHeight: 1.1 }}>Audit Data</div>
+            <div style={{ fontSize: '12px', color: t.text3, marginTop: '6px', maxWidth: '520px' }}>
+              Drill into a branch, weigh each inbound bill, and match it against the CRM gross — without seeing the CRM number first.
+            </div>
           </div>
         </div>
-        <button onClick={fetchAll} style={s.btnOut}>⟳ Refresh</button>
-      </div>
-
-      {/* KPI band — counts only, no weights/values (blind-audit guarantee) */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '1px', background: t.border, borderRadius: '12px', overflow: 'hidden' }}>
-        <Kpi t={t} label="Outstation branches" primary={kpis.outstationBranches} sub={`${kpis.outstationBills} bill${kpis.outstationBills === 1 ? '' : 's'} pending`} accent={t.orange} />
-        <Kpi t={t} label="Bangalore branches"  primary={kpis.bangaloreBranches}  sub={`${kpis.bangaloreBills} bill${kpis.bangaloreBills === 1 ? '' : 's'} pending`}  accent={t.gold} />
-        <Kpi t={t} label="Total branches"      primary={kpis.outstationBranches + kpis.bangaloreBranches} sub="awaiting audit" accent={t.text2} />
-        <Kpi t={t} label="Discrepancy follow-ups" primary={kpis.discrepancies} sub="audited & kept pending" accent={t.red} />
+        <div style={{ display: 'flex', alignItems: 'center', gap: '14px', zIndex: 1 }}>
+          <HeroStat t={t} label="Total bills" value={totalBills} color={t.gold} />
+          <HeroStat t={t} label="Branches"    value={totalBranches} color={t.text2} />
+          {kpis.discrepancies > 0 && <HeroStat t={t} label="Discrepancies" value={kpis.discrepancies} color={t.red} />}
+          <button onClick={fetchAll}
+            style={{ background: 'transparent', border: `1px solid ${t.border}`, borderRadius: '8px', padding: '9px 14px', fontSize: '11px', color: t.text3, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}
+            onMouseEnter={e => { e.currentTarget.style.color = t.gold; e.currentTarget.style.borderColor = `${t.gold}60` }}
+            onMouseLeave={e => { e.currentTarget.style.color = t.text3; e.currentTarget.style.borderColor = t.border }}>
+            ⟳ Refresh
+          </button>
+        </div>
       </div>
 
       {loading ? (
-        <div style={{ padding: '80px', textAlign: 'center' }}><GoldSpinner /></div>
+        <div style={{ padding: '120px', textAlign: 'center' }}><GoldSpinner /></div>
       ) : drillBranch ? (
         <BranchDrilldown
           drill={drillBranch}
           outstationByBranch={outstationByBranch}
           bangaloreByBranch={bangaloreByBranch}
           t={t}
-          s={s}
           onBack={() => setDrillBranch(null)}
           onAudit={(bill) => setActiveBill(bill)}
         />
       ) : (
         <>
-          {/* ─── Outstation branch cards ─── */}
-          <BranchGrid
+          <BranchPool
             t={t}
-            s={s}
-            title="Outstation — Branches In Transit"
-            subtitle="Bills currently in_consignment, grouped by source branch."
             accent={t.orange}
             badge="OUTSTATION"
+            title="In-Transit Branches"
+            subtitle={`${kpis.outstationBranches} branch${kpis.outstationBranches === 1 ? '' : 'es'} · ${kpis.outstationBills} bill${kpis.outstationBills === 1 ? '' : 's'} awaiting receipt`}
             empty="No outstation consignments are currently in transit."
             branches={outstationByBranch.map(b => ({
               branch:        b.branch,
@@ -196,14 +192,12 @@ export default function CollectionAudit() {
             onPick={(branch) => setDrillBranch({ name: branch, pool: 'outstation' })}
           />
 
-          {/* ─── Bangalore branch cards ─── */}
-          <BranchGrid
+          <BranchPool
             t={t}
-            s={s}
-            title="Bangalore — Pending at HO"
-            subtitle="Bills from Bangalore branches walking in for intake (no consignment wrapping)."
             accent={t.gold}
             badge="BANGALORE"
+            title="Pending at HO"
+            subtitle={`${kpis.bangaloreBranches} branch${kpis.bangaloreBranches === 1 ? '' : 'es'} · ${kpis.bangaloreBills} bill${kpis.bangaloreBills === 1 ? '' : 's'} walking in`}
             empty="No Bangalore bills currently pending."
             branches={bangaloreByBranch.map(b => ({
               branch:        b.branch,
@@ -231,69 +225,122 @@ export default function CollectionAudit() {
   )
 }
 
-// ─── BranchGrid: a pool of branch cards (Level 0) ────────────────────────────
-function BranchGrid({ t, s, title, subtitle, accent, badge, empty, branches, onPick }) {
+function HeroStat({ t, label, value, color }) {
   return (
-    <div style={{ ...s.card, position: 'relative' }}>
+    <div style={{ background: `${color}10`, border: `1px solid ${color}30`, borderRadius: '10px', padding: '10px 16px', minWidth: '90px', textAlign: 'center' }}>
+      <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.14em', textTransform: 'uppercase', fontWeight: 600 }}>{label}</div>
+      <div style={{ fontSize: '20px', color, fontWeight: 700, fontFamily: 'monospace', marginTop: '4px', lineHeight: 1 }}>{value}</div>
+    </div>
+  )
+}
+
+// ─── Pool of branch cards (Level 0) ─────────────────────────────────────────
+function BranchPool({ t, accent, badge, title, subtitle, empty, branches, onPick }) {
+  return (
+    <div style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: '14px', overflow: 'hidden', position: 'relative', boxShadow: `0 1px 3px ${t.border}40` }}>
       <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '3px', background: `linear-gradient(90deg, ${accent} 0%, ${accent}30 60%, transparent 100%)` }} />
-      <div style={{ padding: '14px 18px', borderBottom: `1px solid ${t.border}`, display: 'flex', alignItems: 'center', gap: '12px' }}>
-        <span style={s.badge(accent)}>{badge}</span>
+      <div style={{ padding: '18px 22px', borderBottom: `1px solid ${t.border}`, display: 'flex', alignItems: 'center', gap: '14px' }}>
+        <span style={{ fontSize: '10px', color: accent, background: `${accent}18`, borderRadius: '6px', padding: '5px 11px', fontWeight: 700, letterSpacing: '.1em' }}>{badge}</span>
         <div>
-          <div style={{ fontSize: '13px', color: t.text1, fontWeight: 600 }}>{title}</div>
-          <div style={{ fontSize: '10px', color: t.text4, marginTop: '2px' }}>{subtitle}</div>
+          <div style={{ fontSize: '15px', color: t.text1, fontWeight: 600, letterSpacing: '-.01em' }}>{title}</div>
+          <div style={{ fontSize: '11px', color: t.text4, marginTop: '3px' }}>{subtitle}</div>
         </div>
       </div>
       {branches.length === 0 ? (
-        <div style={{ padding: '48px 20px', textAlign: 'center', fontSize: '12px', color: t.text4 }}>{empty}</div>
+        <div style={{ padding: '60px 20px', textAlign: 'center', fontSize: '12px', color: t.text4 }}>{empty}</div>
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: '1px', background: t.border }}>
-          {branches.map(b => {
-            const age = ageBadge(b.oldestAt ? new Date(b.oldestAt) : null, t)
-            return (
-              <button key={b.branch} onClick={() => onPick(b.branch)}
-                style={{
-                  background: t.card, border: 'none', textAlign: 'left',
-                  padding: '16px 18px', cursor: 'pointer',
-                  display: 'flex', flexDirection: 'column', gap: '10px',
-                  transition: 'background .15s ease, transform .12s ease',
-                }}
-                onMouseEnter={e => { e.currentTarget.style.background = `${accent}10` }}
-                onMouseLeave={e => { e.currentTarget.style.background = t.card }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '8px' }}>
-                  <div style={{ fontSize: '13px', color: t.text1, fontWeight: 700, letterSpacing: '-.01em' }}>{b.branch}</div>
-                  <span style={{ fontSize: '9px', color: age.color, background: age.bg, borderRadius: '4px', padding: '2px 6px', fontWeight: 700 }}>{age.label}</span>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px' }}>
-                  <div style={{ fontSize: '28px', color: accent, fontWeight: 700, lineHeight: 1, fontFamily: 'monospace' }}>{b.billCount}</div>
-                  <div style={{ fontSize: '11px', color: t.text3 }}>bill{b.billCount === 1 ? '' : 's'}</div>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '10px', color: t.text4 }}>
-                  <span>{b.extraLabel || ' '}</span>
-                  {b.discrepancies > 0 && (
-                    <span style={{ color: t.red, background: `${t.red}18`, borderRadius: '4px', padding: '2px 6px', fontWeight: 700 }}>
-                      {b.discrepancies} discrepancy
-                    </span>
-                  )}
-                </div>
-              </button>
-            )
-          })}
+        <div style={{ padding: '16px', display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: '14px' }}>
+          {branches.map(b => <BranchCard key={b.branch} {...b} t={t} accent={accent} onPick={() => onPick(b.branch)} />)}
         </div>
       )}
     </div>
   )
 }
 
-// ─── Branch drill-down (Level 1) ────────────────────────────────────────────
-function BranchDrilldown({ drill, outstationByBranch, bangaloreByBranch, t, s, onBack, onAudit }) {
+function BranchCard({ branch, billCount, extraLabel, oldestAt, discrepancies, t, accent, onPick }) {
+  const age = ageBadge(oldestAt ? new Date(oldestAt) : null, t)
+  const urgent = age.color === t.red || age.color === t.orange
+  return (
+    <button onClick={onPick}
+      style={{
+        background:    t.card,
+        border:        `1px solid ${urgent ? `${age.color}40` : t.border}`,
+        borderRadius:  '12px',
+        padding:       '0',
+        cursor:        'pointer',
+        textAlign:     'left',
+        display:       'flex',
+        flexDirection: 'column',
+        position:      'relative',
+        overflow:      'hidden',
+        transition:    'transform .15s ease, box-shadow .15s ease, border-color .15s ease',
+      }}
+      onMouseEnter={e => {
+        e.currentTarget.style.transform   = 'translateY(-2px)'
+        e.currentTarget.style.boxShadow   = `0 6px 18px ${accent}25, 0 0 0 1px ${accent}40 inset`
+        e.currentTarget.style.borderColor = `${accent}80`
+      }}
+      onMouseLeave={e => {
+        e.currentTarget.style.transform   = 'translateY(0)'
+        e.currentTarget.style.boxShadow   = 'none'
+        e.currentTarget.style.borderColor = urgent ? `${age.color}40` : t.border
+      }}>
+      {/* Top accent stripe */}
+      <div style={{ height: '3px', background: `linear-gradient(90deg, ${accent}, ${accent}40 80%, transparent)` }} />
+
+      <div style={{ padding: '18px 18px 16px' }}>
+        {/* Branch name + age pill */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '8px', marginBottom: '14px' }}>
+          <div style={{ fontSize: '14px', color: t.text1, fontWeight: 700, letterSpacing: '-.01em', lineHeight: 1.2, flex: 1 }}>{branch}</div>
+          <span style={{ fontSize: '9px', color: age.color, background: age.bg, borderRadius: '5px', padding: '3px 7px', fontWeight: 700, whiteSpace: 'nowrap', flexShrink: 0 }}>{age.label}</span>
+        </div>
+
+        {/* Hero count */}
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px' }}>
+          <div style={{ fontSize: '36px', color: accent, fontWeight: 700, lineHeight: 1, fontFamily: 'monospace', letterSpacing: '-.02em' }}>{billCount}</div>
+          <div style={{ fontSize: '12px', color: t.text3, fontWeight: 500 }}>bill{billCount === 1 ? '' : 's'}</div>
+        </div>
+
+        {extraLabel && <div style={{ fontSize: '11px', color: t.text4, marginTop: '6px' }}>{extraLabel}</div>}
+      </div>
+
+      {/* Footer row */}
+      <div style={{
+        marginTop:   'auto',
+        padding:     '10px 18px',
+        borderTop:   `1px solid ${t.border}40`,
+        background:  `${accent}06`,
+        display:     'flex',
+        alignItems:  'center',
+        justifyContent: 'space-between',
+        fontSize:    '10px',
+      }}>
+        {discrepancies > 0 ? (
+          <span style={{ color: t.red, fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+            ⚠ {discrepancies} discrepancy{discrepancies === 1 ? '' : ' follow-ups'}
+          </span>
+        ) : (
+          <span style={{ color: t.text4 }}>No discrepancies</span>
+        )}
+        <span style={{ color: accent, fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+          Open <span style={{ fontSize: '12px' }}>→</span>
+        </span>
+      </div>
+    </button>
+  )
+}
+
+// ─── Drill-down (Level 1) ───────────────────────────────────────────────────
+function BranchDrilldown({ drill, outstationByBranch, bangaloreByBranch, t, onBack, onAudit }) {
   const source = drill.pool === 'outstation'
     ? outstationByBranch.find(b => b.branch === drill.name)
     : bangaloreByBranch.find(b => b.branch === drill.name)
 
   if (!source) {
     return (
-      <div style={{ ...s.card, padding: '40px', textAlign: 'center', color: t.text4 }}>
-        Branch no longer has any pending bills. <button onClick={onBack} style={{ ...s.btnOut, marginLeft: '10px' }}>← Back to branches</button>
+      <div style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: '14px', padding: '40px', textAlign: 'center', color: t.text4 }}>
+        Branch no longer has any pending bills.{' '}
+        <button onClick={onBack} style={{ background: 'transparent', border: `1px solid ${t.border}`, borderRadius: '7px', padding: '6px 14px', fontSize: '11px', color: t.text3, cursor: 'pointer', marginLeft: '10px' }}>← Back</button>
       </div>
     )
   }
@@ -301,10 +348,9 @@ function BranchDrilldown({ drill, outstationByBranch, bangaloreByBranch, t, s, o
   const accent  = drill.pool === 'outstation' ? t.orange : t.gold
   const badgeLb = drill.pool === 'outstation' ? 'OUTSTATION' : 'BANGALORE'
   const dateF   = drill.pool === 'outstation' ? 'dispatched_at' : 'purchase_date'
+  const pendingCount = source.bills.filter(b => b.audit_gross_weight == null).length
+  const flaggedCount = source.bills.filter(b => b.audit_gross_weight != null).length
 
-  // For outstation, group by parent consignment for visual grouping; for
-  // Bangalore, flat list. Outstation source bills carry `_consignment` from
-  // the parent reducer.
   const groups = drill.pool === 'outstation'
     ? Object.values(source.bills.reduce((acc, b) => {
         const cid = b._consignment?.id || 'orphan'
@@ -315,113 +361,155 @@ function BranchDrilldown({ drill, outstationByBranch, bangaloreByBranch, t, s, o
     : [{ consignment: null, bills: source.bills }]
 
   return (
-    <div style={{ ...s.card, position: 'relative' }}>
-      <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '3px', background: `linear-gradient(90deg, ${accent} 0%, ${accent}30 60%, transparent 100%)` }} />
-      <div style={{ padding: '14px 18px', borderBottom: `1px solid ${t.border}`, display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
-        <button onClick={onBack} style={{ ...s.btnOut, padding: '4px 10px', fontSize: '11px' }}>← Branches</button>
-        <span style={s.badge(accent)}>{badgeLb}</span>
-        <div>
-          <div style={{ fontSize: '14px', color: t.text1, fontWeight: 700, letterSpacing: '-.01em' }}>{source.branch}</div>
-          <div style={{ fontSize: '10px', color: t.text4, marginTop: '2px' }}>
-            {source.bills.length} bill{source.bills.length === 1 ? '' : 's'} pending audit
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+      {/* Sticky-ish drill-down header */}
+      <div style={{
+        background:  `linear-gradient(135deg, ${accent}10, ${t.card})`,
+        border:      `1px solid ${accent}40`,
+        borderRadius: '14px',
+        padding:     '18px 22px',
+        display:     'flex',
+        alignItems:  'center',
+        justifyContent: 'space-between',
+        gap:         '16px',
+        flexWrap:    'wrap',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
+          <button onClick={onBack}
+            style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: '8px', padding: '7px 14px', fontSize: '11px', color: t.text2, cursor: 'pointer', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+            onMouseEnter={e => { e.currentTarget.style.borderColor = `${accent}80`; e.currentTarget.style.color = accent }}
+            onMouseLeave={e => { e.currentTarget.style.borderColor = t.border; e.currentTarget.style.color = t.text2 }}>
+            ← Branches
+          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <span style={{ fontSize: '10px', color: accent, background: `${accent}25`, borderRadius: '6px', padding: '5px 11px', fontWeight: 700, letterSpacing: '.1em' }}>{badgeLb}</span>
+            <div>
+              <div style={{ fontSize: '18px', color: t.text1, fontWeight: 700, letterSpacing: '-.015em', lineHeight: 1.1 }}>{source.branch}</div>
+              <div style={{ fontSize: '11px', color: t.text4, marginTop: '3px' }}>
+                {source.bills.length} bill{source.bills.length === 1 ? '' : 's'} pending audit
+              </div>
+            </div>
           </div>
+        </div>
+        <div style={{ display: 'flex', gap: '10px' }}>
+          <HeroStat t={t} label="Pending" value={pendingCount} color={accent} />
+          {flaggedCount > 0 && <HeroStat t={t} label="Flagged" value={flaggedCount} color={t.red} />}
         </div>
       </div>
 
-      <div style={{ overflowX: 'auto' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-          <thead><tr style={{ background: t.card2 || t.card }}>
-            <th style={s.th}>App ID</th>
-            <th style={s.th}>Customer</th>
-            <th style={s.th}>Type</th>
-            <th style={s.th}>Purchase Date</th>
-            <th style={s.th}>Age</th>
-            <th style={s.th}>Status</th>
-            <th style={s.th}></th>
-          </tr></thead>
-          <tbody>
-            {groups.map((g, i) => (
-              <Fragment key={g.consignment?.id || i}>
-                {g.consignment && (
-                  <tr>
-                    <td colSpan={7} style={{ padding: '10px 14px', background: `${accent}10`, borderTop: `1px solid ${t.border}` }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
-                        <span style={s.badge(t.gold)}>{g.consignment.tmp_prf_no || '—'}</span>
-                        <span style={{ fontSize: '11px', color: t.text2 }}>
-                          {g.consignment.branch_name} <span style={{ color: t.text4 }}>→</span> {g.consignment.movement_type === 'INTERNAL' ? g.consignment.dest_branch : 'HO'}
-                        </span>
-                        <span style={{ fontSize: '10px', color: t.text4, fontFamily: 'monospace' }}>{g.consignment.challan_no}</span>
-                        <span style={{ marginLeft: 'auto', fontSize: '10px', color: t.text3 }}>
-                          <strong style={{ color: t.text2 }}>{g.bills.length}</strong> bill{g.bills.length === 1 ? '' : 's'}
-                        </span>
-                      </div>
-                    </td>
-                  </tr>
-                )}
-                {g.bills.map(bill => <BillRow key={bill.id} bill={bill} s={s} t={t} dateField={dateF} onAudit={() => onAudit(bill)} />)}
-              </Fragment>
-            ))}
-          </tbody>
-        </table>
+      {/* Bill cards grouped by consignment (outstation) or flat (bangalore) */}
+      {groups.map((g, gi) => (
+        <Fragment key={g.consignment?.id || gi}>
+          {g.consignment && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '6px 4px', flexWrap: 'wrap' }}>
+              <span style={{ fontSize: '10px', color: t.gold, background: `${t.gold}18`, borderRadius: '5px', padding: '4px 10px', fontWeight: 700, letterSpacing: '.08em' }}>{g.consignment.tmp_prf_no || '—'}</span>
+              <span style={{ fontSize: '11px', color: t.text2 }}>
+                {g.consignment.branch_name} <span style={{ color: t.text4 }}>→</span> {g.consignment.movement_type === 'INTERNAL' ? g.consignment.dest_branch : 'HO'}
+              </span>
+              <span style={{ fontSize: '10px', color: t.text4, fontFamily: 'monospace' }}>{g.consignment.challan_no}</span>
+              <span style={{ marginLeft: 'auto', fontSize: '10px', color: t.text3 }}>
+                <strong style={{ color: t.text2 }}>{g.bills.length}</strong> bill{g.bills.length === 1 ? '' : 's'}
+              </span>
+            </div>
+          )}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '10px' }}>
+            {g.bills.map(bill => <BillCard key={bill.id} bill={bill} t={t} dateField={dateF} onAudit={() => onAudit(bill)} />)}
+          </div>
+        </Fragment>
+      ))}
+    </div>
+  )
+}
+
+function BillCard({ bill, t, onAudit, dateField }) {
+  const previouslyAudited = bill.audit_gross_weight != null
+  const age   = ageBadge(bill[dateField], t)
+  const isTakeover = bill.transaction_type === 'TAKEOVER'
+
+  return (
+    <div style={{
+      background:    t.card,
+      border:        `1px solid ${previouslyAudited ? `${t.red}50` : t.border}`,
+      borderRadius:  '12px',
+      padding:       '14px 16px',
+      display:       'flex',
+      flexDirection: 'column',
+      gap:           '10px',
+      position:      'relative',
+      overflow:      'hidden',
+      transition:    'border-color .15s ease, box-shadow .15s ease',
+    }}
+      onMouseEnter={e => {
+        e.currentTarget.style.boxShadow   = `0 4px 14px ${t.gold}20`
+        e.currentTarget.style.borderColor = `${t.gold}60`
+      }}
+      onMouseLeave={e => {
+        e.currentTarget.style.boxShadow   = 'none'
+        e.currentTarget.style.borderColor = previouslyAudited ? `${t.red}50` : t.border
+      }}>
+
+      {/* Top row: App ID + Type + Age */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '8px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+          <span style={{ fontSize: '13px', color: t.gold, fontFamily: 'monospace', fontWeight: 700, letterSpacing: '-.01em' }}>{bill.application_id}</span>
+          <span style={{ fontSize: '9px', color: isTakeover ? t.purple : t.gold, background: isTakeover ? `${t.purple}18` : `${t.gold}18`, borderRadius: '4px', padding: '2px 7px', fontWeight: 700, letterSpacing: '.05em' }}>
+            {bill.transaction_type || '—'}
+          </span>
+        </div>
+        <span style={{ fontSize: '9px', color: age.color, background: age.bg, borderRadius: '4px', padding: '2px 7px', fontWeight: 700, whiteSpace: 'nowrap' }}>{age.label}</span>
+      </div>
+
+      {/* Customer */}
+      <div style={{ fontSize: '14px', color: t.text1, fontWeight: 500, lineHeight: 1.2 }}>{bill.customer_name || '—'}</div>
+
+      {/* Meta */}
+      <div style={{ fontSize: '11px', color: t.text4, display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+        <span>{fmtDate(bill[dateField])}</span>
+      </div>
+
+      {/* Status + Action */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: `1px solid ${t.border}40`, paddingTop: '10px', marginTop: '4px' }}>
+        {previouslyAudited ? (
+          <span style={{ fontSize: '10px', color: t.red, background: `${t.red}18`, borderRadius: '4px', padding: '3px 8px', fontWeight: 700 }}>
+            ⚠ Re-audit needed
+          </span>
+        ) : (
+          <span style={{ fontSize: '10px', color: t.text4, fontWeight: 600 }}>
+            Awaiting weight
+          </span>
+        )}
+        <button onClick={onAudit}
+          style={{
+            background: previouslyAudited ? t.orange : t.gold,
+            color:      previouslyAudited ? '#fff' : '#1a0a00',
+            border:     'none',
+            borderRadius: '8px',
+            padding:    '8px 16px',
+            fontSize:   '11px',
+            fontWeight: 700,
+            letterSpacing: '.02em',
+            cursor:     'pointer',
+            display:    'inline-flex',
+            alignItems: 'center',
+            gap:        '6px',
+          }}>
+          ⚖ {previouslyAudited ? 'Re-weigh' : 'Weigh bill'}
+        </button>
       </div>
     </div>
   )
 }
 
-function BillRow({ bill, s, t, onAudit, dateField }) {
-  const previouslyAudited = bill.audit_gross_weight != null
-  const age = ageBadge(bill[dateField], t)
-  return (
-    <tr style={{
-      background: previouslyAudited ? `${t.red}06` : 'transparent',
-      transition: 'background .12s ease',
-    }}
-      onMouseEnter={e => e.currentTarget.style.background = `${t.gold}08`}
-      onMouseLeave={e => e.currentTarget.style.background = previouslyAudited ? `${t.red}06` : 'transparent'}>
-      <td style={{ ...s.td, color: t.gold, fontFamily: 'monospace', fontWeight: 600 }}>{bill.application_id}</td>
-      <td style={s.td}>{bill.customer_name || '—'}</td>
-      <td style={s.td}>
-        <span style={{ fontSize: '10px', color: bill.transaction_type === 'TAKEOVER' ? t.purple : t.gold, background: bill.transaction_type === 'TAKEOVER' ? `${t.purple}18` : `${t.gold}18`, borderRadius: '4px', padding: '2px 7px', fontWeight: 700 }}>
-          {bill.transaction_type || '—'}
-        </span>
-      </td>
-      <td style={{ ...s.td, color: t.text3, fontSize: '11px' }}>{fmtDate(bill[dateField])}</td>
-      <td style={s.td}>
-        <span style={{ fontSize: '10px', color: age.color, background: age.bg, borderRadius: '4px', padding: '2px 7px', fontWeight: 700 }}>{age.label}</span>
-      </td>
-      <td style={s.td}>
-        {previouslyAudited ? (
-          <span style={{ fontSize: '10px', color: t.red, background: `${t.red}18`, borderRadius: '4px', padding: '2px 7px', fontWeight: 700 }}>
-            ⚠ Re-audit needed
-          </span>
-        ) : (
-          <span style={{ fontSize: '10px', color: t.text4, background: `${t.text4}10`, borderRadius: '4px', padding: '2px 7px', fontWeight: 600 }}>
-            Pending
-          </span>
-        )}
-      </td>
-      <td style={{ ...s.td, textAlign: 'right' }}>
-        <button onClick={onAudit} style={{ ...s.btnGold, background: previouslyAudited ? t.orange : t.gold, color: previouslyAudited ? '#fff' : '#1a0a00' }}>
-          {previouslyAudited ? 'Re-weigh' : 'Weigh bill'}
-        </button>
-      </td>
-    </tr>
-  )
-}
-
 // ─── Blind audit modal ─────────────────────────────────────────────────────
 function AuditModal({ bill, t, onClose, onDone, onError }) {
-  const [weight,  setWeight]  = useState('')
-  const [remark,  setRemark]  = useState(bill.audit_remark || '')
-  const [busy,    setBusy]    = useState(false)
-  // Set after a Submit that triggered a discrepancy — drives the "reveal" UI.
-  const [revealed,setRevealed]= useState(null)   // { crm_gross, measured, discrepancy_g } | null
+  const [weight,   setWeight]   = useState('')
+  const [remark,   setRemark]   = useState(bill.audit_remark || '')
+  const [busy,     setBusy]     = useState(false)
+  const [revealed, setRevealed] = useState(null)   // { crm_gross, measured, discrepancy_g }
 
   const measured = parseFloat(weight)
   const valid    = Number.isFinite(measured) && measured > 0
 
-  // Reset reveal if the user changes the input after a reveal — they're
-  // re-weighing, so the previous comparison no longer applies.
   function onWeightChange(v) {
     setWeight(v)
     if (revealed) setRevealed(null)
@@ -447,13 +535,11 @@ function AuditModal({ bill, t, onClose, onDone, onError }) {
       })
       const j = await res.json()
 
-      // Exact match — server already flipped to at_ho. Close modal with toast.
       if (res.ok && j.success && j.action === 'receive' && Number(j.discrepancy_g) === 0) {
         const tail = j.consignment_received ? ' · Parent consignment also marked received.' : ''
         onDone(`${bill.application_id} matched CRM exactly — received at HO.${tail}`)
         return
       }
-      // Success path with explicit remark (auditor already saw discrepancy)
       if (res.ok && j.success && j.action === 'receive') {
         const tail = j.consignment_received ? ' · Parent consignment also marked received.' : ''
         onDone(`${bill.application_id} received with discrepancy noted (Δ ${j.discrepancy_g}g).${tail}`)
@@ -463,9 +549,6 @@ function AuditModal({ bill, t, onClose, onDone, onError }) {
         onDone(`${bill.application_id} kept pending — discrepancy ${j.discrepancy_g}g recorded.`)
         return
       }
-
-      // Discrepancy reveal — server returned 400 with crm_gross + diff so the
-      // auditor can decide.
       if (j.requires_remark && j.crm_gross != null) {
         setRevealed({ crm_gross: Number(j.crm_gross), measured: Number(j.measured), discrepancy_g: Number(j.discrepancy_g) })
         return
@@ -474,100 +557,167 @@ function AuditModal({ bill, t, onClose, onDone, onError }) {
     } finally { setBusy(false) }
   }
 
-  const overlay = { position: 'fixed', inset: 0, background: 'rgba(0,0,0,.72)', backdropFilter: 'blur(4px)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }
-  const card    = { background: t.card, border: `1px solid ${t.border}`, borderRadius: '14px', maxWidth: '560px', width: '100%', overflow: 'hidden', boxShadow: `0 12px 48px rgba(0,0,0,.6)` }
-  const label   = { fontSize: '10px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 600 }
-  const input   = { background: t.card2 || t.card, border: `1px solid ${t.border}`, borderRadius: '8px', padding: '12px 14px', fontSize: '16px', color: t.text1, fontFamily: 'monospace', outline: 'none', width: '100%', boxSizing: 'border-box' }
+  const overlay = { position: 'fixed', inset: 0, background: 'rgba(0,0,0,.76)', backdropFilter: 'blur(6px)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }
+  const card    = { background: t.card, border: `1px solid ${t.border}`, borderRadius: '16px', maxWidth: '580px', width: '100%', overflow: 'hidden', boxShadow: `0 20px 60px rgba(0,0,0,.7)` }
+  const label   = { fontSize: '10px', color: t.text4, letterSpacing: '.14em', textTransform: 'uppercase', fontWeight: 600 }
 
   const previouslyAudited = bill.audit_gross_weight != null
 
   return (
     <div style={overlay} onClick={onClose}>
       <div style={card} onClick={e => e.stopPropagation()}>
-        <div style={{ padding: '20px 24px', borderBottom: `1px solid ${t.border}` }}>
-          <div style={label}>Audit Bill — Blind Weight Entry</div>
-          <div style={{ fontSize: '20px', color: t.gold, fontFamily: 'monospace', fontWeight: 700, marginTop: '4px' }}>{bill.application_id}</div>
-          <div style={{ fontSize: '12px', color: t.text3, marginTop: '2px' }}>
-            {bill.customer_name} · {bill.branch_name} · {fmtDate(bill.purchase_date)}
+        {/* Hero header */}
+        <div style={{ background: `linear-gradient(135deg, ${t.gold}15, transparent)`, padding: '24px 28px', borderBottom: `1px solid ${t.border}`, position: 'relative', overflow: 'hidden' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+            <div style={{
+              width: '46px', height: '46px', borderRadius: '12px',
+              background: `linear-gradient(135deg, ${t.gold}30, ${t.gold}10)`,
+              border: `1px solid ${t.gold}40`,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: '22px',
+            }}>⚖</div>
+            <div>
+              <div style={label}>Blind weight entry</div>
+              <div style={{ fontSize: '22px', color: t.gold, fontFamily: 'monospace', fontWeight: 700, marginTop: '4px', letterSpacing: '-.015em' }}>{bill.application_id}</div>
+              <div style={{ fontSize: '12px', color: t.text3, marginTop: '2px' }}>
+                {bill.customer_name} · {bill.branch_name} · {fmtDate(bill.purchase_date)}
+              </div>
+            </div>
           </div>
         </div>
 
-        <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
-          {/* Re-audit context (when applicable) */}
+        <div style={{ padding: '24px 28px', display: 'flex', flexDirection: 'column', gap: '18px' }}>
+          {/* Re-audit context */}
           {previouslyAudited && !revealed && (
-            <div style={{ padding: '12px 14px', borderRadius: '10px', background: `${t.orange}10`, border: `1px solid ${t.orange}40`, fontSize: '12px', color: t.orange }}>
-              <strong>Re-audit:</strong> previous reading was <strong style={{ fontFamily: 'monospace' }}>{fmtWt(bill.audit_gross_weight)}</strong>{bill.audit_remark ? <> · note: <em>"{bill.audit_remark}"</em></> : null}.
-              Re-weigh on the scale and type what you see — the CRM gross will be revealed only after you submit.
+            <div style={{ padding: '12px 14px', borderRadius: '10px', background: `${t.orange}10`, border: `1px solid ${t.orange}40`, fontSize: '12px', color: t.orange, display: 'flex', gap: '10px', alignItems: 'flex-start' }}>
+              <span style={{ fontSize: '14px' }}>↻</span>
+              <div>
+                <strong>Re-audit:</strong> previous reading was <strong style={{ fontFamily: 'monospace' }}>{fmtWt(bill.audit_gross_weight)}</strong>
+                {bill.audit_remark ? <> — <em>"{bill.audit_remark}"</em></> : null}.
+                Re-weigh on the scale; CRM gross is still hidden.
+              </div>
             </div>
           )}
 
-          {/* Weight input — blind */}
+          {/* Weight input — the hero */}
           <div>
-            <div style={{ ...label, marginBottom: '6px' }}>Measured Gross Weight (g)</div>
-            <input
-              type="number"
-              step="0.001"
-              autoFocus
-              value={weight}
-              onChange={e => onWeightChange(e.target.value)}
-              placeholder="Place gold on scale, type the reading"
-              style={input}
-            />
+            <div style={{ ...label, marginBottom: '8px' }}>Measured Gross Weight</div>
+            <div style={{ position: 'relative' }}>
+              <input
+                type="number"
+                step="0.001"
+                autoFocus
+                value={weight}
+                onChange={e => onWeightChange(e.target.value)}
+                placeholder="0.000"
+                style={{
+                  background:   t.card2 || t.card,
+                  border:       `1.5px solid ${valid ? `${t.gold}60` : t.border}`,
+                  borderRadius: '10px',
+                  padding:      '18px 60px 18px 18px',
+                  fontSize:     '28px',
+                  color:        t.text1,
+                  fontFamily:   'monospace',
+                  fontWeight:   700,
+                  letterSpacing: '-.02em',
+                  outline:      'none',
+                  width:        '100%',
+                  boxSizing:    'border-box',
+                  transition:   'border-color .15s ease',
+                }}
+              />
+              <div style={{ position: 'absolute', right: '20px', top: '50%', transform: 'translateY(-50%)', fontSize: '14px', color: t.text4, fontWeight: 600, pointerEvents: 'none' }}>g</div>
+            </div>
             {!revealed && (
-              <div style={{ fontSize: '10px', color: t.text4, marginTop: '6px' }}>
-                CRM gross is intentionally hidden. Submit your reading to compare.
+              <div style={{ fontSize: '11px', color: t.text4, marginTop: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <span style={{ fontSize: '13px' }}>🔒</span>
+                CRM gross is hidden. Submit your reading to compare.
               </div>
             )}
           </div>
 
-          {/* Comparison reveal — only after first POST that flagged a discrepancy */}
+          {/* Reveal panel */}
           {revealed && (
-            <div style={{ padding: '14px 16px', borderRadius: '10px', background: `${t.red}10`, border: `1px solid ${t.red}40` }}>
-              <div style={{ fontSize: '11px', color: t.red, fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase', marginBottom: '10px' }}>
-                ⚠ Discrepancy detected
+            <div style={{ padding: '16px 18px', borderRadius: '12px', background: `${t.red}10`, border: `1px solid ${t.red}50` }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '14px' }}>
+                <span style={{ fontSize: '18px' }}>⚠</span>
+                <div style={{ fontSize: '11px', color: t.red, fontWeight: 700, letterSpacing: '.1em', textTransform: 'uppercase' }}>
+                  Discrepancy detected
+                </div>
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px' }}>
                 <Reveal t={t} label="Your reading" value={fmtWt(revealed.measured)} color={t.text1} />
                 <Reveal t={t} label="CRM gross"    value={fmtWt(revealed.crm_gross)} color={t.gold} />
-                <Reveal t={t} label="Δ"             value={`${revealed.discrepancy_g > 0 ? '+' : ''}${revealed.discrepancy_g.toFixed(3)}g`} color={t.red} />
+                <Reveal t={t} label="Δ"            value={`${revealed.discrepancy_g > 0 ? '+' : ''}${revealed.discrepancy_g.toFixed(3)}g`} color={t.red} />
               </div>
-              <div style={{ fontSize: '12px', color: t.text2, marginTop: '12px' }}>
-                {revealed.measured > revealed.crm_gross ? 'You measured MORE than CRM.' : 'You measured LESS than CRM.'} Add a remark and decide.
+              <div style={{ fontSize: '12px', color: t.text2, marginTop: '14px' }}>
+                {revealed.measured > revealed.crm_gross ? 'You measured MORE than CRM.' : 'You measured LESS than CRM.'} Add a remark and decide below.
               </div>
             </div>
           )}
 
-          {/* Remark — only shown after reveal */}
           {revealed && (
             <div>
-              <div style={{ ...label, marginBottom: '6px' }}>Audit Remark <span style={{ color: t.red, textTransform: 'none', letterSpacing: 'normal' }}>(required to accept)</span></div>
+              <div style={{ ...label, marginBottom: '6px' }}>
+                Audit Remark <span style={{ color: t.red, textTransform: 'none', letterSpacing: 'normal' }}>(required to accept)</span>
+              </div>
               <textarea
                 value={remark}
                 onChange={e => setRemark(e.target.value)}
                 placeholder="Why is there a difference? e.g. stones in casing, packing residue, scale calibration drift…"
                 rows={2}
-                style={{ ...input, fontFamily: 'inherit', fontSize: '13px', resize: 'vertical' }}
+                style={{
+                  background:   t.card2 || t.card,
+                  border:       `1px solid ${t.border}`,
+                  borderRadius: '10px',
+                  padding:      '11px 14px',
+                  fontSize:     '13px',
+                  color:        t.text1,
+                  outline:      'none',
+                  width:        '100%',
+                  boxSizing:    'border-box',
+                  resize:       'vertical',
+                  fontFamily:   'inherit',
+                }}
               />
             </div>
           )}
         </div>
 
-        <div style={{ padding: '14px 24px', borderTop: `1px solid ${t.border}`, background: t.card2 || t.card, display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-          <button onClick={onClose} style={{ background: 'transparent', border: `1px solid ${t.border}`, borderRadius: '8px', padding: '9px 18px', fontSize: '12px', color: t.text3, cursor: 'pointer' }}>Cancel</button>
+        {/* Action footer */}
+        <div style={{ padding: '16px 28px', borderTop: `1px solid ${t.border}`, background: t.card2 || t.card, display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+          <button onClick={onClose}
+            style={{ background: 'transparent', border: `1px solid ${t.border}`, borderRadius: '9px', padding: '11px 20px', fontSize: '12px', color: t.text3, cursor: 'pointer', fontWeight: 600 }}>
+            Cancel
+          </button>
           {!revealed ? (
             <button onClick={() => submit('receive')} disabled={busy || !valid}
-              style={{ background: t.gold, color: '#1a0a00', border: 'none', borderRadius: '8px', padding: '9px 22px', fontSize: '12px', fontWeight: 700, cursor: busy ? 'default' : 'pointer', opacity: (busy || !valid) ? .5 : 1, letterSpacing: '.02em' }}>
-              {busy ? 'Comparing…' : 'Submit & Compare'}
+              style={{
+                background: t.gold, color: '#1a0a00', border: 'none', borderRadius: '9px',
+                padding: '11px 26px', fontSize: '13px', fontWeight: 700,
+                cursor: busy ? 'default' : 'pointer',
+                opacity: (busy || !valid) ? .5 : 1, letterSpacing: '.02em',
+                boxShadow: !busy && valid ? `0 2px 8px ${t.gold}50` : 'none',
+                transition: 'opacity .15s, box-shadow .15s',
+              }}>
+              {busy ? 'Comparing…' : 'Submit & Compare →'}
             </button>
           ) : (
             <>
               <button onClick={() => submit('keep_pending')} disabled={busy || !valid}
-                style={{ background: 'transparent', border: `1px solid ${t.orange}80`, borderRadius: '8px', padding: '9px 18px', fontSize: '12px', color: t.orange, fontWeight: 700, cursor: busy ? 'default' : 'pointer', opacity: busy ? .6 : 1 }}>
+                style={{ background: 'transparent', border: `1px solid ${t.orange}80`, borderRadius: '9px', padding: '11px 20px', fontSize: '12px', color: t.orange, fontWeight: 700, cursor: busy ? 'default' : 'pointer', opacity: busy ? .6 : 1 }}>
                 Keep Pending
               </button>
               <button onClick={() => submit('receive')} disabled={busy || !valid || !remark.trim()}
-                style={{ background: t.green, color: '#0a0a0a', border: 'none', borderRadius: '8px', padding: '9px 18px', fontSize: '12px', fontWeight: 700, cursor: busy ? 'default' : 'pointer', opacity: (busy || !valid || !remark.trim()) ? .5 : 1 }}>
-                {busy ? 'Saving…' : 'Accept & Mark Received'}
+                style={{
+                  background: t.green, color: '#0a0a0a', border: 'none', borderRadius: '9px',
+                  padding: '11px 22px', fontSize: '12px', fontWeight: 700,
+                  cursor: busy ? 'default' : 'pointer',
+                  opacity: (busy || !valid || !remark.trim()) ? .5 : 1,
+                  boxShadow: !busy && valid && remark.trim() ? `0 2px 8px ${t.green}50` : 'none',
+                  transition: 'opacity .15s, box-shadow .15s',
+                }}>
+                {busy ? 'Saving…' : '✓ Accept & Mark Received'}
               </button>
             </>
           )}
@@ -579,22 +729,9 @@ function AuditModal({ bill, t, onClose, onDone, onError }) {
 
 function Reveal({ t, label, value, color }) {
   return (
-    <div style={{ background: t.card, padding: '10px 12px', borderRadius: '8px', textAlign: 'center' }}>
-      <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 600 }}>{label}</div>
-      <div style={{ fontSize: '16px', color, fontWeight: 700, fontFamily: 'monospace', marginTop: '4px', letterSpacing: '-.01em' }}>{value}</div>
-    </div>
-  )
-}
-
-function Kpi({ t, label, primary, sub, accent }) {
-  return (
-    <div style={{ background: t.card, padding: '16px 18px 18px', position: 'relative', transition: 'background .18s ease' }}
-      onMouseEnter={e => e.currentTarget.style.background = `${accent || t.text3}08`}
-      onMouseLeave={e => e.currentTarget.style.background = t.card}>
-      <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '2px', background: accent || t.text3, opacity: .55 }} />
-      <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.14em', textTransform: 'uppercase', marginBottom: '8px', fontWeight: 600 }}>{label}</div>
-      <div style={{ fontSize: '22px', color: accent || t.text1, fontWeight: 700, lineHeight: 1.1, letterSpacing: '-.015em' }}>{primary}</div>
-      {sub && <div style={{ fontSize: '10px', color: t.text4, marginTop: '8px' }}>{sub}</div>}
+    <div style={{ background: t.card, padding: '12px 14px', borderRadius: '10px', textAlign: 'center', border: `1px solid ${t.border}40` }}>
+      <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 600 }}>{label}</div>
+      <div style={{ fontSize: '18px', color, fontWeight: 700, fontFamily: 'monospace', marginTop: '6px', letterSpacing: '-.01em' }}>{value}</div>
     </div>
   )
 }
