@@ -16,7 +16,7 @@ export async function GET(req) {
   if (!auth.ok) return auth.response
   try {
     // Run all 3 fetches in parallel
-    const [branchesRes, consignmentsRes, globalExtRes] = await Promise.all([
+    const [branchesRes, consignmentsRes, lastExtRes] = await Promise.all([
       // 1. All outside-Bangalore branches
       supabase
         .from('branches')
@@ -37,14 +37,11 @@ export async function GET(req) {
         .neq('status', 'cancelled')
         .order('tmp_prf_no', { ascending: false }),
 
-      // 3. Global max external_no (seed floor: 001903)
-      supabase
-        .from('consignments')
-        .select('external_no')
-        .not('external_no', 'is', null)
-        .order('external_no', { ascending: false })
-        .limit(1)
-        .single(),
+      // 3. Last issued external_no via the sequence-backed RPC. Atomic and
+      // immune to the dirty-data issue that broke the old SELECT MAX
+      // approach (SEED-* + WG-prefixed garbage in external_no column sorted
+      // ABOVE real numeric values, alpha-tricking parseInt into NaN).
+      supabase.rpc('get_last_external_no'),
     ])
 
     const branches     = branchesRes.data   || []
@@ -66,9 +63,10 @@ export async function GET(req) {
       branch_code:     challanMap[b.name]?.branch_code,
     }))
 
-    const rawExt         = globalExtRes.data?.external_no
-    const lastExternalNo = rawExt
-      ? String(Math.max(parseInt(rawExt), 1903)).padStart(6, '0')
+    // RPC returns a 6-digit zero-padded text. If it errors (sequence not
+    // installed yet), fall back to the seed floor so the page still loads.
+    const lastExternalNo = (typeof lastExtRes.data === 'string' && lastExtRes.data)
+      ? lastExtRes.data
       : '001903'
 
     return Response.json({

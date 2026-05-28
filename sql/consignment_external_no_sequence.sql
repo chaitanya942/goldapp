@@ -54,4 +54,17 @@ $$;
 
 GRANT EXECUTE ON FUNCTION next_consignment_external_no() TO authenticated, service_role;
 
+-- 4. Read-only helper for the Consignment Seeds page's hero card. Returns
+--    the current sequence value (the last number HANDED OUT) WITHOUT
+--    incrementing — STABLE so PostgREST can cache it safely within a request.
+CREATE OR REPLACE FUNCTION get_last_external_no()
+RETURNS TEXT
+LANGUAGE sql
+STABLE
+AS $$
+  SELECT LPAD(last_value::text, 6, '0') FROM consignment_external_no_seq;
+$$;
+
+GRANT EXECUTE ON FUNCTION get_last_external_no() TO authenticated, service_role;
+
 COMMIT;

@@ -17,6 +17,7 @@ export default function ConsignmentSeeds() {
 
   const [loading, setLoading]       = useState(true)
   const [branches, setBranches]     = useState([])
+  const [lastExternalNo, setLastExternalNo] = useState('—')
   const [message, setMessage]     = useState(null)
   const [collapsed, setCollapsed] = useState({})
   const [search, setSearch]       = useState('')
@@ -84,6 +85,7 @@ export default function ConsignmentSeeds() {
     const res  = await authedFetch('/api/consignment-seed')
     const data = await res.json()
     setBranches(data.branches || [])
+    setLastExternalNo(data.last_external_no || '—')
     setLoading(false)
   }
 
@@ -196,19 +198,20 @@ export default function ConsignmentSeeds() {
         </div>
       )}
 
-      {/* Stats bar — focused on what ops needs: how many branches need a seed,
-          how many are done. The legacy "Next External No — Global" card was
-          dropped: the external sequence is server-managed and not something
-          ops should be looking at on this page. */}
+      {/* Stats bar — branches needing a seed, total seeded, plus the global
+          last-used external_no (delivery challan counter) so ops can see at a
+          glance where the sequence stands across every branch. */}
       <div style={{ display: 'flex', gap: '10px' }}>
         {[
-          { label: 'Total Branches', value: branches.length, color: t.gold },
-          { label: 'Seeded',         value: seeded,          color: t.green },
-          { label: 'Pending',        value: pending,         color: pending > 0 ? t.red : t.text4 },
-        ].map(({ label, value, color }) => (
+          { label: 'Total Branches',      value: branches.length,                            color: t.gold },
+          { label: 'Seeded',              value: seeded,                                     color: t.green },
+          { label: 'Pending',             value: pending,                                    color: pending > 0 ? t.red : t.text4 },
+          { label: 'Last External No',    value: lastExternalNo,                             color: t.blue, mono: true, sub: 'global · across all branches' },
+        ].map(({ label, value, color, mono, sub }) => (
           <div key={label} style={{ flex: 1, background: t.card2, border: `1px solid ${t.border}`, borderRadius: '8px', padding: '12px 16px' }}>
             <div style={{ fontSize: '10px', color: t.text4, letterSpacing: '.08em', textTransform: 'uppercase', fontWeight: 600 }}>{label}</div>
-            <div style={{ fontSize: '22px', fontWeight: 600, color, marginTop: '4px' }}>{value}</div>
+            <div style={{ fontSize: '22px', fontWeight: 600, color, marginTop: '4px', fontFamily: mono ? 'monospace' : 'inherit', letterSpacing: mono ? '-.01em' : 'normal' }}>{value}</div>
+            {sub && <div style={{ fontSize: '9px', color: t.text4, marginTop: '4px', letterSpacing: '.04em' }}>{sub}</div>}
           </div>
         ))}
       </div>
