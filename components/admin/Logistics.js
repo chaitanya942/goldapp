@@ -172,12 +172,19 @@ export default function Logistics() {
     return true
   }), [branches, region, partner, search])
 
-  // Header stats
+  // Header stats. Bangalore branches don't have pickup/TAT/days (daily
+  // executive pickup), so "missing" only flags them if partner is unset
+  // or — for leaves — the hub isn't assigned yet.
   const stats = useMemo(() => {
     const total = branches.length
-    const withPickup = branches.filter(b => b.pickup_time).length
-    const withTat    = branches.filter(b => b.delivery_tat_hours).length
-    const missingAny = branches.filter(b => !b.pickup_time || !b.delivery_tat_hours || !b.logistics_partner).length
+    const withPickup = branches.filter(b => b.region === 'Bangalore' || b.pickup_time).length
+    const withTat    = branches.filter(b => b.region === 'Bangalore' || b.delivery_tat_hours).length
+    const missingAny = branches.filter(b => {
+      if (b.region === 'Bangalore') {
+        return !b.logistics_partner || (!b.is_hub && !b.hub_branch_name)
+      }
+      return !b.pickup_time || !b.delivery_tat_hours || !b.logistics_partner
+    }).length
     return { total, withPickup, withTat, missingAny }
   }, [branches])
 
@@ -305,7 +312,12 @@ export default function Logistics() {
         Object.entries(grouped).map(([r, list]) => {
           const accent = REGION_COLORS[r] || t.gold
           const collapsed = collapsedRegions.has(r)
-          const configuredCount = list.filter(b => b.logistics_partner && b.pickup_time && b.delivery_tat_hours && (b.pickup_days || []).length).length
+          const configuredCount = list.filter(b => {
+            if (b.region === 'Bangalore') {
+              return !!b.logistics_partner && (b.is_hub || !!b.hub_branch_name)
+            }
+            return b.logistics_partner && b.pickup_time && b.delivery_tat_hours && (b.pickup_days || []).length
+          }).length
           return (
             <div key={r} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
               <RegionBanner
@@ -612,22 +624,28 @@ function BranchCard({ t, branch, busy, onSave, regionAccent, partnerOptions, onA
   // Bangalore partner is locked (no picker), so don't count partner mismatch
   // as dirty for those cards — even if the DB still has a legacy value, the
   // user can't change it from here. Save still pushes the locked value so
-  // any DB drift gets corrected on the next pickup/tat/days edit.
+  // any DB drift gets corrected on the next hub edit.
+  //
+  // Bangalore branches also don't show pickup/TAT/days — pickup happens daily
+  // by Transaction Executives at the hub. So those fields aren't dirty either.
   const partnerDirty = !isBangalore && ((partner || null) !== (branch.logistics_partner || null))
-  const dirty = (
-    partnerDirty ||
+  const scheduleDirty = !isBangalore && (
     (pickup || '')                    !== (branch.pickup_time       || '')   ||
     Number(tat)                       !== Number(branch.delivery_tat_hours || 24)  ||
-    JSON.stringify([...days].sort()) !== JSON.stringify([...(branch.pickup_days || ['Mon','Tue','Wed','Thu','Fri','Sat'])].sort()) ||
+    JSON.stringify([...days].sort()) !== JSON.stringify([...(branch.pickup_days || ['Mon','Tue','Wed','Thu','Fri','Sat'])].sort())
+  )
+  const dirty = (
+    partnerDirty ||
+    scheduleDirty ||
     (showHubField && (hub || '')     !== (branch.hub_branch_name || ''))
   )
 
   const onSubmit = async () => {
-    const patch = {
-      partner,
-      pickup_time:        pickup,
-      delivery_tat_hours: tat,
-      pickup_days:        days,
+    const patch = { partner }
+    if (!isBangalore) {
+      patch.pickup_time        = pickup
+      patch.delivery_tat_hours = tat
+      patch.pickup_days        = days
     }
     if (showHubField) patch.hub_branch_name = hub
     await onSave(branch.name, patch)
@@ -655,9 +673,12 @@ function BranchCard({ t, branch, busy, onSave, regionAccent, partnerOptions, onA
     transition: 'border-color .15s ease',
   })
 
-  // Configured = all 4 operational fields have a value. Surfaces a green tick
-  // accent so the eye can quickly scan which branches are still pending.
-  const configured = !!branch.logistics_partner && !!branch.pickup_time && !!branch.delivery_tat_hours && (branch.pickup_days || []).length > 0
+  // Configured indicator — green tick when all required ops fields are set.
+  // Bangalore: partner is always Transaction Executives + (if leaf) hub assigned.
+  // Outstation: partner + pickup time + TAT + at least one pickup day.
+  const configured = isBangalore
+    ? !!branch.logistics_partner && (branch.is_hub || !!branch.hub_branch_name)
+    : !!branch.logistics_partner && !!branch.pickup_time && !!branch.delivery_tat_hours && (branch.pickup_days || []).length > 0
 
   // Live 'next pickup' clock — refreshes every minute so the in-line indicator
   // stays accurate without a full page refetch.
@@ -779,70 +800,89 @@ function BranchCard({ t, branch, busy, onSave, regionAccent, partnerOptions, onA
             </select>
           </Row>
         )}
-        <Row label="Pickup">
-          <div>
-            <input type="time" value={pickup} onChange={e => setPickup(e.target.value)} disabled={busy}
-              style={{ ...inp((pickup || '') !== (branch.pickup_time || '')), width: '100%' }} />
-            {nextPick && (
-              <div style={{ fontSize: '10px', marginTop: '4px', color: pickColor, fontWeight: 600, display: 'flex', alignItems: 'center', gap: '5px' }}>
-                <span style={{
-                  width: '5px', height: '5px', borderRadius: '50%', background: pickColor, display: 'inline-block',
-                  ...(nextPick.tier === 'now' || nextPick.tier === 'missed' ? { color: pickColor } : {}),
-                }}
-                  className={nextPick.tier === 'now' ? 'logi-pulse' : ''} />
-                Next pickup · {nextPick.label}
-              </div>
-            )}
+        {!isBangalore && (
+          <Row label="Pickup">
+            <div>
+              <input type="time" value={pickup} onChange={e => setPickup(e.target.value)} disabled={busy}
+                style={{ ...inp((pickup || '') !== (branch.pickup_time || '')), width: '100%' }} />
+              {nextPick && (
+                <div style={{ fontSize: '10px', marginTop: '4px', color: pickColor, fontWeight: 600, display: 'flex', alignItems: 'center', gap: '5px' }}>
+                  <span style={{
+                    width: '5px', height: '5px', borderRadius: '50%', background: pickColor, display: 'inline-block',
+                    ...(nextPick.tier === 'now' || nextPick.tier === 'missed' ? { color: pickColor } : {}),
+                  }}
+                    className={nextPick.tier === 'now' ? 'logi-pulse' : ''} />
+                  Next pickup · {nextPick.label}
+                </div>
+              )}
+            </div>
+          </Row>
+        )}
+        {!isBangalore && (
+          <Row label="TAT">
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '4px' }}>
+              {[24, 48, 72].map(h => {
+                const active = Number(tat) === h
+                return (
+                  <button key={h} onClick={() => setTat(h)} disabled={busy}
+                    style={{
+                      background:   active ? t.gold : 'transparent',
+                      color:        active ? '#1a0a00' : t.text3,
+                      border:       `1px solid ${active ? t.gold : t.border}`,
+                      borderRadius: '6px',
+                      padding:      '6px 0',
+                      fontSize:     '11px',
+                      fontWeight:   active ? 700 : 500,
+                      cursor:       'pointer',
+                      transition:   'all .12s ease',
+                      boxShadow:    active ? `0 1px 4px ${t.gold}45` : 'none',
+                    }}>
+                    {h}h
+                  </button>
+                )
+              })}
+            </div>
+          </Row>
+        )}
+        {!isBangalore && (
+          <Row label="Days">
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '3px' }}>
+              {DAYS.map(d => {
+                const active = days.includes(d)
+                return (
+                  <button key={d} onClick={() => setDays(prev => active ? prev.filter(x => x !== d) : [...prev, d])} disabled={busy}
+                    title={d}
+                    style={{
+                      background:   active ? `${accent}28` : 'transparent',
+                      color:        active ? accent : t.text4,
+                      border:       `1px solid ${active ? `${accent}70` : t.border}`,
+                      borderRadius: '5px',
+                      padding:      '5px 0',
+                      fontSize:     '10px',
+                      fontWeight:   700,
+                      cursor:       'pointer',
+                      transition:   'all .12s ease',
+                    }}>
+                    {d[0]}
+                  </button>
+                )
+              })}
+            </div>
+          </Row>
+        )}
+        {isBangalore && (
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: '8px',
+            padding: '7px 10px', marginTop: '2px',
+            background: `${accent}06`,
+            border: `1px dashed ${accent}30`,
+            borderRadius: '7px',
+            fontSize: '11px', color: t.text3, lineHeight: 1.45,
+          }}>
+            <span style={{ fontSize: '13px', color: accent }}>◷</span>
+            <span><strong style={{ color: t.text2 }}>Daily pickup</strong> — executives sweep this {branch.is_hub ? 'hub' : 'branch'} every day. No fixed time, TAT, or off-days.</span>
           </div>
-        </Row>
-        <Row label="TAT">
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '4px' }}>
-            {[24, 48, 72].map(h => {
-              const active = Number(tat) === h
-              return (
-                <button key={h} onClick={() => setTat(h)} disabled={busy}
-                  style={{
-                    background:   active ? t.gold : 'transparent',
-                    color:        active ? '#1a0a00' : t.text3,
-                    border:       `1px solid ${active ? t.gold : t.border}`,
-                    borderRadius: '6px',
-                    padding:      '6px 0',
-                    fontSize:     '11px',
-                    fontWeight:   active ? 700 : 500,
-                    cursor:       'pointer',
-                    transition:   'all .12s ease',
-                    boxShadow:    active ? `0 1px 4px ${t.gold}45` : 'none',
-                  }}>
-                  {h}h
-                </button>
-              )
-            })}
-          </div>
-        </Row>
-        <Row label="Days">
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '3px' }}>
-            {DAYS.map(d => {
-              const active = days.includes(d)
-              return (
-                <button key={d} onClick={() => setDays(prev => active ? prev.filter(x => x !== d) : [...prev, d])} disabled={busy}
-                  title={d}
-                  style={{
-                    background:   active ? `${accent}28` : 'transparent',
-                    color:        active ? accent : t.text4,
-                    border:       `1px solid ${active ? `${accent}70` : t.border}`,
-                    borderRadius: '5px',
-                    padding:      '5px 0',
-                    fontSize:     '10px',
-                    fontWeight:   700,
-                    cursor:       'pointer',
-                    transition:   'all .12s ease',
-                  }}>
-                  {d[0]}
-                </button>
-              )
-            })}
-          </div>
-        </Row>
+        )}
       </div>
 
       {/* Footer — save / cancel slides in when dirty */}
