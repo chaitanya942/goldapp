@@ -12,7 +12,7 @@ import {
 import { logConsignmentEvent } from '../../../lib/consignmentLog'
 import { applyConsignmentApproval } from '../../../lib/consignmentApproval'
 import { requireAuth, requireAuthForPage, ROLE_GROUPS, getRegionFilter, resolveAllowedBranchNames } from '../../../lib/apiAuth'
-import { istToday, istStartOfDayIso, istEndOfDayIso } from '../../../lib/dateIst'
+import { istToday, istStartOfDayIso, istEndOfDayIso, addWorkingDaysSkipSunday } from '../../../lib/dateIst'
 import { cancelEWayBill, cancelEInvoice } from '../../../lib/clearTaxClient'
 import { REGION_TO_STATE_CODE } from '../../../lib/stateMap'
 
@@ -430,7 +430,10 @@ export async function GET(req) {
       const dt = new Date(Date.UTC(y, m - 1, d + n))
       return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, '0')}-${String(dt.getUTCDate()).padStart(2, '0')}`
     }
-    const arrivalDate    = searchParams.get('date') || addDays(today, 1)  // default: tomorrow IST
+    // Default arrival = next working day (Sunday skipped — logistics off).
+    // So bidding on Saturday targets Monday arrival; bidding on Sunday also
+    // targets Monday. If the operator passes ?date= explicitly, honour it.
+    const arrivalDate    = searchParams.get('date') || addWorkingDaysSkipSunday(today, 1)
     const bangalorePurchaseDate = addDays(arrivalDate, -1)                // bangalore today = arrival - 1
 
     const dayAfterArrival = addDays(arrivalDate, 1)
@@ -518,15 +521,22 @@ export async function GET(req) {
       inflightBills = ib || []
     }
 
-    // Compute arrival_date for each in-flight bill and filter to target.
-    const istDateOf = (utcIso, offsetHours = 0) => {
-      const ms = new Date(utcIso).getTime() + offsetHours * 3600_000
-      const d  = new Date(ms + 5.5 * 3600_000)  // shift to IST
+    // Compute arrival_date for each in-flight bill using working-day math
+    // (skip Sundays — logistics partner is off). Examples:
+    //   24h-TAT bill dispatched Sat → Mon arrival (not Sun)
+    //   48h-TAT bill dispatched Sat → Tue arrival (Sun skipped within transit)
+    // The dispatch IST date is the starting point; we then add ceil(TAT/24)
+    // working days to get the arrival IST date.
+    const istDateOf = (utcIso) => {
+      const d = new Date(new Date(utcIso).getTime() + 5.5 * 3600_000)  // shift to IST
       return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`
     }
     const inflightWithArrival = inflightBills.map(b => {
       const tat = branchMeta[b.branch_name]?.delivery_tat_hours || 24
-      return { ...b, _arrival_date: istDateOf(b.dispatched_at, tat), _tat_hours: tat }
+      const dispatchDate = istDateOf(b.dispatched_at)
+      const workDays = Math.max(1, Math.ceil(tat / 24))
+      const arrivalIst = addWorkingDaysSkipSunday(dispatchDate, workDays)
+      return { ...b, _arrival_date: arrivalIst, _tat_hours: tat }
     })
     const inflight24h = inflightWithArrival.filter(b => b._arrival_date === arrivalDate)
     const inflight48h = inflightWithArrival.filter(b => b._arrival_date === dayAfterArrival)
@@ -2675,14 +2685,16 @@ export async function POST(req) {
             .eq('is_deleted', false)
             .not('dispatched_at', 'is', null)
             .is('booking_id', null)
-          const istDateOf = (utcIso, offsetHours = 0) => {
-            const ms = new Date(utcIso).getTime() + offsetHours * 3600_000
-            const d  = new Date(ms + 5.5 * 3600_000)
+          // Working-day arrival math (skip Sundays — same rule used in the
+          // bidding_volume action and the Consignment Report).
+          const istDispatchDate = (utcIso) => {
+            const d = new Date(new Date(utcIso).getTime() + 5.5 * 3600_000)
             return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`
           }
           const matchingIds = (candidates || []).filter(b => {
             const tat = branchMeta[b.branch_name]?.delivery_tat_hours || 24
-            return istDateOf(b.dispatched_at, tat) === date
+            const workDays = Math.max(1, Math.ceil(tat / 24))
+            return addWorkingDaysSkipSunday(istDispatchDate(b.dispatched_at), workDays) === date
           }).map(b => b.id)
           if (matchingIds.length) {
             await supabase

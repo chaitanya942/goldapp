@@ -20,7 +20,7 @@ import GoldSpinner from '../ui/GoldSpinner'
 import Toast from '../ui/Toast'
 import { authedFetch } from '../../lib/authedFetch'
 import { CONSIGNMENT_THEMES as THEMES, REGION_COLORS, useMobile } from '../../lib/consignmentTheme'
-import { istToday } from '../../lib/dateIst'
+import { istToday, addWorkingDaysSkipSunday } from '../../lib/dateIst'
 import { getCache, setCache } from '../../lib/moduleCache'
 
 const REGION_ICONS = {
@@ -315,14 +315,14 @@ export default function ConsignmentReport() {
         tatByBranch[r.branch_name] = Number(r.delivery_tat_hours)
       }
     }
-    // Expected delivery — dispatch IST day + ceil(TAT_hours / 24).
+    // Expected delivery — dispatch IST day + ceil(TAT_hours / 24) working
+    // days, skipping Sundays (logistics partner is off Sundays). So a 48h-TAT
+    // branch dispatching Saturday lands Tuesday, not Monday.
     for (const g of groups.values()) {
       if (!g.consignment_date) { g.expected_delivery_date = null; continue }
-      const tatHours = tatByBranch[g.branch_name] || 24
-      const daysToAdd = Math.max(1, Math.ceil(tatHours / 24))
-      const [y, m, d] = g.consignment_date.split('-').map(Number)
-      const dt = new Date(Date.UTC(y, m - 1, d + daysToAdd))
-      g.expected_delivery_date = dt.toISOString().slice(0, 10)
+      const tatHours  = tatByBranch[g.branch_name] || 24
+      const workDays  = Math.max(1, Math.ceil(tatHours / 24))
+      g.expected_delivery_date = addWorkingDaysSkipSunday(g.consignment_date, workDays)
       g.delivery_tat_hours = tatHours   // surface on the row for the cell badge
     }
     return Array.from(groups.values())
