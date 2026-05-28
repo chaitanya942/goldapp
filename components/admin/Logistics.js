@@ -609,8 +609,13 @@ function BranchCard({ t, branch, busy, onSave, regionAccent, partnerOptions, onA
   useEffect(() => { setDays(branch.pickup_days || ['Mon','Tue','Wed','Thu','Fri','Sat']) }, [branch.pickup_days])
   useEffect(() => { setHub(branch.hub_branch_name || '') }, [branch.hub_branch_name])
 
+  // Bangalore partner is locked (no picker), so don't count partner mismatch
+  // as dirty for those cards — even if the DB still has a legacy value, the
+  // user can't change it from here. Save still pushes the locked value so
+  // any DB drift gets corrected on the next pickup/tat/days edit.
+  const partnerDirty = !isBangalore && ((partner || null) !== (branch.logistics_partner || null))
   const dirty = (
-    (partner || null)                !== (branch.logistics_partner || null) ||
+    partnerDirty ||
     (pickup || '')                    !== (branch.pickup_time       || '')   ||
     Number(tat)                       !== Number(branch.delivery_tat_hours || 24)  ||
     JSON.stringify([...days].sort()) !== JSON.stringify([...(branch.pickup_days || ['Mon','Tue','Wed','Thu','Fri','Sat'])].sort()) ||
@@ -727,16 +732,36 @@ function BranchCard({ t, branch, busy, onSave, regionAccent, partnerOptions, onA
       {/* Field rows — consistent label / control grid */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
         <Row label="Partner">
-          <PartnerPicker
-            t={t} accent={accent} busy={busy}
-            value={partner} onChange={setPartner}
-            dirty={partner !== (branch.logistics_partner || null)}
-            options={partnerOptions || PARTNERS}
-            onAddPartner={(name) => {
-              if (onAddPartner) onAddPartner(name)
-              setPartner(name)
-            }}
-          />
+          {isBangalore ? (
+            // Bangalore is always Transaction Executives — no picker. The
+            // value still lives in the DB so the consignment / EWB flow
+            // can read it like any other partner.
+            <div title="Bangalore branches are always serviced by our in-house Transaction Executives — not editable here."
+              style={{
+                display: 'flex', alignItems: 'center', gap: '8px',
+                background: `${accent}10`,
+                border: `1px dashed ${accent}55`,
+                borderRadius: '7px',
+                padding: '6px 10px',
+                fontSize: '12px',
+                color: t.text1,
+              }}>
+              <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: accent, flexShrink: 0, boxShadow: `0 0 0 2px ${accent}25` }} />
+              <span style={{ fontWeight: 600 }}>Transaction Executives</span>
+              <span style={{ marginLeft: 'auto', fontSize: '9px', color: t.text4, letterSpacing: '.08em', textTransform: 'uppercase', fontWeight: 700 }}>locked</span>
+            </div>
+          ) : (
+            <PartnerPicker
+              t={t} accent={accent} busy={busy}
+              value={partner} onChange={setPartner}
+              dirty={partner !== (branch.logistics_partner || null)}
+              options={partnerOptions || PARTNERS}
+              onAddPartner={(name) => {
+                if (onAddPartner) onAddPartner(name)
+                setPartner(name)
+              }}
+            />
+          )}
         </Row>
         {showHubField && (
           <Row label="Hub">
