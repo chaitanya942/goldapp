@@ -1750,7 +1750,7 @@ export async function POST(req) {
       }, { status: 400 })
     }
 
-    const tmpPrfNo = await generateTmpPrfNo(supabase, branch_name)
+    let tmpPrfNo = await generateTmpPrfNo(supabase, branch_name)
 
     // Number generation depends on movement type:
     //   EXTERNAL (Branch→HO or Hub→HO): challan_no
@@ -1835,42 +1835,78 @@ export async function POST(req) {
     // consignment_items (with per-bill snapshot), and writes the audit log
     // in one transaction. Bills' stock_status stays 'at_branch' until
     // accounts approves; that flip lives in approve_consignment below.
-    const { data: rpcConsignment, error: rpcErr } = await supabase.rpc('create_consignment_atomic', {
-      p_payload: {
-        consignment_no:  challan,
-        tmp_prf_no:      tmpPrfNo,
-        external_no:     extNo,
-        internal_no:     internalNo,
-        challan_no:      challan,
-        branch_name,
-        branch_code:     branchCode,
-        state_code:      stateCode,
-        movement_type:   movement_type || 'EXTERNAL',
-        dest_branch:     isInternal ? dest_branch : null,
-        eway_bill_no:    eway_bill_no || null,
-        total_bills:     purchase_ids.length,
-        total_net_wt:    totalNetWt,
-        total_gross_wt:  totalGrossWt,
-        total_amount:    totalAmount,
-        gst_snapshot:    gstSnapshot,
-        created_by,
-        added_by:        auth.user?.id || null,
-        purchase_ids,
-        source_address:  branchData.address || null,
-        source_city:     branchData.city || null,
-        source_pin:      branchData.pin_code || null,
-        source_state:    branchData.state || null,
-        source_region:   branchData.region || null,
-        source_gstin:    sourceGstinSnap,
-        dest_address:    isInternal ? (destData?.address || null) : null,
-        dest_city:       isInternal ? (destData?.city || null) : null,
-        dest_pin:        isInternal ? (destData?.pin_code || null) : null,
-        dest_state:      isInternal ? (destData?.state || null) : null,
-        dest_region:     isInternal ? (destData?.region || null) : null,
-        dest_gstin:      isInternal ? destGstinSnap : null,
-        item_snapshots:  itemSnapshots,
-      },
-    })
+    //
+    // RETRY-ON-CONFLICT: generateExternalNo / generateIssueVoucherNo /
+    // generateTmpPrfNo all use a read-then-write pattern that races under
+    // concurrent creates — two users see the same max value and pick the
+    // same next number, then one of them 23505s on the unique constraint.
+    // Detect that specific failure and regenerate fresh numbers + retry
+    // (jittered backoff) so the user never sees a "duplicate key" error.
+    let rpcConsignment = null
+    let rpcErr         = null
+    const MAX_RETRIES  = 5
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+      const result = await supabase.rpc('create_consignment_atomic', {
+        p_payload: {
+          consignment_no:  challan,
+          tmp_prf_no:      tmpPrfNo,
+          external_no:     extNo,
+          internal_no:     internalNo,
+          challan_no:      challan,
+          branch_name,
+          branch_code:     branchCode,
+          state_code:      stateCode,
+          movement_type:   movement_type || 'EXTERNAL',
+          dest_branch:     isInternal ? dest_branch : null,
+          eway_bill_no:    eway_bill_no || null,
+          total_bills:     purchase_ids.length,
+          total_net_wt:    totalNetWt,
+          total_gross_wt:  totalGrossWt,
+          total_amount:    totalAmount,
+          gst_snapshot:    gstSnapshot,
+          created_by,
+          added_by:        auth.user?.id || null,
+          purchase_ids,
+          source_address:  branchData.address || null,
+          source_city:     branchData.city || null,
+          source_pin:      branchData.pin_code || null,
+          source_state:    branchData.state || null,
+          source_region:   branchData.region || null,
+          source_gstin:    sourceGstinSnap,
+          dest_address:    isInternal ? (destData?.address || null) : null,
+          dest_city:       isInternal ? (destData?.city || null) : null,
+          dest_pin:        isInternal ? (destData?.pin_code || null) : null,
+          dest_state:      isInternal ? (destData?.state || null) : null,
+          dest_region:     isInternal ? (destData?.region || null) : null,
+          dest_gstin:      isInternal ? destGstinSnap : null,
+          item_snapshots:  itemSnapshots,
+        },
+      })
+      rpcConsignment = result.data
+      rpcErr         = result.error
+
+      // Unique-constraint collision on a number we generated → regenerate
+      // fresh and retry. Postgres reports code='23505'; the message names
+      // the constraint so we can scope the retry to number conflicts only
+      // (other unique violations e.g. on the bills-already-in-flight check
+      // should propagate immediately).
+      const isNumberCollision = rpcErr?.code === '23505' && /consignment_no|external_no|challan_no|tmp_prf/i.test(rpcErr.message || '')
+      if (!isNumberCollision || attempt >= MAX_RETRIES) break
+
+      console.warn(`[create_consignment] number collision (attempt ${attempt}/${MAX_RETRIES}): ${rpcErr.message}`)
+      await new Promise(r => setTimeout(r, 80 + Math.random() * 160))   // jittered backoff
+      // Regenerate every sequenced field — collisions can happen on any of them.
+      tmpPrfNo = await generateTmpPrfNo(supabase, branch_name)
+      if (isInternal) {
+        const r2 = await generateIssueVoucherNo(supabase, branchCode, stateCode)
+        internalNo = r2.internalNo
+        challan    = r2.voucher
+      } else {
+        const r2 = await generateExternalNo(supabase, branchCode, stateCode)
+        extNo   = r2.extNo
+        challan = r2.challan
+      }
+    }
 
     if (rpcErr) {
       // PGRST202 = function not found. Surface a clear message; do NOT
