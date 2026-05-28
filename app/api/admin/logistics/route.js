@@ -33,9 +33,8 @@ export async function GET(req) {
   try {
     const { data: branches, error } = await supabase
       .from('branches')
-      .select('id, name, region, state, is_hub, is_active, pickup_time, logistics_partner, delivery_tat_hours, pickup_days, logistics_contact_name, logistics_contact_phone, logistics_notes')
+      .select('id, name, region, state, is_hub, hub_branch_name, is_active, pickup_time, logistics_partner, delivery_tat_hours, pickup_days, logistics_contact_name, logistics_contact_phone, logistics_notes')
       .eq('is_active', true)
-      .neq('region', 'Bangalore')
       .order('region')
       .order('name')
     if (error) return Response.json({ error: error.message }, { status: 500 })
@@ -146,7 +145,7 @@ export async function POST(req) {
       // Re-fetch the updated branches so the client can patch local state.
       const { data: rows } = await supabase
         .from('branches')
-        .select('id, name, region, state, is_hub, is_active, pickup_time, logistics_partner, delivery_tat_hours, pickup_days, logistics_contact_name, logistics_contact_phone, logistics_notes')
+        .select('id, name, region, state, is_hub, hub_branch_name, is_active, pickup_time, logistics_partner, delivery_tat_hours, pickup_days, logistics_contact_name, logistics_contact_phone, logistics_notes')
         .in('name', SCHEDULE.map(r => r.name))
 
       return Response.json({
@@ -162,7 +161,7 @@ export async function POST(req) {
       return Response.json({ error: `Unknown kind '${kind}'. Use 'update', 'bulk_update', or 'seed_bvc_schedule'.` }, { status: 400 })
     }
 
-    const { branch_name, branch_names, partner, pickup_time, delivery_tat_hours, pickup_days, contact_name, contact_phone, notes } = body
+    const { branch_name, branch_names, partner, pickup_time, delivery_tat_hours, pickup_days, contact_name, contact_phone, notes, hub_branch_name } = body
 
     if (kind === 'update') {
       if (!branch_name) return Response.json({ error: 'branch_name required' }, { status: 400 })
@@ -221,6 +220,13 @@ export async function POST(req) {
     if (contact_name  !== undefined) updates.logistics_contact_name  = String(contact_name  || '').trim() || null
     if (contact_phone !== undefined) updates.logistics_contact_phone = String(contact_phone || '').trim() || null
     if (notes         !== undefined) updates.logistics_notes         = String(notes         || '').trim() || null
+
+    // Bangalore hub assignment — only meaningful when the branch is itself
+    // not a hub. The caller passes empty string to clear the assignment.
+    if (hub_branch_name !== undefined) {
+      const cleaned = String(hub_branch_name || '').trim()
+      updates.hub_branch_name = cleaned || null
+    }
 
     if (!Object.keys(updates).length) {
       return Response.json({ error: 'no fields to update' }, { status: 400 })

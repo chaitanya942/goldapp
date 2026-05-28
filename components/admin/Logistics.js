@@ -63,7 +63,11 @@ function nextPickup(pickupTime, pickupDays, now = new Date()) {
 // Default partners. Operators can add new ones at runtime via the
 // 'Add new partner…' option in any branch's picker — added partners then
 // appear in every other branch's dropdown for the rest of the session.
-const PARTNERS = ['BVC']
+//
+// Transaction Executives = our in-house pickup squad that services the
+// Bangalore HUB → HO leg (each leaf Bangalore branch consolidates at one
+// of the 6 hubs first, executives sweep the hubs).
+const PARTNERS = ['BVC', 'Transaction Executives']
 
 export default function Logistics() {
   const { theme } = useApp()
@@ -95,6 +99,18 @@ export default function Logistics() {
     }
     setLoading(false)
   }, [])
+
+  // Bangalore HUB list — branches with is_hub=true in the Bangalore region.
+  // Surfaced to BranchCard so leaf Bangalore branches can pick their hub.
+  // Re-derived from `branches` each render so flipping is_hub via SQL +
+  // refreshing keeps the picker in sync without a separate fetch.
+  const bangaloreHubs = useMemo(
+    () => branches
+      .filter(b => b.region === 'Bangalore' && b.is_hub)
+      .map(b => b.name)
+      .sort(),
+    [branches]
+  )
 
   useEffect(() => { fetchAll() }, [fetchAll])
 
@@ -314,6 +330,7 @@ export default function Logistics() {
                       regionAccent={accent}
                       partnerOptions={allPartners}
                       onAddPartner={addCustomPartner}
+                      bangaloreHubs={bangaloreHubs}
                       delayMs={Math.min(i * 25, 300)}
                     />
                   ))}
@@ -569,40 +586,54 @@ function RegionBanner({ t, accent, regionName, list, configuredCount, collapsed,
 // Per-branch editor card. Partner picker uses partnerOptions (merged default +
 // per-branch existing + runtime-added) and can add new partners via
 // onAddPartner. No checkbox / no bulk affordance — pure single-branch edit.
-function BranchCard({ t, branch, busy, onSave, regionAccent, partnerOptions, onAddPartner, delayMs = 0 }) {
-  const [partner,      setPartner]      = useState(branch.logistics_partner || 'BVC')
+//
+// Bangalore-only field: hub_branch_name — which HUB this leaf branch hands
+// its day's bills to. Hidden for non-Bangalore branches and for hubs
+// themselves (a hub can't be its own hub).
+function BranchCard({ t, branch, busy, onSave, regionAccent, partnerOptions, onAddPartner, bangaloreHubs = [], delayMs = 0 }) {
+  const defaultPartner = branch.region === 'Bangalore' ? 'Transaction Executives' : 'BVC'
+  const [partner,      setPartner]      = useState(branch.logistics_partner || defaultPartner)
   const [pickup,  setPickup]  = useState(branch.pickup_time || '')
   const [tat,     setTat]     = useState(branch.delivery_tat_hours || 24)
   const [days,    setDays]    = useState(branch.pickup_days || ['Mon','Tue','Wed','Thu','Fri','Sat'])
+  const [hub,     setHub]     = useState(branch.hub_branch_name || '')
   const [hover,   setHover]   = useState(false)
 
+  const isBangalore  = branch.region === 'Bangalore'
+  const showHubField = isBangalore && !branch.is_hub && bangaloreHubs.length > 0
+
   // Reset on branch row update (after save)
-  useEffect(() => { setPartner(branch.logistics_partner || 'BVC') }, [branch.logistics_partner])
+  useEffect(() => { setPartner(branch.logistics_partner || defaultPartner) }, [branch.logistics_partner, defaultPartner])
   useEffect(() => { setPickup(branch.pickup_time || '') }, [branch.pickup_time])
   useEffect(() => { setTat(branch.delivery_tat_hours || 24) }, [branch.delivery_tat_hours])
   useEffect(() => { setDays(branch.pickup_days || ['Mon','Tue','Wed','Thu','Fri','Sat']) }, [branch.pickup_days])
+  useEffect(() => { setHub(branch.hub_branch_name || '') }, [branch.hub_branch_name])
 
   const dirty = (
     (partner || null)                !== (branch.logistics_partner || null) ||
     (pickup || '')                    !== (branch.pickup_time       || '')   ||
     Number(tat)                       !== Number(branch.delivery_tat_hours || 24)  ||
-    JSON.stringify([...days].sort()) !== JSON.stringify([...(branch.pickup_days || ['Mon','Tue','Wed','Thu','Fri','Sat'])].sort())
+    JSON.stringify([...days].sort()) !== JSON.stringify([...(branch.pickup_days || ['Mon','Tue','Wed','Thu','Fri','Sat'])].sort()) ||
+    (showHubField && (hub || '')     !== (branch.hub_branch_name || ''))
   )
 
   const onSubmit = async () => {
-    await onSave(branch.name, {
+    const patch = {
       partner,
       pickup_time:        pickup,
       delivery_tat_hours: tat,
       pickup_days:        days,
-    })
+    }
+    if (showHubField) patch.hub_branch_name = hub
+    await onSave(branch.name, patch)
   }
 
   const onReset = () => {
-    setPartner(branch.logistics_partner || 'BVC')
+    setPartner(branch.logistics_partner || defaultPartner)
     setPickup(branch.pickup_time || '')
     setTat(branch.delivery_tat_hours || 24)
     setDays(branch.pickup_days || ['Mon','Tue','Wed','Thu','Fri','Sat'])
+    setHub(branch.hub_branch_name || '')
   }
 
   const accent = regionAccent || t.gold
@@ -707,6 +738,22 @@ function BranchCard({ t, branch, busy, onSave, regionAccent, partnerOptions, onA
             }}
           />
         </Row>
+        {showHubField && (
+          <Row label="Hub">
+            <select value={hub} onChange={e => setHub(e.target.value)} disabled={busy}
+              style={{
+                ...inp((hub || '') !== (branch.hub_branch_name || '')),
+                width: '100%', appearance: 'none',
+                paddingRight: '24px', cursor: busy ? 'not-allowed' : 'pointer',
+                backgroundImage: `url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='${encodeURIComponent(t.text4)}' stroke-width='2.5' stroke-linecap='round'><path d='M6 9l6 6 6-6'/></svg>")`,
+                backgroundRepeat: 'no-repeat',
+                backgroundPosition: 'right 8px center',
+              }}>
+              <option value="">— Not assigned —</option>
+              {bangaloreHubs.map(h => <option key={h} value={h}>{h}</option>)}
+            </select>
+          </Row>
+        )}
         <Row label="Pickup">
           <div>
             <input type="time" value={pickup} onChange={e => setPickup(e.target.value)} disabled={busy}
