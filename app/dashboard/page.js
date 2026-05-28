@@ -32,6 +32,7 @@ import CollectionAudit from '../../components/consignments/CollectionAudit'
 import AuditReport from '../../components/consignments/AuditReport'
 import ConsignmentAnalytics from '../../components/consignments/ConsignmentAnalytics'
 import ConsignmentApprovals from '../../components/consignments/ConsignmentApprovals'
+import EodStockReport from '../../components/consignments/EodStockReport'
 import CalTable from '../../components/sales/CalTable'
 import LiveMarketRates from '../../components/sales/LiveMarketRates'
 import InboundBotTesting from '../../components/telesales/InboundBotTesting'
@@ -219,6 +220,7 @@ function DashboardShell() {
       case 'consignment-report':     return <ConsignmentReport />
       case 'consignment-summary':    return <ConsignmentReport />
       case 'consignment-bidding':    return <BiddingVolume />
+      case 'eod-stock-report':       return <EodStockReport />
       case 'audit-data':             return <CollectionAudit />
       case 'audit-report':            return <AuditReport />
       case 'consignment-analytics':  return <ConsignmentAnalytics />
