@@ -100,6 +100,12 @@ export default function BiddingVolume() {
   // 'bidding' = source picker (sections 1-4); 'bookings' = committed bookings
   // list. Tabbed so the page doesn't try to be both at once.
   const [activeTab,    setActiveTab]    = useState('bidding')
+  // Outer region tab — 'ka_ap_ts' = Bangalore + outstation pool (the
+  // historical default), 'kl' = Kerala-only pool with its own 3-section
+  // taxonomy (S1 hub stock, S2 leaf→hub in movement, S3 leaf at_branch).
+  // Each tab carries its own KPI strip, source picker, and bookings filter,
+  // but shares the same arrivalDate / bookingsDate / poll cycle.
+  const [regionTab, setRegionTab] = useState('ka_ap_ts')
   // Source selection — branches the ops team has ticked from the inline
   // picker. Keys are `B:<branch_name>` for Bangalore, `T:<branch_name>` for
   // outside in-transit. Lifted to the parent so the contextual CTA, the
@@ -108,6 +114,10 @@ export default function BiddingVolume() {
   // Reset selection when the arrival date changes — selections are date-
   // specific (a YELAHANKA shipment for 13 May isn't the same as 14 May's).
   useEffect(() => { setSelected(new Set()) }, [arrivalDate])
+  // Reset selection when the region tab flips — KA·AP·TS and KL pools are
+  // mutually exclusive (booking modal can only commit against one at a time),
+  // so the safest behaviour is to start fresh.
+  useEffect(() => { setSelected(new Set()) }, [regionTab])
 
   // Past bidder names — drives the dropdown in the booking modal. Pulled
   // once on mount; the list refreshes after a new booking via fetchAll's
@@ -268,6 +278,14 @@ export default function BiddingVolume() {
 
   const bookings        = bookingsResp?.bookings || []
   const activeBookings  = useMemo(() => bookings.filter(b => b.status !== 'cancelled'), [bookings])
+  // Bookings filtered to the active region tab — the Bookings sub-tab and
+  // the inactive-tab chip both read this so KA·AP·TS only sees non-KL rows
+  // and the KL tab only sees its own.
+  const tabBookings     = useMemo(
+    () => bookings.filter(b => regionTab === 'kl' ? !!b.is_kl : !b.is_kl),
+    [bookings, regionTab]
+  )
+  const tabActiveBookings = useMemo(() => tabBookings.filter(b => b.status !== 'cancelled'), [tabBookings])
   const bookedQty       = bookingsResp?.active_qty_grams || 0
   const bookedValue     = bookingsResp?.active_value     || 0
 
@@ -329,16 +347,19 @@ export default function BiddingVolume() {
   const sumBills = (arr) => arr.reduce((s, b) => s + Number(b.total_bills    || 0), 0)
   const isKL = (b) => b.region === 'Kerala'
 
-  // Kerala — S2 Kerala + S4 Kerala (the hubs). Section 1 contributes 0.
-  const klSupplyNet   = sumWt(s2BranchesAll.filter(isKL))    + sumWt(s4BranchesAll.filter(isKL))
-  const klSupplyGross = sumGross(s2BranchesAll.filter(isKL)) + sumGross(s4BranchesAll.filter(isKL))
-  const klSupplyBills = sumBills(s2BranchesAll.filter(isKL)) + sumBills(s4BranchesAll.filter(isKL))
+  // Kerala "certain pool" for tomorrow = S1 hub stock + S2 in-movement to hub.
+  // S3 (still at leaf) is contingent on the leaf→hub pickup actually firing
+  // today — excluded from Incoming by default; operator ticks manually.
+  const klSupplyNet   = Number(klS1Total.net_wt   || 0) + Number(klS2Total.net_wt   || 0)
+  const klSupplyGross = Number(klS1Total.gross_wt || 0) + Number(klS2Total.gross_wt || 0)
+  const klSupplyBills = Number(klS1Total.bills    || 0) + Number(klS2Total.bills    || 0)
 
   // Others — S1 (all Bangalore) + non-Kerala S2 only. S4 is intentionally
-  // omitted; those bills only count when explicitly selected.
-  const othersSupplyNet   = s1Net   + sumWt(s2BranchesAll.filter(b => !isKL(b)))
-  const othersSupplyGross = s1Gross + sumGross(s2BranchesAll.filter(b => !isKL(b)))
-  const othersSupplyBills = s1Bills + sumBills(s2BranchesAll.filter(b => !isKL(b)))
+  // omitted; those bills only count when explicitly selected. inTBranches is
+  // already Kerala-filtered upstream, so we can sum it directly.
+  const othersSupplyNet   = s1Net   + sumWt(inTBranches)
+  const othersSupplyGross = s1Gross + sumGross(inTBranches)
+  const othersSupplyBills = s1Bills + sumBills(inTBranches)
 
   // Gain — Kerala default is 0 % (leaf→hub flow already absorbs refining
   // loss upstream). Others use the standard 3.5 % (or the operator's
@@ -415,11 +436,26 @@ export default function BiddingVolume() {
   //   2. In-Transit 24h TAT        (T: prefix)  selectable — arrives tomorrow
   //   3. In-Transit 48h TAT                     view-only  — arrives day after
   //   4. Branch Stock pre-EOD      (P: prefix)  selectable — moves today
+  // KA·AP·TS source picker — Kerala bills are filtered OUT here because
+  // they now live on their own tab. Non-Kerala bills (Bangalore S1, KA/AP/TS
+  // S2/S3/S4) are unchanged.
   const bangBranches   = supply?.bangalore?.branches      || []
-  const inTBranches    = supply?.transit_24h?.branches    || supply?.in_transit?.branches || []
-  const t48hBranches   = supply?.transit_48h?.branches    || []
-  const preEodBranches = supply?.branch_pre_eod?.branches || []
+  const inTBranchesRaw = supply?.transit_24h?.branches    || supply?.in_transit?.branches || []
+  const t48hBranchesRaw = supply?.transit_48h?.branches   || []
+  const preEodBranchesRaw = supply?.branch_pre_eod?.branches || []
+  const inTBranches    = useMemo(() => inTBranchesRaw.filter(b => b.region !== 'Kerala'),    [inTBranchesRaw])
+  const t48hBranches   = useMemo(() => t48hBranchesRaw.filter(b => b.region !== 'Kerala'),   [t48hBranchesRaw])
+  const preEodBranches = useMemo(() => preEodBranchesRaw.filter(b => b.region !== 'Kerala'), [preEodBranchesRaw])
   const dayAfterArrivalDate = supply?.day_after_arrival   || null
+
+  // KL tab source picker — three sections from the new kerala_sections payload.
+  const klSections     = supply?.kerala_sections || {}
+  const klS1Branches   = klSections.s1_hub_stock?.branches   || []
+  const klS2Branches   = klSections.s2_in_movement?.branches || []
+  const klS3Branches   = klSections.s3_at_leaf?.branches     || []
+  const klS1Total      = klSections.s1_hub_stock?.total      || { bills: 0, gross_wt: 0, net_wt: 0 }
+  const klS2Total      = klSections.s2_in_movement?.total    || { bills: 0, gross_wt: 0, net_wt: 0 }
+  const klS3Total      = klSections.s3_at_leaf?.total        || { bills: 0, gross_wt: 0, net_wt: 0 }
   // Branch metadata lookup — used for region/Kerala-locking helpers + the
   // booking modal's chip display. Keyed by branch_name (no prefix needed now
   // that the selection is bill-level).
@@ -428,12 +464,17 @@ export default function BiddingVolume() {
     for (const b of bangBranches)   m[b.branch_name] = { ...b, group: 'bangalore' }
     for (const b of inTBranches)    m[b.branch_name] = { ...b, group: 'transit_24h' }
     for (const b of preEodBranches) m[b.branch_name] = { ...b, group: 'branch_pre_eod' }
+    // Kerala-tab buckets — keyed by destination hub for S1/S2 and by leaf for S3.
+    for (const b of klS1Branches)   m[b.branch_name] = { ...b, group: 'kl_hub_stock' }
+    for (const b of klS2Branches)   m[b.branch_name] = { ...b, group: 'kl_in_movement' }
+    for (const b of klS3Branches)   m[b.branch_name] = { ...b, group: 'kl_at_leaf' }
     return m
-  }, [bangBranches, inTBranches, preEodBranches])
+  }, [bangBranches, inTBranches, preEodBranches, klS1Branches, klS2Branches, klS3Branches])
 
-  // Bill-level catalogue across the three SELECTABLE sections (Section 3 is
-  // view-only). Indexed by bill.id so the source of truth for booking math
-  // is the individual purchase row, not the branch summary.
+  // Bill-level catalogue across every selectable section in either tab.
+  // Tagging via _group lets autoSelectRemaining + selectionMode + branchLocked
+  // segregate KA·AP·TS bills (bangalore / transit_24h / branch_pre_eod) from
+  // KL bills (kl_hub_stock / kl_in_movement / kl_at_leaf).
   const billsById = useMemo(() => {
     const m = {}
     const collect = (branches, group) => {
@@ -446,8 +487,11 @@ export default function BiddingVolume() {
     collect(bangBranches,   'bangalore')
     collect(inTBranches,    'transit_24h')
     collect(preEodBranches, 'branch_pre_eod')
+    collect(klS1Branches,   'kl_hub_stock')
+    collect(klS2Branches,   'kl_in_movement')
+    collect(klS3Branches,   'kl_at_leaf')
     return m
-  }, [bangBranches, inTBranches, preEodBranches])
+  }, [bangBranches, inTBranches, preEodBranches, klS1Branches, klS2Branches, klS3Branches])
 
   const selectedTotal = useMemo(() => {
     let s = 0
@@ -522,15 +566,17 @@ export default function BiddingVolume() {
   // Within each section: branch name alphabetical, then purchase_date oldest first.
   const autoSelectRemaining = useCallback((pool, target) => {
     if (!Number.isFinite(target) || target <= 0) return
-    const sectionOrder = { bangalore: 1, transit_24h: 2 }
+    // Per-pool section preference order:
+    //   KA·AP·TS: Bangalore today → 24h transit (pre-EOD S4 excluded — contingent).
+    //   KL:       Hub stock S1     → In-movement S2 (leaf S3 excluded — contingent).
+    const sectionOrder = pool === 'kerala'
+      ? { kl_hub_stock: 1, kl_in_movement: 2 }
+      : { bangalore: 1, transit_24h: 2 }
+    const eligibleGroups = new Set(Object.keys(sectionOrder))
     const eligible = []
     for (const id of Object.keys(billsById)) {
       const bill = billsById[id]
-      // Section 4 explicitly excluded — manual tick only.
-      if (bill._group === 'branch_pre_eod') continue
-      const isKerala = bill._region === 'Kerala'
-      if (pool === 'kerala'           && !isKerala) continue
-      if (pool === 'bangalore_others' &&  isKerala) continue
+      if (!eligibleGroups.has(bill._group)) continue
       eligible.push(bill)
     }
     eligible.sort((a, b) => {
@@ -552,11 +598,14 @@ export default function BiddingVolume() {
   }, [billsById])
 
   // Kerala (KL) no-mix rule — Kerala bookings must be exclusive. With
-  // bill-level selection, look at the BILL's branch's region (cached on the
-  // bill as `_region` by billsById). Locking a branch is now "would any of
-  // its bills violate the current selection mode".
-  const isKeralaBill = (id) => billsById[id]?._region === 'Kerala'
-  const isKeralaBranch = (b)  => b?.region === 'Kerala'
+  // bill-level selection, the cleanest signal is the _group tag set when
+  // the catalogue is built — any 'kl_*' group is Kerala-pool, others are
+  // KA·AP·TS-pool. (We don't fall back to _region because the picker bills
+  // are pre-segregated by group; using _group keeps the rule tied to the
+  // section the bill came from.)
+  const KL_GROUPS = new Set(['kl_hub_stock', 'kl_in_movement', 'kl_at_leaf'])
+  const isKeralaBill = (id) => KL_GROUPS.has(billsById[id]?._group)
+  const isKeralaBranch = (b) => b?.region === 'Kerala'
   const selectionMode = useMemo(() => {
     let hasKerala = false, hasOther = false
     for (const id of selected) {
@@ -731,6 +780,48 @@ export default function BiddingVolume() {
         </div>
       </div>
 
+      {/* ── Region tab strip — switches between the KA·AP·TS pool (Bangalore
+          + outstation) and the KL pool (Kerala-only, with its own S1/S2/S3
+          taxonomy). Selection clears on switch since the two pools can't
+          mix on a single booking. */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        <div style={{ display: 'inline-flex', background: t.card2, border: `1px solid ${t.border}`, borderRadius: 12, padding: 3, gap: 2 }}>
+          {[
+            { key: 'ka_ap_ts', label: 'KA · AP · TS', accent: t.gold },
+            { key: 'kl',       label: 'KL',           accent: t.purple || '#8c5ac8' },
+          ].map(tab => {
+            const active = regionTab === tab.key
+            const otherBookingCount = tab.key === 'kl'
+              ? bookings.filter(b => b.is_kl && b.status !== 'cancelled').length
+              : bookings.filter(b => !b.is_kl && b.status !== 'cancelled').length
+            return (
+              <button key={tab.key} onClick={() => setRegionTab(tab.key)}
+                style={{
+                  background: active ? `${tab.accent}1d` : 'transparent',
+                  border:     `1px solid ${active ? `${tab.accent}80` : 'transparent'}`,
+                  color:      active ? tab.accent : t.text3,
+                  borderRadius: 9, padding: '7px 16px',
+                  fontSize: 12, fontWeight: 800, letterSpacing: '.04em',
+                  cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8,
+                  transition: 'background .15s, color .15s, border-color .15s',
+                }}>
+                {tab.label}
+                {!active && otherBookingCount > 0 && (
+                  <span style={{ fontSize: 9.5, color: tab.accent, background: `${tab.accent}1a`, padding: '1px 7px', borderRadius: 99, fontWeight: 800 }}>
+                    {otherBookingCount}
+                  </span>
+                )}
+              </button>
+            )
+          })}
+        </div>
+        <span style={{ fontSize: 10.5, color: t.text4, letterSpacing: '.05em' }}>
+          {regionTab === 'kl'
+            ? 'Kerala pool · leaf → hub → HO flow'
+            : 'Bangalore + outstation pool'}
+        </span>
+      </div>
+
       {/* ── KPI strips — split by region so the math doesn't conflate
           Bangalore/Others (today's purchases + outstation in-transit)
           with Kerala (leaf → hub consolidation). Each row reads as
@@ -738,6 +829,7 @@ export default function BiddingVolume() {
           Remaining. Kerala drops Pending (it's a global, attributed to
           Others by convention) and Gain (Kerala default is 0). */}
 
+      {regionTab === 'ka_ap_ts' && (<>
       {/* Row 1 — Bangalore & Others */}
       <div>
         <div style={{ fontSize: 10.5, color: t.text3, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 800, marginBottom: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -824,8 +916,11 @@ export default function BiddingVolume() {
           />
         </div>
       </div>
+      </>)}
 
-      {/* Row 2 — Kerala */}
+      {regionTab === 'kl' && (<>
+      {/* Kerala KPI strip (single row — was previously Row 2 on KA·AP·TS).
+          Reads klSupplyNet built from S1+S2 of the new kerala_sections payload. */}
       <div>
         <div style={{ fontSize: 10.5, color: t.purple || '#8c5ac8', letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 800, marginBottom: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
           <span style={{ width: 6, height: 6, borderRadius: '50%', background: t.purple || '#8c5ac8', display: 'inline-block' }} />
@@ -893,21 +988,22 @@ export default function BiddingVolume() {
           />
         </div>
       </div>
+      </>)}
 
-      {poolNegative && (
+      {regionTab === 'ka_ap_ts' && poolNegative && (
         <div style={{ ...card, padding: '10px 16px', borderColor: `${t.red}55`, background: `${t.red}10`, fontSize: '12px', color: t.red, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}>
           <span style={{ fontSize: 14 }}>⚠</span>
           Available pool is negative — the Pending pull-back (<strong>{fmt(pendingGrams, 2)} g</strong>) exceeds Incoming + Gain by <strong>{fmt(Math.abs(availablePool), 2)} g</strong>. Nothing to bid until supply arrives or the pull-back is reduced.
         </div>
       )}
 
-      {othersOverbooked && (
+      {regionTab === 'ka_ap_ts' && othersOverbooked && (
         <div style={{ ...card, padding: '10px 16px', borderColor: `${t.red}55`, background: `${t.red}10`, fontSize: '12px', color: t.red, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}>
           <span style={{ fontSize: 14 }}>⚠</span>
           <strong>Bangalore &amp; Others</strong> · pipeline commitments exceed the pool by <strong>{fmt(Math.abs(othersRemaining), 2)} g</strong>. The auto-attacher won't be able to back-fill every booking from today's incoming.
         </div>
       )}
-      {klOverbooked && (
+      {regionTab === 'kl' && klOverbooked && (
         <div style={{ ...card, padding: '10px 16px', borderColor: `${t.red}55`, background: `${t.red}10`, fontSize: '12px', color: t.red, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}>
           <span style={{ fontSize: 14 }}>⚠</span>
           <strong>Kerala</strong> · pipeline commitments exceed the hub pool by <strong>{fmt(Math.abs(klRemaining), 2)} g</strong>. More bills need to reach the hubs (or pipeline closes to gain at EOD).
@@ -923,7 +1019,7 @@ export default function BiddingVolume() {
         <div style={{ display: 'inline-flex', background: t.card2, border: `1px solid ${t.border}`, borderRadius: 10, padding: 3, gap: 2 }}>
           {[
             { key: 'bidding',  label: 'Bidding',  icon: '⚖' },
-            { key: 'bookings', label: 'Bookings', icon: '✓', count: activeBookings.length },
+            { key: 'bookings', label: 'Bookings', icon: '✓', count: tabActiveBookings.length },
           ].map(tab => {
             const active = activeTab === tab.key
             return (
@@ -994,7 +1090,7 @@ export default function BiddingVolume() {
       </div>
 
       {/* ─────────────────────────── BIDDING TAB ────────────────────────── */}
-      {activeTab === 'bidding' && (<>
+      {activeTab === 'bidding' && regionTab === 'ka_ap_ts' && (<>
 
       {/* ── Four source sections, always rendered in this fixed order ──
           even when empty. Bangalore on top because that's the largest pool;
@@ -1082,8 +1178,85 @@ export default function BiddingVolume() {
         emptyMsg="No eligible branches — either pickups already happened today, or no eligible branches scheduled today."
       />
 
-      {/* Sticky selection bar — appears only when something is selected. */}
-      {selected.size > 0 && (
+      </>)}
+
+      {/* ───────────────────── KL TAB — Kerala source picker ─────────────────────
+          Three sections per the Kerala leaf → hub → HO model:
+            S1 · Hub Stock     (at_branch at a KL hub, certain)
+            S2 · In Movement   (leaf → hub in transit, likely)
+            S3 · At Leaf Branch (at_branch at a KL leaf, contingent — manual select)
+          S3 is rendered last and visually dimmer to reinforce that it isn't
+          auto-pulled by the Remaining tile. */}
+      {activeTab === 'bidding' && regionTab === 'kl' && (<>
+        {/* 1 · Hub Stock */}
+        <SourceSection
+          t={t} card={card}
+          index={1}
+          icon="🏛"
+          title="Hub Stock"
+          subtitle={`At KL hubs · ready for tonight's hub → HO dispatch · arrives at HO ${fmtDate(arrivalDate)}`}
+          accent={t.purple || '#8c5ac8'}
+          branches={klS1Branches}
+          total={klS1Total}
+          prefix="H"
+          selectable
+          selected={selected}
+          branchLocked={branchLocked}
+          onToggleBill={toggleBill}
+          onToggleBranchAll={toggleBranchAll}
+          onToggleRegionAll={toggleRegionAll}
+          branchSelectionState={branchSelectionState}
+          emptyMsg="No bills currently sitting at the Kerala hubs."
+        />
+
+        {/* 2 · In Movement (leaf → hub) */}
+        <SourceSection
+          t={t} card={card}
+          index={2}
+          icon="⇒"
+          title="In Movement · Leaf → Hub"
+          subtitle={`On an INTERNAL run to a KL hub · expected to reach hub today, dispatch to HO tonight · arrives ${fmtDate(arrivalDate)}`}
+          accent={t.blue}
+          branches={klS2Branches}
+          total={klS2Total}
+          prefix="M"
+          selectable
+          selected={selected}
+          branchLocked={branchLocked}
+          onToggleBill={toggleBill}
+          onToggleBranchAll={toggleBranchAll}
+          onToggleRegionAll={toggleRegionAll}
+          branchSelectionState={branchSelectionState}
+          emptyMsg="No leaf → hub movements currently in transit."
+        />
+
+        {/* 3 · At Leaf Branch (contingent — manual select only) */}
+        <SourceSection
+          t={t} card={card}
+          index={3}
+          icon="◐"
+          title="At Leaf Branch — dispatch pending"
+          subtitle={`Still at the leaf · needs leaf → hub pickup to fire before tonight's hub → HO dispatch. Contingent, not in auto-select.`}
+          accent={t.orange}
+          branches={klS3Branches}
+          total={klS3Total}
+          prefix="L"
+          selectable
+          selected={selected}
+          branchLocked={branchLocked}
+          onToggleBill={toggleBill}
+          onToggleBranchAll={toggleBranchAll}
+          onToggleRegionAll={toggleRegionAll}
+          branchSelectionState={branchSelectionState}
+          emptyMsg="No bills sitting at KL leaf branches right now."
+        />
+      </>)}
+
+      {/* Sticky selection bar — shared across both region tabs. Appears the
+          moment any bill is selected; pool exclusivity is enforced upstream
+          by the region tab reset, so the sticky bar always reflects one
+          pool's worth of bills. */}
+      {activeTab === 'bidding' && selected.size > 0 && (
         <div style={{
           position: 'sticky', bottom: 16, zIndex: 50,
           alignSelf: 'center', minWidth: 360, maxWidth: 720,
@@ -1115,14 +1288,12 @@ export default function BiddingVolume() {
         </div>
       )}
 
-      </>)}
-
       {/* ────────────────────────── BOOKINGS TAB ────────────────────────── */}
       {activeTab === 'bookings' && (
         <>
           <BookingsList
             t={t} card={card}
-            bookings={bookings}
+            bookings={tabBookings}
             onUpdateStatus={updateStatus}
             onRequestCancel={(b) => setCancelTarget(b)}
             onClosePipeline={closeBookingPipeline}

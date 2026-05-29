@@ -684,6 +684,141 @@ export async function GET(req) {
       today_dow:    todayDow,
     }
 
+    // ── Kerala bid-desk sections ──────────────────────────────────────────────
+    // The KL tab on Bidding Volume reads its own taxonomy (S1/S2/S3) instead
+    // of the Bangalore-flavoured one above. Same underlying tables, just
+    // grouped by where in the Kerala leaf → hub → HO flow each bill sits.
+    //
+    //   S1 · Hub Stock   — at_branch at a Kerala hub, ready for hub→HO dispatch.
+    //   S2 · In Movement — in_consignment on an INTERNAL run, dest = a Kerala hub.
+    //                      Includes both already-dispatched and still-pending
+    //                      INTERNAL runs (status NOT IN cancelled/received/seed).
+    //   S3 · At Leaf     — at_branch at a Kerala leaf branch, dispatch yet to fire.
+    //
+    // S1 and S2 form the "certain pool" auto-selected by Remaining. S3 is
+    // contingent on the leaf→hub pickup actually running today, so the picker
+    // surfaces it but auto-select skips it (operator ticks manually).
+    const klHubNames   = (branchRows || []).filter(b => b.region === 'Kerala' &&  b.is_hub).map(b => b.name)
+    const klLeafNames  = (branchRows || []).filter(b => b.region === 'Kerala' && !b.is_hub).map(b => b.name)
+
+    // S1 — at_branch at a Kerala hub. Filter on current_branch (the physical
+    // location) so transferred-in bills land here, not under the original leaf.
+    let klS1Bills = []
+    if (klHubNames.length) {
+      const list = klHubNames.map(n => `"${n}"`).join(',')
+      const { data: s1, error: s1Err } = await supabase
+        .from('purchases')
+        .select('id, application_id, branch_name, current_branch, customer_name, gross_weight, net_weight, total_amount, purchase_date, stock_status, dispatched_at, crm_status')
+        .or(`current_branch.in.(${list}),and(current_branch.is.null,branch_name.in.(${list}))`)
+        .eq('stock_status', 'at_branch')
+        .eq('crm_status',   'approved')
+        .eq('is_deleted',   false)
+        .is('booking_id',   null)
+      if (s1Err) return Response.json({ error: s1Err.message }, { status: 500 })
+      klS1Bills = (s1 || []).map(b => ({ ...b, branch_name: b.current_branch || b.branch_name }))
+    }
+
+    // S2 — bills sitting on an active INTERNAL consignment whose destination
+    // is one of the Kerala hubs. Three-step fetch: consignments → items →
+    // purchases (keeps the join out of PostgREST land where it's flaky).
+    let klS2Bills = []
+    let klS2BillToConsignment = {}   // purchase_id → { consignment_id, source_branch, created_at }
+    if (klHubNames.length) {
+      const { data: activeIntConsignments, error: cErr } = await supabase
+        .from('consignments')
+        .select('id, branch_name, created_at, status, dest_branch')
+        .eq('movement_type', 'INTERNAL')
+        .in('dest_branch', klHubNames)
+        .not('status', 'in', '("cancelled","received","seed","completed")')
+      if (cErr) return Response.json({ error: cErr.message }, { status: 500 })
+
+      const cIds  = (activeIntConsignments || []).map(c => c.id)
+      const cMeta = Object.fromEntries((activeIntConsignments || []).map(c => [c.id, c]))
+
+      if (cIds.length) {
+        const { data: items, error: iErr } = await supabase
+          .from('consignment_items')
+          .select('purchase_id, consignment_id')
+          .in('consignment_id', cIds)
+        if (iErr) return Response.json({ error: iErr.message }, { status: 500 })
+
+        const pIds = []
+        for (const it of items || []) {
+          pIds.push(it.purchase_id)
+          klS2BillToConsignment[it.purchase_id] = {
+            consignment_id: it.consignment_id,
+            source_branch:  cMeta[it.consignment_id]?.branch_name || null,
+            dest_branch:    cMeta[it.consignment_id]?.dest_branch || null,
+            created_at:     cMeta[it.consignment_id]?.created_at  || null,
+          }
+        }
+        if (pIds.length) {
+          const { data: s2, error: s2Err } = await supabase
+            .from('purchases')
+            .select('id, application_id, branch_name, current_branch, customer_name, gross_weight, net_weight, total_amount, purchase_date, stock_status, dispatched_at, crm_status')
+            .in('id', pIds)
+            .eq('crm_status', 'approved')
+            .eq('is_deleted', false)
+            .is('booking_id', null)
+          if (s2Err) return Response.json({ error: s2Err.message }, { status: 500 })
+          // Re-key each S2 bill to its DESTINATION hub so the picker groups by
+          // "where it's heading", not the original leaf. The leaf is still
+          // surfaced as `source_branch` for the picker subtitle.
+          klS2Bills = (s2 || []).map(b => {
+            const link = klS2BillToConsignment[b.id] || {}
+            return {
+              ...b,
+              branch_name:    link.dest_branch || b.branch_name,
+              _source_branch: link.source_branch || b.branch_name,
+              _consignment_created_at: link.created_at,
+            }
+          })
+        }
+      }
+    }
+
+    // S3 — at_branch at a Kerala leaf (not a hub), waiting to be dispatched.
+    let klS3Bills = []
+    if (klLeafNames.length) {
+      const list = klLeafNames.map(n => `"${n}"`).join(',')
+      const { data: s3, error: s3Err } = await supabase
+        .from('purchases')
+        .select('id, application_id, branch_name, current_branch, customer_name, gross_weight, net_weight, total_amount, purchase_date, stock_status, dispatched_at, crm_status')
+        .or(`current_branch.in.(${list}),and(current_branch.is.null,branch_name.in.(${list}))`)
+        .eq('stock_status', 'at_branch')
+        .eq('crm_status',   'approved')
+        .eq('is_deleted',   false)
+        .is('booking_id',   null)
+      if (s3Err) return Response.json({ error: s3Err.message }, { status: 500 })
+      klS3Bills = (s3 || []).map(b => ({ ...b, branch_name: b.current_branch || b.branch_name }))
+    }
+
+    // S2 "may slip" heuristic — flag bills whose INTERNAL consignment was
+    // created after the source leaf's published pickup_time + 2h buffer. They
+    // likely won't reach the hub in time for tonight's hub→HO dispatch.
+    // Surfaced on the bill row so the picker can render a small warning pill;
+    // doesn't affect counting (math stays loose per v1 spec).
+    const flagSlipRisk = (bill) => {
+      const link = klS2BillToConsignment[bill.id]
+      if (!link?.created_at) return bill
+      const src = link.source_branch && branchMeta[link.source_branch]
+      if (!src?.pickup_time) return bill
+      const [ph, pm] = src.pickup_time.split(':').map(Number)
+      if (!Number.isFinite(ph)) return bill
+      const cIst = new Date(new Date(link.created_at).getTime() + 5.5 * 3600_000)
+      const cutoff = ph * 60 + (pm || 0) + 120   // pickup + 2h buffer
+      const cMin   = cIst.getUTCHours() * 60 + cIst.getUTCMinutes()
+      return cMin > cutoff ? { ...bill, _slip_risk: true } : bill
+    }
+    klS2Bills = klS2Bills.map(flagSlipRisk)
+
+    const klS1ByHub  = groupByBranch(klS1Bills)
+    const klS2ByHub  = groupByBranch(klS2Bills)
+    const klS3ByLeaf = groupByBranch(klS3Bills)
+    const klS1Total  = sumOf(klS1ByHub)
+    const klS2Total  = sumOf(klS2ByHub)
+    const klS3Total  = sumOf(klS3ByLeaf)
+
     return Response.json({
       data: {
         arrival_date:            arrivalDate,
@@ -695,6 +830,13 @@ export async function GET(req) {
         branch_pre_eod: { branches: preEodByBranch,     total: preEodTotal, _debug: debugSection4 },
         // Back-compat for the existing UI — alias of transit_24h.
         in_transit: { branches: inflightByBranch, total: inflightTotal },
+        // Kerala bid-desk taxonomy (consumed by the KL tab).
+        kerala_sections: {
+          hubs:          klHubNames,
+          s1_hub_stock:  { branches: klS1ByHub,  total: klS1Total  },
+          s2_in_movement:{ branches: klS2ByHub,  total: klS2Total  },
+          s3_at_leaf:    { branches: klS3ByLeaf, total: klS3Total  },
+        },
         grand_total: grandTotal,
         pending: {
           grams:      Number(pendingRow?.pending_grams) || 0,
