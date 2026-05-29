@@ -812,6 +812,41 @@ export async function GET(req) {
     }
     klS2Bills = klS2Bills.map(flagSlipRisk)
 
+    // ── Per-hub post-dispatch exclusion ──────────────────────────────────────
+    // Once a KL hub has cut its hub→HO EXTERNAL consignment (E-invoice) today,
+    // tonight's BVC pickup is sealed. Any bills currently AT that hub (S1) or
+    // IN MOVEMENT to it (S2) physically can't make tonight's truck — they go
+    // on tomorrow's hub→HO run and arrive at HO the day after. So when the
+    // operator is bidding for the standard "tomorrow's HO arrival", exclude
+    // those bills here. When bidding further out, leave everything in (those
+    // ARE the bills landing on the further-out date).
+    //
+    // EXTERNAL = hub → HO. INTERNAL = leaf → hub (we want to ignore those
+    // here — they're upstream of the dispatch cutoff). Excludes 'cancelled'
+    // and 'seed' so a placeholder row doesn't read as "dispatched".
+    let klHubsDispatchedToday = new Set()
+    const standardArrival = addWorkingDaysSkipSunday(today, 1)
+    if (klHubNames.length && arrivalDate === standardArrival) {
+      const { data: dispatched } = await supabase
+        .from('consignments')
+        .select('branch_name')
+        .in('branch_name', klHubNames)
+        .eq('movement_type', 'EXTERNAL')
+        .gte('created_at', `${bangalorePurchaseDate}T00:00:00+05:30`)
+        .lte('created_at', `${bangalorePurchaseDate}T23:59:59+05:30`)
+        .not('status', 'in', '("cancelled","seed")')
+      klHubsDispatchedToday = new Set((dispatched || []).map(c => c.branch_name))
+
+      // Strip excluded bills from S1 + S2. S3 stays untouched — a leaf bill's
+      // eventual hub is decided when the next leaf→hub consignment is created;
+      // if its closest hub has post-dispatched, ops will just route it to
+      // the other hub or hold it for tomorrow.
+      if (klHubsDispatchedToday.size > 0) {
+        klS1Bills = klS1Bills.filter(b => !klHubsDispatchedToday.has(b.branch_name))
+        klS2Bills = klS2Bills.filter(b => !klHubsDispatchedToday.has(b.branch_name))
+      }
+    }
+
     const klS1ByHub  = groupByBranch(klS1Bills)
     const klS2ByHub  = groupByBranch(klS2Bills)
     const klS3ByLeaf = groupByBranch(klS3Bills)
@@ -832,10 +867,11 @@ export async function GET(req) {
         in_transit: { branches: inflightByBranch, total: inflightTotal },
         // Kerala bid-desk taxonomy (consumed by the KL tab).
         kerala_sections: {
-          hubs:          klHubNames,
-          s1_hub_stock:  { branches: klS1ByHub,  total: klS1Total  },
-          s2_in_movement:{ branches: klS2ByHub,  total: klS2Total  },
-          s3_at_leaf:    { branches: klS3ByLeaf, total: klS3Total  },
+          hubs:                  klHubNames,
+          hubs_dispatched_today: [...klHubsDispatchedToday],
+          s1_hub_stock:          { branches: klS1ByHub,  total: klS1Total  },
+          s2_in_movement:        { branches: klS2ByHub,  total: klS2Total  },
+          s3_at_leaf:            { branches: klS3ByLeaf, total: klS3Total  },
         },
         grand_total: grandTotal,
         pending: {

@@ -461,6 +461,10 @@ export default function BiddingVolume() {
   const klS1Total      = klSections.s1_hub_stock?.total      || { bills: 0, gross_wt: 0, net_wt: 0 }
   const klS2Total      = klSections.s2_in_movement?.total    || { bills: 0, gross_wt: 0, net_wt: 0 }
   const klS3Total      = klSections.s3_at_leaf?.total        || { bills: 0, gross_wt: 0, net_wt: 0 }
+  // Hubs that already cut their hub→HO E-invoice today — their incoming
+  // bills (S1 + S2) have been server-side excluded from this bid because
+  // they'll ride tomorrow's truck. Surfaced as a banner above the picker.
+  const klHubsDispatchedToday = klSections.hubs_dispatched_today || []
   // Branch metadata lookup — used for region/Kerala-locking helpers + the
   // booking modal's chip display. Keyed by branch_name (no prefix needed now
   // that the selection is bill-level).
@@ -1193,6 +1197,20 @@ export default function BiddingVolume() {
           S3 is rendered last and visually dimmer to reinforce that it isn't
           auto-pulled by the Remaining tile. */}
       {activeTab === 'bidding' && regionTab === 'kl' && (<>
+        {klHubsDispatchedToday.length > 0 && (
+          <div style={{ ...card, padding: '10px 14px', borderColor: `${t.orange}55`, background: `${t.orange}10`, fontSize: '12px', color: t.text2, display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+            <span style={{ fontSize: 14, color: t.orange, lineHeight: 1, marginTop: 1 }}>⛔</span>
+            <div style={{ flex: 1, lineHeight: 1.5 }}>
+              <strong style={{ color: t.orange, fontWeight: 800 }}>
+                {klHubsDispatchedToday.join(' · ')} already dispatched today
+              </strong>
+              <div style={{ color: t.text3, fontSize: 11, marginTop: 2 }}>
+                Bills currently at or in-movement to {klHubsDispatchedToday.length === 1 ? 'this hub' : 'these hubs'} are excluded from today's bid — they'll ride tomorrow's hub → HO truck and arrive at HO the day after. Bid for them via <strong style={{ color: t.text2 }}>+2 days</strong> instead.
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* 1 · Hub Stock */}
         <SourceSection
           t={t} card={card}
