@@ -350,16 +350,21 @@ export default function BiddingVolume() {
   // Kerala "certain pool" for tomorrow = S1 hub stock + S2 in-movement to hub.
   // S3 (still at leaf) is contingent on the leaf→hub pickup actually firing
   // today — excluded from Incoming by default; operator ticks manually.
-  const klSupplyNet   = Number(klS1Total.net_wt   || 0) + Number(klS2Total.net_wt   || 0)
-  const klSupplyGross = Number(klS1Total.gross_wt || 0) + Number(klS2Total.gross_wt || 0)
-  const klSupplyBills = Number(klS1Total.bills    || 0) + Number(klS2Total.bills    || 0)
+  // Reads supply directly (not the picker-side klS*Total consts) so this
+  // block can sit anywhere in render order without a TDZ issue.
+  const _klS1 = supply?.kerala_sections?.s1_hub_stock?.total   || {}
+  const _klS2 = supply?.kerala_sections?.s2_in_movement?.total || {}
+  const klSupplyNet   = Number(_klS1.net_wt   || 0) + Number(_klS2.net_wt   || 0)
+  const klSupplyGross = Number(_klS1.gross_wt || 0) + Number(_klS2.gross_wt || 0)
+  const klSupplyBills = Number(_klS1.bills    || 0) + Number(_klS2.bills    || 0)
 
   // Others — S1 (all Bangalore) + non-Kerala S2 only. S4 is intentionally
-  // omitted; those bills only count when explicitly selected. inTBranches is
-  // already Kerala-filtered upstream, so we can sum it directly.
-  const othersSupplyNet   = s1Net   + sumWt(inTBranches)
-  const othersSupplyGross = s1Gross + sumGross(inTBranches)
-  const othersSupplyBills = s1Bills + sumBills(inTBranches)
+  // omitted; those bills only count when explicitly selected. Filter
+  // s2BranchesAll inline (rather than reading the picker-side inTBranches
+  // const) so this block stays free of TDZ-bound references.
+  const othersSupplyNet   = s1Net   + sumWt(s2BranchesAll.filter(b => !isKL(b)))
+  const othersSupplyGross = s1Gross + sumGross(s2BranchesAll.filter(b => !isKL(b)))
+  const othersSupplyBills = s1Bills + sumBills(s2BranchesAll.filter(b => !isKL(b)))
 
   // Gain — Kerala default is 0 % (leaf→hub flow already absorbs refining
   // loss upstream). Others use the standard 3.5 % (or the operator's
