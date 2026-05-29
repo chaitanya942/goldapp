@@ -35,13 +35,30 @@ const ACTION_ROLE_REQUIREMENTS = {
 
 // ── GET handler ───────────────────────────────────────────────────────────────
 export async function GET(req) {
-  // Any authenticated user can read consignment data; specific actions can
-  // tighten further by checking auth.role inline.
-  const auth = await requireAuth(req, { requiredRoles: null })
-  if (!auth.ok) return auth.response
-
   const { searchParams } = new URL(req.url)
   const action = searchParams.get('action')
+
+  // Cron-token bypass — narrow allow-list of read-only actions that the
+  // `goldapp-cron` worker can hit server-to-server without a user session.
+  // Currently just the 7pm at-risk summary (logged to Railway). Any new
+  // action added here MUST be read-only.
+  const cronToken     = req.headers.get('x-cron-token')
+  const CRON_ALLOWED  = new Set(['bidding_at_risk_summary'])
+  const isCronCaller  = !!process.env.CRON_SECRET
+                      && cronToken === process.env.CRON_SECRET
+                      && CRON_ALLOWED.has(action)
+  let auth
+  if (isCronCaller) {
+    // Synthesize a minimal auth shape so downstream code that reads
+    // auth.user / auth.role doesn't blow up. No region restrictions —
+    // cron sees everything.
+    auth = { ok: true, user: { id: null, email: 'cron' }, role: 'super_admin', profile: null }
+  } else {
+    // Any authenticated user can read consignment data; specific actions can
+    // tighten further by checking auth.role inline.
+    auth = await requireAuth(req, { requiredRoles: null })
+    if (!auth.ok) return auth.response
+  }
 
   // Region scoping: resolve once per request. allowedBranches=null means
   // "no restriction" (admin/founders bypass, or user has no allowed_regions).
@@ -2986,6 +3003,127 @@ export async function POST(req) {
     }
 
     return Response.json({ data, message: 'Booking created.' })
+  }
+
+  // ── At-risk bookings summary ─────────────────────────────────────────────
+  // Aggregates today's bookings whose attached bills are still at_branch past
+  // the source branch's pickup_time + 2h grace. Powers the 7pm in-app banner
+  // shown to anyone with bidding access — listing party / weight / source
+  // branches so ops can immediately spot what's stuck.
+  //
+  // Same at_risk logic as bidding_bookings (single-flag derivation); rolled
+  // up into a flat summary that the dashboard banner can render in one read.
+  if (action === 'bidding_at_risk_summary') {
+    const todayIst = istToday()
+    // Today's bookings (created_at IST) that are still active.
+    const { data: bookings, error: bkErr } = await supabase
+      .from('cal_quotas')
+      .select('id, party, weight, is_kl, status, created_at')
+      .gte('created_at', istStartOfDayIso(todayIst))
+      .lt('created_at',  istEndOfDayIso(todayIst))
+      .neq('status', 'cancelled')
+      .neq('status', 'fulfilled')
+    if (bkErr) return Response.json({ error: bkErr.message }, { status: 500 })
+    if (!bookings || bookings.length === 0) {
+      return Response.json({ data: { count: 0, bookings: [], by_branch: [], totals: { weight_g: 0, bills: 0 } } })
+    }
+
+    // Pull attached bills + each source branch's pickup_time in two queries.
+    const ids = bookings.map(b => b.id)
+    const { data: bills } = await supabase
+      .from('purchases')
+      .select('booking_id, net_weight, stock_status, branch_name, current_branch')
+      .in('booking_id', ids)
+    const srcNames = [...new Set((bills || []).map(b => b.current_branch || b.branch_name).filter(Boolean))]
+    let pickupByBranch = {}
+    if (srcNames.length) {
+      const { data: bps } = await supabase
+        .from('branches')
+        .select('name, pickup_time')
+        .in('name', srcNames)
+      for (const b of bps || []) pickupByBranch[b.name] = b.pickup_time
+    }
+
+    const nowIst = new Date(Date.now() + 5.5 * 3600_000)
+    const nowMin = nowIst.getUTCHours() * 60 + nowIst.getUTCMinutes()
+    const MOVED  = new Set(['in_consignment', 'at_ho'])
+
+    const billsByBooking = {}
+    for (const p of bills || []) {
+      if (!billsByBooking[p.booking_id]) billsByBooking[p.booking_id] = []
+      billsByBooking[p.booking_id].push(p)
+    }
+
+    const atRisk = []
+    const branchAgg = {}        // branch_name → { bills, weight_g, parties: Set }
+    for (const bk of bookings) {
+      const attached = billsByBooking[bk.id] || []
+      if (attached.length === 0) continue
+      let moved = 0, atBranchCount = 0, pastCutoff = 0, timed = 0
+      const branchesTouched = new Set()
+      for (const p of attached) {
+        if (MOVED.has(p.stock_status))       moved++
+        if (p.stock_status === 'at_branch')  {
+          atBranchCount++
+          const src = p.current_branch || p.branch_name
+          if (src) branchesTouched.add(src)
+          const pt = pickupByBranch[src]
+          if (pt) {
+            const [ph, pm] = pt.split(':').map(Number)
+            if (Number.isFinite(ph)) {
+              timed++
+              const cutoff = ph * 60 + (pm || 0) + 120
+              if (nowMin > cutoff) pastCutoff++
+            }
+          }
+        }
+      }
+      const isAtRisk = (moved === 0) && (atBranchCount > 0) && (timed > 0) && (pastCutoff === timed)
+      if (!isAtRisk) continue
+
+      // Aggregate per-booking weight from attached bills (live), not the
+      // booking's committed weight — only the still-at-branch portion is
+      // the risk.
+      const atBranchWt = attached.filter(p => p.stock_status === 'at_branch').reduce((s, p) => s + Number(p.net_weight || 0), 0)
+      atRisk.push({
+        id:          bk.id,
+        party:       bk.party,
+        is_kl:       !!bk.is_kl,
+        at_branch_bills:  atBranchCount,
+        at_branch_weight_g: Number(atBranchWt.toFixed(3)),
+        booking_weight_g: Number(bk.weight || 0),
+        branches:    [...branchesTouched],
+      })
+      for (const br of branchesTouched) {
+        if (!branchAgg[br]) branchAgg[br] = { branch_name: br, bills: 0, weight_g: 0, parties: new Set() }
+        // Each branch's portion of this booking — count of at_branch bills
+        // at this specific branch, and their weight.
+        const here = attached.filter(p => p.stock_status === 'at_branch' && (p.current_branch || p.branch_name) === br)
+        branchAgg[br].bills    += here.length
+        branchAgg[br].weight_g += here.reduce((s, p) => s + Number(p.net_weight || 0), 0)
+        branchAgg[br].parties.add(bk.party)
+      }
+    }
+
+    const byBranch = Object.values(branchAgg)
+      .map(b => ({ branch_name: b.branch_name, bills: b.bills, weight_g: Number(b.weight_g.toFixed(3)), parties: [...b.parties] }))
+      .sort((a, b) => b.weight_g - a.weight_g)
+
+    const totals = {
+      bills:     atRisk.reduce((s, b) => s + b.at_branch_bills, 0),
+      weight_g:  Number(atRisk.reduce((s, b) => s + b.at_branch_weight_g, 0).toFixed(3)),
+    }
+
+    return Response.json({
+      data: {
+        as_of:    new Date().toISOString(),
+        date:     todayIst,
+        count:    atRisk.length,
+        bookings: atRisk,
+        by_branch: byBranch,
+        totals,
+      },
+    })
   }
 
   // ── Bills attached to a booking, grouped by source branch ─────────────────

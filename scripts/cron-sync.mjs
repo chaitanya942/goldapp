@@ -33,18 +33,55 @@ if (!APP_URL || !CRON_SECRET) {
   process.exit(1)
 }
 
-const ENDPOINT     = `${APP_URL}/api/sync-purchases?days=${SYNC_DAYS}`
-const EOD_ENDPOINT = `${APP_URL}/api/eod-inventory-snapshot`
-const HEADERS      = { Authorization: `Bearer ${CRON_SECRET}` }
+const ENDPOINT         = `${APP_URL}/api/sync-purchases?days=${SYNC_DAYS}`
+const EOD_ENDPOINT     = `${APP_URL}/api/eod-inventory-snapshot`
+const AT_RISK_ENDPOINT = `${APP_URL}/api/consignments?action=bidding_at_risk_summary`
+const HEADERS          = { Authorization: `Bearer ${CRON_SECRET}` }
 // /api/eod-inventory-snapshot POST gates on x-cron-token (not Bearer).
-const EOD_HEADERS  = { 'x-cron-token': CRON_SECRET, 'Content-Type': 'application/json' }
+const EOD_HEADERS      = { 'x-cron-token': CRON_SECRET, 'Content-Type': 'application/json' }
 
-let inFlight     = false      // guard against overlap if a sync runs longer than the interval
-let lastEodDate  = ''         // YYYY-MM-DD (IST) of the last successful EOD snapshot — keeps us idempotent within a day
+let inFlight        = false   // guard against overlap if a sync runs longer than the interval
+let lastEodDate     = ''      // YYYY-MM-DD (IST) of the last successful EOD snapshot — keeps us idempotent within a day
+let lastAtRiskDate  = ''      // YYYY-MM-DD (IST) of the last 7pm at-risk log — once per day
 
 // IST date helper — Asia/Kolkata is fixed UTC+5:30, no DST so we can shift manually.
 const istNow = () => new Date(Date.now() + 5.5 * 60 * 60 * 1000)
 const istDateStr = () => istNow().toISOString().slice(0, 10)
+
+async function maybeLogAtRiskSummary() {
+  const ist = istNow()
+  const hh  = ist.getUTCHours()
+  // Fire once daily at/after 19:00 IST. The browser in-app banner is the
+  // primary surface — this cron call just provides an audit-log trail
+  // (Railway logs) so we can spot how often at-risk bookings happen and
+  // how many bills they cover, without relying on someone having the app
+  // open at 7pm. No external notification channel yet.
+  if (hh < 19) return
+  const today = istDateStr()
+  if (lastAtRiskDate === today) return
+  try {
+    // /api/consignments at-risk summary uses x-cron-token (not Bearer) —
+    // same pattern as the EOD snapshot endpoint.
+    const res = await fetch(AT_RISK_ENDPOINT, { headers: { 'x-cron-token': CRON_SECRET } })
+    const txt = await res.text()
+    let body
+    try { body = JSON.parse(txt) } catch { body = { raw: txt } }
+    if (!res.ok) {
+      console.error(new Date().toISOString(), `[cron-sync] at-risk summary FAIL ${res.status}`, body.error || txt.slice(0, 200))
+      return
+    }
+    const d = body?.data || {}
+    lastAtRiskDate = today
+    if (!d.count) {
+      console.log(new Date().toISOString(), `[cron-sync] at-risk summary ok for ${today}: 0 bookings at risk`)
+      return
+    }
+    const branchSummary = (d.by_branch || []).slice(0, 6).map(b => `${b.branch_name}(${b.bills}/${b.weight_g.toFixed(1)}g)`).join(', ')
+    console.warn(new Date().toISOString(), `[cron-sync] AT-RISK ${today}: ${d.count} booking(s) · ${d.totals?.bills || 0} bills · ${(d.totals?.weight_g || 0).toFixed(2)}g still at branch · ${branchSummary}`)
+  } catch (err) {
+    console.error(new Date().toISOString(), '[cron-sync] at-risk summary threw:', err?.message || err)
+  }
+}
 
 async function maybeRunEodSnapshot() {
   const ist = istNow()
@@ -101,6 +138,12 @@ async function syncOnce() {
   // Piggy-back the daily EOD snapshot on this tick — runs at most once per
   // IST day, only after 23:30 IST. Fire-and-forget; sync health isn't tied to it.
   maybeRunEodSnapshot().catch(() => null)
+
+  // Piggy-back the 7pm at-risk bookings summary — once per IST day, after
+  // 19:00 IST. Logs to Railway so we have an audit trail of how many
+  // bookings landed at risk per day; the in-app banner is what surfaces
+  // it to ops.
+  maybeLogAtRiskSummary().catch(() => null)
 }
 
 console.log(`[cron-sync] starting — ${ENDPOINT} every ${INTERVAL_MS}ms`)
