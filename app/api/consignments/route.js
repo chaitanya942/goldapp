@@ -40,8 +40,7 @@ export async function GET(req) {
 
   // Cron-token bypass — narrow allow-list of read-only actions that the
   // `goldapp-cron` worker can hit server-to-server without a user session.
-  // Currently just the 7pm at-risk summary (logged to Railway). Any new
-  // action added here MUST be read-only.
+  // Any new action added here MUST be read-only.
   const cronToken     = req.headers.get('x-cron-token')
   const CRON_ALLOWED  = new Set(['bidding_at_risk_summary'])
   const isCronCaller  = !!process.env.CRON_SECRET
@@ -509,7 +508,7 @@ export async function GET(req) {
     if (bangaloreBranchNames.length) {
       const { data: bb, error: bbErr } = await supabase
         .from('purchases')
-        .select('id, application_id, branch_name, customer_name, gross_weight, net_weight, total_amount, purchase_date, stock_status, dispatched_at, crm_status')
+        .select('id, application_id, branch_name, customer_name, gross_weight, net_weight, total_amount, purchase_date, stock_status, dispatched_at, crm_status, audit_hold, audit_consumed_at')
         .in('branch_name', bangaloreBranchNames)
         .gte('purchase_date', bangalorePurchaseDate)
         .lt('purchase_date',  addDays(bangalorePurchaseDate, 1))
@@ -517,7 +516,9 @@ export async function GET(req) {
         .eq('is_deleted', false)
         .is('booking_id', null)
       if (bbErr) return Response.json({ error: bbErr.message }, { status: 500 })
-      bangBills = bb || []
+      // Don't surface bills the EOD audit already consumed — they're now
+      // labelled gain and shouldn't show as bookable.
+      bangBills = (bb || []).filter(b => !b.audit_consumed_at)
     }
 
     // 2) Outside Bangalore — bills currently in_consignment. Filter to those
@@ -1885,7 +1886,7 @@ export async function POST(req) {
   // can see the Bidding Volume page (page.consignment-bidding) rather than
   // a hardcoded role group — so the gate can never lock out whichever role
   // ops actually grant the page to (the KT §VII trap-2 lesson).
-  const BIDDING_WRITES = new Set(['set_bidding_pending', 'create_booking', 'update_booking_status', 'close_booking_pipeline'])
+  const BIDDING_WRITES = new Set(['set_bidding_pending', 'create_booking', 'update_booking_status', 'close_booking_pipeline', 'toggle_bill_hold'])
   let auth
   if (BIDDING_WRITES.has(action)) {
     auth = await requireAuthForPage(req, 'consignment-bidding')
@@ -2747,6 +2748,41 @@ export async function POST(req) {
   // ── Set Pending Delivery carry-over for an arrival date ──────────────────
   // Shared, server-side. Signed value (can be negative). Upsert keyed on
   // arrival_date so re-saving the same date overwrites rather than stacking.
+  // ── Toggle a bill's audit_hold flag ──────────────────────────────────────
+  // A held Bangalore Section 1 bill stays visible in the picker but is
+  // skipped by the 23:30 audit — it won't be swept into open bookings'
+  // pipeline NOR attributed to gain. Use cases: quality dispute, intentional
+  // roll-forward to tomorrow's bid.
+  //
+  // Constrained to bills that aren't already attached to a booking
+  // (booking_id IS NULL) and haven't been audit-consumed yet — once either
+  // happens, the hold is moot.
+  if (action === 'toggle_bill_hold') {
+    const { bill_id, hold } = body
+    if (!bill_id)                       return Response.json({ error: 'bill_id required' }, { status: 400 })
+    if (typeof hold !== 'boolean')      return Response.json({ error: 'hold must be boolean' }, { status: 400 })
+
+    const { data: bill, error: fErr } = await supabase
+      .from('purchases')
+      .select('id, booking_id, audit_consumed_at, branch_name, stock_status')
+      .eq('id', bill_id)
+      .single()
+    if (fErr || !bill)                  return Response.json({ error: 'Bill not found' }, { status: 404 })
+    if (bill.booking_id)                return Response.json({ error: 'Already booked — release the booking first.' }, { status: 400 })
+    if (bill.audit_consumed_at)         return Response.json({ error: 'Already audit-consumed — bill is no longer eligible.' }, { status: 400 })
+    if (bill.stock_status !== 'at_branch')
+      return Response.json({ error: `Bill is in '${bill.stock_status}', not at_branch.` }, { status: 400 })
+
+    const { data, error } = await supabase
+      .from('purchases')
+      .update({ audit_hold: hold })
+      .eq('id', bill_id)
+      .select('id, audit_hold')
+      .single()
+    if (error) return Response.json({ error: error.message }, { status: 500 })
+    return Response.json({ success: true, bill: data })
+  }
+
   if (action === 'set_bidding_pending') {
     const { date, pending_grams, note } = body
     if (!date) return Response.json({ error: 'date required (YYYY-MM-DD)' }, { status: 400 })

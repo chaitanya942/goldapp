@@ -518,7 +518,10 @@ export default function BiddingVolume() {
   // bills; clicking again clears them. If only some of the branch's bills
   // are currently selected, the click promotes to ALL (most useful default).
   const branchSelectionState = (branch) => {
-    const bills = branch?.bills || []
+    // Exclude held bills so 'all/partial/none' reflects the actually-
+    // selectable rows. A branch where every non-held bill is ticked reads
+    // as 'all' even if a held bill sits among them.
+    const bills = (branch?.bills || []).filter(b => !b.audit_hold)
     if (!bills.length) return 'none'
     let sel = 0
     for (const b of bills) if (selected.has(b.id)) sel++
@@ -528,7 +531,10 @@ export default function BiddingVolume() {
   }
   const toggleBranchAll = (branch) => setSelected(prev => {
     const next  = new Set(prev)
-    const bills = branch?.bills || []
+    // Held bills (audit_hold=true) are excluded from select-all: ops parked
+    // them outside the bidding pool and shouldn't sweep them back in by
+    // accident. They can still be ticked individually if needed.
+    const bills = (branch?.bills || []).filter(b => !b.audit_hold)
     const state = (() => {
       if (!bills.length) return 'none'
       let sel = 0
@@ -541,11 +547,11 @@ export default function BiddingVolume() {
     else                 for (const b of bills) next.add(b.id)
     return next
   })
-  // Region select-all — operates on every bill under every branch of the
-  // region. Used by the "Select all" link in each region header.
+  // Region select-all — operates on every (non-held) bill under every branch
+  // of the region. Used by the "Select all" link in each region header.
   const toggleRegionAll = (branchRows) => setSelected(prev => {
     const next   = new Set(prev)
-    const allIds = branchRows.flatMap(r => (r.bills || []).map(b => b.id))
+    const allIds = branchRows.flatMap(r => (r.bills || []).filter(b => !b.audit_hold).map(b => b.id))
     if (!allIds.length) return next
     const allOn = allIds.every(id => next.has(id))
     if (allOn) for (const id of allIds) next.delete(id)
@@ -586,6 +592,9 @@ export default function BiddingVolume() {
     for (const id of Object.keys(billsById)) {
       const bill = billsById[id]
       if (!eligibleGroups.has(bill._group)) continue
+      // Skip bills the operator has parked outside the audit pool — they
+      // shouldn't get auto-pulled into a booking.
+      if (bill.audit_hold) continue
       eligible.push(bill)
     }
     eligible.sort((a, b) => {
@@ -736,6 +745,41 @@ export default function BiddingVolume() {
   const unbookBooking = useCallback(async (id) => {
     return updateStatus(id, 'cancelled', 'Unbooked: source bills still at_branch — released for re-booking')
   }, [])
+
+  // Toggle the audit_hold flag on a Bangalore Section 1 bill. Held bills
+  // stay visible in the picker but are skipped by auto-select and by the
+  // 23:30 EOD audit. Optimistically updates supply state so the toggle
+  // feels instant; the next poll reconciles with server truth.
+  const toggleBillHold = useCallback(async (billId, hold) => {
+    try {
+      const r = await authedFetch('/api/consignments?action=toggle_bill_hold', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bill_id: billId, hold }),
+      })
+      const j = await r.json()
+      if (!r.ok || j.error) { showToast(j.error || 'Could not toggle hold', 'error'); return false }
+      // Optimistic patch — mutate the bill row in supply so the UI reflects
+      // the new state without waiting for a refetch. The 30s poll will
+      // re-sync anyway.
+      setSupply(prev => {
+        if (!prev?.bangalore?.branches) return prev
+        const branches = prev.bangalore.branches.map(b => ({
+          ...b,
+          bills: (b.bills || []).map(x => x.id === billId ? { ...x, audit_hold: hold } : x),
+        }))
+        return { ...prev, bangalore: { ...prev.bangalore, branches } }
+      })
+      if (hold && selected.has(billId)) {
+        // If ops held a bill that was selected, drop it from the selection.
+        setSelected(prev => { const next = new Set(prev); next.delete(billId); return next })
+      }
+      showToast(hold ? 'Bill held — excluded from auto-select & EOD audit.' : 'Hold released.', 'success')
+      return true
+    } catch (err) {
+      showToast(err?.message || 'Could not toggle hold', 'error')
+      return false
+    }
+  }, [selected])
 
   // Recovery action for booked-but-not-shipped: fire a consignment for the
   // attached bills' source branch(es). Multi-branch bookings fan out into
@@ -1177,6 +1221,7 @@ export default function BiddingVolume() {
         onToggleBranchAll={toggleBranchAll}
         onToggleRegionAll={toggleRegionAll}
         branchSelectionState={branchSelectionState}
+        onToggleHold={toggleBillHold}
         emptyMsg="No Bangalore purchases recorded today yet."
       />
 
@@ -2179,6 +2224,11 @@ function SourceSection({
   branches = [], total, selectable = false, viewOnly = false,
   selected, branchLocked,
   onToggleBill, onToggleBranchAll, onToggleRegionAll, branchSelectionState,
+  // Per-bill audit_hold override — when provided, renders a small Hold /
+  // Held control on each bill row. Currently passed only for the Bangalore
+  // Section 1 picker (the EOD audit pool). Held bills stay visible but are
+  // excluded from auto-select + the 23:30 reconciliation.
+  onToggleHold,
   emptyMsg,
 }) {
   const tone = accent || t.gold
@@ -2389,9 +2439,11 @@ function SourceSection({
                             front so individual bills can be ticked/unticked.
                             Section 3 (viewOnly) renders the bills sans checkbox. */}
                         {(() => {
+                          // Optional trailing column for the audit_hold control —
+                          // only when SourceSection was given onToggleHold (Bangalore S1).
                           const billCols = selectable
-                            ? '20px 130px minmax(0, 1fr) 100px 100px 130px'
-                            : '130px minmax(0, 1fr) 100px 100px 130px'
+                            ? `20px 130px minmax(0, 1fr) 100px 100px 130px${onToggleHold ? ' 70px' : ''}`
+                            : `130px minmax(0, 1fr) 100px 100px 130px${onToggleHold ? ' 70px' : ''}`
                           const headerCols = (
                             <>
                               {selectable && <span />}
@@ -2400,6 +2452,7 @@ function SourceSection({
                               <span style={{ textAlign: 'right' }}>Gross</span>
                               <span style={{ textAlign: 'right' }}>Net</span>
                               <span style={{ textAlign: 'right' }}>Amount</span>
+                              {onToggleHold && <span style={{ textAlign: 'center' }}>Hold</span>}
                             </>
                           )
                           return (
@@ -2414,20 +2467,21 @@ function SourceSection({
                               </div>
                               {billRows.map((bill, idx) => {
                                 const billChecked = selectable && selected?.has(bill.id)
+                                const isHeld      = !!bill.audit_hold
                                 return (
                                   <div key={bill.id ?? idx}
-                                    onClick={() => { if (selectable && !locked) onToggleBill?.(bill.id) }}
-                                    onMouseEnter={(e) => { if (selectable && !locked) e.currentTarget.style.background = `${tone}10` }}
-                                    onMouseLeave={(e) => { e.currentTarget.style.background = billChecked ? `${tone}1c` : (idx % 2 === 1 ? `${t.card2}40` : 'transparent') }}
+                                    onClick={() => { if (selectable && !locked && !isHeld) onToggleBill?.(bill.id) }}
+                                    onMouseEnter={(e) => { if (selectable && !locked && !isHeld) e.currentTarget.style.background = `${tone}10` }}
+                                    onMouseLeave={(e) => { e.currentTarget.style.background = billChecked ? `${tone}1c` : (isHeld ? `${t.orange || '#c9981f'}0c` : (idx % 2 === 1 ? `${t.card2}40` : 'transparent')) }}
                                     style={{
                                       display: 'grid',
                                       gridTemplateColumns: billCols,
                                       alignItems: 'center',
                                       columnGap: 14, padding: '5px 8px', borderRadius: 5,
-                                      background: billChecked ? `${tone}1c` : (idx % 2 === 1 ? `${t.card2}40` : 'transparent'),
+                                      background: billChecked ? `${tone}1c` : (isHeld ? `${t.orange || '#c9981f'}0c` : (idx % 2 === 1 ? `${t.card2}40` : 'transparent')),
                                       fontFamily: 'monospace', fontSize: 12,
-                                      cursor: selectable ? (locked ? 'not-allowed' : 'pointer') : 'default',
-                                      opacity: selectable && locked ? 0.45 : 1,
+                                      cursor: selectable ? (locked || isHeld ? 'not-allowed' : 'pointer') : 'default',
+                                      opacity: (selectable && locked) || isHeld ? 0.55 : 1,
                                       transition: 'background .12s ease',
                                     }}>
                                     {selectable && (
@@ -2445,6 +2499,27 @@ function SourceSection({
                                     <span style={{ color: t.text2, textAlign: 'right', fontWeight: 600 }}>{fmt(bill.gross_weight, 2)}<span style={{ fontSize: 10, color: t.text4, marginLeft: 2, fontWeight: 600 }}>g</span></span>
                                     <span style={{ color: tone, textAlign: 'right', fontWeight: 800 }}>{fmt(bill.net_weight, 2)}<span style={{ fontSize: 10, color: t.text3, marginLeft: 2, fontWeight: 600 }}>g</span></span>
                                     <span style={{ color: t.blue, textAlign: 'right', fontWeight: 700 }}>{bill.total_amount != null ? `₹${Math.round(Number(bill.total_amount)).toLocaleString('en-IN')}` : '—'}</span>
+                                    {onToggleHold && (
+                                      <span style={{ textAlign: 'center' }}>
+                                        <button type="button"
+                                          onClick={(e) => { e.stopPropagation(); onToggleHold(bill.id, !isHeld) }}
+                                          disabled={billChecked}
+                                          title={isHeld ? 'Release hold — bill returns to the EOD audit pool' : 'Hold this bill — excluded from auto-select and the 23:30 audit'}
+                                          style={{
+                                            background: isHeld ? `${t.orange || '#c9981f'}25` : 'transparent',
+                                            color:      isHeld ? (t.orange || '#c9981f') : t.text4,
+                                            border:     `1px solid ${isHeld ? `${t.orange || '#c9981f'}70` : t.border2}`,
+                                            borderRadius: 5,
+                                            padding: '2px 8px', fontSize: 9.5, fontWeight: 800, letterSpacing: '.05em',
+                                            textTransform: 'uppercase',
+                                            cursor: billChecked ? 'not-allowed' : 'pointer',
+                                            opacity: billChecked ? 0.4 : 1,
+                                            fontFamily: 'inherit',
+                                          }}>
+                                          {isHeld ? '⛔ held' : 'hold'}
+                                        </button>
+                                      </span>
+                                    )}
                                   </div>
                                 )
                               })}
