@@ -686,6 +686,12 @@ export default function PurchaseData() {
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
                     <span style={{ fontSize: '.6rem', padding: '2px 8px', borderRadius: '100px', background: `${status.color}20`, color: status.color, border: `1px solid ${status.color}40` }}>{status.label}</span>
+                    {p.audit_consumed_at && (
+                      <span title={`Booked — attributed to ${p.audit_attributed_to || 'gain'} on ${fmtDate(p.audit_consumed_at)}`}
+                        style={{ fontSize: '.6rem', padding: '2px 8px', borderRadius: '100px', background: `${t.gold}20`, color: t.gold, border: `1px solid ${t.gold}40`, fontWeight: 600, letterSpacing: '.04em' }}>
+                        ✓ Booked
+                      </span>
+                    )}
                     <span style={{ fontSize: '.6rem', padding: '2px 8px', borderRadius: '100px', background: p.transaction_type === 'TAKEOVER' ? `${t.purple}20` : `${t.gold}20`, color: p.transaction_type === 'TAKEOVER' ? t.purple : t.gold, border: `1px solid ${p.transaction_type === 'TAKEOVER' ? t.purple : t.gold}40` }}>{p.transaction_type}</span>
                   </div>
                 </div>
@@ -802,16 +808,29 @@ export default function PurchaseData() {
                       <Badge label={p.transaction_type} color={p.transaction_type === 'TAKEOVER' ? 'purple' : 'gold'} />
                     </td>
                     <td style={s.td}>
-                      <Badge
-                        label={status.label}
-                        color={
-                          p.stock_status === 'at_ho' ? 'green' :
-                          p.stock_status === 'at_branch' ? 'blue' :
-                          p.stock_status === 'in_consignment' ? 'orange' :
-                          p.stock_status === 'sent_for_melting' ? 'red' :
-                          p.stock_status === 'melted' ? 'purple' : 'dim'
-                        }
-                      />
+                      <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
+                        <Badge
+                          label={status.label}
+                          color={
+                            p.stock_status === 'at_ho' ? 'green' :
+                            p.stock_status === 'at_branch' ? 'blue' :
+                            p.stock_status === 'in_consignment' ? 'orange' :
+                            p.stock_status === 'sent_for_melting' ? 'red' :
+                            p.stock_status === 'melted' ? 'purple' : 'dim'
+                          }
+                        />
+                        {p.audit_consumed_at && (
+                          <span title={`Booked — attributed to ${p.audit_attributed_to || 'gain'} on ${fmtDate(p.audit_consumed_at)}`}
+                            style={{
+                              fontSize: '.58rem', padding: '2px 7px', borderRadius: '100px',
+                              background: `${t.gold}1f`, color: t.gold,
+                              border: `1px solid ${t.gold}55`,
+                              fontWeight: 700, letterSpacing: '.04em', whiteSpace: 'nowrap',
+                            }}>
+                            ✓ Booked
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td style={{ ...s.td, color: t.text3, fontSize: '.68rem', whiteSpace: 'normal', maxWidth: '160px' }}>{p.id_proof_types || <span style={{ color: t.text4 }}>—</span>}</td>
                     <td style={{ ...s.td, color: t.text2, fontFamily: 'monospace', fontSize: '.68rem', whiteSpace: 'normal', maxWidth: '200px', wordBreak: 'break-all' }}>{p.id_proof_numbers || <span style={{ color: t.text4 }}>—</span>}</td>
