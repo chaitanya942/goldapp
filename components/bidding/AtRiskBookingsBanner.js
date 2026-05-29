@@ -2,28 +2,41 @@
 
 // AtRiskBookingsBanner — 7pm IST "booked but not shipped" alert.
 //
-// Renders a red dismissible banner whenever today's bookings include rows
-// whose attached bills are still at_branch past the source branch's
+// Renders a red banner whenever today's bookings include rows whose
+// attached bills are still at_branch past the source branch's
 // pickup_time + 2h grace. Same at_risk logic the Bookings tab pill uses;
 // just a global surface so anyone with bidding access sees it without
 // needing to be on the Bidding Volume page.
 //
+// STICKY PER DEVICE: Once it has appeared on a given device today, it
+// stays visible regardless of whether the count drops to zero — the
+// ONLY way to close it is the per-device 'Dismiss for today' button.
+// Each user's acknowledgement is tracked independently so a teammate
+// fixing the bookings on another machine doesn't silently clear it
+// from someone else's screen. Resets at midnight IST.
+//
+// If the count later flips from 0 back up (a fresh at-risk booking
+// surfaces after dismissal), the dismissal still holds for today;
+// the next at-risk batch surfaces tomorrow. (Conservative: a fresh
+// nag every hour would burn out the alert.)
+//
 // Gating:
 //   - Only mounts when canSee('consignment-bidding') OR role === 'super_admin'
-//   - Only renders when IST time >= 19:00 (configurable via FIRE_HOUR_IST)
-//   - Hidden once dismissed (localStorage scoped to today's date — comes
-//     back tomorrow if not resolved)
-//   - Auto-hides if the at_risk count drops to zero (booking shipped /
-//     unbooked / consignment created)
+//   - Only first appears when IST time >= 19:00 (configurable via FIRE_HOUR_IST)
+//   - Hidden once dismissed (localStorage scoped to today's date)
+//   - Live-updates count + branch breakdown as bookings resolve, but
+//     stays mounted with a "✓ resolved" variant once count hits zero
+//     so the user still has to acknowledge.
 //
 // Buttons:
 //   • Open Bookings → deep-links into Consignments → Bidding Volume →
 //     Bookings tab so ops can take action via the per-row at-risk buttons
-//     we already built.
-//   • Dismiss      → localStorage flag, hides until tomorrow.
+//     we already built. (Hidden when count is 0 — nothing to act on.)
+//   • Dismiss for today → localStorage flag, hides until tomorrow.
 //
-// Poll cadence: every 5 minutes while visible. We deliberately don't poll
-// outside the 18:30–23:59 IST window to keep load minimal.
+// Poll cadence: every 5 minutes while visible. Outside 18:30–23:59 IST
+// we still tick once on mount so a user who logs in at 9pm picks up
+// today's state without waiting for the next poll.
 
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { useApp } from '../../lib/context'
@@ -53,15 +66,30 @@ export default function AtRiskBookingsBanner() {
 
   const [summary, setSummary] = useState(null)
   const [dismissed, setDismissed] = useState(false)
+  const [seenToday, setSeenToday] = useState(false)
   const dismissedKey = `at_risk_banner_dismissed_${istToday()}`
+  const seenKey      = `at_risk_banner_seen_${istToday()}`
 
-  // Hydrate dismissed state from localStorage on mount (today only).
+  // Hydrate dismissed + seen state from localStorage on mount (today only).
+  // `seenToday` makes the banner sticky: once it has appeared with count > 0
+  // on this device today, it stays until manually dismissed (even if the
+  // upstream count drops to zero — ops still has to acknowledge).
   useEffect(() => {
     try {
-      const stored = localStorage.getItem(dismissedKey)
-      if (stored) setDismissed(true)
+      if (localStorage.getItem(dismissedKey)) setDismissed(true)
+      if (localStorage.getItem(seenKey))      setSeenToday(true)
     } catch {}
-  }, [dismissedKey])
+  }, [dismissedKey, seenKey])
+
+  // Once the live count goes non-zero past 19:00 IST, mark "seen for today".
+  // From that moment on the banner stays mounted until the user dismisses.
+  useEffect(() => {
+    if (seenToday) return
+    if (!summary || (summary.count || 0) === 0) return
+    if (istHour() < FIRE_HOUR_IST) return
+    try { localStorage.setItem(seenKey, '1') } catch {}
+    setSeenToday(true)
+  }, [summary, seenKey, seenToday])
 
   const fetchSummary = useCallback(async () => {
     try {
@@ -96,11 +124,21 @@ export default function AtRiskBookingsBanner() {
     return () => clearInterval(id)
   }, [hasAccess, fetchSummary])
 
-  if (!hasAccess) return null
-  if (dismissed)  return null
-  if (!summary)   return null
-  if ((summary.count || 0) === 0) return null
-  if (istHour() < FIRE_HOUR_IST)  return null
+  if (!hasAccess)  return null
+  if (dismissed)   return null
+  if (!summary)    return null
+  // Sticky visibility rule — once the user has seen a non-zero count after
+  // 19:00 IST today (seenToday=true), the banner stays mounted regardless
+  // of whether the count later drops. If they've never seen it, fall back
+  // to the standard "show only when actionable" rule (count > 0 AND past
+  // 7pm). This matches the per-device-acknowledge requirement.
+  const liveCount = summary.count || 0
+  if (!seenToday) {
+    if (liveCount === 0)            return null
+    if (istHour() < FIRE_HOUR_IST)  return null
+  }
+
+  const isResolved = liveCount === 0
 
   const onDismiss = () => {
     try { localStorage.setItem(dismissedKey, '1') } catch {}
@@ -108,11 +146,6 @@ export default function AtRiskBookingsBanner() {
   }
   const onOpenBookings = () => {
     setActiveNav('consignment-bidding')
-    // The Bookings sub-tab is the actionable surface — Bidding Volume itself
-    // remembers the last sub-tab via its own state, but deep-linking to the
-    // Bookings tab is preferable on a 7pm alert. The page reads
-    // ?tab= once we add it; for now activeNav switch + the user clicks
-    // 'Bookings' once inside is fine.
   }
 
   const branchSummary = (summary.by_branch || [])
@@ -121,61 +154,82 @@ export default function AtRiskBookingsBanner() {
     .join(', ')
   const moreBranches = Math.max(0, (summary.by_branch || []).length - 6)
 
+  // Resolved-state visuals: green accent + "All resolved" tone. Same shell
+  // so the user's eye doesn't skip past it; only the colour + copy change.
+  const accent = isResolved ? t.green : t.red
+  const icon   = isResolved ? '✓' : '⚠'
+
   return (
     <div role="alert" aria-live="polite"
       style={{
         margin: '12px 16px 0',
-        background: `linear-gradient(135deg, ${t.red}18 0%, ${t.red}05 70%)`,
-        border: `1px solid ${t.red}55`,
-        borderLeft: `4px solid ${t.red}`,
+        background: `linear-gradient(135deg, ${accent}18 0%, ${accent}05 70%)`,
+        border: `1px solid ${accent}55`,
+        borderLeft: `4px solid ${accent}`,
         borderRadius: 10,
         padding: '14px 18px',
         display: 'flex', alignItems: 'flex-start', gap: 14,
-        boxShadow: `0 4px 18px ${t.red}15`,
+        boxShadow: `0 4px 18px ${accent}15`,
         animation: 'atRiskFadeIn .25s ease-out',
       }}>
       <div style={{
         flexShrink: 0,
         width: 32, height: 32, borderRadius: '50%',
-        background: `${t.red}25`, color: t.red,
+        background: `${accent}25`, color: accent,
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         fontSize: 16, fontWeight: 800,
-      }}>⚠</div>
+      }}>{icon}</div>
 
       <div style={{ flex: 1, minWidth: 0, lineHeight: 1.55 }}>
-        <div style={{ fontSize: 13.5, color: t.text1, fontWeight: 800, letterSpacing: '.01em' }}>
-          Hey — you have {summary.count} booking{summary.count === 1 ? '' : 's'} placed today that haven't been dispatched yet.
-        </div>
-        <div style={{ fontSize: 12, color: t.text2, marginTop: 6 }}>
-          <strong style={{ color: t.text1 }}>{summary.totals?.bills || 0}</strong> bill{(summary.totals?.bills || 0) === 1 ? '' : 's'} ·{' '}
-          <strong style={{ color: t.text1, fontFamily: 'monospace' }}>{fmtG(summary.totals?.weight_g)}</strong> still at branch
-          {branchSummary && (
-            <span style={{ color: t.text3 }}> · {branchSummary}{moreBranches > 0 ? ` +${moreBranches} more` : ''}</span>
-          )}
-        </div>
-        <div style={{ fontSize: 11.5, color: t.text3, marginTop: 4 }}>
-          Bills booked today are expected at HO tomorrow. Either create the consignment now so they make tonight's truck, or unbook them if you placed the bid by mistake.
-        </div>
+        {isResolved ? (
+          <>
+            <div style={{ fontSize: 13.5, color: t.text1, fontWeight: 800, letterSpacing: '.01em' }}>
+              All today's at-risk bookings are resolved.
+            </div>
+            <div style={{ fontSize: 11.5, color: t.text3, marginTop: 4 }}>
+              The consignments are out or the bookings were reversed. Dismiss to acknowledge — this won't auto-clear.
+            </div>
+          </>
+        ) : (
+          <>
+            <div style={{ fontSize: 13.5, color: t.text1, fontWeight: 800, letterSpacing: '.01em' }}>
+              Hey — you have {liveCount} booking{liveCount === 1 ? '' : 's'} placed today that haven't been dispatched yet.
+            </div>
+            <div style={{ fontSize: 12, color: t.text2, marginTop: 6 }}>
+              <strong style={{ color: t.text1 }}>{summary.totals?.bills || 0}</strong> bill{(summary.totals?.bills || 0) === 1 ? '' : 's'} ·{' '}
+              <strong style={{ color: t.text1, fontFamily: 'monospace' }}>{fmtG(summary.totals?.weight_g)}</strong> still at branch
+              {branchSummary && (
+                <span style={{ color: t.text3 }}> · {branchSummary}{moreBranches > 0 ? ` +${moreBranches} more` : ''}</span>
+              )}
+            </div>
+            <div style={{ fontSize: 11.5, color: t.text3, marginTop: 4 }}>
+              Bills booked today are expected at HO tomorrow. Either create the consignment now so they make tonight's truck, or unbook them if you placed the bid by mistake.
+            </div>
+          </>
+        )}
 
         <div style={{ display: 'flex', gap: 8, marginTop: 11, flexWrap: 'wrap' }}>
-          <button type="button" onClick={onOpenBookings}
-            style={{
-              background: t.gold, color: '#1a0a00',
-              border: 'none', borderRadius: 7,
-              padding: '7px 16px', fontSize: 12, fontWeight: 800,
-              letterSpacing: '.02em', cursor: 'pointer',
-              boxShadow: `0 2px 10px ${t.gold}55`,
-            }}>
-            Open Bookings →
-          </button>
+          {!isResolved && (
+            <button type="button" onClick={onOpenBookings}
+              style={{
+                background: t.gold, color: '#1a0a00',
+                border: 'none', borderRadius: 7,
+                padding: '7px 16px', fontSize: 12, fontWeight: 800,
+                letterSpacing: '.02em', cursor: 'pointer',
+                boxShadow: `0 2px 10px ${t.gold}55`,
+              }}>
+              Open Bookings →
+            </button>
+          )}
           <button type="button" onClick={onDismiss}
             style={{
-              background: 'transparent', color: t.text3,
-              border: `1px solid ${t.border2 || t.border}`,
+              background: isResolved ? `${accent}18` : 'transparent',
+              color: isResolved ? accent : t.text3,
+              border: `1px solid ${isResolved ? `${accent}55` : (t.border2 || t.border)}`,
               borderRadius: 7, padding: '7px 14px',
               fontSize: 12, fontWeight: 700, cursor: 'pointer',
             }}>
-            Dismiss for today
+            {isResolved ? 'Acknowledge ✓' : 'Dismiss for today'}
           </button>
         </div>
       </div>
