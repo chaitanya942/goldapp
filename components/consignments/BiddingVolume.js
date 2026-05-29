@@ -729,6 +729,58 @@ export default function BiddingVolume() {
     return true
   }
 
+  // Recovery action for booked-but-not-shipped: detach the bills and cancel
+  // the booking so ops can either re-attach against fresh incoming OR start
+  // fresh. Uses the existing cancel path which already releases booking_id
+  // on the attached purchases.
+  const unbookBooking = useCallback(async (id) => {
+    return updateStatus(id, 'cancelled', 'Unbooked: source bills still at_branch — released for re-booking')
+  }, [])
+
+  // Recovery action for booked-but-not-shipped: fire a consignment for the
+  // attached bills' source branch(es). Multi-branch bookings fan out into
+  // one consignment per source branch.
+  const createConsignmentForBooking = useCallback(async (bookingId) => {
+    try {
+      const r = await authedFetch(`/api/consignments?action=booking_bills_by_branch&booking_id=${bookingId}`)
+      const j = await r.json()
+      if (!r.ok || j.error) { showToast(j.error || 'Could not load bills', 'error'); return false }
+      const groups = j.data?.groups || []
+      const dispatchable = groups
+        .map(g => ({ branch_name: g.branch_name, bill_ids: (g.at_branch_bills || []).map(b => b.id) }))
+        .filter(g => g.bill_ids.length > 0)
+      if (dispatchable.length === 0) {
+        showToast('Every attached bill has already moved. Nothing to dispatch.', 'info')
+        return false
+      }
+      let created = 0
+      const errors = []
+      for (const g of dispatchable) {
+        const cr = await authedFetch('/api/consignments?action=create_consignment', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            purchase_ids:  g.bill_ids,
+            branch_name:   g.branch_name,
+            movement_type: 'EXTERNAL',
+          }),
+        })
+        const cj = await cr.json().catch(() => ({}))
+        if (!cr.ok || cj.error) errors.push(`${g.branch_name}: ${cj.error || `HTTP ${cr.status}`}`)
+        else created++
+      }
+      if (created > 0) {
+        showToast(`Created ${created} consignment${created === 1 ? '' : 's'}${errors.length ? ` (${errors.length} failed)` : ''}.`, errors.length ? 'error' : 'success')
+        await fetchAll(true)
+      } else {
+        showToast(`Couldn't create consignment: ${errors.join('; ')}`, 'error')
+      }
+      return created > 0
+    } catch (err) {
+      showToast(err?.message || 'Could not create consignment', 'error')
+      return false
+    }
+  }, [fetchAll])
+
   // Close a sub-10 g residual pipeline → folds into gain immediately.
   const closeBookingPipeline = async (id) => {
     const r = await authedFetch('/api/consignments?action=close_booking_pipeline', {
@@ -1320,6 +1372,8 @@ export default function BiddingVolume() {
             onUpdateStatus={updateStatus}
             onRequestCancel={(b) => setCancelTarget(b)}
             onClosePipeline={closeBookingPipeline}
+            onUnbook={unbookBooking}
+            onCreateConsignment={createConsignmentForBooking}
             onCreate={() => { setActiveTab('bidding') }}
           />
           <div style={{ fontSize: '10px', color: t.text4, textAlign: 'right' }}>
@@ -1772,7 +1826,18 @@ const partyColor = (name) => {
   return _bookingPartyCache[k]
 }
 
-function BookingsList({ t, card, bookings, onUpdateStatus, onRequestCancel, onClosePipeline, onCreate }) {
+// Dispatch-state visual map. Keyed by the per-booking flag the API computes
+// off attached bills' stock_status + source pickup_time + 2h grace. Surfaces
+// "booked but not shipped" risk to the bid desk in a single glance.
+const DISPATCH_META = {
+  ready:   { label: '✓ shipped',          tone: 'green'  },
+  partial: { label: '◐ partial dispatch',  tone: 'blue'   },
+  pending: { label: '◷ dispatch pending',  tone: 'gold'   },
+  at_risk: { label: '⚠ at risk',           tone: 'red'    },
+}
+
+function BookingsList({ t, card, bookings, onUpdateStatus, onRequestCancel, onClosePipeline, onUnbook, onCreateConsignment, onCreate }) {
+  const [actionBusy, setActionBusy] = useState(null)  // booking id currently mid-action
   const [hideCancelled, setHideCancelled] = useState(true)
   const visible       = hideCancelled ? bookings.filter(b => b.status !== 'cancelled') : bookings
   const activeRows    = visible.filter(b => b.status !== 'cancelled')
@@ -1943,6 +2008,73 @@ function BookingsList({ t, card, bookings, onUpdateStatus, onRequestCancel, onCl
                               fontFamily: 'monospace', fontWeight: 800, letterSpacing: '.02em',
                             }}>
                             ✓ settled
+                          </span>
+                        )}
+                        {/* Dispatch state — surfaces whether source bills have
+                            physically moved or are still at_branch (with an
+                            at_risk pill once we're past the source branch's
+                            pickup_time + 2h grace). Only on live bookings. */}
+                        {b.dispatch_state && DISPATCH_META[b.dispatch_state] && (() => {
+                          const meta = DISPATCH_META[b.dispatch_state]
+                          const c = t[meta.tone] || t.text2
+                          return (
+                            <span title={`${b.attached_bills_count} bill${b.attached_bills_count === 1 ? '' : 's'} attached · ${b.dispatch_state === 'at_risk' ? 'past pickup window' : ''}`}
+                              style={{
+                                background: `${c}18`, color: c,
+                                border: `1px solid ${c}40`,
+                                borderRadius: 99, padding: '1px 8px',
+                                fontFamily: 'monospace', fontWeight: 800, letterSpacing: '.02em',
+                                ...(b.dispatch_state === 'at_risk' ? { boxShadow: `0 0 0 2px ${c}10` } : {}),
+                              }}>
+                              {meta.label}
+                            </span>
+                          )
+                        })()}
+                        {/* At-risk recovery actions — single click each. The
+                            confirm gate is intentional friction; the auto-poll
+                            picks up the new state within 30 s of either. */}
+                        {b.dispatch_state === 'at_risk' && !isCancelled && (onUnbook || onCreateConsignment) && (
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, marginLeft: 4 }}>
+                            {onCreateConsignment && (
+                              <button type="button" disabled={actionBusy === b.id}
+                                onClick={async () => {
+                                  if (actionBusy) return
+                                  if (!window.confirm(`Create consignment(s) for the ${b.attached_bills_count} still-at-branch bill${b.attached_bills_count === 1 ? '' : 's'} of "${b.party}"? One consignment per source branch.`)) return
+                                  setActionBusy(b.id)
+                                  try { await onCreateConsignment(b.id) } finally { setActionBusy(null) }
+                                }}
+                                title="Fire EXTERNAL consignments now for every source branch with still-at-branch bills"
+                                style={{
+                                  background: `${t.gold}18`, color: t.gold,
+                                  border: `1px solid ${t.gold}55`,
+                                  borderRadius: 6, padding: '2px 9px',
+                                  fontSize: 10, fontWeight: 800, letterSpacing: '.03em',
+                                  textTransform: 'uppercase', cursor: actionBusy === b.id ? 'wait' : 'pointer',
+                                  opacity: actionBusy === b.id ? 0.6 : 1,
+                                }}>
+                                {actionBusy === b.id ? '…' : 'Create consignment'}
+                              </button>
+                            )}
+                            {onUnbook && (
+                              <button type="button" disabled={actionBusy === b.id}
+                                onClick={async () => {
+                                  if (actionBusy) return
+                                  if (!window.confirm(`Unbook "${b.party}"? The ${b.attached_bills_count} attached bill${b.attached_bills_count === 1 ? '' : 's'} will be released back to the picker and the booking will be cancelled.`)) return
+                                  setActionBusy(b.id)
+                                  try { await onUnbook(b.id) } finally { setActionBusy(null) }
+                                }}
+                                title="Cancel the booking and release the attached bills back into the picker"
+                                style={{
+                                  background: 'transparent', color: t.red,
+                                  border: `1px solid ${t.red}55`,
+                                  borderRadius: 6, padding: '2px 9px',
+                                  fontSize: 10, fontWeight: 800, letterSpacing: '.03em',
+                                  textTransform: 'uppercase', cursor: actionBusy === b.id ? 'wait' : 'pointer',
+                                  opacity: actionBusy === b.id ? 0.6 : 1,
+                                }}>
+                                Mark unbooked
+                              </button>
+                            )}
                           </span>
                         )}
                         {b.created_at && (

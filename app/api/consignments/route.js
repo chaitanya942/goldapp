@@ -986,19 +986,82 @@ export async function GET(req) {
     // sum after pipeline attachments" (attached_net_weight_g).
     if (rows && rows.length > 0) {
       const ids = rows.map(r => r.id)
+      // Also pull stock_status + source branch so we can compute the
+      // per-booking dispatch_state (ready / partial / pending / at_risk)
+      // — surfaces "booked but not shipped" risk to the bid desk.
       const { data: agg } = await supabase
         .from('purchases')
-        .select('booking_id, net_weight')
+        .select('booking_id, net_weight, stock_status, branch_name, current_branch')
         .in('booking_id', ids)
-      const sumByBooking = {}
-      const countByBooking = {}
+      const sumByBooking      = {}
+      const countByBooking    = {}
+      const billsByBooking    = {}
       for (const p of agg || []) {
         sumByBooking[p.booking_id]   = (sumByBooking[p.booking_id]   || 0) + Number(p.net_weight || 0)
         countByBooking[p.booking_id] = (countByBooking[p.booking_id] || 0) + 1
+        if (!billsByBooking[p.booking_id]) billsByBooking[p.booking_id] = []
+        billsByBooking[p.booking_id].push(p)
       }
+
+      // Pull pickup_time for every source branch we touch so at_risk can use
+      // the published pickup + 2h buffer as the cutoff. One query, keyed by
+      // branch name.
+      const srcBranchNames = [...new Set((agg || []).map(p => p.current_branch || p.branch_name).filter(Boolean))]
+      let branchPickupTimes = {}
+      if (srcBranchNames.length) {
+        const { data: bps } = await supabase
+          .from('branches')
+          .select('name, pickup_time')
+          .in('name', srcBranchNames)
+        for (const b of bps || []) branchPickupTimes[b.name] = b.pickup_time
+      }
+
+      // Now-in-IST as minutes-since-midnight for the at_risk cutoff.
+      const nowIst = new Date(Date.now() + 5.5 * 3600_000)
+      const nowMin = nowIst.getUTCHours() * 60 + nowIst.getUTCMinutes()
+
+      const MOVED = new Set(['in_consignment', 'at_ho'])
+
       for (const r of rows) {
         r.attached_net_weight_g = sumByBooking[r.id]   || 0
         r.attached_bills_count  = countByBooking[r.id] || 0
+
+        // dispatch_state: per attached bill, is it still at_branch or has the
+        // physical movement started? Only meaningful for active bookings —
+        // cancelled bookings have detached bills already.
+        const bills = billsByBooking[r.id] || []
+        if (r.status === 'cancelled' || r.status === 'fulfilled' || bills.length === 0) {
+          r.dispatch_state = null
+          continue
+        }
+        let moved = 0, atBranch = 0
+        let pastCutoffCount = 0, withCutoffCount = 0
+        for (const b of bills) {
+          if (MOVED.has(b.stock_status))     moved++
+          if (b.stock_status === 'at_branch') {
+            atBranch++
+            const src = b.current_branch || b.branch_name
+            const pt  = branchPickupTimes[src]
+            if (pt) {
+              const [ph, pm] = pt.split(':').map(Number)
+              if (Number.isFinite(ph)) {
+                withCutoffCount++
+                const cutoff = ph * 60 + (pm || 0) + 120   // pickup + 2h buffer
+                if (nowMin > cutoff) pastCutoffCount++
+              }
+            }
+          }
+        }
+        if (moved === bills.length) {
+          r.dispatch_state = 'ready'
+        } else if (moved > 0) {
+          r.dispatch_state = 'partial'
+        } else if (atBranch > 0 && withCutoffCount > 0 && pastCutoffCount === withCutoffCount) {
+          // Every at_branch bill we can time-check is past its pickup+2h cutoff
+          r.dispatch_state = 'at_risk'
+        } else {
+          r.dispatch_state = 'pending'
+        }
       }
     }
 
@@ -2923,6 +2986,29 @@ export async function POST(req) {
     }
 
     return Response.json({ data, message: 'Booking created.' })
+  }
+
+  // ── Bills attached to a booking, grouped by source branch ─────────────────
+  // Powers the "Create consignment" action on at_risk bookings — the UI needs
+  // to know which source branches to fire a consignment for and which bills
+  // belong to each.
+  if (action === 'booking_bills_by_branch') {
+    const bookingId = searchParams.get('booking_id')
+    if (!bookingId) return Response.json({ error: 'booking_id required' }, { status: 400 })
+    const { data: bills, error } = await supabase
+      .from('purchases')
+      .select('id, application_id, branch_name, current_branch, customer_name, net_weight, gross_weight, total_amount, stock_status, purchase_date')
+      .eq('booking_id', bookingId)
+    if (error) return Response.json({ error: error.message }, { status: 500 })
+    const byBranch = {}
+    for (const b of bills || []) {
+      const key = b.current_branch || b.branch_name
+      if (!byBranch[key]) byBranch[key] = { branch_name: key, bills: [], at_branch_bills: [], moved_bills: [] }
+      byBranch[key].bills.push(b)
+      if (b.stock_status === 'at_branch')      byBranch[key].at_branch_bills.push(b)
+      else if (b.stock_status === 'in_consignment' || b.stock_status === 'at_ho') byBranch[key].moved_bills.push(b)
+    }
+    return Response.json({ data: { groups: Object.values(byBranch) } })
   }
 
   if (action === 'update_booking_status') {
