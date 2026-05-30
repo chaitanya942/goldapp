@@ -1851,8 +1851,10 @@ export default function ConsignmentOverview() {
                     </>)}
 
                     {/* Move — explicit action button (also doubles as the
-                        pickup-time tooltip target so ops still see the schedule). */}
-                    <th style={{ ...thBase, textAlign: 'center' }}>Move</th>
+                        pickup-time tooltip target so ops still see the schedule).
+                        Hidden on the Bangalore tab — branch-level Move doesn't
+                        apply when dispatch happens at the hub level. */}
+                    {scopeTab === 'outside' && <th style={{ ...thBase, textAlign: 'center' }}>Move</th>}
                   </tr>
 
                   {/* Totals row pinned to the top inside <thead> — the whole
@@ -1894,9 +1896,6 @@ export default function ConsignmentOverview() {
                     </td>
                     <td colSpan={3} style={{ padding: '8px 8px', background: `${t.gold}14` }} />
                     </>)}
-                    {scopeTab === 'bangalore' && (
-                      <td style={{ padding: '8px 8px', background: `${t.gold}14` }} />
-                    )}
                   </tr>
                 </thead>
                 <tbody>
@@ -2020,20 +2019,25 @@ export default function ConsignmentOverview() {
                             Row click still works; this button restores the
                             visible CTA the ops team relied on. The pickup
                             time (was the previous column's data) now lives
-                            in the tooltip so it isn't lost. */}
-                        <td style={{ padding: tdPad, textAlign: 'center' }} onClick={e => e.stopPropagation()}>
-                          <button
-                            title={b.pickup_time ? `Pickup at ${b.pickup_time}` : 'No pickup time set'}
-                            onClick={() => {
-                              setConsignmentDeepLink({ branch: b.branch_name, region: b.region })
-                              setActiveNav('consignment-data')
-                            }}
-                            onMouseEnter={e => { e.currentTarget.style.background = `${t.gold}30`; e.currentTarget.style.borderColor = t.gold }}
-                            onMouseLeave={e => { e.currentTarget.style.background = `${t.gold}18`; e.currentTarget.style.borderColor = `${t.gold}50` }}
-                            style={{ background: `${t.gold}18`, border: `1px solid ${t.gold}50`, borderRadius: '7px', padding: '5px 12px', fontSize: '11px', color: t.gold, cursor: 'pointer', fontWeight: 600, whiteSpace: 'nowrap', transition: 'all .15s' }}>
-                            Move →
-                          </button>
-                        </td>
+                            in the tooltip so it isn't lost.
+                            Hidden on Bangalore: hub-level dispatch happens
+                            from the flashcards, branch-level move doesn't
+                            apply. */}
+                        {scopeTab === 'outside' && (
+                          <td style={{ padding: tdPad, textAlign: 'center' }} onClick={e => e.stopPropagation()}>
+                            <button
+                              title={b.pickup_time ? `Pickup at ${b.pickup_time}` : 'No pickup time set'}
+                              onClick={() => {
+                                setConsignmentDeepLink({ branch: b.branch_name, region: b.region })
+                                setActiveNav('consignment-data')
+                              }}
+                              onMouseEnter={e => { e.currentTarget.style.background = `${t.gold}30`; e.currentTarget.style.borderColor = t.gold }}
+                              onMouseLeave={e => { e.currentTarget.style.background = `${t.gold}18`; e.currentTarget.style.borderColor = `${t.gold}50` }}
+                              style={{ background: `${t.gold}18`, border: `1px solid ${t.gold}50`, borderRadius: '7px', padding: '5px 12px', fontSize: '11px', color: t.gold, cursor: 'pointer', fontWeight: 600, whiteSpace: 'nowrap', transition: 'all .15s' }}>
+                              Move →
+                            </button>
+                          </td>
+                        )}
 
                       </tr>
                     )
