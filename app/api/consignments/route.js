@@ -3284,6 +3284,236 @@ export async function POST(req) {
     return Response.json({ data, message: `Booking marked ${status}.` })
   }
 
+  // ── Hub Dispatch (Bangalore) ─────────────────────────────────────────────
+  // One-click create-consignment for a Bangalore hub. Replaces the outstation
+  // pick-branch / pick-bills / create-consignment / download-report /
+  // download-challan / preview-EWB / generate-EWB chain — the operator just
+  // clicks "Dispatch" on the hub card and we:
+  //
+  //   1. Resolve eligible bills: every at_branch bill belonging to the hub
+  //      itself OR to any leaf whose hub_branch_name = <hub>. Filtered to
+  //      crm_status='approved', is_deleted=false, booking_id IS NULL, and
+  //      not already audit-consumed.
+  //   2. Pre-stamp current_branch = <hub> on those bills so they pass the
+  //      same-branch validation in create_consignment_atomic. This is the
+  //      "Transaction Executive sweeps the hub" leg modelled as an instant
+  //      transfer — no separate INTERNAL consignment.
+  //   3. Build per-bill snapshots, generate the consignment numbers, and
+  //      create one EXTERNAL consignment via the atomic RPC.
+  //   4. Auto-stamp ops_confirmed_at + consignee_report_generated_at so the
+  //      sequential workflow gate releases — the operator can fire Challan
+  //      and EWB on demand from the Consignment Data page.
+  //   5. Flip the bills' stock_status to 'in_consignment' (the atomic RPC
+  //      leaves them at_branch; for hub dispatch we approve in the same
+  //      breath since there's no separate accounts-approval queue for it).
+  //
+  // Returns { consignment, summary } where summary is the branch-wise
+  // breakdown the UI rendered in the confirmation dialog.
+  if (action === 'create_hub_consignment') {
+    const { hub_branch_name } = body
+    if (!hub_branch_name) return Response.json({ error: 'hub_branch_name required' }, { status: 400 })
+
+    // 1) Resolve the hub + its leaves.
+    const { data: hubBranch, error: hubErr } = await supabase
+      .from('branches')
+      .select('*')
+      .eq('name', hub_branch_name)
+      .single()
+    if (hubErr || !hubBranch) return Response.json({ error: `Hub '${hub_branch_name}' not found` }, { status: 404 })
+    if (!hubBranch.is_hub)     return Response.json({ error: `'${hub_branch_name}' is not configured as a hub.` }, { status: 400 })
+    if (hubBranch.region !== 'Bangalore') return Response.json({ error: 'Hub dispatch is a Bangalore-only flow.' }, { status: 400 })
+
+    const { data: hubMembers } = await supabase
+      .from('branches')
+      .select('name')
+      .eq('region', 'Bangalore')
+      .or(`name.eq.${hub_branch_name},hub_branch_name.eq.${hub_branch_name}`)
+    const memberNames = (hubMembers || []).map(b => b.name)
+    if (memberNames.length === 0) return Response.json({ error: 'No branches resolved for this hub.' }, { status: 400 })
+
+    // 2) Discover eligible at_branch bills across the hub + its leaves.
+    const { data: bills, error: billsErr } = await supabase
+      .from('purchases')
+      .select('id, application_id, sl_no, branch_name, current_branch, customer_name, gross_weight, net_weight, total_amount, purchase_date, stock_status, crm_status, booking_id, audit_consumed_at')
+      .in('branch_name', memberNames)
+      .eq('stock_status', 'at_branch')
+      .eq('crm_status', 'approved')
+      .eq('is_deleted', false)
+      .is('booking_id', null)
+      .is('audit_consumed_at', null)
+    if (billsErr) return Response.json({ error: billsErr.message }, { status: 500 })
+    if (!bills || bills.length === 0) {
+      return Response.json({ error: 'No eligible at_branch bills to dispatch from this hub right now.' }, { status: 400 })
+    }
+    if (bills.length > 100) {
+      return Response.json({
+        error: `Too many bills (${bills.length}). One consignment can carry at most 100 bills — split into multiple dispatches.`,
+      }, { status: 400 })
+    }
+
+    // Quality validation — same gate as create_consignment.
+    const todayIso = istToday()
+    const qualityErrors = []
+    for (const p of bills) {
+      const tag = p.sl_no || `bill ${p.id}`
+      const wt = Number(p.gross_weight ?? p.net_weight ?? 0)
+      if (wt <= 0)                                            qualityErrors.push(`${tag}: weight is 0 or missing`)
+      if (Number(p.total_amount || 0) <= 0)                    qualityErrors.push(`${tag}: amount is 0 or missing`)
+      if (!p.customer_name || !String(p.customer_name).trim()) qualityErrors.push(`${tag}: customer name is missing`)
+      if (p.purchase_date && String(p.purchase_date).slice(0, 10) > todayIso) {
+        qualityErrors.push(`${tag}: purchase date is in the future (${p.purchase_date})`)
+      }
+    }
+    if (qualityErrors.length) {
+      return Response.json({
+        error: 'Some bills have incomplete data and cannot be dispatched. Fix in Purchases first:\n' + qualityErrors.slice(0, 10).join('\n') + (qualityErrors.length > 10 ? `\n…and ${qualityErrors.length - 10} more` : ''),
+      }, { status: 400 })
+    }
+
+    // Build branch-wise summary first so we can return it even on partial failure.
+    const summaryMap = {}
+    for (const b of bills) {
+      const src = b.branch_name
+      if (!summaryMap[src]) summaryMap[src] = { branch_name: src, bills: 0, gross_wt: 0, net_wt: 0, value: 0 }
+      summaryMap[src].bills    += 1
+      summaryMap[src].gross_wt += Number(b.gross_weight || 0)
+      summaryMap[src].net_wt   += Number(b.net_weight   || 0)
+      summaryMap[src].value    += Number(b.total_amount || 0)
+    }
+    const summary = Object.values(summaryMap).sort((a, b) => b.gross_wt - a.gross_wt)
+    const billIds = bills.map(b => b.id)
+
+    // 3) Pre-stamp current_branch on every leaf bill so create_consignment's
+    //    same-branch validation isn't a problem in future flows (and so
+    //    Branch Stock immediately shows the bills at the hub).
+    const leafBillIds = bills.filter(b => b.branch_name !== hub_branch_name).map(b => b.id)
+    if (leafBillIds.length > 0) {
+      const { error: stampErr } = await supabase
+        .from('purchases')
+        .update({ current_branch: hub_branch_name })
+        .in('id', leafBillIds)
+      if (stampErr) return Response.json({ error: `Failed to virtualize leaves at hub: ${stampErr.message}` }, { status: 500 })
+    }
+
+    // 4) Number generation.
+    const stateCode  = regionToStateCode(hubBranch.region) || 'KA'
+    const branchCode = autoBranchCode(hub_branch_name)
+    let tmpPrfNo = await generateTmpPrfNo(supabase, hub_branch_name)
+    let extNo = null, challan = null
+    const ext = await generateExternalNo(supabase, branchCode, stateCode)
+    extNo   = ext.extNo
+    challan = ext.challan
+
+    // GST snapshot (same logic as create_consignment).
+    const { data: cs } = await supabase.from('company_settings').select('*').single()
+    const igstRate = parseFloat(cs?.igst_rate ?? 3) || 3
+    const gstSnapshot = {
+      igst: igstRate,
+      cgst: parseFloat(cs?.cgst_rate ?? (igstRate / 2)) || (igstRate / 2),
+      sgst: parseFloat(cs?.sgst_rate ?? (igstRate / 2)) || (igstRate / 2),
+      hsn:  cs?.hsn_code || '71131910',
+      captured_at: new Date().toISOString(),
+    }
+    const sourceGstinKey  = `gstin_${stateCode.toLowerCase()}`
+    const sourceGstinSnap = cs?.[sourceGstinKey] || hubBranch.branch_gstin || cs?.gstin || null
+
+    // 5) Build snapshots + create the consignment.
+    const itemSnapshots = bills.map(p => ({
+      purchase_id:   p.id,
+      bill_no:       p.sl_no != null ? String(p.sl_no) : null,
+      gross_weight:  Number(p.gross_weight ?? 0) || 0,
+      net_weight:    Number(p.net_weight   ?? 0) || 0,
+      total_amount:  Number(p.total_amount ?? 0) || 0,
+      customer_name: p.customer_name || null,
+      purchase_date: p.purchase_date ? String(p.purchase_date).slice(0, 10) : null,
+    }))
+    const totalNetWt   = itemSnapshots.reduce((s, i) => s + i.net_weight,   0)
+    const totalGrossWt = itemSnapshots.reduce((s, i) => s + i.gross_weight, 0)
+    const totalAmount  = itemSnapshots.reduce((s, i) => s + i.total_amount, 0)
+
+    let rpcConsignment = null
+    let rpcErr         = null
+    const MAX_RETRIES  = 5
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+      const result = await supabase.rpc('create_consignment_atomic', {
+        p_payload: {
+          consignment_no:  challan,
+          tmp_prf_no:      tmpPrfNo,
+          external_no:     extNo,
+          challan_no:      challan,
+          branch_name:     hub_branch_name,
+          branch_code:     branchCode,
+          state_code:      stateCode,
+          movement_type:   'EXTERNAL',
+          dest_branch:     null,
+          total_bills:     billIds.length,
+          total_net_wt:    totalNetWt,
+          total_gross_wt:  totalGrossWt,
+          total_amount:    totalAmount,
+          gst_snapshot:    gstSnapshot,
+          created_by:      actorEmail,
+          added_by:        auth.user?.id || null,
+          purchase_ids:    billIds,
+          source_address:  hubBranch.address  || null,
+          source_city:     hubBranch.city     || null,
+          source_pin:      hubBranch.pin_code || null,
+          source_state:    hubBranch.state    || null,
+          source_region:   hubBranch.region   || null,
+          source_gstin:    sourceGstinSnap,
+          item_snapshots:  itemSnapshots,
+        },
+      })
+      rpcConsignment = result.data
+      rpcErr         = result.error
+      const isNumberCollision = rpcErr?.code === '23505' && /consignment_no|external_no|challan_no|tmp_prf/i.test(rpcErr.message || '')
+      if (!isNumberCollision || attempt >= MAX_RETRIES) break
+      await new Promise(r => setTimeout(r, 80 + Math.random() * 160))
+      tmpPrfNo = await generateTmpPrfNo(supabase, hub_branch_name)
+      const r2 = await generateExternalNo(supabase, branchCode, stateCode)
+      extNo   = r2.extNo
+      challan = r2.challan
+    }
+    if (rpcErr) return Response.json({ error: rpcErr.message }, { status: 500 })
+    if (!rpcConsignment) return Response.json({ error: 'Consignment creation returned no row.' }, { status: 500 })
+
+    // 6) Auto-stamp the workflow timestamps so Challan + EWB can fire without
+    //    the ops_confirmed / consignee_report sequential checks blocking.
+    //    Bangalore hub dispatch is operator-driven end-to-end, so these
+    //    intermediate confirmations don't model the workflow.
+    const nowIso = new Date().toISOString()
+    await supabase
+      .from('consignments')
+      .update({
+        ops_confirmed_at:              nowIso,
+        ops_confirmed_by:              auth.user?.id || null,
+        consignee_report_generated_at: nowIso,
+        approval_status:               'approved',
+        approved_at:                   nowIso,
+      })
+      .eq('id', rpcConsignment.id)
+
+    // 7) Flip bills' stock_status to in_consignment (the atomic RPC leaves
+    //    them at_branch). Mirrors the approve_consignment step which the
+    //    outstation flow runs separately.
+    const { error: flipErr } = await supabase
+      .from('purchases')
+      .update({ stock_status: 'in_consignment', dispatched_at: nowIso })
+      .in('id', billIds)
+    if (flipErr) console.warn('[create_hub_consignment] stock_status flip warning:', flipErr.message)
+
+    return Response.json({
+      success: true,
+      consignment: { ...rpcConsignment, ops_confirmed_at: nowIso, consignee_report_generated_at: nowIso },
+      summary,
+      totals: {
+        bills: billIds.length,
+        gross_wt: Number(totalGrossWt.toFixed(3)),
+        net_wt:   Number(totalNetWt.toFixed(3)),
+        value:    Number(totalAmount.toFixed(2)),
+      },
+    })
+  }
+
   // ── Cancel consignment (reverse flow) ────────────────────────────────────
   // Voids a consignment that was created by mistake. Bills return to source.
   // Blocked if any bill has since been re-consigned in a later movement.

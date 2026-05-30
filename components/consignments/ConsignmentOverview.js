@@ -92,6 +92,10 @@ export default function ConsignmentOverview() {
   // Clear hub selection when leaving the Bangalore tab so a returning user
   // starts fresh on the All Bangalore view.
   useEffect(() => { if (scopeTab !== 'bangalore') setActiveHub(null) }, [scopeTab])
+  // Hub dispatch flow — modal target + busy + result tracking.
+  const [dispatchHub,    setDispatchHub]    = useState(null)   // hub name when modal open
+  const [dispatchBusy,   setDispatchBusy]   = useState(false)
+  const [dispatchResult, setDispatchResult] = useState(null)   // success payload from API
   // Default sort: total net weight desc (largest stockholders first). Management
   // wants to see the biggest exposures at the top without clicking.
   const [sortKey,      setSortKey]      = useState('total_net_wt')
@@ -1052,11 +1056,198 @@ export default function ConsignmentOverview() {
                   <span><strong style={{ color: t.text2 }}>{stats.total_bills || 0}</strong> bills</span>
                   {(stats.leaves || 0) > 0 && <><span style={{ color: t.border2 }}>·</span><span><strong style={{ color: t.text3 }}>{stats.leaves}</strong> leaves</span></>}
                 </div>
+                {/* Dispatch button — fires the hub-wise consignment flow.
+                    Disabled when the hub has zero bills (nothing to dispatch). */}
+                {(stats.total_bills || 0) > 0 && (
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); setDispatchHub(hubName); setDispatchResult(null) }}
+                    style={{
+                      marginTop: 10,
+                      width: '100%',
+                      background: `${color}18`,
+                      border: `1px solid ${color}55`,
+                      borderRadius: 6,
+                      padding: '6px 10px',
+                      color, fontSize: 11, fontWeight: 800,
+                      letterSpacing: '.04em', textTransform: 'uppercase',
+                      cursor: 'pointer', transition: 'background .15s',
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.background = `${color}30` }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = `${color}18` }}>
+                    Dispatch →
+                  </button>
+                )}
               </div>
             )
           })}
         </div>
       )}
+
+      {/* ── Hub Dispatch Confirmation Modal ── */}
+      {dispatchHub && (() => {
+        const stats   = hubStats[dispatchHub] || {}
+        // Branch-wise breakdown for the confirmation table — every hub member
+        // (hub itself + leaves) with positive stock.
+        const members = scopeData
+          .filter(b => (b.branch_name === dispatchHub || b.hub_branch_name === dispatchHub) && ((b.today_bills || 0) + (b.older_bills || 0)) > 0)
+          .map(b => ({
+            branch_name: b.branch_name,
+            is_hub:      b.branch_name === dispatchHub,
+            bills:       (b.today_bills || 0) + (b.older_bills || 0),
+            gross_wt:    (b.today_net_wt || 0) + (b.older_net_wt || 0),    // approximation; API reports exact gross
+            value:       (b.today_gross_value || 0) + (b.older_gross_value || 0),
+          }))
+          .sort((a, b) => b.gross_wt - a.gross_wt)
+
+        const close = () => { if (!dispatchBusy) { setDispatchHub(null); setDispatchResult(null) } }
+        const onDispatch = async () => {
+          setDispatchBusy(true)
+          try {
+            const r = await authedFetch('/api/consignments?action=create_hub_consignment', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ hub_branch_name: dispatchHub }),
+            })
+            const j = await r.json()
+            if (!r.ok || j.error) {
+              alert(j.error || `Dispatch failed (HTTP ${r.status})`)
+              setDispatchBusy(false)
+              return
+            }
+            setDispatchResult(j)
+            fetchData(true)        // silent refresh so the cards update
+          } catch (err) {
+            alert(err?.message || 'Dispatch failed')
+          } finally {
+            setDispatchBusy(false)
+          }
+        }
+
+        return (
+          <div onClick={close}
+            style={{
+              position: 'fixed', inset: 0, background: 'rgba(0,0,0,.55)',
+              zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center',
+              padding: 20, backdropFilter: 'blur(2px)',
+            }}>
+            <div onClick={(e) => e.stopPropagation()}
+              style={{
+                background: t.card, borderRadius: 12,
+                border: `1px solid ${t.border}`,
+                maxWidth: 620, width: '100%', maxHeight: '85vh', overflow: 'auto',
+                boxShadow: '0 12px 48px rgba(0,0,0,.5)',
+              }}>
+              {/* Header */}
+              <div style={{ padding: '18px 22px', borderBottom: `1px solid ${t.border}` }}>
+                <div style={{ fontSize: 17, fontWeight: 700, color: t.text1 }}>
+                  Dispatch Hub · <span style={{ color: t.gold }}>{dispatchHub}</span>
+                </div>
+                <div style={{ fontSize: 12, color: t.text3, marginTop: 4 }}>
+                  {dispatchResult
+                    ? 'Consignment created. Generate EWB and download Delivery Challan from Consignment Data.'
+                    : 'One consignment will be created for the hub covering every assigned branch listed below. Review and confirm.'}
+                </div>
+              </div>
+
+              {/* Body */}
+              <div style={{ padding: '16px 22px' }}>
+                {dispatchResult ? (
+                  <>
+                    <div style={{
+                      background: `${t.green}10`, border: `1px solid ${t.green}40`,
+                      borderRadius: 8, padding: '12px 14px', marginBottom: 14,
+                    }}>
+                      <div style={{ fontSize: 13, color: t.green, fontWeight: 700, marginBottom: 4 }}>✓ Hub dispatched</div>
+                      <div style={{ fontSize: 12, color: t.text2, lineHeight: 1.6 }}>
+                        <strong>{dispatchResult.totals?.bills || 0}</strong> bills · <strong>{Number(dispatchResult.totals?.gross_wt || 0).toFixed(2)} g</strong> gross · <strong>{fmtINR(dispatchResult.totals?.value || 0)}</strong>
+                        <br />
+                        Consignment <code style={{ background: t.card2, padding: '1px 6px', borderRadius: 3, color: t.gold, fontFamily: 'monospace' }}>{dispatchResult.consignment?.consignment_no || dispatchResult.consignment?.tmp_prf_no}</code>
+                      </div>
+                    </div>
+                    <div style={{ fontSize: 12, color: t.text3, lineHeight: 1.6 }}>
+                      Next: open Consignment Data, find this consignment, and click <strong style={{ color: t.text2 }}>Generate Delivery Challan</strong> then <strong style={{ color: t.text2 }}>Generate EWB</strong> — the workflow stamps are already in place so both will fire without the intermediate steps.
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    {/* Branch-wise summary */}
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                      <thead>
+                        <tr style={{ borderBottom: `1px solid ${t.border}` }}>
+                          <th style={{ textAlign: 'left',  padding: '8px 6px', color: t.text4, fontSize: 10, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 700 }}>Branch</th>
+                          <th style={{ textAlign: 'right', padding: '8px 6px', color: t.text4, fontSize: 10, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 700 }}>Bills</th>
+                          <th style={{ textAlign: 'right', padding: '8px 6px', color: t.text4, fontSize: 10, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 700 }}>Net Wt (g)</th>
+                          <th style={{ textAlign: 'right', padding: '8px 6px', color: t.text4, fontSize: 10, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 700 }}>Value</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {members.length === 0 && (
+                          <tr><td colSpan={4} style={{ padding: '20px 8px', color: t.text4, textAlign: 'center', fontSize: 12 }}>
+                            No active stock under this hub right now.
+                          </td></tr>
+                        )}
+                        {members.map(m => (
+                          <tr key={m.branch_name} style={{ borderBottom: `1px solid ${t.border}` }}>
+                            <td style={{ padding: '7px 6px', color: t.text1 }}>
+                              {m.branch_name}
+                              {m.is_hub && <span style={{ marginLeft: 6, fontSize: 8, color: t.gold, background: `${t.gold}15`, padding: '1px 5px', borderRadius: 3, letterSpacing: '.06em', fontWeight: 700 }}>HUB</span>}
+                            </td>
+                            <td style={{ padding: '7px 6px', textAlign: 'right', color: t.text2, fontFamily: 'monospace', fontWeight: 600 }}>{m.bills}</td>
+                            <td style={{ padding: '7px 6px', textAlign: 'right', color: t.text2, fontFamily: 'monospace', fontWeight: 600 }}>{Number(m.gross_wt).toFixed(2)}</td>
+                            <td style={{ padding: '7px 6px', textAlign: 'right', color: t.blue, fontFamily: 'monospace', fontWeight: 700 }}>{fmtINR(m.value)}</td>
+                          </tr>
+                        ))}
+                        <tr style={{ background: `${t.gold}10`, borderTop: `2px solid ${t.gold}40` }}>
+                          <td style={{ padding: '8px 6px', color: t.gold, fontWeight: 800, fontSize: 11, letterSpacing: '.06em', textTransform: 'uppercase' }}>Σ Hub Total</td>
+                          <td style={{ padding: '8px 6px', textAlign: 'right', color: t.gold, fontFamily: 'monospace', fontWeight: 800 }}>{stats.total_bills || 0}</td>
+                          <td style={{ padding: '8px 6px', textAlign: 'right', color: t.gold, fontFamily: 'monospace', fontWeight: 800 }}>{Number(stats.total_net_wt || 0).toFixed(2)}</td>
+                          <td style={{ padding: '8px 6px', textAlign: 'right', color: t.blue, fontFamily: 'monospace', fontWeight: 800 }}>—</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                    <div style={{ fontSize: 11, color: t.text4, marginTop: 12, lineHeight: 1.5 }}>
+                      Eligible at_branch bills only. Bills already booked, audit-consumed, or sitting on another in-flight consignment are excluded. Exact totals are confirmed by the server on dispatch.
+                    </div>
+                  </>
+                )}
+              </div>
+
+              {/* Footer */}
+              <div style={{ padding: '14px 22px', borderTop: `1px solid ${t.border}`, display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                {dispatchResult ? (
+                  <>
+                    <button onClick={() => { close(); setActiveNav('consignment-data') }}
+                      style={{ background: t.gold, color: '#1a0a00', border: 'none', borderRadius: 7, padding: '8px 18px', fontSize: 12, fontWeight: 800, cursor: 'pointer', letterSpacing: '.02em' }}>
+                      Open Consignment Data →
+                    </button>
+                    <button onClick={close}
+                      style={{ background: 'transparent', color: t.text2, border: `1px solid ${t.border2}`, borderRadius: 7, padding: '8px 16px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
+                      Close
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button onClick={close} disabled={dispatchBusy}
+                      style={{ background: 'transparent', color: t.text3, border: `1px solid ${t.border2}`, borderRadius: 7, padding: '8px 16px', fontSize: 12, fontWeight: 700, cursor: dispatchBusy ? 'not-allowed' : 'pointer' }}>
+                      Cancel
+                    </button>
+                    <button onClick={onDispatch} disabled={dispatchBusy || members.length === 0}
+                      style={{
+                        background: dispatchBusy || members.length === 0 ? t.card2 : t.gold,
+                        color:      dispatchBusy || members.length === 0 ? t.text4  : '#1a0a00',
+                        border: 'none', borderRadius: 7, padding: '8px 20px',
+                        fontSize: 12, fontWeight: 800, cursor: dispatchBusy || members.length === 0 ? 'not-allowed' : 'pointer',
+                        letterSpacing: '.02em',
+                      }}>
+                      {dispatchBusy ? 'Dispatching…' : 'Dispatch Now'}
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        )
+      })()}
 
       {/* ── KPI Strip ── 8 tiles in two semantic groups (Today / Pending),
            bookended by Branches and Total Gross Wt. auto-fit lets the strip
