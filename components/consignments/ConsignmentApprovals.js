@@ -331,15 +331,17 @@ export default function ConsignmentApprovals() {
   }
 
   // Fires the actual cancel call to NIC/IRP via our cancel API.
-  async function confirmCancel() {
+  // forceLocal=true on EWB takes the admin escape hatch — clears local state
+  // without hitting NIC, surfaces the EWB-stays-live-on-NIC warning.
+  async function confirmCancel({ forceLocal = false } = {}) {
     if (!cancelModal) return
     const { type, consignment: c, reasonCode, remark } = cancelModal
     const path = type === 'ewb' ? '/api/eway-bill/cancel' : '/api/e-invoice/cancel'
-    setCancelModal(m => m ? { ...m, busy: true, error: null } : null)
+    setCancelModal(m => m ? { ...m, busy: true, error: null, nicDetails: null } : null)
     try {
       const r = await authedFetch(path, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ consignment_id: c.id, reason_code: reasonCode, remark }),
+        body: JSON.stringify({ consignment_id: c.id, reason_code: reasonCode, remark, ...(forceLocal ? { force_local: true } : {}) }),
       })
       const j = await r.json()
       // 409 from our cancel route = "NIC/IRP returned 107 — not recognised at
@@ -419,13 +421,33 @@ export default function ConsignmentApprovals() {
           }
         }
 
+        // Capture the rich NIC diagnostics the API now returns (nic_error_code,
+        // nic_error_text, ewb_age_hours, hint, can_force_local). The CancelModal
+        // renders them as a structured block instead of the bare error string.
         setCancelModal(m => m ? {
           ...m,
           busy: false,
           error: j.error || 'Cancel failed',
           suggestCreditNote: false,
           ewbPast24h: isEwbPast24h,
+          nicDetails: (j.nic_error_code || j.nic_error_text || j.ewb_age_hours != null || j.hint) ? {
+            code:     j.nic_error_code || null,
+            text:     j.nic_error_text || null,
+            ageHours: j.ewb_age_hours  ?? null,
+            hint:     j.hint           || null,
+          } : null,
+          canForceLocal: type === 'ewb' && !!j.can_force_local,
         } : null)
+        return
+      }
+      if (forceLocal && j.force_local) {
+        // Force-local success — EWB stays live on NIC, local state cleared.
+        // Use a sticky warning toast so the operator sees it (verifying on
+        // the gov portal is the next step).
+        showToast(j.warning || 'Local state cleared. The EWB was NOT cancelled on NIC — verify status on ewaybillgst.gov.in.', 'warning')
+        setCancelModal(null)
+        if (tab === 'cancellations') fetchCancellations(true)
+        else fetchHistory(tab, true)
         return
       }
       showToast(`${type === 'ewb' ? 'E-Way Bill' : 'E-Invoice'} cancelled.`, 'success')
@@ -2203,7 +2225,7 @@ function AddStateForm({ t, availableStates, busyKey, onAdd, onCancel }) {
 // we offer Credit Note (E-Invoice only) as the GST-compliant alternative.
 // ─────────────────────────────────────────────────────────────────────────────
 function CancelModal({ state, t, onChange, onClose, onConfirm, onCreditNote }) {
-  const { type, consignment: c, reasonCode, remark, busy, error, suggestCreditNote, ewbPast24h, verifyOnPortal } = state
+  const { type, consignment: c, reasonCode, remark, busy, error, suggestCreditNote, ewbPast24h, verifyOnPortal, nicDetails, canForceLocal, forceLocalConfirm } = state
   const isEwb = type === 'ewb'
   const docName = isEwb ? 'E-Way Bill' : 'E-Invoice'
   const docNo = isEwb ? c.eway_bill_no : c.irn
@@ -2255,9 +2277,69 @@ function CancelModal({ state, t, onChange, onClose, onConfirm, onCreditNote }) {
             </>
           )}
 
-          {error && (
+          {error && !nicDetails && (
             <div style={{ background: `${t.red}15`, border: `1px solid ${t.red}40`, borderRadius: '7px', padding: '10px 14px', fontSize: '11px', color: t.red, marginTop: '14px' }}>
               {error}
+            </div>
+          )}
+
+          {/* Structured NIC error block — fires when the cancel API returns
+              nic_error_code / nic_error_text / hint. Replaces the generic
+              "Failed to cancel E-Way Bill" red box with the actual reason
+              NIC rejected the request, plus EWB age + the 24h hint. */}
+          {nicDetails && (
+            <div style={{ background: `${t.red}10`, border: `1px solid ${t.red}50`, borderRadius: '8px', padding: '14px', marginTop: '14px' }}>
+              <div style={{ fontSize: '11px', color: t.red, fontWeight: 700, marginBottom: '8px', letterSpacing: '.04em', textTransform: 'uppercase' }}>
+                NIC rejected the cancellation
+              </div>
+              {nicDetails.code && (
+                <div style={{ display: 'flex', gap: '8px', marginBottom: '6px', fontSize: '11px', color: t.text2 }}>
+                  <span style={{ color: t.text4, minWidth: 76 }}>Error code:</span>
+                  <span style={{ fontFamily: 'monospace', color: t.text1 }}>{nicDetails.code}</span>
+                </div>
+              )}
+              {nicDetails.text && (
+                <div style={{ display: 'flex', gap: '8px', marginBottom: '6px', fontSize: '11px', color: t.text2, lineHeight: 1.5 }}>
+                  <span style={{ color: t.text4, minWidth: 76 }}>Reason:</span>
+                  <span style={{ color: t.text1, flex: 1 }}>{nicDetails.text}</span>
+                </div>
+              )}
+              {nicDetails.ageHours != null && (
+                <div style={{ display: 'flex', gap: '8px', marginBottom: '6px', fontSize: '11px', color: t.text2 }}>
+                  <span style={{ color: t.text4, minWidth: 76 }}>EWB age:</span>
+                  <span style={{ color: nicDetails.ageHours > 24 ? t.red : t.text1, fontWeight: nicDetails.ageHours > 24 ? 700 : 400 }}>
+                    {nicDetails.ageHours.toFixed(1)}h {nicDetails.ageHours > 24 ? '(past 24h window)' : ''}
+                  </span>
+                </div>
+              )}
+              {nicDetails.hint && (
+                <div style={{ background: `${t.orange}15`, border: `1px solid ${t.orange}40`, borderRadius: '6px', padding: '10px 12px', fontSize: '11px', color: t.text2, marginTop: '10px', lineHeight: 1.5 }}>
+                  <strong style={{ color: t.orange }}>What now: </strong>{nicDetails.hint}
+                </div>
+              )}
+              {!nicDetails.hint && error && (
+                <div style={{ fontSize: '10px', color: t.text3, marginTop: '8px', lineHeight: 1.5 }}>
+                  {error}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Force-cancel confirmation step — fires when the operator clicks
+              Force Cancel (Local). One last warning before we clear local
+              state without NIC's blessing. */}
+          {forceLocalConfirm && (
+            <div style={{ background: `${t.orange}10`, border: `2px solid ${t.orange}`, borderRadius: '8px', padding: '14px', marginTop: '14px' }}>
+              <div style={{ fontSize: '12px', color: t.orange, fontWeight: 700, marginBottom: '6px' }}>
+                ⚠ Force Cancel — clear local state without NIC
+              </div>
+              <div style={{ fontSize: '11px', color: t.text2, lineHeight: 1.6, marginBottom: '10px' }}>
+                This will mark the consignment as cancelled in our system, release the bills back to source, and clear the EWB fields. However the <strong>E-Way Bill {c.eway_bill_no} stays live on NIC</strong> until it expires naturally (or you cancel it manually on ewaybillgst.gov.in).
+              </div>
+              <div style={{ fontSize: '10px', color: t.text3, lineHeight: 1.5 }}>
+                Use this only when NIC keeps refusing (24h expired, GSTIN mismatch, NIC outage). The action is logged as <code style={{ fontFamily: 'monospace', color: t.orange }}>ewb_cancelled_local_only</code> for audit. <br/>
+                <strong>Cannot be undone.</strong>
+              </div>
             </div>
           )}
 
@@ -2310,21 +2392,43 @@ function CancelModal({ state, t, onChange, onClose, onConfirm, onCreditNote }) {
           )}
         </div>
 
-        <div style={{ padding: '14px 22px', borderTop: `1px solid ${t.border}`, display: 'flex', justifyContent: 'flex-end', gap: '8px', flexShrink: 0 }}>
-          <button onClick={onClose} disabled={busy}
-            style={{ background: 'transparent', border: `1px solid ${t.border}`, borderRadius: '6px', padding: '7px 16px', fontSize: '11px', color: t.text3, cursor: 'pointer' }}>
-            Close
-          </button>
-          {suggestCreditNote ? (
-            <button onClick={onCreditNote} disabled={busy}
-              style={{ background: t.orange, color: '#fff', border: 'none', borderRadius: '6px', padding: '7px 18px', fontSize: '11px', fontWeight: 700, cursor: busy ? 'not-allowed' : 'pointer' }}>
-              {busy ? 'Generating…' : 'Generate Credit Note'}
-            </button>
+        <div style={{ padding: '14px 22px', borderTop: `1px solid ${t.border}`, display: 'flex', justifyContent: 'flex-end', gap: '8px', flexShrink: 0, flexWrap: 'wrap' }}>
+          {forceLocalConfirm ? (
+            <>
+              <button onClick={() => onChange({ forceLocalConfirm: false })} disabled={busy}
+                style={{ background: 'transparent', border: `1px solid ${t.border}`, borderRadius: '6px', padding: '7px 16px', fontSize: '11px', color: t.text3, cursor: 'pointer' }}>
+                Back
+              </button>
+              <button onClick={() => onConfirm({ forceLocal: true })} disabled={busy}
+                style={{ background: t.orange, color: '#1a0a00', border: 'none', borderRadius: '6px', padding: '7px 18px', fontSize: '11px', fontWeight: 700, cursor: busy ? 'not-allowed' : 'pointer' }}>
+                {busy ? 'Force cancelling…' : 'Yes, force cancel locally'}
+              </button>
+            </>
           ) : (
-            <button onClick={onConfirm} disabled={busy}
-              style={{ background: t.red, color: '#fff', border: 'none', borderRadius: '6px', padding: '7px 18px', fontSize: '11px', fontWeight: 700, cursor: busy ? 'not-allowed' : 'pointer' }}>
-              {busy ? 'Cancelling…' : `Cancel ${docName}`}
-            </button>
+            <>
+              <button onClick={onClose} disabled={busy}
+                style={{ background: 'transparent', border: `1px solid ${t.border}`, borderRadius: '6px', padding: '7px 16px', fontSize: '11px', color: t.text3, cursor: 'pointer' }}>
+                Close
+              </button>
+              {canForceLocal && (
+                <button onClick={() => onChange({ forceLocalConfirm: true })} disabled={busy}
+                  title="Clear local state without hitting NIC. The EWB stays live on NIC until it expires."
+                  style={{ background: 'transparent', border: `1px solid ${t.orange}80`, color: t.orange, borderRadius: '6px', padding: '7px 14px', fontSize: '11px', fontWeight: 600, cursor: busy ? 'not-allowed' : 'pointer' }}>
+                  Force Cancel (Local)
+                </button>
+              )}
+              {suggestCreditNote ? (
+                <button onClick={onCreditNote} disabled={busy}
+                  style={{ background: t.orange, color: '#fff', border: 'none', borderRadius: '6px', padding: '7px 18px', fontSize: '11px', fontWeight: 700, cursor: busy ? 'not-allowed' : 'pointer' }}>
+                  {busy ? 'Generating…' : 'Generate Credit Note'}
+                </button>
+              ) : (
+                <button onClick={() => onConfirm()} disabled={busy}
+                  style={{ background: t.red, color: '#fff', border: 'none', borderRadius: '6px', padding: '7px 18px', fontSize: '11px', fontWeight: 700, cursor: busy ? 'not-allowed' : 'pointer' }}>
+                  {busy ? 'Cancelling…' : `Cancel ${docName}`}
+                </button>
+              )}
+            </>
           )}
         </div>
       </div>
