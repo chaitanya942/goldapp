@@ -542,6 +542,9 @@ export default function ConsignmentOverview() {
       .filter(b => {
         // Quick-filter chips applied on top of search/region. Each chip targets
         // a real operations question — "what needs attention now?".
+        // Bangalore tab doesn't render the chips, so its filter always reads
+        // as "all" regardless of any stale state from the Outside tab.
+        if (scopeTab === 'bangalore') return true
         const age = b.oldest_age_days || 0
         const moved = b.last_moved_days_ago
         switch (quickFilter) {
@@ -1075,7 +1078,11 @@ export default function ConsignmentOverview() {
 
       {/* ── KPI Strip ── 8 tiles in two semantic groups (Today / Pending),
            bookended by Branches and Total Gross Wt. auto-fit lets the strip
-           wrap into 4×2 on narrow viewports, 8×1 on wide. */}
+           wrap into 4×2 on narrow viewports, 8×1 on wide.
+           Hidden on the Bangalore tab — every Bangalore bill of the day
+           reaches HO the same day, so today/pending decomposition doesn't
+           model the workflow. */}
+      {scopeTab === 'outside' && (
       <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(auto-fit, minmax(160px, 1fr))', gap: '10px' }}>
 
         {/* Branches */}
@@ -1129,6 +1136,7 @@ export default function ConsignmentOverview() {
           <div style={{ fontSize: '10px', color: `${t.gold}80`, marginTop: '4px' }}>all stock gross</div>
         </div>
       </div>
+      )}
 
       {/* ── Search + quick filters + CSV export ── */}
       <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
@@ -1140,7 +1148,10 @@ export default function ConsignmentOverview() {
           </div>
         )}
 
-        {/* Quick filter chips — operations questions, not data dimensions */}
+        {/* Quick filter chips — operations questions, not data dimensions.
+            Hidden on the Bangalore tab — overdue / watch / no-movement
+            categories don't apply when every bill arrives at HO the same day. */}
+        {scopeTab === 'outside' && (
         <div style={{ display: 'flex', gap: '5px', flexWrap: 'wrap' }}>
           {[
             { key: 'all',          label: 'All',           color: t.text2  },
@@ -1167,6 +1178,7 @@ export default function ConsignmentOverview() {
             )
           })}
         </div>
+        )}
 
         <div style={{ marginLeft: isMobile ? 0 : 'auto', display: 'flex', gap: '8px', alignItems: 'center' }}>
           <span style={{ fontSize: '11px', color: t.text4 }}>
@@ -1456,7 +1468,10 @@ export default function ConsignmentOverview() {
                       Today's Value <SortIcon col="today_gross_value" />
                     </th>
 
-                    {/* Sortable: Pending */}
+                    {/* Sortable: Pending — hidden on Bangalore tab because
+                        every Bangalore bill reaches HO the same day, so a
+                        'pending' bucket has no operational meaning. */}
+                    {scopeTab === 'outside' && (<>
                     <th style={{ ...thBase, textAlign: 'right', cursor: 'pointer', color: sortKey === 'older_bills' ? t.orange : t.text4 }}
                         onClick={() => handleSort('older_bills')}>
                       Pending Bills <SortIcon col="older_bills" />
@@ -1481,6 +1496,7 @@ export default function ConsignmentOverview() {
                         onClick={() => handleSort('last_moved_days_ago')}>
                       Last Moved <SortIcon col="last_moved_days_ago" />
                     </th>
+                    </>)}
 
                     {/* Move — explicit action button (also doubles as the
                         pickup-time tooltip target so ops still see the schedule). */}
@@ -1514,6 +1530,7 @@ export default function ConsignmentOverview() {
                     <td style={{ padding: '8px 8px', textAlign: 'right', fontSize: '11px', color: t.blue, fontFamily: 'monospace', fontWeight: 700, background: `${t.gold}14` }}>
                       {grandTodayVal ? fmtINR(grandTodayVal) : '—'}
                     </td>
+                    {scopeTab === 'outside' && (<>
                     <td style={{ padding: '8px 8px', textAlign: 'right', fontSize: '13px', color: t.orange, fontFamily: 'monospace', fontWeight: 700, background: `${t.gold}14` }}>
                       {grandOlder || '—'}
                     </td>
@@ -1524,6 +1541,10 @@ export default function ConsignmentOverview() {
                       {grandOlderVal ? fmtINR(grandOlderVal) : '—'}
                     </td>
                     <td colSpan={3} style={{ padding: '8px 8px', background: `${t.gold}14` }} />
+                    </>)}
+                    {scopeTab === 'bangalore' && (
+                      <td style={{ padding: '8px 8px', background: `${t.gold}14` }} />
+                    )}
                   </tr>
                 </thead>
                 <tbody>
@@ -1603,6 +1624,7 @@ export default function ConsignmentOverview() {
                             : <span style={{ fontSize: '11px', color: t.text4 }}>—</span>}
                         </td>
 
+                        {scopeTab === 'outside' && (<>
                         {/* Pending Bills */}
                         <td style={{ padding: '11px 14px', textAlign: 'right' }}>
                           {hasPending
@@ -1638,6 +1660,7 @@ export default function ConsignmentOverview() {
                             ? <span style={{ fontSize: '11px', color: t.purple, background: `${t.purple}15`, borderRadius: '5px', padding: '2px 8px', fontWeight: 600, whiteSpace: 'nowrap' }}>{b.last_moved_days_ago}d ago</span>
                             : <span style={{ fontSize: '11px', color: t.text4 }}>never</span>}
                         </td>
+                        </>)}
 
                         {/* Move — explicit affordance for the deep-link nav.
                             Row click still works; this button restores the
@@ -1671,10 +1694,13 @@ export default function ConsignmentOverview() {
         </div>
       )}
 
-      {/* Footer note */}
-      <div style={{ fontSize: '10px', color: t.text4, textAlign: 'right' }}>
-        Pending = <code style={{ background: t.card2, padding: '1px 4px', borderRadius: '3px', color: t.text3 }}>stock_status = at_branch</code> before today · Age alert: &gt;3d orange, &gt;7d red
-      </div>
+      {/* Footer note — describes the Pending column, so only meaningful on
+          the Outside tab where the Pending columns render. */}
+      {scopeTab === 'outside' && (
+        <div style={{ fontSize: '10px', color: t.text4, textAlign: 'right' }}>
+          Pending = <code style={{ background: t.card2, padding: '1px 4px', borderRadius: '3px', color: t.text3 }}>stock_status = at_branch</code> before today · Age alert: &gt;3d orange, &gt;7d red
+        </div>
+      )}
 
       <style>{`
         @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
