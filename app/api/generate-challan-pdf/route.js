@@ -86,11 +86,43 @@ export async function GET(req) {
     const companySettings = { ...DEFAULT_COMPANY, ...(rawSettings || {}) }
     const logoBase64 = loadLogo()
 
+    // Hub-mode detection — if the source branch is a Bangalore hub and this
+    // is an EXTERNAL movement, the challan renders a branch-wise summary
+    // instead of the per-bill verification list. Hub status is read live
+    // from the branches table so a one-off correction in admin works
+    // without re-snapshotting.
+    let hubGroups = null
+    if (consignment.movement_type === 'EXTERNAL' && consignment.source_region === 'Bangalore') {
+      const { data: srcBranch } = await supabase
+        .from('branches')
+        .select('is_hub')
+        .eq('name', consignment.branch_name)
+        .maybeSingle()
+      if (srcBranch?.is_hub) {
+        // Roll items up by the bill's source branch (purchases.branch_name —
+        // each consignment_item carries this via the snapshot if present,
+        // otherwise we fall back to the live purchase row). The result is
+        // one row per branch with bills count, gross weight, and value.
+        const billMap = new Map()
+        for (const it of items || []) {
+          const src = it.branch_name || consignment.branch_name
+          if (!billMap.has(src)) billMap.set(src, { branch_name: src, is_hub: src === consignment.branch_name, bills: 0, gross_wt: 0, net_wt: 0, value: 0 })
+          const g = billMap.get(src)
+          g.bills    += 1
+          g.gross_wt += Number(it.gross_weight || 0)
+          g.net_wt   += Number(it.net_weight   || 0)
+          g.value    += Number(it.total_amount || 0)
+        }
+        hubGroups = [...billMap.values()].sort((a, b) => b.gross_wt - a.gross_wt)
+      }
+    }
+
     const pdf = generateDeliveryChallan({
       consignment,
       branch,
       companySettings,
       items: items || [],
+      hubGroups,
       logoBase64,
     })
 
