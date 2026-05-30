@@ -92,10 +92,11 @@ export default function ConsignmentOverview() {
   // Clear hub selection when leaving the Bangalore tab so a returning user
   // starts fresh on the All Bangalore view.
   useEffect(() => { if (scopeTab !== 'bangalore') setActiveHub(null) }, [scopeTab])
-  // Hub dispatch flow — modal target + busy + result tracking.
+  // Hub dispatch flow — modal target + per-step busy + per-step result.
   const [dispatchHub,    setDispatchHub]    = useState(null)   // hub name when modal open
-  const [dispatchBusy,   setDispatchBusy]   = useState(false)
-  const [dispatchResult, setDispatchResult] = useState(null)   // success payload from API
+  const [dispatchBusy,   setDispatchBusy]   = useState(null)   // 'challan' | 'ewb' | null
+  const [dispatchResult, setDispatchResult] = useState(null)   // consignment + summary from API
+  const [ewbResult,      setEwbResult]      = useState(null)   // { ewb_no, ewb_pdf_url? } once EWB generated
   // Default sort: total net weight desc (largest stockholders first). Management
   // wants to see the biggest exposures at the top without clicking.
   const [sortKey,      setSortKey]      = useState('total_net_wt')
@@ -1104,10 +1105,19 @@ export default function ConsignmentOverview() {
           }))
           .sort((a, b) => b.gross_wt - a.gross_wt)
 
-        const close = () => { if (!dispatchBusy) { setDispatchHub(null); setDispatchResult(null) } }
-        const onDispatch = async () => {
-          setDispatchBusy(true)
+        const close = () => {
+          if (dispatchBusy) return
+          setDispatchHub(null)
+          setDispatchResult(null)
+          setEwbResult(null)
+        }
+
+        // Step 1 — create the consignment, then stream-download the
+        // Delivery Challan PDF. One operator click drives both.
+        const onDownloadChallan = async () => {
+          setDispatchBusy('challan')
           try {
+            // a) Create the hub consignment.
             const r = await authedFetch('/api/consignments?action=create_hub_consignment', {
               method: 'POST', headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ hub_branch_name: dispatchHub }),
@@ -1115,15 +1125,66 @@ export default function ConsignmentOverview() {
             const j = await r.json()
             if (!r.ok || j.error) {
               alert(j.error || `Dispatch failed (HTTP ${r.status})`)
-              setDispatchBusy(false)
+              setDispatchBusy(null)
               return
             }
             setDispatchResult(j)
-            fetchData(true)        // silent refresh so the cards update
+            fetchData(true)
+
+            // b) Download the Delivery Challan PDF (existing endpoint,
+            //    now hub-aware so it renders the branch-wise template).
+            const cid = j.consignment?.id
+            if (cid) {
+              try {
+                const pdfRes = await authedFetch(`/api/generate-challan-pdf?id=${cid}`)
+                if (pdfRes.ok) {
+                  const blob = await pdfRes.blob()
+                  const a = document.createElement('a')
+                  a.href = URL.createObjectURL(blob)
+                  a.download = `DeliveryChallan-${j.consignment?.consignment_no || cid}.pdf`
+                  document.body.appendChild(a); a.click(); document.body.removeChild(a)
+                  URL.revokeObjectURL(a.href)
+                } else {
+                  const errJ = await pdfRes.json().catch(() => null)
+                  alert(errJ?.error || `Challan download failed (HTTP ${pdfRes.status}). Try again from Consignment Data.`)
+                }
+              } catch (dErr) {
+                alert('Challan download failed — try again from Consignment Data.')
+                console.error(dErr)
+              }
+            }
           } catch (err) {
             alert(err?.message || 'Dispatch failed')
           } finally {
-            setDispatchBusy(false)
+            setDispatchBusy(null)
+          }
+        }
+
+        // Step 2 — preview + generate EWB via ClearTax. Same call ops
+        // would make from the Consignment Data action button, just
+        // triggered inline so they don't have to navigate away.
+        const onGenerateEwb = async () => {
+          if (!dispatchResult?.consignment?.id) return
+          setDispatchBusy('ewb')
+          try {
+            const r = await authedFetch('/api/eway-bill/generate', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ consignment_id: dispatchResult.consignment.id }),
+            })
+            const j = await r.json()
+            if (!r.ok || j.error) {
+              alert(j.error || `EWB generation failed (HTTP ${r.status})`)
+              return
+            }
+            setEwbResult({
+              ewb_no:        j.ewb_no || j.data?.ewb_no || j.consignment?.eway_bill_no,
+              ewb_valid_to:  j.ewb_valid_to || j.data?.ewb_valid_to,
+            })
+            fetchData(true)
+          } catch (err) {
+            alert(err?.message || 'EWB generation failed')
+          } finally {
+            setDispatchBusy(null)
           }
         }
 
@@ -1138,41 +1199,61 @@ export default function ConsignmentOverview() {
               style={{
                 background: t.card, borderRadius: 12,
                 border: `1px solid ${t.border}`,
-                maxWidth: 620, width: '100%', maxHeight: '85vh',
+                maxWidth: 820, width: '100%', maxHeight: '90vh',
                 display: 'flex', flexDirection: 'column',
                 boxShadow: '0 12px 48px rgba(0,0,0,.5)',
                 overflow: 'hidden',
               }}>
               {/* Header — sticky at top */}
-              <div style={{ padding: '18px 22px', borderBottom: `1px solid ${t.border}`, flexShrink: 0 }}>
-                <div style={{ fontSize: 17, fontWeight: 700, color: t.text1 }}>
+              <div style={{ padding: '20px 26px', borderBottom: `1px solid ${t.border}`, flexShrink: 0 }}>
+                <div style={{ fontSize: 18, fontWeight: 700, color: t.text1 }}>
                   Dispatch Hub · <span style={{ color: t.gold }}>{dispatchHub}</span>
                 </div>
-                <div style={{ fontSize: 12, color: t.text3, marginTop: 4 }}>
+                <div style={{ fontSize: 12.5, color: t.text3, marginTop: 5 }}>
                   {dispatchResult
-                    ? 'Consignment created. Generate EWB and download Delivery Challan from Consignment Data.'
-                    : 'One consignment will be created for the hub covering every assigned branch listed below. Review and confirm.'}
+                    ? (ewbResult
+                        ? 'EWB generated and Delivery Challan downloaded. Hub is fully dispatched.'
+                        : 'Delivery Challan downloaded. Click below to preview and generate the E-Way Bill.')
+                    : 'One consignment will be created for the hub covering every assigned branch listed below. Click Download Delivery Challan to confirm.'}
                 </div>
               </div>
 
               {/* Body — only this section scrolls when content overflows */}
-              <div style={{ padding: '16px 22px', overflow: 'auto', flex: '1 1 auto', minHeight: 0 }}>
+              <div style={{ padding: '18px 26px', overflow: 'auto', flex: '1 1 auto', minHeight: 0 }}>
                 {dispatchResult ? (
                   <>
+                    {/* Step 1 result — challan downloaded */}
                     <div style={{
                       background: `${t.green}10`, border: `1px solid ${t.green}40`,
-                      borderRadius: 8, padding: '12px 14px', marginBottom: 14,
+                      borderRadius: 8, padding: '12px 14px', marginBottom: 12,
                     }}>
-                      <div style={{ fontSize: 13, color: t.green, fontWeight: 700, marginBottom: 4 }}>✓ Hub dispatched</div>
+                      <div style={{ fontSize: 13, color: t.green, fontWeight: 700, marginBottom: 4 }}>✓ Hub dispatched · Delivery Challan downloaded</div>
                       <div style={{ fontSize: 12, color: t.text2, lineHeight: 1.6 }}>
                         <strong>{dispatchResult.totals?.bills || 0}</strong> bills · <strong>{Number(dispatchResult.totals?.gross_wt || 0).toFixed(2)} g</strong> gross · <strong>{fmtINR(dispatchResult.totals?.value || 0)}</strong>
                         <br />
                         Consignment <code style={{ background: t.card2, padding: '1px 6px', borderRadius: 3, color: t.gold, fontFamily: 'monospace' }}>{dispatchResult.consignment?.consignment_no || dispatchResult.consignment?.tmp_prf_no}</code>
                       </div>
                     </div>
-                    <div style={{ fontSize: 12, color: t.text3, lineHeight: 1.6 }}>
-                      Next: open Consignment Data, find this consignment, and click <strong style={{ color: t.text2 }}>Generate Delivery Challan</strong> then <strong style={{ color: t.text2 }}>Generate EWB</strong> — the workflow stamps are already in place so both will fire without the intermediate steps.
-                    </div>
+
+                    {/* Step 2 result — EWB if generated, otherwise prompt for it */}
+                    {ewbResult ? (
+                      <div style={{
+                        background: `${t.green}10`, border: `1px solid ${t.green}40`,
+                        borderRadius: 8, padding: '12px 14px', marginBottom: 12,
+                      }}>
+                        <div style={{ fontSize: 13, color: t.green, fontWeight: 700, marginBottom: 4 }}>✓ E-Way Bill generated</div>
+                        <div style={{ fontSize: 12, color: t.text2, lineHeight: 1.6 }}>
+                          EWB <code style={{ background: t.card2, padding: '1px 6px', borderRadius: 3, color: t.gold, fontFamily: 'monospace' }}>{ewbResult.ewb_no || '—'}</code>
+                          {ewbResult.ewb_valid_to && (
+                            <> · valid until <strong>{ewbResult.ewb_valid_to}</strong></>
+                          )}
+                        </div>
+                      </div>
+                    ) : (
+                      <div style={{ fontSize: 12.5, color: t.text3, lineHeight: 1.7, padding: '4px 2px' }}>
+                        The workflow gate is already released — clicking <strong style={{ color: t.text2 }}>Preview and Generate EWB</strong> below will hit ClearTax / NIC directly. No further intermediate step is required.
+                      </div>
+                    )}
                   </>
                 ) : (
                   <>
@@ -1218,34 +1299,57 @@ export default function ConsignmentOverview() {
                 )}
               </div>
 
-              {/* Footer — sticky at bottom; always visible regardless of body scroll */}
-              <div style={{ padding: '14px 22px', borderTop: `1px solid ${t.border}`, display: 'flex', justifyContent: 'flex-end', gap: 8, flexShrink: 0, background: t.card }}>
+              {/* Footer — sticky at bottom; always visible regardless of body scroll.
+                  Three states wired by the button labels:
+                    - Review (no dispatchResult) → Cancel + Download Delivery Challan
+                    - Challan downloaded, no EWB yet → Close + Preview and Generate EWB
+                    - EWB done → Open Consignment Data + Close */}
+              <div style={{ padding: '16px 26px', borderTop: `1px solid ${t.border}`, display: 'flex', justifyContent: 'flex-end', gap: 10, flexShrink: 0, background: t.card }}>
                 {dispatchResult ? (
-                  <>
-                    <button onClick={() => { close(); setActiveNav('consignment-data') }}
-                      style={{ background: t.gold, color: '#1a0a00', border: 'none', borderRadius: 7, padding: '8px 18px', fontSize: 12, fontWeight: 800, cursor: 'pointer', letterSpacing: '.02em' }}>
-                      Open Consignment Data →
-                    </button>
-                    <button onClick={close}
-                      style={{ background: 'transparent', color: t.text2, border: `1px solid ${t.border2}`, borderRadius: 7, padding: '8px 16px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
-                      Close
-                    </button>
-                  </>
+                  ewbResult ? (
+                    <>
+                      <button onClick={() => { close(); setActiveNav('consignment-data') }}
+                        style={{ background: t.gold, color: '#1a0a00', border: 'none', borderRadius: 7, padding: '9px 20px', fontSize: 13, fontWeight: 800, cursor: 'pointer', letterSpacing: '.02em' }}>
+                        Open Consignment Data →
+                      </button>
+                      <button onClick={close}
+                        style={{ background: 'transparent', color: t.text2, border: `1px solid ${t.border2}`, borderRadius: 7, padding: '9px 18px', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>
+                        Close
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <button onClick={close} disabled={!!dispatchBusy}
+                        style={{ background: 'transparent', color: t.text3, border: `1px solid ${t.border2}`, borderRadius: 7, padding: '9px 18px', fontSize: 13, fontWeight: 700, cursor: dispatchBusy ? 'not-allowed' : 'pointer' }}>
+                        Close
+                      </button>
+                      <button onClick={onGenerateEwb} disabled={!!dispatchBusy}
+                        style={{
+                          background: dispatchBusy ? t.card2 : t.gold,
+                          color:      dispatchBusy ? t.text4 : '#1a0a00',
+                          border: 'none', borderRadius: 7, padding: '9px 22px',
+                          fontSize: 13, fontWeight: 800, cursor: dispatchBusy ? 'wait' : 'pointer',
+                          letterSpacing: '.02em',
+                        }}>
+                        {dispatchBusy === 'ewb' ? 'Generating EWB…' : 'Preview and Generate EWB'}
+                      </button>
+                    </>
+                  )
                 ) : (
                   <>
-                    <button onClick={close} disabled={dispatchBusy}
-                      style={{ background: 'transparent', color: t.text3, border: `1px solid ${t.border2}`, borderRadius: 7, padding: '8px 16px', fontSize: 12, fontWeight: 700, cursor: dispatchBusy ? 'not-allowed' : 'pointer' }}>
+                    <button onClick={close} disabled={!!dispatchBusy}
+                      style={{ background: 'transparent', color: t.text3, border: `1px solid ${t.border2}`, borderRadius: 7, padding: '9px 18px', fontSize: 13, fontWeight: 700, cursor: dispatchBusy ? 'not-allowed' : 'pointer' }}>
                       Cancel
                     </button>
-                    <button onClick={onDispatch} disabled={dispatchBusy || members.length === 0}
+                    <button onClick={onDownloadChallan} disabled={!!dispatchBusy || members.length === 0}
                       style={{
                         background: dispatchBusy || members.length === 0 ? t.card2 : t.gold,
                         color:      dispatchBusy || members.length === 0 ? t.text4  : '#1a0a00',
-                        border: 'none', borderRadius: 7, padding: '8px 20px',
-                        fontSize: 12, fontWeight: 800, cursor: dispatchBusy || members.length === 0 ? 'not-allowed' : 'pointer',
+                        border: 'none', borderRadius: 7, padding: '9px 22px',
+                        fontSize: 13, fontWeight: 800, cursor: dispatchBusy || members.length === 0 ? 'not-allowed' : 'pointer',
                         letterSpacing: '.02em',
                       }}>
-                      {dispatchBusy ? 'Dispatching…' : 'Dispatch Now'}
+                      {dispatchBusy === 'challan' ? 'Dispatching & downloading…' : 'Download Delivery Challan'}
                     </button>
                   </>
                 )}
