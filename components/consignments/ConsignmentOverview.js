@@ -1134,11 +1134,13 @@ export default function ConsignmentOverview() {
               style={{
                 background: t.card, borderRadius: 12,
                 border: `1px solid ${t.border}`,
-                maxWidth: 620, width: '100%', maxHeight: '85vh', overflow: 'auto',
+                maxWidth: 620, width: '100%', maxHeight: '85vh',
+                display: 'flex', flexDirection: 'column',
                 boxShadow: '0 12px 48px rgba(0,0,0,.5)',
+                overflow: 'hidden',
               }}>
-              {/* Header */}
-              <div style={{ padding: '18px 22px', borderBottom: `1px solid ${t.border}` }}>
+              {/* Header — sticky at top */}
+              <div style={{ padding: '18px 22px', borderBottom: `1px solid ${t.border}`, flexShrink: 0 }}>
                 <div style={{ fontSize: 17, fontWeight: 700, color: t.text1 }}>
                   Dispatch Hub · <span style={{ color: t.gold }}>{dispatchHub}</span>
                 </div>
@@ -1149,8 +1151,8 @@ export default function ConsignmentOverview() {
                 </div>
               </div>
 
-              {/* Body */}
-              <div style={{ padding: '16px 22px' }}>
+              {/* Body — only this section scrolls when content overflows */}
+              <div style={{ padding: '16px 22px', overflow: 'auto', flex: '1 1 auto', minHeight: 0 }}>
                 {dispatchResult ? (
                   <>
                     <div style={{
@@ -1212,8 +1214,8 @@ export default function ConsignmentOverview() {
                 )}
               </div>
 
-              {/* Footer */}
-              <div style={{ padding: '14px 22px', borderTop: `1px solid ${t.border}`, display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              {/* Footer — sticky at bottom; always visible regardless of body scroll */}
+              <div style={{ padding: '14px 22px', borderTop: `1px solid ${t.border}`, display: 'flex', justifyContent: 'flex-end', gap: 8, flexShrink: 0, background: t.card }}>
                 {dispatchResult ? (
                   <>
                     <button onClick={() => { close(); setActiveNav('consignment-data') }}
