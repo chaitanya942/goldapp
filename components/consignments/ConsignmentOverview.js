@@ -88,7 +88,7 @@ function TEPicker({ t, value, onChange, options, disabled }) {
   return (
     <div ref={rootRef}
       style={{
-        marginTop: 18, position: 'relative',
+        position: 'relative',
         padding: '14px 16px 14px',
         background: `linear-gradient(135deg, ${t.gold}06 0%, ${t.card2 || t.card} 60%)`,
         border: `1px solid ${value ? `${t.gold}40` : t.border}`,
@@ -1472,9 +1472,24 @@ export default function ConsignmentOverview() {
                   </>
                 ) : (
                   <>
-                    {/* Branch-wise summary — refined, premium feel. Subtle
-                        row hover, alternating zebra, refined typography. */}
+                    {/* Transaction Executive picker FIRST — required gate, so
+                        keeping it above the fold avoids ops scrolling past
+                        the table just to make their selection. Value column
+                        was retired from the modal: it lives on the Delivery
+                        Challan and the EWB where accounts needs it; on
+                        screen the operator just confirms volume and weight. */}
+                    <TEPicker
+                      t={t}
+                      value={dispatchTE}
+                      onChange={setDispatchTE}
+                      options={TRANSACTION_EXECUTIVES}
+                      disabled={!!dispatchBusy}
+                    />
+
+                    {/* Branch-wise summary — Source Branch / Bills / Gross Wt.
+                        Value is intentionally omitted (challan + EWB carry it). */}
                     <div style={{
+                      marginTop: 18,
                       border: `1px solid ${t.border}`,
                       borderRadius: 10,
                       overflow: 'hidden',
@@ -1485,13 +1500,12 @@ export default function ConsignmentOverview() {
                           <tr style={{ background: `${t.gold}06`, borderBottom: `1px solid ${t.border}` }}>
                             <th style={{ textAlign: 'left',  padding: '11px 14px', color: t.text3, fontSize: 9.5, letterSpacing: '.16em', textTransform: 'uppercase', fontWeight: 800 }}>Source Branch</th>
                             <th style={{ textAlign: 'right', padding: '11px 14px', color: t.text3, fontSize: 9.5, letterSpacing: '.16em', textTransform: 'uppercase', fontWeight: 800 }}>Bills</th>
-                            <th style={{ textAlign: 'right', padding: '11px 14px', color: t.text3, fontSize: 9.5, letterSpacing: '.16em', textTransform: 'uppercase', fontWeight: 800 }}>Gross Wt</th>
-                            <th style={{ textAlign: 'right', padding: '11px 14px', color: t.text3, fontSize: 9.5, letterSpacing: '.16em', textTransform: 'uppercase', fontWeight: 800 }}>Value</th>
+                            <th style={{ textAlign: 'right', padding: '11px 18px', color: t.text3, fontSize: 9.5, letterSpacing: '.16em', textTransform: 'uppercase', fontWeight: 800 }}>Gross Wt</th>
                           </tr>
                         </thead>
                         <tbody>
                           {members.length === 0 && (
-                            <tr><td colSpan={4} style={{ padding: '28px 14px', color: t.text4, textAlign: 'center', fontSize: 12.5, fontStyle: 'italic' }}>
+                            <tr><td colSpan={3} style={{ padding: '28px 14px', color: t.text4, textAlign: 'center', fontSize: 12.5, fontStyle: 'italic' }}>
                               No active stock under this hub right now.
                             </td></tr>
                           )}
@@ -1523,10 +1537,9 @@ export default function ConsignmentOverview() {
                                 </span>
                               </td>
                               <td style={{ padding: '10px 14px', textAlign: 'right', color: t.text2, fontFamily: 'var(--font-dm-mono), monospace', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{m.bills}</td>
-                              <td style={{ padding: '10px 14px', textAlign: 'right', color: t.text1, fontFamily: 'var(--font-dm-mono), monospace', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
+                              <td style={{ padding: '10px 18px', textAlign: 'right', color: t.text1, fontFamily: 'var(--font-dm-mono), monospace', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
                                 {Number(m.gross_wt).toFixed(2)}<span style={{ color: t.text4, fontSize: 10, marginLeft: 3, fontWeight: 500 }}>g</span>
                               </td>
-                              <td style={{ padding: '10px 14px', textAlign: 'right', color: t.blue, fontFamily: 'var(--font-dm-mono), monospace', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{fmtINR(m.value)}</td>
                             </tr>
                           ))}
                           {/* Hub total — distinct gold band */}
@@ -1536,28 +1549,16 @@ export default function ConsignmentOverview() {
                           }}>
                             <td style={{ padding: '12px 14px', color: t.gold, fontWeight: 800, fontSize: 10.5, letterSpacing: '.14em', textTransform: 'uppercase' }}>Σ Hub Total</td>
                             <td style={{ padding: '12px 14px', textAlign: 'right', color: t.gold, fontFamily: 'var(--font-dm-mono), monospace', fontWeight: 800, fontSize: 13.5, fontVariantNumeric: 'tabular-nums' }}>{stats.total_bills || 0}</td>
-                            <td style={{ padding: '12px 14px', textAlign: 'right', color: t.gold, fontFamily: 'var(--font-dm-mono), monospace', fontWeight: 800, fontSize: 13.5, fontVariantNumeric: 'tabular-nums' }}>
+                            <td style={{ padding: '12px 18px', textAlign: 'right', color: t.gold, fontFamily: 'var(--font-dm-mono), monospace', fontWeight: 800, fontSize: 13.5, fontVariantNumeric: 'tabular-nums' }}>
                               {Number(stats.total_gross_wt || stats.gross_wt || 0).toFixed(2)}<span style={{ color: `${t.gold}90`, fontSize: 10.5, marginLeft: 3, fontWeight: 600 }}>g</span>
                             </td>
-                            <td style={{ padding: '12px 14px', textAlign: 'right', color: t.gold, fontFamily: 'var(--font-dm-mono), monospace', fontWeight: 800 }}>—</td>
                           </tr>
                         </tbody>
                       </table>
                     </div>
                     <div style={{ fontSize: 11, color: t.text4, marginTop: 11, lineHeight: 1.55, fontStyle: 'italic' }}>
-                      Eligible at_branch bills only. Bills already booked, audit-consumed, or sitting on another in-flight consignment are excluded. Exact totals are confirmed by the server on dispatch.
+                      Eligible at_branch bills only. Bills already booked, audit-consumed, or sitting on another in-flight consignment are excluded. Exact totals — and per-branch value — appear on the Delivery Challan and EWB.
                     </div>
-
-                    {/* Transaction Executive picker — premium custom dropdown
-                        with avatar circles. Required before Download Delivery
-                        Challan fires. */}
-                    <TEPicker
-                      t={t}
-                      value={dispatchTE}
-                      onChange={setDispatchTE}
-                      options={TRANSACTION_EXECUTIVES}
-                      disabled={!!dispatchBusy}
-                    />
                   </>
                 )}
               </div>
