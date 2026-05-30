@@ -1924,7 +1924,30 @@ export default function ConsignmentOverview() {
                                     : urgentTier === 'watch'   ? t.orange
                                     : t.gold
                     return (
-                      <tr key={b.branch_name} className="cstock-flat-row" title={`Click to create a consignment from ${b.branch_name}`} style={{ borderBottom: `1px solid ${t.border}20`, background: urgentBg, cursor: 'pointer', ['--cstock-glow']: glowColor, ['--cstock-stripe']: stripeColor }} onClick={() => { setConsignmentDeepLink({ branch: b.branch_name, region: b.region }); setActiveNav('consignment-data') }} onMouseEnter={e => { if (!e.currentTarget.dataset.prefetched) { e.currentTarget.dataset.prefetched = '1'; const enc = encodeURIComponent(b.branch_name); prefetch(`/api/consignments?action=stock_in_branch&branch=${enc}`); prefetch(`/api/consignments?action=transfer_history&branch=${enc}`) } }}>
+                      <tr key={b.branch_name} className="cstock-flat-row"
+                        title={scopeTab === 'bangalore' ? undefined : `Click to create a consignment from ${b.branch_name}`}
+                        style={{
+                          borderBottom: `1px solid ${t.border}20`, background: urgentBg,
+                          cursor: scopeTab === 'bangalore' ? 'default' : 'pointer',
+                          ['--cstock-glow']: glowColor, ['--cstock-stripe']: stripeColor,
+                        }}
+                        onClick={() => {
+                          // Bangalore branches dispatch through their hub card;
+                          // a per-branch deep-link into Consignment Data isn't
+                          // meaningful on this tab. Click is a no-op here.
+                          if (scopeTab === 'bangalore') return
+                          setConsignmentDeepLink({ branch: b.branch_name, region: b.region })
+                          setActiveNav('consignment-data')
+                        }}
+                        onMouseEnter={e => {
+                          if (scopeTab === 'bangalore') return
+                          if (!e.currentTarget.dataset.prefetched) {
+                            e.currentTarget.dataset.prefetched = '1'
+                            const enc = encodeURIComponent(b.branch_name)
+                            prefetch(`/api/consignments?action=stock_in_branch&branch=${enc}`)
+                            prefetch(`/api/consignments?action=transfer_history&branch=${enc}`)
+                          }
+                        }}>
                         <td className="cstock-branch-cell">
                           <div className="cstock-branch-name" style={{ color: t.text1 }}>{b.branch_name}</div>
                           <div className="cstock-branch-region" style={{ color: rColor }}>{b.region}</div>
