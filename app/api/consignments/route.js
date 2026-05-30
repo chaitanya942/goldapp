@@ -2013,6 +2013,27 @@ export async function POST(req) {
       }, { status: 400 })
     }
 
+    // ── Pre-flight in-flight check ───────────────────────────────────────────
+    // Same predicate the RPC uses, run BEFORE generateExternalNo so a
+    // guaranteed-to-fail attempt does not burn a consignment_external_no_seq
+    // value (Postgres sequences are non-transactional — nextval is never
+    // rolled back). Without this, every retry leaves visible gaps in the
+    // challan numbering. Catches bills whose stock_status was manually
+    // flipped back to at_branch but whose parent consignment was never
+    // cancelled (the WG000325 / TUMKUR pattern).
+    const { data: inFlight } = await supabase
+      .from('consignment_items')
+      .select('purchase_id, consignments!inner(id, tmp_prf_no, consignment_no, status, eway_bill_no)')
+      .in('purchase_id', purchase_ids)
+      .not('consignments.status', 'in', '(cancelled,received)')
+    if (inFlight && inFlight.length) {
+      const parents = Array.from(new Set(inFlight.map(r => r.consignments?.consignment_no || r.consignments?.tmp_prf_no).filter(Boolean)))
+      return Response.json({
+        error: `${inFlight.length} bill(s) are still attached to an in-flight consignment (${parents.join(', ')}). Cancel that consignment first, then retry.`,
+        stuck_parents: parents,
+      }, { status: 409 })
+    }
+
     // Bill-quality validation. Bills with missing/zero weight or amount break
     // the EWB and E-Invoice payloads silently — NIC accepts the request but
     // the resulting document is unusable for transport. Catch it here.
@@ -3068,21 +3089,30 @@ export async function POST(req) {
   }
 
   // ── At-risk bookings summary ─────────────────────────────────────────────
-  // Aggregates today's bookings whose attached bills are still at_branch past
-  // the source branch's pickup_time + 2h grace. Powers the 7pm in-app banner
-  // shown to anyone with bidding access — listing party / weight / source
-  // branches so ops can immediately spot what's stuck.
+  // Aggregates every ACTIVE booking whose attached bills are still at_branch
+  // past the source branch's pickup_time + 2h grace, regardless of when the
+  // booking was placed. Powers the 7pm in-app banner shown to anyone with
+  // bidding access — listing party / weight / source branches so ops can
+  // immediately spot what's stuck.
   //
-  // Same at_risk logic as bidding_bookings (single-flag derivation); rolled
-  // up into a flat summary that the dashboard banner can render in one read.
+  // The original scope was today's bookings only, which silently buried
+  // older stuck bookings (e.g. TS-PANJAGUTTA bills that got booked days ago
+  // and never moved — the bills don't show in Section 4 because they're
+  // booking_id != NULL, and the banner never flagged them because the
+  // booking was from days ago). Lifting the date scope here means every
+  // multi-day stuck booking is now visible until ops resolves it (either
+  // via Create Consignment or Mark Unbooked, both already wired on the
+  // booking row).
+  //
+  // Same at_risk logic as bidding_bookings (single-flag derivation), with
+  // an extra days_stuck field per booking so the UI can sort oldest first.
   if (action === 'bidding_at_risk_summary') {
     const todayIst = istToday()
-    // Today's bookings (created_at IST) that are still active.
+    // ALL active bookings, no date filter. cancelled + fulfilled are
+    // terminal and excluded.
     const { data: bookings, error: bkErr } = await supabase
       .from('cal_quotas')
-      .select('id, party, weight, is_kl, status, created_at')
-      .gte('created_at', istStartOfDayIso(todayIst))
-      .lt('created_at',  istEndOfDayIso(todayIst))
+      .select('id, party, weight, is_kl, status, created_at, date')
       .neq('status', 'cancelled')
       .neq('status', 'fulfilled')
     if (bkErr) return Response.json({ error: bkErr.message }, { status: 500 })
@@ -3394,6 +3424,23 @@ export async function POST(req) {
     }
     const summary = Object.values(summaryMap).sort((a, b) => b.gross_wt - a.gross_wt)
     const billIds = bills.map(b => b.id)
+
+    // Pre-flight in-flight check — same predicate the RPC uses. Run BEFORE
+    // generateExternalNo (and BEFORE the current_branch pre-stamp) so a
+    // doomed attempt does not burn a consignment_external_no_seq value
+    // nor mutate state. See the regular create path for the full rationale.
+    const { data: inFlight } = await supabase
+      .from('consignment_items')
+      .select('purchase_id, consignments!inner(id, tmp_prf_no, consignment_no, status, eway_bill_no)')
+      .in('purchase_id', billIds)
+      .not('consignments.status', 'in', '(cancelled,received)')
+    if (inFlight && inFlight.length) {
+      const parents = Array.from(new Set(inFlight.map(r => r.consignments?.consignment_no || r.consignments?.tmp_prf_no).filter(Boolean)))
+      return Response.json({
+        error: `${inFlight.length} bill(s) at the hub are still attached to an in-flight consignment (${parents.join(', ')}). Cancel that consignment first, then retry.`,
+        stuck_parents: parents,
+      }, { status: 409 })
+    }
 
     // 3) Pre-stamp current_branch on every leaf bill so create_consignment's
     //    same-branch validation isn't a problem in future flows (and so
