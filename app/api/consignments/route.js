@@ -2665,8 +2665,35 @@ export async function POST(req) {
         }
       } catch (err) {
         console.error('[approve_cancellation] NIC EWB cancel failed:', err)
+        // Unpack the NIC diagnostic the ClearTax client attaches as err.debug.
+        // Without this, accounts sees "Failed to cancel E-Way Bill" — no code,
+        // no reason — and has no way to tell whether it's a 24h-window expiry
+        // (need Force Cancel Local), a GSTIN mismatch (need a manual fix in
+        // company_settings), a transient NIC outage (retry), or a real error
+        // on the EWB itself.
+        const debug         = err?.debug || {}
+        const nicResponse   = debug.cleartaxResponse
+        const govt          = (Array.isArray(nicResponse) ? nicResponse[0] : nicResponse)?.govt_response
+        const errorDetails  = govt?.ErrorDetails || govt?.errorDetails || nicResponse?.ErrorDetails || nicResponse?.errorDetails
+        const nicErrorCode  = Array.isArray(errorDetails) ? errorDetails.map(e => e?.error_code   || e?.errorCode).filter(Boolean).join(', ')   : null
+        const nicErrorMsg   = Array.isArray(errorDetails) ? errorDetails.map(e => e?.error_message || e?.errorMessage).filter(Boolean).join('; ') : null
+        const ewbAgeMs      = c.ewb_generated_at ? (Date.now() - new Date(c.ewb_generated_at).getTime()) : null
+        const ewbAgeHours   = ewbAgeMs != null ? Number((ewbAgeMs / 3600000).toFixed(1)) : null
+        let hint = null
+        if (ewbAgeHours != null && ewbAgeHours > 24) {
+          hint = `EWB ${c.eway_bill_no} is ${ewbAgeHours}h old — NIC only allows cancellation within 24 hours of generation. An admin can use Force Cancel (Local) on the Approvals → Approved tab row for ${c.tmp_prf_no} to clear the consignment without touching NIC; the EWB will expire on NIC naturally.`
+        }
+        const reasonLine = nicErrorMsg
+          ? `NIC said: ${nicErrorMsg}${nicErrorCode ? ` (code ${nicErrorCode})` : ''}.`
+          : (err?.message || 'unknown error')
         return Response.json({
-          error: `Could not cancel the E-Way Bill on NIC: ${err.message || 'unknown error'}. Nothing has been changed. Try again or escalate if NIC is down.`,
+          error:           `Could not cancel the E-Way Bill on NIC. ${reasonLine}${hint ? `\n\n${hint}` : ' Nothing has been changed. Try again or escalate if NIC is down.'}`,
+          nic_error_code:  nicErrorCode || null,
+          nic_error_text:  nicErrorMsg  || null,
+          nic_raw:         nicResponse  || null,
+          ewb_age_hours:   ewbAgeHours,
+          hint,
+          can_force_local: true,
         }, { status: 502 })
       }
     }
