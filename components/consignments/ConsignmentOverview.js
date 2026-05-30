@@ -1084,8 +1084,12 @@ export default function ConsignmentOverview() {
         </div>
       )}
 
-      {/* ── Hub Dispatch Confirmation Modal ── */}
-      {dispatchHub && (() => {
+      {/* ── Hub Dispatch Confirmation Modal ── Portalled to document.body
+          so position:fixed is anchored to the viewport, not whatever
+          ancestor (like the page-enter wrapper) happens to be the nearest
+          containing block. Without the portal the modal floated below
+          centre on slower paints. */}
+      {dispatchHub && typeof document !== 'undefined' && createPortal((() => {
         const stats   = hubStats[dispatchHub] || {}
         // Branch-wise breakdown for the confirmation table — every hub member
         // (hub itself + leaves) with positive stock.
@@ -1249,7 +1253,7 @@ export default function ConsignmentOverview() {
             </div>
           </div>
         )
-      })()}
+      })(), document.body)}
 
       {/* ── KPI Strip ── 8 tiles in two semantic groups (Today / Pending),
            bookended by Branches and Total Gross Wt. auto-fit lets the strip
