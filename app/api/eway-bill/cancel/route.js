@@ -18,14 +18,71 @@ export async function POST(req) {
   const auth = await requireAuth(req, { requiredRoles: ROLE_GROUPS.ADMIN })
   if (!auth.ok) return auth.response
   try {
-    const { consignment_id, reason_code, remark } = await req.json()
+    const { consignment_id, reason_code, remark, force_local } = await req.json()
     if (!consignment_id) return Response.json({ error: 'consignment_id required' }, { status: 400 })
 
     const { data: consignment, error } = await supabase
-      .from('consignments').select('eway_bill_no, branch_name, source_gstin').eq('id', consignment_id).single()
+      .from('consignments').select('id, tmp_prf_no, eway_bill_no, ewb_generated_at, branch_name, source_gstin, status').eq('id', consignment_id).single()
     if (error || !consignment) return Response.json({ error: 'Consignment not found' }, { status: 404 })
     if (!consignment.eway_bill_no) {
       return Response.json({ error: 'No E-Way Bill to cancel for this consignment' }, { status: 400 })
+    }
+
+    const actorEmail   = auth.profile?.email || auth.user?.email || 'unknown'
+    const cancelledEwb = consignment.eway_bill_no
+
+    // ── Force-local path ──────────────────────────────────────────────────────
+    // Admin-only escape hatch when NIC keeps refusing the cancel (24h window
+    // expired, already cancelled upstream, NIC outage, GSTIN mismatch we
+    // can't fix from our side). Clears the LOCAL state — consignment goes
+    // to cancelled, bills return to source, EWB fields cleared — without
+    // hitting NIC. The EWB stays in whatever state NIC has it (often
+    // expires naturally after 24h). Logged separately so accounts can
+    // reconcile later if needed.
+    if (force_local) {
+      const REJECTION_REASON = `Cancelled locally (NIC bypass): ${remark || 'cleared without NIC confirmation'}`
+
+      const { error: rpcErr } = await supabase.rpc('cancel_consignment_atomic', {
+        p_consignment_id: consignment_id,
+        p_reason:         REJECTION_REASON,
+        p_cancelled_by:   actorEmail,
+      })
+      if (rpcErr && rpcErr.code !== 'PGRST202') {
+        console.error('[ewb/cancel force_local] cancel_consignment_atomic failed:', rpcErr)
+        return Response.json({ error: `Local cancel failed: ${rpcErr.message}` }, { status: 500 })
+      }
+
+      const nowIso = new Date().toISOString()
+      await supabase.from('consignments')
+        .update({
+          eway_bill_no:                null,
+          ewb_valid_until:             null,
+          ewb_generated_at:            null,
+          ewb_generation_started_at:   null,
+          approval_status:             'rejected',
+          rejection_reason:            REJECTION_REASON,
+          approved_at:                 nowIso,
+          approved_by:                 actorEmail,
+        })
+        .eq('id', consignment_id)
+
+      await logConsignmentEvent(supabase, {
+        consignment_id,
+        event_type:  'ewb_cancelled_local_only',
+        actor_email: actorEmail,
+        details: {
+          ewb_no:         cancelledEwb,
+          remark:         remark || null,
+          warning:        'EWB was NOT cancelled on NIC — local state cleared only. Verify the EWB status manually on ewaybillgst.gov.in.',
+          tmp_prf_no:     consignment.tmp_prf_no,
+        },
+      })
+
+      return Response.json({
+        success: true,
+        force_local: true,
+        warning: 'Local state cleared. The E-Way Bill was NOT cancelled on NIC — verify its status on ewaybillgst.gov.in.',
+      })
     }
 
     const { data: branch } = await supabase
@@ -41,14 +98,49 @@ export async function POST(req) {
     const stateGstin = stateCode ? companySettings?.[`gstin_${stateCode.toLowerCase()}`] : null
     const gstinFor   = consignment.source_gstin || stateGstin || branch?.branch_gstin || process.env.WG_GSTIN
 
+    // Surface the EWB age — NIC won't accept cancellation past 24h.
+    const ewbAgeMs = consignment.ewb_generated_at ? (Date.now() - new Date(consignment.ewb_generated_at).getTime()) : null
+    const ewbAgeHours = ewbAgeMs != null ? (ewbAgeMs / 3600000) : null
+
     // NIC EWB cancel reason codes: 1=Duplicate, 2=Order Cancelled,
     // 3=Data Entry Mistake, 4=Others. Default to 1=Duplicate.
-    const result = await cancelEWayBill({
-      ewbNumber:     consignment.eway_bill_no,
-      reasonCode:    reason_code || '1',
-      remark:        remark      || 'Duplicate Entry',
-      gstinOverride: gstinFor,
-    })
+    let result
+    try {
+      result = await cancelEWayBill({
+        ewbNumber:     consignment.eway_bill_no,
+        reasonCode:    reason_code || '1',
+        remark:        remark      || 'Duplicate Entry',
+        gstinOverride: gstinFor,
+      })
+    } catch (clearTaxErr) {
+      // Surface every diagnostic detail attached to the error so the UI can
+      // show the actual NIC reason — used to be swallowed into the generic
+      // 'Failed to cancel E-Way Bill' message.
+      const debug = clearTaxErr?.debug || {}
+      const nicResponse = debug.cleartaxResponse
+      const govt = (Array.isArray(nicResponse) ? nicResponse[0] : nicResponse)?.govt_response
+      const errorDetails = govt?.ErrorDetails || govt?.errorDetails || nicResponse?.ErrorDetails || nicResponse?.errorDetails
+      const nicErrorCode = Array.isArray(errorDetails) ? errorDetails.map(e => e?.error_code || e?.errorCode).filter(Boolean).join(', ') : null
+      const nicErrorMsg  = Array.isArray(errorDetails) ? errorDetails.map(e => e?.error_message || e?.errorMessage).filter(Boolean).join('; ') : null
+
+      console.error('[ewb/cancel] ClearTax/NIC error:', clearTaxErr?.message, JSON.stringify(nicResponse))
+
+      // Helpful hint about the 24h window when applicable.
+      let hint = null
+      if (ewbAgeHours != null && ewbAgeHours > 24) {
+        hint = `This EWB is ${ewbAgeHours.toFixed(1)}h old — NIC only allows cancellation within 24 hours of generation. Use Force Cancel (Local) to clear our records; the EWB will expire on NIC naturally.`
+      }
+
+      return Response.json({
+        error:           clearTaxErr?.message || 'Failed to cancel E-Way Bill',
+        nic_error_code:  nicErrorCode || null,
+        nic_error_text:  nicErrorMsg  || null,
+        nic_raw:         nicResponse || null,
+        ewb_age_hours:   ewbAgeHours != null ? Number(ewbAgeHours.toFixed(1)) : null,
+        hint,
+        can_force_local: true,
+      }, { status: 502 })
+    }
 
     // 107 from NIC ("EWB not recognised") is NOT a proof of cancellation —
     // it can also mean the EWB exists at NIC under a different GSTIN, or
@@ -59,8 +151,6 @@ export async function POST(req) {
     // Now: refuse to touch local state. Surface a verification banner so
     // the operator confirms on ewaybillgst.gov.in before clearing anything.
     const ewbNotFound = !!result?.ewb_not_found
-    const cancelledEwb = consignment.eway_bill_no
-    const actorEmail   = auth.profile?.email || auth.user?.email || 'unknown'
 
     if (ewbNotFound) {
       await logConsignmentEvent(supabase, {
