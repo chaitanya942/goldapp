@@ -2234,11 +2234,42 @@ export async function POST(req) {
     // a third manual click in the workflow strip would be redundant, and the
     // sequential gates downstream still enforce: report → voucher/challan →
     // EWB. Fire-and-forget; failure to stamp doesn't void the creation.
+    //
+    // Also fold in the per-consignment Branch Contact override the operator
+    // entered on the create modal (replaces the EWB-No input that used to
+    // live there). Empty/missing → leave NULL so PDF generators fall back to
+    // branches.contact_person / contact_phone at render time. Done in the
+    // same fire-and-forget UPDATE to avoid an extra round-trip.
+    const postCreatePatch = {
+      ops_confirmed_at: new Date().toISOString(),
+      ops_confirmed_by: auth.user?.id || null,
+    }
+    const ccName  = (typeof body.branch_contact_name  === 'string') ? body.branch_contact_name.trim().slice(0, 80) : ''
+    const ccPhone = (typeof body.branch_contact_phone === 'string') ? body.branch_contact_phone.trim().slice(0, 24) : ''
+    if (ccName)  postCreatePatch.branch_contact_name  = ccName
+    if (ccPhone) postCreatePatch.branch_contact_phone = ccPhone
     supabase.from('consignments')
-      .update({ ops_confirmed_at: new Date().toISOString(), ops_confirmed_by: auth.user?.id || null })
+      .update(postCreatePatch)
       .eq('id', rpcConsignment.id)
       .then(() => {})
       .catch(() => {})
+
+    // Stick the contact back onto the branch row so the NEXT create from
+    // this branch pre-fills the modal with the last-used values, not the
+    // original branch default. Spec from ops: "we can't expect the team to
+    // re-type for every consignment." We only stick fields the operator
+    // actually provided — empty input → keep whatever's already on the
+    // branch. Fire-and-forget; this is a UX nicety, not a correctness gate.
+    const branchPatch = {}
+    if (ccName)  branchPatch.contact_person = ccName
+    if (ccPhone) branchPatch.contact_phone  = ccPhone
+    if (Object.keys(branchPatch).length > 0) {
+      supabase.from('branches')
+        .update(branchPatch)
+        .eq('name', branch_name)
+        .then(() => {})
+        .catch(() => {})
+    }
 
     return Response.json({ data: rpcConsignment })
   }
@@ -3540,16 +3571,38 @@ export async function POST(req) {
     //    Bangalore hub dispatch is operator-driven end-to-end, so these
     //    intermediate confirmations don't model the workflow.
     const nowIso = new Date().toISOString()
+    // Fold the Branch Contact override into the same UPDATE — saves a round
+    // trip vs a follow-up patch. Empty → NULL → PDFs fall back to live
+    // branches.contact_person / contact_phone at render time.
+    const hubPatch = {
+      ops_confirmed_at:              nowIso,
+      ops_confirmed_by:              auth.user?.id || null,
+      consignee_report_generated_at: nowIso,
+      approval_status:               'approved',
+      approved_at:                   nowIso,
+    }
+    const hubCName  = (typeof body.branch_contact_name  === 'string') ? body.branch_contact_name.trim().slice(0, 80) : ''
+    const hubCPhone = (typeof body.branch_contact_phone === 'string') ? body.branch_contact_phone.trim().slice(0, 24) : ''
+    if (hubCName)  hubPatch.branch_contact_name  = hubCName
+    if (hubCPhone) hubPatch.branch_contact_phone = hubCPhone
     await supabase
       .from('consignments')
-      .update({
-        ops_confirmed_at:              nowIso,
-        ops_confirmed_by:              auth.user?.id || null,
-        consignee_report_generated_at: nowIso,
-        approval_status:               'approved',
-        approved_at:                   nowIso,
-      })
+      .update(hubPatch)
       .eq('id', rpcConsignment.id)
+
+    // Stick the contact back onto the hub branch so the next hub dispatch
+    // pre-fills with the last-used values. Same rationale as the outstation
+    // flow — ops shouldn't have to re-type for every consignment.
+    const hubBranchPatch = {}
+    if (hubCName)  hubBranchPatch.contact_person = hubCName
+    if (hubCPhone) hubBranchPatch.contact_phone  = hubCPhone
+    if (Object.keys(hubBranchPatch).length > 0) {
+      supabase.from('branches')
+        .update(hubBranchPatch)
+        .eq('name', hub_branch_name)
+        .then(() => {})
+        .catch(() => {})
+    }
 
     // 7) Flip bills' stock_status to in_consignment (the atomic RPC leaves
     //    them at_branch). Mirrors the approve_consignment step which the

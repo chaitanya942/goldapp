@@ -91,6 +91,12 @@ export default function ConsignmentData() {
   const [destSearch,          setDestSearch]         = useState('')
   const [destOpen,            setDestOpen]           = useState(false)
   const [ewayBillNo,          setEwayBillNo]         = useState('')
+  // Per-consignment override of branches.contact_person / contact_phone.
+  // Seeded from the branch row when the modal opens; operator can edit before
+  // creating. Whatever they confirm is what the Delivery Challan / Issue
+  // Voucher prints. Null/empty → fall back to branch defaults at generation.
+  const [branchContactName,   setBranchContactName]  = useState('')
+  const [branchContactPhone,  setBranchContactPhone] = useState('')
   const [showModal,           setShowModal]          = useState(false)
   const [lastConsignment,     setLastConsignment]    = useState(null)
   // Re-render every 60s so the "approval pending · 5m" timer in the ALL
@@ -383,7 +389,13 @@ export default function ConsignmentData() {
           branch_name: nav.branch,
           movement_type: moveType,
           dest_branch: moveType === 'INTERNAL' ? destBranch : null,
-          eway_bill_no: ewayBillNo || null,
+          // EWB is always generated downstream from the preview now — input
+          // for it was removed when Branch Contact replaced it on the modal.
+          eway_bill_no: null,
+          // Per-consignment Branch Contact override. Empty strings normalise
+          // to null so the PDF generator falls back to the live branch row.
+          branch_contact_name:  branchContactName.trim()  || null,
+          branch_contact_phone: branchContactPhone.trim() || null,
         }),
       })
       const result = await res.json()
@@ -396,6 +408,7 @@ export default function ConsignmentData() {
       setSelected(new Set())
       setShowModal(false)
       setDestBranch(''); setEwayBillNo('')
+      setBranchContactName(''); setBranchContactPhone('')
       await fetchAll()
       // Return to Active Consignments list with the new one highlighted
       setNav(null)
@@ -773,7 +786,15 @@ export default function ConsignmentData() {
             <span style={{ fontSize: '12px', color: t.text3 }}>{fmtWt(totalSelWt)}</span>
             <span style={{ fontSize: '12px', color: t.text3 }}>₹{fmt(Math.round(totalSelAmt))}</span>
             <div style={{ marginLeft: 'auto', display: 'flex', gap: '8px' }}>
-              <button onClick={() => { setShowModal(true); fetchPreviewNumbers() }} style={btnGold}>
+              <button onClick={() => {
+                  // Seed the Branch Contact name + phone from the branch's
+                  // configured default. Operator can edit before confirming.
+                  const br = branches.find(b => b.name === nav?.branch)
+                  setBranchContactName(br?.contact_person || '')
+                  setBranchContactPhone(br?.contact_phone  || '')
+                  setShowModal(true)
+                  fetchPreviewNumbers()
+                }} style={btnGold}>
                 Create Consignment →
               </button>
               <button onClick={() => setSelected(new Set())} style={btnOut}>Clear</button>
@@ -1847,16 +1868,32 @@ export default function ConsignmentData() {
                     </div>
                   </div>
 
-                  {/* E-Way Bill input — Branch → HO only */}
-                  {isExternal && (
-                    <div style={{ marginBottom: '14px' }}>
-                      <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', marginBottom: '6px', fontWeight: 700 }}>
-                        E-Way Bill No <span style={{ textTransform: 'none', fontWeight: 400, color: t.text4 }}>(optional — accounts will generate after approval)</span>
-                      </div>
-                      <input value={ewayBillNo} onChange={e => setEwayBillNo(e.target.value)} placeholder="Leave blank — accounts generates from preview"
-                        style={{ width: '100%', background: t.card2, border: `1px solid ${t.border2}`, borderRadius: '9px', padding: '11px 14px', fontSize: '13px', color: t.text1, outline: 'none', boxSizing: 'border-box' }} />
+                  {/* Branch Contact override — prints on Delivery Challan +
+                      Issue Voucher. Pre-seeded from the branch's configured
+                      contact, but operations can edit so the person actually
+                      handling THIS shipment is on the paperwork (not just the
+                      branch manager). Empty → fall back to branch defaults at
+                      PDF-generation time. */}
+                  <div style={{ marginBottom: '14px' }}>
+                    <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', marginBottom: '6px', fontWeight: 700 }}>
+                      Branch Contact <span style={{ textTransform: 'none', fontWeight: 400, color: t.text4 }}>(prints on {moveType === 'INTERNAL' ? 'Issue Voucher' : 'Delivery Challan'})</span>
                     </div>
-                  )}
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      <input
+                        value={branchContactName}
+                        onChange={e => setBranchContactName(e.target.value)}
+                        placeholder="Name"
+                        style={{ flex: 1.4, minWidth: 0, background: t.card2, border: `1px solid ${t.border2}`, borderRadius: '9px', padding: '11px 14px', fontSize: '13px', color: t.text1, outline: 'none', boxSizing: 'border-box' }}
+                      />
+                      <input
+                        value={branchContactPhone}
+                        onChange={e => setBranchContactPhone(e.target.value.replace(/[^\d+ ]/g, '').slice(0, 18))}
+                        placeholder="Phone"
+                        inputMode="tel"
+                        style={{ flex: 1, minWidth: 0, background: t.card2, border: `1px solid ${t.border2}`, borderRadius: '9px', padding: '11px 14px', fontSize: '13px', color: t.text1, outline: 'none', boxSizing: 'border-box', fontFamily: 'monospace' }}
+                      />
+                    </div>
+                  </div>
                 </>
               )
             })()}
