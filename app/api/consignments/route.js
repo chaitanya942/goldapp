@@ -2676,17 +2676,24 @@ export async function POST(req) {
         // Note: the property is NON-enumerable so JSON.stringify(err) hides
         // it. Read it directly. Earlier code looked at err.debug.* and
         // always got undefined.
-        const nicResponse  = err?.cleartaxResponse
-        const firstResp    = Array.isArray(nicResponse) ? nicResponse[0] : nicResponse
-        const govt         = firstResp?.govt_response
-        const errorDetails =
+        const nicResponse = err?.cleartaxResponse
+        const firstResp   = Array.isArray(nicResponse) ? nicResponse[0] : nicResponse
+        const govt        = firstResp?.govt_response
+        // ClearTax returns errorDetails as EITHER an array (NIC's preferred
+        // shape when forwarding NIC's own response) OR a single object (when
+        // ClearTax does its own pre-NIC validation and bounces the payload).
+        // Normalize to an array so the same map() works on both.
+        const rawDetails =
           govt?.ErrorDetails || govt?.errorDetails ||
           firstResp?.ErrorDetails || firstResp?.errorDetails ||
           nicResponse?.ErrorDetails || nicResponse?.errorDetails
-        const nicErrorCode = Array.isArray(errorDetails)
+        const errorDetails = rawDetails == null ? null
+          : Array.isArray(rawDetails) ? rawDetails
+          : [rawDetails]
+        const nicErrorCode = errorDetails
           ? errorDetails.map(e => e?.error_code   || e?.errorCode).filter(Boolean).join(', ')
           : (govt?.error_code || firstResp?.error_code || null)
-        const nicErrorMsg  = Array.isArray(errorDetails)
+        const nicErrorMsg  = errorDetails
           ? errorDetails.map(e => e?.error_message || e?.errorMessage || e?.message).filter(Boolean).join('; ')
           : (govt?.info || govt?.status_desc || firstResp?.message || firstResp?.status_desc || null)
         const ewbAgeMs     = c.ewb_generated_at ? (Date.now() - new Date(c.ewb_generated_at).getTime()) : null
