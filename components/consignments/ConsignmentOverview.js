@@ -490,18 +490,23 @@ export default function ConsignmentOverview() {
     for (const hubName of hubs) {
       // hub itself + every leaf pointing to it
       const members = scopeData.filter(b => b.branch_name === hubName || b.hub_branch_name === hubName)
-      const today_bills  = members.reduce((s, b) => s + (b.today_bills   || 0), 0)
-      const older_bills  = members.reduce((s, b) => s + (b.older_bills   || 0), 0)
-      const today_net_wt = members.reduce((s, b) => s + (b.today_net_wt  || 0), 0)
-      const older_net_wt = members.reduce((s, b) => s + (b.older_net_wt  || 0), 0)
+      const today_bills    = members.reduce((s, b) => s + (b.today_bills    || 0), 0)
+      const older_bills    = members.reduce((s, b) => s + (b.older_bills    || 0), 0)
+      const today_net_wt   = members.reduce((s, b) => s + (b.today_net_wt   || 0), 0)
+      const older_net_wt   = members.reduce((s, b) => s + (b.older_net_wt   || 0), 0)
+      const total_gross_wt = members.reduce((s, b) => s + (b.total_gross_wt || 0), 0)
       out[hubName] = {
         branches:        members.length,
         leaves:          members.length - 1,   // minus the hub itself
         active_branches: members.filter(b => (b.today_bills || 0) + (b.older_bills || 0) > 0).length,
         today_bills, older_bills, today_net_wt, older_net_wt,
-        total_bills:  today_bills + older_bills,
-        total_net_wt: today_net_wt + older_net_wt,
-        gross_wt:     members.reduce((s, b) => s + (b.total_gross_wt || 0), 0),
+        total_bills:   today_bills + older_bills,
+        total_net_wt:  today_net_wt + older_net_wt,
+        // Bangalore's headline weight is GROSS (matches the operational
+        // number ops tracks). Cards read total_gross_wt; net_wt fields
+        // are kept around so the table sort keys still work.
+        total_gross_wt,
+        gross_wt: total_gross_wt,
       }
     }
     return out
@@ -974,14 +979,16 @@ export default function ConsignmentOverview() {
           margin: isMobile ? '0 -16px' : 0,
           padding: isMobile ? '0 16px 4px' : '0 0 4px',
         }}>
-          {/* All Bangalore — sum across every Bangalore row. Click clears the hub filter. */}
+          {/* All Bangalore — sum across every Bangalore row. Click clears the hub filter.
+              Weight shown is GROSS, not net — matches the operational number ops
+              tracks on the Bangalore same-day pickup model. */}
           {(() => {
             const bglColor = REGION_COLORS['Bangalore'] || t.gold
             const allBills      = scopeData.reduce((s, b) => s + (b.today_bills || 0) + (b.older_bills || 0), 0)
-            const allNetWt      = scopeData.reduce((s, b) => s + (b.today_net_wt || 0) + (b.older_net_wt || 0), 0)
+            const allGrossWt    = scopeData.reduce((s, b) => s + (b.total_gross_wt || 0), 0)
             const allTodayBills = scopeData.reduce((s, b) => s + (b.today_bills || 0), 0)
-            const activeBranches = scopeData.filter(b => ((b.today_net_wt || 0) + (b.older_net_wt || 0)) > 0).length
-            const w = fmtWtCard(allNetWt)
+            const activeBranches = scopeData.filter(b => (b.total_gross_wt || 0) > 0).length
+            const w = fmtWtCard(allGrossWt)
             const isActive = !activeHub
             return (
               <div onClick={() => setActiveHub(null)}
@@ -1022,7 +1029,7 @@ export default function ConsignmentOverview() {
             const stats   = hubStats[hubName] || {}
             const color   = t.gold
             const active  = activeHub === hubName
-            const w       = fmtWtCard(stats.total_net_wt)
+            const w       = fmtWtCard(stats.total_gross_wt)
             return (
               <div key={hubName} onClick={() => setActiveHub(active ? null : hubName)}
                 title={`${stats.leaves || 0} leaf branch${(stats.leaves || 0) === 1 ? '' : 'es'} report to this hub`}
@@ -1100,7 +1107,7 @@ export default function ConsignmentOverview() {
             branch_name: b.branch_name,
             is_hub:      b.branch_name === dispatchHub,
             bills:       (b.today_bills || 0) + (b.older_bills || 0),
-            gross_wt:    (b.today_net_wt || 0) + (b.older_net_wt || 0),    // approximation; API reports exact gross
+            gross_wt:    b.total_gross_wt || 0,         // matches the hero cards + the challan
             value:       (b.today_gross_value || 0) + (b.older_gross_value || 0),
           }))
           .sort((a, b) => b.gross_wt - a.gross_wt)
@@ -1263,7 +1270,7 @@ export default function ConsignmentOverview() {
                         <tr style={{ borderBottom: `1px solid ${t.border}` }}>
                           <th style={{ textAlign: 'left',  padding: '8px 6px', color: t.text4, fontSize: 10, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 700 }}>Branch</th>
                           <th style={{ textAlign: 'right', padding: '8px 6px', color: t.text4, fontSize: 10, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 700 }}>Bills</th>
-                          <th style={{ textAlign: 'right', padding: '8px 6px', color: t.text4, fontSize: 10, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 700 }}>Net Wt (g)</th>
+                          <th style={{ textAlign: 'right', padding: '8px 6px', color: t.text4, fontSize: 10, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 700 }}>Gross Wt (g)</th>
                           <th style={{ textAlign: 'right', padding: '8px 6px', color: t.text4, fontSize: 10, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 700 }}>Value</th>
                         </tr>
                       </thead>
@@ -1287,7 +1294,7 @@ export default function ConsignmentOverview() {
                         <tr style={{ background: `${t.gold}10`, borderTop: `2px solid ${t.gold}40` }}>
                           <td style={{ padding: '8px 6px', color: t.gold, fontWeight: 800, fontSize: 11, letterSpacing: '.06em', textTransform: 'uppercase' }}>Σ Hub Total</td>
                           <td style={{ padding: '8px 6px', textAlign: 'right', color: t.gold, fontFamily: 'monospace', fontWeight: 800 }}>{stats.total_bills || 0}</td>
-                          <td style={{ padding: '8px 6px', textAlign: 'right', color: t.gold, fontFamily: 'monospace', fontWeight: 800 }}>{Number(stats.total_net_wt || 0).toFixed(2)}</td>
+                          <td style={{ padding: '8px 6px', textAlign: 'right', color: t.gold, fontFamily: 'monospace', fontWeight: 800 }}>{Number(stats.total_gross_wt || stats.gross_wt || 0).toFixed(2)}</td>
                           <td style={{ padding: '8px 6px', textAlign: 'right', color: t.blue, fontFamily: 'monospace', fontWeight: 800 }}>—</td>
                         </tr>
                       </tbody>
