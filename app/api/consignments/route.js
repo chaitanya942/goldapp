@@ -3323,12 +3323,19 @@ export async function POST(req) {
     if (!hubBranch.is_hub)     return Response.json({ error: `'${hub_branch_name}' is not configured as a hub.` }, { status: 400 })
     if (hubBranch.region !== 'Bangalore') return Response.json({ error: 'Hub dispatch is a Bangalore-only flow.' }, { status: 400 })
 
-    const { data: hubMembers } = await supabase
-      .from('branches')
-      .select('name')
-      .eq('region', 'Bangalore')
-      .or(`name.eq.${hub_branch_name},hub_branch_name.eq.${hub_branch_name}`)
-    const memberNames = (hubMembers || []).map(b => b.name)
+    // Two separate queries instead of a single .or() — PostgREST's or()
+    // parser treats commas and periods as separators and chokes on
+    // unquoted spaces, which silently dropped hubs whose name contains
+    // a space (e.g. 'K R PURAM'). The single-clause variants below are
+    // bulletproof regardless of the hub's spelling.
+    const [hubRow, leafRows] = await Promise.all([
+      supabase.from('branches').select('name').eq('name', hub_branch_name).eq('is_active', true).maybeSingle(),
+      supabase.from('branches').select('name').eq('hub_branch_name', hub_branch_name).eq('region', 'Bangalore').eq('is_active', true),
+    ])
+    const memberSet = new Set()
+    if (hubRow.data?.name) memberSet.add(hubRow.data.name)
+    for (const b of leafRows.data || []) memberSet.add(b.name)
+    const memberNames = [...memberSet]
     if (memberNames.length === 0) return Response.json({ error: 'No branches resolved for this hub.' }, { status: 400 })
 
     // 2) Discover eligible at_branch bills across the hub + its leaves.
