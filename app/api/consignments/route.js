@@ -2248,11 +2248,41 @@ export async function POST(req) {
     const ccPhone = (typeof body.branch_contact_phone === 'string') ? body.branch_contact_phone.trim().slice(0, 24) : ''
     if (ccName)  postCreatePatch.branch_contact_name  = ccName
     if (ccPhone) postCreatePatch.branch_contact_phone = ccPhone
-    supabase.from('consignments')
+
+    // KL leaf → hub fix. create_consignment_atomic unconditionally stamps
+    // INTERNAL consignments as status='received' / received_at=now() — that's
+    // correct for the Bangalore hub-create flow (TE picks bills off shelves
+    // at the same building; instant transfer). But for Kerala, the BVC truck
+    // physically moves bills from a leaf to a hub — there's real transit
+    // time. Section 2 ("In Movement · Leaf → Hub") on the KL Bidding Volume
+    // view filters for consignments NOT IN ('cancelled','received',...), so
+    // auto-received KL leaf → hub consignments silently disappeared from
+    // the picker even though the bills hadn't physically arrived yet.
+    //
+    // Revert here: for KL INTERNAL, flip back to 'dispatched' + clear
+    // received_at. Hub does an explicit receive later in the workflow.
+    const isKlLeafToHub = isInternal && branchData.region === 'Kerala'
+    if (isKlLeafToHub) {
+      postCreatePatch.status      = 'dispatched'
+      postCreatePatch.received_at = null
+    }
+
+    // For KL we MUST await — the operator's very next action is to refresh
+    // Bidding Volume to see this consignment land in S2. Fire-and-forget
+    // would race the read query and leave S2 looking empty briefly.
+    // Other branches: keep fire-and-forget (the patch is UI sugar only).
+    const patchPromise = supabase.from('consignments')
       .update(postCreatePatch)
       .eq('id', rpcConsignment.id)
-      .then(() => {})
-      .catch(() => {})
+    if (isKlLeafToHub) {
+      await patchPromise
+      // Reflect the corrected status on the returned row so the client
+      // doesn't have to refetch to see the truth.
+      rpcConsignment.status      = 'dispatched'
+      rpcConsignment.received_at = null
+    } else {
+      patchPromise.then(() => {}).catch(() => {})
+    }
 
     // Stick the contact back onto the branch row so the NEXT create from
     // this branch pre-fills the modal with the last-used values, not the
