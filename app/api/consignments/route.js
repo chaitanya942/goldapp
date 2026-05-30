@@ -461,10 +461,24 @@ export async function GET(req) {
     // Default arrival = next working day (Sunday skipped — logistics off).
     // So bidding on Saturday targets Monday arrival; bidding on Sunday also
     // targets Monday. If the operator passes ?date= explicitly, honour it.
-    const arrivalDate    = searchParams.get('date') || addWorkingDaysSkipSunday(today, 1)
-    const bangalorePurchaseDate = addDays(arrivalDate, -1)                // bangalore today = arrival - 1
+    const arrivalDate = searchParams.get('date') || addWorkingDaysSkipSunday(today, 1)
 
-    const dayAfterArrival = addDays(arrivalDate, 1)
+    // "Bangalore today" = the most recent working day before arrivalDate.
+    // If arrival is Monday (typical on a Saturday bid), the relevant
+    // Bangalore purchase day is Saturday — NOT Sunday — because Bangalore
+    // branches are closed Sundays. Plain -1 calendar day would land us on
+    // Sunday and return zero bills.
+    const subWorkingDaySkipSunday = (yyyymmdd) => {
+      const [y, m, d] = yyyymmdd.split('-').map(Number)
+      const dt = new Date(Date.UTC(y, m - 1, d - 1))
+      if (dt.getUTCDay() === 0) dt.setUTCDate(dt.getUTCDate() - 1)   // walk past Sunday
+      return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, '0')}-${String(dt.getUTCDate()).padStart(2, '0')}`
+    }
+    const bangalorePurchaseDate = subWorkingDaySkipSunday(arrivalDate)
+
+    // dayAfterArrival should also skip Sunday — if arrival is Friday or
+    // Saturday, the next working arrival is Monday, not Sunday.
+    const dayAfterArrival = addWorkingDaysSkipSunday(arrivalDate, 1)
 
     // Branch metadata — TAT, region, pickup time, pickup_days, is_hub. We
     // need pickup_days + is_hub now to compute Section 4 (branch-stock-pre-
