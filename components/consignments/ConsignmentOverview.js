@@ -101,16 +101,10 @@ export default function ConsignmentOverview() {
   const [quickFilter,  setQuickFilter]  = useState('all')
   const [lastRefresh,  setLastRefresh]  = useState(null)
   const [tick,         setTick]         = useState(0)   // for live clock
-  // 'flat' (default) is the dense sortable table — what most operators want.
-  // 'grouped' collapses 73 branches into region cards for a higher-level view.
-  // Persisted to localStorage so the choice sticks per device.
-  const [viewMode, setViewMode] = useState(() => {
-    if (typeof window === 'undefined') return 'flat'
-    return window.localStorage.getItem('cstock.viewMode') || 'flat'
-  })
-  useEffect(() => {
-    if (typeof window !== 'undefined') window.localStorage.setItem('cstock.viewMode', viewMode)
-  }, [viewMode])
+  // Only the flat sortable table is rendered now — the grouped region-card
+  // view was retired after ops told us it was rarely used and the toggle
+  // just added clutter to the header. The dead 'grouped' render branch
+  // below stays compiled-out (viewMode === 'flat' is hard-coded).
   // Region cards default to expanded so the user immediately sees their branches;
   // they can collapse a region to focus elsewhere. Set holds region names.
   const [collapsedRegions, setCollapsedRegions] = useState(() => new Set())
@@ -683,28 +677,6 @@ export default function ConsignmentOverview() {
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
           {/* View-mode segmented toggle. Default 'grouped' rolls 73 branches up
               into ~4 region cards; 'flat' is the dense table for power users. */}
-          <div style={{ display: 'inline-flex', background: t.card2, border: `1px solid ${t.border}`, borderRadius: '8px', padding: '2px' }}>
-            {[
-              { key: 'grouped', label: 'Grouped', icon: '⬡' },
-              { key: 'flat',    label: 'Flat',    icon: '☰' },
-            ].map(v => {
-              const active = viewMode === v.key
-              return (
-                <button key={v.key} onClick={() => setViewMode(v.key)}
-                  title={v.key === 'grouped' ? 'Group branches by region (collapsible)' : 'Flat table view (sortable)'}
-                  style={{
-                    background: active ? `${t.gold}20` : 'transparent',
-                    color: active ? t.gold : t.text3,
-                    border: 'none', borderRadius: '6px',
-                    padding: '5px 11px', fontSize: '11px', fontWeight: 600,
-                    cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '5px',
-                    transition: 'all .12s',
-                  }}>
-                  <span style={{ fontSize: '12px' }}>{v.icon}</span>{v.label}
-                </button>
-              )
-            })}
-          </div>
           {(activeRegion || search) && (
             <button onClick={() => { setActiveRegion(null); setSearch('') }}
               style={{ background: 'transparent', border: `1px solid ${t.border2}`, borderRadius: '8px', padding: '7px 13px', fontSize: '11px', color: t.text3, cursor: 'pointer' }}>
@@ -1207,7 +1179,10 @@ export default function ConsignmentOverview() {
       </div>
 
       {/* ── Grouped view ── default. Folds 73 branches into one card per region. */}
-      {canSee('element.consignment-overview.table') && viewMode === 'grouped' && (
+      {/* Grouped view retired — toggle removed, this branch never renders.
+          Kept compiled-out (literal false guard) so the code is still here
+          if we want to bring grouped back later without re-archaeology. */}
+      {false && canSee('element.consignment-overview.table') && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
           {loading && data.length === 0 ? (
             <div style={{ ...card, padding: '80px', display: 'flex', justifyContent: 'center' }}><GoldSpinner size={32} /></div>
@@ -1437,7 +1412,7 @@ export default function ConsignmentOverview() {
       )}
 
       {/* ── Flat table view (legacy / power-user) ── */}
-      {canSee('element.consignment-overview.table') && viewMode === 'flat' && (
+      {canSee('element.consignment-overview.table') && (
         <div style={{ ...card, overflow: 'hidden' }}>
           {loading && data.length === 0 ? (
             <div style={{ padding: '80px', display: 'flex', justifyContent: 'center' }}><GoldSpinner size={32} /></div>
