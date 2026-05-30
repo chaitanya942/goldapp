@@ -7,7 +7,7 @@ import { authedFetch } from '../../lib/authedFetch'
 
 import { CONSIGNMENT_THEMES as THEMES } from '../../lib/consignmentTheme'
 
-const EMPTY_FORM = { name: '', opening_date: '', state: '', region: '', cluster: '', model_type: 'outside_bangalore', branch_code: '', address: '', city: '', pin_code: '', branch_gstin: '', crm_branch_id: '', pickup_time: '' }
+const EMPTY_FORM = { name: '', opening_date: '', state: '', region: '', cluster: '', model_type: 'outside_bangalore', branch_code: '', address: '', city: '', pin_code: '', branch_gstin: '', crm_branch_id: '', pickup_time: '', contact_person: '', contact_phone: '', contact_email: '' }
 
 function useMobile() {
   const [m, setM] = useState(false)
@@ -135,6 +135,13 @@ export default function BranchManagement() {
       pin_code: form.pin_code || null,
       branch_gstin: form.branch_gstin || null,
       pickup_time: form.pickup_time || null,
+      // Branch contact — prints on Delivery Challan / Issue Voucher. The
+      // Create Consignment modal pre-fills from these defaults, and any
+      // override entered there sticks back here, so this row is the live
+      // source of truth either way.
+      contact_person: form.contact_person?.trim() || null,
+      contact_phone:  form.contact_phone?.trim()  || null,
+      contact_email:  form.contact_email?.trim()  || null,
       // Manual save = human-verified. Locks the row from future auto-resolution overrides.
       address_verified: true,
       address_source:   'manual',
@@ -161,6 +168,9 @@ export default function BranchManagement() {
       branch_gstin: b.branch_gstin || '',
       crm_branch_id: b.crm_branch_id || '',
       pickup_time: b.pickup_time || '',
+      contact_person: b.contact_person || '',
+      contact_phone:  b.contact_phone  || '',
+      contact_email:  b.contact_email  || '',
     })
     setEditId(b.id); setFormOpen(true); setMsg('')
     window.scrollTo({ top: 0, behavior: 'smooth' })
@@ -501,6 +511,38 @@ export default function BranchManagement() {
               <div>
                 <label style={s.label}>Branch GSTIN</label>
                 <input style={s.input} placeholder="29AAPCA3170M1Z5" value={form.branch_gstin} onChange={e => setField('branch_gstin', e.target.value)} />
+              </div>
+            </div>
+          </div>
+
+          {/* Branch Contact — name + phone print on Delivery Challan and
+              Issue Voucher. Email is captured here but currently informational
+              (no document uses it). Changes here are the source of truth;
+              any edit made via the Create Consignment modal sticks back to
+              these fields automatically. */}
+          <div style={{ borderTop: `1px solid ${t.border}`, marginTop: '20px', paddingTop: '20px' }}>
+            <div style={{ fontSize: '.7rem', color: t.text3, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: '4px', fontWeight: 600 }}>
+              Branch Contact
+            </div>
+            <div style={{ fontSize: '.65rem', color: t.text4, marginBottom: '16px' }}>
+              Name + phone print on Delivery Challan / Issue Voucher. Operators can also edit Name &amp; Phone during Create Consignment — any edit there auto-syncs back here.
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr 1.4fr', gap: isMobile ? '12px' : '16px' }}>
+              <div>
+                <label style={s.label}>Name</label>
+                <input style={s.input} placeholder="Branch person responsible for dispatch"
+                  value={form.contact_person} onChange={e => setField('contact_person', e.target.value)} />
+              </div>
+              <div>
+                <label style={s.label}>Phone</label>
+                <input style={s.input} placeholder="+91 9XXXXXXXXX" inputMode="tel"
+                  value={form.contact_phone}
+                  onChange={e => setField('contact_phone', e.target.value.replace(/[^\d+ ]/g, '').slice(0, 18))} />
+              </div>
+              <div>
+                <label style={s.label}>Email <span style={{ color: t.text4, fontWeight: 400 }}>(optional)</span></label>
+                <input style={s.input} type="email" placeholder="branch.contact@example.com"
+                  value={form.contact_email} onChange={e => setField('contact_email', e.target.value.trim())} />
               </div>
             </div>
           </div>

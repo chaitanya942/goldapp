@@ -19,3 +19,12 @@
 ALTER TABLE consignments
   ADD COLUMN IF NOT EXISTS branch_contact_name  TEXT,
   ADD COLUMN IF NOT EXISTS branch_contact_phone TEXT;
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Branch-level contact email (additive — name + phone already exist as
+-- branches.contact_person + contact_phone). Email is currently informational —
+-- not used in any document — but ops wants a slot for it on the Branch
+-- Management form so it's captured alongside name + phone.
+-- ─────────────────────────────────────────────────────────────────────────────
+ALTER TABLE branches
+  ADD COLUMN IF NOT EXISTS contact_email TEXT;
