@@ -2664,21 +2664,33 @@ export async function POST(req) {
           portalCancelled.push(`EWB ${c.eway_bill_no} cancelled on NIC`)
         }
       } catch (err) {
-        console.error('[approve_cancellation] NIC EWB cancel failed:', err)
-        // Unpack the NIC diagnostic the ClearTax client attaches as err.debug.
-        // Without this, accounts sees "Failed to cancel E-Way Bill" — no code,
-        // no reason — and has no way to tell whether it's a 24h-window expiry
-        // (need Force Cancel Local), a GSTIN mismatch (need a manual fix in
-        // company_settings), a transient NIC outage (retry), or a real error
-        // on the EWB itself.
-        const debug         = err?.debug || {}
-        const nicResponse   = debug.cleartaxResponse
-        const govt          = (Array.isArray(nicResponse) ? nicResponse[0] : nicResponse)?.govt_response
-        const errorDetails  = govt?.ErrorDetails || govt?.errorDetails || nicResponse?.ErrorDetails || nicResponse?.errorDetails
-        const nicErrorCode  = Array.isArray(errorDetails) ? errorDetails.map(e => e?.error_code   || e?.errorCode).filter(Boolean).join(', ')   : null
-        const nicErrorMsg   = Array.isArray(errorDetails) ? errorDetails.map(e => e?.error_message || e?.errorMessage).filter(Boolean).join('; ') : null
-        const ewbAgeMs      = c.ewb_generated_at ? (Date.now() - new Date(c.ewb_generated_at).getTime()) : null
-        const ewbAgeHours   = ewbAgeMs != null ? Number((ewbAgeMs / 3600000).toFixed(1)) : null
+        console.error('[approve_cancellation] NIC EWB cancel failed:', err, JSON.stringify(err?.cleartaxResponse))
+        // Unpack the NIC diagnostic the ClearTax client attaches as a
+        // non-enumerable property on the Error object (`err.cleartaxResponse`,
+        // see lib/clearTaxClient.js attachDebug). Without this, accounts
+        // sees "Failed to cancel E-Way Bill" — no code, no reason — and has
+        // no way to tell whether it's a 24h-window expiry (need Force Cancel
+        // Local), a GSTIN mismatch (Company Settings fix), a transient NIC
+        // outage (retry), or a real EWB-side rejection.
+        //
+        // Note: the property is NON-enumerable so JSON.stringify(err) hides
+        // it. Read it directly. Earlier code looked at err.debug.* and
+        // always got undefined.
+        const nicResponse  = err?.cleartaxResponse
+        const firstResp    = Array.isArray(nicResponse) ? nicResponse[0] : nicResponse
+        const govt         = firstResp?.govt_response
+        const errorDetails =
+          govt?.ErrorDetails || govt?.errorDetails ||
+          firstResp?.ErrorDetails || firstResp?.errorDetails ||
+          nicResponse?.ErrorDetails || nicResponse?.errorDetails
+        const nicErrorCode = Array.isArray(errorDetails)
+          ? errorDetails.map(e => e?.error_code   || e?.errorCode).filter(Boolean).join(', ')
+          : (govt?.error_code || firstResp?.error_code || null)
+        const nicErrorMsg  = Array.isArray(errorDetails)
+          ? errorDetails.map(e => e?.error_message || e?.errorMessage || e?.message).filter(Boolean).join('; ')
+          : (govt?.info || govt?.status_desc || firstResp?.message || firstResp?.status_desc || null)
+        const ewbAgeMs     = c.ewb_generated_at ? (Date.now() - new Date(c.ewb_generated_at).getTime()) : null
+        const ewbAgeHours  = ewbAgeMs != null ? Number((ewbAgeMs / 3600000).toFixed(1)) : null
         let hint = null
         if (ewbAgeHours != null && ewbAgeHours > 24) {
           hint = `EWB ${c.eway_bill_no} is ${ewbAgeHours}h old — NIC only allows cancellation within 24 hours of generation. An admin can use Force Cancel (Local) on the Approvals → Approved tab row for ${c.tmp_prf_no} to clear the consignment without touching NIC; the EWB will expire on NIC naturally.`

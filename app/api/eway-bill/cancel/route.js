@@ -116,12 +116,25 @@ export async function POST(req) {
       // Surface every diagnostic detail attached to the error so the UI can
       // show the actual NIC reason — used to be swallowed into the generic
       // 'Failed to cancel E-Way Bill' message.
-      const debug = clearTaxErr?.debug || {}
-      const nicResponse = debug.cleartaxResponse
-      const govt = (Array.isArray(nicResponse) ? nicResponse[0] : nicResponse)?.govt_response
-      const errorDetails = govt?.ErrorDetails || govt?.errorDetails || nicResponse?.ErrorDetails || nicResponse?.errorDetails
-      const nicErrorCode = Array.isArray(errorDetails) ? errorDetails.map(e => e?.error_code || e?.errorCode).filter(Boolean).join(', ') : null
-      const nicErrorMsg  = Array.isArray(errorDetails) ? errorDetails.map(e => e?.error_message || e?.errorMessage).filter(Boolean).join('; ') : null
+      //
+      // lib/clearTaxClient.js attachDebug stamps the raw NIC payload directly
+      // on the Error object as `cleartaxResponse` (non-enumerable property),
+      // NOT under `.debug.cleartaxResponse`. Earlier code looked at the
+      // wrong path and always got `undefined` — so nic_error_code / text /
+      // raw all came back null. Read the actual property here.
+      const nicResponse = clearTaxErr?.cleartaxResponse
+      const firstResp   = Array.isArray(nicResponse) ? nicResponse[0] : nicResponse
+      const govt        = firstResp?.govt_response
+      const errorDetails =
+        govt?.ErrorDetails || govt?.errorDetails ||
+        firstResp?.ErrorDetails || firstResp?.errorDetails ||
+        nicResponse?.ErrorDetails || nicResponse?.errorDetails
+      const nicErrorCode = Array.isArray(errorDetails)
+        ? errorDetails.map(e => e?.error_code   || e?.errorCode).filter(Boolean).join(', ')
+        : (govt?.error_code || firstResp?.error_code || null)
+      const nicErrorMsg  = Array.isArray(errorDetails)
+        ? errorDetails.map(e => e?.error_message || e?.errorMessage || e?.message).filter(Boolean).join('; ')
+        : (govt?.info || govt?.status_desc || firstResp?.message || firstResp?.status_desc || null)
 
       console.error('[ewb/cancel] ClearTax/NIC error:', clearTaxErr?.message, JSON.stringify(nicResponse))
 
