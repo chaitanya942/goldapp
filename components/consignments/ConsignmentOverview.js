@@ -741,7 +741,11 @@ export default function ConsignmentOverview() {
       {/* ── Pickup alerts — sticky banner, surfaces branches within 30 min
            of scheduled pickup so the ops team can prep. Dismissible per
            branch, resets at midnight IST. */}
-      {pickupAlerts.length > 0 && (
+      {/* Pickup Approaching banner is meaningful only for outstation BVC
+          pickups. Bangalore Transaction Executives sweep hubs daily on a
+          continuous schedule, so the 30-min-before-pickup alert doesn't
+          model that workflow — hide it on the Bangalore tab. */}
+      {scopeTab === 'outside' && pickupAlerts.length > 0 && (
         <div style={{
           background: `linear-gradient(135deg, ${t.orange}18, ${t.orange}08)`,
           border: `1px solid ${t.orange}50`,
