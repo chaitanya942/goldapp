@@ -981,13 +981,17 @@ export default function ConsignmentOverview() {
       {scopeTab === 'bangalore' && canSee('element.consignment-overview.region_cards') && (
         <div style={{
           display: 'flex', gap: '10px',
-          flexWrap: isMobile ? 'nowrap' : 'wrap',
-          overflowX: isMobile ? 'auto' : 'visible',
+          // Single horizontal row across all viewports. 7 hub cards rarely
+          // fit on a laptop without compromise, so we always allow scroll
+          // and let the card minWidths breathe instead of wrapping into a
+          // second row.
+          flexWrap: 'nowrap',
+          overflowX: 'auto',
           scrollSnapType: isMobile ? 'x mandatory' : 'none',
           WebkitOverflowScrolling: 'touch',
           scrollbarWidth: 'none',
           margin: isMobile ? '0 -16px' : 0,
-          padding: isMobile ? '0 16px 4px' : 0,
+          padding: isMobile ? '0 16px 4px' : '0 0 4px',
         }}>
           {/* All Bangalore — sum across every Bangalore row. Click clears the hub filter. */}
           {(() => {
@@ -1004,8 +1008,9 @@ export default function ConsignmentOverview() {
                   background: isActive ? `linear-gradient(145deg, ${bglColor}18, ${bglColor}06)` : `linear-gradient(145deg, ${t.card}, ${t.card2})`,
                   border: `1px solid ${isActive ? bglColor + '60' : t.border}`,
                   borderLeft: `4px solid ${isActive ? bglColor : t.text4 + '30'}`,
-                  borderRadius: '12px', padding: '16px 18px',
-                  cursor: 'pointer', minWidth: '200px',
+                  borderRadius: '12px', padding: '14px 14px',
+                  cursor: 'pointer',
+                  flex: '1 1 0', minWidth: '160px',
                   flexShrink: 0, scrollSnapAlign: 'start',
                   transition: 'all .2s',
                   boxShadow: isActive ? `0 4px 16px ${bglColor}20` : '0 1px 3px rgba(0,0,0,.2)',
@@ -1044,8 +1049,9 @@ export default function ConsignmentOverview() {
                   background: active ? `linear-gradient(145deg, ${color}18, ${color}06)` : `linear-gradient(145deg, ${t.card}, ${t.card2})`,
                   border: `1px solid ${active ? color + '60' : t.border}`,
                   borderLeft: `4px solid ${active ? color : color + '30'}`,
-                  borderRadius: '12px', padding: '16px 18px',
-                  cursor: 'pointer', minWidth: '220px',
+                  borderRadius: '12px', padding: '14px 14px',
+                  cursor: 'pointer',
+                  flex: '1 1 0', minWidth: '160px',
                   flexShrink: 0, scrollSnapAlign: 'start',
                   transition: 'all .2s',
                   boxShadow: active ? `0 4px 16px ${color}20` : '0 1px 3px rgba(0,0,0,.2)',
