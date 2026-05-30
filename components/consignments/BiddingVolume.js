@@ -28,7 +28,7 @@ import GoldSpinner from '../ui/GoldSpinner'
 import AnimatedNumber from '../ui/AnimatedNumber'
 import { authedFetch } from '../../lib/authedFetch'
 import { CONSIGNMENT_THEMES as THEMES, REGION_COLORS, useMobile } from '../../lib/consignmentTheme'
-import { istToday } from '../../lib/dateIst'
+import { istToday, addWorkingDaysSkipSunday } from '../../lib/dateIst'
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 const fmt    = (n, d = 3) => n != null ? Number(n).toFixed(d) : '—'
@@ -83,8 +83,14 @@ export default function BiddingVolume() {
 
   const today    = istToday()
   const tomorrow = dateAdd(today, 1)
+  // Default arrival = next WORKING day (Sunday skipped — BVC logistics is off).
+  // Without this, bidding on a Saturday would target Sunday arrival, which
+  // no logistics partner can hit. A 24h-TAT bill dispatched Saturday lands
+  // Monday, not Sunday — keeping the default Sunday-aware makes Section 2
+  // ("24h TAT, arriving tomorrow") match what the truck actually delivers.
+  const defaultArrival = addWorkingDaysSkipSunday(today, 1)
 
-  const [arrivalDate,  setArrivalDate]  = useState(tomorrow)
+  const [arrivalDate,  setArrivalDate]  = useState(defaultArrival)
   // Bookings tab pivots on bidding day (the date the booking was placed),
   // separate from arrivalDate. Defaults to today so the freshly-placed
   // bookings show up. ← / → step through past bidding days; the hero +
@@ -662,9 +668,12 @@ export default function BiddingVolume() {
     : bidDiff > 0 ? `Bid +${bidDiff}d`
     : `Bid ${bidDiff}d`
 
+  // Presets use the Sunday-aware next-working-day for 'Tomorrow' so a
+  // Saturday bidder doesn't accidentally target Sunday. Today / +2 / +3
+  // are plain calendar bumps because the operator chose those explicitly.
   const presets = [
     { id: 'today',     label: 'Today',     date: today },
-    { id: 'tomorrow',  label: 'Tomorrow',  date: tomorrow },
+    { id: 'tomorrow',  label: 'Tomorrow',  date: defaultArrival },
     { id: 'plus2',     label: '+2 days',   date: dateAdd(today, 2) },
     { id: 'plus3',     label: '+3 days',   date: dateAdd(today, 3) },
   ]
