@@ -3310,8 +3310,13 @@ export async function POST(req) {
   // Returns { consignment, summary } where summary is the branch-wise
   // breakdown the UI rendered in the confirmation dialog.
   if (action === 'create_hub_consignment') {
-    const { hub_branch_name } = body
+    const { hub_branch_name, transaction_executive } = body
     if (!hub_branch_name) return Response.json({ error: 'hub_branch_name required' }, { status: 400 })
+    // Transaction Executive name (who physically picks up the hub) is
+    // surfaced on the UI as required. Trim + truncate defensively in case
+    // the picker ever sends garbage. Stored on logistics_notes for now;
+    // a dedicated column can replace this when the TE roster is wired in.
+    const teClean = (typeof transaction_executive === 'string' ? transaction_executive : '').trim().slice(0, 80) || null
 
     // 1) Resolve the hub + its leaves.
     const { data: hubBranch, error: hubErr } = await supabase
@@ -3508,9 +3513,32 @@ export async function POST(req) {
       .in('id', billIds)
     if (flipErr) console.warn('[create_hub_consignment] stock_status flip warning:', flipErr.message)
 
+    // 8) Stash the Transaction Executive who picked up this hub. Stored
+    //    on the activity-log row (where details is JSONB) so it's audit-
+    //    visible immediately without a schema change. If the consignments
+    //    table later grows a dedicated transaction_executive column we
+    //    can move this to a first-class field.
+    if (teClean) {
+      try {
+        await supabase.from('consignment_activity_log').insert({
+          consignment_id: rpcConsignment.id,
+          event_type:     'hub_picked_up',
+          actor_email:    actorEmail,
+          details:        { transaction_executive: teClean, hub: hub_branch_name },
+        })
+      } catch (logErr) {
+        console.warn('[create_hub_consignment] TE log write failed (non-fatal):', logErr?.message)
+      }
+    }
+
     return Response.json({
       success: true,
-      consignment: { ...rpcConsignment, ops_confirmed_at: nowIso, consignee_report_generated_at: nowIso },
+      consignment: {
+        ...rpcConsignment,
+        ops_confirmed_at:                nowIso,
+        consignee_report_generated_at:   nowIso,
+        transaction_executive:           teClean,
+      },
       summary,
       totals: {
         bills: billIds.length,

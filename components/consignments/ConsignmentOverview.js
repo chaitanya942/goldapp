@@ -97,6 +97,18 @@ export default function ConsignmentOverview() {
   const [dispatchBusy,   setDispatchBusy]   = useState(null)   // 'challan' | 'ewb' | null
   const [dispatchResult, setDispatchResult] = useState(null)   // consignment + summary from API
   const [ewbResult,      setEwbResult]      = useState(null)   // { ewb_no, ewb_pdf_url? } once EWB generated
+  // Transaction Executive who's physically picking the hub up. Required
+  // before Download Delivery Challan fires. Placeholder list for now —
+  // when the real TE roster lands we'll swap this for a fetched list
+  // (likely from user_profiles filtered by a 'transaction_executive' role).
+  const [dispatchTE, setDispatchTE] = useState('')
+  const TRANSACTION_EXECUTIVES = useMemo(() => [
+    'TE — Executive 1',
+    'TE — Executive 2',
+    'TE — Executive 3',
+    'TE — Executive 4',
+    'TE — Executive 5',
+  ], [])
   // Default sort: total net weight desc (largest stockholders first). Management
   // wants to see the biggest exposures at the top without clicking.
   const [sortKey,      setSortKey]      = useState('total_net_wt')
@@ -1117,6 +1129,7 @@ export default function ConsignmentOverview() {
           setDispatchHub(null)
           setDispatchResult(null)
           setEwbResult(null)
+          setDispatchTE('')
         }
 
         // Step 1 — create the consignment, then stream-download the
@@ -1127,7 +1140,7 @@ export default function ConsignmentOverview() {
             // a) Create the hub consignment.
             const r = await authedFetch('/api/consignments?action=create_hub_consignment', {
               method: 'POST', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ hub_branch_name: dispatchHub }),
+              body: JSON.stringify({ hub_branch_name: dispatchHub, transaction_executive: dispatchTE }),
             })
             const j = await r.json()
             if (!r.ok || j.error) {
@@ -1239,6 +1252,12 @@ export default function ConsignmentOverview() {
                         <strong>{dispatchResult.totals?.bills || 0}</strong> bills · <strong>{Number(dispatchResult.totals?.gross_wt || 0).toFixed(2)} g</strong> gross · <strong>{fmtINR(dispatchResult.totals?.value || 0)}</strong>
                         <br />
                         Consignment <code style={{ background: t.card2, padding: '1px 6px', borderRadius: 3, color: t.gold, fontFamily: 'monospace' }}>{dispatchResult.consignment?.consignment_no || dispatchResult.consignment?.tmp_prf_no}</code>
+                        {dispatchResult.consignment?.transaction_executive && (
+                          <>
+                            <br />
+                            Picked up by <strong>{dispatchResult.consignment.transaction_executive}</strong>
+                          </>
+                        )}
                       </div>
                     </div>
 
@@ -1302,6 +1321,45 @@ export default function ConsignmentOverview() {
                     <div style={{ fontSize: 11, color: t.text4, marginTop: 12, lineHeight: 1.5 }}>
                       Eligible at_branch bills only. Bills already booked, audit-consumed, or sitting on another in-flight consignment are excluded. Exact totals are confirmed by the server on dispatch.
                     </div>
+
+                    {/* Transaction Executive picker — required gate before
+                        Download Delivery Challan can fire. Placeholder
+                        roster for now; the real list will replace
+                        TRANSACTION_EXECUTIVES once the role/user mapping
+                        is finalised. */}
+                    <div style={{
+                      marginTop: 18, padding: '14px 16px',
+                      background: t.card2 || t.card,
+                      border: `1px solid ${t.border}`, borderRadius: 8,
+                    }}>
+                      <label style={{ display: 'block', fontSize: 11, color: t.text3, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 700, marginBottom: 8 }}>
+                        Transaction Executive <span style={{ color: t.red }}>*</span>
+                      </label>
+                      <select
+                        value={dispatchTE}
+                        onChange={(e) => setDispatchTE(e.target.value)}
+                        disabled={!!dispatchBusy}
+                        style={{
+                          width: '100%',
+                          background: t.card,
+                          border: `1px solid ${dispatchTE ? t.gold + '55' : t.border2}`,
+                          borderRadius: 6,
+                          padding: '8px 10px',
+                          color: t.text1,
+                          fontSize: 13, fontWeight: 600,
+                          outline: 'none',
+                          cursor: dispatchBusy ? 'not-allowed' : 'pointer',
+                          fontFamily: 'inherit',
+                        }}>
+                        <option value="">— Select the executive picking up this hub —</option>
+                        {TRANSACTION_EXECUTIVES.map(name => (
+                          <option key={name} value={name}>{name}</option>
+                        ))}
+                      </select>
+                      <div style={{ fontSize: 10.5, color: t.text4, marginTop: 6, lineHeight: 1.4 }}>
+                        Recorded on the consignment so accounts knows who handled this pickup. Placeholder list — the actual TE roster will be wired in shortly.
+                      </div>
+                    </div>
                   </>
                 )}
               </div>
@@ -1348,12 +1406,13 @@ export default function ConsignmentOverview() {
                       style={{ background: 'transparent', color: t.text3, border: `1px solid ${t.border2}`, borderRadius: 7, padding: '9px 18px', fontSize: 13, fontWeight: 700, cursor: dispatchBusy ? 'not-allowed' : 'pointer' }}>
                       Cancel
                     </button>
-                    <button onClick={onDownloadChallan} disabled={!!dispatchBusy || members.length === 0}
+                    <button onClick={onDownloadChallan} disabled={!!dispatchBusy || members.length === 0 || !dispatchTE}
+                      title={!dispatchTE ? 'Select a Transaction Executive first' : undefined}
                       style={{
-                        background: dispatchBusy || members.length === 0 ? t.card2 : t.gold,
-                        color:      dispatchBusy || members.length === 0 ? t.text4  : '#1a0a00',
+                        background: dispatchBusy || members.length === 0 || !dispatchTE ? t.card2 : t.gold,
+                        color:      dispatchBusy || members.length === 0 || !dispatchTE ? t.text4  : '#1a0a00',
                         border: 'none', borderRadius: 7, padding: '9px 22px',
-                        fontSize: 13, fontWeight: 800, cursor: dispatchBusy || members.length === 0 ? 'not-allowed' : 'pointer',
+                        fontSize: 13, fontWeight: 800, cursor: dispatchBusy || members.length === 0 || !dispatchTE ? 'not-allowed' : 'pointer',
                         letterSpacing: '.02em',
                       }}>
                       {dispatchBusy === 'challan' ? 'Dispatching & downloading…' : 'Download Delivery Challan'}
