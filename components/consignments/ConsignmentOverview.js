@@ -46,6 +46,160 @@ const ageDaysFromDate = (d) => {
   return Math.floor((Date.now() - new Date(d).getTime()) / 86400000)
 }
 
+// ── Transaction Executive picker — premium custom dropdown ──────────────────
+// Native <select> styling is shamefully inconsistent across browsers, and
+// the operator-facing surface deserves better. This picker mirrors the
+// PartnerPicker pattern from Logistics: anchor button + popover list with
+// avatar circles (first letter), keyboard nav, click-outside close, and
+// smooth open/close animation.
+function TEPicker({ t, value, onChange, options, disabled }) {
+  const [open, setOpen] = useState(false)
+  const rootRef = useRef(null)
+
+  useEffect(() => {
+    if (!open) return
+    const onDoc = (e) => { if (rootRef.current && !rootRef.current.contains(e.target)) setOpen(false) }
+    const onKey = (e) => { if (e.key === 'Escape') setOpen(false) }
+    document.addEventListener('mousedown', onDoc)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDoc)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+
+  // Deterministic per-name accent — distributes the existing palette across
+  // the roster so two TEs side-by-side don't share a colour.
+  const palette = [t.gold, t.blue, t.green, t.purple || '#8c5ac8', t.orange, t.red]
+  const accentFor = (name) => {
+    if (!name) return t.text4
+    let h = 0; for (const ch of name) h = (h * 31 + ch.charCodeAt(0)) | 0
+    return palette[Math.abs(h) % palette.length]
+  }
+  const initialsOf = (name) => {
+    const parts = String(name || '').replace(/^TE\s*—\s*/i, '').trim().split(/\s+/).filter(Boolean)
+    if (parts.length === 0) return '?'
+    if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase()
+    return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
+  }
+
+  const valueAccent = value ? accentFor(value) : t.text4
+
+  return (
+    <div ref={rootRef}
+      style={{
+        marginTop: 18, position: 'relative',
+        padding: '14px 16px 14px',
+        background: `linear-gradient(135deg, ${t.gold}06 0%, ${t.card2 || t.card} 60%)`,
+        border: `1px solid ${value ? `${t.gold}40` : t.border}`,
+        borderRadius: 10,
+        boxShadow: value ? `0 0 0 1px ${t.gold}10` : 'none',
+        transition: 'border-color .15s, box-shadow .15s',
+      }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 9 }}>
+        <span style={{ fontSize: 10, color: t.text3, letterSpacing: '.14em', textTransform: 'uppercase', fontWeight: 800 }}>
+          Transaction Executive
+        </span>
+        <span style={{ color: t.red, fontSize: 12, fontWeight: 800 }}>*</span>
+        {value && (
+          <span style={{
+            marginLeft: 'auto', fontSize: 9.5, color: t.green,
+            background: `${t.green}15`, border: `1px solid ${t.green}40`,
+            padding: '2px 8px', borderRadius: 99, letterSpacing: '.05em', fontWeight: 800,
+          }}>✓ Selected</span>
+        )}
+      </div>
+
+      {/* Anchor */}
+      <button type="button"
+        onClick={() => !disabled && setOpen(o => !o)}
+        disabled={disabled}
+        style={{
+          width: '100%',
+          display: 'flex', alignItems: 'center', gap: 12,
+          padding: '10px 12px',
+          background: t.card,
+          border: `1px solid ${value ? `${valueAccent}55` : t.border2}`,
+          borderRadius: 8,
+          color: t.text1,
+          fontSize: 13, fontWeight: 600,
+          cursor: disabled ? 'not-allowed' : 'pointer',
+          fontFamily: 'inherit', textAlign: 'left',
+          transition: 'all .15s ease',
+          boxShadow: value ? `0 0 0 3px ${valueAccent}10` : 'none',
+        }}>
+        <span style={{
+          width: 30, height: 30, borderRadius: '50%', flexShrink: 0,
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          background: value ? `linear-gradient(135deg, ${valueAccent}30, ${valueAccent}10)` : `${t.text4}20`,
+          color: value ? valueAccent : t.text3,
+          border: `1px solid ${value ? `${valueAccent}50` : t.border2}`,
+          fontSize: 11, fontWeight: 800, letterSpacing: '.04em',
+        }}>{value ? initialsOf(value) : '—'}</span>
+        <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: value ? t.text1 : t.text4 }}>
+          {value || 'Select the executive picking up this hub'}
+        </span>
+        <span style={{ fontSize: 10, color: t.text4, transform: open ? 'rotate(180deg)' : 'rotate(0)', transition: 'transform .15s' }}>▾</span>
+      </button>
+
+      {/* Popover */}
+      {open && (
+        <div style={{
+          position: 'absolute', top: 'calc(100% - 4px)', left: 16, right: 16,
+          background: t.card,
+          border: `1px solid ${t.gold}40`, borderRadius: 8,
+          boxShadow: '0 16px 40px rgba(0,0,0,.45), 0 1px 0 0 rgba(255,255,255,.04) inset',
+          zIndex: 10, overflow: 'hidden',
+          animation: 'tePopIn .18s cubic-bezier(.16,1,.3,1) both',
+        }}>
+          {options.map((name, idx) => {
+            const active = name === value
+            const accent = accentFor(name)
+            return (
+              <button key={name} type="button"
+                onClick={() => { onChange(name); setOpen(false) }}
+                style={{
+                  width: '100%', display: 'flex', alignItems: 'center', gap: 11,
+                  padding: '10px 12px',
+                  background: active ? `${accent}12` : 'transparent',
+                  borderBottom: idx === options.length - 1 ? 'none' : `1px solid ${t.border}80`,
+                  border: 'none',
+                  color: t.text1, fontSize: 12.5, fontWeight: active ? 800 : 600,
+                  cursor: 'pointer', textAlign: 'left',
+                  transition: 'background .12s',
+                  fontFamily: 'inherit',
+                }}
+                onMouseEnter={(e) => { if (!active) e.currentTarget.style.background = `${accent}08` }}
+                onMouseLeave={(e) => { if (!active) e.currentTarget.style.background = 'transparent' }}>
+                <span style={{
+                  width: 26, height: 26, borderRadius: '50%', flexShrink: 0,
+                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                  background: `linear-gradient(135deg, ${accent}30, ${accent}10)`,
+                  color: accent, border: `1px solid ${accent}45`,
+                  fontSize: 10, fontWeight: 800,
+                }}>{initialsOf(name)}</span>
+                <span style={{ flex: 1 }}>{name}</span>
+                {active && <span style={{ color: accent, fontSize: 13, fontWeight: 800 }}>✓</span>}
+              </button>
+            )
+          })}
+        </div>
+      )}
+
+      <div style={{ fontSize: 10.5, color: t.text4, marginTop: 8, lineHeight: 1.45, fontStyle: 'italic' }}>
+        Recorded on the consignment so accounts knows who handled this pickup. Placeholder roster — the real TE list will be wired in shortly.
+      </div>
+
+      <style>{`
+        @keyframes tePopIn {
+          from { opacity: 0; transform: translateY(-4px); }
+          to   { opacity: 1; transform: translateY(0); }
+        }
+      `}</style>
+    </div>
+  )
+}
+
 function AgeBadge({ days, t }) {
   if (!days && days !== 0) return <span style={{ color: t.text4 }}>—</span>
   const color = days > 7 ? t.red : days > 3 ? t.orange : t.green
@@ -1210,31 +1364,66 @@ export default function ConsignmentOverview() {
 
         return (
           <div onClick={close}
+            className="hub-dispatch-backdrop"
             style={{
-              position: 'fixed', inset: 0, background: 'rgba(0,0,0,.55)',
+              position: 'fixed', inset: 0,
+              background: 'radial-gradient(ellipse at center, rgba(0,0,0,.62) 0%, rgba(0,0,0,.72) 100%)',
               zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center',
-              padding: 20, backdropFilter: 'blur(2px)',
+              padding: 20, backdropFilter: 'blur(6px)',
+              animation: 'hubModalFade .22s cubic-bezier(.4,.0,.2,1) both',
             }}>
             <div onClick={(e) => e.stopPropagation()}
+              className="hub-dispatch-card"
               style={{
-                background: t.card, borderRadius: 12,
-                border: `1px solid ${t.border}`,
+                background: `linear-gradient(180deg, ${t.card} 0%, ${t.card} 100%)`,
+                borderRadius: 16,
+                border: `1px solid ${t.gold}25`,
                 maxWidth: 820, width: '100%', maxHeight: '90vh',
                 display: 'flex', flexDirection: 'column',
-                boxShadow: '0 12px 48px rgba(0,0,0,.5)',
+                boxShadow: `0 24px 80px rgba(0,0,0,.55), 0 0 0 1px ${t.gold}10, 0 2px 0 0 ${t.gold}18 inset`,
                 overflow: 'hidden',
+                animation: 'hubModalLift .35s cubic-bezier(.16,1,.3,1) both',
+                position: 'relative',
               }}>
+              {/* Top gradient stroke — subtle gold accent line */}
+              <div style={{
+                position: 'absolute', top: 0, left: 0, right: 0, height: 2,
+                background: `linear-gradient(90deg, transparent 0%, ${t.gold} 50%, transparent 100%)`,
+                opacity: 0.7, pointerEvents: 'none',
+              }} />
+
               {/* Header — sticky at top */}
-              <div style={{ padding: '20px 26px', borderBottom: `1px solid ${t.border}`, flexShrink: 0 }}>
-                <div style={{ fontSize: 18, fontWeight: 700, color: t.text1 }}>
-                  Dispatch Hub · <span style={{ color: t.gold }}>{dispatchHub}</span>
-                </div>
-                <div style={{ fontSize: 12.5, color: t.text3, marginTop: 5 }}>
-                  {dispatchResult
-                    ? (ewbResult
-                        ? 'EWB generated and Delivery Challan downloaded. Hub is fully dispatched.'
-                        : 'Delivery Challan downloaded. Click below to preview and generate the E-Way Bill.')
-                    : 'One consignment will be created for the hub covering every assigned branch listed below. Click Download Delivery Challan to confirm.'}
+              <div style={{
+                padding: '22px 28px 20px',
+                borderBottom: `1px solid ${t.border}`,
+                flexShrink: 0,
+                background: `linear-gradient(180deg, ${t.gold}08 0%, transparent 100%)`,
+              }}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14 }}>
+                  {/* Hub emblem */}
+                  <div style={{
+                    width: 44, height: 44, borderRadius: 12,
+                    background: `linear-gradient(135deg, ${t.gold}25, ${t.gold}08)`,
+                    border: `1px solid ${t.gold}40`,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: 20, flexShrink: 0,
+                    boxShadow: `0 2px 8px ${t.gold}25`,
+                  }}>🏛</div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 10, color: t.text4, letterSpacing: '.16em', textTransform: 'uppercase', fontWeight: 700, marginBottom: 3 }}>
+                      Hub Dispatch
+                    </div>
+                    <div style={{ fontSize: 20, fontWeight: 700, color: t.text1, letterSpacing: '-.005em', lineHeight: 1.2 }}>
+                      {dispatchHub}
+                    </div>
+                    <div style={{ fontSize: 12.5, color: t.text3, marginTop: 8, lineHeight: 1.55 }}>
+                      {dispatchResult
+                        ? (ewbResult
+                            ? 'EWB generated and Delivery Challan downloaded. Hub is fully dispatched.'
+                            : 'Delivery Challan downloaded. Generate the E-Way Bill to complete the dispatch.')
+                        : 'One consignment will be created covering every assigned branch listed below.'}
+                    </div>
+                  </div>
                 </div>
               </div>
 
@@ -1283,83 +1472,92 @@ export default function ConsignmentOverview() {
                   </>
                 ) : (
                   <>
-                    {/* Branch-wise summary */}
-                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-                      <thead>
-                        <tr style={{ borderBottom: `1px solid ${t.border}` }}>
-                          <th style={{ textAlign: 'left',  padding: '8px 6px', color: t.text4, fontSize: 10, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 700 }}>Branch</th>
-                          <th style={{ textAlign: 'right', padding: '8px 6px', color: t.text4, fontSize: 10, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 700 }}>Bills</th>
-                          <th style={{ textAlign: 'right', padding: '8px 6px', color: t.text4, fontSize: 10, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 700 }}>Gross Wt (g)</th>
-                          <th style={{ textAlign: 'right', padding: '8px 6px', color: t.text4, fontSize: 10, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 700 }}>Value</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {members.length === 0 && (
-                          <tr><td colSpan={4} style={{ padding: '20px 8px', color: t.text4, textAlign: 'center', fontSize: 12 }}>
-                            No active stock under this hub right now.
-                          </td></tr>
-                        )}
-                        {members.map(m => (
-                          <tr key={m.branch_name} style={{ borderBottom: `1px solid ${t.border}` }}>
-                            <td style={{ padding: '7px 6px', color: t.text1 }}>
-                              {m.branch_name}
-                              {m.is_hub && <span style={{ marginLeft: 6, fontSize: 8, color: t.gold, background: `${t.gold}15`, padding: '1px 5px', borderRadius: 3, letterSpacing: '.06em', fontWeight: 700 }}>HUB</span>}
-                            </td>
-                            <td style={{ padding: '7px 6px', textAlign: 'right', color: t.text2, fontFamily: 'monospace', fontWeight: 600 }}>{m.bills}</td>
-                            <td style={{ padding: '7px 6px', textAlign: 'right', color: t.text2, fontFamily: 'monospace', fontWeight: 600 }}>{Number(m.gross_wt).toFixed(2)}</td>
-                            <td style={{ padding: '7px 6px', textAlign: 'right', color: t.blue, fontFamily: 'monospace', fontWeight: 700 }}>{fmtINR(m.value)}</td>
+                    {/* Branch-wise summary — refined, premium feel. Subtle
+                        row hover, alternating zebra, refined typography. */}
+                    <div style={{
+                      border: `1px solid ${t.border}`,
+                      borderRadius: 10,
+                      overflow: 'hidden',
+                      background: t.card2 || t.card,
+                    }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
+                        <thead>
+                          <tr style={{ background: `${t.gold}06`, borderBottom: `1px solid ${t.border}` }}>
+                            <th style={{ textAlign: 'left',  padding: '11px 14px', color: t.text3, fontSize: 9.5, letterSpacing: '.16em', textTransform: 'uppercase', fontWeight: 800 }}>Source Branch</th>
+                            <th style={{ textAlign: 'right', padding: '11px 14px', color: t.text3, fontSize: 9.5, letterSpacing: '.16em', textTransform: 'uppercase', fontWeight: 800 }}>Bills</th>
+                            <th style={{ textAlign: 'right', padding: '11px 14px', color: t.text3, fontSize: 9.5, letterSpacing: '.16em', textTransform: 'uppercase', fontWeight: 800 }}>Gross Wt</th>
+                            <th style={{ textAlign: 'right', padding: '11px 14px', color: t.text3, fontSize: 9.5, letterSpacing: '.16em', textTransform: 'uppercase', fontWeight: 800 }}>Value</th>
                           </tr>
-                        ))}
-                        <tr style={{ background: `${t.gold}10`, borderTop: `2px solid ${t.gold}40` }}>
-                          <td style={{ padding: '8px 6px', color: t.gold, fontWeight: 800, fontSize: 11, letterSpacing: '.06em', textTransform: 'uppercase' }}>Σ Hub Total</td>
-                          <td style={{ padding: '8px 6px', textAlign: 'right', color: t.gold, fontFamily: 'monospace', fontWeight: 800 }}>{stats.total_bills || 0}</td>
-                          <td style={{ padding: '8px 6px', textAlign: 'right', color: t.gold, fontFamily: 'monospace', fontWeight: 800 }}>{Number(stats.total_gross_wt || stats.gross_wt || 0).toFixed(2)}</td>
-                          <td style={{ padding: '8px 6px', textAlign: 'right', color: t.blue, fontFamily: 'monospace', fontWeight: 800 }}>—</td>
-                        </tr>
-                      </tbody>
-                    </table>
-                    <div style={{ fontSize: 11, color: t.text4, marginTop: 12, lineHeight: 1.5 }}>
+                        </thead>
+                        <tbody>
+                          {members.length === 0 && (
+                            <tr><td colSpan={4} style={{ padding: '28px 14px', color: t.text4, textAlign: 'center', fontSize: 12.5, fontStyle: 'italic' }}>
+                              No active stock under this hub right now.
+                            </td></tr>
+                          )}
+                          {members.map((m, idx) => (
+                            <tr key={m.branch_name}
+                              className="hub-table-row"
+                              style={{
+                                borderBottom: idx === members.length - 1 ? 'none' : `1px solid ${t.border}80`,
+                                background: idx % 2 === 1 ? `${t.text4}06` : 'transparent',
+                                transition: 'background .15s ease',
+                              }}>
+                              <td style={{ padding: '10px 14px', color: t.text1, fontWeight: 600 }}>
+                                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                                  <span style={{
+                                    width: 6, height: 6, borderRadius: '50%',
+                                    background: m.is_hub ? t.gold : t.text3, flexShrink: 0,
+                                    boxShadow: m.is_hub ? `0 0 0 2px ${t.gold}25` : 'none',
+                                  }} />
+                                  {m.branch_name}
+                                  {m.is_hub && (
+                                    <span style={{
+                                      fontSize: 8.5, color: t.gold,
+                                      background: `${t.gold}15`,
+                                      border: `1px solid ${t.gold}40`,
+                                      padding: '2px 7px', borderRadius: 4,
+                                      letterSpacing: '.08em', fontWeight: 800,
+                                    }}>HUB</span>
+                                  )}
+                                </span>
+                              </td>
+                              <td style={{ padding: '10px 14px', textAlign: 'right', color: t.text2, fontFamily: 'var(--font-dm-mono), monospace', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{m.bills}</td>
+                              <td style={{ padding: '10px 14px', textAlign: 'right', color: t.text1, fontFamily: 'var(--font-dm-mono), monospace', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
+                                {Number(m.gross_wt).toFixed(2)}<span style={{ color: t.text4, fontSize: 10, marginLeft: 3, fontWeight: 500 }}>g</span>
+                              </td>
+                              <td style={{ padding: '10px 14px', textAlign: 'right', color: t.blue, fontFamily: 'var(--font-dm-mono), monospace', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{fmtINR(m.value)}</td>
+                            </tr>
+                          ))}
+                          {/* Hub total — distinct gold band */}
+                          <tr style={{
+                            background: `linear-gradient(90deg, ${t.gold}15 0%, ${t.gold}06 100%)`,
+                            borderTop: `2px solid ${t.gold}50`,
+                          }}>
+                            <td style={{ padding: '12px 14px', color: t.gold, fontWeight: 800, fontSize: 10.5, letterSpacing: '.14em', textTransform: 'uppercase' }}>Σ Hub Total</td>
+                            <td style={{ padding: '12px 14px', textAlign: 'right', color: t.gold, fontFamily: 'var(--font-dm-mono), monospace', fontWeight: 800, fontSize: 13.5, fontVariantNumeric: 'tabular-nums' }}>{stats.total_bills || 0}</td>
+                            <td style={{ padding: '12px 14px', textAlign: 'right', color: t.gold, fontFamily: 'var(--font-dm-mono), monospace', fontWeight: 800, fontSize: 13.5, fontVariantNumeric: 'tabular-nums' }}>
+                              {Number(stats.total_gross_wt || stats.gross_wt || 0).toFixed(2)}<span style={{ color: `${t.gold}90`, fontSize: 10.5, marginLeft: 3, fontWeight: 600 }}>g</span>
+                            </td>
+                            <td style={{ padding: '12px 14px', textAlign: 'right', color: t.gold, fontFamily: 'var(--font-dm-mono), monospace', fontWeight: 800 }}>—</td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                    <div style={{ fontSize: 11, color: t.text4, marginTop: 11, lineHeight: 1.55, fontStyle: 'italic' }}>
                       Eligible at_branch bills only. Bills already booked, audit-consumed, or sitting on another in-flight consignment are excluded. Exact totals are confirmed by the server on dispatch.
                     </div>
 
-                    {/* Transaction Executive picker — required gate before
-                        Download Delivery Challan can fire. Placeholder
-                        roster for now; the real list will replace
-                        TRANSACTION_EXECUTIVES once the role/user mapping
-                        is finalised. */}
-                    <div style={{
-                      marginTop: 18, padding: '14px 16px',
-                      background: t.card2 || t.card,
-                      border: `1px solid ${t.border}`, borderRadius: 8,
-                    }}>
-                      <label style={{ display: 'block', fontSize: 11, color: t.text3, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 700, marginBottom: 8 }}>
-                        Transaction Executive <span style={{ color: t.red }}>*</span>
-                      </label>
-                      <select
-                        value={dispatchTE}
-                        onChange={(e) => setDispatchTE(e.target.value)}
-                        disabled={!!dispatchBusy}
-                        style={{
-                          width: '100%',
-                          background: t.card,
-                          border: `1px solid ${dispatchTE ? t.gold + '55' : t.border2}`,
-                          borderRadius: 6,
-                          padding: '8px 10px',
-                          color: t.text1,
-                          fontSize: 13, fontWeight: 600,
-                          outline: 'none',
-                          cursor: dispatchBusy ? 'not-allowed' : 'pointer',
-                          fontFamily: 'inherit',
-                        }}>
-                        <option value="">— Select the executive picking up this hub —</option>
-                        {TRANSACTION_EXECUTIVES.map(name => (
-                          <option key={name} value={name}>{name}</option>
-                        ))}
-                      </select>
-                      <div style={{ fontSize: 10.5, color: t.text4, marginTop: 6, lineHeight: 1.4 }}>
-                        Recorded on the consignment so accounts knows who handled this pickup. Placeholder list — the actual TE roster will be wired in shortly.
-                      </div>
-                    </div>
+                    {/* Transaction Executive picker — premium custom dropdown
+                        with avatar circles. Required before Download Delivery
+                        Challan fires. */}
+                    <TEPicker
+                      t={t}
+                      value={dispatchTE}
+                      onChange={setDispatchTE}
+                      options={TRANSACTION_EXECUTIVES}
+                      disabled={!!dispatchBusy}
+                    />
                   </>
                 )}
               </div>
@@ -1369,57 +1567,104 @@ export default function ConsignmentOverview() {
                     - Review (no dispatchResult) → Cancel + Download Delivery Challan
                     - Challan downloaded, no EWB yet → Close + Preview and Generate EWB
                     - EWB done → Open Consignment Data + Close */}
-              <div style={{ padding: '16px 26px', borderTop: `1px solid ${t.border}`, display: 'flex', justifyContent: 'flex-end', gap: 10, flexShrink: 0, background: t.card }}>
+              <div style={{
+                padding: '18px 28px',
+                borderTop: `1px solid ${t.border}`,
+                display: 'flex', justifyContent: 'flex-end', gap: 10,
+                flexShrink: 0,
+                background: `linear-gradient(0deg, ${t.gold}05 0%, transparent 100%)`,
+              }}>
                 {dispatchResult ? (
                   ewbResult ? (
                     <>
-                      <button onClick={() => { close(); setActiveNav('consignment-data') }}
-                        style={{ background: t.gold, color: '#1a0a00', border: 'none', borderRadius: 7, padding: '9px 20px', fontSize: 13, fontWeight: 800, cursor: 'pointer', letterSpacing: '.02em' }}>
-                        Open Consignment Data →
-                      </button>
                       <button onClick={close}
-                        style={{ background: 'transparent', color: t.text2, border: `1px solid ${t.border2}`, borderRadius: 7, padding: '9px 18px', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>
+                        className="hub-btn-ghost"
+                        style={{ background: 'transparent', color: t.text2, border: `1px solid ${t.border2}`, borderRadius: 8, padding: '10px 20px', fontSize: 13, fontWeight: 700, cursor: 'pointer', transition: 'all .15s' }}>
                         Close
+                      </button>
+                      <button onClick={() => { close(); setActiveNav('consignment-data') }}
+                        className="hub-btn-primary"
+                        style={{
+                          background: `linear-gradient(180deg, ${t.gold} 0%, ${t.gold}e6 100%)`,
+                          color: '#1a0a00', border: 'none', borderRadius: 8,
+                          padding: '10px 22px', fontSize: 13, fontWeight: 800,
+                          cursor: 'pointer', letterSpacing: '.02em',
+                          boxShadow: `0 4px 14px ${t.gold}55, 0 1px 0 0 ${t.gold} inset`,
+                          transition: 'all .15s',
+                        }}>
+                        Open Consignment Data →
                       </button>
                     </>
                   ) : (
                     <>
                       <button onClick={close} disabled={!!dispatchBusy}
-                        style={{ background: 'transparent', color: t.text3, border: `1px solid ${t.border2}`, borderRadius: 7, padding: '9px 18px', fontSize: 13, fontWeight: 700, cursor: dispatchBusy ? 'not-allowed' : 'pointer' }}>
+                        className="hub-btn-ghost"
+                        style={{ background: 'transparent', color: t.text3, border: `1px solid ${t.border2}`, borderRadius: 8, padding: '10px 20px', fontSize: 13, fontWeight: 700, cursor: dispatchBusy ? 'not-allowed' : 'pointer', transition: 'all .15s' }}>
                         Close
                       </button>
                       <button onClick={onGenerateEwb} disabled={!!dispatchBusy}
+                        className={dispatchBusy ? '' : 'hub-btn-primary'}
                         style={{
-                          background: dispatchBusy ? t.card2 : t.gold,
+                          background: dispatchBusy ? t.card2 : `linear-gradient(180deg, ${t.gold} 0%, ${t.gold}e6 100%)`,
                           color:      dispatchBusy ? t.text4 : '#1a0a00',
-                          border: 'none', borderRadius: 7, padding: '9px 22px',
+                          border: 'none', borderRadius: 8, padding: '10px 24px',
                           fontSize: 13, fontWeight: 800, cursor: dispatchBusy ? 'wait' : 'pointer',
                           letterSpacing: '.02em',
+                          boxShadow: dispatchBusy ? 'none' : `0 4px 14px ${t.gold}55, 0 1px 0 0 ${t.gold} inset`,
+                          transition: 'all .15s',
                         }}>
-                        {dispatchBusy === 'ewb' ? 'Generating EWB…' : 'Preview and Generate EWB'}
+                        {dispatchBusy === 'ewb' ? 'Generating EWB…' : 'Preview & Generate EWB'}
                       </button>
                     </>
                   )
                 ) : (
                   <>
                     <button onClick={close} disabled={!!dispatchBusy}
-                      style={{ background: 'transparent', color: t.text3, border: `1px solid ${t.border2}`, borderRadius: 7, padding: '9px 18px', fontSize: 13, fontWeight: 700, cursor: dispatchBusy ? 'not-allowed' : 'pointer' }}>
+                      className="hub-btn-ghost"
+                      style={{ background: 'transparent', color: t.text3, border: `1px solid ${t.border2}`, borderRadius: 8, padding: '10px 20px', fontSize: 13, fontWeight: 700, cursor: dispatchBusy ? 'not-allowed' : 'pointer', transition: 'all .15s' }}>
                       Cancel
                     </button>
                     <button onClick={onDownloadChallan} disabled={!!dispatchBusy || members.length === 0 || !dispatchTE}
                       title={!dispatchTE ? 'Select a Transaction Executive first' : undefined}
+                      className={dispatchBusy || members.length === 0 || !dispatchTE ? '' : 'hub-btn-primary'}
                       style={{
-                        background: dispatchBusy || members.length === 0 || !dispatchTE ? t.card2 : t.gold,
-                        color:      dispatchBusy || members.length === 0 || !dispatchTE ? t.text4  : '#1a0a00',
-                        border: 'none', borderRadius: 7, padding: '9px 22px',
-                        fontSize: 13, fontWeight: 800, cursor: dispatchBusy || members.length === 0 || !dispatchTE ? 'not-allowed' : 'pointer',
+                        background: dispatchBusy || members.length === 0 || !dispatchTE
+                          ? t.card2
+                          : `linear-gradient(180deg, ${t.gold} 0%, ${t.gold}e6 100%)`,
+                        color: dispatchBusy || members.length === 0 || !dispatchTE ? t.text4 : '#1a0a00',
+                        border: 'none', borderRadius: 8, padding: '10px 24px',
+                        fontSize: 13, fontWeight: 800,
+                        cursor: dispatchBusy || members.length === 0 || !dispatchTE ? 'not-allowed' : 'pointer',
                         letterSpacing: '.02em',
+                        boxShadow: dispatchBusy || members.length === 0 || !dispatchTE
+                          ? 'none'
+                          : `0 4px 14px ${t.gold}55, 0 1px 0 0 ${t.gold} inset`,
+                        transition: 'all .15s',
                       }}>
-                      {dispatchBusy === 'challan' ? 'Dispatching & downloading…' : 'Download Delivery Challan'}
+                      {dispatchBusy === 'challan' ? 'Dispatching & downloading…' : '⤓ Download Delivery Challan'}
                     </button>
                   </>
                 )}
               </div>
+
+              {/* Modal-scoped polish — entry animations, hover micro-interactions
+                  on the primary buttons + table rows. Restricted to the
+                  hub-dispatch namespace so we don't bleed into the rest of the
+                  app. */}
+              <style>{`
+                @keyframes hubModalFade {
+                  from { opacity: 0; }
+                  to   { opacity: 1; }
+                }
+                @keyframes hubModalLift {
+                  from { opacity: 0; transform: translateY(14px) scale(.97); }
+                  to   { opacity: 1; transform: translateY(0) scale(1); }
+                }
+                .hub-btn-primary:hover { transform: translateY(-1px); box-shadow: 0 6px 22px ${t.gold}77, 0 1px 0 0 ${t.gold} inset !important; }
+                .hub-btn-primary:active { transform: translateY(0); }
+                .hub-btn-ghost:hover { background: ${t.gold}10 !important; color: ${t.text1} !important; border-color: ${t.gold}55 !important; }
+                .hub-table-row:hover { background: ${t.gold}06 !important; }
+              `}</style>
             </div>
           </div>
         )
