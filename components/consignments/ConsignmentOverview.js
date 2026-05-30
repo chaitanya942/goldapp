@@ -76,6 +76,22 @@ export default function ConsignmentOverview() {
   const [loading,      setLoading]      = useState(() => !getCache('co:branch-overview'))
   const [search,       setSearch]       = useState('')
   const [activeRegion, setActiveRegion] = useState(null)
+  // Scope tab — 'outside' = outstation branches (the historical default),
+  // 'bangalore' = Bangalore-only view with hubs as hero cards. Restricted
+  // users (no Bangalore access) only see 'outside'. Persisted per-device.
+  const [scopeTab, setScopeTab] = useState(() => {
+    if (typeof window === 'undefined') return 'outside'
+    return window.localStorage.getItem('cstock.scopeTab') || 'outside'
+  })
+  useEffect(() => {
+    if (typeof window !== 'undefined') window.localStorage.setItem('cstock.scopeTab', scopeTab)
+  }, [scopeTab])
+  // Active hub on the Bangalore tab — when set, the branch list filters to
+  // that hub + every leaf whose hub_branch_name matches.
+  const [activeHub, setActiveHub] = useState(null)
+  // Clear hub selection when leaving the Bangalore tab so a returning user
+  // starts fresh on the All Bangalore view.
+  useEffect(() => { if (scopeTab !== 'bangalore') setActiveHub(null) }, [scopeTab])
   // Default sort: total net weight desc (largest stockholders first). Management
   // wants to see the biggest exposures at the top without clicking.
   const [sortKey,      setSortKey]      = useState('total_net_wt')
@@ -121,7 +137,10 @@ export default function ConsignmentOverview() {
   const fetchData = useCallback(async (silent = false) => {
     if (!silent) setLoading(true)
     try {
-      const res  = await authedFetch('/api/consignments?action=branch_overview')
+      // Pull Bangalore branches into the response only when the Bangalore
+      // scope tab is active. Outstation view keeps its lighter payload.
+      const qs = scopeTab === 'bangalore' ? '&include_bangalore=true' : ''
+      const res  = await authedFetch(`/api/consignments?action=branch_overview${qs}`)
       const json = await res.json()
       // The API returns {data, error} even on 200 when the RPC is missing —
       // surface that instead of silently wiping the screen to "No stock".
@@ -156,7 +175,7 @@ export default function ConsignmentOverview() {
     } finally {
       if (!silent) setLoading(false)
     }
-  }, [])
+  }, [scopeTab])
 
   // Mount: render Supabase data immediately (don't block on sync). In
   // parallel, force a fresh CRM→Supabase sync — when it lands, refetch
@@ -413,19 +432,32 @@ export default function ConsignmentOverview() {
     URL.revokeObjectURL(url)
   }
 
+  // ── Scope-filtered data ───────────────────────────────────────────────────
+  // Every downstream computation (regions, hubs, filtered table, KPI tiles)
+  // reads scopeData instead of data so the Bangalore tab and Outside tab
+  // stay cleanly partitioned. Bangalore tab also strips the leaves whose
+  // hub_branch_name doesn't match the active hub when one is selected.
+  const scopeData = useMemo(() => {
+    if (scopeTab === 'bangalore') {
+      const ks = data.filter(b => b.region === 'Bangalore')
+      return ks
+    }
+    return data.filter(b => b.region !== 'Bangalore')
+  }, [data, scopeTab])
+
   // ── Region summary ────────────────────────────────────────────────────────
   // Custom order — Rest of Karnataka first, then Kerala / AP / Telangana.
   // Anything outside the canonical order gets appended alphabetically so a
   // newly-added region doesn't silently disappear.
   const regions = useMemo(() => {
-    const all = [...new Set(data.map(b => b.region).filter(Boolean))]
+    const all = [...new Set(scopeData.map(b => b.region).filter(Boolean))]
     return [
       ...REGION_ORDER.filter(r => all.includes(r)),
       ...all.filter(r => !REGION_ORDER.includes(r)).sort(),
     ]
-  }, [data])
+  }, [scopeData])
   const regionStats = useMemo(() => regions.reduce((acc, r) => {
-    const bs = data.filter(b => b.region === r)
+    const bs = scopeData.filter(b => b.region === r)
     const today_bills  = bs.reduce((s, b) => s + (b.today_bills   || 0), 0)
     const older_bills  = bs.reduce((s, b) => s + (b.older_bills   || 0), 0)
     const today_net_wt = bs.reduce((s, b) => s + (b.today_net_wt  || 0), 0)
@@ -439,7 +471,51 @@ export default function ConsignmentOverview() {
       gross_wt:     bs.reduce((s, b) => s + b.total_gross_wt, 0),
     }
     return acc
-  }, {}), [data, regions])
+  }, {}), [scopeData, regions])
+
+  // ── Bangalore hubs summary ────────────────────────────────────────────────
+  // Bangalore-tab hero cards: one per hub branch. A hub's totals roll up its
+  // own stock + every leaf whose hub_branch_name matches. Computed only when
+  // we have Bangalore rows; otherwise empty.
+  const hubs = useMemo(() => {
+    if (scopeTab !== 'bangalore') return []
+    return scopeData
+      .filter(b => b.is_hub)
+      .map(b => b.branch_name)
+      .sort()
+  }, [scopeData, scopeTab])
+
+  const hubStats = useMemo(() => {
+    if (scopeTab !== 'bangalore') return {}
+    const out = {}
+    for (const hubName of hubs) {
+      // hub itself + every leaf pointing to it
+      const members = scopeData.filter(b => b.branch_name === hubName || b.hub_branch_name === hubName)
+      const today_bills  = members.reduce((s, b) => s + (b.today_bills   || 0), 0)
+      const older_bills  = members.reduce((s, b) => s + (b.older_bills   || 0), 0)
+      const today_net_wt = members.reduce((s, b) => s + (b.today_net_wt  || 0), 0)
+      const older_net_wt = members.reduce((s, b) => s + (b.older_net_wt  || 0), 0)
+      out[hubName] = {
+        branches:        members.length,
+        leaves:          members.length - 1,   // minus the hub itself
+        active_branches: members.filter(b => (b.today_bills || 0) + (b.older_bills || 0) > 0).length,
+        today_bills, older_bills, today_net_wt, older_net_wt,
+        total_bills:  today_bills + older_bills,
+        total_net_wt: today_net_wt + older_net_wt,
+        gross_wt:     members.reduce((s, b) => s + (b.total_gross_wt || 0), 0),
+      }
+    }
+    return out
+  }, [scopeData, scopeTab, hubs])
+
+  // ── Bangalore-tab branch list filter ──────────────────────────────────────
+  // Bangalore branches not assigned to any hub (orphans) are surfaced under
+  // "All Bangalore" but never under a hub card click. When a hub is active,
+  // only that hub + its leaves render in the table.
+  const bangaloreHubFiltered = useMemo(() => {
+    if (scopeTab !== 'bangalore' || !activeHub) return scopeData
+    return scopeData.filter(b => b.branch_name === activeHub || b.hub_branch_name === activeHub)
+  }, [scopeData, scopeTab, activeHub])
 
   // Always display weights in grams (no kg conversion). Comma-grouped, two
   // decimals so the operations team sees the exact figure (rounding to
@@ -452,9 +528,12 @@ export default function ConsignmentOverview() {
   // ── Filtered + sorted ─────────────────────────────────────────────────────
   // Search now matches branch OR region (so typing 'kerala' narrows to all
   // Kerala branches without having to click the region card).
+  // Bangalore tab reads bangaloreHubFiltered (already scoped to Bangalore +
+  // active hub); Outside tab reads scopeData (Bangalore stripped upstream).
   const filtered = useMemo(() => {
+    const baseRows = scopeTab === 'bangalore' ? bangaloreHubFiltered : scopeData
     const searchQ = (search || '').toLowerCase()
-    return data
+    return baseRows
       // Hide branches with zero stock — empty rows are noise. The flash cards
       // above show 'X / Y branches' so the operator knows how many are hidden.
       .filter(b => ((b.today_net_wt || 0) + (b.older_net_wt || 0)) > 0)
@@ -490,7 +569,7 @@ export default function ConsignmentOverview() {
         if (sortKey === 'total_bills')        { av = (a.today_bills  || 0) + (a.older_bills  || 0); bv = (b.today_bills  || 0) + (b.older_bills  || 0) }
         return (av - bv) * sortDir
       })
-  }, [data, activeRegion, search, quickFilter, sortKey, sortDir])
+  }, [scopeTab, scopeData, bangaloreHubFiltered, activeRegion, search, quickFilter, sortKey, sortDir])
 
   // ── Group filtered rows by region for the collapsible card view. Keys keep
   // the canonical REGION_ORDER so cards render Karnataka → Kerala → AP → Telangana.
@@ -566,12 +645,36 @@ export default function ConsignmentOverview() {
             })()}
           </div>
           <div style={{ fontSize: '11px', color: t.text3, marginTop: '4px' }}>
-            Outside-Bangalore branches ·
+            {scopeTab === 'bangalore' ? 'Bangalore branches' : 'Outside-Bangalore branches'} ·
             {lastRefresh && (
               <span style={{ color: minsAgo === 0 ? t.green : t.text4, marginLeft: '4px' }}>
                 {minsAgo === 0 ? 'just refreshed' : `${minsAgo}m ago`} · {lastRefresh.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}
               </span>
             )}
+          </div>
+          {/* Scope tab strip — Outside | Bangalore. Clicking flips the data
+              source and (for Bangalore) swaps the region cards for hub cards. */}
+          <div style={{ display: 'inline-flex', background: t.card2, border: `1px solid ${t.border}`, borderRadius: 10, padding: 3, gap: 2, marginTop: 10 }}>
+            {[
+              { key: 'outside',   label: 'Outside Bangalore', accent: t.gold },
+              { key: 'bangalore', label: 'Bangalore',         accent: REGION_COLORS['Bangalore'] || t.gold },
+            ].map(tab => {
+              const active = scopeTab === tab.key
+              return (
+                <button key={tab.key} onClick={() => { setScopeTab(tab.key); setActiveRegion(null) }}
+                  style={{
+                    background: active ? `${tab.accent}1d` : 'transparent',
+                    border:     `1px solid ${active ? `${tab.accent}80` : 'transparent'}`,
+                    color:      active ? tab.accent : t.text3,
+                    borderRadius: 8, padding: '6px 14px',
+                    fontSize: 11.5, fontWeight: 800, letterSpacing: '.04em',
+                    cursor: 'pointer',
+                    transition: 'background .15s, color .15s, border-color .15s',
+                  }}>
+                  {tab.label}
+                </button>
+              )
+            })}
           </div>
         </div>
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
@@ -768,9 +871,9 @@ export default function ConsignmentOverview() {
         }
       `}</style>
 
-      {/* ── Region Flashcards — horizontal scroll-snap on mobile ── */}
+      {/* ── Region Flashcards (Outside tab only) — horizontal scroll-snap on mobile ── */}
       {/* Hidden entirely when user is restricted to a single region (one card = no value) */}
-      {canSee('element.consignment-overview.region_cards') && !regionAccess.single && (
+      {scopeTab === 'outside' && canSee('element.consignment-overview.region_cards') && !regionAccess.single && (
         <div style={{
           display: 'flex', gap: '10px',
           flexWrap: isMobile ? 'nowrap' : 'wrap',
@@ -784,10 +887,10 @@ export default function ConsignmentOverview() {
 
           {/* All Regions — totals across the board. Hidden for region-restricted users. */}
           {!regionAccess.restricted && (() => {
-            const allBills      = data.reduce((s, b) => s + (b.today_bills || 0) + (b.older_bills || 0), 0)
-            const allNetWt      = data.reduce((s, b) => s + (b.today_net_wt || 0) + (b.older_net_wt || 0), 0)
-            const allTodayBills = data.reduce((s, b) => s + (b.today_bills || 0), 0)
-            const activeBranches = data.filter(b => ((b.today_net_wt || 0) + (b.older_net_wt || 0)) > 0).length
+            const allBills      = scopeData.reduce((s, b) => s + (b.today_bills || 0) + (b.older_bills || 0), 0)
+            const allNetWt      = scopeData.reduce((s, b) => s + (b.today_net_wt || 0) + (b.older_net_wt || 0), 0)
+            const allTodayBills = scopeData.reduce((s, b) => s + (b.today_bills || 0), 0)
+            const activeBranches = scopeData.filter(b => ((b.today_net_wt || 0) + (b.older_net_wt || 0)) > 0).length
             const w = fmtWtCard(allNetWt)
             const isActive = !activeRegion
             return (
@@ -813,8 +916,8 @@ export default function ConsignmentOverview() {
                   <span style={{ fontSize: '12px', fontWeight: 500, color: isActive ? t.gold : t.text3 }}>{w.unit}</span>
                 </div>
                 <div style={{ fontSize: '10px', color: t.text4, display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                  <span title={`${activeBranches} of ${data.length} branches currently hold stock`}>
-                    <strong style={{ color: t.text2 }}>{activeBranches}</strong>/{data.length} branches
+                  <span title={`${activeBranches} of ${scopeData.length} branches currently hold stock`}>
+                    <strong style={{ color: t.text2 }}>{activeBranches}</strong>/{scopeData.length} branches
                   </span>
                   <span style={{ color: t.border2 }}>·</span>
                   <span><strong style={{ color: t.text2 }}>{allBills}</strong> bills</span>
@@ -866,6 +969,110 @@ export default function ConsignmentOverview() {
         </div>
       )}
 
+      {/* ── Bangalore Hub Flashcards (Bangalore tab only) — same visual
+          language as the region cards above. 'All Bangalore' on the left,
+          one card per is_hub=true branch (BASAWESHWARANAGAR, K R PURAM,
+          KAIKONDRAHALLI, KATRIGUPPE, BOMMANAHALLI, ADUGODI). Clicking a
+          hub filters the branch list below to that hub + every leaf
+          whose hub_branch_name matches. ── */}
+      {scopeTab === 'bangalore' && canSee('element.consignment-overview.region_cards') && (
+        <div style={{
+          display: 'flex', gap: '10px',
+          flexWrap: isMobile ? 'nowrap' : 'wrap',
+          overflowX: isMobile ? 'auto' : 'visible',
+          scrollSnapType: isMobile ? 'x mandatory' : 'none',
+          WebkitOverflowScrolling: 'touch',
+          scrollbarWidth: 'none',
+          margin: isMobile ? '0 -16px' : 0,
+          padding: isMobile ? '0 16px 4px' : 0,
+        }}>
+          {/* All Bangalore — sum across every Bangalore row. Click clears the hub filter. */}
+          {(() => {
+            const bglColor = REGION_COLORS['Bangalore'] || t.gold
+            const allBills      = scopeData.reduce((s, b) => s + (b.today_bills || 0) + (b.older_bills || 0), 0)
+            const allNetWt      = scopeData.reduce((s, b) => s + (b.today_net_wt || 0) + (b.older_net_wt || 0), 0)
+            const allTodayBills = scopeData.reduce((s, b) => s + (b.today_bills || 0), 0)
+            const activeBranches = scopeData.filter(b => ((b.today_net_wt || 0) + (b.older_net_wt || 0)) > 0).length
+            const w = fmtWtCard(allNetWt)
+            const isActive = !activeHub
+            return (
+              <div onClick={() => setActiveHub(null)}
+                style={{
+                  background: isActive ? `linear-gradient(145deg, ${bglColor}18, ${bglColor}06)` : `linear-gradient(145deg, ${t.card}, ${t.card2})`,
+                  border: `1px solid ${isActive ? bglColor + '60' : t.border}`,
+                  borderLeft: `4px solid ${isActive ? bglColor : t.text4 + '30'}`,
+                  borderRadius: '12px', padding: '16px 18px',
+                  cursor: 'pointer', minWidth: '200px',
+                  flexShrink: 0, scrollSnapAlign: 'start',
+                  transition: 'all .2s',
+                  boxShadow: isActive ? `0 4px 16px ${bglColor}20` : '0 1px 3px rgba(0,0,0,.2)',
+                }}
+                onMouseEnter={e => { if (!isActive) e.currentTarget.style.transform = 'translateY(-2px)' }}
+                onMouseLeave={e => { if (!isActive) e.currentTarget.style.transform = 'translateY(0)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                  <div style={{ fontSize: '9px', color: isActive ? bglColor : t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 700 }}>All Bangalore</div>
+                  <span style={{ fontSize: '15px', opacity: isActive ? 1 : 0.5 }}>🏙</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px', lineHeight: 1, marginBottom: '6px' }}>
+                  <span style={{ fontSize: '26px', fontWeight: 300, color: isActive ? bglColor : t.text1, fontFamily: 'monospace' }}>{w.value}</span>
+                  <span style={{ fontSize: '12px', fontWeight: 500, color: isActive ? bglColor : t.text3 }}>{w.unit}</span>
+                </div>
+                <div style={{ fontSize: '10px', color: t.text4, display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                  <span title={`${activeBranches} of ${scopeData.length} Bangalore branches currently hold stock`}>
+                    <strong style={{ color: t.text2 }}>{activeBranches}</strong>/{scopeData.length} branches
+                  </span>
+                  <span style={{ color: t.border2 }}>·</span>
+                  <span><strong style={{ color: t.text2 }}>{allBills}</strong> bills</span>
+                  {allTodayBills > 0 && <><span style={{ color: t.border2 }}>·</span><span style={{ color: t.green, fontWeight: 600 }}>+{allTodayBills} today</span></>}
+                </div>
+              </div>
+            )
+          })()}
+
+          {hubs.map(hubName => {
+            const stats   = hubStats[hubName] || {}
+            const color   = t.gold
+            const active  = activeHub === hubName
+            const w       = fmtWtCard(stats.total_net_wt)
+            return (
+              <div key={hubName} onClick={() => setActiveHub(active ? null : hubName)}
+                title={`${stats.leaves || 0} leaf branch${(stats.leaves || 0) === 1 ? '' : 'es'} report to this hub`}
+                style={{
+                  background: active ? `linear-gradient(145deg, ${color}18, ${color}06)` : `linear-gradient(145deg, ${t.card}, ${t.card2})`,
+                  border: `1px solid ${active ? color + '60' : t.border}`,
+                  borderLeft: `4px solid ${active ? color : color + '30'}`,
+                  borderRadius: '12px', padding: '16px 18px',
+                  cursor: 'pointer', minWidth: '220px',
+                  flexShrink: 0, scrollSnapAlign: 'start',
+                  transition: 'all .2s',
+                  boxShadow: active ? `0 4px 16px ${color}20` : '0 1px 3px rgba(0,0,0,.2)',
+                }}
+                onMouseEnter={e => { if (!active) e.currentTarget.style.transform = 'translateY(-2px)' }}
+                onMouseLeave={e => { if (!active) e.currentTarget.style.transform = 'translateY(0)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                  <div style={{ fontSize: '9px', color: active ? color : t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {hubName} <span style={{ fontSize: 8, color: active ? color : t.text4, marginLeft: 4, letterSpacing: '.06em' }}>HUB</span>
+                  </div>
+                  <span style={{ fontSize: '15px', opacity: active ? 1 : 0.6, flexShrink: 0, marginLeft: '6px' }}>🏛</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px', lineHeight: 1, marginBottom: '6px' }}>
+                  <span style={{ fontSize: '26px', fontWeight: 300, color: active ? color : t.text1, fontFamily: 'monospace' }}>{w.value}</span>
+                  <span style={{ fontSize: '12px', fontWeight: 500, color: active ? color : t.text3 }}>{w.unit}</span>
+                </div>
+                <div style={{ fontSize: '10px', color: t.text4, display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                  <span title={`${stats.active_branches || 0} of ${stats.branches || 0} (hub + leaves) currently hold stock`}>
+                    <strong style={{ color: t.text2 }}>{stats.active_branches || 0}</strong>/{stats.branches || 0} branches
+                  </span>
+                  <span style={{ color: t.border2 }}>·</span>
+                  <span><strong style={{ color: t.text2 }}>{stats.total_bills || 0}</strong> bills</span>
+                  {(stats.leaves || 0) > 0 && <><span style={{ color: t.border2 }}>·</span><span><strong style={{ color: t.text3 }}>{stats.leaves}</strong> leaves</span></>}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+
       {/* ── KPI Strip ── 8 tiles in two semantic groups (Today / Pending),
            bookended by Branches and Total Gross Wt. auto-fit lets the strip
            wrap into 4×2 on narrow viewports, 8×1 on wide. */}
@@ -875,7 +1082,7 @@ export default function ConsignmentOverview() {
         <div style={{ ...card, padding: '14px 18px' }}>
           <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: '8px' }}>Branches</div>
           <div style={{ fontSize: '26px', fontWeight: 200, color: t.text1, fontFamily: 'monospace', lineHeight: 1 }}>{filtered.length}</div>
-          <div style={{ fontSize: '10px', color: t.text4, marginTop: '4px' }}>of {data.length} total</div>
+          <div style={{ fontSize: '10px', color: t.text4, marginTop: '4px' }}>of {scopeData.length} total</div>
         </div>
 
         {/* Today group */}

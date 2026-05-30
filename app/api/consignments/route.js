@@ -90,9 +90,11 @@ export async function GET(req) {
 
     // Fetch branch metadata to filter outside_bangalore + attach region/pickup.
     // Region scoping applied here so downstream summary only includes user's branches.
+    // is_hub + hub_branch_name come along so the Bangalore tab can group
+    // leaves under their hubs.
     let branchesQ = supabase
       .from('branches')
-      .select('name, region, state, model_type, pickup_time, pickup_days')
+      .select('name, region, state, model_type, pickup_time, pickup_days, is_hub, hub_branch_name')
       .eq('is_active', true)
     if (allowedRegions) branchesQ = branchesQ.in('region', allowedRegions)
     const { data: branches, error: bErr } = await branchesQ
@@ -100,7 +102,15 @@ export async function GET(req) {
 
     const branchMeta = {}
     for (const b of branches || []) {
-      branchMeta[b.name] = { region: b.region || 'Unknown', state: b.state, model_type: b.model_type, pickup_time: b.pickup_time || null, pickup_days: Array.isArray(b.pickup_days) ? b.pickup_days : null }
+      branchMeta[b.name] = {
+        region:          b.region || 'Unknown',
+        state:           b.state,
+        model_type:      b.model_type,
+        pickup_time:     b.pickup_time || null,
+        pickup_days:     Array.isArray(b.pickup_days) ? b.pickup_days : null,
+        is_hub:          !!b.is_hub,
+        hub_branch_name: b.hub_branch_name || null,
+      }
     }
     const outsideBranches = new Set(
       (branches || []).filter(b => b.model_type === 'outside_bangalore').map(b => b.name)
@@ -136,10 +146,12 @@ export async function GET(req) {
     // include_bangalore_today flag is set (Dashboard's Consignment Overview).
     const summary = {}
     const populateZeroRow = (branchName) => {
-      const meta = branchMeta[branchName] || { region: 'Unknown', pickup_time: null, pickup_days: null }
+      const meta = branchMeta[branchName] || { region: 'Unknown', pickup_time: null, pickup_days: null, is_hub: false, hub_branch_name: null }
       summary[branchName] = {
         branch_name: branchName, region: meta.region, pickup_time: meta.pickup_time,
         pickup_days: meta.pickup_days,
+        is_hub:          !!meta.is_hub,
+        hub_branch_name: meta.hub_branch_name || null,
         last_moved_at: lastMovedByBranch[branchName] || null,
         total_bills: 0, today_bills: 0, older_bills: 0,
         today_net_wt: 0, older_net_wt: 0,
