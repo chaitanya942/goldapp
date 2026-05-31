@@ -2257,39 +2257,30 @@ export async function POST(req) {
     if (ccName)  postCreatePatch.branch_contact_name  = ccName
     if (ccPhone) postCreatePatch.branch_contact_phone = ccPhone
 
-    // KL leaf → hub fix. create_consignment_atomic unconditionally stamps
-    // INTERNAL consignments as status='received' / received_at=now() — that's
-    // correct for the Bangalore hub-create flow (TE picks bills off shelves
-    // at the same building; instant transfer). But for Kerala, the BVC truck
-    // physically moves bills from a leaf to a hub — there's real transit
-    // time. Section 2 ("In Movement · Leaf → Hub") on the KL Bidding Volume
-    // view filters for consignments NOT IN ('cancelled','received',...), so
-    // auto-received KL leaf → hub consignments silently disappeared from
-    // the picker even though the bills hadn't physically arrived yet.
-    //
-    // Revert here: for KL INTERNAL, flip back to 'dispatched' + clear
-    // received_at. Hub does an explicit receive later in the workflow.
-    const isKlLeafToHub = isInternal && branchData.region === 'Kerala'
-    if (isKlLeafToHub) {
-      postCreatePatch.status      = 'dispatched'
-      postCreatePatch.received_at = null
-    }
-
-    // For KL we MUST await — the operator's very next action is to refresh
-    // Bidding Volume to see this consignment land in S2. Fire-and-forget
-    // would race the read query and leave S2 looking empty briefly.
-    // Other branches: keep fire-and-forget (the patch is UI sugar only).
-    const patchPromise = supabase.from('consignments')
+    supabase.from('consignments')
       .update(postCreatePatch)
       .eq('id', rpcConsignment.id)
-    if (isKlLeafToHub) {
-      await patchPromise
-      // Reflect the corrected status on the returned row so the client
-      // doesn't have to refetch to see the truth.
-      rpcConsignment.status      = 'dispatched'
-      rpcConsignment.received_at = null
-    } else {
-      patchPromise.then(() => {}).catch(() => {})
+      .then(() => {})
+      .catch(() => {})
+
+    // INTERNAL (Branch → Hub): bills become hub stock the moment the voucher
+    // is created. Mirrors the Bangalore hub-create flow and the documented
+    // model at the top of this handler — instantaneous transfer, no receive
+    // step at hub. Flip current_branch → dest_branch so Branch Stock at the
+    // hub immediately reflects the new bills, and the hub → HO consignment
+    // created later finds them on the same-branch validation.
+    //
+    // Previously had a KL-specific revert here that forced status back to
+    // 'dispatched'. That broke the model: bills got stuck on leaf →  hub
+    // vouchers indefinitely because the hub had no way to receive them
+    // (no "received at hub" workflow gate exists for KL today, by design).
+    // Ops needs them auto-received so the hub → HO consignment can be
+    // built. See sql/one-off-receive-stuck-kl-leaf-hub-vouchers.sql for
+    // the cleanup of rows created under the previous behaviour.
+    if (isInternal && dest_branch) {
+      await supabase.from('purchases')
+        .update({ current_branch: dest_branch })
+        .in('id', purchase_ids)
     }
 
     // Stick the contact back onto the branch row so the NEXT create from
