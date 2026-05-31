@@ -1935,13 +1935,21 @@ export async function POST(req) {
     if (!purchase_ids?.length) return Response.json({ error: 'No purchases selected' }, { status: 400 })
     if (!branch_name)          return Response.json({ error: 'Branch name required' },  { status: 400 })
 
-    // Cap consignment size. NIC E-Way Bill caps a single bill at 250 line items;
-    // E-Invoice caps at 1000. Beyond ~100 the PDF challan also becomes unreadable
-    // and approval review unworkable. Operators should split into multiple
-    // consignments rather than stuff everything into one.
-    if (purchase_ids.length > 100) {
+    // Cap consignment size. NIC E-Way Bill caps a single document at 250
+    // line items; E-Invoice caps at 1000. INTERNAL (Branch → Hub) doesn't
+    // hit either portal — only an Issue Voucher PDF — so it can run
+    // unlimited. EXTERNAL (Branch → HO) needs the EWB, so respect NIC's
+    // 250-line-item cap.
+    //
+    // The previous 100-bill cap was a guess at PDF readability, not a real
+    // technical constraint. Ops asked for it lifted (Kerala hub dispatches
+    // routinely run 100+ bills) and the Delivery Challan paginates fine
+    // well beyond 100 rows.
+    const isInternalCheck = movement_type === 'INTERNAL'
+    const consignmentCap  = isInternalCheck ? Infinity : 250
+    if (purchase_ids.length > consignmentCap) {
       return Response.json({
-        error: `Too many bills (${purchase_ids.length}). A consignment can carry at most 100 bills — split this into multiple consignments.`,
+        error: `Too many bills (${purchase_ids.length}). NIC E-Way Bill caps a single document at 250 line items, so a Branch → HO consignment can carry at most 250 bills — split this into multiple consignments.`,
       }, { status: 400 })
     }
     // Defensive: reject duplicate IDs (shouldn't happen via UI but a hand-rolled
@@ -3494,9 +3502,13 @@ export async function POST(req) {
     if (!bills || bills.length === 0) {
       return Response.json({ error: 'No eligible at_branch bills to dispatch from this hub right now.' }, { status: 400 })
     }
-    if (bills.length > 100) {
+    // Hub → HO is EXTERNAL — NIC E-Way Bill caps at 250 line items per
+    // document. (Old 100-bill cap was a PDF-readability guess, not a real
+    // limit. Lifted to NIC's actual hard cap so big Bangalore hub sweeps
+    // don't hit a false ceiling.)
+    if (bills.length > 250) {
       return Response.json({
-        error: `Too many bills (${bills.length}). One consignment can carry at most 100 bills — split into multiple dispatches.`,
+        error: `Too many bills (${bills.length}). NIC E-Way Bill caps a single document at 250 line items, so a hub → HO consignment can carry at most 250 bills — split into multiple dispatches.`,
       }, { status: 400 })
     }
 
