@@ -169,6 +169,16 @@ export default function CollectionAudit() {
   // arriving on different days shows under each respective filter, with
   // only that day's truck's bills inside).
   const [arrivalFilter, setArrivalFilter] = useState('today')
+  // Region collapse state. Empty by default = all regions expanded.
+  // Click a region's chevron to toggle.
+  const [collapsedRegions, setCollapsedRegions] = useState(() => new Set())
+  const toggleRegion = useCallback((region) => {
+    setCollapsedRegions(prev => {
+      const next = new Set(prev)
+      if (next.has(region)) next.delete(region); else next.add(region)
+      return next
+    })
+  }, [])
 
   const fetchAll = useCallback(async () => {
     setLoading(true)
@@ -625,18 +635,32 @@ export default function CollectionAudit() {
               <div style={{ padding: '6px 16px 18px' }}>
                 {outstationByRegion.map(({ region, branches }, regionIdx) => {
                   const regionBills = branches.reduce((s, b) => s + b.bills.length, 0)
+                  const collapsed   = collapsedRegions.has(region)
                   return (
                     <div key={region} style={{ marginTop: regionIdx === 0 ? '10px' : '20px' }}>
-                      {/* Region band — full-width strip with left accent bar
-                          and pill-styled count. Heavier visual presence than
-                          a small dot so the auditor can scan the page by
-                          region without needing the title's full attention. */}
-                      <div style={{
-                        display: 'flex', alignItems: 'center', gap: '12px',
-                        margin: '0 0 12px', padding: '8px 0 8px 4px',
-                        borderBottom: `1px solid ${t.border}`,
-                        position: 'relative',
-                      }}>
+                      {/* Region band — clickable to collapse/expand. Heavier
+                          visual presence than a dot so it scans well; chevron
+                          on the right rotates with state so the affordance is
+                          obvious without a tooltip. */}
+                      <button
+                        type="button"
+                        onClick={() => toggleRegion(region)}
+                        aria-expanded={!collapsed}
+                        style={{
+                          display: 'flex', alignItems: 'center', gap: '12px',
+                          width: '100%',
+                          margin: '0 0 12px', padding: '8px 4px',
+                          borderBottom: `1px solid ${t.border}`,
+                          background: 'transparent', border: 'none', borderTop: 'none',
+                          borderLeft: 'none', borderRight: 'none',
+                          textAlign: 'left',
+                          cursor: 'pointer',
+                          position: 'relative',
+                          transition: 'background .15s ease',
+                          borderRadius: '4px',
+                        }}
+                        onMouseEnter={e => { e.currentTarget.style.background = `${t.orange}06` }}
+                        onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}>
                         <span style={{
                           width: '3px', alignSelf: 'stretch', borderRadius: '2px',
                           background: `linear-gradient(180deg, ${t.orange}, ${t.orange}40)`,
@@ -657,36 +681,45 @@ export default function CollectionAudit() {
                         }}>
                           {branches.length} · {regionBills} bill{regionBills === 1 ? '' : 's'}
                         </span>
-                      </div>
-                      <div style={{
-                        display: 'grid',
-                        // 1fr lets cards share remaining row width evenly so
-                        // every row aligns flush left + right. Min 220px is
-                        // tight enough that 5-6 cards fit at typical viewport
-                        // widths, wide enough to hold the longest KL- branch
-                        // names without wrapping mid-word.
-                        gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-                        gap: '5px',
-                      }}>
-                        {branches.map((b, i) => (
-                          <div key={b.branch}
-                               className="ca-card-enter"
-                               style={{ animationDelay: `${Math.min(i * 30, 400)}ms` }}>
-                            <BranchCard
-                              t={t}
-                              accent={t.orange}
-                              branch={b.branch}
-                              billCount={b.bills.length}
-                              extraLabel={`${b.consignments.length} consignment${b.consignments.length === 1 ? '' : 's'}`}
-                              oldestAt={oldestAge(b.consignments, 'dispatched_at')}
-                              dispatchedYmd={latestDispatchDate(b.consignments)}
-                              arrivalAt={earliestArrival(b.consignments)}
-                              discrepancies={b.bills.filter(x => x.audit_gross_weight != null).length}
-                              onPick={() => setDrillBranch({ name: b.branch, pool: 'outstation' })}
-                            />
-                          </div>
-                        ))}
-                      </div>
+                        <span style={{
+                          marginLeft: 'auto',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          width: '20px', height: '20px',
+                          color: t.text3,
+                          fontSize: '11px',
+                          fontWeight: 700,
+                          transform: collapsed ? 'rotate(-90deg)' : 'rotate(0deg)',
+                          transition: 'transform .2s ease, color .15s ease',
+                        }}>▾</span>
+                      </button>
+                      {!collapsed && (
+                        <div style={{
+                          display: 'grid',
+                          gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+                          gap: '5px',
+                        }}>
+                          {branches.map((b, i) => (
+                            <div key={b.branch}
+                                 className="ca-card-enter"
+                                 style={{ animationDelay: `${Math.min(i * 30, 400)}ms` }}>
+                              <BranchCard
+                                t={t}
+                                accent={t.orange}
+                                branch={b.branch}
+                                billCount={b.bills.length}
+                                extraLabel={`${b.consignments.length} consignment${b.consignments.length === 1 ? '' : 's'}`}
+                                oldestAt={oldestAge(b.consignments, 'dispatched_at')}
+                                dispatchedYmd={latestDispatchDate(b.consignments)}
+                                arrivalAt={earliestArrival(b.consignments)}
+                                discrepancies={b.bills.filter(x => x.audit_gross_weight != null).length}
+                                onPick={() => setDrillBranch({ name: b.branch, pool: 'outstation' })}
+                              />
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   )
                 })}
