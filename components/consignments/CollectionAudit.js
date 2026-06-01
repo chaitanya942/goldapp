@@ -596,7 +596,14 @@ export default function CollectionAudit() {
                           {branches.length} · {regionBills} bill{regionBills === 1 ? '' : 's'}
                         </span>
                       </div>
-                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(230px, 1fr))', gap: '8px' }}>
+                      <div style={{
+                        display: 'grid',
+                        // auto-fit so rows with fewer cards stretch to fill;
+                        // min 240px gives even longest KL- branch names room
+                        // for at least 1 word before the wrap kicks in.
+                        gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
+                        gap: '5px',
+                      }}>
                         {branches.map((b, i) => (
                           <div key={b.branch}
                                className="ca-card-enter"
@@ -754,9 +761,23 @@ function BranchCard({ branch, billCount, extraLabel, oldestAt, dispatchedYmd, ar
         e.currentTarget.style.boxShadow   = restingShadow
         e.currentTarget.style.borderColor = urgent ? urgentBorder : t.border
       }}>
-      {/* Row 1: branch name + age pill */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
-        <div style={{ fontSize: '12.5px', color: t.text1, fontWeight: 700, letterSpacing: '-.01em', lineHeight: 1.2, flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{branch}</div>
+      {/* Row 1: branch name + age pill. Branch name wraps to 2 lines instead
+          of getting ellipsis-cropped so long KL- names (KL-THIRUVANANTHAPURAM
+          MGROAD etc.) stay legible. */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '8px' }}>
+        <div style={{
+          fontSize: '12.5px',
+          color: t.text1,
+          fontWeight: 700,
+          letterSpacing: '-.01em',
+          lineHeight: 1.2,
+          flex: 1,
+          wordBreak: 'break-word',
+          display: '-webkit-box',
+          WebkitLineClamp: 2,
+          WebkitBoxOrient: 'vertical',
+          overflow: 'hidden',
+        }}>{branch}</div>
         <span title="Age of oldest dispatch on this branch"
               style={{ fontSize: '9px', color: age.color, background: age.bg, borderRadius: '4px', padding: '2px 6px', fontWeight: 700, whiteSpace: 'nowrap', flexShrink: 0 }}>{age.label}</span>
       </div>
