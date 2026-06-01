@@ -173,17 +173,34 @@ export default function CollectionAudit() {
 
   useEffect(() => { fetchAll() }, [fetchAll])
 
-  // Aggregate bills by source branch.
+  // Aggregate bills by the BILL'S source branch (the leaf), not by the
+  // consignment's source branch (which for Hub → HO bundles equals the hub
+  // name and would merge every leaf under one card).
+  //
+  // For direct Branch → HO consignments these are the same value. For
+  // Hub → HO (Bangalore hub dispatches, KL hub → HO runs), each leaf's
+  // bills get their own card so the auditor sees BTM, JAYANAGAR, BOMMANAHALLI
+  // as separate rows even though the bills travelled together on a single
+  // K R PURAM → HO truck. The parent consignment still drives the
+  // dispatched / arrives dates per card (latest dispatch + earliest arrival
+  // across all consignments touching this leaf) and is dedupped via a Set
+  // so the "N consignments" badge is correct.
   const outstationByBranch = useMemo(() => {
     const m = new Map()
     for (const g of outstation) {
-      const k = g.consignment?.branch_name || '—'
-      if (!m.has(k)) m.set(k, { branch: k, consignments: [], bills: [] })
-      const entry = m.get(k)
-      entry.consignments.push(g.consignment)
-      entry.bills.push(...g.bills.map(b => ({ ...b, _consignment: g.consignment })))
+      for (const bill of g.bills) {
+        const k = bill.branch_name || g.consignment?.branch_name || '—'
+        if (!m.has(k)) m.set(k, { branch: k, consignmentSet: new Map(), bills: [] })
+        const entry = m.get(k)
+        if (g.consignment && !entry.consignmentSet.has(g.consignment.id)) {
+          entry.consignmentSet.set(g.consignment.id, g.consignment)
+        }
+        entry.bills.push({ ...bill, _consignment: g.consignment })
+      }
     }
-    return [...m.values()].sort((a, b) => (oldestAge(a.consignments, 'dispatched_at') ?? Infinity) - (oldestAge(b.consignments, 'dispatched_at') ?? Infinity))
+    return [...m.values()]
+      .map(e => ({ branch: e.branch, consignments: [...e.consignmentSet.values()], bills: e.bills }))
+      .sort((a, b) => (oldestAge(a.consignments, 'dispatched_at') ?? Infinity) - (oldestAge(b.consignments, 'dispatched_at') ?? Infinity))
   }, [outstation])
 
   const bangaloreByBranch = useMemo(() => {
