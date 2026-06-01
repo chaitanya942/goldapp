@@ -162,9 +162,13 @@ export default function CollectionAudit() {
   const [drillBranch, setDrillBranch] = useState(null)   // { name, pool } | null
   const [toast,      setToast]      = useState(null)
   const [search,     setSearch]     = useState('')
-  // Arrival filter: 'all' | 'today' | 'overdue'. Layered on top of search;
-  // matches the arrivalLabel.diff buckets we already compute per card.
-  const [arrivalFilter, setArrivalFilter] = useState('all')
+  // Arrival filter: 'today' | 'tomorrow' | 'overdue'. No "all" -- ops
+  // confirmed the realistic audit horizon is just these three windows;
+  // 'today' is the default because that's where the day's work lives.
+  // Filter applies at the CONSIGNMENT level (one branch with two trucks
+  // arriving on different days shows under each respective filter, with
+  // only that day's truck's bills inside).
+  const [arrivalFilter, setArrivalFilter] = useState('today')
 
   const fetchAll = useCallback(async () => {
     setLoading(true)
@@ -194,9 +198,31 @@ export default function CollectionAudit() {
   // dispatched / arrives dates per card (latest dispatch + earliest arrival
   // across all consignments touching this leaf) and is dedupped via a Set
   // so the "N consignments" badge is correct.
+  // Consignment-level arrival match. Used to filter the raw outstation
+  // groups BEFORE aggregating by branch, so a multi-truck branch only
+  // shows the truck(s) matching the active filter.
+  const arrivalMatchesFilter = useCallback((consignment) => {
+    if (!consignment?.expected_arrival_date) return false
+    const arr = arrivalLabel(consignment.expected_arrival_date, t)
+    if (!arr) return false
+    if (arrivalFilter === 'today')    return arr.diff === 0
+    if (arrivalFilter === 'tomorrow') return arr.diff === 1
+    if (arrivalFilter === 'overdue')  return arr.diff < 0
+    return false
+  }, [arrivalFilter, t])
+
+  // Filter the raw outstation list by consignment arrival, THEN aggregate.
+  // VIJAYAPURA with 2 consignments (one arriving today, one tomorrow)
+  // splits cleanly across the Today + Tomorrow filters — each filter
+  // shows only the trucks (and their bills) that match.
+  const outstationFilteredByArrival = useMemo(
+    () => outstation.filter(g => arrivalMatchesFilter(g.consignment)),
+    [outstation, arrivalMatchesFilter],
+  )
+
   const outstationByBranch = useMemo(() => {
     const m = new Map()
-    for (const g of outstation) {
+    for (const g of outstationFilteredByArrival) {
       for (const bill of g.bills) {
         const k = bill.branch_name || g.consignment?.branch_name || '—'
         if (!m.has(k)) m.set(k, { branch: k, region: bill.region || 'Unknown', consignmentSet: new Map(), bills: [] })
@@ -210,7 +236,7 @@ export default function CollectionAudit() {
     return [...m.values()]
       .map(e => ({ branch: e.branch, region: e.region, consignments: [...e.consignmentSet.values()], bills: e.bills }))
       .sort((a, b) => (oldestAge(a.consignments, 'dispatched_at') ?? Infinity) - (oldestAge(b.consignments, 'dispatched_at') ?? Infinity))
-  }, [outstation])
+  }, [outstationFilteredByArrival])
 
   const bangaloreByBranch = useMemo(() => {
     const m = new Map()
@@ -222,27 +248,13 @@ export default function CollectionAudit() {
     return [...m.values()].sort((a, b) => (oldestAge(a.bills, 'purchase_date') ?? Infinity) - (oldestAge(b.bills, 'purchase_date') ?? Infinity))
   }, [bangalore])
 
-  // Search applies AT branch-pool level: filters which branch cards render.
+  // Search applies on top of the already-arrival-filtered branch list.
   // matchesQuery is all-tokens-AND across branch name + bill + consignment
-  // fields, so an auditor can paste a tamper-proof number / app id / customer
-  // name and the right branch surfaces immediately. Empty query passes all.
-  // Arrival filter (today / overdue) is layered on top.
-  const arrivalBucket = useCallback((branch) => {
-    const arr = arrivalLabel(earliestArrival(branch.consignments || []), t)
-    if (!arr) return null
-    if (arr.diff < 0)  return 'overdue'
-    if (arr.diff === 0) return 'today'
-    if (arr.diff === 1) return 'tomorrow'
-    return 'future'
-  }, [t])
-  const applyArrivalFilter = useCallback((list) => {
-    if (arrivalFilter === 'all') return list
-    return list.filter(b => arrivalBucket(b) === arrivalFilter)
-  }, [arrivalFilter, arrivalBucket])
-
+  // fields, so an auditor can paste a tamper-proof number / app id /
+  // customer name and the right branch surfaces immediately.
   const filteredOutstationByBranch = useMemo(
-    () => applyArrivalFilter(outstationByBranch.filter(b => matchesQuery(b, search))),
-    [outstationByBranch, search, applyArrivalFilter],
+    () => outstationByBranch.filter(b => matchesQuery(b, search)),
+    [outstationByBranch, search],
   )
   const filteredBangaloreByBranch = useMemo(
     () => bangaloreByBranch.filter(b => matchesQuery(b, search)),
@@ -274,18 +286,27 @@ export default function CollectionAudit() {
     return keys.map(r => ({ region: r, branches: m.get(r) }))
   }, [filteredOutstationByBranch])
 
-  // Bucket counts for the filter chips — show how many branches fall into
-  // each arrival window so the auditor knows the size of the wave before
-  // they click.
+  // Bucket counts for the filter chips. Counts distinct branches that have
+  // at least one consignment matching that arrival bucket — same shape as
+  // what the filter will show when clicked. Computed from the raw
+  // outstation list (not the already-filtered one) so the chip badge for
+  // a non-active bucket still reflects what's there.
   const arrivalCounts = useMemo(() => {
-    const base = outstationByBranch.filter(b => matchesQuery(b, search))
-    const out = { all: base.length, today: 0, tomorrow: 0, overdue: 0 }
-    for (const b of base) {
-      const bucket = arrivalBucket(b)
-      if (bucket === 'today' || bucket === 'tomorrow' || bucket === 'overdue') out[bucket] += 1
+    const today = new Set(), tomorrow = new Set(), overdue = new Set()
+    for (const g of outstation) {
+      if (!g.consignment?.expected_arrival_date) continue
+      const arr = arrivalLabel(g.consignment.expected_arrival_date, t)
+      if (!arr) continue
+      for (const bill of g.bills) {
+        const k = bill.branch_name || g.consignment.branch_name
+        if (!k) continue
+        if (arr.diff < 0)       overdue.add(k)
+        else if (arr.diff === 0) today.add(k)
+        else if (arr.diff === 1) tomorrow.add(k)
+      }
     }
-    return out
-  }, [outstationByBranch, search, arrivalBucket])
+    return { today: today.size, tomorrow: tomorrow.size, overdue: overdue.size }
+  }, [outstation, t])
 
   const kpis = {
     outstationBranches: filteredOutstationByBranch.length,
@@ -469,7 +490,6 @@ export default function CollectionAudit() {
           }}>
             <span style={{ fontSize: '10px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 600, marginRight: '4px' }}>Filter</span>
             {[
-              { id: 'all',      label: 'All arrivals',  count: arrivalCounts.all,      color: t.text2, attract: false },
               { id: 'today',    label: 'Arriving today',count: arrivalCounts.today,    color: t.gold,  attract: true },
               { id: 'tomorrow', label: 'Tomorrow',      count: arrivalCounts.tomorrow, color: t.green, attract: false },
               { id: 'overdue',  label: 'Overdue',       count: arrivalCounts.overdue,  color: t.red,   attract: true },
@@ -532,9 +552,7 @@ export default function CollectionAudit() {
               <div>
                 <div style={{ fontSize: '15px', color: t.text1, fontWeight: 600, letterSpacing: '-.01em' }}>In-Transit Branches</div>
                 <div style={{ fontSize: '11px', color: t.text4, marginTop: '3px' }}>
-                  {hasSearchActive || arrivalFilter !== 'all'
-                    ? `${kpis.outstationBranches} matching branch${kpis.outstationBranches === 1 ? '' : 'es'} · ${kpis.outstationBills} bill${kpis.outstationBills === 1 ? '' : 's'}`
-                    : `${kpis.outstationBranches} branch${kpis.outstationBranches === 1 ? '' : 'es'} · ${kpis.outstationBills} bill${kpis.outstationBills === 1 ? '' : 's'} awaiting receipt`}
+                  {`${kpis.outstationBranches} branch${kpis.outstationBranches === 1 ? '' : 'es'} · ${kpis.outstationBills} bill${kpis.outstationBills === 1 ? '' : 's'}`}
                 </div>
               </div>
             </div>
@@ -553,16 +571,12 @@ export default function CollectionAudit() {
                 <div style={{ fontSize: '13px', color: t.text2, fontWeight: 600, marginBottom: '4px' }}>
                   {hasSearchActive
                     ? `No matches for "${search}"`
-                    : arrivalFilter !== 'all'
-                      ? `Nothing arriving ${arrivalFilter}`
-                      : 'All caught up'}
+                    : `Nothing arriving ${arrivalFilter}`}
                 </div>
                 <div style={{ fontSize: '11px', color: t.text4 }}>
                   {hasSearchActive
-                    ? 'Try a different keyword or clear search to see everything.'
-                    : arrivalFilter !== 'all'
-                      ? 'Switch the filter chip above to see other arrival windows.'
-                      : 'No outstation consignments are currently in transit.'}
+                    ? 'Try a different keyword or clear search.'
+                    : 'Switch the filter chip above to see other arrival windows.'}
                 </div>
               </div>
             ) : (
