@@ -156,6 +156,9 @@ export default function CollectionAudit() {
   const [drillBranch, setDrillBranch] = useState(null)   // { name, pool } | null
   const [toast,      setToast]      = useState(null)
   const [search,     setSearch]     = useState('')
+  // Arrival filter: 'all' | 'today' | 'overdue'. Layered on top of search;
+  // matches the arrivalLabel.diff buckets we already compute per card.
+  const [arrivalFilter, setArrivalFilter] = useState('all')
 
   const fetchAll = useCallback(async () => {
     setLoading(true)
@@ -190,7 +193,7 @@ export default function CollectionAudit() {
     for (const g of outstation) {
       for (const bill of g.bills) {
         const k = bill.branch_name || g.consignment?.branch_name || '—'
-        if (!m.has(k)) m.set(k, { branch: k, consignmentSet: new Map(), bills: [] })
+        if (!m.has(k)) m.set(k, { branch: k, region: bill.region || 'Unknown', consignmentSet: new Map(), bills: [] })
         const entry = m.get(k)
         if (g.consignment && !entry.consignmentSet.has(g.consignment.id)) {
           entry.consignmentSet.set(g.consignment.id, g.consignment)
@@ -199,7 +202,7 @@ export default function CollectionAudit() {
       }
     }
     return [...m.values()]
-      .map(e => ({ branch: e.branch, consignments: [...e.consignmentSet.values()], bills: e.bills }))
+      .map(e => ({ branch: e.branch, region: e.region, consignments: [...e.consignmentSet.values()], bills: e.bills }))
       .sort((a, b) => (oldestAge(a.consignments, 'dispatched_at') ?? Infinity) - (oldestAge(b.consignments, 'dispatched_at') ?? Infinity))
   }, [outstation])
 
@@ -217,14 +220,66 @@ export default function CollectionAudit() {
   // matchesQuery is all-tokens-AND across branch name + bill + consignment
   // fields, so an auditor can paste a tamper-proof number / app id / customer
   // name and the right branch surfaces immediately. Empty query passes all.
+  // Arrival filter (today / overdue) is layered on top.
+  const arrivalBucket = useCallback((branch) => {
+    const arr = arrivalLabel(earliestArrival(branch.consignments || []), t)
+    if (!arr) return null
+    if (arr.diff < 0)  return 'overdue'
+    if (arr.diff === 0) return 'today'
+    if (arr.diff === 1) return 'tomorrow'
+    return 'future'
+  }, [t])
+  const applyArrivalFilter = useCallback((list) => {
+    if (arrivalFilter === 'all') return list
+    return list.filter(b => arrivalBucket(b) === arrivalFilter)
+  }, [arrivalFilter, arrivalBucket])
+
   const filteredOutstationByBranch = useMemo(
-    () => outstationByBranch.filter(b => matchesQuery(b, search)),
-    [outstationByBranch, search],
+    () => applyArrivalFilter(outstationByBranch.filter(b => matchesQuery(b, search))),
+    [outstationByBranch, search, applyArrivalFilter],
   )
   const filteredBangaloreByBranch = useMemo(
     () => bangaloreByBranch.filter(b => matchesQuery(b, search)),
     [bangaloreByBranch, search],
   )
+
+  // Group outstation cards by region for section headers. Region comes from
+  // the bill's source branch (enriched server-side) so leaf cards land under
+  // the correct region even when their parent consignment was issued from
+  // a hub in the same region. Preserve a custom ordering (Bangalore first,
+  // Rest of Karnataka second, then alphabetical) so the layout stays
+  // predictable across days.
+  const outstationByRegion = useMemo(() => {
+    const REGION_ORDER = ['Bangalore', 'Rest of Karnataka', 'Kerala', 'Tamil Nadu', 'Andhra Pradesh', 'Telangana']
+    const m = new Map()
+    for (const b of filteredOutstationByBranch) {
+      const r = b.region || 'Unknown'
+      if (!m.has(r)) m.set(r, [])
+      m.get(r).push(b)
+    }
+    const keys = [...m.keys()]
+    keys.sort((a, b) => {
+      const ai = REGION_ORDER.indexOf(a); const bi = REGION_ORDER.indexOf(b)
+      if (ai !== -1 && bi !== -1) return ai - bi
+      if (ai !== -1) return -1
+      if (bi !== -1) return 1
+      return a.localeCompare(b)
+    })
+    return keys.map(r => ({ region: r, branches: m.get(r) }))
+  }, [filteredOutstationByBranch])
+
+  // Bucket counts for the filter chips — show how many branches fall into
+  // each arrival window so the auditor knows the size of the wave before
+  // they click.
+  const arrivalCounts = useMemo(() => {
+    const base = outstationByBranch.filter(b => matchesQuery(b, search))
+    const out = { all: base.length, today: 0, tomorrow: 0, overdue: 0 }
+    for (const b of base) {
+      const bucket = arrivalBucket(b)
+      if (bucket === 'today' || bucket === 'tomorrow' || bucket === 'overdue') out[bucket] += 1
+    }
+    return out
+  }, [outstationByBranch, search, arrivalBucket])
 
   const kpis = {
     outstationBranches: filteredOutstationByBranch.length,
@@ -347,26 +402,107 @@ export default function CollectionAudit() {
         />
       ) : (
         <>
-          <BranchPool
-            t={t}
-            accent={t.orange}
-            badge="OUTSTATION"
-            title="In-Transit Branches"
-            subtitle={hasSearchActive
-              ? `${kpis.outstationBranches} matching branch${kpis.outstationBranches === 1 ? '' : 'es'} · ${kpis.outstationBills} bill${kpis.outstationBills === 1 ? '' : 's'}`
-              : `${kpis.outstationBranches} branch${kpis.outstationBranches === 1 ? '' : 'es'} · ${kpis.outstationBills} bill${kpis.outstationBills === 1 ? '' : 's'} awaiting receipt`}
-            empty={hasSearchActive ? `No outstation matches for "${search}"` : 'No outstation consignments are currently in transit.'}
-            branches={filteredOutstationByBranch.map(b => ({
-              branch:        b.branch,
-              billCount:     b.bills.length,
-              extraLabel:    `${b.consignments.length} consignment${b.consignments.length === 1 ? '' : 's'}`,
-              oldestAt:      oldestAge(b.consignments, 'dispatched_at'),
-              dispatchedYmd: latestDispatchDate(b.consignments),
-              arrivalAt:     earliestArrival(b.consignments),
-              discrepancies: b.bills.filter(x => x.audit_gross_weight != null).length,
-            }))}
-            onPick={(branch) => setDrillBranch({ name: branch, pool: 'outstation' })}
-          />
+          {/* Arrival filter chips — show counts inline so the auditor knows
+              the size of each bucket before clicking. */}
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap',
+            padding: '4px 2px', margin: '-4px 0 -8px',
+          }}>
+            <span style={{ fontSize: '10px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 600, marginRight: '4px' }}>Filter</span>
+            {[
+              { id: 'all',      label: 'All arrivals',  count: arrivalCounts.all,      color: t.text2 },
+              { id: 'today',    label: 'Arriving today',count: arrivalCounts.today,    color: t.gold  },
+              { id: 'tomorrow', label: 'Tomorrow',      count: arrivalCounts.tomorrow, color: t.green },
+              { id: 'overdue',  label: 'Overdue',       count: arrivalCounts.overdue,  color: t.red   },
+            ].map(chip => {
+              const active = arrivalFilter === chip.id
+              const dim    = chip.count === 0 && !active
+              return (
+                <button key={chip.id} onClick={() => setArrivalFilter(chip.id)} disabled={dim}
+                  style={{
+                    background: active ? `${chip.color}18` : 'transparent',
+                    border: `1px solid ${active ? `${chip.color}80` : t.border}`,
+                    borderRadius: '999px',
+                    padding: '6px 14px',
+                    fontSize: '11px',
+                    color: dim ? t.text4 : (active ? chip.color : t.text2),
+                    cursor: dim ? 'default' : 'pointer',
+                    fontWeight: active ? 700 : 500,
+                    display: 'inline-flex', alignItems: 'center', gap: '7px',
+                    transition: 'all .15s ease',
+                    opacity: dim ? 0.4 : 1,
+                  }}
+                  onMouseEnter={e => { if (!active && !dim) { e.currentTarget.style.borderColor = `${chip.color}60`; e.currentTarget.style.color = chip.color } }}
+                  onMouseLeave={e => { if (!active && !dim) { e.currentTarget.style.borderColor = t.border; e.currentTarget.style.color = t.text2 } }}>
+                  {chip.label}
+                  <span style={{ fontSize: '10px', color: active ? chip.color : t.text4, background: active ? `${chip.color}25` : `${t.border}80`, borderRadius: '999px', padding: '1px 7px', fontWeight: 700, fontFamily: 'monospace' }}>{chip.count}</span>
+                </button>
+              )
+            })}
+          </div>
+
+          {/* Outstation pool wrapper. Per-region sections render inside. */}
+          <div style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: '14px', overflow: 'hidden', position: 'relative', boxShadow: `0 1px 3px ${t.border}40` }}>
+            <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '3px', background: `linear-gradient(90deg, ${t.orange} 0%, ${t.orange}30 60%, transparent 100%)` }} />
+            <div style={{ padding: '18px 22px', borderBottom: `1px solid ${t.border}`, display: 'flex', alignItems: 'center', gap: '14px' }}>
+              <span style={{ fontSize: '10px', color: t.orange, background: `${t.orange}18`, borderRadius: '6px', padding: '5px 11px', fontWeight: 700, letterSpacing: '.1em' }}>OUTSTATION</span>
+              <div>
+                <div style={{ fontSize: '15px', color: t.text1, fontWeight: 600, letterSpacing: '-.01em' }}>In-Transit Branches</div>
+                <div style={{ fontSize: '11px', color: t.text4, marginTop: '3px' }}>
+                  {hasSearchActive || arrivalFilter !== 'all'
+                    ? `${kpis.outstationBranches} matching branch${kpis.outstationBranches === 1 ? '' : 'es'} · ${kpis.outstationBills} bill${kpis.outstationBills === 1 ? '' : 's'}`
+                    : `${kpis.outstationBranches} branch${kpis.outstationBranches === 1 ? '' : 'es'} · ${kpis.outstationBills} bill${kpis.outstationBills === 1 ? '' : 's'} awaiting receipt`}
+                </div>
+              </div>
+            </div>
+            {outstationByRegion.length === 0 ? (
+              <div style={{ padding: '60px 20px', textAlign: 'center', fontSize: '12px', color: t.text4 }}>
+                {hasSearchActive
+                  ? `No outstation matches for "${search}"`
+                  : arrivalFilter !== 'all'
+                    ? `No branches in the ${arrivalFilter} arrival window right now.`
+                    : 'No outstation consignments are currently in transit.'}
+              </div>
+            ) : (
+              <div style={{ padding: '8px 14px 16px' }}>
+                {outstationByRegion.map(({ region, branches }) => {
+                  const regionBills = branches.reduce((s, b) => s + b.bills.length, 0)
+                  return (
+                    <div key={region} style={{ marginTop: '14px' }}>
+                      <div style={{
+                        display: 'flex', alignItems: 'center', gap: '10px',
+                        margin: '0 4px 10px', paddingBottom: '6px',
+                        borderBottom: `1px dashed ${t.border}`,
+                      }}>
+                        <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: t.orange }} />
+                        <span style={{ fontSize: '11px', color: t.text2, fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase' }}>{region}</span>
+                        <span style={{ fontSize: '10px', color: t.text4 }}>
+                          {branches.length} branch{branches.length === 1 ? '' : 'es'} · {regionBills} bill{regionBills === 1 ? '' : 's'}
+                        </span>
+                      </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '10px' }}>
+                        {branches.map(b => (
+                          <BranchCard
+                            key={b.branch}
+                            t={t}
+                            accent={t.orange}
+                            branch={b.branch}
+                            billCount={b.bills.length}
+                            extraLabel={`${b.consignments.length} consignment${b.consignments.length === 1 ? '' : 's'}`}
+                            oldestAt={oldestAge(b.consignments, 'dispatched_at')}
+                            dispatchedYmd={latestDispatchDate(b.consignments)}
+                            arrivalAt={earliestArrival(b.consignments)}
+                            discrepancies={b.bills.filter(x => x.audit_gross_weight != null).length}
+                            onPick={() => setDrillBranch({ name: b.branch, pool: 'outstation' })}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
 
           {/* Bangalore pool is intentionally hidden when empty (post 1 Jun
               cutover the walk-in flow is gone — Bangalore bills land in the
@@ -446,7 +582,7 @@ function BranchCard({ branch, billCount, extraLabel, oldestAt, dispatchedYmd, ar
   const age      = ageBadge(oldestAt ? new Date(oldestAt) : null, t)
   const arrival  = arrivalLabel(arrivalAt, t)
   const dispLbl  = fmtShortDate(dispatchedYmd)
-  // "Urgent" border kicks in for stale dispatches OR overdue arrivals so the
+  // "Urgent" border for stale dispatches OR overdue arrivals so the
   // auditor's eye lands on the cards that genuinely need attention.
   const ageUrgent     = age.color === t.red || age.color === t.orange
   const arrivalUrgent = arrival?.diff != null && arrival.diff <= 0
@@ -457,63 +593,64 @@ function BranchCard({ branch, billCount, extraLabel, oldestAt, dispatchedYmd, ar
       style={{
         background:    t.card,
         border:        `1px solid ${urgent ? urgentBorder : t.border}`,
-        borderRadius:  '12px',
-        padding:       '0',
+        borderRadius:  '10px',
+        padding:       '12px 14px 10px',
         cursor:        'pointer',
         textAlign:     'left',
         display:       'flex',
         flexDirection: 'column',
+        gap:           '8px',
         position:      'relative',
         overflow:      'hidden',
-        transition:    'transform .15s ease, box-shadow .15s ease, border-color .15s ease',
+        transition:    'transform .12s ease, box-shadow .12s ease, border-color .12s ease',
       }}
       onMouseEnter={e => {
-        e.currentTarget.style.transform   = 'translateY(-2px)'
-        e.currentTarget.style.boxShadow   = `0 6px 18px ${accent}25, 0 0 0 1px ${accent}40 inset`
-        e.currentTarget.style.borderColor = `${accent}80`
+        e.currentTarget.style.transform   = 'translateY(-1px)'
+        e.currentTarget.style.boxShadow   = `0 4px 12px ${accent}20, 0 0 0 1px ${accent}40 inset`
+        e.currentTarget.style.borderColor = `${accent}70`
       }}
       onMouseLeave={e => {
         e.currentTarget.style.transform   = 'translateY(0)'
         e.currentTarget.style.boxShadow   = 'none'
         e.currentTarget.style.borderColor = urgent ? urgentBorder : t.border
       }}>
-      {/* Top accent stripe */}
-      <div style={{ height: '3px', background: `linear-gradient(90deg, ${accent}, ${accent}40 80%, transparent)` }} />
+      {/* Row 1: branch name + age pill */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
+        <div style={{ fontSize: '12.5px', color: t.text1, fontWeight: 700, letterSpacing: '-.01em', lineHeight: 1.2, flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{branch}</div>
+        <span title="Age of oldest dispatch on this branch"
+              style={{ fontSize: '9px', color: age.color, background: age.bg, borderRadius: '4px', padding: '2px 6px', fontWeight: 700, whiteSpace: 'nowrap', flexShrink: 0 }}>{age.label}</span>
+      </div>
 
-      <div style={{ padding: '18px 18px 16px' }}>
-        {/* Branch name + age pill */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '8px', marginBottom: '12px' }}>
-          <div style={{ fontSize: '14px', color: t.text1, fontWeight: 700, letterSpacing: '-.01em', lineHeight: 1.2, flex: 1 }}>{branch}</div>
-          <span title="Age of oldest dispatch on this branch"
-                style={{ fontSize: '9px', color: age.color, background: age.bg, borderRadius: '5px', padding: '3px 7px', fontWeight: 700, whiteSpace: 'nowrap', flexShrink: 0 }}>{age.label}</span>
+      {/* Row 2: two columns. Left = hero count + consignment count.
+                 Right = dispatched + arrives. Fills the right-side empty
+                 space the auditor flagged. */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+        <div style={{ flex: '0 0 auto', minWidth: '78px' }}>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: '5px' }}>
+            <div style={{ fontSize: '26px', color: accent, fontWeight: 700, lineHeight: 1, fontFamily: 'monospace', letterSpacing: '-.02em' }}>{billCount}</div>
+            <div style={{ fontSize: '10.5px', color: t.text3, fontWeight: 500 }}>bill{billCount === 1 ? '' : 's'}</div>
+          </div>
+          {extraLabel && <div style={{ fontSize: '10px', color: t.text4, marginTop: '3px' }}>{extraLabel}</div>}
         </div>
-
-        {/* Hero count */}
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px' }}>
-          <div style={{ fontSize: '36px', color: accent, fontWeight: 700, lineHeight: 1, fontFamily: 'monospace', letterSpacing: '-.02em' }}>{billCount}</div>
-          <div style={{ fontSize: '12px', color: t.text3, fontWeight: 500 }}>bill{billCount === 1 ? '' : 's'}</div>
-        </div>
-
-        {extraLabel && <div style={{ fontSize: '11px', color: t.text4, marginTop: '6px' }}>{extraLabel}</div>}
-
-        {/* Dispatched + Expected-arrival rows. Calendar dates from the
-            server; Sundays already excluded from the arrival calc upstream
-            (addWorkingDaysSkipSunday — BVC doesn't operate Sundays). The
-            auditor reads "left Friday → arrives Monday" at a glance. */}
         {(dispLbl || arrival) && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginTop: '12px', paddingTop: '10px', borderTop: `1px dashed ${t.border}` }}>
+          <div style={{
+            flex: 1, minWidth: 0,
+            display: 'flex', flexDirection: 'column', gap: '4px',
+            paddingLeft: '10px', borderLeft: `1px solid ${t.border}80`,
+            alignItems: 'flex-end',
+          }}>
             {dispLbl && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span style={{ fontSize: '9px', color: t.text4, textTransform: 'uppercase', letterSpacing: '.1em', fontWeight: 600, minWidth: '60px' }}>Dispatched</span>
-                <span style={{ fontSize: '11px', color: t.text2, fontWeight: 600 }}>{dispLbl}</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <span style={{ fontSize: '8.5px', color: t.text4, textTransform: 'uppercase', letterSpacing: '.08em', fontWeight: 600 }}>Disp</span>
+                <span style={{ fontSize: '10.5px', color: t.text2, fontWeight: 600, fontFamily: 'monospace' }}>{dispLbl}</span>
               </div>
             )}
             {arrival && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span style={{ fontSize: '9px', color: t.text4, textTransform: 'uppercase', letterSpacing: '.1em', fontWeight: 600, minWidth: '60px' }}>Arrives</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <span style={{ fontSize: '8.5px', color: t.text4, textTransform: 'uppercase', letterSpacing: '.08em', fontWeight: 600 }}>Arr</span>
                 <span style={{
-                  fontSize: '10px', color: arrival.color, background: arrival.bg,
-                  borderRadius: '5px', padding: '3px 8px', fontWeight: 700,
+                  fontSize: '9.5px', color: arrival.color, background: arrival.bg,
+                  borderRadius: '4px', padding: '2px 7px', fontWeight: 700,
                   whiteSpace: 'nowrap',
                 }}>{arrival.label}</span>
               </div>
@@ -522,26 +659,22 @@ function BranchCard({ branch, billCount, extraLabel, oldestAt, dispatchedYmd, ar
         )}
       </div>
 
-      {/* Footer row */}
+      {/* Row 3: footer — discrepancies + open arrow. Same height across
+                 the grid so cards stay visually aligned. */}
       <div style={{
-        marginTop:   'auto',
-        padding:     '10px 18px',
-        borderTop:   `1px solid ${t.border}40`,
-        background:  `${accent}06`,
-        display:     'flex',
-        alignItems:  'center',
-        justifyContent: 'space-between',
-        fontSize:    '10px',
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        fontSize: '10px', paddingTop: '6px',
+        borderTop: `1px solid ${t.border}60`,
       }}>
         {discrepancies > 0 ? (
           <span style={{ color: t.red, fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-            ⚠ {discrepancies} discrepancy{discrepancies === 1 ? '' : ' follow-ups'}
+            ⚠ {discrepancies} discrepanc{discrepancies === 1 ? 'y' : 'ies'}
           </span>
         ) : (
           <span style={{ color: t.text4 }}>No discrepancies</span>
         )}
-        <span style={{ color: accent, fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-          Open <span style={{ fontSize: '12px' }}>→</span>
+        <span style={{ color: accent, fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
+          Open <span style={{ fontSize: '11px' }}>→</span>
         </span>
       </div>
     </button>

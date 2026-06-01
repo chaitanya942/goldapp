@@ -162,6 +162,14 @@ export async function GET(req) {
   const linkByPid      = new Map(links.map(l => [l.purchase_id, l.consignment_id]))
   const consignmentIds = [...new Set(outstationRows.map(r => linkByPid.get(r.id)).filter(Boolean))]
 
+  // Consolidated branch metadata lookup — feeds two needs:
+  //   1) bill.region for region-grouping on the UI (auditors think
+  //      region-wise: "what's coming from Karnataka tomorrow")
+  //   2) consignment.delivery_tat_hours for expected_arrival_date
+  // Done in one round-trip so we don't fetch branches twice.
+  const allBranchNames = new Set()
+  for (const b of outstationRows) if (b?.branch_name) allBranchNames.add(b.branch_name)
+
   let consignmentMap = new Map()
   if (consignmentIds.length) {
     // consignmentIds is bounded by outstationRows.length; chunk just in case.
@@ -174,29 +182,27 @@ export async function GET(req) {
         .in('id', slice)
       csAll.push(...(cs || []))
     }
+    for (const c of csAll) if (c?.branch_name) allBranchNames.add(c.branch_name)
+
+    let branchByName = new Map()
+    if (allBranchNames.size) {
+      const { data: branchMeta } = await supabase
+        .from('branches')
+        .select('name, region, delivery_tat_hours')
+        .in('name', [...allBranchNames])
+      branchByName = new Map((branchMeta || []).map(b => [b.name, b]))
+    }
 
     // Enrich each consignment with expected_arrival_date = dispatched_at's
     // IST date + ceil(delivery_tat_hours / 24) WORKING days, skipping Sundays
-    // (BVC logistics doesn't operate Sundays — same constraint addWorkingDays
-    // SkipSunday already encodes for the bidding flow). The auditor uses
-    // this to plan their day: "this truck arrives today / tomorrow / 3 Jun"
-    // and trusts it lines up with the actual BVC week.
+    // (BVC logistics doesn't operate Sundays — same constraint
+    // addWorkingDaysSkipSunday already encodes for the bidding flow).
     //
-    // We deliberately return a *date* (YYYY-MM-DD), not an instant — the
-    // arrival is a calendar-day promise from the auditor's perspective; the
-    // exact hour the truck pulls in doesn't matter for planning.
-    const sourceBranchNames = [...new Set(csAll.map(c => c.branch_name).filter(Boolean))]
-    let tatByBranch = new Map()
-    if (sourceBranchNames.length) {
-      const { data: srcBranches } = await supabase
-        .from('branches')
-        .select('name, delivery_tat_hours')
-        .in('name', sourceBranchNames)
-      tatByBranch = new Map((srcBranches || []).map(b => [b.name, Number(b.delivery_tat_hours) || 24]))
-    }
-
+    // Returns calendar dates (YYYY-MM-DD), not instants — arrival is a
+    // calendar-day promise from the auditor's perspective; the exact hour
+    // the truck pulls in doesn't matter for planning.
     consignmentMap = new Map(csAll.map(c => {
-      const tatHours = tatByBranch.get(c.branch_name) || 24   // sane default
+      const tatHours = Number(branchByName.get(c.branch_name)?.delivery_tat_hours) || 24
       let expectedDate = null
       if (c.dispatched_at) {
         const dispDate = istDateStr(new Date(c.dispatched_at))    // YYYY-MM-DD in IST
@@ -206,12 +212,18 @@ export async function GET(req) {
       const dispatchedDate = c.dispatched_at ? istDateStr(new Date(c.dispatched_at)) : null
       return [c.id, {
         ...c,
-        // Calendar-day promises, not instants. UI consumes both.
         dispatched_date:        dispatchedDate,
         expected_arrival_date:  expectedDate,
         delivery_tat_hours:     tatHours,
       }]
     }))
+
+    // Enrich each bill with its branch's region so the UI can group
+    // cards under "Rest of Karnataka", "Kerala", etc. Mutates in place
+    // because outstationRows is consumed below; no copy needed.
+    for (const b of outstationRows) {
+      b.region = branchByName.get(b.branch_name)?.region || 'Unknown'
+    }
   }
 
   // Group outstation bills by consignment.
