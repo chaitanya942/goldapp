@@ -116,6 +116,18 @@ function DashboardShell() {
     }
   }, [role, activeNav, previewRole])
 
+  // Audit-role landing: auditors have no purchase/sales/etc widgets, so the
+  // generic dashboard renders mostly empty for them. Send them straight to
+  // Collection Audit — that IS their workflow. Fires on first profile load
+  // AND any time they click "Dashboard" in the sidebar, so they never land
+  // on an empty hub. Other roles untouched; super_admin previewing 'audit'
+  // is excluded so they can still inspect the dashboard view.
+  useEffect(() => {
+    if (role === 'audit' && !previewRole && activeNav === 'dashboard') {
+      setActiveNav('audit-data')
+    }
+  }, [role, previewRole, activeNav])
+
   // ── Back-button / swipe-back interception ──────────────────────────────────
   // The app navigates between modules via the activeNav state, not URL changes,
   // so the browser back button used to close the tab/app entirely. That was
