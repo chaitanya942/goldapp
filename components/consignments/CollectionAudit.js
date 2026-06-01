@@ -30,7 +30,7 @@ const fmtDate = (d) => d ? new Date(d).toLocaleDateString('en-IN', { day: '2-dig
 function ageBadge(d, t) {
   if (!d) return { label: '—', color: t.text4, bg: 'transparent' }
   const ms = Date.now() - new Date(d).getTime()
-  if (ms < 0) return { label: 'just now', color: t.green, bg: `${t.green}15` }
+  if (ms < 0) return { label: 'just now', color: t.text3, bg: `${t.text3}10` }
   const days = Math.floor(ms / 86400000)
   let label
   if (days >= 1) label = `${days}d old`
@@ -39,8 +39,14 @@ function ageBadge(d, t) {
     if (hrs >= 1) label = `${hrs}h old`
     else { const mins = Math.max(1, Math.floor(ms / 60000)); label = `${mins}m old` }
   }
-  const color = days < 1 ? t.green : days < 3 ? t.gold : days < 7 ? t.orange : t.red
-  return { label, color, bg: `${color}18` }
+  // Only colour-flag genuinely-stale dispatches. Everything < 3 days is
+  // normal pace and should read as neutral so the colour-flagged ones
+  // (3-7d orange, 7d+ red) actually grab the eye.
+  let color
+  if (days < 3)      color = t.text3
+  else if (days < 7) color = t.orange
+  else               color = t.red
+  return { label, color, bg: `${color}15` }
 }
 
 // Parse a YYYY-MM-DD string into a midnight Date in local time. The audit
@@ -598,11 +604,13 @@ export default function CollectionAudit() {
                       </div>
                       <div style={{
                         display: 'grid',
-                        // auto-fit so rows with fewer cards stretch to fill;
-                        // min 240px gives even longest KL- branch names room
-                        // for at least 1 word before the wrap kicks in.
-                        gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
+                        // auto-fit collapses empty trailing tracks. Cap max
+                        // at 280px so a row with 3 cards doesn't stretch
+                        // them to 400px each -- the last row stays half-
+                        // empty (honest) rather than visually inflated.
+                        gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 280px))',
                         gap: '5px',
+                        justifyContent: 'start',
                       }}>
                         {branches.map((b, i) => (
                           <div key={b.branch}
@@ -710,7 +718,7 @@ function BranchPool({ t, accent, badge, title, subtitle, empty, branches, onPick
       {branches.length === 0 ? (
         <div style={{ padding: '60px 20px', textAlign: 'center', fontSize: '12px', color: t.text4 }}>{empty}</div>
       ) : (
-        <div style={{ padding: '14px', display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(230px, 1fr))', gap: '8px' }}>
+        <div style={{ padding: '14px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 280px))', gap: '5px', justifyContent: 'start' }}>
           {branches.map(b => <BranchCard key={b.branch} {...b} t={t} accent={accent} onPick={() => onPick(b.branch)} />)}
         </div>
       )}
@@ -802,13 +810,13 @@ function BranchCard({ branch, billCount, extraLabel, oldestAt, dispatchedYmd, ar
           }}>
             {dispLbl && (
               <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <span style={{ fontSize: '8.5px', color: t.text4, textTransform: 'uppercase', letterSpacing: '.08em', fontWeight: 600 }}>Disp</span>
+                <span style={{ fontSize: '8.5px', color: t.text4, textTransform: 'uppercase', letterSpacing: '.08em', fontWeight: 600 }}>Dispatched</span>
                 <span style={{ fontSize: '10.5px', color: t.text2, fontWeight: 600, fontFamily: 'monospace' }}>{dispLbl}</span>
               </div>
             )}
             {arrival && (
               <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <span style={{ fontSize: '8.5px', color: t.text4, textTransform: 'uppercase', letterSpacing: '.08em', fontWeight: 600 }}>Arr</span>
+                <span style={{ fontSize: '8.5px', color: t.text4, textTransform: 'uppercase', letterSpacing: '.08em', fontWeight: 600 }}>Arrives</span>
                 <span style={{
                   fontSize: '9.5px', color: arrival.color, background: arrival.bg,
                   borderRadius: '4px', padding: '2px 7px', fontWeight: 700,
@@ -820,8 +828,10 @@ function BranchCard({ branch, billCount, extraLabel, oldestAt, dispatchedYmd, ar
         )}
       </div>
 
-      {/* Row 3: footer — discrepancies + open arrow. Same height across
-                 the grid so cards stay visually aligned. */}
+      {/* Row 3: footer — status + open affordance. The "ready" state used
+                 to read "No discrepancies" in muted grey; now it's a green
+                 ✓ + label so the affordance ("this card is ready to audit")
+                 is visible from across the grid. */}
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         fontSize: '10px', paddingTop: '6px',
@@ -832,7 +842,15 @@ function BranchCard({ branch, billCount, extraLabel, oldestAt, dispatchedYmd, ar
             ⚠ {discrepancies} discrepanc{discrepancies === 1 ? 'y' : 'ies'}
           </span>
         ) : (
-          <span style={{ color: t.text4 }}>No discrepancies</span>
+          <span style={{ color: t.green, fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+            <span style={{
+              width: '14px', height: '14px', borderRadius: '50%',
+              background: `${t.green}20`,
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: '9px', lineHeight: 1,
+            }}>✓</span>
+            Ready to audit
+          </span>
         )}
         <span style={{ color: accent, fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
           Open <span style={{ fontSize: '11px' }}>→</span>
