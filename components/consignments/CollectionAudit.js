@@ -478,6 +478,29 @@ export default function CollectionAudit() {
           t={t}
           onBack={() => setDrillBranch(null)}
           onAudit={(bill) => setActiveBill(bill)}
+          onMarkReceived={async (bill) => {
+            try {
+              const res = await authedFetch('/api/collection-audit', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ purchase_id: bill.id, action: 'mark_received' }),
+              })
+              const j = await res.json()
+              if (!res.ok || j.error) {
+                setToast({ msg: j.error || 'Mark received failed', type: 'error', key: Date.now() })
+                return
+              }
+              setToast({
+                msg: j.already_received
+                  ? `${bill.application_id} was already received.`
+                  : `${bill.application_id} marked received. Weight audit still pending.`,
+                type: 'success',
+                key: Date.now(),
+              })
+              fetchAll()
+            } catch (e) {
+              setToast({ msg: e.message || 'Mark received failed', type: 'error', key: Date.now() })
+            }
+          }}
         />
       ) : (
         <>
@@ -875,7 +898,7 @@ function BranchCard({ branch, billCount, extraLabel, oldestAt, dispatchedYmd, ar
 }
 
 // ─── Drill-down (Level 1) ───────────────────────────────────────────────────
-function BranchDrilldown({ drill, outstationByBranch, bangaloreByBranch, t, onBack, onAudit }) {
+function BranchDrilldown({ drill, outstationByBranch, bangaloreByBranch, t, onBack, onAudit, onMarkReceived }) {
   const source = drill.pool === 'outstation'
     ? outstationByBranch.find(b => b.branch === drill.name)
     : bangaloreByBranch.find(b => b.branch === drill.name)
@@ -957,7 +980,9 @@ function BranchDrilldown({ drill, outstationByBranch, bangaloreByBranch, t, onBa
             </div>
           )}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '10px' }}>
-            {g.bills.map(bill => <BillCard key={bill.id} bill={bill} t={t} dateField={dateF} onAudit={() => onAudit(bill)} />)}
+            {g.bills.map(bill => <BillCard key={bill.id} bill={bill} t={t} dateField={dateF}
+              onAudit={() => onAudit(bill)}
+              onMarkReceived={() => onMarkReceived?.(bill)} />)}
           </div>
         </Fragment>
       ))}
@@ -965,15 +990,27 @@ function BranchDrilldown({ drill, outstationByBranch, bangaloreByBranch, t, onBa
   )
 }
 
-function BillCard({ bill, t, onAudit, dateField }) {
+function BillCard({ bill, t, onAudit, onMarkReceived, dateField }) {
   const previouslyAudited = bill.audit_gross_weight != null
+  const countReceived     = !!bill.count_received_at && !previouslyAudited
   const age   = ageBadge(bill[dateField], t)
   const isTakeover = bill.transaction_type === 'TAKEOVER'
+
+  // Status line + footer action are driven by three states:
+  //   1. previouslyAudited      -> weight audit attempted, re-audit needed
+  //   2. countReceived          -> count done, weight pending
+  //   3. otherwise              -> nothing done yet
+  // The "Mark as Received" button hides once count_received_at is stamped
+  // (further marking would be a no-op anyway, and ops shouldn't see a
+  // button for a step they've already completed).
+  const borderColor = previouslyAudited ? `${t.red}50`
+                    : countReceived     ? `${t.green}40`
+                    : t.border
 
   return (
     <div style={{
       background:    t.card,
-      border:        `1px solid ${previouslyAudited ? `${t.red}50` : t.border}`,
+      border:        `1px solid ${borderColor}`,
       borderRadius:  '12px',
       padding:       '14px 16px',
       display:       'flex',
@@ -989,7 +1026,7 @@ function BillCard({ bill, t, onAudit, dateField }) {
       }}
       onMouseLeave={e => {
         e.currentTarget.style.boxShadow   = 'none'
-        e.currentTarget.style.borderColor = previouslyAudited ? `${t.red}50` : t.border
+        e.currentTarget.style.borderColor = borderColor
       }}>
 
       {/* Top row: App ID + Type + Age */}
@@ -1012,33 +1049,68 @@ function BillCard({ bill, t, onAudit, dateField }) {
       </div>
 
       {/* Status + Action */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: `1px solid ${t.border}40`, paddingTop: '10px', marginTop: '4px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: `1px solid ${t.border}40`, paddingTop: '10px', marginTop: '4px', gap: '8px', flexWrap: 'wrap' }}>
         {previouslyAudited ? (
           <span style={{ fontSize: '10px', color: t.red, background: `${t.red}18`, borderRadius: '4px', padding: '3px 8px', fontWeight: 700 }}>
             ⚠ Re-audit needed
+          </span>
+        ) : countReceived ? (
+          <span style={{ fontSize: '10px', color: t.green, fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+            <span style={{
+              width: '14px', height: '14px', borderRadius: '50%',
+              background: `${t.green}20`,
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: '9px', lineHeight: 1,
+            }}>✓</span>
+            Received — audit pending
           </span>
         ) : (
           <span style={{ fontSize: '10px', color: t.text4, fontWeight: 600 }}>
             Awaiting weight
           </span>
         )}
-        <button onClick={onAudit}
-          style={{
-            background: previouslyAudited ? t.orange : t.gold,
-            color:      previouslyAudited ? '#fff' : '#1a0a00',
-            border:     'none',
-            borderRadius: '8px',
-            padding:    '8px 16px',
-            fontSize:   '11px',
-            fontWeight: 700,
-            letterSpacing: '.02em',
-            cursor:     'pointer',
-            display:    'inline-flex',
-            alignItems: 'center',
-            gap:        '6px',
-          }}>
-          ⚖ {previouslyAudited ? 'Re-weigh' : 'Weigh bill'}
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          {!previouslyAudited && !countReceived && (
+            <button onClick={onMarkReceived}
+              title="Bill is physically here — defer the weight audit"
+              style={{
+                background: 'transparent',
+                color:      t.green,
+                border:     `1px solid ${t.green}50`,
+                borderRadius: '8px',
+                padding:    '7px 12px',
+                fontSize:   '11px',
+                fontWeight: 700,
+                letterSpacing: '.02em',
+                cursor:     'pointer',
+                display:    'inline-flex',
+                alignItems: 'center',
+                gap:        '5px',
+                transition: 'background .15s ease, border-color .15s ease',
+              }}
+              onMouseEnter={e => { e.currentTarget.style.background = `${t.green}12`; e.currentTarget.style.borderColor = `${t.green}80` }}
+              onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.borderColor = `${t.green}50` }}>
+              ✓ Mark as received
+            </button>
+          )}
+          <button onClick={onAudit}
+            style={{
+              background: previouslyAudited ? t.orange : t.gold,
+              color:      previouslyAudited ? '#fff' : '#1a0a00',
+              border:     'none',
+              borderRadius: '8px',
+              padding:    '8px 16px',
+              fontSize:   '11px',
+              fontWeight: 700,
+              letterSpacing: '.02em',
+              cursor:     'pointer',
+              display:    'inline-flex',
+              alignItems: 'center',
+              gap:        '6px',
+            }}>
+            ⚖ {previouslyAudited ? 'Re-weigh' : 'Weigh bill'}
+          </button>
+        </div>
       </div>
     </div>
   )

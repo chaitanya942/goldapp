@@ -88,7 +88,10 @@ export async function GET(req) {
   // keep audit_gross_weight / audit_remark / audited_at so re-auditors have
   // context on the previous reading + reason it was kept pending.
   // The POST handler reveals the actual CRM gross only after a submission.
-  const COLS = 'id, application_id, customer_name, branch_name, purchase_date, transaction_time, transaction_type, audit_gross_weight, audited_at, audit_remark, stock_status, dispatched_at'
+  // count_received_at / count_received_by surface the interim "count
+  // audit done, weight still pending" state on the bill card. See
+  // sql/purchases_count_audit.sql for the business rules.
+  const COLS = 'id, application_id, customer_name, branch_name, purchase_date, transaction_time, transaction_type, audit_gross_weight, audited_at, audit_remark, stock_status, dispatched_at, count_received_at, count_received_by'
 
   // Bangalore pool deliberately empty post 1 Jun 2026 cutover. See header.
   const bangalore = []
@@ -262,11 +265,11 @@ export async function POST(req) {
   const body = await req.json().catch(() => ({}))
   const { purchase_id, audit_gross_weight, action, remark } = body
   if (!purchase_id) return Response.json({ error: 'purchase_id required' }, { status: 400 })
-  if (action !== 'receive' && action !== 'keep_pending') {
-    return Response.json({ error: 'action must be "receive" or "keep_pending"' }, { status: 400 })
+  if (action !== 'receive' && action !== 'keep_pending' && action !== 'mark_received') {
+    return Response.json({ error: 'action must be "receive", "keep_pending", or "mark_received"' }, { status: 400 })
   }
   const measured = Number(audit_gross_weight)
-  if (!Number.isFinite(measured) || measured <= 0) {
+  if (action !== 'mark_received' && (!Number.isFinite(measured) || measured <= 0)) {
     return Response.json({ error: 'audit_gross_weight must be a positive number' }, { status: 400 })
   }
 
@@ -274,7 +277,7 @@ export async function POST(req) {
   // and (for the consignment auto-receive below) find its parent consignment.
   const { data: bill, error: billErr } = await supabase
     .from('purchases')
-    .select('id, application_id, branch_name, gross_weight, stock_status, is_deleted, crm_status')
+    .select('id, application_id, branch_name, gross_weight, stock_status, is_deleted, crm_status, count_received_at, audited_at')
     .eq('id', purchase_id)
     .maybeSingle()
   if (billErr) return Response.json({ error: billErr.message }, { status: 500 })
@@ -283,6 +286,30 @@ export async function POST(req) {
   if (bill.crm_status === 'deleted')    return Response.json({ error: 'Bill is CRM-deleted' }, { status: 400 })
   if (!['at_branch', 'in_consignment'].includes(bill.stock_status)) {
     return Response.json({ error: `Bill is not audit-eligible (stock_status=${bill.stock_status})` }, { status: 400 })
+  }
+
+  // ── 'mark_received' — count audit only ───────────────────────────────────
+  // Auditor confirms the bill physically arrived but is deferring the weight
+  // audit (typically time pressure end-of-day). Stamps count_received_at /
+  // count_received_by; stock_status stays in_consignment so the bill still
+  // appears in the audit queue tomorrow for weighing. Idempotent — re-marking
+  // an already-count-received bill is a no-op.
+  if (action === 'mark_received') {
+    if (bill.audited_at) {
+      return Response.json({ error: 'Bill is already weight-audited; count audit no longer needed.' }, { status: 400 })
+    }
+    if (bill.count_received_at) {
+      return Response.json({ success: true, action: 'mark_received', already_received: true })
+    }
+    const { error } = await supabase
+      .from('purchases')
+      .update({
+        count_received_at: new Date().toISOString(),
+        count_received_by: auth.user?.id || null,
+      })
+      .eq('id', purchase_id)
+    if (error) return Response.json({ error: error.message }, { status: 500 })
+    return Response.json({ success: true, action: 'mark_received' })
   }
 
   const diff = Number((measured - Number(bill.gross_weight || 0)).toFixed(3))
