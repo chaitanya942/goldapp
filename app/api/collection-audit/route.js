@@ -30,6 +30,7 @@
 
 import { createClient } from '@supabase/supabase-js'
 import { requireAuth, ROLE_GROUPS } from '../../../lib/apiAuth'
+import { istDateStr, addWorkingDaysSkipSunday } from '../../../lib/dateIst'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
@@ -174,10 +175,16 @@ export async function GET(req) {
       csAll.push(...(cs || []))
     }
 
-    // Enrich each consignment with expected_arrival_at = dispatched_at + source
-    // branch's delivery_tat_hours. The auditor uses this to plan their day:
-    // "this truck arrives today / tomorrow / 3 Jun". One branch lookup keyed
-    // by source branch name.
+    // Enrich each consignment with expected_arrival_date = dispatched_at's
+    // IST date + ceil(delivery_tat_hours / 24) WORKING days, skipping Sundays
+    // (BVC logistics doesn't operate Sundays — same constraint addWorkingDays
+    // SkipSunday already encodes for the bidding flow). The auditor uses
+    // this to plan their day: "this truck arrives today / tomorrow / 3 Jun"
+    // and trusts it lines up with the actual BVC week.
+    //
+    // We deliberately return a *date* (YYYY-MM-DD), not an instant — the
+    // arrival is a calendar-day promise from the auditor's perspective; the
+    // exact hour the truck pulls in doesn't matter for planning.
     const sourceBranchNames = [...new Set(csAll.map(c => c.branch_name).filter(Boolean))]
     let tatByBranch = new Map()
     if (sourceBranchNames.length) {
@@ -190,10 +197,20 @@ export async function GET(req) {
 
     consignmentMap = new Map(csAll.map(c => {
       const tatHours = tatByBranch.get(c.branch_name) || 24   // sane default
-      const expected = c.dispatched_at
-        ? new Date(new Date(c.dispatched_at).getTime() + tatHours * 3600_000).toISOString()
-        : null
-      return [c.id, { ...c, expected_arrival_at: expected, delivery_tat_hours: tatHours }]
+      let expectedDate = null
+      if (c.dispatched_at) {
+        const dispDate = istDateStr(new Date(c.dispatched_at))    // YYYY-MM-DD in IST
+        const days     = Math.max(1, Math.ceil(tatHours / 24))     // 24h → 1 day, 48h → 2 days
+        expectedDate   = addWorkingDaysSkipSunday(dispDate, days)
+      }
+      const dispatchedDate = c.dispatched_at ? istDateStr(new Date(c.dispatched_at)) : null
+      return [c.id, {
+        ...c,
+        // Calendar-day promises, not instants. UI consumes both.
+        dispatched_date:        dispatchedDate,
+        expected_arrival_date:  expectedDate,
+        delivery_tat_hours:     tatHours,
+      }]
     }))
   }
 

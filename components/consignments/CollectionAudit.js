@@ -43,23 +43,27 @@ function ageBadge(d, t) {
   return { label, color, bg: `${color}18` }
 }
 
-// Format the next expected arrival into a Today/Tomorrow/specific-date label so
-// the auditor can plan their day at a glance. Returns null if no date is set
-// (e.g., older consignments without a dispatched_at).
-function arrivalLabel(d, t) {
-  if (!d) return null
-  const arrival = new Date(d)
-  if (Number.isNaN(arrival.getTime())) return null
+// Parse a YYYY-MM-DD string into a midnight Date in local time. The audit
+// view receives calendar dates (not instants) from the API so all the arrival
+// math is timezone-agnostic.
+function parseYmd(ymd) {
+  if (!ymd || typeof ymd !== 'string') return null
+  const m = ymd.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  if (!m) return null
+  return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]))
+}
 
-  const now    = new Date()
-  const dayStart = (date) => {
-    const x = new Date(date)
-    x.setHours(0, 0, 0, 0)
-    return x.getTime()
-  }
-  const todayMs = dayStart(now)
-  const arrMs   = dayStart(arrival)
-  const diff    = Math.round((arrMs - todayMs) / 86400000)
+// Format the next expected arrival into a Today/Tomorrow/specific-date label
+// so the auditor can plan their day at a glance. Sundays are excluded
+// upstream (server uses addWorkingDaysSkipSunday) — this function just
+// renders. Returns null if no date is set.
+function arrivalLabel(ymd, t) {
+  const arrival = parseYmd(ymd)
+  if (!arrival) return null
+
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  const diff = Math.round((arrival.getTime() - today.getTime()) / 86400000)
 
   let label, color
   if (diff < 0)      { label = `Overdue ${Math.abs(diff)}d`;  color = t.red }
@@ -67,6 +71,13 @@ function arrivalLabel(d, t) {
   else if (diff === 1) { label = 'Tomorrow';                    color = t.green }
   else                 { label = arrival.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }); color = t.text2 }
   return { label, color, bg: `${color}15`, diff }
+}
+
+// Short-form dispatch date for the card secondary line ("Dispatched: 30 May").
+function fmtShortDate(ymd) {
+  const d = parseYmd(ymd)
+  if (!d) return null
+  return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })
 }
 
 function oldestAge(items, dateField) {
@@ -78,17 +89,35 @@ function oldestAge(items, dateField) {
 }
 
 // Earliest expected arrival across a branch's consignments — drives the
-// "Today / Tomorrow / 3 Jun" pill on each branch card.
+// "Today / Tomorrow / 3 Jun" pill on each branch card. Returns a YYYY-MM-DD
+// string (the API ships calendar dates, not instants — Sundays excluded
+// upstream).
 function earliestArrival(consignments) {
   if (!consignments?.length) return null
   let earliest = null
   for (const c of consignments) {
-    if (!c?.expected_arrival_at) continue
-    const t = new Date(c.expected_arrival_at).getTime()
-    if (Number.isNaN(t)) continue
-    if (earliest === null || t < earliest) earliest = t
+    if (!c?.expected_arrival_date) continue
+    const d = parseYmd(c.expected_arrival_date)
+    if (!d) continue
+    if (earliest === null || d.getTime() < earliest.getTime()) earliest = d
   }
-  return earliest ? new Date(earliest).toISOString() : null
+  if (!earliest) return null
+  return `${earliest.getFullYear()}-${String(earliest.getMonth() + 1).padStart(2, '0')}-${String(earliest.getDate()).padStart(2, '0')}`
+}
+
+// Latest dispatch date across a branch's consignments — shown as the
+// secondary line on each card so the auditor knows when the truck(s) left.
+function latestDispatchDate(consignments) {
+  if (!consignments?.length) return null
+  let latest = null
+  for (const c of consignments) {
+    if (!c?.dispatched_date) continue
+    const d = parseYmd(c.dispatched_date)
+    if (!d) continue
+    if (latest === null || d.getTime() > latest.getTime()) latest = d
+  }
+  if (!latest) return null
+  return `${latest.getFullYear()}-${String(latest.getMonth() + 1).padStart(2, '0')}-${String(latest.getDate()).padStart(2, '0')}`
 }
 
 // Match a query against a branch's full payload (branch name + every bill's
@@ -315,6 +344,7 @@ export default function CollectionAudit() {
               billCount:     b.bills.length,
               extraLabel:    `${b.consignments.length} consignment${b.consignments.length === 1 ? '' : 's'}`,
               oldestAt:      oldestAge(b.consignments, 'dispatched_at'),
+              dispatchedYmd: latestDispatchDate(b.consignments),
               arrivalAt:     earliestArrival(b.consignments),
               discrepancies: b.bills.filter(x => x.audit_gross_weight != null).length,
             }))}
@@ -339,6 +369,7 @@ export default function CollectionAudit() {
                 billCount:     b.bills.length,
                 extraLabel:    null,
                 oldestAt:      oldestAge(b.bills, 'purchase_date'),
+                dispatchedYmd: null,
                 arrivalAt:     null,
                 discrepancies: b.bills.filter(x => x.audit_gross_weight != null).length,
               }))}
@@ -394,9 +425,10 @@ function BranchPool({ t, accent, badge, title, subtitle, empty, branches, onPick
   )
 }
 
-function BranchCard({ branch, billCount, extraLabel, oldestAt, arrivalAt, discrepancies, t, accent, onPick }) {
-  const age     = ageBadge(oldestAt ? new Date(oldestAt) : null, t)
-  const arrival = arrivalLabel(arrivalAt, t)
+function BranchCard({ branch, billCount, extraLabel, oldestAt, dispatchedYmd, arrivalAt, discrepancies, t, accent, onPick }) {
+  const age      = ageBadge(oldestAt ? new Date(oldestAt) : null, t)
+  const arrival  = arrivalLabel(arrivalAt, t)
+  const dispLbl  = fmtShortDate(dispatchedYmd)
   // "Urgent" border kicks in for stale dispatches OR overdue arrivals so the
   // auditor's eye lands on the cards that genuinely need attention.
   const ageUrgent     = age.color === t.red || age.color === t.orange
@@ -447,17 +479,28 @@ function BranchCard({ branch, billCount, extraLabel, oldestAt, arrivalAt, discre
 
         {extraLabel && <div style={{ fontSize: '11px', color: t.text4, marginTop: '6px' }}>{extraLabel}</div>}
 
-        {/* Expected-arrival pill — derived from dispatched_at + branch TAT.
-            Shown on the next row so auditors can plan their day at a glance
-            ("oh, two trucks land today, two more tomorrow"). */}
-        {arrival && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '10px' }}>
-            <span style={{ fontSize: '9px', color: t.text4, textTransform: 'uppercase', letterSpacing: '.1em', fontWeight: 600 }}>Arrives</span>
-            <span style={{
-              fontSize: '10px', color: arrival.color, background: arrival.bg,
-              borderRadius: '5px', padding: '3px 8px', fontWeight: 700,
-              whiteSpace: 'nowrap',
-            }}>{arrival.label}</span>
+        {/* Dispatched + Expected-arrival rows. Calendar dates from the
+            server; Sundays already excluded from the arrival calc upstream
+            (addWorkingDaysSkipSunday — BVC doesn't operate Sundays). The
+            auditor reads "left Friday → arrives Monday" at a glance. */}
+        {(dispLbl || arrival) && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginTop: '12px', paddingTop: '10px', borderTop: `1px dashed ${t.border}` }}>
+            {dispLbl && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ fontSize: '9px', color: t.text4, textTransform: 'uppercase', letterSpacing: '.1em', fontWeight: 600, minWidth: '60px' }}>Dispatched</span>
+                <span style={{ fontSize: '11px', color: t.text2, fontWeight: 600 }}>{dispLbl}</span>
+              </div>
+            )}
+            {arrival && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ fontSize: '9px', color: t.text4, textTransform: 'uppercase', letterSpacing: '.1em', fontWeight: 600, minWidth: '60px' }}>Arrives</span>
+                <span style={{
+                  fontSize: '10px', color: arrival.color, background: arrival.bg,
+                  borderRadius: '5px', padding: '3px 8px', fontWeight: 700,
+                  whiteSpace: 'nowrap',
+                }}>{arrival.label}</span>
+              </div>
+            )}
           </div>
         )}
       </div>
