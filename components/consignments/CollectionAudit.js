@@ -272,28 +272,30 @@ export default function CollectionAudit() {
   )
 
   // Group outstation cards by region for section headers. Region comes from
-  // the bill's source branch (enriched server-side) so leaf cards land under
-  // the correct region even when their parent consignment was issued from
-  // a hub in the same region. Preserve a custom ordering (Bangalore first,
-  // Rest of Karnataka second, then alphabetical) so the layout stays
-  // predictable across days.
+  // the bill's source branch (enriched server-side) so leaf cards land
+  // under the correct region even when their parent consignment was issued
+  // from a hub in the same region.
+  //
+  // Sort order is data-driven: regions with the most bills first, ties
+  // broken alphabetically. No hardcoded region list — adding a new region
+  // to the branches table picks up automatically with no code change.
   const outstationByRegion = useMemo(() => {
-    const REGION_ORDER = ['Bangalore', 'Rest of Karnataka', 'Kerala', 'Tamil Nadu', 'Andhra Pradesh', 'Telangana']
     const m = new Map()
     for (const b of filteredOutstationByBranch) {
       const r = b.region || 'Unknown'
       if (!m.has(r)) m.set(r, [])
       m.get(r).push(b)
     }
-    const keys = [...m.keys()]
-    keys.sort((a, b) => {
-      const ai = REGION_ORDER.indexOf(a); const bi = REGION_ORDER.indexOf(b)
-      if (ai !== -1 && bi !== -1) return ai - bi
-      if (ai !== -1) return -1
-      if (bi !== -1) return 1
-      return a.localeCompare(b)
+    const entries = [...m.entries()].map(([region, branches]) => ({
+      region,
+      branches,
+      _billCount: branches.reduce((s, x) => s + x.bills.length, 0),
+    }))
+    entries.sort((a, b) => {
+      if (b._billCount !== a._billCount) return b._billCount - a._billCount
+      return a.region.localeCompare(b.region)
     })
-    return keys.map(r => ({ region: r, branches: m.get(r) }))
+    return entries.map(({ region, branches }) => ({ region, branches }))
   }, [filteredOutstationByBranch])
 
   // Bucket counts for the filter chips. Counts distinct branches that have
