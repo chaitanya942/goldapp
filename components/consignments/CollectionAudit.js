@@ -596,7 +596,7 @@ export default function CollectionAudit() {
                           {branches.length} · {regionBills} bill{regionBills === 1 ? '' : 's'}
                         </span>
                       </div>
-                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '10px' }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(230px, 1fr))', gap: '8px' }}>
                         {branches.map((b, i) => (
                           <div key={b.branch}
                                className="ca-card-enter"
@@ -703,7 +703,7 @@ function BranchPool({ t, accent, badge, title, subtitle, empty, branches, onPick
       {branches.length === 0 ? (
         <div style={{ padding: '60px 20px', textAlign: 'center', fontSize: '12px', color: t.text4 }}>{empty}</div>
       ) : (
-        <div style={{ padding: '16px', display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: '14px' }}>
+        <div style={{ padding: '14px', display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(230px, 1fr))', gap: '8px' }}>
           {branches.map(b => <BranchCard key={b.branch} {...b} t={t} accent={accent} onPick={() => onPick(b.branch)} />)}
         </div>
       )}
