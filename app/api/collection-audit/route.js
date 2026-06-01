@@ -173,7 +173,28 @@ export async function GET(req) {
         .in('id', slice)
       csAll.push(...(cs || []))
     }
-    consignmentMap = new Map(csAll.map(c => [c.id, c]))
+
+    // Enrich each consignment with expected_arrival_at = dispatched_at + source
+    // branch's delivery_tat_hours. The auditor uses this to plan their day:
+    // "this truck arrives today / tomorrow / 3 Jun". One branch lookup keyed
+    // by source branch name.
+    const sourceBranchNames = [...new Set(csAll.map(c => c.branch_name).filter(Boolean))]
+    let tatByBranch = new Map()
+    if (sourceBranchNames.length) {
+      const { data: srcBranches } = await supabase
+        .from('branches')
+        .select('name, delivery_tat_hours')
+        .in('name', sourceBranchNames)
+      tatByBranch = new Map((srcBranches || []).map(b => [b.name, Number(b.delivery_tat_hours) || 24]))
+    }
+
+    consignmentMap = new Map(csAll.map(c => {
+      const tatHours = tatByBranch.get(c.branch_name) || 24   // sane default
+      const expected = c.dispatched_at
+        ? new Date(new Date(c.dispatched_at).getTime() + tatHours * 3600_000).toISOString()
+        : null
+      return [c.id, { ...c, expected_arrival_at: expected, delivery_tat_hours: tatHours }]
+    }))
   }
 
   // Group outstation bills by consignment.
