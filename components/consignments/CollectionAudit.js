@@ -604,13 +604,13 @@ export default function CollectionAudit() {
                       </div>
                       <div style={{
                         display: 'grid',
-                        // auto-fit collapses empty trailing tracks. Cap max
-                        // at 280px so a row with 3 cards doesn't stretch
-                        // them to 400px each -- the last row stays half-
-                        // empty (honest) rather than visually inflated.
-                        gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 280px))',
+                        // 1fr lets cards share remaining row width evenly so
+                        // every row aligns flush left + right. Min 220px is
+                        // tight enough that 5-6 cards fit at typical viewport
+                        // widths, wide enough to hold the longest KL- branch
+                        // names without wrapping mid-word.
+                        gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
                         gap: '5px',
-                        justifyContent: 'start',
                       }}>
                         {branches.map((b, i) => (
                           <div key={b.branch}
@@ -718,7 +718,7 @@ function BranchPool({ t, accent, badge, title, subtitle, empty, branches, onPick
       {branches.length === 0 ? (
         <div style={{ padding: '60px 20px', textAlign: 'center', fontSize: '12px', color: t.text4 }}>{empty}</div>
       ) : (
-        <div style={{ padding: '14px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 280px))', gap: '5px', justifyContent: 'start' }}>
+        <div style={{ padding: '14px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '5px' }}>
           {branches.map(b => <BranchCard key={b.branch} {...b} t={t} accent={accent} onPick={() => onPick(b.branch)} />)}
         </div>
       )}
