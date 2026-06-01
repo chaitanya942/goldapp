@@ -263,13 +263,83 @@ export async function POST(req) {
   if (!auth.ok) return auth.response
 
   const body = await req.json().catch(() => ({}))
-  const { purchase_id, audit_gross_weight, action, remark } = body
+  const { purchase_id, purchase_ids, audit_gross_weight, action, remark } = body
+
+  // ── 'mark_received' — count audit, single OR bulk ────────────────────────
+  // Bulk mode (purchase_ids array) lets the auditor mark an entire truck's
+  // bills as count-received in one click. Per-bill mode (single purchase_id)
+  // is still supported for the per-card button.
+  //
+  // Skips bills that are already weight-audited (count is moot then), and
+  // is idempotent on bills already count-received. Stock_status stays
+  // in_consignment for everyone — weight audit is still required to flip
+  // to at_ho.
+  if (action === 'mark_received') {
+    const ids = Array.isArray(purchase_ids) && purchase_ids.length
+      ? purchase_ids
+      : (purchase_id ? [purchase_id] : [])
+    if (!ids.length) {
+      return Response.json({ error: 'purchase_id or purchase_ids required' }, { status: 400 })
+    }
+    // Load the candidate bills so we can apply the eligibility filter once
+    // server-side rather than trusting the client.
+    const { data: bills, error: billsErr } = await supabase
+      .from('purchases')
+      .select('id, application_id, stock_status, is_deleted, crm_status, count_received_at, audited_at')
+      .in('id', ids)
+    if (billsErr) return Response.json({ error: billsErr.message }, { status: 500 })
+    if (!bills || bills.length === 0) {
+      return Response.json({ error: 'No matching bills found' }, { status: 404 })
+    }
+    const eligible = []
+    let skippedDeleted     = 0
+    let skippedNotInTransit = 0
+    let skippedAudited     = 0
+    let alreadyReceived    = 0
+    for (const b of bills) {
+      if (b.is_deleted || b.crm_status === 'deleted')              { skippedDeleted++;     continue }
+      if (!['at_branch', 'in_consignment'].includes(b.stock_status)) { skippedNotInTransit++; continue }
+      if (b.audited_at)        { skippedAudited++;  continue }
+      if (b.count_received_at) { alreadyReceived++; continue }
+      eligible.push(b.id)
+    }
+    if (eligible.length === 0) {
+      return Response.json({
+        success:           true,
+        action:            'mark_received',
+        marked:            0,
+        already_received:  alreadyReceived,
+        skipped_audited:   skippedAudited,
+        skipped_deleted:   skippedDeleted,
+        skipped_not_in_transit: skippedNotInTransit,
+      })
+    }
+    const { error: upErr } = await supabase
+      .from('purchases')
+      .update({
+        count_received_at: new Date().toISOString(),
+        count_received_by: auth.user?.id || null,
+      })
+      .in('id', eligible)
+    if (upErr) return Response.json({ error: upErr.message }, { status: 500 })
+    return Response.json({
+      success:           true,
+      action:            'mark_received',
+      marked:            eligible.length,
+      already_received:  alreadyReceived,
+      skipped_audited:   skippedAudited,
+      skipped_deleted:   skippedDeleted,
+      skipped_not_in_transit: skippedNotInTransit,
+    })
+  }
+
+  // ── 'receive' / 'keep_pending' — weight audit on a single bill ───────────
   if (!purchase_id) return Response.json({ error: 'purchase_id required' }, { status: 400 })
-  if (action !== 'receive' && action !== 'keep_pending' && action !== 'mark_received') {
+  if (action !== 'receive' && action !== 'keep_pending') {
     return Response.json({ error: 'action must be "receive", "keep_pending", or "mark_received"' }, { status: 400 })
   }
   const measured = Number(audit_gross_weight)
-  if (action !== 'mark_received' && (!Number.isFinite(measured) || measured <= 0)) {
+  if (!Number.isFinite(measured) || measured <= 0) {
     return Response.json({ error: 'audit_gross_weight must be a positive number' }, { status: 400 })
   }
 
@@ -286,30 +356,6 @@ export async function POST(req) {
   if (bill.crm_status === 'deleted')    return Response.json({ error: 'Bill is CRM-deleted' }, { status: 400 })
   if (!['at_branch', 'in_consignment'].includes(bill.stock_status)) {
     return Response.json({ error: `Bill is not audit-eligible (stock_status=${bill.stock_status})` }, { status: 400 })
-  }
-
-  // ── 'mark_received' — count audit only ───────────────────────────────────
-  // Auditor confirms the bill physically arrived but is deferring the weight
-  // audit (typically time pressure end-of-day). Stamps count_received_at /
-  // count_received_by; stock_status stays in_consignment so the bill still
-  // appears in the audit queue tomorrow for weighing. Idempotent — re-marking
-  // an already-count-received bill is a no-op.
-  if (action === 'mark_received') {
-    if (bill.audited_at) {
-      return Response.json({ error: 'Bill is already weight-audited; count audit no longer needed.' }, { status: 400 })
-    }
-    if (bill.count_received_at) {
-      return Response.json({ success: true, action: 'mark_received', already_received: true })
-    }
-    const { error } = await supabase
-      .from('purchases')
-      .update({
-        count_received_at: new Date().toISOString(),
-        count_received_by: auth.user?.id || null,
-      })
-      .eq('id', purchase_id)
-    if (error) return Response.json({ error: error.message }, { status: 500 })
-    return Response.json({ success: true, action: 'mark_received' })
   }
 
   const diff = Number((measured - Number(bill.gross_weight || 0)).toFixed(3))

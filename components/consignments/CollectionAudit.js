@@ -478,24 +478,43 @@ export default function CollectionAudit() {
           t={t}
           onBack={() => setDrillBranch(null)}
           onAudit={(bill) => setActiveBill(bill)}
-          onMarkReceived={async (bill) => {
+          onMarkReceived={async (target) => {
+            // Single-bill form: target = { id, application_id }
+            // Bulk form:        target = { ids: [...], label: 'WG000051 (4 bills)' }
+            const isBulk = target && Array.isArray(target.ids)
+            const body   = isBulk
+              ? { purchase_ids: target.ids, action: 'mark_received' }
+              : { purchase_id:  target.id,  action: 'mark_received' }
             try {
               const res = await authedFetch('/api/collection-audit', {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ purchase_id: bill.id, action: 'mark_received' }),
+                body: JSON.stringify(body),
               })
               const j = await res.json()
               if (!res.ok || j.error) {
                 setToast({ msg: j.error || 'Mark received failed', type: 'error', key: Date.now() })
                 return
               }
-              setToast({
-                msg: j.already_received
-                  ? `${bill.application_id} was already received.`
-                  : `${bill.application_id} marked received. Weight audit still pending.`,
-                type: 'success',
-                key: Date.now(),
-              })
+              if (isBulk) {
+                // Build a granular toast so the auditor can verify what
+                // actually changed vs what was already done or skipped.
+                const parts = [`${j.marked || 0} bill${j.marked === 1 ? '' : 's'} marked`]
+                if (j.already_received  > 0) parts.push(`${j.already_received} already received`)
+                if (j.skipped_audited   > 0) parts.push(`${j.skipped_audited} already weight-audited`)
+                setToast({
+                  msg:   `${target.label} — ${parts.join(', ')}.`,
+                  type:  (j.marked || 0) > 0 ? 'success' : 'info',
+                  key:   Date.now(),
+                })
+              } else {
+                setToast({
+                  msg: j.already_received
+                    ? `${target.application_id} was already received.`
+                    : `${target.application_id} marked received. Weight audit still pending.`,
+                  type: 'success',
+                  key: Date.now(),
+                })
+              }
               fetchAll()
             } catch (e) {
               setToast({ msg: e.message || 'Mark received failed', type: 'error', key: Date.now() })
@@ -965,27 +984,66 @@ function BranchDrilldown({ drill, outstationByBranch, bangaloreByBranch, t, onBa
       </div>
 
       {/* Bill cards grouped by consignment (outstation) or flat (bangalore) */}
-      {groups.map((g, gi) => (
-        <Fragment key={g.consignment?.id || gi}>
-          {g.consignment && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '6px 4px', flexWrap: 'wrap' }}>
-              <span style={{ fontSize: '10px', color: t.gold, background: `${t.gold}18`, borderRadius: '5px', padding: '4px 10px', fontWeight: 700, letterSpacing: '.08em' }}>{g.consignment.tmp_prf_no || '—'}</span>
-              <span style={{ fontSize: '11px', color: t.text2 }}>
-                {g.consignment.branch_name} <span style={{ color: t.text4 }}>→</span> {g.consignment.movement_type === 'INTERNAL' ? g.consignment.dest_branch : 'HO'}
-              </span>
-              <span style={{ fontSize: '10px', color: t.text4, fontFamily: 'monospace' }}>{g.consignment.challan_no}</span>
-              <span style={{ marginLeft: 'auto', fontSize: '10px', color: t.text3 }}>
-                <strong style={{ color: t.text2 }}>{g.bills.length}</strong> bill{g.bills.length === 1 ? '' : 's'}
-              </span>
+      {groups.map((g, gi) => {
+        // Bills in this group that haven't been count-received or weight-
+        // audited yet -- these are the only ones the bulk button targets.
+        const eligibleBills = (g.bills || []).filter(
+          b => !b.count_received_at && b.audit_gross_weight == null,
+        )
+        const bulkLabel = g.consignment?.tmp_prf_no
+          ? `${g.consignment.tmp_prf_no} (${eligibleBills.length} bill${eligibleBills.length === 1 ? '' : 's'})`
+          : `${eligibleBills.length} bill${eligibleBills.length === 1 ? '' : 's'}`
+        return (
+          <Fragment key={g.consignment?.id || gi}>
+            {g.consignment && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '6px 4px', flexWrap: 'wrap' }}>
+                <span style={{ fontSize: '10px', color: t.gold, background: `${t.gold}18`, borderRadius: '5px', padding: '4px 10px', fontWeight: 700, letterSpacing: '.08em' }}>{g.consignment.tmp_prf_no || '—'}</span>
+                <span style={{ fontSize: '11px', color: t.text2 }}>
+                  {g.consignment.branch_name} <span style={{ color: t.text4 }}>→</span> {g.consignment.movement_type === 'INTERNAL' ? g.consignment.dest_branch : 'HO'}
+                </span>
+                <span style={{ fontSize: '10px', color: t.text4, fontFamily: 'monospace' }}>{g.consignment.challan_no}</span>
+                <span style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: '12px' }}>
+                  <span style={{ fontSize: '10px', color: t.text3 }}>
+                    <strong style={{ color: t.text2 }}>{g.bills.length}</strong> bill{g.bills.length === 1 ? '' : 's'}
+                  </span>
+                  {eligibleBills.length > 0 && (
+                    <button
+                      onClick={() => onMarkReceived?.({
+                        ids:   eligibleBills.map(b => b.id),
+                        label: bulkLabel,
+                      })}
+                      title={`Mark all ${eligibleBills.length} pending bill${eligibleBills.length === 1 ? '' : 's'} on this consignment as received`}
+                      style={{
+                        background:    `${t.green}12`,
+                        color:         t.green,
+                        border:        `1px solid ${t.green}50`,
+                        borderRadius:  '8px',
+                        padding:       '6px 12px',
+                        fontSize:      '10.5px',
+                        fontWeight:    700,
+                        letterSpacing: '.02em',
+                        cursor:        'pointer',
+                        display:       'inline-flex',
+                        alignItems:    'center',
+                        gap:           '5px',
+                        transition:    'background .15s ease, border-color .15s ease, transform .15s ease',
+                      }}
+                      onMouseEnter={e => { e.currentTarget.style.background = `${t.green}22`; e.currentTarget.style.borderColor = `${t.green}90`; e.currentTarget.style.transform = 'translateY(-1px)' }}
+                      onMouseLeave={e => { e.currentTarget.style.background = `${t.green}12`; e.currentTarget.style.borderColor = `${t.green}50`; e.currentTarget.style.transform = 'translateY(0)' }}>
+                      ✓ Mark all {eligibleBills.length} as received
+                    </button>
+                  )}
+                </span>
+              </div>
+            )}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '10px' }}>
+              {g.bills.map(bill => <BillCard key={bill.id} bill={bill} t={t} dateField={dateF}
+                onAudit={() => onAudit(bill)}
+                onMarkReceived={() => onMarkReceived?.(bill)} />)}
             </div>
-          )}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '10px' }}>
-            {g.bills.map(bill => <BillCard key={bill.id} bill={bill} t={t} dateField={dateF}
-              onAudit={() => onAudit(bill)}
-              onMarkReceived={() => onMarkReceived?.(bill)} />)}
-          </div>
-        </Fragment>
-      ))}
+          </Fragment>
+        )
+      })}
     </div>
   )
 }
