@@ -3439,9 +3439,12 @@ export async function POST(req) {
   //   4. Auto-stamp ops_confirmed_at + consignee_report_generated_at so the
   //      sequential workflow gate releases — the operator can fire Challan
   //      and EWB on demand from the Consignment Data page.
-  //   5. Flip the bills' stock_status to 'in_consignment' (the atomic RPC
-  //      leaves them at_branch; for hub dispatch we approve in the same
-  //      breath since there's no separate accounts-approval queue for it).
+  //
+  // Bills stay at_branch and approval_status stays pending. The bill flip
+  // (at_branch → in_consignment) and the auto-approve fire together when
+  // ops generates the hub-level EWB downstream — same trigger as the
+  // outstation EWB-route flow. See lib/consignmentApproval.js for the
+  // single source of truth on that transition.
   //
   // Returns { consignment, summary } where summary is the branch-wise
   // breakdown the UI rendered in the confirmation dialog.
@@ -3653,12 +3656,18 @@ export async function POST(req) {
     // Fold the Branch Contact override into the same UPDATE — saves a round
     // trip vs a follow-up patch. Empty → NULL → PDFs fall back to live
     // branches.contact_person / contact_phone at render time.
+    // Hub Dispatch is two-step under the event-driven model: this endpoint
+    // creates the consignment + delivery challan, leaves bills at_branch
+    // and approval_status pending. The bill flip + auto-approval happens
+    // when ops clicks Generate EWB downstream — same trigger as outstation
+    // EWB-route. ops_confirmed_at and consignee_report_generated_at are
+    // still stamped here because the operator has confirmed twice on the
+    // Hub Dispatch modal and the report is generated as part of this
+    // call's documents.
     const hubPatch = {
       ops_confirmed_at:              nowIso,
       ops_confirmed_by:              auth.user?.id || null,
       consignee_report_generated_at: nowIso,
-      approval_status:               'approved',
-      approved_at:                   nowIso,
     }
     const hubCName  = (typeof body.branch_contact_name  === 'string') ? body.branch_contact_name.trim().slice(0, 80) : ''
     const hubCPhone = (typeof body.branch_contact_phone === 'string') ? body.branch_contact_phone.trim().slice(0, 24) : ''
@@ -3683,14 +3692,11 @@ export async function POST(req) {
         .catch(() => {})
     }
 
-    // 7) Flip bills' stock_status to in_consignment (the atomic RPC leaves
-    //    them at_branch). Mirrors the approve_consignment step which the
-    //    outstation flow runs separately.
-    const { error: flipErr } = await supabase
-      .from('purchases')
-      .update({ stock_status: 'in_consignment', dispatched_at: nowIso })
-      .in('id', billIds)
-    if (flipErr) console.warn('[create_hub_consignment] stock_status flip warning:', flipErr.message)
+    // Step 7 (the at_branch → in_consignment flip + dispatched_at stamp)
+    // intentionally deleted under the event-driven lifecycle. Bills stay
+    // at_branch until ops generates the hub-level EWB. See
+    // applyConsignmentApproval (called by /api/eway-bill/generate) for the
+    // single source of truth on the stock-movement transition.
 
     // 8) Stash the Transaction Executive who picked up this hub. Stored
     //    on the activity-log row (where details is JSONB) so it's audit-
