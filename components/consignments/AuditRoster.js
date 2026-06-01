@@ -364,113 +364,175 @@ function StackedSections({ sections, t, bodyRenderer: Body, extras }) {
 
 // ── Body renderers ──────────────────────────────────────────────────────────
 function ShiftBody({ section, accent, t, shiftDate, assignments = [], auditors = [], busy, onAssign, onUnassign }) {
-  // Auditors NOT already on this shift — candidate set for the picker.
-  // Conflict prevention (no-back-to-back) is enforced server-side too; we
-  // don't filter on the client for that because the client doesn't know the
-  // other shift's assignments without an extra prop. The server returns a
-  // clear toast on rejection.
-  const assignedIds  = new Set(assignments.map(a => a.auditor_id))
-  const availables   = (auditors || []).filter(a => a.is_active !== false && !assignedIds.has(a.id))
-  const atCapacity   = assignments.length >= MAX_PER_SHIFT
-  const dateLabel    = fmtPrettyDate(shiftDate)
+  // Assigned auditor id -> assignment id (so we can fire DELETE on uncheck).
+  const assignmentByAuditor = new Map(assignments.map(a => [a.auditor_id, a.id]))
+  const activeAuditors      = (auditors || []).filter(a => a.is_active !== false)
+  const atCapacity          = assignments.length >= MAX_PER_SHIFT
+  const dateLabel           = fmtPrettyDate(shiftDate)
 
   return (
-    <div style={{ padding: '18px 22px 20px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
-      {/* Date label so the operator always knows which day's slot they're editing */}
+    <div style={{ padding: '20px 22px 22px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+      {/* Date strip + cap pill */}
       <div style={{
-        fontSize: '10px', color: t.text4, letterSpacing: '.1em',
-        textTransform: 'uppercase', fontWeight: 600,
-        display: 'flex', alignItems: 'center', gap: '8px',
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        gap: '12px', flexWrap: 'wrap',
+        paddingBottom: '12px',
+        borderBottom: `1px dashed ${t.border}`,
       }}>
-        <span>Shift date</span>
-        <span style={{ fontSize: '11px', color: t.text2, letterSpacing: 0, textTransform: 'none', fontWeight: 600, fontFamily: 'monospace' }}>{dateLabel}</span>
-        <span style={{ fontSize: '10px', color: t.text4, letterSpacing: 0, textTransform: 'none' }}>· up to {MAX_PER_SHIFT} auditors per shift</span>
-      </div>
-
-      {/* Assigned auditor chips */}
-      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
-        {assignments.length === 0 && (
-          <span style={{ fontSize: '11px', color: t.text4, fontStyle: 'italic' }}>No auditors assigned yet.</span>
-        )}
-        {assignments.map(a => (
-          <span key={a.id} style={{
-            display: 'inline-flex', alignItems: 'center', gap: '8px',
-            background:  `${accent}10`,
-            border:      `1px solid ${accent}40`,
-            borderRadius: '999px',
-            padding:     '6px 6px 6px 12px',
-            fontSize:    '12px',
-            color:       t.text1,
-            fontWeight:  600,
-          }}>
-            <span style={{
-              width: '18px', height: '18px', borderRadius: '50%',
-              background: `${accent}30`,
-              color: accent,
-              fontWeight: 700,
-              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: '10px',
-            }}>{(a.auditor?.full_name || a.auditor?.email || '?').charAt(0).toUpperCase()}</span>
-            <span>{a.auditor?.full_name || a.auditor?.email || '—'}</span>
-            <button onClick={() => onUnassign(a.id)} disabled={busy}
-              title="Unassign auditor"
-              style={{
-                background: 'transparent',
-                border: 'none',
-                color: t.text3,
-                cursor: busy ? 'not-allowed' : 'pointer',
-                fontSize: '14px',
-                padding: '0 8px',
-                borderRadius: '50%',
-                lineHeight: 1,
-                transition: 'color .15s ease, background .15s ease',
-              }}
-              onMouseEnter={e => { if (!busy) { e.currentTarget.style.color = t.red; e.currentTarget.style.background = `${t.red}15` } }}
-              onMouseLeave={e => { e.currentTarget.style.color = t.text3; e.currentTarget.style.background = 'transparent' }}>
-              ✕
-            </button>
-          </span>
-        ))}
-      </div>
-
-      {/* Picker — disabled when at capacity */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-        <select
-          disabled={busy || atCapacity || availables.length === 0}
-          value=""
-          onChange={e => { if (e.target.value) onAssign(e.target.value) }}
-          style={{
-            background: t.card2 || t.card,
-            border: `1px solid ${atCapacity ? `${t.border}80` : t.border}`,
-            borderRadius: '8px',
-            padding: '8px 12px',
-            fontSize: '12px',
-            color: t.text1,
-            outline: 'none',
-            cursor: (busy || atCapacity || availables.length === 0) ? 'not-allowed' : 'pointer',
-            minWidth: '220px',
-            opacity: (busy || atCapacity || availables.length === 0) ? 0.55 : 1,
-          }}>
-          <option value="">
-            {atCapacity
-              ? `Shift is at the ${MAX_PER_SHIFT}-auditor cap`
-              : availables.length === 0
-                ? auditors.length === 0
-                  ? 'No auditors yet — add one from the Audit History tab'
-                  : 'Every auditor is already on this shift'
-                : 'Select an auditor to assign…'}
-          </option>
-          {availables.map(a => (
-            <option key={a.id} value={a.id}>
-              {a.full_name || a.email}{a.full_name ? ` · ${a.email}` : ''}
-            </option>
-          ))}
-        </select>
-        <span style={{ fontSize: '10px', color: t.text4, fontStyle: 'italic' }}>
-          {section.id === 'night'
-            ? 'Auditors here cannot also run tomorrow morning (back-to-back rule).'
-            : 'Auditors here cannot also have run last night (back-to-back rule).'}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+          <span style={{ fontSize: '10px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 600 }}>Shift date</span>
+          <span style={{ fontSize: '12px', color: t.text1, fontWeight: 700, fontFamily: 'monospace' }}>{dateLabel}</span>
+        </div>
+        <span style={{
+          fontSize: '10px',
+          color: atCapacity ? t.gold : t.text3,
+          background: atCapacity ? `${t.gold}15` : `${t.border}40`,
+          border: `1px solid ${atCapacity ? `${t.gold}40` : t.border}`,
+          borderRadius: '999px',
+          padding: '4px 11px',
+          fontWeight: 700,
+          letterSpacing: '.04em',
+        }}>
+          {assignments.length} / {MAX_PER_SHIFT} assigned
         </span>
+      </div>
+
+      {/* Auditor checklist */}
+      {activeAuditors.length === 0 ? (
+        <div style={{ padding: '24px 16px', textAlign: 'center', fontSize: '11px', color: t.text4 }}>
+          No active auditors yet — add one from the <strong style={{ color: t.text2 }}>Audit History</strong> tab.
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+          {activeAuditors.map(a => {
+            const assigned   = assignmentByAuditor.has(a.id)
+            const lockedByCap = !assigned && atCapacity
+            const disabled    = busy || lockedByCap
+            const onToggle    = () => {
+              if (disabled) return
+              if (assigned) onUnassign(assignmentByAuditor.get(a.id))
+              else          onAssign(a.id)
+            }
+            return (
+              <button
+                key={a.id}
+                type="button"
+                onClick={onToggle}
+                disabled={disabled}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: '12px',
+                  width: '100%',
+                  textAlign: 'left',
+                  background: assigned
+                    ? `linear-gradient(135deg, ${accent}12, ${accent}06)`
+                    : t.card2 || t.card,
+                  border: `1px solid ${assigned ? `${accent}60` : t.border}`,
+                  borderRadius: '11px',
+                  padding: '11px 14px',
+                  cursor: disabled ? 'not-allowed' : 'pointer',
+                  opacity: lockedByCap ? 0.45 : 1,
+                  transition: 'transform .15s ease, border-color .15s ease, background .15s ease, box-shadow .15s ease',
+                  position: 'relative',
+                  overflow: 'hidden',
+                }}
+                onMouseEnter={e => {
+                  if (disabled) return
+                  e.currentTarget.style.borderColor = `${accent}80`
+                  e.currentTarget.style.transform   = 'translateY(-1px)'
+                  e.currentTarget.style.boxShadow   = `0 4px 12px ${accent}22`
+                }}
+                onMouseLeave={e => {
+                  if (disabled) return
+                  e.currentTarget.style.borderColor = assigned ? `${accent}60` : t.border
+                  e.currentTarget.style.transform   = 'translateY(0)'
+                  e.currentTarget.style.boxShadow   = 'none'
+                }}>
+                {/* Custom checkbox — square, accent-coloured when checked */}
+                <span style={{
+                  width: '20px', height: '20px',
+                  borderRadius: '6px',
+                  border: `1.5px solid ${assigned ? accent : `${t.text4}80`}`,
+                  background: assigned ? accent : 'transparent',
+                  color: assigned ? '#fff' : 'transparent',
+                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                  fontSize: '13px',
+                  fontWeight: 900,
+                  lineHeight: 1,
+                  flexShrink: 0,
+                  transition: 'background .15s ease, border-color .15s ease',
+                }}>
+                  {assigned ? '✓' : ''}
+                </span>
+
+                {/* Avatar + identity */}
+                <span style={{
+                  width: '32px', height: '32px', borderRadius: '50%',
+                  background: `linear-gradient(135deg, ${accent}25, ${accent}10)`,
+                  border:     `1px solid ${accent}30`,
+                  color:      accent,
+                  fontWeight: 700,
+                  fontSize:   '12px',
+                  display:    'inline-flex', alignItems: 'center', justifyContent: 'center',
+                  flexShrink: 0,
+                }}>{(a.full_name || a.email || '?').charAt(0).toUpperCase()}</span>
+
+                <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                  <span style={{
+                    fontSize: '13px', color: t.text1, fontWeight: 600, lineHeight: 1.2,
+                    whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                  }}>{a.full_name || '—'}</span>
+                  <span style={{
+                    fontSize: '11px', color: t.text3, fontFamily: 'monospace',
+                    whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                  }}>{a.email || '—'}</span>
+                </span>
+
+                {/* Right-side status pill */}
+                {assigned ? (
+                  <span style={{
+                    fontSize: '9px',
+                    color: accent,
+                    background: `${accent}20`,
+                    border: `1px solid ${accent}50`,
+                    borderRadius: '999px',
+                    padding: '3px 9px',
+                    fontWeight: 700,
+                    letterSpacing: '.06em',
+                    flexShrink: 0,
+                  }}>
+                    ASSIGNED
+                  </span>
+                ) : lockedByCap ? (
+                  <span style={{
+                    fontSize: '9px',
+                    color: t.text4,
+                    background: `${t.text4}15`,
+                    border: `1px solid ${t.text4}40`,
+                    borderRadius: '999px',
+                    padding: '3px 9px',
+                    fontWeight: 700,
+                    letterSpacing: '.06em',
+                    flexShrink: 0,
+                  }}>
+                    CAP REACHED
+                  </span>
+                ) : null}
+              </button>
+            )
+          })}
+        </div>
+      )}
+
+      {/* Footnote — back-to-back rule reminder */}
+      <div style={{
+        fontSize: '10px', color: t.text4, fontStyle: 'italic',
+        display: 'flex', alignItems: 'center', gap: '6px',
+        paddingTop: '6px',
+      }}>
+        <span style={{ opacity: 0.7 }}>ℹ</span>
+        {section.id === 'night'
+          ? 'Auditors here cannot also run tomorrow morning (back-to-back rule).'
+          : 'Auditors here cannot also have run last night (back-to-back rule).'}
       </div>
     </div>
   )
