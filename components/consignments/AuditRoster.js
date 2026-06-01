@@ -12,35 +12,34 @@
 //      with the additional melting check (the gold is being prepared for the
 //      melt and the morning auditor signs off on both weight + readiness).
 //
-// This file is intentionally minimal — a tab shell with placeholders so we
-// can iterate on the specific data shape, queries, and audit POST actions
-// for each shift in subsequent passes.
+// Both sections render stacked on the same page so the auditor / supervisor
+// can see both shifts at once without flipping tabs. Bodies are intentionally
+// minimal placeholders right now — actual queues + actions land here in
+// subsequent passes.
 
-import { useState } from 'react'
 import { useApp } from '../../lib/context'
 import { CONSIGNMENT_THEMES as THEMES } from '../../lib/consignmentTheme'
 
-const TABS = [
+const SECTIONS = [
   {
-    id:    'night',
-    label: 'Night Weight Audit',
-    icon:  '🌙',
-    desc:  'Bills audited during the night shift — weight check only.',
+    id:     'night',
+    label:  'Night Weight Audit',
+    icon:   '🌙',
+    accent: 'gold',
+    desc:   'Bills audited during the night shift — weight check only.',
   },
   {
-    id:    'morning',
-    label: 'Morning Weight + Melting Audit',
-    icon:  '☀',
-    desc:  'Bills audited during the morning shift — weight check + melting readiness.',
+    id:     'morning',
+    label:  'Morning Weight + Melting Audit',
+    icon:   '☀',
+    accent: 'orange',
+    desc:   'Bills audited during the morning shift — weight check + melting readiness.',
   },
 ]
 
 export default function AuditRoster() {
   const { theme } = useApp()
   const t = THEMES[theme] || THEMES.dark
-  const [tab, setTab] = useState('night')
-
-  const active = TABS.find(x => x.id === tab) || TABS[0]
 
   return (
     <div style={{ padding: '24px 28px', maxWidth: '1400px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '20px' }}>
@@ -75,59 +74,52 @@ export default function AuditRoster() {
         </div>
       </div>
 
-      {/* Tab strip */}
-      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-        {TABS.map(item => {
-          const isActive = item.id === tab
-          return (
-            <button key={item.id} onClick={() => setTab(item.id)}
-              style={{
-                background: isActive ? `${t.gold}15` : 'transparent',
-                border: `1px solid ${isActive ? `${t.gold}80` : t.border}`,
-                borderRadius: '11px',
-                padding: '10px 18px',
-                fontSize: '12px',
-                color: isActive ? t.gold : t.text2,
-                cursor: 'pointer',
-                fontWeight: isActive ? 700 : 500,
-                display: 'inline-flex', alignItems: 'center', gap: '8px',
-                transition: 'all .15s ease',
-                boxShadow: isActive ? `0 0 0 4px ${t.gold}12` : 'none',
-              }}
-              onMouseEnter={e => { if (!isActive) { e.currentTarget.style.borderColor = `${t.gold}60`; e.currentTarget.style.color = t.gold } }}
-              onMouseLeave={e => { if (!isActive) { e.currentTarget.style.borderColor = t.border; e.currentTarget.style.color = t.text2 } }}>
-              <span style={{ fontSize: '14px', lineHeight: 1 }}>{item.icon}</span>
-              {item.label}
-            </button>
-          )
-        })}
-      </div>
+      {/* Stacked sections — both visible, no tabs */}
+      {SECTIONS.map(section => {
+        const accent = t[section.accent] || t.gold
+        return (
+          <div key={section.id} style={{
+            background:  t.card,
+            border:      `1px solid ${t.border}`,
+            borderRadius: '14px',
+            overflow:    'hidden',
+            position:    'relative',
+            boxShadow:   `0 1px 3px ${t.border}40`,
+          }}>
+            {/* Top accent stripe — colour-codes the section without needing a sidebar */}
+            <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '3px', background: `linear-gradient(90deg, ${accent} 0%, ${accent}30 60%, transparent 100%)` }} />
 
-      {/* Placeholder body — actual queues / actions land here in later passes */}
-      <div style={{
-        background: t.card,
-        border:     `1px solid ${t.border}`,
-        borderRadius: '14px',
-        padding:    '60px 24px',
-        textAlign:  'center',
-        boxShadow:  `0 1px 3px ${t.border}40`,
-      }}>
-        <div style={{
-          width: '56px', height: '56px', borderRadius: '50%',
-          background: `linear-gradient(135deg, ${t.gold}20, ${t.gold}08)`,
-          border:     `1px solid ${t.gold}30`,
-          margin:     '0 auto 14px',
-          display:    'flex', alignItems: 'center', justifyContent: 'center',
-          fontSize:   '24px',
-        }}>{active.icon}</div>
-        <div style={{ fontSize: '15px', color: t.text1, fontWeight: 600, marginBottom: '6px' }}>{active.label}</div>
-        <div style={{ fontSize: '12px', color: t.text3, maxWidth: '480px', margin: '0 auto', lineHeight: 1.6 }}>
-          {active.desc}
-        </div>
-        <div style={{ fontSize: '11px', color: t.text4, marginTop: '14px', fontStyle: 'italic' }}>
-          Workflow scaffolding next — bill queue, weight entry, and (for the morning lane) melting sign-off.
-        </div>
-      </div>
+            {/* Section header */}
+            <div style={{
+              padding: '18px 22px',
+              borderBottom: `1px solid ${t.border}`,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '14px',
+            }}>
+              <div style={{
+                width: '40px', height: '40px', borderRadius: '10px',
+                background: `linear-gradient(135deg, ${accent}25, ${accent}08)`,
+                border:     `1px solid ${accent}30`,
+                display:    'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize:   '18px',
+                flexShrink: 0,
+              }}>{section.icon}</div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: '14px', color: t.text1, fontWeight: 700, letterSpacing: '-.01em' }}>{section.label}</div>
+                <div style={{ fontSize: '11px', color: t.text4, marginTop: '3px' }}>{section.desc}</div>
+              </div>
+            </div>
+
+            {/* Placeholder body — actual queue / actions land here later */}
+            <div style={{ padding: '40px 24px', textAlign: 'center' }}>
+              <div style={{ fontSize: '11px', color: t.text4, fontStyle: 'italic', maxWidth: '460px', margin: '0 auto', lineHeight: 1.6 }}>
+                Workflow scaffolding next — bill queue, weight entry{section.id === 'morning' ? ', and melting sign-off' : ''}.
+              </div>
+            </div>
+          </div>
+        )
+      })}
     </div>
   )
 }
