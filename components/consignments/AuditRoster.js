@@ -20,9 +20,19 @@
 // All bodies are first-cut shells. Real data + actions land in
 // subsequent passes.
 
-import { useState } from 'react'
+import { useState, useEffect, useCallback } from 'react'
+import { createPortal } from 'react-dom'
 import { useApp } from '../../lib/context'
+import { supabase } from '../../lib/supabase'
+import { authedFetch } from '../../lib/authedFetch'
 import { CONSIGNMENT_THEMES as THEMES } from '../../lib/consignmentTheme'
+import Toast from '../ui/Toast'
+
+// All auditors share the same role — fixed, not user-selectable in the modal.
+// Same role string the existing ROLE_GROUPS.AUDIT (lib/apiAuth.js) admits, so
+// every auditor added here also satisfies the audit endpoints' auth check.
+const AUDITOR_ROLE = 'audit'
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
 const TABS = [
   { id: 'shifts',  label: 'Shifts',        icon: '🗓' },
@@ -69,6 +79,30 @@ export default function AuditRoster() {
   const { theme } = useApp()
   const t = THEMES[theme] || THEMES.dark
   const [tab, setTab] = useState('shifts')
+
+  // ── Auditor list state ────────────────────────────────────────────────────
+  // Auditors are stored in user_profiles with role='audit'. Inviting one from
+  // here uses the same /api/invite-user endpoint that User Management uses —
+  // so the entry shows up in BOTH the Audit Roster auditors section and
+  // User Management. Single source of truth, no duplicate table.
+  const [auditors,  setAuditors]  = useState([])
+  const [loading,   setLoading]   = useState(true)
+  const [modalOpen, setModalOpen] = useState(false)
+  const [toast,     setToast]     = useState(null)
+
+  const fetchAuditors = useCallback(async () => {
+    setLoading(true)
+    const { data, error } = await supabase
+      .from('user_profiles')
+      .select('id, email, full_name, role, is_active, created_at')
+      .eq('role', AUDITOR_ROLE)
+      .order('created_at', { ascending: false })
+    if (error) setToast({ msg: error.message || 'Failed to load auditors', type: 'error', key: Date.now() })
+    else        setAuditors(data || [])
+    setLoading(false)
+  }, [])
+
+  useEffect(() => { fetchAuditors() }, [fetchAuditors])
 
   return (
     <div style={{ padding: '24px 28px', maxWidth: '1400px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '20px' }}>
@@ -143,19 +177,40 @@ export default function AuditRoster() {
 
       {/* Tab body */}
       {tab === 'shifts'  && <StackedSections sections={SHIFT_SECTIONS}  t={t} bodyRenderer={ShiftBody}   />}
-      {tab === 'history' && <StackedSections sections={HISTORY_SECTIONS} t={t} bodyRenderer={HistoryBody} extras={extrasFor} />}
+      {tab === 'history' && (
+        <StackedSections
+          sections={HISTORY_SECTIONS}
+          t={t}
+          bodyRenderer={(props) => <HistoryBody {...props} auditors={auditors} loading={loading} />}
+          extras={(section, t) => extrasFor(section, t, () => setModalOpen(true))}
+        />
+      )}
+
+      {modalOpen && (
+        <AddAuditorModal
+          t={t}
+          onClose={() => setModalOpen(false)}
+          onAdded={(msg) => {
+            setToast({ msg, type: 'success', key: Date.now() })
+            setModalOpen(false)
+            fetchAuditors()
+          }}
+          onError={(msg) => setToast({ msg, type: 'error', key: Date.now() })}
+        />
+      )}
+
+      {toast && <Toast key={toast.key} msg={toast.msg} type={toast.type} onDone={() => setToast(null)} />}
     </div>
   )
 }
 
 // extras() decides whether a section header gets a button on the right.
-function extrasFor(section, t) {
+function extrasFor(section, t, onClick) {
   if (section.id !== 'auditors') return null
   const accent = t.blue || t.gold
   return (
     <button
-      disabled
-      title="Scaffolding only — add-auditor flow wires up in the next pass"
+      onClick={onClick}
       style={{
         background: accent,
         color: '#fff',
@@ -165,11 +220,13 @@ function extrasFor(section, t) {
         fontSize: '11px',
         fontWeight: 700,
         letterSpacing: '.02em',
-        cursor: 'not-allowed',
-        opacity: 0.55,
+        cursor: 'pointer',
         display: 'inline-flex', alignItems: 'center', gap: '6px',
         flexShrink: 0,
-      }}>
+        transition: 'transform .15s ease, box-shadow .15s ease',
+      }}
+      onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-1px)'; e.currentTarget.style.boxShadow = `0 4px 12px ${accent}40` }}
+      onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)';   e.currentTarget.style.boxShadow = 'none' }}>
       + Add auditor
     </button>
   )
@@ -231,26 +288,197 @@ function ShiftBody({ section, t }) {
   )
 }
 
-function HistoryBody({ section, accent, t }) {
-  const isHistory = section.id === 'history'
+function HistoryBody({ section, accent, t, auditors = [], loading = false }) {
+  // Audit history is still a future pass (need an audit_events table); the
+  // auditors body renders the real list now.
+  if (section.id === 'history') {
+    return (
+      <div style={{ padding: '40px 24px 48px', textAlign: 'center' }}>
+        <div style={{
+          width: '52px', height: '52px', borderRadius: '50%',
+          background: `linear-gradient(135deg, ${accent}20, ${accent}08)`,
+          border:     `1px solid ${accent}30`,
+          margin:     '0 auto 12px',
+          display:    'flex', alignItems: 'center', justifyContent: 'center',
+          fontSize:   '22px',
+        }}>{section.icon}</div>
+        <div style={{ fontSize: '13px', color: t.text2, fontWeight: 600, marginBottom: '4px' }}>No audit history yet</div>
+        <div style={{ fontSize: '11px', color: t.text4, maxWidth: '460px', margin: '0 auto', lineHeight: 1.6 }}>
+          Once auditors run their first shifts, this section will list every bill audited — auditor name, shift, weight measured vs CRM, and any discrepancies.
+        </div>
+      </div>
+    )
+  }
+
+  // section.id === 'auditors' — real list.
+  if (loading) {
+    return (
+      <div style={{ padding: '40px 24px', textAlign: 'center', fontSize: '11px', color: t.text4 }}>Loading auditors…</div>
+    )
+  }
+  if (!auditors.length) {
+    return (
+      <div style={{ padding: '40px 24px 48px', textAlign: 'center' }}>
+        <div style={{
+          width: '52px', height: '52px', borderRadius: '50%',
+          background: `linear-gradient(135deg, ${accent}20, ${accent}08)`,
+          border:     `1px solid ${accent}30`,
+          margin:     '0 auto 12px',
+          display:    'flex', alignItems: 'center', justifyContent: 'center',
+          fontSize:   '22px',
+        }}>{section.icon}</div>
+        <div style={{ fontSize: '13px', color: t.text2, fontWeight: 600, marginBottom: '4px' }}>No auditors added yet</div>
+        <div style={{ fontSize: '11px', color: t.text4, maxWidth: '460px', margin: '0 auto', lineHeight: 1.6 }}>
+          Click <strong style={{ color: t.text2 }}>+ Add auditor</strong> above to invite the people who run the audit shifts. They'll also show up in User Management.
+        </div>
+      </div>
+    )
+  }
   return (
-    <div style={{ padding: '40px 24px 48px', textAlign: 'center' }}>
-      <div style={{
-        width: '52px', height: '52px', borderRadius: '50%',
-        background: `linear-gradient(135deg, ${accent}20, ${accent}08)`,
-        border:     `1px solid ${accent}30`,
-        margin:     '0 auto 12px',
-        display:    'flex', alignItems: 'center', justifyContent: 'center',
-        fontSize:   '22px',
-      }}>{section.icon}</div>
-      <div style={{ fontSize: '13px', color: t.text2, fontWeight: 600, marginBottom: '4px' }}>
-        {isHistory ? 'No audit history yet' : 'No auditors added yet'}
-      </div>
-      <div style={{ fontSize: '11px', color: t.text4, maxWidth: '460px', margin: '0 auto', lineHeight: 1.6 }}>
-        {isHistory
-          ? 'Once auditors run their first shifts, this section will list every bill audited — auditor name, shift, weight measured vs CRM, and any discrepancies.'
-          : 'Add the people who run the night and morning audit shifts. Each entry will store name, phone, designation, and which shift(s) they cover.'}
-      </div>
+    <div style={{ padding: '12px 18px 18px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+      {auditors.map(a => (
+        <div key={a.id} style={{
+          background:    t.card2 || t.card,
+          border:        `1px solid ${t.border}`,
+          borderRadius:  '10px',
+          padding:       '12px 16px',
+          display:       'flex',
+          alignItems:    'center',
+          gap:           '14px',
+          transition:    'border-color .15s ease, transform .15s ease',
+        }}
+        onMouseEnter={e => { e.currentTarget.style.borderColor = `${accent}60`; e.currentTarget.style.transform = 'translateY(-1px)' }}
+        onMouseLeave={e => { e.currentTarget.style.borderColor = t.border; e.currentTarget.style.transform = 'translateY(0)' }}>
+          {/* Avatar — first-letter circle, accent tinted */}
+          <div style={{
+            width: '36px', height: '36px', borderRadius: '50%',
+            background: `linear-gradient(135deg, ${accent}30, ${accent}10)`,
+            border:     `1px solid ${accent}40`,
+            display:    'flex', alignItems: 'center', justifyContent: 'center',
+            color:      accent,
+            fontWeight: 700,
+            fontSize:   '13px',
+            flexShrink: 0,
+          }}>{(a.full_name || a.email || '?').charAt(0).toUpperCase()}</div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: '13px', color: t.text1, fontWeight: 600, lineHeight: 1.2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {a.full_name || '—'}
+            </div>
+            <div style={{ fontSize: '11px', color: t.text3, marginTop: '2px', fontFamily: 'monospace', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {a.email || '—'}
+            </div>
+          </div>
+          <span style={{
+            fontSize: '9px',
+            color: a.is_active === false ? t.text4 : t.green,
+            background: a.is_active === false ? `${t.text4}15` : `${t.green}15`,
+            border: `1px solid ${(a.is_active === false ? t.text4 : t.green)}40`,
+            borderRadius: '999px',
+            padding: '2px 8px',
+            fontWeight: 700,
+            letterSpacing: '.05em',
+            flexShrink: 0,
+          }}>
+            {a.is_active === false ? 'INACTIVE' : 'ACTIVE'}
+          </span>
+        </div>
+      ))}
     </div>
   )
+}
+
+// ── Add Auditor modal ──────────────────────────────────────────────────────
+// Same shape as the User Management add-user flow (POST /api/invite-user),
+// but the role is fixed to 'audit' — no role picker on the form. After the
+// invite returns success, the new auditor lands in BOTH user_profiles AND
+// the Audit Roster auditors list (same row, queried two different places).
+
+function AddAuditorModal({ t, onClose, onAdded, onError }) {
+  const [name, setName]    = useState('')
+  const [email, setEmail]  = useState('')
+  const [busy, setBusy]    = useState(false)
+
+  const submit = async () => {
+    const cleanName  = name.trim()
+    const cleanEmail = email.trim()
+    if (!cleanName)  return onError('Name is required.')
+    if (!cleanEmail || !EMAIL_RE.test(cleanEmail)) return onError('A valid email is required.')
+
+    setBusy(true)
+    try {
+      const res = await authedFetch('/api/invite-user', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({
+          email:     cleanEmail,
+          full_name: cleanName,
+          role:      AUDITOR_ROLE,
+        }),
+      })
+      const j = await res.json()
+      if (!res.ok || j.error) {
+        onError(j.error || 'Invite failed')
+        return
+      }
+      onAdded(`Invited ${cleanName} (${cleanEmail}) as auditor.`)
+    } catch (e) {
+      onError(e.message || 'Invite failed')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  if (typeof document === 'undefined') return null
+  return createPortal((
+    <div onClick={(e) => { if (e.target === e.currentTarget && !busy) onClose() }}
+      style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000, padding: '20px', backdropFilter: 'blur(4px)' }}>
+      <div style={{
+        background: t.card,
+        border: `1px solid ${t.gold}40`,
+        borderRadius: '14px',
+        width: '100%',
+        maxWidth: '460px',
+        display: 'flex',
+        flexDirection: 'column',
+        boxShadow: '0 20px 60px rgba(0,0,0,.6)',
+        overflow: 'hidden',
+      }}>
+        <div style={{ padding: '20px 24px', borderBottom: `1px solid ${t.border}` }}>
+          <div style={{ fontSize: '15px', color: t.text1, fontWeight: 700, letterSpacing: '-.01em' }}>Add auditor</div>
+          <div style={{ fontSize: '11px', color: t.text4, marginTop: '4px' }}>
+            They'll get an invite email and a profile in both Audit Roster and User Management.
+          </div>
+        </div>
+        <div style={{ padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+          <div>
+            <label style={{ fontSize: '10px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 600, display: 'block', marginBottom: '6px' }}>Name</label>
+            <input value={name} onChange={e => setName(e.target.value)} disabled={busy}
+              placeholder="Full name"
+              autoFocus
+              style={{ width: '100%', background: t.card2 || t.card, border: `1px solid ${t.border}`, borderRadius: '8px', padding: '10px 12px', fontSize: '13px', color: t.text1, outline: 'none', boxSizing: 'border-box' }} />
+          </div>
+          <div>
+            <label style={{ fontSize: '10px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 600, display: 'block', marginBottom: '6px' }}>Email</label>
+            <input value={email} onChange={e => setEmail(e.target.value)} disabled={busy}
+              placeholder="name@whitegold.money"
+              type="email"
+              style={{ width: '100%', background: t.card2 || t.card, border: `1px solid ${t.border}`, borderRadius: '8px', padding: '10px 12px', fontSize: '13px', color: t.text1, outline: 'none', boxSizing: 'border-box', fontFamily: 'monospace' }} />
+          </div>
+          <div style={{ fontSize: '10px', color: t.text4, padding: '8px 10px', background: `${t.gold}08`, border: `1px solid ${t.gold}20`, borderRadius: '6px', lineHeight: 1.5 }}>
+            Role is fixed to <strong style={{ color: t.gold, fontFamily: 'monospace' }}>audit</strong> — every new entry here can run both night and morning audit shifts. To grant a different role, use User Management.
+          </div>
+        </div>
+        <div style={{ padding: '14px 24px', borderTop: `1px solid ${t.border}`, display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+          <button onClick={onClose} disabled={busy}
+            style={{ background: 'transparent', border: `1px solid ${t.border}`, borderRadius: '7px', padding: '8px 16px', fontSize: '12px', color: t.text2, cursor: busy ? 'not-allowed' : 'pointer' }}>
+            Cancel
+          </button>
+          <button onClick={submit} disabled={busy || !name.trim() || !email.trim()}
+            style={{ background: t.gold, color: '#1a0a00', border: 'none', borderRadius: '7px', padding: '8px 18px', fontSize: '12px', fontWeight: 700, cursor: (busy || !name.trim() || !email.trim()) ? 'not-allowed' : 'pointer', opacity: (busy || !name.trim() || !email.trim()) ? 0.55 : 1 }}>
+            {busy ? 'Inviting…' : 'Send invite'}
+          </button>
+        </div>
+      </div>
+    </div>
+  ), document.body)
 }
