@@ -93,45 +93,105 @@ export async function GET(req) {
   const bangalore = []
 
   // ── Outstation pool: in_consignment, grouped by parent consignment ──────
-  // Linked via consignment_items.purchase_id → consignments.id. Pull both
-  // tables in parallel, then stitch in JS.
-  const [outstationRowsRes, outstationLinksRes] = await Promise.all([
-    supabase
-      .from('purchases')
-      .select(COLS)
-      .eq('stock_status', 'in_consignment')
-      .eq('is_deleted', false)
-      .neq('crm_status', 'deleted')
-      .order('dispatched_at', { ascending: true, nullsFirst: false }),
-    supabase
-      .from('consignment_items')
-      .select('purchase_id, consignment_id'),
-  ])
-  if (outstationRowsRes.error) return Response.json({ error: outstationRowsRes.error.message }, { status: 500 })
-  if (outstationLinksRes.error) return Response.json({ error: outstationLinksRes.error.message }, { status: 500 })
+  // Linked via consignment_items.purchase_id → consignments.id.
+  //
+  // PAGINATION: Supabase's default max_rows cap is 1000. A naive
+  // `select * from consignment_items` was silently truncating to the
+  // first 1000 link rows (the table has tens of thousands), so any
+  // in_consignment bill whose link wasn't in that first 1000 fell
+  // through the `if (!cid) continue` orphan filter below and silently
+  // disappeared from the audit queue. Two changes:
+  //
+  //   1. Paginate the in_consignment bills fetch in chunks of 1000.
+  //   2. Constrain the consignment_items lookup to ONLY the purchase
+  //      IDs we just fetched (so the link result is bounded by the
+  //      same N), and chunk that too if N > 1000.
+  //
+  // After this, the audit pool shows every in_consignment bill
+  // regardless of when it was dispatched. The auditor's only filter is
+  // "is this bill physically in front of me to weigh".
+  const CHUNK = 1000
 
-  const outstationRows = outstationRowsRes.data || []
-  const links          = outstationLinksRes.data || []
+  async function fetchAllInConsignmentPurchases() {
+    const all = []
+    let from = 0
+    while (true) {
+      const { data, error } = await supabase
+        .from('purchases')
+        .select(COLS)
+        .eq('stock_status', 'in_consignment')
+        .eq('is_deleted', false)
+        .neq('crm_status', 'deleted')
+        .order('dispatched_at', { ascending: true, nullsFirst: false })
+        .order('id', { ascending: true })   // tie-breaker so pagination is stable
+        .range(from, from + CHUNK - 1)
+      if (error) throw error
+      all.push(...(data || []))
+      if (!data || data.length < CHUNK) break
+      from += CHUNK
+    }
+    return all
+  }
+
+  async function fetchLinksForPurchaseIds(purchaseIds) {
+    const all = []
+    for (let i = 0; i < purchaseIds.length; i += CHUNK) {
+      const slice = purchaseIds.slice(i, i + CHUNK)
+      const { data, error } = await supabase
+        .from('consignment_items')
+        .select('purchase_id, consignment_id')
+        .in('purchase_id', slice)
+      if (error) throw error
+      all.push(...(data || []))
+    }
+    return all
+  }
+
+  let outstationRows = []
+  let links = []
+  try {
+    outstationRows = await fetchAllInConsignmentPurchases()
+    if (outstationRows.length) {
+      links = await fetchLinksForPurchaseIds(outstationRows.map(r => r.id))
+    }
+  } catch (err) {
+    return Response.json({ error: err.message || 'Failed to load audit queue' }, { status: 500 })
+  }
+
   const linkByPid      = new Map(links.map(l => [l.purchase_id, l.consignment_id]))
   const consignmentIds = [...new Set(outstationRows.map(r => linkByPid.get(r.id)).filter(Boolean))]
 
   let consignmentMap = new Map()
   if (consignmentIds.length) {
-    const { data: cs } = await supabase
-      .from('consignments')
-      .select('id, tmp_prf_no, challan_no, branch_name, dest_branch, movement_type, status, dispatched_at, total_bills, total_net_wt, total_gross_wt, total_amount')
-      .in('id', consignmentIds)
-    consignmentMap = new Map((cs || []).map(c => [c.id, c]))
+    // consignmentIds is bounded by outstationRows.length; chunk just in case.
+    const csAll = []
+    for (let i = 0; i < consignmentIds.length; i += CHUNK) {
+      const slice = consignmentIds.slice(i, i + CHUNK)
+      const { data: cs } = await supabase
+        .from('consignments')
+        .select('id, tmp_prf_no, challan_no, branch_name, dest_branch, movement_type, status, dispatched_at, total_bills, total_net_wt, total_gross_wt, total_amount')
+        .in('id', slice)
+      csAll.push(...(cs || []))
+    }
+    consignmentMap = new Map(csAll.map(c => [c.id, c]))
   }
 
   // Group outstation bills by consignment.
   const byConsignment = new Map()
+  let orphanCount = 0
   for (const bill of outstationRows) {
     const cid = linkByPid.get(bill.id)
-    if (!cid) continue   // orphan in_consignment bill — shouldn't happen but skip
+    if (!cid) { orphanCount++; continue }   // truly orphan: no consignment_items row exists
     if (!byConsignment.has(cid)) byConsignment.set(cid, { consignment: consignmentMap.get(cid), bills: [] })
     byConsignment.get(cid).bills.push(bill)
   }
+  if (orphanCount > 0) {
+    // Surface as a server-log warning so we can investigate truly-broken rows
+    // without breaking the response. Pagination drops should be zero after
+    // this rewrite -- any remaining orphans are data integrity issues.
+    console.warn(`[collection-audit] ${orphanCount} in_consignment bill(s) have no consignment_items link — investigate as data drift.`)
+  }
+
   const outstation = [...byConsignment.values()]
     .filter(g => g.consignment)
     .sort((a, b) => {
