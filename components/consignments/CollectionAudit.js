@@ -296,20 +296,59 @@ export default function CollectionAudit() {
     <div style={{ padding: '24px 28px', maxWidth: '1400px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '20px' }}>
       {toast && <Toast key={toast.key} msg={toast.msg} type={toast.type} onDone={() => setToast(null)} />}
 
+      {/* ── Page-scoped keyframes for the animation suite. Kept inline so it
+            travels with the component instead of leaking into globals. ── */}
+      <style>{`
+        @keyframes caAuditFadeIn {
+          0%   { opacity: 0; transform: translateY(8px); }
+          100% { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes caAuditShimmer {
+          0%   { background-position: -300% 0; }
+          100% { background-position: 300% 0; }
+        }
+        @keyframes caAuditUrgentPulse {
+          0%, 100% { box-shadow: 0 0 0 0 currentColor; }
+          50%      { box-shadow: 0 0 0 4px transparent; }
+        }
+        @keyframes caAuditSpin {
+          to { transform: rotate(360deg); }
+        }
+        .ca-card-enter {
+          animation: caAuditFadeIn .4s cubic-bezier(.34,1.56,.64,1) backwards;
+        }
+        .ca-urgent-dot {
+          width: 6px; height: 6px; border-radius: 50%;
+          background: currentColor;
+          animation: caAuditUrgentPulse 1.8s ease-in-out infinite;
+        }
+        .ca-refresh-icon { display: inline-block; transition: transform .4s ease; }
+        .ca-refresh:hover .ca-refresh-icon { animation: caAuditSpin .6s linear; }
+      `}</style>
+
       {/* ─── Hero header ─── */}
       <div style={{
         background:  `linear-gradient(135deg, ${t.card} 0%, ${t.card2 || t.card} 100%)`,
         border:      `1px solid ${t.border}`,
-        borderRadius: '14px',
+        borderRadius: '16px',
         padding:     '22px 26px',
         display:     'flex',
         flexDirection: 'column',
         gap:         '18px',
         position:    'relative',
         overflow:    'hidden',
+        boxShadow:   `0 1px 3px ${t.border}40`,
       }}>
-        {/* Subtle gold sheen */}
+        {/* Subtle gold sheen (gradient ellipse) + animated shimmer line */}
         <div style={{ position: 'absolute', top: '-50%', right: '-10%', width: '50%', height: '200%', background: `radial-gradient(ellipse at center, ${t.gold}10 0%, transparent 70%)`, pointerEvents: 'none' }} />
+        <div style={{
+          position: 'absolute', top: 0, left: 0, right: 0, height: '2px',
+          background: `linear-gradient(90deg, transparent, ${t.gold}80, transparent)`,
+          backgroundSize: '200% 100%',
+          animation: 'caAuditShimmer 4s linear infinite',
+          opacity: 0.5,
+          pointerEvents: 'none',
+        }} />
 
         {/* Row 1: title + stats + refresh */}
         <div style={{
@@ -339,10 +378,23 @@ export default function CollectionAudit() {
             {kpis.discrepancies > 0 && <HeroStat t={t} label="Discrepancies" value={kpis.discrepancies} color={t.red} />}
             <button onClick={fetchAll}
               title="Reload pending audits"
-              style={{ background: 'transparent', border: `1px solid ${t.border}`, borderRadius: '9px', padding: '9px 14px', fontSize: '11px', color: t.text3, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}
-              onMouseEnter={e => { e.currentTarget.style.color = t.gold; e.currentTarget.style.borderColor = `${t.gold}60` }}
-              onMouseLeave={e => { e.currentTarget.style.color = t.text3; e.currentTarget.style.borderColor = t.border }}>
-              ⟳ Refresh
+              className="ca-refresh"
+              style={{
+                background: 'transparent',
+                border: `1px solid ${t.border}`,
+                borderRadius: '10px',
+                padding: '9px 16px',
+                fontSize: '11px',
+                color: t.text3,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                transition: 'color .2s ease, border-color .2s ease, background .2s ease',
+              }}
+              onMouseEnter={e => { e.currentTarget.style.color = t.gold; e.currentTarget.style.borderColor = `${t.gold}60`; e.currentTarget.style.background = `${t.gold}08` }}
+              onMouseLeave={e => { e.currentTarget.style.color = t.text3; e.currentTarget.style.borderColor = t.border; e.currentTarget.style.background = 'transparent' }}>
+              <span className="ca-refresh-icon">⟳</span> Refresh
             </button>
           </div>
         </div>
@@ -403,20 +455,22 @@ export default function CollectionAudit() {
       ) : (
         <>
           {/* Arrival filter chips — show counts inline so the auditor knows
-              the size of each bucket before clicking. */}
+              the size of each bucket before clicking. Today + Overdue carry
+              a pulsing accent dot when non-zero to attract the eye. */}
           <div style={{
             display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap',
             padding: '4px 2px', margin: '-4px 0 -8px',
           }}>
             <span style={{ fontSize: '10px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 600, marginRight: '4px' }}>Filter</span>
             {[
-              { id: 'all',      label: 'All arrivals',  count: arrivalCounts.all,      color: t.text2 },
-              { id: 'today',    label: 'Arriving today',count: arrivalCounts.today,    color: t.gold  },
-              { id: 'tomorrow', label: 'Tomorrow',      count: arrivalCounts.tomorrow, color: t.green },
-              { id: 'overdue',  label: 'Overdue',       count: arrivalCounts.overdue,  color: t.red   },
+              { id: 'all',      label: 'All arrivals',  count: arrivalCounts.all,      color: t.text2, attract: false },
+              { id: 'today',    label: 'Arriving today',count: arrivalCounts.today,    color: t.gold,  attract: true },
+              { id: 'tomorrow', label: 'Tomorrow',      count: arrivalCounts.tomorrow, color: t.green, attract: false },
+              { id: 'overdue',  label: 'Overdue',       count: arrivalCounts.overdue,  color: t.red,   attract: true },
             ].map(chip => {
               const active = arrivalFilter === chip.id
               const dim    = chip.count === 0 && !active
+              const showDot = chip.attract && chip.count > 0 && !active
               return (
                 <button key={chip.id} onClick={() => setArrivalFilter(chip.id)} disabled={dim}
                   style={{
@@ -429,13 +483,36 @@ export default function CollectionAudit() {
                     cursor: dim ? 'default' : 'pointer',
                     fontWeight: active ? 700 : 500,
                     display: 'inline-flex', alignItems: 'center', gap: '7px',
-                    transition: 'all .15s ease',
+                    transition: 'transform .18s cubic-bezier(.34,1.56,.64,1), color .15s ease, background .15s ease, border-color .15s ease, box-shadow .2s ease',
                     opacity: dim ? 0.4 : 1,
+                    boxShadow: active ? `0 0 0 4px ${chip.color}12, 0 2px 6px ${chip.color}25` : 'none',
+                    transform: 'translateY(0)',
                   }}
-                  onMouseEnter={e => { if (!active && !dim) { e.currentTarget.style.borderColor = `${chip.color}60`; e.currentTarget.style.color = chip.color } }}
-                  onMouseLeave={e => { if (!active && !dim) { e.currentTarget.style.borderColor = t.border; e.currentTarget.style.color = t.text2 } }}>
+                  onMouseEnter={e => {
+                    if (active || dim) return
+                    e.currentTarget.style.borderColor = `${chip.color}60`
+                    e.currentTarget.style.color       = chip.color
+                    e.currentTarget.style.transform   = 'translateY(-1px)'
+                  }}
+                  onMouseLeave={e => {
+                    if (active || dim) return
+                    e.currentTarget.style.borderColor = t.border
+                    e.currentTarget.style.color       = t.text2
+                    e.currentTarget.style.transform   = 'translateY(0)'
+                  }}>
+                  {showDot && <span className="ca-urgent-dot" style={{ color: chip.color }} />}
                   {chip.label}
-                  <span style={{ fontSize: '10px', color: active ? chip.color : t.text4, background: active ? `${chip.color}25` : `${t.border}80`, borderRadius: '999px', padding: '1px 7px', fontWeight: 700, fontFamily: 'monospace' }}>{chip.count}</span>
+                  <span style={{
+                    fontSize: '10px',
+                    color: active ? chip.color : t.text4,
+                    background: active ? `${chip.color}25` : `${t.border}80`,
+                    borderRadius: '999px',
+                    padding: '1px 7px',
+                    fontWeight: 700,
+                    fontFamily: 'monospace',
+                    minWidth: '20px',
+                    textAlign: 'center',
+                  }}>{chip.count}</span>
                 </button>
               )
             })}
@@ -456,45 +533,87 @@ export default function CollectionAudit() {
               </div>
             </div>
             {outstationByRegion.length === 0 ? (
-              <div style={{ padding: '60px 20px', textAlign: 'center', fontSize: '12px', color: t.text4 }}>
-                {hasSearchActive
-                  ? `No outstation matches for "${search}"`
-                  : arrivalFilter !== 'all'
-                    ? `No branches in the ${arrivalFilter} arrival window right now.`
-                    : 'No outstation consignments are currently in transit.'}
+              <div style={{ padding: '70px 20px 80px', textAlign: 'center' }}>
+                <div style={{
+                  width: '56px', height: '56px', borderRadius: '50%',
+                  background: `linear-gradient(135deg, ${t.green}18, ${t.green}06)`,
+                  border: `1px solid ${t.green}30`,
+                  margin: '0 auto 14px',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontSize: '24px', color: t.green,
+                }}>
+                  {hasSearchActive || arrivalFilter !== 'all' ? '⌕' : '✓'}
+                </div>
+                <div style={{ fontSize: '13px', color: t.text2, fontWeight: 600, marginBottom: '4px' }}>
+                  {hasSearchActive
+                    ? `No matches for "${search}"`
+                    : arrivalFilter !== 'all'
+                      ? `Nothing arriving ${arrivalFilter}`
+                      : 'All caught up'}
+                </div>
+                <div style={{ fontSize: '11px', color: t.text4 }}>
+                  {hasSearchActive
+                    ? 'Try a different keyword or clear search to see everything.'
+                    : arrivalFilter !== 'all'
+                      ? 'Switch the filter chip above to see other arrival windows.'
+                      : 'No outstation consignments are currently in transit.'}
+                </div>
               </div>
             ) : (
-              <div style={{ padding: '8px 14px 16px' }}>
-                {outstationByRegion.map(({ region, branches }) => {
+              <div style={{ padding: '6px 16px 18px' }}>
+                {outstationByRegion.map(({ region, branches }, regionIdx) => {
                   const regionBills = branches.reduce((s, b) => s + b.bills.length, 0)
                   return (
-                    <div key={region} style={{ marginTop: '14px' }}>
+                    <div key={region} style={{ marginTop: regionIdx === 0 ? '10px' : '20px' }}>
+                      {/* Region band — full-width strip with left accent bar
+                          and pill-styled count. Heavier visual presence than
+                          a small dot so the auditor can scan the page by
+                          region without needing the title's full attention. */}
                       <div style={{
-                        display: 'flex', alignItems: 'center', gap: '10px',
-                        margin: '0 4px 10px', paddingBottom: '6px',
-                        borderBottom: `1px dashed ${t.border}`,
+                        display: 'flex', alignItems: 'center', gap: '12px',
+                        margin: '0 0 12px', padding: '8px 0 8px 4px',
+                        borderBottom: `1px solid ${t.border}`,
+                        position: 'relative',
                       }}>
-                        <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: t.orange }} />
-                        <span style={{ fontSize: '11px', color: t.text2, fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase' }}>{region}</span>
-                        <span style={{ fontSize: '10px', color: t.text4 }}>
-                          {branches.length} branch{branches.length === 1 ? '' : 'es'} · {regionBills} bill{regionBills === 1 ? '' : 's'}
+                        <span style={{
+                          width: '3px', alignSelf: 'stretch', borderRadius: '2px',
+                          background: `linear-gradient(180deg, ${t.orange}, ${t.orange}40)`,
+                        }} />
+                        <span style={{
+                          fontSize: '12px', color: t.text1, fontWeight: 700,
+                          letterSpacing: '.06em', textTransform: 'uppercase',
+                        }}>{region}</span>
+                        <span style={{
+                          fontSize: '10px',
+                          color: t.text3,
+                          background: `${t.orange}10`,
+                          border: `1px solid ${t.orange}25`,
+                          borderRadius: '999px',
+                          padding: '2px 9px',
+                          fontWeight: 600,
+                          fontFamily: 'monospace',
+                        }}>
+                          {branches.length} · {regionBills} bill{regionBills === 1 ? '' : 's'}
                         </span>
                       </div>
                       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '10px' }}>
-                        {branches.map(b => (
-                          <BranchCard
-                            key={b.branch}
-                            t={t}
-                            accent={t.orange}
-                            branch={b.branch}
-                            billCount={b.bills.length}
-                            extraLabel={`${b.consignments.length} consignment${b.consignments.length === 1 ? '' : 's'}`}
-                            oldestAt={oldestAge(b.consignments, 'dispatched_at')}
-                            dispatchedYmd={latestDispatchDate(b.consignments)}
-                            arrivalAt={earliestArrival(b.consignments)}
-                            discrepancies={b.bills.filter(x => x.audit_gross_weight != null).length}
-                            onPick={() => setDrillBranch({ name: b.branch, pool: 'outstation' })}
-                          />
+                        {branches.map((b, i) => (
+                          <div key={b.branch}
+                               className="ca-card-enter"
+                               style={{ animationDelay: `${Math.min(i * 30, 400)}ms` }}>
+                            <BranchCard
+                              t={t}
+                              accent={t.orange}
+                              branch={b.branch}
+                              billCount={b.bills.length}
+                              extraLabel={`${b.consignments.length} consignment${b.consignments.length === 1 ? '' : 's'}`}
+                              oldestAt={oldestAge(b.consignments, 'dispatched_at')}
+                              dispatchedYmd={latestDispatchDate(b.consignments)}
+                              arrivalAt={earliestArrival(b.consignments)}
+                              discrepancies={b.bills.filter(x => x.audit_gross_weight != null).length}
+                              onPick={() => setDrillBranch({ name: b.branch, pool: 'outstation' })}
+                            />
+                          </div>
                         ))}
                       </div>
                     </div>
@@ -548,9 +667,23 @@ export default function CollectionAudit() {
 
 function HeroStat({ t, label, value, color }) {
   return (
-    <div style={{ background: `${color}10`, border: `1px solid ${color}30`, borderRadius: '10px', padding: '10px 16px', minWidth: '90px', textAlign: 'center' }}>
+    <div style={{
+      background:  `linear-gradient(135deg, ${color}15 0%, ${color}08 100%)`,
+      border:      `1px solid ${color}30`,
+      borderRadius: '11px',
+      padding:     '10px 18px',
+      minWidth:    '96px',
+      textAlign:   'center',
+      position:    'relative',
+      overflow:    'hidden',
+      transition:  'transform .2s ease, box-shadow .2s ease',
+    }}
+    onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-1px)'; e.currentTarget.style.boxShadow = `0 4px 12px ${color}20` }}
+    onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)';    e.currentTarget.style.boxShadow = 'none' }}>
+      {/* Top sliver glow that hints depth without taking attention */}
+      <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '1px', background: `linear-gradient(90deg, transparent, ${color}50, transparent)`, pointerEvents: 'none' }} />
       <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.14em', textTransform: 'uppercase', fontWeight: 600 }}>{label}</div>
-      <div style={{ fontSize: '20px', color, fontWeight: 700, fontFamily: 'monospace', marginTop: '4px', lineHeight: 1 }}>{value}</div>
+      <div style={{ fontSize: '22px', color, fontWeight: 700, fontFamily: 'monospace', marginTop: '4px', lineHeight: 1, letterSpacing: '-.02em' }}>{value}</div>
     </div>
   )
 }
@@ -588,12 +721,18 @@ function BranchCard({ branch, billCount, extraLabel, oldestAt, dispatchedYmd, ar
   const arrivalUrgent = arrival?.diff != null && arrival.diff <= 0
   const urgent        = ageUrgent || arrivalUrgent
   const urgentBorder  = arrivalUrgent ? `${arrival.color}50` : `${age.color}40`
+  // Urgent cards carry a permanent soft halo so the eye is drawn to them
+  // before the auditor has even hovered. Subtle so non-urgent cards don't
+  // feel ignored.
+  const restingShadow = urgent
+    ? `0 0 0 1px ${urgentBorder.replace('40', '30')}, 0 2px 10px ${arrivalUrgent ? arrival.color : age.color}15`
+    : 'none'
   return (
     <button onClick={onPick}
       style={{
-        background:    t.card,
+        background:    `linear-gradient(180deg, ${t.card} 0%, ${t.card2 || t.card} 100%)`,
         border:        `1px solid ${urgent ? urgentBorder : t.border}`,
-        borderRadius:  '10px',
+        borderRadius:  '11px',
         padding:       '12px 14px 10px',
         cursor:        'pointer',
         textAlign:     'left',
@@ -602,16 +741,17 @@ function BranchCard({ branch, billCount, extraLabel, oldestAt, dispatchedYmd, ar
         gap:           '8px',
         position:      'relative',
         overflow:      'hidden',
-        transition:    'transform .12s ease, box-shadow .12s ease, border-color .12s ease',
+        boxShadow:     restingShadow,
+        transition:    'transform .18s cubic-bezier(.34,1.56,.64,1), box-shadow .18s ease, border-color .18s ease',
       }}
       onMouseEnter={e => {
-        e.currentTarget.style.transform   = 'translateY(-1px)'
-        e.currentTarget.style.boxShadow   = `0 4px 12px ${accent}20, 0 0 0 1px ${accent}40 inset`
-        e.currentTarget.style.borderColor = `${accent}70`
+        e.currentTarget.style.transform   = 'translateY(-2px)'
+        e.currentTarget.style.boxShadow   = `0 6px 18px ${accent}28, 0 0 0 1px ${accent}50 inset`
+        e.currentTarget.style.borderColor = `${accent}80`
       }}
       onMouseLeave={e => {
         e.currentTarget.style.transform   = 'translateY(0)'
-        e.currentTarget.style.boxShadow   = 'none'
+        e.currentTarget.style.boxShadow   = restingShadow
         e.currentTarget.style.borderColor = urgent ? urgentBorder : t.border
       }}>
       {/* Row 1: branch name + age pill */}
