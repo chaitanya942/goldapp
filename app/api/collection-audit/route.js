@@ -205,12 +205,26 @@ export async function GET(req) {
     // calendar-day promise from the auditor's perspective; the exact hour
     // the truck pulls in doesn't matter for planning.
     consignmentMap = new Map(csAll.map(c => {
-      const tatHours = Number(branchByName.get(c.branch_name)?.delivery_tat_hours) || 24
+      const sourceBranch = branchByName.get(c.branch_name)
+      const sourceRegion = sourceBranch?.region
+      // Bangalore Hub → HO is a same-building move. The truck pulls in
+      // the moment the EWB is generated, so arrival = dispatch day, not
+      // dispatch + 24h. Hard-coded as 0 here because branches.delivery_
+      // tat_hours typically isn't set on Bangalore rows (no transit
+      // time to encode); falling back to the generic 24h default would
+      // wrongly push these into the Tomorrow bucket.
+      const tatHours = sourceRegion === 'Bangalore'
+        ? 0
+        : (Number(sourceBranch?.delivery_tat_hours) || 24)
       let expectedDate = null
       if (c.dispatched_at) {
         const dispDate = istDateStr(new Date(c.dispatched_at))    // YYYY-MM-DD in IST
-        const days     = Math.max(1, Math.ceil(tatHours / 24))     // 24h → 1 day, 48h → 2 days
-        expectedDate   = addWorkingDaysSkipSunday(dispDate, days)
+        if (tatHours < 24) {
+          expectedDate = dispDate    // same-day arrival
+        } else {
+          const days   = Math.ceil(tatHours / 24)
+          expectedDate = addWorkingDaysSkipSunday(dispDate, days)
+        }
       }
       const dispatchedDate = c.dispatched_at ? istDateStr(new Date(c.dispatched_at)) : null
       return [c.id, {
