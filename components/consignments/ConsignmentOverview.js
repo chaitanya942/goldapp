@@ -1436,7 +1436,7 @@ export default function ConsignmentOverview() {
                       background: `${t.green}10`, border: `1px solid ${t.green}40`,
                       borderRadius: 8, padding: '12px 14px', marginBottom: 12,
                     }}>
-                      <div style={{ fontSize: 13, color: t.green, fontWeight: 700, marginBottom: 4 }}>✓ Hub dispatched · Delivery Challan downloaded</div>
+                      <div style={{ fontSize: 13, color: t.green, fontWeight: 700, marginBottom: 4 }}>✓ Consignment created · Delivery Challan downloaded</div>
                       <div style={{ fontSize: 12, color: t.text2, lineHeight: 1.6 }}>
                         <strong>{dispatchResult.totals?.bills || 0}</strong> bills · <strong>{Number(dispatchResult.totals?.gross_wt || 0).toFixed(2)} g</strong> gross · <strong>{fmtINR(dispatchResult.totals?.value || 0)}</strong>
                         <br />
@@ -1447,6 +1447,10 @@ export default function ConsignmentOverview() {
                             Picked up by <strong>{dispatchResult.consignment.transaction_executive}</strong>
                           </>
                         )}
+                        <br />
+                        <span style={{ color: t.text3, fontSize: 11 }}>
+                          Bills remain at branch until you generate the E-Way Bill below.
+                        </span>
                       </div>
                     </div>
 
