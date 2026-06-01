@@ -40,6 +40,7 @@ import LiveMarketRates from '../../components/sales/LiveMarketRates'
 import InboundBotTesting from '../../components/telesales/InboundBotTesting'
 import TelesalesDashboard from '../../components/telesales/TelesalesDashboard'
 import DialogHost from '../../components/ui/ConfirmDialog'
+import AuditAccessGuard from '../../components/AuditAccessGuard'
 
 const THEMES = {
   dark:  { bg: '#0a0a0a', card: '#111111', text1: '#f0e6c8', text2: '#c8b89a', text3: '#7a6a4a', text4: '#4a3a2a', gold: '#c9a84c', border: '#1e1e1e', red: '#e05555' },
@@ -266,6 +267,11 @@ function DashboardShell() {
 
       {/* Global themed dialog host — replaces native window.confirm() / window.prompt() */}
       <DialogHost />
+
+      {/* Audit-shift time gate — only active for role='audit' users. Other
+          roles render nothing from this component. Mounted at dashboard root
+          so it covers every module. */}
+      <AuditAccessGuard role={role} />
 
       {/* Exit-confirmation toast — surfaces when the user presses back on the
           dashboard. A second back press within 2.5s actually exits. Sits
