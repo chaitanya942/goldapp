@@ -277,17 +277,28 @@ export default function AuditRoster() {
         <StackedSections
           sections={SHIFT_SECTIONS}
           t={t}
-          bodyRenderer={(props) => (
-            <ShiftBody
-              {...props}
-              shiftDate={props.section.id === 'night' ? nightDate : morningDate}
-              assignments={props.section.id === 'night' ? nightAssigns : morningAssigns}
-              auditors={auditors}
-              busy={shiftBusy}
-              onAssign={(auditorId) => assignAuditor(props.section.id, auditorId)}
-              onUnassign={unassignAuditor}
-            />
-          )}
+          bodyRenderer={(props) => {
+            const isNight = props.section.id === 'night'
+            // Cross-shift lock: an auditor already in the other shift would
+            // trip the DB's back-to-back trigger (night N ↔ morning N+1).
+            // Disable the checkbox here too so ops gets immediate feedback
+            // instead of a round-trip error.
+            const otherIds = new Set(
+              (isNight ? morningAssigns : nightAssigns).map(a => a.auditor_id)
+            )
+            return (
+              <ShiftBody
+                {...props}
+                shiftDate={isNight ? nightDate : morningDate}
+                assignments={isNight ? nightAssigns : morningAssigns}
+                conflictingAuditorIds={otherIds}
+                auditors={auditors}
+                busy={shiftBusy}
+                onAssign={(auditorId) => assignAuditor(props.section.id, auditorId)}
+                onUnassign={unassignAuditor}
+              />
+            )
+          }}
         />
       )}
       {tab === 'history' && (
@@ -391,22 +402,24 @@ function StackedSections({ sections, t, bodyRenderer: Body, extras }) {
 }
 
 // ── Body renderers ──────────────────────────────────────────────────────────
-function ShiftBody({ section, accent, t, shiftDate, assignments = [], auditors = [], busy, onAssign, onUnassign }) {
+function ShiftBody({ section, accent, t, shiftDate, assignments = [], conflictingAuditorIds, auditors = [], busy, onAssign, onUnassign }) {
   // Assigned auditor id -> assignment id (so we can fire DELETE on uncheck).
   const assignmentByAuditor = new Map(assignments.map(a => [a.auditor_id, a.id]))
+  const conflicts           = conflictingAuditorIds instanceof Set ? conflictingAuditorIds : new Set()
   const activeAuditors      = (auditors || []).filter(a => a.is_active !== false)
   const atCapacity          = assignments.length >= MAX_PER_SHIFT
   const dateLabel           = fmtPrettyDate(shiftDate)
   const dateRelative        = fmtRelativeDay(shiftDate)
+  const otherShiftLabel     = section.id === 'night' ? 'morning' : 'night'
 
   return (
-    <div style={{ padding: '22px 24px 24px', display: 'flex', flexDirection: 'column', gap: '18px' }}>
+    <div style={{ padding: '20px 22px 22px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
       {/* Date + capacity header — premium card-in-card with subtle accent glow */}
       <div style={{
         background:  `linear-gradient(135deg, ${accent}10 0%, ${accent}04 60%, transparent 100%)`,
         border:      `1px solid ${accent}25`,
         borderRadius: '13px',
-        padding:     '14px 18px',
+        padding:     '12px 16px',
         display:     'flex',
         alignItems:  'center',
         justifyContent: 'space-between',
@@ -416,23 +429,23 @@ function ShiftBody({ section, accent, t, shiftDate, assignments = [], auditors =
         overflow:    'hidden',
       }}>
         <div style={{ position: 'absolute', top: 0, left: 0, width: '120%', height: '1px', background: `linear-gradient(90deg, transparent, ${accent}60, transparent)` }} />
-        <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
           <div style={{
-            width: '38px', height: '38px', borderRadius: '10px',
+            width: '34px', height: '34px', borderRadius: '9px',
             background: `linear-gradient(135deg, ${accent}30, ${accent}10)`,
             border:     `1px solid ${accent}40`,
             color:      accent,
             display:    'flex', alignItems: 'center', justifyContent: 'center',
-            fontSize:   '18px',
+            fontSize:   '16px',
             flexShrink: 0,
           }}>{section.icon}</div>
           <div>
-            <div style={{ fontSize: '10px', color: t.text4, letterSpacing: '.14em', textTransform: 'uppercase', fontWeight: 700 }}>
+            <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.14em', textTransform: 'uppercase', fontWeight: 700 }}>
               {section.id === 'night' ? 'Tonight' : 'Tomorrow morning'} · shift date
             </div>
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: '10px', marginTop: '4px' }}>
-              <div style={{ fontSize: '17px', color: t.text1, fontWeight: 700, letterSpacing: '-.01em' }}>{dateLabel}</div>
-              {dateRelative && <div style={{ fontSize: '11px', color: accent, fontWeight: 600 }}>{dateRelative}</div>}
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', marginTop: '3px' }}>
+              <div style={{ fontSize: '15px', color: t.text1, fontWeight: 700, letterSpacing: '-.01em' }}>{dateLabel}</div>
+              {dateRelative && <div style={{ fontSize: '10px', color: accent, fontWeight: 600 }}>{dateRelative}</div>}
             </div>
           </div>
         </div>
@@ -442,14 +455,14 @@ function ShiftBody({ section, accent, t, shiftDate, assignments = [], auditors =
           <CapacityRing accent={accent} t={t} count={assignments.length} max={MAX_PER_SHIFT} />
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
             <span style={{
-              fontSize: '11px',
+              fontSize: '10px',
               color: atCapacity ? accent : t.text2,
               fontWeight: 700,
               letterSpacing: '.04em',
             }}>
               {assignments.length} of {MAX_PER_SHIFT} assigned
             </span>
-            <span style={{ fontSize: '9px', color: t.text4, marginTop: '2px' }}>
+            <span style={{ fontSize: '8px', color: t.text4, marginTop: '2px' }}>
               {atCapacity ? 'Shift fully staffed' : `${MAX_PER_SHIFT - assignments.length} more can join`}
             </span>
           </div>
@@ -459,43 +472,44 @@ function ShiftBody({ section, accent, t, shiftDate, assignments = [], auditors =
       {/* Auditor checklist */}
       {activeAuditors.length === 0 ? (
         <div style={{
-          padding: '40px 20px', textAlign: 'center',
+          padding: '36px 18px', textAlign: 'center',
           background: t.card2 || t.card,
           border: `1px dashed ${t.border}`,
           borderRadius: '11px',
         }}>
           <div style={{
-            width: '40px', height: '40px', borderRadius: '50%',
+            width: '36px', height: '36px', borderRadius: '50%',
             background: `${t.text4}15`,
             margin: '0 auto 10px',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            fontSize: '18px',
+            fontSize: '16px',
             color: t.text4,
           }}>👤</div>
-          <div style={{ fontSize: '12px', color: t.text2, fontWeight: 600 }}>No active auditors yet</div>
-          <div style={{ fontSize: '11px', color: t.text4, marginTop: '4px' }}>
+          <div style={{ fontSize: '11px', color: t.text2, fontWeight: 600 }}>No active auditors yet</div>
+          <div style={{ fontSize: '10px', color: t.text4, marginTop: '4px' }}>
             Add one from the <strong style={{ color: t.text2 }}>Audit History</strong> tab.
           </div>
         </div>
       ) : (
         <div>
           <div style={{
-            fontSize: '10px', color: t.text4,
+            fontSize: '9px', color: t.text4,
             letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 600,
             display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-            marginBottom: '10px',
+            marginBottom: '8px',
           }}>
             <span>Select auditors</span>
-            <span style={{ fontSize: '9px', color: t.text4, letterSpacing: 0, textTransform: 'none', fontStyle: 'italic' }}>
+            <span style={{ fontSize: '8px', color: t.text4, letterSpacing: 0, textTransform: 'none', fontStyle: 'italic' }}>
               {activeAuditors.length} available
             </span>
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
             {activeAuditors.map(a => {
-              const assigned   = assignmentByAuditor.has(a.id)
-              const lockedByCap = !assigned && atCapacity
-              const disabled    = busy || lockedByCap
-              const onToggle    = () => {
+              const assigned     = assignmentByAuditor.has(a.id)
+              const lockedByPair = !assigned && conflicts.has(a.id)
+              const lockedByCap  = !assigned && !lockedByPair && atCapacity
+              const disabled     = busy || lockedByCap || lockedByPair
+              const onToggle     = () => {
                 if (disabled) return
                 if (assigned) onUnassign(assignmentByAuditor.get(a.id))
                 else          onAssign(a.id)
@@ -506,18 +520,19 @@ function ShiftBody({ section, accent, t, shiftDate, assignments = [], auditors =
                   type="button"
                   onClick={onToggle}
                   disabled={disabled}
+                  title={lockedByPair ? `Already assigned to the ${otherShiftLabel} shift — back-to-back blocked.` : undefined}
                   style={{
-                    display: 'flex', alignItems: 'center', gap: '14px',
+                    display: 'flex', alignItems: 'center', gap: '12px',
                     width: '100%',
                     textAlign: 'left',
                     background: assigned
                       ? `linear-gradient(135deg, ${accent}15 0%, ${accent}05 100%)`
                       : t.card2 || t.card,
                     border: `1.5px solid ${assigned ? accent : t.border}`,
-                    borderRadius: '12px',
-                    padding: '14px 16px',
+                    borderRadius: '11px',
+                    padding: '12px 14px',
                     cursor: disabled ? 'not-allowed' : 'pointer',
-                    opacity: lockedByCap ? 0.4 : 1,
+                    opacity: lockedByCap || lockedByPair ? 0.45 : 1,
                     transition: 'transform .2s cubic-bezier(.34,1.56,.64,1), border-color .2s ease, background .2s ease, box-shadow .2s ease',
                     position: 'relative',
                     overflow: 'hidden',
@@ -548,15 +563,15 @@ function ShiftBody({ section, accent, t, shiftDate, assignments = [], auditors =
 
                   {/* Custom rounded-square checkbox */}
                   <span style={{
-                    width: '22px', height: '22px',
-                    borderRadius: '7px',
+                    width: '20px', height: '20px',
+                    borderRadius: '6px',
                     border: `2px solid ${assigned ? accent : t.text4}`,
                     background: assigned
                       ? `linear-gradient(135deg, ${accent}, ${accent}cc)`
                       : 'transparent',
                     color: '#fff',
                     display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                    fontSize: '14px',
+                    fontSize: '13px',
                     fontWeight: 900,
                     lineHeight: 1,
                     flexShrink: 0,
@@ -568,26 +583,26 @@ function ShiftBody({ section, accent, t, shiftDate, assignments = [], auditors =
 
                   {/* Avatar — larger, more premium */}
                   <span style={{
-                    width: '40px', height: '40px', borderRadius: '50%',
+                    width: '36px', height: '36px', borderRadius: '50%',
                     background: `linear-gradient(135deg, ${accent}35, ${accent}10)`,
                     border:     `1.5px solid ${assigned ? `${accent}80` : `${accent}25`}`,
                     color:      accent,
                     fontWeight: 700,
-                    fontSize:   '15px',
+                    fontSize:   '13px',
                     display:    'inline-flex', alignItems: 'center', justifyContent: 'center',
                     flexShrink: 0,
                     boxShadow:  assigned ? `0 0 0 3px ${accent}10` : 'none',
                     transition: 'box-shadow .15s ease, border-color .15s ease',
                   }}>{(a.full_name || a.email || '?').charAt(0).toUpperCase()}</span>
 
-                  <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                  <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: '2px' }}>
                     <span style={{
-                      fontSize: '14px', color: t.text1, fontWeight: 700, lineHeight: 1.2,
+                      fontSize: '13px', color: t.text1, fontWeight: 700, lineHeight: 1.2,
                       letterSpacing: '-.01em',
                       whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
                     }}>{a.full_name || '—'}</span>
                     <span style={{
-                      fontSize: '11px', color: t.text3, fontFamily: 'monospace',
+                      fontSize: '10px', color: t.text3, fontFamily: 'monospace',
                       whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
                     }}>{a.email || '—'}</span>
                   </span>
@@ -595,11 +610,11 @@ function ShiftBody({ section, accent, t, shiftDate, assignments = [], auditors =
                   {/* Right-side status pill */}
                   {assigned ? (
                     <span style={{
-                      fontSize: '9px',
+                      fontSize: '8px',
                       color: '#fff',
                       background: `linear-gradient(135deg, ${accent}, ${accent}cc)`,
                       borderRadius: '999px',
-                      padding: '4px 11px',
+                      padding: '4px 10px',
                       fontWeight: 700,
                       letterSpacing: '.08em',
                       flexShrink: 0,
@@ -607,14 +622,28 @@ function ShiftBody({ section, accent, t, shiftDate, assignments = [], auditors =
                     }}>
                       ON SHIFT
                     </span>
+                  ) : lockedByPair ? (
+                    <span style={{
+                      fontSize: '8px',
+                      color: t.text3,
+                      background: 'transparent',
+                      border: `1px solid ${t.text4}50`,
+                      borderRadius: '999px',
+                      padding: '4px 10px',
+                      fontWeight: 700,
+                      letterSpacing: '.08em',
+                      flexShrink: 0,
+                    }}>
+                      ON {otherShiftLabel.toUpperCase()}
+                    </span>
                   ) : lockedByCap ? (
                     <span style={{
-                      fontSize: '9px',
+                      fontSize: '8px',
                       color: t.text4,
                       background: 'transparent',
                       border: `1px solid ${t.text4}40`,
                       borderRadius: '999px',
-                      padding: '4px 11px',
+                      padding: '4px 10px',
                       fontWeight: 700,
                       letterSpacing: '.08em',
                       flexShrink: 0,
@@ -623,7 +652,7 @@ function ShiftBody({ section, accent, t, shiftDate, assignments = [], auditors =
                     </span>
                   ) : (
                     <span style={{
-                      fontSize: '10px',
+                      fontSize: '9px',
                       color: t.text4,
                       flexShrink: 0,
                       fontStyle: 'italic',
@@ -641,18 +670,18 @@ function ShiftBody({ section, accent, t, shiftDate, assignments = [], auditors =
 
       {/* Footnote — back-to-back rule reminder */}
       <div style={{
-        fontSize: '10px', color: t.text4,
+        fontSize: '9px', color: t.text4,
         display: 'flex', alignItems: 'flex-start', gap: '8px',
         paddingTop: '4px',
         lineHeight: 1.5,
       }}>
         <span style={{
           flexShrink: 0,
-          width: '16px', height: '16px', borderRadius: '50%',
+          width: '14px', height: '14px', borderRadius: '50%',
           background: `${accent}15`,
           color: accent,
           display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-          fontSize: '10px',
+          fontSize: '9px',
           fontWeight: 700,
           marginTop: '1px',
         }}>i</span>
