@@ -464,8 +464,33 @@ function AddAuditorModal({ t, onClose, onAdded, onError }) {
               type="email"
               style={{ width: '100%', background: t.card2 || t.card, border: `1px solid ${t.border}`, borderRadius: '8px', padding: '10px 12px', fontSize: '13px', color: t.text1, outline: 'none', boxSizing: 'border-box', fontFamily: 'monospace' }} />
           </div>
-          <div style={{ fontSize: '10px', color: t.text4, padding: '8px 10px', background: `${t.gold}08`, border: `1px solid ${t.gold}20`, borderRadius: '6px', lineHeight: 1.5 }}>
-            Role is fixed to <strong style={{ color: t.gold, fontFamily: 'monospace' }}>audit</strong> — every new entry here can run both night and morning audit shifts. To grant a different role, use User Management.
+          {/* Role — visible but locked. Mirrors the User Management form shape
+              so ops sees a consistent UI, but the field is disabled (with a
+              lock icon hint) so it can't be changed from this entry point.
+              For any other role, ops uses User Management. */}
+          <div>
+            <label style={{ fontSize: '10px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' }}>
+              <span>Role</span>
+              <span style={{ fontSize: '11px', opacity: 0.8 }}>🔒</span>
+              <span style={{ fontSize: '9px', color: t.text4, letterSpacing: 0, textTransform: 'none', fontWeight: 500 }}>locked — change via User Management</span>
+            </label>
+            <div style={{
+              background: `${t.gold}08`,
+              border: `1px solid ${t.gold}30`,
+              borderRadius: '8px',
+              padding: '10px 12px',
+              fontSize: '13px',
+              color: t.gold,
+              fontWeight: 600,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              cursor: 'not-allowed',
+              opacity: 0.95,
+            }}>
+              <span>Auditor</span>
+              <span style={{ fontSize: '10px', color: t.text4, fontFamily: 'monospace', fontWeight: 400 }}>(audit)</span>
+            </div>
           </div>
         </div>
         <div style={{ padding: '14px 24px', borderTop: `1px solid ${t.border}`, display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
