@@ -56,11 +56,20 @@ const SHIFT_SECTIONS = [
   },
 ]
 
-// Today in IST as YYYY-MM-DD — first cut defaults the shift date to today.
-// A date picker can be added later if ops needs to plan ahead.
+// Today in IST as YYYY-MM-DD.
 function istTodayYmd() {
   const istMs = Date.now() + (5.5 * 3600_000)
   return new Date(istMs).toISOString().slice(0, 10)
+}
+
+// Add N calendar days to a YYYY-MM-DD string. Used to pair the night
+// shift on date N with the morning shift on date N+1 (the morning that
+// processes what the night audited).
+function addDaysYmd(ymd, n) {
+  const [y, m, d] = ymd.split('-').map(Number)
+  const dt = new Date(Date.UTC(y, m - 1, d))
+  dt.setUTCDate(dt.getUTCDate() + n)
+  return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, '0')}-${String(dt.getUTCDate()).padStart(2, '0')}`
 }
 
 const MAX_PER_SHIFT = 2
@@ -97,9 +106,13 @@ export default function AuditRoster() {
   const [modalOpen, setModalOpen] = useState(false)
   const [toast,     setToast]     = useState(null)
 
-  // Shift assignments — first cut pins to today's date. Adding a date
-  // picker later is a one-state change.
-  const [shiftDate]      = useState(istTodayYmd)
+  // Shift assignments. Night and morning form a back-to-back pair: tonight's
+  // night audit + tomorrow morning's audit are linked because tomorrow
+  // morning processes what tonight's audit just count-checked. So the night
+  // shift defaults to TODAY and the morning shift defaults to TOMORROW —
+  // separate calendar dates, paired logically.
+  const [nightDate]   = useState(istTodayYmd)
+  const morningDate   = addDaysYmd(nightDate, 1)
   const [nightAssigns,   setNightAssigns]   = useState([])
   const [morningAssigns, setMorningAssigns] = useState([])
   const [shiftBusy,      setShiftBusy]      = useState(false)
@@ -118,24 +131,39 @@ export default function AuditRoster() {
 
   const fetchShifts = useCallback(async () => {
     try {
-      const res = await authedFetch(`/api/audit-shifts?date=${shiftDate}`)
-      const j   = await res.json()
-      if (!res.ok || j.error) {
-        setToast({ msg: j.error || 'Failed to load shift assignments', type: 'error', key: Date.now() })
+      // Two calls in parallel — night on date N, morning on date N+1. The
+      // API takes one date at a time and returns both shift types for it;
+      // we only consume the relevant one from each response so the
+      // back-to-back rule plays out correctly across the pair.
+      const [nightRes, morningRes] = await Promise.all([
+        authedFetch(`/api/audit-shifts?date=${nightDate}`),
+        authedFetch(`/api/audit-shifts?date=${morningDate}`),
+      ])
+      const nightJ   = await nightRes.json()
+      const morningJ = await morningRes.json()
+      if (!nightRes.ok || nightJ.error) {
+        setToast({ msg: nightJ.error || 'Failed to load night shift', type: 'error', key: Date.now() })
         return
       }
-      setNightAssigns(j.night   || [])
-      setMorningAssigns(j.morning || [])
+      if (!morningRes.ok || morningJ.error) {
+        setToast({ msg: morningJ.error || 'Failed to load morning shift', type: 'error', key: Date.now() })
+        return
+      }
+      setNightAssigns(nightJ.night     || [])
+      setMorningAssigns(morningJ.morning || [])
     } catch (e) {
       setToast({ msg: e.message || 'Failed to load shift assignments', type: 'error', key: Date.now() })
     }
-  }, [shiftDate])
+  }, [nightDate, morningDate])
 
   useEffect(() => { fetchAuditors() }, [fetchAuditors])
   useEffect(() => { fetchShifts() }, [fetchShifts])
 
-  // Assign / unassign handlers used by both shift sections.
+  // Assign / unassign handlers used by both shift sections. The date the
+  // assignment is written against depends on which shift we're editing:
+  // night → today; morning → tomorrow (the back-to-back pair anchor).
   const assignAuditor = useCallback(async (shiftType, auditorId) => {
+    const shiftDate = shiftType === 'night' ? nightDate : morningDate
     setShiftBusy(true)
     try {
       const res = await authedFetch('/api/audit-shifts', {
@@ -154,7 +182,7 @@ export default function AuditRoster() {
     } finally {
       setShiftBusy(false)
     }
-  }, [shiftDate, fetchShifts])
+  }, [nightDate, morningDate, fetchShifts])
 
   const unassignAuditor = useCallback(async (assignmentId) => {
     setShiftBusy(true)
@@ -252,7 +280,7 @@ export default function AuditRoster() {
           bodyRenderer={(props) => (
             <ShiftBody
               {...props}
-              shiftDate={shiftDate}
+              shiftDate={props.section.id === 'night' ? nightDate : morningDate}
               assignments={props.section.id === 'night' ? nightAssigns : morningAssigns}
               auditors={auditors}
               busy={shiftBusy}
@@ -369,173 +397,310 @@ function ShiftBody({ section, accent, t, shiftDate, assignments = [], auditors =
   const activeAuditors      = (auditors || []).filter(a => a.is_active !== false)
   const atCapacity          = assignments.length >= MAX_PER_SHIFT
   const dateLabel           = fmtPrettyDate(shiftDate)
+  const dateRelative        = fmtRelativeDay(shiftDate)
 
   return (
-    <div style={{ padding: '20px 22px 22px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
-      {/* Date strip + cap pill */}
+    <div style={{ padding: '22px 24px 24px', display: 'flex', flexDirection: 'column', gap: '18px' }}>
+      {/* Date + capacity header — premium card-in-card with subtle accent glow */}
       <div style={{
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        gap: '12px', flexWrap: 'wrap',
-        paddingBottom: '12px',
-        borderBottom: `1px dashed ${t.border}`,
+        background:  `linear-gradient(135deg, ${accent}10 0%, ${accent}04 60%, transparent 100%)`,
+        border:      `1px solid ${accent}25`,
+        borderRadius: '13px',
+        padding:     '14px 18px',
+        display:     'flex',
+        alignItems:  'center',
+        justifyContent: 'space-between',
+        gap:         '14px',
+        flexWrap:    'wrap',
+        position:    'relative',
+        overflow:    'hidden',
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-          <span style={{ fontSize: '10px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 600 }}>Shift date</span>
-          <span style={{ fontSize: '12px', color: t.text1, fontWeight: 700, fontFamily: 'monospace' }}>{dateLabel}</span>
+        <div style={{ position: 'absolute', top: 0, left: 0, width: '120%', height: '1px', background: `linear-gradient(90deg, transparent, ${accent}60, transparent)` }} />
+        <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap' }}>
+          <div style={{
+            width: '38px', height: '38px', borderRadius: '10px',
+            background: `linear-gradient(135deg, ${accent}30, ${accent}10)`,
+            border:     `1px solid ${accent}40`,
+            color:      accent,
+            display:    'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize:   '18px',
+            flexShrink: 0,
+          }}>{section.icon}</div>
+          <div>
+            <div style={{ fontSize: '10px', color: t.text4, letterSpacing: '.14em', textTransform: 'uppercase', fontWeight: 700 }}>
+              {section.id === 'night' ? 'Tonight' : 'Tomorrow morning'} · shift date
+            </div>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: '10px', marginTop: '4px' }}>
+              <div style={{ fontSize: '17px', color: t.text1, fontWeight: 700, letterSpacing: '-.01em' }}>{dateLabel}</div>
+              {dateRelative && <div style={{ fontSize: '11px', color: accent, fontWeight: 600 }}>{dateRelative}</div>}
+            </div>
+          </div>
         </div>
-        <span style={{
-          fontSize: '10px',
-          color: atCapacity ? t.gold : t.text3,
-          background: atCapacity ? `${t.gold}15` : `${t.border}40`,
-          border: `1px solid ${atCapacity ? `${t.gold}40` : t.border}`,
-          borderRadius: '999px',
-          padding: '4px 11px',
-          fontWeight: 700,
-          letterSpacing: '.04em',
-        }}>
-          {assignments.length} / {MAX_PER_SHIFT} assigned
-        </span>
+
+        {/* Capacity pill — animates filled vs empty */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <CapacityRing accent={accent} t={t} count={assignments.length} max={MAX_PER_SHIFT} />
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
+            <span style={{
+              fontSize: '11px',
+              color: atCapacity ? accent : t.text2,
+              fontWeight: 700,
+              letterSpacing: '.04em',
+            }}>
+              {assignments.length} of {MAX_PER_SHIFT} assigned
+            </span>
+            <span style={{ fontSize: '9px', color: t.text4, marginTop: '2px' }}>
+              {atCapacity ? 'Shift fully staffed' : `${MAX_PER_SHIFT - assignments.length} more can join`}
+            </span>
+          </div>
+        </div>
       </div>
 
       {/* Auditor checklist */}
       {activeAuditors.length === 0 ? (
-        <div style={{ padding: '24px 16px', textAlign: 'center', fontSize: '11px', color: t.text4 }}>
-          No active auditors yet — add one from the <strong style={{ color: t.text2 }}>Audit History</strong> tab.
+        <div style={{
+          padding: '40px 20px', textAlign: 'center',
+          background: t.card2 || t.card,
+          border: `1px dashed ${t.border}`,
+          borderRadius: '11px',
+        }}>
+          <div style={{
+            width: '40px', height: '40px', borderRadius: '50%',
+            background: `${t.text4}15`,
+            margin: '0 auto 10px',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: '18px',
+            color: t.text4,
+          }}>👤</div>
+          <div style={{ fontSize: '12px', color: t.text2, fontWeight: 600 }}>No active auditors yet</div>
+          <div style={{ fontSize: '11px', color: t.text4, marginTop: '4px' }}>
+            Add one from the <strong style={{ color: t.text2 }}>Audit History</strong> tab.
+          </div>
         </div>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-          {activeAuditors.map(a => {
-            const assigned   = assignmentByAuditor.has(a.id)
-            const lockedByCap = !assigned && atCapacity
-            const disabled    = busy || lockedByCap
-            const onToggle    = () => {
-              if (disabled) return
-              if (assigned) onUnassign(assignmentByAuditor.get(a.id))
-              else          onAssign(a.id)
-            }
-            return (
-              <button
-                key={a.id}
-                type="button"
-                onClick={onToggle}
-                disabled={disabled}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: '12px',
-                  width: '100%',
-                  textAlign: 'left',
-                  background: assigned
-                    ? `linear-gradient(135deg, ${accent}12, ${accent}06)`
-                    : t.card2 || t.card,
-                  border: `1px solid ${assigned ? `${accent}60` : t.border}`,
-                  borderRadius: '11px',
-                  padding: '11px 14px',
-                  cursor: disabled ? 'not-allowed' : 'pointer',
-                  opacity: lockedByCap ? 0.45 : 1,
-                  transition: 'transform .15s ease, border-color .15s ease, background .15s ease, box-shadow .15s ease',
-                  position: 'relative',
-                  overflow: 'hidden',
-                }}
-                onMouseEnter={e => {
-                  if (disabled) return
-                  e.currentTarget.style.borderColor = `${accent}80`
-                  e.currentTarget.style.transform   = 'translateY(-1px)'
-                  e.currentTarget.style.boxShadow   = `0 4px 12px ${accent}22`
-                }}
-                onMouseLeave={e => {
-                  if (disabled) return
-                  e.currentTarget.style.borderColor = assigned ? `${accent}60` : t.border
-                  e.currentTarget.style.transform   = 'translateY(0)'
-                  e.currentTarget.style.boxShadow   = 'none'
-                }}>
-                {/* Custom checkbox — square, accent-coloured when checked */}
-                <span style={{
-                  width: '20px', height: '20px',
-                  borderRadius: '6px',
-                  border: `1.5px solid ${assigned ? accent : `${t.text4}80`}`,
-                  background: assigned ? accent : 'transparent',
-                  color: assigned ? '#fff' : 'transparent',
-                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                  fontSize: '13px',
-                  fontWeight: 900,
-                  lineHeight: 1,
-                  flexShrink: 0,
-                  transition: 'background .15s ease, border-color .15s ease',
-                }}>
-                  {assigned ? '✓' : ''}
-                </span>
-
-                {/* Avatar + identity */}
-                <span style={{
-                  width: '32px', height: '32px', borderRadius: '50%',
-                  background: `linear-gradient(135deg, ${accent}25, ${accent}10)`,
-                  border:     `1px solid ${accent}30`,
-                  color:      accent,
-                  fontWeight: 700,
-                  fontSize:   '12px',
-                  display:    'inline-flex', alignItems: 'center', justifyContent: 'center',
-                  flexShrink: 0,
-                }}>{(a.full_name || a.email || '?').charAt(0).toUpperCase()}</span>
-
-                <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                  <span style={{
-                    fontSize: '13px', color: t.text1, fontWeight: 600, lineHeight: 1.2,
-                    whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-                  }}>{a.full_name || '—'}</span>
-                  <span style={{
-                    fontSize: '11px', color: t.text3, fontFamily: 'monospace',
-                    whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-                  }}>{a.email || '—'}</span>
-                </span>
-
-                {/* Right-side status pill */}
-                {assigned ? (
-                  <span style={{
-                    fontSize: '9px',
-                    color: accent,
-                    background: `${accent}20`,
-                    border: `1px solid ${accent}50`,
-                    borderRadius: '999px',
-                    padding: '3px 9px',
-                    fontWeight: 700,
-                    letterSpacing: '.06em',
-                    flexShrink: 0,
+        <div>
+          <div style={{
+            fontSize: '10px', color: t.text4,
+            letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 600,
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            marginBottom: '10px',
+          }}>
+            <span>Select auditors</span>
+            <span style={{ fontSize: '9px', color: t.text4, letterSpacing: 0, textTransform: 'none', fontStyle: 'italic' }}>
+              {activeAuditors.length} available
+            </span>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            {activeAuditors.map(a => {
+              const assigned   = assignmentByAuditor.has(a.id)
+              const lockedByCap = !assigned && atCapacity
+              const disabled    = busy || lockedByCap
+              const onToggle    = () => {
+                if (disabled) return
+                if (assigned) onUnassign(assignmentByAuditor.get(a.id))
+                else          onAssign(a.id)
+              }
+              return (
+                <button
+                  key={a.id}
+                  type="button"
+                  onClick={onToggle}
+                  disabled={disabled}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: '14px',
+                    width: '100%',
+                    textAlign: 'left',
+                    background: assigned
+                      ? `linear-gradient(135deg, ${accent}15 0%, ${accent}05 100%)`
+                      : t.card2 || t.card,
+                    border: `1.5px solid ${assigned ? accent : t.border}`,
+                    borderRadius: '12px',
+                    padding: '14px 16px',
+                    cursor: disabled ? 'not-allowed' : 'pointer',
+                    opacity: lockedByCap ? 0.4 : 1,
+                    transition: 'transform .2s cubic-bezier(.34,1.56,.64,1), border-color .2s ease, background .2s ease, box-shadow .2s ease',
+                    position: 'relative',
+                    overflow: 'hidden',
+                    boxShadow: assigned ? `0 2px 12px ${accent}15` : 'none',
+                  }}
+                  onMouseEnter={e => {
+                    if (disabled) return
+                    e.currentTarget.style.borderColor = accent
+                    e.currentTarget.style.transform   = 'translateY(-2px)'
+                    e.currentTarget.style.boxShadow   = `0 8px 24px ${accent}25`
+                  }}
+                  onMouseLeave={e => {
+                    if (disabled) return
+                    e.currentTarget.style.borderColor = assigned ? accent : t.border
+                    e.currentTarget.style.transform   = 'translateY(0)'
+                    e.currentTarget.style.boxShadow   = assigned ? `0 2px 12px ${accent}15` : 'none'
                   }}>
-                    ASSIGNED
-                  </span>
-                ) : lockedByCap ? (
+                  {/* Left accent rail — visible only when assigned, gives the
+                      row a "selected" feeling like a tab indicator */}
+                  {assigned && (
+                    <span style={{
+                      position: 'absolute', left: 0, top: '12%', bottom: '12%',
+                      width: '3px',
+                      borderRadius: '0 3px 3px 0',
+                      background: `linear-gradient(180deg, ${accent}, ${accent}80)`,
+                    }} />
+                  )}
+
+                  {/* Custom rounded-square checkbox */}
                   <span style={{
-                    fontSize: '9px',
-                    color: t.text4,
-                    background: `${t.text4}15`,
-                    border: `1px solid ${t.text4}40`,
-                    borderRadius: '999px',
-                    padding: '3px 9px',
-                    fontWeight: 700,
-                    letterSpacing: '.06em',
+                    width: '22px', height: '22px',
+                    borderRadius: '7px',
+                    border: `2px solid ${assigned ? accent : t.text4}`,
+                    background: assigned
+                      ? `linear-gradient(135deg, ${accent}, ${accent}cc)`
+                      : 'transparent',
+                    color: '#fff',
+                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: '14px',
+                    fontWeight: 900,
+                    lineHeight: 1,
                     flexShrink: 0,
+                    transition: 'background .15s ease, border-color .15s ease',
+                    boxShadow: assigned ? `0 2px 6px ${accent}50` : 'none',
                   }}>
-                    CAP REACHED
+                    {assigned ? '✓' : ''}
                   </span>
-                ) : null}
-              </button>
-            )
-          })}
+
+                  {/* Avatar — larger, more premium */}
+                  <span style={{
+                    width: '40px', height: '40px', borderRadius: '50%',
+                    background: `linear-gradient(135deg, ${accent}35, ${accent}10)`,
+                    border:     `1.5px solid ${assigned ? `${accent}80` : `${accent}25`}`,
+                    color:      accent,
+                    fontWeight: 700,
+                    fontSize:   '15px',
+                    display:    'inline-flex', alignItems: 'center', justifyContent: 'center',
+                    flexShrink: 0,
+                    boxShadow:  assigned ? `0 0 0 3px ${accent}10` : 'none',
+                    transition: 'box-shadow .15s ease, border-color .15s ease',
+                  }}>{(a.full_name || a.email || '?').charAt(0).toUpperCase()}</span>
+
+                  <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                    <span style={{
+                      fontSize: '14px', color: t.text1, fontWeight: 700, lineHeight: 1.2,
+                      letterSpacing: '-.01em',
+                      whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                    }}>{a.full_name || '—'}</span>
+                    <span style={{
+                      fontSize: '11px', color: t.text3, fontFamily: 'monospace',
+                      whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                    }}>{a.email || '—'}</span>
+                  </span>
+
+                  {/* Right-side status pill */}
+                  {assigned ? (
+                    <span style={{
+                      fontSize: '9px',
+                      color: '#fff',
+                      background: `linear-gradient(135deg, ${accent}, ${accent}cc)`,
+                      borderRadius: '999px',
+                      padding: '4px 11px',
+                      fontWeight: 700,
+                      letterSpacing: '.08em',
+                      flexShrink: 0,
+                      boxShadow: `0 2px 8px ${accent}50`,
+                    }}>
+                      ON SHIFT
+                    </span>
+                  ) : lockedByCap ? (
+                    <span style={{
+                      fontSize: '9px',
+                      color: t.text4,
+                      background: 'transparent',
+                      border: `1px solid ${t.text4}40`,
+                      borderRadius: '999px',
+                      padding: '4px 11px',
+                      fontWeight: 700,
+                      letterSpacing: '.08em',
+                      flexShrink: 0,
+                    }}>
+                      CAP REACHED
+                    </span>
+                  ) : (
+                    <span style={{
+                      fontSize: '10px',
+                      color: t.text4,
+                      flexShrink: 0,
+                      fontStyle: 'italic',
+                      opacity: 0.7,
+                    }}>
+                      Click to assign
+                    </span>
+                  )}
+                </button>
+              )
+            })}
+          </div>
         </div>
       )}
 
       {/* Footnote — back-to-back rule reminder */}
       <div style={{
-        fontSize: '10px', color: t.text4, fontStyle: 'italic',
-        display: 'flex', alignItems: 'center', gap: '6px',
-        paddingTop: '6px',
+        fontSize: '10px', color: t.text4,
+        display: 'flex', alignItems: 'flex-start', gap: '8px',
+        paddingTop: '4px',
+        lineHeight: 1.5,
       }}>
-        <span style={{ opacity: 0.7 }}>ℹ</span>
-        {section.id === 'night'
-          ? 'Auditors here cannot also run tomorrow morning (back-to-back rule).'
-          : 'Auditors here cannot also have run last night (back-to-back rule).'}
+        <span style={{
+          flexShrink: 0,
+          width: '16px', height: '16px', borderRadius: '50%',
+          background: `${accent}15`,
+          color: accent,
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          fontSize: '10px',
+          fontWeight: 700,
+          marginTop: '1px',
+        }}>i</span>
+        <span style={{ fontStyle: 'italic' }}>
+          {section.id === 'night'
+            ? 'Auditors assigned here cannot also run tomorrow morning — back-to-back shifts are blocked.'
+            : 'Auditors assigned here cannot also have run last night — back-to-back shifts are blocked.'}
+        </span>
       </div>
     </div>
   )
+}
+
+// Small ring indicator showing count/max — same color scheme as the section
+// accent so it reads as part of the section's visual identity.
+function CapacityRing({ accent, t, count, max }) {
+  const pct      = Math.min(1, count / max)
+  const circ     = 2 * Math.PI * 14
+  const dash     = circ * pct
+  return (
+    <svg width="36" height="36" viewBox="0 0 36 36" style={{ flexShrink: 0 }}>
+      <circle cx="18" cy="18" r="14" fill="none" stroke={`${t.border}80`} strokeWidth="3" />
+      <circle
+        cx="18" cy="18" r="14"
+        fill="none"
+        stroke={accent}
+        strokeWidth="3"
+        strokeLinecap="round"
+        strokeDasharray={`${dash} ${circ}`}
+        transform="rotate(-90 18 18)"
+        style={{ transition: 'stroke-dasharray .3s ease' }}
+      />
+      <text x="18" y="22" textAnchor="middle" fontSize="11" fontWeight="700" fill={accent} fontFamily="monospace">
+        {count}
+      </text>
+    </svg>
+  )
+}
+
+// "Today" / "Tomorrow" / "in 2 days" — relative label paired with the
+// absolute date so ops can scan both reads at once.
+function fmtRelativeDay(ymd) {
+  if (!ymd) return ''
+  const today = istTodayYmd()
+  if (ymd === today) return 'Today'
+  if (ymd === addDaysYmd(today, 1)) return 'Tomorrow'
+  if (ymd === addDaysYmd(today, -1)) return 'Yesterday'
+  return ''
 }
 
 // Pretty date label like "Mon, 02 Jun 2026". Pure formatting helper.
