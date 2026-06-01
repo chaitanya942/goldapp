@@ -27,7 +27,7 @@
 
 import { createClient } from '@supabase/supabase-js'
 import { requireAuth } from '../../../lib/apiAuth'
-import { auditorAccessNow, getIstNow } from '../../../lib/auditShiftGate'
+import { auditorAccessNow, findNextShift, getIstNow } from '../../../lib/auditShiftGate'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
@@ -45,21 +45,31 @@ export async function GET(req) {
       gated:   false,
       allowed: true,
       reason:  '',
-      activeShift: null,
+      auditor: null,
+      activeShift:    null,
+      nextShift:      null,
       windowStartIst: null,
       windowEndIst:   null,
       expiresAtMs:    null,
     })
   }
 
-  // Pull this auditor's shifts for today's IST date. We don't look further
-  // ahead — tomorrow's shift doesn't grant access today.
+  // Pull this auditor's shifts from today onwards. We need today's set to
+  // evaluate the current window, and the broader future set so the lock
+  // screen can show "Your next shift opens at X" when they're denied.
   const today = getIstNow().date
   const { data: shifts, error } = await supabase
     .from('audit_shift_assignments')
     .select('shift_date, shift_type')
     .eq('auditor_id', auth.profile.id)
-    .eq('shift_date', today)
+    .gte('shift_date', today)
+    .order('shift_date', { ascending: true })
+
+  const auditor = {
+    id:        auth.profile.id,
+    full_name: auth.profile.full_name || null,
+    email:     auth.profile.email     || null,
+  }
 
   if (error) {
     // Fail-closed: an auditor we can't verify against the table is denied.
@@ -68,17 +78,23 @@ export async function GET(req) {
     return Response.json({
       role: 'audit', gated: true, allowed: false,
       reason: 'Unable to verify your shift assignment right now. Try again in a minute.',
-      activeShift: null, windowStartIst: null, windowEndIst: null, expiresAtMs: null,
+      auditor, activeShift: null, nextShift: null,
+      windowStartIst: null, windowEndIst: null, expiresAtMs: null,
     }, { status: 200 })
   }
 
-  const decision = auditorAccessNow(shifts || [])
+  const todaysShifts = (shifts || []).filter(s => s.shift_date === today)
+  const decision     = auditorAccessNow(todaysShifts)
+  const nextShift    = findNextShift(shifts || [])
+
   return Response.json({
     role:    'audit',
     gated:   true,
     allowed: decision.allowed,
     reason:  decision.reason,
+    auditor,
     activeShift:    decision.activeShift,
+    nextShift,                          // null if nothing assigned ahead
     windowStartIst: decision.windowStartIst,
     windowEndIst:   decision.windowEndIst,
     expiresAtMs:    decision.expiresAtMs,

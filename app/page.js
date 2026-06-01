@@ -35,42 +35,6 @@ export default function LoginPage() {
     }
   }, [])
 
-  // ── Show a reason banner when the dashboard bounced us back here ─
-  // The audit-shift guard signs auditors out and redirects to
-  // /?reason=outside-shift-window when their shift window closes. We
-  // surface that as an error message instead of a silent bounce.
-  useEffect(() => {
-    if (typeof window === 'undefined') return
-    const params = new URLSearchParams(window.location.search)
-    const reason = params.get('reason')
-    if (reason === 'outside-shift-window') {
-      setError('Your audit shift window has ended. Sign in again on your next assigned shift date.')
-      // Clean the URL so a refresh doesn't keep showing the message.
-      window.history.replaceState({}, '', window.location.pathname)
-    }
-  }, [])
-
-  // ── Post-sign-in audit-shift check ─
-  // Audit-role users can only access during their assigned window. We block
-  // the redirect to /dashboard if the gate denies them, so the auditor sees
-  // a clear reason on the login page instead of being bounced after a flash
-  // of the dashboard shell. Non-audit roles short-circuit on `gated: false`.
-  // Returns `{ allowed: true }` on success, or `{ allowed: false, reason }`
-  // when the gate denies; caller is responsible for signing out.
-  const checkShiftGate = async (accessToken) => {
-    try {
-      const res = await fetch('/api/auditor-access', {
-        headers: { 'Authorization': `Bearer ${accessToken}` },
-      })
-      const j = await res.json().catch(() => ({}))
-      if (!res.ok) return { allowed: true }   // fail-open on transient — server gate still protects API
-      if (j.gated === false) return { allowed: true }
-      if (j.allowed) return { allowed: true }
-      return { allowed: false, reason: j.reason || 'Outside your assigned shift window.' }
-    } catch {
-      return { allowed: true }                 // network blip — let them through; API auth re-checks anyway
-    }
-  }
 
   useEffect(() => {
     if (!hasSavedPasskey) return
@@ -181,17 +145,6 @@ export default function LoginPage() {
     if (err) { setError(err.message); setLoading(false); return }
     accessTokenRef.current = data.session?.access_token
 
-    // Audit-shift gate: block role='audit' users outside their window.
-    // No-op for every other role.
-    const gate = await checkShiftGate(accessTokenRef.current)
-    if (!gate.allowed) {
-      await supabase.auth.signOut()
-      try { localStorage.removeItem('goldapp-role') } catch {}
-      setError(gate.reason)
-      setLoading(false)
-      return
-    }
-
     // Offer passkey registration if device supports it and not already saved for this email
     const savedData    = JSON.parse(localStorage.getItem('wg_passkey_data') || 'null')
     const alreadySaved = savedData?.email === email || localStorage.getItem('wg_passkey_email') === email
@@ -224,19 +177,6 @@ export default function LoginPage() {
       if (!verifyRes.ok) throw new Error(result.error || 'Authentication failed')
       const { error: otpErr } = await supabase.auth.verifyOtp({ token_hash: result.token_hash, type: 'magiclink' })
       if (otpErr) throw new Error(otpErr.message)
-
-      // Audit-shift gate after biometric sign-in — same rule as the
-      // password flow. Non-audit roles short-circuit allowed=true.
-      const { data: { session } } = await supabase.auth.getSession()
-      const gate = await checkShiftGate(session?.access_token)
-      if (!gate.allowed) {
-        await supabase.auth.signOut()
-        try { localStorage.removeItem('goldapp-role') } catch {}
-        setPasskeyError(gate.reason)
-        setBiometricLoading(false)
-        return
-      }
-
       window.location.href = '/dashboard'
     } catch (err) {
       // User dismissed the prompt (back button / cancel / timeout) — silently fall back to form
