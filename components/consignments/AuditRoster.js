@@ -46,7 +46,6 @@ const SHIFT_SECTIONS = [
     icon:   '🌙',
     accent: 'gold',
     desc:   'Bills audited during the night shift — weight check only.',
-    hint:   'Workflow scaffolding next — bill queue, weight entry.',
   },
   {
     id:     'morning',
@@ -54,9 +53,17 @@ const SHIFT_SECTIONS = [
     icon:   '☀',
     accent: 'orange',
     desc:   'Bills audited during the morning shift — weight check + melting readiness.',
-    hint:   'Workflow scaffolding next — bill queue, weight entry, and melting sign-off.',
   },
 ]
+
+// Today in IST as YYYY-MM-DD — first cut defaults the shift date to today.
+// A date picker can be added later if ops needs to plan ahead.
+function istTodayYmd() {
+  const istMs = Date.now() + (5.5 * 3600_000)
+  return new Date(istMs).toISOString().slice(0, 10)
+}
+
+const MAX_PER_SHIFT = 2
 
 const HISTORY_SECTIONS = [
   {
@@ -90,6 +97,13 @@ export default function AuditRoster() {
   const [modalOpen, setModalOpen] = useState(false)
   const [toast,     setToast]     = useState(null)
 
+  // Shift assignments — first cut pins to today's date. Adding a date
+  // picker later is a one-state change.
+  const [shiftDate]      = useState(istTodayYmd)
+  const [nightAssigns,   setNightAssigns]   = useState([])
+  const [morningAssigns, setMorningAssigns] = useState([])
+  const [shiftBusy,      setShiftBusy]      = useState(false)
+
   const fetchAuditors = useCallback(async () => {
     setLoading(true)
     const { data, error } = await supabase
@@ -102,7 +116,62 @@ export default function AuditRoster() {
     setLoading(false)
   }, [])
 
+  const fetchShifts = useCallback(async () => {
+    try {
+      const res = await authedFetch(`/api/audit-shifts?date=${shiftDate}`)
+      const j   = await res.json()
+      if (!res.ok || j.error) {
+        setToast({ msg: j.error || 'Failed to load shift assignments', type: 'error', key: Date.now() })
+        return
+      }
+      setNightAssigns(j.night   || [])
+      setMorningAssigns(j.morning || [])
+    } catch (e) {
+      setToast({ msg: e.message || 'Failed to load shift assignments', type: 'error', key: Date.now() })
+    }
+  }, [shiftDate])
+
   useEffect(() => { fetchAuditors() }, [fetchAuditors])
+  useEffect(() => { fetchShifts() }, [fetchShifts])
+
+  // Assign / unassign handlers used by both shift sections.
+  const assignAuditor = useCallback(async (shiftType, auditorId) => {
+    setShiftBusy(true)
+    try {
+      const res = await authedFetch('/api/audit-shifts', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ shift_date: shiftDate, shift_type: shiftType, auditor_id: auditorId }),
+      })
+      const j = await res.json()
+      if (!res.ok || j.error) {
+        setToast({ msg: j.error || 'Assignment failed', type: 'error', key: Date.now() })
+        return
+      }
+      await fetchShifts()
+    } catch (e) {
+      setToast({ msg: e.message || 'Assignment failed', type: 'error', key: Date.now() })
+    } finally {
+      setShiftBusy(false)
+    }
+  }, [shiftDate, fetchShifts])
+
+  const unassignAuditor = useCallback(async (assignmentId) => {
+    setShiftBusy(true)
+    try {
+      const res = await authedFetch(`/api/audit-shifts?id=${assignmentId}`, { method: 'DELETE' })
+      const j = await res.json()
+      if (!res.ok || j.error) {
+        setToast({ msg: j.error || 'Unassignment failed', type: 'error', key: Date.now() })
+        return
+      }
+      await fetchShifts()
+    } catch (e) {
+      setToast({ msg: e.message || 'Unassignment failed', type: 'error', key: Date.now() })
+    } finally {
+      setShiftBusy(false)
+    }
+  }, [fetchShifts])
 
   return (
     <div style={{ padding: '24px 28px', maxWidth: '1400px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '20px' }}>
@@ -176,7 +245,23 @@ export default function AuditRoster() {
       </div>
 
       {/* Tab body */}
-      {tab === 'shifts'  && <StackedSections sections={SHIFT_SECTIONS}  t={t} bodyRenderer={ShiftBody}   />}
+      {tab === 'shifts' && (
+        <StackedSections
+          sections={SHIFT_SECTIONS}
+          t={t}
+          bodyRenderer={(props) => (
+            <ShiftBody
+              {...props}
+              shiftDate={shiftDate}
+              assignments={props.section.id === 'night' ? nightAssigns : morningAssigns}
+              auditors={auditors}
+              busy={shiftBusy}
+              onAssign={(auditorId) => assignAuditor(props.section.id, auditorId)}
+              onUnassign={unassignAuditor}
+            />
+          )}
+        />
+      )}
       {tab === 'history' && (
         <StackedSections
           sections={HISTORY_SECTIONS}
@@ -278,14 +363,127 @@ function StackedSections({ sections, t, bodyRenderer: Body, extras }) {
 }
 
 // ── Body renderers ──────────────────────────────────────────────────────────
-function ShiftBody({ section, t }) {
+function ShiftBody({ section, accent, t, shiftDate, assignments = [], auditors = [], busy, onAssign, onUnassign }) {
+  // Auditors NOT already on this shift — candidate set for the picker.
+  // Conflict prevention (no-back-to-back) is enforced server-side too; we
+  // don't filter on the client for that because the client doesn't know the
+  // other shift's assignments without an extra prop. The server returns a
+  // clear toast on rejection.
+  const assignedIds  = new Set(assignments.map(a => a.auditor_id))
+  const availables   = (auditors || []).filter(a => a.is_active !== false && !assignedIds.has(a.id))
+  const atCapacity   = assignments.length >= MAX_PER_SHIFT
+  const dateLabel    = fmtPrettyDate(shiftDate)
+
   return (
-    <div style={{ padding: '40px 24px', textAlign: 'center' }}>
-      <div style={{ fontSize: '11px', color: t.text4, fontStyle: 'italic', maxWidth: '460px', margin: '0 auto', lineHeight: 1.6 }}>
-        {section.hint || 'Workflow scaffolding next.'}
+    <div style={{ padding: '18px 22px 20px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+      {/* Date label so the operator always knows which day's slot they're editing */}
+      <div style={{
+        fontSize: '10px', color: t.text4, letterSpacing: '.1em',
+        textTransform: 'uppercase', fontWeight: 600,
+        display: 'flex', alignItems: 'center', gap: '8px',
+      }}>
+        <span>Shift date</span>
+        <span style={{ fontSize: '11px', color: t.text2, letterSpacing: 0, textTransform: 'none', fontWeight: 600, fontFamily: 'monospace' }}>{dateLabel}</span>
+        <span style={{ fontSize: '10px', color: t.text4, letterSpacing: 0, textTransform: 'none' }}>· up to {MAX_PER_SHIFT} auditors per shift</span>
+      </div>
+
+      {/* Assigned auditor chips */}
+      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+        {assignments.length === 0 && (
+          <span style={{ fontSize: '11px', color: t.text4, fontStyle: 'italic' }}>No auditors assigned yet.</span>
+        )}
+        {assignments.map(a => (
+          <span key={a.id} style={{
+            display: 'inline-flex', alignItems: 'center', gap: '8px',
+            background:  `${accent}10`,
+            border:      `1px solid ${accent}40`,
+            borderRadius: '999px',
+            padding:     '6px 6px 6px 12px',
+            fontSize:    '12px',
+            color:       t.text1,
+            fontWeight:  600,
+          }}>
+            <span style={{
+              width: '18px', height: '18px', borderRadius: '50%',
+              background: `${accent}30`,
+              color: accent,
+              fontWeight: 700,
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: '10px',
+            }}>{(a.auditor?.full_name || a.auditor?.email || '?').charAt(0).toUpperCase()}</span>
+            <span>{a.auditor?.full_name || a.auditor?.email || '—'}</span>
+            <button onClick={() => onUnassign(a.id)} disabled={busy}
+              title="Unassign auditor"
+              style={{
+                background: 'transparent',
+                border: 'none',
+                color: t.text3,
+                cursor: busy ? 'not-allowed' : 'pointer',
+                fontSize: '14px',
+                padding: '0 8px',
+                borderRadius: '50%',
+                lineHeight: 1,
+                transition: 'color .15s ease, background .15s ease',
+              }}
+              onMouseEnter={e => { if (!busy) { e.currentTarget.style.color = t.red; e.currentTarget.style.background = `${t.red}15` } }}
+              onMouseLeave={e => { e.currentTarget.style.color = t.text3; e.currentTarget.style.background = 'transparent' }}>
+              ✕
+            </button>
+          </span>
+        ))}
+      </div>
+
+      {/* Picker — disabled when at capacity */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+        <select
+          disabled={busy || atCapacity || availables.length === 0}
+          value=""
+          onChange={e => { if (e.target.value) onAssign(e.target.value) }}
+          style={{
+            background: t.card2 || t.card,
+            border: `1px solid ${atCapacity ? `${t.border}80` : t.border}`,
+            borderRadius: '8px',
+            padding: '8px 12px',
+            fontSize: '12px',
+            color: t.text1,
+            outline: 'none',
+            cursor: (busy || atCapacity || availables.length === 0) ? 'not-allowed' : 'pointer',
+            minWidth: '220px',
+            opacity: (busy || atCapacity || availables.length === 0) ? 0.55 : 1,
+          }}>
+          <option value="">
+            {atCapacity
+              ? `Shift is at the ${MAX_PER_SHIFT}-auditor cap`
+              : availables.length === 0
+                ? auditors.length === 0
+                  ? 'No auditors yet — add one from the Audit History tab'
+                  : 'Every auditor is already on this shift'
+                : 'Select an auditor to assign…'}
+          </option>
+          {availables.map(a => (
+            <option key={a.id} value={a.id}>
+              {a.full_name || a.email}{a.full_name ? ` · ${a.email}` : ''}
+            </option>
+          ))}
+        </select>
+        <span style={{ fontSize: '10px', color: t.text4, fontStyle: 'italic' }}>
+          {section.id === 'night'
+            ? 'Auditors here cannot also run tomorrow morning (back-to-back rule).'
+            : 'Auditors here cannot also have run last night (back-to-back rule).'}
+        </span>
       </div>
     </div>
   )
+}
+
+// Pretty date label like "Mon, 02 Jun 2026". Pure formatting helper.
+function fmtPrettyDate(ymd) {
+  if (!ymd || typeof ymd !== 'string') return '—'
+  const m = ymd.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  if (!m) return ymd
+  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]))
+  if (Number.isNaN(d.getTime())) return ymd
+  return d.toLocaleDateString('en-IN', { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' })
 }
 
 function HistoryBody({ section, accent, t, auditors = [], loading = false }) {
