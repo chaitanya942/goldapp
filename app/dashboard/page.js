@@ -30,6 +30,7 @@ import ConsignmentReport from '../../components/consignments/ConsignmentReport'
 import BiddingVolume from '../../components/consignments/BiddingVolume'
 import CollectionAudit from '../../components/consignments/CollectionAudit'
 import AuditRoster from '../../components/consignments/AuditRoster'
+import AuditHistory from '../../components/consignments/AuditHistory'
 import AuditReport from '../../components/consignments/AuditReport'
 import ConsignmentAnalytics from '../../components/consignments/ConsignmentAnalytics'
 import ConsignmentApprovals from '../../components/consignments/ConsignmentApprovals'
@@ -225,6 +226,7 @@ function DashboardShell() {
       case 'eod-stock-report':       return <EodStockReport />
       case 'audit-data':              return <CollectionAudit />
       case 'audit-roster':            return <AuditRoster />
+      case 'audit-history':           return <AuditHistory />
       case 'audit-report':            return <AuditReport />
       case 'consignment-analytics':  return <ConsignmentAnalytics />
       case 'melting':             return <ComingSoon title="Melting" />
