@@ -4,11 +4,18 @@
 // manual stock_status flips. Two endpoints:
 //
 //   GET  /api/collection-audit
-//     Returns { bangalore: [...], outstation: [{consignment, bills: [...]}, ...] }
-//     - bangalore  = bills from KA-Bangalore branches still at stock_status='at_branch'
-//                    (these never enter the consignment/EWB flow; they walk in to HO)
+//     Returns { bangalore: [], outstation: [{consignment, bills: [...]}, ...] }
 //     - outstation = bills with stock_status='in_consignment', grouped by their
 //                    parent consignment (so the auditor sees them as the truck arrives)
+//     - bangalore  = INTENTIONALLY EMPTY post 1 Jun 2026 cutover. Bangalore
+//                    bills no longer follow the "walk-in" model — under the
+//                    event-driven lifecycle they're wrapped in a Hub → HO
+//                    consignment, generate an EWB, and flip to in_consignment
+//                    at EWB-generation time. Once that's done they appear in
+//                    the outstation pool just like any other in-flight
+//                    consignment. The field is kept in the response shape so
+//                    the UI doesn't need an immediate re-render but it will
+//                    always be [] going forward.
 //
 //   POST /api/collection-audit
 //     Body: { purchase_id, audit_gross_weight, action: 'receive' | 'keep_pending', remark? }
@@ -72,12 +79,6 @@ export async function GET(req) {
   }
 
   // ── Default: pending audit queue (the original AuditData screen) ──
-  // Bangalore-branch identification — every branch carries region; KA-Bangalore
-  // ones have region='Bangalore'. The Audit Data screen surfaces their
-  // at_branch bills directly (no consignment wrapping for intrastate moves).
-  const { data: branches } = await supabase.from('branches').select('name, region')
-  const bangaloreNames = (branches || []).filter(b => b.region === 'Bangalore').map(b => b.name)
-
   // BLIND-AUDIT MODE: deliberately omit gross_weight / net_weight / total_amount
   // / audit_discrepancy_g from the queue payload. The auditor must weigh the
   // bill on the scale and type what they see — not rubber-stamp by copying the
@@ -88,20 +89,8 @@ export async function GET(req) {
   // The POST handler reveals the actual CRM gross only after a submission.
   const COLS = 'id, application_id, customer_name, branch_name, purchase_date, transaction_time, transaction_type, audit_gross_weight, audited_at, audit_remark, stock_status, dispatched_at'
 
-  // ── Bangalore pool: at_branch + from a Bangalore branch ─────────────────
-  let bangalore = []
-  if (bangaloreNames.length) {
-    const { data, error } = await supabase
-      .from('purchases')
-      .select(COLS)
-      .eq('stock_status', 'at_branch')
-      .eq('is_deleted', false)
-      .neq('crm_status', 'deleted')
-      .in('branch_name', bangaloreNames)
-      .order('purchase_date', { ascending: true })
-    if (error) return Response.json({ error: error.message }, { status: 500 })
-    bangalore = data || []
-  }
+  // Bangalore pool deliberately empty post 1 Jun 2026 cutover. See header.
+  const bangalore = []
 
   // ── Outstation pool: in_consignment, grouped by parent consignment ──────
   // Linked via consignment_items.purchase_id → consignments.id. Pull both
