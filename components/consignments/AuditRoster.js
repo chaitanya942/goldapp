@@ -159,47 +159,50 @@ export default function AuditRoster() {
   useEffect(() => { fetchAuditors() }, [fetchAuditors])
   useEffect(() => { fetchShifts() }, [fetchShifts])
 
-  // Assign / unassign handlers used by both shift sections. The date the
-  // assignment is written against depends on which shift we're editing:
-  // night → today; morning → tomorrow (the back-to-back pair anchor).
-  const assignAuditor = useCallback(async (shiftType, auditorId) => {
+  // Batch save for a shift draft. ShiftBody holds the staged selection
+  // locally; only when ops clicks "Assign" do we walk the diff vs persisted
+  // state and fire the POST/DELETEs. Sequential so the DB trigger errors
+  // (cap, back-to-back) surface in a deterministic order — the first
+  // failure aborts the rest of the batch.
+  const saveShift = useCallback(async (shiftType, diff) => {
     const shiftDate = shiftType === 'night' ? nightDate : morningDate
     setShiftBusy(true)
     try {
-      const res = await authedFetch('/api/audit-shifts', {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ shift_date: shiftDate, shift_type: shiftType, auditor_id: auditorId }),
-      })
-      const j = await res.json()
-      if (!res.ok || j.error) {
-        setToast({ msg: j.error || 'Assignment failed', type: 'error', key: Date.now() })
-        return
+      for (const auditorId of (diff.adds || [])) {
+        const res = await authedFetch('/api/audit-shifts', {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({ shift_date: shiftDate, shift_type: shiftType, auditor_id: auditorId }),
+        })
+        const j = await res.json()
+        if (!res.ok || j.error) {
+          setToast({ msg: j.error || 'Assignment failed', type: 'error', key: Date.now() })
+          await fetchShifts()
+          return false
+        }
+      }
+      for (const assignmentId of (diff.removes || [])) {
+        const res = await authedFetch(`/api/audit-shifts?id=${assignmentId}`, { method: 'DELETE' })
+        const j = await res.json()
+        if (!res.ok || j.error) {
+          setToast({ msg: j.error || 'Unassignment failed', type: 'error', key: Date.now() })
+          await fetchShifts()
+          return false
+        }
       }
       await fetchShifts()
+      const total = (diff.adds?.length || 0) + (diff.removes?.length || 0)
+      if (total > 0) {
+        setToast({ msg: `${shiftType === 'night' ? 'Night' : 'Morning'} shift saved.`, type: 'success', key: Date.now() })
+      }
+      return true
     } catch (e) {
-      setToast({ msg: e.message || 'Assignment failed', type: 'error', key: Date.now() })
+      setToast({ msg: e.message || 'Save failed', type: 'error', key: Date.now() })
+      return false
     } finally {
       setShiftBusy(false)
     }
   }, [nightDate, morningDate, fetchShifts])
-
-  const unassignAuditor = useCallback(async (assignmentId) => {
-    setShiftBusy(true)
-    try {
-      const res = await authedFetch(`/api/audit-shifts?id=${assignmentId}`, { method: 'DELETE' })
-      const j = await res.json()
-      if (!res.ok || j.error) {
-        setToast({ msg: j.error || 'Unassignment failed', type: 'error', key: Date.now() })
-        return
-      }
-      await fetchShifts()
-    } catch (e) {
-      setToast({ msg: e.message || 'Unassignment failed', type: 'error', key: Date.now() })
-    } finally {
-      setShiftBusy(false)
-    }
-  }, [fetchShifts])
 
   return (
     <div style={{ padding: '24px 28px', maxWidth: '1400px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '20px' }}>
@@ -294,8 +297,7 @@ export default function AuditRoster() {
                 conflictingAuditorIds={otherIds}
                 auditors={auditors}
                 busy={shiftBusy}
-                onAssign={(auditorId) => assignAuditor(props.section.id, auditorId)}
-                onUnassign={unassignAuditor}
+                onSave={(diff) => saveShift(props.section.id, diff)}
               />
             )
           }}
@@ -402,15 +404,48 @@ function StackedSections({ sections, t, bodyRenderer: Body, extras }) {
 }
 
 // ── Body renderers ──────────────────────────────────────────────────────────
-function ShiftBody({ section, accent, t, shiftDate, assignments = [], conflictingAuditorIds, auditors = [], busy, onAssign, onUnassign }) {
-  // Assigned auditor id -> assignment id (so we can fire DELETE on uncheck).
+function ShiftBody({ section, accent, t, shiftDate, assignments = [], conflictingAuditorIds, auditors = [], busy, onSave }) {
+  // Assigned auditor id -> assignment id (so we can fire DELETE when a
+  // previously-saved auditor is removed from the draft on Save).
   const assignmentByAuditor = new Map(assignments.map(a => [a.auditor_id, a.id]))
+  const persistedSet        = new Set(assignments.map(a => a.auditor_id))
   const conflicts           = conflictingAuditorIds instanceof Set ? conflictingAuditorIds : new Set()
   const activeAuditors      = (auditors || []).filter(a => a.is_active !== false)
-  const atCapacity          = assignments.length >= MAX_PER_SHIFT
   const dateLabel           = fmtPrettyDate(shiftDate)
   const dateRelative        = fmtRelativeDay(shiftDate)
   const otherShiftLabel     = section.id === 'night' ? 'morning' : 'night'
+
+  // Draft selection — the staged set ops is editing before they click Save.
+  // null = "in sync with persisted state"; a Set = "user has touched it".
+  // We re-sync whenever the persisted set changes (e.g. after a successful
+  // save → assignments prop updates → draft clears so the diff goes to 0).
+  const [draft, setDraft] = useState(null)
+  const persistedKey = [...persistedSet].sort().join(',')
+  useEffect(() => { setDraft(null) }, [persistedKey])
+
+  const workingSet  = draft ?? persistedSet
+  const atCapacity  = workingSet.size >= MAX_PER_SHIFT
+
+  // Diff between draft and persisted — drives the Assign button label + state.
+  const adds    = [...workingSet].filter(id => !persistedSet.has(id))
+  const removes = [...persistedSet].filter(id => !workingSet.has(id))
+  const hasChanges = adds.length > 0 || removes.length > 0
+
+  const toggle = (auditorId) => {
+    const next = new Set(workingSet)
+    if (next.has(auditorId)) next.delete(auditorId)
+    else                     next.add(auditorId)
+    setDraft(next)
+  }
+  const resetDraft = () => setDraft(null)
+  const commitDraft = async () => {
+    if (!hasChanges || busy) return
+    await onSave({
+      adds,
+      removes: removes.map(auditorId => assignmentByAuditor.get(auditorId)).filter(Boolean),
+    })
+    // assignments will refresh from the parent; the useEffect above clears the draft.
+  }
 
   return (
     <div style={{ padding: '20px 22px 22px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
@@ -505,15 +540,19 @@ function ShiftBody({ section, accent, t, shiftDate, assignments = [], conflictin
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
             {activeAuditors.map(a => {
-              const assigned     = assignmentByAuditor.has(a.id)
-              const lockedByPair = !assigned && conflicts.has(a.id)
-              const lockedByCap  = !assigned && !lockedByPair && atCapacity
+              // Visual state follows the DRAFT — ops sees the row light up the
+              // moment they click, even though nothing is persisted until they
+              // hit Assign. The pill below distinguishes "persisted" from "pending".
+              const inDraft      = workingSet.has(a.id)
+              const wasPersisted = persistedSet.has(a.id)
+              const lockedByPair = !inDraft && conflicts.has(a.id)
+              const lockedByCap  = !inDraft && !lockedByPair && atCapacity
               const disabled     = busy || lockedByCap || lockedByPair
-              const onToggle     = () => {
-                if (disabled) return
-                if (assigned) onUnassign(assignmentByAuditor.get(a.id))
-                else          onAssign(a.id)
-              }
+              const onToggle     = () => { if (!disabled) toggle(a.id) }
+              const assigned     = inDraft
+              // pending state — drives the right-side pill.
+              const pendingAdd    = inDraft && !wasPersisted
+              const pendingRemove = !inDraft && wasPersisted
               return (
                 <button
                   key={a.id}
@@ -607,8 +646,36 @@ function ShiftBody({ section, accent, t, shiftDate, assignments = [], conflictin
                     }}>{a.email || '—'}</span>
                   </span>
 
-                  {/* Right-side status pill */}
-                  {assigned ? (
+                  {/* Right-side status pill — distinguishes persisted from staged */}
+                  {pendingAdd ? (
+                    <span style={{
+                      fontSize: '8px',
+                      color: accent,
+                      background: 'transparent',
+                      border: `1px dashed ${accent}80`,
+                      borderRadius: '999px',
+                      padding: '4px 10px',
+                      fontWeight: 700,
+                      letterSpacing: '.08em',
+                      flexShrink: 0,
+                    }}>
+                      PENDING · ADD
+                    </span>
+                  ) : pendingRemove ? (
+                    <span style={{
+                      fontSize: '8px',
+                      color: t.red || '#c03030',
+                      background: 'transparent',
+                      border: `1px dashed ${t.red || '#c03030'}80`,
+                      borderRadius: '999px',
+                      padding: '4px 10px',
+                      fontWeight: 700,
+                      letterSpacing: '.08em',
+                      flexShrink: 0,
+                    }}>
+                      PENDING · REMOVE
+                    </span>
+                  ) : assigned ? (
                     <span style={{
                       fontSize: '8px',
                       color: '#fff',
@@ -664,6 +731,79 @@ function ShiftBody({ section, accent, t, shiftDate, assignments = [], conflictin
                 </button>
               )
             })}
+          </div>
+        </div>
+      )}
+
+      {/* Save action bar — only visible when the draft differs from persisted.
+          Shows a compact diff summary on the left, Discard + Assign on the right. */}
+      {hasChanges && (
+        <div style={{
+          background:  `linear-gradient(135deg, ${accent}12 0%, ${accent}04 100%)`,
+          border:      `1px solid ${accent}40`,
+          borderRadius: '11px',
+          padding:     '12px 14px',
+          display:     'flex',
+          alignItems:  'center',
+          justifyContent: 'space-between',
+          gap:         '12px',
+          flexWrap:    'wrap',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap', minWidth: 0 }}>
+            <span style={{
+              width: '24px', height: '24px', borderRadius: '7px',
+              background: accent, color: '#fff',
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: '12px', fontWeight: 900, flexShrink: 0,
+            }}>!</span>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: '11px', color: t.text1, fontWeight: 700 }}>
+                Unsaved changes
+              </div>
+              <div style={{ fontSize: '9px', color: t.text3, marginTop: '2px' }}>
+                {adds.length    > 0 && <>+{adds.length} to add</>}
+                {adds.length    > 0 && removes.length > 0 && <span style={{ color: t.text4, margin: '0 5px' }}>·</span>}
+                {removes.length > 0 && <>−{removes.length} to remove</>}
+              </div>
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: '8px', flexShrink: 0 }}>
+            <button
+              type="button"
+              onClick={resetDraft}
+              disabled={busy}
+              style={{
+                background: 'transparent',
+                border: `1px solid ${t.border}`,
+                color: t.text2,
+                borderRadius: '8px',
+                padding: '7px 13px',
+                fontSize: '11px',
+                fontWeight: 600,
+                cursor: busy ? 'not-allowed' : 'pointer',
+                opacity: busy ? 0.5 : 1,
+              }}>
+              Discard
+            </button>
+            <button
+              type="button"
+              onClick={commitDraft}
+              disabled={busy}
+              style={{
+                background: busy ? `${accent}80` : `linear-gradient(135deg, ${accent}, ${accent}dd)`,
+                color: '#fff',
+                border: 'none',
+                borderRadius: '8px',
+                padding: '7px 16px',
+                fontSize: '11px',
+                fontWeight: 700,
+                letterSpacing: '.04em',
+                cursor: busy ? 'wait' : 'pointer',
+                boxShadow: busy ? 'none' : `0 2px 8px ${accent}40`,
+                display: 'inline-flex', alignItems: 'center', gap: '6px',
+              }}>
+              {busy ? 'Saving…' : 'Assign'}
+            </button>
           </div>
         </div>
       )}
