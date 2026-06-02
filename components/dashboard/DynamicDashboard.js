@@ -114,6 +114,7 @@ const EmptyPanel = ({ t }) => (
 
 // ══ PURCHASE INLINE (replaces section + accordion — always open, no title) ═══
 function PurchaseInline({ t, setActiveNav, canSee }) {
+  const canSeeLive    = canSee('purchase-live')
   const canSeeData    = canSee('purchase-data')
   const canSeeReports = canSee('purchase-reports')
 
@@ -334,7 +335,15 @@ function PurchaseInline({ t, setActiveNav, canSee }) {
   const panelTitle = { fontSize:13, color:t.text2, letterSpacing:'.1em', textTransform:'uppercase', fontWeight:600 }
   const panelMeta  = { fontSize:11, color:t.text4 }
 
-  const openTarget = canSeeData ? 'purchase-data' : canSeeReports ? 'purchase-reports' : null
+  // Button labels itself "Live Feed" when possible, so navigate there
+  // first. Fall back to Master Purchase Data, then Reports.
+  const openTarget = canSeeLive ? 'purchase-live'
+                   : canSeeData ? 'purchase-data'
+                   : canSeeReports ? 'purchase-reports'
+                   : null
+  const openLabel  = canSeeLive ? 'Live Feed'
+                   : canSeeData ? 'Master Data'
+                   : 'Reports'
 
   return (
     <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
@@ -367,7 +376,7 @@ function PurchaseInline({ t, setActiveNav, canSee }) {
             </div>
             {openTarget && (
               <button onClick={()=>setActiveNav(openTarget)} style={{ padding:'6px 14px', borderRadius:9, background:`${t.gold}15`, border:`1px solid ${t.gold}35`, color:t.gold, fontSize:11, fontWeight:600, cursor:'pointer', marginLeft:'auto' }}>
-                {canSeeData ? 'Live Feed' : 'Reports'} →
+                {openLabel} →
               </button>
             )}
           </div>
