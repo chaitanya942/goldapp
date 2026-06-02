@@ -25,7 +25,7 @@ import { createPortal } from 'react-dom'
 import { useApp } from '../../lib/context'
 import { supabase } from '../../lib/supabase'
 import { authedFetch } from '../../lib/authedFetch'
-import { CONSIGNMENT_THEMES as THEMES } from '../../lib/consignmentTheme'
+import { CONSIGNMENT_THEMES as THEMES, useMobile } from '../../lib/consignmentTheme'
 import Toast from '../ui/Toast'
 
 // All auditors share the same role — fixed, not user-selectable in the modal.
@@ -94,6 +94,7 @@ const HISTORY_SECTIONS = [
 export default function AuditRoster() {
   const { theme } = useApp()
   const t = THEMES[theme] || THEMES.dark
+  const isMobile = useMobile()
   const [tab, setTab] = useState('shifts')
 
   // ── Auditor list state ────────────────────────────────────────────────────
@@ -237,33 +238,41 @@ export default function AuditRoster() {
   }, [nightDate, morningDate, fetchShifts])
 
   return (
-    <div style={{ padding: '24px 28px', maxWidth: '1400px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+    <div style={{
+      padding: isMobile ? '12px 12px 80px' : '24px 28px',
+      maxWidth: '1400px',
+      margin: '0 auto',
+      display: 'flex', flexDirection: 'column',
+      gap: isMobile ? '14px' : '20px',
+    }}>
       {/* Hero header */}
       <div style={{
         background:  `linear-gradient(135deg, ${t.card} 0%, ${t.card2 || t.card} 100%)`,
         border:      `1px solid ${t.border}`,
         borderRadius: '16px',
-        padding:     '22px 26px',
+        padding:     isMobile ? '14px 16px' : '22px 26px',
         display:     'flex',
         alignItems:  'center',
-        gap:         '18px',
+        gap:         isMobile ? '12px' : '18px',
         position:    'relative',
         overflow:    'hidden',
         boxShadow:   `0 1px 3px ${t.border}40`,
       }}>
         <div style={{ position: 'absolute', top: '-50%', right: '-10%', width: '50%', height: '200%', background: `radial-gradient(ellipse at center, ${t.gold}10 0%, transparent 70%)`, pointerEvents: 'none' }} />
         <div style={{
-          width: '54px', height: '54px', borderRadius: '14px',
+          width: isMobile ? '42px' : '54px', height: isMobile ? '42px' : '54px',
+          borderRadius: isMobile ? '11px' : '14px',
           background: `linear-gradient(135deg, ${t.gold}25, ${t.gold}10)`,
           border:     `1px solid ${t.gold}40`,
           display:    'flex', alignItems: 'center', justifyContent: 'center',
-          fontSize:   '26px',
+          fontSize:   isMobile ? '20px' : '26px',
+          flexShrink: 0,
         }}>
           🗓
         </div>
-        <div>
-          <div style={{ fontSize: '1.6rem', fontWeight: 300, color: t.text1, letterSpacing: '.02em', lineHeight: 1.1 }}>Audit Roster</div>
-          <div style={{ fontSize: '12px', color: t.text3, marginTop: '6px', maxWidth: '640px' }}>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: isMobile ? '1.15rem' : '1.6rem', fontWeight: 300, color: t.text1, letterSpacing: '.02em', lineHeight: 1.1 }}>Audit Roster</div>
+          <div style={{ fontSize: isMobile ? '11px' : '12px', color: t.text3, marginTop: isMobile ? '4px' : '6px', maxWidth: '640px' }}>
             Night + morning audit shifts, audit history, and the team running them.
           </div>
         </div>
@@ -312,6 +321,7 @@ export default function AuditRoster() {
         <StackedSections
           sections={SHIFT_SECTIONS}
           t={t}
+          isMobile={isMobile}
           bodyRenderer={(props) => {
             const isNight = props.section.id === 'night'
             // Cross-shift lock: an auditor already in the other shift would
@@ -339,6 +349,7 @@ export default function AuditRoster() {
         <StackedSections
           sections={HISTORY_SECTIONS}
           t={t}
+          isMobile={isMobile}
           bodyRenderer={(props) => (
             <HistoryBody
               {...props}
@@ -356,6 +367,7 @@ export default function AuditRoster() {
       {modalOpen && (
         <AddAuditorModal
           t={t}
+          isMobile={isMobile}
           onClose={() => setModalOpen(false)}
           onAdded={(msg) => {
             setToast({ msg, type: 'success', key: Date.now() })
@@ -400,7 +412,7 @@ function extrasFor(section, t, onClick) {
 }
 
 // ── Stacked-sections layout used by both tabs ──────────────────────────────
-function StackedSections({ sections, t, bodyRenderer: Body, extras }) {
+function StackedSections({ sections, t, isMobile = false, bodyRenderer: Body, extras }) {
   return (
     <>
       {sections.map(section => {
@@ -416,27 +428,28 @@ function StackedSections({ sections, t, bodyRenderer: Body, extras }) {
           }}>
             <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '3px', background: `linear-gradient(90deg, ${accent} 0%, ${accent}30 60%, transparent 100%)` }} />
             <div style={{
-              padding: '18px 22px',
+              padding: isMobile ? '12px 14px' : '18px 22px',
               borderBottom: `1px solid ${t.border}`,
               display: 'flex',
               alignItems: 'center',
-              gap: '14px',
+              gap: isMobile ? '10px' : '14px',
             }}>
               <div style={{
-                width: '40px', height: '40px', borderRadius: '10px',
+                width: isMobile ? '34px' : '40px', height: isMobile ? '34px' : '40px',
+                borderRadius: isMobile ? '8px' : '10px',
                 background: `linear-gradient(135deg, ${accent}25, ${accent}08)`,
                 border:     `1px solid ${accent}30`,
                 display:    'flex', alignItems: 'center', justifyContent: 'center',
-                fontSize:   '18px',
+                fontSize:   isMobile ? '15px' : '18px',
                 flexShrink: 0,
               }}>{section.icon}</div>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: '14px', color: t.text1, fontWeight: 700, letterSpacing: '-.01em' }}>{section.label}</div>
-                <div style={{ fontSize: '11px', color: t.text4, marginTop: '3px' }}>{section.desc}</div>
+                <div style={{ fontSize: isMobile ? '13px' : '14px', color: t.text1, fontWeight: 700, letterSpacing: '-.01em' }}>{section.label}</div>
+                <div style={{ fontSize: isMobile ? '10.5px' : '11px', color: t.text4, marginTop: '3px' }}>{section.desc}</div>
               </div>
               {extras?.(section, t)}
             </div>
-            <Body section={section} accent={accent} t={t} />
+            <Body section={section} accent={accent} t={t} isMobile={isMobile} />
           </div>
         )
       })}
@@ -445,7 +458,7 @@ function StackedSections({ sections, t, bodyRenderer: Body, extras }) {
 }
 
 // ── Body renderers ──────────────────────────────────────────────────────────
-function ShiftBody({ section, accent, t, shiftDate, assignments = [], conflictingAuditorIds, auditors = [], busy, onSave }) {
+function ShiftBody({ section, accent, t, isMobile = false, shiftDate, assignments = [], conflictingAuditorIds, auditors = [], busy, onSave }) {
   // Assigned auditor id -> assignment id (so we can fire DELETE when a
   // previously-saved auditor is removed from the draft on Save).
   const assignmentByAuditor = new Map(assignments.map(a => [a.auditor_id, a.id]))
@@ -489,17 +502,21 @@ function ShiftBody({ section, accent, t, shiftDate, assignments = [], conflictin
   }
 
   return (
-    <div style={{ padding: '20px 22px 22px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+    <div style={{
+      padding: isMobile ? '14px 14px 16px' : '20px 22px 22px',
+      display: 'flex', flexDirection: 'column',
+      gap: isMobile ? '12px' : '16px',
+    }}>
       {/* Date + capacity header — premium card-in-card with subtle accent glow */}
       <div style={{
         background:  `linear-gradient(135deg, ${accent}10 0%, ${accent}04 60%, transparent 100%)`,
         border:      `1px solid ${accent}25`,
         borderRadius: '13px',
-        padding:     '12px 16px',
+        padding:     isMobile ? '10px 12px' : '12px 16px',
         display:     'flex',
         alignItems:  'center',
         justifyContent: 'space-between',
-        gap:         '14px',
+        gap:         isMobile ? '10px' : '14px',
         flexWrap:    'wrap',
         position:    'relative',
         overflow:    'hidden',
@@ -1171,7 +1188,7 @@ function fmtRelativeTime(iso) {
 // invite returns success, the new auditor lands in BOTH user_profiles AND
 // the Audit Roster auditors list (same row, queried two different places).
 
-function AddAuditorModal({ t, onClose, onAdded, onError }) {
+function AddAuditorModal({ t, isMobile = false, onClose, onAdded, onError }) {
   const [name, setName]    = useState('')
   const [email, setEmail]  = useState('')
   const [busy, setBusy]    = useState(false)
@@ -1209,25 +1226,35 @@ function AddAuditorModal({ t, onClose, onAdded, onError }) {
   if (typeof document === 'undefined') return null
   return createPortal((
     <div onClick={(e) => { if (e.target === e.currentTarget && !busy) onClose() }}
-      style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000, padding: '20px', backdropFilter: 'blur(4px)' }}>
+      style={{
+        position: 'fixed', inset: 0,
+        background: 'rgba(0,0,0,.7)',
+        display: 'flex',
+        alignItems: isMobile ? 'flex-end' : 'center',
+        justifyContent: 'center',
+        zIndex: 2000,
+        padding: isMobile ? '0' : '20px',
+        backdropFilter: 'blur(4px)',
+      }}>
       <div style={{
         background: t.card,
         border: `1px solid ${t.gold}40`,
-        borderRadius: '14px',
+        borderRadius: isMobile ? '14px 14px 0 0' : '14px',
         width: '100%',
         maxWidth: '460px',
+        maxHeight: isMobile ? '92vh' : 'none',
         display: 'flex',
         flexDirection: 'column',
         boxShadow: '0 20px 60px rgba(0,0,0,.6)',
-        overflow: 'hidden',
+        overflow: 'auto',
       }}>
-        <div style={{ padding: '20px 24px', borderBottom: `1px solid ${t.border}` }}>
+        <div style={{ padding: isMobile ? '14px 18px' : '20px 24px', borderBottom: `1px solid ${t.border}` }}>
           <div style={{ fontSize: '15px', color: t.text1, fontWeight: 700, letterSpacing: '-.01em' }}>Add auditor</div>
           <div style={{ fontSize: '11px', color: t.text4, marginTop: '4px' }}>
             They'll get an invite email and a profile in both Audit Roster and User Management.
           </div>
         </div>
-        <div style={{ padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+        <div style={{ padding: isMobile ? '14px 18px' : '20px 24px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
           <div>
             <label style={{ fontSize: '10px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 600, display: 'block', marginBottom: '6px' }}>Name</label>
             <input value={name} onChange={e => setName(e.target.value)} disabled={busy}
@@ -1271,7 +1298,14 @@ function AddAuditorModal({ t, onClose, onAdded, onError }) {
             </div>
           </div>
         </div>
-        <div style={{ padding: '14px 24px', borderTop: `1px solid ${t.border}`, display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+        <div style={{
+          padding: isMobile ? '12px 18px' : '14px 24px',
+          borderTop: `1px solid ${t.border}`,
+          display: 'flex',
+          justifyContent: 'flex-end',
+          gap: '8px',
+          flexDirection: isMobile ? 'column-reverse' : 'row',
+        }}>
           <button onClick={onClose} disabled={busy}
             style={{ background: 'transparent', border: `1px solid ${t.border}`, borderRadius: '7px', padding: '8px 16px', fontSize: '12px', color: t.text2, cursor: busy ? 'not-allowed' : 'pointer' }}>
             Cancel
