@@ -1,9 +1,16 @@
 // app/api/invite-user/route.js
 // Sends a Supabase invite email and pre-creates the profile row so the
-// role is ready on first login. Admin-only.
+// role is ready on first login.
+//
+// Two access tiers:
+//   - ADMIN role group → can invite any role (User Management surface).
+//   - page.audit-roster permission → can ONLY invite role='audit' (Audit
+//     Roster "+ Add auditor" surface). Privilege-escalation guard: a
+//     non-admin caller cannot mint a super_admin or any other role no
+//     matter what they pass in `role`.
 
 import { createClient } from '@supabase/supabase-js'
-import { requireAuth, ROLE_GROUPS } from '../../../lib/apiAuth'
+import { requireAuth, requireAuthForPage, ROLE_GROUPS } from '../../../lib/apiAuth'
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
@@ -13,8 +20,16 @@ const supabaseAdmin = createClient(
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
 export async function POST(request) {
-  const auth = await requireAuth(request, { requiredRoles: ROLE_GROUPS.ADMIN })
-  if (!auth.ok) return auth.response
+  // Try ADMIN first (preserves existing User Management behaviour); fall
+  // back to page.audit-roster, but clamp those callers to inviting
+  // role='audit' only.
+  let auth = await requireAuth(request, { requiredRoles: ROLE_GROUPS.ADMIN })
+  let restrictedToAudit = false
+  if (!auth.ok) {
+    auth = await requireAuthForPage(request, 'audit-roster')
+    if (!auth.ok) return auth.response
+    restrictedToAudit = !ROLE_GROUPS.ADMIN.includes(auth.role)
+  }
 
   try {
     const { email, full_name, role } = await request.json()
@@ -23,7 +38,15 @@ export async function POST(request) {
     if (!cleanEmail || !EMAIL_RE.test(cleanEmail)) {
       return Response.json({ error: 'Valid email is required.' }, { status: 400 })
     }
-    const cleanRole = String(role || 'viewer').trim()
+    let cleanRole = String(role || 'viewer').trim()
+    if (restrictedToAudit) {
+      // Non-admin callers (e.g. master_auditor) can only mint auditors.
+      // Don't silently accept whatever they sent — that would let the UI
+      // accidentally pass through and grant the wrong role.
+      if (cleanRole !== 'audit') {
+        return Response.json({ error: "Your role can only invite users as 'audit'." }, { status: 403 })
+      }
+    }
 
     // Validate role exists in the roles table — otherwise the user gets an
     // invite for a role that grants nothing, and silently lands in a broken

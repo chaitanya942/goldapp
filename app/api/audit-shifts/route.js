@@ -19,7 +19,7 @@
 //     Removes one assignment.
 
 import { createClient } from '@supabase/supabase-js'
-import { requireAuth, ROLE_GROUPS } from '../../../lib/apiAuth'
+import { requireAuthForPage } from '../../../lib/apiAuth'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
@@ -31,7 +31,7 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
 
 // ── GET ─────────────────────────────────────────────────────────────────────
 export async function GET(req) {
-  const auth = await requireAuth(req, { requiredRoles: ROLE_GROUPS.AUDIT })
+  const auth = await requireAuthForPage(req, 'audit-roster')
   if (!auth.ok) return auth.response
 
   const { searchParams } = new URL(req.url)
@@ -73,7 +73,7 @@ export async function GET(req) {
 
 // ── POST ────────────────────────────────────────────────────────────────────
 export async function POST(req) {
-  const auth = await requireAuth(req, { requiredRoles: ROLE_GROUPS.AUDIT })
+  const auth = await requireAuthForPage(req, 'audit-roster')
   if (!auth.ok) return auth.response
 
   const body = await req.json().catch(() => ({}))
@@ -127,7 +127,7 @@ export async function POST(req) {
 
 // ── DELETE ──────────────────────────────────────────────────────────────────
 export async function DELETE(req) {
-  const auth = await requireAuth(req, { requiredRoles: ROLE_GROUPS.AUDIT })
+  const auth = await requireAuthForPage(req, 'audit-roster')
   if (!auth.ok) return auth.response
 
   const { searchParams } = new URL(req.url)
