@@ -35,12 +35,87 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
 // 'mater_auditor' are accepted since ops may have created either.
 const AUDITOR_ROLES = new Set(['audit', 'master_auditor', 'mater_auditor'])
 
+// Add N days to a YYYY-MM-DD string. Local helper so we don't introduce
+// a new util import for a single call site.
+function addDaysYmd(ymd, n) {
+  const [y, m, d] = ymd.split('-').map(Number)
+  const dt = new Date(Date.UTC(y, m - 1, d))
+  dt.setUTCDate(dt.getUTCDate() + n)
+  return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, '0')}-${String(dt.getUTCDate()).padStart(2, '0')}`
+}
+
+// Today in IST as YYYY-MM-DD. Mirrors lib/auditShiftGate's getIstNow without
+// pulling the full module since we only need the date string here.
+function istTodayYmd() {
+  return new Date(Date.now() + 5.5 * 3600_000).toISOString().slice(0, 10)
+}
+
 // ── GET ─────────────────────────────────────────────────────────────────────
+//
+// Two modes:
+//   ?date=YYYY-MM-DD           → night + morning assignments for ONE date
+//                                (used by the Shifts tab).
+//   ?mode=history[&days=N]     → past shift assignments grouped by date,
+//                                most recent first (used by the Audit
+//                                History tab — "who worked which shift on
+//                                which date"). Defaults to last 30 days.
 export async function GET(req) {
   const auth = await requireAuthForPage(req, 'audit-roster')
   if (!auth.ok) return auth.response
 
   const { searchParams } = new URL(req.url)
+  const mode = searchParams.get('mode')
+
+  // ── History mode ──────────────────────────────────────────────────────
+  if (mode === 'history') {
+    const today    = istTodayYmd()
+    const daysRaw  = parseInt(searchParams.get('days') || '30', 10)
+    const days     = Number.isFinite(daysRaw) && daysRaw > 0 ? Math.min(180, daysRaw) : 30
+    const fromDate = addDaysYmd(today, -days)
+
+    // Past shifts only — today's still-in-progress shift is shown by the
+    // Shifts tab, not in history.
+    const { data: rows, error } = await supabase
+      .from('audit_shift_assignments')
+      .select('shift_date, shift_type, auditor_id, assigned_at')
+      .gte('shift_date', fromDate)
+      .lt('shift_date', today)
+      .order('shift_date', { ascending: false })
+
+    if (error) return Response.json({ error: error.message }, { status: 500 })
+
+    const auditorIds = [...new Set((rows || []).map(r => r.auditor_id))]
+    let auditorById = new Map()
+    if (auditorIds.length) {
+      const { data: profiles } = await supabase
+        .from('user_profiles')
+        .select('id, full_name, email, role')
+        .in('id', auditorIds)
+      auditorById = new Map((profiles || []).map(p => [p.id, p]))
+    }
+
+    // Group by (date, type) so two auditors on the same shift collapse
+    // into one row with a 2-chip list.
+    const byKey = new Map()
+    for (const r of (rows || [])) {
+      const k = `${r.shift_date}|${r.shift_type}`
+      if (!byKey.has(k)) {
+        byKey.set(k, { shift_date: r.shift_date, shift_type: r.shift_type, auditors: [] })
+      }
+      const p = auditorById.get(r.auditor_id)
+      if (p) byKey.get(k).auditors.push(p)
+    }
+
+    // Date desc, and within a date show night first (it ran earlier).
+    const shifts = [...byKey.values()].sort((a, b) => {
+      if (a.shift_date !== b.shift_date) return a.shift_date < b.shift_date ? 1 : -1
+      return a.shift_type === 'night' ? -1 : 1
+    })
+
+    return Response.json({ shifts, from: fromDate, to: addDaysYmd(today, -1) })
+  }
+
+  // ── Single-date mode (Shifts tab) ─────────────────────────────────────
   const date = searchParams.get('date')
   if (!date || !DATE_RE.test(date)) {
     return Response.json({ error: 'date (YYYY-MM-DD) required' }, { status: 400 })

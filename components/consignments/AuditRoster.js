@@ -113,11 +113,12 @@ export default function AuditRoster() {
   const [loading,       setLoading]       = useState(true)
   const [modalOpen,     setModalOpen]     = useState(false)
   const [toast,         setToast]         = useState(null)
-  // Audit-events feed — populates the Audit History section. Lazily
-  // fetched only when the user actually opens the History tab so the
-  // default Shifts tab stays fast.
-  const [events,        setEvents]        = useState(null)
-  const [eventsLoading, setEventsLoading] = useState(false)
+  // Past shift assignments — populates the Audit History section. One row
+  // per (shift_date, shift_type), with the assigned auditors collapsed
+  // into an array. Lazily fetched only when the user actually opens the
+  // History tab so the default Shifts tab stays fast.
+  const [historyShifts,  setHistoryShifts]  = useState(null)
+  const [historyLoading, setHistoryLoading] = useState(false)
 
   // Shift assignments. Night and morning form a back-to-back pair: tonight's
   // night audit + tomorrow morning's audit are linked because tomorrow
@@ -172,32 +173,31 @@ export default function AuditRoster() {
   useEffect(() => { fetchAuditors() }, [fetchAuditors])
   useEffect(() => { fetchShifts() }, [fetchShifts])
 
-  const fetchEvents = useCallback(async () => {
-    setEventsLoading(true)
+  const fetchHistory = useCallback(async () => {
+    setHistoryLoading(true)
     try {
-      const res = await authedFetch('/api/collection-audit?mode=events&limit=50')
+      const res = await authedFetch('/api/audit-shifts?mode=history&days=30')
       const j   = await res.json().catch(() => ({}))
       if (!res.ok || j.error) {
         setToast({ msg: j.error || 'Failed to load audit history', type: 'error', key: Date.now() })
-        setEvents([])
+        setHistoryShifts([])
       } else {
-        setEvents(j.rows || [])
+        setHistoryShifts(j.shifts || [])
       }
     } catch (e) {
       setToast({ msg: e.message || 'Failed to load audit history', type: 'error', key: Date.now() })
-      setEvents([])
+      setHistoryShifts([])
     } finally {
-      setEventsLoading(false)
+      setHistoryLoading(false)
     }
   }, [])
 
-  // Lazy-load the events feed the first time the user opens the History tab,
-  // and refresh whenever they re-enter it. Shifts tab visitors don't pay this
-  // round-trip cost.
+  // Lazy-load history the first time the user opens the tab, and refresh
+  // whenever they re-enter it. Shifts tab visitors don't pay this round-trip.
   useEffect(() => {
     if (tab !== 'history') return
-    fetchEvents()
-  }, [tab, fetchEvents])
+    fetchHistory()
+  }, [tab, fetchHistory])
 
   // Batch save for a shift draft. ShiftBody holds the staged selection
   // locally; only when ops clicks "Assign" do we walk the diff vs persisted
@@ -362,9 +362,9 @@ export default function AuditRoster() {
               {...props}
               auditors={auditors}
               loading={loading}
-              events={events}
-              eventsLoading={eventsLoading}
-              onRefresh={fetchEvents}
+              historyShifts={historyShifts}
+              historyLoading={historyLoading}
+              onRefresh={fetchHistory}
             />
           )}
           extras={(section, t) => extrasFor(section, t, () => setModalOpen(true))}
@@ -947,9 +947,9 @@ function fmtPrettyDate(ymd) {
   return d.toLocaleDateString('en-IN', { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' })
 }
 
-function HistoryBody({ section, accent, t, auditors = [], loading = false, events = null, eventsLoading = false, onRefresh }) {
+function HistoryBody({ section, accent, t, isMobile = false, auditors = [], loading = false, historyShifts = null, historyLoading = false, onRefresh }) {
   if (section.id === 'history') {
-    return <HistoryEventsList accent={accent} t={t} events={events} loading={eventsLoading} onRefresh={onRefresh} icon={section.icon} />
+    return <HistoryShiftsList accent={accent} t={t} shifts={historyShifts} loading={historyLoading} onRefresh={onRefresh} icon={section.icon} isMobile={isMobile} />
   }
 
   // section.id === 'auditors' — real list.
@@ -1029,21 +1029,21 @@ function HistoryBody({ section, accent, t, auditors = [], loading = false, event
   )
 }
 
-// ── Audit History — events feed ─────────────────────────────────────────────
-// Renders the per-action audit log: one row per count-receive AND one row
-// per weight-audit, sorted newest first. Two-stage audit model documented
-// in sql/purchases_count_audit.sql — weight audit also records the
-// measured vs CRM discrepancy.
+// ── Audit History — past shift assignments ─────────────────────────────────
+// Renders a per-date log of who worked which shift. One row per
+// (shift_date, shift_type) with the assigned auditors collapsed into an
+// inline chip list. Today's still-in-progress shifts live in the Shifts
+// tab, not here — history only shows shifts that have already happened.
 
-function HistoryEventsList({ accent, t, events, loading, onRefresh, icon }) {
-  if (loading || events === null) {
+function HistoryShiftsList({ accent, t, shifts, loading, onRefresh, icon, isMobile = false }) {
+  if (loading || shifts === null) {
     return (
       <div style={{ padding: '40px 24px', textAlign: 'center', fontSize: '11px', color: t.text4 }}>
         Loading audit history…
       </div>
     )
   }
-  if (!events.length) {
+  if (!shifts.length) {
     return (
       <div style={{ padding: '40px 24px 48px', textAlign: 'center' }}>
         <div style={{
@@ -1054,21 +1054,33 @@ function HistoryEventsList({ accent, t, events, loading, onRefresh, icon }) {
           display:    'flex', alignItems: 'center', justifyContent: 'center',
           fontSize:   '22px',
         }}>{icon}</div>
-        <div style={{ fontSize: '13px', color: t.text2, fontWeight: 600, marginBottom: '4px' }}>No audit history yet</div>
+        <div style={{ fontSize: '13px', color: t.text2, fontWeight: 600, marginBottom: '4px' }}>No past shifts yet</div>
         <div style={{ fontSize: '11px', color: t.text4, maxWidth: '460px', margin: '0 auto', lineHeight: 1.6 }}>
-          Once auditors run their first shifts, every count-received and weight-audit action will land here — auditor name, time, bill, and any discrepancy.
+          Once today's shift wraps up, the date + the auditors who worked it will appear here. Today's still-active shift lives in the <strong style={{ color: t.text2 }}>Shifts</strong> tab.
         </div>
       </div>
     )
   }
+
+  // Group by date so each calendar day shows as one card containing its
+  // night + morning rows.
+  const byDate = new Map()
+  for (const s of shifts) {
+    if (!byDate.has(s.shift_date)) byDate.set(s.shift_date, [])
+    byDate.get(s.shift_date).push(s)
+  }
+  const dateEntries = [...byDate.entries()]   // already sorted desc by the API
+
+  const dayCount = dateEntries.length
+
   return (
-    <div style={{ padding: '12px 18px 18px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+    <div style={{ padding: isMobile ? '10px 14px 16px' : '12px 18px 18px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         fontSize: '10px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 600,
-        padding: '0 2px 8px',
+        padding: '0 2px 4px',
       }}>
-        <span>{events.length} recent event{events.length === 1 ? '' : 's'}</span>
+        <span>{dayCount} day{dayCount === 1 ? '' : 's'} of history</span>
         <button type="button" onClick={onRefresh}
           style={{
             background: 'transparent',
@@ -1084,109 +1096,109 @@ function HistoryEventsList({ accent, t, events, loading, onRefresh, icon }) {
           REFRESH
         </button>
       </div>
-      {events.map((ev, i) => <HistoryEventRow key={`${ev.type}-${ev.purchase_id}-${i}`} ev={ev} t={t} accent={accent} />)}
+      {dateEntries.map(([date, dayShifts]) => (
+        <HistoryDayCard key={date} date={date} dayShifts={dayShifts} t={t} accent={accent} isMobile={isMobile} />
+      ))}
     </div>
   )
 }
 
-function HistoryEventRow({ ev, t, accent }) {
-  const isWeight = ev.type === 'weight'
-  const eventColor = isWeight ? accent : (t.blue || '#3a8fbf')
-  const eventIcon  = isWeight ? '⚖' : '✓'
-  const eventLabel = isWeight ? 'Weight audited' : 'Count received'
-
-  // Discrepancy badge — only for weight events with a non-zero delta.
-  const discrepancy = isWeight ? Number(ev.audit_discrepancy_g || 0) : 0
-  const hasDiscrepancy = isWeight && Math.abs(discrepancy) >= 0.001
-  const diffColor = discrepancy > 0 ? (t.green || '#3aaa6a') : (t.red || '#c03030')
-
+// One calendar day. Holds up to 2 rows (night + morning).
+function HistoryDayCard({ date, dayShifts, t, accent, isMobile }) {
   return (
     <div style={{
       background:   t.card2 || t.card,
       border:       `1px solid ${t.border}`,
-      borderRadius: '10px',
-      padding:      '11px 14px',
-      display:      'flex',
-      alignItems:   'center',
-      gap:          '12px',
+      borderRadius: '11px',
+      overflow:     'hidden',
     }}>
       <div style={{
-        width: '32px', height: '32px', borderRadius: '50%',
-        background: `linear-gradient(135deg, ${eventColor}30, ${eventColor}10)`,
-        border:     `1px solid ${eventColor}40`,
-        color:      eventColor,
-        display:    'flex', alignItems: 'center', justifyContent: 'center',
-        fontSize:   '14px', fontWeight: 700,
-        flexShrink: 0,
-      }}>{eventIcon}</div>
-
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', flexWrap: 'wrap' }}>
-          <span style={{ fontSize: '12px', color: t.text1, fontWeight: 700, letterSpacing: '-.01em' }}>{eventLabel}</span>
-          <span style={{ fontSize: '11px', color: t.text2, fontFamily: 'monospace' }}>{ev.application_id || '—'}</span>
-          <span style={{ fontSize: '10.5px', color: t.text3 }}>· {ev.branch_name || '—'}</span>
+        padding: isMobile ? '10px 14px' : '10px 16px',
+        borderBottom: `1px solid ${t.border}`,
+        background: `${accent}06`,
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        gap: '10px',
+      }}>
+        <div style={{ fontSize: '12.5px', color: t.text1, fontWeight: 700, letterSpacing: '-.01em' }}>
+          {fmtPrettyDate(date)}
         </div>
-        <div style={{ fontSize: '10.5px', color: t.text3, marginTop: '3px', display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-          <span>{fmtRelativeTime(ev.when)}</span>
-          <span style={{ color: t.text4 }}>·</span>
-          <span>by <span style={{ color: t.text2, fontWeight: 600 }}>{ev.auditor_name || ev.auditor_email || '—'}</span></span>
-          {isWeight && ev.audit_gross_weight != null && (
-            <>
-              <span style={{ color: t.text4 }}>·</span>
-              <span style={{ fontFamily: 'monospace' }}>
-                {Number(ev.audit_gross_weight).toFixed(3)}g vs {Number(ev.gross_weight_g || 0).toFixed(3)}g
-              </span>
-            </>
-          )}
-          {ev.audit_remark && (
-            <>
-              <span style={{ color: t.text4 }}>·</span>
-              <span style={{ fontStyle: 'italic' }}>"{ev.audit_remark}"</span>
-            </>
-          )}
-        </div>
-      </div>
-
-      {hasDiscrepancy && (
-        <span style={{
-          fontSize: '9px',
-          color: diffColor,
-          background: `${diffColor}15`,
-          border: `1px solid ${diffColor}50`,
-          borderRadius: '999px',
-          padding: '3px 9px',
-          fontWeight: 700,
-          letterSpacing: '.04em',
-          fontFamily: 'monospace',
-          flexShrink: 0,
-        }}>
-          {discrepancy > 0 ? '+' : ''}{discrepancy.toFixed(3)}g
+        <span style={{ fontSize: '9.5px', color: t.text4, letterSpacing: '.08em', textTransform: 'uppercase', fontWeight: 600 }}>
+          {dayShifts.length} shift{dayShifts.length === 1 ? '' : 's'} run
         </span>
-      )}
+      </div>
+      {dayShifts.map(s => <HistoryShiftRow key={s.shift_type} shift={s} t={t} isMobile={isMobile} />)}
     </div>
   )
 }
 
-// "10m ago" / "3h ago" / "Yesterday 8:15 PM IST" / full date.
-function fmtRelativeTime(iso) {
-  if (!iso) return ''
-  const then = new Date(iso).getTime()
-  const now  = Date.now()
-  const diffMs = now - then
-  const mins = Math.floor(diffMs / 60_000)
-  if (mins < 1)   return 'just now'
-  if (mins < 60)  return `${mins}m ago`
-  const hours = Math.floor(mins / 60)
-  if (hours < 24) return `${hours}h ago`
-  const days = Math.floor(hours / 24)
-  if (days < 7)   return `${days}d ago`
-  try {
-    return new Date(iso).toLocaleString('en-IN', {
-      day: '2-digit', month: 'short',
-      hour: '2-digit', minute: '2-digit',
-      timeZone: 'Asia/Kolkata',
-    })
-  } catch { return iso }
+function HistoryShiftRow({ shift, t, isMobile }) {
+  const isNight   = shift.shift_type === 'night'
+  const shiftAccent = isNight ? (t.gold || '#c9a84c') : (t.orange || '#e9a942')
+  const shiftIcon = isNight ? '🌙' : '☀'
+  const shiftLabel = isNight ? 'Night' : 'Morning'
+  const window  = isNight ? '19:30–24:00 IST' : '08:30–20:00 IST'
+
+  return (
+    <div style={{
+      padding: isMobile ? '11px 14px' : '12px 16px',
+      display: 'flex',
+      alignItems: isMobile ? 'flex-start' : 'center',
+      gap: '12px',
+      borderTop: `1px solid ${t.border}40`,
+      flexDirection: isMobile ? 'column' : 'row',
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: isMobile ? 0 : '140px' }}>
+        <div style={{
+          width: '30px', height: '30px', borderRadius: '8px',
+          background: `linear-gradient(135deg, ${shiftAccent}30, ${shiftAccent}10)`,
+          border:     `1px solid ${shiftAccent}40`,
+          color:      shiftAccent,
+          display:    'flex', alignItems: 'center', justifyContent: 'center',
+          fontSize:   '14px',
+          flexShrink: 0,
+        }}>{shiftIcon}</div>
+        <div>
+          <div style={{ fontSize: '12px', color: t.text1, fontWeight: 700, letterSpacing: '-.01em' }}>{shiftLabel}</div>
+          <div style={{ fontSize: '9.5px', color: t.text4, marginTop: '2px', fontFamily: 'monospace' }}>{window}</div>
+        </div>
+      </div>
+
+      <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+        {shift.auditors.length === 0 ? (
+          <span style={{ fontSize: '11px', color: t.text4, fontStyle: 'italic' }}>No one was assigned.</span>
+        ) : (
+          shift.auditors.map(a => <AuditorChip key={a.id} auditor={a} t={t} accent={shiftAccent} />)
+        )}
+      </div>
+    </div>
+  )
+}
+
+function AuditorChip({ auditor, t, accent }) {
+  const initial = (auditor.full_name || auditor.email || '?').charAt(0).toUpperCase()
+  return (
+    <div style={{
+      display: 'inline-flex', alignItems: 'center', gap: '7px',
+      background: `${accent}10`,
+      border: `1px solid ${accent}35`,
+      borderRadius: '999px',
+      padding: '4px 11px 4px 4px',
+      maxWidth: '100%',
+    }}>
+      <span style={{
+        width: '20px', height: '20px', borderRadius: '50%',
+        background: `linear-gradient(135deg, ${accent}40, ${accent}15)`,
+        color: accent,
+        fontSize: '10px', fontWeight: 700,
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+        flexShrink: 0,
+      }}>{initial}</span>
+      <span style={{
+        fontSize: '11px', color: t.text1, fontWeight: 600,
+        whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+      }}>{auditor.full_name || auditor.email || '—'}</span>
+    </div>
+  )
 }
 
 // ── Add Auditor modal ──────────────────────────────────────────────────────
