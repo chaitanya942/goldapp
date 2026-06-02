@@ -3581,6 +3581,14 @@ export async function POST(req) {
     if (memberNames.length === 0) return Response.json({ error: 'No branches resolved for this hub.' }, { status: 400 })
 
     // 2) Discover eligible at_branch bills across the hub + its leaves.
+    // BOOKING vs MOVEMENT — booking_id is a sales commitment (this bill is
+    // earmarked for a cal_quotas row); dispatch is logistics. They're
+    // independent: a booked bill still needs to physically move to HO,
+    // and the booking_id rides along untouched so accounts can fulfil it
+    // at HO. So we DO NOT exclude booked bills here. We DO exclude:
+    //   - is_deleted / crm_status != 'approved'  → not real intake
+    //   - audit_consumed_at IS NOT NULL          → already audited & spent
+    //   - bills attached to an in-flight consignment (checked further down)
     const { data: bills, error: billsErr } = await supabase
       .from('purchases')
       .select('id, application_id, sl_no, branch_name, current_branch, customer_name, gross_weight, net_weight, total_amount, purchase_date, stock_status, crm_status, booking_id, audit_consumed_at')
@@ -3588,7 +3596,6 @@ export async function POST(req) {
       .eq('stock_status', 'at_branch')
       .eq('crm_status', 'approved')
       .eq('is_deleted', false)
-      .is('booking_id', null)
       .is('audit_consumed_at', null)
     if (billsErr) return Response.json({ error: billsErr.message }, { status: 500 })
     if (!bills || bills.length === 0) {

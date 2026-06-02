@@ -1561,7 +1561,7 @@ export default function ConsignmentOverview() {
                       </table>
                     </div>
                     <div style={{ fontSize: 11, color: t.text4, marginTop: 11, lineHeight: 1.55, fontStyle: 'italic' }}>
-                      Eligible at_branch bills only. Bills already booked, audit-consumed, or sitting on another in-flight consignment are excluded. Exact totals — and per-branch value — appear on the Delivery Challan and EWB.
+                      Eligible at_branch bills only. Booked bills are included — the booking_id rides along and is fulfilled when the bill is audited at HO. Audit-consumed bills and bills already on another in-flight consignment are excluded. Exact totals — and per-branch value — appear on the Delivery Challan and EWB.
                     </div>
                   </>
                 )}
