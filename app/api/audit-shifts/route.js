@@ -28,6 +28,12 @@ const supabase = createClient(
 
 const VALID_SHIFTS = new Set(['night', 'morning'])
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
+// Roles that count as "an auditor" for shift staffing. Kept in lockstep
+// with AUDITOR_ROLES in components/consignments/AuditRoster.js.
+// master_auditor is admin-like but still does the actual audit work, so
+// they're assignable too. Both 'master_auditor' and the typo
+// 'mater_auditor' are accepted since ops may have created either.
+const AUDITOR_ROLES = new Set(['audit', 'master_auditor', 'mater_auditor'])
 
 // ── GET ─────────────────────────────────────────────────────────────────────
 export async function GET(req) {
@@ -98,8 +104,8 @@ export async function POST(req) {
     .eq('id', auditor_id)
     .maybeSingle()
   if (!profile)            return Response.json({ error: 'Auditor not found' }, { status: 404 })
-  if (profile.role !== 'audit') {
-    return Response.json({ error: 'User is not an auditor (role != audit)' }, { status: 400 })
+  if (!AUDITOR_ROLES.has(profile.role)) {
+    return Response.json({ error: `User is not an auditor (role '${profile.role}' is not assignable to shifts).` }, { status: 400 })
   }
   if (profile.is_active === false) {
     return Response.json({ error: 'Auditor is inactive' }, { status: 400 })

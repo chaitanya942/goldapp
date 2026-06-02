@@ -28,10 +28,17 @@ import { authedFetch } from '../../lib/authedFetch'
 import { CONSIGNMENT_THEMES as THEMES, useMobile } from '../../lib/consignmentTheme'
 import Toast from '../ui/Toast'
 
-// All auditors share the same role — fixed, not user-selectable in the modal.
-// Same role string the existing ROLE_GROUPS.AUDIT (lib/apiAuth.js) admits, so
-// every auditor added here also satisfies the audit endpoints' auth check.
+// Role minted by the "+ Add auditor" modal — basic auditor. master_auditor
+// users are created via User Management (they're admin-like), but they ALSO
+// audit and ALSO can be assigned to shifts, so they appear in the auditors
+// list below alongside role='audit' users.
 const AUDITOR_ROLE = 'audit'
+// Every role that is considered "an auditor" for staffing purposes. Used
+// for fetchAuditors() and mirrored in app/api/audit-shifts/route.js so the
+// POST sanity check stays in sync. Both 'master_auditor' and the typo
+// 'mater_auditor' are accepted in case ops created the role with either
+// spelling.
+const AUDITOR_ROLES = ['audit', 'master_auditor', 'mater_auditor']
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
 const TABS = [
@@ -128,7 +135,7 @@ export default function AuditRoster() {
     const { data, error } = await supabase
       .from('user_profiles')
       .select('id, email, full_name, role, is_active, created_at')
-      .eq('role', AUDITOR_ROLE)
+      .in('role', AUDITOR_ROLES)
       .order('created_at', { ascending: false })
     if (error) setToast({ msg: error.message || 'Failed to load auditors', type: 'error', key: Date.now() })
     else        setAuditors(data || [])
