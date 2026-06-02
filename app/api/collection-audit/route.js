@@ -650,30 +650,13 @@ export async function POST(req) {
   }
 
   // ── 'receive' path ──
-  // ASYMMETRIC discrepancy rule:
-  //   - measured  >  CRM  →  auto-accept (extra weight is not suspicious;
-  //                          could be packaging residue / scale drift / a
-  //                          legitimate over-pour). The diff is still
-  //                          captured on the row + audit_events so it
-  //                          shows up in the Audit Report, but no remark
-  //                          prompt blocks the auditor.
-  //   - measured  <  CRM  →  REQUIRE remark. Missing weight is material —
-  //                          could be packaging loss, dust, or worse — and
-  //                          the auditor must consciously document it.
-  //   - measured ==  CRM  →  silent receive (exact match).
-  if (diff < 0 && !remark) {
-    // Write the measurement now so the discrepancy badge surfaces in the
-    // queue even if the auditor closes the modal without picking a path.
-    await supabase.from('purchases').update(auditFields).eq('id', purchase_id)
-    await recordEvent('keep_pending')   // unresolved short measurement → still pending
-    return Response.json({
-      error:          'Measured weight is LESS than CRM. Provide an audit_remark to accept the shortfall or click "Keep Pending".',
-      discrepancy_g:  diff,
-      crm_gross:      Number(bill.gross_weight || 0),
-      measured,
-      requires_remark: true,
-    }, { status: 400 })
-  }
+  // Discrepancies (positive OR negative) auto-accept. The remark stays
+  // OPTIONAL — auditor can document a reason if they want, but the
+  // receive doesn't block on it. Every diff is still written to the
+  // purchases row + audit_events row so the Audit Report shows the
+  // delta and any future re-audit. The "Keep Pending" button stays in
+  // the modal for auditors who want to defer (e.g. waiting for a
+  // re-weigh on a different scale).
 
   const { error: updErr } = await supabase
     .from('purchases')
