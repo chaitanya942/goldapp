@@ -1308,7 +1308,13 @@ function AuditModal({ bill, t, isMobile, onClose, onDone, onError }) {
       }
       if (res.ok && j.success && j.action === 'receive') {
         const tail = j.consignment_received ? ' · Parent consignment also marked received.' : ''
-        onDone(`${bill.application_id} received with discrepancy noted (Δ ${j.discrepancy_g}g).${tail}`)
+        const d    = Number(j.discrepancy_g)
+        const sign = d > 0 ? '+' : ''
+        const diffLabel = `${sign}${d.toFixed(3)}g`
+        const wording   = d > 0
+          ? `received with extra weight (${diffLabel} over CRM)`
+          : `received with shortfall noted (${diffLabel})`
+        onDone(`${bill.application_id} ${wording}.${tail}`)
         return
       }
       if (res.ok && j.success && j.action === 'keep_pending') {

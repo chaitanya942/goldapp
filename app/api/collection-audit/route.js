@@ -650,17 +650,24 @@ export async function POST(req) {
   }
 
   // ── 'receive' path ──
-  // Reject exact-match policy violations only for the no-remark case. With a
-  // remark the auditor has consciously accepted the discrepancy. The error
-  // payload deliberately reveals CRM gross now — the auditor has just made a
-  // blind measurement, so showing it lets them resolve the discrepancy.
-  if (diff !== 0 && !remark) {
+  // ASYMMETRIC discrepancy rule:
+  //   - measured  >  CRM  →  auto-accept (extra weight is not suspicious;
+  //                          could be packaging residue / scale drift / a
+  //                          legitimate over-pour). The diff is still
+  //                          captured on the row + audit_events so it
+  //                          shows up in the Audit Report, but no remark
+  //                          prompt blocks the auditor.
+  //   - measured  <  CRM  →  REQUIRE remark. Missing weight is material —
+  //                          could be packaging loss, dust, or worse — and
+  //                          the auditor must consciously document it.
+  //   - measured ==  CRM  →  silent receive (exact match).
+  if (diff < 0 && !remark) {
     // Write the measurement now so the discrepancy badge surfaces in the
     // queue even if the auditor closes the modal without picking a path.
     await supabase.from('purchases').update(auditFields).eq('id', purchase_id)
-    await recordEvent('keep_pending')   // unresolved measurement → still pending
+    await recordEvent('keep_pending')   // unresolved short measurement → still pending
     return Response.json({
-      error:          'Gross weight does not match CRM. Provide an audit_remark to accept the discrepancy or click "Keep Pending".',
+      error:          'Measured weight is LESS than CRM. Provide an audit_remark to accept the shortfall or click "Keep Pending".',
       discrepancy_g:  diff,
       crm_gross:      Number(bill.gross_weight || 0),
       measured,
