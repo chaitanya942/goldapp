@@ -152,8 +152,30 @@ function matchesQuery(branch, q) {
 }
 
 export default function CollectionAudit() {
-  const { theme } = useApp()
+  const { theme, role } = useApp()
   const t = THEMES[theme] || THEMES.dark
+
+  // For role='audit' users we read their current shift assignment so the page
+  // can show a "you're on night/morning shift" context banner. Non-audit
+  // roles (super_admin/admin/founders_office/etc.) don't see this — the
+  // page works the same for them as before. We reuse /api/auditor-access
+  // which already knows the auditor's active shift for today.
+  const [currentShift, setCurrentShift] = useState(null)   // 'night' | 'morning' | null
+
+  useEffect(() => {
+    if (role !== 'audit') return
+    let cancelled = false
+    ;(async () => {
+      try {
+        const res = await authedFetch('/api/auditor-access')
+        const j   = await res.json().catch(() => ({}))
+        if (cancelled || !res.ok) return
+        const type = j?.activeShift?.shift_type
+        if (type === 'night' || type === 'morning') setCurrentShift(type)
+      } catch { /* silent — banner just stays hidden */ }
+    })()
+    return () => { cancelled = true }
+  }, [role])
 
   const [loading,    setLoading]    = useState(true)
   const [bangalore,  setBangalore]  = useState([])
@@ -334,6 +356,13 @@ export default function CollectionAudit() {
   return (
     <div style={{ padding: '24px 28px', maxWidth: '1400px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '20px' }}>
       {toast && <Toast key={toast.key} msg={toast.msg} type={toast.type} onDone={() => setToast(null)} />}
+
+      {/* Shift context banner — only shown to role='audit' users when an
+          active shift is detected. Sets expectations: night auditors do
+          weight only; morning auditors do weight + flag bills ready for
+          melting (the Melting module proper lands later). Other roles see
+          nothing here — page is unchanged for them. */}
+      {role === 'audit' && currentShift && <ShiftContextBanner shiftType={currentShift} t={t} />}
 
       {/* ── Page-scoped keyframes for the animation suite. Kept inline so it
             travels with the component instead of leaking into globals. ── */}
@@ -1441,6 +1470,67 @@ function Reveal({ t, label, value, color }) {
     <div style={{ background: t.card, padding: '12px 14px', borderRadius: '10px', textAlign: 'center', border: `1px solid ${t.border}40` }}>
       <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 600 }}>{label}</div>
       <div style={{ fontSize: '18px', color, fontWeight: 700, fontFamily: 'monospace', marginTop: '6px', letterSpacing: '-.01em' }}>{value}</div>
+    </div>
+  )
+}
+
+// ── Shift context banner ───────────────────────────────────────────────────
+// Top-of-page strip shown to role='audit' users only. Names which shift
+// they're on and what that shift covers, so a Night Weight auditor doesn't
+// look for Melting tasks that don't exist, and a Morning auditor knows
+// they're expected to flag bills ready for melting (workflow lands with
+// the Melting module — for now this is just an expectation-setter).
+function ShiftContextBanner({ shiftType, t }) {
+  const isNight = shiftType === 'night'
+  const accent  = isNight ? (t.gold || '#c9a84c') : (t.orange || '#e9a942')
+  const icon    = isNight ? '🌙' : '☀'
+  const title   = isNight ? "You're on the Night shift" : "You're on the Morning shift"
+  const detail  = isNight
+    ? 'Tonight you do the weight audit only — measure each bill and flip it to received.'
+    : 'This morning you do the weight audit and flag bills ready for melting. Melting workflow lands with the dedicated module — for now, focus on weight.'
+
+  return (
+    <div style={{
+      background:  `linear-gradient(135deg, ${accent}14 0%, ${accent}04 60%, transparent 100%)`,
+      border:      `1px solid ${accent}40`,
+      borderLeft:  `4px solid ${accent}`,
+      borderRadius: '12px',
+      padding:     '12px 16px',
+      display:     'flex',
+      alignItems:  'center',
+      gap:         '14px',
+      boxShadow:   `0 2px 12px ${accent}10`,
+    }}>
+      <div style={{
+        flexShrink: 0,
+        width: '38px', height: '38px', borderRadius: '10px',
+        background: `linear-gradient(135deg, ${accent}30, ${accent}10)`,
+        border:     `1px solid ${accent}40`,
+        color:      accent,
+        display:    'flex', alignItems: 'center', justifyContent: 'center',
+        fontSize:   '18px',
+      }}>{icon}</div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: '12.5px', color: t.text1, fontWeight: 700, letterSpacing: '-.01em' }}>
+          {title}
+        </div>
+        <div style={{ fontSize: '11px', color: t.text3, marginTop: '3px', lineHeight: 1.5 }}>
+          {detail}
+        </div>
+      </div>
+      <span style={{
+        fontSize: '9px',
+        color: accent,
+        background: `${accent}18`,
+        border: `1px solid ${accent}50`,
+        borderRadius: '999px',
+        padding: '4px 10px',
+        fontWeight: 700,
+        letterSpacing: '.08em',
+        flexShrink: 0,
+      }}>
+        {isNight ? 'WEIGHT ONLY' : 'WEIGHT + MELTING'}
+      </span>
     </div>
   )
 }
