@@ -400,6 +400,25 @@ export default function CollectionAudit() {
         }
         .ca-refresh-icon { display: inline-block; transition: transform .4s ease; }
         .ca-refresh:hover .ca-refresh-icon { animation: caAuditSpin .6s linear; }
+
+        /* Blind weight entry — strip spinner arrows + pulse the "Blind" dot.
+           type="text" + inputMode="decimal" already prevents most browsers
+           from rendering spinners, but Firefox keeps them on type="number"
+           and Edge can still show controls on text inputs in some cases.
+           Defensive ::-webkit hide + Firefox appearance:textfield. */
+        .ca-weight-input::-webkit-outer-spin-button,
+        .ca-weight-input::-webkit-inner-spin-button {
+          -webkit-appearance: none;
+          margin: 0;
+        }
+        .ca-weight-input {
+          -moz-appearance: textfield;
+          appearance: textfield;
+        }
+        @keyframes auditBlindPulse {
+          0%, 100% { box-shadow: 0 0 0 3px rgba(201,168,76,.25); opacity: 1; }
+          50%      { box-shadow: 0 0 0 6px rgba(201,168,76,0);   opacity: .6; }
+        }
       `}</style>
 
       {/* ─── Hero header ─── */}
@@ -1330,21 +1349,49 @@ function AuditModal({ bill, t, isMobile, onClose, onDone, onError }) {
   return (
     <div style={overlay} onClick={onClose}>
       <div style={card} onClick={e => e.stopPropagation()}>
-        {/* Hero header */}
-        <div style={{ background: `linear-gradient(135deg, ${t.gold}15, transparent)`, padding: isMobile ? '16px 18px' : '24px 28px', borderBottom: `1px solid ${t.border}`, position: 'relative', overflow: 'hidden' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+        {/* Hero header — more presence: larger glowing icon, subtle gold
+            sheen across the top, app id sits as the visual focal point. */}
+        <div style={{
+          background: `linear-gradient(135deg, ${t.gold}1a 0%, ${t.gold}06 50%, transparent 100%)`,
+          padding: isMobile ? '18px 18px 16px' : '26px 28px 22px',
+          borderBottom: `1px solid ${t.border}`,
+          position: 'relative', overflow: 'hidden',
+        }}>
+          <div style={{
+            position: 'absolute', top: 0, left: 0, right: 0, height: '1px',
+            background: `linear-gradient(90deg, transparent, ${t.gold}80, transparent)`,
+          }} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
             <div style={{
-              width: '46px', height: '46px', borderRadius: '12px',
-              background: `linear-gradient(135deg, ${t.gold}30, ${t.gold}10)`,
-              border: `1px solid ${t.gold}40`,
+              width: '52px', height: '52px', borderRadius: '14px',
+              background: `linear-gradient(135deg, ${t.gold}38, ${t.gold}12)`,
+              border: `1px solid ${t.gold}55`,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: '22px',
+              fontSize: '26px',
+              flexShrink: 0,
+              boxShadow: `0 4px 16px ${t.gold}30, inset 0 1px 0 ${t.gold}40`,
             }}>⚖</div>
-            <div>
-              <div style={label}>Blind weight entry</div>
-              <div style={{ fontSize: '22px', color: t.gold, fontFamily: 'monospace', fontWeight: 700, marginTop: '4px', letterSpacing: '-.015em' }}>{bill.application_id}</div>
-              <div style={{ fontSize: '12px', color: t.text3, marginTop: '2px' }}>
-                {bill.customer_name} · {bill.branch_name} · {fmtDate(bill.purchase_date)}
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <div style={{
+                display: 'inline-flex', alignItems: 'center', gap: '6px',
+                fontSize: '9.5px', color: t.gold,
+                letterSpacing: '.18em', textTransform: 'uppercase', fontWeight: 800,
+                background: `${t.gold}15`,
+                border: `1px solid ${t.gold}40`,
+                borderRadius: '999px',
+                padding: '3px 9px',
+              }}>
+                <span style={{
+                  width: '5px', height: '5px', borderRadius: '50%',
+                  background: t.gold,
+                  boxShadow: `0 0 0 3px ${t.gold}25`,
+                  animation: 'auditBlindPulse 1.8s ease-in-out infinite',
+                }} />
+                Blind Weight Entry
+              </div>
+              <div style={{ fontSize: '24px', color: t.text1, fontFamily: 'monospace', fontWeight: 800, marginTop: '8px', letterSpacing: '-.02em', lineHeight: 1.1 }}>{bill.application_id}</div>
+              <div style={{ fontSize: '11.5px', color: t.text3, marginTop: '5px', fontWeight: 500 }}>
+                <span style={{ color: t.text2 }}>{bill.customer_name}</span> <span style={{ opacity: 0.4 }}>·</span> {bill.branch_name} <span style={{ opacity: 0.4 }}>·</span> {fmtDate(bill.purchase_date)}
               </div>
             </div>
           </div>
@@ -1363,39 +1410,87 @@ function AuditModal({ bill, t, isMobile, onClose, onDone, onError }) {
             </div>
           )}
 
-          {/* Weight input — the hero */}
+          {/* Weight input — the hero. inputMode="decimal" forces the numeric
+              keypad on mobile (no alpha keys); type="text" + pattern avoids
+              the spinner arrows desktop browsers attach to type="number". */}
           <div>
-            <div style={{ ...label, marginBottom: '8px' }}>Measured Gross Weight</div>
-            <div style={{ position: 'relative' }}>
+            <div style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              marginBottom: '10px', gap: '8px',
+            }}>
+              <span style={label}>Measured Gross Weight</span>
+              {valid && (
+                <span style={{
+                  fontSize: '9px', color: t.green,
+                  background: `${t.green}15`,
+                  border: `1px solid ${t.green}40`,
+                  borderRadius: '999px',
+                  padding: '2px 8px',
+                  fontWeight: 700, letterSpacing: '.08em',
+                }}>READY</span>
+              )}
+            </div>
+            <div style={{
+              position: 'relative',
+              background: valid
+                ? `linear-gradient(135deg, ${t.gold}0d 0%, ${t.gold}03 100%)`
+                : t.card2 || t.card,
+              borderRadius: '14px',
+              padding: '2px',
+              boxShadow: valid ? `0 0 0 1px ${t.gold}55, 0 4px 16px ${t.gold}18` : `0 0 0 1px ${t.border}`,
+              transition: 'box-shadow .2s ease, background .2s ease',
+            }}>
               <input
-                type="number"
-                step="0.001"
+                type="text"
+                inputMode="decimal"
+                pattern="[0-9]*[.,]?[0-9]*"
+                autoComplete="off"
                 autoFocus
                 value={weight}
-                onChange={e => onWeightChange(e.target.value)}
+                onChange={e => onWeightChange(e.target.value.replace(',', '.'))}
                 placeholder="0.000"
+                aria-label="Measured gross weight in grams"
+                className="ca-weight-input"
                 style={{
-                  background:   t.card2 || t.card,
-                  border:       `1.5px solid ${valid ? `${t.gold}60` : t.border}`,
-                  borderRadius: '10px',
-                  padding:      '18px 60px 18px 18px',
-                  fontSize:     '28px',
-                  color:        t.text1,
-                  fontFamily:   'monospace',
-                  fontWeight:   700,
-                  letterSpacing: '-.02em',
-                  outline:      'none',
-                  width:        '100%',
-                  boxSizing:    'border-box',
-                  transition:   'border-color .15s ease',
+                  background: t.card2 || t.card,
+                  border: 'none',
+                  borderRadius: '12px',
+                  padding: isMobile ? '20px 70px 20px 22px' : '24px 80px 24px 26px',
+                  fontSize: isMobile ? '34px' : '42px',
+                  color: t.text1,
+                  fontFamily: 'monospace',
+                  fontWeight: 800,
+                  letterSpacing: '-.025em',
+                  outline: 'none',
+                  width: '100%',
+                  boxSizing: 'border-box',
+                  textAlign: 'center',
                 }}
               />
-              <div style={{ position: 'absolute', right: '20px', top: '50%', transform: 'translateY(-50%)', fontSize: '14px', color: t.text4, fontWeight: 600, pointerEvents: 'none' }}>g</div>
+              <div style={{
+                position: 'absolute', right: isMobile ? '20px' : '26px', top: '50%', transform: 'translateY(-50%)',
+                fontSize: isMobile ? '16px' : '20px',
+                color: valid ? t.gold : t.text4,
+                fontWeight: 700,
+                fontFamily: 'monospace',
+                pointerEvents: 'none',
+                opacity: 0.8,
+                transition: 'color .15s ease',
+              }}>g</div>
             </div>
             {!revealed && (
-              <div style={{ fontSize: '11px', color: t.text4, marginTop: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <span style={{ fontSize: '13px' }}>🔒</span>
-                CRM gross is hidden. Submit your reading to compare.
+              <div style={{
+                fontSize: '11px',
+                color: t.text3,
+                marginTop: '12px',
+                display: 'flex', alignItems: 'center', gap: '8px',
+                padding: '8px 12px',
+                background: `${t.text4}08`,
+                border: `1px dashed ${t.text4}30`,
+                borderRadius: '8px',
+              }}>
+                <span style={{ fontSize: '13px', opacity: 0.7 }}>🔒</span>
+                <span><strong style={{ color: t.text2 }}>CRM gross is hidden.</strong> Weigh on the scale and submit your reading to compare.</span>
               </div>
             )}
           </div>
