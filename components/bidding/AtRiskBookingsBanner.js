@@ -8,31 +8,24 @@
 // just a global surface so anyone with bidding access sees it without
 // needing to be on the Bidding Volume page.
 //
-// STICKY PER DEVICE: Once it has appeared on a given device today, it
-// stays visible regardless of whether the count drops to zero — the
-// ONLY way to close it is the per-device 'Dismiss for today' button.
-// Each user's acknowledgement is tracked independently so a teammate
-// fixing the bookings on another machine doesn't silently clear it
-// from someone else's screen. Resets at midnight IST.
-//
-// If the count later flips from 0 back up (a fresh at-risk booking
-// surfaces after dismissal), the dismissal still holds for today;
-// the next at-risk batch surfaces tomorrow. (Conservative: a fresh
-// nag every hour would burn out the alert.)
+// NOT DISMISSIBLE — consistent with the next-day StuckBookingsBanner.
+// The banner stays visible until every at-risk booking is resolved
+// (consignment fired or booking unbooked) — the count flipping to zero
+// is the ONLY thing that hides it. This matches the rule "if they get
+// the notification they just can't close it, the notification will be
+// there till they take an action."
 //
 // Gating:
 //   - Only mounts when canSee('consignment-bidding') OR role === 'super_admin'
 //   - Only first appears when IST time >= 19:00 (configurable via FIRE_HOUR_IST)
-//   - Hidden once dismissed (localStorage scoped to today's date)
-//   - Live-updates count + branch breakdown as bookings resolve, but
-//     stays mounted with a "✓ resolved" variant once count hits zero
-//     so the user still has to acknowledge.
+//   - Live-updates count + branch breakdown; auto-hides when count = 0
+//     (no acknowledgement step — anyone who fixes a booking on any
+//     device clears it for everyone).
 //
-// Buttons:
+// Button:
 //   • Open Bookings → deep-links into Consignments → Bidding Volume →
 //     Bookings tab so ops can take action via the per-row at-risk buttons
-//     we already built. (Hidden when count is 0 — nothing to act on.)
-//   • Dismiss for today → localStorage flag, hides until tomorrow.
+//     we already built.
 //
 // Poll cadence: every 5 minutes while visible. Outside 18:30–23:59 IST
 // we still tick once on mount so a user who logs in at 9pm picks up
@@ -65,31 +58,6 @@ export default function AtRiskBookingsBanner() {
   const hasAccess = role === 'super_admin' || canSee('consignment-bidding')
 
   const [summary, setSummary] = useState(null)
-  const [dismissed, setDismissed] = useState(false)
-  const [seenToday, setSeenToday] = useState(false)
-  const dismissedKey = `at_risk_banner_dismissed_${istToday()}`
-  const seenKey      = `at_risk_banner_seen_${istToday()}`
-
-  // Hydrate dismissed + seen state from localStorage on mount (today only).
-  // `seenToday` makes the banner sticky: once it has appeared with count > 0
-  // on this device today, it stays until manually dismissed (even if the
-  // upstream count drops to zero — ops still has to acknowledge).
-  useEffect(() => {
-    try {
-      if (localStorage.getItem(dismissedKey)) setDismissed(true)
-      if (localStorage.getItem(seenKey))      setSeenToday(true)
-    } catch {}
-  }, [dismissedKey, seenKey])
-
-  // Once the live count goes non-zero past 19:00 IST, mark "seen for today".
-  // From that moment on the banner stays mounted until the user dismisses.
-  useEffect(() => {
-    if (seenToday) return
-    if (!summary || (summary.count || 0) === 0) return
-    if (istHour() < FIRE_HOUR_IST) return
-    try { localStorage.setItem(seenKey, '1') } catch {}
-    setSeenToday(true)
-  }, [summary, seenKey, seenToday])
 
   const fetchSummary = useCallback(async () => {
     try {
@@ -124,26 +92,15 @@ export default function AtRiskBookingsBanner() {
     return () => clearInterval(id)
   }, [hasAccess, fetchSummary])
 
-  if (!hasAccess)  return null
-  if (dismissed)   return null
-  if (!summary)    return null
-  // Sticky visibility rule — once the user has seen a non-zero count after
-  // 19:00 IST today (seenToday=true), the banner stays mounted regardless
-  // of whether the count later drops. If they've never seen it, fall back
-  // to the standard "show only when actionable" rule (count > 0 AND past
-  // 7pm). This matches the per-device-acknowledge requirement.
+  if (!hasAccess) return null
+  if (!summary)   return null
+  // Visibility rule: actionable only — show when there's something to fix
+  // AND we're past 7pm IST. Hides automatically the moment count hits 0
+  // (anyone fixing on any device clears the banner for everyone).
   const liveCount = summary.count || 0
-  if (!seenToday) {
-    if (liveCount === 0)            return null
-    if (istHour() < FIRE_HOUR_IST)  return null
-  }
+  if (liveCount === 0)            return null
+  if (istHour() < FIRE_HOUR_IST)  return null
 
-  const isResolved = liveCount === 0
-
-  const onDismiss = () => {
-    try { localStorage.setItem(dismissedKey, '1') } catch {}
-    setDismissed(true)
-  }
   const onOpenBookings = () => {
     setActiveNav('consignment-bidding')
   }
@@ -154,10 +111,8 @@ export default function AtRiskBookingsBanner() {
     .join(', ')
   const moreBranches = Math.max(0, (summary.by_branch || []).length - 6)
 
-  // Resolved-state visuals: green accent + "All resolved" tone. Same shell
-  // so the user's eye doesn't skip past it; only the colour + copy change.
-  const accent = isResolved ? t.green : t.red
-  const icon   = isResolved ? '✓' : '⚠'
+  const accent = t.red
+  const icon   = '⚠'
 
   return (
     <div role="alert" aria-live="polite"
@@ -181,55 +136,30 @@ export default function AtRiskBookingsBanner() {
       }}>{icon}</div>
 
       <div style={{ flex: 1, minWidth: 0, lineHeight: 1.55 }}>
-        {isResolved ? (
-          <>
-            <div style={{ fontSize: 13.5, color: t.text1, fontWeight: 800, letterSpacing: '.01em' }}>
-              All today's at-risk bookings are resolved.
-            </div>
-            <div style={{ fontSize: 11.5, color: t.text3, marginTop: 4 }}>
-              The consignments are out or the bookings were reversed. Dismiss to acknowledge — this won't auto-clear.
-            </div>
-          </>
-        ) : (
-          <>
-            <div style={{ fontSize: 13.5, color: t.text1, fontWeight: 800, letterSpacing: '.01em' }}>
-              Hey — you have {liveCount} booking{liveCount === 1 ? '' : 's'} placed today that haven't been dispatched yet.
-            </div>
-            <div style={{ fontSize: 12, color: t.text2, marginTop: 6 }}>
-              <strong style={{ color: t.text1 }}>{summary.totals?.bills || 0}</strong> bill{(summary.totals?.bills || 0) === 1 ? '' : 's'} ·{' '}
-              <strong style={{ color: t.text1, fontFamily: 'monospace' }}>{fmtG(summary.totals?.weight_g)}</strong> still at branch
-              {branchSummary && (
-                <span style={{ color: t.text3 }}> · {branchSummary}{moreBranches > 0 ? ` +${moreBranches} more` : ''}</span>
-              )}
-            </div>
-            <div style={{ fontSize: 11.5, color: t.text3, marginTop: 4 }}>
-              Bills booked today are expected at HO tomorrow. Either create the consignment now so they make tonight's truck, or unbook them if you placed the bid by mistake.
-            </div>
-          </>
-        )}
+        <div style={{ fontSize: 13.5, color: t.text1, fontWeight: 800, letterSpacing: '.01em' }}>
+          Hey — you have {liveCount} booking{liveCount === 1 ? '' : 's'} placed today that haven't been dispatched yet.
+        </div>
+        <div style={{ fontSize: 12, color: t.text2, marginTop: 6 }}>
+          <strong style={{ color: t.text1 }}>{summary.totals?.bills || 0}</strong> bill{(summary.totals?.bills || 0) === 1 ? '' : 's'} ·{' '}
+          <strong style={{ color: t.text1, fontFamily: 'monospace' }}>{fmtG(summary.totals?.weight_g)}</strong> still at branch
+          {branchSummary && (
+            <span style={{ color: t.text3 }}> · {branchSummary}{moreBranches > 0 ? ` +${moreBranches} more` : ''}</span>
+          )}
+        </div>
+        <div style={{ fontSize: 11.5, color: t.text3, marginTop: 4 }}>
+          Bills booked today are expected at HO tomorrow. Either create the consignment now so they make tonight's truck, or unbook them if you placed the bid by mistake. This banner won't clear until every row is resolved.
+        </div>
 
         <div style={{ display: 'flex', gap: 8, marginTop: 11, flexWrap: 'wrap' }}>
-          {!isResolved && (
-            <button type="button" onClick={onOpenBookings}
-              style={{
-                background: t.gold, color: '#1a0a00',
-                border: 'none', borderRadius: 7,
-                padding: '7px 16px', fontSize: 12, fontWeight: 800,
-                letterSpacing: '.02em', cursor: 'pointer',
-                boxShadow: `0 2px 10px ${t.gold}55`,
-              }}>
-              Open Bookings →
-            </button>
-          )}
-          <button type="button" onClick={onDismiss}
+          <button type="button" onClick={onOpenBookings}
             style={{
-              background: isResolved ? `${accent}18` : 'transparent',
-              color: isResolved ? accent : t.text3,
-              border: `1px solid ${isResolved ? `${accent}55` : (t.border2 || t.border)}`,
-              borderRadius: 7, padding: '7px 14px',
-              fontSize: 12, fontWeight: 700, cursor: 'pointer',
+              background: t.gold, color: '#1a0a00',
+              border: 'none', borderRadius: 7,
+              padding: '7px 16px', fontSize: 12, fontWeight: 800,
+              letterSpacing: '.02em', cursor: 'pointer',
+              boxShadow: `0 2px 10px ${t.gold}55`,
             }}>
-            {isResolved ? 'Acknowledge ✓' : 'Dismiss for today'}
+            Open Bookings →
           </button>
         </div>
       </div>
