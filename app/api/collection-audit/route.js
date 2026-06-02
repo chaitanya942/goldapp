@@ -45,6 +45,95 @@ export async function GET(req) {
   const url  = new URL(req.url)
   const mode = url.searchParams.get('mode') || 'pending'
 
+  // ── Events mode: per-action audit log ──────────────────────────────────
+  // Used by the Audit Roster → Audit History tab. Returns one row per
+  // AUDIT ACTION, not per bill — so a bill that was count-received then
+  // later weight-audited produces TWO event rows in reverse chronological
+  // order. Sources:
+  //   - count_received_at + count_received_by → type='count'
+  //   - audited_at + audited_by               → type='weight' (carries
+  //     measured weight, discrepancy, and remark)
+  // The two-stage audit model is documented in sql/purchases_count_audit.sql.
+  if (mode === 'events') {
+    const limit = Math.min(200, Math.max(1, parseInt(url.searchParams.get('limit') || '50', 10)))
+
+    // Pull bills that produced ANY audit event. To avoid PostgREST's lack of
+    // `OR (a IS NOT NULL, b IS NOT NULL)` ergonomics across two columns, run
+    // two parallel selects and merge in JS. Each query is small (limited)
+    // because we only need the recent slice.
+    const COLS = 'id, application_id, branch_name, current_branch, gross_weight, net_weight, audit_gross_weight, audit_discrepancy_g, audited_at, audited_by, audit_remark, count_received_at, count_received_by, stock_status'
+    const [{ data: countRows, error: cErr }, { data: weightRows, error: wErr }] = await Promise.all([
+      supabase
+        .from('purchases')
+        .select(COLS)
+        .not('count_received_at', 'is', null)
+        .order('count_received_at', { ascending: false })
+        .limit(limit),
+      supabase
+        .from('purchases')
+        .select(COLS)
+        .not('audited_at', 'is', null)
+        .order('audited_at', { ascending: false })
+        .limit(limit),
+    ])
+    if (cErr) return Response.json({ error: cErr.message }, { status: 500 })
+    if (wErr) return Response.json({ error: wErr.message }, { status: 500 })
+
+    const events = []
+    for (const r of (countRows || [])) {
+      events.push({
+        type:           'count',
+        when:           r.count_received_at,
+        who:            r.count_received_by,
+        purchase_id:    r.id,
+        application_id: r.application_id,
+        branch_name:    r.current_branch || r.branch_name,
+        net_weight_g:   r.net_weight,
+        gross_weight_g: r.gross_weight,
+      })
+    }
+    for (const r of (weightRows || [])) {
+      events.push({
+        type:                'weight',
+        when:                r.audited_at,
+        who:                 r.audited_by,
+        purchase_id:         r.id,
+        application_id:      r.application_id,
+        branch_name:         r.current_branch || r.branch_name,
+        net_weight_g:        r.net_weight,
+        gross_weight_g:      r.gross_weight,
+        audit_gross_weight:  r.audit_gross_weight,
+        audit_discrepancy_g: r.audit_discrepancy_g,
+        audit_remark:        r.audit_remark,
+        stock_status:        r.stock_status,
+      })
+    }
+
+    // Sort across both buckets, slice to the requested limit.
+    events.sort((a, b) => (b.when || '').localeCompare(a.when || ''))
+    const top = events.slice(0, limit)
+
+    // Resolve auditor identity in one round-trip.
+    const userIds = [...new Set(top.map(e => e.who).filter(Boolean))]
+    let profileByUid = new Map()
+    if (userIds.length) {
+      const { data: profiles } = await supabase
+        .from('user_profiles')
+        .select('id, email, full_name')
+        .in('id', userIds)
+      profileByUid = new Map((profiles || []).map(p => [p.id, p]))
+    }
+    const out = top.map(e => {
+      const p = profileByUid.get(e.who)
+      return {
+        ...e,
+        auditor_name:  p?.full_name || null,
+        auditor_email: p?.email || null,
+      }
+    })
+    return Response.json({ rows: out })
+  }
+
   // ── History mode: paginated list of every audited bill in the window ──
   // Used by the Audit Report page to power KPIs + per-auditor/per-branch
   // breakdowns. Filters by audited_at, not purchase_date.

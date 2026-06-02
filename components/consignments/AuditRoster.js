@@ -101,10 +101,15 @@ export default function AuditRoster() {
   // here uses the same /api/invite-user endpoint that User Management uses —
   // so the entry shows up in BOTH the Audit Roster auditors section and
   // User Management. Single source of truth, no duplicate table.
-  const [auditors,  setAuditors]  = useState([])
-  const [loading,   setLoading]   = useState(true)
-  const [modalOpen, setModalOpen] = useState(false)
-  const [toast,     setToast]     = useState(null)
+  const [auditors,      setAuditors]      = useState([])
+  const [loading,       setLoading]       = useState(true)
+  const [modalOpen,     setModalOpen]     = useState(false)
+  const [toast,         setToast]         = useState(null)
+  // Audit-events feed — populates the Audit History section. Lazily
+  // fetched only when the user actually opens the History tab so the
+  // default Shifts tab stays fast.
+  const [events,        setEvents]        = useState(null)
+  const [eventsLoading, setEventsLoading] = useState(false)
 
   // Shift assignments. Night and morning form a back-to-back pair: tonight's
   // night audit + tomorrow morning's audit are linked because tomorrow
@@ -158,6 +163,33 @@ export default function AuditRoster() {
 
   useEffect(() => { fetchAuditors() }, [fetchAuditors])
   useEffect(() => { fetchShifts() }, [fetchShifts])
+
+  const fetchEvents = useCallback(async () => {
+    setEventsLoading(true)
+    try {
+      const res = await authedFetch('/api/collection-audit?mode=events&limit=50')
+      const j   = await res.json().catch(() => ({}))
+      if (!res.ok || j.error) {
+        setToast({ msg: j.error || 'Failed to load audit history', type: 'error', key: Date.now() })
+        setEvents([])
+      } else {
+        setEvents(j.rows || [])
+      }
+    } catch (e) {
+      setToast({ msg: e.message || 'Failed to load audit history', type: 'error', key: Date.now() })
+      setEvents([])
+    } finally {
+      setEventsLoading(false)
+    }
+  }, [])
+
+  // Lazy-load the events feed the first time the user opens the History tab,
+  // and refresh whenever they re-enter it. Shifts tab visitors don't pay this
+  // round-trip cost.
+  useEffect(() => {
+    if (tab !== 'history') return
+    fetchEvents()
+  }, [tab, fetchEvents])
 
   // Batch save for a shift draft. ShiftBody holds the staged selection
   // locally; only when ops clicks "Assign" do we walk the diff vs persisted
@@ -307,7 +339,16 @@ export default function AuditRoster() {
         <StackedSections
           sections={HISTORY_SECTIONS}
           t={t}
-          bodyRenderer={(props) => <HistoryBody {...props} auditors={auditors} loading={loading} />}
+          bodyRenderer={(props) => (
+            <HistoryBody
+              {...props}
+              auditors={auditors}
+              loading={loading}
+              events={events}
+              eventsLoading={eventsLoading}
+              onRefresh={fetchEvents}
+            />
+          )}
           extras={(section, t) => extrasFor(section, t, () => setModalOpen(true))}
         />
       )}
@@ -882,26 +923,9 @@ function fmtPrettyDate(ymd) {
   return d.toLocaleDateString('en-IN', { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' })
 }
 
-function HistoryBody({ section, accent, t, auditors = [], loading = false }) {
-  // Audit history is still a future pass (need an audit_events table); the
-  // auditors body renders the real list now.
+function HistoryBody({ section, accent, t, auditors = [], loading = false, events = null, eventsLoading = false, onRefresh }) {
   if (section.id === 'history') {
-    return (
-      <div style={{ padding: '40px 24px 48px', textAlign: 'center' }}>
-        <div style={{
-          width: '52px', height: '52px', borderRadius: '50%',
-          background: `linear-gradient(135deg, ${accent}20, ${accent}08)`,
-          border:     `1px solid ${accent}30`,
-          margin:     '0 auto 12px',
-          display:    'flex', alignItems: 'center', justifyContent: 'center',
-          fontSize:   '22px',
-        }}>{section.icon}</div>
-        <div style={{ fontSize: '13px', color: t.text2, fontWeight: 600, marginBottom: '4px' }}>No audit history yet</div>
-        <div style={{ fontSize: '11px', color: t.text4, maxWidth: '460px', margin: '0 auto', lineHeight: 1.6 }}>
-          Once auditors run their first shifts, this section will list every bill audited — auditor name, shift, weight measured vs CRM, and any discrepancies.
-        </div>
-      </div>
-    )
+    return <HistoryEventsList accent={accent} t={t} events={events} loading={eventsLoading} onRefresh={onRefresh} icon={section.icon} />
   }
 
   // section.id === 'auditors' — real list.
@@ -979,6 +1003,166 @@ function HistoryBody({ section, accent, t, auditors = [], loading = false }) {
       ))}
     </div>
   )
+}
+
+// ── Audit History — events feed ─────────────────────────────────────────────
+// Renders the per-action audit log: one row per count-receive AND one row
+// per weight-audit, sorted newest first. Two-stage audit model documented
+// in sql/purchases_count_audit.sql — weight audit also records the
+// measured vs CRM discrepancy.
+
+function HistoryEventsList({ accent, t, events, loading, onRefresh, icon }) {
+  if (loading || events === null) {
+    return (
+      <div style={{ padding: '40px 24px', textAlign: 'center', fontSize: '11px', color: t.text4 }}>
+        Loading audit history…
+      </div>
+    )
+  }
+  if (!events.length) {
+    return (
+      <div style={{ padding: '40px 24px 48px', textAlign: 'center' }}>
+        <div style={{
+          width: '52px', height: '52px', borderRadius: '50%',
+          background: `linear-gradient(135deg, ${accent}20, ${accent}08)`,
+          border:     `1px solid ${accent}30`,
+          margin:     '0 auto 12px',
+          display:    'flex', alignItems: 'center', justifyContent: 'center',
+          fontSize:   '22px',
+        }}>{icon}</div>
+        <div style={{ fontSize: '13px', color: t.text2, fontWeight: 600, marginBottom: '4px' }}>No audit history yet</div>
+        <div style={{ fontSize: '11px', color: t.text4, maxWidth: '460px', margin: '0 auto', lineHeight: 1.6 }}>
+          Once auditors run their first shifts, every count-received and weight-audit action will land here — auditor name, time, bill, and any discrepancy.
+        </div>
+      </div>
+    )
+  }
+  return (
+    <div style={{ padding: '12px 18px 18px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        fontSize: '10px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 600,
+        padding: '0 2px 8px',
+      }}>
+        <span>{events.length} recent event{events.length === 1 ? '' : 's'}</span>
+        <button type="button" onClick={onRefresh}
+          style={{
+            background: 'transparent',
+            border: `1px solid ${t.border}`,
+            borderRadius: '6px',
+            padding: '4px 10px',
+            fontSize: '9px',
+            color: t.text3,
+            cursor: 'pointer',
+            fontWeight: 700,
+            letterSpacing: '.06em',
+          }}>
+          REFRESH
+        </button>
+      </div>
+      {events.map((ev, i) => <HistoryEventRow key={`${ev.type}-${ev.purchase_id}-${i}`} ev={ev} t={t} accent={accent} />)}
+    </div>
+  )
+}
+
+function HistoryEventRow({ ev, t, accent }) {
+  const isWeight = ev.type === 'weight'
+  const eventColor = isWeight ? accent : (t.blue || '#3a8fbf')
+  const eventIcon  = isWeight ? '⚖' : '✓'
+  const eventLabel = isWeight ? 'Weight audited' : 'Count received'
+
+  // Discrepancy badge — only for weight events with a non-zero delta.
+  const discrepancy = isWeight ? Number(ev.audit_discrepancy_g || 0) : 0
+  const hasDiscrepancy = isWeight && Math.abs(discrepancy) >= 0.001
+  const diffColor = discrepancy > 0 ? (t.green || '#3aaa6a') : (t.red || '#c03030')
+
+  return (
+    <div style={{
+      background:   t.card2 || t.card,
+      border:       `1px solid ${t.border}`,
+      borderRadius: '10px',
+      padding:      '11px 14px',
+      display:      'flex',
+      alignItems:   'center',
+      gap:          '12px',
+    }}>
+      <div style={{
+        width: '32px', height: '32px', borderRadius: '50%',
+        background: `linear-gradient(135deg, ${eventColor}30, ${eventColor}10)`,
+        border:     `1px solid ${eventColor}40`,
+        color:      eventColor,
+        display:    'flex', alignItems: 'center', justifyContent: 'center',
+        fontSize:   '14px', fontWeight: 700,
+        flexShrink: 0,
+      }}>{eventIcon}</div>
+
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', flexWrap: 'wrap' }}>
+          <span style={{ fontSize: '12px', color: t.text1, fontWeight: 700, letterSpacing: '-.01em' }}>{eventLabel}</span>
+          <span style={{ fontSize: '11px', color: t.text2, fontFamily: 'monospace' }}>{ev.application_id || '—'}</span>
+          <span style={{ fontSize: '10.5px', color: t.text3 }}>· {ev.branch_name || '—'}</span>
+        </div>
+        <div style={{ fontSize: '10.5px', color: t.text3, marginTop: '3px', display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+          <span>{fmtRelativeTime(ev.when)}</span>
+          <span style={{ color: t.text4 }}>·</span>
+          <span>by <span style={{ color: t.text2, fontWeight: 600 }}>{ev.auditor_name || ev.auditor_email || '—'}</span></span>
+          {isWeight && ev.audit_gross_weight != null && (
+            <>
+              <span style={{ color: t.text4 }}>·</span>
+              <span style={{ fontFamily: 'monospace' }}>
+                {Number(ev.audit_gross_weight).toFixed(3)}g vs {Number(ev.gross_weight_g || 0).toFixed(3)}g
+              </span>
+            </>
+          )}
+          {ev.audit_remark && (
+            <>
+              <span style={{ color: t.text4 }}>·</span>
+              <span style={{ fontStyle: 'italic' }}>"{ev.audit_remark}"</span>
+            </>
+          )}
+        </div>
+      </div>
+
+      {hasDiscrepancy && (
+        <span style={{
+          fontSize: '9px',
+          color: diffColor,
+          background: `${diffColor}15`,
+          border: `1px solid ${diffColor}50`,
+          borderRadius: '999px',
+          padding: '3px 9px',
+          fontWeight: 700,
+          letterSpacing: '.04em',
+          fontFamily: 'monospace',
+          flexShrink: 0,
+        }}>
+          {discrepancy > 0 ? '+' : ''}{discrepancy.toFixed(3)}g
+        </span>
+      )}
+    </div>
+  )
+}
+
+// "10m ago" / "3h ago" / "Yesterday 8:15 PM IST" / full date.
+function fmtRelativeTime(iso) {
+  if (!iso) return ''
+  const then = new Date(iso).getTime()
+  const now  = Date.now()
+  const diffMs = now - then
+  const mins = Math.floor(diffMs / 60_000)
+  if (mins < 1)   return 'just now'
+  if (mins < 60)  return `${mins}m ago`
+  const hours = Math.floor(mins / 60)
+  if (hours < 24) return `${hours}h ago`
+  const days = Math.floor(hours / 24)
+  if (days < 7)   return `${days}d ago`
+  try {
+    return new Date(iso).toLocaleString('en-IN', {
+      day: '2-digit', month: 'short',
+      hour: '2-digit', minute: '2-digit',
+      timeZone: 'Asia/Kolkata',
+    })
+  } catch { return iso }
 }
 
 // ── Add Auditor modal ──────────────────────────────────────────────────────
