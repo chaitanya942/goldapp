@@ -26,10 +26,13 @@
 //                        If audit_gross_weight differs from gross_weight, the discrepancy
 //                        is captured for follow-up.
 //
-// Auth: AUDIT role group (super_admin / founders_office / admin / audit).
+// Auth: page-permission based (page.audit-data). Any role that has been
+// granted that permission via Role Management can hit this endpoint — so
+// custom roles ops create (e.g. master_auditor) work without a code change.
+// Same KT §VII trap-2 pattern as the bidding writes in app/api/consignments.
 
 import { createClient } from '@supabase/supabase-js'
-import { requireAuth, ROLE_GROUPS } from '../../../lib/apiAuth'
+import { requireAuthForPage } from '../../../lib/apiAuth'
 import { istDateStr, addWorkingDaysSkipSunday } from '../../../lib/dateIst'
 
 const supabase = createClient(
@@ -39,7 +42,7 @@ const supabase = createClient(
 
 // ── GET: list pending bills (default) OR historical audits (?mode=history) ──
 export async function GET(req) {
-  const auth = await requireAuth(req, { requiredRoles: ROLE_GROUPS.AUDIT })
+  const auth = await requireAuthForPage(req, 'audit-data')
   if (!auth.ok) return auth.response
 
   const url  = new URL(req.url)
@@ -359,7 +362,7 @@ export async function GET(req) {
 
 // ── POST: record an audit action on a single bill ───────────────────────────
 export async function POST(req) {
-  const auth = await requireAuth(req, { requiredRoles: ROLE_GROUPS.AUDIT })
+  const auth = await requireAuthForPage(req, 'audit-data')
   if (!auth.ok) return auth.response
 
   const body = await req.json().catch(() => ({}))
