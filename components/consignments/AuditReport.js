@@ -16,7 +16,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useApp } from '../../lib/context'
 import GoldSpinner from '../ui/GoldSpinner'
 import { authedFetch } from '../../lib/authedFetch'
-import { CONSIGNMENT_THEMES as THEMES } from '../../lib/consignmentTheme'
+import { CONSIGNMENT_THEMES as THEMES, useMobile } from '../../lib/consignmentTheme'
 import { istToday, istDaysAgo } from '../../lib/dateIst'
 
 const fmt    = (n) => n != null ? Number(n).toLocaleString('en-IN') : '—'
@@ -27,6 +27,7 @@ const fmtDate= (d) => d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digi
 export default function AuditReport() {
   const { theme } = useApp()
   const t = THEMES[theme] || THEMES.dark
+  const isMobile = useMobile()
 
   const today      = istToday()
   const yesterday  = istDaysAgo(1)
@@ -143,7 +144,7 @@ export default function AuditReport() {
 
   // ── Styles ──
   const s = {
-    wrap:    { padding: '18px 22px', display: 'flex', flexDirection: 'column', gap: '14px', maxWidth: '1400px', margin: '0 auto' },
+    wrap:    { padding: isMobile ? '12px 12px 80px' : '18px 22px', display: 'flex', flexDirection: 'column', gap: '14px', maxWidth: '1400px', margin: '0 auto' },
     title:   { fontSize: '1.35rem', fontWeight: 300, color: t.text1, letterSpacing: '.02em' },
     sub:     { fontSize: '11px', color: t.text3 },
     card:    { background: t.card, border: `1px solid ${t.border}`, borderRadius: '12px', overflow: 'hidden' },
@@ -173,12 +174,19 @@ export default function AuditReport() {
 
       {/* Date controls */}
       <div style={{ ...s.card }}>
-        <div style={{ padding: '14px 18px', display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap' }}>
+        <div style={{
+          padding: isMobile ? '12px 14px' : '14px 18px',
+          display: 'flex',
+          alignItems: isMobile ? 'flex-start' : 'center',
+          gap: isMobile ? '10px' : '14px',
+          flexWrap: 'wrap',
+          flexDirection: isMobile ? 'column' : 'row',
+        }}>
           <div>
             <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 600 }}>Reporting window</div>
             <div style={{ fontSize: '14px', color: t.text1, fontWeight: 600, marginTop: '3px', fontFamily: 'monospace', letterSpacing: '-.01em' }}>{windowLabel}</div>
           </div>
-          <div style={{ width: '1px', height: '32px', background: t.border }} />
+          {!isMobile && <div style={{ width: '1px', height: '32px', background: t.border }} />}
           <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
             {presets.map(p => {
               const active = isPresetActive(p)
@@ -199,10 +207,17 @@ export default function AuditReport() {
               )
             })}
           </div>
-          <div style={{ marginLeft: 'auto', display: 'flex', gap: '6px', alignItems: 'center' }}>
-            <input type="date" value={from} onChange={e => setFrom(e.target.value)} max={today} style={s.input} />
+          <div style={{
+            marginLeft: isMobile ? 0 : 'auto',
+            display: 'flex',
+            gap: '6px',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            width: isMobile ? '100%' : 'auto',
+          }}>
+            <input type="date" value={from} onChange={e => setFrom(e.target.value)} max={today} style={{ ...s.input, flex: isMobile ? 1 : undefined, minWidth: 0 }} />
             <span style={{ fontSize: '11px', color: t.text4 }}>→</span>
-            <input type="date" value={to} onChange={e => setTo(e.target.value)} max={today} style={s.input} />
+            <input type="date" value={to} onChange={e => setTo(e.target.value)} max={today} style={{ ...s.input, flex: isMobile ? 1 : undefined, minWidth: 0 }} />
             <button onClick={exportCsv} disabled={!filtered.length}
               style={{ ...s.btnOut, color: filtered.length ? t.gold : t.text4, borderColor: filtered.length ? `${t.gold}50` : t.border }}>
               ↓ CSV
@@ -211,8 +226,9 @@ export default function AuditReport() {
         </div>
       </div>
 
-      {/* KPI band */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '1px', background: t.border, borderRadius: '12px', overflow: 'hidden', boxShadow: `0 1px 3px ${t.border}50` }}>
+      {/* KPI band — drop minimum to 130px on mobile so 2 KPIs fit per row
+          on a 360px phone instead of 1 (which made the band very tall). */}
+      <div style={{ display: 'grid', gridTemplateColumns: `repeat(auto-fit, minmax(${isMobile ? '130px' : '180px'}, 1fr))`, gap: '1px', background: t.border, borderRadius: '12px', overflow: 'hidden', boxShadow: `0 1px 3px ${t.border}50` }}>
         <Kpi t={t} label="Bills audited"          primary={kpis.total}                              sub={windowLabel}                                                    accent={t.gold} />
         <Kpi t={t} label="Received"               primary={kpis.received}                           sub={`${kpis.total ? Math.round(kpis.received / kpis.total * 100) : 0}% of audited`} accent={t.green} />
         <Kpi t={t} label="Kept pending"           primary={kpis.pending}                            sub="awaiting follow-up"                                            accent={t.orange} />
@@ -230,6 +246,7 @@ export default function AuditReport() {
             {byAuditor.length === 0 ? (
               <Empty t={t} text="No audits in this window." />
             ) : (
+              <div style={{ overflowX: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead><tr style={{ background: t.card2 || t.card }}>
                   <th style={s.th}>Auditor</th>
@@ -252,6 +269,7 @@ export default function AuditReport() {
                   ))}
                 </tbody>
               </table>
+              </div>
             )}
           </Section>
 
@@ -260,6 +278,7 @@ export default function AuditReport() {
             {byBranch.length === 0 ? (
               <Empty t={t} text="No audits in this window." />
             ) : (
+              <div style={{ overflowX: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead><tr style={{ background: t.card2 || t.card }}>
                   <th style={s.th}>Branch</th>
@@ -286,6 +305,7 @@ export default function AuditReport() {
                   })}
                 </tbody>
               </table>
+              </div>
             )}
           </Section>
 
