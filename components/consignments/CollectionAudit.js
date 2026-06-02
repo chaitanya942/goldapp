@@ -314,7 +314,7 @@ export default function CollectionAudit() {
     const entries = [...m.entries()].map(([region, branches]) => ({
       region,
       branches: [...branches].sort((a, b) =>
-        String(a.branch_name || '').localeCompare(String(b.branch_name || ''), undefined, { sensitivity: 'base' })
+        String(a.branch || '').localeCompare(String(b.branch || ''), undefined, { sensitivity: 'base' })
       ),
       _billCount: branches.reduce((s, x) => s + x.bills.length, 0),
     }))
