@@ -1287,10 +1287,6 @@ function AuditModal({ bill, t, isMobile, onClose, onDone, onError }) {
 
   async function submit(action) {
     if (!valid) { onError('Enter a valid measured gross weight'); return }
-    if (revealed && action === 'receive' && !remark.trim()) {
-      onError('Discrepancy is flagged — add a remark before accepting.')
-      return
-    }
     setBusy(true)
     try {
       const res = await authedFetch('/api/collection-audit', {
@@ -1301,6 +1297,10 @@ function AuditModal({ bill, t, isMobile, onClose, onDone, onError }) {
           audit_gross_weight: measured,
           action,
           remark:             remark.trim() || null,
+          // Second submit after the reveal panel has been shown — tells
+          // the backend "auditor has seen the shortfall and chose to
+          // accept anyway." Remark is optional whether they fill it or not.
+          acknowledged_diff:  !!revealed,
         }),
       })
       const j = await res.json()
@@ -1325,11 +1325,13 @@ function AuditModal({ bill, t, isMobile, onClose, onDone, onError }) {
         onDone(`${bill.application_id} kept pending — discrepancy ${j.discrepancy_g}g recorded.`)
         return
       }
-      if (j.requires_remark && j.crm_gross != null) {
+      // 409 with reveal: backend wants the auditor to SEE the comparison
+      // before confirming. requires_remark left in for old payloads.
+      if ((j.reveal || j.requires_remark) && j.crm_gross != null) {
         setRevealed({ crm_gross: Number(j.crm_gross), measured: Number(j.measured), discrepancy_g: Number(j.discrepancy_g) })
         return
       }
-      onError(j.error || 'Audit action failed')
+      onError(j.error || j.message || 'Audit action failed')
     } finally { setBusy(false) }
   }
 
@@ -1528,7 +1530,7 @@ function AuditModal({ bill, t, isMobile, onClose, onDone, onError }) {
           {revealed && (
             <div>
               <div style={{ ...label, marginBottom: '6px' }}>
-                Audit Remark <span style={{ color: t.red, textTransform: 'none', letterSpacing: 'normal' }}>(required to accept)</span>
+                Audit Remark <span style={{ color: t.text4, textTransform: 'none', letterSpacing: 'normal' }}>(optional)</span>
               </div>
               <textarea
                 value={remark}
@@ -1587,13 +1589,13 @@ function AuditModal({ bill, t, isMobile, onClose, onDone, onError }) {
                 style={{ background: 'transparent', border: `1px solid ${t.orange}80`, borderRadius: '9px', padding: '11px 20px', fontSize: '12px', color: t.orange, fontWeight: 700, cursor: busy ? 'default' : 'pointer', opacity: busy ? .6 : 1 }}>
                 Keep Pending
               </button>
-              <button onClick={() => submit('receive')} disabled={busy || !valid || !remark.trim()}
+              <button onClick={() => submit('receive')} disabled={busy || !valid}
                 style={{
                   background: t.green, color: '#0a0a0a', border: 'none', borderRadius: '9px',
                   padding: '11px 22px', fontSize: '12px', fontWeight: 700,
                   cursor: busy ? 'default' : 'pointer',
-                  opacity: (busy || !valid || !remark.trim()) ? .5 : 1,
-                  boxShadow: !busy && valid && remark.trim() ? `0 2px 8px ${t.green}50` : 'none',
+                  opacity: (busy || !valid) ? .5 : 1,
+                  boxShadow: !busy && valid ? `0 2px 8px ${t.green}50` : 'none',
                   transition: 'opacity .15s, box-shadow .15s',
                 }}>
                 {busy ? 'Saving…' : '✓ Accept & Mark Received'}

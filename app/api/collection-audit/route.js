@@ -515,7 +515,7 @@ export async function POST(req) {
   if (!auth.ok) return auth.response
 
   const body = await req.json().catch(() => ({}))
-  const { purchase_id, purchase_ids, audit_gross_weight, action, remark } = body
+  const { purchase_id, purchase_ids, audit_gross_weight, action, remark, acknowledged_diff } = body
 
   // ── 'mark_received' — count audit, single OR bulk ────────────────────────
   // Bulk mode (purchase_ids array) lets the auditor mark an entire truck's
@@ -650,13 +650,29 @@ export async function POST(req) {
   }
 
   // ── 'receive' path ──
-  // Discrepancies (positive OR negative) auto-accept. The remark stays
-  // OPTIONAL — auditor can document a reason if they want, but the
-  // receive doesn't block on it. Every diff is still written to the
-  // purchases row + audit_events row so the Audit Report shows the
-  // delta and any future re-audit. The "Keep Pending" button stays in
-  // the modal for auditors who want to defer (e.g. waiting for a
-  // re-weigh on a different scale).
+  // Two-stage flow for negative discrepancies:
+  //   1. First submit (no acknowledged_diff flag) → if measured < CRM,
+  //      reveal the comparison so the auditor SEES what they entered vs
+  //      what was expected. Bill stays pending.
+  //   2. Second submit (acknowledged_diff: true) → accept the receive,
+  //      whether or not the auditor added a remark. The remark stays
+  //      OPTIONAL throughout.
+  //
+  // Positive discrepancy auto-accepts on first submit — extra weight is
+  // not suspicious and doesn't need a confirmation step.
+  if (diff < 0 && !acknowledged_diff) {
+    // Write the measurement now so the discrepancy badge surfaces in the
+    // queue if the auditor closes the modal without confirming.
+    await supabase.from('purchases').update(auditFields).eq('id', purchase_id)
+    await recordEvent('keep_pending')   // not received yet — interim state
+    return Response.json({
+      reveal:        true,
+      discrepancy_g: diff,
+      crm_gross:     Number(bill.gross_weight || 0),
+      measured,
+      message:       'Measured weight is LESS than CRM. Review the comparison and confirm to accept; a remark is optional.',
+    }, { status: 409 })
+  }
 
   const { error: updErr } = await supabase
     .from('purchases')
