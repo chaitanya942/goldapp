@@ -1130,9 +1130,8 @@ function HistoryShiftsList({ accent, t, shifts, loading, onRefresh, icon, isMobi
   )
 }
 
-// One calendar day. Holds up to 2 rows (night + morning). The header strip
-// inherits a top accent in the relative-day colour (gold/blue/grey) so the
-// eye finds TODAY instantly when scanning a long list.
+// One calendar day. Two-column on desktop: calendar-leaf date on the left,
+// per-shift mini-cards on the right. Stacks vertically on mobile.
 function HistoryDayCard({ date, dayShifts, t, accent, isMobile }) {
   const today    = istTodayYmd()
   const relative = date === today                  ? { label: 'TODAY',     color: t.gold || '#c9a84c' }
@@ -1140,129 +1139,229 @@ function HistoryDayCard({ date, dayShifts, t, accent, isMobile }) {
                  : date === addDaysYmd(today, -1)  ? { label: 'YESTERDAY', color: t.text3 || '#7a6a4a' }
                  : null
   const stripColor = relative?.color || accent
+  const isToday    = relative?.label === 'TODAY'
   const totalAuditors = dayShifts.reduce((n, s) => n + s.auditors.length, 0)
 
   return (
     <div style={{
       background:   t.card2 || t.card,
       border:       `1px solid ${t.border}`,
-      borderRadius: '13px',
+      borderRadius: '14px',
       overflow:     'hidden',
       position:     'relative',
+      display:      'flex',
+      flexDirection: isMobile ? 'column' : 'row',
       boxShadow:    `0 1px 3px ${t.border}40`,
-      transition:   'transform .15s ease, box-shadow .15s ease, border-color .15s ease',
+      transition:   'transform .18s ease, box-shadow .18s ease, border-color .18s ease',
+    }}
+    onMouseEnter={(e) => {
+      e.currentTarget.style.borderColor = `${stripColor}55`
+      e.currentTarget.style.boxShadow   = `0 4px 14px ${stripColor}18`
+    }}
+    onMouseLeave={(e) => {
+      e.currentTarget.style.borderColor = t.border
+      e.currentTarget.style.boxShadow   = `0 1px 3px ${t.border}40`
     }}>
-      {/* Top accent strip — colour codes today / tomorrow / yesterday */}
-      <div style={{
-        position: 'absolute', top: 0, left: 0, right: 0, height: '2px',
-        background: `linear-gradient(90deg, ${stripColor} 0%, ${stripColor}40 60%, transparent 100%)`,
-      }} />
+      {/* Calendar-leaf date column — the visual anchor of the row */}
+      <CalendarLeaf
+        date={date}
+        relative={relative}
+        stripColor={stripColor}
+        isToday={isToday}
+        totalAuditors={totalAuditors}
+        shiftCount={dayShifts.length}
+        t={t}
+        isMobile={isMobile}
+      />
 
+      {/* Shift list */}
       <div style={{
-        padding: isMobile ? '11px 14px' : '12px 18px',
-        borderBottom: `1px solid ${t.border}`,
-        background: `linear-gradient(135deg, ${stripColor}08 0%, transparent 70%)`,
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        gap: '10px',
-        flexWrap: 'wrap',
+        flex: 1,
+        padding: isMobile ? '12px 14px 14px' : '14px 18px',
+        display: 'flex', flexDirection: 'column', gap: '10px',
+        minWidth: 0,
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-          <div style={{ fontSize: '13px', color: t.text1, fontWeight: 700, letterSpacing: '-.01em' }}>
-            {fmtPrettyDate(date)}
-          </div>
-          {relative && (
-            <span style={{
-              fontSize: '8.5px',
-              color: relative.color,
-              background: `${relative.color}18`,
-              border: `1px solid ${relative.color}55`,
-              borderRadius: '999px',
-              padding: '2.5px 9px',
-              fontWeight: 700,
-              letterSpacing: '.1em',
-              boxShadow: `0 1px 4px ${relative.color}25`,
-            }}>
-              {relative.label}
-            </span>
-          )}
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <span style={{
-            fontSize: '9px', color: t.text4,
-            letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 600,
-          }}>
-            {dayShifts.length} shift{dayShifts.length === 1 ? '' : 's'} · {totalAuditors} auditor{totalAuditors === 1 ? '' : 's'}
-          </span>
-        </div>
+        {dayShifts.map(s => <HistoryShiftCard key={s.shift_type} shift={s} t={t} isMobile={isMobile} />)}
       </div>
-
-      {dayShifts.map(s => <HistoryShiftRow key={s.shift_type} shift={s} t={t} isMobile={isMobile} />)}
     </div>
   )
 }
 
-function HistoryShiftRow({ shift, t, isMobile }) {
-  const isNight   = shift.shift_type === 'night'
-  const shiftAccent = isNight ? (t.gold || '#c9a84c') : (t.orange || '#e9a942')
-  const shiftIcon = isNight ? '🌙' : '☀'
-  const shiftLabel = isNight ? 'Night' : 'Morning'
-  const window  = isNight ? '19:30 – 24:00' : '08:30 – 20:00'
+// Calendar-leaf style date display. Day name → big day number → month/year.
+// Background gradient + animated TODAY ring make it the visual focal point.
+function CalendarLeaf({ date, relative, stripColor, isToday, totalAuditors, shiftCount, t, isMobile }) {
+  const [y, m, d] = date.split('-').map(Number)
+  const dt        = new Date(Date.UTC(y, m - 1, d))
+  const dayName   = dt.toLocaleDateString('en-IN', { weekday: 'short', timeZone: 'UTC' }).toUpperCase()
+  const dayNum    = String(d).padStart(2, '0')
+  const monthName = dt.toLocaleDateString('en-IN', { month: 'short', timeZone: 'UTC' }).toUpperCase()
 
   return (
     <div style={{
-      padding: isMobile ? '12px 14px' : '14px 18px',
-      display: 'flex',
-      alignItems: isMobile ? 'flex-start' : 'center',
-      gap: isMobile ? '10px' : '14px',
-      borderTop: `1px solid ${t.border}40`,
-      flexDirection: isMobile ? 'column' : 'row',
       position: 'relative',
+      width: isMobile ? 'auto' : '156px',
+      minWidth: isMobile ? 0 : '156px',
+      padding: isMobile ? '14px 16px 12px' : '18px 16px',
+      background: `linear-gradient(160deg, ${stripColor}14 0%, ${stripColor}05 60%, transparent 100%)`,
+      borderRight: isMobile ? 'none' : `1px solid ${t.border}`,
+      borderBottom: isMobile ? `1px solid ${t.border}` : 'none',
+      display: 'flex',
+      flexDirection: isMobile ? 'row' : 'column',
+      alignItems: isMobile ? 'center' : 'flex-start',
+      gap: isMobile ? '12px' : '4px',
+      justifyContent: isMobile ? 'space-between' : 'flex-start',
+      flexWrap: isMobile ? 'wrap' : 'nowrap',
     }}>
-      {/* Left accent rail in the shift colour — visible thread tying this
-          row to the shift type. */}
-      <span style={{
-        position: 'absolute', left: 0, top: '18%', bottom: '18%',
-        width: '3px',
-        borderRadius: '0 3px 3px 0',
-        background: `linear-gradient(180deg, ${shiftAccent}, ${shiftAccent}70)`,
-      }} />
-
-      <div style={{ display: 'flex', alignItems: 'center', gap: '11px', minWidth: isMobile ? 0 : '160px', paddingLeft: isMobile ? '4px' : '6px' }}>
+      {/* Day name + big number + month — torn-from-calendar feel */}
+      <div style={{
+        display: 'flex',
+        flexDirection: isMobile ? 'row' : 'column',
+        alignItems: isMobile ? 'baseline' : 'flex-start',
+        gap: isMobile ? '8px' : 0,
+      }}>
         <div style={{
-          width: '34px', height: '34px', borderRadius: '9px',
-          background: `linear-gradient(135deg, ${shiftAccent}30, ${shiftAccent}08)`,
-          border:     `1px solid ${shiftAccent}45`,
-          color:      shiftAccent,
-          display:    'flex', alignItems: 'center', justifyContent: 'center',
-          fontSize:   '15px',
+          fontSize: isMobile ? '10px' : '10.5px',
+          color: stripColor,
+          fontWeight: 800,
+          letterSpacing: '.22em',
+        }}>{dayName}</div>
+        <div style={{
+          fontSize: isMobile ? '28px' : '40px',
+          color: t.text1,
+          fontWeight: 800,
+          fontFamily: 'monospace',
+          lineHeight: 1,
+          letterSpacing: '-.04em',
+          marginTop: isMobile ? 0 : '2px',
+          textShadow: isToday ? `0 2px 12px ${stripColor}55` : 'none',
+        }}>{dayNum}</div>
+        <div style={{
+          fontSize: isMobile ? '10px' : '10.5px',
+          color: t.text3,
+          fontWeight: 700,
+          letterSpacing: '.18em',
+          marginTop: isMobile ? 0 : '6px',
+        }}>{monthName} {y}</div>
+      </div>
+
+      {/* Relative day pill */}
+      {relative && (
+        <div style={{
+          marginTop: isMobile ? 0 : '12px',
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: '6px',
+        }}>
+          {isToday && (
+            <span style={{
+              width: '6px', height: '6px', borderRadius: '50%',
+              background: stripColor,
+              boxShadow: `0 0 0 4px ${stripColor}25`,
+              animation: 'auditTodayPulse 1.8s ease-in-out infinite',
+            }} />
+          )}
+          <span style={{
+            fontSize: '8.5px',
+            color: relative.color,
+            background: `${relative.color}18`,
+            border: `1px solid ${relative.color}55`,
+            borderRadius: '999px',
+            padding: '3px 10px',
+            fontWeight: 800,
+            letterSpacing: '.12em',
+            boxShadow: `0 1px 4px ${relative.color}30`,
+          }}>{relative.label}</span>
+        </div>
+      )}
+
+      {/* Compact stats — pushed to the bottom on desktop, inline on mobile */}
+      <div style={{
+        marginTop: isMobile ? 0 : 'auto',
+        paddingTop: isMobile ? 0 : '14px',
+        fontSize: '9.5px',
+        color: t.text4,
+        letterSpacing: '.08em',
+        textTransform: 'uppercase',
+        fontWeight: 600,
+        lineHeight: 1.5,
+      }}>
+        {shiftCount} shift{shiftCount === 1 ? '' : 's'} <span style={{ opacity: 0.5 }}>·</span> {totalAuditors} auditor{totalAuditors === 1 ? '' : 's'}
+      </div>
+
+      <style>{`
+        @keyframes auditTodayPulse {
+          0%, 100% { box-shadow: 0 0 0 4px ${stripColor}25, 0 0 0 0 ${stripColor}40; }
+          50%      { box-shadow: 0 0 0 4px ${stripColor}25, 0 0 0 8px ${stripColor}00; }
+        }
+      `}</style>
+    </div>
+  )
+}
+
+// One shift inside a day card. Mini-card itself with icon, name, time pill,
+// and a horizontal auditor stack (large avatars + names).
+function HistoryShiftCard({ shift, t, isMobile }) {
+  const isNight     = shift.shift_type === 'night'
+  const shiftAccent = isNight ? (t.gold || '#c9a84c') : (t.orange || '#e9a942')
+  const shiftIcon   = isNight ? '🌙' : '☀'
+  const shiftLabel  = isNight ? 'Night Weight Audit' : 'Morning Weight + Melting'
+  const window      = isNight ? '19:30 – 24:00' : '08:30 – 20:00'
+  const empty       = shift.auditors.length === 0
+
+  return (
+    <div style={{
+      background:   `linear-gradient(135deg, ${shiftAccent}0a 0%, ${shiftAccent}03 70%, transparent 100%)`,
+      border:       `1px solid ${shiftAccent}28`,
+      borderRadius: '11px',
+      padding:      isMobile ? '11px 12px' : '12px 14px',
+      display:      'flex',
+      flexDirection: isMobile ? 'column' : 'row',
+      alignItems:   isMobile ? 'flex-start' : 'center',
+      gap:          isMobile ? '10px' : '14px',
+      transition:   'border-color .15s ease, background .15s ease',
+    }}>
+      {/* Shift identity — icon + name + time */}
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: '11px',
+        minWidth: isMobile ? 0 : '190px',
+      }}>
+        <div style={{
+          width: '38px', height: '38px', borderRadius: '10px',
+          background: `linear-gradient(135deg, ${shiftAccent}38, ${shiftAccent}10)`,
+          border: `1px solid ${shiftAccent}55`,
+          color:  shiftAccent,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          fontSize: '17px',
           flexShrink: 0,
-          boxShadow:  `0 1px 4px ${shiftAccent}15`,
+          boxShadow: `0 2px 8px ${shiftAccent}20`,
         }}>{shiftIcon}</div>
         <div>
-          <div style={{ fontSize: '12.5px', color: t.text1, fontWeight: 700, letterSpacing: '-.01em' }}>{shiftLabel}</div>
+          <div style={{ fontSize: '12.5px', color: t.text1, fontWeight: 700, letterSpacing: '-.01em', lineHeight: 1.2 }}>{shiftLabel}</div>
           <div style={{
             fontSize: '9.5px',
-            color: t.text4,
-            marginTop: '3px',
+            color: t.text3,
+            marginTop: '4px',
             fontFamily: 'monospace',
             display: 'inline-flex', alignItems: 'center', gap: '4px',
-            background: `${shiftAccent}10`,
-            border: `1px solid ${shiftAccent}25`,
+            background: `${shiftAccent}12`,
+            border: `1px solid ${shiftAccent}30`,
             borderRadius: '5px',
             padding: '2px 6px',
             letterSpacing: '.02em',
-          }}>{window} <span style={{ opacity: 0.7 }}>IST</span></div>
+          }}>{window} <span style={{ opacity: 0.65 }}>IST</span></div>
         </div>
       </div>
 
-      <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-        {shift.auditors.length === 0 ? (
+      {/* Auditor stack */}
+      <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+        {empty ? (
           <span style={{
             fontSize: '10.5px', color: t.text4, fontStyle: 'italic',
             background: `${t.text4}10`,
             border: `1px dashed ${t.text4}40`,
             borderRadius: '6px',
-            padding: '4px 10px',
+            padding: '5px 11px',
+            display: 'inline-flex', alignItems: 'center', gap: '6px',
           }}>
             ⚠ No one assigned
           </span>
