@@ -207,11 +207,18 @@ export async function GET(req) {
 
   // ── Get outside-Bangalore branches from branches master ──────────────────
   if (action === 'branches') {
+    // Bangalore branches are intentionally INCLUDED here post-cutover
+    // (1 Jun 2026). The pre-cutover .neq('region','Bangalore') filter
+    // was a safety from when Bangalore stock bypassed the consignment
+    // flow entirely; under the event-driven lifecycle they DO appear in
+    // ConsignmentData and the UI needs their region/state to decide
+    // EWB vs E-Invoice. Missing them made BOMMANAHALLI → HO render as
+    // E-INVOICE PENDING instead of EWB PENDING (region lookup returned
+    // undefined → defaulted to interstate → wrong document path).
     let q = supabase
       .from('branches')
       .select('id, name, state, region, cluster, model_type, address, city, pin_code, contact_person, contact_phone, branch_gstin, is_hub, hub_branch_name, pickup_time')
       .eq('is_active', true)
-      .neq('region', 'Bangalore')
       .order('region')
       .order('name')
     if (allowedRegions) q = q.in('region', allowedRegions)
