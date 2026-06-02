@@ -1054,9 +1054,9 @@ function HistoryShiftsList({ accent, t, shifts, loading, onRefresh, icon, isMobi
           display:    'flex', alignItems: 'center', justifyContent: 'center',
           fontSize:   '22px',
         }}>{icon}</div>
-        <div style={{ fontSize: '13px', color: t.text2, fontWeight: 600, marginBottom: '4px' }}>No past shifts yet</div>
+        <div style={{ fontSize: '13px', color: t.text2, fontWeight: 600, marginBottom: '4px' }}>No shift assignments yet</div>
         <div style={{ fontSize: '11px', color: t.text4, maxWidth: '460px', margin: '0 auto', lineHeight: 1.6 }}>
-          Once today's shift wraps up, the date + the auditors who worked it will appear here. Today's still-active shift lives in the <strong style={{ color: t.text2 }}>Shifts</strong> tab.
+          Once auditors are assigned in the <strong style={{ color: t.text2 }}>Shifts</strong> tab, each date + the auditors who worked it will appear here.
         </div>
       </div>
     )
@@ -1105,6 +1105,11 @@ function HistoryShiftsList({ accent, t, shifts, loading, onRefresh, icon, isMobi
 
 // One calendar day. Holds up to 2 rows (night + morning).
 function HistoryDayCard({ date, dayShifts, t, accent, isMobile }) {
+  const today    = istTodayYmd()
+  const relative = date === today                  ? { label: 'TODAY',     color: t.gold || '#c9a84c' }
+                 : date === addDaysYmd(today,  1)  ? { label: 'TOMORROW',  color: t.blue || '#3a8fbf' }
+                 : date === addDaysYmd(today, -1)  ? { label: 'YESTERDAY', color: t.text3 || '#7a6a4a' }
+                 : null
   return (
     <div style={{
       background:   t.card2 || t.card,
@@ -1118,12 +1123,29 @@ function HistoryDayCard({ date, dayShifts, t, accent, isMobile }) {
         background: `${accent}06`,
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         gap: '10px',
+        flexWrap: 'wrap',
       }}>
-        <div style={{ fontSize: '12.5px', color: t.text1, fontWeight: 700, letterSpacing: '-.01em' }}>
-          {fmtPrettyDate(date)}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+          <div style={{ fontSize: '12.5px', color: t.text1, fontWeight: 700, letterSpacing: '-.01em' }}>
+            {fmtPrettyDate(date)}
+          </div>
+          {relative && (
+            <span style={{
+              fontSize: '8.5px',
+              color: relative.color,
+              background: `${relative.color}15`,
+              border: `1px solid ${relative.color}50`,
+              borderRadius: '999px',
+              padding: '2px 7px',
+              fontWeight: 700,
+              letterSpacing: '.08em',
+            }}>
+              {relative.label}
+            </span>
+          )}
         </div>
         <span style={{ fontSize: '9.5px', color: t.text4, letterSpacing: '.08em', textTransform: 'uppercase', fontWeight: 600 }}>
-          {dayShifts.length} shift{dayShifts.length === 1 ? '' : 's'} run
+          {dayShifts.length} shift{dayShifts.length === 1 ? '' : 's'} assigned
         </span>
       </div>
       {dayShifts.map(s => <HistoryShiftRow key={s.shift_type} shift={s} t={t} isMobile={isMobile} />)}

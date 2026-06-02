@@ -73,13 +73,14 @@ export async function GET(req) {
     const days     = Number.isFinite(daysRaw) && daysRaw > 0 ? Math.min(180, daysRaw) : 30
     const fromDate = addDaysYmd(today, -days)
 
-    // Past shifts only — today's still-in-progress shift is shown by the
-    // Shifts tab, not in history.
+    // Include today + future-dated assignments too: once an auditor is
+    // assigned to tonight's shift, that record should surface in history
+    // immediately — the shift's start time is for ACCESS gating, not for
+    // visibility of the assignment itself.
     const { data: rows, error } = await supabase
       .from('audit_shift_assignments')
       .select('shift_date, shift_type, auditor_id, assigned_at')
       .gte('shift_date', fromDate)
-      .lt('shift_date', today)
       .order('shift_date', { ascending: false })
 
     if (error) return Response.json({ error: error.message }, { status: 500 })
@@ -112,7 +113,7 @@ export async function GET(req) {
       return a.shift_type === 'night' ? -1 : 1
     })
 
-    return Response.json({ shifts, from: fromDate, to: addDaysYmd(today, -1) })
+    return Response.json({ shifts, from: fromDate })
   }
 
   // ── Single-date mode (Shifts tab) ─────────────────────────────────────
