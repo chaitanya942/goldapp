@@ -22,7 +22,7 @@ import { useApp } from '../../lib/context'
 import GoldSpinner from '../ui/GoldSpinner'
 import Toast from '../ui/Toast'
 import { authedFetch } from '../../lib/authedFetch'
-import { CONSIGNMENT_THEMES as THEMES } from '../../lib/consignmentTheme'
+import { CONSIGNMENT_THEMES as THEMES, useMobile } from '../../lib/consignmentTheme'
 
 const fmtWt   = (n) => n != null ? `${Number(n).toFixed(3)}g` : '—'
 const fmtDate = (d) => d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: '2-digit' }) : '—'
@@ -154,6 +154,7 @@ function matchesQuery(branch, q) {
 export default function CollectionAudit() {
   const { theme, role } = useApp()
   const t = THEMES[theme] || THEMES.dark
+  const isMobile = useMobile()
 
   // For role='audit' users we read their current shift assignment so the page
   // can show a "you're on night/morning shift" context banner. Non-audit
@@ -354,7 +355,14 @@ export default function CollectionAudit() {
   const hasSearchActive = (search || '').trim().length > 0
 
   return (
-    <div style={{ padding: '24px 28px', maxWidth: '1400px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+    <div style={{
+      padding: isMobile ? '12px 12px 80px' : '24px 28px',
+      maxWidth: '1400px',
+      margin: '0 auto',
+      display: 'flex',
+      flexDirection: 'column',
+      gap: isMobile ? '14px' : '20px',
+    }}>
       {toast && <Toast key={toast.key} msg={toast.msg} type={toast.type} onDone={() => setToast(null)} />}
 
       {/* Shift context banner — only shown to role='audit' users when an
@@ -790,6 +798,7 @@ export default function CollectionAudit() {
         <AuditModal
           bill={activeBill}
           t={t}
+          isMobile={isMobile}
           onClose={() => setActiveBill(null)}
           onDone={(msg) => { setToast({ msg, type: 'success', key: Date.now() }); setActiveBill(null); fetchAll() }}
           onError={(msg) => setToast({ msg, type: 'error', key: Date.now() })}
@@ -1239,7 +1248,7 @@ function BillCard({ bill, t, onAudit, onMarkReceived, dateField }) {
 }
 
 // ─── Blind audit modal ─────────────────────────────────────────────────────
-function AuditModal({ bill, t, onClose, onDone, onError }) {
+function AuditModal({ bill, t, isMobile, onClose, onDone, onError }) {
   const [weight,   setWeight]   = useState('')
   const [remark,   setRemark]   = useState(bill.audit_remark || '')
   const [busy,     setBusy]     = useState(false)
@@ -1295,8 +1304,25 @@ function AuditModal({ bill, t, onClose, onDone, onError }) {
     } finally { setBusy(false) }
   }
 
-  const overlay = { position: 'fixed', inset: 0, background: 'rgba(0,0,0,.76)', backdropFilter: 'blur(6px)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }
-  const card    = { background: t.card, border: `1px solid ${t.border}`, borderRadius: '16px', maxWidth: '580px', width: '100%', overflow: 'hidden', boxShadow: `0 20px 60px rgba(0,0,0,.7)` }
+  // Mobile: minimal overlay padding so the card uses the full viewport
+  // (auditors hold the phone in one hand while operating the scale —
+  // a half-screen modal with chrome around it wastes precious touch area).
+  const overlay = {
+    position: 'fixed', inset: 0,
+    background: 'rgba(0,0,0,.76)', backdropFilter: 'blur(6px)',
+    zIndex: 1000,
+    display: 'flex', alignItems: isMobile ? 'flex-end' : 'center', justifyContent: 'center',
+    padding: isMobile ? '0' : '20px',
+  }
+  const card = {
+    background: t.card,
+    border: `1px solid ${t.border}`,
+    borderRadius: isMobile ? '16px 16px 0 0' : '16px',
+    maxWidth: '580px', width: '100%',
+    maxHeight: isMobile ? '92vh' : 'none',
+    overflowY: 'auto', overflowX: 'hidden',
+    boxShadow: `0 20px 60px rgba(0,0,0,.7)`,
+  }
   const label   = { fontSize: '10px', color: t.text4, letterSpacing: '.14em', textTransform: 'uppercase', fontWeight: 600 }
 
   const previouslyAudited = bill.audit_gross_weight != null
@@ -1305,7 +1331,7 @@ function AuditModal({ bill, t, onClose, onDone, onError }) {
     <div style={overlay} onClick={onClose}>
       <div style={card} onClick={e => e.stopPropagation()}>
         {/* Hero header */}
-        <div style={{ background: `linear-gradient(135deg, ${t.gold}15, transparent)`, padding: '24px 28px', borderBottom: `1px solid ${t.border}`, position: 'relative', overflow: 'hidden' }}>
+        <div style={{ background: `linear-gradient(135deg, ${t.gold}15, transparent)`, padding: isMobile ? '16px 18px' : '24px 28px', borderBottom: `1px solid ${t.border}`, position: 'relative', overflow: 'hidden' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
             <div style={{
               width: '46px', height: '46px', borderRadius: '12px',
@@ -1324,7 +1350,7 @@ function AuditModal({ bill, t, onClose, onDone, onError }) {
           </div>
         </div>
 
-        <div style={{ padding: '24px 28px', display: 'flex', flexDirection: 'column', gap: '18px' }}>
+        <div style={{ padding: isMobile ? '16px 18px' : '24px 28px', display: 'flex', flexDirection: 'column', gap: isMobile ? '14px' : '18px' }}>
           {/* Re-audit context */}
           {previouslyAudited && !revealed && (
             <div style={{ padding: '12px 14px', borderRadius: '10px', background: `${t.orange}10`, border: `1px solid ${t.orange}40`, fontSize: '12px', color: t.orange, display: 'flex', gap: '10px', alignItems: 'flex-start' }}>
@@ -1422,8 +1448,18 @@ function AuditModal({ bill, t, onClose, onDone, onError }) {
           )}
         </div>
 
-        {/* Action footer */}
-        <div style={{ padding: '16px 28px', borderTop: `1px solid ${t.border}`, background: t.card2 || t.card, display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+        {/* Action footer — stacks on mobile so each button gets full width
+            for one-handed scale operation. */}
+        <div style={{
+          padding: isMobile ? '14px 18px' : '16px 28px',
+          borderTop: `1px solid ${t.border}`,
+          background: t.card2 || t.card,
+          display: 'flex',
+          gap: '8px',
+          justifyContent: 'flex-end',
+          flexDirection: isMobile ? 'column-reverse' : 'row',
+          flexWrap: 'wrap',
+        }}>
           <button onClick={onClose}
             style={{ background: 'transparent', border: `1px solid ${t.border}`, borderRadius: '9px', padding: '11px 20px', fontSize: '12px', color: t.text3, cursor: 'pointer', fontWeight: 600 }}>
             Cancel
