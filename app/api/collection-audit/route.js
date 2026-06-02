@@ -137,9 +137,15 @@ export async function GET(req) {
     return Response.json({ rows: out })
   }
 
-  // ── History mode: paginated list of every audited bill in the window ──
-  // Used by the Audit Report page to power KPIs + per-auditor/per-branch
-  // breakdowns. Filters by audited_at, not purchase_date.
+  // ── History mode: per-bill audit log + per-branch breakdown ──────────
+  // Used by the Audit Report page. Returns:
+  //   rows          → one entry per audited bill in the window. Each carries
+  //                   first_audit + latest_audit from audit_events so the
+  //                   log can show original measurement vs re-audit weight.
+  //   branchBreakdown → one entry per source branch with in-transit /
+  //                   received / audited / discrepancy counts, expected
+  //                   vs received-audited weights, and the list of
+  //                   auditors who touched bills from that branch in window.
   if (mode === 'history') {
     const from = url.searchParams.get('from')   // YYYY-MM-DD inclusive
     const to   = url.searchParams.get('to')     // YYYY-MM-DD inclusive
@@ -153,22 +159,165 @@ export async function GET(req) {
       .limit(2000)
     if (from) q = q.gte('audited_at', `${from}T00:00:00+05:30`)
     if (to)   q = q.lte('audited_at', `${to}T23:59:59+05:30`)
-    const { data, error } = await q
+    const { data: audited, error } = await q
     if (error) return Response.json({ error: error.message }, { status: 500 })
 
-    // Resolve auditor emails for display — single user_profiles lookup.
-    const userIds = [...new Set((data || []).map(r => r.audited_by).filter(Boolean))]
+    // ── Re-audit history per bill ────────────────────────────────────────
+    // Pull every audit event for the bills in this window so the UI can
+    // separate first audit from latest re-audit. We don't filter events
+    // by window — even if a re-audit happened OUTSIDE the window, it's
+    // still the most recent audit on that bill and should surface.
+    const billIds = (audited || []).map(r => r.id)
+    const eventsByBill = new Map()
+    if (billIds.length) {
+      // Chunk to dodge any large-IN limits on the Supabase REST layer.
+      const EVT_CHUNK = 1000
+      for (let i = 0; i < billIds.length; i += EVT_CHUNK) {
+        const slice = billIds.slice(i, i + EVT_CHUNK)
+        const { data: evts } = await supabase
+          .from('audit_events')
+          .select('purchase_id, action, audit_gross_weight, crm_gross_weight, discrepancy_g, remark, audited_at, audited_by')
+          .in('purchase_id', slice)
+          .order('audited_at', { ascending: true })
+        for (const e of (evts || [])) {
+          if (!eventsByBill.has(e.purchase_id)) eventsByBill.set(e.purchase_id, [])
+          eventsByBill.get(e.purchase_id).push(e)
+        }
+      }
+    }
+
+    // Resolve auditor emails — covers both bill-level audited_by and
+    // event-level audited_by in one round-trip.
+    const userIds = new Set()
+    for (const r of (audited || [])) if (r.audited_by) userIds.add(r.audited_by)
+    for (const evts of eventsByBill.values()) {
+      for (const e of evts) if (e.audited_by) userIds.add(e.audited_by)
+    }
     let emailByUid = new Map()
-    if (userIds.length) {
+    if (userIds.size) {
       const { data: profiles } = await supabase
         .from('user_profiles')
         .select('id, email, full_name')
-        .in('id', userIds)
+        .in('id', [...userIds])
       emailByUid = new Map((profiles || []).map(p => [p.id, p.email || p.full_name || '—']))
     }
-    return Response.json({
-      rows: (data || []).map(r => ({ ...r, audited_by_email: emailByUid.get(r.audited_by) || '—' })),
+
+    const rows = (audited || []).map(r => {
+      const events = eventsByBill.get(r.id) || []
+      const first  = events[0] || null
+      const latest = events.length > 1 ? events[events.length - 1] : null
+      return {
+        ...r,
+        audited_by_email: emailByUid.get(r.audited_by) || '—',
+        first_audit: first ? {
+          audit_gross_weight: first.audit_gross_weight,
+          discrepancy_g:      first.discrepancy_g,
+          audited_at:         first.audited_at,
+          audited_by_email:   emailByUid.get(first.audited_by) || null,
+          remark:             first.remark,
+          action:             first.action,
+        } : null,
+        reaudit: latest ? {
+          audit_gross_weight: latest.audit_gross_weight,
+          discrepancy_g:      latest.discrepancy_g,
+          audited_at:         latest.audited_at,
+          audited_by_email:   emailByUid.get(latest.audited_by) || null,
+          remark:             latest.remark,
+          action:             latest.action,
+        } : null,
+        audit_attempts: events.length,
+      }
     })
+
+    // ── Per-branch breakdown ─────────────────────────────────────────────
+    // In-transit is a LIVE snapshot — bills currently sitting in
+    // stock_status='in_consignment' from each source branch, irrespective
+    // of the audit window. The rest of the metrics scope to the audit
+    // window via the rows fetched above.
+    const inTransitByBranch = new Map()
+    {
+      const CHUNK = 1000
+      let fromIdx = 0
+      while (true) {
+        const { data: live } = await supabase
+          .from('purchases')
+          .select('branch_name, gross_weight, net_weight')
+          .eq('stock_status', 'in_consignment')
+          .eq('is_deleted', false)
+          .neq('crm_status', 'deleted')
+          .range(fromIdx, fromIdx + CHUNK - 1)
+        if (!live || live.length === 0) break
+        for (const p of live) {
+          const k = p.branch_name || '—'
+          if (!inTransitByBranch.has(k)) inTransitByBranch.set(k, { bills: 0, weight_g: 0 })
+          inTransitByBranch.get(k).bills    += 1
+          inTransitByBranch.get(k).weight_g += Number(p.gross_weight || 0)
+        }
+        if (live.length < CHUNK) break
+        fromIdx += CHUNK
+      }
+    }
+
+    const branchAgg = new Map()
+    const ensure = (k) => {
+      if (!branchAgg.has(k)) branchAgg.set(k, {
+        branch:                   k,
+        in_transit_count:         0,
+        in_transit_weight_g:      0,
+        received_count:           0,
+        received_weight_g:        0,
+        audited_count:            0,
+        discrepancy_count:        0,
+        sum_abs_discrepancy_g:    0,
+        total_expected_g:         0,   // sum of CRM gross for audited bills in window
+        total_received_audited_g: 0,   // sum of measured for the received subset
+        auditors:                 new Set(),
+      })
+      return branchAgg.get(k)
+    }
+
+    // Seed with in-transit so branches with no audits this window still appear.
+    for (const [k, v] of inTransitByBranch.entries()) {
+      const e = ensure(k)
+      e.in_transit_count   = v.bills
+      e.in_transit_weight_g = Number(v.weight_g.toFixed(3))
+    }
+
+    for (const r of rows) {
+      const e = ensure(r.branch_name || '—')
+      e.audited_count    += 1
+      e.total_expected_g += Number(r.gross_weight || 0)
+      if (r.stock_status === 'at_ho') {
+        e.received_count           += 1
+        e.received_weight_g        += Number(r.audit_gross_weight || 0)
+        e.total_received_audited_g += Number(r.audit_gross_weight || 0)
+      }
+      const d = Number(r.audit_discrepancy_g || 0)
+      if (d !== 0) {
+        e.discrepancy_count    += 1
+        e.sum_abs_discrepancy_g += Math.abs(d)
+      }
+      if (r.audited_by_email) e.auditors.add(r.audited_by_email)
+    }
+
+    const branchBreakdown = [...branchAgg.values()].map(b => ({
+      branch:                   b.branch,
+      in_transit_count:         b.in_transit_count,
+      in_transit_weight_g:      Number(b.in_transit_weight_g.toFixed(3)),
+      received_count:           b.received_count,
+      received_weight_g:        Number(b.received_weight_g.toFixed(3)),
+      audited_count:            b.audited_count,
+      discrepancy_count:        b.discrepancy_count,
+      sum_abs_discrepancy_g:    Number(b.sum_abs_discrepancy_g.toFixed(3)),
+      total_expected_g:         Number(b.total_expected_g.toFixed(3)),
+      total_received_audited_g: Number(b.total_received_audited_g.toFixed(3)),
+      auditors:                 [...b.auditors],
+    })).sort((a, b) =>
+      b.discrepancy_count - a.discrepancy_count ||
+      b.audited_count     - a.audited_count
+    )
+
+    return Response.json({ rows, branchBreakdown })
   }
 
   // ── Default: pending audit queue (the original AuditData screen) ──
@@ -462,18 +611,35 @@ export async function POST(req) {
   }
 
   const diff = Number((measured - Number(bill.gross_weight || 0)).toFixed(3))
+  const auditedAtIso = new Date().toISOString()
 
   // Common audit-fields write — applied on both 'receive' and 'keep_pending'.
   const auditFields = {
     audit_gross_weight: measured,
-    audited_at:         new Date().toISOString(),
+    audited_at:         auditedAtIso,
     audited_by:         auth.user?.id || null,
     audit_remark:       remark || null,
   }
 
+  // Append-only event log — one row per audit ACTION, even re-audits. See
+  // sql/audit_events.sql for schema + backfill. We snapshot CRM gross so
+  // a later CRM edit can't retroactively rewrite history.
+  const recordEvent = (eventAction) =>
+    supabase.from('audit_events').insert({
+      purchase_id,
+      action:             eventAction,
+      audit_gross_weight: measured,
+      crm_gross_weight:   Number(bill.gross_weight || 0),
+      discrepancy_g:      diff,
+      remark:             remark || null,
+      audited_at:         auditedAtIso,
+      audited_by:         auth.user?.id || null,
+    })
+
   if (action === 'keep_pending') {
     const { error } = await supabase.from('purchases').update(auditFields).eq('id', purchase_id)
     if (error) return Response.json({ error: error.message }, { status: 500 })
+    await recordEvent('keep_pending')
     return Response.json({
       success:       true,
       action:        'keep_pending',
@@ -492,6 +658,7 @@ export async function POST(req) {
     // Write the measurement now so the discrepancy badge surfaces in the
     // queue even if the auditor closes the modal without picking a path.
     await supabase.from('purchases').update(auditFields).eq('id', purchase_id)
+    await recordEvent('keep_pending')   // unresolved measurement → still pending
     return Response.json({
       error:          'Gross weight does not match CRM. Provide an audit_remark to accept the discrepancy or click "Keep Pending".',
       discrepancy_g:  diff,
@@ -511,6 +678,7 @@ export async function POST(req) {
     })
     .eq('id', purchase_id)
   if (updErr) return Response.json({ error: updErr.message }, { status: 500 })
+  await recordEvent('receive')
 
   // ── Auto-flip parent consignment to 'received' if this was the last
   //    in_consignment bill. INTERNAL consignments are auto-received at
