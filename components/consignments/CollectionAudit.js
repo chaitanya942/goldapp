@@ -300,8 +300,10 @@ export default function CollectionAudit() {
   // from a hub in the same region.
   //
   // Sort order is data-driven: regions with the most bills first, ties
-  // broken alphabetically. No hardcoded region list — adding a new region
-  // to the branches table picks up automatically with no code change.
+  // broken alphabetically. Within each region, branches sort A→Z by name
+  // so the auditor can scan a long list (Bangalore has ~30) without
+  // hunting around. No hardcoded region list — adding a new region to
+  // the branches table picks up automatically with no code change.
   const outstationByRegion = useMemo(() => {
     const m = new Map()
     for (const b of filteredOutstationByBranch) {
@@ -311,7 +313,9 @@ export default function CollectionAudit() {
     }
     const entries = [...m.entries()].map(([region, branches]) => ({
       region,
-      branches,
+      branches: [...branches].sort((a, b) =>
+        String(a.branch_name || '').localeCompare(String(b.branch_name || ''), undefined, { sensitivity: 'base' })
+      ),
       _billCount: branches.reduce((s, x) => s + x.bills.length, 0),
     }))
     entries.sort((a, b) => {
