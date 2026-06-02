@@ -1912,7 +1912,7 @@ export async function POST(req) {
   // can see the Bidding Volume page (page.consignment-bidding) rather than
   // a hardcoded role group — so the gate can never lock out whichever role
   // ops actually grant the page to (the KT §VII trap-2 lesson).
-  const BIDDING_WRITES = new Set(['set_bidding_pending', 'create_booking', 'update_booking_status', 'close_booking_pipeline', 'toggle_bill_hold'])
+  const BIDDING_WRITES = new Set(['set_bidding_pending', 'create_booking', 'update_booking_status', 'close_booking_pipeline', 'toggle_bill_hold', 'unbook_bills'])
   let auth
   if (BIDDING_WRITES.has(action)) {
     auth = await requireAuthForPage(req, 'consignment-bidding')
@@ -3324,6 +3324,104 @@ export async function POST(req) {
     })
   }
 
+  // ── Stuck-booking summary ──────────────────────────────────────────────────
+  // Sibling to bidding_at_risk_summary, but for the past-day case: bills
+  // that were booked YESTERDAY OR EARLIER, are still at_branch, and have
+  // booking_id IS NOT NULL — meaning the consignment was never created and
+  // the stock never moved. Ops must either fire the consignment now or
+  // unbook the bill. Drives the non-dismissible StuckBookingsBanner.
+  //
+  // Filter logic:
+  //   booking_id IS NOT NULL                          ← still attached
+  //   stock_status = 'at_branch'                      ← never moved
+  //   booked_at < istStartOfDay(today)                ← past-day, not same-day
+  //   is_deleted = false, audit_consumed_at IS NULL   ← still live
+  if (action === 'bidding_stuck_summary') {
+    const todayIst   = istToday()
+    const todayStart = istStartOfDayIso(todayIst)
+
+    // Page through purchases — Supabase caps at 1000 rows per query, and a
+    // multi-day backlog could easily exceed that across branches.
+    const CHUNK = 1000
+    let from = 0
+    const allBills = []
+    while (true) {
+      let q = supabase
+        .from('purchases')
+        .select('id, application_id, branch_name, current_branch, booking_id, booked_at, net_weight, gross_weight, purchase_date')
+        .not('booking_id', 'is', null)
+        .eq('stock_status', 'at_branch')
+        .eq('is_deleted', false)
+        .is('audit_consumed_at', null)
+        .lt('booked_at', todayStart)
+        .order('booked_at', { ascending: true })
+        .range(from, from + CHUNK - 1)
+      if (allowedBranches) q = q.in('branch_name', allowedBranches)
+      const { data, error } = await q
+      if (error) return Response.json({ error: error.message }, { status: 500 })
+      if (!data || data.length === 0) break
+      allBills.push(...data)
+      if (data.length < CHUNK) break
+      from += CHUNK
+    }
+
+    if (allBills.length === 0) {
+      return Response.json({ data: { as_of: new Date().toISOString(), date: todayIst, count: 0, bills: [], by_branch: [], totals: { bills: 0, weight_g: 0 } } })
+    }
+
+    // Resolve booking metadata (party, date) so the row shows useful context.
+    const bookingIds = [...new Set(allBills.map(b => b.booking_id))]
+    const { data: bookings } = await supabase
+      .from('cal_quotas')
+      .select('id, party, date, status')
+      .in('id', bookingIds)
+    const bookingById = new Map((bookings || []).map(b => [b.id, b]))
+
+    // Per-bill view + per-branch aggregation. branch_name is the source of
+    // truth here (current_branch may be set during consignment movement but
+    // since these bills never moved, branch_name === current_branch).
+    const byBranchMap = {}
+    const bills = []
+    for (const p of allBills) {
+      const branch = p.current_branch || p.branch_name
+      const bk     = bookingById.get(p.booking_id) || null
+      const wt     = Number(p.net_weight || 0)
+      bills.push({
+        id:             p.id,
+        application_id: p.application_id,
+        branch_name:    branch,
+        booking_id:     p.booking_id,
+        booked_at:      p.booked_at,
+        purchase_date:  p.purchase_date,
+        net_weight_g:   Number(wt.toFixed(3)),
+        gross_weight_g: Number(Number(p.gross_weight || 0).toFixed(3)),
+        booking_party:  bk?.party  || null,
+        booking_date:   bk?.date   || null,
+        booking_status: bk?.status || null,
+      })
+      if (!byBranchMap[branch]) byBranchMap[branch] = { branch_name: branch, bills: 0, weight_g: 0 }
+      byBranchMap[branch].bills    += 1
+      byBranchMap[branch].weight_g += wt
+    }
+    const byBranch = Object.values(byBranchMap)
+      .map(b => ({ ...b, weight_g: Number(b.weight_g.toFixed(3)) }))
+      .sort((a, b) => b.weight_g - a.weight_g)
+    const totals = {
+      bills:    bills.length,
+      weight_g: Number(bills.reduce((s, b) => s + b.net_weight_g, 0).toFixed(3)),
+    }
+    return Response.json({
+      data: {
+        as_of:    new Date().toISOString(),
+        date:     todayIst,
+        count:    bills.length,
+        bills,
+        by_branch: byBranch,
+        totals,
+      },
+    })
+  }
+
   // ── Bills attached to a booking, grouped by source branch ─────────────────
   // Powers the "Create consignment" action on at_risk bookings — the UI needs
   // to know which source branches to fire a consignment for and which bills
@@ -3955,6 +4053,51 @@ export async function POST(req) {
     if (updErr) return Response.json({ error: updErr.message }, { status: 500 })
 
     return Response.json({ data: { closed: true, residual_g: Number(residual.toFixed(3)) } })
+  }
+
+  // ── Unbook a list of bills ────────────────────────────────────────────────
+  // Used by the StuckBookingsBanner's "Unbook" action. Takes a list of
+  // application_ids and clears booking_id + booked_at on each. Defensive:
+  // only flips bills that are CURRENTLY booked AND still at_branch — refuses
+  // to touch a bill whose consignment has since fired (booking_id may now be
+  // referenced by an in-flight consignment). Returns per-id outcome so the
+  // banner can show which succeeded and which were skipped.
+  if (action === 'unbook_bills') {
+    const { application_ids } = body
+    if (!Array.isArray(application_ids) || application_ids.length === 0) {
+      return Response.json({ error: 'application_ids[] required' }, { status: 400 })
+    }
+
+    const { data: rows, error: fErr } = await supabase
+      .from('purchases')
+      .select('id, application_id, stock_status, booking_id, is_deleted, audit_consumed_at')
+      .in('application_id', application_ids)
+    if (fErr) return Response.json({ error: fErr.message }, { status: 500 })
+
+    const byApp = new Map((rows || []).map(r => [r.application_id, r]))
+    const toUnbook = []
+    const skipped  = []
+    for (const appId of application_ids) {
+      const r = byApp.get(appId)
+      if (!r)                            { skipped.push({ application_id: appId, reason: 'Not found' });           continue }
+      if (r.is_deleted)                  { skipped.push({ application_id: appId, reason: 'Deleted' });             continue }
+      if (r.audit_consumed_at)           { skipped.push({ application_id: appId, reason: 'Already audit-consumed' }); continue }
+      if (!r.booking_id)                 { skipped.push({ application_id: appId, reason: 'Not booked' });          continue }
+      if (r.stock_status !== 'at_branch'){ skipped.push({ application_id: appId, reason: `Stock status is ${r.stock_status}` }); continue }
+      toUnbook.push(r.id)
+    }
+
+    if (toUnbook.length === 0) {
+      return Response.json({ data: { unbooked: 0, skipped } })
+    }
+
+    const { error: uErr } = await supabase
+      .from('purchases')
+      .update({ booking_id: null, booked_at: null })
+      .in('id', toUnbook)
+    if (uErr) return Response.json({ error: uErr.message }, { status: 500 })
+
+    return Response.json({ data: { unbooked: toUnbook.length, skipped } })
   }
 
   return Response.json({ error: 'Invalid action' }, { status: 400 })
