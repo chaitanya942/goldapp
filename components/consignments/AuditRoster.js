@@ -1073,29 +1073,56 @@ function HistoryShiftsList({ accent, t, shifts, loading, onRefresh, icon, isMobi
 
   const dayCount = dateEntries.length
 
+  // Total assignments + unique auditors give the header strip a meaningful
+  // "feel" rather than just "N days" — ops can see scale at a glance.
+  const totalAssignments = shifts.reduce((n, s) => n + s.auditors.length, 0)
+  const uniqueAuditors   = new Set(shifts.flatMap(s => s.auditors.map(a => a.id))).size
+
   return (
-    <div style={{ padding: isMobile ? '10px 14px 16px' : '12px 18px 18px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+    <div style={{ padding: isMobile ? '12px 14px 18px' : '14px 20px 20px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+      {/* Header strip — date count + scale chips + refresh */}
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        fontSize: '10px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 600,
-        padding: '0 2px 4px',
+        gap: '10px', flexWrap: 'wrap',
+        padding: '2px 2px 0',
       }}>
-        <span>{dayCount} day{dayCount === 1 ? '' : 's'} of history</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+          <span style={{
+            fontSize: '10px', color: t.text3,
+            letterSpacing: '.14em', textTransform: 'uppercase', fontWeight: 700,
+          }}>{dayCount} day{dayCount === 1 ? '' : 's'} · {totalAssignments} assignment{totalAssignments === 1 ? '' : 's'}</span>
+          {uniqueAuditors > 0 && (
+            <span style={{
+              fontSize: '9px', color: t.text4,
+              background: `${t.border}40`,
+              border: `1px solid ${t.border}`,
+              borderRadius: '999px',
+              padding: '2px 8px',
+              fontWeight: 600, letterSpacing: '.04em',
+            }}>{uniqueAuditors} auditor{uniqueAuditors === 1 ? '' : 's'}</span>
+          )}
+        </div>
         <button type="button" onClick={onRefresh}
           style={{
             background: 'transparent',
             border: `1px solid ${t.border}`,
-            borderRadius: '6px',
-            padding: '4px 10px',
-            fontSize: '9px',
-            color: t.text3,
+            borderRadius: '7px',
+            padding: '5px 12px',
+            fontSize: '9.5px',
+            color: t.text2,
             cursor: 'pointer',
             fontWeight: 700,
-            letterSpacing: '.06em',
-          }}>
+            letterSpacing: '.08em',
+            display: 'inline-flex', alignItems: 'center', gap: '5px',
+            transition: 'border-color .15s ease, color .15s ease',
+          }}
+          onMouseEnter={(e) => { e.currentTarget.style.borderColor = `${accent}60`; e.currentTarget.style.color = accent }}
+          onMouseLeave={(e) => { e.currentTarget.style.borderColor = t.border; e.currentTarget.style.color = t.text2 }}>
+          <span style={{ fontSize: '11px', lineHeight: 1 }}>↻</span>
           REFRESH
         </button>
       </div>
+
       {dateEntries.map(([date, dayShifts]) => (
         <HistoryDayCard key={date} date={date} dayShifts={dayShifts} t={t} accent={accent} isMobile={isMobile} />
       ))}
@@ -1103,51 +1130,72 @@ function HistoryShiftsList({ accent, t, shifts, loading, onRefresh, icon, isMobi
   )
 }
 
-// One calendar day. Holds up to 2 rows (night + morning).
+// One calendar day. Holds up to 2 rows (night + morning). The header strip
+// inherits a top accent in the relative-day colour (gold/blue/grey) so the
+// eye finds TODAY instantly when scanning a long list.
 function HistoryDayCard({ date, dayShifts, t, accent, isMobile }) {
   const today    = istTodayYmd()
   const relative = date === today                  ? { label: 'TODAY',     color: t.gold || '#c9a84c' }
                  : date === addDaysYmd(today,  1)  ? { label: 'TOMORROW',  color: t.blue || '#3a8fbf' }
                  : date === addDaysYmd(today, -1)  ? { label: 'YESTERDAY', color: t.text3 || '#7a6a4a' }
                  : null
+  const stripColor = relative?.color || accent
+  const totalAuditors = dayShifts.reduce((n, s) => n + s.auditors.length, 0)
+
   return (
     <div style={{
       background:   t.card2 || t.card,
       border:       `1px solid ${t.border}`,
-      borderRadius: '11px',
+      borderRadius: '13px',
       overflow:     'hidden',
+      position:     'relative',
+      boxShadow:    `0 1px 3px ${t.border}40`,
+      transition:   'transform .15s ease, box-shadow .15s ease, border-color .15s ease',
     }}>
+      {/* Top accent strip — colour codes today / tomorrow / yesterday */}
       <div style={{
-        padding: isMobile ? '10px 14px' : '10px 16px',
+        position: 'absolute', top: 0, left: 0, right: 0, height: '2px',
+        background: `linear-gradient(90deg, ${stripColor} 0%, ${stripColor}40 60%, transparent 100%)`,
+      }} />
+
+      <div style={{
+        padding: isMobile ? '11px 14px' : '12px 18px',
         borderBottom: `1px solid ${t.border}`,
-        background: `${accent}06`,
+        background: `linear-gradient(135deg, ${stripColor}08 0%, transparent 70%)`,
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         gap: '10px',
         flexWrap: 'wrap',
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-          <div style={{ fontSize: '12.5px', color: t.text1, fontWeight: 700, letterSpacing: '-.01em' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+          <div style={{ fontSize: '13px', color: t.text1, fontWeight: 700, letterSpacing: '-.01em' }}>
             {fmtPrettyDate(date)}
           </div>
           {relative && (
             <span style={{
               fontSize: '8.5px',
               color: relative.color,
-              background: `${relative.color}15`,
-              border: `1px solid ${relative.color}50`,
+              background: `${relative.color}18`,
+              border: `1px solid ${relative.color}55`,
               borderRadius: '999px',
-              padding: '2px 7px',
+              padding: '2.5px 9px',
               fontWeight: 700,
-              letterSpacing: '.08em',
+              letterSpacing: '.1em',
+              boxShadow: `0 1px 4px ${relative.color}25`,
             }}>
               {relative.label}
             </span>
           )}
         </div>
-        <span style={{ fontSize: '9.5px', color: t.text4, letterSpacing: '.08em', textTransform: 'uppercase', fontWeight: 600 }}>
-          {dayShifts.length} shift{dayShifts.length === 1 ? '' : 's'} assigned
-        </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <span style={{
+            fontSize: '9px', color: t.text4,
+            letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 600,
+          }}>
+            {dayShifts.length} shift{dayShifts.length === 1 ? '' : 's'} · {totalAuditors} auditor{totalAuditors === 1 ? '' : 's'}
+          </span>
+        </div>
       </div>
+
       {dayShifts.map(s => <HistoryShiftRow key={s.shift_type} shift={s} t={t} isMobile={isMobile} />)}
     </div>
   )
@@ -1158,36 +1206,66 @@ function HistoryShiftRow({ shift, t, isMobile }) {
   const shiftAccent = isNight ? (t.gold || '#c9a84c') : (t.orange || '#e9a942')
   const shiftIcon = isNight ? '🌙' : '☀'
   const shiftLabel = isNight ? 'Night' : 'Morning'
-  const window  = isNight ? '19:30–24:00 IST' : '08:30–20:00 IST'
+  const window  = isNight ? '19:30 – 24:00' : '08:30 – 20:00'
 
   return (
     <div style={{
-      padding: isMobile ? '11px 14px' : '12px 16px',
+      padding: isMobile ? '12px 14px' : '14px 18px',
       display: 'flex',
       alignItems: isMobile ? 'flex-start' : 'center',
-      gap: '12px',
+      gap: isMobile ? '10px' : '14px',
       borderTop: `1px solid ${t.border}40`,
       flexDirection: isMobile ? 'column' : 'row',
+      position: 'relative',
     }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: isMobile ? 0 : '140px' }}>
+      {/* Left accent rail in the shift colour — visible thread tying this
+          row to the shift type. */}
+      <span style={{
+        position: 'absolute', left: 0, top: '18%', bottom: '18%',
+        width: '3px',
+        borderRadius: '0 3px 3px 0',
+        background: `linear-gradient(180deg, ${shiftAccent}, ${shiftAccent}70)`,
+      }} />
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: '11px', minWidth: isMobile ? 0 : '160px', paddingLeft: isMobile ? '4px' : '6px' }}>
         <div style={{
-          width: '30px', height: '30px', borderRadius: '8px',
-          background: `linear-gradient(135deg, ${shiftAccent}30, ${shiftAccent}10)`,
-          border:     `1px solid ${shiftAccent}40`,
+          width: '34px', height: '34px', borderRadius: '9px',
+          background: `linear-gradient(135deg, ${shiftAccent}30, ${shiftAccent}08)`,
+          border:     `1px solid ${shiftAccent}45`,
           color:      shiftAccent,
           display:    'flex', alignItems: 'center', justifyContent: 'center',
-          fontSize:   '14px',
+          fontSize:   '15px',
           flexShrink: 0,
+          boxShadow:  `0 1px 4px ${shiftAccent}15`,
         }}>{shiftIcon}</div>
         <div>
-          <div style={{ fontSize: '12px', color: t.text1, fontWeight: 700, letterSpacing: '-.01em' }}>{shiftLabel}</div>
-          <div style={{ fontSize: '9.5px', color: t.text4, marginTop: '2px', fontFamily: 'monospace' }}>{window}</div>
+          <div style={{ fontSize: '12.5px', color: t.text1, fontWeight: 700, letterSpacing: '-.01em' }}>{shiftLabel}</div>
+          <div style={{
+            fontSize: '9.5px',
+            color: t.text4,
+            marginTop: '3px',
+            fontFamily: 'monospace',
+            display: 'inline-flex', alignItems: 'center', gap: '4px',
+            background: `${shiftAccent}10`,
+            border: `1px solid ${shiftAccent}25`,
+            borderRadius: '5px',
+            padding: '2px 6px',
+            letterSpacing: '.02em',
+          }}>{window} <span style={{ opacity: 0.7 }}>IST</span></div>
         </div>
       </div>
 
-      <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+      <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
         {shift.auditors.length === 0 ? (
-          <span style={{ fontSize: '11px', color: t.text4, fontStyle: 'italic' }}>No one was assigned.</span>
+          <span style={{
+            fontSize: '10.5px', color: t.text4, fontStyle: 'italic',
+            background: `${t.text4}10`,
+            border: `1px dashed ${t.text4}40`,
+            borderRadius: '6px',
+            padding: '4px 10px',
+          }}>
+            ⚠ No one assigned
+          </span>
         ) : (
           shift.auditors.map(a => <AuditorChip key={a.id} auditor={a} t={t} accent={shiftAccent} />)
         )}
@@ -1199,21 +1277,37 @@ function HistoryShiftRow({ shift, t, isMobile }) {
 function AuditorChip({ auditor, t, accent }) {
   const initial = (auditor.full_name || auditor.email || '?').charAt(0).toUpperCase()
   return (
-    <div style={{
-      display: 'inline-flex', alignItems: 'center', gap: '7px',
-      background: `${accent}10`,
-      border: `1px solid ${accent}35`,
-      borderRadius: '999px',
-      padding: '4px 11px 4px 4px',
-      maxWidth: '100%',
-    }}>
+    <div
+      title={auditor.email || auditor.full_name || ''}
+      style={{
+        display: 'inline-flex', alignItems: 'center', gap: '8px',
+        background: `linear-gradient(135deg, ${accent}14 0%, ${accent}06 100%)`,
+        border: `1px solid ${accent}40`,
+        borderRadius: '999px',
+        padding: '3px 13px 3px 3px',
+        maxWidth: '100%',
+        boxShadow: `0 1px 3px ${accent}15`,
+        transition: 'transform .15s ease, border-color .15s ease, box-shadow .15s ease',
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.transform = 'translateY(-1px)'
+        e.currentTarget.style.borderColor = `${accent}70`
+        e.currentTarget.style.boxShadow = `0 3px 8px ${accent}25`
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.transform = 'translateY(0)'
+        e.currentTarget.style.borderColor = `${accent}40`
+        e.currentTarget.style.boxShadow = `0 1px 3px ${accent}15`
+      }}>
       <span style={{
-        width: '20px', height: '20px', borderRadius: '50%',
-        background: `linear-gradient(135deg, ${accent}40, ${accent}15)`,
-        color: accent,
-        fontSize: '10px', fontWeight: 700,
+        width: '22px', height: '22px', borderRadius: '50%',
+        background: `linear-gradient(135deg, ${accent}55, ${accent}20)`,
+        border: `1px solid ${accent}50`,
+        color: '#fff',
+        fontSize: '10.5px', fontWeight: 800,
         display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
         flexShrink: 0,
+        textShadow: `0 1px 2px ${accent}80`,
       }}>{initial}</span>
       <span style={{
         fontSize: '11px', color: t.text1, fontWeight: 600,
