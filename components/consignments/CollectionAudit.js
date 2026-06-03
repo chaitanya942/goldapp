@@ -1621,31 +1621,35 @@ function AuditModal({ bill, t, isMobile, onClose, onDone, onError }) {
           )}
         </div>
 
-        {/* Action footer — stacks on mobile so each button gets full width
-            for one-handed scale operation. */}
+        {/* Action footer — single row on desktop; stacks on mobile so each
+            button gets full width for one-handed scale operation. Tightened
+            paddings + shorter "Mark Received" CTA so all four fit in one
+            row inside the 580px modal. */}
         <div style={{
-          padding: isMobile ? '14px 18px' : '16px 28px',
+          padding: isMobile ? '14px 18px' : '14px 22px',
           borderTop: `1px solid ${t.border}`,
           background: t.card2 || t.card,
           display: 'flex',
-          gap: '8px',
+          gap: isMobile ? '8px' : '6px',
           justifyContent: 'flex-end',
+          alignItems: 'center',
           flexDirection: isMobile ? 'column-reverse' : 'row',
-          flexWrap: 'wrap',
+          flexWrap: 'nowrap',
         }}>
           <button onClick={onClose}
-            style={{ background: 'transparent', border: `1px solid ${t.border}`, borderRadius: '9px', padding: '11px 20px', fontSize: '12px', color: t.text3, cursor: 'pointer', fontWeight: 600 }}>
+            style={{ background: 'transparent', border: `1px solid ${t.border}`, borderRadius: '8px', padding: isMobile ? '11px 20px' : '9px 14px', fontSize: '12px', color: t.text3, cursor: 'pointer', fontWeight: 600, whiteSpace: 'nowrap' }}>
             Cancel
           </button>
           {!revealed ? (
             <button onClick={() => submit('receive')} disabled={busy || !valid || (remarkNeeded && !remark.trim())}
               style={{
-                background: t.gold, color: '#1a0a00', border: 'none', borderRadius: '9px',
-                padding: '11px 26px', fontSize: '13px', fontWeight: 700,
+                background: t.gold, color: '#1a0a00', border: 'none', borderRadius: '8px',
+                padding: isMobile ? '11px 26px' : '9px 18px', fontSize: '12.5px', fontWeight: 700,
                 cursor: busy ? 'default' : 'pointer',
                 opacity: (busy || !valid || (remarkNeeded && !remark.trim())) ? .5 : 1, letterSpacing: '.02em',
                 boxShadow: (!busy && valid && (!remarkNeeded || remark.trim())) ? `0 2px 8px ${t.gold}50` : 'none',
                 transition: 'opacity .15s, box-shadow .15s',
+                whiteSpace: 'nowrap',
               }}>
               {busy ? 'Comparing…' : 'Submit & Compare →'}
             </button>
@@ -1653,23 +1657,24 @@ function AuditModal({ bill, t, isMobile, onClose, onDone, onError }) {
             <>
               <button onClick={onReweigh} disabled={busy}
                 title="Re-weigh on the scale and enter a new reading. A remark will be required."
-                style={{ background: 'transparent', border: `1px solid ${t.blue || '#3a8fbf'}80`, borderRadius: '9px', padding: '11px 20px', fontSize: '12px', color: t.blue || '#3a8fbf', fontWeight: 700, cursor: busy ? 'default' : 'pointer', opacity: busy ? .6 : 1 }}>
+                style={{ background: 'transparent', border: `1px solid ${t.blue || '#3a8fbf'}80`, borderRadius: '8px', padding: isMobile ? '11px 18px' : '9px 12px', fontSize: '11.5px', color: t.blue || '#3a8fbf', fontWeight: 700, cursor: busy ? 'default' : 'pointer', opacity: busy ? .6 : 1, whiteSpace: 'nowrap' }}>
                 ↻ Re-weigh
               </button>
               <button onClick={() => submit('keep_pending')} disabled={busy || !valid}
-                style={{ background: 'transparent', border: `1px solid ${t.orange}80`, borderRadius: '9px', padding: '11px 20px', fontSize: '12px', color: t.orange, fontWeight: 700, cursor: busy ? 'default' : 'pointer', opacity: busy ? .6 : 1 }}>
+                style={{ background: 'transparent', border: `1px solid ${t.orange}80`, borderRadius: '8px', padding: isMobile ? '11px 18px' : '9px 12px', fontSize: '11.5px', color: t.orange, fontWeight: 700, cursor: busy ? 'default' : 'pointer', opacity: busy ? .6 : 1, whiteSpace: 'nowrap' }}>
                 Keep Pending
               </button>
               <button onClick={() => submit('receive')} disabled={busy || !valid}
                 style={{
-                  background: t.green, color: '#0a0a0a', border: 'none', borderRadius: '9px',
-                  padding: '11px 22px', fontSize: '12px', fontWeight: 700,
+                  background: t.green, color: '#0a0a0a', border: 'none', borderRadius: '8px',
+                  padding: isMobile ? '11px 22px' : '9px 14px', fontSize: '12px', fontWeight: 700,
                   cursor: busy ? 'default' : 'pointer',
                   opacity: (busy || !valid) ? .5 : 1,
                   boxShadow: !busy && valid ? `0 2px 8px ${t.green}50` : 'none',
                   transition: 'opacity .15s, box-shadow .15s',
+                  whiteSpace: 'nowrap',
                 }}>
-                {busy ? 'Saving…' : '✓ Accept & Mark Received'}
+                {busy ? 'Saving…' : '✓ Mark Received'}
               </button>
             </>
           )}
