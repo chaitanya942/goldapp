@@ -192,11 +192,14 @@ export default function CollectionAudit() {
   // arriving on different days shows under each respective filter, with
   // only that day's truck's bills inside).
   const [arrivalFilter, setArrivalFilter] = useState('today')
-  // Region collapse state. Empty by default = all regions expanded.
-  // Click a region's chevron to toggle.
-  const [collapsedRegions, setCollapsedRegions] = useState(() => new Set())
+  // Region collapse state. Tracked as EXPANDED set so the default
+  // (empty set) means every region starts collapsed — Bangalore has
+  // ~30 branches and scrolling past them every page load was wasted
+  // motion. Ops opens the regions they care about; clicking the band
+  // toggles membership.
+  const [expandedRegions, setExpandedRegions] = useState(() => new Set())
   const toggleRegion = useCallback((region) => {
-    setCollapsedRegions(prev => {
+    setExpandedRegions(prev => {
       const next = new Set(prev)
       if (next.has(region)) next.delete(region); else next.add(region)
       return next
@@ -697,7 +700,7 @@ export default function CollectionAudit() {
               <div style={{ padding: '6px 16px 18px' }}>
                 {outstationByRegion.map(({ region, branches }, regionIdx) => {
                   const regionBills = branches.reduce((s, b) => s + b.bills.length, 0)
-                  const collapsed   = collapsedRegions.has(region)
+                  const collapsed   = !expandedRegions.has(region)
                   return (
                     <div key={region} style={{ marginTop: regionIdx === 0 ? '10px' : '20px' }}>
                       {/* Region band — clickable to collapse/expand. Heavier
