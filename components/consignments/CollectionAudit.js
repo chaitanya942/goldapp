@@ -1283,10 +1283,16 @@ function AuditModal({ bill, t, isMobile, onClose, onDone, onError }) {
   // the remark required on the next submit cycle so a re-weigh always
   // carries an explanation.
   const [reweighRequired,  setReweighRequired]  = useState(false)
+  // Flips true after the auditor has completed one re-weigh cycle
+  // (clicked Re-weigh, entered a new reading, and submitted). Re-weigh
+  // is a single-use action: once done, the button hides and the remark
+  // becomes locked so the explanation can't be edited post-hoc.
+  const [hasReweighed,     setHasReweighed]     = useState(false)
 
   const measured = parseFloat(weight)
   const valid    = Number.isFinite(measured) && measured > 0
   const remarkNeeded = reweighRequired && !revealed   // entering a fresh reading after Re-weigh
+  const remarkLocked = hasReweighed && !!revealed     // re-weigh completed → remark is final
 
   function onWeightChange(v) {
     setWeight(v)
@@ -1345,6 +1351,9 @@ function AuditModal({ bill, t, isMobile, onClose, onDone, onError }) {
       // before confirming. requires_remark left in for old payloads.
       if ((j.reveal || j.requires_remark) && j.crm_gross != null) {
         setRevealed({ crm_gross: Number(j.crm_gross), measured: Number(j.measured), discrepancy_g: Number(j.discrepancy_g) })
+        // If this submit followed a Re-weigh click, the cycle is now
+        // complete — lock further re-weighs + freeze the remark.
+        if (reweighRequired) setHasReweighed(true)
         return
       }
       onError(j.error || j.message || 'Audit action failed')
@@ -1592,7 +1601,9 @@ function AuditModal({ bill, t, isMobile, onClose, onDone, onError }) {
             <div>
               <div style={{ ...label, marginBottom: '6px' }}>
                 Audit Remark
-                {remarkNeeded ? (
+                {remarkLocked ? (
+                  <span style={{ color: t.text3, textTransform: 'none', letterSpacing: 'normal' }}> 🔒 (locked — re-weigh complete)</span>
+                ) : remarkNeeded ? (
                   <span style={{ color: t.red, textTransform: 'none', letterSpacing: 'normal' }}> (required for re-weigh)</span>
                 ) : (
                   <span style={{ color: t.text4, textTransform: 'none', letterSpacing: 'normal' }}> (optional)</span>
@@ -1603,18 +1614,20 @@ function AuditModal({ bill, t, isMobile, onClose, onDone, onError }) {
                 onChange={e => setRemark(e.target.value)}
                 placeholder="Why is there a difference? e.g. stones in casing, packing residue, scale calibration drift…"
                 rows={2}
+                readOnly={remarkLocked}
                 style={{
-                  background:   t.card2 || t.card,
-                  border:       `1px solid ${t.border}`,
+                  background:   remarkLocked ? `${t.text4}08` : (t.card2 || t.card),
+                  border:       `1px solid ${remarkLocked ? `${t.text4}40` : t.border}`,
                   borderRadius: '10px',
                   padding:      '11px 14px',
                   fontSize:     '13px',
-                  color:        t.text1,
+                  color:        remarkLocked ? t.text2 : t.text1,
                   outline:      'none',
                   width:        '100%',
                   boxSizing:    'border-box',
-                  resize:       'vertical',
+                  resize:       remarkLocked ? 'none' : 'vertical',
                   fontFamily:   'inherit',
+                  cursor:       remarkLocked ? 'not-allowed' : 'text',
                 }}
               />
             </div>
@@ -1655,11 +1668,13 @@ function AuditModal({ bill, t, isMobile, onClose, onDone, onError }) {
             </button>
           ) : (
             <>
-              <button onClick={onReweigh} disabled={busy}
-                title="Re-weigh on the scale and enter a new reading. A remark will be required."
-                style={{ background: 'transparent', border: `1px solid ${t.blue || '#3a8fbf'}80`, borderRadius: '8px', padding: isMobile ? '11px 18px' : '9px 12px', fontSize: '11.5px', color: t.blue || '#3a8fbf', fontWeight: 700, cursor: busy ? 'default' : 'pointer', opacity: busy ? .6 : 1, whiteSpace: 'nowrap' }}>
-                ↻ Re-weigh
-              </button>
+              {!hasReweighed && (
+                <button onClick={onReweigh} disabled={busy}
+                  title="Re-weigh on the scale and enter a new reading. A remark will be required. Re-weigh can only be done once per audit."
+                  style={{ background: 'transparent', border: `1px solid ${t.blue || '#3a8fbf'}80`, borderRadius: '8px', padding: isMobile ? '11px 18px' : '9px 12px', fontSize: '11.5px', color: t.blue || '#3a8fbf', fontWeight: 700, cursor: busy ? 'default' : 'pointer', opacity: busy ? .6 : 1, whiteSpace: 'nowrap' }}>
+                  ↻ Re-weigh
+                </button>
+              )}
               <button onClick={() => submit('keep_pending')} disabled={busy || !valid}
                 style={{ background: 'transparent', border: `1px solid ${t.orange}80`, borderRadius: '8px', padding: isMobile ? '11px 18px' : '9px 12px', fontSize: '11.5px', color: t.orange, fontWeight: 700, cursor: busy ? 'default' : 'pointer', opacity: busy ? .6 : 1, whiteSpace: 'nowrap' }}>
                 Keep Pending
