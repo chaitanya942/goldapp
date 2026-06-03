@@ -1350,7 +1350,18 @@ function AuditModal({ bill, t, isMobile, onClose, onDone, onError }) {
       // 409 with reveal: backend wants the auditor to SEE the comparison
       // before confirming. requires_remark left in for old payloads.
       if ((j.reveal || j.requires_remark) && j.crm_gross != null) {
-        setRevealed({ crm_gross: Number(j.crm_gross), measured: Number(j.measured), discrepancy_g: Number(j.discrepancy_g) })
+        const d = Number(j.discrepancy_g)
+        setRevealed({ crm_gross: Number(j.crm_gross), measured: Number(j.measured), discrepancy_g: d })
+        // Pre-fill a default remark by sign so the auditor doesn't type
+        // the same boilerplate every time. Skip when there's no
+        // discrepancy (the field is hidden), and don't overwrite
+        // anything the auditor has already typed (e.g. a re-weigh remark).
+        if (!remark.trim() && Math.abs(d) >= 0.0005) {
+          setRemark(d > 0
+            ? 'Audit weight > CRM Weight'
+            : 'Acceptable difference vary from different weighing scales'
+          )
+        }
         // If this submit followed a Re-weigh click, the cycle is now
         // complete — lock further re-weighs + freeze the remark.
         if (reweighRequired) setHasReweighed(true)
@@ -1597,7 +1608,12 @@ function AuditModal({ bill, t, isMobile, onClose, onDone, onError }) {
             )
           })()}
 
-          {(revealed || reweighRequired) && (
+          {/* Show remark when:
+                - re-weigh entry mode (auditor must enter one), OR
+                - in revealed state AND (there's a discrepancy OR a remark was
+                  already captured during a re-weigh cycle).
+              Hidden silently when an audit lands exactly on CRM. */}
+          {(reweighRequired || (revealed && (Math.abs(Number(revealed.discrepancy_g || 0)) >= 0.0005 || hasReweighed))) && (
             <div>
               <div style={{ ...label, marginBottom: '6px' }}>
                 Audit Remark
