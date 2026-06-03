@@ -649,29 +649,22 @@ export async function POST(req) {
     })
   }
 
-  // ── 'receive' path ──
-  // Two-stage flow for negative discrepancies:
-  //   1. First submit (no acknowledged_diff flag) → if measured < CRM,
-  //      reveal the comparison so the auditor SEES what they entered vs
-  //      what was expected. Bill stays pending.
-  //   2. Second submit (acknowledged_diff: true) → accept the receive,
-  //      whether or not the auditor added a remark. The remark stays
-  //      OPTIONAL throughout.
-  //
-  // Positive discrepancy auto-accepts on first submit — extra weight is
-  // not suspicious and doesn't need a confirmation step.
-  if (diff < 0 && !acknowledged_diff) {
-    // Write the measurement now so the discrepancy badge surfaces in the
-    // queue if the auditor closes the modal without confirming.
+  // ── 'receive' path — always two-stage ──
+  // The auditor's first submit reveals the comparison (CRM gross,
+  // measured, Δ) regardless of whether there's a discrepancy. They
+  // confirm via a second submit with acknowledged_diff=true to actually
+  // flip the bill to at_ho. Match this with frontend's revealed-state
+  // panel; the measurement is stamped on the bill + audit_events so
+  // closing the modal mid-flow doesn't lose the reading.
+  if (!acknowledged_diff) {
     await supabase.from('purchases').update(auditFields).eq('id', purchase_id)
-    await recordEvent('keep_pending')   // not received yet — interim state
+    await recordEvent('keep_pending')   // interim — not received yet
     return Response.json({
       reveal:        true,
       discrepancy_g: diff,
       crm_gross:     Number(bill.gross_weight || 0),
       measured,
-      message:       'Measured weight is LESS than CRM. Review the comparison and confirm to accept; a remark is optional.',
-    }, { status: 409 })
+    })
   }
 
   const { error: updErr } = await supabase

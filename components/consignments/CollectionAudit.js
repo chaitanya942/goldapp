@@ -1275,21 +1275,35 @@ function BillCard({ bill, t, onAudit, onMarkReceived, dateField }) {
 
 // ─── Blind audit modal ─────────────────────────────────────────────────────
 function AuditModal({ bill, t, isMobile, onClose, onDone, onError }) {
-  const [weight,   setWeight]   = useState('')
-  const [remark,   setRemark]   = useState(bill.audit_remark || '')
-  const [busy,     setBusy]     = useState(false)
-  const [revealed, setRevealed] = useState(null)   // { crm_gross, measured, discrepancy_g }
+  const [weight,           setWeight]           = useState('')
+  const [remark,           setRemark]           = useState(bill.audit_remark || '')
+  const [busy,             setBusy]             = useState(false)
+  const [revealed,         setRevealed]         = useState(null)   // { crm_gross, measured, discrepancy_g }
+  // Set once the auditor clicks Re-weigh on the revealed panel — keeps
+  // the remark required on the next submit cycle so a re-weigh always
+  // carries an explanation.
+  const [reweighRequired,  setReweighRequired]  = useState(false)
 
   const measured = parseFloat(weight)
   const valid    = Number.isFinite(measured) && measured > 0
+  const remarkNeeded = reweighRequired && !revealed   // entering a fresh reading after Re-weigh
 
   function onWeightChange(v) {
     setWeight(v)
     if (revealed) setRevealed(null)
   }
 
+  function onReweigh() {
+    setRevealed(null)
+    setReweighRequired(true)
+  }
+
   async function submit(action) {
     if (!valid) { onError('Enter a valid measured gross weight'); return }
+    if (remarkNeeded && action === 'receive' && !remark.trim()) {
+      onError('Re-weigh requires a remark explaining what changed.')
+      return
+    }
     setBusy(true)
     try {
       const res = await authedFetch('/api/collection-audit', {
@@ -1301,8 +1315,7 @@ function AuditModal({ bill, t, isMobile, onClose, onDone, onError }) {
           action,
           remark:             remark.trim() || null,
           // Second submit after the reveal panel has been shown — tells
-          // the backend "auditor has seen the shortfall and chose to
-          // accept anyway." Remark is optional whether they fill it or not.
+          // the backend "auditor has seen the comparison and confirms."
           acknowledged_diff:  !!revealed,
         }),
       })
@@ -1460,11 +1473,13 @@ function AuditModal({ bill, t, isMobile, onClose, onDone, onError }) {
                 inputMode="decimal"
                 pattern="[0-9]*[.,]?[0-9]*"
                 autoComplete="off"
-                autoFocus
+                autoFocus={!revealed}
                 value={weight}
                 onChange={e => onWeightChange(e.target.value.replace(',', '.'))}
                 placeholder="0.000"
                 aria-label="Measured gross weight in grams"
+                readOnly={!!revealed}
+                tabIndex={revealed ? -1 : 0}
                 className="ca-weight-input"
                 style={{
                   background: t.card2 || t.card,
@@ -1472,7 +1487,7 @@ function AuditModal({ bill, t, isMobile, onClose, onDone, onError }) {
                   borderRadius: '12px',
                   padding: isMobile ? '20px 70px 20px 22px' : '24px 80px 24px 26px',
                   fontSize: isMobile ? '34px' : '42px',
-                  color: t.text1,
+                  color: revealed ? t.text2 : t.text1,
                   fontFamily: 'monospace',
                   fontWeight: 800,
                   letterSpacing: '-.025em',
@@ -1480,8 +1495,22 @@ function AuditModal({ bill, t, isMobile, onClose, onDone, onError }) {
                   width: '100%',
                   boxSizing: 'border-box',
                   textAlign: 'center',
+                  cursor: revealed ? 'not-allowed' : 'text',
                 }}
               />
+              {revealed && (
+                <span
+                  title="Submitted reading is locked. Click Re-weigh below to enter a new measurement."
+                  style={{
+                    position: 'absolute',
+                    left: isMobile ? '16px' : '22px',
+                    top: '50%', transform: 'translateY(-50%)',
+                    fontSize: isMobile ? '14px' : '16px',
+                    color: t.text4,
+                    pointerEvents: 'none',
+                  }}
+                >🔒</span>
+              )}
               <div style={{
                 position: 'absolute', right: isMobile ? '20px' : '26px', top: '50%', transform: 'translateY(-50%)',
                 fontSize: isMobile ? '16px' : '20px',
@@ -1510,30 +1539,64 @@ function AuditModal({ bill, t, isMobile, onClose, onDone, onError }) {
             )}
           </div>
 
-          {/* Reveal panel */}
-          {revealed && (
-            <div style={{ padding: '16px 18px', borderRadius: '12px', background: `${t.red}10`, border: `1px solid ${t.red}50` }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '14px' }}>
-                <span style={{ fontSize: '18px' }}>⚠</span>
-                <div style={{ fontSize: '11px', color: t.red, fontWeight: 700, letterSpacing: '.1em', textTransform: 'uppercase' }}>
-                  Discrepancy detected
+          {/* Reveal panel — shown for every comparison (match, over, short).
+              Color codes by diff sign so the auditor reads the outcome
+              before drilling into the numbers. */}
+          {revealed && (() => {
+            const d         = Number(revealed.discrepancy_g || 0)
+            const isMatch   = Math.abs(d) < 0.0005
+            const isOver    = d > 0
+            const panelColor = isMatch ? (t.green || '#3aaa6a')
+                            : isOver  ? (t.gold  || '#c9a84c')
+                            :           (t.red   || '#c03030')
+            const headerIcon  = isMatch ? '✓' : isOver ? 'ℹ' : '⚠'
+            const headerLabel = isMatch ? 'Weight verified'
+                              : isOver  ? 'Extra weight noted'
+                              :           'Shortfall detected'
+            const detail = isMatch
+              ? 'Measured weight matches CRM exactly.'
+              : isOver
+                ? `Measured ${d.toFixed(3)}g MORE than CRM. Captured for the audit report.`
+                : `Measured ${Math.abs(d).toFixed(3)}g LESS than CRM. Captured for the audit report.`
+            return (
+              <div style={{
+                padding: '16px 18px',
+                borderRadius: '12px',
+                background: `${panelColor}10`,
+                border: `1px solid ${panelColor}50`,
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '14px' }}>
+                  <span style={{
+                    width: '22px', height: '22px', borderRadius: '50%',
+                    background: panelColor, color: '#fff',
+                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: '12px', fontWeight: 900,
+                  }}>{headerIcon}</span>
+                  <div style={{ fontSize: '11px', color: panelColor, fontWeight: 700, letterSpacing: '.1em', textTransform: 'uppercase' }}>
+                    {headerLabel}
+                  </div>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px' }}>
+                  <Reveal t={t} label="Your reading" value={fmtWt(revealed.measured)} color={t.text1} />
+                  <Reveal t={t} label="CRM gross"    value={fmtWt(revealed.crm_gross)} color={t.gold} />
+                  <Reveal t={t} label="Δ"            value={isMatch ? '0.000g' : `${isOver ? '+' : ''}${d.toFixed(3)}g`} color={panelColor} />
+                </div>
+                <div style={{ fontSize: '12px', color: t.text2, marginTop: '14px' }}>
+                  {detail}
                 </div>
               </div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px' }}>
-                <Reveal t={t} label="Your reading" value={fmtWt(revealed.measured)} color={t.text1} />
-                <Reveal t={t} label="CRM gross"    value={fmtWt(revealed.crm_gross)} color={t.gold} />
-                <Reveal t={t} label="Δ"            value={`${revealed.discrepancy_g > 0 ? '+' : ''}${revealed.discrepancy_g.toFixed(3)}g`} color={t.red} />
-              </div>
-              <div style={{ fontSize: '12px', color: t.text2, marginTop: '14px' }}>
-                {revealed.measured > revealed.crm_gross ? 'You measured MORE than CRM.' : 'You measured LESS than CRM.'} Add a remark and decide below.
-              </div>
-            </div>
-          )}
+            )
+          })()}
 
-          {revealed && (
+          {(revealed || reweighRequired) && (
             <div>
               <div style={{ ...label, marginBottom: '6px' }}>
-                Audit Remark <span style={{ color: t.text4, textTransform: 'none', letterSpacing: 'normal' }}>(optional)</span>
+                Audit Remark
+                {remarkNeeded ? (
+                  <span style={{ color: t.red, textTransform: 'none', letterSpacing: 'normal' }}> (required for re-weigh)</span>
+                ) : (
+                  <span style={{ color: t.text4, textTransform: 'none', letterSpacing: 'normal' }}> (optional)</span>
+                )}
               </div>
               <textarea
                 value={remark}
@@ -1575,19 +1638,24 @@ function AuditModal({ bill, t, isMobile, onClose, onDone, onError }) {
             Cancel
           </button>
           {!revealed ? (
-            <button onClick={() => submit('receive')} disabled={busy || !valid}
+            <button onClick={() => submit('receive')} disabled={busy || !valid || (remarkNeeded && !remark.trim())}
               style={{
                 background: t.gold, color: '#1a0a00', border: 'none', borderRadius: '9px',
                 padding: '11px 26px', fontSize: '13px', fontWeight: 700,
                 cursor: busy ? 'default' : 'pointer',
-                opacity: (busy || !valid) ? .5 : 1, letterSpacing: '.02em',
-                boxShadow: !busy && valid ? `0 2px 8px ${t.gold}50` : 'none',
+                opacity: (busy || !valid || (remarkNeeded && !remark.trim())) ? .5 : 1, letterSpacing: '.02em',
+                boxShadow: (!busy && valid && (!remarkNeeded || remark.trim())) ? `0 2px 8px ${t.gold}50` : 'none',
                 transition: 'opacity .15s, box-shadow .15s',
               }}>
               {busy ? 'Comparing…' : 'Submit & Compare →'}
             </button>
           ) : (
             <>
+              <button onClick={onReweigh} disabled={busy}
+                title="Re-weigh on the scale and enter a new reading. A remark will be required."
+                style={{ background: 'transparent', border: `1px solid ${t.blue || '#3a8fbf'}80`, borderRadius: '9px', padding: '11px 20px', fontSize: '12px', color: t.blue || '#3a8fbf', fontWeight: 700, cursor: busy ? 'default' : 'pointer', opacity: busy ? .6 : 1 }}>
+                ↻ Re-weigh
+              </button>
               <button onClick={() => submit('keep_pending')} disabled={busy || !valid}
                 style={{ background: 'transparent', border: `1px solid ${t.orange}80`, borderRadius: '9px', padding: '11px 20px', fontSize: '12px', color: t.orange, fontWeight: 700, cursor: busy ? 'default' : 'pointer', opacity: busy ? .6 : 1 }}>
                 Keep Pending
