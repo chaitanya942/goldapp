@@ -30,6 +30,22 @@ const fmtSignedWt  = (n) => {
 const fmtTS  = (d) => d ? new Date(d).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false }) : '—'
 const fmtDate= (d) => d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'
 
+// Classify an audit timestamp into one of:
+//   'morning' (8:30 – 19:30 IST), 'night' (19:30 – 24:00 IST), 'off' (else)
+// Mirrors the shift windows used by the time-gate + roster module, with the
+// 19:30–20:00 overlap resolved to 'night' so a hand-off audit goes with the
+// shift that's actually starting.
+function classifyShift(iso) {
+  if (!iso) return null
+  const istMs = new Date(iso).getTime() + 5.5 * 3600_000
+  const ist   = new Date(istMs)
+  const mins  = ist.getUTCHours() * 60 + ist.getUTCMinutes()
+  if (mins >= 510  && mins < 1170) return 'morning'   // 08:30 – 19:30
+  if (mins >= 1170 && mins < 1440) return 'night'     // 19:30 – 24:00
+  return 'off'                                         // 00:00 – 08:30
+}
+const SHIFT_LABEL = { night: 'Night', morning: 'Morning', off: 'Off-shift' }
+
 export default function AuditReport() {
   const { theme } = useApp()
   const t = THEMES[theme] || THEMES.dark
@@ -47,6 +63,11 @@ export default function AuditReport() {
   const [loading, setLoading] = useState(true)
   const [search,  setSearch]  = useState('')
   const [tab,     setTab]     = useState('branches')   // 'branches' | 'log'
+  // Shift filter — 'all' shows every audit; 'night' / 'morning' / 'off'
+  // narrow to events whose audited_at falls inside that shift's window.
+  // Drives both the Audit Log filter AND a client-side recomputation
+  // of the Per-Branch breakdown so the numbers always match.
+  const [shift,   setShift]   = useState('all')
 
   const fetchData = useCallback(async (f, tt) => {
     setLoading(true)
@@ -75,13 +96,84 @@ export default function AuditReport() {
 
   // ── Filtered / derived ──
   const q = search.trim().toLowerCase()
-  const filteredLog = useMemo(() => rows.filter(r =>
-    !q
-    || (r.application_id   || '').toLowerCase().includes(q)
-    || (r.customer_name    || '').toLowerCase().includes(q)
-    || (r.branch_name      || '').toLowerCase().includes(q)
-    || (r.audited_by_email || '').toLowerCase().includes(q)
-  ), [rows, q])
+  // Decorate every row with its shift up-front so the filter, the column,
+  // and the breakdown recompute all read from the same value.
+  const rowsWithShift = useMemo(() => rows.map(r => ({ ...r, _shift: classifyShift(r.audited_at) })), [rows])
+  const shiftMatches = (r) => shift === 'all' || r._shift === shift
+  const filteredLog = useMemo(() => rowsWithShift.filter(r =>
+    shiftMatches(r) && (
+      !q
+      || (r.application_id   || '').toLowerCase().includes(q)
+      || (r.customer_name    || '').toLowerCase().includes(q)
+      || (r.branch_name      || '').toLowerCase().includes(q)
+      || (r.audited_by_email || '').toLowerCase().includes(q)
+    )
+  ), [rowsWithShift, q, shift])
+
+  // Per-branch breakdown: when 'all' shift, use the server-supplied
+  // breakdown verbatim (it already includes live in-transit counts).
+  // When filtered, recompute everything EXCEPT in-transit (which is a
+  // live snapshot independent of audit window/shift) from rowsWithShift.
+  const filteredBranchBreakdown = useMemo(() => {
+    if (shift === 'all') return branchBreakdown
+    const inTransitByBranch = new Map(branchBreakdown.map(b => [b.branch, {
+      in_transit_count:    b.in_transit_count,
+      in_transit_weight_g: b.in_transit_weight_g,
+    }]))
+    const agg = new Map()
+    for (const r of rowsWithShift) {
+      if (!shiftMatches(r)) continue
+      const k = r.branch_name || '—'
+      if (!agg.has(k)) agg.set(k, {
+        branch: k,
+        in_transit_count:         0,
+        in_transit_weight_g:      0,
+        received_count:           0,
+        received_weight_g:        0,
+        audited_count:            0,
+        discrepancy_count:        0,
+        sum_abs_discrepancy_g:    0,
+        total_expected_g:         0,
+        total_received_audited_g: 0,
+        auditors:                 new Set(),
+      })
+      const e = agg.get(k)
+      e.audited_count    += 1
+      e.total_expected_g += Number(r.gross_weight || 0)
+      if (r.stock_status === 'at_ho') {
+        e.received_count           += 1
+        e.received_weight_g        += Number(r.audit_gross_weight || 0)
+        e.total_received_audited_g += Number(r.audit_gross_weight || 0)
+      }
+      const d = Number(r.audit_discrepancy_g || 0)
+      if (d !== 0) {
+        e.discrepancy_count    += 1
+        e.sum_abs_discrepancy_g += Math.abs(d)
+      }
+      if (r.audited_by_email) e.auditors.add(r.audited_by_email)
+    }
+    // Merge in-transit (live snapshot) per branch and round.
+    const out = [...agg.values()].map(e => {
+      const live = inTransitByBranch.get(e.branch) || { in_transit_count: 0, in_transit_weight_g: 0 }
+      return {
+        branch:                   e.branch,
+        in_transit_count:         live.in_transit_count,
+        in_transit_weight_g:      live.in_transit_weight_g,
+        received_count:           e.received_count,
+        received_weight_g:        Number(e.received_weight_g.toFixed(3)),
+        audited_count:            e.audited_count,
+        discrepancy_count:        e.discrepancy_count,
+        sum_abs_discrepancy_g:    Number(e.sum_abs_discrepancy_g.toFixed(3)),
+        total_expected_g:         Number(e.total_expected_g.toFixed(3)),
+        total_received_audited_g: Number(e.total_received_audited_g.toFixed(3)),
+        auditors:                 [...e.auditors],
+      }
+    })
+    return out.sort((a, b) =>
+      b.discrepancy_count - a.discrepancy_count ||
+      b.audited_count     - a.audited_count
+    )
+  }, [shift, rowsWithShift, branchBreakdown])
 
   // KPI band — driven by the full window (not the filtered log) since the
   // filter is just a search filter on top of the log, not a scope change.
@@ -118,6 +210,7 @@ export default function AuditReport() {
   ]
   const logCols = [
     ['Audited At',          r => r.audited_at],
+    ['Shift',               r => SHIFT_LABEL[r._shift] || '—'],
     ['Customer',            r => r.customer_name],
     ['Branch',              r => r.branch_name],
     ['CRM Gross (g)',       r => fmtWt(r.gross_weight)],
@@ -131,9 +224,9 @@ export default function AuditReport() {
 
   function exportCsv() {
     const isBranches = tab === 'branches'
-    const data = isBranches ? branchBreakdown : filteredLog
+    const data = isBranches ? filteredBranchBreakdown : filteredLog
     const cols = isBranches ? branchCols : logCols
-    const fname = `AuditReport_${isBranches ? 'PerBranch' : 'Log'}_${dateTag}.csv`
+    const fname = `AuditReport_${isBranches ? 'PerBranch' : 'Log'}_${dateTag}${shift === 'all' ? '' : `_${shift}`}.csv`
     if (!data.length) return
     const esc = (v) => /[",\n]/.test(String(v ?? '')) ? `"${String(v).replace(/"/g, '""')}"` : String(v ?? '')
     const csv = [cols.map(c => c[0]).join(','), ...data.map(r => cols.map(c => esc(c[1](r))).join(','))].join('\n')
@@ -147,9 +240,9 @@ export default function AuditReport() {
 
   async function exportPdf() {
     const isBranches = tab === 'branches'
-    const data = isBranches ? branchBreakdown : filteredLog
+    const data = isBranches ? filteredBranchBreakdown : filteredLog
     const cols = isBranches ? branchCols : logCols
-    const fname = `AuditReport_${isBranches ? 'PerBranch' : 'Log'}_${dateTag}.pdf`
+    const fname = `AuditReport_${isBranches ? 'PerBranch' : 'Log'}_${dateTag}${shift === 'all' ? '' : `_${shift}`}.pdf`
     if (!data.length) return
     // Dynamic imports — jspdf is heavy and only needed on click.
     const { jsPDF } = await import('jspdf')
@@ -250,6 +343,48 @@ export default function AuditReport() {
             <input type="date" value={to} onChange={e => setTo(e.target.value)} max={today} style={{ ...s.input, flex: isMobile ? 1 : undefined, minWidth: 0 }} />
           </div>
         </div>
+
+        {/* Shift filter chips — narrow both Audit Log + Per-Branch breakdown
+            to audits captured in that shift's IST window. Times mirror the
+            roster: Night 19:30–24:00, Morning 08:30–19:30. */}
+        <div style={{
+          padding: isMobile ? '0 14px 12px' : '0 18px 14px',
+          display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap',
+        }}>
+          <span style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 600 }}>Shift</span>
+          {[
+            { id: 'all',     label: 'All',     color: t.text2,                  icon: null },
+            { id: 'morning', label: 'Morning', color: t.orange || '#e9a942',    icon: '☀' },
+            { id: 'night',   label: 'Night',   color: t.gold   || '#c9a84c',    icon: '🌙' },
+          ].map(c => {
+            const active = shift === c.id
+            return (
+              <button key={c.id} onClick={() => setShift(c.id)}
+                style={{
+                  background: active ? `${c.color}20` : 'transparent',
+                  color:      active ? c.color : t.text3,
+                  border:     `1px solid ${active ? `${c.color}80` : t.border}`,
+                  borderRadius: '14px',
+                  padding:    '4px 11px',
+                  fontSize:   '11px',
+                  fontWeight: active ? 700 : 500,
+                  cursor:     'pointer',
+                  display:    'inline-flex', alignItems: 'center', gap: '5px',
+                  letterSpacing: '.02em',
+                  boxShadow: active ? `0 0 0 3px ${c.color}10` : 'none',
+                  transition: 'all .15s ease',
+                }}>
+                {c.icon && <span style={{ fontSize: '12px', lineHeight: 1 }}>{c.icon}</span>}
+                {c.label}
+              </button>
+            )
+          })}
+          {shift !== 'all' && (
+            <span style={{ fontSize: '10.5px', color: t.text4, fontStyle: 'italic' }}>
+              ({SHIFT_LABEL[shift]} shift only — {shift === 'night' ? '19:30 – 24:00' : '08:30 – 19:30'} IST)
+            </span>
+          )}
+        </div>
       </div>
 
       {/* KPI band */}
@@ -302,11 +437,11 @@ export default function AuditReport() {
             </div>
             <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
               <button onClick={exportCsv} disabled={tab === 'branches' ? !branchBreakdown.length : !filteredLog.length}
-                style={{ ...s.btnOut, color: (tab === 'branches' ? branchBreakdown.length : filteredLog.length) ? t.gold : t.text4, borderColor: (tab === 'branches' ? branchBreakdown.length : filteredLog.length) ? `${t.gold}50` : t.border, padding: '7px 13px' }}>
+                style={{ ...s.btnOut, color: (tab === 'branches' ? filteredBranchBreakdown.length : filteredLog.length) ? t.gold : t.text4, borderColor: (tab === 'branches' ? filteredBranchBreakdown.length : filteredLog.length) ? `${t.gold}50` : t.border, padding: '7px 13px' }}>
                 ↓ CSV
               </button>
               <button onClick={exportPdf} disabled={tab === 'branches' ? !branchBreakdown.length : !filteredLog.length}
-                style={{ ...s.btnOut, color: (tab === 'branches' ? branchBreakdown.length : filteredLog.length) ? t.red : t.text4, borderColor: (tab === 'branches' ? branchBreakdown.length : filteredLog.length) ? `${(t.red || '#c03030')}55` : t.border, padding: '7px 13px' }}>
+                style={{ ...s.btnOut, color: (tab === 'branches' ? filteredBranchBreakdown.length : filteredLog.length) ? t.red : t.text4, borderColor: (tab === 'branches' ? filteredBranchBreakdown.length : filteredLog.length) ? `${(t.red || '#c03030')}55` : t.border, padding: '7px 13px' }}>
                 ↓ PDF
               </button>
             </div>
@@ -314,7 +449,7 @@ export default function AuditReport() {
 
           {tab === 'branches' && (
             <Section t={t} s={s} accent={t.gold} badge="BRANCHES" title="Per-Branch Breakdown" subtitle="In-transit is a live snapshot; everything else scopes to the window. Sorted by discrepancy count, then audited count.">
-              {branchBreakdown.length === 0 ? (
+              {filteredBranchBreakdown.length === 0 ? (
                 <Empty t={t} text="No branch activity in this window." />
               ) : (
                 <div style={{ overflowX: 'auto' }}>
@@ -333,7 +468,7 @@ export default function AuditReport() {
                       </tr>
                     </thead>
                     <tbody>
-                      {branchBreakdown.map(b => (
+                      {filteredBranchBreakdown.map(b => (
                         <tr key={b.branch}>
                           <td style={{ ...s.td, color: t.text1, fontWeight: 600 }}>{b.branch}</td>
                           <td style={{ ...s.td, textAlign: 'right', fontFamily: 'monospace' }}>
@@ -379,6 +514,7 @@ export default function AuditReport() {
                     <thead>
                       <tr style={{ background: t.card2 || t.card }}>
                         <th style={s.th}>Audit Date</th>
+                        <th style={s.th}>Shift</th>
                         <th style={s.th}>Customer</th>
                         <th style={s.th}>Branch</th>
                         <th style={{ ...s.th, textAlign: 'right' }}>CRM Weight</th>
@@ -398,9 +534,21 @@ export default function AuditReport() {
                         const reD = Number(r.reaudit?.discrepancy_g || 0)
                         const auditor = r.reaudit?.audited_by_email || r.audited_by_email || '—'
                         const remark  = r.reaudit?.remark || r.audit_remark || ''
+                        const shiftColor = r._shift === 'night' ? t.gold : r._shift === 'morning' ? t.orange : t.text4
                         return (
                           <tr key={r.id}>
                             <td style={{ ...s.td, fontFamily: 'monospace', color: t.text3, fontSize: '11px' }}>{fmtTS(r.audited_at)}</td>
+                            <td style={s.td}>
+                              <span style={{
+                                fontSize: '9.5px', color: shiftColor,
+                                background: `${shiftColor}18`,
+                                border: `1px solid ${shiftColor}45`,
+                                borderRadius: '5px',
+                                padding: '2px 7px',
+                                fontWeight: 700, letterSpacing: '.06em',
+                                textTransform: 'uppercase',
+                              }}>{SHIFT_LABEL[r._shift] || '—'}</span>
+                            </td>
                             <td style={s.td}>{r.customer_name || '—'}</td>
                             <td style={s.td}>{r.branch_name}</td>
                             <td style={{ ...s.td, textAlign: 'right', fontFamily: 'monospace', color: t.gold }}>{fmtWt(r.gross_weight)}</td>
