@@ -712,7 +712,36 @@ export default function ConsignmentApprovals() {
                         body: JSON.stringify({ action: 'approve_cancellation', id: c.id }),
                       })
                       const j = await r.json()
-                      if (!r.ok || j.error) { showToast(j.error || 'Approval failed', 'error'); return }
+                      if (!r.ok || j.error) {
+                        // Portal-cancel rejected (NIC for EWB, IRP for IRN).
+                        // If the backend hands us can_force_local, offer the
+                        // escape hatch: cancel locally only, leave the EWB/IRN
+                        // on the gov portal for accounts to handle directly.
+                        if (j.can_force_local) {
+                          const portalLabel = j.irp_error_code != null ? 'IRP' : 'NIC'
+                          const portalNote = portalLabel === 'IRP'
+                            ? `The IRN ${c.irn || ''} will remain on IRP — accounts must cancel it directly (within 24h of generation) or issue a credit note. The EWB (if any) was ${ j.error?.includes('EWB') ? 'already cancelled' : 'not touched' }.`
+                            : `The EWB ${c.eway_bill_no || ''} will remain on NIC — it expires naturally or can be cancelled on the NIC portal.`
+                          const okForce = await openConfirm({
+                            title: `Force cancel ${c.tmp_prf_no} locally?`,
+                            message: `${portalLabel} rejected the cancel call:\n\n${j.error}\n\nForcing local cancellation will:\n1. Mark the consignment cancelled in our DB\n2. Return all attached bills to source branch\n3. Clear EWB / IRN fields locally\n\n${portalNote}\n\nThis is irreversible from our side. Proceed only if you've verified the portal state.`,
+                            confirmLabel: 'Force cancel locally',
+                            danger: true,
+                          })
+                          if (!okForce) return
+                          const r2 = await authedFetch('/api/consignments', {
+                            method: 'POST', headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ action: 'approve_cancellation', id: c.id, force_local: true }),
+                          })
+                          const j2 = await r2.json()
+                          if (!r2.ok || j2.error) { showToast(j2.error || 'Force-cancel failed', 'error'); return }
+                          showToast(j2.message || 'Cancellation force-applied locally. Verify portal state separately.', 'success')
+                          fetchCancelRequests(true)
+                          return
+                        }
+                        showToast(j.error || 'Approval failed', 'error')
+                        return
+                      }
                       showToast(j.message || 'Cancellation approved.', 'success')
                       fetchCancelRequests(true)
                     } finally { setApproveCancelBusy(null) }

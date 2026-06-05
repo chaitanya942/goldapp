@@ -2585,7 +2585,7 @@ export async function POST(req) {
   //      marks status='cancelled' in a single txn).
   // Audit log entries written at each step so the timeline reads sequentially.
   if (action === 'approve_cancellation') {
-    const { id } = body
+    const { id, force_local } = body
     if (!id) return Response.json({ error: 'Missing id' }, { status: 400 })
 
     const { data: c, error: fetchErr } = await supabase
@@ -2610,11 +2610,16 @@ export async function POST(req) {
     const HOUR_MS = 3600 * 1000
     const WINDOW  = 24 * HOUR_MS
     const now     = Date.now()
-    const composedReason = `Approved by accounts (${actorEmail}). Operations reason: ${c.cancellation_reason || '—'}`
+    const composedReason = force_local
+      ? `Force-cancelled locally by accounts (${actorEmail}). Portal docs left untouched. Operations reason: ${c.cancellation_reason || '—'}`
+      : `Approved by accounts (${actorEmail}). Operations reason: ${c.cancellation_reason || '—'}`
     const portalCancelled = []  // tracks what we cancelled for the audit + UI
 
     // STEP 1 — EWB on NIC
-    if (c.eway_bill_no) {
+    // Force-local mode: skip the portal calls entirely and jump straight to
+    // local void. EWB/IRN remain "active" on NIC/IRP; accounts must verify
+    // and handle there manually (or via a credit note for IRN-past-24h).
+    if (c.eway_bill_no && !force_local) {
       // Sanity check: is the 24h NIC window even open? request_cancellation
       // already gated this when the request was filed, but the request might
       // have been sitting in the queue for hours. Re-check at approval time.
@@ -2724,7 +2729,7 @@ export async function POST(req) {
     }
 
     // STEP 2 — IRN on IRP
-    if (c.irn) {
+    if (c.irn && !force_local) {
       const irnAge = c.einvoice_generated_at ? now - new Date(c.einvoice_generated_at).getTime() : Infinity
       if (irnAge >= WINDOW) {
         return Response.json({
@@ -2777,14 +2782,46 @@ export async function POST(req) {
           portalCancelled.push('E-Invoice cancelled on IRP')
         }
       } catch (err) {
-        console.error('[approve_cancellation] IRP E-Invoice cancel failed:', err)
+        console.error('[approve_cancellation] IRP E-Invoice cancel failed:', err, JSON.stringify(err?.cleartaxResponse))
         // EWB may have already been cancelled by this point — that's an
         // inconsistent state. Tell the user precisely so they can decide.
         const ewbNote = portalCancelled.length
           ? ` Note: the E-Way Bill was already cancelled on NIC. The consignment has NOT been voided.`
           : ''
+        // Extract IRP diagnostics from the ClearTax client's attached debug
+        // payload — same pattern as the EWB catch above. Lets the UI show
+        // "IRP said: <message> (code N)" plus age + a Force Cancel Local
+        // escape hatch instead of the bare error string.
+        const irpResponse  = err?.cleartaxResponse
+        const firstResp    = Array.isArray(irpResponse) ? irpResponse[0] : irpResponse
+        const govt         = firstResp?.govt_response
+        const rawDetails   =
+          govt?.ErrorDetails || govt?.errorDetails ||
+          firstResp?.ErrorDetails || firstResp?.errorDetails ||
+          irpResponse?.ErrorDetails || irpResponse?.errorDetails
+        const errorDetails = rawDetails == null ? null
+          : Array.isArray(rawDetails) ? rawDetails
+          : [rawDetails]
+        const irpErrorCode = errorDetails
+          ? errorDetails.map(e => e?.error_code   || e?.errorCode).filter(Boolean).join(', ')
+          : (govt?.error_code || firstResp?.error_code || null)
+        const irpErrorMsg  = errorDetails
+          ? errorDetails.map(e => e?.error_message || e?.errorMessage || e?.message).filter(Boolean).join('; ')
+          : (govt?.info || govt?.status_desc || firstResp?.message || firstResp?.status_desc || null)
+        const irnAgeMs     = c.einvoice_generated_at ? (Date.now() - new Date(c.einvoice_generated_at).getTime()) : null
+        const irnAgeHours  = irnAgeMs != null ? Number((irnAgeMs / 3600000).toFixed(1)) : null
+        const reasonLine   = irpErrorMsg
+          ? `IRP said: ${irpErrorMsg}${irpErrorCode ? ` (code ${irpErrorCode})` : ''}.`
+          : (err?.message || 'unknown error')
+        const hint = `An admin can use Force Cancel (Local) to clear this consignment without touching IRP — the IRN ${c.irn} will remain on IRP unless accounts handles it there directly (cancel within 24h or issue a credit note).`
         return Response.json({
-          error: `Could not cancel the E-Invoice on IRP: ${err.message || 'unknown error'}.${ewbNote}`,
+          error:           `Could not cancel the E-Invoice on IRP. ${reasonLine}${ewbNote}\n\n${hint}`,
+          irp_error_code:  irpErrorCode || null,
+          irp_error_text:  irpErrorMsg  || null,
+          irp_raw:         irpResponse  || null,
+          irn_age_hours:   irnAgeHours,
+          hint,
+          can_force_local: true,
         }, { status: 502 })
       }
     }
