@@ -53,14 +53,15 @@ SELECT b.name           AS branch_name,
 -- 3) E-Invoice generation event log — what did ClearTax actually return
 --    at generation time? Confirms the IRN we stored matches what was
 --    acknowledged. Table is consignment_activity_log (not consignment_events).
+--    NB: tmp_prf_no 'WG000024' is reused across 5 consignment_no rows; pin to
+--    the AP-KAKINADA cancellation-requested row directly by id.
 SELECT event_type,
        actor_email,
        actor_role,
        created_at,
        details
   FROM consignment_activity_log
- WHERE consignment_id = (SELECT id FROM consignments WHERE tmp_prf_no = 'WG000024')
-   AND event_type IN ('einvoice_generated', 'einvoice_generation_started', 'einvoice_generation_failed', 'einvoice_cancelled', 'einvoice_cancel_failed', 'cancellation_requested', 'cancellation_approved', 'cancellation_failed')
+ WHERE consignment_id = '9f683ea7-0147-4ebc-bf71-556641aac2a0'::uuid
  ORDER BY created_at;
 
 -- 4) Quick sanity — is the stored IRN a 64-char hex hash like NIC issues?
