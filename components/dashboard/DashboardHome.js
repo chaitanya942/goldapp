@@ -11,6 +11,7 @@ import { triggerSync } from '../../lib/triggerSync'
 import { CONSIGNMENT_THEMES as THEMES } from '../../lib/consignmentTheme'
 import { istNow, istStr, fromUtcDate } from '../../lib/dateIst'
 import LiveFeedFlashcards from './LiveFeedFlashcards'
+import MonthProjection from './MonthProjection'
 import TodaysBookingsWidget from './TodaysBookingsWidget'
 
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
@@ -1267,6 +1268,12 @@ export default function DashboardHome() {
           <LiveFeedFlashcards t={t} isMobile={isMobile} />
         </div>
       )}
+
+      {/* ── MONTH PROJECTION — run rate (g/working day) + projected month-end
+            closure. Per-state working day math feeds off Admin → Calendar.
+            Lives directly under Live Feed per ops layout ask. Not gated
+            further — dashboard access is enough. */}
+      <MonthProjection t={t} isMobile={isMobile} />
 
       {/* ── MOBILE MODULE GRID — clean grouped-by-module view (role-aware) ── */}
       {isMobile && (() => {
