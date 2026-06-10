@@ -42,6 +42,7 @@ import InboundBotTesting from '../../components/telesales/InboundBotTesting'
 import TelesalesDashboard from '../../components/telesales/TelesalesDashboard'
 import DialogHost from '../../components/ui/ConfirmDialog'
 import AuditAccessGuard from '../../components/AuditAccessGuard'
+import CancelRequestNotifier from '../../components/consignments/CancelRequestNotifier'
 
 const THEMES = {
   dark:  { bg: '#0a0a0a', card: '#111111', text1: '#f0e6c8', text2: '#c8b89a', text3: '#7a6a4a', text4: '#4a3a2a', gold: '#c9a84c', border: '#1e1e1e', red: '#e05555' },
@@ -286,6 +287,13 @@ function DashboardShell() {
           roles render nothing from this component. Mounted at dashboard root
           so it covers every module. */}
       <AuditAccessGuard role={role} />
+
+      {/* Cancel-request notifier — active for ACCOUNTS group (super_admin /
+          founders_office / accounts). Polls every 60 s; surfaces pending
+          consignment cancellation requests as toast cards + browser
+          notifications until accounts approves/rejects each one. Renders
+          nothing for other roles. */}
+      <CancelRequestNotifier />
 
       {/* Exit-confirmation toast — surfaces when the user presses back on the
           dashboard. A second back press within 2.5s actually exits. Sits
