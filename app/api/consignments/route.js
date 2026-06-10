@@ -646,6 +646,37 @@ export async function GET(req) {
         .filter(b => !postDispatchedBranches.has(b.branch_name))
     }
 
+    // 5) Booked Pending Dispatch — at_branch bills that are already attached
+    //    to a booking (booking_id IS NOT NULL). These are "promises without
+    //    delivery in motion" — a booking row commits this weight to a buyer,
+    //    but the bill itself is still sitting at the branch. Surfaces
+    //    stalled bookings that need either a consignment kicked off or the
+    //    booking released. View-only on the picker — not part of any
+    //    bookable total (the booking already counts it).
+    //
+    //    NOT scoped by today's arrival window — a stalled booking is a
+    //    stalled booking regardless of which day it was supposed to arrive
+    //    on. The whole point is to surface ones that have lingered.
+    //
+    //    Partitioned by region so the KA·AP·TS tab and the KL tab can each
+    //    show their own slice.
+    let bookedPendingBills = []
+    const allBookableBranchNames = (branchRows || []).map(b => b.name)
+    if (allBookableBranchNames.length) {
+      const { data: bp, error: bpErr } = await supabase
+        .from('purchases')
+        .select('id, application_id, branch_name, current_branch, customer_name, gross_weight, net_weight, total_amount, purchase_date, stock_status, dispatched_at, crm_status, booking_id, booked_at')
+        .in('branch_name', allBookableBranchNames)
+        .eq('stock_status', 'at_branch')
+        .eq('crm_status',   'approved')
+        .eq('is_deleted',   false)
+        .not('booking_id',  'is', null)
+      if (bpErr) return Response.json({ error: bpErr.message }, { status: 500 })
+      bookedPendingBills = (bp || []).map(b => ({ ...b, branch_name: b.current_branch || b.branch_name }))
+    }
+    const bookedNonKlBills = bookedPendingBills.filter(b => (branchMeta[b.branch_name]?.region) !== 'Kerala')
+    const bookedKlBills    = bookedPendingBills.filter(b => (branchMeta[b.branch_name]?.region) === 'Kerala')
+
     // Group by branch for the per-branch breakdown card.
     const groupByBranch = (bills) => {
       const m = {}
@@ -680,6 +711,8 @@ export async function GET(req) {
     const transit24hByBranch = groupByBranch(inflight24h)
     const transit48hByBranch = groupByBranch(inflight48h)
     const preEodByBranch     = groupByBranch(preEodBills)
+    const bookedNonKlByBranch = groupByBranch(bookedNonKlBills)
+    const bookedKlByBranch    = groupByBranch(bookedKlBills)
     // Back-compat alias: the older UI reads supply.in_transit and expects
     // the bookable-tomorrow bucket. Keep it pointing at the 24h transit.
     const inflightByBranch   = transit24hByBranch
@@ -692,10 +725,12 @@ export async function GET(req) {
       amount:   a.amount   + r.total_amount,
     }), { bills: 0, gross_wt: 0, net_wt: 0, amount: 0 })
 
-    const bangTotal       = sumOf(bangaloreByBranch)
-    const transit24hTotal = sumOf(transit24hByBranch)
-    const transit48hTotal = sumOf(transit48hByBranch)
-    const preEodTotal     = sumOf(preEodByBranch)
+    const bangTotal         = sumOf(bangaloreByBranch)
+    const transit24hTotal   = sumOf(transit24hByBranch)
+    const transit48hTotal   = sumOf(transit48hByBranch)
+    const preEodTotal       = sumOf(preEodByBranch)
+    const bookedNonKlTotal  = sumOf(bookedNonKlByBranch)
+    const bookedKlTotal     = sumOf(bookedKlByBranch)
     // Bookable pool = sections that can actually arrive at HO on arrivalDate.
     // Section 3 (transit_48h) is informational only — excluded from grandTotal.
     const grandTotal = {
@@ -914,6 +949,10 @@ export async function GET(req) {
         transit_24h:    { branches: transit24hByBranch, total: transit24hTotal },
         transit_48h:    { branches: transit48hByBranch, total: transit48hTotal },   // view-only, NOT part of bookable pool
         branch_pre_eod: { branches: preEodByBranch,     total: preEodTotal, _debug: debugSection4 },
+        // Section 5 — booked but consignment not yet created (at_branch +
+        // booking_id IS NOT NULL). View-only; intentionally excluded from
+        // bookable totals (the booking row already counts this weight).
+        booked_pending_dispatch: { branches: bookedNonKlByBranch, total: bookedNonKlTotal },
         // Back-compat for the existing UI — alias of transit_24h.
         in_transit: { branches: inflightByBranch, total: inflightTotal },
         // Kerala bid-desk taxonomy (consumed by the KL tab).
@@ -923,6 +962,8 @@ export async function GET(req) {
           s1_hub_stock:          { branches: klS1ByHub,  total: klS1Total  },
           s2_in_movement:        { branches: klS2ByHub,  total: klS2Total  },
           s3_at_leaf:            { branches: klS3ByLeaf, total: klS3Total  },
+          // Kerala counterpart of booked_pending_dispatch.
+          s4_booked_pending:     { branches: bookedKlByBranch, total: bookedKlTotal },
         },
         grand_total: grandTotal,
         pending: {

@@ -1293,6 +1293,26 @@ export default function BiddingVolume() {
         emptyMsg="No eligible branches — either pickups already happened today, or no eligible branches scheduled today."
       />
 
+      {/* 5 · Booked but consignment not created (view-only — risk surface)
+          These bills are booked (booking_id set) but still sitting at_branch
+          — the booking commits the weight to a buyer but no consignment has
+          been kicked off. Doesn't count toward today's bid; the booking
+          already represents this weight. Surfaced so ops can either create
+          the consignment or release the booking. */}
+      <SourceSection
+        t={t} card={card}
+        index={5}
+        icon="⚠"
+        title="Booked — consignment not created"
+        subtitle="Already attached to a booking but still at the branch · create the consignment or release the booking"
+        accent={t.red}
+        branches={supply?.booked_pending_dispatch?.branches || []}
+        total={supply?.booked_pending_dispatch?.total}
+        selectable={false}
+        viewOnly
+        emptyMsg="No stalled bookings — every booked bill is in motion or already received."
+      />
+
       </>)}
 
       {/* ───────────────────── KL TAB — Kerala source picker ─────────────────────
@@ -1378,6 +1398,22 @@ export default function BiddingVolume() {
           onToggleRegionAll={toggleRegionAll}
           branchSelectionState={branchSelectionState}
           emptyMsg="No bills sitting at KL leaf branches right now."
+        />
+
+        {/* 4 · Booked but consignment not created (Kerala slice) — same
+            view-only risk surface as the KA·AP·TS tab's Section 5. */}
+        <SourceSection
+          t={t} card={card}
+          index={4}
+          icon="⚠"
+          title="Booked — consignment not created"
+          subtitle="Already attached to a booking but still at the branch · create the consignment or release the booking"
+          accent={t.red}
+          branches={klSections.s4_booked_pending?.branches || []}
+          total={klSections.s4_booked_pending?.total}
+          selectable={false}
+          viewOnly
+          emptyMsg="No stalled bookings in Kerala — every booked bill is in motion or already received."
         />
       </>)}
 
