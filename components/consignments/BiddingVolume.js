@@ -77,7 +77,7 @@ const STATUS_META = {
 
 // ── Component ────────────────────────────────────────────────────────────────
 export default function BiddingVolume() {
-  const { theme } = useApp()
+  const { theme, setActiveNav, setConsignmentDeepLink } = useApp()
   const t = THEMES[theme]
   const isMobile = useMobile()
 
@@ -684,6 +684,40 @@ export default function BiddingVolume() {
   const showToast = (msg, type = 'info') => {
     setToast({ msg, type, key: Date.now() })
     setTimeout(() => setToast(null), 3500)
+  }
+
+  // ── Section 5 / S4 actions (booked-pending dispatch) ──────────────────────
+  // Deep-link to Consignment Data with the branch pre-selected, so ops can
+  // tick the bills and create the consignment without re-navigating manually.
+  const handleCreateConsignment = (branchName, region) => {
+    setConsignmentDeepLink({ branch: branchName, region: region || null })
+    setActiveNav('consignment-data')
+  }
+
+  // Release all booked-but-still-at_branch bills under a single branch row.
+  // Server-side endpoint is defensive (skips if not booked / not at_branch /
+  // audit-consumed), returns per-id outcome — we surface the counts on toast
+  // then silently refetch supply so the branch disappears from Section 5.
+  const handleUnbookBranch = async (applicationIds, branchName) => {
+    if (!Array.isArray(applicationIds) || applicationIds.length === 0) return
+    if (!confirm(`Release ${applicationIds.length} bill${applicationIds.length === 1 ? '' : 's'} from their booking${applicationIds.length === 1 ? '' : 's'} at ${branchName}?`)) return
+    try {
+      const res = await authedFetch('/api/consignments', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ action: 'unbook_bills', application_ids: applicationIds }),
+      })
+      const j = await res.json()
+      if (j.error) { showToast(`Unbook failed: ${j.error}`, 'error'); return }
+      const skipped = (j.data?.skipped || []).length
+      showToast(
+        `Unbooked ${j.data?.unbooked || 0} bill${(j.data?.unbooked || 0) === 1 ? '' : 's'}${skipped ? ` · ${skipped} skipped` : ''} at ${branchName}`,
+        'success',
+      )
+      await fetchAll(true)
+    } catch (e) {
+      showToast(`Unbook failed: ${String(e?.message || e)}`, 'error')
+    }
   }
 
   // ── Mutations ──────────────────────────────────────────────────────────────
@@ -1310,6 +1344,8 @@ export default function BiddingVolume() {
         total={supply?.booked_pending_dispatch?.total}
         selectable={false}
         viewOnly
+        onCreateConsignment={handleCreateConsignment}
+        onUnbookBranch={handleUnbookBranch}
         emptyMsg="No stalled bookings — every booked bill is in motion or already received."
       />
 
@@ -1413,6 +1449,8 @@ export default function BiddingVolume() {
           total={klSections.s4_booked_pending?.total}
           selectable={false}
           viewOnly
+          onCreateConsignment={handleCreateConsignment}
+          onUnbookBranch={handleUnbookBranch}
           emptyMsg="No stalled bookings in Kerala — every booked bill is in motion or already received."
         />
       </>)}
@@ -2274,6 +2312,12 @@ function SourceSection({
   // Section 1 picker (the EOD audit pool). Held bills stay visible but are
   // excluded from auto-select + the 23:30 reconciliation.
   onToggleHold,
+  // Branch-level actions for the booked-pending sections only. When both
+  // callbacks are provided, the branch row renders [Create] [Unbook]
+  // buttons inline; otherwise the row stays clean (default for sections
+  // 1-4 which don't pass these).
+  onCreateConsignment,
+  onUnbookBranch,
   emptyMsg,
 }) {
   const tone = accent || t.gold
@@ -2456,6 +2500,39 @@ function SourceSection({
                             {b._booking_users && b._booking_users.length > 0 && (
                               <> · by {b._booking_users.join(', ')}</>
                             )}
+                          </span>
+                        )}
+                        {/* Branch-level actions for booked-pending rows only.
+                            Both handlers must be passed (only Section 5 / S4
+                            wire them up). Stops row-click propagation so
+                            clicking the button doesn't toggle row selection. */}
+                        {onCreateConsignment && onUnbookBranch && (b.bills?.length > 0) && (
+                          <span style={{ display: 'inline-flex', gap: 6, marginLeft: 6 }}
+                            onClick={(e) => e.stopPropagation()}>
+                            <button type="button"
+                              onClick={() => onCreateConsignment(b.branch_name, b.region)}
+                              title="Open Consignment Data for this branch to pack a consignment around these bills."
+                              style={{
+                                background: t.gold, color: '#1a0a00', border: 'none',
+                                borderRadius: 5, padding: '3px 10px',
+                                fontSize: 10.5, fontWeight: 700, letterSpacing: '.04em',
+                                cursor: 'pointer', whiteSpace: 'nowrap',
+                                fontFamily: 'inherit',
+                              }}>
+                              Create
+                            </button>
+                            <button type="button"
+                              onClick={() => onUnbookBranch((b.bills || []).map(x => x.application_id).filter(Boolean), b.branch_name)}
+                              title="Release the booking on all bills at this branch — clears booking_id + booked_at."
+                              style={{
+                                background: 'transparent', color: t.red, border: `1px solid ${t.red}55`,
+                                borderRadius: 5, padding: '3px 10px',
+                                fontSize: 10.5, fontWeight: 700, letterSpacing: '.04em',
+                                cursor: 'pointer', whiteSpace: 'nowrap',
+                                fontFamily: 'inherit',
+                              }}>
+                              Unbook
+                            </button>
                           </span>
                         )}
                       </div>
