@@ -36,9 +36,12 @@ const ALL_INDIA = 'All India'
 // the off-by-one where a UTC-midnight stamp lands on the previous IST day.
 const istNow = () => new Date(Date.now() + 5.5 * 3600_000)
 const isoYMD = (d) => `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`
-const istToday      = () => isoYMD(istNow())
-const istMonthStart = () => { const d = istNow(); d.setUTCDate(1); return isoYMD(d) }
-const istMonthEnd   = () => { const d = istNow(); d.setUTCMonth(d.getUTCMonth() + 1, 0); return isoYMD(d) }
+const istToday        = () => isoYMD(istNow())
+const istMonthStart   = () => { const d = istNow(); d.setUTCDate(1); return isoYMD(d) }
+const istMonthEnd     = () => { const d = istNow(); d.setUTCMonth(d.getUTCMonth() + 1, 0); return isoYMD(d) }
+const istPrevStart    = () => { const d = istNow(); d.setUTCMonth(d.getUTCMonth() - 1, 1); return isoYMD(d) }
+const istPrevEnd      = () => { const d = istNow(); d.setUTCDate(0); return isoYMD(d) }
+const istPrevName     = () => { const d = istNow(); d.setUTCMonth(d.getUTCMonth() - 1, 1); return d.toLocaleDateString('en-IN', { month: 'short', timeZone: 'UTC' }) }
 
 // Count working days between two YYYY-MM-DD dates (inclusive) for a given
 // state, skipping Sundays and any active holiday entry covering that
@@ -85,6 +88,13 @@ export default function MonthProjection({ t, isMobile }) {
   const [regionToState, setRegionToState] = useState({})          // { <region>: <state> } — for region→holiday calendar lookup
   const [mtdOverall,    setMtdOverall]    = useState(0)
   const [grossOverall,  setGrossOverall]  = useState(0)            // MTD gross purchase value overall
+  // Previous-month totals — used for delta vs prev month + the on-track marker
+  // on the progress bar (which shows where MTD would be at last month's pace).
+  const [prevMonth,     setPrevMonth]     = useState({
+    overallNet: 0, overallGross: 0,
+    byState:  {},
+    byRegion: {},
+  })
   const [holidays,      setHolidays]      = useState([])          // raw rows
   const [loading,       setLoading]       = useState(true)
   const [error,         setError]         = useState(null)
@@ -93,17 +103,46 @@ export default function MonthProjection({ t, isMobile }) {
   const todayYmd      = useMemo(istToday,      [])
   const monthStartYmd = useMemo(istMonthStart, [])
   const monthEndYmd   = useMemo(istMonthEnd,   [])
+  const prevStartYmd  = useMemo(istPrevStart,  [])
+  const prevEndYmd    = useMemo(istPrevEnd,    [])
+  const prevMonthName = useMemo(istPrevName,   [])
   const currentYear   = useMemo(() => Number(todayYmd.slice(0, 4)), [todayYmd])
 
   const fetchAll = useCallback(async () => {
     try {
-      const params = new URLSearchParams({ from: monthStartYmd, to: todayYmd })
-      const [aggRes, holRes] = await Promise.all([
+      const params     = new URLSearchParams({ from: monthStartYmd, to: todayYmd })
+      const prevParams = new URLSearchParams({ from: prevStartYmd,  to: prevEndYmd  })
+      const [aggRes, holRes, prevRes] = await Promise.all([
         authedFetch(`/api/report-aggregates?${params}`),
         authedFetch(`/api/admin/holidays?year=${currentYear}`),
+        authedFetch(`/api/report-aggregates?${prevParams}`),
       ])
-      const aggJson = await aggRes.json().catch(() => ({}))
-      const holJson = await holRes.json().catch(() => ({}))
+      const aggJson  = await aggRes.json().catch(() => ({}))
+      const holJson  = await holRes.json().catch(() => ({}))
+      const prevJson = await prevRes.json().catch(() => ({}))
+
+      // Previous month aggregate — buckets same as current, for state-level
+      // and region-level deltas + the prev-pace marker on the progress bar.
+      if (prevJson?.kpis) {
+        const prevRows = prevJson.branchData || prevJson.branches || []
+        const byState  = {}
+        const byRegion = {}
+        for (const b of prevRows) {
+          const s = b.state  || null
+          const r = b.region || null
+          const net = Number(b.total_net || 0)
+          if (s) byState[s]   = (byState[s]  || 0) + net
+          if (r) byRegion[r]  = (byRegion[r] || 0) + net
+        }
+        setPrevMonth({
+          overallNet:   Number(prevJson.kpis.total_net   || 0),
+          overallGross: Number(prevJson.kpis.total_value || 0),
+          byState,
+          byRegion,
+        })
+      } else {
+        setPrevMonth({ overallNet: 0, overallGross: 0, byState: {}, byRegion: {} })
+      }
 
       if (aggJson?.empty || !aggJson?.kpis) {
         setMtdOverall(0); setGrossOverall(0)
@@ -166,7 +205,7 @@ export default function MonthProjection({ t, isMobile }) {
     } finally {
       setLoading(false)
     }
-  }, [monthStartYmd, todayYmd, currentYear])
+  }, [monthStartYmd, todayYmd, prevStartYmd, prevEndYmd, currentYear])
 
   useEffect(() => { fetchAll() }, [fetchAll])
 
@@ -270,6 +309,51 @@ export default function MonthProjection({ t, isMobile }) {
     }
   }, [mtdByState, grossByState, mtdOverall, grossOverall, holidaysByDate, monthStartYmd, monthEndYmd, todayYmd])
 
+  // Compute the prev-month run rate per state so we can plot a "pace marker"
+  // on the progress bar showing where MTD would be if we ran at last
+  // month's pace. Averaging across active states keeps the marker honest
+  // when state activity varies.
+  const prevMarker = useMemo(() => {
+    if (!prevMonth.overallNet) return { overall: 0, byState: {}, byRegion: {} }
+    const byState  = {}
+    const byRegion = {}
+    let expectedMtdSum   = 0
+    let projectedClosure = 0
+    for (const state of Object.keys(prevMonth.byState)) {
+      const prevNet  = Number(prevMonth.byState[state] || 0)
+      if (prevNet <= 0) continue
+      const prevWd   = countWorkingDays(prevStartYmd, prevEndYmd, state, holidaysByDate)
+      const prevRR   = prevWd > 0 ? prevNet / prevWd : 0
+      const curWdEl  = countWorkingDays(monthStartYmd, todayYmd,    state, holidaysByDate)
+      const curWdT   = countWorkingDays(monthStartYmd, monthEndYmd, state, holidaysByDate)
+      const expected = prevRR * curWdEl
+      // For overall marker: aggregate weighted by closure denominator.
+      const curMtd   = Number(mtdByState[state] || 0)
+      const curRR    = curWdEl > 0 ? curMtd / curWdEl : 0
+      const curClos  = curRR * curWdT
+      expectedMtdSum   += expected
+      projectedClosure += curClos
+      byState[state]    = curClos > 0 ? Math.min(100, (expected / curClos) * 100) : 0
+    }
+    for (const region of Object.keys(prevMonth.byRegion)) {
+      const state = regionToState[region]
+      if (!state) continue
+      const prevNet = Number(prevMonth.byRegion[region] || 0)
+      if (prevNet <= 0) continue
+      const prevWd  = countWorkingDays(prevStartYmd, prevEndYmd, state, holidaysByDate)
+      const prevRR  = prevWd > 0 ? prevNet / prevWd : 0
+      const curWdEl = countWorkingDays(monthStartYmd, todayYmd,    state, holidaysByDate)
+      const curWdT  = countWorkingDays(monthStartYmd, monthEndYmd, state, holidaysByDate)
+      const expected = prevRR * curWdEl
+      const curMtd  = Number(mtdByRegion[region] || 0)
+      const curRR   = curWdEl > 0 ? curMtd / curWdEl : 0
+      const curClos = curRR * curWdT
+      byRegion[region] = curClos > 0 ? Math.min(100, (expected / curClos) * 100) : 0
+    }
+    const overall = projectedClosure > 0 ? Math.min(100, (expectedMtdSum / projectedClosure) * 100) : 0
+    return { overall, byState, byRegion }
+  }, [prevMonth, mtdByState, mtdByRegion, regionToState, holidaysByDate, prevStartYmd, prevEndYmd, monthStartYmd, monthEndYmd, todayYmd])
+
   // Per-region metrics. Each region inherits its state's holiday calendar
   // (the state is looked up via regionToState which was built from
   // branchData — no hardcoded mapping). Sorted by closure desc so the
@@ -338,22 +422,39 @@ export default function MonthProjection({ t, isMobile }) {
       </div>
 
       {viewMode === 'overall' ? (
-        <ProjectionHero
-          accent={t.gold}
-          title="Estimated Month Closure"
-          loading={loading}
-          mtd={overall.mtd}
-          mtdGross={overall.mtdGross}
-          pricePerGram={overall.pricePerGram}
-          runRate={overall.runRate}
-          closure={overall.closure}
-          closureValue={overall.closureValue}
-          wdElapsed={overall.wdElapsed}
-          wdRemaining={overall.wdRemaining}
-          wdTotal={overall.wdTotal}
-          subhead={overall.statesWithData > 0 ? `Avg across ${overall.statesWithData} state${overall.statesWithData === 1 ? '' : 's'} · total ${overall.wdTotal} WD this month` : null}
-          t={t} isMobile={isMobile}
-        />
+        <>
+          <ProjectionHero
+            accent={t.gold}
+            title="Estimated Month Closure"
+            loading={loading}
+            mtd={overall.mtd}
+            mtdGross={overall.mtdGross}
+            pricePerGram={overall.pricePerGram}
+            runRate={overall.runRate}
+            closure={overall.closure}
+            closureValue={overall.closureValue}
+            wdElapsed={overall.wdElapsed}
+            wdRemaining={overall.wdRemaining}
+            wdTotal={overall.wdTotal}
+            prevClosure={prevMonth.overallNet}
+            prevMonthName={prevMonthName}
+            paceMarkerPct={prevMarker.overall}
+            subhead={overall.statesWithData > 0 ? `Avg across ${overall.statesWithData} state${overall.statesWithData === 1 ? '' : 's'} · total ${overall.wdTotal} WD this month` : null}
+            t={t} isMobile={isMobile}
+          />
+
+          {/* Per-region contribution bar — only on the overall card. Each
+              region segment is sized by its share of the total projected
+              closure and coloured by REGION_COLORS. Surfaces concentration
+              risk at a glance (e.g. "Bangalore is 40% of next month"). */}
+          {!loading && regionwise.length > 0 && (
+            <RegionContributionBar
+              t={t} isMobile={isMobile}
+              regions={regionwise}
+              totalClosure={overall.closure}
+            />
+          )}
+        </>
       ) : (
         <div style={{
           display: 'grid',
@@ -384,6 +485,9 @@ export default function MonthProjection({ t, isMobile }) {
                 wdElapsed={row.wdElapsed}
                 wdRemaining={row.wdRemaining}
                 wdTotal={row.wdTotal}
+                prevClosure={Number(prevMonth.byRegion[row.region] || 0)}
+                prevMonthName={prevMonthName}
+                paceMarkerPct={prevMarker.byRegion[row.region] || 0}
                 compact
                 t={t} isMobile={isMobile}
               />
@@ -415,6 +519,7 @@ function ProjectionHero({
   mtd, mtdGross, pricePerGram,
   runRate, closure, closureValue,
   wdElapsed, wdRemaining, wdTotal,
+  prevClosure, prevMonthName, paceMarkerPct,
   compact, t, isMobile,
 }) {
   const pct = closure > 0 ? Math.min(100, (mtd / closure) * 100) : 0
@@ -479,16 +584,40 @@ function ProjectionHero({
       }} />
 
       {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, position: 'relative' }}>
-        <span style={{
-          fontSize: compact && !isMobile ? sizes.titleSize : sizes.headerLabel,
-          color: accent,
-          fontWeight: 700,
-          letterSpacing: compact && !isMobile ? '.03em' : '.12em',
-          textTransform: compact && !isMobile ? 'none' : 'uppercase',
-        }}>
-          {title}
-        </span>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, position: 'relative', flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+          <span style={{
+            fontSize: compact && !isMobile ? sizes.titleSize : sizes.headerLabel,
+            color: accent,
+            fontWeight: 700,
+            letterSpacing: compact && !isMobile ? '.03em' : '.12em',
+            textTransform: compact && !isMobile ? 'none' : 'uppercase',
+          }}>
+            {title}
+          </span>
+          {/* Prev-month delta pill — compares projected closure to last
+              month's total. Green for up, red for down, muted for ~flat. */}
+          {!loading && prevClosure > 0 && closure > 0 && (() => {
+            const delta = ((closure - prevClosure) / prevClosure) * 100
+            const isFlat = Math.abs(delta) < 1
+            const color  = isFlat ? t.text3 : delta > 0 ? (t.green || '#3aaa6a') : (t.red || '#e05555')
+            const arrow  = isFlat ? '·' : delta > 0 ? '▲' : '▼'
+            return (
+              <span title={`Previous month closure: ${fmtWt(prevClosure)}`}
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 4,
+                  background: `${color}1a`, color, border: `1px solid ${color}55`,
+                  borderRadius: 99, padding: '2px 9px', whiteSpace: 'nowrap',
+                  fontSize: isMobile ? 11 : 10.5, fontWeight: 700, letterSpacing: '.02em',
+                  fontVariantNumeric: 'tabular-nums',
+                }}>
+                <span style={{ fontSize: 9 }}>{arrow}</span>
+                {Math.abs(delta).toFixed(1)}%
+                <span style={{ fontSize: 9, opacity: 0.75, fontWeight: 600 }}>vs {prevMonthName}</span>
+              </span>
+            )
+          })()}
+        </div>
         {titleBadge && (
           <span style={{ fontSize: 10, color: t.text4, letterSpacing: '.05em', textTransform: 'uppercase', whiteSpace: 'nowrap', fontWeight: 600 }}>{titleBadge}</span>
         )}
@@ -543,13 +672,17 @@ function ProjectionHero({
         )}
       </div>
 
-      {/* Progress bar — MTD/Closure (≡ wdElapsed/wdTotal at current pace) */}
+      {/* Progress bar — MTD/Closure (≡ wdElapsed/wdTotal at current pace).
+          Vertical tick at paceMarkerPct shows where MTD would be at last
+          month's run rate. Fill ahead of the tick → ahead of last month's
+          pace; fill behind → slipping. */}
       <div style={{ position: 'relative' }}>
         <div style={{
           height: isMobile ? 8 : 6,
           width: '100%',
           background: `${t.border}`,
           borderRadius: 99, overflow: 'hidden',
+          position: 'relative',
         }}>
           <div style={{
             height: '100%',
@@ -558,6 +691,18 @@ function ProjectionHero({
             transition: 'width .35s ease',
             boxShadow: `0 0 8px ${accent}55`,
           }} />
+          {paceMarkerPct > 0 && paceMarkerPct < 100 && (
+            <div title={`${prevMonthName}'s pace would put us here at this point in the month`}
+              style={{
+                position: 'absolute',
+                top: -2, bottom: -2,
+                left: `${paceMarkerPct}%`,
+                width: 2,
+                background: t.text2,
+                borderRadius: 2,
+                boxShadow: `0 0 0 2px ${t.card || '#0a0a0a'}`,
+              }} />
+          )}
         </div>
         <div style={{
           display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap',
@@ -566,7 +711,14 @@ function ProjectionHero({
           color: t.text4,
           letterSpacing: '.02em', fontWeight: 600,
         }}>
-          <span><strong style={{ color: t.text2, fontVariantNumeric: 'tabular-nums' }}>{pct.toFixed(1)}%</strong> through projected closure</span>
+          <span>
+            <strong style={{ color: t.text2, fontVariantNumeric: 'tabular-nums' }}>{pct.toFixed(1)}%</strong> through projected closure
+            {paceMarkerPct > 0 && (
+              <span style={{ marginLeft: 6, color: pct >= paceMarkerPct ? (t.green || '#3aaa6a') : (t.red || '#e05555'), fontWeight: 700 }}>
+                {pct >= paceMarkerPct ? '↗ ahead of' : '↘ behind'} {prevMonthName} pace
+              </span>
+            )}
+          </span>
           <span>{wdElapsed}/{wdTotal} WD · <strong style={{ color: t.text2 }}>{wdRemaining}</strong> left</span>
         </div>
       </div>
@@ -614,6 +766,62 @@ function ProjectionHero({
       {subhead && !compact && (
         <div style={{ fontSize: sizes.captionSize, color: t.text4, position: 'relative', marginTop: -4 }}>{subhead}</div>
       )}
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// RegionContributionBar — slim stacked bar showing each region's share of the
+// total projected closure, coloured by REGION_COLORS. Tells ops at a glance
+// where the month's closure is concentrated (e.g. "Bangalore is 40%, so a
+// Bangalore-side problem moves the whole forecast").
+// ─────────────────────────────────────────────────────────────────────────────
+function RegionContributionBar({ t, isMobile, regions, totalClosure }) {
+  if (!regions || regions.length === 0 || totalClosure <= 0) return null
+  return (
+    <div style={{ marginTop: 12 }}>
+      <div style={{
+        fontSize: 10, color: t.text4,
+        letterSpacing: '.08em', textTransform: 'uppercase', fontWeight: 700,
+        marginBottom: 6,
+      }}>
+        Closure mix by region
+      </div>
+      <div style={{
+        display: 'flex',
+        height: isMobile ? 12 : 10,
+        borderRadius: 99, overflow: 'hidden',
+        background: t.border,
+      }}>
+        {regions.map(row => {
+          const share = (row.closure / totalClosure) * 100
+          const color = (REGION_COLORS && REGION_COLORS[row.region]) || t.gold
+          return (
+            <div key={row.region} title={`${row.region}: ${fmtWt(row.closure)} (${share.toFixed(1)}%)`}
+              style={{
+                width: `${share}%`,
+                background: `linear-gradient(180deg, ${color}, ${color}d0)`,
+              }} />
+          )
+        })}
+      </div>
+      <div style={{
+        display: 'flex', flexWrap: 'wrap', gap: isMobile ? 8 : 14,
+        marginTop: 8,
+        fontSize: isMobile ? 11 : 10.5, color: t.text3, fontWeight: 600,
+      }}>
+        {regions.map(row => {
+          const share = (row.closure / totalClosure) * 100
+          const color = (REGION_COLORS && REGION_COLORS[row.region]) || t.gold
+          return (
+            <span key={row.region} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, whiteSpace: 'nowrap' }}>
+              <span style={{ width: 8, height: 8, borderRadius: 2, background: color, display: 'inline-block' }} />
+              <span style={{ color: t.text2 }}>{row.region}</span>
+              <span style={{ color: t.text4, fontVariantNumeric: 'tabular-nums' }}>{share.toFixed(1)}%</span>
+            </span>
+          )
+        })}
+      </div>
     </div>
   )
 }
