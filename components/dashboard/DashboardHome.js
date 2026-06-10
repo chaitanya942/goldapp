@@ -1260,17 +1260,21 @@ export default function DashboardHome() {
       {/* ── LIVE RATES ── */}
       <LiveTicker />
 
-      {/* ── LIVE FEED FLASHCARDS + MONTH PROJECTION ──────────────────────
-            Both gated by tab.purchase-data.live — if the user can't see Live
-            Feed they don't see today's snapshot OR the month projection
-            either. Keeps the dashboard quiet for view-only roles. */}
+      {/* ── LIVE FEED FLASHCARDS ──
+            Gated by tab.purchase-data.live (matches Purchase Data → Live tab). */}
       {canSee('tab.purchase-data.live') && (
-        <>
-          <div style={{ marginTop: 14 }}>
-            <LiveFeedFlashcards t={t} isMobile={isMobile} />
-          </div>
-          <MonthProjection t={t} isMobile={isMobile} />
-        </>
+        <div style={{ marginTop: 14 }}>
+          <LiveFeedFlashcards t={t} isMobile={isMobile} />
+        </div>
+      )}
+
+      {/* ── MONTH PROJECTION ──
+            Broader gate than Live Feed: anyone with access to either Live Feed
+            OR Purchase Reports & Analytics sees the projection. Analytics-only
+            users (no Live tab) get the forecast even though they can't watch
+            today's snapshot. */}
+      {(canSee('tab.purchase-data.live') || canSee('purchase-reports')) && (
+        <MonthProjection t={t} isMobile={isMobile} />
       )}
 
       {/* ── MOBILE MODULE GRID — clean grouped-by-module view (role-aware) ── */}

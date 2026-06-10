@@ -63,11 +63,28 @@ const fmtWt = (g) => {
   return `${g.toFixed(1)} g`
 }
 
+// ₹ formatter — Cr for ≥ 1 Cr (most projections are headed to ₹X Cr scale),
+// Lakhs for 1L–<1Cr, plain INR with grouping for smaller. Mirrors fmtCr's
+// thresholds used elsewhere on the dashboard.
+const fmtINR = (n) => {
+  if (!Number.isFinite(n) || n <= 0) return '—'
+  if (n >= 1e7)  return `₹${(n / 1e7).toFixed(2)} Cr`
+  if (n >= 1e5)  return `₹${(n / 1e5).toFixed(2)} L`
+  return `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
+}
+const fmtRatePerGram = (n) => {
+  if (!Number.isFinite(n) || n <= 0) return '—'
+  return `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 })}/g`
+}
+
 export default function MonthProjection({ t, isMobile }) {
   const [mtdByState,    setMtdByState]    = useState({})          // { <state>: net_wt } — auto-discovered from branchData
   const [mtdByRegion,   setMtdByRegion]   = useState({})          // { <region>: net_wt } — auto-discovered
+  const [grossByState,  setGrossByState]  = useState({})          // { <state>: gross_value_inr } — for ₹/g and value projection
+  const [grossByRegion, setGrossByRegion] = useState({})          // { <region>: gross_value_inr }
   const [regionToState, setRegionToState] = useState({})          // { <region>: <state> } — for region→holiday calendar lookup
   const [mtdOverall,    setMtdOverall]    = useState(0)
+  const [grossOverall,  setGrossOverall]  = useState(0)            // MTD gross purchase value overall
   const [holidays,      setHolidays]      = useState([])          // raw rows
   const [loading,       setLoading]       = useState(true)
   const [error,         setError]         = useState(null)
@@ -89,28 +106,46 @@ export default function MonthProjection({ t, isMobile }) {
       const holJson = await holRes.json().catch(() => ({}))
 
       if (aggJson?.empty || !aggJson?.kpis) {
-        setMtdOverall(0); setMtdByState({}); setMtdByRegion({}); setRegionToState({})
+        setMtdOverall(0); setGrossOverall(0)
+        setMtdByState({}); setMtdByRegion({})
+        setGrossByState({}); setGrossByRegion({})
+        setRegionToState({})
       } else {
-        setMtdOverall(Number(aggJson.kpis.total_net || 0))
+        setMtdOverall(Number(aggJson.kpis.total_net   || 0))
+        setGrossOverall(Number(aggJson.kpis.total_value || 0))
         // Endpoint returns the per-branch breakdown under `branchData` (legacy
         // alias for `branches`). Read both — whichever the server happens to
         // ship today wins. We bucket by both b.state (for state-level holiday
         // math) and b.region (for the regionwise view), and capture the
         // region→state link from each row so the regionwise math can look up
         // the right holiday calendar without hardcoding the mapping.
+        // Gross value is bucketed alongside so we can compute a per-state /
+        // per-region ₹/g and project the closure in monetary terms too.
         const branchRows = aggJson.branchData || aggJson.branches || []
         const stateBucket   = {}
         const regionBucket  = {}
+        const stateGross    = {}
+        const regionGross   = {}
         const regionStateMap = {}
         for (const b of branchRows) {
           const s = b.state  || null
           const r = b.region || null
-          if (s) stateBucket[s]   = (stateBucket[s]  || 0) + Number(b.total_net || 0)
-          if (r) regionBucket[r]  = (regionBucket[r] || 0) + Number(b.total_net || 0)
+          const net   = Number(b.total_net         || 0)
+          const gross = Number(b.total_gross_value || 0)
+          if (s) {
+            stateBucket[s] = (stateBucket[s] || 0) + net
+            stateGross[s]  = (stateGross[s]  || 0) + gross
+          }
+          if (r) {
+            regionBucket[r] = (regionBucket[r] || 0) + net
+            regionGross[r]  = (regionGross[r]  || 0) + gross
+          }
           if (r && s) regionStateMap[r] = s
         }
         setMtdByState(stateBucket)
         setMtdByRegion(regionBucket)
+        setGrossByState(stateGross)
+        setGrossByRegion(regionGross)
         setRegionToState(regionStateMap)
       }
 
@@ -162,7 +197,9 @@ export default function MonthProjection({ t, isMobile }) {
   const overall = useMemo(() => {
     const states = Object.keys(mtdByState)
     let totalClosure   = 0
+    let totalClosureVal= 0      // sum of per-state closure × per-state ₹/g
     let totalMtd       = 0
+    let totalGross     = 0
     let totalWdElapsed = 0
     let totalWdAll     = 0      // sum of total working days across active states
     let statesWithData = 0
@@ -171,13 +208,18 @@ export default function MonthProjection({ t, isMobile }) {
       const mtd = Number(mtdByState[state] || 0)
       if (mtd <= 0) continue
       statesWithData++
+      const gross     = Number(grossByState[state] || 0)
+      const pricePerG = mtd > 0 ? gross / mtd : 0
       const wdElapsed = countWorkingDays(monthStartYmd, todayYmd,    state, holidaysByDate)
       const wdTotal   = countWorkingDays(monthStartYmd, monthEndYmd, state, holidaysByDate)
       const runRate   = wdElapsed > 0 ? mtd / wdElapsed : 0
-      totalClosure   += runRate * wdTotal
-      totalMtd       += mtd
-      totalWdElapsed += wdElapsed
-      totalWdAll     += wdTotal
+      const closure   = runRate * wdTotal
+      totalClosure    += closure
+      totalClosureVal += closure * pricePerG
+      totalMtd        += mtd
+      totalGross      += gross
+      totalWdElapsed  += wdElapsed
+      totalWdAll      += wdTotal
     }
 
     if (statesWithData === 0 && mtdOverall > 0) {
@@ -187,14 +229,19 @@ export default function MonthProjection({ t, isMobile }) {
       const elapsed  = countWorkingDays(monthStartYmd, todayYmd,    sentinel, holidaysByDate)
       const total    = countWorkingDays(monthStartYmd, monthEndYmd, sentinel, holidaysByDate)
       const runRate  = elapsed > 0 ? mtdOverall / elapsed : 0
+      const closure  = runRate * total
+      const pricePerG = mtdOverall > 0 ? grossOverall / mtdOverall : 0
       return {
-        mtd:                     mtdOverall,
+        mtd:            mtdOverall,
+        mtdGross:       grossOverall,
+        pricePerGram:   pricePerG,
         runRate,
-        closure:                 runRate * total,
-        wdElapsed:               elapsed,
-        wdTotal:                 total,
-        wdRemaining:             Math.max(0, total - elapsed),
-        statesWithData:          1,
+        closure,
+        closureValue:   closure * pricePerG,
+        wdElapsed:      elapsed,
+        wdTotal:        total,
+        wdRemaining:    Math.max(0, total - elapsed),
+        statesWithData: 1,
       }
     }
 
@@ -208,14 +255,17 @@ export default function MonthProjection({ t, isMobile }) {
       : 0
     return {
       mtd:            totalMtd,
+      mtdGross:       totalGross,
+      pricePerGram:   totalMtd > 0 ? totalGross / totalMtd : 0,
       runRate,
       closure:        totalClosure,
+      closureValue:   totalClosureVal,
       wdElapsed:      avgWdElapsed,
       wdTotal:        avgWdTotal,
       wdRemaining:    Math.max(0, avgWdTotal - avgWdElapsed),
       statesWithData,
     }
-  }, [mtdByState, mtdOverall, holidaysByDate, monthStartYmd, monthEndYmd, todayYmd])
+  }, [mtdByState, grossByState, mtdOverall, grossOverall, holidaysByDate, monthStartYmd, monthEndYmd, todayYmd])
 
   // Per-region metrics. Each region inherits its state's holiday calendar
   // (the state is looked up via regionToState which was built from
@@ -225,21 +275,29 @@ export default function MonthProjection({ t, isMobile }) {
     return Object.keys(mtdByRegion)
       .filter(r => Number(mtdByRegion[r] || 0) > 0)
       .map(region => {
-        const mtd       = Number(mtdByRegion[region] || 0)
+        const mtd       = Number(mtdByRegion[region]   || 0)
+        const gross     = Number(grossByRegion[region] || 0)
+        const pricePerG = mtd > 0 ? gross / mtd : 0
         const state     = regionToState[region]
         const wdElapsed = countWorkingDays(monthStartYmd, todayYmd,    state, holidaysByDate)
         const wdTotal   = countWorkingDays(monthStartYmd, monthEndYmd, state, holidaysByDate)
         const runRate   = wdElapsed > 0 ? mtd / wdElapsed : 0
+        const closure   = runRate * wdTotal
         return {
-          region, state, mtd, runRate,
-          closure:     runRate * wdTotal,
+          region, state,
+          mtd,
+          mtdGross:     gross,
+          pricePerGram: pricePerG,
+          runRate,
+          closure,
+          closureValue: closure * pricePerG,
           wdElapsed,
           wdTotal,
-          wdRemaining: Math.max(0, wdTotal - wdElapsed),
+          wdRemaining:  Math.max(0, wdTotal - wdElapsed),
         }
       })
       .sort((a, b) => b.closure - a.closure)
-  }, [mtdByRegion, regionToState, holidaysByDate, monthStartYmd, monthEndYmd, todayYmd])
+  }, [mtdByRegion, grossByRegion, regionToState, holidaysByDate, monthStartYmd, monthEndYmd, todayYmd])
 
   // ─── Render ─────────────────────────────────────────────────────────────
   const card = {
@@ -282,8 +340,11 @@ export default function MonthProjection({ t, isMobile }) {
           title="Estimated Month Closure"
           loading={loading}
           mtd={overall.mtd}
+          mtdGross={overall.mtdGross}
+          pricePerGram={overall.pricePerGram}
           runRate={overall.runRate}
           closure={overall.closure}
+          closureValue={overall.closureValue}
           wdElapsed={overall.wdElapsed}
           wdRemaining={overall.wdRemaining}
           wdTotal={overall.wdTotal}
@@ -312,8 +373,11 @@ export default function MonthProjection({ t, isMobile }) {
                 titleBadge={row.state && row.state !== row.region ? row.state : null}
                 loading={false}
                 mtd={row.mtd}
+                mtdGross={row.mtdGross}
+                pricePerGram={row.pricePerGram}
                 runRate={row.runRate}
                 closure={row.closure}
+                closureValue={row.closureValue}
                 wdElapsed={row.wdElapsed}
                 wdRemaining={row.wdRemaining}
                 wdTotal={row.wdTotal}
@@ -345,7 +409,9 @@ export default function MonthProjection({ t, isMobile }) {
 // ─────────────────────────────────────────────────────────────────────────────
 function ProjectionHero({
   accent, title, titleBadge, subhead, loading,
-  mtd, runRate, closure, wdElapsed, wdRemaining, wdTotal,
+  mtd, mtdGross, pricePerGram,
+  runRate, closure, closureValue,
+  wdElapsed, wdRemaining, wdTotal,
   compact, t, isMobile,
 }) {
   const pct = closure > 0 ? Math.min(100, (mtd / closure) * 100) : 0
@@ -425,7 +491,7 @@ function ProjectionHero({
         )}
       </div>
 
-      {/* Hero number */}
+      {/* Hero number — closure in net weight */}
       <div style={{ position: 'relative' }}>
         <div style={{
           fontSize: sizes.hero,
@@ -447,6 +513,29 @@ function ProjectionHero({
             letterSpacing: '.04em', textTransform: 'uppercase', fontWeight: 600,
           }}>
             Estimated month closure
+          </div>
+        )}
+
+        {/* Monetary projection — closure weight × ₹/g.
+            Smaller, secondary, but right under the hero so the rupee value
+            reads as "what that weight is worth at the current rate". */}
+        {!loading && closureValue > 0 && (
+          <div style={{
+            marginTop: 8,
+            display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap',
+          }}>
+            <span style={{
+              fontSize: isMobile ? 22 : (compact ? 19 : 26),
+              color: t.green || '#3aaa6a',
+              fontWeight: 400,
+              fontVariantNumeric: 'tabular-nums',
+              letterSpacing: '-.01em',
+            }}>
+              ≈ {fmtINR(closureValue)}
+            </span>
+            <span style={{ fontSize: sizes.captionSize, color: t.text4, fontWeight: 600 }}>
+              at {fmtRatePerGram(pricePerGram)}
+            </span>
           </div>
         )}
       </div>
@@ -496,6 +585,11 @@ function ProjectionHero({
           <div style={{ fontSize: sizes.tile, color: t.blue || '#3a8fbf', fontWeight: 500, fontVariantNumeric: 'tabular-nums', marginTop: 4 }}>
             {fmtWt(mtd)}
           </div>
+          {mtdGross > 0 && (
+            <div style={{ fontSize: sizes.tileLabel, color: t.text4, fontWeight: 600, marginTop: 2, fontVariantNumeric: 'tabular-nums' }}>
+              {fmtINR(mtdGross)}
+            </div>
+          )}
         </div>
         <div>
           <div style={tileLabel}>Run Rate</div>
