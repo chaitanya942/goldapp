@@ -53,6 +53,7 @@ const ADMIN_ITEMS = [
       { id: 'company-settings',  label: 'Company Settings',  dot: '#c9a84c' },
       { id: 'gold-buying-rate',  label: 'Gold Buying Rate',  dot: '#c9a84c' },
       { id: 'logistics',         label: 'Logistics',         dot: '#5ec1d6' },
+      { id: 'holiday-calendar',  label: 'Calendar',          dot: '#e58a3b' },
       { id: 'consignment-seeds', label: 'Consignment Seeds', dot: '#3a8fbf' },
       { id: 'import-logs',       label: 'Import Logs',       dot: '#c9981f' },
       { id: 'role-management',   label: 'Role Management',   dot: '#e05555' },
