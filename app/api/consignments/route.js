@@ -737,8 +737,26 @@ export async function GET(req) {
     const transit24hByBranch = groupByBranch(inflight24h)
     const transit48hByBranch = groupByBranch(inflight48h)
     const preEodByBranch     = groupByBranch(preEodBills)
-    const bookedNonKlByBranch = groupByBranch(bookedNonKlBills)
-    const bookedKlByBranch    = groupByBranch(bookedKlBills)
+
+    // For booked-pending: also fold in branch-level booking summaries
+    // (earliest + latest booked_at, unique parties, unique created_by) so
+    // the collapsed branch row can show "when + by whom" at a glance,
+    // without the operator needing to expand into the bill list.
+    const annotateBookingMeta = (rows) => rows.map(b => {
+      const bills   = b.bills || []
+      const parties = [...new Set(bills.map(x => x._booking_party).filter(Boolean))]
+      const users   = [...new Set(bills.map(x => x._booking_created_by).filter(Boolean))]
+      const ts      = bills.map(x => x.booked_at).filter(Boolean).sort()
+      return {
+        ...b,
+        _booking_parties:  parties,
+        _booking_users:    users,
+        _booking_earliest: ts[0]               || null,
+        _booking_latest:   ts[ts.length - 1]   || null,
+      }
+    })
+    const bookedNonKlByBranch = annotateBookingMeta(groupByBranch(bookedNonKlBills))
+    const bookedKlByBranch    = annotateBookingMeta(groupByBranch(bookedKlBills))
     // Back-compat alias: the older UI reads supply.in_transit and expects
     // the bookable-tomorrow bucket. Keep it pointing at the 24h transit.
     const inflightByBranch   = transit24hByBranch
