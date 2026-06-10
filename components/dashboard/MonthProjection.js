@@ -84,8 +84,12 @@ export default function MonthProjection({ t, isMobile }) {
         setMtdOverall(0); setMtdByState({})
       } else {
         setMtdOverall(Number(aggJson.kpis.total_net || 0))
+        // Endpoint returns the per-branch breakdown under `branchData` (legacy
+        // alias for `branches`). Read both — whichever the server happens to
+        // ship today wins.
+        const branchRows = aggJson.branchData || aggJson.branches || []
         const bucket = {}
-        for (const b of aggJson.branches || []) {
+        for (const b of branchRows) {
           const s = b.state || 'Unknown'
           bucket[s] = (bucket[s] || 0) + Number(b.total_net || 0)
         }
@@ -131,29 +135,54 @@ export default function MonthProjection({ t, isMobile }) {
   }, [holidays])
 
   // Per-state run rate + projected closure. Aggregated to two scalars.
+  // Fallback: if no recognised state is present in the breakdown (e.g. the
+  // branches array shape changed or rows lack a state field), but the overall
+  // MTD is non-zero, fall back to a single-bucket aggregate calculation
+  // using only 'All India' holidays. Sundays still excluded. This keeps the
+  // dashboard useful while the data schema settles.
   const { totalClosure, overallRunRate, statesWithData, totalWorkingDaysElapsed } = useMemo(() => {
-    let totalClosure        = 0
-    let totalMtd            = 0
-    let totalWdElapsed      = 0
-    let statesWithData      = 0
+    let totalClosure   = 0
+    let totalMtd       = 0
+    let totalWdElapsed = 0
+    let statesWithData = 0
 
     for (const state of STATES) {
       const mtd = Number(mtdByState[state] || 0)
       if (mtd <= 0) continue
       statesWithData++
-      const wdElapsed = countWorkingDays(monthStartYmd, todayYmd,      state, holidaysByDate)
-      const wdTotal   = countWorkingDays(monthStartYmd, monthEndYmd,   state, holidaysByDate)
+      const wdElapsed = countWorkingDays(monthStartYmd, todayYmd,    state, holidaysByDate)
+      const wdTotal   = countWorkingDays(monthStartYmd, monthEndYmd, state, holidaysByDate)
       const runRate   = wdElapsed > 0 ? mtd / wdElapsed : 0
       totalClosure   += runRate * wdTotal
       totalMtd       += mtd
       totalWdElapsed += wdElapsed
     }
-    // Headline run rate = aggregated MTD ÷ aggregated elapsed working days
-    // across active states. Reads naturally as "average daily pace" without
-    // mixing in inactive states' zero contributions.
-    const overallRunRate = totalWdElapsed > 0 ? totalMtd / (totalWdElapsed / Math.max(1, statesWithData)) : 0
+
+    // ── Fallback path ───────────────────────────────────────────────────────
+    // Use 'All India' wildcard ('__OVERALL__' is treated as no-state in
+    // countWorkingDays — only All India entries match). This still respects
+    // active national holidays + Sundays.
+    if (statesWithData === 0 && mtdOverall > 0) {
+      const elapsed = countWorkingDays(monthStartYmd, todayYmd,    '__OVERALL__', holidaysByDate)
+      const total   = countWorkingDays(monthStartYmd, monthEndYmd, '__OVERALL__', holidaysByDate)
+      const runRate = elapsed > 0 ? mtdOverall / elapsed : 0
+      return {
+        totalClosure:            runRate * total,
+        overallRunRate:          runRate,
+        statesWithData:          1,
+        totalWorkingDaysElapsed: elapsed,
+      }
+    }
+
+    // Per-state path: headline run rate = aggregated MTD ÷ aggregated elapsed
+    // working days, averaged across active states so the figure reads as
+    // "average daily pace" rather than "sum of state paces" (which would
+    // overshoot when states share elapsed days).
+    const overallRunRate = totalWdElapsed > 0
+      ? totalMtd / (totalWdElapsed / Math.max(1, statesWithData))
+      : 0
     return { totalClosure, overallRunRate, statesWithData, totalWorkingDaysElapsed: totalWdElapsed }
-  }, [mtdByState, holidaysByDate, monthStartYmd, monthEndYmd, todayYmd])
+  }, [mtdByState, mtdOverall, holidaysByDate, monthStartYmd, monthEndYmd, todayYmd])
 
   // ─── Render ─────────────────────────────────────────────────────────────
   const card = {
