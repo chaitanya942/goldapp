@@ -24,8 +24,13 @@
 
 import { useEffect, useState, useMemo, useCallback } from 'react'
 import { authedFetch } from '../../lib/authedFetch'
+import { REGION_COLORS } from '../../lib/consignmentTheme'
 
-const STATES = ['Karnataka', 'Andhra Pradesh', 'Telangana', 'Kerala']
+// 'All India' is a DB-defined wildcard sentinel from holiday_calendar's
+// state CHECK constraint — when a row carries this value, the holiday
+// applies to every state. Kept as a named constant so the magic string
+// is referenced from one place; the value itself comes from the schema.
+const ALL_INDIA = 'All India'
 
 // IST helpers — month-start / month-end / today as YYYY-MM-DD in IST. Avoids
 // the off-by-one where a UTC-midnight stamp lands on the previous IST day.
@@ -46,7 +51,7 @@ function countWorkingDays(startYmd, endYmd, state, holidaysByDate) {
     if (d.getUTCDay() === 0) continue                           // Sunday
     const key = isoYMD(d)
     const list = holidaysByDate[key] || []
-    if (list.some(h => h.is_active && (h.state === state || h.state === 'All India'))) continue
+    if (list.some(h => h.is_active && (h.state === state || h.state === ALL_INDIA))) continue
     count++
   }
   return count
@@ -59,11 +64,14 @@ const fmtWt = (g) => {
 }
 
 export default function MonthProjection({ t, isMobile }) {
-  const [mtdByState,  setMtdByState]  = useState({})              // { Karnataka: 12345.6, ... }
-  const [mtdOverall,  setMtdOverall]  = useState(0)
-  const [holidays,    setHolidays]    = useState([])              // raw rows
-  const [loading,     setLoading]     = useState(true)
-  const [error,       setError]       = useState(null)
+  const [mtdByState,    setMtdByState]    = useState({})          // { <state>: net_wt } — auto-discovered from branchData
+  const [mtdByRegion,   setMtdByRegion]   = useState({})          // { <region>: net_wt } — auto-discovered
+  const [regionToState, setRegionToState] = useState({})          // { <region>: <state> } — for region→holiday calendar lookup
+  const [mtdOverall,    setMtdOverall]    = useState(0)
+  const [holidays,      setHolidays]      = useState([])          // raw rows
+  const [loading,       setLoading]       = useState(true)
+  const [error,         setError]         = useState(null)
+  const [viewMode,      setViewMode]      = useState('overall')   // 'overall' | 'regionwise'
 
   const todayYmd      = useMemo(istToday,      [])
   const monthStartYmd = useMemo(istMonthStart, [])
@@ -81,19 +89,29 @@ export default function MonthProjection({ t, isMobile }) {
       const holJson = await holRes.json().catch(() => ({}))
 
       if (aggJson?.empty || !aggJson?.kpis) {
-        setMtdOverall(0); setMtdByState({})
+        setMtdOverall(0); setMtdByState({}); setMtdByRegion({}); setRegionToState({})
       } else {
         setMtdOverall(Number(aggJson.kpis.total_net || 0))
         // Endpoint returns the per-branch breakdown under `branchData` (legacy
         // alias for `branches`). Read both — whichever the server happens to
-        // ship today wins.
+        // ship today wins. We bucket by both b.state (for state-level holiday
+        // math) and b.region (for the regionwise view), and capture the
+        // region→state link from each row so the regionwise math can look up
+        // the right holiday calendar without hardcoding the mapping.
         const branchRows = aggJson.branchData || aggJson.branches || []
-        const bucket = {}
+        const stateBucket   = {}
+        const regionBucket  = {}
+        const regionStateMap = {}
         for (const b of branchRows) {
-          const s = b.state || 'Unknown'
-          bucket[s] = (bucket[s] || 0) + Number(b.total_net || 0)
+          const s = b.state  || null
+          const r = b.region || null
+          if (s) stateBucket[s]   = (stateBucket[s]  || 0) + Number(b.total_net || 0)
+          if (r) regionBucket[r]  = (regionBucket[r] || 0) + Number(b.total_net || 0)
+          if (r && s) regionStateMap[r] = s
         }
-        setMtdByState(bucket)
+        setMtdByState(stateBucket)
+        setMtdByRegion(regionBucket)
+        setRegionToState(regionStateMap)
       }
 
       // Holidays — 401/403 (auth-restricted) is fine; we just compute with
@@ -134,19 +152,21 @@ export default function MonthProjection({ t, isMobile }) {
     return m
   }, [holidays])
 
-  // Per-state run rate + projected closure. Aggregated to two scalars.
-  // Fallback: if no recognised state is present in the breakdown (e.g. the
-  // branches array shape changed or rows lack a state field), but the overall
-  // MTD is non-zero, fall back to a single-bucket aggregate calculation
-  // using only 'All India' holidays. Sundays still excluded. This keeps the
-  // dashboard useful while the data schema settles.
-  const { totalClosure, overallRunRate, statesWithData, totalWorkingDaysElapsed } = useMemo(() => {
+  // Overall (state-aggregated) metrics. Iterates only states that actually
+  // showed up in branchData this month — no hardcoded state list, so adding
+  // a new state to the system surfaces here automatically.
+  // Fallback: if no state is present in the breakdown (e.g. the rows lack a
+  // state field), but mtdOverall is non-zero, project from the overall MTD
+  // using only Sundays + 'All India' holidays. Keeps the dashboard useful
+  // while the data schema settles.
+  const overall = useMemo(() => {
+    const states = Object.keys(mtdByState)
     let totalClosure   = 0
     let totalMtd       = 0
     let totalWdElapsed = 0
     let statesWithData = 0
 
-    for (const state of STATES) {
+    for (const state of states) {
       const mtd = Number(mtdByState[state] || 0)
       if (mtd <= 0) continue
       statesWithData++
@@ -158,14 +178,13 @@ export default function MonthProjection({ t, isMobile }) {
       totalWdElapsed += wdElapsed
     }
 
-    // ── Fallback path ───────────────────────────────────────────────────────
-    // Use 'All India' wildcard ('__OVERALL__' is treated as no-state in
-    // countWorkingDays — only All India entries match). This still respects
-    // active national holidays + Sundays.
     if (statesWithData === 0 && mtdOverall > 0) {
-      const elapsed = countWorkingDays(monthStartYmd, todayYmd,    '__OVERALL__', holidaysByDate)
-      const total   = countWorkingDays(monthStartYmd, monthEndYmd, '__OVERALL__', holidaysByDate)
-      const runRate = elapsed > 0 ? mtdOverall / elapsed : 0
+      // Sentinel state value that won't match any real state row in
+      // holiday_calendar — leaves only ALL_INDIA matches active.
+      const sentinel = '__no_state__'
+      const elapsed  = countWorkingDays(monthStartYmd, todayYmd,    sentinel, holidaysByDate)
+      const total    = countWorkingDays(monthStartYmd, monthEndYmd, sentinel, holidaysByDate)
+      const runRate  = elapsed > 0 ? mtdOverall / elapsed : 0
       return {
         totalClosure:            runRate * total,
         overallRunRate:          runRate,
@@ -174,15 +193,34 @@ export default function MonthProjection({ t, isMobile }) {
       }
     }
 
-    // Per-state path: headline run rate = aggregated MTD ÷ aggregated elapsed
-    // working days, averaged across active states so the figure reads as
-    // "average daily pace" rather than "sum of state paces" (which would
-    // overshoot when states share elapsed days).
     const overallRunRate = totalWdElapsed > 0
       ? totalMtd / (totalWdElapsed / Math.max(1, statesWithData))
       : 0
-    return { totalClosure, overallRunRate, statesWithData, totalWorkingDaysElapsed: totalWdElapsed }
+    return {
+      totalClosure,
+      overallRunRate,
+      statesWithData,
+      totalWorkingDaysElapsed: totalWdElapsed,
+    }
   }, [mtdByState, mtdOverall, holidaysByDate, monthStartYmd, monthEndYmd, todayYmd])
+
+  // Per-region metrics. Each region inherits its state's holiday calendar
+  // (the state is looked up via regionToState which was built from
+  // branchData — no hardcoded mapping). Sorted by closure desc so the
+  // biggest contributors land at the top.
+  const regionwise = useMemo(() => {
+    return Object.keys(mtdByRegion)
+      .filter(r => Number(mtdByRegion[r] || 0) > 0)
+      .map(region => {
+        const mtd       = Number(mtdByRegion[region] || 0)
+        const state     = regionToState[region]
+        const wdElapsed = countWorkingDays(monthStartYmd, todayYmd,    state, holidaysByDate)
+        const wdTotal   = countWorkingDays(monthStartYmd, monthEndYmd, state, holidaysByDate)
+        const runRate   = wdElapsed > 0 ? mtd / wdElapsed : 0
+        return { region, state, mtd, runRate, closure: runRate * wdTotal, wdElapsed, wdTotal }
+      })
+      .sort((a, b) => b.closure - a.closure)
+  }, [mtdByRegion, regionToState, holidaysByDate, monthStartYmd, monthEndYmd, todayYmd])
 
   // ─── Render ─────────────────────────────────────────────────────────────
   const card = {
@@ -196,44 +234,117 @@ export default function MonthProjection({ t, isMobile }) {
 
   const monthName = new Date(monthStartYmd).toLocaleDateString('en-IN', { month: 'long', year: 'numeric' })
 
+  const toggleChip = (active) => ({
+    padding: '4px 11px', borderRadius: 99,
+    background: active ? `${t.gold}22` : 'transparent',
+    border: `1px solid ${active ? `${t.gold}80` : t.border}`,
+    color: active ? t.gold : t.text3,
+    fontSize: 10.5, fontWeight: active ? 700 : 600,
+    cursor: 'pointer', whiteSpace: 'nowrap', letterSpacing: '.04em',
+    transition: 'background .15s, color .15s, border-color .15s',
+    fontFamily: 'inherit',
+  })
+
   return (
     <div style={{ marginTop: 14 }}>
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 10 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
         <span style={{ width: 6, height: 6, borderRadius: '50%', background: t.gold, display: 'inline-block' }} />
         <span style={{ fontSize: 11, color: t.text2, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 700 }}>Month Projection</span>
         <span style={{ fontSize: 10, color: t.text4 }}>· {monthName} · Sundays + holidays excluded</span>
+        <div style={{ flex: 1 }} />
+        <button onClick={() => setViewMode('overall')}     style={toggleChip(viewMode === 'overall')}>Overall</button>
+        <button onClick={() => setViewMode('regionwise')}  style={toggleChip(viewMode === 'regionwise')}>Regionwise</button>
       </div>
 
-      <div style={{
-        display: 'grid',
-        gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr',
-        gap: 12,
-      }}>
-        {/* Run Rate */}
-        <div style={card}>
-          <div style={subtle}>Run Rate</div>
-          <div style={{ fontSize: isMobile ? 28 : 32, color: t.gold, fontWeight: 300, lineHeight: 1.1, letterSpacing: '-.02em', marginTop: 6, fontVariantNumeric: 'tabular-nums' }}>
-            {loading ? '…' : fmtWt(overallRunRate)}
-            {!loading && overallRunRate > 0 && (
-              <span style={{ fontSize: 12, color: t.text4, fontWeight: 500, marginLeft: 6 }}>/ working day</span>
-            )}
+      {viewMode === 'overall' ? (
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr',
+          gap: 12,
+        }}>
+          {/* Run Rate */}
+          <div style={card}>
+            <div style={subtle}>Run Rate</div>
+            <div style={{ fontSize: isMobile ? 28 : 32, color: t.gold, fontWeight: 300, lineHeight: 1.1, letterSpacing: '-.02em', marginTop: 6, fontVariantNumeric: 'tabular-nums' }}>
+              {loading ? '…' : fmtWt(overall.overallRunRate)}
+              {!loading && overall.overallRunRate > 0 && (
+                <span style={{ fontSize: 12, color: t.text4, fontWeight: 500, marginLeft: 6 }}>/ working day</span>
+              )}
+            </div>
+            <div style={{ fontSize: 10, color: t.text4, marginTop: 6 }}>
+              MTD net weight ÷ working days elapsed
+              {overall.totalWorkingDaysElapsed > 0
+                ? ` · ${Math.round(overall.totalWorkingDaysElapsed / Math.max(1, overall.statesWithData))} avg WD`
+                : ' · no working day yet'}
+            </div>
           </div>
-          <div style={{ fontSize: 10, color: t.text4, marginTop: 6 }}>
-            MTD net weight ÷ working days elapsed · {totalWorkingDaysElapsed > 0 ? `${Math.round(totalWorkingDaysElapsed / Math.max(1, statesWithData))} avg WD` : 'no working day yet'}
-          </div>
-        </div>
 
-        {/* Estimated Closure */}
-        <div style={card}>
-          <div style={subtle}>Estimated Month Closure</div>
-          <div style={{ fontSize: isMobile ? 28 : 32, color: t.green || '#3aaa6a', fontWeight: 300, lineHeight: 1.1, letterSpacing: '-.02em', marginTop: 6, fontVariantNumeric: 'tabular-nums' }}>
-            {loading ? '…' : fmtWt(totalClosure)}
-          </div>
-          <div style={{ fontSize: 10, color: t.text4, marginTop: 6 }}>
-            Per-state run rate × per-state working days remaining, summed
+          {/* Estimated Closure */}
+          <div style={card}>
+            <div style={subtle}>Estimated Month Closure</div>
+            <div style={{ fontSize: isMobile ? 28 : 32, color: t.green || '#3aaa6a', fontWeight: 300, lineHeight: 1.1, letterSpacing: '-.02em', marginTop: 6, fontVariantNumeric: 'tabular-nums' }}>
+              {loading ? '…' : fmtWt(overall.totalClosure)}
+            </div>
+            <div style={{ fontSize: 10, color: t.text4, marginTop: 6 }}>
+              Per-state run rate × per-state working days remaining, summed
+            </div>
           </div>
         </div>
-      </div>
+      ) : (
+        // Regionwise — one card per region surfaced in branchData this month.
+        // Each region uses its state's holiday calendar (resolved from
+        // regionToState which itself came from the data).
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fill, minmax(220px, 1fr))',
+          gap: 10,
+        }}>
+          {loading ? (
+            <div style={{ ...card, color: t.text4, fontSize: 12 }}>Loading…</div>
+          ) : regionwise.length === 0 ? (
+            <div style={{ ...card, color: t.text4, fontSize: 12 }}>
+              No region has MTD purchases yet this month.
+            </div>
+          ) : regionwise.map(row => {
+            const accent = (REGION_COLORS && REGION_COLORS[row.region]) || t.gold
+            return (
+              <div key={row.region} style={{
+                background: `linear-gradient(135deg, ${accent}10, ${t.card2 || t.card})`,
+                border: `1px solid ${accent}30`,
+                borderLeft: `3px solid ${accent}`,
+                borderRadius: 14,
+                padding: isMobile ? '12px 14px' : '14px 16px',
+                display: 'flex', flexDirection: 'column', gap: 8,
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
+                  <span style={{ fontSize: 12, color: accent, fontWeight: 700, letterSpacing: '.04em', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {row.region}
+                  </span>
+                  {row.state && row.state !== row.region && (
+                    <span style={{ fontSize: 9, color: t.text4, letterSpacing: '.05em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>{row.state}</span>
+                  )}
+                </div>
+                <div>
+                  <div style={{ fontSize: 9, color: t.text4, letterSpacing: '.08em', textTransform: 'uppercase', fontWeight: 700 }}>Run Rate</div>
+                  <div style={{ fontSize: 17, color: t.text1, fontWeight: 500, fontVariantNumeric: 'tabular-nums', marginTop: 2 }}>
+                    {fmtWt(row.runRate)}
+                    <span style={{ fontSize: 10, color: t.text4, fontWeight: 500, marginLeft: 4 }}>/ WD</span>
+                  </div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 9, color: t.text4, letterSpacing: '.08em', textTransform: 'uppercase', fontWeight: 700 }}>Est. Closure</div>
+                  <div style={{ fontSize: 19, color: accent, fontWeight: 500, fontVariantNumeric: 'tabular-nums', marginTop: 2 }}>
+                    {fmtWt(row.closure)}
+                  </div>
+                </div>
+                <div style={{ fontSize: 9, color: t.text4, marginTop: 2 }}>
+                  MTD {fmtWt(row.mtd)} · {row.wdElapsed}/{row.wdTotal} WD
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
 
       {error && (
         <div style={{ fontSize: 10, color: t.red || '#e05555', marginTop: 6 }}>
