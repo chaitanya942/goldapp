@@ -2540,7 +2540,20 @@ function SourceSection({
                                       }}>{billChecked ? '✓' : ''}</span>
                                     )}
                                     <span style={{ color: t.gold, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{bill.application_id || '—'}</span>
-                                    <span style={{ color: t.text1, fontFamily: 'inherit', fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{bill.customer_name || '—'}</span>
+                                    {/* Customer cell — stacked with optional booking caption (only
+                                        present for Section 5 / S4 booked-pending rows). When the
+                                        booking metadata fields are absent, this renders identical
+                                        to the original single-line span. */}
+                                    <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0, overflow: 'hidden' }}>
+                                      <span style={{ color: t.text1, fontFamily: 'inherit', fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{bill.customer_name || '—'}</span>
+                                      {(bill._booking_party || bill.booked_at) && (
+                                        <span style={{ fontSize: 10, color: t.text4, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', marginTop: 2 }}>
+                                          {bill._booking_party && <span style={{ color: t.red, fontWeight: 700 }}>{bill._booking_party}</span>}
+                                          {bill.booked_at && <> · {fmtTS(bill.booked_at)}</>}
+                                          {bill._booking_created_by && <> · by {bill._booking_created_by}</>}
+                                        </span>
+                                      )}
+                                    </span>
                                     <span style={{ color: t.text2, textAlign: 'right', fontWeight: 600 }}>{fmt(bill.gross_weight, 2)}<span style={{ fontSize: 10, color: t.text4, marginLeft: 2, fontWeight: 600 }}>g</span></span>
                                     <span style={{ color: tone, textAlign: 'right', fontWeight: 800 }}>{fmt(bill.net_weight, 2)}<span style={{ fontSize: 10, color: t.text3, marginLeft: 2, fontWeight: 600 }}>g</span></span>
                                     <span style={{ color: t.blue, textAlign: 'right', fontWeight: 700 }}>{bill.total_amount != null ? `₹${Math.round(Number(bill.total_amount)).toLocaleString('en-IN')}` : '—'}</span>

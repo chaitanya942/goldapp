@@ -674,6 +674,32 @@ export async function GET(req) {
       if (bpErr) return Response.json({ error: bpErr.message }, { status: 500 })
       bookedPendingBills = (bp || []).map(b => ({ ...b, branch_name: b.current_branch || b.branch_name }))
     }
+
+    // Booking metadata join — fetch the cal_quotas row each bill is attached
+    // to so the UI can show "booked for [party] · by [user] · created [ts]".
+    // bookedPendingBills.booked_at (already in the select above) covers WHEN
+    // the bill was attached to the booking; party + created_by + created_at
+    // come from cal_quotas.
+    if (bookedPendingBills.length) {
+      const bookingIds = [...new Set(bookedPendingBills.map(b => b.booking_id).filter(Boolean))]
+      if (bookingIds.length) {
+        const { data: qrs } = await supabase
+          .from('cal_quotas')
+          .select('id, party, created_at, created_by')
+          .in('id', bookingIds)
+        const qMeta = Object.fromEntries((qrs || []).map(q => [q.id, q]))
+        bookedPendingBills = bookedPendingBills.map(b => {
+          const q = qMeta[b.booking_id] || {}
+          return {
+            ...b,
+            _booking_party:      q.party      || null,
+            _booking_created_at: q.created_at || null,
+            _booking_created_by: q.created_by || null,
+          }
+        })
+      }
+    }
+
     const bookedNonKlBills = bookedPendingBills.filter(b => (branchMeta[b.branch_name]?.region) !== 'Kerala')
     const bookedKlBills    = bookedPendingBills.filter(b => (branchMeta[b.branch_name]?.region) === 'Kerala')
 
