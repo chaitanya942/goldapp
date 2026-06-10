@@ -130,7 +130,6 @@ export default function ConsignmentData() {
   // List filters. filterRegions is a Set of region names — multi-select via
   // toggleable chips. dateFrom / dateTo bound created_at against IST calendar
   // days so "today" matches the operator's clock, not the server's.
-  const [filterType,    setFilterType]    = useState('')
   const [filterRegions, setFilterRegions] = useState(() => new Set())
   const [dateFrom,      setDateFrom]      = useState('')
   const [dateTo,        setDateTo]        = useState('')
@@ -560,7 +559,6 @@ export default function ConsignmentData() {
     const isRejected         = c.approval_status === 'rejected'
     const isOperatorCancelled = c.status === 'cancelled' && !isRejected
     if (isOperatorCancelled) return false
-    if (filterType   && c.movement_type !== filterType)   return false
     if (filterRegions.size > 0) {
       const br = branches.find(b => b.name === c.branch_name)
       if (!filterRegions.has(br?.region)) return false
@@ -905,7 +903,7 @@ export default function ConsignmentData() {
           Bottom: type chips + multi-select region chips + clear + count. */}
       {(() => {
         const allRegions = [...new Set(branches.map(b => b.region).filter(Boolean))].sort()
-        const hasFilters = filterType || filterRegions.size > 0 || search || dateFrom || dateTo
+        const hasFilters = filterRegions.size > 0 || search || dateFrom || dateTo
         const today = istToday()
         const datePresetActive =
           dateFrom === today && dateTo === today                ? 'today'
@@ -934,12 +932,23 @@ export default function ConsignmentData() {
         )
         return (
           <div style={{ ...card, padding: '12px 14px', display: 'flex', gap: '16px', flexWrap: 'wrap', alignItems: 'center', rowGap: '10px' }}>
-            {/* Type */}
-            <div style={{ display: 'flex', gap: '4px', alignItems: 'center', flexWrap: 'wrap' }}>
-              <span style={{ fontSize: '10px', color: t.text4, letterSpacing: '.06em', textTransform: 'uppercase', fontWeight: 600, marginRight: '2px' }}>Type</span>
-              <Chip active={!filterType}                color={t.gold}   onClick={() => setFilterType('')}>All</Chip>
-              <Chip active={filterType === 'EXTERNAL'} color={t.orange} onClick={() => setFilterType(filterType === 'EXTERNAL' ? '' : 'EXTERNAL')}>Branch → HO</Chip>
-              <Chip active={filterType === 'INTERNAL'} color={t.purple} onClick={() => setFilterType(filterType === 'INTERNAL' ? '' : 'INTERNAL')}>Branch → Hub</Chip>
+            {/* Search — sits where Type chips used to be. Matches TMP PRF,
+                challan_no, branch_name, dest_branch. Filter wiring in the
+                main filter pass above; this is purely the UI surface. */}
+            <div style={{ position: 'relative', minWidth: '200px', maxWidth: '260px', flex: '0 1 auto' }}>
+              <span style={{ position: 'absolute', left: '11px', top: '50%', transform: 'translateY(-50%)', color: t.text4, fontSize: '13px', pointerEvents: 'none' }}>⌕</span>
+              <input
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                placeholder="Search TMP PRF, source, dest…"
+                style={{ width: '100%', background: t.card2, border: `1px solid ${t.border2}`, borderRadius: '8px', padding: '7px 30px 7px 30px', fontSize: '12px', color: t.text1, outline: 'none', boxSizing: 'border-box' }}
+              />
+              {search && (
+                <button onClick={() => setSearch('')} title="Clear search"
+                  style={{ position: 'absolute', right: '8px', top: '50%', transform: 'translateY(-50%)', background: 'transparent', border: 'none', color: t.text4, fontSize: '14px', cursor: 'pointer', padding: '2px 4px', lineHeight: 1 }}>
+                  ×
+                </button>
+              )}
             </div>
             {/* Region */}
             <div style={{ display: 'flex', gap: '4px', alignItems: 'center', flexWrap: 'wrap' }}>
@@ -976,27 +985,9 @@ export default function ConsignmentData() {
                 style={{ background: t.card2, border: `1px solid ${t.border2}`, borderRadius: '7px', padding: '6px 8px', fontSize: '11px', color: t.text2, outline: 'none', colorScheme: 'dark' }} />
             </div>
             {hasFilters && (
-              <button onClick={() => { setFilterType(''); setFilterRegions(new Set()); setSearch(''); setDateFrom(''); setDateTo('') }}
+              <button onClick={() => { setFilterRegions(new Set()); setSearch(''); setDateFrom(''); setDateTo('') }}
                 style={{ ...btnOut, padding: '5px 11px', fontSize: '11px' }}>Clear all</button>
             )}
-            {/* Search — right-aligned in the chip row. Matches TMP PRF, challan_no,
-                branch_name, dest_branch. Filter wiring already exists; this is
-                purely the UI surface. */}
-            <div style={{ marginLeft: 'auto', position: 'relative', minWidth: '220px', maxWidth: '320px', flex: '0 1 auto' }}>
-              <span style={{ position: 'absolute', left: '11px', top: '50%', transform: 'translateY(-50%)', color: t.text4, fontSize: '13px', pointerEvents: 'none' }}>⌕</span>
-              <input
-                value={search}
-                onChange={e => setSearch(e.target.value)}
-                placeholder="Search TMP PRF, source, dest…"
-                style={{ width: '100%', background: t.card2, border: `1px solid ${t.border2}`, borderRadius: '8px', padding: '7px 30px 7px 30px', fontSize: '12px', color: t.text1, outline: 'none', boxSizing: 'border-box' }}
-              />
-              {search && (
-                <button onClick={() => setSearch('')} title="Clear search"
-                  style={{ position: 'absolute', right: '8px', top: '50%', transform: 'translateY(-50%)', background: 'transparent', border: 'none', color: t.text4, fontSize: '14px', cursor: 'pointer', padding: '2px 4px', lineHeight: 1 }}>
-                  ×
-                </button>
-              )}
-            </div>
           </div>
         )
       })()}
