@@ -2507,30 +2507,39 @@ function SourceSection({
                             wire them up). Stops row-click propagation so
                             clicking the button doesn't toggle row selection. */}
                         {onCreateConsignment && onUnbookBranch && (b.bills?.length > 0) && (
-                          <span style={{ display: 'inline-flex', gap: 6, marginLeft: 6 }}
+                          <span style={{ display: 'inline-flex', gap: 8, marginLeft: 10, alignItems: 'center' }}
                             onClick={(e) => e.stopPropagation()}>
                             <button type="button"
                               onClick={() => onCreateConsignment(b.branch_name, b.region)}
                               title="Open Consignment Data for this branch to pack a consignment around these bills."
                               style={{
                                 background: t.gold, color: '#1a0a00', border: 'none',
-                                borderRadius: 5, padding: '3px 10px',
-                                fontSize: 10.5, fontWeight: 700, letterSpacing: '.04em',
+                                borderRadius: 7, padding: '5px 14px',
+                                fontSize: 11, fontWeight: 700, letterSpacing: '.04em',
                                 cursor: 'pointer', whiteSpace: 'nowrap',
                                 fontFamily: 'inherit',
-                              }}>
-                              Create
+                                display: 'inline-flex', alignItems: 'center', gap: 5,
+                                boxShadow: `0 2px 6px ${t.gold}40`,
+                                transition: 'transform .15s ease, box-shadow .15s ease',
+                              }}
+                              onMouseEnter={(e) => { e.currentTarget.style.transform = 'translateY(-1px)'; e.currentTarget.style.boxShadow = `0 4px 12px ${t.gold}66` }}
+                              onMouseLeave={(e) => { e.currentTarget.style.transform = 'translateY(0)';    e.currentTarget.style.boxShadow = `0 2px 6px ${t.gold}40` }}>
+                              Create Consignment <span style={{ fontSize: 12 }}>→</span>
                             </button>
                             <button type="button"
                               onClick={() => onUnbookBranch((b.bills || []).map(x => x.application_id).filter(Boolean), b.branch_name)}
                               title="Release the booking on all bills at this branch — clears booking_id + booked_at."
                               style={{
-                                background: 'transparent', color: t.red, border: `1px solid ${t.red}55`,
-                                borderRadius: 5, padding: '3px 10px',
-                                fontSize: 10.5, fontWeight: 700, letterSpacing: '.04em',
+                                background: 'transparent', color: t.red,
+                                border: `1px solid ${t.red}55`,
+                                borderRadius: 7, padding: '5px 12px',
+                                fontSize: 11, fontWeight: 700, letterSpacing: '.04em',
                                 cursor: 'pointer', whiteSpace: 'nowrap',
                                 fontFamily: 'inherit',
-                              }}>
+                                transition: 'background .15s ease, border-color .15s ease, color .15s ease',
+                              }}
+                              onMouseEnter={(e) => { e.currentTarget.style.background = `${t.red}12`; e.currentTarget.style.borderColor = `${t.red}99` }}
+                              onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.borderColor = `${t.red}55` }}>
                               Unbook
                             </button>
                           </span>
