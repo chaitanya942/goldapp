@@ -979,8 +979,23 @@ export default function ConsignmentData() {
               <button onClick={() => { setFilterType(''); setFilterRegions(new Set()); setSearch(''); setDateFrom(''); setDateTo('') }}
                 style={{ ...btnOut, padding: '5px 11px', fontSize: '11px' }}>Clear all</button>
             )}
-            <div style={{ marginLeft: 'auto', fontSize: '11px', color: t.text4 }}>
-              <strong style={{ color: t.text2, fontFamily: 'monospace' }}>{filteredCons.length}</strong> of {consignments.length}
+            {/* Search — right-aligned in the chip row. Matches TMP PRF, challan_no,
+                branch_name, dest_branch. Filter wiring already exists; this is
+                purely the UI surface. */}
+            <div style={{ marginLeft: 'auto', position: 'relative', minWidth: '220px', maxWidth: '320px', flex: '0 1 auto' }}>
+              <span style={{ position: 'absolute', left: '11px', top: '50%', transform: 'translateY(-50%)', color: t.text4, fontSize: '13px', pointerEvents: 'none' }}>⌕</span>
+              <input
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                placeholder="Search TMP PRF, source, dest…"
+                style={{ width: '100%', background: t.card2, border: `1px solid ${t.border2}`, borderRadius: '8px', padding: '7px 30px 7px 30px', fontSize: '12px', color: t.text1, outline: 'none', boxSizing: 'border-box' }}
+              />
+              {search && (
+                <button onClick={() => setSearch('')} title="Clear search"
+                  style={{ position: 'absolute', right: '8px', top: '50%', transform: 'translateY(-50%)', background: 'transparent', border: 'none', color: t.text4, fontSize: '14px', cursor: 'pointer', padding: '2px 4px', lineHeight: 1 }}>
+                  ×
+                </button>
+              )}
             </div>
           </div>
         )
