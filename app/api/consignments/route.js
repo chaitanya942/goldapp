@@ -679,7 +679,11 @@ export async function GET(req) {
     // to so the UI can show "booked for [party] · by [user] · created [ts]".
     // bookedPendingBills.booked_at (already in the select above) covers WHEN
     // the bill was attached to the booking; party + created_by + created_at
-    // come from cal_quotas.
+    // come from cal_quotas. created_by is a uuid (auth.users.id) on prod —
+    // we resolve it to email/full_name via user_profiles so the UI doesn't
+    // show a raw UUID. Some legacy rows still have created_by stored as an
+    // email TEXT (the TEXT-schema fallback path in create_booking); those
+    // get passed through unchanged.
     if (bookedPendingBills.length) {
       const bookingIds = [...new Set(bookedPendingBills.map(b => b.booking_id).filter(Boolean))]
       if (bookingIds.length) {
@@ -687,6 +691,28 @@ export async function GET(req) {
           .from('cal_quotas')
           .select('id, party, created_at, created_by')
           .in('id', bookingIds)
+
+        // Collect unique creator IDs that LOOK like UUIDs and resolve them
+        // in a single batched query. Anything that doesn't look like a UUID
+        // (e.g. already-an-email legacy rows) is left alone.
+        const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+        const uuidIds = [...new Set((qrs || [])
+          .map(q => q.created_by)
+          .filter(v => typeof v === 'string' && UUID_RE.test(v)))]
+        let userMap = {}
+        if (uuidIds.length) {
+          const { data: users } = await supabase
+            .from('user_profiles')
+            .select('id, email, full_name')
+            .in('id', uuidIds)
+          userMap = Object.fromEntries((users || []).map(u => [u.id, u.full_name || u.email || u.id]))
+        }
+        const resolveCreator = (v) => {
+          if (!v) return null
+          if (typeof v === 'string' && UUID_RE.test(v)) return userMap[v] || v
+          return v
+        }
+
         const qMeta = Object.fromEntries((qrs || []).map(q => [q.id, q]))
         bookedPendingBills = bookedPendingBills.map(b => {
           const q = qMeta[b.booking_id] || {}
@@ -694,7 +720,7 @@ export async function GET(req) {
             ...b,
             _booking_party:      q.party      || null,
             _booking_created_at: q.created_at || null,
-            _booking_created_by: q.created_by || null,
+            _booking_created_by: resolveCreator(q.created_by),
           }
         })
       }
