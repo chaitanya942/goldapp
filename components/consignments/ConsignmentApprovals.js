@@ -101,6 +101,7 @@ export default function ConsignmentApprovals() {
   const [approvedFrom,  setApprovedFrom]  = useState('')      // YYYY-MM-DD, '' = no floor
   const [approvedTo,    setApprovedTo]    = useState('')      // YYYY-MM-DD, '' = no ceiling
   const [approvedDoc,   setApprovedDoc]   = useState('all')   // 'all' | 'ewb' | 'einv'
+  const [approvedSearch,setApprovedSearch]= useState('')      // matches tmp_prf_no, branch_name, dest, EWB no, IRN doc no
   const [settings,      setSettings]      = useState(null)
   const [settingsBusy,  setSettingsBusy]  = useState(null)  // 'seq:KL' | 'gstin:KA' etc.
   const [settingsToast, setSettingsToast] = useState(null)
@@ -916,12 +917,14 @@ export default function ConsignmentApprovals() {
               from={approvedFrom} setFrom={setApprovedFrom}
               to={approvedTo}     setTo={setApprovedTo}
               doc={approvedDoc}   setDoc={setApprovedDoc}
+              search={approvedSearch} setSearch={setApprovedSearch}
               total={history.length}
             />
           )}
           {(() => {
             // Client-side filter for the Approved tab only — rejected stays
             // unfiltered (audit-critical) until accounts asks otherwise.
+            const q = approvedSearch.trim().toLowerCase()
             const list = tab === 'approved'
               ? history.filter(c => {
                   // Doc-type filter
@@ -934,6 +937,10 @@ export default function ConsignmentApprovals() {
                     if (approvedFrom && d < approvedFrom) return false
                     if (approvedTo   && d > approvedTo)   return false
                   }
+                  // Search — TMP PRF / source / dest / EWB no / IRN doc no.
+                  // Free-text, case-insensitive, substring match.
+                  if (q && ![c.tmp_prf_no, c.consignment_no, c.challan_no, c.branch_name, c.dest_branch, c.eway_bill_no, c.einvoice_doc_no, c.irn]
+                    .some(v => String(v || '').toLowerCase().includes(q))) return false
                   return true
                 })
               : history
@@ -1430,7 +1437,7 @@ function ReportKpi({ t, label, primary, sub, accent, mono, small }) {
 // Date range applies to approved_at (the audit timestamp). Doc-type segments
 // narrow to EWB-only or E-Invoice-only when reconciling against a specific
 // portal. Quick presets cover the common windows (today / this month / etc).
-function ApprovedFilterBar({ t, card, from, setFrom, setTo, to, doc, setDoc, total }) {
+function ApprovedFilterBar({ t, card, from, setFrom, setTo, to, doc, setDoc, search, setSearch, total }) {
   const today      = new Date().toISOString().slice(0, 10)
   const daysAgo    = (n) => { const d = new Date(); d.setDate(d.getDate() - n + 1); return d.toISOString().slice(0, 10) }
   const monthStart = (() => { const n = new Date(); return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}-01` })()
@@ -1529,6 +1536,39 @@ function ApprovedFilterBar({ t, card, from, setFrom, setTo, to, doc, setDoc, tot
             </button>
           )
         })}
+      </div>
+
+      {/* Divider */}
+      <span style={{ width: 1, height: 18, background: t.border }} />
+
+      {/* Search — TMP PRF, source, dest, EWB no, IRN doc no. Matches the
+          Consignment Data search pattern: subtle glyph on the left, ×
+          clear on the right when populated. */}
+      <div style={{ position: 'relative', minWidth: 200, maxWidth: 260, flex: '0 1 auto' }}>
+        <span style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: t.text4, fontSize: 12, pointerEvents: 'none' }}>⌕</span>
+        <input
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          placeholder="Search TMP PRF, source, EWB / IRN…"
+          style={{
+            width: '100%',
+            background: t.card2 || t.card,
+            border: `1px solid ${t.border}`,
+            borderRadius: 7,
+            padding: '5px 26px 5px 28px',
+            fontSize: 11,
+            color: t.text1,
+            outline: 'none',
+            boxSizing: 'border-box',
+            fontFamily: 'inherit',
+          }}
+        />
+        {search && (
+          <button onClick={() => setSearch('')} title="Clear search"
+            style={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)', background: 'transparent', border: 'none', color: t.text4, fontSize: 13, cursor: 'pointer', padding: '2px 4px', lineHeight: 1 }}>
+            ×
+          </button>
+        )}
       </div>
 
       <div style={{ flex: 1 }} />
