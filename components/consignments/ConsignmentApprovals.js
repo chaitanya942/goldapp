@@ -1152,11 +1152,11 @@ function ReportsTab({ t, card, report, reportFrom, setReportFrom, reportTo, setR
   const exportEinv = () => downloadCsv(`EInvoice_${dateTag}.csv`, report.einvoices.map(r => ({
     'E-Invoice Generated Date': r.einvoice_generated_at,
     'E-Invoice No':             r.einvoice_doc_no || '',
+    IRN:                        r.irn || '',
     'From Branch':              r.branch_name,
     'To Destination':           'HO',
     'No of Bills':              r.total_bills,
     'Gross Weight (g)':         Number(r.total_gross_wt || 0).toFixed(3),
-    'Net Weight (g)':           Number(r.total_net_wt   || 0).toFixed(3),
     Value:                      Number(r.assessable_value || 0).toFixed(2),
     IGST:                       Number(r.igst_amount      || 0).toFixed(2),
     'Total Value':              Number(r.total_invoice    || 0).toFixed(2),
@@ -1300,11 +1300,11 @@ function ReportsTab({ t, card, report, reportFrom, setReportFrom, reportTo, setR
             <tr style={{ background: t.card2 || t.card }}>
               <th style={th}>E-Invoice Generated Date</th>
               <th style={th}>E-Invoice No</th>
+              <th style={th}>IRN</th>
               <th style={th}>From Branch</th>
               <th style={th}>To Destination</th>
               <th style={{ ...th, textAlign: 'right' }}>No of Bills</th>
               <th style={{ ...th, textAlign: 'right' }}>Gross Weight</th>
-              <th style={{ ...th, textAlign: 'right' }}>Net Weight</th>
               <th style={{ ...th, textAlign: 'right' }}>Value</th>
               <th style={{ ...th, textAlign: 'right', borderLeft: `1px solid ${t.purple}30` }}>IGST</th>
               <th style={{ ...th, textAlign: 'right' }}>Total Value</th>
@@ -1316,7 +1316,7 @@ function ReportsTab({ t, card, report, reportFrom, setReportFrom, reportTo, setR
               const stateMatch = (r.einvoice_doc_no || '').match(/^WG\/(KL|TS|AP)\//)
               const stateCode  = stateMatch?.[1] || ''
               return (
-                <ReportRow key={r.id} t={t} striped={i % 2 === 1} title={r.irn ? `IRN: ${r.irn}` : ''}>
+                <ReportRow key={r.id} t={t} striped={i % 2 === 1}>
                   <td style={{ ...td, color: t.text3, fontFamily: 'monospace', whiteSpace: 'nowrap' }}>{fmtTS(r.einvoice_generated_at)}</td>
                   <td style={td}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
@@ -1328,11 +1328,13 @@ function ReportsTab({ t, card, report, reportFrom, setReportFrom, reportTo, setR
                       )}
                     </div>
                   </td>
+                  <td style={{ ...td, color: t.text3, fontFamily: 'monospace', fontSize: '10.5px' }} title={r.irn || ''}>
+                    {r.irn ? `${String(r.irn).slice(0, 12)}…${String(r.irn).slice(-6)}` : '—'}
+                  </td>
                   <td style={{ ...td, color: t.text2 }}>{r.branch_name}</td>
                   <td style={{ ...td, color: t.text2 }}>HO</td>
                   <td style={{ ...td, color: t.text2, textAlign: 'right' }}>{r.total_bills}</td>
                   <td style={{ ...td, color: t.gold, textAlign: 'right', fontFamily: 'monospace' }}>{fmtWt(r.total_gross_wt)}</td>
-                  <td style={{ ...td, color: t.gold, textAlign: 'right', fontFamily: 'monospace' }}>{fmtWt(r.total_net_wt)}</td>
                   <td style={{ ...td, color: t.blue, textAlign: 'right', fontFamily: 'monospace', fontWeight: 600 }}>₹{fmt(Math.round(r.assessable_value || 0))}</td>
                   <td style={{ ...td, color: t.purple, textAlign: 'right', fontFamily: 'monospace', borderLeft: `1px solid ${t.purple}20` }}>₹{fmt(Math.round(r.igst_amount || 0))}</td>
                   <td style={{ ...td, color: t.blue, textAlign: 'right', fontFamily: 'monospace', fontWeight: 700 }}>₹{fmt(Math.round(r.total_invoice || 0))}</td>
@@ -1342,10 +1344,9 @@ function ReportsTab({ t, card, report, reportFrom, setReportFrom, reportTo, setR
             })}
             <tr>
               <td style={{ ...totalsTd, color: t.text3, fontSize: '9px', letterSpacing: '.12em', textTransform: 'uppercase' }}>Total</td>
-              <td style={totalsTd} colSpan={3} />
+              <td style={totalsTd} colSpan={4} />
               <td style={{ ...totalsTd, color: t.text1, textAlign: 'right' }}>{eiBills}</td>
               <td style={{ ...totalsTd, color: t.gold, textAlign: 'right', fontFamily: 'monospace' }}>{fmtWt(eiGrossWt)}</td>
-              <td style={{ ...totalsTd, color: t.gold, textAlign: 'right', fontFamily: 'monospace' }}>{fmtWt(eiWt)}</td>
               <td style={{ ...totalsTd, color: t.blue, textAlign: 'right', fontFamily: 'monospace' }}>₹{fmt(Math.round(eiAssess))}</td>
               <td style={{ ...totalsTd, color: t.purple, textAlign: 'right', fontFamily: 'monospace', borderLeft: `1px solid ${t.purple}40` }}>₹{fmt(Math.round(eiIgst))}</td>
               <td style={{ ...totalsTd, color: t.blue, textAlign: 'right', fontFamily: 'monospace' }}>₹{fmt(Math.round(eiVal))}</td>
