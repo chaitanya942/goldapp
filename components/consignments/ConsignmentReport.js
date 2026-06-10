@@ -843,6 +843,10 @@ export default function ConsignmentReport() {
               whiteSpace: 'nowrap', fontWeight: 600, userSelect: 'none',
               verticalAlign: 'middle', textAlign: col.a, cursor: 'pointer',
               position: 'sticky', top: 0, zIndex: 2,
+              // Per-column left-padding override so a sparser column (e.g.
+              // Expected Delivery) can sit visually away from the dense
+              // numeric column to its left.
+              ...(col.padLeft ? { paddingLeft: col.padLeft } : null),
             })
             const fmtAmt = (n) => n != null ? `₹${Number(n).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'
             const fmtWt  = (n) => n != null ? Number(n).toFixed(2) : '—'
@@ -873,7 +877,7 @@ export default function ConsignmentReport() {
                       { k: 'gross_weight',           l: 'Gross Wt (g)',      a: 'right'  },
                       { k: 'net_weight',             l: 'Net Wt (g)',        a: 'right'  },
                       { k: 'total_amount',           l: 'Amount',            a: 'right'  },
-                      { k: 'expected_delivery_date', l: 'Expected Delivery', a: 'left'   },
+                      { k: 'expected_delivery_date', l: 'Expected Delivery', a: 'center', padLeft: 32 },
                     ].map(col => {
                       // Sort arrow on the leading side for right-aligned columns
                       // so the label sits flush with the values below. Same
@@ -907,7 +911,7 @@ export default function ConsignmentReport() {
                     <td style={{ ...tdR, color: t.text2, fontWeight: 600 }}>{fmtWt(totals.gross_weight)}</td>
                     <td style={{ ...tdR, color: t.gold,  fontWeight: 700 }}>{fmtWt(totals.net_weight)}</td>
                     <td style={{ ...tdR, color: t.text2, fontWeight: 600 }}>{fmtAmt(totals.total_amount)}</td>
-                    <td style={tdL} />
+                    <td style={{ ...tdC, paddingLeft: 32 }} />
                   </tr>
                 </thead>
                 <tbody>
@@ -928,7 +932,7 @@ export default function ConsignmentReport() {
                         <td style={{ ...tdR, color: t.text2 }}>{fmtWt(g.gross_weight)}</td>
                         <td style={{ ...tdR, color: t.gold, fontWeight: 600 }}>{fmtWt(g.net_weight)}</td>
                         <td style={{ ...tdR, color: t.text2 }}>{fmtAmt(g.total_amount)}</td>
-                        <td style={{ ...tdL, color: t.green, fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
+                        <td style={{ ...tdC, color: t.green, whiteSpace: 'nowrap', paddingLeft: 32 }}>
                           {fmtCellDate(g.expected_delivery_date)}
                           {g.delivery_tat_hours > 24 && (
                             <span style={{ marginLeft: 6, fontSize: 9, color: t.orange, background: `${t.orange}18`, borderRadius: 4, padding: '1px 5px', fontWeight: 700, letterSpacing: '.04em' }}>
