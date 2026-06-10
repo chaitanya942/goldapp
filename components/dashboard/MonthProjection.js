@@ -254,11 +254,12 @@ export default function MonthProjection({ t, isMobile }) {
   const monthName = new Date(monthStartYmd).toLocaleDateString('en-IN', { month: 'long', year: 'numeric' })
 
   const toggleChip = (active) => ({
-    padding: '4px 11px', borderRadius: 99,
+    padding: isMobile ? '6px 14px' : '4px 11px', borderRadius: 99,
     background: active ? `${t.gold}22` : 'transparent',
     border: `1px solid ${active ? `${t.gold}80` : t.border}`,
     color: active ? t.gold : t.text3,
-    fontSize: 10.5, fontWeight: active ? 700 : 600,
+    fontSize: isMobile ? 12 : 10.5,
+    fontWeight: active ? 700 : 600,
     cursor: 'pointer', whiteSpace: 'nowrap', letterSpacing: '.04em',
     transition: 'background .15s, color .15s, border-color .15s',
     fontFamily: 'inherit',
@@ -267,9 +268,9 @@ export default function MonthProjection({ t, isMobile }) {
   return (
     <div style={{ marginTop: 14 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
-        <span style={{ width: 6, height: 6, borderRadius: '50%', background: t.gold, display: 'inline-block' }} />
-        <span style={{ fontSize: 11, color: t.text2, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 700 }}>Month Projection</span>
-        <span style={{ fontSize: 10, color: t.text4 }}>· {monthName} · Sundays + holidays excluded</span>
+        <span style={{ width: 7, height: 7, borderRadius: '50%', background: t.gold, display: 'inline-block' }} />
+        <span style={{ fontSize: isMobile ? 12.5 : 11, color: t.text2, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 700 }}>Month Projection</span>
+        <span style={{ fontSize: isMobile ? 11 : 10, color: t.text4 }}>· {monthName} · Sundays + holidays excluded</span>
         <div style={{ flex: 1 }} />
         <button onClick={() => setViewMode('overall')}     style={toggleChip(viewMode === 'overall')}>Overall</button>
         <button onClick={() => setViewMode('regionwise')}  style={toggleChip(viewMode === 'regionwise')}>Regionwise</button>
@@ -348,22 +349,57 @@ function ProjectionHero({
   compact, t, isMobile,
 }) {
   const pct = closure > 0 ? Math.min(100, (mtd / closure) * 100) : 0
-  const heroSize    = compact ? (isMobile ? 26 : 30) : (isMobile ? 30 : 38)
-  const padding     = compact ? (isMobile ? '14px 16px' : '16px 18px') : (isMobile ? '18px 20px' : '20px 24px')
-  const tileSize    = compact ? 13 : 15
-  const labelSize   = compact ? 9  : 10
+
+  // Per ops feedback: every number must be visibly legible — no tiny text on
+  // mobile. So mobile ignores the compact density flag and uses bumped sizes
+  // throughout. Desktop keeps two densities (compact for regionwise cards,
+  // full for the overall hero).
+  const sizes = isMobile ? {
+    hero:      32,
+    padding:   '18px 20px',
+    tile:      18,
+    tileLabel: 11,
+    titleSize: 13,
+    captionSize: 11.5,
+    headerLabel: 13,
+    gap:       14,
+  } : compact ? {
+    hero:      30,
+    padding:   '16px 18px',
+    tile:      14,
+    tileLabel: 10,
+    titleSize: 13,
+    captionSize: 10,
+    headerLabel: 13,
+    gap:       12,
+  } : {
+    hero:      40,
+    padding:   '22px 26px',
+    tile:      17,
+    tileLabel: 11,
+    titleSize: 11,
+    captionSize: 11,
+    headerLabel: 11,
+    gap:       16,
+  }
 
   const card = {
     background: `linear-gradient(135deg, ${accent}10 0%, ${accent}04 50%, ${t.card2 || t.card} 100%)`,
     border: `1px solid ${accent}30`,
     borderLeft: `3px solid ${accent}`,
     borderRadius: 14,
-    padding,
-    display: 'flex', flexDirection: 'column', gap: compact ? 10 : 14,
+    padding: sizes.padding,
+    display: 'flex', flexDirection: 'column', gap: sizes.gap,
     position: 'relative', overflow: 'hidden',
   }
 
-  const tileLabel = { fontSize: labelSize, color: t.text4, letterSpacing: '.08em', textTransform: 'uppercase', fontWeight: 700 }
+  const tileLabel = {
+    fontSize: sizes.tileLabel,
+    color: t.text4,
+    letterSpacing: '.08em',
+    textTransform: 'uppercase',
+    fontWeight: 700,
+  }
 
   return (
     <div style={card}>
@@ -376,23 +412,23 @@ function ProjectionHero({
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, position: 'relative' }}>
         <span style={{
-          fontSize: compact ? 12 : 10,
+          fontSize: compact && !isMobile ? sizes.titleSize : sizes.headerLabel,
           color: accent,
-          fontWeight: compact ? 700 : 700,
-          letterSpacing: compact ? '.03em' : '.12em',
-          textTransform: compact ? 'none' : 'uppercase',
+          fontWeight: 700,
+          letterSpacing: compact && !isMobile ? '.03em' : '.12em',
+          textTransform: compact && !isMobile ? 'none' : 'uppercase',
         }}>
           {title}
         </span>
         {titleBadge && (
-          <span style={{ fontSize: 9, color: t.text4, letterSpacing: '.05em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>{titleBadge}</span>
+          <span style={{ fontSize: 10, color: t.text4, letterSpacing: '.05em', textTransform: 'uppercase', whiteSpace: 'nowrap', fontWeight: 600 }}>{titleBadge}</span>
         )}
       </div>
 
       {/* Hero number */}
       <div style={{ position: 'relative' }}>
         <div style={{
-          fontSize: heroSize,
+          fontSize: sizes.hero,
           color: accent,
           fontWeight: 300,
           lineHeight: 1.05,
@@ -401,8 +437,15 @@ function ProjectionHero({
         }}>
           {loading ? '…' : fmtWt(closure)}
         </div>
-        {!compact && (
-          <div style={{ fontSize: 10, color: t.text4, marginTop: 4, letterSpacing: '.04em', textTransform: 'uppercase', fontWeight: 600 }}>
+        {/* Caption shown for the overall view, AND on mobile regionwise cards
+            so the region's hero number is unambiguous even on the smallest
+            screens. */}
+        {(!compact || isMobile) && (
+          <div style={{
+            fontSize: sizes.captionSize,
+            color: t.text4, marginTop: 4,
+            letterSpacing: '.04em', textTransform: 'uppercase', fontWeight: 600,
+          }}>
             Estimated month closure
           </div>
         )}
@@ -411,7 +454,8 @@ function ProjectionHero({
       {/* Progress bar — MTD/Closure (≡ wdElapsed/wdTotal at current pace) */}
       <div style={{ position: 'relative' }}>
         <div style={{
-          height: 6, width: '100%',
+          height: isMobile ? 8 : 6,
+          width: '100%',
           background: `${t.border}`,
           borderRadius: 99, overflow: 'hidden',
         }}>
@@ -423,44 +467,55 @@ function ProjectionHero({
             boxShadow: `0 0 8px ${accent}55`,
           }} />
         </div>
-        <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 5, fontSize: 9.5, color: t.text4, letterSpacing: '.04em', fontWeight: 600 }}>
+        <div style={{
+          display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap',
+          marginTop: 6, gap: 6,
+          fontSize: sizes.captionSize,
+          color: t.text4,
+          letterSpacing: '.02em', fontWeight: 600,
+        }}>
           <span><strong style={{ color: t.text2, fontVariantNumeric: 'tabular-nums' }}>{pct.toFixed(1)}%</strong> through projected closure</span>
           <span>{wdElapsed}/{wdTotal} WD · <strong style={{ color: t.text2 }}>{wdRemaining}</strong> left</span>
         </div>
       </div>
 
-      {/* Stat tiles — MTD, Run Rate, Working Days */}
+      {/* Stat tiles — MTD, Run Rate, Working Days.
+          Mobile drops the Working Days tile (its info already lives in the
+          progress caption above) so the remaining two tiles have room to
+          breathe. */}
       <div style={{
         display: 'grid',
-        gridTemplateColumns: 'repeat(3, 1fr)',
-        gap: compact ? 6 : 10,
+        gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(3, 1fr)',
+        gap: isMobile ? 12 : (compact ? 8 : 12),
         position: 'relative',
-        paddingTop: compact ? 6 : 8,
+        paddingTop: isMobile ? 10 : 8,
         borderTop: `1px dashed ${t.border}`,
       }}>
         <div>
           <div style={tileLabel}>MTD</div>
-          <div style={{ fontSize: tileSize, color: t.blue || '#3a8fbf', fontWeight: 500, fontVariantNumeric: 'tabular-nums', marginTop: 2 }}>
+          <div style={{ fontSize: sizes.tile, color: t.blue || '#3a8fbf', fontWeight: 500, fontVariantNumeric: 'tabular-nums', marginTop: 4 }}>
             {fmtWt(mtd)}
           </div>
         </div>
         <div>
           <div style={tileLabel}>Run Rate</div>
-          <div style={{ fontSize: tileSize, color: t.text1, fontWeight: 500, fontVariantNumeric: 'tabular-nums', marginTop: 2 }}>
+          <div style={{ fontSize: sizes.tile, color: t.text1, fontWeight: 500, fontVariantNumeric: 'tabular-nums', marginTop: 4 }}>
             {fmtWt(runRate)}
-            <span style={{ fontSize: 9.5, color: t.text4, fontWeight: 500, marginLeft: 3 }}>/ WD</span>
+            <span style={{ fontSize: sizes.tileLabel, color: t.text4, fontWeight: 500, marginLeft: 4 }}>/ WD</span>
           </div>
         </div>
-        <div>
-          <div style={tileLabel}>Working Days</div>
-          <div style={{ fontSize: tileSize, color: t.text1, fontWeight: 500, fontVariantNumeric: 'tabular-nums', marginTop: 2 }}>
-            {wdElapsed}<span style={{ color: t.text4, fontWeight: 500 }}> / {wdTotal}</span>
+        {!isMobile && (
+          <div>
+            <div style={tileLabel}>Working Days</div>
+            <div style={{ fontSize: sizes.tile, color: t.text1, fontWeight: 500, fontVariantNumeric: 'tabular-nums', marginTop: 4 }}>
+              {wdElapsed}<span style={{ color: t.text4, fontWeight: 500 }}> / {wdTotal}</span>
+            </div>
           </div>
-        </div>
+        )}
       </div>
 
       {subhead && !compact && (
-        <div style={{ fontSize: 10, color: t.text4, position: 'relative', marginTop: -4 }}>{subhead}</div>
+        <div style={{ fontSize: sizes.captionSize, color: t.text4, position: 'relative', marginTop: -4 }}>{subhead}</div>
       )}
     </div>
   )
