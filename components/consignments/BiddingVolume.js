@@ -2431,29 +2431,25 @@ function SourceSection({
                         <span style={{ width: 16, height: 16, borderRadius: 4, border: `1.5px dashed ${t.border}`, background: 'transparent' }} />
                       )}
                       {/* Col 2: branch name + meta chips, plus optional booking
-                          caption (only on Section 5 / S4 booked-pending rows). */}
-                      <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0, gap: 2 }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-                          <span style={{ fontSize: 13.5, color: t.text1, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{b.branch_name}</span>
-                          {b.tat_hours != null && (
-                            <span title={`Delivery TAT ${b.tat_hours}h`} style={{ fontSize: 10.5, color: t.text3, background: `${t.text4}1c`, border: `1px solid ${t.text4}2e`, borderRadius: 4, padding: '1px 8px', whiteSpace: 'nowrap', fontWeight: 700, letterSpacing: '.03em' }}>{b.tat_hours}h TAT</span>
-                          )}
-                          {/* Pickup time intentionally suppressed — pickups
-                              can run late and we don't want ops to think a
-                              branch is "done" just because the scheduled
-                              time has passed. Eligibility is gated by
-                              pickup_days (today is a pickup day), not by
-                              the clock. */}
-                        </div>
-                        {((b._booking_parties && b._booking_parties.length > 0) || b._booking_earliest) && (
-                          <span style={{ fontSize: 10, color: t.text4, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                            {b._booking_parties && b._booking_parties.length > 0 && (
-                              <span style={{ color: t.red, fontWeight: 700 }}>{b._booking_parties.join(' · ')}</span>
-                            )}
+                          caption inline (only on Section 5 / S4 booked-pending
+                          rows). Inline placement uses the empty space after
+                          the 24h TAT chip instead of stacking a new line. */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                        <span style={{ fontSize: 13.5, color: t.text1, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{b.branch_name}</span>
+                        {b.tat_hours != null && (
+                          <span title={`Delivery TAT ${b.tat_hours}h`} style={{ fontSize: 10.5, color: t.text3, background: `${t.text4}1c`, border: `1px solid ${t.text4}2e`, borderRadius: 4, padding: '1px 8px', whiteSpace: 'nowrap', fontWeight: 700, letterSpacing: '.03em' }}>{b.tat_hours}h TAT</span>
+                        )}
+                        {/* Pickup time intentionally suppressed — pickups
+                            can run late and we don't want ops to think a
+                            branch is "done" just because the scheduled
+                            time has passed. Eligibility is gated by
+                            pickup_days (today is a pickup day), not by
+                            the clock. */}
+                        {(b._booking_earliest || (b._booking_users && b._booking_users.length > 0)) && (
+                          <span style={{ fontSize: 11, color: t.text2, fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0 }}>
                             {b._booking_earliest && (
                               <>
-                                {' · booked '}
-                                {fmtTS(b._booking_earliest)}
+                                booked {fmtTS(b._booking_earliest)}
                                 {b._booking_latest && b._booking_latest !== b._booking_earliest ? ` → ${fmtTS(b._booking_latest)}` : ''}
                               </>
                             )}
