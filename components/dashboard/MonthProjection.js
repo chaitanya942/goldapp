@@ -131,7 +131,10 @@ export default function MonthProjection({ t, isMobile }) {
           const s = b.state  || null
           const r = b.region || null
           const net   = Number(b.total_net         || 0)
-          const gross = Number(b.total_gross_value || 0)
+          // get_purchase_aggregates RPC names this field 'total_value' per
+          // branch (not 'total_gross_value' — that's a CRM-style shape used
+          // by a different endpoint). Read both for forward compat.
+          const gross = Number(b.total_value || b.total_gross_value || 0)
           if (s) {
             stateBucket[s] = (stateBucket[s] || 0) + net
             stateGross[s]  = (stateGross[s]  || 0) + gross
