@@ -276,67 +276,24 @@ export default function MonthProjection({ t, isMobile }) {
       </div>
 
       {viewMode === 'overall' ? (
-        <>
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, 1fr)',
-            gap: 12,
-          }}>
-            {/* Current Run Rate */}
-            <div style={card}>
-              <div style={subtle}>Current Run Rate</div>
-              <div style={{ fontSize: isMobile ? 26 : 30, color: t.gold, fontWeight: 300, lineHeight: 1.1, letterSpacing: '-.02em', marginTop: 6, fontVariantNumeric: 'tabular-nums' }}>
-                {loading ? '…' : fmtWt(overall.runRate)}
-                {!loading && overall.runRate > 0 && (
-                  <span style={{ fontSize: 11, color: t.text4, fontWeight: 500, marginLeft: 6 }}>/ working day</span>
-                )}
-              </div>
-              <div style={{ fontSize: 10, color: t.text4, marginTop: 6 }}>
-                MTD ÷ working days elapsed
-              </div>
-            </div>
-
-            {/* MTD */}
-            <div style={card}>
-              <div style={subtle}>MTD</div>
-              <div style={{ fontSize: isMobile ? 26 : 30, color: t.blue || '#3a8fbf', fontWeight: 300, lineHeight: 1.1, letterSpacing: '-.02em', marginTop: 6, fontVariantNumeric: 'tabular-nums' }}>
-                {loading ? '…' : fmtWt(overall.mtd)}
-              </div>
-              <div style={{ fontSize: 10, color: t.text4, marginTop: 6 }}>
-                Net weight purchased so far this month
-              </div>
-            </div>
-
-            {/* Estimated Closure */}
-            <div style={card}>
-              <div style={subtle}>Estimated Month Closure</div>
-              <div style={{ fontSize: isMobile ? 26 : 30, color: t.green || '#3aaa6a', fontWeight: 300, lineHeight: 1.1, letterSpacing: '-.02em', marginTop: 6, fontVariantNumeric: 'tabular-nums' }}>
-                {loading ? '…' : fmtWt(overall.closure)}
-              </div>
-              <div style={{ fontSize: 10, color: t.text4, marginTop: 6 }}>
-                Per-state run rate × working days remaining, summed
-              </div>
-            </div>
-          </div>
-
-          {/* Working days summary — applies to the Overall view as the average
-              across active states (each state has its own calendar). */}
-          {!loading && overall.statesWithData > 0 && (
-            <div style={{ fontSize: 10.5, color: t.text3, marginTop: 8, display: 'flex', flexWrap: 'wrap', gap: 14 }}>
-              <span><strong style={{ color: t.text2 }}>{overall.wdElapsed}</strong> working day{overall.wdElapsed === 1 ? '' : 's'} passed</span>
-              <span><strong style={{ color: t.text2 }}>{overall.wdRemaining}</strong> remaining</span>
-              <span style={{ color: t.text4 }}>· avg across {overall.statesWithData} state{overall.statesWithData === 1 ? '' : 's'} · total {overall.wdTotal} WD this month</span>
-            </div>
-          )}
-        </>
+        <ProjectionHero
+          accent={t.gold}
+          title="Estimated Month Closure"
+          loading={loading}
+          mtd={overall.mtd}
+          runRate={overall.runRate}
+          closure={overall.closure}
+          wdElapsed={overall.wdElapsed}
+          wdRemaining={overall.wdRemaining}
+          wdTotal={overall.wdTotal}
+          subhead={overall.statesWithData > 0 ? `Avg across ${overall.statesWithData} state${overall.statesWithData === 1 ? '' : 's'} · total ${overall.wdTotal} WD this month` : null}
+          t={t} isMobile={isMobile}
+        />
       ) : (
-        // Regionwise — one card per region surfaced in branchData this month.
-        // Each region uses its state's holiday calendar (resolved from
-        // regionToState which itself came from the data).
         <div style={{
           display: 'grid',
-          gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fill, minmax(240px, 1fr))',
-          gap: 10,
+          gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fill, minmax(320px, 1fr))',
+          gap: 12,
         }}>
           {loading ? (
             <div style={{ ...card, color: t.text4, fontSize: 12 }}>Loading…</div>
@@ -346,57 +303,22 @@ export default function MonthProjection({ t, isMobile }) {
             </div>
           ) : regionwise.map(row => {
             const accent = (REGION_COLORS && REGION_COLORS[row.region]) || t.gold
-            const metricLabel = { fontSize: 9, color: t.text4, letterSpacing: '.08em', textTransform: 'uppercase', fontWeight: 700 }
             return (
-              <div key={row.region} style={{
-                background: `linear-gradient(135deg, ${accent}10, ${t.card2 || t.card})`,
-                border: `1px solid ${accent}30`,
-                borderLeft: `3px solid ${accent}`,
-                borderRadius: 14,
-                padding: isMobile ? '12px 14px' : '14px 16px',
-                display: 'flex', flexDirection: 'column', gap: 10,
-              }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
-                  <span style={{ fontSize: 13, color: accent, fontWeight: 700, letterSpacing: '.03em', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {row.region}
-                  </span>
-                  {row.state && row.state !== row.region && (
-                    <span style={{ fontSize: 9, color: t.text4, letterSpacing: '.05em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>{row.state}</span>
-                  )}
-                </div>
-
-                <div>
-                  <div style={metricLabel}>Current Run Rate</div>
-                  <div style={{ fontSize: 16, color: t.text1, fontWeight: 500, fontVariantNumeric: 'tabular-nums', marginTop: 2 }}>
-                    {fmtWt(row.runRate)}
-                    <span style={{ fontSize: 10, color: t.text4, fontWeight: 500, marginLeft: 4 }}>/ WD</span>
-                  </div>
-                </div>
-
-                <div>
-                  <div style={metricLabel}>MTD</div>
-                  <div style={{ fontSize: 16, color: t.blue || '#3a8fbf', fontWeight: 500, fontVariantNumeric: 'tabular-nums', marginTop: 2 }}>
-                    {fmtWt(row.mtd)}
-                  </div>
-                </div>
-
-                <div>
-                  <div style={metricLabel}>Est. Month Closure</div>
-                  <div style={{ fontSize: 18, color: accent, fontWeight: 500, fontVariantNumeric: 'tabular-nums', marginTop: 2 }}>
-                    {fmtWt(row.closure)}
-                  </div>
-                </div>
-
-                {/* Per-region working day footer */}
-                <div style={{
-                  fontSize: 10, color: t.text3, marginTop: 2,
-                  paddingTop: 8, borderTop: `1px dashed ${t.border}`,
-                  display: 'flex', justifyContent: 'space-between', gap: 6,
-                }}>
-                  <span><strong style={{ color: t.text2 }}>{row.wdElapsed}</strong> WD passed</span>
-                  <span><strong style={{ color: t.text2 }}>{row.wdRemaining}</strong> remaining</span>
-                </div>
-              </div>
+              <ProjectionHero
+                key={row.region}
+                accent={accent}
+                title={row.region}
+                titleBadge={row.state && row.state !== row.region ? row.state : null}
+                loading={false}
+                mtd={row.mtd}
+                runRate={row.runRate}
+                closure={row.closure}
+                wdElapsed={row.wdElapsed}
+                wdRemaining={row.wdRemaining}
+                wdTotal={row.wdTotal}
+                compact
+                t={t} isMobile={isMobile}
+              />
             )
           })}
         </div>
@@ -406,6 +328,139 @@ export default function MonthProjection({ t, isMobile }) {
         <div style={{ fontSize: 10, color: t.red || '#e05555', marginTop: 6 }}>
           Couldn&apos;t refresh: {error}
         </div>
+      )}
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ProjectionHero — single card showing Closure as the hero number, a progress
+// bar (MTD / Closure = working days completed proportion), and three small
+// stat tiles below for MTD / Run Rate / Working Days.
+//
+// Used by both the overall view (one big card) and the regionwise view (one
+// compact card per region). `compact` shrinks paddings/typography for the
+// per-region density; otherwise the same layout.
+// ─────────────────────────────────────────────────────────────────────────────
+function ProjectionHero({
+  accent, title, titleBadge, subhead, loading,
+  mtd, runRate, closure, wdElapsed, wdRemaining, wdTotal,
+  compact, t, isMobile,
+}) {
+  const pct = closure > 0 ? Math.min(100, (mtd / closure) * 100) : 0
+  const heroSize    = compact ? (isMobile ? 26 : 30) : (isMobile ? 30 : 38)
+  const padding     = compact ? (isMobile ? '14px 16px' : '16px 18px') : (isMobile ? '18px 20px' : '20px 24px')
+  const tileSize    = compact ? 13 : 15
+  const labelSize   = compact ? 9  : 10
+
+  const card = {
+    background: `linear-gradient(135deg, ${accent}10 0%, ${accent}04 50%, ${t.card2 || t.card} 100%)`,
+    border: `1px solid ${accent}30`,
+    borderLeft: `3px solid ${accent}`,
+    borderRadius: 14,
+    padding,
+    display: 'flex', flexDirection: 'column', gap: compact ? 10 : 14,
+    position: 'relative', overflow: 'hidden',
+  }
+
+  const tileLabel = { fontSize: labelSize, color: t.text4, letterSpacing: '.08em', textTransform: 'uppercase', fontWeight: 700 }
+
+  return (
+    <div style={card}>
+      {/* Faint accent glow in the corner — subtle premium feel */}
+      <div aria-hidden style={{
+        position: 'absolute', top: -40, right: -40, width: 140, height: 140, borderRadius: '50%',
+        background: `radial-gradient(circle, ${accent}1c 0%, transparent 70%)`, pointerEvents: 'none',
+      }} />
+
+      {/* Header */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, position: 'relative' }}>
+        <span style={{
+          fontSize: compact ? 12 : 10,
+          color: accent,
+          fontWeight: compact ? 700 : 700,
+          letterSpacing: compact ? '.03em' : '.12em',
+          textTransform: compact ? 'none' : 'uppercase',
+        }}>
+          {title}
+        </span>
+        {titleBadge && (
+          <span style={{ fontSize: 9, color: t.text4, letterSpacing: '.05em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>{titleBadge}</span>
+        )}
+      </div>
+
+      {/* Hero number */}
+      <div style={{ position: 'relative' }}>
+        <div style={{
+          fontSize: heroSize,
+          color: accent,
+          fontWeight: 300,
+          lineHeight: 1.05,
+          letterSpacing: '-.02em',
+          fontVariantNumeric: 'tabular-nums',
+        }}>
+          {loading ? '…' : fmtWt(closure)}
+        </div>
+        {!compact && (
+          <div style={{ fontSize: 10, color: t.text4, marginTop: 4, letterSpacing: '.04em', textTransform: 'uppercase', fontWeight: 600 }}>
+            Estimated month closure
+          </div>
+        )}
+      </div>
+
+      {/* Progress bar — MTD/Closure (≡ wdElapsed/wdTotal at current pace) */}
+      <div style={{ position: 'relative' }}>
+        <div style={{
+          height: 6, width: '100%',
+          background: `${t.border}`,
+          borderRadius: 99, overflow: 'hidden',
+        }}>
+          <div style={{
+            height: '100%',
+            width: `${pct}%`,
+            background: `linear-gradient(90deg, ${accent}, ${accent}cc)`,
+            transition: 'width .35s ease',
+            boxShadow: `0 0 8px ${accent}55`,
+          }} />
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 5, fontSize: 9.5, color: t.text4, letterSpacing: '.04em', fontWeight: 600 }}>
+          <span><strong style={{ color: t.text2, fontVariantNumeric: 'tabular-nums' }}>{pct.toFixed(1)}%</strong> through projected closure</span>
+          <span>{wdElapsed}/{wdTotal} WD · <strong style={{ color: t.text2 }}>{wdRemaining}</strong> left</span>
+        </div>
+      </div>
+
+      {/* Stat tiles — MTD, Run Rate, Working Days */}
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: 'repeat(3, 1fr)',
+        gap: compact ? 6 : 10,
+        position: 'relative',
+        paddingTop: compact ? 6 : 8,
+        borderTop: `1px dashed ${t.border}`,
+      }}>
+        <div>
+          <div style={tileLabel}>MTD</div>
+          <div style={{ fontSize: tileSize, color: t.blue || '#3a8fbf', fontWeight: 500, fontVariantNumeric: 'tabular-nums', marginTop: 2 }}>
+            {fmtWt(mtd)}
+          </div>
+        </div>
+        <div>
+          <div style={tileLabel}>Run Rate</div>
+          <div style={{ fontSize: tileSize, color: t.text1, fontWeight: 500, fontVariantNumeric: 'tabular-nums', marginTop: 2 }}>
+            {fmtWt(runRate)}
+            <span style={{ fontSize: 9.5, color: t.text4, fontWeight: 500, marginLeft: 3 }}>/ WD</span>
+          </div>
+        </div>
+        <div>
+          <div style={tileLabel}>Working Days</div>
+          <div style={{ fontSize: tileSize, color: t.text1, fontWeight: 500, fontVariantNumeric: 'tabular-nums', marginTop: 2 }}>
+            {wdElapsed}<span style={{ color: t.text4, fontWeight: 500 }}> / {wdTotal}</span>
+          </div>
+        </div>
+      </div>
+
+      {subhead && !compact && (
+        <div style={{ fontSize: 10, color: t.text4, position: 'relative', marginTop: -4 }}>{subhead}</div>
       )}
     </div>
   )
