@@ -494,8 +494,16 @@ function ProjectionHero({
         )}
       </div>
 
-      {/* Hero number — closure in net weight */}
-      <div style={{ position: 'relative' }}>
+      {/* Hero row — closure in net weight on the left, monetary projection
+          on the right. Uses the empty horizontal space the kg number leaves
+          instead of stacking. Wraps to two rows on very narrow viewports. */}
+      <div style={{
+        position: 'relative',
+        display: 'flex',
+        alignItems: 'flex-start',
+        justifyContent: 'space-between',
+        gap: 16, flexWrap: 'wrap',
+      }}>
         <div style={{
           fontSize: sizes.hero,
           color: accent,
@@ -506,39 +514,31 @@ function ProjectionHero({
         }}>
           {loading ? '…' : fmtWt(closure)}
         </div>
-        {/* Caption shown for the overall view, AND on mobile regionwise cards
-            so the region's hero number is unambiguous even on the smallest
-            screens. */}
-        {(!compact || isMobile) && (
-          <div style={{
-            fontSize: sizes.captionSize,
-            color: t.text4, marginTop: 4,
-            letterSpacing: '.04em', textTransform: 'uppercase', fontWeight: 600,
-          }}>
-            Estimated month closure
-          </div>
-        )}
 
         {/* Monetary projection — closure weight × ₹/g.
-            Smaller, secondary, but right under the hero so the rupee value
-            reads as "what that weight is worth at the current rate". */}
+            Right-aligned. Uses a smaller hero size so it reads as the
+            "value translation" of the weight on the left, not as a competing
+            headline. */}
         {!loading && closureValue > 0 && (
-          <div style={{
-            marginTop: 8,
-            display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap',
-          }}>
-            <span style={{
-              fontSize: isMobile ? 22 : (compact ? 19 : 26),
+          <div style={{ textAlign: 'right', minWidth: 0 }}>
+            <div style={{
+              fontSize: isMobile ? 22 : (compact ? 20 : 28),
               color: t.green || '#3aaa6a',
               fontWeight: 400,
               fontVariantNumeric: 'tabular-nums',
               letterSpacing: '-.01em',
+              lineHeight: 1.05,
+              whiteSpace: 'nowrap',
             }}>
               ≈ {fmtINR(closureValue)}
-            </span>
-            <span style={{ fontSize: sizes.captionSize, color: t.text4, fontWeight: 600 }}>
+            </div>
+            <div style={{
+              fontSize: sizes.captionSize,
+              color: t.text4, fontWeight: 600,
+              marginTop: 4, letterSpacing: '.02em', whiteSpace: 'nowrap',
+            }}>
               at {fmtRatePerGram(pricePerGram)}
-            </span>
+            </div>
           </div>
         )}
       </div>
