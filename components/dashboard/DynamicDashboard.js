@@ -15,6 +15,7 @@ import { istNow, istStr, istDaysAgo as daysBack } from '../../lib/dateIst'
 import ConsignmentOverviewWidget from './ConsignmentOverviewWidget'
 import TodaysBookingsWidget from './TodaysBookingsWidget'
 import LiveFeedFlashcards from './LiveFeedFlashcards'
+import MonthProjection from './MonthProjection'
 
 // ── Date helpers ──────────────────────────────────────────────────────────────
 const MONTHS   = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
@@ -348,6 +349,14 @@ function PurchaseInline({ t, setActiveNav, canSee }) {
   return (
     <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
 
+      {/* ── MONTH PROJECTION (first thing inside Purchases) ──
+            Run Rate + Estimated Month Closure surface here so the projection
+            is the lead metric when ops opens this section. Gated by the
+            same Live Feed OR Reports access that LiveFeedFlashcards uses. */}
+      {(canSee('tab.purchase-data.live') || canSee('purchase-reports')) && (
+        <MonthProjection t={t} isMobile={isMobile} />
+      )}
+
       {/* Period selector row */}
       {showPeriodSelector && (
         <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
@@ -374,11 +383,9 @@ function PurchaseInline({ t, setActiveNav, canSee }) {
                 {totalBranches} active branches · {Object.keys(regionCounts).length} regions
               </div>}
             </div>
-            {openTarget && (
-              <button onClick={()=>setActiveNav(openTarget)} style={{ padding:'6px 14px', borderRadius:9, background:`${t.gold}15`, border:`1px solid ${t.gold}35`, color:t.gold, fontSize:11, fontWeight:600, cursor:'pointer', marginLeft:'auto' }}>
-                {openLabel} →
-              </button>
-            )}
+            {/* Live Feed → button moved to the Today's Feed header above so
+                it's reachable without scrolling into this section. See
+                LiveFeedFlashcards' liveFeedAction prop. */}
           </div>
         </div>
       )}
@@ -1021,9 +1028,17 @@ export default function DynamicDashboard() {
       {/* ── Live Feed flashcards ──
           Anyone with access to Purchase Data → Live tab sees today's
           live snapshot at the top of their dashboard (walk-ins,
-          purchases, conversion). Auto-refreshes every 30s. */}
+          purchases, conversion). Auto-refreshes every 30s. The "Live
+          Feed →" button sits in the header (replacing the freshness
+          pill) so it's reachable without expanding Purchases. */}
       {canSee('tab.purchase-data.live') && (
-        <LiveFeedFlashcards t={t} isMobile={isMobile} />
+        <LiveFeedFlashcards
+          t={t} isMobile={isMobile}
+          liveFeedAction={canSee('purchase-live') ? {
+            label: 'Live Feed',
+            onClick: () => setActiveNav('purchase-live'),
+          } : null}
+        />
       )}
 
       {/* ── Purchase ── */}

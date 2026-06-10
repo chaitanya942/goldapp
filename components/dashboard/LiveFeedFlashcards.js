@@ -14,7 +14,7 @@ import { istToday } from '../../lib/dateIst'
 
 const REFRESH_SECS = 10
 
-export default function LiveFeedFlashcards({ t, isMobile }) {
+export default function LiveFeedFlashcards({ t, isMobile, liveFeedAction }) {
   const [data,        setData]        = useState(null)
   const [loading,     setLoading]     = useState(true)
   const [lastUpdated, setLastUpdated] = useState(null)
@@ -54,14 +54,34 @@ export default function LiveFeedFlashcards({ t, isMobile }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-      {/* Section label with LIVE indicator */}
+      {/* Section label with LIVE indicator. Right slot shows either the
+          freshness pill (default) or a "Live Feed →" navigation button when
+          the parent passes liveFeedAction — keeps the button reachable
+          without needing to expand the Purchases section first. */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, paddingBottom: 2 }}>
         <div style={{ width: 28, height: 28, borderRadius: 8, background: `${t.green}18`, border: `1px solid ${t.green}30`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, flexShrink: 0 }}>
           <span style={{ display: 'inline-block', width: 6, height: 6, borderRadius: '50%', background: t.green, animation: 'lfPulse 1.6s infinite' }}/>
         </div>
         <div style={{ fontSize: 11, fontWeight: 700, color: t.text3, letterSpacing: '.1em', textTransform: 'uppercase' }}>Today's Feed</div>
         <div style={{ flex: 1, height: 1, background: `linear-gradient(90deg,${t.green}30,transparent)` }}/>
-        <span style={{ fontSize: 10, color: t.text4, fontFamily: 'monospace' }} title={`Refreshes every ${REFRESH_SECS}s`}>{liveLabel}</span>
+        {liveFeedAction ? (
+          <button onClick={liveFeedAction.onClick}
+            title={`Open ${liveFeedAction.label}`}
+            style={{
+              padding: '5px 12px', borderRadius: 8,
+              background: `${t.gold}18`,
+              border: `1px solid ${t.gold}55`,
+              color: t.gold,
+              fontSize: 11, fontWeight: 700, letterSpacing: '.04em',
+              cursor: 'pointer', whiteSpace: 'nowrap',
+              fontFamily: 'inherit',
+              display: 'inline-flex', alignItems: 'center', gap: 4,
+            }}>
+            {liveFeedAction.label} <span style={{ fontSize: 12 }}>→</span>
+          </button>
+        ) : (
+          <span style={{ fontSize: 10, color: t.text4, fontFamily: 'monospace' }} title={`Refreshes every ${REFRESH_SECS}s`}>{liveLabel}</span>
+        )}
       </div>
 
       {/* 3-column flashcard grid — comfortably fits 360px+. On very narrow

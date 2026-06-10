@@ -1261,20 +1261,20 @@ export default function DashboardHome() {
       <LiveTicker />
 
       {/* ── LIVE FEED FLASHCARDS ──
-            Gated by tab.purchase-data.live (matches Purchase Data → Live tab). */}
+            Gated by tab.purchase-data.live (matches Purchase Data → Live tab).
+            The "Live Feed →" button sits in the header (replacing the
+            freshness pill) so ops can reach Live Feed without expanding
+            the Purchases section first. */}
       {canSee('tab.purchase-data.live') && (
         <div style={{ marginTop: 14 }}>
-          <LiveFeedFlashcards t={t} isMobile={isMobile} />
+          <LiveFeedFlashcards
+            t={t} isMobile={isMobile}
+            liveFeedAction={canSee('purchase-live') ? {
+              label: 'Live Feed',
+              onClick: () => setActiveNav('purchase-live'),
+            } : null}
+          />
         </div>
-      )}
-
-      {/* ── MONTH PROJECTION ──
-            Broader gate than Live Feed: anyone with access to either Live Feed
-            OR Purchase Reports & Analytics sees the projection. Analytics-only
-            users (no Live tab) get the forecast even though they can't watch
-            today's snapshot. */}
-      {(canSee('tab.purchase-data.live') || canSee('purchase-reports')) && (
-        <MonthProjection t={t} isMobile={isMobile} />
       )}
 
       {/* ── MOBILE MODULE GRID — clean grouped-by-module view (role-aware) ── */}
@@ -1453,6 +1453,16 @@ export default function DashboardHome() {
         {/* ── Collapsible body ── */}
         <div className={`overview-body${overviewOpen ? '' : ' collapsed'}`}>
           <div style={{ padding: overviewOpen ? (isMobile ? '16px 14px 20px' : '24px 24px 28px') : '0' }}>
+
+            {/* ── MONTH PROJECTION — first thing inside Purchases ──
+                  Run rate + estimated month closure surface here so ops sees
+                  the forecast before the period selector / KPI grid. Same gate
+                  as the Live Feed flashcards above. */}
+            {overviewOpen && (canSee('tab.purchase-data.live') || canSee('purchase-reports')) && (
+              <div style={{ marginBottom: 14 }}>
+                <MonthProjection t={t} isMobile={isMobile} />
+              </div>
+            )}
 
             {/* Period selector — mobile only, own scrollable row */}
             {isMobile && showPeriodSelector && overviewOpen && (
