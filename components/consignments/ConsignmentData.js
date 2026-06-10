@@ -1002,16 +1002,17 @@ export default function ConsignmentData() {
               <tr>
                 {(() => {
                   const cols = [
-                    { key: 'tmp_prf_no',   label: 'TMP PRF',   align: 'left',  sortable: true  },
-                    { key: 'type',         label: 'Type',      align: 'left',  sortable: false },
-                    { key: 'branch_name',  label: 'Source → Destination', align: 'left',  sortable: true },
-                    { key: 'total_bills',  label: 'Bills',     align: 'right', sortable: true  },
-                    { key: 'total_net_wt', label: 'Net Wt',    align: 'right', sortable: true  },
-                    { key: 'total_amount', label: 'Value',     align: 'right', sortable: true  },
-                    { key: 'created_at',   label: 'Created',   align: 'left',  sortable: true  },
-                    { key: 'document',     label: 'Document',  align: 'left',  sortable: false },
-                    { key: 'gst_doc',      label: 'EWB / E-Invoice', align: 'left', sortable: false },
-                    { key: 'cancel',       label: 'Cancel',    align: 'left',  sortable: false },
+                    { key: 'created_at',   label: 'Created',         align: 'left',  sortable: true  },
+                    { key: 'tmp_prf_no',   label: 'TMP PRF',         align: 'left',  sortable: true  },
+                    { key: 'type',         label: 'Type',            align: 'left',  sortable: false },
+                    { key: 'branch_name',  label: 'Source',          align: 'left',  sortable: true  },
+                    { key: 'dest_branch',  label: 'Destination',     align: 'left',  sortable: false },
+                    { key: 'total_bills',  label: 'Bills',           align: 'right', sortable: true  },
+                    { key: 'total_net_wt', label: 'Net Wt',          align: 'right', sortable: true  },
+                    { key: 'total_amount', label: 'Value',           align: 'right', sortable: true  },
+                    { key: 'document',     label: 'Document',        align: 'left',  sortable: false },
+                    { key: 'gst_doc',      label: 'EWB / E-Invoice', align: 'left',  sortable: false },
+                    { key: 'cancel',       label: 'Cancel',          align: 'left',  sortable: false },
                   ]
                   return cols.map(col => {
                     const isActive = col.sortable && sortKey === col.key
@@ -1046,25 +1047,35 @@ export default function ConsignmentData() {
                 // become. Shimmer is animated via .cdata-skeleton in CSS.
                 Array.from({ length: 8 }).map((_, i) => (
                   <tr key={`skeleton-${i}`} style={{ borderBottom: `1px solid ${t.border}15` }}>
+                    {/* Created — stripe lives here now */}
                     <td style={{ padding: '14px 14px 14px 11px', boxShadow: `inset 3px 0 0 ${t.border}` }}>
-                      <span className="cdata-skeleton" style={{ width: '78px' }} />
-                    </td>
-                    <td style={{ padding: '14px' }}><span className="cdata-skeleton" style={{ width: '92px', height: '18px', borderRadius: '99px' }} /></td>
-                    <td style={{ padding: '14px' }}><span className="cdata-skeleton" style={{ width: '180px' }} /></td>
-                    <td style={{ padding: '14px', textAlign: 'right' }}><span className="cdata-skeleton" style={{ width: '24px' }} /></td>
-                    <td style={{ padding: '14px', textAlign: 'right' }}><span className="cdata-skeleton" style={{ width: '60px' }} /></td>
-                    <td style={{ padding: '14px', textAlign: 'right' }}><span className="cdata-skeleton" style={{ width: '70px' }} /></td>
-                    <td style={{ padding: '14px' }}>
                       <span className="cdata-skeleton" style={{ width: '90px' }} /><br />
                       <span className="cdata-skeleton" style={{ width: '50px', height: '10px', marginTop: '4px' }} />
                     </td>
+                    {/* TMP PRF */}
+                    <td style={{ padding: '14px' }}><span className="cdata-skeleton" style={{ width: '78px' }} /></td>
+                    {/* Type */}
+                    <td style={{ padding: '14px' }}><span className="cdata-skeleton" style={{ width: '92px', height: '18px', borderRadius: '99px' }} /></td>
+                    {/* Source */}
+                    <td style={{ padding: '14px' }}><span className="cdata-skeleton" style={{ width: '110px' }} /></td>
+                    {/* Destination */}
+                    <td style={{ padding: '14px' }}><span className="cdata-skeleton" style={{ width: '90px' }} /></td>
+                    {/* Bills */}
+                    <td style={{ padding: '14px', textAlign: 'right' }}><span className="cdata-skeleton" style={{ width: '24px' }} /></td>
+                    {/* Net Wt */}
+                    <td style={{ padding: '14px', textAlign: 'right' }}><span className="cdata-skeleton" style={{ width: '60px' }} /></td>
+                    {/* Value */}
+                    <td style={{ padding: '14px', textAlign: 'right' }}><span className="cdata-skeleton" style={{ width: '70px' }} /></td>
+                    {/* Document */}
                     <td style={{ padding: '14px' }}><span className="cdata-skeleton" style={{ width: '120px', height: '20px' }} /></td>
+                    {/* EWB / E-Invoice */}
                     <td style={{ padding: '14px' }}><span className="cdata-skeleton" style={{ width: '90px', height: '20px' }} /></td>
+                    {/* Cancel */}
                     <td style={{ padding: '14px' }}><span className="cdata-skeleton" style={{ width: '60px', height: '20px' }} /></td>
                   </tr>
                 ))
               ) : filteredCons.length === 0 ? (
-                <tr><td colSpan={10} style={{ padding: '64px', textAlign: 'center', color: t.text4, fontSize: '13px' }}>
+                <tr><td colSpan={11} style={{ padding: '64px', textAlign: 'center', color: t.text4, fontSize: '13px' }}>
                   {consignments.length === 0
                     ? 'No active consignments. Use Branch Stock → Move to create one.'
                     : 'No consignments match the filters'}
@@ -1087,19 +1098,31 @@ export default function ConsignmentData() {
                       borderTop:    `1px solid ${t.gold}30`,
                       borderBottom: `1px solid ${t.gold}40`,
                     }}>
-                      <td style={{ padding: '10px 14px 10px 11px', fontSize: '10px', color: t.gold, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 800, boxShadow: `inset 3px 0 0 ${t.gold}` }}>
+                      {/* Created — Σ label with stripe (matches data rows' new stripe location) */}
+                      <td style={{ padding: '10px 14px 10px 11px', fontSize: '10px', color: t.gold, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 800, boxShadow: `inset 3px 0 0 ${t.gold}`, whiteSpace: 'nowrap' }}>
                         Σ Totals
                       </td>
-                      <td />
-                      <td style={{ padding: '10px 14px', fontSize: '11px', color: t.text3, fontWeight: 600 }}>
+                      {/* TMP PRF — count */}
+                      <td style={{ padding: '10px 14px', fontSize: '11px', color: t.text3, fontWeight: 600, whiteSpace: 'nowrap' }}>
                         {filteredCons.length} consignment{filteredCons.length === 1 ? '' : 's'}
                       </td>
+                      {/* Type */}
+                      <td />
+                      {/* Source */}
+                      <td />
+                      {/* Destination */}
+                      <td />
+                      {/* Bills */}
                       <td style={{ padding: '10px 14px', fontSize: '12px', color: t.text1, textAlign: 'right', fontFamily: 'monospace', fontWeight: 800 }}>{fmt(tot.bills)}</td>
+                      {/* Net Wt */}
                       <td style={{ padding: '10px 14px', fontSize: '13px', color: t.gold, textAlign: 'right', fontFamily: 'monospace', fontWeight: 800, whiteSpace: 'nowrap' }}>{fmtWt(tot.netWt)}</td>
+                      {/* Value */}
                       <td style={{ padding: '10px 14px', fontSize: '12px', color: t.blue, textAlign: 'right', fontFamily: 'monospace', fontWeight: 800, whiteSpace: 'nowrap' }}>₹{fmt(Math.round(tot.amount))}</td>
+                      {/* Document */}
                       <td />
+                      {/* EWB / E-Invoice */}
                       <td />
-                      <td />
+                      {/* Cancel */}
                       <td />
                     </tr>
                   )
@@ -1138,7 +1161,13 @@ export default function ConsignmentData() {
                       ['--cdata-stripe']: isRejectedRow ? t.red : regionStripe,
                       ['--cdata-glow']:   isRejectedRow ? t.red : isNew ? t.green : t.gold,
                     }}>
-                    <td style={{ paddingTop: '11px', paddingRight: '14px', paddingBottom: '11px', paddingLeft: '11px', fontSize: '12px', color: t.gold, fontWeight: 700, fontFamily: 'monospace', whiteSpace: 'nowrap', boxShadow: 'inset 3px 0 0 var(--cdata-stripe)' }}>
+                    {/* Created — moved to leading column; stripe lives here now */}
+                    <td style={{ padding: '11px 14px 11px 11px', whiteSpace: 'nowrap', boxShadow: 'inset 3px 0 0 var(--cdata-stripe)' }}>
+                      <div className="cdata-num" style={{ fontSize: '11px', color: t.text2, fontFamily: 'monospace' }}>{fmtTS(c.created_at)}</div>
+                      <div style={{ fontSize: '10px', color: t.text4, marginTop: '2px' }}>{relTime(c.created_at)}</div>
+                    </td>
+                    {/* TMP PRF — stripe moved off; standard left padding now */}
+                    <td style={{ padding: '11px 14px', fontSize: '12px', color: t.gold, fontWeight: 700, fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
                       <button type="button" onClick={() => setActivityId(c.id)}
                         title="View full activity log — every event from creation through dispatch"
                         style={{ background: 'transparent', border: 'none', padding: 0, font: 'inherit', color: t.gold, fontWeight: 700, fontFamily: 'monospace', cursor: 'pointer' }}
@@ -1180,18 +1209,17 @@ export default function ConsignmentData() {
                         {isType ? 'Branch → Hub' : 'Branch → HO'}
                       </span>
                     </td>
+                    {/* Source */}
+                    <td style={{ padding: '11px 14px', fontSize: '12px', color: t.text1, fontWeight: 600, whiteSpace: 'nowrap' }}>
+                      {c.branch_name}
+                    </td>
+                    {/* Destination */}
                     <td style={{ padding: '11px 14px', fontSize: '12px', color: t.text2, whiteSpace: 'nowrap' }}>
-                      <strong style={{ color: t.text1 }}>{c.branch_name}</strong>
-                      <span style={{ color: t.text4, margin: '0 6px' }}>→</span>
-                      <span>{isType ? (c.dest_branch || '?') : 'Head Office'}</span>
+                      {isType ? (c.dest_branch || '?') : 'Head Office'}
                     </td>
                     <td className="cdata-num" style={{ padding: '11px 14px', fontSize: '12px', color: t.text2, textAlign: 'right' }}>{c.total_bills}</td>
                     <td className="cdata-num" style={{ padding: '11px 14px', fontSize: '12px', color: t.gold, textAlign: 'right', fontFamily: 'monospace', fontWeight: 600, whiteSpace: 'nowrap' }}>{fmtWt(c.total_net_wt)}</td>
                     <td className="cdata-num" style={{ padding: '11px 14px', fontSize: '12px', color: t.blue, textAlign: 'right', fontFamily: 'monospace', whiteSpace: 'nowrap' }}>₹{fmt(Math.round(c.total_amount))}</td>
-                    <td style={{ padding: '11px 14px', whiteSpace: 'nowrap' }}>
-                      <div className="cdata-num" style={{ fontSize: '11px', color: t.text2, fontFamily: 'monospace' }}>{fmtTS(c.created_at)}</div>
-                      <div style={{ fontSize: '10px', color: t.text4, marginTop: '2px' }}>{relTime(c.created_at)}</div>
-                    </td>
                     {/* Document column — Report comes first (always available),
                         Voucher/Challan unlocks only after Report. The button
                         disable + tooltip mirrors the backend workflow gate so
