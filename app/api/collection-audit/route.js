@@ -584,18 +584,51 @@ export async function GET(req) {
     return res
   } catch (err) {
     const stackFirst = String(err?.stack || '').split('\n').slice(0, 3).join(' | ')
+
+    // Whatever was thrown — log a full type + ownProps snapshot. Native
+    // Errors land with name/stack populated; plain strings (`throw 'Bad
+    // Request'`) and bare objects (`throw { message }`) come through with
+    // name/stack null, which is the smoking gun we saw on the last
+    // failure. Capture EVERYTHING so we can identify the source instantly.
+    let repr = null
+    try {
+      if (err && typeof err === 'object') {
+        const seen = new Set()
+        repr = JSON.stringify(err, (k, v) => {
+          if (typeof v === 'object' && v !== null) {
+            if (seen.has(v)) return '[Circular]'
+            seen.add(v)
+          }
+          return v
+        }, 0).slice(0, 600)
+      } else {
+        repr = String(err).slice(0, 600)
+      }
+    } catch (reprErr) {
+      repr = `<repr failed: ${reprErr?.message}>`
+    }
+    const ownProps = err && typeof err === 'object' ? Object.getOwnPropertyNames(err) : []
+
     console.error('[collection-audit][' + BUILD_MARKER + '] GET unhandled:',
+      'typeof=', typeof err,
+      'isError=', err instanceof Error,
       'name=',   err?.name,
       'message=',err?.message,
       'cause=',  err?.cause,
+      'ownProps=', ownProps,
+      'repr=', repr,
       'stack=',  stackFirst,
     )
     return Response.json({
-      error:   err?.message || 'Server error',
-      name:    err?.name    || null,
-      cause:   err?.cause   || null,
-      stack:   stackFirst   || null,
-      _build:  BUILD_MARKER,
+      error:    err?.message || (typeof err === 'string' ? err : null) || 'Server error',
+      name:     err?.name    || null,
+      cause:    err?.cause   || null,
+      stack:    stackFirst   || null,
+      _typeof:  typeof err,
+      _isError: err instanceof Error,
+      _ownProps: ownProps,
+      _repr:    repr,
+      _build:   BUILD_MARKER,
     }, {
       status: 500,
       headers: { 'x-handler-build': BUILD_MARKER },
