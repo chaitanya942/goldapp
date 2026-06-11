@@ -152,18 +152,29 @@ async function handleGet(req) {
   //                   vs received-audited weights, and the list of
   //                   auditors who touched bills from that branch in window.
   if (mode === 'history') {
-    const from = url.searchParams.get('from')   // YYYY-MM-DD inclusive
-    const to   = url.searchParams.get('to')     // YYYY-MM-DD inclusive
+    const from = url.searchParams.get('from')   // YYYY-MM-DD inclusive (audit-pair anchor)
+    const to   = url.searchParams.get('to')     // YYYY-MM-DD inclusive (audit-pair anchor)
     const COLS = 'id, application_id, customer_name, branch_name, purchase_date, gross_weight, net_weight, total_amount, audit_gross_weight, audit_discrepancy_g, audited_at, audited_by, audit_remark, stock_status'
 
+    // ── Shift-pair date window ────────────────────────────────────────────
+    // An "audit report for date N" is the pair Night-N + Morning-(N+1):
+    //   start  = N            19:30 IST (start of night shift on N)
+    //   end    = (N + 1 day)  19:30 IST (end of next morning shift)
+    // So a range [from, to] expands to [from 19:30 IST, (to + 1) 19:30 IST).
+    const addDay = (ymd) => {
+      const [y, m, d] = ymd.split('-').map(Number)
+      const dt = new Date(Date.UTC(y, m - 1, d))
+      dt.setUTCDate(dt.getUTCDate() + 1)
+      return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, '0')}-${String(dt.getUTCDate()).padStart(2, '0')}`
+    }
     let q = supabase
       .from('purchases')
       .select(COLS)
       .not('audited_at', 'is', null)
       .order('audited_at', { ascending: false })
       .limit(2000)
-    if (from) q = q.gte('audited_at', `${from}T00:00:00+05:30`)
-    if (to)   q = q.lte('audited_at', `${to}T23:59:59+05:30`)
+    if (from) q = q.gte('audited_at', `${from}T19:30:00+05:30`)
+    if (to)   q = q.lt ('audited_at', `${addDay(to)}T19:30:00+05:30`)
     const { data: audited, error } = await q
     if (error) return Response.json({ error: error.message }, { status: 500 })
 
@@ -191,20 +202,51 @@ async function handleGet(req) {
       }
     }
 
-    // Resolve auditor emails — covers both bill-level audited_by and
-    // event-level audited_by in one round-trip.
+    // Resolve auditor identity — both name + email so the UI can show name
+    // (preferred) and the CSV can fall back to email for ambiguity.
     const userIds = new Set()
     for (const r of (audited || [])) if (r.audited_by) userIds.add(r.audited_by)
     for (const evts of eventsByBill.values()) {
       for (const e of evts) if (e.audited_by) userIds.add(e.audited_by)
     }
-    let emailByUid = new Map()
+    let profileByUid = new Map()   // id → { name, email }
     if (userIds.size) {
       const { data: profiles } = await supabase
         .from('user_profiles')
         .select('id, email, full_name')
         .in('id', [...userIds])
-      emailByUid = new Map((profiles || []).map(p => [p.id, p.email || p.full_name || '—']))
+      profileByUid = new Map((profiles || []).map(p => [p.id, {
+        name:  p.full_name || p.email || '—',
+        email: p.email     || p.full_name || '—',
+      }]))
+    }
+    const nameOf  = (uid) => (profileByUid.get(uid)?.name)  || '—'
+    const emailOf = (uid) => (profileByUid.get(uid)?.email) || '—'
+
+    // ── Consignment-created-at per bill ──────────────────────────────────
+    // The bill's "Consignment Created date" is the created_at of the
+    // consignment that contains it. A bill may have ridden multiple
+    // consignments over its lifetime (one cancelled, another dispatched);
+    // we keep the most recent one because that's the cycle this audit
+    // belongs to.
+    const consCreatedByBill = new Map()  // purchase_id → ISO ts
+    if (billIds.length) {
+      const LINK_CHUNK = 1000
+      for (let i = 0; i < billIds.length; i += LINK_CHUNK) {
+        const slice = billIds.slice(i, i + LINK_CHUNK)
+        const { data: links } = await supabase
+          .from('consignment_items')
+          .select('purchase_id, consignment_id, consignments(created_at)')
+          .in('purchase_id', slice)
+        for (const link of (links || [])) {
+          const ts = link.consignments?.created_at
+          if (!ts) continue
+          const prev = consCreatedByBill.get(link.purchase_id)
+          if (!prev || new Date(ts) > new Date(prev)) {
+            consCreatedByBill.set(link.purchase_id, ts)
+          }
+        }
+      }
     }
 
     const rows = (audited || []).map(r => {
@@ -213,12 +255,15 @@ async function handleGet(req) {
       const latest = events.length > 1 ? events[events.length - 1] : null
       return {
         ...r,
-        audited_by_email: emailByUid.get(r.audited_by) || '—',
+        consignment_created_at: consCreatedByBill.get(r.id) || null,
+        audited_by_name:        nameOf(r.audited_by),
+        audited_by_email:       emailOf(r.audited_by),
         first_audit: first ? {
           audit_gross_weight: first.audit_gross_weight,
           discrepancy_g:      first.discrepancy_g,
           audited_at:         first.audited_at,
-          audited_by_email:   emailByUid.get(first.audited_by) || null,
+          audited_by_name:    nameOf(first.audited_by),
+          audited_by_email:   emailOf(first.audited_by),
           remark:             first.remark,
           action:             first.action,
         } : null,
@@ -226,7 +271,8 @@ async function handleGet(req) {
           audit_gross_weight: latest.audit_gross_weight,
           discrepancy_g:      latest.discrepancy_g,
           audited_at:         latest.audited_at,
-          audited_by_email:   emailByUid.get(latest.audited_by) || null,
+          audited_by_name:    nameOf(latest.audited_by),
+          audited_by_email:   emailOf(latest.audited_by),
           remark:             latest.remark,
           action:             latest.action,
         } : null,
@@ -234,95 +280,7 @@ async function handleGet(req) {
       }
     })
 
-    // ── Per-branch breakdown ─────────────────────────────────────────────
-    // In-transit is a LIVE snapshot — bills currently sitting in
-    // stock_status='in_consignment' from each source branch, irrespective
-    // of the audit window. The rest of the metrics scope to the audit
-    // window via the rows fetched above.
-    const inTransitByBranch = new Map()
-    {
-      const CHUNK = 1000
-      let fromIdx = 0
-      while (true) {
-        const { data: live } = await supabase
-          .from('purchases')
-          .select('branch_name, gross_weight, net_weight')
-          .eq('stock_status', 'in_consignment')
-          .eq('is_deleted', false)
-          .neq('crm_status', 'deleted')
-          .range(fromIdx, fromIdx + CHUNK - 1)
-        if (!live || live.length === 0) break
-        for (const p of live) {
-          const k = p.branch_name || '—'
-          if (!inTransitByBranch.has(k)) inTransitByBranch.set(k, { bills: 0, weight_g: 0 })
-          inTransitByBranch.get(k).bills    += 1
-          inTransitByBranch.get(k).weight_g += Number(p.gross_weight || 0)
-        }
-        if (live.length < CHUNK) break
-        fromIdx += CHUNK
-      }
-    }
-
-    const branchAgg = new Map()
-    const ensure = (k) => {
-      if (!branchAgg.has(k)) branchAgg.set(k, {
-        branch:                   k,
-        in_transit_count:         0,
-        in_transit_weight_g:      0,
-        received_count:           0,
-        received_weight_g:        0,
-        audited_count:            0,
-        discrepancy_count:        0,
-        sum_abs_discrepancy_g:    0,
-        total_expected_g:         0,   // sum of CRM gross for audited bills in window
-        total_received_audited_g: 0,   // sum of measured for the received subset
-        auditors:                 new Set(),
-      })
-      return branchAgg.get(k)
-    }
-
-    // Seed with in-transit so branches with no audits this window still appear.
-    for (const [k, v] of inTransitByBranch.entries()) {
-      const e = ensure(k)
-      e.in_transit_count   = v.bills
-      e.in_transit_weight_g = Number(v.weight_g.toFixed(3))
-    }
-
-    for (const r of rows) {
-      const e = ensure(r.branch_name || '—')
-      e.audited_count    += 1
-      e.total_expected_g += Number(r.gross_weight || 0)
-      if (r.stock_status === 'at_ho') {
-        e.received_count           += 1
-        e.received_weight_g        += Number(r.audit_gross_weight || 0)
-        e.total_received_audited_g += Number(r.audit_gross_weight || 0)
-      }
-      const d = Number(r.audit_discrepancy_g || 0)
-      if (d !== 0) {
-        e.discrepancy_count    += 1
-        e.sum_abs_discrepancy_g += Math.abs(d)
-      }
-      if (r.audited_by_email) e.auditors.add(r.audited_by_email)
-    }
-
-    const branchBreakdown = [...branchAgg.values()].map(b => ({
-      branch:                   b.branch,
-      in_transit_count:         b.in_transit_count,
-      in_transit_weight_g:      Number(b.in_transit_weight_g.toFixed(3)),
-      received_count:           b.received_count,
-      received_weight_g:        Number(b.received_weight_g.toFixed(3)),
-      audited_count:            b.audited_count,
-      discrepancy_count:        b.discrepancy_count,
-      sum_abs_discrepancy_g:    Number(b.sum_abs_discrepancy_g.toFixed(3)),
-      total_expected_g:         Number(b.total_expected_g.toFixed(3)),
-      total_received_audited_g: Number(b.total_received_audited_g.toFixed(3)),
-      auditors:                 [...b.auditors],
-    })).sort((a, b) =>
-      b.discrepancy_count - a.discrepancy_count ||
-      b.audited_count     - a.audited_count
-    )
-
-    return Response.json({ rows, branchBreakdown })
+    return Response.json({ rows })
   }
 
   // ── Default: pending audit queue (the original AuditData screen) ──

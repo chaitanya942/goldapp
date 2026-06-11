@@ -1,13 +1,21 @@
 'use client'
 
-// Audit Report — historical view + analytics over every audit action.
+// Audit Report — historical view of every audit action, case-wise.
 // Powered by /api/collection-audit?mode=history which returns every bill
 // that has audited_at populated, regardless of current stock_status.
 //
-// Surfaces:
-//   - Per-auditor breakdown: who audited how many, how many discrepancies they flagged.
-//   - Per-branch breakdown: which branches generate the most discrepancies.
-//   - Full row-level log table with CSV / PDF export.
+// Date filter semantics:
+//   An "audit report for date N" is the pair Night-N + Morning-(N+1).
+//   The window for a [from, to] range is [from 19:30 IST, (to+1) 19:30 IST)
+//   — i.e. each calendar day in the range expands into one full audit pair.
+//
+// Columns: Consignment Created · Customer · Branch · CRM Gross · Audit Wt ·
+//   Discrepancy (green when audit>CRM, red when audit<CRM, em-dash when
+//   equal) · Re-audit Wt · Re-audit Δ · Auditor Name · Remark.
+//
+// "Collection audit only" — when a bill has audited_at but audit_gross_weight
+// is null/0, the remark auto-fills to "Received — weight audit not done"
+// so ops sees at a glance that the bill is in HO but still owes a weighing.
 
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useApp } from '../../lib/context'
@@ -16,7 +24,6 @@ import { authedFetch } from '../../lib/authedFetch'
 import { CONSIGNMENT_THEMES as THEMES, useMobile } from '../../lib/consignmentTheme'
 import { istToday, istDaysAgo } from '../../lib/dateIst'
 
-const fmt          = (n) => n != null ? Number(n).toLocaleString('en-IN') : '—'
 const fmtWt        = (n) => n != null ? `${Number(n).toFixed(3)}g` : '—'
 const fmtSignedWt  = (n) => {
   if (n == null) return '—'
@@ -24,7 +31,6 @@ const fmtSignedWt  = (n) => {
   if (!Number.isFinite(v) || v === 0) return '0.000g'
   return `${v > 0 ? '+' : ''}${v.toFixed(3)}g`
 }
-const fmtTS  = (d) => d ? new Date(d).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false }) : '—'
 const fmtDate= (d) => d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'
 
 // Classify an audit timestamp into one of:
@@ -56,14 +62,10 @@ export default function AuditReport() {
   const [from, setFrom]   = useState(last7)
   const [to,   setTo]     = useState(today)
   const [rows, setRows]   = useState([])
-  const [branchBreakdown, setBranchBreakdown] = useState([])
   const [loading, setLoading] = useState(true)
   const [search,  setSearch]  = useState('')
-  const [tab,     setTab]     = useState('branches')   // 'branches' | 'log'
-  // Shift filter — 'all' shows every audit; 'night' / 'morning' / 'off'
-  // narrow to events whose audited_at falls inside that shift's window.
-  // Drives both the Audit Log filter AND a client-side recomputation
-  // of the Per-Branch breakdown so the numbers always match.
+  // Shift filter — 'all' shows every audit in the pair; 'night' / 'morning'
+  // narrow to the half-shift the audit landed in.
   const [shift,   setShift]   = useState('all')
 
   const fetchData = useCallback(async (f, tt) => {
@@ -72,12 +74,10 @@ export default function AuditReport() {
     const j   = await res.json()
     if (!res.ok || j.error) {
       setRows([])
-      setBranchBreakdown([])
       setLoading(false)
       return
     }
     setRows(j.rows || [])
-    setBranchBreakdown(j.branchBreakdown || [])
     setLoading(false)
   }, [])
 
@@ -103,124 +103,62 @@ export default function AuditReport() {
       || (r.application_id   || '').toLowerCase().includes(q)
       || (r.customer_name    || '').toLowerCase().includes(q)
       || (r.branch_name      || '').toLowerCase().includes(q)
+      || (r.audited_by_name  || '').toLowerCase().includes(q)
       || (r.audited_by_email || '').toLowerCase().includes(q)
     )
   ), [rowsWithShift, q, shift])
 
-  // Per-branch breakdown: when 'all' shift, use the server-supplied
-  // breakdown verbatim (it already includes live in-transit counts).
-  // When filtered, recompute everything EXCEPT in-transit (which is a
-  // live snapshot independent of audit window/shift) from rowsWithShift.
-  const filteredBranchBreakdown = useMemo(() => {
-    if (shift === 'all') return branchBreakdown
-    const inTransitByBranch = new Map(branchBreakdown.map(b => [b.branch, {
-      in_transit_count:    b.in_transit_count,
-      in_transit_weight_g: b.in_transit_weight_g,
-    }]))
-    const agg = new Map()
-    for (const r of rowsWithShift) {
-      if (!shiftMatches(r)) continue
-      const k = r.branch_name || '—'
-      if (!agg.has(k)) agg.set(k, {
-        branch: k,
-        in_transit_count:         0,
-        in_transit_weight_g:      0,
-        received_count:           0,
-        received_weight_g:        0,
-        audited_count:            0,
-        discrepancy_count:        0,
-        sum_abs_discrepancy_g:    0,
-        total_expected_g:         0,
-        total_received_audited_g: 0,
-        auditors:                 new Set(),
-      })
-      const e = agg.get(k)
-      e.audited_count    += 1
-      e.total_expected_g += Number(r.gross_weight || 0)
-      if (r.stock_status === 'at_ho') {
-        e.received_count           += 1
-        e.received_weight_g        += Number(r.audit_gross_weight || 0)
-        e.total_received_audited_g += Number(r.audit_gross_weight || 0)
-      }
-      const d = Number(r.audit_discrepancy_g || 0)
-      if (d !== 0) {
-        e.discrepancy_count    += 1
-        e.sum_abs_discrepancy_g += Math.abs(d)
-      }
-      if (r.audited_by_email) e.auditors.add(r.audited_by_email)
-    }
-    // Merge in-transit (live snapshot) per branch and round.
-    const out = [...agg.values()].map(e => {
-      const live = inTransitByBranch.get(e.branch) || { in_transit_count: 0, in_transit_weight_g: 0 }
-      return {
-        branch:                   e.branch,
-        in_transit_count:         live.in_transit_count,
-        in_transit_weight_g:      live.in_transit_weight_g,
-        received_count:           e.received_count,
-        received_weight_g:        Number(e.received_weight_g.toFixed(3)),
-        audited_count:            e.audited_count,
-        discrepancy_count:        e.discrepancy_count,
-        sum_abs_discrepancy_g:    Number(e.sum_abs_discrepancy_g.toFixed(3)),
-        total_expected_g:         Number(e.total_expected_g.toFixed(3)),
-        total_received_audited_g: Number(e.total_received_audited_g.toFixed(3)),
-        auditors:                 [...e.auditors],
-      }
-    })
-    return out.sort((a, b) =>
-      b.discrepancy_count - a.discrepancy_count ||
-      b.audited_count     - a.audited_count
-    )
-  }, [shift, rowsWithShift, branchBreakdown])
-
-  // Max Σ|Δ|g across visible branches — drives the magnitude bar so the
-  // worst offender renders full-width and the rest scale proportionally.
-  const maxAbsDiscG = useMemo(() => {
-    return filteredBranchBreakdown.reduce((m, b) => Math.max(m, Number(b.sum_abs_discrepancy_g || 0)), 0)
-  }, [filteredBranchBreakdown])
-
-  // ── CSV / PDF download — per-tab ─────────────────────────────────────────
+  // ── CSV / PDF download ──────────────────────────────────────────────────
   const dateTag = from === to ? from : `${from}_to_${to}`
   const windowLabelShort = from === to
     ? new Date(from).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
     : `${new Date(from).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })} to ${new Date(to).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}`
 
-  // Column definitions — single source of truth so CSV, PDF, and on-screen
-  // tables all stay in sync.
-  const branchCols = [
-    ['Branch',                       b => b.branch],
-    ['In transit (bills)',           b => b.in_transit_count],
-    ['In transit (g)',               b => fmtWt(b.in_transit_weight_g)],
-    ['Received (bills)',             b => b.received_count],
-    ['Received (g)',                 b => fmtWt(b.received_weight_g)],
-    ['Audited (bills)',              b => b.audited_count],
-    ['Discrepancies',                b => b.discrepancy_count],
-    ['Σ |Δ| grams',                  b => fmtWt(b.sum_abs_discrepancy_g)],
-    ['Total expected (g)',           b => fmtWt(b.total_expected_g)],
-    ['Total received+audited (g)',   b => fmtWt(b.total_received_audited_g)],
-    ['Auditors',                     b => (b.auditors || []).join('; ')],
-  ]
+  // Collection-only signal: bill was logged into HO (audited_at exists) but
+  // the weight audit wasn't actually performed (audit_gross_weight is null
+  // or 0). Surfaces as an auto-filled remark so ops can chase the weighing.
+  const isCollectionOnly = (r) => {
+    const w = r.first_audit?.audit_gross_weight ?? r.audit_gross_weight
+    return r.audited_at && (w == null || Number(w) === 0)
+  }
+  const effectiveRemark = (r) => {
+    const stated = r.reaudit?.remark || r.audit_remark || ''
+    if (stated) return stated
+    return isCollectionOnly(r) ? 'Received — weight audit not done' : ''
+  }
+
+  // Column definitions — single source of truth so CSV, PDF, and the
+  // on-screen table stay in sync.
   const logCols = [
-    ['Audited At',          r => r.audited_at],
-    ['Shift',               r => SHIFT_LABEL[r._shift] || '—'],
+    ['Consignment Created', r => fmtDate(r.consignment_created_at)],
     ['Customer',            r => r.customer_name],
     ['Branch',              r => r.branch_name],
     ['CRM Gross (g)',       r => fmtWt(r.gross_weight)],
-    ['Audit Weight (g)',    r => fmtWt(r.first_audit?.audit_gross_weight ?? r.audit_gross_weight)],
-    ['Discrepancy (g)',     r => fmtSignedWt(r.first_audit?.discrepancy_g ?? r.audit_discrepancy_g)],
+    ['Audit Weight (g)',    r => {
+      const w = r.first_audit?.audit_gross_weight ?? r.audit_gross_weight
+      return w == null || Number(w) === 0 ? '—' : fmtWt(w)
+    }],
+    ['Discrepancy (g)',     r => {
+      if (isCollectionOnly(r)) return '—'
+      const d = Number(r.first_audit?.discrepancy_g ?? r.audit_discrepancy_g ?? 0)
+      return d === 0 ? '—' : fmtSignedWt(d)
+    }],
     ['Re-audit Weight (g)', r => r.reaudit ? fmtWt(r.reaudit.audit_gross_weight) : '—'],
-    ['Re-audit Δ (g)',      r => r.reaudit ? fmtSignedWt(r.reaudit.discrepancy_g) : '—'],
-    ['Auditor',             r => r.reaudit?.audited_by_email || r.audited_by_email || '—'],
-    ['Remark',              r => r.reaudit?.remark || r.audit_remark || ''],
+    ['Re-audit Δ (g)',      r => {
+      if (!r.reaudit) return '—'
+      const d = Number(r.reaudit.discrepancy_g || 0)
+      return d === 0 ? '—' : fmtSignedWt(d)
+    }],
+    ['Auditor',             r => r.reaudit?.audited_by_name || r.audited_by_name || '—'],
+    ['Remark',              r => effectiveRemark(r)],
   ]
 
   function exportCsv() {
-    const isBranches = tab === 'branches'
-    const data = isBranches ? filteredBranchBreakdown : filteredLog
-    const cols = isBranches ? branchCols : logCols
-    const fname = `AuditReport_${isBranches ? 'PerBranch' : 'Log'}_${dateTag}${shift === 'all' ? '' : `_${shift}`}.csv`
+    const data = filteredLog
+    const fname = `AuditReport_${dateTag}${shift === 'all' ? '' : `_${shift}`}.csv`
     if (!data.length) return
     const esc = (v) => /[",\n]/.test(String(v ?? '')) ? `"${String(v).replace(/"/g, '""')}"` : String(v ?? '')
-    const csv = [cols.map(c => c[0]).join(','), ...data.map(r => cols.map(c => esc(c[1](r))).join(','))].join('\n')
+    const csv = [logCols.map(c => c[0]).join(','), ...data.map(r => logCols.map(c => esc(c[1](r))).join(','))].join('\n')
     const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' })
     const a = document.createElement('a')
     a.href = URL.createObjectURL(blob)
@@ -230,10 +168,8 @@ export default function AuditReport() {
   }
 
   async function exportPdf() {
-    const isBranches = tab === 'branches'
-    const data = isBranches ? filteredBranchBreakdown : filteredLog
-    const cols = isBranches ? branchCols : logCols
-    const fname = `AuditReport_${isBranches ? 'PerBranch' : 'Log'}_${dateTag}${shift === 'all' ? '' : `_${shift}`}.pdf`
+    const data = filteredLog
+    const fname = `AuditReport_${dateTag}${shift === 'all' ? '' : `_${shift}`}.pdf`
     if (!data.length) return
     // Dynamic imports — jspdf is heavy and only needed on click.
     const { jsPDF } = await import('jspdf')
@@ -241,13 +177,13 @@ export default function AuditReport() {
     const autoTable = autoTableMod.default || autoTableMod
     const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' })
     doc.setFontSize(13)
-    doc.text(`Audit Report — ${isBranches ? 'Per-Branch Breakdown' : 'Audit Log'}`, 40, 32)
+    doc.text('Audit Report', 40, 32)
     doc.setFontSize(9)
-    doc.text(`Reporting window: ${windowLabelShort}`, 40, 48)
+    doc.text(`Reporting window: ${windowLabelShort} (night N + morning N+1)`, 40, 48)
     autoTable(doc, {
       startY: 60,
-      head: [cols.map(c => c[0])],
-      body: data.map(r => cols.map(c => String(c[1](r) ?? ''))),
+      head: [logCols.map(c => c[0])],
+      body: data.map(r => logCols.map(c => String(c[1](r) ?? ''))),
       styles: { fontSize: 7, cellPadding: 3 },
       headStyles: { fillColor: [201, 168, 76], textColor: [26, 10, 0], fontStyle: 'bold' },
       alternateRowStyles: { fillColor: [248, 244, 235] },
@@ -280,7 +216,7 @@ export default function AuditReport() {
         <div>
           <div style={s.title}>Audit Report</div>
           <div style={{ ...s.sub, marginTop: '2px' }}>
-            Historical view of every audit action. Filter by date window, see per-auditor and per-branch breakdowns.
+            Case-wise audit log. Each date covers one full shift pair: night-N (19:30 IST) → morning-N+1 (19:30 IST handover).
           </div>
         </div>
         <button onClick={() => fetchData(from, to)} style={s.btnOut}>⟳ Refresh</button>
@@ -335,9 +271,9 @@ export default function AuditReport() {
           </div>
         </div>
 
-        {/* Shift filter chips — narrow both Audit Log + Per-Branch breakdown
-            to audits captured in that shift's IST window. Times mirror the
-            roster: Night 19:30–24:00, Morning 08:30–19:30. */}
+        {/* Shift filter chips — narrow the log to audits captured in that
+            half of the pair. Times mirror the roster: Night 19:30–24:00 IST
+            (date N), Morning 08:30–19:30 IST (date N+1). */}
         <div style={{
           padding: isMobile ? '0 14px 12px' : '0 18px 14px',
           display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap',
@@ -382,225 +318,117 @@ export default function AuditReport() {
         <div style={{ padding: '80px', textAlign: 'center' }}><GoldSpinner /></div>
       ) : (
         <>
-          {/* Tab strip + download buttons */}
+          {/* Search + download buttons */}
           <div style={{
             display: 'flex', alignItems: 'center', justifyContent: 'space-between',
             gap: '10px', flexWrap: 'wrap',
             padding: '0 2px',
           }}>
-            <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-              {[
-                { id: 'branches', label: 'Per-Branch Breakdown', icon: '🏬' },
-                { id: 'log',      label: 'Audit Log',            icon: '📜' },
-              ].map(item => {
-                const active = tab === item.id
-                return (
-                  <button key={item.id} onClick={() => setTab(item.id)}
-                    style={{
-                      background: active ? `${t.gold}18` : 'transparent',
-                      color:      active ? t.gold       : t.text2,
-                      border:     `1px solid ${active ? `${t.gold}60` : t.border}`,
-                      borderRadius: '11px',
-                      padding:    '9px 16px',
-                      fontSize:   '12px',
-                      fontWeight: active ? 700 : 500,
-                      cursor:     'pointer',
-                      letterSpacing: '.02em',
-                      display:    'inline-flex', alignItems: 'center', gap: '7px',
-                      transition: 'all .15s ease',
-                      boxShadow:  active ? `0 0 0 3px ${t.gold}10` : 'none',
-                    }}>
-                    <span style={{ fontSize: '13px', lineHeight: 1 }}>{item.icon}</span>
-                    {item.label}
-                  </button>
-                )
-              })}
-            </div>
+            <input
+              style={{ ...s.input, flex: 1, minWidth: '220px', fontFamily: 'inherit' }}
+              placeholder="Filter by app ID, customer, branch, auditor…"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+            />
             <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
-              <button onClick={exportCsv} disabled={tab === 'branches' ? !branchBreakdown.length : !filteredLog.length}
-                style={{ ...s.btnOut, color: (tab === 'branches' ? filteredBranchBreakdown.length : filteredLog.length) ? t.gold : t.text4, borderColor: (tab === 'branches' ? filteredBranchBreakdown.length : filteredLog.length) ? `${t.gold}50` : t.border, padding: '7px 13px' }}>
+              <button onClick={exportCsv} disabled={!filteredLog.length}
+                style={{ ...s.btnOut, color: filteredLog.length ? t.gold : t.text4, borderColor: filteredLog.length ? `${t.gold}50` : t.border, padding: '7px 13px' }}>
                 ↓ CSV
               </button>
-              <button onClick={exportPdf} disabled={tab === 'branches' ? !branchBreakdown.length : !filteredLog.length}
-                style={{ ...s.btnOut, color: (tab === 'branches' ? filteredBranchBreakdown.length : filteredLog.length) ? t.red : t.text4, borderColor: (tab === 'branches' ? filteredBranchBreakdown.length : filteredLog.length) ? `${(t.red || '#c03030')}55` : t.border, padding: '7px 13px' }}>
+              <button onClick={exportPdf} disabled={!filteredLog.length}
+                style={{ ...s.btnOut, color: filteredLog.length ? t.red : t.text4, borderColor: filteredLog.length ? `${(t.red || '#c03030')}55` : t.border, padding: '7px 13px' }}>
                 ↓ PDF
               </button>
             </div>
           </div>
 
-          {tab === 'branches' && (
-            <Section t={t} s={s} accent={t.gold} badge="BRANCHES" title="Per-Branch Breakdown" subtitle="In-transit is a live snapshot; everything else scopes to the window. Sorted by discrepancy count, then audited count.">
-              {filteredBranchBreakdown.length === 0 ? (
-                <Empty t={t} text="No branch activity in this window." />
-              ) : (
-                <div style={{ overflowX: 'auto' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                    <thead>
-                      <tr style={{ background: t.card2 || t.card }}>
-                        <th style={s.th}>Branch</th>
-                        <th style={{ ...s.th, textAlign: 'right' }}>In transit</th>
-                        <th style={{ ...s.th, textAlign: 'right' }}>Received</th>
-                        <th style={{ ...s.th, textAlign: 'right' }}>Audited</th>
-                        <th style={{ ...s.th, textAlign: 'right' }}>Discrepancies</th>
-                        <th style={{ ...s.th, textAlign: 'right' }}>Σ |Δ| g</th>
-                        <th style={{ ...s.th, textAlign: 'right' }}>Total expected</th>
-                        <th style={{ ...s.th, textAlign: 'right' }}>Total received+audited</th>
-                        <th style={s.th}>Auditors</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filteredBranchBreakdown.map(b => {
-                        // Tighter row format: combine count + weight into one
-                        // inline cell ("4 · 35.310g") so rows shrink to a
-                        // single line and the eye can scan a full screen
-                        // worth of branches at once.
-                        const tdCompact = { ...s.td, padding: '8px 14px', textAlign: 'right', fontFamily: 'monospace' }
-                        // Magnitude bar in the Σ|Δ| column — width relative
-                        // to the worst branch in the window. Makes the
-                        // outlier branch obvious without reading numbers.
-                        const discG = Number(b.sum_abs_discrepancy_g || 0)
-                        const barPct = maxAbsDiscG > 0 ? (discG / maxAbsDiscG) * 100 : 0
-                        return (
-                          <tr key={b.branch}>
-                            <td style={{ ...s.td, padding: '8px 14px', color: t.text1, fontWeight: 600 }}>{b.branch}</td>
-                            <td style={tdCompact}>
-                              <CountWt t={t} count={b.in_transit_count} weight_g={b.in_transit_weight_g} color={t.text2} />
-                            </td>
-                            <td style={tdCompact}>
-                              <CountWt t={t} count={b.received_count} weight_g={b.received_weight_g} color={t.green} />
-                            </td>
-                            <td style={{ ...tdCompact, color: t.gold, fontWeight: 700 }}>
-                              {b.audited_count > 0 ? b.audited_count : <span style={{ color: t.text4, fontWeight: 400 }}>—</span>}
-                            </td>
-                            <td style={{ ...tdCompact, color: b.discrepancy_count > 0 ? t.red : t.text4, fontWeight: 700 }}>
-                              {b.discrepancy_count > 0 ? b.discrepancy_count : <span style={{ color: t.text4, fontWeight: 400 }}>—</span>}
-                            </td>
-                            <td style={{ ...tdCompact, color: discG > 0 ? t.purple : t.text4 }}>
-                              {discG > 0 ? (
-                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '8px' }}>
-                                  <div style={{
-                                    flex: '0 0 60px',
-                                    height: '4px',
-                                    background: `${t.purple}18`,
-                                    borderRadius: '2px',
-                                    overflow: 'hidden',
-                                    position: 'relative',
-                                  }}>
-                                    <div style={{
-                                      position: 'absolute', left: 0, top: 0, bottom: 0,
-                                      width: `${barPct}%`,
-                                      background: t.purple,
-                                      opacity: .75,
-                                    }} />
-                                  </div>
-                                  <span>{fmtWt(discG)}</span>
-                                </div>
-                              ) : '—'}
-                            </td>
-                            <td style={{ ...tdCompact, color: t.text2 }}>{fmtWt(b.total_expected_g)}</td>
-                            <td style={{ ...tdCompact, color: t.text2 }}>{fmtWt(b.total_received_audited_g)}</td>
-                            <td style={{ ...s.td, padding: '8px 14px' }}>
-                              <AuditorChips t={t} auditors={b.auditors || []} />
-                            </td>
-                          </tr>
-                        )
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </Section>
-          )}
-
-          {tab === 'log' && (
-            <Section t={t} s={s} accent={t.purple} badge="LOG" title="Audit Log" subtitle={`${filteredLog.length} row${filteredLog.length === 1 ? '' : 's'} · most recent first · re-audit columns populated when a bill was audited more than once`}>
-              <div style={{ padding: '10px 14px', borderBottom: `1px solid ${t.border}`, display: 'flex', gap: '10px', alignItems: 'center' }}>
-                <input
-                  style={{ ...s.input, flex: 1, fontFamily: 'inherit' }}
-                  placeholder="Filter by app ID, customer, branch, auditor…"
-                  value={search}
-                  onChange={e => setSearch(e.target.value)}
-                />
+          {/* Case-wise audit log — one row per audited bill in the
+              window. Discrepancy colour: green when audit > CRM (we
+              found more gold), red when audit < CRM (short), em-dash
+              when equal. Collection-only rows (no weight captured)
+              auto-fill the Remark column. */}
+          <div style={{ ...s.card, position: 'relative' }}>
+            <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '3px', background: `linear-gradient(90deg, ${t.gold} 0%, ${t.gold}30 60%, transparent 100%)` }} />
+            <div style={{ padding: '14px 18px', borderBottom: `1px solid ${t.border}` }}>
+              <div style={{ fontSize: '13px', color: t.text1, fontWeight: 600 }}>
+                Audit Log <span style={{ color: t.text4, fontWeight: 400, marginLeft: '6px' }}>· {filteredLog.length} row{filteredLog.length === 1 ? '' : 's'}</span>
               </div>
-              {filteredLog.length === 0 ? (
-                <Empty t={t} text="No audits in this window." />
-              ) : (
-                <div style={{ overflowX: 'auto' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                    <thead>
-                      <tr style={{ background: t.card2 || t.card }}>
-                        <th style={s.th}>Audit Date</th>
-                        <th style={s.th}>Shift</th>
-                        <th style={s.th}>Customer</th>
-                        <th style={s.th}>Branch</th>
-                        <th style={{ ...s.th, textAlign: 'right' }}>CRM Weight</th>
-                        <th style={{ ...s.th, textAlign: 'right' }}>Audit Weight</th>
-                        <th style={{ ...s.th, textAlign: 'right' }}>Δ</th>
-                        <th style={{ ...s.th, textAlign: 'right' }}>Re-audit Weight</th>
-                        <th style={{ ...s.th, textAlign: 'right' }}>Re-audit Δ</th>
-                        <th style={s.th}>Auditor</th>
-                        <th style={s.th}>Remark</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filteredLog.map(r => {
-                        const firstW = r.first_audit?.audit_gross_weight ?? r.audit_gross_weight
-                        const firstD = Number(r.first_audit?.discrepancy_g ?? r.audit_discrepancy_g ?? 0)
-                        const hasReaudit = !!r.reaudit
-                        const reD = Number(r.reaudit?.discrepancy_g || 0)
-                        const auditor = r.reaudit?.audited_by_email || r.audited_by_email || '—'
-                        const remark  = r.reaudit?.remark || r.audit_remark || ''
-                        const shiftColor = r._shift === 'night' ? t.gold : r._shift === 'morning' ? t.orange : t.text4
-                        return (
-                          <tr key={r.id}>
-                            <td style={{ ...s.td, fontFamily: 'monospace', color: t.text3, fontSize: '11px' }}>{fmtTS(r.audited_at)}</td>
-                            <td style={s.td}>
-                              <span style={{
-                                fontSize: '9.5px', color: shiftColor,
-                                background: `${shiftColor}18`,
-                                border: `1px solid ${shiftColor}45`,
-                                borderRadius: '5px',
-                                padding: '2px 7px',
-                                fontWeight: 700, letterSpacing: '.06em',
-                                textTransform: 'uppercase',
-                              }}>{SHIFT_LABEL[r._shift] || '—'}</span>
-                            </td>
-                            <td style={s.td}>{r.customer_name || '—'}</td>
-                            <td style={s.td}>{r.branch_name}</td>
-                            <td style={{ ...s.td, textAlign: 'right', fontFamily: 'monospace', color: t.gold }}>{fmtWt(r.gross_weight)}</td>
-                            <td style={{ ...s.td, textAlign: 'right', fontFamily: 'monospace' }}>{fmtWt(firstW)}</td>
-                            <td style={{ ...s.td, textAlign: 'right', fontFamily: 'monospace', color: firstD !== 0 ? t.red : t.green, fontWeight: 700 }}>{fmtSignedWt(firstD)}</td>
-                            <td style={{ ...s.td, textAlign: 'right', fontFamily: 'monospace', color: hasReaudit ? t.text1 : t.text4 }}>{hasReaudit ? fmtWt(r.reaudit.audit_gross_weight) : '—'}</td>
-                            <td style={{ ...s.td, textAlign: 'right', fontFamily: 'monospace', color: hasReaudit ? (reD !== 0 ? t.red : t.green) : t.text4, fontWeight: hasReaudit ? 700 : 400 }}>{hasReaudit ? fmtSignedWt(reD) : '—'}</td>
-                            <td style={{ ...s.td, fontSize: '11px', color: t.text3 }}>{auditor}</td>
-                            <td style={{ ...s.td, fontSize: '11px', color: t.text3, whiteSpace: 'normal', maxWidth: '260px' }}>{remark || '—'}</td>
-                          </tr>
-                        )
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </Section>
-          )}
+              <div style={{ fontSize: '10px', color: t.text4, marginTop: '2px' }}>
+                Each row = one bill. Window covers night-N + morning-N+1 (19:30 IST handover). Discrepancy green = audit weight higher than CRM, red = lower.
+              </div>
+            </div>
+            {filteredLog.length === 0 ? (
+              <Empty t={t} text="No audits in this window." />
+            ) : (
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr style={{ background: t.card2 || t.card }}>
+                      <th style={s.th}>Consignment Created</th>
+                      <th style={s.th}>Customer</th>
+                      <th style={s.th}>Branch</th>
+                      <th style={{ ...s.th, textAlign: 'right' }}>CRM Gross</th>
+                      <th style={{ ...s.th, textAlign: 'right' }}>Audit Weight</th>
+                      <th style={{ ...s.th, textAlign: 'right' }}>Discrepancy</th>
+                      <th style={{ ...s.th, textAlign: 'right' }}>Re-audit Weight</th>
+                      <th style={{ ...s.th, textAlign: 'right' }}>Re-audit Δ</th>
+                      <th style={s.th}>Auditor</th>
+                      <th style={s.th}>Remark</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredLog.map(r => {
+                      const collectionOnly = isCollectionOnly(r)
+                      const firstW = r.first_audit?.audit_gross_weight ?? r.audit_gross_weight
+                      const firstD = Number(r.first_audit?.discrepancy_g ?? r.audit_discrepancy_g ?? 0)
+                      const hasReaudit = !!r.reaudit
+                      const reW = hasReaudit ? r.reaudit.audit_gross_weight : null
+                      const reD = Number(r.reaudit?.discrepancy_g || 0)
+                      const auditor = r.reaudit?.audited_by_name || r.audited_by_name || '—'
+                      const remark  = effectiveRemark(r)
+                      // Δ colour: green when audit > CRM (positive), red
+                      // when audit < CRM (negative), neutral when 0.
+                      const discColor   = firstD > 0 ? t.green : firstD < 0 ? t.red : t.text4
+                      const reDiscColor = reD > 0 ? t.green : reD < 0 ? t.red : t.text4
+                      return (
+                        <tr key={r.id}>
+                          <td style={{ ...s.td, padding: '9px 14px', fontFamily: 'monospace', color: t.text2, fontSize: '11.5px' }}>
+                            {fmtDate(r.consignment_created_at)}
+                          </td>
+                          <td style={{ ...s.td, padding: '9px 14px' }}>{r.customer_name || '—'}</td>
+                          <td style={{ ...s.td, padding: '9px 14px', color: t.text2 }}>{r.branch_name || '—'}</td>
+                          <td style={{ ...s.td, padding: '9px 14px', textAlign: 'right', fontFamily: 'monospace', color: t.gold }}>
+                            {fmtWt(r.gross_weight)}
+                          </td>
+                          <td style={{ ...s.td, padding: '9px 14px', textAlign: 'right', fontFamily: 'monospace', color: collectionOnly ? t.text4 : t.text1 }}>
+                            {collectionOnly ? '—' : fmtWt(firstW)}
+                          </td>
+                          <td style={{ ...s.td, padding: '9px 14px', textAlign: 'right', fontFamily: 'monospace', color: discColor, fontWeight: firstD !== 0 ? 700 : 400 }}>
+                            {collectionOnly || firstD === 0 ? '—' : fmtSignedWt(firstD)}
+                          </td>
+                          <td style={{ ...s.td, padding: '9px 14px', textAlign: 'right', fontFamily: 'monospace', color: hasReaudit ? t.text1 : t.text4 }}>
+                            {hasReaudit && reW != null && Number(reW) !== 0 ? fmtWt(reW) : '—'}
+                          </td>
+                          <td style={{ ...s.td, padding: '9px 14px', textAlign: 'right', fontFamily: 'monospace', color: reDiscColor, fontWeight: hasReaudit && reD !== 0 ? 700 : 400 }}>
+                            {hasReaudit && reD !== 0 ? fmtSignedWt(reD) : '—'}
+                          </td>
+                          <td style={{ ...s.td, padding: '9px 14px', fontSize: '11.5px', color: t.text2 }}>{auditor}</td>
+                          <td style={{
+                            ...s.td, padding: '9px 14px', fontSize: '11px',
+                            color: collectionOnly ? t.orange : t.text3,
+                            fontStyle: collectionOnly ? 'italic' : 'normal',
+                            whiteSpace: 'normal', maxWidth: '260px',
+                          }}>{remark || '—'}</td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
         </>
       )}
-    </div>
-  )
-}
-
-function Section({ t, s, accent, badge, title, subtitle, children }) {
-  return (
-    <div style={{ ...s.card, position: 'relative' }}>
-      <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '3px', background: `linear-gradient(90deg, ${accent} 0%, ${accent}30 60%, transparent 100%)` }} />
-      <div style={{ padding: '14px 18px', borderBottom: `1px solid ${t.border}`, display: 'flex', alignItems: 'center', gap: '12px' }}>
-        <span style={s.badge(accent)}>{badge}</span>
-        <div>
-          <div style={{ fontSize: '13px', color: t.text1, fontWeight: 600 }}>{title}</div>
-          <div style={{ fontSize: '10px', color: t.text4, marginTop: '2px' }}>{subtitle}</div>
-        </div>
-      </div>
-      {children}
     </div>
   )
 }
@@ -610,65 +438,6 @@ function Empty({ t, text }) {
     <div style={{ padding: '48px 20px', textAlign: 'center', fontSize: '12px', color: t.text4 }}>
       {text}
     </div>
-  )
-}
-
-// Compact "count · weight" cell. Renders a single dim em-dash for zero so
-// empty cells (e.g. an In-transit row with nothing in flight) stop competing
-// with cells that actually carry data.
-function CountWt({ t, count, weight_g, color }) {
-  const n = Number(count || 0)
-  const w = Number(weight_g || 0)
-  if (n === 0 && w === 0) return <span style={{ color: t.text4 }}>—</span>
-  return (
-    <span>
-      <span style={{ color, fontWeight: 700 }}>{n}</span>
-      <span style={{ color: t.text4, marginLeft: '5px' }}>·</span>
-      <span style={{ color: t.text4, marginLeft: '5px', fontSize: '11px' }}>
-        {w.toFixed(3)}g
-      </span>
-    </span>
-  )
-}
-
-// Auditor cell — one initials chip per distinct auditor when ≤2, collapsing
-// to "first · +N" past that. Far less noisy than a wrapped email list when
-// the same person audits every branch in the window.
-function AuditorChips({ t, auditors }) {
-  if (!auditors.length) return <span style={{ color: t.text4 }}>—</span>
-  const initials = (email) => {
-    const name = (email || '').split('@')[0].replace(/[._-]+/g, ' ').trim()
-    if (!name) return '?'
-    const parts = name.split(/\s+/)
-    return (parts[0][0] + (parts[1]?.[0] || '')).toUpperCase()
-  }
-  const chip = (email, i) => (
-    <span key={email + i}
-      title={email}
-      style={{
-        fontSize: '9.5px',
-        color: t.gold,
-        background: `${t.gold}18`,
-        border: `1px solid ${t.gold}40`,
-        borderRadius: '8px',
-        padding: '2px 7px',
-        fontWeight: 700,
-        letterSpacing: '.04em',
-        fontFamily: 'monospace',
-      }}>{initials(email)}</span>
-  )
-  if (auditors.length <= 2) {
-    return (
-      <span style={{ display: 'inline-flex', gap: '4px', alignItems: 'center' }}>
-        {auditors.map(chip)}
-      </span>
-    )
-  }
-  return (
-    <span style={{ display: 'inline-flex', gap: '4px', alignItems: 'center' }} title={auditors.join('\n')}>
-      {chip(auditors[0], 0)}
-      <span style={{ fontSize: '10px', color: t.text4 }}>+{auditors.length - 1}</span>
-    </span>
   )
 }
 
