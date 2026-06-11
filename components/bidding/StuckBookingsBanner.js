@@ -52,7 +52,14 @@ export default function StuckBookingsBanner() {
   const fetchSummary = useCallback(async () => {
     try {
       lastFetchRef.current = Date.now()
-      const r = await authedFetch('/api/consignments?action=bidding_stuck_summary')
+      // Action handler lives in POST; sending GET hit the 'Invalid action'
+      // fallthrough in the GET dispatcher and the banner data silently never
+      // updated (errors swallowed by the catch below). Switching to POST.
+      const r = await authedFetch('/api/consignments', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ action: 'bidding_stuck_summary' }),
+      })
       if (!r.ok) return
       const j = await r.json().catch(() => null)
       if (j?.data) setSummary(j.data)

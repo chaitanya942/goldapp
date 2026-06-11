@@ -224,7 +224,14 @@ export default function CollectionAudit() {
       }
       if (!res.ok || j?.error) {
         const detail = j?.error || rawText?.slice(0, 120) || `HTTP ${res.status}`
-        console.error('[CollectionAudit] fetchAll failed:', { status: res.status, body: j ?? rawText })
+        // Stringify the body inline so the actual cause is visible without
+        // clicking the collapsed Object — Supabase column-missing errors
+        // and similar carry the diagnostic in the body's message field.
+        try {
+          console.error('[CollectionAudit] fetchAll failed:', `status=${res.status}`, 'body=', JSON.stringify(j ?? rawText))
+        } catch {
+          console.error('[CollectionAudit] fetchAll failed:', { status: res.status, body: j ?? rawText })
+        }
         setToast({ msg: `Failed to load audit queue — ${detail}`, type: 'error', key: Date.now() })
         setLoading(false)
         return

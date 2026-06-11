@@ -61,7 +61,15 @@ export default function AtRiskBookingsBanner() {
 
   const fetchSummary = useCallback(async () => {
     try {
-      const r = await authedFetch('/api/consignments?action=bidding_at_risk_summary')
+      // Action handler lives in POST; the GET dispatcher's cron-token
+      // allowlist only matches on the cron worker, so user sessions were
+      // silently hitting 'Invalid action'. Switching to POST so the banner
+      // actually populates.
+      const r = await authedFetch('/api/consignments', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ action: 'bidding_at_risk_summary' }),
+      })
       if (!r.ok) return
       const j = await r.json().catch(() => null)
       if (j?.data) setSummary(j.data)
