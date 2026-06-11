@@ -361,19 +361,17 @@ export default function AuditRoster() {
           isMobile={isMobile}
           bodyRenderer={(props) => {
             const isNight = props.section.id === 'night'
-            // Cross-shift lock: an auditor already in the other shift would
-            // trip the DB's back-to-back trigger (night N ↔ morning N+1).
-            // Disable the checkbox here too so ops gets immediate feedback
-            // instead of a round-trip error.
-            const otherIds = new Set(
-              (isNight ? morningAssigns : nightAssigns).map(a => a.auditor_id)
-            )
+            // Back-to-back rule removed per ops: the same auditor can now
+            // run night N AND morning N+1. We still pass conflictingAuditorIds
+            // as an empty set so ShiftBody's lock-detection code path stays
+            // intact (in case the rule is re-introduced later); callers just
+            // never trip the lock today.
             return (
               <ShiftBody
                 {...props}
                 shiftDate={isNight ? nightDate : morningDate}
                 assignments={isNight ? nightAssigns : morningAssigns}
-                conflictingAuditorIds={otherIds}
+                conflictingAuditorIds={new Set()}
                 auditors={auditors}
                 busy={shiftBusy}
                 onSave={(diff) => saveShift(props.section.id, diff)}
