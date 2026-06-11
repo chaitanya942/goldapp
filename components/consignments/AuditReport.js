@@ -73,6 +73,32 @@ export default function AuditReport() {
   const toggleSort = (key) => setSort(s =>
     s.key === key ? { key, dir: s.dir === 'desc' ? 'asc' : 'desc' } : { key, dir: 'desc' }
   )
+  // ── Discrepancy case state ────────────────────────────────────────────
+  // casesByPurchase: Map<purchase_id, { status, reason }> for every case
+  //   ops has open or has resolved. Drives the per-row pill.
+  // selected: Set<purchase_id> for rows the auditor has ticked but not yet
+  //   sent. Cleared after a successful POST.
+  // sending: in-flight flag for the floating "Send to Ops" button so we
+  //   don't fire two requests on a double-click.
+  const [casesByPurchase, setCasesByPurchase] = useState(new Map())
+  const [selected,        setSelected]        = useState(new Set())
+  const [sending,         setSending]         = useState(false)
+
+  const fetchCases = useCallback(async () => {
+    const res = await authedFetch('/api/discrepancy-cases?status=all')
+    const j   = await res.json().catch(() => ({}))
+    if (!res.ok) return
+    const m = new Map()
+    for (const c of (j.cases || [])) {
+      // If multiple cases exist for the same bill (one resolved + one
+      // pending after re-queue), the pending one wins because the unique
+      // index guarantees at most one is pending.
+      const prev = m.get(c.purchase_id)
+      if (!prev || c.status === 'pending') m.set(c.purchase_id, { status: c.status, reason: c.reason })
+    }
+    setCasesByPurchase(m)
+  }, [])
+  useEffect(() => { fetchCases() }, [fetchCases])
 
   const fetchData = useCallback(async (f, tt) => {
     setLoading(true)
@@ -153,6 +179,33 @@ export default function AuditReport() {
   const isCollectionOnly = (r) => {
     const w = r.first_audit?.audit_gross_weight ?? r.audit_gross_weight
     return r.audited_at && (w == null || Number(w) === 0)
+  }
+  // Eligible to queue: real discrepancy, not collection-only, no existing
+  // pending case (the unique partial index would reject it anyway, but
+  // hiding the checkbox is friendlier than a silent skip).
+  const hasDiscrepancy = (r) => {
+    const d = Number(r.first_audit?.discrepancy_g ?? r.audit_discrepancy_g ?? 0)
+    return d !== 0
+  }
+  const caseFor = (r) => casesByPurchase.get(r.id) || null
+  const isEligible = (r) => hasDiscrepancy(r) && !isCollectionOnly(r) && !(caseFor(r)?.status === 'pending')
+
+  async function sendSelectedToOps() {
+    if (selected.size === 0 || sending) return
+    setSending(true)
+    const res = await authedFetch('/api/discrepancy-cases', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ purchase_ids: [...selected] }),
+    })
+    const j = await res.json().catch(() => ({}))
+    setSending(false)
+    if (!res.ok) {
+      alert(j.error || 'Failed to send cases')
+      return
+    }
+    setSelected(new Set())
+    fetchCases()
   }
   const effectiveRemark = (r) => {
     const stated = r.reaudit?.remark || r.audit_remark || ''
@@ -349,6 +402,55 @@ export default function AuditReport() {
         </div>
       </div>
 
+      {/* Floating action bar — appears when ≥1 row is ticked. Sits low
+          on screen so it's reachable from a tall table without scrolling
+          back to a header button. */}
+      {selected.size > 0 && (
+        <div style={{
+          position: 'fixed',
+          left: '50%',
+          bottom: isMobile ? '14px' : '22px',
+          transform: 'translateX(-50%)',
+          background: t.card,
+          border: `1px solid ${t.gold}`,
+          borderRadius: '12px',
+          boxShadow: `0 12px 32px -6px ${t.border}, 0 4px 12px -2px ${t.border}60`,
+          padding: '10px 14px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '14px',
+          zIndex: 50,
+          maxWidth: 'calc(100vw - 28px)',
+        }}>
+          <span style={{ fontSize: '12px', color: t.text2 }}>
+            <strong style={{ color: t.text1, fontFamily: 'monospace' }}>{selected.size}</strong>
+            {' '}case{selected.size === 1 ? '' : 's'} selected
+          </span>
+          <button
+            onClick={() => setSelected(new Set())}
+            style={{
+              background: 'transparent', border: `1px solid ${t.border}`,
+              borderRadius: '7px', padding: '6px 10px', fontSize: '11px',
+              color: t.text3, cursor: 'pointer',
+            }}
+          >Clear</button>
+          <button
+            onClick={sendSelectedToOps}
+            disabled={sending}
+            style={{
+              background: t.gold, color: '#1a0a00',
+              border: 'none', borderRadius: '7px',
+              padding: '8px 16px', fontSize: '12px', fontWeight: 700,
+              cursor: sending ? 'wait' : 'pointer',
+              opacity: sending ? 0.7 : 1,
+              letterSpacing: '.02em',
+            }}
+          >
+            {sending ? 'Sending…' : `Send ${selected.size} to Ops →`}
+          </button>
+        </div>
+      )}
+
       {loading ? (
         <div style={{ padding: '80px', textAlign: 'center' }}><GoldSpinner /></div>
       ) : (
@@ -399,6 +501,26 @@ export default function AuditReport() {
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <thead>
                     <tr style={{ background: t.card2 || t.card }}>
+                      <th style={{ ...s.th, width: '32px', padding: '11px 8px 11px 14px' }}>
+                        <input
+                          type="checkbox"
+                          aria-label="Select all eligible rows"
+                          checked={(() => {
+                            const elig = sortedLog.filter(isEligible)
+                            return elig.length > 0 && elig.every(r => selected.has(r.id))
+                          })()}
+                          onChange={(e) => {
+                            const elig = sortedLog.filter(isEligible).map(r => r.id)
+                            setSelected(prev => {
+                              const next = new Set(prev)
+                              if (e.target.checked) elig.forEach(id => next.add(id))
+                              else                  elig.forEach(id => next.delete(id))
+                              return next
+                            })
+                          }}
+                          style={{ cursor: 'pointer' }}
+                        />
+                      </th>
                       <SortTh s={s} sortKey="consignment_created_at" label="Consignment Created" sort={sort} onSort={toggleSort} />
                       <SortTh s={s} sortKey="audited_at"             label="Audited Date"        sort={sort} onSort={toggleSort} />
                       <SortTh s={s} sortKey="_shift"                 label="Shift"               sort={sort} onSort={toggleSort} />
@@ -432,8 +554,39 @@ export default function AuditReport() {
                       const shiftColor = r._shift === 'night'   ? t.gold
                                        : r._shift === 'morning' ? (t.orange || '#e9a942')
                                        : t.text4
+                      const existingCase = caseFor(r)
+                      const eligible     = isEligible(r)
+                      const ticked       = selected.has(r.id)
                       return (
                         <tr key={r.id}>
+                          <td style={{ ...s.td, padding: '9px 8px 9px 14px', width: '32px' }}>
+                            {existingCase ? (
+                              <span style={{
+                                fontSize: '9px',
+                                color: existingCase.status === 'pending' ? (t.orange || '#e9a942') : t.green,
+                                background: `${existingCase.status === 'pending' ? (t.orange || '#e9a942') : t.green}18`,
+                                border: `1px solid ${existingCase.status === 'pending' ? (t.orange || '#e9a942') : t.green}45`,
+                                borderRadius: '5px',
+                                padding: '2px 6px',
+                                fontWeight: 700, letterSpacing: '.06em',
+                                textTransform: 'uppercase',
+                              }} title={existingCase.reason || (existingCase.status === 'pending' ? 'Sent to ops — awaiting reasoning' : 'Resolved')}>
+                                {existingCase.status === 'pending' ? 'Sent' : 'Resolved'}
+                              </span>
+                            ) : eligible ? (
+                              <input
+                                type="checkbox"
+                                checked={ticked}
+                                onChange={() => setSelected(prev => {
+                                  const next = new Set(prev)
+                                  if (next.has(r.id)) next.delete(r.id); else next.add(r.id)
+                                  return next
+                                })}
+                                style={{ cursor: 'pointer' }}
+                                title="Select to send to ops"
+                              />
+                            ) : null}
+                          </td>
                           <td style={{ ...s.td, padding: '9px 14px', fontFamily: 'monospace', color: t.text2, fontSize: '11.5px' }}>
                             {fmtDate(r.consignment_created_at)}
                           </td>
