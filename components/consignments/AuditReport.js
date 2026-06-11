@@ -172,6 +172,56 @@ export default function AuditReport() {
     return arr
   }, [filteredLog, sort])
 
+  // ── Totals row ──────────────────────────────────────────────────────────
+  // Computed across the SORTED (= visible) log so the totals always match
+  // what's on screen. Counts and sums are split by direction so a single
+  // gross-weight figure doesn't mask a +shortfall scenario.
+  const totals = useMemo(() => {
+    const t0 = {
+      bills: 0,
+      crmG: 0,
+      auditG: 0,
+      auditedBills: 0,           // bills with an actual weight audit
+      posDeltaG: 0,
+      negDeltaG: 0,              // stored as absolute value
+      zeroDeltaBills: 0,
+      posDeltaBills: 0,
+      negDeltaBills: 0,
+      reauditG: 0,
+      reauditBills: 0,
+      reauditPosG: 0,
+      reauditNegG: 0,
+      opsResolvedBills: 0,
+      opsPendingBills: 0,
+    }
+    for (const r of sortedLog) {
+      t0.bills += 1
+      t0.crmG += Number(r.gross_weight || 0)
+      const w = r.first_audit?.audit_gross_weight ?? r.audit_gross_weight
+      const collectionOnly = (r.audited_at && (w == null || Number(w) === 0))
+      if (!collectionOnly && w != null) {
+        t0.auditG += Number(w || 0)
+        t0.auditedBills += 1
+        const d = Number(r.first_audit?.discrepancy_g ?? r.audit_discrepancy_g ?? 0)
+        if (d > 0)      { t0.posDeltaG += d; t0.posDeltaBills += 1 }
+        else if (d < 0) { t0.negDeltaG += Math.abs(d); t0.negDeltaBills += 1 }
+        else            { t0.zeroDeltaBills += 1 }
+      }
+      if (r.reaudit) {
+        t0.reauditBills += 1
+        t0.reauditG += Number(r.reaudit.audit_gross_weight || 0)
+        const rd = Number(r.reaudit.discrepancy_g || 0)
+        if (rd > 0)      t0.reauditPosG += rd
+        else if (rd < 0) t0.reauditNegG += Math.abs(rd)
+      }
+      const c = casesByPurchase.get(r.id)
+      if      (c?.status === 'resolved') t0.opsResolvedBills += 1
+      else if (c?.status === 'pending')  t0.opsPendingBills  += 1
+    }
+    t0.netDeltaG = t0.posDeltaG - t0.negDeltaG
+    return t0
+  }, [sortedLog, casesByPurchase])
+
   // ── CSV / PDF download ──────────────────────────────────────────────────
   const dateTag = from === to ? from : `${from}_to_${to}`
   const windowLabelShort = from === to
@@ -262,12 +312,40 @@ export default function AuditReport() {
     }],
   ]
 
+  // Totals row for CSV / PDF / on-screen footer. Each entry maps a
+  // logCols header to its summary text. Untouched columns get an em-dash.
+  function totalsRowFor(headerLabel) {
+    switch (headerLabel) {
+      case 'Consignment Created': return `TOTAL · ${totals.bills} bill${totals.bills === 1 ? '' : 's'}`
+      case 'Customer':            return totals.auditedBills > 0 ? `${totals.auditedBills} audited` : ''
+      case 'Branch':              return totals.opsResolvedBills || totals.opsPendingBills
+                                    ? `${totals.opsPendingBills} pending · ${totals.opsResolvedBills} resolved`
+                                    : ''
+      case 'CRM Gross (g)':       return fmtWt(totals.crmG)
+      case 'Audit Weight (g)':   return fmtWt(totals.auditG)
+      case 'Discrepancy (g)':
+        if (totals.posDeltaG === 0 && totals.negDeltaG === 0) return '—'
+        return `+${totals.posDeltaG.toFixed(3)}g / -${totals.negDeltaG.toFixed(3)}g`
+      case 'Re-audit Weight (g)': return totals.reauditBills ? fmtWt(totals.reauditG) : '—'
+      case 'Re-audit Δ (g)':
+        if (!totals.reauditBills) return '—'
+        if (totals.reauditPosG === 0 && totals.reauditNegG === 0) return '—'
+        return `+${totals.reauditPosG.toFixed(3)}g / -${totals.reauditNegG.toFixed(3)}g`
+      default: return ''
+    }
+  }
+
   function exportCsv() {
     const data = sortedLog
     const fname = `AuditReport_${dateTag}${shift === 'all' ? '' : `_${shift}`}.csv`
     if (!data.length) return
     const esc = (v) => /[",\n]/.test(String(v ?? '')) ? `"${String(v).replace(/"/g, '""')}"` : String(v ?? '')
-    const csv = [logCols.map(c => c[0]).join(','), ...data.map(r => logCols.map(c => esc(c[1](r))).join(','))].join('\n')
+    const totalsRow = logCols.map(c => esc(totalsRowFor(c[0])))
+    const csv = [
+      logCols.map(c => c[0]).join(','),
+      ...data.map(r => logCols.map(c => esc(c[1](r))).join(',')),
+      totalsRow.join(','),
+    ].join('\n')
     const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' })
     const a = document.createElement('a')
     a.href = URL.createObjectURL(blob)
@@ -288,15 +366,47 @@ export default function AuditReport() {
     doc.setFontSize(13)
     doc.text('Audit Report', 40, 32)
     doc.setFontSize(9)
-    doc.text(`Reporting window: ${windowLabelShort} (night N + morning N+1)`, 40, 48)
+    doc.text(`Reporting window: ${windowLabelShort}`, 40, 48)
+
+    // Shorter labels for the PDF — autoTable letter-spaces narrow columns
+    // when the header text wraps, which is what was producing the
+    // 'R e - a u d i t' artefact in earlier exports.
+    const pdfHeaderOverrides = {
+      'Consignment Created':  'Consign. Created',
+      'Audit Shift':          'Shift',
+      'CRM Gross (g)':        'CRM Gross',
+      'Audit Weight (g)':     'Audit Wt',
+      'Discrepancy (g)':      'Δ',
+      'Re-audit Weight (g)':  'Re-Wt',
+      'Re-audit Δ (g)':       'Re-Δ',
+    }
+    const pdfHead = logCols.map(c => pdfHeaderOverrides[c[0]] || c[0])
+    const body    = data.map(r => logCols.map(c => String(c[1](r) ?? '')))
+    const foot    = logCols.map(c => totalsRowFor(c[0]))
+
+    // Find the Δ columns by index so didParseCell can colour them.
+    const idxDiscrepancy = logCols.findIndex(c => c[0] === 'Discrepancy (g)')
+    const idxReDelta     = logCols.findIndex(c => c[0] === 'Re-audit Δ (g)')
+
     autoTable(doc, {
       startY: 60,
-      head: [logCols.map(c => c[0])],
-      body: data.map(r => logCols.map(c => String(c[1](r) ?? ''))),
+      head:   [pdfHead],
+      body,
+      foot:   [foot],
       styles: { fontSize: 7, cellPadding: 3 },
       headStyles: { fillColor: [201, 168, 76], textColor: [26, 10, 0], fontStyle: 'bold' },
+      footStyles: { fillColor: [240, 232, 210], textColor: [40, 25, 0], fontStyle: 'bold', fontSize: 7 },
       alternateRowStyles: { fillColor: [248, 244, 235] },
       margin: { left: 24, right: 24 },
+      // Colour the Δ columns based on their text content (+ = green,
+      // - = red) so the meaning carries from screen to PDF.
+      didParseCell: (data) => {
+        if (data.section !== 'body') return
+        if (data.column.index !== idxDiscrepancy && data.column.index !== idxReDelta) return
+        const txt = String(data.cell.raw || '')
+        if (txt.startsWith('+'))      data.cell.styles.textColor = [40, 130, 70]
+        else if (txt.startsWith('-')) data.cell.styles.textColor = [180, 50, 50]
+      },
     })
     doc.save(fname)
   }
@@ -325,7 +435,7 @@ export default function AuditReport() {
         <div>
           <div style={s.title}>Audit Report</div>
           <div style={{ ...s.sub, marginTop: '2px' }}>
-            Case-wise audit log. Each date covers one full shift pair: night-N (19:30 IST) → morning-N+1 (19:30 IST handover).
+            Case-wise audit log. Each date covers one full audit shift pair.
           </div>
         </div>
         <button onClick={() => fetchData(from, to)} style={s.btnOut}>⟳ Refresh</button>
@@ -496,7 +606,7 @@ export default function AuditReport() {
                 Audit Log <span style={{ color: t.text4, fontWeight: 400, marginLeft: '6px' }}>· {filteredLog.length} row{filteredLog.length === 1 ? '' : 's'}</span>
               </div>
               <div style={{ fontSize: '10px', color: t.text4, marginTop: '2px' }}>
-                Each row = one bill. Window covers night-N + morning-N+1 (19:30 IST handover). Discrepancy green = audit weight higher than CRM, red = lower.
+                Each row = one bill. Discrepancy green = audit weight higher than CRM, red = lower.
               </div>
             </div>
             {filteredLog.length === 0 ? (
@@ -664,6 +774,62 @@ export default function AuditReport() {
                       )
                     })}
                   </tbody>
+                  {/* Totals row — sums the visible (sorted+filtered) log.
+                      Splits +/- discrepancies because a single net number
+                      would mask shortfalls hidden behind surplus. */}
+                  <tfoot>
+                    <tr style={{ background: t.card2 || t.card, borderTop: `1px solid ${t.border}` }}>
+                      <td style={{ ...s.td, padding: '10px 8px 10px 14px', borderBottom: 'none' }}></td>
+                      <td style={{ ...s.td, padding: '10px 14px', borderBottom: 'none', color: t.text1, fontWeight: 700, letterSpacing: '.04em', fontSize: '11px', textTransform: 'uppercase' }} colSpan={2}>
+                        Total · {totals.bills} bill{totals.bills === 1 ? '' : 's'}
+                      </td>
+                      <td style={{ ...s.td, padding: '10px 14px', borderBottom: 'none', fontSize: '10.5px', color: t.text3 }}>
+                        {totals.auditedBills} audited{totals.opsResolvedBills || totals.opsPendingBills
+                          ? ` · ${totals.opsPendingBills}↗ ${totals.opsResolvedBills}✓`
+                          : ''}
+                      </td>
+                      <td style={{ ...s.td, padding: '10px 14px', borderBottom: 'none', fontSize: '10.5px', color: t.text4 }}>
+                        {totals.negDeltaBills > 0 ? `${totals.negDeltaBills} short` : ''}
+                        {totals.negDeltaBills > 0 && totals.posDeltaBills > 0 ? ' · ' : ''}
+                        {totals.posDeltaBills > 0 ? `${totals.posDeltaBills} surplus` : ''}
+                      </td>
+                      <td style={{ ...s.td, padding: '10px 14px', borderBottom: 'none', textAlign: 'right', fontFamily: 'monospace', color: t.gold, fontWeight: 700 }}>
+                        {fmtWt(totals.crmG)}
+                      </td>
+                      <td style={{ ...s.td, padding: '10px 14px', borderBottom: 'none', textAlign: 'right', fontFamily: 'monospace', color: t.text1, fontWeight: 700 }}>
+                        {fmtWt(totals.auditG)}
+                      </td>
+                      <td style={{ ...s.td, padding: '10px 14px', borderBottom: 'none', textAlign: 'right', fontFamily: 'monospace', fontSize: '10.5px', whiteSpace: 'nowrap' }}>
+                        {totals.posDeltaG === 0 && totals.negDeltaG === 0 ? (
+                          <span style={{ color: t.text4 }}>—</span>
+                        ) : (
+                          <>
+                            {totals.posDeltaG > 0 && <span style={{ color: t.green, fontWeight: 700 }}>+{totals.posDeltaG.toFixed(3)}</span>}
+                            {totals.posDeltaG > 0 && totals.negDeltaG > 0 && <span style={{ color: t.text4 }}> / </span>}
+                            {totals.negDeltaG > 0 && <span style={{ color: t.red, fontWeight: 700 }}>−{totals.negDeltaG.toFixed(3)}</span>}
+                            <span style={{ color: t.text4 }}>g</span>
+                          </>
+                        )}
+                      </td>
+                      <td style={{ ...s.td, padding: '10px 14px', borderBottom: 'none', textAlign: 'right', fontFamily: 'monospace', color: totals.reauditBills ? t.text1 : t.text4, fontWeight: 700 }}>
+                        {totals.reauditBills ? fmtWt(totals.reauditG) : '—'}
+                      </td>
+                      <td style={{ ...s.td, padding: '10px 14px', borderBottom: 'none', textAlign: 'right', fontFamily: 'monospace', fontSize: '10.5px', whiteSpace: 'nowrap' }}>
+                        {!totals.reauditBills || (totals.reauditPosG === 0 && totals.reauditNegG === 0) ? (
+                          <span style={{ color: t.text4 }}>—</span>
+                        ) : (
+                          <>
+                            {totals.reauditPosG > 0 && <span style={{ color: t.green, fontWeight: 700 }}>+{totals.reauditPosG.toFixed(3)}</span>}
+                            {totals.reauditPosG > 0 && totals.reauditNegG > 0 && <span style={{ color: t.text4 }}> / </span>}
+                            {totals.reauditNegG > 0 && <span style={{ color: t.red, fontWeight: 700 }}>−{totals.reauditNegG.toFixed(3)}</span>}
+                            <span style={{ color: t.text4 }}>g</span>
+                          </>
+                        )}
+                      </td>
+                      <td style={{ ...s.td, padding: '10px 14px', borderBottom: 'none' }}></td>
+                      <td style={{ ...s.td, padding: '10px 14px', borderBottom: 'none' }}></td>
+                    </tr>
+                  </tfoot>
                 </table>
               </div>
             )}
