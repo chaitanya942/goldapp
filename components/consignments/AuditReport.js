@@ -172,6 +172,12 @@ export default function AuditReport() {
     )
   }, [shift, rowsWithShift, branchBreakdown])
 
+  // Max Σ|Δ|g across visible branches — drives the magnitude bar so the
+  // worst offender renders full-width and the rest scale proportionally.
+  const maxAbsDiscG = useMemo(() => {
+    return filteredBranchBreakdown.reduce((m, b) => Math.max(m, Number(b.sum_abs_discrepancy_g || 0)), 0)
+  }, [filteredBranchBreakdown])
+
   // ── CSV / PDF download — per-tab ─────────────────────────────────────────
   const dateTag = from === to ? from : `${from}_to_${to}`
   const windowLabelShort = from === to
@@ -443,27 +449,62 @@ export default function AuditReport() {
                       </tr>
                     </thead>
                     <tbody>
-                      {filteredBranchBreakdown.map(b => (
-                        <tr key={b.branch}>
-                          <td style={{ ...s.td, color: t.text1, fontWeight: 600 }}>{b.branch}</td>
-                          <td style={{ ...s.td, textAlign: 'right', fontFamily: 'monospace' }}>
-                            <div style={{ color: t.text2, fontWeight: 700 }}>{b.in_transit_count}</div>
-                            <div style={{ color: t.text4, fontSize: '10px' }}>{fmtWt(b.in_transit_weight_g)}</div>
-                          </td>
-                          <td style={{ ...s.td, textAlign: 'right', fontFamily: 'monospace' }}>
-                            <div style={{ color: t.green, fontWeight: 700 }}>{b.received_count}</div>
-                            <div style={{ color: t.text4, fontSize: '10px' }}>{fmtWt(b.received_weight_g)}</div>
-                          </td>
-                          <td style={{ ...s.td, textAlign: 'right', fontFamily: 'monospace', color: t.gold, fontWeight: 700 }}>{b.audited_count}</td>
-                          <td style={{ ...s.td, textAlign: 'right', fontFamily: 'monospace', color: b.discrepancy_count > 0 ? t.red : t.text4, fontWeight: 700 }}>{b.discrepancy_count}</td>
-                          <td style={{ ...s.td, textAlign: 'right', fontFamily: 'monospace', color: t.purple }}>{fmtWt(b.sum_abs_discrepancy_g)}</td>
-                          <td style={{ ...s.td, textAlign: 'right', fontFamily: 'monospace', color: t.text2 }}>{fmtWt(b.total_expected_g)}</td>
-                          <td style={{ ...s.td, textAlign: 'right', fontFamily: 'monospace', color: t.text2 }}>{fmtWt(b.total_received_audited_g)}</td>
-                          <td style={{ ...s.td, fontSize: '10.5px', color: t.text3, whiteSpace: 'normal', maxWidth: '260px' }}>
-                            {(b.auditors || []).length ? b.auditors.join(', ') : '—'}
-                          </td>
-                        </tr>
-                      ))}
+                      {filteredBranchBreakdown.map(b => {
+                        // Tighter row format: combine count + weight into one
+                        // inline cell ("4 · 35.310g") so rows shrink to a
+                        // single line and the eye can scan a full screen
+                        // worth of branches at once.
+                        const tdCompact = { ...s.td, padding: '8px 14px', textAlign: 'right', fontFamily: 'monospace' }
+                        // Magnitude bar in the Σ|Δ| column — width relative
+                        // to the worst branch in the window. Makes the
+                        // outlier branch obvious without reading numbers.
+                        const discG = Number(b.sum_abs_discrepancy_g || 0)
+                        const barPct = maxAbsDiscG > 0 ? (discG / maxAbsDiscG) * 100 : 0
+                        return (
+                          <tr key={b.branch}>
+                            <td style={{ ...s.td, padding: '8px 14px', color: t.text1, fontWeight: 600 }}>{b.branch}</td>
+                            <td style={tdCompact}>
+                              <CountWt t={t} count={b.in_transit_count} weight_g={b.in_transit_weight_g} color={t.text2} />
+                            </td>
+                            <td style={tdCompact}>
+                              <CountWt t={t} count={b.received_count} weight_g={b.received_weight_g} color={t.green} />
+                            </td>
+                            <td style={{ ...tdCompact, color: t.gold, fontWeight: 700 }}>
+                              {b.audited_count > 0 ? b.audited_count : <span style={{ color: t.text4, fontWeight: 400 }}>—</span>}
+                            </td>
+                            <td style={{ ...tdCompact, color: b.discrepancy_count > 0 ? t.red : t.text4, fontWeight: 700 }}>
+                              {b.discrepancy_count > 0 ? b.discrepancy_count : <span style={{ color: t.text4, fontWeight: 400 }}>—</span>}
+                            </td>
+                            <td style={{ ...tdCompact, color: discG > 0 ? t.purple : t.text4 }}>
+                              {discG > 0 ? (
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '8px' }}>
+                                  <div style={{
+                                    flex: '0 0 60px',
+                                    height: '4px',
+                                    background: `${t.purple}18`,
+                                    borderRadius: '2px',
+                                    overflow: 'hidden',
+                                    position: 'relative',
+                                  }}>
+                                    <div style={{
+                                      position: 'absolute', left: 0, top: 0, bottom: 0,
+                                      width: `${barPct}%`,
+                                      background: t.purple,
+                                      opacity: .75,
+                                    }} />
+                                  </div>
+                                  <span>{fmtWt(discG)}</span>
+                                </div>
+                              ) : '—'}
+                            </td>
+                            <td style={{ ...tdCompact, color: t.text2 }}>{fmtWt(b.total_expected_g)}</td>
+                            <td style={{ ...tdCompact, color: t.text2 }}>{fmtWt(b.total_received_audited_g)}</td>
+                            <td style={{ ...s.td, padding: '8px 14px' }}>
+                              <AuditorChips t={t} auditors={b.auditors || []} />
+                            </td>
+                          </tr>
+                        )
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -569,6 +610,65 @@ function Empty({ t, text }) {
     <div style={{ padding: '48px 20px', textAlign: 'center', fontSize: '12px', color: t.text4 }}>
       {text}
     </div>
+  )
+}
+
+// Compact "count · weight" cell. Renders a single dim em-dash for zero so
+// empty cells (e.g. an In-transit row with nothing in flight) stop competing
+// with cells that actually carry data.
+function CountWt({ t, count, weight_g, color }) {
+  const n = Number(count || 0)
+  const w = Number(weight_g || 0)
+  if (n === 0 && w === 0) return <span style={{ color: t.text4 }}>—</span>
+  return (
+    <span>
+      <span style={{ color, fontWeight: 700 }}>{n}</span>
+      <span style={{ color: t.text4, marginLeft: '5px' }}>·</span>
+      <span style={{ color: t.text4, marginLeft: '5px', fontSize: '11px' }}>
+        {w.toFixed(3)}g
+      </span>
+    </span>
+  )
+}
+
+// Auditor cell — one initials chip per distinct auditor when ≤2, collapsing
+// to "first · +N" past that. Far less noisy than a wrapped email list when
+// the same person audits every branch in the window.
+function AuditorChips({ t, auditors }) {
+  if (!auditors.length) return <span style={{ color: t.text4 }}>—</span>
+  const initials = (email) => {
+    const name = (email || '').split('@')[0].replace(/[._-]+/g, ' ').trim()
+    if (!name) return '?'
+    const parts = name.split(/\s+/)
+    return (parts[0][0] + (parts[1]?.[0] || '')).toUpperCase()
+  }
+  const chip = (email, i) => (
+    <span key={email + i}
+      title={email}
+      style={{
+        fontSize: '9.5px',
+        color: t.gold,
+        background: `${t.gold}18`,
+        border: `1px solid ${t.gold}40`,
+        borderRadius: '8px',
+        padding: '2px 7px',
+        fontWeight: 700,
+        letterSpacing: '.04em',
+        fontFamily: 'monospace',
+      }}>{initials(email)}</span>
+  )
+  if (auditors.length <= 2) {
+    return (
+      <span style={{ display: 'inline-flex', gap: '4px', alignItems: 'center' }}>
+        {auditors.map(chip)}
+      </span>
+    )
+  }
+  return (
+    <span style={{ display: 'inline-flex', gap: '4px', alignItems: 'center' }} title={auditors.join('\n')}>
+      {chip(auditors[0], 0)}
+      <span style={{ fontSize: '10px', color: t.text4 }}>+{auditors.length - 1}</span>
+    </span>
   )
 }
 
