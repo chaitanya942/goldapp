@@ -20,7 +20,7 @@ import GoldSpinner from '../ui/GoldSpinner'
 import Toast from '../ui/Toast'
 import { authedFetch } from '../../lib/authedFetch'
 import { CONSIGNMENT_THEMES as THEMES, REGION_COLORS, useMobile } from '../../lib/consignmentTheme'
-import { istToday, addWorkingDaysSkipSunday } from '../../lib/dateIst'
+import { istToday, addWorkingDaysSkipSunday, istDateStr } from '../../lib/dateIst'
 import { getCache, setCache } from '../../lib/moduleCache'
 
 const REGION_ICONS = {
@@ -382,6 +382,17 @@ export default function ConsignmentReport() {
       }
       return true
     })
+    // Decorate every row with expected_delivery_date so the column can sort
+    // and render off a single source of truth. Logic mirrors the branch-wise
+    // computation: dispatch IST day + ceil(TAT_hours / 24) working days,
+    // skipping Sundays. Defaults to 24h TAT if the row didn't return one.
+    .map(r => {
+      const tatHours     = Number(r.delivery_tat_hours) || 24
+      const workDays     = Math.max(1, Math.ceil(tatHours / 24))
+      const dispatchDate = r.dispatched_at ? istDateStr(new Date(r.dispatched_at)) : null
+      const expDate      = dispatchDate ? addWorkingDaysSkipSunday(dispatchDate, workDays) : null
+      return { ...r, expected_delivery_date: expDate, _tat_hours_effective: tatHours }
+    })
     .slice()
     .sort((a, b) => {
       const dir = caseSortDir
@@ -504,7 +515,7 @@ export default function ConsignmentReport() {
       ['net_weight',                'Net Wt (g)'],
       ['total_amount',              'Gross Amt'],
       ['dispatched_at',             'Consignment Date'],
-      ['stock_status',              'Current Status'],
+      ['expected_delivery_date',    'Expected Delivery'],
     ]
     const lines = [cols.map(([, l]) => csvEscape(l)).join(',')]
     for (const r of rows) {
@@ -983,6 +994,14 @@ export default function ConsignmentReport() {
             })
             const fmtAmt = (n) => n != null ? `₹${Number(n).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'
             const fmtWt  = (n) => n != null ? Number(n).toFixed(2) : '—'
+            // DD-MMM-YYYY (e.g. "23-May-2026") — same format the branch-wise
+            // view uses so the two tables read identically for dates.
+            const fmtCellDate = (d) => {
+              if (!d) return '—'
+              const [y, m, day] = d.split('-')
+              const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+              return `${day}-${months[+m - 1]}-${y}`
+            }
             return (
             <div style={{ overflowX: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px', tableLayout: 'auto' }}>
@@ -997,7 +1016,7 @@ export default function ConsignmentReport() {
                       { k: 'net_weight',                l: 'Net (g)',    a: 'right' },
                       { k: 'total_amount',              l: 'Gross Amt',  a: 'right' },
                       { k: 'dispatched_at',             l: 'Consignment Date', a: 'center' },
-                      { k: 'stock_status',              l: 'Status',     a: 'left'  },
+                      { k: 'expected_delivery_date',    l: 'Expected Delivery', a: 'center' },
                     ].map(col => {
                       // Put the sort arrow on the *leading* side of the label
                       // — right-aligned columns get the arrow before the label
@@ -1064,29 +1083,13 @@ export default function ConsignmentReport() {
                             ? new Date(r.dispatched_at).toLocaleDateString('en-GB', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', year: 'numeric' }).replace(/ /g, '-')
                             : '—'}
                         </td>
-                        <td style={caseTdL}>
-                          {(() => {
-                            // Current physical state of the bill — the point of
-                            // the historical report. A bill dispatched 5 days
-                            // ago may now be received / melted / sold.
-                            const s = r.stock_status
-                            const cfg =
-                              s === 'in_consignment'   ? { c: t.blue,    l: 'In transit' } :
-                              s === 'at_ho'            ? { c: t.green,   l: 'Received'   } :
-                              s === 'sent_for_melting' ? { c: t.orange,  l: 'Melting'    } :
-                              s === 'melted'           ? { c: t.purple,  l: 'Melted'     } :
-                              s === 'sold'             ? { c: t.text3,   l: 'Sold'       } :
-                              s === 'at_branch'        ? { c: t.text4,   l: 'Back at branch' } :
-                                                         { c: t.text4,   l: s || '—'     }
-                            return (
-                              <span style={{
-                                fontSize: '9.5px', padding: '2px 7px', borderRadius: '4px',
-                                background: `${cfg.c}18`, color: cfg.c,
-                                fontWeight: 700, letterSpacing: '.02em', whiteSpace: 'nowrap',
-                                border: `1px solid ${cfg.c}40`,
-                              }}>{cfg.l}</span>
-                            )
-                          })()}
+                        <td style={{ ...caseTdC, color: t.green, fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
+                          {fmtCellDate(r.expected_delivery_date)}
+                          {r._tat_hours_effective > 24 && (
+                            <span style={{ marginLeft: 6, fontSize: 9, color: t.orange, background: `${t.orange}18`, borderRadius: 4, padding: '1px 5px', fontWeight: 700, letterSpacing: '.04em' }}>
+                              {r._tat_hours_effective}h
+                            </span>
+                          )}
                         </td>
                       </tr>
                     )
