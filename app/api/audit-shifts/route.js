@@ -10,10 +10,12 @@
 //
 //   POST /api/audit-shifts
 //     Body: { shift_date, shift_type, auditor_id }
-//     Inserts one assignment. DB triggers enforce the 2-auditors-per-slot cap
-//     and the no-back-to-back (night N → morning N+1) rule. Their RAISE
-//     EXCEPTION messages are returned verbatim so ops sees exactly why a
-//     pick was rejected.
+//     Inserts one assignment. The 2-auditors-per-slot cap is enforced by a
+//     DB trigger; its RAISE EXCEPTION message is returned verbatim so ops
+//     sees exactly why a pick was rejected. (The old back-to-back rule —
+//     same auditor on night N AND morning N+1 — was dropped in
+//     sql/drop-audit-back-to-back.sql per ops; same auditor can now run
+//     both halves of a pair.)
 //
 //   DELETE /api/audit-shifts?id=<assignment_id>
 //     Removes one assignment.
@@ -231,10 +233,10 @@ export async function POST(req) {
     .select()
     .single()
   if (error) {
-    // The triggers in sql/audit_shift_assignments.sql raise human-readable
-    // messages — pass them through. PGRST codes for trigger violations
-    // come back as 23514 (check_violation, via the RAISE) or 23505
-    // (unique_violation for re-assigning the same auditor).
+    // The two-per-slot trigger in sql/audit_shift_assignments.sql raises a
+    // human-readable message — pass it through. PGRST codes for trigger
+    // violations come back as 23514 (check_violation, via the RAISE) or
+    // 23505 (unique_violation for re-assigning the same auditor).
     return Response.json({ error: error.message || 'Failed to assign auditor' }, { status: 400 })
   }
   return Response.json({ assignment: data })
