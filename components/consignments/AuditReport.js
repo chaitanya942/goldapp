@@ -94,7 +94,12 @@ export default function AuditReport() {
       // pending after re-queue), the pending one wins because the unique
       // index guarantees at most one is pending.
       const prev = m.get(c.purchase_id)
-      if (!prev || c.status === 'pending') m.set(c.purchase_id, { status: c.status, reason: c.reason })
+      if (!prev || c.status === 'pending') m.set(c.purchase_id, {
+        status:       c.status,
+        reason:       c.reason,
+        resolverName: c.resolver?.name || null,
+        resolvedAt:   c.resolved_at    || null,
+      })
     }
     setCasesByPurchase(m)
   }, [])
@@ -180,15 +185,15 @@ export default function AuditReport() {
     const w = r.first_audit?.audit_gross_weight ?? r.audit_gross_weight
     return r.audited_at && (w == null || Number(w) === 0)
   }
-  // Eligible to queue: real discrepancy, not collection-only, no existing
-  // pending case (the unique partial index would reject it anyway, but
-  // hiding the checkbox is friendlier than a silent skip).
-  const hasDiscrepancy = (r) => {
+  // Eligible to queue: NEGATIVE discrepancy only (audit weight < CRM,
+  // i.e. short on gold) per ops policy — surplus cases don't go to ops.
+  // Plus: not collection-only, and no pending case open already.
+  const hasNegativeDiscrepancy = (r) => {
     const d = Number(r.first_audit?.discrepancy_g ?? r.audit_discrepancy_g ?? 0)
-    return d !== 0
+    return d < 0
   }
   const caseFor = (r) => casesByPurchase.get(r.id) || null
-  const isEligible = (r) => hasDiscrepancy(r) && !isCollectionOnly(r) && !(caseFor(r)?.status === 'pending')
+  const isEligible = (r) => hasNegativeDiscrepancy(r) && !isCollectionOnly(r) && !(caseFor(r)?.status === 'pending')
 
   async function sendSelectedToOps() {
     if (selected.size === 0 || sending) return
@@ -207,10 +212,22 @@ export default function AuditReport() {
     setSelected(new Set())
     fetchCases()
   }
+  // Structured remark — resolution by ops takes precedence so the
+  // reasoning surfaces back on the auditor's screen along with who
+  // wrote it.
+  //   type: 'ops'      → ops reasoning + resolver name (priority)
+  //   type: 'auditor'  → original audit_remark / reaudit remark
+  //   type: 'system'   → collection-only auto-fill
+  //   type: 'empty'    → nothing
   const effectiveRemark = (r) => {
+    const c = caseFor(r)
+    if (c?.status === 'resolved' && c.reason) {
+      return { type: 'ops', text: c.reason, by: c.resolverName, at: c.resolvedAt }
+    }
     const stated = r.reaudit?.remark || r.audit_remark || ''
-    if (stated) return stated
-    return isCollectionOnly(r) ? 'Received — weight audit not done' : ''
+    if (stated) return { type: 'auditor', text: stated }
+    if (isCollectionOnly(r)) return { type: 'system', text: 'Received — weight audit not done' }
+    return { type: 'empty', text: '' }
   }
 
   // Column definitions — single source of truth so CSV, PDF, and the
@@ -238,7 +255,11 @@ export default function AuditReport() {
       return d === 0 ? '—' : fmtSignedWt(d)
     }],
     ['Auditor',             r => r.reaudit?.audited_by_name || r.audited_by_name || '—'],
-    ['Remark',              r => effectiveRemark(r)],
+    ['Remark',              r => {
+      const rk = effectiveRemark(r)
+      if (rk.type === 'ops') return `OPS: ${rk.text}${rk.by ? ` — ${rk.by}` : ''}`
+      return rk.text
+    }],
   ]
 
   function exportCsv() {
@@ -402,60 +423,14 @@ export default function AuditReport() {
         </div>
       </div>
 
-      {/* Floating action bar — appears when ≥1 row is ticked. Sits low
-          on screen so it's reachable from a tall table without scrolling
-          back to a header button. */}
-      {selected.size > 0 && (
-        <div style={{
-          position: 'fixed',
-          left: '50%',
-          bottom: isMobile ? '14px' : '22px',
-          transform: 'translateX(-50%)',
-          background: t.card,
-          border: `1px solid ${t.gold}`,
-          borderRadius: '12px',
-          boxShadow: `0 12px 32px -6px ${t.border}, 0 4px 12px -2px ${t.border}60`,
-          padding: '10px 14px',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '14px',
-          zIndex: 50,
-          maxWidth: 'calc(100vw - 28px)',
-        }}>
-          <span style={{ fontSize: '12px', color: t.text2 }}>
-            <strong style={{ color: t.text1, fontFamily: 'monospace' }}>{selected.size}</strong>
-            {' '}case{selected.size === 1 ? '' : 's'} selected
-          </span>
-          <button
-            onClick={() => setSelected(new Set())}
-            style={{
-              background: 'transparent', border: `1px solid ${t.border}`,
-              borderRadius: '7px', padding: '6px 10px', fontSize: '11px',
-              color: t.text3, cursor: 'pointer',
-            }}
-          >Clear</button>
-          <button
-            onClick={sendSelectedToOps}
-            disabled={sending}
-            style={{
-              background: t.gold, color: '#1a0a00',
-              border: 'none', borderRadius: '7px',
-              padding: '8px 16px', fontSize: '12px', fontWeight: 700,
-              cursor: sending ? 'wait' : 'pointer',
-              opacity: sending ? 0.7 : 1,
-              letterSpacing: '.02em',
-            }}
-          >
-            {sending ? 'Sending…' : `Send ${selected.size} to Ops →`}
-          </button>
-        </div>
-      )}
-
       {loading ? (
         <div style={{ padding: '80px', textAlign: 'center' }}><GoldSpinner /></div>
       ) : (
         <>
-          {/* Search + download buttons */}
+          {/* Search + action buttons. Send-to-Ops sits between selection
+              counter and the export buttons so it's always reachable from
+              the top of the page — no need to scroll to a fixed bottom
+              bar after ticking rows. */}
           <div style={{
             display: 'flex', alignItems: 'center', justifyContent: 'space-between',
             gap: '10px', flexWrap: 'wrap',
@@ -468,6 +443,36 @@ export default function AuditReport() {
               onChange={e => setSearch(e.target.value)}
             />
             <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
+              {selected.size > 0 && (
+                <>
+                  <span style={{ fontSize: '11.5px', color: t.text2 }}>
+                    <strong style={{ color: t.text1, fontFamily: 'monospace' }}>{selected.size}</strong>
+                    {' '}selected
+                  </span>
+                  <button
+                    onClick={() => setSelected(new Set())}
+                    style={{
+                      background: 'transparent', border: `1px solid ${t.border}`,
+                      borderRadius: '7px', padding: '6px 10px', fontSize: '11px',
+                      color: t.text3, cursor: 'pointer',
+                    }}
+                  >Clear</button>
+                  <button
+                    onClick={sendSelectedToOps}
+                    disabled={sending}
+                    style={{
+                      background: t.gold, color: '#1a0a00',
+                      border: 'none', borderRadius: '7px',
+                      padding: '7px 14px', fontSize: '11.5px', fontWeight: 700,
+                      cursor: sending ? 'wait' : 'pointer',
+                      opacity: sending ? 0.7 : 1,
+                      letterSpacing: '.02em',
+                    }}
+                  >
+                    {sending ? 'Sending…' : `Send ${selected.size} to Ops →`}
+                  </button>
+                </>
+              )}
               <button onClick={exportCsv} disabled={!filteredLog.length}
                 style={{ ...s.btnOut, color: filteredLog.length ? t.gold : t.text4, borderColor: filteredLog.length ? `${t.gold}50` : t.border, padding: '7px 13px' }}>
                 ↓ CSV
@@ -624,10 +629,37 @@ export default function AuditReport() {
                           <td style={{ ...s.td, padding: '9px 14px', fontSize: '11.5px', color: t.text2 }}>{auditor}</td>
                           <td style={{
                             ...s.td, padding: '9px 14px', fontSize: '11px',
-                            color: collectionOnly ? t.orange : t.text3,
-                            fontStyle: collectionOnly ? 'italic' : 'normal',
-                            whiteSpace: 'normal', maxWidth: '260px',
-                          }}>{remark || '—'}</td>
+                            whiteSpace: 'normal', maxWidth: '300px',
+                          }}>
+                            {remark.type === 'ops' ? (
+                              <div>
+                                <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px', flexWrap: 'wrap' }}>
+                                  <span style={{
+                                    fontSize: '8.5px',
+                                    color: t.green,
+                                    background: `${t.green}18`,
+                                    border: `1px solid ${t.green}45`,
+                                    borderRadius: '4px',
+                                    padding: '1px 5px',
+                                    fontWeight: 700, letterSpacing: '.08em',
+                                    textTransform: 'uppercase',
+                                  }}>Ops</span>
+                                  <span style={{ color: t.text2 }}>{remark.text}</span>
+                                </div>
+                                {remark.by && (
+                                  <div style={{ fontSize: '10px', color: t.text4, marginTop: '3px', fontStyle: 'italic' }}>
+                                    — {remark.by}
+                                  </div>
+                                )}
+                              </div>
+                            ) : remark.type === 'system' ? (
+                              <span style={{ color: t.orange, fontStyle: 'italic' }}>{remark.text}</span>
+                            ) : remark.type === 'auditor' ? (
+                              <span style={{ color: t.text3 }}>{remark.text}</span>
+                            ) : (
+                              <span style={{ color: t.text4 }}>—</span>
+                            )}
+                          </td>
                         </tr>
                       )
                     })}
