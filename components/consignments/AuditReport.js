@@ -131,6 +131,8 @@ export default function AuditReport() {
   // on-screen table stay in sync.
   const logCols = [
     ['Consignment Created', r => fmtDate(r.consignment_created_at)],
+    ['Audited Date',        r => fmtDate(r.audited_at)],
+    ['Audit Shift',         r => SHIFT_LABEL[r._shift] || '—'],
     ['Customer',            r => r.customer_name],
     ['Branch',              r => r.branch_name],
     ['CRM Gross (g)',       r => fmtWt(r.gross_weight)],
@@ -365,6 +367,8 @@ export default function AuditReport() {
                   <thead>
                     <tr style={{ background: t.card2 || t.card }}>
                       <th style={s.th}>Consignment Created</th>
+                      <th style={s.th}>Audited Date</th>
+                      <th style={s.th}>Shift</th>
                       <th style={s.th}>Customer</th>
                       <th style={s.th}>Branch</th>
                       <th style={{ ...s.th, textAlign: 'right' }}>CRM Gross</th>
@@ -390,10 +394,29 @@ export default function AuditReport() {
                       // when audit < CRM (negative), neutral when 0.
                       const discColor   = firstD > 0 ? t.green : firstD < 0 ? t.red : t.text4
                       const reDiscColor = reD > 0 ? t.green : reD < 0 ? t.red : t.text4
+                      // Shift chip colours mirror the roster — gold for
+                      // night, orange for morning, dim for off-shift.
+                      const shiftColor = r._shift === 'night'   ? t.gold
+                                       : r._shift === 'morning' ? (t.orange || '#e9a942')
+                                       : t.text4
                       return (
                         <tr key={r.id}>
                           <td style={{ ...s.td, padding: '9px 14px', fontFamily: 'monospace', color: t.text2, fontSize: '11.5px' }}>
                             {fmtDate(r.consignment_created_at)}
+                          </td>
+                          <td style={{ ...s.td, padding: '9px 14px', fontFamily: 'monospace', color: t.text2, fontSize: '11.5px' }}>
+                            {fmtDate(r.audited_at)}
+                          </td>
+                          <td style={{ ...s.td, padding: '9px 14px' }}>
+                            <span style={{
+                              fontSize: '9.5px', color: shiftColor,
+                              background: `${shiftColor}18`,
+                              border: `1px solid ${shiftColor}45`,
+                              borderRadius: '5px',
+                              padding: '2px 7px',
+                              fontWeight: 700, letterSpacing: '.06em',
+                              textTransform: 'uppercase',
+                            }}>{SHIFT_LABEL[r._shift] || '—'}</span>
                           </td>
                           <td style={{ ...s.td, padding: '9px 14px' }}>{r.customer_name || '—'}</td>
                           <td style={{ ...s.td, padding: '9px 14px', color: t.text2 }}>{r.branch_name || '—'}</td>
