@@ -337,7 +337,14 @@ async function handleGet(req) {
   // count_received_at / count_received_by surface the interim "count
   // audit done, weight still pending" state on the bill card. See
   // sql/purchases_count_audit.sql for the business rules.
-  const COLS = 'id, application_id, customer_name, branch_name, purchase_date, transaction_time, transaction_type, audit_gross_weight, audited_at, audit_remark, stock_status, dispatched_at, count_received_at, count_received_by'
+  // Optional columns are split out so we can degrade gracefully if a deploy
+  // is sitting on a DB schema where they don't exist yet. sql/purchases_count_audit.sql
+  // adds count_received_at + count_received_by; if that migration hasn't been
+  // applied, the original SELECT fails the entire endpoint with a generic
+  // Supabase REST error. We try WITH those columns first, fall back to the
+  // base set on the column-missing error.
+  const COLS_BASE     = 'id, application_id, customer_name, branch_name, purchase_date, transaction_time, transaction_type, audit_gross_weight, audited_at, audit_remark, stock_status, dispatched_at'
+  const COLS_EXTENDED = COLS_BASE + ', count_received_at, count_received_by'
 
   // Bangalore pool deliberately empty post 1 Jun 2026 cutover. See header.
   const bangalore = []
@@ -362,20 +369,56 @@ async function handleGet(req) {
   // "is this bill physically in front of me to weigh".
   const CHUNK = 1000
 
+  // Track which COLS variant succeeded so per-page diagnostics know.
+  let colsUsed = COLS_EXTENDED
+
   async function fetchAllInConsignmentPurchases() {
     const all = []
     let from = 0
     while (true) {
-      const { data, error } = await supabase
+      let { data, error } = await supabase
         .from('purchases')
-        .select(COLS)
+        .select(colsUsed)
         .eq('stock_status', 'in_consignment')
         .eq('is_deleted', false)
         .neq('crm_status', 'deleted')
         .order('dispatched_at', { ascending: true, nullsFirst: false })
         .order('id', { ascending: true })   // tie-breaker so pagination is stable
         .range(from, from + CHUNK - 1)
-      if (error) throw error
+
+      // Schema-fallback: column doesn't exist → retry the SAME page with the
+      // base column set. Only triggers on the first page so we don't mid-stream
+      // change shapes — if it happens later, surface as the real error.
+      if (error && from === 0 && colsUsed === COLS_EXTENDED) {
+        const looksLikeColMissing =
+             /column .* does not exist/i.test(error.message || '')
+          || error.code === '42703'
+          || /count_received_(at|by)/.test(error.message || '')
+        if (looksLikeColMissing) {
+          console.warn('[collection-audit] count_received_* columns missing on DB; falling back to COLS_BASE. Apply sql/purchases_count_audit.sql to enable count-audit features.')
+          colsUsed = COLS_BASE
+          const retry = await supabase
+            .from('purchases')
+            .select(colsUsed)
+            .eq('stock_status', 'in_consignment')
+            .eq('is_deleted', false)
+            .neq('crm_status', 'deleted')
+            .order('dispatched_at', { ascending: true, nullsFirst: false })
+            .order('id', { ascending: true })
+            .range(from, from + CHUNK - 1)
+          data = retry.data
+          error = retry.error
+        }
+      }
+
+      if (error) {
+        // Enrich the thrown error so the upstream catch's diagnostic includes
+        // the Supabase code + hint, not just the (sometimes opaque) message.
+        const enriched = new Error(error.message || 'Supabase select failed')
+        enriched.name  = error.code ? `SupabaseError(${error.code})` : 'SupabaseError'
+        enriched.cause = { code: error.code, hint: error.hint, details: error.details, message: error.message }
+        throw enriched
+      }
       all.push(...(data || []))
       if (!data || data.length < CHUNK) break
       from += CHUNK
@@ -405,7 +448,12 @@ async function handleGet(req) {
       links = await fetchLinksForPurchaseIds(outstationRows.map(r => r.id))
     }
   } catch (err) {
-    return Response.json({ error: err.message || 'Failed to load audit queue' }, { status: 500 })
+    // Re-throw so the outer GET wrapper's catch can format the diagnostic
+    // response consistently (build marker + name + first stack frame). The
+    // outer catch already JSON-stringifies err.cause if present, so the
+    // Supabase code/hint/details captured by fetchAllInConsignmentPurchases
+    // surface in the response body.
+    throw err
   }
 
   const linkByPid      = new Map(links.map(l => [l.purchase_id, l.consignment_id]))
@@ -539,11 +587,13 @@ export async function GET(req) {
     console.error('[collection-audit][' + BUILD_MARKER + '] GET unhandled:',
       'name=',   err?.name,
       'message=',err?.message,
+      'cause=',  err?.cause,
       'stack=',  stackFirst,
     )
     return Response.json({
       error:   err?.message || 'Server error',
       name:    err?.name    || null,
+      cause:   err?.cause   || null,
       stack:   stackFirst   || null,
       _build:  BUILD_MARKER,
     }, {
