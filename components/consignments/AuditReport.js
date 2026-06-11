@@ -5,12 +5,9 @@
 // that has audited_at populated, regardless of current stock_status.
 //
 // Surfaces:
-//   - KPI band: bills audited in window, received vs kept-pending split,
-//     count of bills with discrepancy, total discrepancy grams, total value
-//     of discrepancy-flagged bills.
 //   - Per-auditor breakdown: who audited how many, how many discrepancies they flagged.
 //   - Per-branch breakdown: which branches generate the most discrepancies.
-//   - Full row-level log table with CSV export.
+//   - Full row-level log table with CSV / PDF export.
 
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useApp } from '../../lib/context'
@@ -174,18 +171,6 @@ export default function AuditReport() {
       b.audited_count     - a.audited_count
     )
   }, [shift, rowsWithShift, branchBreakdown])
-
-  // KPI band — driven by the full window (not the filtered log) since the
-  // filter is just a search filter on top of the log, not a scope change.
-  const kpis = useMemo(() => {
-    const total      = rows.length
-    const received   = rows.filter(r => r.stock_status === 'at_ho').length
-    const pending    = total - received
-    const discrepancies = rows.filter(r => Number(r.audit_discrepancy_g || 0) !== 0)
-    const totalDiscG = discrepancies.reduce((s, r) => s + Math.abs(Number(r.audit_discrepancy_g || 0)), 0)
-    const reaudited  = rows.filter(r => (r.audit_attempts || 0) > 1).length
-    return { total, received, pending, discrepancyCount: discrepancies.length, totalDiscG, reaudited }
-  }, [rows])
 
   // ── CSV / PDF download — per-tab ─────────────────────────────────────────
   const dateTag = from === to ? from : `${from}_to_${to}`
@@ -385,16 +370,6 @@ export default function AuditReport() {
             </span>
           )}
         </div>
-      </div>
-
-      {/* KPI band */}
-      <div style={{ display: 'grid', gridTemplateColumns: `repeat(auto-fit, minmax(${isMobile ? '130px' : '170px'}, 1fr))`, gap: '1px', background: t.border, borderRadius: '12px', overflow: 'hidden', boxShadow: `0 1px 3px ${t.border}50` }}>
-        <Kpi t={t} label="Bills audited"          primary={kpis.total}                              sub={windowLabel}                                                       accent={t.gold} />
-        <Kpi t={t} label="Received"               primary={kpis.received}                           sub={`${kpis.total ? Math.round(kpis.received / kpis.total * 100) : 0}% of audited`}        accent={t.green} />
-        <Kpi t={t} label="Kept pending"           primary={kpis.pending}                            sub="awaiting follow-up"                                                accent={t.orange} />
-        <Kpi t={t} label="Discrepancies"          primary={kpis.discrepancyCount}                   sub={`${kpis.total ? Math.round(kpis.discrepancyCount / kpis.total * 100) : 0}% of audited`} accent={t.red} />
-        <Kpi t={t} label="Re-audited"             primary={kpis.reaudited}                          sub="bills with > 1 attempt"                                            accent={t.purple} />
-        <Kpi t={t} label="Total |Δ| grams"        primary={fmtWt(kpis.totalDiscG)}                  sub="sum of absolute differences"                                       accent={t.blue} mono />
       </div>
 
       {loading ? (
@@ -597,15 +572,3 @@ function Empty({ t, text }) {
   )
 }
 
-function Kpi({ t, label, primary, sub, accent, mono }) {
-  return (
-    <div style={{ background: t.card, padding: '16px 18px 18px', position: 'relative', transition: 'background .18s ease' }}
-      onMouseEnter={e => e.currentTarget.style.background = `${accent || t.text3}08`}
-      onMouseLeave={e => e.currentTarget.style.background = t.card}>
-      <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '2px', background: accent || t.text3, opacity: .55 }} />
-      <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.14em', textTransform: 'uppercase', marginBottom: '8px', fontWeight: 600 }}>{label}</div>
-      <div style={{ fontSize: '22px', color: accent || t.text1, fontWeight: 700, fontFamily: mono ? 'monospace' : 'inherit', lineHeight: 1.1, letterSpacing: '-.015em' }}>{primary}</div>
-      {sub && <div style={{ fontSize: '10px', color: t.text4, marginTop: '8px' }}>{sub}</div>}
-    </div>
-  )
-}
