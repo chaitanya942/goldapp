@@ -67,6 +67,12 @@ export default function AuditReport() {
   // Shift filter — 'all' shows every audit in the pair; 'night' / 'morning'
   // narrow to the half-shift the audit landed in.
   const [shift,   setShift]   = useState('all')
+  // Click-to-sort state. Default to most-recently-audited first so the
+  // freshest audit lands at the top.
+  const [sort, setSort] = useState({ key: 'audited_at', dir: 'desc' })
+  const toggleSort = (key) => setSort(s =>
+    s.key === key ? { key, dir: s.dir === 'desc' ? 'asc' : 'desc' } : { key, dir: 'desc' }
+  )
 
   const fetchData = useCallback(async (f, tt) => {
     setLoading(true)
@@ -107,6 +113,33 @@ export default function AuditReport() {
       || (r.audited_by_email || '').toLowerCase().includes(q)
     )
   ), [rowsWithShift, q, shift])
+
+  // Sort layer on top of the filter. Cross-cutting keys ('discrepancy_g',
+  // 'audit_gross_weight') resolve to the underlying first-audit fields
+  // so the column behaves how the user reads it.
+  const sortedLog = useMemo(() => {
+    const arr = [...filteredLog]
+    const { key, dir } = sort
+    const m = dir === 'desc' ? -1 : 1
+    arr.sort((a, b) => {
+      let av, bv
+      if (key === 'discrepancy_g') {
+        av = Number(a.first_audit?.discrepancy_g ?? a.audit_discrepancy_g ?? 0)
+        bv = Number(b.first_audit?.discrepancy_g ?? b.audit_discrepancy_g ?? 0)
+      } else if (key === 'audit_gross_weight') {
+        av = Number(a.first_audit?.audit_gross_weight ?? a.audit_gross_weight ?? 0)
+        bv = Number(b.first_audit?.audit_gross_weight ?? b.audit_gross_weight ?? 0)
+      } else if (key === 'auditor_name') {
+        av = (a.reaudit?.audited_by_name || a.audited_by_name || '').toLowerCase()
+        bv = (b.reaudit?.audited_by_name || b.audited_by_name || '').toLowerCase()
+      } else {
+        av = a[key]; bv = b[key]
+      }
+      if (typeof av === 'string') return (av || '').localeCompare(bv || '') * m
+      return ((Number(av) || 0) - (Number(bv) || 0)) * m
+    })
+    return arr
+  }, [filteredLog, sort])
 
   // ── CSV / PDF download ──────────────────────────────────────────────────
   const dateTag = from === to ? from : `${from}_to_${to}`
@@ -156,7 +189,7 @@ export default function AuditReport() {
   ]
 
   function exportCsv() {
-    const data = filteredLog
+    const data = sortedLog
     const fname = `AuditReport_${dateTag}${shift === 'all' ? '' : `_${shift}`}.csv`
     if (!data.length) return
     const esc = (v) => /[",\n]/.test(String(v ?? '')) ? `"${String(v).replace(/"/g, '""')}"` : String(v ?? '')
@@ -170,7 +203,7 @@ export default function AuditReport() {
   }
 
   async function exportPdf() {
-    const data = filteredLog
+    const data = sortedLog
     const fname = `AuditReport_${dateTag}${shift === 'all' ? '' : `_${shift}`}.pdf`
     if (!data.length) return
     // Dynamic imports — jspdf is heavy and only needed on click.
@@ -366,22 +399,22 @@ export default function AuditReport() {
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <thead>
                     <tr style={{ background: t.card2 || t.card }}>
-                      <th style={s.th}>Consignment Created</th>
-                      <th style={s.th}>Audited Date</th>
-                      <th style={s.th}>Shift</th>
-                      <th style={s.th}>Customer</th>
-                      <th style={s.th}>Branch</th>
-                      <th style={{ ...s.th, textAlign: 'right' }}>CRM Gross</th>
-                      <th style={{ ...s.th, textAlign: 'right' }}>Audit Weight</th>
-                      <th style={{ ...s.th, textAlign: 'right' }}>Discrepancy</th>
+                      <SortTh s={s} sortKey="consignment_created_at" label="Consignment Created" sort={sort} onSort={toggleSort} />
+                      <SortTh s={s} sortKey="audited_at"             label="Audited Date"        sort={sort} onSort={toggleSort} />
+                      <SortTh s={s} sortKey="_shift"                 label="Shift"               sort={sort} onSort={toggleSort} />
+                      <SortTh s={s} sortKey="customer_name"          label="Customer"            sort={sort} onSort={toggleSort} />
+                      <SortTh s={s} sortKey="branch_name"            label="Branch"              sort={sort} onSort={toggleSort} />
+                      <SortTh s={s} sortKey="gross_weight"           label="CRM Gross"           sort={sort} onSort={toggleSort} align="right" />
+                      <SortTh s={s} sortKey="audit_gross_weight"     label="Audit Weight"        sort={sort} onSort={toggleSort} align="right" />
+                      <SortTh s={s} sortKey="discrepancy_g"          label="Discrepancy"         sort={sort} onSort={toggleSort} align="right" />
                       <th style={{ ...s.th, textAlign: 'right' }}>Re-audit Weight</th>
                       <th style={{ ...s.th, textAlign: 'right' }}>Re-audit Δ</th>
-                      <th style={s.th}>Auditor</th>
+                      <SortTh s={s} sortKey="auditor_name"           label="Auditor"             sort={sort} onSort={toggleSort} />
                       <th style={s.th}>Remark</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredLog.map(r => {
+                    {sortedLog.map(r => {
                       const collectionOnly = isCollectionOnly(r)
                       const firstW = r.first_audit?.audit_gross_weight ?? r.audit_gross_weight
                       const firstD = Number(r.first_audit?.discrepancy_g ?? r.audit_discrepancy_g ?? 0)
@@ -461,6 +494,28 @@ function Empty({ t, text }) {
     <div style={{ padding: '48px 20px', textAlign: 'center', fontSize: '12px', color: t.text4 }}>
       {text}
     </div>
+  )
+}
+
+// Click-to-sort header cell. Shows ▼/▲ when this column is the active
+// sort, a faint ↕ otherwise so the affordance is visible without being
+// noisy. Uses Discrepancy magnitude (signed) as the comparison key so
+// the largest positives and largest negatives land at opposite ends of
+// the sort, which is what ops actually wants when scanning for misses.
+function SortTh({ s, sortKey, label, sort, onSort, align }) {
+  const active = sort.key === sortKey
+  return (
+    <th
+      onClick={() => onSort(sortKey)}
+      style={{ ...s.th, textAlign: align || 'left', cursor: 'pointer', userSelect: 'none' }}
+    >
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+        {label}
+        <span style={{ opacity: active ? 0.95 : 0.28, fontSize: '8px', letterSpacing: 0 }}>
+          {active ? (sort.dir === 'desc' ? '▼' : '▲') : '↕'}
+        </span>
+      </span>
+    </th>
   )
 }
 
