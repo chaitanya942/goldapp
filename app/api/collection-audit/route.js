@@ -520,12 +520,23 @@ async function handleGet(req) {
 // Critical: when an Error's .message happens to be 'Bad Request' (a known
 // Supabase REST trap), the previous bare-throw path leaked through Next.js
 // as the opaque body the client kept seeing.
+// Build marker: bumping this string forces Next.js to invalidate any cached
+// route bundle on Railway and proves to the client which build is serving.
+const BUILD_MARKER = 'ca-v3-2026-06-11'
+
 export async function GET(req) {
+  // Unique log line on EVERY request — if we don't see this in Railway
+  // logs, the route file isn't being executed at all.
+  console.log('[collection-audit][' + BUILD_MARKER + '] GET start')
   try {
-    return await handleGet(req)
+    const res = await handleGet(req)
+    // Echo the marker in a header so the browser can verify which build
+    // produced the response without us touching the body shape.
+    res.headers.set('x-handler-build', BUILD_MARKER)
+    return res
   } catch (err) {
     const stackFirst = String(err?.stack || '').split('\n').slice(0, 3).join(' | ')
-    console.error('[collection-audit] GET unhandled:',
+    console.error('[collection-audit][' + BUILD_MARKER + '] GET unhandled:',
       'name=',   err?.name,
       'message=',err?.message,
       'stack=',  stackFirst,
@@ -534,7 +545,11 @@ export async function GET(req) {
       error:   err?.message || 'Server error',
       name:    err?.name    || null,
       stack:   stackFirst   || null,
-    }, { status: 500 })
+      _build:  BUILD_MARKER,
+    }, {
+      status: 500,
+      headers: { 'x-handler-build': BUILD_MARKER },
+    })
   }
 }
 
