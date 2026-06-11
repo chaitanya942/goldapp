@@ -1036,11 +1036,33 @@ function AuditorRow({ auditor, accent, t, isMobile, onToggleActive }) {
   const isActive = a.is_active !== false
   const [hovered,  setHovered]  = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
+  const [menuPos,  setMenuPos]  = useState(null)  // { top, left, flipUp } in viewport coords
   const [busy,     setBusy]     = useState(false)
   const kebabRef  = useRef(null)
   const menuRef   = useRef(null)
 
+  // Compute the menu's position from the kebab's bounding rect — portalled
+  // out of the row, so no parent overflow can clip it. Flips above the kebab
+  // if there isn't enough room below the viewport bottom.
+  const computeMenuPos = useCallback(() => {
+    const el = kebabRef.current
+    if (!el) return null
+    const r = el.getBoundingClientRect()
+    const menuW = 240
+    const menuH = 96       // rough estimate; menu auto-sizes anyway
+    const gap   = 6
+    const vh    = window.innerHeight
+    const vw    = window.innerWidth
+    const flipUp = (r.bottom + gap + menuH) > vh - 8 && (r.top - gap - menuH) > 8
+    let left = r.right - menuW
+    if (left < 8)             left = 8
+    if (left + menuW > vw - 8) left = vw - 8 - menuW
+    const top = flipUp ? (r.top - gap - menuH) : (r.bottom + gap)
+    return { top, left, flipUp }
+  }, [])
+
   // Click-outside / Escape close the menu so it never feels stuck open.
+  // Scroll / resize reposition (or close — closing is the safer default).
   useEffect(() => {
     if (!menuOpen) return
     const onDocClick = (e) => {
@@ -1048,14 +1070,26 @@ function AuditorRow({ auditor, accent, t, isMobile, onToggleActive }) {
       if (kebabRef.current && kebabRef.current.contains(e.target)) return
       setMenuOpen(false)
     }
-    const onEsc = (e) => { if (e.key === 'Escape') setMenuOpen(false) }
-    document.addEventListener('mousedown', onDocClick)
-    document.addEventListener('keydown',   onEsc)
+    const onEsc    = (e) => { if (e.key === 'Escape') setMenuOpen(false) }
+    const onScroll = () => setMenuOpen(false)
+    const onResize = () => setMenuOpen(false)
+    document.addEventListener('mousedown',     onDocClick)
+    document.addEventListener('keydown',       onEsc)
+    window.addEventListener('scroll',          onScroll, true) // capture scroll on any ancestor
+    window.addEventListener('resize',          onResize)
     return () => {
-      document.removeEventListener('mousedown', onDocClick)
-      document.removeEventListener('keydown',   onEsc)
+      document.removeEventListener('mousedown',     onDocClick)
+      document.removeEventListener('keydown',       onEsc)
+      window.removeEventListener('scroll',          onScroll, true)
+      window.removeEventListener('resize',          onResize)
     }
   }, [menuOpen])
+
+  const openMenu = () => {
+    const pos = computeMenuPos()
+    setMenuPos(pos)
+    setMenuOpen(true)
+  }
 
   const onConfirmToggle = async () => {
     setMenuOpen(false)
@@ -1147,7 +1181,7 @@ function AuditorRow({ auditor, accent, t, isMobile, onToggleActive }) {
         ref={kebabRef}
         type="button"
         aria-label="Auditor actions"
-        onClick={() => setMenuOpen(o => !o)}
+        onClick={() => { menuOpen ? setMenuOpen(false) : openMenu() }}
         disabled={busy}
         style={{
           width: 30, height: 30,
@@ -1168,25 +1202,42 @@ function AuditorRow({ auditor, accent, t, isMobile, onToggleActive }) {
         ⋮
       </button>
 
-      {/* Floating menu */}
-      {menuOpen && (
+      {/* Floating menu — portalled to document.body so no parent overflow
+          can clip it. Flips above the kebab when there's no room below. */}
+      {menuOpen && menuPos && typeof document !== 'undefined' && createPortal(
         <div
           ref={menuRef}
           role="menu"
           style={{
-            position: 'absolute',
-            top: 'calc(100% + 6px)',
-            right: 12,
-            minWidth: 200,
+            position: 'fixed',
+            top:  menuPos.top,
+            left: menuPos.left,
+            width: 240,
             background: t.card || '#111',
             border: `1px solid ${accent}40`,
             borderRadius: 12,
-            boxShadow: `0 18px 40px rgba(0,0,0,.45), 0 0 0 1px ${accent}10 inset`,
+            boxShadow: `0 22px 50px rgba(0,0,0,.55), 0 0 0 1px ${accent}10 inset`,
             backdropFilter: 'blur(12px)',
             padding: 4,
-            zIndex: 50,
-            animation: 'auditorMenuIn .14s cubic-bezier(.34,1.2,.64,1)',
+            zIndex: 9999,
+            transformOrigin: menuPos.flipUp ? 'bottom right' : 'top right',
+            animation: 'auditorMenuIn .16s cubic-bezier(.34,1.2,.64,1)',
           }}>
+          {/* Header — confirms which auditor this menu acts on, so an
+              accidental kebab click doesn't fire on the wrong row. */}
+          <div style={{
+            padding: '10px 12px 8px',
+            borderBottom: `1px dashed ${t.border}`,
+            marginBottom: 4,
+          }}>
+            <div style={{ fontSize: 11.5, color: t.text1, fontWeight: 700, lineHeight: 1.2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {a.full_name || '—'}
+            </div>
+            <div style={{ fontSize: 9.5, color: t.text4, marginTop: 2, fontFamily: 'monospace', letterSpacing: '.02em', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {a.email || ''}
+            </div>
+          </div>
+
           <button
             type="button"
             role="menuitem"
@@ -1215,16 +1266,15 @@ function AuditorRow({ auditor, accent, t, isMobile, onToggleActive }) {
             <span style={{ flex: 1 }}>{isActive ? 'Remove from active pool' : 'Re-activate'}</span>
           </button>
           <div style={{
-            padding: '8px 12px 4px',
+            padding: '6px 12px 8px',
             fontSize: 10, color: t.text4, lineHeight: 1.4,
-            borderTop: `1px dashed ${t.border}`,
-            marginTop: 2,
           }}>
             {isActive
               ? 'Soft removal · history preserved · reversible'
               : 'Returns to the shift picker · access restored'}
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
 
       <style>{`
