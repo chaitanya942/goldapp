@@ -2592,11 +2592,12 @@ function SourceSection({
                           // Optional trailing column for the audit_hold control —
                           // only when SourceSection was given onToggleHold (Bangalore S1).
                           const billCols = selectable
-                            ? `20px 130px minmax(0, 1fr) 100px 100px 130px${onToggleHold ? ' 70px' : ''}`
-                            : `130px minmax(0, 1fr) 100px 100px 130px${onToggleHold ? ' 70px' : ''}`
+                            ? `20px 78px 130px minmax(0, 1fr) 100px 100px 130px${onToggleHold ? ' 70px' : ''}`
+                            : `78px 130px minmax(0, 1fr) 100px 100px 130px${onToggleHold ? ' 70px' : ''}`
                           const headerCols = (
                             <>
                               {selectable && <span />}
+                              <span>Date</span>
                               <span>App ID</span>
                               <span>Customer</span>
                               <span style={{ textAlign: 'right' }}>Gross</span>
@@ -2644,6 +2645,10 @@ function SourceSection({
                                         transition: 'all .12s ease',
                                       }}>{billChecked ? '✓' : ''}</span>
                                     )}
+                                    {/* Purchase date — compact "10 Jun" form. */}
+                                    <span style={{ color: t.text3, fontWeight: 600, whiteSpace: 'nowrap' }}>
+                                      {bill.purchase_date ? fmtDateShort(bill.purchase_date) : '—'}
+                                    </span>
                                     <span style={{ color: t.gold, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{bill.application_id || '—'}</span>
                                     {/* Customer cell — stacked with optional booking caption (only
                                         present for Section 5 / S4 booked-pending rows). When the
