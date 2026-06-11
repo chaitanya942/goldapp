@@ -20,8 +20,9 @@
 // All bodies are first-cut shells. Real data + actions land in
 // subsequent passes.
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { createPortal } from 'react-dom'
+import { openConfirm } from '../ui/ConfirmDialog'
 import { useApp } from '../../lib/context'
 import { supabase } from '../../lib/supabase'
 import { authedFetch } from '../../lib/authedFetch'
@@ -244,6 +245,35 @@ export default function AuditRoster() {
     }
   }, [nightDate, morningDate, fetchShifts])
 
+  // ── Auditor activate/deactivate ──────────────────────────────────────────
+  // Soft toggle is_active on user_profiles via the kind: 'set_auditor_active'
+  // POST. Confirmation is handled at the row level (the AuditorRow component
+  // opens a themed dialog before calling this). On success, refetch the
+  // auditors list and surface a toast; on failure, leave state untouched.
+  const toggleAuditorActive = useCallback(async (auditorId, nextActive) => {
+    try {
+      const res = await authedFetch('/api/audit-shifts', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ kind: 'set_auditor_active', auditor_id: auditorId, is_active: nextActive }),
+      })
+      const j = await res.json().catch(() => ({}))
+      if (!res.ok || j.error) {
+        setToast({ msg: j.error || 'Update failed', type: 'error', key: Date.now() })
+        return false
+      }
+      setToast({
+        msg:  nextActive ? `${j.auditor?.full_name || 'Auditor'} re-activated.` : `${j.auditor?.full_name || 'Auditor'} removed from the active pool.`,
+        type: 'success', key: Date.now(),
+      })
+      await fetchAuditors()
+      return true
+    } catch (e) {
+      setToast({ msg: e.message || 'Update failed', type: 'error', key: Date.now() })
+      return false
+    }
+  }, [fetchAuditors])
+
   return (
     <div style={{
       padding: isMobile ? '12px 12px 80px' : '24px 28px',
@@ -365,6 +395,7 @@ export default function AuditRoster() {
               historyShifts={historyShifts}
               historyLoading={historyLoading}
               onRefresh={fetchHistory}
+              onToggleAuditorActive={toggleAuditorActive}
             />
           )}
           extras={(section, t) => extrasFor(section, t, () => setModalOpen(true))}
@@ -947,7 +978,7 @@ function fmtPrettyDate(ymd) {
   return d.toLocaleDateString('en-IN', { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' })
 }
 
-function HistoryBody({ section, accent, t, isMobile = false, auditors = [], loading = false, historyShifts = null, historyLoading = false, onRefresh }) {
+function HistoryBody({ section, accent, t, isMobile = false, auditors = [], loading = false, historyShifts = null, historyLoading = false, onRefresh, onToggleAuditorActive }) {
   if (section.id === 'history') {
     return <HistoryShiftsList accent={accent} t={t} shifts={historyShifts} loading={historyLoading} onRefresh={onRefresh} icon={section.icon} isMobile={isMobile} />
   }
@@ -979,52 +1010,224 @@ function HistoryBody({ section, accent, t, isMobile = false, auditors = [], load
   return (
     <div style={{ padding: '12px 18px 18px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
       {auditors.map(a => (
-        <div key={a.id} style={{
-          background:    t.card2 || t.card,
-          border:        `1px solid ${t.border}`,
-          borderRadius:  '10px',
-          padding:       '12px 16px',
-          display:       'flex',
-          alignItems:    'center',
-          gap:           '14px',
-          transition:    'border-color .15s ease, transform .15s ease',
-        }}
-        onMouseEnter={e => { e.currentTarget.style.borderColor = `${accent}60`; e.currentTarget.style.transform = 'translateY(-1px)' }}
-        onMouseLeave={e => { e.currentTarget.style.borderColor = t.border; e.currentTarget.style.transform = 'translateY(0)' }}>
-          {/* Avatar — first-letter circle, accent tinted */}
-          <div style={{
-            width: '36px', height: '36px', borderRadius: '50%',
-            background: `linear-gradient(135deg, ${accent}30, ${accent}10)`,
-            border:     `1px solid ${accent}40`,
-            display:    'flex', alignItems: 'center', justifyContent: 'center',
-            color:      accent,
-            fontWeight: 700,
-            fontSize:   '13px',
-            flexShrink: 0,
-          }}>{(a.full_name || a.email || '?').charAt(0).toUpperCase()}</div>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: '13px', color: t.text1, fontWeight: 600, lineHeight: 1.2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-              {a.full_name || '—'}
-            </div>
-            <div style={{ fontSize: '11px', color: t.text3, marginTop: '2px', fontFamily: 'monospace', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-              {a.email || '—'}
-            </div>
-          </div>
-          <span style={{
-            fontSize: '9px',
-            color: a.is_active === false ? t.text4 : t.green,
-            background: a.is_active === false ? `${t.text4}15` : `${t.green}15`,
-            border: `1px solid ${(a.is_active === false ? t.text4 : t.green)}40`,
-            borderRadius: '999px',
-            padding: '2px 8px',
-            fontWeight: 700,
-            letterSpacing: '.05em',
-            flexShrink: 0,
-          }}>
-            {a.is_active === false ? 'INACTIVE' : 'ACTIVE'}
-          </span>
-        </div>
+        <AuditorRow
+          key={a.id}
+          auditor={a}
+          accent={accent}
+          t={t}
+          isMobile={isMobile}
+          onToggleActive={onToggleAuditorActive}
+        />
       ))}
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AuditorRow — premium row with hover state + kebab menu for activate/remove.
+// Avatar, name, email, status pill, and a discrete ⋮ menu on the right. The
+// menu opens a small floating dropdown anchored to the kebab; clicking the
+// action item opens a themed confirmation dialog (openConfirm) and on
+// confirm calls onToggleActive(id, nextActive). Click-outside dismisses the
+// menu; Escape too. No external dropdown lib — pure portal+state.
+// ─────────────────────────────────────────────────────────────────────────────
+function AuditorRow({ auditor, accent, t, isMobile, onToggleActive }) {
+  const a = auditor
+  const isActive = a.is_active !== false
+  const [hovered,  setHovered]  = useState(false)
+  const [menuOpen, setMenuOpen] = useState(false)
+  const [busy,     setBusy]     = useState(false)
+  const kebabRef  = useRef(null)
+  const menuRef   = useRef(null)
+
+  // Click-outside / Escape close the menu so it never feels stuck open.
+  useEffect(() => {
+    if (!menuOpen) return
+    const onDocClick = (e) => {
+      if (menuRef.current && menuRef.current.contains(e.target)) return
+      if (kebabRef.current && kebabRef.current.contains(e.target)) return
+      setMenuOpen(false)
+    }
+    const onEsc = (e) => { if (e.key === 'Escape') setMenuOpen(false) }
+    document.addEventListener('mousedown', onDocClick)
+    document.addEventListener('keydown',   onEsc)
+    return () => {
+      document.removeEventListener('mousedown', onDocClick)
+      document.removeEventListener('keydown',   onEsc)
+    }
+  }, [menuOpen])
+
+  const onConfirmToggle = async () => {
+    setMenuOpen(false)
+    const next = !isActive
+    const ok = await openConfirm({
+      title:    next ? `Re-activate ${a.full_name || 'this auditor'}?` : `Remove ${a.full_name || 'this auditor'}?`,
+      message:  next
+        ? `${a.full_name || 'They'} will appear in the shift picker again and regain access. Past audit history is unchanged.`
+        : `${a.full_name || 'They'} will no longer appear in the shift picker and won't be able to log in.\n\nPast audit history is preserved — this is a soft removal you can undo by re-activating.`,
+      confirmLabel: next ? 'Re-activate' : 'Remove',
+      danger:       !next,
+    })
+    if (!ok) return
+    setBusy(true)
+    try { await onToggleActive?.(a.id, next) } finally { setBusy(false) }
+  }
+
+  const statusColor = isActive ? t.green : t.text4
+  const inactiveOpacity = isActive ? 1 : 0.55
+
+  return (
+    <div
+      style={{
+        position:    'relative',
+        background:  isActive
+          ? (t.card2 || t.card)
+          : `linear-gradient(135deg, ${t.text4}08, ${t.card2 || t.card})`,
+        border:      `1px solid ${hovered ? `${accent}60` : t.border}`,
+        borderRadius:'12px',
+        padding:     '12px 16px',
+        display:     'flex',
+        alignItems:  'center',
+        gap:         '14px',
+        transform:   hovered ? 'translateY(-1px)' : 'translateY(0)',
+        boxShadow:   hovered ? `0 6px 18px rgba(0,0,0,.22), 0 0 0 1px ${accent}18 inset` : 'none',
+        transition:  'border-color .18s ease, transform .18s ease, box-shadow .2s ease, background .2s ease',
+        opacity:     busy ? 0.55 : 1,
+      }}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}>
+
+      {/* Avatar */}
+      <div style={{
+        width: '38px', height: '38px', borderRadius: '50%',
+        background: `linear-gradient(135deg, ${accent}30, ${accent}10)`,
+        border:     `1px solid ${accent}40`,
+        display:    'flex', alignItems: 'center', justifyContent: 'center',
+        color:      accent,
+        fontWeight: 700,
+        fontSize:   '14px',
+        flexShrink: 0,
+        opacity:    inactiveOpacity,
+      }}>{(a.full_name || a.email || '?').charAt(0).toUpperCase()}</div>
+
+      {/* Identity */}
+      <div style={{ flex: 1, minWidth: 0, opacity: inactiveOpacity }}>
+        <div style={{ fontSize: '13.5px', color: t.text1, fontWeight: 600, lineHeight: 1.2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          {a.full_name || '—'}
+        </div>
+        <div style={{ fontSize: '11px', color: t.text3, marginTop: '3px', fontFamily: 'monospace', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          {a.email || '—'}
+        </div>
+      </div>
+
+      {/* Status pill */}
+      <span style={{
+        fontSize: '9.5px',
+        color: statusColor,
+        background: `${statusColor}15`,
+        border: `1px solid ${statusColor}45`,
+        borderRadius: '999px',
+        padding: '3px 9px',
+        fontWeight: 700,
+        letterSpacing: '.06em',
+        flexShrink: 0,
+        whiteSpace: 'nowrap',
+      }}>
+        {isActive ? 'ACTIVE' : 'INACTIVE'}
+      </span>
+
+      {/* Kebab menu trigger — always visible on mobile, hover-revealed on
+          desktop so the row stays calm at rest. */}
+      <button
+        ref={kebabRef}
+        type="button"
+        aria-label="Auditor actions"
+        onClick={() => setMenuOpen(o => !o)}
+        disabled={busy}
+        style={{
+          width: 30, height: 30,
+          borderRadius: 8,
+          border: `1px solid ${menuOpen ? `${accent}80` : `${t.border}`}`,
+          background: menuOpen ? `${accent}18` : 'transparent',
+          color: menuOpen ? accent : t.text3,
+          cursor: busy ? 'not-allowed' : 'pointer',
+          fontSize: 18, lineHeight: 1,
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          opacity: isMobile ? 1 : (hovered || menuOpen ? 1 : 0.35),
+          transition: 'opacity .18s ease, background .18s ease, border-color .18s ease, color .18s ease',
+          flexShrink: 0,
+          padding: 0,
+        }}
+        onMouseEnter={e => { e.currentTarget.style.background = `${accent}18`; e.currentTarget.style.color = accent }}
+        onMouseLeave={e => { if (!menuOpen) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = t.text3 } }}>
+        ⋮
+      </button>
+
+      {/* Floating menu */}
+      {menuOpen && (
+        <div
+          ref={menuRef}
+          role="menu"
+          style={{
+            position: 'absolute',
+            top: 'calc(100% + 6px)',
+            right: 12,
+            minWidth: 200,
+            background: t.card || '#111',
+            border: `1px solid ${accent}40`,
+            borderRadius: 12,
+            boxShadow: `0 18px 40px rgba(0,0,0,.45), 0 0 0 1px ${accent}10 inset`,
+            backdropFilter: 'blur(12px)',
+            padding: 4,
+            zIndex: 50,
+            animation: 'auditorMenuIn .14s cubic-bezier(.34,1.2,.64,1)',
+          }}>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={onConfirmToggle}
+            style={{
+              width: '100%', textAlign: 'left',
+              padding: '10px 12px',
+              border: 'none',
+              borderRadius: 8,
+              background: 'transparent',
+              color: isActive ? (t.red || '#e05555') : (t.green || '#3aaa6a'),
+              fontSize: 12, fontWeight: 700, letterSpacing: '.04em',
+              cursor: 'pointer',
+              display: 'flex', alignItems: 'center', gap: 10,
+              fontFamily: 'inherit',
+              transition: 'background .12s ease',
+            }}
+            onMouseEnter={e => { e.currentTarget.style.background = isActive ? `${t.red || '#e05555'}14` : `${t.green || '#3aaa6a'}14` }}
+            onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}>
+            <span style={{
+              width: 22, height: 22, borderRadius: 6,
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+              background: isActive ? `${t.red || '#e05555'}20` : `${t.green || '#3aaa6a'}20`,
+              fontSize: 12,
+            }}>{isActive ? '−' : '+'}</span>
+            <span style={{ flex: 1 }}>{isActive ? 'Remove from active pool' : 'Re-activate'}</span>
+          </button>
+          <div style={{
+            padding: '8px 12px 4px',
+            fontSize: 10, color: t.text4, lineHeight: 1.4,
+            borderTop: `1px dashed ${t.border}`,
+            marginTop: 2,
+          }}>
+            {isActive
+              ? 'Soft removal · history preserved · reversible'
+              : 'Returns to the shift picker · access restored'}
+          </div>
+        </div>
+      )}
+
+      <style>{`
+        @keyframes auditorMenuIn {
+          from { opacity: 0; transform: translateY(-4px) scale(.96); }
+          to   { opacity: 1; transform: translateY(0)    scale(1);   }
+        }
+      `}</style>
     </div>
   )
 }

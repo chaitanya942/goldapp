@@ -159,6 +159,39 @@ export async function POST(req) {
   if (!auth.ok) return auth.response
 
   const body = await req.json().catch(() => ({}))
+
+  // ── kind: 'set_auditor_active' ───────────────────────────────────────────
+  // Soft-toggle is_active on user_profiles. Used by the AuditorRow kebab
+  // menu to deactivate (remove from the active pool) without losing the
+  // audit history those rows reference. Re-activating is the same call
+  // with active:true.
+  if (body?.kind === 'set_auditor_active') {
+    const { auditor_id, is_active } = body
+    if (!auditor_id) {
+      return Response.json({ error: 'auditor_id required' }, { status: 400 })
+    }
+    if (typeof is_active !== 'boolean') {
+      return Response.json({ error: 'is_active must be true or false' }, { status: 400 })
+    }
+    const { data: profile } = await supabase
+      .from('user_profiles')
+      .select('id, role, full_name, email')
+      .eq('id', auditor_id)
+      .maybeSingle()
+    if (!profile) return Response.json({ error: 'Auditor not found' }, { status: 404 })
+    if (!AUDITOR_ROLES.has(profile.role)) {
+      return Response.json({ error: `User is not an auditor (role '${profile.role}').` }, { status: 400 })
+    }
+    const { data, error } = await supabase
+      .from('user_profiles')
+      .update({ is_active })
+      .eq('id', auditor_id)
+      .select('id, email, full_name, role, is_active')
+      .single()
+    if (error) return Response.json({ error: error.message }, { status: 500 })
+    return Response.json({ auditor: data })
+  }
+
   const { shift_date, shift_type, auditor_id } = body
 
   if (!shift_date || !DATE_RE.test(shift_date)) {
