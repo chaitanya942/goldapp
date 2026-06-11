@@ -41,7 +41,12 @@ const supabase = createClient(
 )
 
 // ── GET: list pending bills (default) OR historical audits (?mode=history) ──
-export async function GET(req) {
+//
+// Wrapped in a top-level try/catch so ANY throw (Supabase REST 400, undefined
+// helper, URL parse error, etc.) surfaces with a real message + stack in the
+// Railway logs AND in the JSON response — not the opaque 'Bad Request' that
+// otherwise leaks through when an Error.message happens to equal that.
+async function handleGet(req) {
   const auth = await requireAuthForPage(req, 'audit-data')
   if (!auth.ok) return auth.response
 
@@ -507,6 +512,30 @@ export async function GET(req) {
     })
 
   return Response.json({ bangalore, outstation })
+}
+
+// Public GET — wraps the inner handler with a top-level try/catch. Any
+// uncaught throw lands here, gets logged in full to Railway, and is
+// returned as a 500 with the actual message + name + first stack frame.
+// Critical: when an Error's .message happens to be 'Bad Request' (a known
+// Supabase REST trap), the previous bare-throw path leaked through Next.js
+// as the opaque body the client kept seeing.
+export async function GET(req) {
+  try {
+    return await handleGet(req)
+  } catch (err) {
+    const stackFirst = String(err?.stack || '').split('\n').slice(0, 3).join(' | ')
+    console.error('[collection-audit] GET unhandled:',
+      'name=',   err?.name,
+      'message=',err?.message,
+      'stack=',  stackFirst,
+    )
+    return Response.json({
+      error:   err?.message || 'Server error',
+      name:    err?.name    || null,
+      stack:   stackFirst   || null,
+    }, { status: 500 })
+  }
 }
 
 // ── POST: record an audit action on a single bill ───────────────────────────
