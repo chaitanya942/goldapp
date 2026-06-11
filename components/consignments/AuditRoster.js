@@ -1079,7 +1079,12 @@ function AuditorRow({ auditor, accent, t, isMobile, onToggleActive }) {
   return (
     <div
       style={{
+        // Lift the row above its siblings when the menu is open so the
+        // absolute-positioned dropdown isn't painted over by the next row's
+        // background. Below that, sit just above default so hover shadows
+        // also clear neighbours without layering issues.
         position:    'relative',
+        zIndex:      menuOpen ? 100 : (hovered ? 2 : 1),
         background:  isActive
           ? (t.card2 || t.card)
           : `linear-gradient(135deg, ${t.text4}08, ${t.card2 || t.card})`,
