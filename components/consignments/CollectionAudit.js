@@ -208,15 +208,33 @@ export default function CollectionAudit() {
 
   const fetchAll = useCallback(async () => {
     setLoading(true)
-    const res = await authedFetch('/api/collection-audit')
-    const j   = await res.json()
-    if (!res.ok || j.error) {
-      setToast({ msg: j.error || 'Failed to load audit queue', type: 'error', key: Date.now() })
-      setLoading(false)
-      return
+    try {
+      const res = await authedFetch('/api/collection-audit')
+      // Defensive parse — non-JSON responses (HTML error pages, plain-text
+      // upstream 'Bad Request' from a proxy / Next.js, etc.) used to throw
+      // here and the toast would surface the raw thrown text, leaving ops
+      // to guess what failed. Now we capture both the JSON shape AND the
+      // raw HTTP status so the toast actually carries the diagnostic.
+      let j = null
+      let rawText = null
+      try {
+        j = await res.json()
+      } catch {
+        try { rawText = await res.clone().text() } catch {}
+      }
+      if (!res.ok || j?.error) {
+        const detail = j?.error || rawText?.slice(0, 120) || `HTTP ${res.status}`
+        console.error('[CollectionAudit] fetchAll failed:', { status: res.status, body: j ?? rawText })
+        setToast({ msg: `Failed to load audit queue — ${detail}`, type: 'error', key: Date.now() })
+        setLoading(false)
+        return
+      }
+      setBangalore(j?.bangalore || [])
+      setOutstation(j?.outstation || [])
+    } catch (e) {
+      console.error('[CollectionAudit] fetchAll exception:', e)
+      setToast({ msg: `Network error — ${e?.message || 'unknown'}`, type: 'error', key: Date.now() })
     }
-    setBangalore(j.bangalore || [])
-    setOutstation(j.outstation || [])
     setLoading(false)
   }, [])
 
