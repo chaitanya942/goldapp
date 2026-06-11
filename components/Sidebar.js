@@ -25,9 +25,10 @@ const NAV_ITEMS = [
   },
   { id: 'collection-audit', label: 'Collection Audit', icon: 'M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z', desc: 'At-HO weight check',
     children: [
-      { id: 'audit-data',    label: 'Audit Data',    dot: '#5ec1d6' },
-      { id: 'audit-roster',  label: 'Audit Roster',  dot: '#c9a84c' },
-      { id: 'audit-report',  label: 'Audit Report',  dot: '#8c5ac8' },
+      { id: 'audit-data',         label: 'Audit Data',         dot: '#5ec1d6' },
+      { id: 'audit-roster',       label: 'Audit Roster',       dot: '#c9a84c' },
+      { id: 'audit-report',       label: 'Audit Report',       dot: '#8c5ac8' },
+      { id: 'discrepancy-cases',  label: 'Discrepancy Cases',  dot: '#e9a942' },
     ],
   },
   { id: 'melting', label: 'Melting', icon: 'M17.657 18.657A8 8 0 016.343 7.343S7 9 9 10c0-2 .5-5 2.986-7C14 5 16.09 5.777 17.656 7.343A7.975 7.975 0 0120 13a7.975 7.975 0 01-2.343 5.657z', desc: 'Processing' },
