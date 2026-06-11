@@ -426,15 +426,35 @@ async function handleGet(req) {
     return all
   }
 
+  // PostgREST builds the .in() filter as a comma-separated query string. A
+  // chunk of 1000 UUIDs produces a ~36 KB URL — most HTTP layers (Supabase's
+  // edge, Railway's proxy, Cloudflare) reject anything over 8 KB as 'Bad
+  // Request'. The supabase-js docs recommend keeping .in() arrays under ~100
+  // for exactly this reason. We chunk in 100s and let the outer await flush
+  // sequentially; the round-trip cost is negligible vs. the previous silent
+  // breakage when bills > 100 were in flight.
+  const IN_CHUNK = 100
+
   async function fetchLinksForPurchaseIds(purchaseIds) {
     const all = []
-    for (let i = 0; i < purchaseIds.length; i += CHUNK) {
-      const slice = purchaseIds.slice(i, i + CHUNK)
+    for (let i = 0; i < purchaseIds.length; i += IN_CHUNK) {
+      const slice = purchaseIds.slice(i, i + IN_CHUNK)
       const { data, error } = await supabase
         .from('consignment_items')
         .select('purchase_id, consignment_id')
         .in('purchase_id', slice)
-      if (error) throw error
+      if (error) {
+        // Wrap so the upstream diagnostic shows the actual Supabase code +
+        // hint, not the opaque {error:'Bad Request'} a plain POJO throw
+        // produces. Same wrapping pattern as fetchAllInConsignmentPurchases.
+        const enriched = new Error(error.message || 'consignment_items IN lookup failed')
+        enriched.name  = error.code ? `SupabaseError(${error.code})` : 'SupabaseError'
+        enriched.cause = {
+          code: error.code, hint: error.hint, details: error.details, message: error.message,
+          context: `fetchLinksForPurchaseIds chunk=${i}-${i + slice.length - 1} of ${purchaseIds.length}`,
+        }
+        throw enriched
+      }
       all.push(...(data || []))
     }
     return all
@@ -469,25 +489,47 @@ async function handleGet(req) {
 
   let consignmentMap = new Map()
   if (consignmentIds.length) {
-    // consignmentIds is bounded by outstationRows.length; chunk just in case.
+    // Same URL-length trap as fetchLinksForPurchaseIds: 1000 UUIDs in an
+    // .in() filter overflows PostgREST's URL budget. Chunk at IN_CHUNK and
+    // check the error every iteration (previously swallowed silently).
     const csAll = []
-    for (let i = 0; i < consignmentIds.length; i += CHUNK) {
-      const slice = consignmentIds.slice(i, i + CHUNK)
-      const { data: cs } = await supabase
+    for (let i = 0; i < consignmentIds.length; i += IN_CHUNK) {
+      const slice = consignmentIds.slice(i, i + IN_CHUNK)
+      const { data: cs, error: csErr } = await supabase
         .from('consignments')
         .select('id, tmp_prf_no, challan_no, branch_name, dest_branch, movement_type, status, dispatched_at, total_bills, total_net_wt, total_gross_wt, total_amount')
         .in('id', slice)
+      if (csErr) {
+        const enriched = new Error(csErr.message || 'consignments IN lookup failed')
+        enriched.name  = csErr.code ? `SupabaseError(${csErr.code})` : 'SupabaseError'
+        enriched.cause = { code: csErr.code, hint: csErr.hint, details: csErr.details, message: csErr.message, context: `consignments chunk=${i}` }
+        throw enriched
+      }
       csAll.push(...(cs || []))
     }
     for (const c of csAll) if (c?.branch_name) allBranchNames.add(c.branch_name)
 
     let branchByName = new Map()
     if (allBranchNames.size) {
-      const { data: branchMeta } = await supabase
-        .from('branches')
-        .select('name, region, delivery_tat_hours')
-        .in('name', [...allBranchNames])
-      branchByName = new Map((branchMeta || []).map(b => [b.name, b]))
+      // Also chunked. allBranchNames usually < 200 so a single batch would
+      // work today, but the chunked form is cheap and future-proof.
+      const branchNameArr = [...allBranchNames]
+      const branchMetaAll = []
+      for (let i = 0; i < branchNameArr.length; i += IN_CHUNK) {
+        const slice = branchNameArr.slice(i, i + IN_CHUNK)
+        const { data: branchMeta, error: bmErr } = await supabase
+          .from('branches')
+          .select('name, region, delivery_tat_hours')
+          .in('name', slice)
+        if (bmErr) {
+          const enriched = new Error(bmErr.message || 'branches IN lookup failed')
+          enriched.name  = bmErr.code ? `SupabaseError(${bmErr.code})` : 'SupabaseError'
+          enriched.cause = { code: bmErr.code, hint: bmErr.hint, details: bmErr.details, message: bmErr.message, context: `branches chunk=${i}` }
+          throw enriched
+        }
+        branchMetaAll.push(...(branchMeta || []))
+      }
+      branchByName = new Map(branchMetaAll.map(b => [b.name, b]))
     }
 
     // Enrich each consignment with expected_arrival_date = dispatched_at's
