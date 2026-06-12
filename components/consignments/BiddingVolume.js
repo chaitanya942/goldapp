@@ -1309,6 +1309,7 @@ export default function BiddingVolume() {
         viewOnly
         onCreateConsignment={handleCreateConsignment}
         onUnbookBranch={handleUnbookBranch}
+        consolidateRegions={['Bangalore']}
         emptyMsg="No stalled bookings — every booked bill is in motion or already received."
       />
 
@@ -2321,6 +2322,13 @@ function SourceSection({
   // 1-4 which don't pass these).
   onCreateConsignment,
   onUnbookBranch,
+  // Region names that should render as a single collapsed summary row
+  // instead of an inline divider with every branch listed. Currently
+  // only Section 5 (Booked — consignment not created) passes
+  // ['Bangalore'] so ops sees one BANGALORE roll-up by default and
+  // clicks to drill into the per-branch breakdown. Other regions in
+  // the same section stay branch-wise.
+  consolidateRegions,
   emptyMsg,
 }) {
   const tone = accent || t.gold
@@ -2332,6 +2340,22 @@ function SourceSection({
     if (next.has(name)) next.delete(name); else next.add(name)
     return next
   })
+  // Per-region expand state for the consolidated roll-up. Only applies to
+  // regions named in consolidateRegions; everything else renders the
+  // branch list inline as before. Starts COLLAPSED so the default view
+  // matches what ops asked for ('by default let it be Bangalore').
+  const [openConsolidated, setOpenConsolidated] = useState(() => new Set())
+  const toggleConsolidatedExpand = (region) => setOpenConsolidated(prev => {
+    const next = new Set(prev)
+    if (next.has(region)) next.delete(region); else next.add(region)
+    return next
+  })
+  const consolidateSet = (() => {
+    if (!consolidateRegions) return null
+    if (consolidateRegions instanceof Set) return consolidateRegions
+    return new Set(consolidateRegions)
+  })()
+  const isConsolidatedRegion = (region) => consolidateSet?.has(region) || false
 
   // Group branches by region in insertion order (server already sorted by
   // total_net_wt within each branch list).
@@ -2427,20 +2451,93 @@ function SourceSection({
               if (sel === all.length) return 'all'
               return 'partial'
             })()
+            const consolidated   = isConsolidatedRegion(region)
+            const regionExpanded = openConsolidated.has(region)
+            const showBranches   = !consolidated || regionExpanded
+            // Region totals — only need them when rendering the
+            // consolidated roll-up row.
+            const regBills = consolidated ? rows.reduce((s, r) => s + (r.total_bills    || 0), 0) : 0
+            const regGross = consolidated ? rows.reduce((s, r) => s + (r.total_gross_wt || 0), 0) : 0
+            const regNet   = consolidated ? rows.reduce((s, r) => s + (r.total_net_wt   || 0), 0) : 0
             return (
               <div key={region} style={{ padding: '11px 20px', borderTop: `1px solid ${t.border}25` }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 7 }}>
-                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, fontSize: 11, color: rColor, fontWeight: 800, letterSpacing: '.1em', textTransform: 'uppercase' }}>
-                    <span style={{ width: 6, height: 6, borderRadius: '50%', background: rColor, display: 'inline-block' }} />
-                    {region}
-                  </span>
-                  {selectable && rows.length >= 1 && (
-                    <button onClick={() => onToggleRegionAll?.(rows)}
-                      style={{ background: regionState === 'none' ? 'transparent' : `${rColor}14`, border: `1px solid ${regionState === 'none' ? t.border2 : `${rColor}55`}`, borderRadius: 6, color: regionState === 'none' ? t.text3 : rColor, fontSize: 11, fontWeight: 700, cursor: 'pointer', letterSpacing: '.02em', padding: '3px 10px' }}>
-                      {regionState === 'all' ? 'Clear region' : regionState === 'partial' ? 'Select rest' : 'Select all'}
-                    </button>
-                  )}
-                </div>
+                {consolidated ? (
+                  // ── Consolidated region row — single roll-up that drills
+                  //    down into the existing per-branch list on click.
+                  //    Layout mirrors a branch row so the columns line up
+                  //    with the regular branch rows that appear below when
+                  //    expanded.
+                  <div
+                    onClick={() => toggleConsolidatedExpand(region)}
+                    onMouseEnter={(e) => { e.currentTarget.style.background = `${rColor}10` }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = regionExpanded ? `${rColor}0c` : 'transparent' }}
+                    style={{
+                      display: 'grid', gridTemplateColumns: rowGrid, alignItems: 'center',
+                      columnGap: 14, padding: '12px 11px', borderRadius: 8,
+                      cursor: 'pointer',
+                      background: regionExpanded ? `${rColor}0c` : 'transparent',
+                      border: `1px solid ${regionExpanded ? `${rColor}50` : `${rColor}28`}`,
+                      transition: 'background .15s ease, border-color .15s ease',
+                    }}>
+                    {/* Col 1: region dot (no checkbox in consolidated row) */}
+                    <span style={{
+                      width: 16, height: 16, borderRadius: '50%',
+                      background: `${rColor}40`, border: `1.5px solid ${rColor}`,
+                      display: 'inline-flex', flexShrink: 0,
+                    }} />
+                    {/* Col 2: REGION label + branch count */}
+                    <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, minWidth: 0 }}>
+                      <span style={{ fontSize: 14, color: rColor, fontWeight: 800, letterSpacing: '.08em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>{region}</span>
+                      <span style={{ fontSize: 11, color: t.text3, fontWeight: 600, whiteSpace: 'nowrap' }}>
+                        {rows.length} branch{rows.length === 1 ? '' : 'es'}
+                      </span>
+                      <span style={{ fontSize: 10.5, color: t.text4, fontWeight: 500, fontStyle: 'italic' }}>
+                        {regionExpanded ? 'click to collapse' : 'click to drill down'}
+                      </span>
+                    </div>
+                    {/* Col 3: aggregated gross */}
+                    <span title="Aggregated gross weight" style={{ fontSize: 12.5, color: t.text2, fontFamily: 'monospace', textAlign: 'right', fontWeight: 600, whiteSpace: 'nowrap' }}>
+                      {fmt(regGross, 2)}<span style={{ fontSize: 10, color: t.text4, marginLeft: 2, fontWeight: 600 }}>g gross</span>
+                    </span>
+                    {/* Col 4: aggregated net (primary) */}
+                    <span title="Aggregated net weight" style={{ fontSize: 15, color: tone, fontFamily: 'monospace', textAlign: 'right', fontWeight: 800, whiteSpace: 'nowrap', letterSpacing: '-.01em' }}>
+                      {fmt(regNet, 2)}<span style={{ fontSize: 11, color: t.text3, marginLeft: 2, fontWeight: 600 }}>g</span>
+                    </span>
+                    {/* Col 5: aggregated bill count */}
+                    <span style={{ fontSize: 12, color: t.text2, textAlign: 'right', fontFamily: 'monospace', whiteSpace: 'nowrap', fontWeight: 700 }}>
+                      {regBills} bill{regBills === 1 ? '' : 's'}
+                    </span>
+                    {/* Col 6: expand caret */}
+                    <span style={{
+                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                      width: 24, height: 24, borderRadius: 6,
+                      color: regionExpanded ? rColor : t.text3,
+                      fontSize: 13, fontWeight: 800,
+                      background: regionExpanded ? `${rColor}18` : 'transparent',
+                      border: `1px solid ${regionExpanded ? `${rColor}66` : 'transparent'}`,
+                      transition: 'all .15s ease',
+                    }}>
+                      {regionExpanded ? '▾' : '▸'}
+                    </span>
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 7 }}>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, fontSize: 11, color: rColor, fontWeight: 800, letterSpacing: '.1em', textTransform: 'uppercase' }}>
+                      <span style={{ width: 6, height: 6, borderRadius: '50%', background: rColor, display: 'inline-block' }} />
+                      {region}
+                    </span>
+                    {selectable && rows.length >= 1 && (
+                      <button onClick={() => onToggleRegionAll?.(rows)}
+                        style={{ background: regionState === 'none' ? 'transparent' : `${rColor}14`, border: `1px solid ${regionState === 'none' ? t.border2 : `${rColor}55`}`, borderRadius: 6, color: regionState === 'none' ? t.text3 : rColor, fontSize: 11, fontWeight: 700, cursor: 'pointer', letterSpacing: '.02em', padding: '3px 10px' }}>
+                        {regionState === 'all' ? 'Clear region' : regionState === 'partial' ? 'Select rest' : 'Select all'}
+                      </button>
+                    )}
+                  </div>
+                )}
+                {showBranches && (
+                  // Tiny left-indent on expanded branches so the visual
+                  // hierarchy (region → branch → bills) is obvious.
+                  <div style={{ marginLeft: consolidated ? 14 : 0, marginTop: consolidated ? 6 : 0, paddingLeft: consolidated ? 10 : 0, borderLeft: consolidated ? `2px solid ${rColor}40` : 'none' }}>
                 {rows.map(b => {
                   const billRows  = Array.isArray(b.bills) ? b.bills : []
                   const branchSt  = selectable ? (branchSelectionState?.(b) || 'none') : 'none'
@@ -2699,6 +2796,8 @@ function SourceSection({
                     </Fragment>
                   )
                 })}
+                  </div>
+                )}
               </div>
             )
           })}
