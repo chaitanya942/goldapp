@@ -80,11 +80,28 @@ const EXPORT_COLS = [
   { key: 'booked_at',                 label: 'Booking Date' },
 ]
 
+// Columns that are TIMESTAMPTZ in the DB — we export them date-only (IST,
+// YYYY-MM-DD) so Excel/Sheets recognise them as dates and the date filter
+// works. Keeping the time component made the filter treat the whole cell
+// as text. transaction_time stays untouched (it's a clock time, not a date).
+const DATE_ONLY_EXPORT_KEYS = new Set(['dispatched_at', 'received_at', 'booked_at'])
+const toIstDateOnly = (v) => {
+  if (!v) return ''
+  if (/^\d{4}-\d{2}-\d{2}$/.test(String(v))) return v   // already plain date
+  const d = new Date(v)
+  return isNaN(d) ? v : d.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' })
+}
+const exportCell = (r, key) => {
+  const raw = r[key]
+  if (DATE_ONLY_EXPORT_KEYS.has(key)) return toIstDateOnly(raw)
+  return raw ?? ''
+}
+
 function exportCSV(rows, filename) {
   const header = EXPORT_COLS.map(c => c.label).join(',')
   const body   = rows.map(r =>
     EXPORT_COLS.map(c => {
-      const v = r[c.key] ?? ''
+      const v = exportCell(r, c.key)
       return typeof v === 'string' && v.includes(',') ? `"${v}"` : v
     }).join(',')
   ).join('\n')
@@ -107,7 +124,7 @@ async function exportXLSX(rows, filename) {
   await loadScript('https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js')
   const data = [
     EXPORT_COLS.map(c => c.label),
-    ...rows.map(r => EXPORT_COLS.map(c => r[c.key] ?? ''))
+    ...rows.map(r => EXPORT_COLS.map(c => exportCell(r, c.key)))
   ]
   const ws = window.XLSX.utils.aoa_to_sheet(data)
   const wb = window.XLSX.utils.book_new()
