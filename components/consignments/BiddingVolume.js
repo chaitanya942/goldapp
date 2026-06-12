@@ -485,6 +485,7 @@ export default function BiddingVolume() {
     const m = {}
     for (const b of bangBranches)     m[b.branch_name] = { ...b, group: 'bangalore' }
     for (const b of inTBranches)      m[b.branch_name] = { ...b, group: 'transit_24h' }
+    for (const b of t48hBranches)     m[b.branch_name] = { ...b, group: 'transit_48h' }
     for (const b of pendBookBranches) m[b.branch_name] = { ...b, group: 'transit_pending_booking' }
     for (const b of bangPendBranches) m[b.branch_name] = { ...b, group: 'bangalore_pending_booking' }
     for (const b of preEodBranches)   m[b.branch_name] = { ...b, group: 'branch_pre_eod' }
@@ -493,7 +494,7 @@ export default function BiddingVolume() {
     for (const b of klS2Branches)   m[b.branch_name] = { ...b, group: 'kl_in_movement' }
     for (const b of klS3Branches)   m[b.branch_name] = { ...b, group: 'kl_at_leaf' }
     return m
-  }, [bangBranches, inTBranches, pendBookBranches, bangPendBranches, preEodBranches, klS1Branches, klS2Branches, klS3Branches])
+  }, [bangBranches, inTBranches, t48hBranches, pendBookBranches, bangPendBranches, preEodBranches, klS1Branches, klS2Branches, klS3Branches])
 
   // Bill-level catalogue across every selectable section in either tab.
   // Tagging via _group lets autoSelectRemaining + selectionMode + branchLocked
@@ -510,6 +511,7 @@ export default function BiddingVolume() {
     }
     collect(bangBranches,     'bangalore')
     collect(inTBranches,      'transit_24h')
+    collect(t48hBranches,     'transit_48h')
     collect(pendBookBranches, 'transit_pending_booking')
     collect(bangPendBranches, 'bangalore_pending_booking')
     collect(preEodBranches,   'branch_pre_eod')
@@ -517,7 +519,7 @@ export default function BiddingVolume() {
     collect(klS2Branches,     'kl_in_movement')
     collect(klS3Branches,     'kl_at_leaf')
     return m
-  }, [bangBranches, inTBranches, pendBookBranches, bangPendBranches, preEodBranches, klS1Branches, klS2Branches, klS3Branches])
+  }, [bangBranches, inTBranches, t48hBranches, pendBookBranches, bangPendBranches, preEodBranches, klS1Branches, klS2Branches, klS3Branches])
 
   const selectedTotal = useMemo(() => {
     let s = 0
@@ -1299,14 +1301,14 @@ export default function BiddingVolume() {
           even when empty. Bangalore on top because that's the largest pool;
           48h-TAT view-only and pre-EOD pickup-pending at the bottom. */}
 
-      {/* 1 · Bangalore Today */}
+      {/* 1 · Today's Bangalore purchases */}
       <SourceSection
         t={t} card={card}
         index={1}
         icon="🏙"
-        title="Bangalore Today"
+        title="Today's Bangalore purchases"
         subtitle={supply?.bangalore_purchase_date
-          ? `Today's Bangalore purchases (${fmtDateShort(supply.bangalore_purchase_date)}) · arrive at HO ${fmtDate(arrivalDate)}`
+          ? `Bangalore purchases (${fmtDateShort(supply.bangalore_purchase_date)}) · arrive at HO ${fmtDate(arrivalDate)}`
           : `Today's Bangalore purchases · arrive at HO ${fmtDate(arrivalDate)}`}
         accent={t.gold}
         branches={bangBranches}
@@ -1320,25 +1322,15 @@ export default function BiddingVolume() {
         onToggleRegionAll={toggleRegionAll}
         branchSelectionState={branchSelectionState}
         onToggleHold={toggleBillHold}
-        subGroup={bangPendBranches.length ? {
-          icon:     '⚠',
-          title:    'Consignment created · booking pending',
-          subtitle: 'Bangalore consignments already dispatched but never booked — created and forgotten, or stuck un-received. Click to drill into branches; select to book.',
-          accent:   t.orange,
-          branches: bangPendBranches,
-          total:    supply?.bangalore_pending_booking?.total,
-          consolidateRegions: ['Bangalore'],
-        } : null}
         emptyMsg="No Bangalore purchases recorded today yet."
       />
 
-      {/* 2 · In-Transit · 24h TAT (arrives tomorrow)
-          + flagged sub-group: consignment created · booking pending. */}
+      {/* 2 · Consignment created — arriving tomorrow (24h) */}
       <SourceSection
         t={t} card={card}
         index={2}
         icon="⇒"
-        title="In-Transit · 24h TAT"
+        title="Consignment created — arriving tomorrow (24h)"
         subtitle={`Already dispatched · arriving at HO ${fmtDate(arrivalDate)}`}
         accent={t.blue}
         branches={inTBranches}
@@ -1351,62 +1343,77 @@ export default function BiddingVolume() {
         onToggleBranchAll={toggleBranchAll}
         onToggleRegionAll={toggleRegionAll}
         branchSelectionState={branchSelectionState}
+        emptyMsg="No 24h-TAT bills currently in transit."
+      />
+
+      {/* 3 · Not booked yet — two bands:
+            a) Old Bangalore purchases, consignment created, never booked
+               (consolidated Bangalore roll-up).
+            b) Outstation consignments created but never booked.
+          Both selectable so ops can book straight from here. */}
+      <SourceSection
+        t={t} card={card}
+        index={3}
+        icon="⚠"
+        title="Not booked yet"
+        subtitle="Consignments dispatched but no booking attached — select to book"
+        accent={t.orange}
+        branches={bangPendBranches}
+        total={{
+          bills:  (supply?.bangalore_pending_booking?.total?.bills  || 0) + (supply?.consignment_pending_booking?.total?.bills  || 0),
+          net_wt: (supply?.bangalore_pending_booking?.total?.net_wt || 0) + (supply?.consignment_pending_booking?.total?.net_wt || 0),
+        }}
+        selectable
+        selected={selected}
+        branchLocked={branchLocked}
+        onToggleBill={toggleBill}
+        onToggleBranchAll={toggleBranchAll}
+        onToggleRegionAll={toggleRegionAll}
+        branchSelectionState={branchSelectionState}
+        consolidateRegions={['Bangalore']}
+        mainLabel={bangPendBranches.length ? {
+          icon:  '🏙',
+          title: 'Old Bangalore purchases · not booked',
+        } : null}
         subGroup={pendBookBranches.length ? {
-          icon:     '⚠',
-          title:    'Consignment created · booking pending',
-          subtitle: 'Already dispatched but no booking attached — created and forgotten, or held to book later. Select to book.',
+          icon:     '⇒',
+          title:    'Consignment created but not booked',
+          subtitle: 'Outstation consignments dispatched, no booking attached.',
           accent:   t.orange,
           branches: pendBookBranches,
           total:    supply?.consignment_pending_booking?.total,
         } : null}
-        emptyMsg="No 24h-TAT bills currently in transit."
+        emptyMsg="Nothing pending — every dispatched consignment is booked."
       />
 
-      {/* 5 · Booked but consignment not created (view-only — risk surface)
-          Sits between Section 2 and Section 3 per ops layout ask: the
-          stalled-booking surface is more urgent than the still-passive 48h
-          TAT and pre-EOD sections below, so ops sees the risk first.
-          Doesn't count toward today's bid; the booking already represents
-          this weight. Surfaced so ops can either create the consignment or
-          release the booking. */}
-      <SourceSection
-        t={t} card={card}
-        index={5}
-        icon="⚠"
-        title="Booked — consignment not created"
-        subtitle="Already attached to a booking but still at the branch · create the consignment or release the booking"
-        accent={t.red}
-        branches={supply?.booked_pending_dispatch?.branches || []}
-        total={supply?.booked_pending_dispatch?.total}
-        selectable={false}
-        viewOnly
-        onCreateConsignment={handleCreateConsignment}
-        onUnbookBranch={handleUnbookBranch}
-        consolidateRegions={['Bangalore']}
-        emptyMsg="No stalled bookings — every booked bill is in motion or already received."
-      />
-
-      {/* 3 · In-Transit · 48h TAT (view-only — not part of today's bid) */}
-      <SourceSection
-        t={t} card={card}
-        index={3}
-        icon="⏲"
-        title="In-Transit · 48h TAT"
-        subtitle={dayAfterArrivalDate
-          ? `Arriving at HO ${fmtDate(dayAfterArrivalDate)} — view-only, not part of today's bidding`
-          : "Arriving day after tomorrow — view-only, not part of today's bidding"}
-        accent={t.text4}
-        branches={t48hBranches}
-        total={supply?.transit_48h?.total}
-        selectable={false}
-        viewOnly
-        emptyMsg="No 48h-TAT bills currently in transit."
-      />
-
-      {/* 4 · Branch Stock pre-EOD (selectable — moves today) */}
+      {/* 4 · Consignment created — arriving day after tomorrow (48h).
+          Now SELECTABLE so ops can book against day-after supply too. */}
       <SourceSection
         t={t} card={card}
         index={4}
+        icon="⏲"
+        title="Consignment created — arriving day after tomorrow (48h)"
+        subtitle={dayAfterArrivalDate
+          ? `Arriving at HO ${fmtDate(dayAfterArrivalDate)} · available to book`
+          : 'Arriving day after tomorrow · available to book'}
+        accent={t.purple || '#8c5ac8'}
+        branches={t48hBranches}
+        total={supply?.transit_48h?.total}
+        prefix="D"
+        selectable
+        selected={selected}
+        branchLocked={branchLocked}
+        onToggleBill={toggleBill}
+        onToggleBranchAll={toggleBranchAll}
+        onToggleRegionAll={toggleRegionAll}
+        branchSelectionState={branchSelectionState}
+        emptyMsg="No 48h-TAT bills currently in transit."
+      />
+
+      {/* 5 · Branch Stock pre-EOD (selectable — moves today) */}
+      <SourceSection
+        t={t} card={card}
+        index={5}
         icon="◐"
         title="Branch Stock — pickup pending today"
         subtitle={`Currently at_branch · will move by EOD · arrives at HO ${fmtDate(arrivalDate)}`}
@@ -2450,6 +2457,10 @@ function SourceSection({
   // total, accent }. The sub-group's rows reuse the exact same renderer
   // (selection, drill-down) as the main list.
   subGroup,
+  // Optional band label rendered above the MAIN region list — used when a
+  // section stacks two labelled bands (main + subGroup) and the section
+  // title alone can't name the main band. Shape: { icon, title, subtitle }.
+  mainLabel,
   emptyMsg,
 }) {
   const tone = accent || t.gold
@@ -2581,6 +2592,17 @@ function SourceSection({
         </div>
       ) : (
         <div style={{ padding: '4px 0' }}>
+          {mainLabel && regions.length > 0 && (
+            <div style={{ margin: '6px 14px 2px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 9, flexWrap: 'wrap' }}>
+                {mainLabel.icon && <span style={{ fontSize: 14 }}>{mainLabel.icon}</span>}
+                <span style={{ fontSize: 12.5, color: tone, fontWeight: 800, letterSpacing: '.02em' }}>{mainLabel.title}</span>
+              </div>
+              {mainLabel.subtitle && (
+                <div style={{ fontSize: 11, color: t.text3, marginTop: 4, lineHeight: 1.5 }}>{mainLabel.subtitle}</div>
+              )}
+            </div>
+          )}
           {regionRenderList.map(([region, rows, isSub]) => {
             // Sentinel between the main list and the sub-group — draws a
             // labeled divider so ops reads the sub-group as a flagged
