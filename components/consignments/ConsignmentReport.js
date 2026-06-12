@@ -515,12 +515,13 @@ export default function ConsignmentReport() {
       ['net_weight',                'Net Wt (g)'],
       ['total_amount',              'Gross Amt'],
       ['dispatched_at',             'Consignment Date'],
+      ['booked_at',                 'Booking Date'],
       ['expected_delivery_date',    'Expected Delivery'],
     ]
     const lines = [cols.map(([, l]) => csvEscape(l)).join(',')]
     for (const r of rows) {
       lines.push(cols.map(([k]) => {
-        if (k === 'dispatched_at') return r[k] ? new Date(r[k]).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', year: 'numeric' }) : ''
+        if (k === 'dispatched_at' || k === 'booked_at') return r[k] ? new Date(r[k]).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', year: 'numeric' }) : ''
         return csvEscape(r[k])
       }).join(','))
     }
@@ -1016,6 +1017,7 @@ export default function ConsignmentReport() {
                       { k: 'net_weight',                l: 'Net (g)',    a: 'right' },
                       { k: 'total_amount',              l: 'Gross Amt',  a: 'right' },
                       { k: 'dispatched_at',             l: 'Consignment Date', a: 'center' },
+                      { k: 'booked_at',                 l: 'Booking Date', a: 'center' },
                       { k: 'expected_delivery_date',    l: 'Expected Delivery', a: 'center' },
                     ].map(col => {
                       // Put the sort arrow on the *leading* side of the label
@@ -1051,6 +1053,7 @@ export default function ConsignmentReport() {
                     <td style={{ ...caseTdR, color: t.text2, fontWeight: 600 }}>{fmtAmt(caseTotals.gross_amt)}</td>
                     <td style={caseTdL} />
                     <td style={caseTdL} />
+                    <td style={caseTdL} />
                   </tr>
                 </thead>
                 <tbody>
@@ -1081,6 +1084,11 @@ export default function ConsignmentReport() {
                         <td style={{ ...caseTdC, color: t.text2, whiteSpace: 'nowrap' }}>
                           {r.dispatched_at
                             ? new Date(r.dispatched_at).toLocaleDateString('en-GB', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', year: 'numeric' }).replace(/ /g, '-')
+                            : '—'}
+                        </td>
+                        <td style={{ ...caseTdC, color: r.booked_at ? t.text2 : t.text4, whiteSpace: 'nowrap' }}>
+                          {r.booked_at
+                            ? new Date(r.booked_at).toLocaleDateString('en-GB', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', year: 'numeric' }).replace(/ /g, '-')
                             : '—'}
                         </td>
                         <td style={{ ...caseTdC, color: t.green, fontFamily: 'monospace', whiteSpace: 'nowrap' }}>

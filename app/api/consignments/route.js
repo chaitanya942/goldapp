@@ -1931,7 +1931,7 @@ export async function GET(req) {
     // wider date ranges and lets the Postgres index-only path apply.
     let billsQ = supabase
       .from('purchases')
-      .select('id, application_id, branch_name, customer_name, purchase_date, gross_weight, net_weight, total_amount, dispatched_at, stock_status')
+      .select('id, application_id, branch_name, customer_name, purchase_date, gross_weight, net_weight, total_amount, dispatched_at, booked_at, stock_status')
       .eq('is_deleted', false)
     if (isDateRange) {
       // dispatched_at is TIMESTAMPTZ — convert YYYY-MM-DD (IST) to UTC instants
