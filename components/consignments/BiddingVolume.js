@@ -455,10 +455,13 @@ export default function BiddingVolume() {
   const t48hBranchesRaw = supply?.transit_48h?.branches   || []
   const preEodBranchesRaw = supply?.branch_pre_eod?.branches || []
   const pendBookRaw    = supply?.consignment_pending_booking?.branches || []
+  const bangPendRaw    = supply?.bangalore_pending_booking?.branches    || []
   const inTBranches    = useMemo(() => inTBranchesRaw.filter(b => b.region !== 'Kerala'),    [inTBranchesRaw])
   // Consignment-created-but-booking-pending bills — already non-Kerala
   // server-side, but filter defensively to match the rest of this tab.
   const pendBookBranches = useMemo(() => pendBookRaw.filter(b => b.region !== 'Kerala'), [pendBookRaw])
+  // Bangalore counterpart — feeds Section 1's consolidated sub-group.
+  const bangPendBranches = useMemo(() => bangPendRaw, [bangPendRaw])
   const t48hBranches   = useMemo(() => t48hBranchesRaw.filter(b => b.region !== 'Kerala'),   [t48hBranchesRaw])
   const preEodBranches = useMemo(() => preEodBranchesRaw.filter(b => b.region !== 'Kerala'), [preEodBranchesRaw])
   const dayAfterArrivalDate = supply?.day_after_arrival   || null
@@ -483,13 +486,14 @@ export default function BiddingVolume() {
     for (const b of bangBranches)     m[b.branch_name] = { ...b, group: 'bangalore' }
     for (const b of inTBranches)      m[b.branch_name] = { ...b, group: 'transit_24h' }
     for (const b of pendBookBranches) m[b.branch_name] = { ...b, group: 'transit_pending_booking' }
+    for (const b of bangPendBranches) m[b.branch_name] = { ...b, group: 'bangalore_pending_booking' }
     for (const b of preEodBranches)   m[b.branch_name] = { ...b, group: 'branch_pre_eod' }
     // Kerala-tab buckets — keyed by destination hub for S1/S2 and by leaf for S3.
     for (const b of klS1Branches)   m[b.branch_name] = { ...b, group: 'kl_hub_stock' }
     for (const b of klS2Branches)   m[b.branch_name] = { ...b, group: 'kl_in_movement' }
     for (const b of klS3Branches)   m[b.branch_name] = { ...b, group: 'kl_at_leaf' }
     return m
-  }, [bangBranches, inTBranches, pendBookBranches, preEodBranches, klS1Branches, klS2Branches, klS3Branches])
+  }, [bangBranches, inTBranches, pendBookBranches, bangPendBranches, preEodBranches, klS1Branches, klS2Branches, klS3Branches])
 
   // Bill-level catalogue across every selectable section in either tab.
   // Tagging via _group lets autoSelectRemaining + selectionMode + branchLocked
@@ -507,12 +511,13 @@ export default function BiddingVolume() {
     collect(bangBranches,     'bangalore')
     collect(inTBranches,      'transit_24h')
     collect(pendBookBranches, 'transit_pending_booking')
+    collect(bangPendBranches, 'bangalore_pending_booking')
     collect(preEodBranches,   'branch_pre_eod')
     collect(klS1Branches,     'kl_hub_stock')
     collect(klS2Branches,     'kl_in_movement')
     collect(klS3Branches,     'kl_at_leaf')
     return m
-  }, [bangBranches, inTBranches, pendBookBranches, preEodBranches, klS1Branches, klS2Branches, klS3Branches])
+  }, [bangBranches, inTBranches, pendBookBranches, bangPendBranches, preEodBranches, klS1Branches, klS2Branches, klS3Branches])
 
   const selectedTotal = useMemo(() => {
     let s = 0
@@ -1315,6 +1320,15 @@ export default function BiddingVolume() {
         onToggleRegionAll={toggleRegionAll}
         branchSelectionState={branchSelectionState}
         onToggleHold={toggleBillHold}
+        subGroup={bangPendBranches.length ? {
+          icon:     '⚠',
+          title:    'Consignment created · booking pending',
+          subtitle: 'Bangalore consignments already dispatched but never booked — created and forgotten, or stuck un-received. Click to drill into branches; select to book.',
+          accent:   t.orange,
+          branches: bangPendBranches,
+          total:    supply?.bangalore_pending_booking?.total,
+          consolidateRegions: ['Bangalore'],
+        } : null}
         emptyMsg="No Bangalore purchases recorded today yet."
       />
 
@@ -2457,12 +2471,19 @@ function SourceSection({
     if (next.has(region)) next.delete(region); else next.add(region)
     return next
   })
-  const consolidateSet = (() => {
-    if (!consolidateRegions) return null
-    if (consolidateRegions instanceof Set) return consolidateRegions
-    return new Set(consolidateRegions)
-  })()
-  const isConsolidatedRegion = (region) => consolidateSet?.has(region) || false
+  const toSet = (v) => {
+    if (!v) return null
+    if (v instanceof Set) return v
+    return new Set(v)
+  }
+  const consolidateSet    = toSet(consolidateRegions)
+  const subConsolidateSet = toSet(subGroup?.consolidateRegions)
+  // Region consolidation is resolved per-entry: main entries read the
+  // section-level set, sub-group entries read the sub-group's own set, so
+  // the same region name (e.g. 'Bangalore') can render expanded in the
+  // main list yet consolidated in the sub-group.
+  const isConsolidatedRegion = (region, isSub) =>
+    (isSub ? subConsolidateSet : consolidateSet)?.has(region) || false
 
   // Group branches by region in insertion order (server already sorted by
   // total_net_wt within each branch list).
@@ -2479,12 +2500,17 @@ function SourceSection({
   const subBranches  = subGroup?.branches || []
   const subRegions   = regionsOf(subBranches)
   // Main region blocks, then (when a sub-group exists) a sentinel divider
-  // entry followed by the sub-group's own region blocks. The render
-  // callback special-cases the sentinel to draw a labeled divider; every
-  // other entry renders identically whether it's main or sub.
+  // entry followed by the sub-group's own region blocks. Entries are
+  // [region, rows, isSub] — the isSub flag lets the render callback apply
+  // the sub-group's own consolidation + namespace its expand state so a
+  // region present in both main and sub doesn't cross-toggle.
   const regionRenderList = subRegions.length
-    ? [...regions, ['__SUBGROUP_DIVIDER__', { __divider: true }], ...subRegions]
-    : regions
+    ? [
+        ...regions.map(([r, rows]) => [r, rows, false]),
+        ['__SUBGROUP_DIVIDER__', { __divider: true }, false],
+        ...subRegions.map(([r, rows]) => [r, rows, true]),
+      ]
+    : regions.map(([r, rows]) => [r, rows, false])
   const isEmpty   = branches.length === 0 && subBranches.length === 0
   const totalBills = total?.bills  || 0
   const totalNet   = total?.net_wt || 0
@@ -2555,7 +2581,7 @@ function SourceSection({
         </div>
       ) : (
         <div style={{ padding: '4px 0' }}>
-          {regionRenderList.map(([region, rows]) => {
+          {regionRenderList.map(([region, rows, isSub]) => {
             // Sentinel between the main list and the sub-group — draws a
             // labeled divider so ops reads the sub-group as a flagged
             // continuation of this section, not a new section.
@@ -2596,8 +2622,11 @@ function SourceSection({
               if (sel === all.length) return 'all'
               return 'partial'
             })()
-            const consolidated   = isConsolidatedRegion(region)
-            const regionExpanded = openConsolidated.has(region)
+            const consolidated   = isConsolidatedRegion(region, isSub)
+            // Namespace the consolidated-expand key so a region present in
+            // both the main list and the sub-group doesn't cross-toggle.
+            const consolidateKey = isSub ? `sub:${region}` : region
+            const regionExpanded = openConsolidated.has(consolidateKey)
             const showBranches   = !consolidated || regionExpanded
             // Region totals — only need them when rendering the
             // consolidated roll-up row.
@@ -2605,7 +2634,7 @@ function SourceSection({
             const regGross = consolidated ? rows.reduce((s, r) => s + (r.total_gross_wt || 0), 0) : 0
             const regNet   = consolidated ? rows.reduce((s, r) => s + (r.total_net_wt   || 0), 0) : 0
             return (
-              <div key={region} style={{ padding: '11px 20px', borderTop: `1px solid ${t.border}25` }}>
+              <div key={consolidateKey} style={{ padding: '11px 20px', borderTop: `1px solid ${t.border}25` }}>
                 {consolidated ? (
                   // ── Consolidated region row — single roll-up that drills
                   //    down into the existing per-branch list on click.
@@ -2613,7 +2642,7 @@ function SourceSection({
                   //    with the regular branch rows that appear below when
                   //    expanded.
                   <div
-                    onClick={() => toggleConsolidatedExpand(region)}
+                    onClick={() => toggleConsolidatedExpand(consolidateKey)}
                     onMouseEnter={(e) => { e.currentTarget.style.background = `${rColor}10` }}
                     onMouseLeave={(e) => { e.currentTarget.style.background = regionExpanded ? `${rColor}0c` : 'transparent' }}
                     style={{

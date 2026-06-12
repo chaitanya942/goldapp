@@ -635,6 +635,29 @@ export async function GET(req) {
       b._arrival_date !== dayAfterArrival &&
       (branchMeta[b.branch_name]?.region) !== 'Kerala',
     )
+
+    // Bangalore counterpart — Bangalore bills currently in_consignment with
+    // no booking attached, EXCLUDING those already surfaced in Section 1
+    // (today's Bangalore pool, by id). What's left is older Bangalore
+    // consignments still in transit and never booked — created and
+    // forgotten, or stuck un-received. Rendered as a consolidated,
+    // drill-down sub-group inside Section 1 (Bangalore's own section).
+    let bangalorePendingBooking = []
+    if (bangaloreBranchNames.length) {
+      const section1Ids = new Set(bangBills.map(b => b.id))
+      const { data: bpb } = await supabase
+        .from('purchases')
+        .select('id, application_id, branch_name, current_branch, customer_name, gross_weight, net_weight, total_amount, purchase_date, dispatched_at, stock_status, crm_status, audit_consumed_at')
+        .in('branch_name', bangaloreBranchNames)
+        .eq('stock_status', 'in_consignment')
+        .eq('crm_status', 'approved')
+        .eq('is_deleted', false)
+        .is('booking_id', null)
+      bangalorePendingBooking = (bpb || [])
+        .filter(b => !b.audit_consumed_at && !section1Ids.has(b.id))
+        .map(b => ({ ...b, branch_name: b.current_branch || b.branch_name }))
+    }
+
     // Back-compat alias for the existing UI (renders only the 24h bucket).
     const inflightForTarget = inflight24h
 
@@ -803,18 +826,20 @@ export async function GET(req) {
       return Object.values(m).sort((a, b) => b.total_net_wt - a.total_net_wt)
     }
 
-    // Pending-booking bills carry their parent consignment's creation
-    // stamp (when + by whom) so the Section 2 sub-group can show 'created
-    // <date> by <who>' per branch — the whole point being to chase down
-    // who dispatched a consignment and never booked it. Resolved via
-    // consignment_items → consignments (most recent non-cancelled link
-    // per bill). created_by is stored as an email on consignments.
-    if (inflightPendingBooking.length) {
-      const pendIds = inflightPendingBooking.map(b => b.id)
+    // Pending-booking bills (both outstation Section-2 and Bangalore
+    // Section-1 sub-groups) carry their parent consignment's creation
+    // stamp (when + by whom) so each row can show 'created <date> by
+    // <who>' — the whole point being to chase down who dispatched a
+    // consignment and never booked it. Resolved via consignment_items →
+    // consignments (most recent non-cancelled link per bill). created_by
+    // is stored as an email on consignments.
+    const stampConsignmentMeta = async (bills) => {
+      if (!bills.length) return
+      const ids = bills.map(b => b.id)
       const linkByBill = {}   // purchase_id → { created_at, created_by }
       const IN_CHUNK = 100
-      for (let i = 0; i < pendIds.length; i += IN_CHUNK) {
-        const slice = pendIds.slice(i, i + IN_CHUNK)
+      for (let i = 0; i < ids.length; i += IN_CHUNK) {
+        const slice = ids.slice(i, i + IN_CHUNK)
         const { data: links } = await supabase
           .from('consignment_items')
           .select('purchase_id, consignment:consignment_id(created_at, created_by, status)')
@@ -828,20 +853,19 @@ export async function GET(req) {
           }
         }
       }
-      for (const b of inflightPendingBooking) {
+      for (const b of bills) {
         const meta = linkByBill[b.id]
         b._consignment_created_at = meta?.created_at || null
         b._consignment_created_by = meta?.created_by || null
       }
     }
+    await stampConsignmentMeta(inflightPendingBooking)
+    await stampConsignmentMeta(bangalorePendingBooking)
 
-    const bangaloreByBranch  = groupByBranch(bangBills)
-    const transit24hByBranch = groupByBranch(inflight24h)
-    const transit48hByBranch = groupByBranch(inflight48h)
-    // Annotate each pending-booking branch row with the consignment-
-    // creation summary (earliest/latest stamp + unique creators) so the
-    // collapsed row reads 'created <date> by <who>' without expanding.
-    const pendingBookingByBranch = groupByBranch(inflightPendingBooking).map(b => {
+    // Annotate each pending-booking branch row with the consignment-creation
+    // summary (earliest/latest stamp + unique creators) so the collapsed
+    // row reads 'created <date> by <who>' without expanding.
+    const annotateConsignmentMeta = (rows) => rows.map(b => {
       const bills    = b.bills || []
       const stamps   = bills.map(x => x._consignment_created_at).filter(Boolean).sort()
       const creators = [...new Set(bills.map(x => x._consignment_created_by).filter(Boolean))]
@@ -852,6 +876,12 @@ export async function GET(req) {
         _consignment_creators: creators,
       }
     })
+
+    const bangaloreByBranch  = groupByBranch(bangBills)
+    const transit24hByBranch = groupByBranch(inflight24h)
+    const transit48hByBranch = groupByBranch(inflight48h)
+    const pendingBookingByBranch     = annotateConsignmentMeta(groupByBranch(inflightPendingBooking))
+    const bangPendingBookingByBranch = annotateConsignmentMeta(groupByBranch(bangalorePendingBooking))
     const preEodByBranch     = groupByBranch(preEodBills)
 
     // For booked-pending: also fold in branch-level booking summaries
@@ -888,7 +918,8 @@ export async function GET(req) {
     const bangTotal         = sumOf(bangaloreByBranch)
     const transit24hTotal   = sumOf(transit24hByBranch)
     const transit48hTotal   = sumOf(transit48hByBranch)
-    const pendingBookingTotal = sumOf(pendingBookingByBranch)
+    const pendingBookingTotal     = sumOf(pendingBookingByBranch)
+    const bangPendingBookingTotal = sumOf(bangPendingBookingByBranch)
     const preEodTotal       = sumOf(preEodByBranch)
     const bookedNonKlTotal  = sumOf(bookedNonKlByBranch)
     const bookedKlTotal     = sumOf(bookedKlByBranch)
@@ -1113,6 +1144,9 @@ export async function GET(req) {
         // bookable (selectable), but off the tomorrow window so it's flagged
         // separately under Section 2 rather than mixed into the main list.
         consignment_pending_booking: { branches: pendingBookingByBranch, total: pendingBookingTotal },
+        // Bangalore counterpart — rendered as a consolidated drill-down
+        // sub-group inside Section 1 (Bangalore's own section).
+        bangalore_pending_booking:   { branches: bangPendingBookingByBranch, total: bangPendingBookingTotal },
         branch_pre_eod: { branches: preEodByBranch,     total: preEodTotal, _debug: debugSection4 },
         // Section 5 — booked but consignment not yet created (at_branch +
         // booking_id IS NOT NULL). View-only; intentionally excluded from
