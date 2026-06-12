@@ -401,6 +401,18 @@ export default function ConsignmentData() {
     finally { setLoadingPreview(false) }
   }
 
+  // When the modal is open and ops picks a destination, the preview numbers
+  // (tmp_prf_no, challan_no) need to refresh. The original Create-button
+  // handler called fetchPreviewNumbers once with the old default moveType;
+  // since the toggle moved to an opt-in pick, the first fetch hits an empty
+  // moveType and short-circuits. This effect catches the moveType landing
+  // and fires the fetch so the tamper-proof number is always visible
+  // before Confirm & Create.
+  useEffect(() => {
+    if (showModal && moveType) fetchPreviewNumbers()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showModal, moveType, nav?.branch])
+
   async function handleCreate() {
     if (!selected.size || !nav?.branch) return
     if (!moveType) {
