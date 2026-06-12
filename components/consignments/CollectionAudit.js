@@ -620,6 +620,33 @@ export default function CollectionAudit() {
               setToast({ msg: e.message || 'Mark received failed', type: 'error', key: Date.now() })
             }
           }}
+          onVerifySeal={async (consignmentId, sealNo) => {
+            // Auditor types the number printed on the physical tamper bag.
+            // Server-side compare: match → stamp seal_verified_at and the
+            // bulk-receive / per-bill receive guards unlock for this
+            // consignment. Mismatch → red toast, retry on the same row.
+            try {
+              const res = await authedFetch('/api/collection-audit', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'verify_consignment_seal', consignment_id: consignmentId, seal_no: sealNo }),
+              })
+              const j = await res.json()
+              if (!res.ok || j.error) {
+                setToast({ msg: j.error || 'Seal verification failed', type: 'error', key: Date.now() })
+                return false
+              }
+              setToast({
+                msg: j.already ? 'Seal already verified.' : 'Tamper seal verified — receive unlocked.',
+                type: 'success',
+                key: Date.now(),
+              })
+              fetchAll()
+              return true
+            } catch (e) {
+              setToast({ msg: e.message || 'Seal verification failed', type: 'error', key: Date.now() })
+              return false
+            }
+          }}
         />
       ) : (
         <>
@@ -1041,7 +1068,12 @@ function BranchCard({ branch, billCount, extraLabel, oldestAt, dispatchedYmd, ar
 }
 
 // ─── Drill-down (Level 1) ───────────────────────────────────────────────────
-function BranchDrilldown({ drill, outstationByBranch, bangaloreByBranch, t, onBack, onAudit, onMarkReceived }) {
+function BranchDrilldown({ drill, outstationByBranch, bangaloreByBranch, t, onBack, onAudit, onMarkReceived, onVerifySeal }) {
+  // Per-consignment input + in-flight state for the tamper-seal verifier.
+  // Keyed by consignment id so multiple verifiers can be open at once
+  // (e.g. a hub receiving two trucks in the same hour).
+  const [sealInputs, setSealInputs] = useState({})
+  const [sealBusy,   setSealBusy]   = useState({})
   const source = drill.pool === 'outstation'
     ? outstationByBranch.find(b => b.branch === drill.name)
     : bangaloreByBranch.find(b => b.branch === drill.name)
@@ -1119,47 +1151,129 @@ function BranchDrilldown({ drill, outstationByBranch, bangaloreByBranch, t, onBa
           : `${eligibleBills.length} bill${eligibleBills.length === 1 ? '' : 's'}`
         return (
           <Fragment key={g.consignment?.id || gi}>
-            {g.consignment && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '6px 4px', flexWrap: 'wrap' }}>
-                <span style={{ fontSize: '10px', color: t.gold, background: `${t.gold}18`, borderRadius: '5px', padding: '4px 10px', fontWeight: 700, letterSpacing: '.08em' }}>{g.consignment.tmp_prf_no || '—'}</span>
-                <span style={{ fontSize: '11px', color: t.text2 }}>
-                  {g.consignment.branch_name} <span style={{ color: t.text4 }}>→</span> {g.consignment.movement_type === 'INTERNAL' ? g.consignment.dest_branch : 'HO'}
-                </span>
-                <span style={{ fontSize: '10px', color: t.text4, fontFamily: 'monospace' }}>{g.consignment.challan_no}</span>
-                <span style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: '12px' }}>
-                  <span style={{ fontSize: '10px', color: t.text3 }}>
-                    <strong style={{ color: t.text2 }}>{g.bills.length}</strong> bill{g.bills.length === 1 ? '' : 's'}
-                  </span>
-                  {eligibleBills.length > 0 && (
-                    <button
-                      onClick={() => onMarkReceived?.({
-                        ids:   eligibleBills.map(b => b.id),
-                        label: bulkLabel,
-                      })}
-                      title={`Mark all ${eligibleBills.length} pending bill${eligibleBills.length === 1 ? '' : 's'} on this consignment as received`}
-                      style={{
-                        background:    `${t.green}12`,
-                        color:         t.green,
-                        border:        `1px solid ${t.green}50`,
-                        borderRadius:  '8px',
-                        padding:       '6px 12px',
-                        fontSize:      '10.5px',
-                        fontWeight:    700,
-                        letterSpacing: '.02em',
-                        cursor:        'pointer',
-                        display:       'inline-flex',
-                        alignItems:    'center',
-                        gap:           '5px',
-                        transition:    'background .15s ease, border-color .15s ease, transform .15s ease',
-                      }}
-                      onMouseEnter={e => { e.currentTarget.style.background = `${t.green}22`; e.currentTarget.style.borderColor = `${t.green}90`; e.currentTarget.style.transform = 'translateY(-1px)' }}
-                      onMouseLeave={e => { e.currentTarget.style.background = `${t.green}12`; e.currentTarget.style.borderColor = `${t.green}50`; e.currentTarget.style.transform = 'translateY(0)' }}>
-                      ✓ Mark all {eligibleBills.length} as received
-                    </button>
+            {g.consignment && (() => {
+              const cid          = g.consignment.id
+              const sealVerified = !!g.consignment.seal_verified_at
+              const sealInput    = sealInputs[cid] || ''
+              const verifyBusy   = !!sealBusy[cid]
+              const submitSeal   = async () => {
+                if (!sealInput.trim() || verifyBusy) return
+                setSealBusy(prev => ({ ...prev, [cid]: true }))
+                const ok = await onVerifySeal?.(cid, sealInput.trim())
+                setSealBusy(prev => { const { [cid]: _, ...rest } = prev; return rest })
+                if (ok) setSealInputs(prev => { const { [cid]: _, ...rest } = prev; return rest })
+              }
+              return (
+                <div style={{
+                  display: 'flex', flexDirection: 'column', gap: 8,
+                  padding: '8px 10px',
+                  background: sealVerified ? 'transparent' : `${t.orange}08`,
+                  border: sealVerified ? 'none' : `1px solid ${t.orange}30`,
+                  borderRadius: 8,
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: '10px', color: t.gold, background: `${t.gold}18`, borderRadius: '5px', padding: '4px 10px', fontWeight: 700, letterSpacing: '.08em' }}>{g.consignment.tmp_prf_no || '—'}</span>
+                    <span style={{ fontSize: '11px', color: t.text2 }}>
+                      {g.consignment.branch_name} <span style={{ color: t.text4 }}>→</span> {g.consignment.movement_type === 'INTERNAL' ? g.consignment.dest_branch : 'HO'}
+                    </span>
+                    <span style={{ fontSize: '10px', color: t.text4, fontFamily: 'monospace' }}>{g.consignment.challan_no}</span>
+                    {sealVerified && (
+                      <span title={g.consignment.seal_verified_by_email ? `Verified by ${g.consignment.seal_verified_by_email}` : 'Tamper seal verified'}
+                        style={{
+                          fontSize: '10px', color: t.green,
+                          background: `${t.green}18`,
+                          border: `1px solid ${t.green}50`,
+                          borderRadius: '5px',
+                          padding: '3px 9px',
+                          fontWeight: 800, letterSpacing: '.06em',
+                          textTransform: 'uppercase',
+                        }}>
+                        ✓ Seal verified
+                      </span>
+                    )}
+                    <span style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: '12px' }}>
+                      <span style={{ fontSize: '10px', color: t.text3 }}>
+                        <strong style={{ color: t.text2 }}>{g.bills.length}</strong> bill{g.bills.length === 1 ? '' : 's'}
+                      </span>
+                      {sealVerified && eligibleBills.length > 0 && (
+                        <button
+                          onClick={() => onMarkReceived?.({
+                            ids:   eligibleBills.map(b => b.id),
+                            label: bulkLabel,
+                          })}
+                          title={`Mark all ${eligibleBills.length} pending bill${eligibleBills.length === 1 ? '' : 's'} on this consignment as received`}
+                          style={{
+                            background:    `${t.green}12`,
+                            color:         t.green,
+                            border:        `1px solid ${t.green}50`,
+                            borderRadius:  '8px',
+                            padding:       '6px 12px',
+                            fontSize:      '10.5px',
+                            fontWeight:    700,
+                            letterSpacing: '.02em',
+                            cursor:        'pointer',
+                            display:       'inline-flex',
+                            alignItems:    'center',
+                            gap:           '5px',
+                            transition:    'background .15s ease, border-color .15s ease, transform .15s ease',
+                          }}
+                          onMouseEnter={e => { e.currentTarget.style.background = `${t.green}22`; e.currentTarget.style.borderColor = `${t.green}90`; e.currentTarget.style.transform = 'translateY(-1px)' }}
+                          onMouseLeave={e => { e.currentTarget.style.background = `${t.green}12`; e.currentTarget.style.borderColor = `${t.green}50`; e.currentTarget.style.transform = 'translateY(0)' }}>
+                          ✓ Mark all {eligibleBills.length} as received
+                        </button>
+                      )}
+                    </span>
+                  </div>
+                  {!sealVerified && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                      <span style={{ fontSize: '11px', color: t.orange, fontWeight: 700, letterSpacing: '.02em', display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                        🔒 Tamper seal not verified
+                      </span>
+                      <span style={{ fontSize: '10.5px', color: t.text3 }}>
+                        Receive is locked. Type the number printed on the physical bag to unlock.
+                      </span>
+                      <input
+                        value={sealInput}
+                        onChange={e => setSealInputs(prev => ({ ...prev, [cid]: e.target.value }))}
+                        onKeyDown={e => { if (e.key === 'Enter') submitSeal() }}
+                        placeholder="e.g. WG000004"
+                        disabled={verifyBusy}
+                        style={{
+                          marginLeft: 'auto',
+                          background: t.card,
+                          border: `1px solid ${t.border2}`,
+                          borderRadius: 7,
+                          padding: '6px 10px',
+                          fontFamily: 'monospace',
+                          fontSize: '12px',
+                          color: t.text1,
+                          width: 150,
+                          outline: 'none',
+                          textTransform: 'uppercase',
+                        }} />
+                      <button
+                        onClick={submitSeal}
+                        disabled={verifyBusy || !sealInput.trim()}
+                        style={{
+                          background: verifyBusy ? t.card2 : (sealInput.trim() ? t.gold : t.card2),
+                          color:      sealInput.trim() ? '#1a0a00' : t.text4,
+                          border:     'none',
+                          borderRadius: 7,
+                          padding: '7px 14px',
+                          fontSize: 11,
+                          fontWeight: 800,
+                          letterSpacing: '.04em',
+                          textTransform: 'uppercase',
+                          cursor: verifyBusy || !sealInput.trim() ? 'not-allowed' : 'pointer',
+                          opacity: verifyBusy ? 0.6 : 1,
+                        }}>
+                        {verifyBusy ? 'Verifying…' : 'Verify Seal'}
+                      </button>
+                    </div>
                   )}
-                </span>
-              </div>
-            )}
+                </div>
+              )
+            })()}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '10px' }}>
               {g.bills.map(bill => <BillCard key={bill.id} bill={bill} t={t} dateField={dateF}
                 onAudit={() => onAudit(bill)}

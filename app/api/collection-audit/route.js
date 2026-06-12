@@ -455,7 +455,7 @@ async function handleGet(req) {
       const slice = consignmentIds.slice(i, i + IN_CHUNK)
       const { data: cs, error: csErr } = await supabase
         .from('consignments')
-        .select('id, tmp_prf_no, challan_no, branch_name, dest_branch, movement_type, status, dispatched_at, total_bills, total_net_wt, total_gross_wt, total_amount')
+        .select('id, tmp_prf_no, challan_no, branch_name, dest_branch, movement_type, status, dispatched_at, total_bills, total_net_wt, total_gross_wt, total_amount, seal_verified_at, seal_verified_by_email')
         .in('id', slice)
       if (csErr) {
         const enriched = new Error(csErr.message || 'consignments IN lookup failed')
@@ -653,6 +653,60 @@ export async function POST(req) {
   // is idempotent on bills already count-received. Stock_status stays
   // in_consignment for everyone — weight audit is still required to flip
   // to at_ho.
+  // ── 'verify_consignment_seal' — auditor types the seal serial; we compare ──
+  // Used by Collection Audit to gate every receive action on a consignment.
+  // Match is case-insensitive + whitespace-trimmed so a stray space on a
+  // sticker doesn't trip ops up. Idempotent: a consignment that's already
+  // verified short-circuits with success so retrying the call after a
+  // network flake never fails.
+  if (action === 'verify_consignment_seal') {
+    const { consignment_id, seal_no } = body
+    if (!consignment_id) return Response.json({ error: 'consignment_id required' }, { status: 400 })
+    if (!seal_no || !String(seal_no).trim()) {
+      return Response.json({ error: 'Type the number printed on the bag’s tamper seal.' }, { status: 400 })
+    }
+    const { data: c, error: cErr } = await supabase
+      .from('consignments')
+      .select('id, tmp_prf_no, seal_verified_at, seal_verified_by_email')
+      .eq('id', consignment_id)
+      .single()
+    if (cErr)  return Response.json({ error: cErr.message }, { status: 500 })
+    if (!c)    return Response.json({ error: 'Consignment not found' }, { status: 404 })
+    if (c.seal_verified_at) {
+      return Response.json({
+        success: true,
+        already: true,
+        seal_verified_at:       c.seal_verified_at,
+        seal_verified_by_email: c.seal_verified_by_email,
+      })
+    }
+    const expected = String(c.tmp_prf_no || '').trim().toUpperCase()
+    const provided = String(seal_no).trim().toUpperCase()
+    if (!expected) {
+      return Response.json({ error: 'This consignment has no tamper-proof number on file. Contact admin.' }, { status: 500 })
+    }
+    if (expected !== provided) {
+      return Response.json({
+        error: `Seal mismatch — expected ${c.tmp_prf_no}, got ${String(seal_no).trim()}. Re-check the bag.`,
+      }, { status: 400 })
+    }
+    const stampIso = new Date().toISOString()
+    const { error: upErr } = await supabase
+      .from('consignments')
+      .update({
+        seal_verified_at:       stampIso,
+        seal_verified_by:       auth.user?.id || null,
+        seal_verified_by_email: auth.user?.email || null,
+      })
+      .eq('id', consignment_id)
+    if (upErr) return Response.json({ error: upErr.message }, { status: 500 })
+    return Response.json({
+      success:                true,
+      seal_verified_at:       stampIso,
+      seal_verified_by_email: auth.user?.email || null,
+    })
+  }
+
   if (action === 'mark_received') {
     const ids = Array.isArray(purchase_ids) && purchase_ids.length
       ? purchase_ids
@@ -670,6 +724,30 @@ export async function POST(req) {
     if (!bills || bills.length === 0) {
       return Response.json({ error: 'No matching bills found' }, { status: 404 })
     }
+
+    // ── Seal-verification gate ───────────────────────────────────────────
+    // Every parent consignment that any of these bills rides on must have
+    // its tamper seal verified before the count-receive can stamp through.
+    // Skips the guard for bills not riding a consignment (rare, but stays
+    // backwards-compatible if any direct-at-HO flow ever reappears).
+    const { data: links } = await supabase
+      .from('consignment_items')
+      .select('purchase_id, consignment_id')
+      .in('purchase_id', ids)
+    const parentIds = [...new Set((links || []).map(l => l.consignment_id).filter(Boolean))]
+    if (parentIds.length) {
+      const { data: parents } = await supabase
+        .from('consignments')
+        .select('id, tmp_prf_no, seal_verified_at')
+        .in('id', parentIds)
+      const unverified = (parents || []).filter(p => !p.seal_verified_at).map(p => p.tmp_prf_no || p.id)
+      if (unverified.length) {
+        return Response.json({
+          error: `Verify the tamper seal on ${unverified.join(', ')} before marking these bills received.`,
+        }, { status: 400 })
+      }
+    }
+
     const eligible = []
     let skippedDeleted     = 0
     let skippedNotInTransit = 0
@@ -735,6 +813,32 @@ export async function POST(req) {
   if (bill.crm_status === 'deleted')    return Response.json({ error: 'Bill is CRM-deleted' }, { status: 400 })
   if (!['at_branch', 'in_consignment'].includes(bill.stock_status)) {
     return Response.json({ error: `Bill is not audit-eligible (stock_status=${bill.stock_status})` }, { status: 400 })
+  }
+
+  // ── Seal-verification gate (single-bill audit) ────────────────────────
+  // Same rule as mark_received: the parent consignment's tamper seal must
+  // have been verified before any bill on it can be audited at HO. Old
+  // consignments are pre-stamped by sql/consignment_seal_verification.sql
+  // so this only blocks freshly-dispatched ones the auditor hasn't sealed
+  // yet.
+  {
+    const { data: link } = await supabase
+      .from('consignment_items')
+      .select('consignment_id')
+      .eq('purchase_id', purchase_id)
+      .maybeSingle()
+    if (link?.consignment_id) {
+      const { data: parent } = await supabase
+        .from('consignments')
+        .select('tmp_prf_no, seal_verified_at')
+        .eq('id', link.consignment_id)
+        .maybeSingle()
+      if (parent && !parent.seal_verified_at) {
+        return Response.json({
+          error: `Verify the tamper seal on ${parent.tmp_prf_no || 'this consignment'} first.`,
+        }, { status: 400 })
+      }
+    }
   }
 
   const diff = Number((measured - Number(bill.gross_weight || 0)).toFixed(3))
