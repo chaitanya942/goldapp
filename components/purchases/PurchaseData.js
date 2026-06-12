@@ -77,6 +77,7 @@ const EXPORT_COLS = [
   { key: 'payment_reference',         label: 'Payment Ref' },
   { key: 'dispatched_at',             label: 'In Consignment Since' },
   { key: 'received_at',               label: 'Received At HO' },
+  { key: 'booked_at',                 label: 'Booking Date' },
 ]
 
 function exportCSV(rows, filename) {
@@ -745,6 +746,7 @@ export default function PurchaseData() {
                   { label: 'Received At HO',       col: 'received_at' },
                   { label: 'CRM',                  col: 'crm_status' },
                   { label: 'Booking',              col: 'booking_id' },
+                  { label: 'Booking Date',         col: 'booked_at' },
                 ].map(({ label, col }) => (
                   <th key={label}
                     onClick={col ? () => handleSort(col) : undefined}
@@ -858,11 +860,18 @@ export default function PurchaseData() {
                         <span style={{ color: t.text4 }}>—</span>
                       )}
                     </td>
+                    {/* purchases.booked_at — stamped when the bill was
+                        attached to a cal_quotas booking. Blank for unbooked
+                        bills (and for gain-attributed ones, which have no
+                        booking row). */}
+                    <td style={{ ...s.td, color: p.booked_at ? t.text2 : t.text4, fontSize: '.68rem', whiteSpace: 'nowrap' }}>
+                      {fmtDispatched(p.booked_at)}
+                    </td>
                   </tr>
                 )
               })}
               {purchases.length === 0 && (
-                <tr><td colSpan={isSuperAdmin ? 26 : 25} style={{ ...s.td, textAlign: 'center', color: t.text4, padding: '48px' }}>
+                <tr><td colSpan={isSuperAdmin ? 27 : 26} style={{ ...s.td, textAlign: 'center', color: t.text4, padding: '48px' }}>
                   {(search || filterStatus || filterBranch || filterCrmStatus || filterTxn || fromDate || toDate || dispatchedFrom || dispatchedTo) ? 'No records match your filters' : 'No purchase data yet. Syncing from CRM in the background.'}
                 </td></tr>
               )}
