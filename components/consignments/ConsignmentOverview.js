@@ -230,9 +230,12 @@ export default function ConsignmentOverview() {
   const [loading,      setLoading]      = useState(() => !getCache('co:branch-overview'))
   const [search,       setSearch]       = useState('')
   const [activeRegion, setActiveRegion] = useState(null)
-  // Scope tab — 'outside' = outstation branches (the historical default),
-  // 'bangalore' = Bangalore-only view with hubs as hero cards. Restricted
-  // users (no Bangalore access) only see 'outside'. Persisted per-device.
+  // Scope tab — 'outside' = outstation branches (historical default),
+  // 'bangalore' = Bangalore-only view. Both tabs treat every branch as
+  // independent: click a row to deep-link into Consignment Data and
+  // create a consignment for that branch (destination — Hub or HO —
+  // chosen on the consignment screen, not here).
+  // Restricted users (no Bangalore access) only see 'outside'.
   const [scopeTab, setScopeTab] = useState(() => {
     if (typeof window === 'undefined') return 'outside'
     return window.localStorage.getItem('cstock.scopeTab') || 'outside'
@@ -240,29 +243,6 @@ export default function ConsignmentOverview() {
   useEffect(() => {
     if (typeof window !== 'undefined') window.localStorage.setItem('cstock.scopeTab', scopeTab)
   }, [scopeTab])
-  // Active hub on the Bangalore tab — when set, the branch list filters to
-  // that hub + every leaf whose hub_branch_name matches.
-  const [activeHub, setActiveHub] = useState(null)
-  // Clear hub selection when leaving the Bangalore tab so a returning user
-  // starts fresh on the All Bangalore view.
-  useEffect(() => { if (scopeTab !== 'bangalore') setActiveHub(null) }, [scopeTab])
-  // Hub dispatch flow — modal target + per-step busy + per-step result.
-  const [dispatchHub,    setDispatchHub]    = useState(null)   // hub name when modal open
-  const [dispatchBusy,   setDispatchBusy]   = useState(null)   // 'challan' | 'ewb' | null
-  const [dispatchResult, setDispatchResult] = useState(null)   // consignment + summary from API
-  const [ewbResult,      setEwbResult]      = useState(null)   // { ewb_no, ewb_pdf_url? } once EWB generated
-  // Transaction Executive who's physically picking the hub up. Required
-  // before Download Delivery Challan fires. Placeholder list for now —
-  // when the real TE roster lands we'll swap this for a fetched list
-  // (likely from user_profiles filtered by a 'transaction_executive' role).
-  const [dispatchTE, setDispatchTE] = useState('')
-  const TRANSACTION_EXECUTIVES = useMemo(() => [
-    'TE — Executive 1',
-    'TE — Executive 2',
-    'TE — Executive 3',
-    'TE — Executive 4',
-    'TE — Executive 5',
-  ], [])
   // Default sort: total net weight desc (largest stockholders first). Management
   // wants to see the biggest exposures at the top without clicking.
   const [sortKey,      setSortKey]      = useState('total_net_wt')
@@ -598,10 +578,9 @@ export default function ConsignmentOverview() {
   }
 
   // ── Scope-filtered data ───────────────────────────────────────────────────
-  // Every downstream computation (regions, hubs, filtered table, KPI tiles)
-  // reads scopeData instead of data so the Bangalore tab and Outside tab
-  // stay cleanly partitioned. Bangalore tab also strips the leaves whose
-  // hub_branch_name doesn't match the active hub when one is selected.
+  // Every downstream computation (regions, filtered table, KPI tiles) reads
+  // scopeData instead of data so the Bangalore tab and Outside tab stay
+  // cleanly partitioned.
   const scopeData = useMemo(() => {
     if (scopeTab === 'bangalore') {
       const ks = data.filter(b => b.region === 'Bangalore')
@@ -638,55 +617,6 @@ export default function ConsignmentOverview() {
     return acc
   }, {}), [scopeData, regions])
 
-  // ── Bangalore hubs summary ────────────────────────────────────────────────
-  // Bangalore-tab hero cards: one per hub branch. A hub's totals roll up its
-  // own stock + every leaf whose hub_branch_name matches. Computed only when
-  // we have Bangalore rows; otherwise empty.
-  const hubs = useMemo(() => {
-    if (scopeTab !== 'bangalore') return []
-    return scopeData
-      .filter(b => b.is_hub)
-      .map(b => b.branch_name)
-      .sort()
-  }, [scopeData, scopeTab])
-
-  const hubStats = useMemo(() => {
-    if (scopeTab !== 'bangalore') return {}
-    const out = {}
-    for (const hubName of hubs) {
-      // hub itself + every leaf pointing to it
-      const members = scopeData.filter(b => b.branch_name === hubName || b.hub_branch_name === hubName)
-      const today_bills    = members.reduce((s, b) => s + (b.today_bills    || 0), 0)
-      const older_bills    = members.reduce((s, b) => s + (b.older_bills    || 0), 0)
-      const today_net_wt   = members.reduce((s, b) => s + (b.today_net_wt   || 0), 0)
-      const older_net_wt   = members.reduce((s, b) => s + (b.older_net_wt   || 0), 0)
-      const total_gross_wt = members.reduce((s, b) => s + (b.total_gross_wt || 0), 0)
-      out[hubName] = {
-        branches:        members.length,
-        leaves:          members.length - 1,   // minus the hub itself
-        active_branches: members.filter(b => (b.today_bills || 0) + (b.older_bills || 0) > 0).length,
-        today_bills, older_bills, today_net_wt, older_net_wt,
-        total_bills:   today_bills + older_bills,
-        total_net_wt:  today_net_wt + older_net_wt,
-        // Bangalore's headline weight is GROSS (matches the operational
-        // number ops tracks). Cards read total_gross_wt; net_wt fields
-        // are kept around so the table sort keys still work.
-        total_gross_wt,
-        gross_wt: total_gross_wt,
-      }
-    }
-    return out
-  }, [scopeData, scopeTab, hubs])
-
-  // ── Bangalore-tab branch list filter ──────────────────────────────────────
-  // Bangalore branches not assigned to any hub (orphans) are surfaced under
-  // "All Bangalore" but never under a hub card click. When a hub is active,
-  // only that hub + its leaves render in the table.
-  const bangaloreHubFiltered = useMemo(() => {
-    if (scopeTab !== 'bangalore' || !activeHub) return scopeData
-    return scopeData.filter(b => b.branch_name === activeHub || b.hub_branch_name === activeHub)
-  }, [scopeData, scopeTab, activeHub])
-
   // Always display weights in grams (no kg conversion). Comma-grouped, two
   // decimals so the operations team sees the exact figure (rounding to
   // integers was hiding sub-gram differences they need to reconcile).
@@ -698,10 +628,8 @@ export default function ConsignmentOverview() {
   // ── Filtered + sorted ─────────────────────────────────────────────────────
   // Search now matches branch OR region (so typing 'kerala' narrows to all
   // Kerala branches without having to click the region card).
-  // Bangalore tab reads bangaloreHubFiltered (already scoped to Bangalore +
-  // active hub); Outside tab reads scopeData (Bangalore stripped upstream).
   const filtered = useMemo(() => {
-    const baseRows = scopeTab === 'bangalore' ? bangaloreHubFiltered : scopeData
+    const baseRows = scopeData
     const searchQ = (search || '').toLowerCase()
     return baseRows
       // Hide branches with zero stock — empty rows are noise. The flash cards
@@ -742,7 +670,7 @@ export default function ConsignmentOverview() {
         if (sortKey === 'total_bills')        { av = (a.today_bills  || 0) + (a.older_bills  || 0); bv = (b.today_bills  || 0) + (b.older_bills  || 0) }
         return (av - bv) * sortDir
       })
-  }, [scopeTab, scopeData, bangaloreHubFiltered, activeRegion, search, quickFilter, sortKey, sortDir])
+  }, [scopeTab, scopeData, activeRegion, search, quickFilter, sortKey, sortDir])
 
   // ── Group filtered rows by region for the collapsible card view. Keys keep
   // the canonical REGION_ORDER so cards render Karnataka → Kerala → AP → Telangana.
@@ -890,9 +818,8 @@ export default function ConsignmentOverview() {
            of scheduled pickup so the ops team can prep. Dismissible per
            branch, resets at midnight IST. */}
       {/* Pickup Approaching banner is meaningful only for outstation BVC
-          pickups. Bangalore Transaction Executives sweep hubs daily on a
-          continuous schedule, so the 30-min-before-pickup alert doesn't
-          model that workflow — hide it on the Bangalore tab. */}
+          pickups — Bangalore branches run on a same-day pickup schedule
+          where a 30-min countdown isn't meaningful. Hide on Bangalore. */}
       {scopeTab === 'outside' && pickupAlerts.length > 0 && (
         <div style={{
           background: `linear-gradient(135deg, ${t.orange}18, ${t.orange}08)`,
@@ -1124,556 +1051,6 @@ export default function ConsignmentOverview() {
         </div>
       )}
 
-      {/* ── Bangalore Hub Flashcards (Bangalore tab only) — same visual
-          language as the region cards above. 'All Bangalore' on the left,
-          one card per is_hub=true branch (BASAWESHWARANAGAR, K R PURAM,
-          KAIKONDRAHALLI, KATRIGUPPE, BOMMANAHALLI, ADUGODI). Clicking a
-          hub filters the branch list below to that hub + every leaf
-          whose hub_branch_name matches. ── */}
-      {scopeTab === 'bangalore' && canSee('element.consignment-overview.region_cards') && (
-        <div style={{
-          display: 'flex', gap: '10px',
-          // Single horizontal row across all viewports. 7 hub cards rarely
-          // fit on a laptop without compromise, so we always allow scroll
-          // and let the card minWidths breathe instead of wrapping into a
-          // second row.
-          flexWrap: 'nowrap',
-          overflowX: 'auto',
-          scrollSnapType: isMobile ? 'x mandatory' : 'none',
-          WebkitOverflowScrolling: 'touch',
-          scrollbarWidth: 'none',
-          margin: isMobile ? '0 -16px' : 0,
-          padding: isMobile ? '0 16px 4px' : '0 0 4px',
-        }}>
-          {/* All Bangalore — sum across every Bangalore row. Click clears the hub filter.
-              Weight shown is GROSS, not net — matches the operational number ops
-              tracks on the Bangalore same-day pickup model. */}
-          {(() => {
-            const bglColor = REGION_COLORS['Bangalore'] || t.gold
-            const allBills      = scopeData.reduce((s, b) => s + (b.today_bills || 0) + (b.older_bills || 0), 0)
-            const allGrossWt    = scopeData.reduce((s, b) => s + (b.total_gross_wt || 0), 0)
-            const allTodayBills = scopeData.reduce((s, b) => s + (b.today_bills || 0), 0)
-            const activeBranches = scopeData.filter(b => (b.total_gross_wt || 0) > 0).length
-            const w = fmtWtCard(allGrossWt)
-            const isActive = !activeHub
-            return (
-              <div onClick={() => setActiveHub(null)}
-                style={{
-                  background: isActive ? `linear-gradient(145deg, ${bglColor}18, ${bglColor}06)` : `linear-gradient(145deg, ${t.card}, ${t.card2})`,
-                  border: `1px solid ${isActive ? bglColor + '60' : t.border}`,
-                  borderLeft: `4px solid ${isActive ? bglColor : t.text4 + '30'}`,
-                  borderRadius: '12px', padding: '14px 14px',
-                  cursor: 'pointer',
-                  flex: '1 1 0', minWidth: '160px',
-                  flexShrink: 0, scrollSnapAlign: 'start',
-                  transition: 'all .2s',
-                  boxShadow: isActive ? `0 4px 16px ${bglColor}20` : '0 1px 3px rgba(0,0,0,.2)',
-                }}
-                onMouseEnter={e => { if (!isActive) e.currentTarget.style.transform = 'translateY(-2px)' }}
-                onMouseLeave={e => { if (!isActive) e.currentTarget.style.transform = 'translateY(0)' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-                  <div style={{ fontSize: '9px', color: isActive ? bglColor : t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 700 }}>All Bangalore</div>
-                  <span style={{ fontSize: '15px', opacity: isActive ? 1 : 0.5 }}>🏙</span>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px', lineHeight: 1, marginBottom: '6px' }}>
-                  <span style={{ fontSize: '26px', fontWeight: 300, color: isActive ? bglColor : t.text1, fontFamily: 'monospace' }}>{w.value}</span>
-                  <span style={{ fontSize: '12px', fontWeight: 500, color: isActive ? bglColor : t.text3 }}>{w.unit}</span>
-                </div>
-                <div style={{ fontSize: '10px', color: t.text4, display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                  <span title={`${activeBranches} of ${scopeData.length} Bangalore branches currently hold stock`}>
-                    <strong style={{ color: t.text2 }}>{activeBranches}</strong>/{scopeData.length} branches
-                  </span>
-                  <span style={{ color: t.border2 }}>·</span>
-                  <span><strong style={{ color: t.text2 }}>{allBills}</strong> bills</span>
-                  {allTodayBills > 0 && <><span style={{ color: t.border2 }}>·</span><span style={{ color: t.green, fontWeight: 600 }}>+{allTodayBills} today</span></>}
-                </div>
-              </div>
-            )
-          })()}
-
-          {hubs.map(hubName => {
-            const stats   = hubStats[hubName] || {}
-            const color   = t.gold
-            const active  = activeHub === hubName
-            const w       = fmtWtCard(stats.total_gross_wt)
-            return (
-              <div key={hubName} onClick={() => setActiveHub(active ? null : hubName)}
-                title={`${stats.leaves || 0} leaf branch${(stats.leaves || 0) === 1 ? '' : 'es'} report to this hub`}
-                style={{
-                  background: active ? `linear-gradient(145deg, ${color}18, ${color}06)` : `linear-gradient(145deg, ${t.card}, ${t.card2})`,
-                  border: `1px solid ${active ? color + '60' : t.border}`,
-                  borderLeft: `4px solid ${active ? color : color + '30'}`,
-                  borderRadius: '12px', padding: '14px 14px',
-                  cursor: 'pointer',
-                  flex: '1 1 0', minWidth: '160px',
-                  flexShrink: 0, scrollSnapAlign: 'start',
-                  transition: 'all .2s',
-                  boxShadow: active ? `0 4px 16px ${color}20` : '0 1px 3px rgba(0,0,0,.2)',
-                }}
-                onMouseEnter={e => { if (!active) e.currentTarget.style.transform = 'translateY(-2px)' }}
-                onMouseLeave={e => { if (!active) e.currentTarget.style.transform = 'translateY(0)' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-                  <div style={{ fontSize: '9px', color: active ? color : t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {hubName} <span style={{ fontSize: 8, color: active ? color : t.text4, marginLeft: 4, letterSpacing: '.06em' }}>HUB</span>
-                  </div>
-                  <span style={{ fontSize: '15px', opacity: active ? 1 : 0.6, flexShrink: 0, marginLeft: '6px' }}>🏛</span>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px', lineHeight: 1, marginBottom: '6px' }}>
-                  <span style={{ fontSize: '26px', fontWeight: 300, color: active ? color : t.text1, fontFamily: 'monospace' }}>{w.value}</span>
-                  <span style={{ fontSize: '12px', fontWeight: 500, color: active ? color : t.text3 }}>{w.unit}</span>
-                </div>
-                <div style={{ fontSize: '10px', color: t.text4, display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                  <span title={`${stats.active_branches || 0} of ${stats.branches || 0} (hub + leaves) currently hold stock`}>
-                    <strong style={{ color: t.text2 }}>{stats.active_branches || 0}</strong>/{stats.branches || 0} branches
-                  </span>
-                  <span style={{ color: t.border2 }}>·</span>
-                  <span><strong style={{ color: t.text2 }}>{stats.total_bills || 0}</strong> bills</span>
-                  {(stats.leaves || 0) > 0 && <><span style={{ color: t.border2 }}>·</span><span><strong style={{ color: t.text3 }}>{stats.leaves}</strong> leaves</span></>}
-                </div>
-                {/* Dispatch button — fires the hub-wise consignment flow.
-                    Disabled when the hub has zero bills (nothing to dispatch). */}
-                {(stats.total_bills || 0) > 0 && (
-                  <button
-                    type="button"
-                    onClick={(e) => { e.stopPropagation(); setDispatchHub(hubName); setDispatchResult(null) }}
-                    style={{
-                      marginTop: 10,
-                      width: '100%',
-                      background: `${color}18`,
-                      border: `1px solid ${color}55`,
-                      borderRadius: 6,
-                      padding: '6px 10px',
-                      color, fontSize: 11, fontWeight: 800,
-                      letterSpacing: '.04em', textTransform: 'uppercase',
-                      cursor: 'pointer', transition: 'background .15s',
-                    }}
-                    onMouseEnter={(e) => { e.currentTarget.style.background = `${color}30` }}
-                    onMouseLeave={(e) => { e.currentTarget.style.background = `${color}18` }}>
-                    Dispatch →
-                  </button>
-                )}
-              </div>
-            )
-          })}
-        </div>
-      )}
-
-      {/* ── Hub Dispatch Confirmation Modal ── Portalled to document.body
-          so position:fixed is anchored to the viewport, not whatever
-          ancestor (like the page-enter wrapper) happens to be the nearest
-          containing block. Without the portal the modal floated below
-          centre on slower paints. */}
-      {dispatchHub && typeof document !== 'undefined' && createPortal((() => {
-        const stats   = hubStats[dispatchHub] || {}
-        // Branch-wise breakdown for the confirmation table — every hub member
-        // (hub itself + leaves) with positive stock.
-        const members = scopeData
-          .filter(b => (b.branch_name === dispatchHub || b.hub_branch_name === dispatchHub) && ((b.today_bills || 0) + (b.older_bills || 0)) > 0)
-          .map(b => ({
-            branch_name: b.branch_name,
-            is_hub:      b.branch_name === dispatchHub,
-            bills:       (b.today_bills || 0) + (b.older_bills || 0),
-            gross_wt:    b.total_gross_wt || 0,         // matches the hero cards + the challan
-            value:       (b.today_gross_value || 0) + (b.older_gross_value || 0),
-          }))
-          .sort((a, b) => b.gross_wt - a.gross_wt)
-
-        const close = () => {
-          if (dispatchBusy) return
-          setDispatchHub(null)
-          setDispatchResult(null)
-          setEwbResult(null)
-          setDispatchTE('')
-        }
-
-        // Step 1 — create the consignment, then stream-download the
-        // Delivery Challan PDF. One operator click drives both.
-        const onDownloadChallan = async () => {
-          setDispatchBusy('challan')
-          try {
-            // a) Create the hub consignment.
-            const r = await authedFetch('/api/consignments?action=create_hub_consignment', {
-              method: 'POST', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ hub_branch_name: dispatchHub, transaction_executive: dispatchTE }),
-            })
-            const j = await r.json()
-            if (!r.ok || j.error) {
-              alert(j.error || `Dispatch failed (HTTP ${r.status})`)
-              setDispatchBusy(null)
-              return
-            }
-            setDispatchResult(j)
-            fetchData(true)
-
-            // b) Download the Delivery Challan PDF (existing endpoint,
-            //    now hub-aware so it renders the branch-wise template).
-            const cid = j.consignment?.id
-            if (cid) {
-              try {
-                const pdfRes = await authedFetch(`/api/generate-challan-pdf?id=${cid}`)
-                if (pdfRes.ok) {
-                  const blob = await pdfRes.blob()
-                  const a = document.createElement('a')
-                  a.href = URL.createObjectURL(blob)
-                  a.download = `DeliveryChallan-${j.consignment?.consignment_no || cid}.pdf`
-                  document.body.appendChild(a); a.click(); document.body.removeChild(a)
-                  URL.revokeObjectURL(a.href)
-                } else {
-                  const errJ = await pdfRes.json().catch(() => null)
-                  alert(errJ?.error || `Challan download failed (HTTP ${pdfRes.status}). Try again from Consignment Data.`)
-                }
-              } catch (dErr) {
-                alert('Challan download failed — try again from Consignment Data.')
-                console.error(dErr)
-              }
-            }
-          } catch (err) {
-            alert(err?.message || 'Dispatch failed')
-          } finally {
-            setDispatchBusy(null)
-          }
-        }
-
-        // Step 2 — preview + generate EWB via ClearTax. Same call ops
-        // would make from the Consignment Data action button, just
-        // triggered inline so they don't have to navigate away.
-        const onGenerateEwb = async () => {
-          if (!dispatchResult?.consignment?.id) return
-          setDispatchBusy('ewb')
-          try {
-            const r = await authedFetch('/api/eway-bill/generate', {
-              method: 'POST', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ consignment_id: dispatchResult.consignment.id }),
-            })
-            const j = await r.json()
-            if (!r.ok || j.error) {
-              alert(j.error || `EWB generation failed (HTTP ${r.status})`)
-              return
-            }
-            setEwbResult({
-              ewb_no:        j.ewb_no || j.data?.ewb_no || j.consignment?.eway_bill_no,
-              ewb_valid_to:  j.ewb_valid_to || j.data?.ewb_valid_to,
-            })
-            fetchData(true)
-          } catch (err) {
-            alert(err?.message || 'EWB generation failed')
-          } finally {
-            setDispatchBusy(null)
-          }
-        }
-
-        return (
-          <div onClick={close}
-            className="hub-dispatch-backdrop"
-            style={{
-              position: 'fixed', inset: 0,
-              background: 'radial-gradient(ellipse at center, rgba(0,0,0,.62) 0%, rgba(0,0,0,.72) 100%)',
-              zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center',
-              padding: 20, backdropFilter: 'blur(6px)',
-              animation: 'hubModalFade .22s cubic-bezier(.4,.0,.2,1) both',
-            }}>
-            <div onClick={(e) => e.stopPropagation()}
-              className="hub-dispatch-card"
-              style={{
-                background: `linear-gradient(180deg, ${t.card} 0%, ${t.card} 100%)`,
-                borderRadius: 16,
-                border: `1px solid ${t.gold}25`,
-                maxWidth: 820, width: '100%', maxHeight: '90vh',
-                display: 'flex', flexDirection: 'column',
-                boxShadow: `0 24px 80px rgba(0,0,0,.55), 0 0 0 1px ${t.gold}10, 0 2px 0 0 ${t.gold}18 inset`,
-                overflow: 'hidden',
-                animation: 'hubModalLift .35s cubic-bezier(.16,1,.3,1) both',
-                position: 'relative',
-              }}>
-              {/* Top gradient stroke — subtle gold accent line */}
-              <div style={{
-                position: 'absolute', top: 0, left: 0, right: 0, height: 2,
-                background: `linear-gradient(90deg, transparent 0%, ${t.gold} 50%, transparent 100%)`,
-                opacity: 0.7, pointerEvents: 'none',
-              }} />
-
-              {/* Header — sticky at top */}
-              <div style={{
-                padding: '22px 28px 20px',
-                borderBottom: `1px solid ${t.border}`,
-                flexShrink: 0,
-                background: `linear-gradient(180deg, ${t.gold}08 0%, transparent 100%)`,
-              }}>
-                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14 }}>
-                  {/* Hub emblem */}
-                  <div style={{
-                    width: 44, height: 44, borderRadius: 12,
-                    background: `linear-gradient(135deg, ${t.gold}25, ${t.gold}08)`,
-                    border: `1px solid ${t.gold}40`,
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    fontSize: 20, flexShrink: 0,
-                    boxShadow: `0 2px 8px ${t.gold}25`,
-                  }}>🏛</div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 10, color: t.text4, letterSpacing: '.16em', textTransform: 'uppercase', fontWeight: 700, marginBottom: 3 }}>
-                      Hub Dispatch
-                    </div>
-                    <div style={{ fontSize: 20, fontWeight: 700, color: t.text1, letterSpacing: '-.005em', lineHeight: 1.2 }}>
-                      {dispatchHub}
-                    </div>
-                    <div style={{ fontSize: 12.5, color: t.text3, marginTop: 8, lineHeight: 1.55 }}>
-                      {dispatchResult
-                        ? (ewbResult
-                            ? 'EWB generated and Delivery Challan downloaded. Hub is fully dispatched.'
-                            : 'Delivery Challan downloaded. Generate the E-Way Bill to complete the dispatch.')
-                        : 'One consignment will be created covering every assigned branch listed below.'}
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Body — only this section scrolls when content overflows */}
-              <div style={{ padding: '18px 26px', overflow: 'auto', flex: '1 1 auto', minHeight: 0 }}>
-                {dispatchResult ? (
-                  <>
-                    {/* Step 1 result — challan downloaded */}
-                    <div style={{
-                      background: `${t.green}10`, border: `1px solid ${t.green}40`,
-                      borderRadius: 8, padding: '12px 14px', marginBottom: 12,
-                    }}>
-                      <div style={{ fontSize: 13, color: t.green, fontWeight: 700, marginBottom: 4 }}>✓ Consignment created · Delivery Challan downloaded</div>
-                      <div style={{ fontSize: 12, color: t.text2, lineHeight: 1.6 }}>
-                        <strong>{dispatchResult.totals?.bills || 0}</strong> bills · <strong>{Number(dispatchResult.totals?.gross_wt || 0).toFixed(2)} g</strong> gross · <strong>{fmtINR(dispatchResult.totals?.value || 0)}</strong>
-                        <br />
-                        Consignment <code style={{ background: t.card2, padding: '1px 6px', borderRadius: 3, color: t.gold, fontFamily: 'monospace' }}>{dispatchResult.consignment?.consignment_no || dispatchResult.consignment?.tmp_prf_no}</code>
-                        {dispatchResult.consignment?.transaction_executive && (
-                          <>
-                            <br />
-                            Picked up by <strong>{dispatchResult.consignment.transaction_executive}</strong>
-                          </>
-                        )}
-                        <br />
-                        <span style={{ color: t.text3, fontSize: 11 }}>
-                          Bills remain at branch until you generate the E-Way Bill below.
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* Step 2 result — EWB if generated, otherwise prompt for it */}
-                    {ewbResult ? (
-                      <div style={{
-                        background: `${t.green}10`, border: `1px solid ${t.green}40`,
-                        borderRadius: 8, padding: '12px 14px', marginBottom: 12,
-                      }}>
-                        <div style={{ fontSize: 13, color: t.green, fontWeight: 700, marginBottom: 4 }}>✓ E-Way Bill generated</div>
-                        <div style={{ fontSize: 12, color: t.text2, lineHeight: 1.6 }}>
-                          EWB <code style={{ background: t.card2, padding: '1px 6px', borderRadius: 3, color: t.gold, fontFamily: 'monospace' }}>{ewbResult.ewb_no || '—'}</code>
-                          {ewbResult.ewb_valid_to && (
-                            <> · valid until <strong>{ewbResult.ewb_valid_to}</strong></>
-                          )}
-                        </div>
-                      </div>
-                    ) : (
-                      <div style={{ fontSize: 12.5, color: t.text3, lineHeight: 1.7, padding: '4px 2px' }}>
-                        The workflow gate is already released — clicking <strong style={{ color: t.text2 }}>Preview and Generate EWB</strong> below will hit ClearTax / NIC directly. No further intermediate step is required.
-                      </div>
-                    )}
-                  </>
-                ) : (
-                  <>
-                    {/* Transaction Executive picker FIRST — required gate, so
-                        keeping it above the fold avoids ops scrolling past
-                        the table just to make their selection. Value column
-                        was retired from the modal: it lives on the Delivery
-                        Challan and the EWB where accounts needs it; on
-                        screen the operator just confirms volume and weight. */}
-                    <TEPicker
-                      t={t}
-                      value={dispatchTE}
-                      onChange={setDispatchTE}
-                      options={TRANSACTION_EXECUTIVES}
-                      disabled={!!dispatchBusy}
-                    />
-
-                    {/* Branch-wise summary — Source Branch / Bills / Gross Wt.
-                        Value is intentionally omitted (challan + EWB carry it). */}
-                    <div style={{
-                      marginTop: 18,
-                      border: `1px solid ${t.border}`,
-                      borderRadius: 10,
-                      overflow: 'hidden',
-                      background: t.card2 || t.card,
-                    }}>
-                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
-                        <thead>
-                          <tr style={{ background: `${t.gold}06`, borderBottom: `1px solid ${t.border}` }}>
-                            <th style={{ textAlign: 'left',  padding: '11px 14px', color: t.text3, fontSize: 9.5, letterSpacing: '.16em', textTransform: 'uppercase', fontWeight: 800 }}>Source Branch</th>
-                            <th style={{ textAlign: 'right', padding: '11px 14px', color: t.text3, fontSize: 9.5, letterSpacing: '.16em', textTransform: 'uppercase', fontWeight: 800 }}>Bills</th>
-                            <th style={{ textAlign: 'right', padding: '11px 18px', color: t.text3, fontSize: 9.5, letterSpacing: '.16em', textTransform: 'uppercase', fontWeight: 800 }}>Gross Wt</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {members.length === 0 && (
-                            <tr><td colSpan={3} style={{ padding: '28px 14px', color: t.text4, textAlign: 'center', fontSize: 12.5, fontStyle: 'italic' }}>
-                              No active stock under this hub right now.
-                            </td></tr>
-                          )}
-                          {members.map((m, idx) => (
-                            <tr key={m.branch_name}
-                              className="hub-table-row"
-                              style={{
-                                borderBottom: idx === members.length - 1 ? 'none' : `1px solid ${t.border}80`,
-                                background: idx % 2 === 1 ? `${t.text4}06` : 'transparent',
-                                transition: 'background .15s ease',
-                              }}>
-                              <td style={{ padding: '10px 14px', color: t.text1, fontWeight: 600 }}>
-                                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-                                  <span style={{
-                                    width: 6, height: 6, borderRadius: '50%',
-                                    background: m.is_hub ? t.gold : t.text3, flexShrink: 0,
-                                    boxShadow: m.is_hub ? `0 0 0 2px ${t.gold}25` : 'none',
-                                  }} />
-                                  {m.branch_name}
-                                  {m.is_hub && (
-                                    <span style={{
-                                      fontSize: 8.5, color: t.gold,
-                                      background: `${t.gold}15`,
-                                      border: `1px solid ${t.gold}40`,
-                                      padding: '2px 7px', borderRadius: 4,
-                                      letterSpacing: '.08em', fontWeight: 800,
-                                    }}>HUB</span>
-                                  )}
-                                </span>
-                              </td>
-                              <td style={{ padding: '10px 14px', textAlign: 'right', color: t.text2, fontFamily: 'var(--font-dm-mono), monospace', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{m.bills}</td>
-                              <td style={{ padding: '10px 18px', textAlign: 'right', color: t.text1, fontFamily: 'var(--font-dm-mono), monospace', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
-                                {Number(m.gross_wt).toFixed(2)}<span style={{ color: t.text4, fontSize: 10, marginLeft: 3, fontWeight: 500 }}>g</span>
-                              </td>
-                            </tr>
-                          ))}
-                          {/* Hub total — distinct gold band */}
-                          <tr style={{
-                            background: `linear-gradient(90deg, ${t.gold}15 0%, ${t.gold}06 100%)`,
-                            borderTop: `2px solid ${t.gold}50`,
-                          }}>
-                            <td style={{ padding: '12px 14px', color: t.gold, fontWeight: 800, fontSize: 10.5, letterSpacing: '.14em', textTransform: 'uppercase' }}>Σ Hub Total</td>
-                            <td style={{ padding: '12px 14px', textAlign: 'right', color: t.gold, fontFamily: 'var(--font-dm-mono), monospace', fontWeight: 800, fontSize: 13.5, fontVariantNumeric: 'tabular-nums' }}>{stats.total_bills || 0}</td>
-                            <td style={{ padding: '12px 18px', textAlign: 'right', color: t.gold, fontFamily: 'var(--font-dm-mono), monospace', fontWeight: 800, fontSize: 13.5, fontVariantNumeric: 'tabular-nums' }}>
-                              {Number(stats.total_gross_wt || stats.gross_wt || 0).toFixed(2)}<span style={{ color: `${t.gold}90`, fontSize: 10.5, marginLeft: 3, fontWeight: 600 }}>g</span>
-                            </td>
-                          </tr>
-                        </tbody>
-                      </table>
-                    </div>
-                    <div style={{ fontSize: 11, color: t.text4, marginTop: 11, lineHeight: 1.55, fontStyle: 'italic' }}>
-                      Eligible at_branch bills only. Booked bills are included — the booking_id rides along and is fulfilled when the bill is audited at HO. Audit-consumed bills and bills already on another in-flight consignment are excluded. Exact totals — and per-branch value — appear on the Delivery Challan and EWB.
-                    </div>
-                  </>
-                )}
-              </div>
-
-              {/* Footer — sticky at bottom; always visible regardless of body scroll.
-                  Three states wired by the button labels:
-                    - Review (no dispatchResult) → Cancel + Download Delivery Challan
-                    - Challan downloaded, no EWB yet → Close + Preview and Generate EWB
-                    - EWB done → Open Consignment Data + Close */}
-              <div style={{
-                padding: '18px 28px',
-                borderTop: `1px solid ${t.border}`,
-                display: 'flex', justifyContent: 'flex-end', gap: 10,
-                flexShrink: 0,
-                background: `linear-gradient(0deg, ${t.gold}05 0%, transparent 100%)`,
-              }}>
-                {dispatchResult ? (
-                  ewbResult ? (
-                    <>
-                      <button onClick={close}
-                        className="hub-btn-ghost"
-                        style={{ background: 'transparent', color: t.text2, border: `1px solid ${t.border2}`, borderRadius: 8, padding: '10px 20px', fontSize: 13, fontWeight: 700, cursor: 'pointer', transition: 'all .15s' }}>
-                        Close
-                      </button>
-                      <button onClick={() => { close(); setActiveNav('consignment-data') }}
-                        className="hub-btn-primary"
-                        style={{
-                          background: `linear-gradient(180deg, ${t.gold} 0%, ${t.gold}e6 100%)`,
-                          color: '#1a0a00', border: 'none', borderRadius: 8,
-                          padding: '10px 22px', fontSize: 13, fontWeight: 800,
-                          cursor: 'pointer', letterSpacing: '.02em',
-                          boxShadow: `0 4px 14px ${t.gold}55, 0 1px 0 0 ${t.gold} inset`,
-                          transition: 'all .15s',
-                        }}>
-                        Open Consignment Data →
-                      </button>
-                    </>
-                  ) : (
-                    <>
-                      <button onClick={close} disabled={!!dispatchBusy}
-                        className="hub-btn-ghost"
-                        style={{ background: 'transparent', color: t.text3, border: `1px solid ${t.border2}`, borderRadius: 8, padding: '10px 20px', fontSize: 13, fontWeight: 700, cursor: dispatchBusy ? 'not-allowed' : 'pointer', transition: 'all .15s' }}>
-                        Close
-                      </button>
-                      <button onClick={onGenerateEwb} disabled={!!dispatchBusy}
-                        className={dispatchBusy ? '' : 'hub-btn-primary'}
-                        style={{
-                          background: dispatchBusy ? t.card2 : `linear-gradient(180deg, ${t.gold} 0%, ${t.gold}e6 100%)`,
-                          color:      dispatchBusy ? t.text4 : '#1a0a00',
-                          border: 'none', borderRadius: 8, padding: '10px 24px',
-                          fontSize: 13, fontWeight: 800, cursor: dispatchBusy ? 'wait' : 'pointer',
-                          letterSpacing: '.02em',
-                          boxShadow: dispatchBusy ? 'none' : `0 4px 14px ${t.gold}55, 0 1px 0 0 ${t.gold} inset`,
-                          transition: 'all .15s',
-                        }}>
-                        {dispatchBusy === 'ewb' ? 'Generating EWB…' : 'Preview & Generate EWB'}
-                      </button>
-                    </>
-                  )
-                ) : (
-                  <>
-                    <button onClick={close} disabled={!!dispatchBusy}
-                      className="hub-btn-ghost"
-                      style={{ background: 'transparent', color: t.text3, border: `1px solid ${t.border2}`, borderRadius: 8, padding: '10px 20px', fontSize: 13, fontWeight: 700, cursor: dispatchBusy ? 'not-allowed' : 'pointer', transition: 'all .15s' }}>
-                      Cancel
-                    </button>
-                    <button onClick={onDownloadChallan} disabled={!!dispatchBusy || members.length === 0 || !dispatchTE}
-                      title={!dispatchTE ? 'Select a Transaction Executive first' : undefined}
-                      className={dispatchBusy || members.length === 0 || !dispatchTE ? '' : 'hub-btn-primary'}
-                      style={{
-                        background: dispatchBusy || members.length === 0 || !dispatchTE
-                          ? t.card2
-                          : `linear-gradient(180deg, ${t.gold} 0%, ${t.gold}e6 100%)`,
-                        color: dispatchBusy || members.length === 0 || !dispatchTE ? t.text4 : '#1a0a00',
-                        border: 'none', borderRadius: 8, padding: '10px 24px',
-                        fontSize: 13, fontWeight: 800,
-                        cursor: dispatchBusy || members.length === 0 || !dispatchTE ? 'not-allowed' : 'pointer',
-                        letterSpacing: '.02em',
-                        boxShadow: dispatchBusy || members.length === 0 || !dispatchTE
-                          ? 'none'
-                          : `0 4px 14px ${t.gold}55, 0 1px 0 0 ${t.gold} inset`,
-                        transition: 'all .15s',
-                      }}>
-                      {dispatchBusy === 'challan' ? 'Dispatching & downloading…' : '⤓ Download Delivery Challan'}
-                    </button>
-                  </>
-                )}
-              </div>
-
-              {/* Modal-scoped polish — entry animations, hover micro-interactions
-                  on the primary buttons + table rows. Restricted to the
-                  hub-dispatch namespace so we don't bleed into the rest of the
-                  app. */}
-              <style>{`
-                @keyframes hubModalFade {
-                  from { opacity: 0; }
-                  to   { opacity: 1; }
-                }
-                @keyframes hubModalLift {
-                  from { opacity: 0; transform: translateY(14px) scale(.97); }
-                  to   { opacity: 1; transform: translateY(0) scale(1); }
-                }
-                .hub-btn-primary:hover { transform: translateY(-1px); box-shadow: 0 6px 22px ${t.gold}77, 0 1px 0 0 ${t.gold} inset !important; }
-                .hub-btn-primary:active { transform: translateY(0); }
-                .hub-btn-ghost:hover { background: ${t.gold}10 !important; color: ${t.text1} !important; border-color: ${t.gold}55 !important; }
-                .hub-table-row:hover { background: ${t.gold}06 !important; }
-              `}</style>
-            </div>
-          </div>
-        )
-      })(), document.body)}
 
       {/* ── KPI Strip ── 8 tiles in two semantic groups (Today / Pending),
            bookended by Branches and Total Gross Wt. auto-fit lets the strip
@@ -2175,22 +1552,17 @@ export default function ConsignmentOverview() {
                                     : t.gold
                     return (
                       <tr key={b.branch_name} className="cstock-flat-row"
-                        title={scopeTab === 'bangalore' ? undefined : `Click to create a consignment from ${b.branch_name}`}
+                        title={`Click to create a consignment from ${b.branch_name}`}
                         style={{
                           borderBottom: `1px solid ${t.border}20`, background: urgentBg,
-                          cursor: scopeTab === 'bangalore' ? 'default' : 'pointer',
+                          cursor: 'pointer',
                           ['--cstock-glow']: glowColor, ['--cstock-stripe']: stripeColor,
                         }}
                         onClick={() => {
-                          // Bangalore branches dispatch through their hub card;
-                          // a per-branch deep-link into Consignment Data isn't
-                          // meaningful on this tab. Click is a no-op here.
-                          if (scopeTab === 'bangalore') return
                           setConsignmentDeepLink({ branch: b.branch_name, region: b.region })
                           setActiveNav('consignment-data')
                         }}
                         onMouseEnter={e => {
-                          if (scopeTab === 'bangalore') return
                           if (!e.currentTarget.dataset.prefetched) {
                             e.currentTarget.dataset.prefetched = '1'
                             const enc = encodeURIComponent(b.branch_name)
