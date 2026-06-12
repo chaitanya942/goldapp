@@ -2011,6 +2011,78 @@ export async function GET(req) {
   return Response.json({ error: 'Invalid action' }, { status: 400 })
 }
 
+// ── Auto-reconcile helper ─────────────────────────────────────────────────────
+// Detach SMALLEST-FIRST bills from a booking until attached_net × (1+gain_rate)
+// no longer exceeds the booked weight, then return any residual gap that
+// should land in pipeline_remaining_g.
+//
+// Shared between create_booking (runs automatically on every new booking)
+// and reconcile_booking (one-click fix for legacy over-attached rows).
+// Returns { detached, residual_pipeline_g, error }.
+async function reconcileBookingOverAttachment({ supabase, bookingId, bookedWeight, isKl }) {
+  const gainRate = isKl ? 0 : 0.035
+  let detachedItems = []
+  let residualPipelineG = 0
+  let error = null
+  try {
+    const { data: attached, error: fetchErr } = await supabase
+      .from('purchases')
+      .select('id, application_id, customer_name, net_weight')
+      .eq('booking_id', bookingId)
+    if (fetchErr) { error = fetchErr.message; return { detached: [], residual_pipeline_g: 0, error } }
+    if (!attached || attached.length === 0) {
+      return { detached: [], residual_pipeline_g: 0, error: null }
+    }
+
+    const attachedNet        = attached.reduce((s, b) => s + Number(b.net_weight || 0), 0)
+    const effectiveCommitted = attachedNet * (1 + gainRate)
+    const excessEffective    = effectiveCommitted - bookedWeight
+
+    if (excessEffective <= 0.01) {
+      // Float-noise threshold — not worth touching.
+      return { detached: [], residual_pipeline_g: 0, error: null }
+    }
+    const excessNet = excessEffective / (1 + gainRate)
+    const ordered = [...attached].sort((a, b) =>
+      Number(a.net_weight || 0) - Number(b.net_weight || 0)
+    )
+    const detachIds = []
+    let cumulativeDetachedNet = 0
+    for (const bill of ordered) {
+      if (cumulativeDetachedNet >= excessNet) break
+      detachIds.push(bill.id)
+      detachedItems.push({
+        id:             bill.id,
+        application_id: bill.application_id,
+        customer_name:  bill.customer_name,
+        net_weight_g:   Number(bill.net_weight || 0),
+      })
+      cumulativeDetachedNet += Number(bill.net_weight || 0)
+    }
+    if (detachIds.length === 0) {
+      return { detached: [], residual_pipeline_g: 0, error: null }
+    }
+    const { error: detErr } = await supabase
+      .from('purchases')
+      .update({ booking_id: null, booked_at: null })
+      .in('id', detachIds)
+    if (detErr) {
+      // Don't claim a detach happened if the UPDATE failed.
+      return { detached: [], residual_pipeline_g: 0, error: detErr.message }
+    }
+    const newAttachedNet = attachedNet - cumulativeDetachedNet
+    const newEffective   = newAttachedNet * (1 + gainRate)
+    residualPipelineG    = Math.max(0, bookedWeight - newEffective)
+  } catch (e) {
+    return { detached: [], residual_pipeline_g: 0, error: e?.message || 'reconcile threw' }
+  }
+  return {
+    detached:            detachedItems,
+    residual_pipeline_g: Number(residualPipelineG.toFixed(3)),
+    error:               null,
+  }
+}
+
 // ── POST handler ──────────────────────────────────────────────────────────────
 export async function POST(req) {
   const body   = await req.json()
@@ -2030,7 +2102,7 @@ export async function POST(req) {
   // can see the Bidding Volume page (page.consignment-bidding) rather than
   // a hardcoded role group — so the gate can never lock out whichever role
   // ops actually grant the page to (the KT §VII trap-2 lesson).
-  const BIDDING_WRITES = new Set(['set_bidding_pending', 'create_booking', 'update_booking_status', 'close_booking_pipeline', 'toggle_bill_hold', 'unbook_bills'])
+  const BIDDING_WRITES = new Set(['set_bidding_pending', 'create_booking', 'reconcile_booking', 'update_booking_status', 'close_booking_pipeline', 'toggle_bill_hold', 'unbook_bills'])
   let auth
   if (BIDDING_WRITES.has(action)) {
     auth = await requireAuthForPage(req, 'consignment-bidding')
@@ -3347,81 +3419,27 @@ export async function POST(req) {
     }
 
     // ── Auto-reconcile over-attachment ─────────────────────────────────
-    // Bills were attached above. If their net × (1+gain_rate) overshoots
-    // the booked weight, detach SMALLEST-FIRST until the booking fits.
-    // Any residual under-attachment after detach flows into
-    // pipeline_remaining_g so the next sync-purchases run can auto-fill
-    // the gap from tomorrow's incoming bills.
-    //
-    // Smallest-first is intentional: minimises the residual that ends up
-    // in pipeline, and keeps the biggest committed bills tied to the
-    // booking (those are the ones the buyer's expecting to receive).
-    let detachedItems = []
-    let residualPipelineG = 0
-    try {
-      const gainRate = is_kl ? 0 : 0.035
-      const { data: attached } = await supabase
-        .from('purchases')
-        .select('id, application_id, customer_name, net_weight')
-        .eq('booking_id', data.id)
-
-      if (attached && attached.length > 0) {
-        const attachedNet      = attached.reduce((s, b) => s + Number(b.net_weight || 0), 0)
-        const effectiveCommitted = attachedNet * (1 + gainRate)
-        const excessEffective    = effectiveCommitted - w
-
-        // Threshold of 0.01g — below this, treat as float noise and skip.
-        if (excessEffective > 0.01) {
-          const excessNet = excessEffective / (1 + gainRate)
-          const ordered = [...attached].sort((a, b) =>
-            Number(a.net_weight || 0) - Number(b.net_weight || 0)
-          )
-          const detachIds = []
-          let cumulativeDetachedNet = 0
-          for (const bill of ordered) {
-            if (cumulativeDetachedNet >= excessNet) break
-            detachIds.push(bill.id)
-            detachedItems.push({
-              id:             bill.id,
-              application_id: bill.application_id,
-              customer_name:  bill.customer_name,
-              net_weight_g:   Number(bill.net_weight || 0),
-            })
-            cumulativeDetachedNet += Number(bill.net_weight || 0)
-          }
-
-          if (detachIds.length > 0) {
-            const { error: detErr } = await supabase
-              .from('purchases')
-              .update({ booking_id: null, booked_at: null })
-              .in('id', detachIds)
-            if (detErr) {
-              console.error('[create_booking] detach failed:', detErr.message)
-              // Roll back the detached items array — they're still
-              // attached, so reporting them as detached would mislead.
-              detachedItems = []
-            } else {
-              const newAttachedNet  = attachedNet - cumulativeDetachedNet
-              const newEffective    = newAttachedNet * (1 + gainRate)
-              residualPipelineG     = Math.max(0, w - newEffective)
-            }
-          }
-        }
-      }
-    } catch (reconErr) {
-      console.warn('[create_booking] over-attachment reconcile failed (non-fatal):', reconErr?.message)
+    // Shared helper; same logic used by the standalone reconcile_booking
+    // action for legacy over-attached rows.
+    const recon = await reconcileBookingOverAttachment({
+      supabase,
+      bookingId:    data.id,
+      bookedWeight: w,
+      isKl:         !!is_kl,
+    })
+    if (recon.error) {
+      console.warn('[create_booking] reconcile non-fatal:', recon.error)
     }
 
-    // If auto-reconcile produced a residual, fold it into pipeline_remaining_g.
-    // Overrides any explicit pipeline value the client might have sent — in
-    // the over-attached scenario the client's overBy is 0 so there's no
-    // conflict in practice.
-    if (residualPipelineG > 0.001) {
+    // Fold any residual into pipeline_remaining_g. Overrides any explicit
+    // pipeline value the client sent — in the over-attached scenario the
+    // client's overBy is 0 so there's no conflict in practice.
+    if (recon.residual_pipeline_g > 0.001) {
       try {
         await supabase
           .from('cal_quotas')
           .update({
-            pipeline_remaining_g:  Number(residualPipelineG.toFixed(3)),
+            pipeline_remaining_g:  recon.residual_pipeline_g,
             pipeline_region:       pipelineRegionResolved || (is_kl ? 'Kerala' : 'Bangalore'),
             pipeline_arrival_date: date,
           })
@@ -3434,8 +3452,70 @@ export async function POST(req) {
     return Response.json({
       data,
       message:             'Booking created.',
-      detached:            detachedItems,
-      residual_pipeline_g: Number(residualPipelineG.toFixed(3)),
+      detached:            recon.detached,
+      residual_pipeline_g: recon.residual_pipeline_g,
+    })
+  }
+
+  // ── Reconcile an existing booking — same auto-detach logic as create ──
+  // For legacy over-attached rows that pre-date the auto-reconcile feature.
+  // Takes a booking_id, runs the smallest-first detach, folds residual into
+  // pipeline_remaining_g. Returns the same shape as create_booking so the
+  // UI can show the same toast.
+  if (action === 'reconcile_booking') {
+    const { booking_id } = body
+    if (!booking_id) return Response.json({ error: 'booking_id required' }, { status: 400 })
+
+    const { data: booking, error: getErr } = await supabase
+      .from('cal_quotas')
+      .select('id, date, weight, is_kl, pipeline_region, status')
+      .eq('id', booking_id)
+      .single()
+    if (getErr) return Response.json({ error: getErr.message }, { status: 500 })
+    if (!booking) return Response.json({ error: 'Booking not found' }, { status: 404 })
+    if (booking.status && booking.status !== 'booked') {
+      return Response.json({ error: `Cannot reconcile a ${booking.status} booking.` }, { status: 400 })
+    }
+
+    const recon = await reconcileBookingOverAttachment({
+      supabase,
+      bookingId:    booking.id,
+      bookedWeight: Number(booking.weight),
+      isKl:         !!booking.is_kl,
+    })
+    if (recon.error) return Response.json({ error: recon.error }, { status: 500 })
+
+    // No-op when nothing to reconcile — return a friendly message instead of
+    // 200/empty so the UI can say 'already reconciled' rather than 'reconciled'.
+    if (recon.detached.length === 0 && recon.residual_pipeline_g === 0) {
+      return Response.json({
+        data:                booking,
+        message:             'Nothing to reconcile — booking is already within booked weight.',
+        detached:            [],
+        residual_pipeline_g: 0,
+      })
+    }
+
+    if (recon.residual_pipeline_g > 0.001) {
+      try {
+        await supabase
+          .from('cal_quotas')
+          .update({
+            pipeline_remaining_g:  recon.residual_pipeline_g,
+            pipeline_region:       booking.pipeline_region || (booking.is_kl ? 'Kerala' : 'Bangalore'),
+            pipeline_arrival_date: booking.date,
+          })
+          .eq('id', booking.id)
+      } catch (pErr) {
+        console.warn('[reconcile_booking] residual pipeline update failed:', pErr?.message)
+      }
+    }
+
+    return Response.json({
+      data:                booking,
+      message:             'Booking reconciled.',
+      detached:            recon.detached,
+      residual_pipeline_g: recon.residual_pipeline_g,
     })
   }
 

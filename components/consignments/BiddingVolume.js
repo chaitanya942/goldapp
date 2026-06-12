@@ -895,6 +895,36 @@ export default function BiddingVolume() {
     return true
   }
 
+  // ── Reconcile an over-attached booking ────────────────────────────────────
+  // Calls /api/consignments?action=reconcile_booking which runs the same
+  // smallest-first detach + residual-to-pipeline logic that create_booking
+  // does at create time. For legacy rows that were over-attached BEFORE the
+  // auto-reconcile feature shipped (e.g. the Augmont 12-Jun booking ops
+  // flagged: NET 1217.19 + GAIN 42.60 = 1259.79 vs BOOKED 1200).
+  const reconcileBooking = async (id) => {
+    const r = await authedFetch('/api/consignments?action=reconcile_booking', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ booking_id: id }),
+    })
+    const j = await r.json().catch(() => ({}))
+    if (!r.ok || j.error) {
+      showToast(j.error || 'Reconcile failed', 'error')
+      return false
+    }
+    const detached    = Array.isArray(j.detached) ? j.detached : []
+    const detachedNet = detached.reduce((s, x) => s + Number(x.net_weight_g || 0), 0)
+    const residual    = Number(j.residual_pipeline_g || 0)
+    if (detached.length === 0 && residual === 0) {
+      showToast('Already within booked weight — nothing to reconcile.', 'info')
+    } else {
+      let msg = `Detached ${detached.length} bill${detached.length === 1 ? '' : 's'} (${detachedNet.toFixed(2)} g)`
+      msg += residual > 0.001 ? ` — ${residual.toFixed(2)} g residual → pipeline.` : '.'
+      showToast(msg, 'success')
+    }
+    fetchAll(true)
+    return true
+  }
+
   // ── Loading / error ────────────────────────────────────────────────────────
   if (loading && !supply) return <div style={{ padding: 80, display: 'flex', justifyContent: 'center' }}><GoldSpinner size={32} /></div>
 
@@ -1518,6 +1548,7 @@ export default function BiddingVolume() {
             onUpdateStatus={updateStatus}
             onRequestCancel={(b) => setCancelTarget(b)}
             onClosePipeline={closeBookingPipeline}
+            onReconcile={reconcileBooking}
             onUnbook={unbookBooking}
             onCreateConsignment={createConsignmentForBooking}
             onCreate={() => { setActiveTab('bidding') }}
@@ -1982,7 +2013,7 @@ const DISPATCH_META = {
   at_risk: { label: '⚠ at risk',           tone: 'red'    },
 }
 
-function BookingsList({ t, card, bookings, onUpdateStatus, onRequestCancel, onClosePipeline, onUnbook, onCreateConsignment, onCreate }) {
+function BookingsList({ t, card, bookings, onUpdateStatus, onRequestCancel, onClosePipeline, onReconcile, onUnbook, onCreateConsignment, onCreate }) {
   const [actionBusy, setActionBusy] = useState(null)  // booking id currently mid-action
   const [hideCancelled, setHideCancelled] = useState(true)
   const visible       = hideCancelled ? bookings.filter(b => b.status !== 'cancelled') : bookings
@@ -2142,6 +2173,46 @@ function BookingsList({ t, card, bookings, onUpdateStatus, onRequestCancel, onCl
                             )}
                           </span>
                         )}
+                        {/* Over-attached — net + gain exceeds booked weight.
+                            Legacy rows created before the auto-detach feature
+                            shipped, plus any edge case where bills got
+                            re-attached out of sync. One-click Auto-fix runs
+                            the same smallest-first detach + residual-to-
+                            pipeline reconcile that create_booking does. */}
+                        {(() => {
+                          if (isCancelled || isSettled || !onReconcile) return null
+                          if (billsG == null || !(Number(b.weight) > 0)) return null
+                          const effectiveCommittedG = billsG + (effectiveGainG || 0)
+                          const overByG = effectiveCommittedG - Number(b.weight)
+                          if (overByG <= 0.5) return null
+                          return (
+                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 0 }}>
+                              <span title={`Net + gain (${fmt(effectiveCommittedG, 2)} g) exceeds booked (${fmt(Number(b.weight), 2)} g) by ${fmt(overByG, 2)} g`}
+                                style={{
+                                  background: `${t.red}18`,
+                                  color: t.red,
+                                  border: `1px solid ${t.red}40`,
+                                  borderRadius: '99px 0 0 99px',
+                                  padding: '1px 8px',
+                                  fontFamily: 'monospace', fontWeight: 800, letterSpacing: '.02em',
+                                }}>
+                                ⚠ over-attached {fmt(overByG, 2)}g
+                              </span>
+                              <button type="button"
+                                onClick={() => onReconcile(b.id)}
+                                title="Auto-detach the smallest bills until the booking fits. Residual moves to pipeline."
+                                style={{
+                                  background: t.gold, color: '#1a0a00',
+                                  border: 'none', borderRadius: '0 99px 99px 0',
+                                  padding: '2px 10px', fontSize: 10, fontWeight: 800,
+                                  letterSpacing: '.03em', cursor: 'pointer',
+                                  textTransform: 'uppercase',
+                                }}>
+                                Auto-fix
+                              </button>
+                            </span>
+                          )
+                        })()}
                         {/* Settled — arrival day has passed; gain is final
                             (net × rate plus any small EOD leftover). */}
                         {isSettled && (
