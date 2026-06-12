@@ -86,7 +86,15 @@ export default function ConsignmentData() {
   const [sortBy,              setSortBy]             = useState('oldest')
   const [search,              setSearch]             = useState('')
   const [creating,            setCreating]           = useState(false)
-  const [moveType,            setMoveType]           = useState('EXTERNAL')
+  // moveType:
+  //   ''         → nothing chosen yet (modal just opened, suggestion hasn't
+  //                landed, ops hasn't clicked). Create is blocked.
+  //   'INTERNAL' → ops picked a hub from the picker.
+  //   'EXTERNAL' → ops clicked the 'send to Head Office' button.
+  // Default is empty so an accidental Enter / Confirm never ships to HO
+  // when ops meant to pick a hub — the toggle that defaulted to EXTERNAL
+  // produced exactly that failure mode.
+  const [moveType,            setMoveType]           = useState('')
   const [destBranch,          setDestBranch]         = useState('')
   const [destSearch,          setDestSearch]         = useState('')
   const [destOpen,            setDestOpen]           = useState(false)
@@ -383,7 +391,7 @@ export default function ConsignmentData() {
   function toggleRow(id) { const n = new Set(selected); n.has(id) ? n.delete(id) : n.add(id); setSelected(n) }
 
   async function fetchPreviewNumbers() {
-    if (!nav?.branch) return
+    if (!nav?.branch || !moveType) return
     setLoadingPreview(true)
     try {
       const res  = await authedFetch(`/api/consignments-preview?branch=${encodeURIComponent(nav.branch)}&movement_type=${moveType}`)
@@ -395,6 +403,10 @@ export default function ConsignmentData() {
 
   async function handleCreate() {
     if (!selected.size || !nav?.branch) return
+    if (!moveType) {
+      setToast({ msg: 'Pick a destination first — a hub or Head Office.', type: 'error' })
+      return
+    }
     if (moveType === 'INTERNAL' && !destBranch) {
       setToast({ msg: 'Select a destination hub before creating.', type: 'error' })
       return
@@ -1788,9 +1800,18 @@ export default function ConsignmentData() {
               const filteredHubs  = destSearch
                 ? candidateHubs.filter(b => b.name.toLowerCase().includes(destSearch.toLowerCase()) || (b.region || '').toLowerCase().includes(destSearch.toLowerCase()))
                 : candidateHubs
-              const isExternal = moveType === 'EXTERNAL'
-              const dest        = isExternal ? 'Head Office' : (destBranch || '— select hub —')
-              const destRegion  = isExternal ? 'Bangalore (KA)' : (branches.find(b => b.name === destBranch)?.region || '')
+              const isExternal     = moveType === 'EXTERNAL'
+              const isHubPicked    = moveType === 'INTERNAL' && !!destBranch
+              const hasDestination = isExternal || isHubPicked
+              const dest = isExternal ? 'Head Office'
+                         : isHubPicked ? destBranch
+                         : '— pick a destination below —'
+              const destRegion = isExternal ? 'Bangalore (KA)'
+                               : isHubPicked ? (branches.find(b => b.name === destBranch)?.region || '')
+                               : ''
+              const destColor  = isExternal ? t.gold
+                               : isHubPicked ? t.purple
+                               : t.text4
 
               return (
                 <>
@@ -1821,68 +1842,64 @@ export default function ConsignmentData() {
                     </div>
                   )}
 
-                  {/* Movement type — segmented control with semantic labels */}
+                  {/* Destination — unified two-zone picker.
+                      Hub combobox up top, an explicit 'send to Head Office'
+                      button below. The previous segmented toggle defaulted
+                      to EXTERNAL which let ops accidentally ship to HO when
+                      they meant a hub — this layout forces an explicit
+                      click on either side before Create unlocks. */}
                   <div style={{ marginBottom: '18px' }}>
-                    <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', marginBottom: '8px', fontWeight: 700 }}>Movement type</div>
-                    <div style={{ display: 'flex', gap: '6px', padding: '4px', background: t.card2, borderRadius: '10px' }}>
-                      <button type="button" onClick={() => setMoveType('EXTERNAL')}
-                        style={{
-                          flex: 1, padding: '11px 10px', border: 'none', borderRadius: '7px',
-                          cursor: 'pointer',
-                          background: isExternal ? t.card : 'transparent',
-                          color: isExternal ? t.gold : t.text3,
-                          fontWeight: isExternal ? 700 : 500,
-                          fontSize: '12px', letterSpacing: '.02em',
-                          boxShadow: isExternal ? '0 1px 4px rgba(0,0,0,.25)' : 'none',
-                          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
-                          transition: 'all .15s',
-                        }}>
-                        <span style={{ fontSize: '14px' }}>📤</span>
-                        Branch → HO
-                      </button>
-                      <button type="button" onClick={() => setMoveType('INTERNAL')} disabled={candidateHubs.length === 0}
-                        title={candidateHubs.length === 0 ? `No other branches in ${srcState || srcRegion || 'this state'}` : ''}
-                        style={{
-                          flex: 1, padding: '11px 10px', border: 'none', borderRadius: '7px',
-                          cursor: candidateHubs.length === 0 ? 'not-allowed' : 'pointer',
-                          opacity: candidateHubs.length === 0 ? 0.4 : 1,
-                          background: !isExternal ? t.card : 'transparent',
-                          color: !isExternal ? t.purple : t.text3,
-                          fontWeight: !isExternal ? 700 : 500,
-                          fontSize: '12px', letterSpacing: '.02em',
-                          boxShadow: !isExternal ? '0 1px 4px rgba(0,0,0,.25)' : 'none',
-                          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
-                          transition: 'all .15s',
-                        }}>
-                        <span style={{ fontSize: '14px' }}>🔁</span>
-                        Branch → Hub
-                      </button>
+                    <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', marginBottom: '8px', fontWeight: 700, display: 'flex', alignItems: 'baseline', gap: '6px' }}>
+                      Destination
+                      <span style={{ color: t.red, fontSize: '9px' }}>(required)</span>
                     </div>
-                  </div>
 
-                  {/* Hub picker — only when Branch → Hub */}
-                  {!isExternal && (
-                    <div style={{ marginBottom: '18px', position: 'relative' }}>
-                      <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', marginBottom: '6px', fontWeight: 700 }}>Destination hub</div>
+                    {/* Zone 1: Hub picker */}
+                    <div style={{ position: 'relative', opacity: isExternal ? 0.45 : 1, transition: 'opacity .15s' }}>
                       <input
                         value={destBranch && !destOpen ? destBranch : destSearch}
-                        onFocus={() => { setDestOpen(true); setDestSearch('') }}
-                        onChange={e => { setDestSearch(e.target.value); setDestBranch(''); setDestOpen(true) }}
-                        placeholder={`Type to search any branch in ${srcRegionLabel || 'state'}…`}
+                        onFocus={() => {
+                          if (candidateHubs.length === 0) return
+                          // Clicking the hub picker clears any prior HO
+                          // pick — ops is signalling they want a hub.
+                          if (isExternal) setMoveType('')
+                          setDestOpen(true); setDestSearch('')
+                        }}
+                        onChange={e => {
+                          if (isExternal) setMoveType('')
+                          setDestSearch(e.target.value); setDestBranch(''); setDestOpen(true)
+                        }}
+                        placeholder={candidateHubs.length === 0
+                          ? `No other branches in ${srcState || srcRegion || 'this state'} — use Head Office below.`
+                          : `Type to search a hub in ${srcRegionLabel || 'state'}…`}
+                        disabled={candidateHubs.length === 0}
                         style={{
                           width: '100%',
                           background: t.card2,
-                          border: `1px solid ${destBranch ? t.purple + '60' : t.border2}`,
+                          border: `1px solid ${isHubPicked ? `${t.purple}80` : t.border2}`,
                           borderRadius: '9px', padding: '11px 14px',
                           fontSize: '13px', color: t.text1, outline: 'none', boxSizing: 'border-box',
+                          cursor: candidateHubs.length === 0 ? 'not-allowed' : 'text',
+                          transition: 'border-color .15s',
                         }} />
-                      {destOpen && (
+                      {isHubPicked && (
+                        <span title="Destination hub picked"
+                          style={{
+                            position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)',
+                            color: t.purple, fontSize: '15px', fontWeight: 800,
+                            pointerEvents: 'none',
+                          }}>✓</span>
+                      )}
+                      {destOpen && !isExternal && (
                         <div style={{ position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0, background: t.card, border: `1px solid ${t.border2}`, borderRadius: '9px', maxHeight: '240px', overflowY: 'auto', zIndex: 10, boxShadow: '0 12px 36px rgba(0,0,0,.45)' }}>
                           {filteredHubs.length === 0 ? (
                             <div style={{ padding: '14px', fontSize: '12px', color: t.text4, textAlign: 'center' }}>No branches match</div>
                           ) : filteredHubs.map(b => (
                             <div key={b.id}
-                              onClick={() => { setDestBranch(b.name); setDestSearch(''); setDestOpen(false) }}
+                              onClick={() => {
+                                setMoveType('INTERNAL')
+                                setDestBranch(b.name); setDestSearch(''); setDestOpen(false)
+                              }}
                               style={{ padding: '10px 14px', cursor: 'pointer', fontSize: '12px', color: t.text1, borderBottom: `1px solid ${t.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
                               onMouseEnter={e => e.currentTarget.style.background = `${t.purple}10`}
                               onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
@@ -1893,7 +1910,52 @@ export default function ConsignmentData() {
                         </div>
                       )}
                     </div>
-                  )}
+
+                    {/* OR divider */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', margin: '12px 0' }}>
+                      <div style={{ flex: 1, height: 1, background: t.border }} />
+                      <span style={{ fontSize: '9px', color: t.text4, letterSpacing: '.14em', fontWeight: 700 }}>OR</span>
+                      <div style={{ flex: 1, height: 1, background: t.border }} />
+                    </div>
+
+                    {/* Zone 2: Head Office button — explicit click required. */}
+                    <button type="button"
+                      onClick={() => {
+                        setMoveType('EXTERNAL')
+                        setDestBranch('')
+                        setDestSearch('')
+                        setDestOpen(false)
+                      }}
+                      style={{
+                        width: '100%',
+                        padding: '13px 14px',
+                        borderRadius: '9px',
+                        border: isExternal ? `1.5px solid ${t.gold}` : `1px solid ${t.border2}`,
+                        background: isExternal ? `${t.gold}1c` : t.card2,
+                        color: isExternal ? t.gold : t.text2,
+                        fontSize: '13px', fontWeight: 700, letterSpacing: '.02em',
+                        cursor: 'pointer',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px',
+                        opacity: isHubPicked ? 0.45 : 1,
+                        transition: 'all .15s',
+                        boxSizing: 'border-box',
+                      }}
+                      onMouseEnter={e => { if (!isExternal && !isHubPicked) e.currentTarget.style.background = `${t.gold}10` }}
+                      onMouseLeave={e => { if (!isExternal && !isHubPicked) e.currentTarget.style.background = t.card2 }}>
+                      <span style={{ fontSize: '15px' }}>📤</span>
+                      Send directly to Head Office
+                      {isExternal && <span style={{ fontSize: '15px', fontWeight: 900 }}>✓</span>}
+                    </button>
+
+                    {/* Tiny hint at the bottom — only visible while ops
+                        hasn't picked anything yet, so the empty state isn't
+                        ambiguous. */}
+                    {!hasDestination && (
+                      <div style={{ fontSize: '10.5px', color: t.text4, marginTop: '8px', textAlign: 'center', fontStyle: 'italic' }}>
+                        Pick a hub above OR tap Head Office to continue.
+                      </div>
+                    )}
+                  </div>
 
                   {/* Source ──→ Destination flow card */}
                   <div style={{
@@ -1913,11 +1975,11 @@ export default function ConsignmentData() {
                       {srcRegionLabel && <div style={{ fontSize: '10px', color: t.text3, marginTop: '2px' }}>{srcRegionLabel}</div>}
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column' }}>
-                      <div style={{ fontSize: '20px', color: isExternal ? t.gold : t.purple, lineHeight: 1 }}>→</div>
+                      <div style={{ fontSize: '20px', color: destColor, lineHeight: 1 }}>→</div>
                     </div>
                     <div style={{ minWidth: 0, textAlign: 'right' }}>
                       <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 700, marginBottom: '4px' }}>To</div>
-                      <div style={{ fontSize: '13px', fontWeight: 700, color: isExternal ? t.gold : t.purple, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{dest}</div>
+                      <div style={{ fontSize: '13px', fontWeight: 700, color: destColor, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{dest}</div>
                       {destRegion && <div style={{ fontSize: '10px', color: t.text3, marginTop: '2px' }}>{destRegion}</div>}
                     </div>
                   </div>
