@@ -803,10 +803,55 @@ export async function GET(req) {
       return Object.values(m).sort((a, b) => b.total_net_wt - a.total_net_wt)
     }
 
+    // Pending-booking bills carry their parent consignment's creation
+    // stamp (when + by whom) so the Section 2 sub-group can show 'created
+    // <date> by <who>' per branch — the whole point being to chase down
+    // who dispatched a consignment and never booked it. Resolved via
+    // consignment_items → consignments (most recent non-cancelled link
+    // per bill). created_by is stored as an email on consignments.
+    if (inflightPendingBooking.length) {
+      const pendIds = inflightPendingBooking.map(b => b.id)
+      const linkByBill = {}   // purchase_id → { created_at, created_by }
+      const IN_CHUNK = 100
+      for (let i = 0; i < pendIds.length; i += IN_CHUNK) {
+        const slice = pendIds.slice(i, i + IN_CHUNK)
+        const { data: links } = await supabase
+          .from('consignment_items')
+          .select('purchase_id, consignment:consignment_id(created_at, created_by, status)')
+          .in('purchase_id', slice)
+        for (const l of links || []) {
+          const c = l.consignment
+          if (!c || c.status === 'cancelled') continue
+          const prev = linkByBill[l.purchase_id]
+          if (!prev || new Date(c.created_at) > new Date(prev.created_at)) {
+            linkByBill[l.purchase_id] = { created_at: c.created_at, created_by: c.created_by }
+          }
+        }
+      }
+      for (const b of inflightPendingBooking) {
+        const meta = linkByBill[b.id]
+        b._consignment_created_at = meta?.created_at || null
+        b._consignment_created_by = meta?.created_by || null
+      }
+    }
+
     const bangaloreByBranch  = groupByBranch(bangBills)
     const transit24hByBranch = groupByBranch(inflight24h)
     const transit48hByBranch = groupByBranch(inflight48h)
-    const pendingBookingByBranch = groupByBranch(inflightPendingBooking)
+    // Annotate each pending-booking branch row with the consignment-
+    // creation summary (earliest/latest stamp + unique creators) so the
+    // collapsed row reads 'created <date> by <who>' without expanding.
+    const pendingBookingByBranch = groupByBranch(inflightPendingBooking).map(b => {
+      const bills    = b.bills || []
+      const stamps   = bills.map(x => x._consignment_created_at).filter(Boolean).sort()
+      const creators = [...new Set(bills.map(x => x._consignment_created_by).filter(Boolean))]
+      return {
+        ...b,
+        _consignment_earliest: stamps[0]                 || null,
+        _consignment_latest:   stamps[stamps.length - 1] || null,
+        _consignment_creators: creators,
+      }
+    })
     const preEodByBranch     = groupByBranch(preEodBills)
 
     // For booked-pending: also fold in branch-level booking summaries

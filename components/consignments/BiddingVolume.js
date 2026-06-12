@@ -2747,6 +2747,24 @@ function SourceSection({
                             )}
                           </span>
                         )}
+                        {/* Consignment-creation caption — only present on the
+                            Section 2 'booking pending' sub-group rows, where
+                            the API attaches _consignment_earliest + creators.
+                            Tells ops who dispatched the consignment and when,
+                            so they can chase the missing booking. */}
+                        {(b._consignment_earliest || (b._consignment_creators && b._consignment_creators.length > 0)) && (
+                          <span style={{ fontSize: 11, color: t.text3, fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0 }}>
+                            {b._consignment_earliest && (
+                              <>
+                                created {fmtTS(b._consignment_earliest)}
+                                {b._consignment_latest && b._consignment_latest !== b._consignment_earliest ? ` → ${fmtTS(b._consignment_latest)}` : ''}
+                              </>
+                            )}
+                            {b._consignment_creators && b._consignment_creators.length > 0 && (
+                              <> · by {b._consignment_creators.join(', ')}</>
+                            )}
+                          </span>
+                        )}
                         {/* Branch-level actions for booked-pending rows only.
                             Both handlers must be passed (only Section 5 / S4
                             wire them up). Stops row-click propagation so
