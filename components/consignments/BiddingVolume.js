@@ -753,7 +753,21 @@ export default function BiddingVolume() {
         showToast(msg, 'error')
         return false
       }
-      showToast('Booking created.', 'success')
+      // Surface the auto-reconcile outcome — server may have detached
+      // smallest-first bills when the operator's selection exceeded
+      // booked weight, and any residual under-attachment lands in
+      // pipeline. Stays out of the toast when nothing was reconciled.
+      const detachedList = Array.isArray(j?.detached) ? j.detached : []
+      const detachedNetG = detachedList.reduce((s, b) => s + Number(b.net_weight_g || 0), 0)
+      const residualG    = Number(j?.residual_pipeline_g || 0)
+      let toastMsg = 'Booking created.'
+      if (detachedList.length > 0) {
+        toastMsg = `Booking created. Auto-detached ${detachedList.length} bill${detachedList.length === 1 ? '' : 's'} (${detachedNetG.toFixed(2)} g)`
+        toastMsg += residualG > 0.001
+          ? ` — ${residualG.toFixed(2)} g residual → pipeline.`
+          : '.'
+      }
+      showToast(toastMsg, 'success')
       setShowBookModal(false)
       setActiveTab('bookings')                        // surface the committed row immediately
       fetchAll(true)

@@ -3346,7 +3346,97 @@ export async function POST(req) {
       }
     }
 
-    return Response.json({ data, message: 'Booking created.' })
+    // ── Auto-reconcile over-attachment ─────────────────────────────────
+    // Bills were attached above. If their net × (1+gain_rate) overshoots
+    // the booked weight, detach SMALLEST-FIRST until the booking fits.
+    // Any residual under-attachment after detach flows into
+    // pipeline_remaining_g so the next sync-purchases run can auto-fill
+    // the gap from tomorrow's incoming bills.
+    //
+    // Smallest-first is intentional: minimises the residual that ends up
+    // in pipeline, and keeps the biggest committed bills tied to the
+    // booking (those are the ones the buyer's expecting to receive).
+    let detachedItems = []
+    let residualPipelineG = 0
+    try {
+      const gainRate = is_kl ? 0 : 0.035
+      const { data: attached } = await supabase
+        .from('purchases')
+        .select('id, application_id, customer_name, net_weight')
+        .eq('booking_id', data.id)
+
+      if (attached && attached.length > 0) {
+        const attachedNet      = attached.reduce((s, b) => s + Number(b.net_weight || 0), 0)
+        const effectiveCommitted = attachedNet * (1 + gainRate)
+        const excessEffective    = effectiveCommitted - w
+
+        // Threshold of 0.01g — below this, treat as float noise and skip.
+        if (excessEffective > 0.01) {
+          const excessNet = excessEffective / (1 + gainRate)
+          const ordered = [...attached].sort((a, b) =>
+            Number(a.net_weight || 0) - Number(b.net_weight || 0)
+          )
+          const detachIds = []
+          let cumulativeDetachedNet = 0
+          for (const bill of ordered) {
+            if (cumulativeDetachedNet >= excessNet) break
+            detachIds.push(bill.id)
+            detachedItems.push({
+              id:             bill.id,
+              application_id: bill.application_id,
+              customer_name:  bill.customer_name,
+              net_weight_g:   Number(bill.net_weight || 0),
+            })
+            cumulativeDetachedNet += Number(bill.net_weight || 0)
+          }
+
+          if (detachIds.length > 0) {
+            const { error: detErr } = await supabase
+              .from('purchases')
+              .update({ booking_id: null, booked_at: null })
+              .in('id', detachIds)
+            if (detErr) {
+              console.error('[create_booking] detach failed:', detErr.message)
+              // Roll back the detached items array — they're still
+              // attached, so reporting them as detached would mislead.
+              detachedItems = []
+            } else {
+              const newAttachedNet  = attachedNet - cumulativeDetachedNet
+              const newEffective    = newAttachedNet * (1 + gainRate)
+              residualPipelineG     = Math.max(0, w - newEffective)
+            }
+          }
+        }
+      }
+    } catch (reconErr) {
+      console.warn('[create_booking] over-attachment reconcile failed (non-fatal):', reconErr?.message)
+    }
+
+    // If auto-reconcile produced a residual, fold it into pipeline_remaining_g.
+    // Overrides any explicit pipeline value the client might have sent — in
+    // the over-attached scenario the client's overBy is 0 so there's no
+    // conflict in practice.
+    if (residualPipelineG > 0.001) {
+      try {
+        await supabase
+          .from('cal_quotas')
+          .update({
+            pipeline_remaining_g:  Number(residualPipelineG.toFixed(3)),
+            pipeline_region:       pipelineRegionResolved || (is_kl ? 'Kerala' : 'Bangalore'),
+            pipeline_arrival_date: date,
+          })
+          .eq('id', data.id)
+      } catch (pErr) {
+        console.warn('[create_booking] residual pipeline update failed:', pErr?.message)
+      }
+    }
+
+    return Response.json({
+      data,
+      message:             'Booking created.',
+      detached:            detachedItems,
+      residual_pipeline_g: Number(residualPipelineG.toFixed(3)),
+    })
   }
 
   // ── At-risk bookings summary ─────────────────────────────────────────────
