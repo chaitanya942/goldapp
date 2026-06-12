@@ -112,6 +112,12 @@ export default function ConsignmentReport() {
   const [caseSinceQuick, setCaseSinceQuick] = useState('today')
   const [caseSinceFrom,  setCaseSinceFrom]  = useState('')
   const [caseSinceTo,    setCaseSinceTo]    = useState('')
+  // Secondary filter on the DERIVED expected_delivery_date (dispatch +
+  // working-day TAT). Client-side only — the server doesn't compute it.
+  // Defaults to 'all' so it never narrows the view until ops opts in.
+  const [expDelivQuick, setExpDelivQuick] = useState('all')
+  const [expDelivFrom,  setExpDelivFrom]  = useState('')
+  const [expDelivTo,    setExpDelivTo]    = useState('')
   const [caseSortKey,    setCaseSortKey]    = useState('dispatched_at')
   const [caseSortDir,    setCaseSortDir]    = useState(-1)
   // Pagination — large filter results (e.g. "All" on 1000+ bills) become a
@@ -140,6 +146,36 @@ export default function ConsignmentReport() {
     }
     return { from: null, to: null }  // 'all'
   }, [caseSinceQuick, caseSinceFrom, caseSinceTo])
+
+  // Expected-delivery window. Forward-looking presets (today / tomorrow /
+  // next 7d) since the question here is "what's due to land when". 'all'
+  // and 'custom' mirror the consignment-date filter.
+  const expDelivRange = useMemo(() => {
+    if (expDelivQuick === 'custom') return { from: expDelivFrom || null, to: expDelivTo || null }
+    const today = istToday()
+    if (expDelivQuick === 'today') return { from: today, to: today }
+    if (expDelivQuick === 'tomorrow') {
+      const d = new Date(today); d.setDate(d.getDate() + 1)
+      const tm = d.toISOString().slice(0, 10)
+      return { from: tm, to: tm }
+    }
+    if (expDelivQuick === 'next7') {
+      const d = new Date(today); d.setDate(d.getDate() + 6)
+      return { from: today, to: d.toISOString().slice(0, 10) }
+    }
+    return { from: null, to: null }  // 'all'
+  }, [expDelivQuick, expDelivFrom, expDelivTo])
+
+  // True when a row's expected_delivery_date falls inside the active
+  // expected-delivery window. A row with no expected date is excluded only
+  // when the filter is active (so 'all' keeps everything).
+  const expDelivMatch = (expDate) => {
+    if (!expDelivRange.from && !expDelivRange.to) return true
+    if (!expDate) return false
+    if (expDelivRange.from && expDate < expDelivRange.from) return false
+    if (expDelivRange.to   && expDate > expDelivRange.to)   return false
+    return true
+  }
 
   // Fetch every bill dispatched in the selected window — drives both the
   // case-wise and branch-wise views. The API returns ALL dispatched bills in
@@ -341,6 +377,7 @@ export default function ConsignmentReport() {
         }
         return true
       })
+      .filter(g => expDelivMatch(g.expected_delivery_date))
       .slice()
       .sort((a, b) => {
         let av, bv
@@ -360,7 +397,7 @@ export default function ConsignmentReport() {
         }
         return (av - bv) * sortDir
       })
-  }, [branchAggregated, activeRegions, hasRegionFilter, searchQ, caseSinceRange, sortKey, sortDir])
+  }, [branchAggregated, activeRegions, hasRegionFilter, searchQ, caseSinceRange, expDelivRange, sortKey, sortDir])
 
   const filteredCaseRows = useMemo(() => caseData
     .filter(r => {
@@ -393,6 +430,9 @@ export default function ConsignmentReport() {
       const expDate      = dispatchDate ? addWorkingDaysSkipSunday(dispatchDate, workDays) : null
       return { ...r, expected_delivery_date: expDate, _tat_hours_effective: tatHours }
     })
+    // Expected-delivery filter applied AFTER decoration (the date is derived
+    // in the map above, so it can't be filtered before this point).
+    .filter(r => expDelivMatch(r.expected_delivery_date))
     .slice()
     .sort((a, b) => {
       const dir = caseSortDir
@@ -404,7 +444,7 @@ export default function ConsignmentReport() {
       if (typeof av === 'number' && typeof bv === 'number') return (av - bv) * dir
       return String(av).localeCompare(String(bv)) * dir
     })
-  , [caseData, caseSinceRange, activeRegions, hasRegionFilter, searchQ, branchToRegion, caseSortKey, caseSortDir])
+  , [caseData, caseSinceRange, expDelivRange, activeRegions, hasRegionFilter, searchQ, branchToRegion, caseSortKey, caseSortDir])
 
   function handleCaseSort(key) {
     if (caseSortKey === key) setCaseSortDir(d => d * -1)
@@ -480,7 +520,7 @@ export default function ConsignmentReport() {
 
   // Reset to page 1 whenever the filter set changes so ops aren't stuck on
   // page 5 of a result set that only has 2 pages now.
-  useEffect(() => { setCasePage(1) }, [caseSinceQuick, caseSinceFrom, caseSinceTo, activeRegions, search, caseSortKey, caseSortDir])
+  useEffect(() => { setCasePage(1) }, [caseSinceQuick, caseSinceFrom, caseSinceTo, expDelivQuick, expDelivFrom, expDelivTo, activeRegions, search, caseSortKey, caseSortDir])
 
   // Σ totals across the visible case rows — drives the totals row pinned
   // beneath the headers. Note: Svc % can't be summed (it's a per-bill rate),
@@ -798,6 +838,42 @@ export default function ConsignmentReport() {
             <span style={{ color: t.text4 }}>→</span>
             <input type="date" value={caseSinceTo}
               onChange={e => { setCaseSinceTo(e.target.value); setCaseSinceQuick('custom') }}
+              style={{ background: t.card2, border: `1px solid ${t.border2}`, borderRadius: '6px', padding: '5px 7px', fontSize: '11px', color: t.text1, fontFamily: 'monospace', outline: 'none' }} />
+        </div>
+
+        {/* Expected Delivery filter — narrows BOTH views by the derived
+            expected_delivery_date (dispatch + working-day TAT). Independent
+            of the consignment-date filter; the two AND together. */}
+        <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
+            <span style={{ fontSize: '10px', color: t.text4, letterSpacing: '.08em', textTransform: 'uppercase', fontWeight: 600 }}>Expected delivery</span>
+            {[
+              { key: 'all',      label: 'All' },
+              { key: 'today',    label: 'Today' },
+              { key: 'tomorrow', label: 'Tomorrow' },
+              { key: 'next7',    label: 'Next 7d' },
+            ].map(q => {
+              const active = expDelivQuick === q.key
+              return (
+                <button key={q.key}
+                  onClick={() => { setExpDelivQuick(q.key); setExpDelivFrom(''); setExpDelivTo('') }}
+                  style={{
+                    padding: '5px 11px', borderRadius: '6px',
+                    background: active ? `${t.green}18` : 'transparent',
+                    border: `1px solid ${active ? `${t.green}80` : t.border2}`,
+                    color: active ? t.green : t.text3,
+                    fontSize: '11px', fontWeight: active ? 700 : 500,
+                    cursor: 'pointer', whiteSpace: 'nowrap',
+                  }}>
+                  {q.label}
+                </button>
+              )
+            })}
+            <input type="date" value={expDelivFrom}
+              onChange={e => { setExpDelivFrom(e.target.value); setExpDelivQuick('custom') }}
+              style={{ background: t.card2, border: `1px solid ${t.border2}`, borderRadius: '6px', padding: '5px 7px', fontSize: '11px', color: t.text1, fontFamily: 'monospace', outline: 'none' }} />
+            <span style={{ color: t.text4 }}>→</span>
+            <input type="date" value={expDelivTo}
+              onChange={e => { setExpDelivTo(e.target.value); setExpDelivQuick('custom') }}
               style={{ background: t.card2, border: `1px solid ${t.border2}`, borderRadius: '6px', padding: '5px 7px', fontSize: '11px', color: t.text1, fontFamily: 'monospace', outline: 'none' }} />
         </div>
 
