@@ -90,6 +90,11 @@ export default function ConsignmentData() {
   const [destBranch,          setDestBranch]         = useState('')
   const [destSearch,          setDestSearch]         = useState('')
   const [destOpen,            setDestOpen]           = useState(false)
+  // Suggested destination from history — surfaces a small hint next to
+  // the destination picker so ops knows where the default came from and
+  // can override it without confusion.
+  //   { dest_branch, movement_type } or null when no prior consignment.
+  const [destSuggestion,      setDestSuggestion]    = useState(null)
   const [ewayBillNo,          setEwayBillNo]         = useState('')
   // Per-consignment override of branches.contact_person / contact_phone.
   // Seeded from the branch row when the modal opens; operator can edit before
@@ -270,9 +275,37 @@ export default function ConsignmentData() {
   // When entering a branch view, fetch authoritative own + transferred-in
   // bills into a SEPARATE state. Decoupled from the global `purchases`
   // (used by Branch Stock Overview) so fetchAll can't race-overwrite it.
+  // Also pulls the last destination this branch shipped to so the
+  // destination picker can default to it (overridable).
   useEffect(() => {
-    if (!nav?.branch) { setTransferHistory({}); setBranchBillsState(null); return }
+    if (!nav?.branch) {
+      setTransferHistory({})
+      setBranchBillsState(null)
+      setDestSuggestion(null)
+      return
+    }
     setBranchBillsState(null)  // show loading until fresh data arrives
+    // Fire the suggestion fetch in parallel — non-blocking, failures
+    // just leave the picker empty (current behaviour).
+    authedFetch(`/api/consignments?action=last_destination_for_branch&branch=${encodeURIComponent(nav.branch)}`)
+      .then(r => r.json())
+      .then(j => {
+        const sug = j?.suggestion
+        if (!sug) { setDestSuggestion(null); return }
+        setDestSuggestion(sug)
+        // Pre-fill the picker IF ops hasn't already started editing it.
+        // We check destBranch === '' && moveType still at default to avoid
+        // clobbering a deliberate choice on a tab they're returning to.
+        if (sug.movement_type === 'INTERNAL' && sug.dest_branch) {
+          setMoveType('INTERNAL')
+          setDestBranch(sug.dest_branch)
+        } else if (sug.movement_type === 'EXTERNAL') {
+          setMoveType('EXTERNAL')
+          setDestBranch('')
+        }
+      })
+      .catch(() => { setDestSuggestion(null) })
+
     Promise.all([
       authedFetch(`/api/consignments?action=stock_in_branch&branch=${encodeURIComponent(nav.branch)}`).then(r => r.json()),
       authedFetch(`/api/consignments?action=transfer_history&branch=${encodeURIComponent(nav.branch)}`).then(r => r.json()),
@@ -1761,6 +1794,33 @@ export default function ConsignmentData() {
 
               return (
                 <>
+                  {/* Suggestion hint — only when we have a prior consignment
+                      from this branch. Tells ops where the defaults came
+                      from so an unexpected pre-fill doesn't read as a bug. */}
+                  {destSuggestion && (
+                    <div style={{
+                      marginBottom: '12px',
+                      padding: '8px 12px',
+                      background: `${t.purple}10`,
+                      border: `1px solid ${t.purple}35`,
+                      borderRadius: '7px',
+                      fontSize: '11px',
+                      color: t.text2,
+                      display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap',
+                    }}>
+                      <span style={{ fontSize: '12px', color: t.purple }}>💡</span>
+                      <span>
+                        Suggested from your last consignment:{' '}
+                        <strong style={{ color: t.text1 }}>
+                          {destSuggestion.movement_type === 'INTERNAL'
+                            ? `Branch → ${destSuggestion.dest_branch}`
+                            : 'Branch → HO'}
+                        </strong>
+                        {' '}— change anything below to override.
+                      </span>
+                    </div>
+                  )}
+
                   {/* Movement type — segmented control with semantic labels */}
                   <div style={{ marginBottom: '18px' }}>
                     <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', marginBottom: '8px', fontWeight: 700 }}>Movement type</div>

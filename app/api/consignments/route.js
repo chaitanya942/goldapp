@@ -339,6 +339,37 @@ export async function GET(req) {
     return Response.json({ data, error: error?.message })
   }
 
+  // ── Last destination for a source branch ─────────────────────────────────
+  // For the create-consignment screen: when ops opens it for a branch they've
+  // shipped from before, default the destination + movement type to whatever
+  // they used most recently. Ops can override on the screen — this just
+  // saves the typical case (a branch usually consolidates to the same hub).
+  //
+  // Returns { suggestion: { dest_branch, movement_type, created_at } | null }.
+  // null when this branch has no prior consignment in history.
+  if (action === 'last_destination_for_branch') {
+    const branch = searchParams.get('branch')
+    if (!branch) return Response.json({ error: 'branch required' }, { status: 400 })
+    const { data, error } = await supabase
+      .from('consignments')
+      .select('dest_branch, movement_type, created_at, status')
+      .eq('branch_name', branch)
+      .neq('status', 'cancelled')
+      .neq('status', 'seed')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    if (error) return Response.json({ error: error.message }, { status: 500 })
+    if (!data)  return Response.json({ suggestion: null })
+    return Response.json({
+      suggestion: {
+        dest_branch:   data.dest_branch || null,
+        movement_type: data.movement_type || null,
+        created_at:    data.created_at,
+      },
+    })
+  }
+
   // ── Check for unknown branches (in purchases but not in branches table) ──
   if (action === 'unknown_branches') {
     const { data: knownBranches } = await supabase
