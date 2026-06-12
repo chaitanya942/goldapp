@@ -622,6 +622,19 @@ export async function GET(req) {
     })
     const inflight24h = inflightWithArrival.filter(b => b._arrival_date === arrivalDate)
     const inflight48h = inflightWithArrival.filter(b => b._arrival_date === dayAfterArrival)
+    // Consignment created · booking pending — in_consignment + unbooked bills
+    // whose computed arrival is NEITHER tomorrow (Section 2 main) NOR the day
+    // after (Section 3). These are consignments already dispatched that fell
+    // outside the forward bid windows: arrival already passed (stuck, never
+    // received) or held back to book later. Ops created the movement but
+    // never attached a booking. Surfaced as a flagged, still-bookable
+    // sub-group inside Section 2 so they don't get lost. Non-Kerala only —
+    // the KL tab has its own movement sections.
+    const inflightPendingBooking = inflightWithArrival.filter(b =>
+      b._arrival_date !== arrivalDate &&
+      b._arrival_date !== dayAfterArrival &&
+      (branchMeta[b.branch_name]?.region) !== 'Kerala',
+    )
     // Back-compat alias for the existing UI (renders only the 24h bucket).
     const inflightForTarget = inflight24h
 
@@ -793,6 +806,7 @@ export async function GET(req) {
     const bangaloreByBranch  = groupByBranch(bangBills)
     const transit24hByBranch = groupByBranch(inflight24h)
     const transit48hByBranch = groupByBranch(inflight48h)
+    const pendingBookingByBranch = groupByBranch(inflightPendingBooking)
     const preEodByBranch     = groupByBranch(preEodBills)
 
     // For booked-pending: also fold in branch-level booking summaries
@@ -829,6 +843,7 @@ export async function GET(req) {
     const bangTotal         = sumOf(bangaloreByBranch)
     const transit24hTotal   = sumOf(transit24hByBranch)
     const transit48hTotal   = sumOf(transit48hByBranch)
+    const pendingBookingTotal = sumOf(pendingBookingByBranch)
     const preEodTotal       = sumOf(preEodByBranch)
     const bookedNonKlTotal  = sumOf(bookedNonKlByBranch)
     const bookedKlTotal     = sumOf(bookedKlByBranch)
@@ -1049,6 +1064,10 @@ export async function GET(req) {
         bangalore:      { branches: bangaloreByBranch,  total: bangTotal       },
         transit_24h:    { branches: transit24hByBranch, total: transit24hTotal },
         transit_48h:    { branches: transit48hByBranch, total: transit48hTotal },   // view-only, NOT part of bookable pool
+        // Section 2 sub-group — consignment created, booking pending. Still
+        // bookable (selectable), but off the tomorrow window so it's flagged
+        // separately under Section 2 rather than mixed into the main list.
+        consignment_pending_booking: { branches: pendingBookingByBranch, total: pendingBookingTotal },
         branch_pre_eod: { branches: preEodByBranch,     total: preEodTotal, _debug: debugSection4 },
         // Section 5 — booked but consignment not yet created (at_branch +
         // booking_id IS NOT NULL). View-only; intentionally excluded from

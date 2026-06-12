@@ -454,7 +454,11 @@ export default function BiddingVolume() {
   const inTBranchesRaw = supply?.transit_24h?.branches    || supply?.in_transit?.branches || []
   const t48hBranchesRaw = supply?.transit_48h?.branches   || []
   const preEodBranchesRaw = supply?.branch_pre_eod?.branches || []
+  const pendBookRaw    = supply?.consignment_pending_booking?.branches || []
   const inTBranches    = useMemo(() => inTBranchesRaw.filter(b => b.region !== 'Kerala'),    [inTBranchesRaw])
+  // Consignment-created-but-booking-pending bills — already non-Kerala
+  // server-side, but filter defensively to match the rest of this tab.
+  const pendBookBranches = useMemo(() => pendBookRaw.filter(b => b.region !== 'Kerala'), [pendBookRaw])
   const t48hBranches   = useMemo(() => t48hBranchesRaw.filter(b => b.region !== 'Kerala'),   [t48hBranchesRaw])
   const preEodBranches = useMemo(() => preEodBranchesRaw.filter(b => b.region !== 'Kerala'), [preEodBranchesRaw])
   const dayAfterArrivalDate = supply?.day_after_arrival   || null
@@ -476,15 +480,16 @@ export default function BiddingVolume() {
   // that the selection is bill-level).
   const branchesByKey = useMemo(() => {
     const m = {}
-    for (const b of bangBranches)   m[b.branch_name] = { ...b, group: 'bangalore' }
-    for (const b of inTBranches)    m[b.branch_name] = { ...b, group: 'transit_24h' }
-    for (const b of preEodBranches) m[b.branch_name] = { ...b, group: 'branch_pre_eod' }
+    for (const b of bangBranches)     m[b.branch_name] = { ...b, group: 'bangalore' }
+    for (const b of inTBranches)      m[b.branch_name] = { ...b, group: 'transit_24h' }
+    for (const b of pendBookBranches) m[b.branch_name] = { ...b, group: 'transit_pending_booking' }
+    for (const b of preEodBranches)   m[b.branch_name] = { ...b, group: 'branch_pre_eod' }
     // Kerala-tab buckets — keyed by destination hub for S1/S2 and by leaf for S3.
     for (const b of klS1Branches)   m[b.branch_name] = { ...b, group: 'kl_hub_stock' }
     for (const b of klS2Branches)   m[b.branch_name] = { ...b, group: 'kl_in_movement' }
     for (const b of klS3Branches)   m[b.branch_name] = { ...b, group: 'kl_at_leaf' }
     return m
-  }, [bangBranches, inTBranches, preEodBranches, klS1Branches, klS2Branches, klS3Branches])
+  }, [bangBranches, inTBranches, pendBookBranches, preEodBranches, klS1Branches, klS2Branches, klS3Branches])
 
   // Bill-level catalogue across every selectable section in either tab.
   // Tagging via _group lets autoSelectRemaining + selectionMode + branchLocked
@@ -499,14 +504,15 @@ export default function BiddingVolume() {
         }
       }
     }
-    collect(bangBranches,   'bangalore')
-    collect(inTBranches,    'transit_24h')
-    collect(preEodBranches, 'branch_pre_eod')
-    collect(klS1Branches,   'kl_hub_stock')
-    collect(klS2Branches,   'kl_in_movement')
-    collect(klS3Branches,   'kl_at_leaf')
+    collect(bangBranches,     'bangalore')
+    collect(inTBranches,      'transit_24h')
+    collect(pendBookBranches, 'transit_pending_booking')
+    collect(preEodBranches,   'branch_pre_eod')
+    collect(klS1Branches,     'kl_hub_stock')
+    collect(klS2Branches,     'kl_in_movement')
+    collect(klS3Branches,     'kl_at_leaf')
     return m
-  }, [bangBranches, inTBranches, preEodBranches, klS1Branches, klS2Branches, klS3Branches])
+  }, [bangBranches, inTBranches, pendBookBranches, preEodBranches, klS1Branches, klS2Branches, klS3Branches])
 
   const selectedTotal = useMemo(() => {
     let s = 0
@@ -1312,7 +1318,8 @@ export default function BiddingVolume() {
         emptyMsg="No Bangalore purchases recorded today yet."
       />
 
-      {/* 2 · In-Transit · 24h TAT (arrives tomorrow) */}
+      {/* 2 · In-Transit · 24h TAT (arrives tomorrow)
+          + flagged sub-group: consignment created · booking pending. */}
       <SourceSection
         t={t} card={card}
         index={2}
@@ -1330,6 +1337,14 @@ export default function BiddingVolume() {
         onToggleBranchAll={toggleBranchAll}
         onToggleRegionAll={toggleRegionAll}
         branchSelectionState={branchSelectionState}
+        subGroup={pendBookBranches.length ? {
+          icon:     '⚠',
+          title:    'Consignment created · booking pending',
+          subtitle: 'Already dispatched but no booking attached — created and forgotten, or held to book later. Select to book.',
+          accent:   t.orange,
+          branches: pendBookBranches,
+          total:    supply?.consignment_pending_booking?.total,
+        } : null}
         emptyMsg="No 24h-TAT bills currently in transit."
       />
 
@@ -2414,6 +2429,13 @@ function SourceSection({
   // clicks to drill into the per-branch breakdown. Other regions in
   // the same section stay branch-wise.
   consolidateRegions,
+  // Optional flagged sub-group rendered at the bottom of the SAME card,
+  // separated by a labeled divider. Used by Section 2 to fold in
+  // 'consignment created · booking pending' bills without spawning a
+  // second numbered section. Shape: { title, subtitle, icon, branches,
+  // total, accent }. The sub-group's rows reuse the exact same renderer
+  // (selection, drill-down) as the main list.
+  subGroup,
   emptyMsg,
 }) {
   const tone = accent || t.gold
@@ -2444,18 +2466,29 @@ function SourceSection({
 
   // Group branches by region in insertion order (server already sorted by
   // total_net_wt within each branch list).
-  const regions = (() => {
+  const regionsOf = (branchList) => {
     const m = new Map()
-    for (const b of branches) {
+    for (const b of branchList || []) {
       const r = b.region || 'Unknown'
       if (!m.has(r)) m.set(r, [])
       m.get(r).push(b)
     }
     return [...m.entries()]
-  })()
-  const isEmpty   = branches.length === 0
+  }
+  const regions      = regionsOf(branches)
+  const subBranches  = subGroup?.branches || []
+  const subRegions   = regionsOf(subBranches)
+  // Main region blocks, then (when a sub-group exists) a sentinel divider
+  // entry followed by the sub-group's own region blocks. The render
+  // callback special-cases the sentinel to draw a labeled divider; every
+  // other entry renders identically whether it's main or sub.
+  const regionRenderList = subRegions.length
+    ? [...regions, ['__SUBGROUP_DIVIDER__', { __divider: true }], ...subRegions]
+    : regions
+  const isEmpty   = branches.length === 0 && subBranches.length === 0
   const totalBills = total?.bills  || 0
   const totalNet   = total?.net_wt || 0
+  const subTone    = subGroup?.accent || t.orange || '#e9a942'
 
   // Shared row grid — fills the horizontal extent so the columns align
   // across every branch in every section. Left column flexes; the right
@@ -2522,7 +2555,34 @@ function SourceSection({
         </div>
       ) : (
         <div style={{ padding: '4px 0' }}>
-          {regions.map(([region, rows]) => {
+          {regionRenderList.map(([region, rows]) => {
+            // Sentinel between the main list and the sub-group — draws a
+            // labeled divider so ops reads the sub-group as a flagged
+            // continuation of this section, not a new section.
+            if (region === '__SUBGROUP_DIVIDER__') {
+              return (
+                <div key="__subgroup_divider__" style={{
+                  margin: '10px 14px 4px',
+                  paddingTop: 12,
+                  borderTop: `1px dashed ${subTone}55`,
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 9, flexWrap: 'wrap' }}>
+                    {subGroup?.icon && <span style={{ fontSize: 14 }}>{subGroup.icon}</span>}
+                    <span style={{ fontSize: 12.5, color: subTone, fontWeight: 800, letterSpacing: '.02em' }}>
+                      {subGroup?.title || 'Also bookable'}
+                    </span>
+                    {subGroup?.total && (
+                      <span style={{ fontSize: 11, color: t.text3, fontFamily: 'monospace', fontWeight: 700 }}>
+                        {fmt(subGroup.total.net_wt || 0, 2)} g · {subGroup.total.bills || 0} bill{(subGroup.total.bills || 0) === 1 ? '' : 's'}
+                      </span>
+                    )}
+                  </div>
+                  {subGroup?.subtitle && (
+                    <div style={{ fontSize: 11, color: t.text3, marginTop: 4, lineHeight: 1.5 }}>{subGroup.subtitle}</div>
+                  )}
+                </div>
+              )
+            }
             const rColor = REGION_COLORS[region] || t.text3
             // Region tri-state: 'all' if every bill in the region is selected,
             // 'none' if zero, 'partial' otherwise.
