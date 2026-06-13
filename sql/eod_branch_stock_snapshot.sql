@@ -81,8 +81,10 @@ create policy eod_branch_stock_items_read on eod_branch_stock_items
 --     url:     https://<app-host>/api/eod-branch-snapshot
 --     headers: { "X-Cron-Token": "<CRON_SECRET>" }
 --
--- Until that line is added, admins can capture today's snapshot manually with
--- the 'Generate Now' button on the EOD Branch Stock Report tab. The capture is
--- idempotent (snapshot_date is UNIQUE; items are delete-then-insert), so a
--- manual run plus the cron run on the same day is safe.
+-- The report is generated ONLY by this 10 PM cron — there is no in-app manual
+-- generate button. Each date appears in the report once the cron has run for it
+-- (so a given day's at-branch stock is visible from 10 PM that night onward).
+-- The capture is idempotent (snapshot_date is UNIQUE; items are
+-- delete-then-insert), so re-running the cron for a day is safe.
+-- The POST also still accepts ADMIN auth, for one-off operator backfills.
 -- ─────────────────────────────────────────────────────────────────────────────

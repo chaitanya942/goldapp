@@ -11,6 +11,7 @@ import { useApp } from '../../lib/context'
 import GoldSpinner from '../ui/GoldSpinner'
 import Toast from '../ui/Toast'
 import { authedFetch } from '../../lib/authedFetch'
+import { istToday } from '../../lib/dateIst'
 import { CONSIGNMENT_THEMES as THEMES, REGION_COLORS, useMobile } from '../../lib/consignmentTheme'
 
 const REGION_ICONS = {
@@ -42,16 +43,13 @@ const fmtCellDate = (d) => {
 }
 
 export default function EodBranchStockReport() {
-  const { theme, userProfile } = useApp()
+  const { theme } = useApp()
   const t = THEMES[theme] || THEMES.dark
   const isMobile = useMobile()
-  const isAdmin  = ['super_admin', 'founders_office', 'admin'].includes(userProfile?.role)
 
   const [snapshot,     setSnapshot]     = useState(null)
-  const [available,    setAvailable]    = useState([])
   const [selectedDate, setSelectedDate] = useState(null)
   const [loading,      setLoading]      = useState(true)
-  const [generating,   setGenerating]   = useState(false)
   const [toast,        setToast]        = useState(null)
   const [search,       setSearch]       = useState('')
   const [activeRegion, setActiveRegion] = useState(null)
@@ -60,13 +58,6 @@ export default function EodBranchStockReport() {
   const [branchCases,  setBranchCases]  = useState({})
   const [sortKey,      setSortKey]      = useState('net_wt')
   const [sortDir,      setSortDir]      = useState(-1)
-
-  const fetchList = useCallback(async () => {
-    const res = await authedFetch('/api/eod-branch-snapshot?list=1')
-    const j   = await res.json().catch(() => ({}))
-    setAvailable(j.list || [])
-    return j.list || []
-  }, [])
 
   const fetchSnapshot = useCallback(async (date) => {
     setLoading(true)
@@ -81,24 +72,9 @@ export default function EodBranchStockReport() {
   }, [])
 
   useEffect(() => {
-    (async () => {
-      const list = await fetchList()
-      await fetchSnapshot(list[0]?.snapshot_date || null)
-    })()
-  }, [fetchList, fetchSnapshot])
-
-  const generateNow = async () => {
-    setGenerating(true)
-    try {
-      const res = await authedFetch('/api/eod-branch-snapshot', { method: 'POST' })
-      const j   = await res.json().catch(() => ({}))
-      if (!res.ok || j.error) { setToast({ msg: j.error || 'Snapshot failed', type: 'error', key: Date.now() }); return }
-      setToast({ msg: 'Snapshot captured for today.', type: 'success', key: Date.now() })
-      setBranchCases({})
-      await fetchList()
-      await fetchSnapshot(j.snapshot?.snapshot_date || null)
-    } finally { setGenerating(false) }
-  }
+    // Open on the most recent captured snapshot (date=null → latest).
+    fetchSnapshot(null)
+  }, [fetchSnapshot])
 
   // ── Region cards — dynamic from the snapshot's by_region map ──────────────
   const regions = useMemo(() => {
@@ -185,16 +161,15 @@ export default function EodBranchStockReport() {
             Gold lying at branch as of {selectedDate ? fmtDate(selectedDate) : '—'} · snapshot frozen 10 PM IST · at-branch (not yet dispatched)
           </div>
         </div>
-        <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
-          <select value={selectedDate || ''} onChange={e => fetchSnapshot(e.target.value || null)} style={s.select} disabled={!available.length}>
-            {available.length === 0 && <option value="">No snapshots yet</option>}
-            {available.map(a => <option key={a.snapshot_date} value={a.snapshot_date}>{fmtDate(a.snapshot_date)}</option>)}
-          </select>
-          {isAdmin && (
-            <button onClick={generateNow} disabled={generating} style={{ ...s.btnGold, opacity: generating ? .6 : 1 }}>
-              {generating ? 'Generating…' : 'Generate Now'}
-            </button>
-          )}
+        <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+          <span style={{ fontSize: '10px', color: t.text4, letterSpacing: '.04em', display: 'flex', alignItems: 'center', gap: '5px' }}>
+            <span style={{ fontSize: '10px' }}>🕙</span> Auto-generated 10 PM IST daily
+          </span>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <span style={{ fontSize: '10px', color: t.text4, letterSpacing: '.08em', textTransform: 'uppercase', fontWeight: 700 }}>Date</span>
+            <input type="date" value={selectedDate || istToday()} min="2026-06-13" max={istToday()}
+              onChange={e => fetchSnapshot(e.target.value || null)} style={s.select} />
+          </label>
         </div>
       </div>
 
@@ -202,7 +177,7 @@ export default function EodBranchStockReport() {
         <div style={{ padding: '80px', textAlign: 'center' }}><GoldSpinner /></div>
       ) : !snapshot ? (
         <div style={{ ...s.card, padding: '60px 20px', textAlign: 'center', color: t.text4, fontSize: '12px' }}>
-          No snapshot for this date yet.{isAdmin ? ' Click “Generate Now” to capture the current at-branch stock.' : ' The 10 PM cron will create it tonight.'}
+          No report for {selectedDate ? fmtDate(selectedDate) : 'this date'}. Reports are generated automatically at 10 PM IST each day — pick a date on or after 13-Jun-2026 that has already passed 10 PM.
         </div>
       ) : (
         <>
