@@ -1967,14 +1967,13 @@ export async function GET(req) {
     const toDate   = searchParams.get('to')
 
     // ── Permanent ledger of consignments CREATED per day ──────────────────
-    // ONE server-side-joined, paginated query: consignment_items → its
-    // consignment (created in window, approved+, not cancelled) → its bill.
-    // This replaces the earlier chunked-IN approach which both (a) overflowed
-    // PostgREST's URL budget on .in('id', [1000 uuids]) → 'Bad Request', and
-    // (b) did N sequential round-trips → high latency. The embedded !inner
-    // filter pattern is the same one used by the picker's committed-items
-    // query above. So a consignment created last month still appears (with
-    // its bills) even after the bills were received at HO.
+    // Step 1 — ONE paginated, server-side-filtered query on consignment_items
+    // embedding consignments!inner (the only FK consignment_items actually
+    // has). The embedded filter does the created-date window + approved+ +
+    // not-cancelled scoping server-side, so we never build a giant
+    // .in([consignment_ids]) list. Returns (purchase_id, consignment) pairs.
+    // So a consignment created last month still appears (with its bills) even
+    // after the bills were received at HO.
     const PAGE = 1000
     const MAX_PAGES = 60          // safety cap (~60k item rows) for the 'All' chip
     let offset = 0
@@ -1982,11 +1981,10 @@ export async function GET(req) {
     for (let page = 0; page < MAX_PAGES; page++) {
       let q = supabase
         .from('consignment_items')
-        .select('purchase_id, consignments!inner(id, tmp_prf_no, branch_name, dest_branch, movement_type, status, approval_status, dispatched_at, created_at), purchases!inner(id, application_id, branch_name, customer_name, purchase_date, gross_weight, net_weight, total_amount, dispatched_at, booked_at, stock_status, is_deleted)')
+        .select('purchase_id, consignments!inner(id, tmp_prf_no, branch_name, dest_branch, movement_type, status, approval_status, dispatched_at, created_at)')
         .neq('consignments.status', 'cancelled')
         .neq('consignments.status', 'seed')
         .not('consignments.dispatched_at', 'is', null)
-        .eq('purchases.is_deleted', false)
         .order('purchase_id', { ascending: true })
         .range(offset, offset + PAGE - 1)
       if (fromDate) q = q.gte('consignments.created_at', `${fromDate}T00:00:00+05:30`)
@@ -2003,44 +2001,67 @@ export async function GET(req) {
 
     // De-dup per bill: a bill re-consigned across two active consignments
     // keeps the most-recently-created one (cancelled already excluded).
-    const byPurchase = {}
+    const consByPurchase = {}   // purchase_id → consignment row
     for (const row of itemRows) {
       const c = row.consignments
-      const p = row.purchases
-      if (!c || !p) continue
-      const prev = byPurchase[p.id]
-      if (!prev || new Date(c.created_at) > new Date(prev._c.created_at)) {
-        byPurchase[p.id] = { _p: p, _c: c }
+      if (!c) continue
+      const prev = consByPurchase[row.purchase_id]
+      if (!prev || new Date(c.created_at) > new Date(prev.created_at)) {
+        consByPurchase[row.purchase_id] = c
       }
     }
-    const bills = Object.values(byPurchase)
+    const purchaseIds = Object.keys(consByPurchase)
+    if (!purchaseIds.length) return Response.json({ data: [] })
+
+    // Step 2 — fetch the bills. consignment_items has NO FK to purchases, so
+    // we can't embed it; fetch by id instead. Chunk at a URL-SAFE 100 (a
+    // 1000-id .in() overflows PostgREST's URL budget → 'Bad Request') and run
+    // the chunks in bounded-parallel waves so latency stays low without
+    // hammering the connection pool.
+    const P_CHUNK = 100
+    const WAVE    = 10
+    const PCOLS   = 'id, application_id, branch_name, customer_name, purchase_date, gross_weight, net_weight, total_amount, dispatched_at, booked_at, stock_status'
+    const bills = []
+    for (let i = 0; i < purchaseIds.length; i += P_CHUNK * WAVE) {
+      const waveSlices = []
+      for (let j = i; j < Math.min(i + P_CHUNK * WAVE, purchaseIds.length); j += P_CHUNK) {
+        waveSlices.push(purchaseIds.slice(j, j + P_CHUNK))
+      }
+      const results = await Promise.all(waveSlices.map(slice =>
+        supabase.from('purchases').select(PCOLS).in('id', slice).eq('is_deleted', false)
+      ))
+      for (const r of results) {
+        if (r.error) return Response.json({ error: r.error.message }, { status: 500 })
+        bills.push(...(r.data || []))
+      }
+    }
     if (!bills.length) return Response.json({ data: [] })
 
     // Branch region + delivery TAT (drives the Expected Delivery column).
-    const branchNames = [...new Set(bills.map(b => b._p.branch_name).filter(Boolean))]
+    const branchNames = [...new Set(bills.map(b => b.branch_name).filter(Boolean))]
     const { data: brRows } = branchNames.length
       ? await supabase.from('branches').select('name, region, delivery_tat_hours').in('name', branchNames)
       : { data: [] }
     const regionByBranch = Object.fromEntries((brRows || []).map(b => [b.name, b.region]))
     const tatByBranch    = Object.fromEntries((brRows || []).map(b => [b.name, Number(b.delivery_tat_hours) || null]))
 
-    const enriched = bills.map(({ _p: p, _c: c }) => ({
-      id: p.id, application_id: p.application_id, branch_name: p.branch_name,
-      customer_name: p.customer_name, purchase_date: p.purchase_date,
-      gross_weight: p.gross_weight, net_weight: p.net_weight, total_amount: p.total_amount,
-      dispatched_at: p.dispatched_at, booked_at: p.booked_at, stock_status: p.stock_status,
-      region: regionByBranch[p.branch_name] || null,
-      delivery_tat_hours: tatByBranch[p.branch_name] ?? null,
-      // The report's date axis = the owning consignment's CREATION date.
-      consignment_created_at: c.created_at || null,
-      consignment: {
-        id: c.id, tmp_prf_no: c.tmp_prf_no,
-        source: c.branch_name, dest: c.dest_branch,
-        movement_type: c.movement_type,
-        status: c.status, approval_status: c.approval_status,
-        dispatched_at: c.dispatched_at, created_at: c.created_at,
-      },
-    }))
+    const enriched = bills.map(b => {
+      const c = consByPurchase[b.id]
+      return {
+        ...b,
+        region: regionByBranch[b.branch_name] || null,
+        delivery_tat_hours: tatByBranch[b.branch_name] ?? null,
+        // The report's date axis = the owning consignment's CREATION date.
+        consignment_created_at: c?.created_at || null,
+        consignment: c ? {
+          id: c.id, tmp_prf_no: c.tmp_prf_no,
+          source: c.branch_name, dest: c.dest_branch,
+          movement_type: c.movement_type,
+          status: c.status, approval_status: c.approval_status,
+          dispatched_at: c.dispatched_at, created_at: c.created_at,
+        } : null,
+      }
+    })
     return Response.json({ data: enriched })
   }
 
