@@ -247,9 +247,6 @@ export default function ConsignmentOverview() {
   // wants to see the biggest exposures at the top without clicking.
   const [sortKey,      setSortKey]      = useState('total_net_wt')
   const [sortDir,      setSortDir]      = useState(-1)   // -1 = desc, 1 = asc
-  // Quick-filter chip state. 'all' = no filter; the others apply on top of
-  // search + region selection so users can narrow further.
-  const [quickFilter,  setQuickFilter]  = useState('all')
   const [lastRefresh,  setLastRefresh]  = useState(null)
   const [tick,         setTick]         = useState(0)   // for live clock
   // Only the flat sortable table is rendered now — the grouped region-card
@@ -637,23 +634,6 @@ export default function ConsignmentOverview() {
       .filter(b => ((b.today_net_wt || 0) + (b.older_net_wt || 0)) > 0)
       .filter(b => !activeRegion || b.region === activeRegion)
       .filter(b => !searchQ || (b.branch_name || '').toLowerCase().includes(searchQ) || (b.region || '').toLowerCase().includes(searchQ))
-      .filter(b => {
-        // Quick-filter chips applied on top of search/region. Each chip targets
-        // a real operations question — "what needs attention now?".
-        // Bangalore tab doesn't render the chips, so its filter always reads
-        // as "all" regardless of any stale state from the Outside tab.
-        if (scopeTab === 'bangalore') return true
-        const age = b.oldest_age_days || 0
-        const moved = b.last_moved_days_ago
-        switch (quickFilter) {
-          case 'overdue':       return age > 7
-          case 'watch':         return age > 3 && age <= 7
-          case 'today_active':  return (b.today_bills || 0) > 0
-          case 'no_movement':   return moved == null || moved > 30
-          case 'all':
-          default:              return true
-        }
-      })
       .slice()
       .sort((a, b) => {
         let av = 0, bv = 0
@@ -670,7 +650,7 @@ export default function ConsignmentOverview() {
         if (sortKey === 'total_bills')        { av = (a.today_bills  || 0) + (a.older_bills  || 0); bv = (b.today_bills  || 0) + (b.older_bills  || 0) }
         return (av - bv) * sortDir
       })
-  }, [scopeTab, scopeData, activeRegion, search, quickFilter, sortKey, sortDir])
+  }, [scopeTab, scopeData, activeRegion, search, sortKey, sortDir])
 
   // ── Group filtered rows by region for the collapsible card view. Keys keep
   // the canonical REGION_ORDER so cards render Karnataka → Kerala → AP → Telangana.
@@ -1122,38 +1102,6 @@ export default function ConsignmentOverview() {
             <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search branch or region…"
               style={{ width: '100%', background: t.card2, border: `1px solid ${t.border2}`, borderRadius: '8px', padding: '8px 12px 8px 30px', fontSize: '12px', color: t.text1, outline: 'none', boxSizing: 'border-box' }} />
           </div>
-        )}
-
-        {/* Quick filter chips — operations questions, not data dimensions.
-            Hidden on the Bangalore tab — overdue / watch / no-movement
-            categories don't apply when every bill arrives at HO the same day. */}
-        {scopeTab === 'outside' && (
-        <div style={{ display: 'flex', gap: '5px', flexWrap: 'wrap' }}>
-          {[
-            { key: 'all',          label: 'All',           color: t.text2  },
-            { key: 'overdue',      label: 'Overdue >7d',   color: t.red    },
-            { key: 'watch',        label: 'Watch 4-7d',    color: t.orange },
-            { key: 'today_active', label: 'Active today',  color: t.blue   },
-            { key: 'no_movement',  label: 'No movement',   color: t.purple },
-          ].map(q => {
-            const active = quickFilter === q.key
-            return (
-              <button key={q.key}
-                onClick={() => setQuickFilter(q.key)}
-                style={{
-                  padding: '6px 12px', borderRadius: '6px',
-                  background: active ? `${q.color}18` : 'transparent',
-                  border: `1px solid ${active ? `${q.color}80` : t.border2}`,
-                  color: active ? q.color : t.text3,
-                  fontSize: '11px', fontWeight: active ? 700 : 500, letterSpacing: '.02em',
-                  cursor: 'pointer', whiteSpace: 'nowrap',
-                  transition: 'all .12s',
-                }}>
-                {q.label}
-              </button>
-            )
-          })}
-        </div>
         )}
 
         <div style={{ marginLeft: isMobile ? 0 : 'auto', display: 'flex', gap: '8px', alignItems: 'center' }}>
