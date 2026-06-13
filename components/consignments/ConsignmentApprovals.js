@@ -646,9 +646,32 @@ export default function ConsignmentApprovals() {
             const busy = approveCancelBusy === c.id
             return (
               <div key={c.id} style={{ ...card, padding: '14px 18px', borderLeft: `3px solid ${t.red}`, display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                {/* Header row — TMP PRF, type, source→dest, request age */}
+                {/* Header row — TMP PRF, doc-type badge(s), movement, age.
+                    Doc-type badge tells the accounts team exactly which
+                    document this request cancels: green EWB / purple
+                    E-Invoice (combo requests show both). Derived from the
+                    live eway_bill_no / irn on the consignment — accurate
+                    because the docs aren't nulled until the request is
+                    actually approved. Colours mirror the Cancellations tab. */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
                   <span style={{ fontSize: '13px', fontWeight: 700, color: t.gold, fontFamily: 'monospace' }}>{c.tmp_prf_no}</span>
+                  {ewbActive && (
+                    <span title={c.eway_bill_no ? `EWB ${c.eway_bill_no}` : 'E-Way Bill cancellation'}
+                      style={{ fontSize: '9px', color: t.green, background: `${t.green}15`, border: `1px solid ${t.green}40`, borderRadius: '4px', padding: '2px 7px', fontWeight: 700, letterSpacing: '.04em' }}>
+                      EWB CANCELLATION
+                    </span>
+                  )}
+                  {irnActive && (
+                    <span title={c.irn ? `IRN ${c.irn}` : 'E-Invoice cancellation'}
+                      style={{ fontSize: '9px', color: t.purple, background: `${t.purple}15`, border: `1px solid ${t.purple}40`, borderRadius: '4px', padding: '2px 7px', fontWeight: 700, letterSpacing: '.04em' }}>
+                      E-INVOICE CANCELLATION
+                    </span>
+                  )}
+                  {!ewbActive && !irnActive && (
+                    <span style={{ fontSize: '9px', color: t.text4, background: `${t.text4}15`, border: `1px solid ${t.text4}30`, borderRadius: '4px', padding: '2px 7px', fontWeight: 700, letterSpacing: '.04em' }}>
+                      NO PORTAL DOC
+                    </span>
+                  )}
                   <span style={{ fontSize: '10px', color: isType ? t.purple : t.orange, background: `${isType ? t.purple : t.orange}15`, borderRadius: '5px', padding: '2px 8px', fontWeight: 600 }}>
                     {isType ? 'Branch → Hub' : 'Branch → HO'}
                   </span>
