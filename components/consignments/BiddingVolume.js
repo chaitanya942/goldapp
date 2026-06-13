@@ -2172,7 +2172,11 @@ function BookingsList({ t, card, bookings, onUpdateStatus, onRequestCancel, onCl
   const toggleBreakdown = async (id) => {
     if (openBooking === id) { setOpenBooking(null); return }
     setOpenBooking(id)
-    if (!breakdowns[id]) {
+    // Refetch when not yet loaded OR when a prior fetch came back empty —
+    // never let a stale empty result stick (e.g. from a pre-deploy click).
+    const cached = breakdowns[id]
+    const needsFetch = !cached || (!cached.loading && !(cached.branches && cached.branches.length))
+    if (needsFetch) {
       setBreakdowns(p => ({ ...p, [id]: { loading: true } }))
       const res = await authedFetch(`/api/consignments?action=booking_bills&booking_id=${id}`)
       const j   = await res.json().catch(() => ({}))
