@@ -2622,6 +2622,16 @@ function SourceSection({
       if (!m.has(r)) m.set(r, [])
       m.get(r).push(b)
     }
+    // Within each region, order by delivery TAT ascending (24h → 48h → 72h),
+    // then by net weight desc as a tiebreak.
+    for (const rows of m.values()) {
+      rows.sort((a, b) => {
+        const ta = a.tat_hours ?? 9999
+        const tb = b.tat_hours ?? 9999
+        if (ta !== tb) return ta - tb
+        return (b.total_net_wt || 0) - (a.total_net_wt || 0)
+      })
+    }
     return [...m.entries()]
   }
   const regions      = regionsOf(branches)
