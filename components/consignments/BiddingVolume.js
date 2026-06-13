@@ -112,9 +112,9 @@ export default function BiddingVolume() {
   // Each tab carries its own KPI strip, source picker, and bookings filter,
   // but shares the same arrivalDate / bookingsDate / poll cycle.
   const [regionTab, setRegionTab] = useState('ka_ap_ts')
-  // Section navigator — ops found all 7 sections stacked at once overwhelming.
-  // 'all' shows every section; '1'..'7' isolates one. KA·AP·TS tab only.
-  const [activeSection, setActiveSection] = useState('all')
+  // Section navigator — ops view ONE section at a time ('1'..'7'); the
+  // stacked "ALL" view was removed. KA·AP·TS tab only.
+  const [activeSection, setActiveSection] = useState('1')
   // Source selection — branches the ops team has ticked from the inline
   // picker. Keys are `B:<branch_name>` for Bangalore, `T:<branch_name>` for
   // outside in-transit. Lifted to the parent so the contextual CTA, the
@@ -126,7 +126,7 @@ export default function BiddingVolume() {
   // Reset selection when the region tab flips — KA·AP·TS and KL pools are
   // mutually exclusive (booking modal can only commit against one at a time),
   // so the safest behaviour is to start fresh.
-  useEffect(() => { setSelected(new Set()); setActiveSection('all') }, [regionTab])
+  useEffect(() => { setSelected(new Set()); setActiveSection('1') }, [regionTab])
 
   // Past bidder names — drives the dropdown in the booking modal. Pulled
   // once on mount; the list refreshes after a new booking via fetchAll's
@@ -1060,94 +1060,9 @@ export default function BiddingVolume() {
           Remaining. Kerala drops Pending (it's a global, attributed to
           Others by convention) and Gain (Kerala default is 0). */}
 
-      {regionTab === 'ka_ap_ts' && (<>
-      {/* Row 1 — Bangalore & Others */}
-      <div>
-        <div style={{ fontSize: 10.5, color: t.text3, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 800, marginBottom: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ width: 6, height: 6, borderRadius: '50%', background: t.gold, display: 'inline-block' }} />
-          Bangalore &amp; Others
-        </div>
-        <div className="bidKpi" style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(7, 1fr)', gap: '10px' }}>
-          <KpiCard
-            label="Incoming"
-            value={<AnimatedNumber target={othersSupplyNet} decimals={2} suffix=" g"
-                     fromPrevious animateOnMount={false} replayable={false} duration={650} />}
-            sub={`${othersSupplyBills} bill${othersSupplyBills === 1 ? '' : 's'} · gross ${fmt(othersSupplyGross, 2)} g`}
-            accent={t.gold} card={card} t={t} variant="source" />
-
-          <GainCard
-            op="+"
-            t={t} card={card}
-            basisGrams={othersSupplyNet}
-            gainGrams={othersGain}
-            ratePct={gainRatePct}
-            overridden={gainOverridden}
-            editing={editingGain}
-            onStartEdit={() => setEditingGain(true)}
-            onSave={(v) => { setGainOverrideGrams(v); setEditingGain(false) }}
-            onResetDefault={() => { setGainOverrideGrams(null); setEditingGain(false) }}
-            onCancel={() => setEditingGain(false)} />
-
-          <PendingCard
-            op={othersPending > 0 ? '+' : othersPending < 0 ? '−' : '±'}
-            t={t} card={card}
-            grams={othersPending}
-            setBy={pendingSetBy}
-            editing={editingPending}
-            saving={savingPending}
-            onStartEdit={() => setEditingPending(true)}
-            onSave={savePending}
-            onClear={() => savePending(0)}
-            onCancel={() => setEditingPending(false)} />
-
-          <KpiCard
-            op="="
-            label="Available"
-            value={<AnimatedNumber target={othersAvailable} decimals={2} suffix=" g"
-                     fromPrevious animateOnMount={false} replayable={false} duration={650} />}
-            sub={`${othersPending === 0
-              ? 'Incoming + Gain'
-              : `Incoming + Gain ${othersPending < 0 ? '−' : '+'} Pending`} · Bangalore + Others pool`}
-            accent={t.gold} card={card} t={t}
-            variant="result" />
-
-          <KpiCard
-            op="·"
-            label="Booked"
-            value={<AnimatedNumber target={othersBookedQty} decimals={2} suffix=" g"
-                     fromPrevious animateOnMount={false} replayable={false} duration={650} />}
-            sub={pipelineOtherG > 0
-              ? `${othersBookings} booking${othersBookings === 1 ? '' : 's'} · ${fmt(pipelineOtherG, 2)} g still pipeline · ${fmtINR(othersBookedValue)}`
-              : `${othersBookings} booking${othersBookings === 1 ? '' : 's'} · ${fmtINR(othersBookedValue)}`}
-            accent={t.blue} card={card} t={t} variant="consumed" />
-
-          <KpiCard
-            op="−"
-            label="Pipeline Booked"
-            value={<AnimatedNumber target={pipelineOtherG} decimals={2} suffix=" g"
-                     fromPrevious animateOnMount={false} replayable={false} duration={650} />}
-            sub={pipelineOtherG > 0
-              ? 'against tomorrow’s Bangalore purchases'
-              : 'No pipeline commitments'}
-            accent={t.gold} card={card} t={t}
-            variant={pipelineOtherG > 0 ? 'consumed' : 'source'} />
-
-          <KpiCard
-            op="="
-            label={othersOverbooked ? 'Pipeline Over' : 'Remaining'}
-            value={<AnimatedNumber target={Math.abs(othersRemaining)} prefix={othersOverbooked ? '−' : ''} decimals={2} suffix=" g"
-                     fromPrevious animateOnMount={false} replayable={false} duration={650} />}
-            sub={othersOverbooked
-              ? `Pipeline owes ${fmt(Math.abs(othersRemaining), 2)} g more than the pool can supply`
-              : (pipelineOtherG > 0 ? 'After pipeline back-fill' : 'Full pool free · no pipeline commitments')}
-            accent={othersOverbooked ? t.red : t.green} card={card} t={t}
-            variant="state" pulse={othersOverbooked}
-            onClick={!othersOverbooked && othersRemaining > 0 ? () => autoSelectRemaining('bangalore_others', othersRemaining) : null}
-            actionHint={!othersOverbooked && othersRemaining > 0 ? 'Click to auto-select bills' : null}
-          />
-        </div>
-      </div>
-      </>)}
+      {/* KA·AP·TS top KPI strip removed — the per-section metric cards
+          (Total / Booked / Unbooked / Gain / Available) under each section
+          now carry these numbers section-wise. */}
 
       {regionTab === 'kl' && (<>
       {/* Kerala KPI strip (single row — was previously Row 2 on KA·AP·TS).
@@ -1323,10 +1238,9 @@ export default function BiddingVolume() {
       {/* ─────────────────────────── BIDDING TAB ────────────────────────── */}
       {activeTab === 'bidding' && regionTab === 'ka_ap_ts' && (<>
 
-      {/* ── Section navigator ── ops found all 7 sections stacked at once
-          overwhelming. ALL shows every section; a number isolates one. The
-          count badge is that section's bill count so ops can see at a glance
-          which sections have anything in them. */}
+      {/* ── Section navigator ── ops view ONE section at a time. Each chip
+          shows its bill count + (where a single date applies) the HO-arrival
+          date, so ops can see at a glance which sections have anything. */}
       {(() => {
         const t72 = t.teal || '#0e9aa7'
         // Weekday (DDD) + short date, e.g. "Sun · 15 Jun".
@@ -1356,18 +1270,13 @@ export default function BiddingVolume() {
           color: active ? accent : t.text2,
           fontSize: 12, fontWeight: active ? 800 : 600, letterSpacing: '.01em',
         })
-        const allActive = activeSection === 'all'
         return (
           <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap', alignItems: 'stretch', overflowX: 'auto', paddingBottom: 2 }}>
-            <button onClick={() => setActiveSection('all')} style={baseChip(allActive, t.gold)}>
-              <span style={{ fontWeight: 800, letterSpacing: '.06em' }}>ALL</span>
-            </button>
-            <div style={{ width: 1, background: t.border, margin: '2px 1px' }} />
             {navS.map(sx => {
               const active = activeSection === sx.id
               return (
                 <button key={sx.id}
-                  onClick={() => setActiveSection(active ? 'all' : sx.id)}
+                  onClick={() => setActiveSection(sx.id)}
                   style={baseChip(active, sx.accent)}>
                   <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', minWidth: 18, height: 18, borderRadius: 5, background: active ? sx.accent : `${sx.accent}26`, color: active ? '#fff' : sx.accent, fontSize: 10, fontWeight: 800, flexShrink: 0 }}>{sx.id}</span>
                   <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', lineHeight: 1.2 }}>
@@ -1386,7 +1295,7 @@ export default function BiddingVolume() {
           visibility. 'all' shows every one stacked (legacy behaviour). ── */}
 
       {/* 1 · Today's Bangalore purchases */}
-      {(activeSection === 'all' || activeSection === '1') && (
+      {(activeSection === '1') && (
       <SourceSection
         t={t} card={card}
         index={1}
@@ -1413,7 +1322,7 @@ export default function BiddingVolume() {
       />)}
 
       {/* 2 · In Consignment — arriving tomorrow (24h) */}
-      {(activeSection === 'all' || activeSection === '2') && (
+      {(activeSection === '2') && (
       <SourceSection
         t={t} card={card}
         index={2}
@@ -1437,7 +1346,7 @@ export default function BiddingVolume() {
       />)}
 
       {/* 3 · In Consignment — arriving day after tomorrow (48h) */}
-      {(activeSection === 'all' || activeSection === '3') && (
+      {(activeSection === '3') && (
       <SourceSection
         t={t} card={card}
         index={3}
@@ -1463,7 +1372,7 @@ export default function BiddingVolume() {
       />)}
 
       {/* 4 · In Consignment — arriving after 2 days (72h) */}
-      {(activeSection === 'all' || activeSection === '4') && (
+      {(activeSection === '4') && (
       <SourceSection
         t={t} card={card}
         index={4}
@@ -1496,7 +1405,7 @@ export default function BiddingVolume() {
                lands here the next day.
             b) Outstation consignments created but never booked.
           Both selectable so ops can book straight from here. */}
-      {(activeSection === 'all' || activeSection === '5') && (
+      {(activeSection === '5') && (
       <SourceSection
         t={t} card={card}
         index={5}
@@ -1537,7 +1446,7 @@ export default function BiddingVolume() {
       {/* 6 · Booked but consignment NOT created (Red Flag). View-only —
             already attached to a booking but still at the branch. Ops must
             either kick off the consignment or release the booking. */}
-      {(activeSection === 'all' || activeSection === '6') && (
+      {(activeSection === '6') && (
       <SourceSection
         t={t} card={card}
         index={6}
@@ -1556,7 +1465,7 @@ export default function BiddingVolume() {
       />)}
 
       {/* 7 · Branch Stock — pickup pending today (selectable — moves today) */}
-      {(activeSection === 'all' || activeSection === '7') && (
+      {(activeSection === '7') && (
       <SourceSection
         t={t} card={card}
         index={7}
