@@ -479,16 +479,26 @@ export default function BiddingVolume() {
   // Per-section metric cards (Total / Booked / Unbooked / Gain / Available).
   // Total = booked + unbooked; gain mirrors the % rate but is applied to the
   // UNBOOKED portion only, so Available to Book = Unbooked + its gain.
-  const sectionMetrics = (unbookedNet, bookedNet) => {
+  // Per-section absolute gain override (grams), keyed by section index. When
+  // set, that section's gain = the override instead of unbooked × rate.
+  const [sectionGainGrams, setSectionGainGrams] = useState({})
+  useEffect(() => { setSectionGainGrams({}) }, [arrivalDate, regionTab])
+
+  const sectionMetrics = (unbookedNet, bookedNet, idx) => {
     const u = Number(unbookedNet || 0)
     const b = Number(bookedNet || 0)
-    const gain = u * (gainRatePct / 100)
-    return { totalNet: u + b, bookedNet: b, unbookedNet: u, gainNet: gain, availableNet: u + gain, rate: gainRatePct }
+    const ov = idx != null ? sectionGainGrams[idx] : null
+    const gain = ov != null ? Number(ov) : u * (gainRatePct / 100)
+    return { totalNet: u + b, bookedNet: b, unbookedNet: u, gainNet: gain, availableNet: u + gain, rate: gainRatePct, gainOverride: ov != null ? Number(ov) : null }
   }
-  // Editing the gain % from any section sets the shared company rate and
-  // clears any absolute-grams override so the rate is authoritative again
-  // (keeps the top hero strip + every section in sync).
-  const handleSectionRate = (pct) => { setGainOverrideGrams(null); setGainRatePct(pct) }
+  // Editing the gain % from a section sets the shared company rate and clears
+  // that section's absolute override so the rate applies again.
+  const handleSectionRate = (idx, pct) => {
+    setSectionGainGrams(o => { const n = { ...o }; delete n[idx]; return n })
+    setGainOverrideGrams(null); setGainRatePct(pct)
+  }
+  // Editing the gain in grams sets a per-section absolute override.
+  const handleSectionGainGrams = (idx, g) => setSectionGainGrams(o => ({ ...o, [idx]: g }))
 
   // KL tab source picker — three sections from the new kerala_sections payload.
   const klSections     = supply?.kerala_sections || {}
@@ -658,6 +668,20 @@ export default function BiddingVolume() {
       sum += Number(bill.net_weight || 0)
     }
     setSelected(chosen)
+  }, [billsById])
+
+  // Click a section's "Available to Book" card → select every unbooked
+  // (non-held) bill in that section's group(s).
+  const selectSectionBills = useCallback((groups) => {
+    const gset = new Set(groups)
+    setSelected(prev => {
+      const next = new Set(prev)
+      for (const id of Object.keys(billsById)) {
+        const bl = billsById[id]
+        if (gset.has(bl._group) && !bl.audit_hold) next.add(id)
+      }
+      return next
+    })
   }, [billsById])
 
   // Kerala (KL) no-mix rule — Kerala bookings must be exclusive. With
@@ -1307,8 +1331,10 @@ export default function BiddingVolume() {
         accent={t.gold}
         branches={bangBranches}
         total={supply?.bangalore?.total}
-        metrics={sectionMetrics(supply?.bangalore?.total?.net_wt, supply?.bangalore?.booked?.net_wt)}
-        onRateChange={handleSectionRate}
+        metrics={sectionMetrics(supply?.bangalore?.total?.net_wt, supply?.bangalore?.booked?.net_wt, 1)}
+        onRateChange={(p) => handleSectionRate(1, p)}
+        onSetGainGrams={(g) => handleSectionGainGrams(1, g)}
+        onAutoSelect={() => selectSectionBills(['bangalore'])}
         prefix="B"
         selectable
         selected={selected}
@@ -1332,8 +1358,10 @@ export default function BiddingVolume() {
         accent={t.blue}
         branches={inTBranches}
         total={supply?.transit_24h?.total || supply?.in_transit?.total}
-        metrics={sectionMetrics(supply?.transit_24h?.total?.net_wt, supply?.transit_24h?.booked?.net_wt)}
-        onRateChange={handleSectionRate}
+        metrics={sectionMetrics(supply?.transit_24h?.total?.net_wt, supply?.transit_24h?.booked?.net_wt, 2)}
+        onRateChange={(p) => handleSectionRate(2, p)}
+        onSetGainGrams={(g) => handleSectionGainGrams(2, g)}
+        onAutoSelect={() => selectSectionBills(['transit_24h'])}
         prefix="T"
         selectable
         selected={selected}
@@ -1358,8 +1386,10 @@ export default function BiddingVolume() {
         accent={t.purple || '#8c5ac8'}
         branches={t48hBranches}
         total={supply?.transit_48h?.total}
-        metrics={sectionMetrics(supply?.transit_48h?.total?.net_wt, supply?.transit_48h?.booked?.net_wt)}
-        onRateChange={handleSectionRate}
+        metrics={sectionMetrics(supply?.transit_48h?.total?.net_wt, supply?.transit_48h?.booked?.net_wt, 3)}
+        onRateChange={(p) => handleSectionRate(3, p)}
+        onSetGainGrams={(g) => handleSectionGainGrams(3, g)}
+        onAutoSelect={() => selectSectionBills(['transit_48h'])}
         prefix="D"
         selectable
         selected={selected}
@@ -1384,8 +1414,10 @@ export default function BiddingVolume() {
         accent={t.teal || '#0e9aa7'}
         branches={t72hBranches}
         total={supply?.transit_72h?.total}
-        metrics={sectionMetrics(supply?.transit_72h?.total?.net_wt, supply?.transit_72h?.booked?.net_wt)}
-        onRateChange={handleSectionRate}
+        metrics={sectionMetrics(supply?.transit_72h?.total?.net_wt, supply?.transit_72h?.booked?.net_wt, 4)}
+        onRateChange={(p) => handleSectionRate(4, p)}
+        onSetGainGrams={(g) => handleSectionGainGrams(4, g)}
+        onAutoSelect={() => selectSectionBills(['transit_72h'])}
         prefix="E"
         selectable
         selected={selected}
@@ -1418,8 +1450,10 @@ export default function BiddingVolume() {
           bills:  (supply?.bangalore_pending_booking?.total?.bills  || 0) + (supply?.consignment_pending_booking?.total?.bills  || 0),
           net_wt: (supply?.bangalore_pending_booking?.total?.net_wt || 0) + (supply?.consignment_pending_booking?.total?.net_wt || 0),
         }}
-        metrics={sectionMetrics((supply?.bangalore_pending_booking?.total?.net_wt || 0) + (supply?.consignment_pending_booking?.total?.net_wt || 0), 0)}
-        onRateChange={handleSectionRate}
+        metrics={sectionMetrics((supply?.bangalore_pending_booking?.total?.net_wt || 0) + (supply?.consignment_pending_booking?.total?.net_wt || 0), 0, 5)}
+        onRateChange={(p) => handleSectionRate(5, p)}
+        onSetGainGrams={(g) => handleSectionGainGrams(5, g)}
+        onAutoSelect={() => selectSectionBills(['bangalore_pending_booking', 'transit_pending_booking'])}
         selectable
         selected={selected}
         branchLocked={branchLocked}
@@ -1475,8 +1509,10 @@ export default function BiddingVolume() {
         accent={t.orange}
         branches={preEodBranches}
         total={supply?.branch_pre_eod?.total}
-        metrics={sectionMetrics(supply?.branch_pre_eod?.total?.net_wt, supply?.branch_pre_eod?.booked?.net_wt)}
-        onRateChange={handleSectionRate}
+        metrics={sectionMetrics(supply?.branch_pre_eod?.total?.net_wt, supply?.branch_pre_eod?.booked?.net_wt, 7)}
+        onRateChange={(p) => handleSectionRate(7, p)}
+        onSetGainGrams={(g) => handleSectionGainGrams(7, g)}
+        onAutoSelect={() => selectSectionBills(['branch_pre_eod'])}
         prefix="P"
         selectable
         selected={selected}
@@ -2521,15 +2557,19 @@ function SourceSection({
   // Optional 5-card metric strip rendered under the header. Shape:
   // { totalNet, bookedNet, unbookedNet, gainNet, availableNet, rate }.
   metrics,
-  // When provided, the Gain card's % rate becomes inline-editable; called
-  // with the new percent (e.g. 3.5) on commit. The rate is the shared
-  // company gain rate, so editing it from any section updates them all.
+  // When provided, the Gain card becomes inline-editable. onRateChange(pct)
+  // sets the shared company % rate; onSetGainGrams(g) sets a per-section
+  // absolute gain override (grams). onAutoSelect() is fired when ops clicks
+  // the "Available to Book" card — selects this section's unbooked bills.
   onRateChange,
+  onSetGainGrams,
+  onAutoSelect,
   emptyMsg,
 }) {
   const tone = accent || t.gold
   const [editRate, setEditRate] = useState(false)
-  const [rateDraft, setRateDraft] = useState('')
+  const [gainMode, setGainMode] = useState('pct')   // 'pct' | 'abs'
+  const [gainDraft, setGainDraft] = useState('')
   // Per-branch expand state for the bill drill-down. Keyed by branch_name
   // within this section — collapses on rerender if the branch disappears.
   const [openBranches, setOpenBranches] = useState(() => new Set())
@@ -2641,13 +2681,22 @@ function SourceSection({
             {subtitle && <div style={{ fontSize: 12, color: t.text2, marginTop: 5, lineHeight: 1.5, fontWeight: 500 }}>{subtitle}</div>}
           </div>
         </div>
-        <div style={{ textAlign: 'right', flexShrink: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: 5, justifyContent: 'flex-end' }}>
-            <span style={{ fontSize: 26, color: tone, fontFamily: 'monospace', fontWeight: 700, lineHeight: 1, letterSpacing: '-.01em' }}>{fmt(totalNet, 2)}</span>
-            <span style={{ fontSize: 13, color: t.text2, fontWeight: 700 }}>g</span>
+        {/* Header total — hidden when the metric strip is shown (the Total
+            Net card already carries it; showing it twice confused ops). */}
+        {!metrics && (
+          <div style={{ textAlign: 'right', flexShrink: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 5, justifyContent: 'flex-end' }}>
+              <span style={{ fontSize: 26, color: tone, fontFamily: 'monospace', fontWeight: 700, lineHeight: 1, letterSpacing: '-.01em' }}>{fmt(totalNet, 2)}</span>
+              <span style={{ fontSize: 13, color: t.text2, fontWeight: 700 }}>g</span>
+            </div>
+            <div style={{ fontSize: 11, color: t.text3, marginTop: 5, letterSpacing: '.04em', fontWeight: 700 }}>{totalBills} bill{totalBills === 1 ? '' : 's'}</div>
           </div>
-          <div style={{ fontSize: 11, color: t.text3, marginTop: 5, letterSpacing: '.04em', fontWeight: 700 }}>{totalBills} bill{totalBills === 1 ? '' : 's'}</div>
-        </div>
+        )}
+        {/* When the strip is shown, keep just the bill count on the right so
+            the header still reads "N bills" at a glance. */}
+        {metrics && (
+          <div style={{ fontSize: 11, color: t.text3, letterSpacing: '.04em', fontWeight: 700, flexShrink: 0 }}>{totalBills} bill{totalBills === 1 ? '' : 's'}</div>
+        )}
       </div>
 
       {/* Metric strip — Total / Booked / Unbooked / Gain on unbooked /
@@ -2656,17 +2705,27 @@ function SourceSection({
       {metrics && (() => {
         const green = t.green || '#3fa66a'
         const blue  = t.blue  || '#4a90d9'
-        const commitRate = () => {
-          const v = parseFloat(rateDraft)
-          if (Number.isFinite(v) && v >= 0 && v <= 100 && onRateChange) onRateChange(v)
+        const canEditGain = !!(onRateChange || onSetGainGrams)
+        const openGainEdit = () => {
+          if (metrics.gainOverride != null) { setGainMode('abs'); setGainDraft(String(metrics.gainOverride)) }
+          else { setGainMode('pct'); setGainDraft(String(metrics.rate)) }
+          setEditRate(true)
+        }
+        const commitGain = () => {
+          const v = parseFloat(gainDraft)
+          if (Number.isFinite(v) && v >= 0) {
+            if (gainMode === 'pct') { if (v <= 100 && onRateChange) onRateChange(v) }
+            else if (onSetGainGrams) onSetGainGrams(v)
+          }
           setEditRate(false)
         }
+        const canSelect = !!onAutoSelect && metrics.unbookedNet > 0
         const cards = [
           { key: 'total',    label: 'Total Net',         icon: 'Σ', color: t.text1, val: metrics.totalNet,     sub: 'booked + unbooked' },
           { key: 'booked',   label: 'Booked Net',        icon: '◆', color: blue,    val: metrics.bookedNet,    sub: 'already booked' },
           { key: 'unbooked', label: 'Unbooked Net',      icon: '○', color: tone,    val: metrics.unbookedNet,  sub: 'still to book' },
           { key: 'gain',     label: 'Gain on Unbooked',  icon: '↗', color: green,   val: metrics.gainNet,      gain: true },
-          { key: 'avail',    label: 'Available to Book', icon: '✓', color: green,   val: metrics.availableNet, sub: 'unbooked + gain', strong: true },
+          { key: 'avail',    label: 'Available to Book', icon: '✓', color: green,   val: metrics.availableNet, sub: canSelect ? 'tap to select →' : 'unbooked + gain', strong: true, onClick: canSelect ? onAutoSelect : null },
         ]
         return (
           <div style={{
@@ -2675,9 +2734,12 @@ function SourceSection({
             background: `linear-gradient(180deg, ${t.card2 || t.card} 0%, transparent 100%)`,
           }}>
             {cards.map((c) => (
-              <div key={c.key} style={{
+              <div key={c.key}
+                onClick={c.onClick || undefined}
+                style={{
                 position: 'relative', overflow: 'hidden',
                 borderRadius: 12, padding: '13px 15px',
+                cursor: c.onClick ? 'pointer' : 'default',
                 background: c.strong
                   ? `linear-gradient(150deg, ${c.color}24 0%, ${c.color}0c 100%)`
                   : `linear-gradient(150deg, ${t.card} 0%, ${t.card2 || t.card} 100%)`,
@@ -2699,34 +2761,41 @@ function SourceSection({
                   <span style={{ fontSize: 23, color: c.color, fontFamily: 'monospace', fontWeight: c.strong ? 800 : 700, lineHeight: 1, letterSpacing: '-.01em' }}>{fmt(c.val, 2)}</span>
                   <span style={{ fontSize: 12, color: t.text3, fontWeight: 700 }}>g</span>
                 </div>
-                {/* Sub-line — editable rate pill for the Gain card */}
+                {/* Sub-line — editable gain: % rate (shared) or absolute g (per-section) */}
                 {c.gain ? (
-                  <div style={{ marginTop: 7 }}>
+                  <div style={{ marginTop: 7 }} onClick={e => e.stopPropagation()}>
                     {editRate ? (
-                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                        <span style={{ fontSize: 10, color: t.text4, fontWeight: 700 }}>est ·</span>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
+                        <span style={{ display: 'inline-flex', border: `1px solid ${green}66`, borderRadius: 6, overflow: 'hidden' }}>
+                          {[['pct', '%'], ['abs', 'g']].map(([m, lbl]) => (
+                            <button key={m} onClick={() => setGainMode(m)}
+                              style={{ padding: '2px 7px', fontSize: 9.5, fontWeight: 800, border: 'none', cursor: 'pointer',
+                                background: gainMode === m ? green : 'transparent', color: gainMode === m ? '#fff' : green }}>{lbl}</button>
+                          ))}
+                        </span>
                         <input
-                          autoFocus type="number" step="0.1" min="0" max="100"
-                          value={rateDraft}
-                          onChange={e => setRateDraft(e.target.value)}
-                          onBlur={commitRate}
-                          onKeyDown={e => { if (e.key === 'Enter') commitRate(); if (e.key === 'Escape') setEditRate(false) }}
-                          style={{ width: 52, padding: '2px 6px', borderRadius: 6, border: `1px solid ${green}`, background: t.card, color: t.text1, fontSize: 11, fontWeight: 800, fontFamily: 'monospace', outline: 'none' }}
+                          autoFocus type="number" step={gainMode === 'pct' ? '0.1' : '1'} min="0"
+                          value={gainDraft}
+                          onChange={e => setGainDraft(e.target.value)}
+                          onBlur={commitGain}
+                          onKeyDown={e => { if (e.key === 'Enter') commitGain(); if (e.key === 'Escape') setEditRate(false) }}
+                          style={{ width: 56, padding: '2px 6px', borderRadius: 6, border: `1px solid ${green}`, background: t.card, color: t.text1, fontSize: 11, fontWeight: 800, fontFamily: 'monospace', outline: 'none' }}
                         />
-                        <span style={{ fontSize: 10, color: t.text4, fontWeight: 700 }}>%</span>
+                        <span style={{ fontSize: 10, color: t.text4, fontWeight: 700 }}>{gainMode === 'pct' ? '%' : 'g'}</span>
                       </span>
                     ) : (
                       <button
-                        onClick={() => { if (onRateChange) { setRateDraft(String(metrics.rate)); setEditRate(true) } }}
-                        disabled={!onRateChange}
+                        onClick={() => { if (canEditGain) openGainEdit() }}
+                        disabled={!canEditGain}
                         style={{
                           display: 'inline-flex', alignItems: 'center', gap: 5,
                           padding: '2px 8px', borderRadius: 999,
                           border: `1px solid ${green}55`, background: `${green}14`,
                           color: green, fontSize: 10, fontWeight: 800, letterSpacing: '.02em',
-                          cursor: onRateChange ? 'pointer' : 'default',
+                          cursor: canEditGain ? 'pointer' : 'default',
                         }}>
-                        est · {fmt(metrics.rate, 2)}%{onRateChange && <span style={{ fontSize: 9, opacity: .85 }}>✎</span>}
+                        {metrics.gainOverride != null ? `set · ${fmt(metrics.gainOverride, 2)} g` : `est · ${fmt(metrics.rate, 2)}%`}
+                        {canEditGain && <span style={{ fontSize: 9, opacity: .85 }}>✎</span>}
                       </button>
                     )}
                   </div>
