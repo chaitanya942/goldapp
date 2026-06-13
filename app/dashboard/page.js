@@ -28,6 +28,7 @@ import ReportsHub    from '../../components/purchases/ReportsHub'
 import ConsignmentOverview from '../../components/consignments/ConsignmentOverview'
 import ConsignmentData from '../../components/consignments/ConsignmentData'
 import ConsignmentReport from '../../components/consignments/ConsignmentReport'
+import Reports from '../../components/consignments/Reports'
 import BiddingVolume from '../../components/consignments/BiddingVolume'
 import CollectionAudit from '../../components/consignments/CollectionAudit'
 import AuditRoster from '../../components/consignments/AuditRoster'
@@ -236,7 +237,7 @@ function DashboardShell() {
       case 'consignment-overview': return <ConsignmentOverview />
       case 'consignment-data':       return <ConsignmentData />
       case 'consignment-approvals':  return <ConsignmentApprovals />
-      case 'consignment-report':     return <ConsignmentReport />
+      case 'consignment-report':     return <Reports />
       case 'consignment-summary':    return <ConsignmentReport />
       case 'consignment-bidding':    return <BiddingVolume />
       case 'eod-stock-report':       return <EodStockReport />

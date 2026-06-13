@@ -17,7 +17,7 @@ const NAV_ITEMS = [
       { id: 'consignment-overview',   label: 'Branch Stock',          dot: '#3aaa6a' },
       { id: 'consignment-data',       label: 'Consignment Data',      dot: '#c9a84c' },
       { id: 'consignment-approvals',  label: 'Approvals',             dot: '#c9a84c' },
-      { id: 'consignment-report',     label: 'Consignment Report',    dot: '#3a8fbf' },
+      { id: 'consignment-report',     label: 'Reports',               dot: '#3a8fbf' },
       { id: 'consignment-bidding',    label: 'Bidding Volume',        dot: '#c9a84c' },
       { id: 'eod-stock-report',       label: 'EOD Stock Report',      dot: '#5ec1d6' },
       { id: 'consignment-analytics',  label: 'Movement Analytics',    dot: '#8c5ac8' },
