@@ -476,6 +476,16 @@ export default function BiddingVolume() {
   const dayAfterArrivalDate  = supply?.day_after_arrival   || null
   const dayAfter2ArrivalDate = supply?.day_after_2_arrival || null
 
+  // Per-section metric cards (Total / Booked / Unbooked / Gain / Available).
+  // Total = booked + unbooked; gain mirrors the % rate but is applied to the
+  // UNBOOKED portion only, so Available to Book = Unbooked + its gain.
+  const sectionMetrics = (unbookedNet, bookedNet) => {
+    const u = Number(unbookedNet || 0)
+    const b = Number(bookedNet || 0)
+    const gain = u * (gainRatePct / 100)
+    return { totalNet: u + b, bookedNet: b, unbookedNet: u, gainNet: gain, availableNet: u + gain, rate: gainRatePct }
+  }
+
   // KL tab source picker — three sections from the new kerala_sections payload.
   const klSections     = supply?.kerala_sections || {}
   const klS1Branches   = klSections.s1_hub_stock?.branches   || []
@@ -1384,6 +1394,7 @@ export default function BiddingVolume() {
         accent={t.gold}
         branches={bangBranches}
         total={supply?.bangalore?.total}
+        metrics={sectionMetrics(supply?.bangalore?.total?.net_wt, supply?.bangalore?.booked?.net_wt)}
         prefix="B"
         selectable
         selected={selected}
@@ -1407,6 +1418,7 @@ export default function BiddingVolume() {
         accent={t.blue}
         branches={inTBranches}
         total={supply?.transit_24h?.total || supply?.in_transit?.total}
+        metrics={sectionMetrics(supply?.transit_24h?.total?.net_wt, supply?.transit_24h?.booked?.net_wt)}
         prefix="T"
         selectable
         selected={selected}
@@ -1431,6 +1443,7 @@ export default function BiddingVolume() {
         accent={t.purple || '#8c5ac8'}
         branches={t48hBranches}
         total={supply?.transit_48h?.total}
+        metrics={sectionMetrics(supply?.transit_48h?.total?.net_wt, supply?.transit_48h?.booked?.net_wt)}
         prefix="D"
         selectable
         selected={selected}
@@ -1455,6 +1468,7 @@ export default function BiddingVolume() {
         accent={t.teal || '#0e9aa7'}
         branches={t72hBranches}
         total={supply?.transit_72h?.total}
+        metrics={sectionMetrics(supply?.transit_72h?.total?.net_wt, supply?.transit_72h?.booked?.net_wt)}
         prefix="E"
         selectable
         selected={selected}
@@ -1487,6 +1501,7 @@ export default function BiddingVolume() {
           bills:  (supply?.bangalore_pending_booking?.total?.bills  || 0) + (supply?.consignment_pending_booking?.total?.bills  || 0),
           net_wt: (supply?.bangalore_pending_booking?.total?.net_wt || 0) + (supply?.consignment_pending_booking?.total?.net_wt || 0),
         }}
+        metrics={sectionMetrics((supply?.bangalore_pending_booking?.total?.net_wt || 0) + (supply?.consignment_pending_booking?.total?.net_wt || 0), 0)}
         selectable
         selected={selected}
         branchLocked={branchLocked}
@@ -1523,6 +1538,7 @@ export default function BiddingVolume() {
         accent={t.red}
         branches={bookedPendBranches}
         total={supply?.booked_pending_dispatch?.total}
+        metrics={sectionMetrics(0, supply?.booked_pending_dispatch?.total?.net_wt)}
         selectable={false}
         viewOnly
         onCreateConsignment={handleCreateConsignment}
@@ -1541,6 +1557,7 @@ export default function BiddingVolume() {
         accent={t.orange}
         branches={preEodBranches}
         total={supply?.branch_pre_eod?.total}
+        metrics={sectionMetrics(supply?.branch_pre_eod?.total?.net_wt, supply?.branch_pre_eod?.booked?.net_wt)}
         prefix="P"
         selectable
         selected={selected}
@@ -2582,6 +2599,9 @@ function SourceSection({
   // section stacks two labelled bands (main + subGroup) and the section
   // title alone can't name the main band. Shape: { icon, title, subtitle }.
   mainLabel,
+  // Optional 5-card metric strip rendered under the header. Shape:
+  // { totalNet, bookedNet, unbookedNet, gainNet, availableNet, rate }.
+  metrics,
   emptyMsg,
 }) {
   const tone = accent || t.gold
@@ -2704,6 +2724,39 @@ function SourceSection({
           <div style={{ fontSize: 11, color: t.text3, marginTop: 5, letterSpacing: '.04em', fontWeight: 700 }}>{totalBills} bill{totalBills === 1 ? '' : 's'}</div>
         </div>
       </div>
+
+      {/* Metric strip — Total / Booked / Unbooked / Gain on unbooked /
+          Available to book. Gain applies to the UNBOOKED portion only, so
+          Available = Unbooked + its gain. */}
+      {metrics && (() => {
+        const cards = [
+          { label: 'Total Net',          val: metrics.totalNet,     unit: 'g', color: t.text1, sub: 'booked + unbooked' },
+          { label: 'Booked Net',         val: metrics.bookedNet,    unit: 'g', color: t.blue || '#4a90d9', sub: 'already booked' },
+          { label: 'Unbooked Net',       val: metrics.unbookedNet,  unit: 'g', color: tone, sub: 'still to book' },
+          { label: 'Gain on Unbooked',   val: metrics.gainNet,      unit: 'g', color: t.green || '#3fa66a', sub: `est · ${fmt(metrics.rate, 2)}%` },
+          { label: 'Available to Book',  val: metrics.availableNet, unit: 'g', color: t.green || '#3fa66a', sub: 'unbooked + gain', strong: true },
+        ]
+        return (
+          <div style={{
+            display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 1,
+            background: `${t.border}40`, borderBottom: `1px solid ${t.border}40`,
+          }}>
+            {cards.map((c, i) => (
+              <div key={i} style={{
+                background: c.strong ? `${tone}0c` : t.card,
+                padding: '11px 14px', display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0,
+              }}>
+                <div style={{ fontSize: 9.5, color: t.text4, letterSpacing: '.08em', textTransform: 'uppercase', fontWeight: 800 }}>{c.label}</div>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: 3 }}>
+                  <span style={{ fontSize: 19, color: c.color, fontFamily: 'monospace', fontWeight: c.strong ? 800 : 700, lineHeight: 1 }}>{fmt(c.val, 2)}</span>
+                  <span style={{ fontSize: 11, color: t.text3, fontWeight: 700 }}>{c.unit}</span>
+                </div>
+                <div style={{ fontSize: 9.5, color: t.text4, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.sub}</div>
+              </div>
+            ))}
+          </div>
+        )
+      })()}
 
       {/* Body */}
       {isEmpty ? (
