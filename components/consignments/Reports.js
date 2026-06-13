@@ -49,15 +49,16 @@ export default function Reports() {
         })}
       </div>
 
-      {/* Active tab. ConsignmentReport self-pads; the EOD report doesn't, so
-          wrap it to match the module's horizontal rhythm. */}
-      {tab === 'consignment' ? (
+      {/* Both tabs stay MOUNTED — we toggle visibility instead of
+          conditionally rendering, so switching tabs doesn't unmount and
+          re-fetch (the Consignment Report's query is heavy). ConsignmentReport
+          self-pads; the EOD report doesn't, so wrap it. */}
+      <div style={{ display: tab === 'consignment' ? 'block' : 'none' }}>
         <ConsignmentReport />
-      ) : (
-        <div style={{ padding: '18px 16px' }}>
-          <EodBranchStockReport />
-        </div>
-      )}
+      </div>
+      <div style={{ display: tab === 'eod_branch' ? 'block' : 'none', padding: '18px 16px' }}>
+        <EodBranchStockReport />
+      </div>
     </div>
   )
 }

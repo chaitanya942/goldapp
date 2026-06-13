@@ -204,17 +204,18 @@ export default function ConsignmentReport() {
   }, [])
 
   // Fetch whenever the date window changes; seed from cache for the new key
-  // so the screen never blanks while the new range loads.
+  // so the screen shows the last result instantly while the fresh data loads.
+  // No background poll — the consignment-ledger query is heavy and the data
+  // is a historical ledger (it doesn't churn second-to-second), so we fetch
+  // once per window selection. Switch a date chip to pull fresh data.
   useEffect(() => {
     const cacheKey = `cr:movements:${caseSinceRange.from || ''}|${caseSinceRange.to || ''}`
     const cached   = getCache(cacheKey)
     if (cached) { setCaseData(cached); setCaseLoaded(true) }
-    fetchMovements(caseSinceRange, !!cached)
-    // Backup poll every 3 min for the active window (silent — UI keeps the
-    // current rows visible). Useful when ops sits on "today" — new dispatches
-    // land within the poll interval.
-    const interval = setInterval(() => fetchMovements(caseSinceRange, true), 3 * 60 * 1000)
-    return () => clearInterval(interval)
+    // If we already have cached rows for this window, don't refetch on every
+    // mount — only fetch when there's nothing cached yet. This stops the
+    // "keeps refreshing" churn when ops flips between the report tabs.
+    if (!cached) fetchMovements(caseSinceRange, false)
   }, [caseSinceRange, fetchMovements])
 
   // Live "X min ago" clock
@@ -681,13 +682,9 @@ export default function ConsignmentReport() {
               Clear
             </button>
           )}
-          <button
-            onClick={() => fetchMovements(caseSinceRange)}
-            disabled={caseLoading}
-            style={{ background: caseLoading ? t.card2 : `${t.gold}15`, border: `1px solid ${caseLoading ? t.border : t.gold}40`, borderRadius: '8px', padding: '7px 16px', fontSize: '12px', color: caseLoading ? t.text4 : t.gold, cursor: caseLoading ? 'default' : 'pointer', fontWeight: 600, transition: 'all .15s', display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <span style={{ display: 'inline-block', animation: caseLoading ? 'spin 1s linear infinite' : 'none', fontSize: '13px' }}>⟳</span>
-            {caseLoading ? 'Refreshing…' : 'Refresh'}
-          </button>
+          {/* Refresh button removed per ops — the report is a historical
+              ledger, not a live feed. Data loads once per date window; pick a
+              date chip (or reload the page) to pull fresh data. */}
         </div>
       </div>
 
