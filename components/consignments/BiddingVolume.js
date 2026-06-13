@@ -1315,6 +1315,13 @@ export default function BiddingVolume() {
           which sections have anything in them. */}
       {(() => {
         const t72 = t.teal || '#0e9aa7'
+        // Weekday (DDD) + short date, e.g. "Sun · 15 Jun".
+        const dddDate = (d) => {
+          if (!d) return ''
+          const dt = new Date(`${d}T00:00:00+05:30`)
+          const day = dt.toLocaleDateString('en-IN', { weekday: 'short', timeZone: 'Asia/Kolkata' })
+          return `${day} · ${fmtDateShort(d)}`
+        }
         // `date` = the HO-arrival date that section's stock lands on (where a
         // single date applies). Shown as a dim sub-line on the chip so ops can
         // read "which date" at a glance. Sections 5/6 span many dates → none.
@@ -1349,9 +1356,9 @@ export default function BiddingVolume() {
                   onClick={() => setActiveSection(active ? 'all' : sx.id)}
                   style={baseChip(active, sx.accent)}>
                   <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', minWidth: 18, height: 18, borderRadius: 5, background: active ? sx.accent : `${sx.accent}26`, color: active ? '#fff' : sx.accent, fontSize: 10, fontWeight: 800, flexShrink: 0 }}>{sx.id}</span>
-                  <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', lineHeight: 1.15 }}>
+                  <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', lineHeight: 1.2 }}>
                     <span>{sx.label}</span>
-                    {sx.date && <span style={{ fontSize: 9.5, color: active ? sx.accent : t.text4, fontWeight: 600, opacity: active ? 0.85 : 1 }}>→ HO {fmtDateShort(sx.date)}</span>}
+                    {sx.date && <span style={{ fontSize: 10, color: sx.accent, fontWeight: 800, letterSpacing: '.01em' }}>→ HO {dddDate(sx.date)}</span>}
                   </span>
                   <span style={{ fontSize: 10.5, color: active ? sx.accent : t.text4, fontWeight: 700, fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>{sx.bills}</span>
                 </button>
