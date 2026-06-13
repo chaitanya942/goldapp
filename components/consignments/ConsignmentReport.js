@@ -211,11 +211,18 @@ export default function ConsignmentReport() {
   useEffect(() => {
     const cacheKey = `cr:movements:${caseSinceRange.from || ''}|${caseSinceRange.to || ''}`
     const cached   = getCache(cacheKey)
-    if (cached) { setCaseData(cached); setCaseLoaded(true) }
-    // If we already have cached rows for this window, don't refetch on every
-    // mount — only fetch when there's nothing cached yet. This stops the
-    // "keeps refreshing" churn when ops flips between the report tabs.
-    if (!cached) fetchMovements(caseSinceRange, false)
+    if (cached) {
+      // Paint from cache and clear the loading flag — caseLoading starts true,
+      // so without this the header sticks on 'loading…' even though the data
+      // is already on screen. This is the only thing that runs on a tab
+      // switch / remount, so it's instant with no network call.
+      setCaseData(cached)
+      setCaseLoaded(true)
+      setCaseLoading(false)
+    } else {
+      // Nothing cached for this window yet → one fetch. No background poll.
+      fetchMovements(caseSinceRange, false)
+    }
   }, [caseSinceRange, fetchMovements])
 
   // Live "X min ago" clock
