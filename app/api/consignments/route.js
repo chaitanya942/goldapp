@@ -1295,6 +1295,41 @@ export async function GET(req) {
   // bidding to a region-restricted role until cal_quotas gains a region
   // dimension. Bypass roles (super_admin/founders_office/admin) are
   // unaffected (they see all regions anyway).
+  // ── Booking bill breakdown: the bills attached to ONE booking, grouped by
+  //    branch — powers the click-to-expand "branch-wise breakup" on the
+  //    Bookings tab. Owner branch = current_branch || branch_name (so leaf→hub
+  //    transfers roll up under the hub). ──
+  if (action === 'booking_bills') {
+    const bookingId = url.searchParams.get('booking_id')
+    if (!bookingId) return Response.json({ error: 'booking_id required' }, { status: 400 })
+    const { data: bills, error: bErr } = await supabase
+      .from('purchases')
+      .select('application_id, customer_name, branch_name, current_branch, gross_weight, net_weight, total_amount, purchase_date, stock_status')
+      .eq('booking_id', bookingId)
+      .eq('is_deleted', false)
+      .order('net_weight', { ascending: false })
+    if (bErr) return Response.json({ error: bErr.message }, { status: 500 })
+    const { data: brs } = await supabase.from('branches').select('name, region')
+    const regionBy = Object.fromEntries((brs || []).map(x => [x.name, x.region]))
+    const byBranch = {}
+    let tBills = 0, tNet = 0, tGross = 0
+    for (const p of bills || []) {
+      const owner = p.current_branch || p.branch_name
+      if (!byBranch[owner]) byBranch[owner] = { branch_name: owner, region: regionBy[owner] || 'Unknown', bills: [], net_wt: 0, gross_wt: 0 }
+      const g = byBranch[owner]
+      g.bills.push({
+        application_id: p.application_id, customer_name: p.customer_name,
+        purchase_date: p.purchase_date, stock_status: p.stock_status,
+        net_weight: Number(p.net_weight || 0), gross_weight: Number(p.gross_weight || 0),
+        total_amount: Number(p.total_amount || 0),
+      })
+      g.net_wt += Number(p.net_weight || 0); g.gross_wt += Number(p.gross_weight || 0)
+      tBills += 1; tNet += Number(p.net_weight || 0); tGross += Number(p.gross_weight || 0)
+    }
+    const branches = Object.values(byBranch).sort((a, b) => b.net_wt - a.net_wt)
+    return Response.json({ branches, total: { bills: tBills, net_wt: tNet, gross_wt: tGross } })
+  }
+
   if (action === 'bidding_bookings') {
     // Accept either `bidding_date` (NEW: filter by created_at IST date —
     // the day the booking was placed) or `date` (LEGACY: filter by

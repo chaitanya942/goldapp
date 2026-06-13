@@ -2164,6 +2164,22 @@ const DISPATCH_META = {
 function BookingsList({ t, card, bookings, onUpdateStatus, onRequestCancel, onClosePipeline, onReconcile, onUnbook, onCreateConsignment, onCreate }) {
   const [actionBusy, setActionBusy] = useState(null)  // booking id currently mid-action
   const [hideCancelled, setHideCancelled] = useState(true)
+  // Branch-wise breakdown drill-down — click a booking's Net Wt to see every
+  // attached bill grouped by branch.
+  const [openBooking,   setOpenBooking]   = useState(null)
+  const [breakdowns,    setBreakdowns]    = useState({})           // id → { loading, branches, total }
+  const [openBranches,  setOpenBranches]  = useState(() => new Set())
+  const toggleBreakdown = async (id) => {
+    if (openBooking === id) { setOpenBooking(null); return }
+    setOpenBooking(id)
+    if (!breakdowns[id]) {
+      setBreakdowns(p => ({ ...p, [id]: { loading: true } }))
+      const res = await authedFetch(`/api/consignments?action=booking_bills&booking_id=${id}`)
+      const j   = await res.json().catch(() => ({}))
+      setBreakdowns(p => ({ ...p, [id]: { loading: false, branches: j.branches || [], total: j.total || {} } }))
+    }
+  }
+  const toggleBranch = (key) => setOpenBranches(prev => { const n = new Set(prev); if (n.has(key)) n.delete(key); else n.add(key); return n })
   const visible       = hideCancelled ? bookings.filter(b => b.status !== 'cancelled') : bookings
   const activeRows    = visible.filter(b => b.status !== 'cancelled')
   const activeWeight  = activeRows.reduce((s, b) => s + Number(b.weight || 0), 0)
@@ -2271,10 +2287,13 @@ function BookingsList({ t, card, bookings, onUpdateStatus, onRequestCancel, onCl
                   </span>
                 )
               }
+              const bdOpen = openBooking === b.id
+              const bd     = breakdowns[b.id]
               return (
-                <tr key={b.id}
+                <Fragment key={b.id}>
+                <tr
                   style={{
-                    background: i % 2 === 1 ? `${t.card2}40` : 'transparent',
+                    background: bdOpen ? `${t.gold}0c` : (i % 2 === 1 ? `${t.card2}40` : 'transparent'),
                     opacity: isCancelled ? 0.55 : 1,
                   }}>
                   <td style={{ ...td, textAlign: 'center', color: t.text4, fontFamily: 'monospace', fontSize: 12, fontWeight: 700 }}>{i + 1}</td>
@@ -2451,7 +2470,14 @@ function BookingsList({ t, card, bookings, onUpdateStatus, onRequestCancel, onCl
                       </div>
                     )}
                   </td>
-                  <td style={{ ...td, textAlign: 'right' }}>{numCell(billsG,         { color: t.text1 })}</td>
+                  <td style={{ ...td, textAlign: 'right', cursor: billsG ? 'pointer' : 'default' }}
+                      onClick={() => { if (billsG) toggleBreakdown(b.id) }}
+                      title={billsG ? 'Click for the branch-wise breakdown of attached bills' : undefined}>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, justifyContent: 'flex-end' }}>
+                      {numCell(billsG, { color: billsG ? t.gold : t.text1 })}
+                      {billsG ? <span style={{ fontSize: 9, color: bdOpen ? t.gold : t.text4, fontWeight: 800 }}>{bdOpen ? '▾' : '▸'}</span> : null}
+                    </span>
+                  </td>
                   <td style={{ ...td, textAlign: 'right' }}>{numCell(effectiveGainG, { color: t.orange || '#e58a3b' })}</td>
                   <td style={{ ...td, textAlign: 'right' }}>{numCell(pendingG,       { color: t.purple || '#8c5ac8' })}</td>
                   <td style={{ ...td, textAlign: 'right' }}>{numCell(pipelineG,      { color: t.purple || '#8c5ac8' })}</td>
@@ -2470,6 +2496,61 @@ function BookingsList({ t, card, bookings, onUpdateStatus, onRequestCancel, onCl
                       : <span style={{ color: t.text4 }}>—</span>}
                   </td>
                 </tr>
+                {bdOpen && (
+                  <tr>
+                    <td colSpan={10} style={{ padding: 0, background: `${t.card2}55`, borderBottom: `1px solid ${t.border}` }}>
+                      <div style={{ padding: '10px 18px 14px 44px' }}>
+                        {bd?.loading ? (
+                          <div style={{ padding: '14px', textAlign: 'center', color: t.text4, fontSize: 12 }}>Loading breakdown…</div>
+                        ) : !bd?.branches?.length ? (
+                          <div style={{ padding: '14px', color: t.text4, fontSize: 12 }}>No bills attached to this booking yet.</div>
+                        ) : (
+                          <>
+                            <div style={{ fontSize: 10.5, color: t.text3, letterSpacing: '.08em', textTransform: 'uppercase', fontWeight: 800, marginBottom: 8 }}>
+                              Branch-wise breakup · {bd.total?.bills || 0} bill{(bd.total?.bills || 0) === 1 ? '' : 's'} · {fmt(bd.total?.net_wt || 0, 2)} g net · {bd.branches.length} branch{bd.branches.length === 1 ? '' : 'es'}
+                            </div>
+                            {bd.branches.map(br => {
+                              const key  = `${b.id}:${br.branch_name}`
+                              const open = openBranches.has(key)
+                              const rColor = REGION_COLORS[br.region] || t.text3
+                              return (
+                                <div key={key} style={{ borderTop: `1px solid ${t.border}30` }}>
+                                  <div onClick={() => toggleBranch(key)}
+                                    style={{ display: 'grid', gridTemplateColumns: '16px minmax(0,1fr) 90px 90px 60px', alignItems: 'center', columnGap: 12, padding: '8px 8px', cursor: 'pointer' }}>
+                                    <span style={{ color: open ? t.gold : t.text4, fontSize: 10, fontWeight: 800 }}>{open ? '▾' : '▸'}</span>
+                                    <span style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                                      <span style={{ fontSize: 13, color: t.text1, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{br.branch_name}</span>
+                                      <span style={{ fontSize: 10, color: rColor, fontWeight: 700, whiteSpace: 'nowrap' }}>{br.region}</span>
+                                    </span>
+                                    <span style={{ textAlign: 'right', fontFamily: 'monospace', color: t.gold, fontWeight: 700, fontSize: 12.5 }}>{fmt(br.net_wt, 2)}<span style={{ fontSize: 9, color: t.text4, marginLeft: 1.5 }}>g</span></span>
+                                    <span style={{ textAlign: 'right', fontFamily: 'monospace', color: t.text3, fontSize: 12 }}>{fmt(br.gross_wt, 2)}<span style={{ fontSize: 9, color: t.text4, marginLeft: 1.5 }}>g</span></span>
+                                    <span style={{ textAlign: 'right', fontSize: 11, color: t.text3, fontWeight: 700 }}>{br.bills.length} bill{br.bills.length === 1 ? '' : 's'}</span>
+                                  </div>
+                                  {open && (
+                                    <div style={{ paddingLeft: 28, paddingBottom: 6 }}>
+                                      {br.bills.map((c, j) => (
+                                        <div key={c.application_id || j} style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) 90px 70px 70px', alignItems: 'center', columnGap: 12, padding: '5px 8px', borderTop: `1px solid ${t.border}1f` }}>
+                                          <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+                                            <span style={{ fontSize: 11.5, color: t.text2, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.customer_name || '—'}</span>
+                                            <span style={{ fontSize: 10, color: t.gold, fontFamily: 'monospace' }}>{c.application_id || '—'}</span>
+                                          </span>
+                                          <span style={{ textAlign: 'right', fontSize: 10.5, color: t.text4, fontWeight: 600, whiteSpace: 'nowrap' }}>{c.purchase_date ? fmtDateShort(c.purchase_date) : '—'}</span>
+                                          <span style={{ textAlign: 'right', fontFamily: 'monospace', color: t.text2, fontSize: 11.5 }}>{fmt(c.gross_weight, 2)}</span>
+                                          <span style={{ textAlign: 'right', fontFamily: 'monospace', color: t.gold, fontSize: 11.5, fontWeight: 700 }}>{fmt(c.net_weight, 2)}</span>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              )
+                            })}
+                          </>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                )}
+                </Fragment>
               )
             })}
           </tbody>
