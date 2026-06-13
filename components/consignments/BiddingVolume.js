@@ -1332,6 +1332,7 @@ export default function BiddingVolume() {
         branches={bangBranches}
         total={supply?.bangalore?.total}
         metrics={sectionMetrics(supply?.bangalore?.total?.net_wt, supply?.bangalore?.booked?.net_wt, 1)}
+        bookedBranches={supply?.bangalore?.booked?.branches}
         onRateChange={(p) => handleSectionRate(1, p)}
         onSetGainGrams={(g) => handleSectionGainGrams(1, g)}
         onAutoSelect={() => selectSectionBills(['bangalore'])}
@@ -1359,6 +1360,7 @@ export default function BiddingVolume() {
         branches={inTBranches}
         total={supply?.transit_24h?.total || supply?.in_transit?.total}
         metrics={sectionMetrics(supply?.transit_24h?.total?.net_wt, supply?.transit_24h?.booked?.net_wt, 2)}
+        bookedBranches={supply?.transit_24h?.booked?.branches}
         onRateChange={(p) => handleSectionRate(2, p)}
         onSetGainGrams={(g) => handleSectionGainGrams(2, g)}
         onAutoSelect={() => selectSectionBills(['transit_24h'])}
@@ -1387,6 +1389,7 @@ export default function BiddingVolume() {
         branches={t48hBranches}
         total={supply?.transit_48h?.total}
         metrics={sectionMetrics(supply?.transit_48h?.total?.net_wt, supply?.transit_48h?.booked?.net_wt, 3)}
+        bookedBranches={supply?.transit_48h?.booked?.branches}
         onRateChange={(p) => handleSectionRate(3, p)}
         onSetGainGrams={(g) => handleSectionGainGrams(3, g)}
         onAutoSelect={() => selectSectionBills(['transit_48h'])}
@@ -1415,6 +1418,7 @@ export default function BiddingVolume() {
         branches={t72hBranches}
         total={supply?.transit_72h?.total}
         metrics={sectionMetrics(supply?.transit_72h?.total?.net_wt, supply?.transit_72h?.booked?.net_wt, 4)}
+        bookedBranches={supply?.transit_72h?.booked?.branches}
         onRateChange={(p) => handleSectionRate(4, p)}
         onSetGainGrams={(g) => handleSectionGainGrams(4, g)}
         onAutoSelect={() => selectSectionBills(['transit_72h'])}
@@ -1510,6 +1514,7 @@ export default function BiddingVolume() {
         branches={preEodBranches}
         total={supply?.branch_pre_eod?.total}
         metrics={sectionMetrics(supply?.branch_pre_eod?.total?.net_wt, supply?.branch_pre_eod?.booked?.net_wt, 7)}
+        bookedBranches={supply?.branch_pre_eod?.booked?.branches}
         onRateChange={(p) => handleSectionRate(7, p)}
         onSetGainGrams={(g) => handleSectionGainGrams(7, g)}
         onAutoSelect={() => selectSectionBills(['branch_pre_eod'])}
@@ -2557,6 +2562,10 @@ function SourceSection({
   // Optional 5-card metric strip rendered under the header. Shape:
   // { totalNet, bookedNet, unbookedNet, gainNet, availableNet, rate }.
   metrics,
+  // Already-booked bills in this section's window, grouped by branch. Rendered
+  // as a read-only "Already booked" band so booked stock stays visible (it
+  // doesn't vanish from the section just because it left the picker list).
+  bookedBranches,
   // When provided, the Gain card becomes inline-editable. onRateChange(pct)
   // sets the shared company % rate; onSetGainGrams(g) sets a per-section
   // absolute gain override (grams). onAutoSelect() is fired when ops clicks
@@ -2628,9 +2637,16 @@ function SourceSection({
         ...subRegions.map(([r, rows]) => [r, rows, true]),
       ]
     : regions.map(([r, rows]) => [r, rows, false])
-  const isEmpty   = branches.length === 0 && subBranches.length === 0
-  const totalBills = total?.bills  || 0
-  const totalNet   = total?.net_wt || 0
+  // Already-booked band (read-only) — booked stock that's part of this
+  // section's window but already attached to a booking. Kept visible so the
+  // section never looks empty when stock has been booked.
+  const bookedRows  = bookedBranches || []
+  const bookedBills = bookedRows.reduce((s, b) => s + (b.total_bills || 0), 0)
+  const bookedNet   = bookedRows.reduce((s, b) => s + (b.total_net_wt || 0), 0)
+  const isEmpty   = branches.length === 0 && subBranches.length === 0 && bookedRows.length === 0
+  const unbookedBills = total?.bills  || 0
+  const totalBills = unbookedBills + bookedBills   // header count = booked + unbooked
+  const totalNet   = (total?.net_wt || 0) + bookedNet
   const subTone    = subGroup?.accent || t.orange || '#e9a942'
 
   // Shared row grid — fills the horizontal extent so the columns align
@@ -3239,6 +3255,35 @@ function SourceSection({
               </div>
             )
           })}
+
+          {/* Already-booked band — read-only. Booked stock in this window stays
+              visible so the section never looks empty after booking. */}
+          {bookedRows.length > 0 && (() => {
+            const bk = t.blue || '#4a90d9'
+            return (
+              <div style={{ margin: '10px 14px 4px', paddingTop: 12, borderTop: `1px dashed ${bk}44` }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 9, flexWrap: 'wrap', marginBottom: 6 }}>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11, color: bk, fontWeight: 800, letterSpacing: '.04em', textTransform: 'uppercase' }}>
+                    <span style={{ width: 16, height: 16, borderRadius: 5, background: `${bk}22`, color: bk, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 900 }}>✓</span>
+                    Already booked
+                  </span>
+                  <span style={{ fontSize: 11, color: t.text3, fontFamily: 'monospace', fontWeight: 700 }}>
+                    {fmt(bookedNet, 2)} g · {bookedBills} bill{bookedBills === 1 ? '' : 's'}
+                  </span>
+                </div>
+                {bookedRows.map(b => (
+                  <div key={`bk-${b.branch_name}`} style={{ display: 'grid', gridTemplateColumns: rowGrid, alignItems: 'center', columnGap: 14, padding: '8px 11px', borderRadius: 8, opacity: 0.72 }}>
+                    <span style={{ width: 16, height: 16, borderRadius: 4, background: `${bk}22`, color: bk, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 900 }}>✓</span>
+                    <span style={{ fontSize: 13, color: t.text2, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{b.branch_name}</span>
+                    <span style={{ textAlign: 'right', color: t.text3, fontWeight: 600 }}>{fmt(b.total_gross_wt, 2)}<span style={{ fontSize: 10, color: t.text4, marginLeft: 2 }}>g</span></span>
+                    <span style={{ textAlign: 'right', color: bk, fontWeight: 800 }}>{fmt(b.total_net_wt, 2)}<span style={{ fontSize: 10, color: t.text4, marginLeft: 2 }}>g</span></span>
+                    <span style={{ textAlign: 'right', color: t.text3, fontWeight: 700 }}>{b.total_bills} bill{b.total_bills === 1 ? '' : 's'}</span>
+                    <span />
+                  </div>
+                ))}
+              </div>
+            )
+          })()}
         </div>
       )}
     </div>

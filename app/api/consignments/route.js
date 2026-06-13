@@ -921,7 +921,7 @@ export async function GET(req) {
     if (allBookableBranchNames.length) {
       const { data: bw } = await supabase
         .from('purchases')
-        .select('id, branch_name, current_branch, net_weight, purchase_date, stock_status, dispatched_at, crm_status')
+        .select('id, application_id, customer_name, branch_name, current_branch, gross_weight, net_weight, total_amount, purchase_date, stock_status, dispatched_at, crm_status')
         .in('branch_name', allBookableBranchNames)
         .eq('crm_status', 'approved')
         .eq('is_deleted', false)
@@ -950,6 +950,13 @@ export async function GET(req) {
     // Section 7 (branch pre-EOD): booked at_branch bills at the eligible branches.
     const preEodOwnerSet = new Set(preEodEligibleAfterDispatch)
     const bookedPreEod = bookedWindowBills.filter(b => b.stock_status === 'at_branch' && preEodOwnerSet.has(b._owner))
+    // Booked bills grouped by branch — so each section can render an
+    // "Already booked" read-only band (booked bills stay visible; they don't
+    // vanish just because they left the unbooked picker list).
+    const bookedSection = (bills, useOwner) => {
+      const branches = groupByBranch(useOwner ? bills.map(b => ({ ...b, branch_name: b._owner })) : bills)
+      return { ...sumNet(bills), branches }
+    }
 
     // Section totals + grand total.
     const sumOf = (rows) => rows.reduce((a, r) => ({
@@ -1183,10 +1190,10 @@ export async function GET(req) {
         day_after_arrival:       dayAfterArrival,
         day_after_2_arrival:     dayAfter2Arrival,
         bangalore_purchase_date: bangalorePurchaseDate,
-        bangalore:      { branches: bangaloreByBranch,  total: bangTotal,       booked: sumNet(bookedBang)   },
-        transit_24h:    { branches: transit24hByBranch, total: transit24hTotal, booked: sumNet(bookedT24)    },
-        transit_48h:    { branches: transit48hByBranch, total: transit48hTotal, booked: sumNet(bookedT48)    },   // selectable
-        transit_72h:    { branches: transit72hByBranch, total: transit72hTotal, booked: sumNet(bookedT72)    },   // arriving after 2 days (72h), selectable
+        bangalore:      { branches: bangaloreByBranch,  total: bangTotal,       booked: bookedSection(bookedBang)        },
+        transit_24h:    { branches: transit24hByBranch, total: transit24hTotal, booked: bookedSection(bookedT24)         },
+        transit_48h:    { branches: transit48hByBranch, total: transit48hTotal, booked: bookedSection(bookedT48)         },   // selectable
+        transit_72h:    { branches: transit72hByBranch, total: transit72hTotal, booked: bookedSection(bookedT72)         },   // arriving after 2 days (72h), selectable
         // Section 2 sub-group — consignment created, booking pending. Still
         // bookable (selectable), but off the tomorrow window so it's flagged
         // separately under Section 2 rather than mixed into the main list.
@@ -1194,7 +1201,7 @@ export async function GET(req) {
         // Bangalore counterpart — rendered as a consolidated drill-down
         // sub-group inside Section 1 (Bangalore's own section).
         bangalore_pending_booking:   { branches: bangPendingBookingByBranch, total: bangPendingBookingTotal },
-        branch_pre_eod: { branches: preEodByBranch,     total: preEodTotal, booked: sumNet(bookedPreEod), _debug: debugSection4 },
+        branch_pre_eod: { branches: preEodByBranch,     total: preEodTotal, booked: bookedSection(bookedPreEod, true), _debug: debugSection4 },
         // Section 5 — booked but consignment not yet created (at_branch +
         // booking_id IS NOT NULL). View-only; intentionally excluded from
         // bookable totals (the booking row already counts this weight).
