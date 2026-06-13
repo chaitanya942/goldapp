@@ -2466,7 +2466,16 @@ function BookingsList({ t, card, bookings, onUpdateStatus, onRequestCancel, onCl
                             {fmtTS(b.created_at)}
                           </span>
                         )}
-                        {b.notes && <span title={b.notes} style={{ fontStyle: 'italic', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>· {b.notes}</span>}
+                        {b.notes && (billsG ? (
+                          <span onClick={(e) => { e.stopPropagation(); toggleBreakdown(b.id) }}
+                            title="Click to see the branch-wise breakup of every booked bill"
+                            style={{ display: 'inline-flex', alignItems: 'center', gap: 5, maxWidth: 360, cursor: 'pointer', color: t.blue, fontWeight: 700 }}>
+                            <span style={{ fontStyle: 'italic', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>· {b.notes}</span>
+                            <span style={{ fontStyle: 'normal', fontWeight: 800, whiteSpace: 'nowrap', textDecoration: 'underline', textDecorationStyle: 'dotted' }}>{bdOpen ? '▾ hide breakup' : '▸ view breakup'}</span>
+                          </span>
+                        ) : (
+                          <span title={b.notes} style={{ fontStyle: 'italic', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>· {b.notes}</span>
+                        ))}
                       </div>
                     )}
                   </td>
