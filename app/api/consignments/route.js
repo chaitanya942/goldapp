@@ -933,9 +933,23 @@ export async function GET(req) {
       net_wt: bills.reduce((s, b) => s + Number(b.net_weight || 0), 0),
     })
     // Section 1 (Bangalore today): booked Bangalore purchases in today's window.
-    const bookedBang = bookedWindowBills.filter(b =>
-      bangaloreBranchNames.includes(b.branch_name) &&
-      b.purchase_date >= bangalorePurchaseDate && b.purchase_date < addDays(bangalorePurchaseDate, 1))
+    // Query SERVER-SIDE (mirroring the unbooked bangBills query) rather than
+    // JS-comparing purchase_date — purchase_date is a timestamptz, so the IST
+    // day comes back as the prior UTC date and a JS string compare against
+    // 'YYYY-MM-DD' silently dropped every bill (Booked Net always read 0).
+    let bookedBang = []
+    if (bangaloreBranchNames.length) {
+      const { data: bbk } = await supabase
+        .from('purchases')
+        .select('id, application_id, customer_name, branch_name, current_branch, gross_weight, net_weight, total_amount, purchase_date, stock_status')
+        .in('branch_name', bangaloreBranchNames)
+        .gte('purchase_date', bangalorePurchaseDate)
+        .lt('purchase_date',  addDays(bangalorePurchaseDate, 1))
+        .eq('crm_status', 'approved')
+        .eq('is_deleted', false)
+        .not('booking_id', 'is', null)
+      bookedBang = bbk || []
+    }
     // Sections 2/3/4 (transit): booked in_consignment bills bucketed by arrival.
     const bookedInflight = bookedWindowBills
       .filter(b => b.stock_status === 'in_consignment' && b.dispatched_at && outsideBranchNames.includes(b.branch_name))
