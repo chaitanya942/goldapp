@@ -1965,40 +1965,72 @@ export async function GET(req) {
     // back to the original "currently in transit" snapshot.
     const fromDate = searchParams.get('from')
     const toDate   = searchParams.get('to')
-    const isDateRange = !!(fromDate || toDate)
 
-    // Slim select — the Consignment Report only displays App ID / Purchase /
-    // Customer / Branch / Gross / Net / Gross Amt / Dispatched Date / Status,
-    // plus consignment metadata via a separate query. Skipping the stone /
-    // wastage / svc / final / transaction_type columns reduces payload on
-    // wider date ranges and lets the Postgres index-only path apply.
-    let billsQ = supabase
-      .from('purchases')
-      .select('id, application_id, branch_name, customer_name, purchase_date, gross_weight, net_weight, total_amount, dispatched_at, booked_at, stock_status')
-      .eq('is_deleted', false)
-    if (isDateRange) {
-      // dispatched_at is TIMESTAMPTZ — convert YYYY-MM-DD (IST) to UTC instants
-      // at IST midnight bounds so the day comparison aligns with the operator's
-      // calendar instead of UTC.
-      if (fromDate) billsQ = billsQ.gte('dispatched_at', `${fromDate}T00:00:00+05:30`)
-      if (toDate)   billsQ = billsQ.lte('dispatched_at', `${toDate}T23:59:59+05:30`)
-      // Exclude bills that were never dispatched (still at_branch or returned).
-      billsQ = billsQ.not('dispatched_at', 'is', null)
-    } else {
-      billsQ = billsQ.eq('stock_status', 'in_consignment')
+    // ── Permanent ledger of consignments CREATED per day ──────────────────
+    // Sourced from the CONSIGNMENTS table keyed on created_at — NOT a live
+    // in_consignment snapshot. So a consignment created last month still
+    // appears (with its bills) even after the bills were received at HO.
+    // Scope: approved/dispatched onward only (consignments.dispatched_at is
+    // stamped at approval), excluding cancelled + seed + still-pending. The
+    // optional from/to filter the consignment CREATION date; with no range
+    // (the 'All' chip) it returns every such consignment, most recent first.
+    let consQ = supabase
+      .from('consignments')
+      .select('id, tmp_prf_no, branch_name, dest_branch, movement_type, status, approval_status, dispatched_at, created_at')
+      .neq('status', 'cancelled')
+      .neq('status', 'seed')
+      .not('dispatched_at', 'is', null)
+    if (fromDate) consQ = consQ.gte('created_at', `${fromDate}T00:00:00+05:30`)
+    if (toDate)   consQ = consQ.lte('created_at', `${toDate}T23:59:59+05:30`)
+    if (allowedBranches) consQ = consQ.in('branch_name', allowedBranches)
+    consQ = consQ.order('created_at', { ascending: false }).limit(8000)
+    const { data: cons, error: cErr } = await consQ
+    if (cErr) return Response.json({ error: cErr.message }, { status: 500 })
+    if (!cons?.length) return Response.json({ data: [] })
+
+    const consById = {}
+    for (const c of cons) consById[c.id] = c
+    const consIds = cons.map(c => c.id)
+
+    // Resolve consignment → bills via consignment_items (chunked IN). A bill
+    // re-consigned across two non-cancelled consignments keeps the most
+    // recently created one (cancelled ones are already excluded above).
+    const consByPurchase = {}   // purchase_id → consignment_id
+    const IN_CHUNK = 200
+    for (let i = 0; i < consIds.length; i += IN_CHUNK) {
+      const slice = consIds.slice(i, i + IN_CHUNK)
+      const { data: items, error: itErr } = await supabase
+        .from('consignment_items')
+        .select('purchase_id, consignment_id')
+        .in('consignment_id', slice)
+      if (itErr) return Response.json({ error: itErr.message }, { status: 500 })
+      for (const it of items || []) {
+        const c = consById[it.consignment_id]
+        if (!c) continue
+        const prevId = consByPurchase[it.purchase_id]
+        if (!prevId || new Date(c.created_at) > new Date(consById[prevId].created_at)) {
+          consByPurchase[it.purchase_id] = it.consignment_id
+        }
+      }
     }
-    // Filter by branch_name (origin) so a region-restricted user only sees their bills.
-    if (allowedBranches) billsQ = billsQ.in('branch_name', allowedBranches)
-    const { data: bills, error: be } = await billsQ
+    const purchaseIds = Object.keys(consByPurchase)
+    if (!purchaseIds.length) return Response.json({ data: [] })
 
-    if (be) return Response.json({ error: be.message }, { status: 500 })
-    if (!bills?.length) return Response.json({ data: [] })
+    // Fetch the bills (chunked) — same column set the report renders.
+    let bills = []
+    for (let i = 0; i < purchaseIds.length; i += 1000) {
+      const slice = purchaseIds.slice(i, i + 1000)
+      const { data: pb, error: pe } = await supabase
+        .from('purchases')
+        .select('id, application_id, branch_name, customer_name, purchase_date, gross_weight, net_weight, total_amount, dispatched_at, booked_at, stock_status')
+        .in('id', slice)
+        .eq('is_deleted', false)
+      if (pe) return Response.json({ error: pe.message }, { status: 500 })
+      bills.push(...(pb || []))
+    }
+    if (!bills.length) return Response.json({ data: [] })
 
-    // Attach branch region + delivery TAT to each bill so the client doesn't
-    // need a second lookup. Bangalore included — date-range mode covers it
-    // via the 19:30 IST lifecycle and direct-to-HO Bangalore dispatches.
-    // delivery_tat_hours drives the Expected Delivery column in the Consignment
-    // Report: 24h-TAT → next IST day, 48h-TAT → day after, etc.
+    // Branch region + delivery TAT (drives the Expected Delivery column).
     const branchNames = [...new Set(bills.map(b => b.branch_name).filter(Boolean))]
     const { data: brRows } = branchNames.length
       ? await supabase.from('branches').select('name, region, delivery_tat_hours').in('name', branchNames)
@@ -2006,35 +2038,14 @@ export async function GET(req) {
     const regionByBranch = Object.fromEntries((brRows || []).map(b => [b.name, b.region]))
     const tatByBranch    = Object.fromEntries((brRows || []).map(b => [b.name, Number(b.delivery_tat_hours) || null]))
 
-    // 2. For each bill, look up the most recent dispatched consignment that links it.
-    //    A bill might appear in multiple consignment_items rows historically (cancelled
-    //    + re-consigned). Pick the most recent non-cancelled link.
-    const billIds = bills.map(b => b.id)
-    const { data: links } = await supabase
-      .from('consignment_items')
-      .select('purchase_id, consignment:consignment_id(id, tmp_prf_no, branch_name, dest_branch, movement_type, status, approval_status, dispatched_at, created_at)')
-      .in('purchase_id', billIds)
-
-    // Index: purchase_id → best matching consignment (most recent dispatched + approved)
-    const consByPurchase = {}
-    for (const link of links || []) {
-      const c = link.consignment
-      if (!c) continue
-      if (c.status === 'cancelled') continue
-      // Only consider rows that represent current in-flight state
-      const existing = consByPurchase[link.purchase_id]
-      const ts = c.dispatched_at || c.created_at
-      if (!existing || new Date(ts) > new Date(existing._ts)) {
-        consByPurchase[link.purchase_id] = { ...c, _ts: ts }
-      }
-    }
-
     const enriched = bills.map(b => {
-      const c = consByPurchase[b.id]
+      const c = consById[consByPurchase[b.id]]
       return {
         ...b,
         region: regionByBranch[b.branch_name] || null,
         delivery_tat_hours: tatByBranch[b.branch_name] ?? null,
+        // The report's date axis = the owning consignment's CREATION date.
+        consignment_created_at: c?.created_at || null,
         consignment: c ? {
           id: c.id, tmp_prf_no: c.tmp_prf_no,
           source: c.branch_name, dest: c.dest_branch,

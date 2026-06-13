@@ -118,7 +118,7 @@ export default function ConsignmentReport() {
   const [expDelivQuick, setExpDelivQuick] = useState('all')
   const [expDelivFrom,  setExpDelivFrom]  = useState('')
   const [expDelivTo,    setExpDelivTo]    = useState('')
-  const [caseSortKey,    setCaseSortKey]    = useState('dispatched_at')
+  const [caseSortKey,    setCaseSortKey]    = useState('consignment_created_at')
   const [caseSortDir,    setCaseSortDir]    = useState(-1)
   // Pagination — large filter results (e.g. "All" on 1000+ bills) become a
   // long scroll; cap visible at casePageSize and let ops page through.
@@ -314,8 +314,11 @@ export default function ConsignmentReport() {
     const groups = new Map()
     for (const r of caseData) {
       const branch = r.branch_name || '—'
-      const date = r.dispatched_at
-        ? new Date(r.dispatched_at).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' })
+      // Axis = the consignment's CREATION date (falls back to the bill's
+      // dispatch date for any legacy row without a consignment link).
+      const axisTs = r.consignment_created_at || r.dispatched_at
+      const date = axisTs
+        ? new Date(axisTs).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' })
         : null   // YYYY-MM-DD
       const key = `${date || '∅'}|${branch}`
       let g = groups.get(key)
@@ -403,12 +406,13 @@ export default function ConsignmentReport() {
 
   const filteredCaseRows = useMemo(() => caseData
     .filter(r => {
-      // Date filter on dispatched_at (the bill's at_branch → in_consignment
-      // transition timestamp). Compare against the IST calendar day so the
-      // 19:30 cutover for Bangalore doesn't bleed into yesterday.
+      // Date filter on the consignment CREATION date (the bill's owning
+      // consignment), compared against the IST calendar day. Falls back to
+      // the bill's dispatch date for any legacy row without a link.
       if (caseSinceRange.from || caseSinceRange.to) {
-        if (!r.dispatched_at) return false
-        const day = new Date(r.dispatched_at).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' })
+        const axisTs = r.consignment_created_at || r.dispatched_at
+        if (!axisTs) return false
+        const day = new Date(axisTs).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' })
         if (caseSinceRange.from && day < caseSinceRange.from) return false
         if (caseSinceRange.to   && day > caseSinceRange.to)   return false
       }
@@ -556,14 +560,14 @@ export default function ConsignmentReport() {
       ['gross_weight',              'Gross Wt (g)'],
       ['net_weight',                'Net Wt (g)'],
       ['total_amount',              'Gross Amt'],
-      ['dispatched_at',             'Consignment Date'],
+      ['consignment_created_at',    'Consignment Date'],
       ['booked_at',                 'Booking Date'],
       ['expected_delivery_date',    'Expected Delivery'],
     ]
     const lines = [cols.map(([, l]) => csvEscape(l)).join(',')]
     for (const r of rows) {
       lines.push(cols.map(([k]) => {
-        if (k === 'dispatched_at' || k === 'booked_at') return r[k] ? new Date(r[k]).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', year: 'numeric' }) : ''
+        if (k === 'consignment_created_at' || k === 'booked_at') return r[k] ? new Date(r[k]).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', year: 'numeric' }) : ''
         return csvEscape(r[k])
       }).join(','))
     }
@@ -637,7 +641,7 @@ export default function ConsignmentReport() {
             <div style={{ fontSize: '1.4rem', fontWeight: 300, color: t.text1, letterSpacing: '.03em' }}>Consignment Report</div>
           </div>
           <div style={{ fontSize: '11px', color: t.text3, marginTop: '4px' }}>
-            What dispatched on {activeFilterLabel().toLowerCase()} · {viewMode === 'branch' ? 'per-branch rollup' : 'bill-level'}
+            Consignments created on {activeFilterLabel().toLowerCase()} · {viewMode === 'branch' ? 'per-branch rollup' : 'bill-level'}
             {caseLoading
               ? <span style={{ color: t.gold, marginLeft: '6px' }}>· loading…</span>
               : lastRefresh && (
@@ -915,7 +919,7 @@ export default function ConsignmentReport() {
             <div style={{ padding: '80px', display: 'flex', justifyContent: 'center' }}><GoldSpinner size={32} /></div>
           ) : filteredBranchRows.length === 0 ? (
             <div style={{ padding: '80px', textAlign: 'center', color: t.text4, fontSize: '13px' }}>
-              {search || hasRegionFilter ? 'No rows match your filter' : `No bills dispatched in ${activeFilterLabel().toLowerCase()}`}
+              {search || hasRegionFilter ? 'No rows match your filter' : `No consignments created in ${activeFilterLabel().toLowerCase()}`}
             </div>
           ) : (() => {
             // New branch-wise view: bills grouped by (branch + dispatched date)
@@ -1050,7 +1054,7 @@ export default function ConsignmentReport() {
             <div style={{ padding: '80px', display: 'flex', justifyContent: 'center' }}><GoldSpinner size={32} /></div>
           ) : filteredCaseRows.length === 0 ? (
             <div style={{ padding: '80px', textAlign: 'center', color: t.text4, fontSize: '13px' }}>
-              {caseData.length === 0 ? `No bills dispatched in ${activeFilterLabel().toLowerCase()}` : 'No bills match your filter'}
+              {caseData.length === 0 ? `No consignments created in ${activeFilterLabel().toLowerCase()}` : 'No bills match your filter'}
             </div>
           ) : (() => {
             // Case-wise table — tighter than the branch-wise rollup so all 14
@@ -1094,7 +1098,7 @@ export default function ConsignmentReport() {
                       { k: 'gross_weight',              l: 'Gross (g)',  a: 'right' },
                       { k: 'net_weight',                l: 'Net (g)',    a: 'right' },
                       { k: 'total_amount',              l: 'Gross Amt',  a: 'right' },
-                      { k: 'dispatched_at',             l: 'Consignment Date', a: 'center' },
+                      { k: 'consignment_created_at',    l: 'Consignment Date', a: 'center' },
                       { k: 'booked_at',                 l: 'Booking Date', a: 'center' },
                       { k: 'expected_delivery_date',    l: 'Expected Delivery', a: 'center' },
                     ].map(col => {
@@ -1160,8 +1164,8 @@ export default function ConsignmentReport() {
                         <td style={{ ...caseTdR, color: t.gold, fontWeight: 600 }}>{fmtWt(r.net_weight)}</td>
                         <td style={{ ...caseTdR, color: t.text2 }}>{fmtAmt(r.total_amount)}</td>
                         <td style={{ ...caseTdC, color: t.text2, whiteSpace: 'nowrap' }}>
-                          {r.dispatched_at
-                            ? new Date(r.dispatched_at).toLocaleDateString('en-GB', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', year: 'numeric' }).replace(/ /g, '-')
+                          {r.consignment_created_at
+                            ? new Date(r.consignment_created_at).toLocaleDateString('en-GB', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', year: 'numeric' }).replace(/ /g, '-')
                             : '—'}
                         </td>
                         <td style={{ ...caseTdC, color: r.booked_at ? t.text2 : t.text4, whiteSpace: 'nowrap' }}>
@@ -1232,9 +1236,7 @@ export default function ConsignmentReport() {
 
       {/* Footer note */}
       <div style={{ fontSize: '10px', color: t.text4, textAlign: 'right' }}>
-        {viewMode === 'case'
-          ? <>Case-wise = <code style={{ background: t.card2, padding: '1px 4px', borderRadius: '3px', color: t.text3 }}>purchases.stock_status = in_consignment</code> · &quot;Consignment date&quot; filters by <code style={{ background: t.card2, padding: '1px 4px', borderRadius: '3px', color: t.text3 }}>dispatched_at</code> (IST)</>
-          : <>In-Flight = <code style={{ background: t.card2, padding: '1px 4px', borderRadius: '3px', color: t.text3 }}>stock_status = in_consignment</code> before today · Age alert: &gt;3d orange, &gt;7d red</>}
+        Permanent ledger of consignments created (approved onward, excludes cancelled) · &quot;Consignment date&quot; = <code style={{ background: t.card2, padding: '1px 4px', borderRadius: '3px', color: t.text3 }}>consignments.created_at</code> (IST) · persists after receipt
       </div>
 
       {toast && <Toast msg={toast.msg} type={toast.type} onDone={() => setToast(null)} />}
