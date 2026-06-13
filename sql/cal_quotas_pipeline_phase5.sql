@@ -19,6 +19,10 @@
 
 BEGIN;
 
+-- A previously-deployed version may have a different OUT-parameter row type,
+-- which blocks CREATE OR REPLACE ("cannot change return type"). Drop first.
+DROP FUNCTION IF EXISTS process_pipeline_attachments();
+
 CREATE OR REPLACE FUNCTION process_pipeline_attachments()
 RETURNS TABLE (
   booking_id      UUID,
