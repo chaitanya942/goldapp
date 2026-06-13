@@ -919,14 +919,25 @@ export async function GET(req) {
     // One query, bucketed in JS to mirror the unbooked bucketing exactly.
     let bookedWindowBills = []
     if (allBookableBranchNames.length) {
-      const { data: bw } = await supabase
-        .from('purchases')
-        .select('id, application_id, customer_name, branch_name, current_branch, gross_weight, net_weight, total_amount, purchase_date, stock_status, dispatched_at, crm_status')
-        .in('branch_name', allBookableBranchNames)
-        .eq('crm_status', 'approved')
-        .eq('is_deleted', false)
-        .not('booking_id', 'is', null)
-      bookedWindowBills = (bw || []).map(b => ({ ...b, _owner: b.current_branch || b.branch_name }))
+      // Paginate — without a range, this caps at Supabase max_rows (1000) and
+      // would silently undercount booked stock in the transit/pre-EOD tallies
+      // once enough bills are booked.
+      const CHUNK = 1000
+      let from = 0
+      while (true) {
+        const { data: bw, error: bwErr } = await supabase
+          .from('purchases')
+          .select('id, application_id, customer_name, branch_name, current_branch, gross_weight, net_weight, total_amount, purchase_date, stock_status, dispatched_at, crm_status')
+          .in('branch_name', allBookableBranchNames)
+          .eq('crm_status', 'approved')
+          .eq('is_deleted', false)
+          .not('booking_id', 'is', null)
+          .range(from, from + CHUNK - 1)
+        if (bwErr || !bw?.length) break
+        bookedWindowBills.push(...bw.map(b => ({ ...b, _owner: b.current_branch || b.branch_name })))
+        if (bw.length < CHUNK) break
+        from += CHUNK
+      }
     }
     const sumNet = (bills) => ({
       bills:  bills.length,
