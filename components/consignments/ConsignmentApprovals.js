@@ -812,6 +812,9 @@ export default function ConsignmentApprovals() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
           {cancellations.map(ev => {
             const c       = ev.consignment || {}
+            // The API resolves event_type to ewb_cancelled / einvoice_cancelled
+            // and ranks EWB above E-Invoice for combo consignments, so a bare
+            // event-type check is correct here.
             const isEwb   = ev.event_type === 'ewb_cancelled'
             const docNo   = isEwb ? ev.details?.ewb_no : ev.details?.irn
             const reasonCode = ev.details?.reason_code

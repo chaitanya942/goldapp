@@ -1482,15 +1482,23 @@ export async function GET(req) {
 
     // Group events by consignment_id. Specificity ordering so the tab shows
     // the most informative event per consignment:
-    //   3 = ewb_cancelled / einvoice_cancelled (has doc no, ack, reason)
+    //   4 = ewb_cancelled       (EWB is the movement doc — wins combo cases)
+    //   3 = einvoice_cancelled  (has doc no, ack, reason)
     //   2 = cancelled (RPC marker, carries had_ewb/had_irn flags)
     //   1 = cancellation_approved (route marker, carries portal_cancelled list)
+    //
+    // EWB ranks ABOVE E-Invoice: a consignment that had both docs logs an
+    // ewb_cancelled AND an einvoice_cancelled event. They used to tie at 3,
+    // so whichever was written last won — which mislabelled EWB moves as
+    // 'E-INVOICE CANCELLED'. Ranking EWB higher makes combo cases always
+    // show the EWB, matching how ops thinks of the movement.
     const eventsByConsignment = new Map()
     for (const e of events || []) {
       const existing = eventsByConsignment.get(e.consignment_id)
       if (!existing) { eventsByConsignment.set(e.consignment_id, e); continue }
       const specifity = (t) => {
-        if (t === 'ewb_cancelled' || t === 'einvoice_cancelled') return 3
+        if (t === 'ewb_cancelled') return 4
+        if (t === 'einvoice_cancelled') return 3
         if (t === 'cancelled') return 2
         return 1
       }
@@ -1533,20 +1541,21 @@ export async function GET(req) {
       // placeholder.
       if (c && !inScope(c)) return []
       let inferredType = e.event_type
+      // Generic fallback events carry no doc type of their own. The
+      // consignment's eway_bill_no / irn are NULLED at cancel time, so they
+      // can't be trusted here — derive from the event's own details (which
+      // survive). EWB takes priority in combo cases (it's the movement doc).
       if (e.event_type === 'cancelled') {
         if (e.details?.had_ewb) inferredType = 'ewb_cancelled'
         else if (e.details?.had_irn) inferredType = 'einvoice_cancelled'
       } else if (e.event_type === 'cancellation_approved') {
         // portal_cancelled is a free-form string array: ["EWB 123 cancelled on NIC", "E-Invoice cancelled on IRP", ...]
-        // Sniff for the EWB pattern first so combo cases (had both) prefer EWB
-        // styling — matches the priority in the upstream cancel flow.
+        // Sniff for the EWB pattern first so combo cases (had both) prefer EWB.
         const portal = e.details?.portal_cancelled
         const hasEwb = Array.isArray(portal) && portal.some(p => /\bewb\b/i.test(String(p)))
         const hasIrn = Array.isArray(portal) && portal.some(p => /e-?invoice|irp|irn/i.test(String(p)))
         if (hasEwb) inferredType = 'ewb_cancelled'
         else if (hasIrn) inferredType = 'einvoice_cancelled'
-        // Last resort: read the consignment row itself if it was cancelled,
-        // since the portal_cancelled array may be empty for pre-doc cancels.
         else if (c?.status === 'cancelled') inferredType = 'cancelled'
       }
       // Also surface the doc number on the synthesized details so the UI
