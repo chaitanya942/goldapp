@@ -1315,17 +1315,20 @@ export default function BiddingVolume() {
           which sections have anything in them. */}
       {(() => {
         const t72 = t.teal || '#0e9aa7'
+        // `date` = the HO-arrival date that section's stock lands on (where a
+        // single date applies). Shown as a dim sub-line on the chip so ops can
+        // read "which date" at a glance. Sections 5/6 span many dates → none.
         const navS = [
-          { id: '1', label: 'Bangalore today',        accent: t.gold,                bills: supply?.bangalore?.total?.bills    || 0 },
-          { id: '2', label: 'Arriving tomorrow · 24h', accent: t.blue,                bills: supply?.transit_24h?.total?.bills  || 0 },
-          { id: '3', label: 'Day after · 48h',         accent: t.purple || '#8c5ac8', bills: supply?.transit_48h?.total?.bills  || 0 },
-          { id: '4', label: 'After 2 days · 72h',      accent: t72,                   bills: supply?.transit_72h?.total?.bills  || 0 },
-          { id: '5', label: 'Created · not booked',    accent: t.orange,              bills: (supply?.bangalore_pending_booking?.total?.bills || 0) + (supply?.consignment_pending_booking?.total?.bills || 0) },
-          { id: '6', label: 'Booked · no consignment', accent: t.red,                 bills: supply?.booked_pending_dispatch?.total?.bills || 0 },
-          { id: '7', label: 'Branch pickup pending',   accent: t.orange,              bills: supply?.branch_pre_eod?.total?.bills || 0 },
+          { id: '1', label: 'Bangalore today',        accent: t.gold,                bills: supply?.bangalore?.total?.bills    || 0, date: arrivalDate },
+          { id: '2', label: 'Arriving tomorrow · 24h', accent: t.blue,                bills: supply?.transit_24h?.total?.bills  || 0, date: arrivalDate },
+          { id: '3', label: 'Day after · 48h',         accent: t.purple || '#8c5ac8', bills: supply?.transit_48h?.total?.bills  || 0, date: dayAfterArrivalDate },
+          { id: '4', label: 'After 2 days · 72h',      accent: t72,                   bills: supply?.transit_72h?.total?.bills  || 0, date: dayAfter2ArrivalDate },
+          { id: '5', label: 'Created · not booked',    accent: t.orange,              bills: (supply?.bangalore_pending_booking?.total?.bills || 0) + (supply?.consignment_pending_booking?.total?.bills || 0), date: null },
+          { id: '6', label: 'Booked · no consignment', accent: t.red,                 bills: supply?.booked_pending_dispatch?.total?.bills || 0, date: null },
+          { id: '7', label: 'Branch pickup pending',   accent: t.orange,              bills: supply?.branch_pre_eod?.total?.bills || 0, date: arrivalDate },
         ]
         const baseChip = (active, accent) => ({
-          display: 'flex', alignItems: 'center', gap: 7, padding: '7px 12px',
+          display: 'flex', alignItems: 'center', gap: 7, padding: '6px 12px',
           borderRadius: 9, cursor: 'pointer', whiteSpace: 'nowrap',
           border: `1px solid ${active ? accent : t.border}`,
           background: active ? `${accent}1f` : 'transparent',
@@ -1334,20 +1337,23 @@ export default function BiddingVolume() {
         })
         const allActive = activeSection === 'all'
         return (
-          <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap', alignItems: 'center', overflowX: 'auto', paddingBottom: 2 }}>
+          <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap', alignItems: 'stretch', overflowX: 'auto', paddingBottom: 2 }}>
             <button onClick={() => setActiveSection('all')} style={baseChip(allActive, t.gold)}>
               <span style={{ fontWeight: 800, letterSpacing: '.06em' }}>ALL</span>
             </button>
-            <div style={{ width: 1, height: 20, background: t.border, margin: '0 1px' }} />
+            <div style={{ width: 1, background: t.border, margin: '2px 1px' }} />
             {navS.map(sx => {
               const active = activeSection === sx.id
               return (
                 <button key={sx.id}
                   onClick={() => setActiveSection(active ? 'all' : sx.id)}
                   style={baseChip(active, sx.accent)}>
-                  <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', minWidth: 18, height: 18, borderRadius: 5, background: active ? sx.accent : `${sx.accent}26`, color: active ? '#fff' : sx.accent, fontSize: 10, fontWeight: 800 }}>{sx.id}</span>
-                  <span>{sx.label}</span>
-                  <span style={{ fontSize: 10.5, color: active ? sx.accent : t.text4, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{sx.bills}</span>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', minWidth: 18, height: 18, borderRadius: 5, background: active ? sx.accent : `${sx.accent}26`, color: active ? '#fff' : sx.accent, fontSize: 10, fontWeight: 800, flexShrink: 0 }}>{sx.id}</span>
+                  <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', lineHeight: 1.15 }}>
+                    <span>{sx.label}</span>
+                    {sx.date && <span style={{ fontSize: 9.5, color: active ? sx.accent : t.text4, fontWeight: 600, opacity: active ? 0.85 : 1 }}>→ HO {fmtDateShort(sx.date)}</span>}
+                  </span>
+                  <span style={{ fontSize: 10.5, color: active ? sx.accent : t.text4, fontWeight: 700, fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>{sx.bills}</span>
                 </button>
               )
             })}
