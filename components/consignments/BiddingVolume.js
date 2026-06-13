@@ -485,6 +485,10 @@ export default function BiddingVolume() {
     const gain = u * (gainRatePct / 100)
     return { totalNet: u + b, bookedNet: b, unbookedNet: u, gainNet: gain, availableNet: u + gain, rate: gainRatePct }
   }
+  // Editing the gain % from any section sets the shared company rate and
+  // clears any absolute-grams override so the rate is authoritative again
+  // (keeps the top hero strip + every section in sync).
+  const handleSectionRate = (pct) => { setGainOverrideGrams(null); setGainRatePct(pct) }
 
   // KL tab source picker — three sections from the new kerala_sections payload.
   const klSections     = supply?.kerala_sections || {}
@@ -1395,6 +1399,7 @@ export default function BiddingVolume() {
         branches={bangBranches}
         total={supply?.bangalore?.total}
         metrics={sectionMetrics(supply?.bangalore?.total?.net_wt, supply?.bangalore?.booked?.net_wt)}
+        onRateChange={handleSectionRate}
         prefix="B"
         selectable
         selected={selected}
@@ -1419,6 +1424,7 @@ export default function BiddingVolume() {
         branches={inTBranches}
         total={supply?.transit_24h?.total || supply?.in_transit?.total}
         metrics={sectionMetrics(supply?.transit_24h?.total?.net_wt, supply?.transit_24h?.booked?.net_wt)}
+        onRateChange={handleSectionRate}
         prefix="T"
         selectable
         selected={selected}
@@ -1444,6 +1450,7 @@ export default function BiddingVolume() {
         branches={t48hBranches}
         total={supply?.transit_48h?.total}
         metrics={sectionMetrics(supply?.transit_48h?.total?.net_wt, supply?.transit_48h?.booked?.net_wt)}
+        onRateChange={handleSectionRate}
         prefix="D"
         selectable
         selected={selected}
@@ -1469,6 +1476,7 @@ export default function BiddingVolume() {
         branches={t72hBranches}
         total={supply?.transit_72h?.total}
         metrics={sectionMetrics(supply?.transit_72h?.total?.net_wt, supply?.transit_72h?.booked?.net_wt)}
+        onRateChange={handleSectionRate}
         prefix="E"
         selectable
         selected={selected}
@@ -1502,6 +1510,7 @@ export default function BiddingVolume() {
           net_wt: (supply?.bangalore_pending_booking?.total?.net_wt || 0) + (supply?.consignment_pending_booking?.total?.net_wt || 0),
         }}
         metrics={sectionMetrics((supply?.bangalore_pending_booking?.total?.net_wt || 0) + (supply?.consignment_pending_booking?.total?.net_wt || 0), 0)}
+        onRateChange={handleSectionRate}
         selectable
         selected={selected}
         branchLocked={branchLocked}
@@ -1558,6 +1567,7 @@ export default function BiddingVolume() {
         branches={preEodBranches}
         total={supply?.branch_pre_eod?.total}
         metrics={sectionMetrics(supply?.branch_pre_eod?.total?.net_wt, supply?.branch_pre_eod?.booked?.net_wt)}
+        onRateChange={handleSectionRate}
         prefix="P"
         selectable
         selected={selected}
@@ -2602,9 +2612,15 @@ function SourceSection({
   // Optional 5-card metric strip rendered under the header. Shape:
   // { totalNet, bookedNet, unbookedNet, gainNet, availableNet, rate }.
   metrics,
+  // When provided, the Gain card's % rate becomes inline-editable; called
+  // with the new percent (e.g. 3.5) on commit. The rate is the shared
+  // company gain rate, so editing it from any section updates them all.
+  onRateChange,
   emptyMsg,
 }) {
   const tone = accent || t.gold
+  const [editRate, setEditRate] = useState(false)
+  const [rateDraft, setRateDraft] = useState('')
   // Per-branch expand state for the bill drill-down. Keyed by branch_name
   // within this section — collapses on rerender if the branch disappears.
   const [openBranches, setOpenBranches] = useState(() => new Set())
@@ -2727,31 +2743,87 @@ function SourceSection({
 
       {/* Metric strip — Total / Booked / Unbooked / Gain on unbooked /
           Available to book. Gain applies to the UNBOOKED portion only, so
-          Available = Unbooked + its gain. */}
+          Available = Unbooked + its gain. The Gain card's % is editable. */}
       {metrics && (() => {
+        const green = t.green || '#3fa66a'
+        const blue  = t.blue  || '#4a90d9'
+        const commitRate = () => {
+          const v = parseFloat(rateDraft)
+          if (Number.isFinite(v) && v >= 0 && v <= 100 && onRateChange) onRateChange(v)
+          setEditRate(false)
+        }
         const cards = [
-          { label: 'Total Net',          val: metrics.totalNet,     unit: 'g', color: t.text1, sub: 'booked + unbooked' },
-          { label: 'Booked Net',         val: metrics.bookedNet,    unit: 'g', color: t.blue || '#4a90d9', sub: 'already booked' },
-          { label: 'Unbooked Net',       val: metrics.unbookedNet,  unit: 'g', color: tone, sub: 'still to book' },
-          { label: 'Gain on Unbooked',   val: metrics.gainNet,      unit: 'g', color: t.green || '#3fa66a', sub: `est · ${fmt(metrics.rate, 2)}%` },
-          { label: 'Available to Book',  val: metrics.availableNet, unit: 'g', color: t.green || '#3fa66a', sub: 'unbooked + gain', strong: true },
+          { key: 'total',    label: 'Total Net',         icon: 'Σ', color: t.text1, val: metrics.totalNet,     sub: 'booked + unbooked' },
+          { key: 'booked',   label: 'Booked Net',        icon: '◆', color: blue,    val: metrics.bookedNet,    sub: 'already booked' },
+          { key: 'unbooked', label: 'Unbooked Net',      icon: '○', color: tone,    val: metrics.unbookedNet,  sub: 'still to book' },
+          { key: 'gain',     label: 'Gain on Unbooked',  icon: '↗', color: green,   val: metrics.gainNet,      gain: true },
+          { key: 'avail',    label: 'Available to Book', icon: '✓', color: green,   val: metrics.availableNet, sub: 'unbooked + gain', strong: true },
         ]
         return (
           <div style={{
-            display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 1,
-            background: `${t.border}40`, borderBottom: `1px solid ${t.border}40`,
+            display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(168px, 1fr))', gap: 10,
+            padding: '14px 18px', borderBottom: `1px solid ${t.border}40`,
+            background: `linear-gradient(180deg, ${t.card2 || t.card} 0%, transparent 100%)`,
           }}>
-            {cards.map((c, i) => (
-              <div key={i} style={{
-                background: c.strong ? `${tone}0c` : t.card,
-                padding: '11px 14px', display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0,
+            {cards.map((c) => (
+              <div key={c.key} style={{
+                position: 'relative', overflow: 'hidden',
+                borderRadius: 12, padding: '13px 15px',
+                background: c.strong
+                  ? `linear-gradient(150deg, ${c.color}24 0%, ${c.color}0c 100%)`
+                  : `linear-gradient(150deg, ${t.card} 0%, ${t.card2 || t.card} 100%)`,
+                border: `1px solid ${c.strong ? c.color + '66' : t.border}`,
+                boxShadow: c.strong ? `0 2px 10px ${c.color}22` : '0 1px 2px rgba(0,0,0,.12)',
               }}>
-                <div style={{ fontSize: 9.5, color: t.text4, letterSpacing: '.08em', textTransform: 'uppercase', fontWeight: 800 }}>{c.label}</div>
-                <div style={{ display: 'flex', alignItems: 'baseline', gap: 3 }}>
-                  <span style={{ fontSize: 19, color: c.color, fontFamily: 'monospace', fontWeight: c.strong ? 800 : 700, lineHeight: 1 }}>{fmt(c.val, 2)}</span>
-                  <span style={{ fontSize: 11, color: t.text3, fontWeight: 700 }}>{c.unit}</span>
+                {/* accent edge */}
+                <div aria-hidden style={{ position: 'absolute', top: 0, left: 0, bottom: 0, width: 3, background: c.color, opacity: c.strong ? 1 : .55 }} />
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                  <span style={{ fontSize: 9.5, color: c.strong ? c.color : t.text4, letterSpacing: '.09em', textTransform: 'uppercase', fontWeight: 800 }}>{c.label}</span>
+                  <span style={{
+                    width: 19, height: 19, borderRadius: 6, flexShrink: 0,
+                    background: `${c.color}1f`, color: c.color,
+                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: 11, fontWeight: 800, lineHeight: 1,
+                  }}>{c.icon}</span>
                 </div>
-                <div style={{ fontSize: 9.5, color: t.text4, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.sub}</div>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: 4 }}>
+                  <span style={{ fontSize: 23, color: c.color, fontFamily: 'monospace', fontWeight: c.strong ? 800 : 700, lineHeight: 1, letterSpacing: '-.01em' }}>{fmt(c.val, 2)}</span>
+                  <span style={{ fontSize: 12, color: t.text3, fontWeight: 700 }}>g</span>
+                </div>
+                {/* Sub-line — editable rate pill for the Gain card */}
+                {c.gain ? (
+                  <div style={{ marginTop: 7 }}>
+                    {editRate ? (
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                        <span style={{ fontSize: 10, color: t.text4, fontWeight: 700 }}>est ·</span>
+                        <input
+                          autoFocus type="number" step="0.1" min="0" max="100"
+                          value={rateDraft}
+                          onChange={e => setRateDraft(e.target.value)}
+                          onBlur={commitRate}
+                          onKeyDown={e => { if (e.key === 'Enter') commitRate(); if (e.key === 'Escape') setEditRate(false) }}
+                          style={{ width: 52, padding: '2px 6px', borderRadius: 6, border: `1px solid ${green}`, background: t.card, color: t.text1, fontSize: 11, fontWeight: 800, fontFamily: 'monospace', outline: 'none' }}
+                        />
+                        <span style={{ fontSize: 10, color: t.text4, fontWeight: 700 }}>%</span>
+                      </span>
+                    ) : (
+                      <button
+                        onClick={() => { if (onRateChange) { setRateDraft(String(metrics.rate)); setEditRate(true) } }}
+                        disabled={!onRateChange}
+                        style={{
+                          display: 'inline-flex', alignItems: 'center', gap: 5,
+                          padding: '2px 8px', borderRadius: 999,
+                          border: `1px solid ${green}55`, background: `${green}14`,
+                          color: green, fontSize: 10, fontWeight: 800, letterSpacing: '.02em',
+                          cursor: onRateChange ? 'pointer' : 'default',
+                        }}>
+                        est · {fmt(metrics.rate, 2)}%{onRateChange && <span style={{ fontSize: 9, opacity: .85 }}>✎</span>}
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  <div style={{ fontSize: 9.5, color: t.text4, fontWeight: 600, marginTop: 7, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.sub}</div>
+                )}
               </div>
             ))}
           </div>
