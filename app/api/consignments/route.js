@@ -516,7 +516,9 @@ export async function GET(req) {
 
     // dayAfterArrival should also skip Sunday — if arrival is Friday or
     // Saturday, the next working arrival is Monday, not Sunday.
-    const dayAfterArrival = addWorkingDaysSkipSunday(arrivalDate, 1)
+    const dayAfterArrival  = addWorkingDaysSkipSunday(arrivalDate, 1)
+    // +2 working days — the 72h-TAT window (arriving after 2 days).
+    const dayAfter2Arrival = addWorkingDaysSkipSunday(arrivalDate, 2)
 
     // Branch metadata — TAT, region, pickup time, pickup_days, is_hub. We
     // need pickup_days + is_hub now to compute Section 4 (branch-stock-pre-
@@ -622,6 +624,7 @@ export async function GET(req) {
     })
     const inflight24h = inflightWithArrival.filter(b => b._arrival_date === arrivalDate)
     const inflight48h = inflightWithArrival.filter(b => b._arrival_date === dayAfterArrival)
+    const inflight72h = inflightWithArrival.filter(b => b._arrival_date === dayAfter2Arrival)
     // Consignment created · booking pending — in_consignment + unbooked bills
     // whose computed arrival is NEITHER tomorrow (Section 2 main) NOR the day
     // after (Section 3). These are consignments already dispatched that fell
@@ -633,6 +636,7 @@ export async function GET(req) {
     const inflightPendingBooking = inflightWithArrival.filter(b =>
       b._arrival_date !== arrivalDate &&
       b._arrival_date !== dayAfterArrival &&
+      b._arrival_date !== dayAfter2Arrival &&
       (branchMeta[b.branch_name]?.region) !== 'Kerala',
     )
 
@@ -880,6 +884,7 @@ export async function GET(req) {
     const bangaloreByBranch  = groupByBranch(bangBills)
     const transit24hByBranch = groupByBranch(inflight24h)
     const transit48hByBranch = groupByBranch(inflight48h)
+    const transit72hByBranch = groupByBranch(inflight72h)
     const pendingBookingByBranch     = annotateConsignmentMeta(groupByBranch(inflightPendingBooking))
     const bangPendingBookingByBranch = annotateConsignmentMeta(groupByBranch(bangalorePendingBooking))
     const preEodByBranch     = groupByBranch(preEodBills)
@@ -918,6 +923,7 @@ export async function GET(req) {
     const bangTotal         = sumOf(bangaloreByBranch)
     const transit24hTotal   = sumOf(transit24hByBranch)
     const transit48hTotal   = sumOf(transit48hByBranch)
+    const transit72hTotal   = sumOf(transit72hByBranch)
     const pendingBookingTotal     = sumOf(pendingBookingByBranch)
     const bangPendingBookingTotal = sumOf(bangPendingBookingByBranch)
     const preEodTotal       = sumOf(preEodByBranch)
@@ -1136,10 +1142,12 @@ export async function GET(req) {
       data: {
         arrival_date:            arrivalDate,
         day_after_arrival:       dayAfterArrival,
+        day_after_2_arrival:     dayAfter2Arrival,
         bangalore_purchase_date: bangalorePurchaseDate,
         bangalore:      { branches: bangaloreByBranch,  total: bangTotal       },
         transit_24h:    { branches: transit24hByBranch, total: transit24hTotal },
-        transit_48h:    { branches: transit48hByBranch, total: transit48hTotal },   // view-only, NOT part of bookable pool
+        transit_48h:    { branches: transit48hByBranch, total: transit48hTotal },   // selectable
+        transit_72h:    { branches: transit72hByBranch, total: transit72hTotal },   // arriving after 2 days (72h), selectable
         // Section 2 sub-group — consignment created, booking pending. Still
         // bookable (selectable), but off the tomorrow window so it's flagged
         // separately under Section 2 rather than mixed into the main list.
