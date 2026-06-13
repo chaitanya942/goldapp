@@ -2579,6 +2579,8 @@ function SourceSection({
   const [editRate, setEditRate] = useState(false)
   const [gainMode, setGainMode] = useState('pct')   // 'pct' | 'abs'
   const [gainDraft, setGainDraft] = useState('')
+  // Already-booked band — collapsed by default (just the summary row).
+  const [bookedOpen, setBookedOpen] = useState(false)
   // Per-branch expand state for the bill drill-down. Keyed by branch_name
   // within this section — collapses on rerender if the branch disappears.
   const [openBranches, setOpenBranches] = useState(() => new Set())
@@ -3262,7 +3264,11 @@ function SourceSection({
             const bk = t.blue || '#4a90d9'
             return (
               <div style={{ margin: '10px 14px 4px', paddingTop: 12, borderTop: `1px dashed ${bk}44` }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 9, flexWrap: 'wrap', marginBottom: 6 }}>
+                {/* Summary row — click to expand the booked branches. Collapsed
+                    by default so the section stays compact. */}
+                <div onClick={() => setBookedOpen(o => !o)}
+                  style={{ display: 'flex', alignItems: 'center', gap: 9, flexWrap: 'wrap', marginBottom: bookedOpen ? 6 : 0, cursor: 'pointer', userSelect: 'none' }}>
+                  <span style={{ color: bookedOpen ? bk : t.text4, fontSize: 11, fontWeight: 800, width: 12, textAlign: 'center' }}>{bookedOpen ? '▾' : '▸'}</span>
                   <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11, color: bk, fontWeight: 800, letterSpacing: '.04em', textTransform: 'uppercase' }}>
                     <span style={{ width: 16, height: 16, borderRadius: 5, background: `${bk}22`, color: bk, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 900 }}>✓</span>
                     Already booked
@@ -3271,7 +3277,7 @@ function SourceSection({
                     {fmt(bookedNet, 2)} g · {bookedBills} bill{bookedBills === 1 ? '' : 's'}
                   </span>
                 </div>
-                {bookedRows.map(b => (
+                {bookedOpen && bookedRows.map(b => (
                   <div key={`bk-${b.branch_name}`} style={{ display: 'grid', gridTemplateColumns: rowGrid, alignItems: 'center', columnGap: 14, padding: '8px 11px', borderRadius: 8, opacity: 0.72 }}>
                     <span style={{ width: 16, height: 16, borderRadius: 4, background: `${bk}22`, color: bk, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 900 }}>✓</span>
                     <span style={{ fontSize: 13, color: t.text2, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{b.branch_name}</span>
