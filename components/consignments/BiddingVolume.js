@@ -1726,6 +1726,11 @@ export default function BiddingVolume() {
           onClose={() => setShowBookModal(false)}
           onSuccess={() => setSelected(new Set())}
           onSubmitGuardFail={(msg) => showToast(msg, 'error')}
+          onDetachBills={(ids) => setSelected(prev => {
+            const next = new Set(prev)
+            for (const id of ids) next.delete(id)
+            return next
+          })}
         />
       )}
 
@@ -3608,7 +3613,7 @@ function hashAvatarBg(s, t) {
 //
 // Selected sources display: compact by default — chip strip is collapsed
 // to "first 6 + (N more)" so 20+ branches don't blow up the modal height.
-function BookingModal({ t, arrivalDate, availablePool, remainingQty, incomingNetWt, gainGrams, pendingGrams, bookedQty, selected, selectedTotal, billsById, bidders, effectiveGainRate, isKerala, onSubmit, onClose, onSuccess, onSubmitGuardFail }) {
+function BookingModal({ t, arrivalDate, availablePool, remainingQty, incomingNetWt, gainGrams, pendingGrams, bookedQty, selected, selectedTotal, billsById, bidders, effectiveGainRate, isKerala, onSubmit, onClose, onSuccess, onSubmitGuardFail, onDetachBills }) {
   // The quantity committed to a bidder is a *negotiated* figure against the
   // whole available pool (Incoming + Gain ± Pending), not the exact sum of
   // the selected source branches — ops tells a bidder "550 g", a rounded
@@ -3754,6 +3759,44 @@ function BookingModal({ t, arrivalDate, availablePool, remainingQty, incomingNet
     }
   }, [overBy]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // EXCESS — operator committed LESS than the selected booking weight
+  // (bid < net + gain). The extra has to come OFF: trim it from gain, or
+  // detach Bangalore-only bills (smallest first; gain absorbs any sub-bill
+  // remainder). This stops the booking from being over-attached.
+  const selectedBookingW = netFromSelection + addedGainsW
+  const excessBy = wValid && selectedBookingW > 0 ? Math.max(0, selectedBookingW - w) : 0
+  // Bangalore-only selected bills, smallest net first — the only detachable pool.
+  const bangSelected = useMemo(() => {
+    const out = []
+    for (const id of selected) {
+      const b = billsById?.[id]
+      if (b && b._group === 'bangalore') out.push(b)
+    }
+    return out.sort((a, b) => Number(a.net_weight || 0) - Number(b.net_weight || 0))
+  }, [selected, billsById])
+  const canTrimGain = excessBy > 0 && excessBy <= addedGainsW + 0.001
+  // Trim the excess straight off gain (viable while gain can absorb it).
+  const trimFromGain = () => {
+    const newGain = Math.max(0, addedGainsW - excessBy)
+    setGainsEntry(newGain.toFixed(2)); setGainsEntryDirty(true)
+  }
+  const canDetachBangalore = excessBy > 0 && bangSelected.length > 0
+  // Auto-detach smallest Bangalore bills (gain-adjusted contribution) until the
+  // excess is covered, then land exactly on the bid by trimming gain.
+  const detachBangalore = () => {
+    let rem = excessBy, detachedNet = 0
+    const toDetach = []
+    for (const b of bangSelected) {
+      if (rem <= 0.001) break
+      const contrib = Number(b.net_weight || 0) * (1 + liveGainRate)
+      if (contrib <= rem + 0.001) { toDetach.push(b.id); detachedNet += Number(b.net_weight || 0); rem -= contrib }
+    }
+    if (toDetach.length && onDetachBills) onDetachBills(toDetach)
+    const newNet  = Math.max(0, netFromSelection - detachedNet)
+    const newGain = Math.max(0, w - newNet)        // land net + gain = bid
+    setGainsEntry(newGain.toFixed(2)); setGainsEntryDirty(true)
+  }
+
   const submit = async () => {
     // Loud diagnostics — these logs and the visible bail-toast guarantee
     // we never have another "I clicked but nothing happened" scenario.
@@ -3777,6 +3820,11 @@ function BookingModal({ t, arrivalDate, availablePool, remainingQty, incomingNet
     if (!Number.isFinite(r) || r <= 0) {
       console.warn('[BookingModal] guard: invalid rate', r)
       if (onSubmitGuardFail) onSubmitGuardFail('Rate is missing or invalid.')
+      return
+    }
+    if (excessBy > 0.05) {
+      console.warn('[BookingModal] guard: excess not reconciled', excessBy)
+      if (onSubmitGuardFail) onSubmitGuardFail(`Bid is ${excessBy.toFixed(2)} g under the selected weight — reduce gain or detach Bangalore bills first.`)
       return
     }
     if (overBy > 0 && !attrGain && !attrPipeline) {
@@ -3834,7 +3882,7 @@ function BookingModal({ t, arrivalDate, availablePool, remainingQty, incomingNet
     }
   }
 
-  const valid = party.trim() && Number.isFinite(w) && w > 0 && Number.isFinite(r) && r > 0 && (overBy === 0 || attrGain || attrPipeline)
+  const valid = party.trim() && Number.isFinite(w) && w > 0 && Number.isFinite(r) && r > 0 && (overBy === 0 || attrGain || attrPipeline) && excessBy <= 0.05
 
   // Portal to document.body — the dashboard <main> uses overflow: clip on
   // its x-axis, which (with overflow-y: auto) creates a clipping/paint
@@ -4132,6 +4180,51 @@ function BookingModal({ t, arrivalDate, availablePool, remainingQty, incomingNet
                       Tick at least one to enable Create Booking.
                     </div>
                   )}
+                </div>
+              )
+            })()}
+
+            {/* Excess reconcile — operator committed LESS than the selected
+                booking weight (bid < net + gain). Take it off: trim from gain,
+                or auto-detach Bangalore-only bills (smallest first; gain covers
+                any sub-bill remainder). Must be cleared to enable booking. */}
+            {excessBy > 0.05 && (() => {
+              const tone = t.blue || '#3a8fbf'
+              const actBtn = (enabled, accent) => ({
+                display: 'block', textAlign: 'left', padding: '9px 12px',
+                background: enabled ? `${accent}12` : (t.card2 || t.card),
+                border: `1px solid ${enabled ? `${accent}66` : t.border}`,
+                borderRadius: 8, cursor: enabled ? 'pointer' : 'not-allowed',
+                opacity: enabled ? 1 : 0.6,
+              })
+              return (
+                <div style={{
+                  background: `linear-gradient(150deg, ${tone}0e, ${tone}04 60%, transparent)`,
+                  border: `1px solid ${tone}40`, borderRadius: 12, padding: '12px 14px',
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 10, marginBottom: 8 }}>
+                    <span style={{ fontSize: 10.5, color: tone, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 800 }}>Excess</span>
+                    <span style={{ fontSize: 17, color: tone, fontFamily: 'monospace', fontWeight: 800 }}>−{fmt(excessBy, 2)}<span style={{ fontSize: 11, color: t.text3, marginLeft: 3 }}>g</span></span>
+                  </div>
+                  <div style={{ fontSize: 11, color: t.text3, marginBottom: 8, fontWeight: 600 }}>
+                    Bid ({fmt(w, 2)} g) is {fmt(excessBy, 2)} g under the selected booking weight ({fmt(selectedBookingW, 2)} g). Take it off:
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                    <button type="button" onClick={trimFromGain} disabled={!canTrimGain}
+                      style={actBtn(canTrimGain, t.green || '#3aaa6a')}>
+                      <div style={{ fontSize: 12, fontWeight: 800, color: canTrimGain ? (t.green || '#3aaa6a') : t.text3 }}>Reduce from gain</div>
+                      <div style={{ fontSize: 10.5, color: t.text3, marginTop: 2, fontWeight: 500, lineHeight: 1.35 }}>
+                        {canTrimGain ? `Gain ${fmt(addedGainsW, 2)} → ${fmt(Math.max(0, addedGainsW - excessBy), 2)} g` : 'Excess exceeds gain — detach instead'}
+                      </div>
+                    </button>
+                    <button type="button" onClick={detachBangalore} disabled={!canDetachBangalore}
+                      style={actBtn(canDetachBangalore, t.gold)}>
+                      <div style={{ fontSize: 12, fontWeight: 800, color: canDetachBangalore ? t.gold : t.text3 }}>Detach Bangalore bills</div>
+                      <div style={{ fontSize: 10.5, color: t.text3, marginTop: 2, fontWeight: 500, lineHeight: 1.35 }}>
+                        {canDetachBangalore ? 'Drop smallest Bangalore bills; gain covers the rest' : 'No Bangalore bills in this selection'}
+                      </div>
+                    </button>
+                  </div>
                 </div>
               )
             })()}
