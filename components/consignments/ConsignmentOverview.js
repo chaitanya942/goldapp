@@ -1031,6 +1031,55 @@ export default function ConsignmentOverview() {
         </div>
       )}
 
+      {/* ── Bangalore hero cards ── two summary tiles the Bangalore tab needs
+           in place of the (retired) hub cards: what came in today vs what's
+           still sitting at branch from before today. Bangalore's today/older
+           split is on net weight + value; gross-only fields don't carry a
+           today/older breakdown. */}
+      {scopeTab === 'bangalore' && canSee('element.consignment-overview.region_cards') && (() => {
+        const todayBills = scopeData.reduce((s, b) => s + (b.today_bills || 0), 0)
+        const todayNet   = scopeData.reduce((s, b) => s + (b.today_net_wt || 0), 0)
+        const todayVal   = scopeData.reduce((s, b) => s + (b.today_gross_value || 0), 0)
+        const oldBills   = scopeData.reduce((s, b) => s + (b.older_bills || 0), 0)
+        const oldNet     = scopeData.reduce((s, b) => s + (b.older_net_wt || 0), 0)
+        const oldVal     = scopeData.reduce((s, b) => s + (b.older_gross_value || 0), 0)
+        const oldBranches = scopeData.filter(b => (b.older_net_wt || 0) > 0).length
+        const HeroCard = ({ label, icon, accent, wt, bills, val, sub }) => {
+          const w = fmtWtCard(wt)
+          return (
+            <div style={{
+              flex: '1 1 0', minWidth: '220px',
+              background: `linear-gradient(145deg, ${accent}14, ${accent}06)`,
+              border: `1px solid ${accent}45`,
+              borderLeft: `4px solid ${accent}`,
+              borderRadius: '12px', padding: '16px 18px',
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                <div style={{ fontSize: '9px', color: accent, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 700 }}>{label}</div>
+                <span style={{ fontSize: '15px' }}>{icon}</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px', lineHeight: 1, marginBottom: '6px' }}>
+                <span style={{ fontSize: '26px', fontWeight: 300, color: accent, fontFamily: 'monospace' }}>{w.value}</span>
+                <span style={{ fontSize: '12px', fontWeight: 500, color: accent }}>{w.unit}</span>
+              </div>
+              <div style={{ fontSize: '10px', color: t.text4, display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                <span><strong style={{ color: t.text2 }}>{bills}</strong> bill{bills === 1 ? '' : 's'}</span>
+                {val > 0 && <><span style={{ color: t.border2 }}>·</span><span style={{ color: t.text3 }}>{fmtINR(val)}</span></>}
+                {sub && <><span style={{ color: t.border2 }}>·</span><span style={{ color: t.text4 }}>{sub}</span></>}
+              </div>
+            </div>
+          )
+        }
+        return (
+          <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+            <HeroCard label="Today's Bangalore purchases" icon="🏙" accent={t.gold}
+              wt={todayNet} bills={todayBills} val={todayVal} sub="net · arrives HO today" />
+            <HeroCard label="Bangalore old stock at branch" icon="📦" accent={t.orange}
+              wt={oldNet} bills={oldBills} val={oldVal} sub={`${oldBranches} branch${oldBranches === 1 ? '' : 'es'} holding`} />
+          </div>
+        )
+      })()}
+
 
       {/* ── KPI Strip ── 8 tiles in two semantic groups (Today / Pending),
            bookended by Branches and Total Gross Wt. auto-fit lets the strip
