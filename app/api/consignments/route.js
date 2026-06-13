@@ -1302,11 +1302,14 @@ export async function GET(req) {
   if (action === 'booking_bills') {
     const bookingId = url.searchParams.get('booking_id')
     if (!bookingId) return Response.json({ error: 'booking_id required' }, { status: 400 })
+    // No is_deleted filter — mirror the bidding_bookings attached-weight
+    // aggregation exactly (it filters only on booking_id). Filtering
+    // is_deleted = false would drop rows where the column is NULL, which is
+    // what made this come back empty while the Net Wt showed 2898 g.
     const { data: bills, error: bErr } = await supabase
       .from('purchases')
       .select('application_id, customer_name, branch_name, current_branch, gross_weight, net_weight, total_amount, purchase_date, stock_status')
       .eq('booking_id', bookingId)
-      .eq('is_deleted', false)
       .order('net_weight', { ascending: false })
     if (bErr) return Response.json({ error: bErr.message }, { status: 500 })
     const { data: brs } = await supabase.from('branches').select('name, region')
