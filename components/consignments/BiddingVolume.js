@@ -562,6 +562,12 @@ export default function BiddingVolume() {
     for (const id of selected) s += Number(billsById[id]?.net_weight || 0)
     return s
   }, [selected, billsById])
+  // Booking weight = selected net + refining gain (the figure actually
+  // committed to the bidder). Kerala bookings carry 0 % gain by convention;
+  // everything else uses the company rate. Mirrors the booking modal's default.
+  const selGainRate  = regionTab === 'kl' ? 0 : (gainRatePct / 100)
+  const selGain      = selectedTotal * selGainRate
+  const selBookingWt = selectedTotal + selGain
 
   // Single-bill toggle (used by the drill-down checkbox).
   const toggleBill = (billId) => setSelected(prev => {
@@ -1654,10 +1660,13 @@ export default function BiddingVolume() {
           backdropFilter: 'blur(8px)',
         }}>
           <div>
-            <div style={{ fontSize: 11, color: t.text3, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 800 }}>Selected</div>
+            <div style={{ fontSize: 11, color: t.text3, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 800 }}>Booking weight</div>
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 7, marginTop: 3 }}>
-              <span style={{ fontSize: 26, color: t.gold, fontFamily: 'monospace', fontWeight: 700, letterSpacing: '-.01em' }}>{fmt(selectedTotal, 2)}</span>
+              <span style={{ fontSize: 26, color: t.gold, fontFamily: 'monospace', fontWeight: 700, letterSpacing: '-.01em' }}>{fmt(selBookingWt, 2)}</span>
               <span style={{ fontSize: 13, color: t.text2, fontWeight: 700 }}>g · {selected.size} bill{selected.size === 1 ? '' : 's'}</span>
+            </div>
+            <div style={{ fontSize: 10.5, color: t.text4, fontWeight: 600, marginTop: 2 }}>
+              net {fmt(selectedTotal, 2)} g{selGainRate > 0 && <> + gain {fmt(selGain, 2)} g · {fmt(gainRatePct, 2)}%</>}
             </div>
           </div>
           <div style={{ display: 'flex', gap: 9, alignItems: 'center' }}>
