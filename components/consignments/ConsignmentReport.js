@@ -63,7 +63,7 @@ function AgeBadge({ days, t }) {
 }
 
 export default function ConsignmentReport() {
-  const { theme } = useApp()
+  const { theme, branches } = useApp()
   const regionAccess = useRegionAccess()
   const t = THEMES[theme]
   const isMobile = useMobile()
@@ -275,15 +275,17 @@ export default function ConsignmentReport() {
   // Pre-lowered search term — shared by all filter passes below.
   const searchQ = useMemo(() => (search || '').toLowerCase(), [search])
 
-  // ── Region discovery. Always render cards for the 4 canonical regions even
-  //     when a date window has zero dispatches from one of them — ops wants
-  //     a consistent "scan all regions at a glance" view. Extras seen in the
-  //     data (e.g. Bangalore via the 19:30 IST lifecycle) are appended.
+  // ── Region discovery. DYNAMIC: the base set is every region present in the
+  //     active branches table (from context) — so Bangalore and any future
+  //     region appear as permanent cards even on a day with zero dispatches,
+  //     without hardcoding a list. Regions seen in the data are merged in too
+  //     (defensive, in case a bill's region isn't in the branch map yet).
+  //     Known regions sort by REGION_ORDER; unknown ones alphabetically.
   //     Region-restricted users only see their allowed set.
   const regions = useMemo(() => {
-    const baseRegions = ['Rest of Karnataka', 'Kerala', 'Andhra Pradesh', 'Telangana']
-    const dataRegions = [...new Set(caseData.map(b => b.region).filter(Boolean))]
-    const all = [...new Set([...baseRegions, ...dataRegions])]
+    const branchRegions = [...new Set(Object.values(branches || {}).map(b => b?.region).filter(Boolean))]
+    const dataRegions   = [...new Set(caseData.map(b => b.region).filter(Boolean))]
+    const all = [...new Set([...branchRegions, ...dataRegions])]
     const visible = regionAccess.restricted
       ? all.filter(r => regionAccess.regions.includes(r))
       : all
@@ -291,7 +293,7 @@ export default function ConsignmentReport() {
       ...REGION_ORDER.filter(r => visible.includes(r)),
       ...visible.filter(r => !REGION_ORDER.includes(r)).sort(),
     ]
-  }, [caseData, regionAccess.restricted, regionAccess.regions])
+  }, [branches, caseData, regionAccess.restricted, regionAccess.regions])
 
   // Map branch_name → region for callers that don't have the bill row handy
   // (kept for backwards compatibility with the case-row filter logic).
