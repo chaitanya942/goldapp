@@ -168,18 +168,19 @@ async function runSync(request) {
       }
     })
 
-    // ── Full refresh: delete Supabase records in sync window, re-insert completed
     const dates   = allRecords.map(r => r.purchase_date).filter(Boolean)
     const minDate = dates.reduce((a, b) => a < b ? a : b)
     const maxDate = dates.reduce((a, b) => a > b ? a : b)
-    await supabaseAdmin
-      .from('purchases')
-      .delete()
-      .eq('crm_source', 'new_crm')
-      .gte('purchase_date', minDate)
-      .lte('purchase_date', maxDate)
 
-    // ── Upsert all completed records for the window ──────────────────────────
+    // ── Non-destructive upsert (NO delete-then-reinsert) ─────────────────────
+    // Earlier this did a "full refresh" — delete every new_crm row in the
+    // window, then re-insert. That nuked operational state: a bill marked
+    // in_consignment (or booked) would lose stock_status / dispatched_at /
+    // booking_id on the very next cron cycle and snap back to at_branch.
+    // The upsert below carries ONLY CRM-sourced columns; stock_status,
+    // dispatched_at, booking_id and the audit fields are intentionally NOT in
+    // the record object, so ON CONFLICT DO UPDATE leaves them untouched for
+    // existing rows, while new rows fall back to their DB defaults on INSERT.
     const BATCH = 100
     let synced = 0, errors = 0, lastError = null
     for (let i = 0; i < allRecords.length; i += BATCH) {
@@ -202,7 +203,7 @@ async function runSync(request) {
       synced,
       errors,
       lastError: lastError ? lastError.message : null,
-      message:   `New CRM full refresh ${minDate}→${maxDate}: ${allRecords.length} completed bills (${errors} errors)`,
+      message:   `New CRM upsert ${minDate}→${maxDate}: ${allRecords.length} completed bills (${errors} errors)`,
     })
 
   } catch (err) {
