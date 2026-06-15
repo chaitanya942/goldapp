@@ -866,7 +866,7 @@ export default function ConsignmentData() {
                   <th style={{ padding: '10px 14px', background: t.card2, borderBottom: `1px solid ${t.border}`, width: '36px' }}>
                     <input type="checkbox" checked={allSelected} onChange={toggleAll} style={{ cursor: 'pointer', accentColor: t.gold }} />
                   </th>
-                  {['Date', ...(isHub ? ['Origin'] : []), 'Customer','App ID','Net Wt','Amount','Age','Type'].map(h => (
+                  {['Date', ...(isHub ? ['Origin'] : []), 'Customer','App ID','Net Wt','Amount','Age','Type','CRM'].map(h => (
                     <th key={h} style={{ padding: '10px 14px', fontSize: '10px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', textAlign: h === 'Net Wt' || h === 'Amount' ? 'right' : 'left', background: t.card2, borderBottom: `1px solid ${t.border}`, whiteSpace: 'nowrap', fontWeight: 600 }}>{h}</th>
                   ))}
                 </tr>
@@ -878,7 +878,7 @@ export default function ConsignmentData() {
                   // arrives. shimmer keyframe is defined further down.
                   Array.from({ length: 8 }).map((_, i) => (
                     <tr key={`sk-${i}`} style={{ borderBottom: `1px solid ${t.border}15` }}>
-                      {Array.from({ length: isHub ? 9 : 8 }).map((__, j) => (
+                      {Array.from({ length: isHub ? 10 : 9 }).map((__, j) => (
                         <td key={j} style={{ padding: '10px 14px' }}>
                           <span style={{ display: 'block', height: '12px', width: `${30 + ((i + j) * 7) % 50}%`, borderRadius: '3px', background: `linear-gradient(90deg, ${t.border}40 0%, ${t.border}80 50%, ${t.border}40 100%)`, backgroundSize: '200% 100%', animation: 'shimmerRow 1.4s ease-in-out infinite' }} />
                         </td>
@@ -886,7 +886,7 @@ export default function ConsignmentData() {
                     </tr>
                   ))
                 ) : visibleBills.length === 0 ? (
-                  <tr><td colSpan={isHub ? 9 : 8} style={{ padding: '48px', textAlign: 'center', color: t.text4, fontSize: '13px' }}>No bills available at this branch</td></tr>
+                  <tr><td colSpan={isHub ? 10 : 9} style={{ padding: '48px', textAlign: 'center', color: t.text4, fontSize: '13px' }}>No bills available at this branch</td></tr>
                 ) : visibleBills.map(row => {
                   const isSel    = selected.has(row.id)
                   const days     = daysSince(row.purchase_date)
@@ -940,6 +940,9 @@ export default function ConsignmentData() {
                       <td style={{ padding: '10px 14px' }}><AgeBadge days={days} t={t} /></td>
                       <td style={{ padding: '10px 14px' }}>
                         <Badge label={row.transaction_type} color={row.transaction_type === 'TAKEOVER' ? 'purple' : 'green'} />
+                      </td>
+                      <td style={{ padding: '10px 14px' }}>
+                        <Badge label={row.crm_source === 'new_crm' ? 'NEW CRM' : 'OLD CRM'} color={row.crm_source === 'new_crm' ? 'blue' : 'dim'} />
                       </td>
                     </tr>
                   )
