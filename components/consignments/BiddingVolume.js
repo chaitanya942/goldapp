@@ -239,7 +239,7 @@ export default function BiddingVolume() {
     if (!Number.isFinite(grams)) {
       setToast({ msg: 'Pending Delivery must be a number', type: 'error', key: Date.now() })
       setTimeout(() => setToast(null), 3500)
-      return
+      return false
     }
     setSavingPending(true)
     try {
@@ -254,9 +254,11 @@ export default function BiddingVolume() {
       await fetchAll(true)               // silent refetch — keep numbers on screen
       setToast({ msg: `Pending Delivery set to ${grams >= 0 ? '+' : ''}${grams.toFixed(2)} g`, type: 'success', key: Date.now() })
       setTimeout(() => setToast(null), 3500)
+      return true
     } catch (e) {
       setToast({ msg: `Couldn't save Pending Delivery: ${String(e?.message || e)}`, type: 'error', key: Date.now() })
       setTimeout(() => setToast(null), 3500)
+      return false
     } finally {
       setSavingPending(false)
     }
@@ -1715,6 +1717,8 @@ export default function BiddingVolume() {
           incomingNetWt={incomingNetWt}
           gainGrams={gainGrams}
           pendingGrams={pendingGrams}
+          onSavePending={savePending}
+          savingPending={savingPending}
           bookedQty={bookedQty}
           selected={selected}
           selectedTotal={selectedTotal}
@@ -3709,7 +3713,7 @@ function hashAvatarBg(s, t) {
 //
 // Selected sources display: compact by default — chip strip is collapsed
 // to "first 6 + (N more)" so 20+ branches don't blow up the modal height.
-function BookingModal({ t, arrivalDate, availablePool, remainingQty, incomingNetWt, gainGrams, pendingGrams, bookedQty, selected, selectedTotal, billsById, bidders, effectiveGainRate, isKerala, onSubmit, onClose, onSuccess, onSubmitGuardFail, onDetachBills }) {
+function BookingModal({ t, arrivalDate, availablePool, remainingQty, incomingNetWt, gainGrams, pendingGrams, onSavePending, savingPending, bookedQty, selected, selectedTotal, billsById, bidders, effectiveGainRate, isKerala, onSubmit, onClose, onSuccess, onSubmitGuardFail, onDetachBills }) {
   // The quantity committed to a bidder is a *negotiated* figure against the
   // whole available pool (Incoming + Gain ± Pending), not the exact sum of
   // the selected source branches — ops tells a bidder "550 g", a rounded
@@ -3737,6 +3741,23 @@ function BookingModal({ t, arrivalDate, availablePool, remainingQty, incomingNet
   const [gainsEntry,        setGainsEntry]      = useState(() => defaultGainGrams > 0 ? defaultGainGrams.toFixed(2) : '')
   const [gainsEntryDirty,   setGainsEntryDirty] = useState(false)
   const [includePending,    setIncludePending]  = useState(false)
+  // Inline Pending Delivery editor — the shared, server-side carry-over for
+  // this arrival date (positive = delayed gold rolling in, negative = a
+  // pull-back). Edited here now that the hero Pending card is gone. Saving
+  // persists globally (every device sees it on next poll); a non-zero save
+  // auto-ticks "include" so it folds into this booking immediately.
+  const [pendingEditing, setPendingEditing] = useState(false)
+  const [pendingDraft,   setPendingDraft]   = useState('')
+  const pendingCancelRef = useRef(false)     // set on Escape so the blur-commit is skipped
+  const startEditPending = () => { pendingCancelRef.current = false; setPendingDraft(pendingGrams ? String(pendingGrams) : ''); setPendingEditing(true) }
+  const cancelEditPending = () => { pendingCancelRef.current = true; setPendingEditing(false) }
+  const commitPending = async () => {
+    if (pendingCancelRef.current) { pendingCancelRef.current = false; return }
+    const n = Number(pendingDraft)
+    if (!Number.isFinite(n) || n === Number(pendingGrams || 0)) { setPendingEditing(false); return }
+    const ok = await onSavePending?.(n)
+    if (ok) { setPendingEditing(false); setIncludePending(n !== 0) }
+  }
   // Auto-sync the gains field to the live default until the operator edits.
   useEffect(() => {
     if (gainsEntryDirty) return
@@ -4107,24 +4128,58 @@ function BookingModal({ t, arrivalDate, availablePool, remainingQty, incomingNet
                             : `default ${(liveGainRate * 100).toFixed(2)} % of selected · type to override`)
                   })}
 
-                {/* + Pending — checkbox decides whether the hero's pending
-                    carry-over enters this booking. Value column shows the
-                    signed amount in muted text. */}
+                {/* + Pending — the shared, server-side carry-over for this
+                    arrival date, now editable here (the hero Pending card is
+                    gone). Checkbox decides whether it enters THIS booking;
+                    the pill/input lets ops add or subtract the carry-over,
+                    which persists globally. */}
                 {row('Add pending delivery',
-                  <span style={{
-                    textAlign: 'right',
-                    fontSize: 14, fontFamily: 'monospace', fontWeight: 700,
-                    color: includePending ? purpleTone : t.text3,
-                    opacity: pendingAvailable ? 1 : 0.5,
-                  }}>
-                    {includePending
-                      ? `${pendingGrams > 0 ? '+' : pendingGrams < 0 ? '−' : ''}${fmt(Math.abs(pendingGrams), 2)}`
-                      : (pendingAvailable ? `${pendingGrams > 0 ? '+' : '−'}${fmt(Math.abs(pendingGrams), 2)}` : '0.00')}
-                    <span style={{ fontSize: 10, color: t.text4, marginLeft: 3, fontWeight: 600 }}>g</span>
-                  </span>,
-                  { symbolNode: pendingCheckbox, hint: pendingAvailable
-                      ? (includePending ? 'included — uncheck to remove' : 'tick to include in this booking')
-                      : 'no carry-over for this date' })}
+                  pendingEditing ? (
+                    <input
+                      type="number" step="0.01"
+                      value={pendingDraft}
+                      onChange={e => setPendingDraft(e.target.value)}
+                      onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); e.currentTarget.blur() } else if (e.key === 'Escape') { cancelEditPending() } }}
+                      onBlur={commitPending}
+                      autoFocus
+                      placeholder="±g"
+                      disabled={savingPending}
+                      style={{
+                        ...inputStyle(t), padding: '5px 10px', fontSize: 13.5,
+                        fontFamily: 'monospace', fontWeight: 700, textAlign: 'right',
+                        color: purpleTone, borderColor: `${purpleTone}66`, width: '100%',
+                      }} />
+                  ) : (
+                    <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'flex-end', gap: 6 }}>
+                      {pendingAvailable && (
+                        <button type="button"
+                          onClick={() => onSavePending?.(0)}
+                          disabled={savingPending}
+                          title="Clear carry-over (set to 0)"
+                          style={{ background: 'transparent', border: 'none', color: t.text4, fontSize: 12, fontWeight: 700, cursor: savingPending ? 'default' : 'pointer', padding: 0, lineHeight: 1 }}>↺</button>
+                      )}
+                      <button type="button"
+                        onClick={startEditPending}
+                        disabled={savingPending}
+                        title="Set the shared pending-delivery carry-over (negative = pull-back)"
+                        style={{
+                          background: pendingAvailable ? `${purpleTone}15` : 'transparent',
+                          border: `1px solid ${pendingAvailable ? `${purpleTone}40` : t.border2}`,
+                          borderRadius: 99, padding: '3px 10px', cursor: savingPending ? 'default' : 'pointer',
+                          fontFamily: 'monospace', fontWeight: 800, fontSize: 13.5,
+                          color: pendingAvailable ? (includePending ? purpleTone : t.text2) : t.text3,
+                          display: 'inline-flex', alignItems: 'center', gap: 5, whiteSpace: 'nowrap',
+                        }}>
+                        <span>{savingPending ? '…' : (pendingAvailable ? `${pendingGrams > 0 ? '+' : '−'}${fmt(Math.abs(pendingGrams), 2)} g` : 'Set ±g')}</span>
+                        <span style={{ fontSize: 10, opacity: .8 }}>✎</span>
+                      </button>
+                    </span>
+                  ),
+                  { symbolNode: pendingCheckbox, hint: pendingEditing
+                      ? 'Enter to save · Esc to cancel · negative = pull-back'
+                      : (pendingAvailable
+                          ? (includePending ? 'shared carry-over · included — uncheck to remove' : 'shared carry-over · tick to include')
+                          : 'tap Set to add or subtract delivery for this date') })}
 
                 <div style={{ height: 1, background: `${t.gold}55`, margin: '4px 0 0' }} />
 
