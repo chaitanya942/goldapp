@@ -5,6 +5,7 @@ import mysql    from 'mysql2/promise'
 import postgres  from 'postgres'
 import { createClient } from '@supabase/supabase-js'
 import { requireAuth } from '../../../lib/apiAuth'
+import { aliasBranchName } from '../../../lib/crmBranchAlias'
 
 const REGION_BYPASS_ROLES = new Set(['super_admin', 'founders_office', 'admin'])
 
@@ -239,6 +240,7 @@ export async function GET(req) {
             for (const b of (brAll || [])) regionByName[(b.name || '').trim().toLowerCase()] = b.region
           }
           for (const r of ncRows) {
+            r.branch = aliasBranchName(r.branch)   // stale-CRM-name → canonical
             if (needRegionMap && !allowedSet.has(regionByName[(r.branch || '').trim().toLowerCase()] || '')) continue
             walkedInCount    += Number(r.c)        || 0
             walkedInWt       += parseFloat(r.wt)   || 0
@@ -951,6 +953,7 @@ export async function GET(req) {
 
         const txnArr = [...txnRows]
         for (const row of txnArr) {
+          row.branch_name = aliasBranchName(row.branch_name)   // stale-CRM-name → canonical
           row.region = nameRegionMap[(row.branch_name || '').trim().toLowerCase()] || ''
         }
         // Region scope: drop new-CRM rows outside user's allowed regions.

@@ -9,6 +9,7 @@ import { createClient } from '@supabase/supabase-js'
 import { readFileSync } from 'fs'
 import { resolve, dirname } from 'path'
 import { fileURLToPath } from 'url'
+import { aliasBranchName } from '../lib/crmBranchAlias.js'
 
 const { Client } = pg
 
@@ -141,7 +142,7 @@ async function main() {
       transaction_time:           fmtTime(r.created_at),
       customer_name:              [r.first_name, r.last_name].filter(Boolean).join(' ').trim() || null,
       phone_number:               r.mobile?.trim() || null,
-      branch_name:                r.branch_name?.trim() || null,
+      branch_name:                aliasBranchName(r.branch_name?.trim()) || null,
       transaction_type:           mapTxnType(r.transaction_type),
       gross_weight:               parseFloat(r.gross_weight) || 0,
       stone_weight:               parseFloat(r.stone_weight) || 0,

@@ -2,6 +2,7 @@ import pg from 'pg'
 import { createClient } from '@supabase/supabase-js'
 import { NEW_CRM_LIVE_DATE } from '../../../lib/crmConfig'
 import { requireAuth, ROLE_GROUPS } from '../../../lib/apiAuth'
+import { aliasBranchName } from '../../../lib/crmBranchAlias'
 
 const { Client } = pg
 
@@ -142,7 +143,7 @@ async function runSync(request) {
         transaction_time:           fmtTime(r.created_at),
         customer_name:              customerName,
         phone_number:               r.mobile?.trim() || null,
-        branch_name:                r.branch_name?.trim() || null,
+        branch_name:                aliasBranchName(r.branch_name?.trim()) || null,
         transaction_type:           mapTxnType(r.transaction_type),
         gross_weight:               parseFloat(r.gross_weight) || 0,
         stone_weight:               parseFloat(r.stone_weight) || 0,
