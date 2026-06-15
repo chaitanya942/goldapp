@@ -1505,6 +1505,7 @@ export default function BiddingVolume() {
         metrics={sectionMetrics(0, supply?.booked_pending_dispatch?.total?.net_wt)}
         selectable={false}
         viewOnly
+        consolidateRegions={['Bangalore']}
         onCreateConsignment={handleCreateConsignment}
         onUnbookBranch={handleUnbookBranch}
         emptyMsg="No stalled bookings — every booked bill is in motion or already received."
