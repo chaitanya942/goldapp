@@ -2518,46 +2518,48 @@ function BookingsList({ t, card, bookings, onUpdateStatus, onRequestCancel, onCl
                         ) : !bd?.branches?.length ? (
                           <div style={{ padding: '14px', color: t.text4, fontSize: 12 }}>No bills attached to this booking yet.</div>
                         ) : (
-                          <>
-                            <div style={{ fontSize: 10.5, color: t.text3, letterSpacing: '.08em', textTransform: 'uppercase', fontWeight: 800, marginBottom: 8 }}>
-                              Branch-wise breakup · {bd.total?.bills || 0} bill{(bd.total?.bills || 0) === 1 ? '' : 's'} · {fmt(bd.total?.net_wt || 0, 2)} g net · {bd.branches.length} branch{bd.branches.length === 1 ? '' : 'es'}
-                            </div>
-                            {bd.branches.map(br => {
-                              const key  = `${b.id}:${br.branch_name}`
-                              const open = openBranches.has(key)
-                              const rColor = REGION_COLORS[br.region] || t.text3
-                              return (
-                                <div key={key} style={{ borderTop: `1px solid ${t.border}30` }}>
-                                  <div onClick={() => toggleBranch(key)}
-                                    style={{ display: 'grid', gridTemplateColumns: '16px minmax(0,1fr) 90px 90px 60px', alignItems: 'center', columnGap: 12, padding: '8px 8px', cursor: 'pointer' }}>
-                                    <span style={{ color: open ? t.gold : t.text4, fontSize: 10, fontWeight: 800 }}>{open ? '▾' : '▸'}</span>
-                                    <span style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-                                      <span style={{ fontSize: 13, color: t.text1, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{br.branch_name}</span>
-                                      <span style={{ fontSize: 10, color: rColor, fontWeight: 700, whiteSpace: 'nowrap' }}>{br.region}</span>
-                                    </span>
-                                    <span style={{ textAlign: 'right', fontFamily: 'monospace', color: t.gold, fontWeight: 700, fontSize: 12.5 }}>{fmt(br.net_wt, 2)}<span style={{ fontSize: 9, color: t.text4, marginLeft: 1.5 }}>g</span></span>
-                                    <span style={{ textAlign: 'right', fontFamily: 'monospace', color: t.text3, fontSize: 12 }}>{fmt(br.gross_wt, 2)}<span style={{ fontSize: 9, color: t.text4, marginLeft: 1.5 }}>g</span></span>
-                                    <span style={{ textAlign: 'right', fontSize: 11, color: t.text3, fontWeight: 700 }}>{br.bills.length} bill{br.bills.length === 1 ? '' : 's'}</span>
-                                  </div>
-                                  {open && (
-                                    <div style={{ paddingLeft: 28, paddingBottom: 6 }}>
-                                      {br.bills.map((c, j) => (
-                                        <div key={c.application_id || j} style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) 90px 70px 70px', alignItems: 'center', columnGap: 12, padding: '5px 8px', borderTop: `1px solid ${t.border}1f` }}>
-                                          <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-                                            <span style={{ fontSize: 11.5, color: t.text2, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.customer_name || '—'}</span>
-                                            <span style={{ fontSize: 10, color: t.gold, fontFamily: 'monospace' }}>{c.application_id || '—'}</span>
-                                          </span>
-                                          <span style={{ textAlign: 'right', fontSize: 10.5, color: t.text4, fontWeight: 600, whiteSpace: 'nowrap' }}>{c.purchase_date ? fmtDateShort(c.purchase_date) : '—'}</span>
-                                          <span style={{ textAlign: 'right', fontFamily: 'monospace', color: t.text2, fontSize: 11.5 }}>{fmt(c.gross_weight, 2)}</span>
-                                          <span style={{ textAlign: 'right', fontFamily: 'monospace', color: t.gold, fontSize: 11.5, fontWeight: 700 }}>{fmt(c.net_weight, 2)}</span>
-                                        </div>
-                                      ))}
-                                    </div>
-                                  )}
-                                </div>
-                              )
-                            })}
-                          </>
+                          (() => {
+                            const bth = (align) => ({ padding: '7px 12px', textAlign: align, fontSize: 9.5, color: t.text4, letterSpacing: '.08em', textTransform: 'uppercase', fontWeight: 800, whiteSpace: 'nowrap', borderBottom: `1px solid ${t.border}` })
+                            const btd = (align, color, weight) => ({ padding: '8px 12px', textAlign: align, fontSize: 12.5, color: color || t.text2, fontWeight: weight || 500, whiteSpace: 'nowrap' })
+                            return (
+                            <>
+                              <div style={{ fontSize: 10.5, color: t.text3, letterSpacing: '.08em', textTransform: 'uppercase', fontWeight: 800, marginBottom: 8 }}>
+                                Branch-wise breakup · {bd.total?.bills || 0} bill{(bd.total?.bills || 0) === 1 ? '' : 's'} · {fmt(bd.total?.net_wt || 0, 2)} g net · {bd.branches.length} branch{bd.branches.length === 1 ? '' : 'es'}
+                              </div>
+                              <table style={{ width: '100%', maxWidth: 640, borderCollapse: 'collapse' }}>
+                                <thead>
+                                  <tr style={{ background: t.card2 || t.card }}>
+                                    <th style={bth('center')}>#</th>
+                                    <th style={bth('left')}>Branch</th>
+                                    <th style={bth('left')}>Region</th>
+                                    <th style={bth('right')}>No. of Bills</th>
+                                    <th style={bth('right')}>Net Weight</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {bd.branches.map((br, i) => (
+                                    <tr key={br.branch_name} style={{ borderTop: `1px solid ${t.border}25` }}>
+                                      <td style={btd('center', t.text4)}>{i + 1}</td>
+                                      <td style={btd('left', t.text1, 700)}>{br.branch_name}</td>
+                                      <td style={btd('left', REGION_COLORS[br.region] || t.text3, 600)}>{br.region || '—'}</td>
+                                      <td style={btd('right', t.text2, 600)}>{br.bills.length}</td>
+                                      <td style={{ ...btd('right', t.gold, 700), fontFamily: 'monospace' }}>{fmt(br.net_wt, 2)} g</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                                <tfoot>
+                                  <tr style={{ borderTop: `2px solid ${t.gold}40`, background: `${t.gold}08` }}>
+                                    <td style={btd('center')} />
+                                    <td style={btd('left', t.gold, 800)}>Total</td>
+                                    <td style={btd('left')} />
+                                    <td style={btd('right', t.gold, 800)}>{bd.total?.bills || 0}</td>
+                                    <td style={{ ...btd('right', t.gold, 800), fontFamily: 'monospace' }}>{fmt(bd.total?.net_wt || 0, 2)} g</td>
+                                  </tr>
+                                </tfoot>
+                              </table>
+                            </>
+                            )
+                          })()
                         )}
                       </div>
                     </td>
