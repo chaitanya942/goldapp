@@ -478,6 +478,42 @@ export default function BiddingVolume() {
   const dayAfterArrivalDate  = supply?.day_after_arrival   || null
   const dayAfter2ArrivalDate = supply?.day_after_2_arrival || null
 
+  // Region-consistent section totals. The KA·AP·TS tab hides Kerala branch
+  // rows (Kerala has its own KL tab), but the API's *.total / *.booked figures
+  // are region-agnostic (all outside-Bangalore incl. Kerala). Feeding those raw
+  // totals into the hero cards made Kerala bills (e.g. KL-THRISSUR) show up as
+  // "Unbooked / Available to Book" with NO rows beneath them. Sum the metrics
+  // from the same Kerala-filtered branch lists the rows actually render.
+  const sumBranches = (arr) => (arr || []).reduce((a, b) => ({
+    bills:    a.bills    + (b.total_bills    || 0),
+    gross_wt: a.gross_wt + (b.total_gross_wt || 0),
+    net_wt:   a.net_wt   + (b.total_net_wt   || 0),
+    amount:   a.amount   + (b.total_amount   || 0),
+  }), { bills: 0, gross_wt: 0, net_wt: 0, amount: 0 })
+  const dropKL = (arr) => (arr || []).filter(b => b.region !== 'Kerala')
+  const t24Booked    = useMemo(() => dropKL(supply?.transit_24h?.booked?.branches),    [supply])
+  const t48Booked    = useMemo(() => dropKL(supply?.transit_48h?.booked?.branches),    [supply])
+  const t72Booked    = useMemo(() => dropKL(supply?.transit_72h?.booked?.branches),    [supply])
+  const preEodBooked = useMemo(() => dropKL(supply?.branch_pre_eod?.booked?.branches), [supply])
+
+  // Region-consistent section totals. The KA·AP·TS tab hides Kerala branch
+  // rows (Kerala has its own KL tab), but the API's *.total / *.booked figures
+  // are region-agnostic (all outside-Bangalore incl. Kerala). Reading those
+  // raw totals into the hero cards made Kerala bills show up as "Unbooked /
+  // Available to Book" with NO rows beneath them. Sum the metrics from the same
+  // Kerala-filtered branch lists the rows use instead.
+  const sumBranches = (arr) => (arr || []).reduce((a, b) => ({
+    bills:    a.bills    + (b.total_bills    || 0),
+    gross_wt: a.gross_wt + (b.total_gross_wt || 0),
+    net_wt:   a.net_wt   + (b.total_net_wt   || 0),
+    amount:   a.amount   + (b.total_amount   || 0),
+  }), { bills: 0, gross_wt: 0, net_wt: 0, amount: 0 })
+  const dropKL = (arr) => (arr || []).filter(b => b.region !== 'Kerala')
+  const t24Booked    = useMemo(() => dropKL(supply?.transit_24h?.booked?.branches),    [supply])
+  const t48Booked    = useMemo(() => dropKL(supply?.transit_48h?.booked?.branches),    [supply])
+  const t72Booked    = useMemo(() => dropKL(supply?.transit_72h?.booked?.branches),    [supply])
+  const preEodBooked = useMemo(() => dropKL(supply?.branch_pre_eod?.booked?.branches), [supply])
+
   // Per-section metric cards (Total / Booked / Unbooked / Gain / Available).
   // Total = booked + unbooked; gain mirrors the % rate but is applied to the
   // UNBOOKED portion only, so Available to Book = Unbooked + its gain.
@@ -1366,9 +1402,9 @@ export default function BiddingVolume() {
         subtitle={`Already dispatched · arriving at HO ${fmtDate(arrivalDate)}`}
         accent={t.blue}
         branches={inTBranches}
-        total={supply?.transit_24h?.total || supply?.in_transit?.total}
-        metrics={sectionMetrics(supply?.transit_24h?.total?.net_wt, supply?.transit_24h?.booked?.net_wt, 2)}
-        bookedBranches={supply?.transit_24h?.booked?.branches}
+        total={sumBranches(inTBranches)}
+        metrics={sectionMetrics(sumBranches(inTBranches).net_wt, sumBranches(t24Booked).net_wt, 2)}
+        bookedBranches={t24Booked}
         onRateChange={(p) => handleSectionRate(2, p)}
         onSetGainGrams={(g) => handleSectionGainGrams(2, g)}
         onAutoSelect={() => selectSectionBills(['transit_24h'])}
@@ -1395,9 +1431,9 @@ export default function BiddingVolume() {
           : 'Arriving day after tomorrow · available to book'}
         accent={t.purple || '#8c5ac8'}
         branches={t48hBranches}
-        total={supply?.transit_48h?.total}
-        metrics={sectionMetrics(supply?.transit_48h?.total?.net_wt, supply?.transit_48h?.booked?.net_wt, 3)}
-        bookedBranches={supply?.transit_48h?.booked?.branches}
+        total={sumBranches(t48hBranches)}
+        metrics={sectionMetrics(sumBranches(t48hBranches).net_wt, sumBranches(t48Booked).net_wt, 3)}
+        bookedBranches={t48Booked}
         onRateChange={(p) => handleSectionRate(3, p)}
         onSetGainGrams={(g) => handleSectionGainGrams(3, g)}
         onAutoSelect={() => selectSectionBills(['transit_48h'])}
@@ -1424,9 +1460,9 @@ export default function BiddingVolume() {
           : 'Arriving after 2 days · available to book'}
         accent={t.teal || '#0e9aa7'}
         branches={t72hBranches}
-        total={supply?.transit_72h?.total}
-        metrics={sectionMetrics(supply?.transit_72h?.total?.net_wt, supply?.transit_72h?.booked?.net_wt, 4)}
-        bookedBranches={supply?.transit_72h?.booked?.branches}
+        total={sumBranches(t72hBranches)}
+        metrics={sectionMetrics(sumBranches(t72hBranches).net_wt, sumBranches(t72Booked).net_wt, 4)}
+        bookedBranches={t72Booked}
         onRateChange={(p) => handleSectionRate(4, p)}
         onSetGainGrams={(g) => handleSectionGainGrams(4, g)}
         onAutoSelect={() => selectSectionBills(['transit_72h'])}
@@ -1521,9 +1557,9 @@ export default function BiddingVolume() {
         subtitle={`Currently at_branch · will move by EOD · arrives at HO ${fmtDate(arrivalDate)}`}
         accent={t.orange}
         branches={preEodBranches}
-        total={supply?.branch_pre_eod?.total}
-        metrics={sectionMetrics(supply?.branch_pre_eod?.total?.net_wt, supply?.branch_pre_eod?.booked?.net_wt, 7)}
-        bookedBranches={supply?.branch_pre_eod?.booked?.branches}
+        total={sumBranches(preEodBranches)}
+        metrics={sectionMetrics(sumBranches(preEodBranches).net_wt, sumBranches(preEodBooked).net_wt, 7)}
+        bookedBranches={preEodBooked}
         onRateChange={(p) => handleSectionRate(7, p)}
         onSetGainGrams={(g) => handleSectionGainGrams(7, g)}
         onAutoSelect={() => selectSectionBills(['branch_pre_eod'])}
