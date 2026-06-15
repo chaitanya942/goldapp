@@ -1768,11 +1768,16 @@ function NewCrmTab({ t, newCrmTxns, newCrmError, regionFilter, regions, isToday,
   const walkout    = walkoutTxns.length
 
   const completedValue = completedTxns.reduce((s, tx) => s + (Number(tx.amount) || 0), 0)
-  const totalWt        = txns.reduce((s, tx) => s + (Number(tx.gross_weight) || 0), 0)
-  const completedWt    = completedTxns.reduce((s, tx) => s + (Number(tx.gross_weight) || 0), 0)
-  const inProgressWt   = inProgressTxns.reduce((s, tx) => s + (Number(tx.gross_weight) || 0), 0)
-  const walkoutWt      = walkoutTxns.reduce((s, tx) => s + (Number(tx.gross_weight) || 0), 0)
-  const walkinWt       = walkinTxns.reduce((s, tx) => s + (Number(tx.gross_weight) || 0), 0)
+  // NET weight per stage (net = gross − stone − wastage; the weight ops bid on).
+  const netW = (arr) => arr.reduce((s, tx) => s + (Number(tx.net_weight) || 0), 0)
+  const totalWt        = netW(txns)
+  const completedWt    = netW(completedTxns)
+  const inProgressWt   = netW(inProgressTxns)
+  const walkoutWt      = netW(walkoutTxns)
+  const walkinWt       = netW(walkinTxns)
+  const estimationWt   = netW(estimationTxns)
+  const kycWt          = netW(kycTxns)
+  const paymentWt      = netW(paymentTxns)
 
   const conversionPct       = total > 0 ? Math.round(completed / total * 100) : 0
   const walkoutRate         = total > 0 ? Math.round(walkout / total * 100) : 0
@@ -1836,11 +1841,11 @@ function NewCrmTab({ t, newCrmTxns, newCrmError, regionFilter, regions, isToday,
           <FlowSep t={t} />
           <HeroNum label="At Walk-in"   value={walkinTxns.length}     color={t.blue}   t={t} small weight={walkinWt}   active={activeMetric==='walkin'}     onClick={() => toggleMetric('walkin')} />
           <FlowSep t={t} />
-          <HeroNum label="Estimation"   value={estimationTxns.length} color={t.orange} t={t} small                    active={activeMetric==='estimation'} onClick={() => toggleMetric('estimation')} />
+          <HeroNum label="Estimation"   value={estimationTxns.length} color={t.orange} t={t} small weight={estimationWt} active={activeMetric==='estimation'} onClick={() => toggleMetric('estimation')} />
           <FlowSep t={t} />
-          <HeroNum label="KYC"          value={kycTxns.length}        color={t.purple} t={t} small                    active={activeMetric==='kyc'}        onClick={() => toggleMetric('kyc')} />
+          <HeroNum label="KYC"          value={kycTxns.length}        color={t.purple} t={t} small weight={kycWt}        active={activeMetric==='kyc'}        onClick={() => toggleMetric('kyc')} />
           <FlowSep t={t} />
-          <HeroNum label="Payment Due"  value={paymentTxns.length}    color={t.gold}   t={t} small                    active={activeMetric==='payment'}    onClick={() => toggleMetric('payment')} />
+          <HeroNum label="Payment Due"  value={paymentTxns.length}    color={t.gold}   t={t} small weight={paymentWt}    active={activeMetric==='payment'}    onClick={() => toggleMetric('payment')} />
           <FlowSep t={t} />
           <HeroNum label="Walkout"      value={walkout}                color={t.red}    t={t} small weight={walkoutWt}  active={activeMetric==='walkout'}    onClick={() => toggleMetric('walkout')} />
         </div>

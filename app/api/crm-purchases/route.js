@@ -841,8 +841,8 @@ export async function GET(req) {
           sql`
             SELECT
               t.id, t.code AS bill_no, t.status, t.transaction_type,
-              TO_CHAR(t.created_at AT TIME ZONE 'Asia/Kolkata', 'HH24:MI:SS') AS txn_time,
-              TO_CHAR(t.created_at AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM-DD') AS txn_date,
+              TO_CHAR(t.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata', 'HH24:MI:SS') AS txn_time,
+              TO_CHAR(t.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM-DD') AS txn_date,
               TRIM(COALESCE(c.first_name,'') || ' ' || COALESCE(c.last_name,'')) AS cust_name,
               c.mobile AS cust_mobile,
               b.name AS branch_name,
