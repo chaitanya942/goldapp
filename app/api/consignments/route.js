@@ -1300,7 +1300,7 @@ export async function GET(req) {
   //    Bookings tab. Owner branch = current_branch || branch_name (so leaf→hub
   //    transfers roll up under the hub). ──
   if (action === 'booking_bills') {
-    const bookingId = url.searchParams.get('booking_id')
+    const bookingId = searchParams.get('booking_id')
     if (!bookingId) return Response.json({ error: 'booking_id required' }, { status: 400 })
     // No is_deleted filter — mirror the bidding_bookings attached-weight
     // aggregation exactly (it filters only on booking_id). Filtering
