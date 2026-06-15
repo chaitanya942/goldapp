@@ -496,24 +496,6 @@ export default function BiddingVolume() {
   const t72Booked    = useMemo(() => dropKL(supply?.transit_72h?.booked?.branches),    [supply])
   const preEodBooked = useMemo(() => dropKL(supply?.branch_pre_eod?.booked?.branches), [supply])
 
-  // Region-consistent section totals. The KA·AP·TS tab hides Kerala branch
-  // rows (Kerala has its own KL tab), but the API's *.total / *.booked figures
-  // are region-agnostic (all outside-Bangalore incl. Kerala). Reading those
-  // raw totals into the hero cards made Kerala bills show up as "Unbooked /
-  // Available to Book" with NO rows beneath them. Sum the metrics from the same
-  // Kerala-filtered branch lists the rows use instead.
-  const sumBranches = (arr) => (arr || []).reduce((a, b) => ({
-    bills:    a.bills    + (b.total_bills    || 0),
-    gross_wt: a.gross_wt + (b.total_gross_wt || 0),
-    net_wt:   a.net_wt   + (b.total_net_wt   || 0),
-    amount:   a.amount   + (b.total_amount   || 0),
-  }), { bills: 0, gross_wt: 0, net_wt: 0, amount: 0 })
-  const dropKL = (arr) => (arr || []).filter(b => b.region !== 'Kerala')
-  const t24Booked    = useMemo(() => dropKL(supply?.transit_24h?.booked?.branches),    [supply])
-  const t48Booked    = useMemo(() => dropKL(supply?.transit_48h?.booked?.branches),    [supply])
-  const t72Booked    = useMemo(() => dropKL(supply?.transit_72h?.booked?.branches),    [supply])
-  const preEodBooked = useMemo(() => dropKL(supply?.branch_pre_eod?.booked?.branches), [supply])
-
   // Per-section metric cards (Total / Booked / Unbooked / Gain / Available).
   // Total = booked + unbooked; gain mirrors the % rate but is applied to the
   // UNBOOKED portion only, so Available to Book = Unbooked + its gain.
