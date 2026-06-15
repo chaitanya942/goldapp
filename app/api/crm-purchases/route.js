@@ -190,11 +190,13 @@ export async function GET(req) {
         walkedInWt    += parseFloat(r.wt) || 0
       }
 
-      // ── New CRM walk-ins — every Transaction today is a customer visit.
-      //    Added to the old-CRM count so the dashboard shows the combined
-      //    total. Best-effort + region-scoped; if the new CRM is unreachable
-      //    we silently keep the old-CRM numbers. (Purchased already includes
-      //    new-CRM completed bills via the purchases aggregate above.)
+      // ── New CRM live — walk-ins (every Transaction today) + completed
+      //    bills, queried directly so the dashboard matches the Live Feed
+      //    instead of waiting for the sync. Walk-ins add to the old-CRM count;
+      //    completed feed the LIVE purchased calc below. Best-effort +
+      //    region-scoped; if the new CRM is unreachable we keep the synced
+      //    numbers.
+      let ncCompleted = 0, ncCompletedNet = 0, ncCompletedValue = 0, ncLiveOk = false
       try {
         const sslOpt = process.env.NEW_CRM_DB_CA
           ? { ca: process.env.NEW_CRM_DB_CA, rejectUnauthorized: true }
@@ -211,12 +213,19 @@ export async function GET(req) {
           const dayStart = `${todayIST}T00:00:00+05:30`
           const dayEnd   = `${todayIST}T23:59:59+05:30`
           const ncRows = await ncSql`
-            SELECT b.name AS branch, COUNT(*)::int AS c,
-                   COALESCE(ROUND(SUM(ow.gross_weight)::numeric, 2), 0) AS wt
+            SELECT b.name AS branch,
+                   COUNT(*)::int AS c,
+                   COALESCE(ROUND(SUM(ow.gross_weight)::numeric, 2), 0) AS wt,
+                   COUNT(*) FILTER (WHERE t.status = 'FINAL_PAYMENT_COMPLETED')::int AS done,
+                   COALESCE(ROUND(SUM(ow.net_weight)   FILTER (WHERE t.status = 'FINAL_PAYMENT_COMPLETED')::numeric, 2), 0) AS done_net,
+                   COALESCE(ROUND(SUM(ow.final_amount) FILTER (WHERE t.status = 'FINAL_PAYMENT_COMPLETED')::numeric, 0), 0) AS done_val
             FROM "Transaction" t
             LEFT JOIN "Branch" b ON b.id = t.branch_id
             LEFT JOIN (
-              SELECT q.transaction_id, SUM(o.gross_weight) AS gross_weight
+              SELECT q.transaction_id,
+                     SUM(o.gross_weight) AS gross_weight,
+                     SUM(o.net_weight)   AS net_weight,
+                     MAX(q.final_amount) AS final_amount
               FROM "Quotation" q JOIN "Ornament" o ON o.quotation_id = q.id
               GROUP BY q.transaction_id
             ) ow ON ow.transaction_id = t.id
@@ -231,19 +240,38 @@ export async function GET(req) {
           }
           for (const r of ncRows) {
             if (needRegionMap && !allowedSet.has(regionByName[(r.branch || '').trim().toLowerCase()] || '')) continue
-            walkedInCount += Number(r.c)  || 0
-            walkedInWt    += parseFloat(r.wt) || 0
+            walkedInCount    += Number(r.c)        || 0
+            walkedInWt       += parseFloat(r.wt)   || 0
+            ncCompleted      += Number(r.done)     || 0
+            ncCompletedNet   += parseFloat(r.done_net) || 0
+            ncCompletedValue += parseFloat(r.done_val) || 0
           }
+          ncLiveOk = true
         } finally { await ncSql.end() }
-      } catch { /* new CRM offline — keep old-CRM walk-in numbers */ }
+      } catch { /* new CRM offline — keep old-CRM + synced numbers */ }
 
-      // Purchased numbers come straight from Supabase aggregate — same
-      // source as Purchase Reports / dashboard panel, so they cannot
-      // disagree.
+      // Purchased = old CRM (synced purchases aggregate, ~live) + new CRM
+      // (LIVE completed from the query above). The synced purchases table lags
+      // the new CRM, so subtract the synced new_crm slice and add the live
+      // completed counts — old CRM stays from the aggregate.
       const kpis = agg?.data?.kpis || {}
-      const purchasedCount = Number(kpis.total_count) || 0
-      const purchasedWt    = Number(kpis.total_net)   || 0
-      const approvedValue  = Number(kpis.total_value) || 0
+      let purchasedCount = Number(kpis.total_count) || 0
+      let purchasedWt    = Number(kpis.total_net)   || 0
+      let approvedValue  = Number(kpis.total_value) || 0
+      if (ncLiveOk) {
+        let nsq = supabase.from('purchases')
+          .select('net_weight, total_amount')
+          .eq('crm_source', 'new_crm').eq('crm_status', 'approved')
+          .eq('purchase_date', todayIST)
+        if (regionBranches) nsq = nsq.in('branch_name', regionBranches)
+        const { data: nsRows } = await nsq
+        const nsCount = (nsRows || []).length
+        const nsNet   = (nsRows || []).reduce((s, r) => s + (Number(r.net_weight)   || 0), 0)
+        const nsVal   = (nsRows || []).reduce((s, r) => s + (Number(r.total_amount) || 0), 0)
+        purchasedCount = Math.max(0, purchasedCount - nsCount + ncCompleted)
+        purchasedWt    = Math.max(0, purchasedWt    - nsNet   + ncCompletedNet)
+        approvedValue  = Math.max(0, approvedValue  - nsVal   + ncCompletedValue)
+      }
 
       const result = {
         todayIST,
