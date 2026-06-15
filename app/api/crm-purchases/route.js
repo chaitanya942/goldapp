@@ -190,6 +190,53 @@ export async function GET(req) {
         walkedInWt    += parseFloat(r.wt) || 0
       }
 
+      // ── New CRM walk-ins — every Transaction today is a customer visit.
+      //    Added to the old-CRM count so the dashboard shows the combined
+      //    total. Best-effort + region-scoped; if the new CRM is unreachable
+      //    we silently keep the old-CRM numbers. (Purchased already includes
+      //    new-CRM completed bills via the purchases aggregate above.)
+      try {
+        const sslOpt = process.env.NEW_CRM_DB_CA
+          ? { ca: process.env.NEW_CRM_DB_CA, rejectUnauthorized: true }
+          : { rejectUnauthorized: false }
+        const ncSql = postgres({
+          host:     process.env.NEW_CRM_DB_HOSTNAME || process.env.NEW_CRM_DB_HOST,
+          port:     parseInt(process.env.NEW_CRM_DB_PORT || '5432'),
+          database: process.env.NEW_CRM_DB_NAME,
+          username: process.env.NEW_CRM_DB_USER,
+          password: process.env.NEW_CRM_DB_PASSWORD,
+          ssl:      sslOpt, connect_timeout: 3, max: 1,
+        })
+        try {
+          const dayStart = `${todayIST}T00:00:00+05:30`
+          const dayEnd   = `${todayIST}T23:59:59+05:30`
+          const ncRows = await ncSql`
+            SELECT b.name AS branch, COUNT(*)::int AS c,
+                   COALESCE(ROUND(SUM(ow.gross_weight)::numeric, 2), 0) AS wt
+            FROM "Transaction" t
+            LEFT JOIN "Branch" b ON b.id = t.branch_id
+            LEFT JOIN (
+              SELECT q.transaction_id, SUM(o.gross_weight) AS gross_weight
+              FROM "Quotation" q JOIN "Ornament" o ON o.quotation_id = q.id
+              GROUP BY q.transaction_id
+            ) ow ON ow.transaction_id = t.id
+            WHERE t.created_at BETWEEN ${dayStart} AND ${dayEnd}
+            GROUP BY b.name
+          `
+          let regionByName = null
+          if (needRegionMap) {
+            const { data: brAll } = await supabase.from('branches').select('name, region').not('region', 'is', null)
+            regionByName = {}
+            for (const b of (brAll || [])) regionByName[(b.name || '').trim().toLowerCase()] = b.region
+          }
+          for (const r of ncRows) {
+            if (needRegionMap && !allowedSet.has(regionByName[(r.branch || '').trim().toLowerCase()] || '')) continue
+            walkedInCount += Number(r.c)  || 0
+            walkedInWt    += parseFloat(r.wt) || 0
+          }
+        } finally { await ncSql.end() }
+      } catch { /* new CRM offline — keep old-CRM walk-in numbers */ }
+
       // Purchased numbers come straight from Supabase aggregate — same
       // source as Purchase Reports / dashboard panel, so they cannot
       // disagree.
