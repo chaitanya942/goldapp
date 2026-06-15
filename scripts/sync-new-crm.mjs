@@ -187,7 +187,8 @@ async function main() {
     const results = await Promise.all(
       chunk.map(r => supabase.from('purchases')
         .update({ crm_status: r.crm_status, crm_source: 'new_crm' })
-        .eq('application_id', r.application_id))
+        .eq('application_id', r.application_id)
+        .eq('crm_source', 'new_crm'))   // scope to the new_crm row — the same WGKA number may also exist as old_crm
     )
     results.forEach(({ error }, idx) => {
       if (error) console.error(`  ❌ Update failed: ${chunk[idx].application_id}`)

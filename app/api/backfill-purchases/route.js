@@ -145,6 +145,7 @@ export async function POST(request) {
         .from('purchases')
         .select('application_id')
         .in('application_id', chunk)
+        .eq('crm_source', 'old_crm')   // same WGKA number can exist as new_crm; only match old-CRM rows
       if (data) data.forEach(r => existingIds.add(r.application_id))
     }
 
