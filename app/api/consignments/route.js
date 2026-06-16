@@ -2299,7 +2299,7 @@ async function reconcileBookingOverAttachment({ supabase, bookingId, bookedWeigh
   try {
     const { data: attached, error: fetchErr } = await supabase
       .from('purchases')
-      .select('id, application_id, customer_name, net_weight')
+      .select('id, application_id, customer_name, net_weight, stock_status, branch_name, current_branch')
       .eq('booking_id', bookingId)
     if (fetchErr) { error = fetchErr.message; return { detached: [], residual_pipeline_g: 0, error } }
     if (!attached || attached.length === 0) {
@@ -2315,9 +2315,25 @@ async function reconcileBookingOverAttachment({ supabase, bookingId, bookedWeigh
       return { detached: [], residual_pipeline_g: 0, error: null }
     }
     const excessNet = excessEffective / (1 + gainRate)
-    const ordered = [...attached].sort((a, b) =>
-      Number(a.net_weight || 0) - Number(b.net_weight || 0)
-    )
+
+    // RULE: only ever free SECTION-1 BANGALORE bills that are still locally
+    // available (at_branch / at_ho). NEVER detach in-transit (in_consignment)
+    // bills — those are already dispatched and physically committed to this
+    // booking's consignment — and never pull from non-Bangalore branches.
+    // Outstation / in-transit weight stays put even if that leaves the booking
+    // over-attached; it's the operator's call to fix, not ours to silently
+    // strip in-transit gold. (See incident 16-Jun-2026: smallest-first across
+    // ALL bills wrongly freed 13 outstation in-transit bills.)
+    const { data: blrBranches } = await supabase
+      .from('branches').select('name').eq('region', 'Bangalore')
+    const bangaloreNames = new Set((blrBranches || []).map(b => b.name))
+    const isDetachable = (b) =>
+      (b.stock_status === 'at_branch' || b.stock_status === 'at_ho') &&
+      (bangaloreNames.has(b.current_branch) || bangaloreNames.has(b.branch_name))
+
+    const ordered = attached
+      .filter(b => isDetachable(b) && Number(b.net_weight || 0) > 0)
+      .sort((a, b) => Number(a.net_weight || 0) - Number(b.net_weight || 0))
     const detachIds = []
     let cumulativeDetachedNet = 0
     for (const bill of ordered) {
@@ -2332,6 +2348,8 @@ async function reconcileBookingOverAttachment({ supabase, bookingId, bookedWeigh
       cumulativeDetachedNet += Number(bill.net_weight || 0)
     }
     if (detachIds.length === 0) {
+      // No Bangalore local bills available to free — leave the booking as-is
+      // rather than touching in-transit / outstation weight.
       return { detached: [], residual_pipeline_g: 0, error: null }
     }
     const { error: detErr } = await supabase
