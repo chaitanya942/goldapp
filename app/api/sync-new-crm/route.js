@@ -26,6 +26,13 @@ function mapTxnType(type) {
   return type.toUpperCase().includes('RELEASED') ? 'TAKEOVER' : 'PHYSICAL'
 }
 
+// Percentage fields (service charge, purity) are bounded 0–100 by definition.
+// Clamp so bad source data can't overflow the numeric column and abort the sync.
+function clampPct(v) {
+  const n = parseFloat(v)
+  return Number.isFinite(n) ? Math.max(0, Math.min(100, n)) : 0
+}
+
 // ── Format Postgres timestamp → YYYY-MM-DD (IST) ─────────────────────────────
 function fmtDate(ts) {
   if (!ts) return null
@@ -127,7 +134,10 @@ async function runSync(request) {
     const allRecords = rows.map(r => {
       const netWeight   = parseFloat(r.net_weight)   || 0
       const finalAmount = parseFloat(r.final_amount)  || 0
-      const svcPct      = parseFloat(r.service_charge) || 0
+      // Clamp service-charge % to 0–100. Some new-CRM quotations carry garbage
+      // values (e.g. 1685.94) that overflow the numeric column and, because the
+      // upsert batches are all-or-nothing, block every new bill in the run.
+      const svcPct      = clampPct(r.service_charge)
       const svcAmount   = parseFloat(r.service_charge_amount) || 0
       const customerName = [r.first_name, r.last_name].filter(Boolean).join(' ').trim() || null
 
@@ -181,19 +191,30 @@ async function runSync(request) {
     // dispatched_at, booking_id and the audit fields are intentionally NOT in
     // the record object, so ON CONFLICT DO UPDATE leaves them untouched for
     // existing rows, while new rows fall back to their DB defaults on INSERT.
+    // Batch for speed, but on any batch error fall back to per-row upserts so a
+    // single bad record (e.g. an overflowing numeric value) only drops itself
+    // and is named in the response, instead of aborting the whole batch and
+    // silently stalling the sync.
     const BATCH = 100
     let synced = 0, errors = 0, lastError = null
+    const failedIds = []
     for (let i = 0; i < allRecords.length; i += BATCH) {
       const batch = allRecords.slice(i, i + BATCH)
       const { error } = await supabaseAdmin
         .from('purchases')
         .upsert(batch, { onConflict: 'application_id,crm_source', ignoreDuplicates: false })
-      if (error) {
-        console.error('New CRM upsert error:', error.message)
-        lastError = error
-        errors += batch.length
-      } else {
-        synced += batch.length
+      if (!error) { synced += batch.length; continue }
+      console.error('New CRM batch failed, retrying per-row:', error.message)
+      for (const rec of batch) {
+        const { error: e1 } = await supabaseAdmin
+          .from('purchases')
+          .upsert([rec], { onConflict: 'application_id,crm_source', ignoreDuplicates: false })
+        if (e1) {
+          console.error(`New CRM row failed ${rec.application_id}: ${e1.message}`)
+          lastError = e1; errors++; failedIds.push(rec.application_id)
+        } else {
+          synced++
+        }
       }
     }
 
@@ -202,8 +223,9 @@ async function runSync(request) {
       total:     rows.length,
       synced,
       errors,
+      failedIds,
       lastError: lastError ? lastError.message : null,
-      message:   `New CRM upsert ${minDate}→${maxDate}: ${allRecords.length} completed bills (${errors} errors)`,
+      message:   `New CRM upsert ${minDate}→${maxDate}: ${allRecords.length} completed bills (${errors} errors${failedIds.length ? `: ${failedIds.join(', ')}` : ''})`,
     })
 
   } catch (err) {

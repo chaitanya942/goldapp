@@ -43,6 +43,13 @@ function mapTxnType(type) {
   return type.toUpperCase().includes('RELEASED') ? 'TAKEOVER' : 'PHYSICAL'
 }
 
+// Percentage fields (service charge, purity) are bounded 0–100 by definition.
+// Clamp to keep bad source data from overflowing the numeric column.
+function clampPct(v) {
+  const n = parseFloat(v)
+  return Number.isFinite(n) ? Math.max(0, Math.min(100, n)) : 0
+}
+
 function fmtDate(ts) {
   if (!ts) return null
   const ist = new Date(new Date(ts).getTime() + 5.5 * 60 * 60 * 1000)
@@ -132,7 +139,10 @@ async function main() {
     const rawCode  = String(r.code || '').trim().replace(/-/g, '')
     const appId    = rawCode.toUpperCase().startsWith('WGKA') ? rawCode.toUpperCase() : `WGKA${rawCode}`
     const finalAmount = parseFloat(r.final_amount)  || 0
-    const svcPct      = parseFloat(r.service_charge) || 0
+    // Clamp the service-charge % to a sane 0–100 range. Some new-CRM quotations
+    // carry garbage values (e.g. 1685.94) that overflow the numeric column and,
+    // because upsert batches are all-or-nothing, block EVERY new bill in the run.
+    const svcPct      = clampPct(r.service_charge)
     const netWeight   = parseFloat(r.net_weight)    || 0
     return {
       application_id:             appId,
@@ -198,12 +208,20 @@ async function main() {
   }
 
   // ── Insert new records ────────────────────────────────────────────────────
+  // Batch for speed, but on any batch error fall back to per-row inserts so a
+  // single bad record (e.g. an overflowing numeric value) only drops itself and
+  // gets named, instead of taking down all 100 bills in the batch.
   let synced = 0, errors = 0
   for (let i = 0; i < newRecords.length; i += 100) {
     const batch = newRecords.slice(i, i + 100)
     const { error } = await supabase.from('purchases').upsert(batch, { onConflict: 'application_id,crm_source', ignoreDuplicates: true })
-    if (error) { console.error('  ❌ Batch error:', error.message); errors += batch.length }
-    else { synced += batch.length; process.stdout.write('.') }
+    if (!error) { synced += batch.length; process.stdout.write('.'); continue }
+    console.error(`\n  ⚠ Batch failed (${error.message}) — retrying ${batch.length} rows individually…`)
+    for (const rec of batch) {
+      const { error: e1 } = await supabase.from('purchases').upsert([rec], { onConflict: 'application_id,crm_source', ignoreDuplicates: true })
+      if (e1) { console.error(`  ❌ ${rec.application_id}: ${e1.message}`); errors++ }
+      else synced++
+    }
   }
 
   console.log(`\n✅ Done: ${synced} inserted, ${statusUpdated} status updates, ${errors} errors`)
