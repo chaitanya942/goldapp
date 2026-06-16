@@ -145,7 +145,10 @@ async function main() {
       COALESCE(orn.wastage, 0)      AS wastage,
       COALESCE(orn.net_weight, 0)   AS net_weight,
       COALESCE(orn.purity, 0)       AS purity,
-      COALESCE(orn.total_amount, 0) AS total_amount
+      COALESCE(orn.total_amount, 0) AS total_amount,
+      -- Final-payment timestamp = the day the purchase actually happened (== invoice
+      -- date). Used as purchase_date for completed bills; null for in-progress ones.
+      fpay.fp AS final_payment_at
     FROM "Transaction" t
     LEFT JOIN "Customer"  c ON c.id = t.customer_id
     LEFT JOIN "Branch"    b ON b.id = t.branch_id
@@ -157,8 +160,14 @@ async function main() {
       SELECT service_charge, service_charge_amount, final_amount
       FROM "Quotation" WHERE transaction_id = t.id ORDER BY created_at DESC LIMIT 1
     ) q ON true
+    LEFT JOIN LATERAL (
+      SELECT MAX(created_at) fp FROM "Payment"
+      WHERE transaction_id = t.id AND status = 'COMPLETED' AND type = 'FINAL_PAYMENT'
+    ) fpay ON true
     LEFT JOIN orn ON orn.transaction_id = t.id
-    WHERE t.created_at >= $1
+    -- created-window for in-progress bills, OR final-payment-window so a bill
+    -- walked-in earlier but PAID recently still syncs (purchase = payment day).
+    WHERE (t.created_at >= $1 OR fpay.fp >= $1)
       AND t.status != 'WALKIN'
     ORDER BY t.created_at DESC
   `, [cutoffDate])
@@ -185,8 +194,10 @@ async function main() {
       application_id:             appId,
       crm_source:                 'new_crm',
       crm_status:                 mapStatus(r.status),
-      purchase_date:              fmtDate(r.created_at),
-      transaction_time:           fmtTime(r.created_at),
+      // Purchase date/time = final-payment date (== invoice date) for completed
+      // bills; created_at for in-progress ones that have no final payment yet.
+      purchase_date:              fmtDate(r.final_payment_at || r.created_at),
+      transaction_time:           fmtTime(r.final_payment_at || r.created_at),
       customer_name:              [r.first_name, r.last_name].filter(Boolean).join(' ').trim() || null,
       phone_number:               r.mobile?.trim() || null,
       branch_name:                aliasBranchName(r.branch_name?.trim()) || null,

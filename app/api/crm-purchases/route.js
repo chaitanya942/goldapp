@@ -1014,13 +1014,14 @@ export async function GET(req) {
             LIMIT 1000
           `,
 
-          // COMPLETED PURCHASES today — the CRM dashboard's "purchased today"
-          // basis. The Case Wise Report (latest_gold_transaction_report) dates a
-          // completed bill by updated_at (which the final payment bumps to today),
-          // NOT by created_at. So a bill walked-in on an earlier day but PAID today
-          // counts as today's purchase. We mirror that: status completed AND
-          // updated_at IST = today. Weight via the same estimation+quotation union
-          // dedup. Returned as rows so the client can region/type-filter the card.
+          // COMPLETED PURCHASES today — dated by the FINAL PAYMENT date (the day
+          // the final payment / invoice was generated), NOT created_at and NOT
+          // updated_at. A purchase belongs to the day its final payment was made.
+          // updated_at is unsafe — any later edit re-floats an old bill into a new
+          // day (confirmed: WGKA-55734/55754 paid 15-Jun showed under 16-Jun after a
+          // 16-Jun edit). Final-payment created_at is immutable and == invoice date
+          // (verified 0 discrepancies across 342 bills). Weight via the same
+          // estimation+quotation union dedup. Returned as rows for region/type filter.
           sql`
             WITH txn_orn AS (
               SELECT q.transaction_id tid, o.ornament_id, o.id::text oid, o.gross_weight gw, o.net_weight nw, o.approve ap, o.created_at ca, 2 sr
@@ -1040,8 +1041,12 @@ export async function GET(req) {
             FROM "Transaction" t
             LEFT JOIN "Branch" b ON b.id = t.branch_id
             LEFT JOIN orn ON orn.tid = t.id
+            JOIN LATERAL (
+              SELECT MAX(created_at) fp FROM "Payment"
+              WHERE transaction_id = t.id AND status = 'COMPLETED' AND type = 'FINAL_PAYMENT'
+            ) fpay ON true
             WHERE t.status = 'FINAL_PAYMENT_COMPLETED'
-              AND (t.updated_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata')::date = ${todayIST}::date
+              AND (fpay.fp AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata')::date = ${todayIST}::date
           `,
         ])
 

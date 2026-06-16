@@ -138,7 +138,10 @@ async function runSync(request) {
         COALESCE(orn.wastage, 0)      AS wastage,
         COALESCE(orn.net_weight, 0)   AS net_weight,
         COALESCE(orn.purity, 0)       AS purity,
-        COALESCE(orn.total_amount, 0) AS total_amount
+        COALESCE(orn.total_amount, 0) AS total_amount,
+        -- Final-payment timestamp = the day the purchase actually happened (== the
+        -- invoice date). This is the purchase_date we store, NOT created_at.
+        fpay.fp AS final_payment_at
       FROM "Transaction" t
       LEFT JOIN "Customer" c ON c.id = t.customer_id
       LEFT JOIN "Branch"   b ON b.id = t.branch_id
@@ -150,10 +153,17 @@ async function runSync(request) {
         SELECT service_charge, service_charge_amount, final_amount
         FROM "Quotation" WHERE transaction_id = t.id ORDER BY created_at DESC LIMIT 1
       ) q ON true
+      LEFT JOIN LATERAL (
+        SELECT MAX(created_at) fp FROM "Payment"
+        WHERE transaction_id = t.id AND status = 'COMPLETED' AND type = 'FINAL_PAYMENT'
+      ) fpay ON true
       LEFT JOIN orn ON orn.transaction_id = t.id
-      WHERE t.created_at >= $1
+      -- Window on the FINAL-PAYMENT date, not created_at: a bill walked-in before
+      -- the cutoff but PAID recently is a recent purchase and must still sync.
+      -- (created_at-based windowing silently dropped such bills from the master.)
+      WHERE fpay.fp >= $1
         AND t.status = 'FINAL_PAYMENT_COMPLETED'
-      ORDER BY t.created_at DESC
+      ORDER BY fpay.fp DESC
     `, [cutoffDate])
 
     if (!rows.length) {
@@ -179,8 +189,11 @@ async function runSync(request) {
         application_id:             appId,
         crm_source:                 'new_crm',
         crm_status:                 mapStatus(r.status),
-        purchase_date:              fmtDate(r.created_at),
-        transaction_time:           fmtTime(r.created_at),
+        // Purchase date/time = when the final payment was made (== invoice date).
+        // Falls back to created_at only if a completed bill somehow lacks a
+        // final-payment row (shouldn't happen for FINAL_PAYMENT_COMPLETED).
+        purchase_date:              fmtDate(r.final_payment_at || r.created_at),
+        transaction_time:           fmtTime(r.final_payment_at || r.created_at),
         customer_name:              customerName,
         phone_number:               r.mobile?.trim() || null,
         branch_name:                aliasBranchName(r.branch_name?.trim()) || null,
