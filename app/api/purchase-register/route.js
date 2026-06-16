@@ -165,13 +165,14 @@ async function fetchFppNewCrm(from, to) {
       quo AS (SELECT DISTINCT ON (transaction_id) transaction_id, service_charge, service_charge_amount, final_amount, COALESCE(release_amount,0) takeover FROM "Quotation" ORDER BY transaction_id, created_at DESC),
       pay AS (SELECT DISTINCT ON (transaction_id) transaction_id, utr, processor, bank_name, account_holder_name, account_number, ifsc_code FROM "Payment" WHERE action='DEBITED' ORDER BY transaction_id, created_at DESC)
       SELECT t.code, t.created_at, t.transaction_type,
-             trim(coalesce(cu.first_name,'')||' '||coalesce(cu.last_name,'')) cust, cu.mobile, b.name branch,
+             trim(coalesce(NULLIF(btrim(w.first_name),''), cu.first_name, '')||' '||coalesce(NULLIF(btrim(w.last_name),''), cu.last_name, '')) cust, cu.mobile, b.name branch,
              orn.grs, orn.stone, orn.wastage, orn.net, orn.purity, orn.gross_amount,
              quo.service_charge, quo.service_charge_amount, quo.final_amount, quo.takeover,
              pay.utr, pay.processor, pay.bank_name, pay.account_holder_name, pay.account_number, pay.ifsc_code
       FROM "Transaction" t
       LEFT JOIN "Customer" cu ON cu.id=t.customer_id
       LEFT JOIN "Branch"   b  ON b.id=t.branch_id
+      LEFT JOIN LATERAL (SELECT first_name, last_name FROM "Walkin" WHERE transaction_id=t.id ORDER BY created_at DESC LIMIT 1) w ON true
       LEFT JOIN orn ON orn.transaction_id=t.id
       LEFT JOIN quo ON quo.transaction_id=t.id
       LEFT JOIN pay ON pay.transaction_id=t.id

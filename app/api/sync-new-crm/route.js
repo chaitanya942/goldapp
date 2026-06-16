@@ -110,7 +110,12 @@ async function runSync(request) {
       )
       SELECT
         t.id, t.code, t.status, t.transaction_type, t.created_at, t.branch_id, t.customer_id,
-        c.first_name, c.last_name, c.mobile, b.name AS branch_name,
+        -- Customer name comes from the WALKIN record (per DevOps, that's what
+        -- the branch-facing CRM dashboard shows — it carries the KYC-stage name).
+        -- Falls back to the Customer record only if there's no Walkin row.
+        COALESCE(NULLIF(btrim(w.first_name), ''), c.first_name) AS first_name,
+        COALESCE(NULLIF(btrim(w.last_name),  ''), c.last_name)  AS last_name,
+        c.mobile, b.name AS branch_name,
         q.service_charge, q.service_charge_amount, q.final_amount,
         COALESCE(orn.gross_weight, 0) AS gross_weight,
         COALESCE(orn.stone_weight, 0) AS stone_weight,
@@ -121,6 +126,10 @@ async function runSync(request) {
       FROM "Transaction" t
       LEFT JOIN "Customer" c ON c.id = t.customer_id
       LEFT JOIN "Branch"   b ON b.id = t.branch_id
+      LEFT JOIN LATERAL (
+        SELECT first_name, last_name FROM "Walkin"
+        WHERE transaction_id = t.id ORDER BY created_at DESC LIMIT 1
+      ) w ON true
       LEFT JOIN LATERAL (
         SELECT service_charge, service_charge_amount, final_amount
         FROM "Quotation" WHERE transaction_id = t.id ORDER BY created_at DESC LIMIT 1
