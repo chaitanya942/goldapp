@@ -34,6 +34,7 @@ import CollectionAudit from '../../components/consignments/CollectionAudit'
 import AuditRoster from '../../components/consignments/AuditRoster'
 import AuditReport from '../../components/consignments/AuditReport'
 import DiscrepancyCases from '../../components/consignments/DiscrepancyCases'
+import PurchaseRegister from '../../components/consignments/PurchaseRegister'
 import ConsignmentAnalytics from '../../components/consignments/ConsignmentAnalytics'
 import ConsignmentApprovals from '../../components/consignments/ConsignmentApprovals'
 import EodStockReport from '../../components/consignments/EodStockReport'
@@ -245,6 +246,7 @@ function DashboardShell() {
       case 'audit-roster':            return <AuditRoster />
       case 'audit-report':            return <AuditReport />
       case 'discrepancy-cases':       return <DiscrepancyCases />
+      case 'purchase-register':       return <PurchaseRegister />
       case 'consignment-analytics':  return <ConsignmentAnalytics />
       case 'melting':             return <ComingSoon title="Melting" />
       case 'sales':               return <ComingSoon title="Sales" />
