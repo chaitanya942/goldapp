@@ -98,31 +98,46 @@ async function main() {
   console.log(`📅 Syncing from ${cutoffDate}...`)
 
   // ── Pull from new CRM ─────────────────────────────────────────────────────
+  // Dedupe Ornament rows by ornament_id (the new CRM can leave a duplicate
+  // approve=false copy alongside the approved row — summing both doubles the
+  // weight). Keep one per (transaction, ornament_id), preferring approved/latest.
   const { rows } = await client.query(`
+    WITH orn_dedup AS (
+      SELECT DISTINCT ON (q.transaction_id, COALESCE(o.ornament_id, o.id::text))
+             q.transaction_id, o.gross_weight, o.stone_weight, o.wastage, o.net_weight, o.purity, o.amount
+      FROM "Quotation" q
+      JOIN "Ornament" o ON o.quotation_id = q.id
+      ORDER BY q.transaction_id, COALESCE(o.ornament_id, o.id::text), o.approve DESC NULLS LAST, o.created_at DESC
+    ),
+    orn AS (
+      SELECT transaction_id,
+             SUM(gross_weight) gross_weight, SUM(stone_weight) stone_weight,
+             SUM(wastage) wastage, SUM(net_weight) net_weight,
+             CASE WHEN SUM(net_weight) > 0 THEN SUM(net_weight * purity) / SUM(net_weight) ELSE 0 END purity,
+             SUM(amount) total_amount
+      FROM orn_dedup GROUP BY transaction_id
+    )
     SELECT
       t.id, t.code, t.status, t.transaction_type, t.created_at,
       c.first_name, c.last_name, c.mobile,
       b.name AS branch_name,
       q.service_charge, q.service_charge_amount, q.final_amount,
-      COALESCE(SUM(o.gross_weight), 0) AS gross_weight,
-      COALESCE(SUM(o.stone_weight), 0) AS stone_weight,
-      COALESCE(SUM(o.wastage), 0)      AS wastage,
-      COALESCE(SUM(o.net_weight), 0)   AS net_weight,
-      CASE WHEN COALESCE(SUM(o.net_weight), 0) > 0
-        THEN SUM(o.net_weight * o.purity) / SUM(o.net_weight)
-        ELSE 0
-      END AS purity,
-      COALESCE(SUM(o.amount), 0) AS total_amount
+      COALESCE(orn.gross_weight, 0) AS gross_weight,
+      COALESCE(orn.stone_weight, 0) AS stone_weight,
+      COALESCE(orn.wastage, 0)      AS wastage,
+      COALESCE(orn.net_weight, 0)   AS net_weight,
+      COALESCE(orn.purity, 0)       AS purity,
+      COALESCE(orn.total_amount, 0) AS total_amount
     FROM "Transaction" t
     LEFT JOIN "Customer"  c ON c.id = t.customer_id
     LEFT JOIN "Branch"    b ON b.id = t.branch_id
-    LEFT JOIN "Quotation" q ON q.transaction_id = t.id
-    LEFT JOIN "Ornament"  o ON o.quotation_id = q.id
+    LEFT JOIN LATERAL (
+      SELECT service_charge, service_charge_amount, final_amount
+      FROM "Quotation" WHERE transaction_id = t.id ORDER BY created_at DESC LIMIT 1
+    ) q ON true
+    LEFT JOIN orn ON orn.transaction_id = t.id
     WHERE t.created_at >= $1
       AND t.status != 'WALKIN'
-    GROUP BY t.id, t.code, t.status, t.transaction_type, t.created_at,
-             c.first_name, c.last_name, c.mobile, b.name,
-             q.service_charge, q.service_charge_amount, q.final_amount
     ORDER BY t.created_at DESC
   `, [cutoffDate])
 

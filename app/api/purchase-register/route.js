@@ -148,13 +148,19 @@ async function fetchFppNewCrm(from, to) {
   await client.connect()
   try {
     const { rows } = await client.query(`
-      WITH orn AS (
-        SELECT q.transaction_id,
-               COALESCE(SUM(o.gross_weight),0) grs, COALESCE(SUM(o.stone_weight),0) stone,
-               COALESCE(SUM(o.wastage),0) wastage, COALESCE(SUM(o.net_weight),0) net,
-               CASE WHEN COALESCE(SUM(o.net_weight),0)>0 THEN SUM(o.net_weight*o.purity)/SUM(o.net_weight) ELSE 0 END purity,
-               COALESCE(SUM(o.amount),0) gross_amount
-        FROM "Quotation" q LEFT JOIN "Ornament" o ON o.quotation_id=q.id GROUP BY q.transaction_id
+      WITH orn_dedup AS (
+        SELECT DISTINCT ON (q.transaction_id, COALESCE(o.ornament_id, o.id::text))
+               q.transaction_id, o.gross_weight, o.stone_weight, o.wastage, o.net_weight, o.purity, o.amount
+        FROM "Quotation" q JOIN "Ornament" o ON o.quotation_id=q.id
+        ORDER BY q.transaction_id, COALESCE(o.ornament_id, o.id::text), o.approve DESC NULLS LAST, o.created_at DESC
+      ),
+      orn AS (
+        SELECT transaction_id,
+               COALESCE(SUM(gross_weight),0) grs, COALESCE(SUM(stone_weight),0) stone,
+               COALESCE(SUM(wastage),0) wastage, COALESCE(SUM(net_weight),0) net,
+               CASE WHEN COALESCE(SUM(net_weight),0)>0 THEN SUM(net_weight*purity)/SUM(net_weight) ELSE 0 END purity,
+               COALESCE(SUM(amount),0) gross_amount
+        FROM orn_dedup GROUP BY transaction_id
       ),
       quo AS (SELECT DISTINCT ON (transaction_id) transaction_id, service_charge, service_charge_amount, final_amount, COALESCE(release_amount,0) takeover FROM "Quotation" ORDER BY transaction_id, created_at DESC),
       pay AS (SELECT DISTINCT ON (transaction_id) transaction_id, utr, processor, bank_name, account_holder_name, account_number, ifsc_code FROM "Payment" WHERE action='DEBITED' ORDER BY transaction_id, created_at DESC)
