@@ -962,7 +962,14 @@ export async function GET(req) {
                      CASE WHEN SUM(nw)>0 THEN SUM(nw*pu)/SUM(nw) ELSE 0 END p
               FROM orn_dd GROUP BY tid
             ),
-            pledge AS (SELECT r.transaction_id tid, SUM(pc.gross_weight) g, SUM(pc.net_weight) n FROM "Release" r JOIN "PledgeCompany" pc ON pc.release_id = r.id GROUP BY r.transaction_id),
+            pledge AS (
+              SELECT r.transaction_id tid, SUM(pc.gross_weight) g, SUM(pc.net_weight) n, SUM(pc.final_amount) amt,
+                     -- PledgeCompany.purity is free text; weight only the numeric ones
+                     SUM(pc.net_weight * CASE WHEN btrim(COALESCE(pc.purity,'')) ~ '^[0-9.]+$' THEN pc.purity::float END) pw,
+                     SUM(CASE WHEN btrim(COALESCE(pc.purity,'')) ~ '^[0-9.]+$' THEN pc.net_weight END) pwn
+              FROM "Release" r JOIN "PledgeCompany" pc ON pc.release_id = r.id GROUP BY r.transaction_id
+            ),
+            rel AS (SELECT transaction_id tid, SUM(total_release_amount) tot FROM "Release" GROUP BY transaction_id),
             ord AS (SELECT transaction_id tid, SUM(branch_gross_weight) g, SUM(branch_stone_weight) s, SUM(branch_wastage) w, SUM(branch_net_weight) n, AVG(NULLIF(billing_purity,0)) p FROM "Order" GROUP BY transaction_id),
             leadw AS (SELECT DISTINCT ON (transaction_id) transaction_id tid, approx_gross_weight ag FROM "Lead" WHERE transaction_id IS NOT NULL ORDER BY transaction_id, created_at DESC)
             SELECT
@@ -972,8 +979,11 @@ export async function GET(req) {
               TRIM(COALESCE(NULLIF(btrim(wk.first_name),''), c.first_name, '') || ' ' || COALESCE(NULLIF(btrim(wk.last_name),''), c.last_name, '')) AS cust_name,
               c.mobile AS cust_mobile,
               b.name AS branch_name,
-              COALESCE(q.final_amount, 0)::float AS amount,
-              q.service_charge::float AS serv_chr,
+              -- Amount resolves like the weight: quotation → estimation (physical,
+              -- before a quotation is cut) → pledge → release total. Pledge-stage
+              -- bills often have no amount computed yet → stays 0/blank.
+              COALESCE(NULLIF(q.final_amount,0), NULLIF(est.final_amount,0), NULLIF(pl.amt,0), NULLIF(rl.tot,0), 0)::float AS amount,
+              COALESCE(q.service_charge, est.service_charge)::float AS serv_chr,
               (CASE WHEN COALESCE(orn.n,0)>0 THEN 'ornament'
                     WHEN COALESCE(pl.n,0)>0  THEN 'pledge'
                     WHEN COALESCE(od.n,0)>0  THEN 'order'
@@ -984,6 +994,7 @@ export async function GET(req) {
               (CASE WHEN COALESCE(orn.n,0)>0 THEN orn.w WHEN COALESCE(od.n,0)>0 THEN od.w ELSE 0 END)::float AS wastage,
               (CASE WHEN COALESCE(orn.n,0)>0 THEN orn.n WHEN COALESCE(pl.n,0)>0 THEN pl.n WHEN COALESCE(od.n,0)>0 THEN od.n ELSE 0 END)::float AS net_weight,
               (CASE WHEN COALESCE(orn.n,0)>0 THEN ROUND(orn.p::numeric,1)
+                    WHEN COALESCE(pl.n,0)>0 AND COALESCE(pl.pwn,0)>0 THEN ROUND((pl.pw/pl.pwn)::numeric,1)
                     WHEN COALESCE(od.n,0)>0  THEN ROUND(od.p::numeric,1)
                     ELSE NULL END)::float AS avg_purity
             FROM "Transaction" t
@@ -991,8 +1002,10 @@ export async function GET(req) {
             LEFT JOIN "Branch"   b ON b.id = t.branch_id
             LEFT JOIN LATERAL (SELECT first_name, last_name FROM "Walkin" WHERE transaction_id = t.id ORDER BY created_at DESC LIMIT 1) wk ON true
             LEFT JOIN LATERAL (SELECT final_amount, service_charge FROM "Quotation" WHERE transaction_id = t.id ORDER BY created_at DESC LIMIT 1) q ON true
+            LEFT JOIN LATERAL (SELECT final_amount, service_charge FROM "Estimation" WHERE transaction_id = t.id ORDER BY created_at DESC LIMIT 1) est ON true
             LEFT JOIN orn       ON orn.tid = t.id
             LEFT JOIN pledge pl ON pl.tid = t.id
+            LEFT JOIN rel    rl ON rl.tid = t.id
             LEFT JOIN ord    od ON od.tid = t.id
             LEFT JOIN leadw  ld ON ld.tid = t.id
             WHERE t.created_at BETWEEN ${todayStart} AND ${todayEnd}
