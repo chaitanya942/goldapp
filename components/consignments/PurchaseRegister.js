@@ -71,7 +71,8 @@ export default function PurchaseRegister() {
       <div style={{ marginBottom: 4 }}>
         <h1 style={{ fontSize: 24, fontWeight: 800, color: t.text1, margin: 0 }}>Purchase Register</h1>
         <p style={{ fontSize: 13, color: t.text3, marginTop: 4 }}>
-          Daily approved/completed bills across <strong>both CRMs</strong>, in the standard 25-column report — download as CSV (opens in Excel).
+          Daily bills across <strong>both CRMs</strong> — completed purchases plus any at the
+          <strong> payment-pending</strong> stage (payment done, final payment not yet made). 25-column report, download as CSV (opens in Excel).
         </p>
       </div>
 
@@ -109,6 +110,8 @@ export default function PurchaseRegister() {
         <>
           <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', marginTop: 14 }}>
             {stat('Total bills', res.total, t.gold)}
+            {stat('Completed', res.completedCount ?? '—', t.green || '#3aaa6a')}
+            {stat('Payment pending', res.pendingCount ?? '—', t.orange || '#e58a3b')}
             {stat('New CRM', res.newCount, t.blue)}
             {stat('Old CRM', res.oldCount, t.text2)}
           </div>
@@ -130,7 +133,7 @@ export default function PurchaseRegister() {
           </div>
 
           <div style={{ fontSize: 11.5, color: t.text4, marginTop: 14, lineHeight: 1.5 }}>
-            Note: <em>Bank Branch</em> isn’t stored in the new CRM (blank for new-CRM rows), and <em>Bank Name</em> is the payment rail/processor. Old-CRM <em>Service Charge Amount</em> is computed from the % when not stored.
+            <strong>Status</strong> = Completed (final payment made) or Payment Pending (final payment not yet made). Weights/amounts come from the reconciled master data, so completed totals tie out to Purchase Reports. <em>Bank Branch</em> isn’t stored in the new CRM (blank for new-CRM rows), and <em>Bank Name</em> is the payment rail/processor.
           </div>
         </>
       )}
