@@ -103,25 +103,27 @@ async function main() {
   // weight). Keep one per (transaction, ornament_id), preferring approved/latest.
   const { rows } = await client.query(`
     WITH txn_orn AS (
-      -- Ornaments link via estimation_id (pre-quotation) OR quotation_id (after).
-      -- Gather both and dedupe by ornament_id so a bill whose ornaments are still
-      -- estimation-linked doesn't sync as 0 weight (the quotation copy duplicates
-      -- the estimation copy once a quotation is cut).
+      -- Weight basis = APPROVED ornaments only (approve=true), matching the CRM
+      -- dashboard. Gather approved ornaments via BOTH estimation_id and
+      -- quotation_id links, dedupe by ornament_id keeping the latest. Unapproved/
+      -- superseded rows are excluded (they over-counted 15-Jun by ~84 g).
       SELECT q.transaction_id, o.ornament_id, o.id::text AS oid,
              o.gross_weight, o.stone_weight, o.wastage, o.net_weight, o.purity, o.amount,
-             o.approve, o.created_at, 2 AS sr
+             o.created_at
       FROM "Quotation" q JOIN "Ornament" o ON o.quotation_id = q.id
+      WHERE o.approve = true
       UNION ALL
       SELECT e.transaction_id, o.ornament_id, o.id::text,
              o.gross_weight, o.stone_weight, o.wastage, o.net_weight, o.purity, o.amount,
-             o.approve, o.created_at, 1
+             o.created_at
       FROM "Estimation" e JOIN "Ornament" o ON o.estimation_id = e.id
+      WHERE o.approve = true
     ),
     orn_dedup AS (
       SELECT DISTINCT ON (transaction_id, COALESCE(ornament_id, oid))
              transaction_id, gross_weight, stone_weight, wastage, net_weight, purity, amount
       FROM txn_orn
-      ORDER BY transaction_id, COALESCE(ornament_id, oid), sr DESC, approve DESC NULLS LAST, created_at DESC
+      ORDER BY transaction_id, COALESCE(ornament_id, oid), created_at DESC
     ),
     orn AS (
       SELECT transaction_id,

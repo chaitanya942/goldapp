@@ -1020,19 +1020,19 @@ export async function GET(req) {
           // updated_at is unsafe — any later edit re-floats an old bill into a new
           // day (confirmed: WGKA-55734/55754 paid 15-Jun showed under 16-Jun after a
           // 16-Jun edit). Final-payment created_at is immutable and == invoice date
-          // (verified 0 discrepancies across 342 bills). Weight via the same
-          // estimation+quotation union dedup. Returned as rows for region/type filter.
+          // (verified 0 discrepancies across 342 bills). Weight = APPROVED
+          // ornaments only (approve=true), matching the dashboard exactly.
           sql`
             WITH txn_orn AS (
-              SELECT q.transaction_id tid, o.ornament_id, o.id::text oid, o.gross_weight gw, o.net_weight nw, o.approve ap, o.created_at ca, 2 sr
-              FROM "Quotation" q JOIN "Ornament" o ON o.quotation_id = q.id
+              SELECT q.transaction_id tid, o.ornament_id, o.id::text oid, o.gross_weight gw, o.net_weight nw, o.created_at ca
+              FROM "Quotation" q JOIN "Ornament" o ON o.quotation_id = q.id WHERE o.approve = true
               UNION ALL
-              SELECT e.transaction_id, o.ornament_id, o.id::text, o.gross_weight, o.net_weight, o.approve, o.created_at, 1
-              FROM "Estimation" e JOIN "Ornament" o ON o.estimation_id = e.id
+              SELECT e.transaction_id, o.ornament_id, o.id::text, o.gross_weight, o.net_weight, o.created_at
+              FROM "Estimation" e JOIN "Ornament" o ON o.estimation_id = e.id WHERE o.approve = true
             ),
             orn_dd AS (
               SELECT DISTINCT ON (tid, COALESCE(ornament_id, oid)) tid, gw, nw
-              FROM txn_orn ORDER BY tid, COALESCE(ornament_id, oid), sr DESC, ap DESC NULLS LAST, ca DESC
+              FROM txn_orn ORDER BY tid, COALESCE(ornament_id, oid), ca DESC
             ),
             orn AS (SELECT tid, SUM(gw) g, SUM(nw) n FROM orn_dd GROUP BY tid)
             SELECT t.code AS bill_no, t.transaction_type, b.name AS branch_name,
