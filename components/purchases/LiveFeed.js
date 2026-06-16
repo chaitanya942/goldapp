@@ -1180,7 +1180,7 @@ function OldCrmTab({
 /* ════════════════════════════════════════════════════════════════ */
 
 /* ── Hero Number (clickable) ── */
-function HeroNum({ label, value, color, t, small, muted, onClick, active, weight, grossWt, netWt }) {
+function HeroNum({ label, value, color, t, small, muted, onClick, active, weight, grossWt, netWt, noWtCount }) {
   return (
     <div
       onClick={onClick}
@@ -1208,14 +1208,23 @@ function HeroNum({ label, value, color, t, small, muted, onClick, active, weight
         {label}
       </span>
       {(grossWt != null || netWt != null) ? (
-        ((grossWt > 0) || (netWt > 0)) && (
+        (((grossWt > 0) || (netWt > 0)) || noWtCount > 0) && (
           <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginTop: 3, gap: 1 }}>
-            <span style={{ fontSize: '.55rem', color: active ? `${color}aa` : t.text4, fontFamily: 'ui-monospace,monospace', letterSpacing: '.03em' }}>
-              {fmtWt(grossWt || 0)} <span style={{ opacity: .6 }}>gross</span>
-            </span>
-            <span style={{ fontSize: '.55rem', color: active ? color : t.text3, fontFamily: 'ui-monospace,monospace', letterSpacing: '.03em', fontWeight: 600 }}>
-              {fmtWt(netWt || 0)} <span style={{ opacity: .6 }}>net</span>
-            </span>
+            {((grossWt > 0) || (netWt > 0)) && (
+              <>
+                <span style={{ fontSize: '.55rem', color: active ? `${color}aa` : t.text4, fontFamily: 'ui-monospace,monospace', letterSpacing: '.03em' }}>
+                  {fmtWt(grossWt || 0)} <span style={{ opacity: .6 }}>gross</span>
+                </span>
+                <span style={{ fontSize: '.55rem', color: active ? color : t.text3, fontFamily: 'ui-monospace,monospace', letterSpacing: '.03em', fontWeight: 600 }}>
+                  {fmtWt(netWt || 0)} <span style={{ opacity: .6 }}>net</span>
+                </span>
+              </>
+            )}
+            {noWtCount > 0 && (
+              <span title="Bills with no weight recorded yet (items not weighed)" style={{ fontSize: '.52rem', color: t.red, fontWeight: 600, letterSpacing: '.03em', marginTop: ((grossWt > 0) || (netWt > 0)) ? 2 : 0 }}>
+                {noWtCount} no wt
+              </span>
+            )}
           </span>
         )
       ) : (weight > 0 && (
@@ -1738,6 +1747,7 @@ const IN_PROGRESS_STATUSES = [
 
 function NewCrmTab({ t, newCrmTxns, newCrmError, regionFilter, regions, isToday, newEventCount, clearNewEvents }) {
   const [activeMetric, setActiveMetric] = useState(null)
+  const [typeFilter, setTypeFilter] = useState('')   // '' | 'physical' | 'takeover'
   const [tlOpen, setTlOpen] = useState(false)
   const [tlSearch, setTlSearch] = useState('')
   const toggleMetric = key => setActiveMetric(prev => prev === key ? null : key)
@@ -1760,9 +1770,14 @@ function NewCrmTab({ t, newCrmTxns, newCrmError, regionFilter, regions, isToday,
     )
   }
 
-  // Region filter
-  const txns    = regionFilter ? newCrmTxns.filter(tx => tx.region === regionFilter) : newCrmTxns
+  // Region filter, then transaction-type filter (Physical vs Takeover/released gold)
+  const regionTxns = regionFilter ? newCrmTxns.filter(tx => tx.region === regionFilter) : newCrmTxns
+  const txns    = typeFilter === 'physical' ? regionTxns.filter(tx => tx.transaction_type === 'PHYSICAL_GOLD')
+                : typeFilter === 'takeover' ? regionTxns.filter(tx => tx.transaction_type === 'RELEASED_GOLD')
+                : regionTxns
   const allTxns = newCrmTxns
+  // Bills with no weight in ANY source (items not weighed yet) — weight_source==='none'
+  const noWt = (arr) => arr.filter(tx => (Number(tx.net_weight) || 0) === 0 && (Number(tx.gross_weight) || 0) === 0).length
 
   // Derived counts
   const walkinTxns     = txns.filter(tx => tx.status === 'WALKIN')
@@ -1813,8 +1828,27 @@ function NewCrmTab({ t, newCrmTxns, newCrmError, regionFilter, regions, isToday,
       {/* ──────── 1. CUSTOMER JOURNEY ──────── */}
       <div>
         <SectionLabel t={t}>Customer Journey · New CRM</SectionLabel>
+        {/* Transaction-type filter — All / Physical / Takeover (released gold) */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: '.58rem', color: t.text4, letterSpacing: '.08em' }}>TYPE</span>
+          {[
+            { key: '',         label: 'All',      n: regionTxns.length },
+            { key: 'physical', label: 'Physical', n: regionTxns.filter(tx => tx.transaction_type === 'PHYSICAL_GOLD').length },
+            { key: 'takeover', label: 'Takeover', n: regionTxns.filter(tx => tx.transaction_type === 'RELEASED_GOLD').length },
+          ].map(o => (
+            <button key={o.key || 'all'} onClick={() => setTypeFilter(o.key)} style={{
+              padding: '4px 12px', borderRadius: 999, fontSize: '.62rem', cursor: 'pointer',
+              border: `1px solid ${typeFilter === o.key ? t.gold : t.border}`,
+              background: typeFilter === o.key ? `${t.gold}18` : 'transparent',
+              color: typeFilter === o.key ? t.gold : t.text3,
+              fontWeight: typeFilter === o.key ? 600 : 400, transition: 'all .15s', whiteSpace: 'nowrap',
+            }}>
+              {o.label} <span style={{ opacity: .6, fontFamily: 'ui-monospace,monospace' }}>{o.n}</span>
+            </button>
+          ))}
+        </div>
         <div className="lf-hero" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0, flexWrap: 'wrap', background: t.surface, borderRadius: 16, border: `1px solid ${t.border}`, padding: '28px 16px', boxShadow: `0 4px 20px rgba(0,0,0,.12), inset 0 1px 0 ${t.border}`, backdropFilter: 'blur(4px)' }}>
-          <HeroNum label="Total Today"  value={total}      color={t.blue}   t={t} grossWt={totalGr} netWt={totalWt}      active={activeMetric==='total'}      onClick={() => toggleMetric('total')} />
+          <HeroNum label="Total Today"  value={total}      color={t.blue}   t={t} grossWt={totalGr} netWt={totalWt}      noWtCount={noWt(txns)}          active={activeMetric==='total'}      onClick={() => toggleMetric('total')} />
           <FlowArrow t={t} pct={progressedPct || null} />
           <div style={{
             position:'relative',
@@ -1831,8 +1865,8 @@ function NewCrmTab({ t, newCrmTxns, newCrmError, regionFilter, regions, isToday,
             </div>
             <div style={{ position:'relative', display:'flex', alignItems:'center', gap:8 }}>
               {[
-                { node: <HeroNum label="In Progress" value={inProgress} color={t.orange} t={t} grossWt={inProgressGr} netWt={inProgressWt} active={activeMetric==='inprogress'} onClick={() => toggleMetric('inprogress')} />, color: t.orange },
-                { node: <HeroNum label="Completed"   value={completed}  color={t.green}  t={t} grossWt={completedGr} netWt={completedWt}  active={activeMetric==='completed'}  onClick={() => toggleMetric('completed')}  />, color: t.green  },
+                { node: <HeroNum label="In Progress" value={inProgress} color={t.orange} t={t} grossWt={inProgressGr} netWt={inProgressWt} noWtCount={noWt(inProgressTxns)} active={activeMetric==='inprogress'} onClick={() => toggleMetric('inprogress')} />, color: t.orange },
+                { node: <HeroNum label="Completed"   value={completed}  color={t.green}  t={t} grossWt={completedGr} netWt={completedWt}  noWtCount={noWt(completedTxns)}  active={activeMetric==='completed'}  onClick={() => toggleMetric('completed')}  />, color: t.green  },
               ].map((item, i) => (
                 <div key={i} style={{ display:'flex', alignItems:'center', gap:8 }}>
                   {i > 0 && <FlowArrow t={t} pct={completedOfProgPct || null} />}
@@ -1851,15 +1885,15 @@ function NewCrmTab({ t, newCrmTxns, newCrmError, regionFilter, regions, isToday,
             </div>
           </div>
           <FlowSep t={t} />
-          <HeroNum label="At Walk-in"   value={walkinTxns.length}     color={t.blue}   t={t} small grossWt={walkinGr} netWt={walkinWt}         active={activeMetric==='walkin'}     onClick={() => toggleMetric('walkin')} />
+          <HeroNum label="At Walk-in"   value={walkinTxns.length}     color={t.blue}   t={t} small grossWt={walkinGr} netWt={walkinWt}         noWtCount={noWt(walkinTxns)}     active={activeMetric==='walkin'}     onClick={() => toggleMetric('walkin')} />
           <FlowSep t={t} />
-          <HeroNum label="Estimation"   value={estimationTxns.length} color={t.orange} t={t} small grossWt={estimationGr} netWt={estimationWt} active={activeMetric==='estimation'} onClick={() => toggleMetric('estimation')} />
+          <HeroNum label="Estimation"   value={estimationTxns.length} color={t.orange} t={t} small grossWt={estimationGr} netWt={estimationWt} noWtCount={noWt(estimationTxns)} active={activeMetric==='estimation'} onClick={() => toggleMetric('estimation')} />
           <FlowSep t={t} />
-          <HeroNum label="KYC"          value={kycTxns.length}        color={t.purple} t={t} small grossWt={kycGr} netWt={kycWt}               active={activeMetric==='kyc'}        onClick={() => toggleMetric('kyc')} />
+          <HeroNum label="KYC"          value={kycTxns.length}        color={t.purple} t={t} small grossWt={kycGr} netWt={kycWt}               noWtCount={noWt(kycTxns)}        active={activeMetric==='kyc'}        onClick={() => toggleMetric('kyc')} />
           <FlowSep t={t} />
-          <HeroNum label="Payment Due"  value={paymentTxns.length}    color={t.gold}   t={t} small grossWt={paymentGr} netWt={paymentWt}       active={activeMetric==='payment'}    onClick={() => toggleMetric('payment')} />
+          <HeroNum label="Payment Due"  value={paymentTxns.length}    color={t.gold}   t={t} small grossWt={paymentGr} netWt={paymentWt}       noWtCount={noWt(paymentTxns)}    active={activeMetric==='payment'}    onClick={() => toggleMetric('payment')} />
           <FlowSep t={t} />
-          <HeroNum label="Walkout"      value={walkout}                color={t.red}    t={t} small grossWt={walkoutGr} netWt={walkoutWt}       active={activeMetric==='walkout'}    onClick={() => toggleMetric('walkout')} />
+          <HeroNum label="Walkout"      value={walkout}                color={t.red}    t={t} small grossWt={walkoutGr} netWt={walkoutWt}       noWtCount={noWt(walkoutTxns)}    active={activeMetric==='walkout'}    onClick={() => toggleMetric('walkout')} />
         </div>
         {/* ── Stats ribbon ── */}
         <div style={{ display:'flex', gap:0, marginTop:10, background:t.card, border:`1px solid ${t.border}`, borderRadius:14, overflow:'hidden', flexWrap:'wrap', boxShadow:`0 2px 8px rgba(0,0,0,.08)` }}>
