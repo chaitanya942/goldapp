@@ -2153,7 +2153,9 @@ function NewCrmTxnTable({ rows, t }) {
                   <span style={{ fontSize: '.72rem', color: t.text1, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.cust_name || '—'}</span>
                   <span style={{ fontSize: '.65rem', color: t.text2, fontFamily: 'ui-monospace,monospace' }}>{r.cust_mobile || '—'}</span>
                   <span style={{ fontSize: '.65rem', color: t.text2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.branch_name || '—'}</span>
-                  <span style={{ fontSize: '.68rem', color: t.text1, fontFamily: 'ui-monospace,monospace' }}>{Number(r.gross_weight||0) > 0 ? `${Number(r.gross_weight).toFixed(2)}g` : '—'}</span>
+                  <span title={r.weight_source === 'lead_approx' ? 'Approx weight declared at walk-in (not yet weighed)' : r.weight_source === 'none' ? 'Items not weighed yet' : ''}
+                    style={{ fontSize: '.68rem', color: r.weight_source === 'lead_approx' ? t.text3 : t.text1, fontStyle: r.weight_source === 'lead_approx' ? 'italic' : 'normal', fontFamily: 'ui-monospace,monospace' }}>
+                    {Number(r.gross_weight||0) > 0 ? `${r.weight_source === 'lead_approx' ? '~' : ''}${Number(r.gross_weight).toFixed(2)}g` : '—'}</span>
                   <span style={{ fontSize: '.68rem', color: t.text1, fontFamily: 'ui-monospace,monospace' }}>{Number(r.net_weight||0) > 0 ? `${Number(r.net_weight).toFixed(2)}g` : '—'}</span>
                   <span style={{ fontSize: '.65rem', color: t.text2 }}>{r.avg_purity ? `${Number(r.avg_purity).toFixed(1)}` : '—'}</span>
                   <span style={{ fontSize: '.68rem', color: t.gold, fontFamily: 'ui-monospace,monospace' }}>{Number(r.amount||0) > 0 ? fmtAmt(r.amount) : '—'}</span>

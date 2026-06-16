@@ -897,50 +897,105 @@ export async function GET(req) {
         const todayEnd   = `${todayIST}T23:59:59+05:30`
 
         const [stageRows, txnRows] = await Promise.all([
-          // Stage counts
+          // Stage counts.
+          // Weight lives in a DIFFERENT place depending on stage (see the resolver
+          // chain in the txn query below): physical-gold ornaments link via
+          // Ornament.estimation_id (pre-quotation) or Ornament.quotation_id (after),
+          // takeover/pledge gold lives in PledgeCompany (via Release), the branch
+          // confirms a final weight in Order, and a rough lead weight sits in Lead.
+          // We coalesce ornament → pledge → order so every stage's net_wt is real,
+          // deduping ornaments by ornament_id (the quotation copy duplicates the
+          // estimation copy once a quotation is cut).
           sql`
+            WITH txn_orn AS (
+              SELECT q.transaction_id tid, o.ornament_id, o.id::text oid, o.net_weight nw, o.purity pu, o.approve ap, o.created_at ca, 2 sr
+              FROM "Quotation" q JOIN "Ornament" o ON o.quotation_id = q.id
+              UNION ALL
+              SELECT e.transaction_id, o.ornament_id, o.id::text, o.net_weight, o.purity, o.approve, o.created_at, 1
+              FROM "Estimation" e JOIN "Ornament" o ON o.estimation_id = e.id
+            ),
+            orn_dd AS (
+              SELECT DISTINCT ON (tid, COALESCE(ornament_id, oid)) tid, nw
+              FROM txn_orn ORDER BY tid, COALESCE(ornament_id, oid), sr DESC, ap DESC NULLS LAST, ca DESC
+            ),
+            orn AS (SELECT tid, SUM(nw) n FROM orn_dd GROUP BY tid),
+            pledge AS (SELECT r.transaction_id tid, SUM(pc.net_weight) n FROM "Release" r JOIN "PledgeCompany" pc ON pc.release_id = r.id GROUP BY r.transaction_id),
+            ord AS (SELECT transaction_id tid, SUM(branch_net_weight) n FROM "Order" GROUP BY transaction_id)
             SELECT
               t.status,
               COUNT(*) AS count,
-              COALESCE(ROUND(SUM(ow.net_weight)::numeric, 2), 0) AS net_wt
+              COALESCE(ROUND(SUM(
+                CASE WHEN COALESCE(orn.n,0)>0 THEN orn.n
+                     WHEN COALESCE(pl.n,0)>0  THEN pl.n
+                     WHEN COALESCE(od.n,0)>0  THEN od.n
+                     ELSE 0 END)::numeric, 2), 0) AS net_wt
             FROM "Transaction" t
-            LEFT JOIN (
-              SELECT q.transaction_id, SUM(o.net_weight) AS net_weight
-              FROM "Quotation" q
-              JOIN "Ornament" o ON o.quotation_id = q.id
-              GROUP BY q.transaction_id
-            ) ow ON ow.transaction_id = t.id
+            LEFT JOIN orn ON orn.tid = t.id
+            LEFT JOIN pledge pl ON pl.tid = t.id
+            LEFT JOIN ord od ON od.tid = t.id
             WHERE t.created_at BETWEEN ${todayStart} AND ${todayEnd}
             GROUP BY t.status ORDER BY count DESC
           `,
 
-          // Full transaction rows for today
+          // Full transaction rows for today.
+          // weight_source records WHERE each row's weight came from, resolving in
+          // stage order: ornament (estimation+quotation, deduped by ornament_id) →
+          // pledge (PledgeCompany via Release, for takeover/release gold) → order
+          // (branch-confirmed weight) → lead approx gross (rough, gross only).
+          // 'none' = nothing weighed yet (fresh WALKIN / just-registered ESTIMATION
+          // / PLEDGE_ESTIMATION) — genuinely no data, the UI shows it as such.
+          // Name comes from Walkin (matches the CRM dashboard), falling back to Customer.
           sql`
+            WITH txn_orn AS (
+              SELECT q.transaction_id tid, o.ornament_id, o.id::text oid, o.gross_weight gw, o.stone_weight sw, o.wastage wa, o.net_weight nw, o.purity pu, o.approve ap, o.created_at ca, 2 sr
+              FROM "Quotation" q JOIN "Ornament" o ON o.quotation_id = q.id
+              UNION ALL
+              SELECT e.transaction_id, o.ornament_id, o.id::text, o.gross_weight, o.stone_weight, o.wastage, o.net_weight, o.purity, o.approve, o.created_at, 1
+              FROM "Estimation" e JOIN "Ornament" o ON o.estimation_id = e.id
+            ),
+            orn_dd AS (
+              SELECT DISTINCT ON (tid, COALESCE(ornament_id, oid)) tid, gw, sw, wa, nw, pu
+              FROM txn_orn ORDER BY tid, COALESCE(ornament_id, oid), sr DESC, ap DESC NULLS LAST, ca DESC
+            ),
+            orn AS (
+              SELECT tid, SUM(gw) g, SUM(sw) s, SUM(wa) w, SUM(nw) n,
+                     CASE WHEN SUM(nw)>0 THEN SUM(nw*pu)/SUM(nw) ELSE 0 END p
+              FROM orn_dd GROUP BY tid
+            ),
+            pledge AS (SELECT r.transaction_id tid, SUM(pc.gross_weight) g, SUM(pc.net_weight) n FROM "Release" r JOIN "PledgeCompany" pc ON pc.release_id = r.id GROUP BY r.transaction_id),
+            ord AS (SELECT transaction_id tid, SUM(branch_gross_weight) g, SUM(branch_stone_weight) s, SUM(branch_wastage) w, SUM(branch_net_weight) n, AVG(NULLIF(billing_purity,0)) p FROM "Order" GROUP BY transaction_id),
+            leadw AS (SELECT DISTINCT ON (transaction_id) transaction_id tid, approx_gross_weight ag FROM "Lead" WHERE transaction_id IS NOT NULL ORDER BY transaction_id, created_at DESC)
             SELECT
               t.id, t.code AS bill_no, t.status, t.transaction_type,
               TO_CHAR(t.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata', 'HH24:MI:SS') AS txn_time,
               TO_CHAR(t.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM-DD') AS txn_date,
-              TRIM(COALESCE(c.first_name,'') || ' ' || COALESCE(c.last_name,'')) AS cust_name,
+              TRIM(COALESCE(NULLIF(btrim(wk.first_name),''), c.first_name, '') || ' ' || COALESCE(NULLIF(btrim(wk.last_name),''), c.last_name, '')) AS cust_name,
               c.mobile AS cust_mobile,
               b.name AS branch_name,
               COALESCE(q.final_amount, 0)::float AS amount,
               q.service_charge::float AS serv_chr,
-              COALESCE(SUM(o.gross_weight), 0)::float AS gross_weight,
-              COALESCE(SUM(o.stone_weight), 0)::float AS stone_weight,
-              COALESCE(SUM(o.wastage), 0)::float       AS wastage,
-              COALESCE(SUM(o.net_weight), 0)::float    AS net_weight,
-              CASE WHEN COALESCE(SUM(o.net_weight), 0) > 0
-                THEN ROUND((SUM(o.net_weight * o.purity) / SUM(o.net_weight))::numeric, 1)::float
-                ELSE NULL END AS avg_purity
+              (CASE WHEN COALESCE(orn.n,0)>0 THEN 'ornament'
+                    WHEN COALESCE(pl.n,0)>0  THEN 'pledge'
+                    WHEN COALESCE(od.n,0)>0  THEN 'order'
+                    WHEN COALESCE(ld.ag,0)>0 THEN 'lead_approx'
+                    ELSE 'none' END) AS weight_source,
+              (CASE WHEN COALESCE(orn.n,0)>0 THEN orn.g WHEN COALESCE(pl.n,0)>0 THEN pl.g WHEN COALESCE(od.n,0)>0 THEN od.g WHEN COALESCE(ld.ag,0)>0 THEN ld.ag ELSE 0 END)::float AS gross_weight,
+              (CASE WHEN COALESCE(orn.n,0)>0 THEN orn.s WHEN COALESCE(od.n,0)>0 THEN od.s ELSE 0 END)::float AS stone_weight,
+              (CASE WHEN COALESCE(orn.n,0)>0 THEN orn.w WHEN COALESCE(od.n,0)>0 THEN od.w ELSE 0 END)::float AS wastage,
+              (CASE WHEN COALESCE(orn.n,0)>0 THEN orn.n WHEN COALESCE(pl.n,0)>0 THEN pl.n WHEN COALESCE(od.n,0)>0 THEN od.n ELSE 0 END)::float AS net_weight,
+              (CASE WHEN COALESCE(orn.n,0)>0 THEN ROUND(orn.p::numeric,1)
+                    WHEN COALESCE(od.n,0)>0  THEN ROUND(od.p::numeric,1)
+                    ELSE NULL END)::float AS avg_purity
             FROM "Transaction" t
-            LEFT JOIN "Customer"  c ON c.id = t.customer_id
-            LEFT JOIN "Branch"    b ON b.id = t.branch_id
-            LEFT JOIN "Quotation" q ON q.transaction_id = t.id
-            LEFT JOIN "Ornament"  o ON o.quotation_id = q.id
+            LEFT JOIN "Customer" c ON c.id = t.customer_id
+            LEFT JOIN "Branch"   b ON b.id = t.branch_id
+            LEFT JOIN LATERAL (SELECT first_name, last_name FROM "Walkin" WHERE transaction_id = t.id ORDER BY created_at DESC LIMIT 1) wk ON true
+            LEFT JOIN LATERAL (SELECT final_amount, service_charge FROM "Quotation" WHERE transaction_id = t.id ORDER BY created_at DESC LIMIT 1) q ON true
+            LEFT JOIN orn       ON orn.tid = t.id
+            LEFT JOIN pledge pl ON pl.tid = t.id
+            LEFT JOIN ord    od ON od.tid = t.id
+            LEFT JOIN leadw  ld ON ld.tid = t.id
             WHERE t.created_at BETWEEN ${todayStart} AND ${todayEnd}
-            GROUP BY t.id, t.code, t.status, t.transaction_type, t.created_at,
-                     c.first_name, c.last_name, c.mobile,
-                     b.name, q.final_amount, q.service_charge
             ORDER BY t.created_at DESC
             LIMIT 1000
           `,
