@@ -876,6 +876,7 @@ export async function GET(req) {
       // Try new CRM (best-effort, don't fail if unreachable)
       let stages = null
       let newCrmTxns = null   // null = offline; [] = online but no data
+      let newCrmCompletedToday = null   // completed-purchased-today rows (dashboard basis)
       let newCrmError = null
       let sql
       try {
@@ -896,7 +897,7 @@ export async function GET(req) {
         const todayStart = `${todayIST}T00:00:00+05:30`
         const todayEnd   = `${todayIST}T23:59:59+05:30`
 
-        const [stageRows, txnRows] = await Promise.all([
+        const [stageRows, txnRows, completedTodayRows] = await Promise.all([
           // Stage counts.
           // Weight lives in a DIFFERENT place depending on stage (see the resolver
           // chain in the txn query below): physical-gold ornaments link via
@@ -1012,6 +1013,36 @@ export async function GET(req) {
             ORDER BY t.created_at DESC
             LIMIT 1000
           `,
+
+          // COMPLETED PURCHASES today — the CRM dashboard's "purchased today"
+          // basis. The Case Wise Report (latest_gold_transaction_report) dates a
+          // completed bill by updated_at (which the final payment bumps to today),
+          // NOT by created_at. So a bill walked-in on an earlier day but PAID today
+          // counts as today's purchase. We mirror that: status completed AND
+          // updated_at IST = today. Weight via the same estimation+quotation union
+          // dedup. Returned as rows so the client can region/type-filter the card.
+          sql`
+            WITH txn_orn AS (
+              SELECT q.transaction_id tid, o.ornament_id, o.id::text oid, o.gross_weight gw, o.net_weight nw, o.approve ap, o.created_at ca, 2 sr
+              FROM "Quotation" q JOIN "Ornament" o ON o.quotation_id = q.id
+              UNION ALL
+              SELECT e.transaction_id, o.ornament_id, o.id::text, o.gross_weight, o.net_weight, o.approve, o.created_at, 1
+              FROM "Estimation" e JOIN "Ornament" o ON o.estimation_id = e.id
+            ),
+            orn_dd AS (
+              SELECT DISTINCT ON (tid, COALESCE(ornament_id, oid)) tid, gw, nw
+              FROM txn_orn ORDER BY tid, COALESCE(ornament_id, oid), sr DESC, ap DESC NULLS LAST, ca DESC
+            ),
+            orn AS (SELECT tid, SUM(gw) g, SUM(nw) n FROM orn_dd GROUP BY tid)
+            SELECT t.code AS bill_no, t.transaction_type, b.name AS branch_name,
+                   COALESCE(orn.g, 0)::float AS gross_weight,
+                   COALESCE(orn.n, 0)::float AS net_weight
+            FROM "Transaction" t
+            LEFT JOIN "Branch" b ON b.id = t.branch_id
+            LEFT JOIN orn ON orn.tid = t.id
+            WHERE t.status = 'FINAL_PAYMENT_COMPLETED'
+              AND (t.updated_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata')::date = ${todayIST}::date
+          `,
         ])
 
         stages = {}
@@ -1029,6 +1060,16 @@ export async function GET(req) {
         newCrmTxns = allowedRegionsForNewCrm
           ? txnArr.filter(r => r.region && allowedRegionsForNewCrm.includes(r.region))
           : txnArr
+
+        // Completed-purchased-today rows (dashboard basis) — alias branch → region
+        // so the client can region/type-filter the COMPLETED card.
+        const ctArr = [...completedTodayRows].map(row => {
+          const branch_name = aliasBranchName(row.branch_name)
+          return { ...row, branch_name, region: nameRegionMap[(branch_name || '').trim().toLowerCase()] || '' }
+        })
+        newCrmCompletedToday = allowedRegionsForNewCrm
+          ? ctArr.filter(r => r.region && allowedRegionsForNewCrm.includes(r.region))
+          : ctArr
 
       } catch (e) {
         newCrmError = e.message
@@ -1050,6 +1091,7 @@ export async function GET(req) {
         takeoverRows,
         allRegions,
         newCrmTxns,
+        newCrmCompletedToday,
         newCrmError,
       })
     }

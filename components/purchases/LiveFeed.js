@@ -273,6 +273,7 @@ export default function LiveFeed() {
   const kycRows      = data?.kycRows      || []
   const takeoverRows = data?.takeoverRows || []
   const newCrmTxns   = data ? (data.newCrmTxns ?? null) : null  // null = offline
+  const newCrmCompletedToday = data ? (data.newCrmCompletedToday ?? null) : null  // completed-purchased-today (dashboard basis)
   const newCrmError  = data?.newCrmError || null
 
   // Region-filtered raw rows
@@ -527,7 +528,7 @@ export default function LiveFeed() {
           </div>
         ) : crmTab === 'new' ? (
           <div style={{ opacity: loading && data ? 0.6 : 1, transition: 'opacity .3s' }}>
-            <NewCrmTab t={t} stages={stages} newCrmTxns={newCrmTxns} newCrmError={newCrmError}
+            <NewCrmTab t={t} stages={stages} newCrmTxns={newCrmTxns} completedToday={newCrmCompletedToday} newCrmError={newCrmError}
               regionFilter={regionFilter} regions={regions}
               viewDate={viewDate} isToday={isToday}
               newEventCount={newEventCount} clearNewEvents={() => setNewEventCount(0)} />
@@ -549,7 +550,7 @@ export default function LiveFeed() {
               regionFilter={regionFilter}
               filteredTimeline={filteredTimeline}
               /* New CRM props */
-              stages={stages} newCrmTxns={newCrmTxns} newCrmError={newCrmError}
+              stages={stages} newCrmTxns={newCrmTxns} newCrmCompletedToday={newCrmCompletedToday} newCrmError={newCrmError}
               /* Shared */
               isToday={isToday} viewDate={viewDate}
               newEventCount={newEventCount} clearNewEvents={() => setNewEventCount(0)} />
@@ -575,7 +576,7 @@ function CombinedCrmTab({
   kycRows, takeoverRows, regionFilter,
   filteredTimeline,
   // New CRM
-  stages, newCrmTxns, newCrmError,
+  stages, newCrmTxns, newCrmCompletedToday, newCrmError,
   // Shared
   isToday, viewDate, newEventCount, clearNewEvents,
 }) {
@@ -652,7 +653,7 @@ function CombinedCrmTab({
           <div style={{ flex: 1, height: 1, background: `linear-gradient(90deg,${t.blue}30,transparent)` }} />
         </div>
         <NewCrmTab
-          t={t} stages={stages} newCrmTxns={newCrmTxns} newCrmError={newCrmError}
+          t={t} stages={stages} newCrmTxns={newCrmTxns} completedToday={newCrmCompletedToday} newCrmError={newCrmError}
           regionFilter={regionFilter} regions={regions}
           viewDate={viewDate} isToday={isToday}
           newEventCount={newEventCount} clearNewEvents={clearNewEvents} />
@@ -1745,7 +1746,7 @@ const IN_PROGRESS_STATUSES = [
   'PENNY_DROP_PENDING', 'FINAL_PAYMENT_PENDING', 'RELEASE_PENDING', 'RELEASE_AGREEMENT_PENDING',
 ]
 
-function NewCrmTab({ t, newCrmTxns, newCrmError, regionFilter, regions, isToday, newEventCount, clearNewEvents }) {
+function NewCrmTab({ t, newCrmTxns, completedToday, newCrmError, regionFilter, regions, isToday, newEventCount, clearNewEvents }) {
   const [activeMetric, setActiveMetric] = useState(null)
   const [typeFilter, setTypeFilter] = useState('')   // '' | 'physical' | 'takeover'
   const [tlOpen, setTlOpen] = useState(false)
@@ -1788,9 +1789,21 @@ function NewCrmTab({ t, newCrmTxns, newCrmError, regionFilter, regions, isToday,
   const walkoutTxns    = txns.filter(tx => tx.status === 'WALKOUT')
   const inProgressTxns = txns.filter(tx => IN_PROGRESS_STATUSES.includes(tx.status))
 
+  // COMPLETED card = PURCHASED today (CRM dashboard basis): bills whose final
+  // payment completed today, dated by updated_at — so a bill walked-in earlier
+  // but paid today counts here (matches the Case Wise Report). Region + type
+  // filtered. Falls back to the created-today completed cohort if the server
+  // didn't supply the dataset (offline / cached old payload).
+  const ctRegion = completedToday == null ? null
+    : (regionFilter ? completedToday.filter(r => r.region === regionFilter) : completedToday)
+  const ctSet = ctRegion == null ? null
+    : (typeFilter === 'physical' ? ctRegion.filter(r => r.transaction_type === 'PHYSICAL_GOLD')
+     : typeFilter === 'takeover' ? ctRegion.filter(r => r.transaction_type === 'RELEASED_GOLD')
+     : ctRegion)
+
   const total      = txns.length
   const inProgress = inProgressTxns.length
-  const completed  = completedTxns.length
+  const completed  = ctSet ? ctSet.length : completedTxns.length
   const walkout    = walkoutTxns.length
 
   const completedValue = completedTxns.reduce((s, tx) => s + (Number(tx.amount) || 0), 0)
@@ -1798,7 +1811,8 @@ function NewCrmTab({ t, newCrmTxns, newCrmError, regionFilter, regions, isToday,
   const netW   = (arr) => arr.reduce((s, tx) => s + (Number(tx.net_weight)   || 0), 0)
   const grossW = (arr) => arr.reduce((s, tx) => s + (Number(tx.gross_weight) || 0), 0)
   const totalWt      = netW(txns),           totalGr      = grossW(txns)
-  const completedWt  = netW(completedTxns),  completedGr  = grossW(completedTxns)
+  const completedWt  = ctSet ? netW(ctSet) : netW(completedTxns)
+  const completedGr  = ctSet ? grossW(ctSet) : grossW(completedTxns)
   const inProgressWt = netW(inProgressTxns), inProgressGr = grossW(inProgressTxns)
   const walkoutWt    = netW(walkoutTxns),    walkoutGr    = grossW(walkoutTxns)
   const walkinWt     = netW(walkinTxns),     walkinGr     = grossW(walkinTxns)
@@ -1866,7 +1880,7 @@ function NewCrmTab({ t, newCrmTxns, newCrmError, regionFilter, regions, isToday,
             <div style={{ position:'relative', display:'flex', alignItems:'center', gap:8 }}>
               {[
                 { node: <HeroNum label="In Progress" value={inProgress} color={t.orange} t={t} grossWt={inProgressGr} netWt={inProgressWt} noWtCount={noWt(inProgressTxns)} active={activeMetric==='inprogress'} onClick={() => toggleMetric('inprogress')} />, color: t.orange },
-                { node: <HeroNum label="Completed"   value={completed}  color={t.green}  t={t} grossWt={completedGr} netWt={completedWt}  noWtCount={noWt(completedTxns)}  active={activeMetric==='completed'}  onClick={() => toggleMetric('completed')}  />, color: t.green  },
+                { node: <HeroNum label="Completed"   value={completed}  color={t.green}  t={t} grossWt={completedGr} netWt={completedWt}  noWtCount={noWt(ctSet || completedTxns)}  active={activeMetric==='completed'}  onClick={() => toggleMetric('completed')}  />, color: t.green  },
               ].map((item, i) => (
                 <div key={i} style={{ display:'flex', alignItems:'center', gap:8 }}>
                   {i > 0 && <FlowArrow t={t} pct={completedOfProgPct || null} />}
