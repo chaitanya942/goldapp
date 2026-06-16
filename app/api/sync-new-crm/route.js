@@ -93,12 +93,28 @@ async function runSync(request) {
     // doubles the weight. Keep ONE row per (transaction, ornament_id), preferring
     // the approved/latest. Then aggregate the deduped rows.
     const { rows } = await client.query(`
-      WITH orn_dedup AS (
-        SELECT DISTINCT ON (q.transaction_id, COALESCE(o.ornament_id, o.id::text))
-               q.transaction_id, o.gross_weight, o.stone_weight, o.wastage, o.net_weight, o.purity, o.amount
-        FROM "Quotation" q
-        JOIN "Ornament" o ON o.quotation_id = q.id
-        ORDER BY q.transaction_id, COALESCE(o.ornament_id, o.id::text), o.approve DESC NULLS LAST, o.created_at DESC
+      WITH txn_orn AS (
+        -- Ornaments attach via estimation_id (pre-quotation) OR quotation_id
+        -- (after). A completed bill whose ornaments are still only estimation-
+        -- linked would sync as 0 weight on the quotation-only join — that's how
+        -- bills like WGKA55894 (260.71 g) landed in the master at net 0.
+        -- Gather BOTH links and dedupe by ornament_id (the quotation copy
+        -- duplicates the estimation copy once a quotation is cut).
+        SELECT q.transaction_id, o.ornament_id, o.id::text AS oid,
+               o.gross_weight, o.stone_weight, o.wastage, o.net_weight, o.purity, o.amount,
+               o.approve, o.created_at, 2 AS sr
+        FROM "Quotation" q JOIN "Ornament" o ON o.quotation_id = q.id
+        UNION ALL
+        SELECT e.transaction_id, o.ornament_id, o.id::text,
+               o.gross_weight, o.stone_weight, o.wastage, o.net_weight, o.purity, o.amount,
+               o.approve, o.created_at, 1
+        FROM "Estimation" e JOIN "Ornament" o ON o.estimation_id = e.id
+      ),
+      orn_dedup AS (
+        SELECT DISTINCT ON (transaction_id, COALESCE(ornament_id, oid))
+               transaction_id, gross_weight, stone_weight, wastage, net_weight, purity, amount
+        FROM txn_orn
+        ORDER BY transaction_id, COALESCE(ornament_id, oid), sr DESC, approve DESC NULLS LAST, created_at DESC
       ),
       orn AS (
         SELECT transaction_id,
