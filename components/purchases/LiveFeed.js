@@ -1212,16 +1212,16 @@ function HeroNum({ label, value, color, t, small, muted, onClick, active, weight
           <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginTop: 3, gap: 1 }}>
             {((grossWt > 0) || (netWt > 0)) && (
               <>
-                <span style={{ fontSize: '.55rem', color: active ? `${color}aa` : t.text4, fontFamily: 'ui-monospace,monospace', letterSpacing: '.03em' }}>
-                  {fmtWt(grossWt || 0)} <span style={{ opacity: .6 }}>gross</span>
+                <span style={{ fontSize: '.66rem', color: active ? color : t.text2, fontFamily: '"SF Mono","Roboto Mono",ui-monospace,monospace', letterSpacing: '.01em', fontWeight: 600 }}>
+                  {fmtWt(grossWt || 0)} <span style={{ opacity: .55, fontWeight: 500, fontSize: '.92em' }}>gross</span>
                 </span>
-                <span style={{ fontSize: '.55rem', color: active ? color : t.text3, fontFamily: 'ui-monospace,monospace', letterSpacing: '.03em', fontWeight: 600 }}>
-                  {fmtWt(netWt || 0)} <span style={{ opacity: .6 }}>net</span>
+                <span style={{ fontSize: '.72rem', color: active ? color : t.text1, fontFamily: '"SF Mono","Roboto Mono",ui-monospace,monospace', letterSpacing: '.01em', fontWeight: 700 }}>
+                  {fmtWt(netWt || 0)} <span style={{ opacity: .55, fontWeight: 500, fontSize: '.92em' }}>net</span>
                 </span>
               </>
             )}
             {noWtCount > 0 && (
-              <span title="Bills with no weight recorded yet (items not weighed)" style={{ fontSize: '.52rem', color: t.red, fontWeight: 600, letterSpacing: '.03em', marginTop: ((grossWt > 0) || (netWt > 0)) ? 2 : 0 }}>
+              <span title="Bills with no weight recorded yet (items not weighed)" style={{ fontSize: '.6rem', color: t.red, fontWeight: 700, fontFamily: '"SF Mono","Roboto Mono",ui-monospace,monospace', letterSpacing: '.02em', marginTop: ((grossWt > 0) || (netWt > 0)) ? 3 : 0 }}>
                 {noWtCount} no wt
               </span>
             )}
