@@ -439,14 +439,17 @@ function ProjectionHero({
   // throughout. Desktop keeps two densities (compact for regionwise cards,
   // full for the overall hero).
   const sizes = isMobile ? {
-    hero:      32,
-    padding:   '18px 20px',
-    tile:      18,
+    // Sized to match the dashboard's KPI cards (value ≈ 22px) so the closure
+    // hero and run-rate read consistently with the rest of the dashboard
+    // rather than dominating it (founder feedback).
+    hero:      24,
+    padding:   '16px 18px',
+    tile:      20,
     tileLabel: 11,
     titleSize: 13,
     captionSize: 11.5,
     headerLabel: 13,
-    gap:       14,
+    gap:       13,
   } : compact ? {
     hero:      30,
     padding:   '16px 18px',
@@ -537,7 +540,7 @@ function ProjectionHero({
         {!loading && closureValue > 0 && (
           <div style={{ textAlign: 'right', minWidth: 0 }}>
             <div style={{
-              fontSize: isMobile ? 22 : (compact ? 20 : 28),
+              fontSize: isMobile ? 19 : (compact ? 20 : 28),
               color: t.green || '#3aaa6a',
               fontWeight: 400,
               fontVariantNumeric: 'tabular-nums',
