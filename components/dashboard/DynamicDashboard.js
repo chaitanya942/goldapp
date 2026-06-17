@@ -349,14 +349,6 @@ function PurchaseInline({ t, setActiveNav, canSee }) {
   return (
     <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
 
-      {/* ── MONTH PROJECTION (first thing inside Purchases) ──
-            Run Rate + Estimated Month Closure surface here so the projection
-            is the lead metric when ops opens this section. Gated by the
-            same Live Feed OR Reports access that LiveFeedFlashcards uses. */}
-      {(canSee('tab.purchase-data.live') || canSee('purchase-reports')) && (
-        <MonthProjection t={t} isMobile={isMobile} />
-      )}
-
       {/* Period selector row */}
       {showPeriodSelector && (
         <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
@@ -490,6 +482,13 @@ function PurchaseInline({ t, setActiveNav, canSee }) {
             <KpiCard t={t} delay={420} label="Active Branches"    icon="⬡"  color={t.blue}   loading={loading} compact={isMobile} value={hasData?`${kpis.branch_count} / ${totalBranches}`:`— / ${totalBranches}`} sub={hasData?'branches purchased':'No purchases this period'}/>
           </div>
         </>
+      )}
+
+      {/* ── MONTH PROJECTION — moved here (below the KPI grid, above the
+            14-day chart) per founder request. Run Rate + Estimated Month
+            Closure. Same gate as the Live Feed flashcards. */}
+      {(canSee('tab.purchase-data.live') || canSee('purchase-reports')) && (
+        <MonthProjection t={t} isMobile={isMobile} />
       )}
 
       {/* Today strip + trend chart */}
