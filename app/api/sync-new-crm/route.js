@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js'
 import { NEW_CRM_LIVE_DATE } from '../../../lib/crmConfig'
 import { requireAuth, ROLE_GROUPS } from '../../../lib/apiAuth'
 import { aliasBranchName } from '../../../lib/crmBranchAlias'
+import { recordSyncSuccess, recordSyncFailure } from '../../../lib/syncHeartbeat'
 
 const { Client } = pg
 
@@ -169,6 +170,7 @@ async function runSync(request) {
     `, [cutoffDate])
 
     if (!rows.length) {
+      await recordSyncSuccess(supabaseAdmin, 'new_crm', 0)
       return Response.json({ success: true, message: 'No new CRM records found', synced: 0, newCount: 0 })
     }
 
@@ -263,6 +265,10 @@ async function runSync(request) {
       }
     }
 
+    // Heartbeat: the worker completed (alive). Per-row failures are tracked
+    // separately in failedIds; they don't mean the sync is down.
+    await recordSyncSuccess(supabaseAdmin, 'new_crm', synced)
+
     return Response.json({
       success:   errors === 0,
       total:     rows.length,
@@ -275,6 +281,7 @@ async function runSync(request) {
 
   } catch (err) {
     console.error('New CRM sync error:', err)
+    await recordSyncFailure(supabaseAdmin, 'new_crm', err.message)
     return Response.json({ success: false, error: err.message }, { status: 500 })
   } finally {
     if (client) await client.end()

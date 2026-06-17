@@ -47,6 +47,7 @@ import TelesalesDashboard from '../../components/telesales/TelesalesDashboard'
 import DialogHost from '../../components/ui/ConfirmDialog'
 import AuditAccessGuard from '../../components/AuditAccessGuard'
 import CancelRequestNotifier from '../../components/consignments/CancelRequestNotifier'
+import SyncHealthNotifier from '../../components/consignments/SyncHealthNotifier'
 
 const THEMES = {
   dark:  { bg: '#0a0a0a', card: '#111111', text1: '#f0e6c8', text2: '#c8b89a', text3: '#7a6a4a', text4: '#4a3a2a', gold: '#c9a84c', border: '#1e1e1e', red: '#e05555' },
@@ -301,6 +302,10 @@ function DashboardShell() {
           notifications until accounts approves/rejects each one. Renders
           nothing for other roles. */}
       <CancelRequestNotifier />
+
+      {/* SyncHealthNotifier — super-admin-only alert when a CRM sync stalls
+          (last successful run > ~10 min ago). Renders nothing for other roles. */}
+      <SyncHealthNotifier />
 
       {/* Exit-confirmation toast — surfaces when the user presses back on the
           dashboard. A second back press within 2.5s actually exits. Sits

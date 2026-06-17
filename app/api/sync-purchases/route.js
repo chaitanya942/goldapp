@@ -1,6 +1,7 @@
 import mysql from 'mysql2/promise'
 import { createClient } from '@supabase/supabase-js'
 import { requireAuth, ROLE_GROUPS } from '../../../lib/apiAuth'
+import { recordSyncSuccess, recordSyncFailure } from '../../../lib/syncHeartbeat'
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
@@ -195,6 +196,7 @@ async function runSync(request) {
     const { proofMap, bankMap } = await fetchKycMetaMaps(conn, rows.map(r => r.kyc_id))
 
     if (!rows.length) {
+      await recordSyncSuccess(supabaseAdmin, 'old_crm', 0)
       return Response.json({ success: true, message: 'No approved records in CRM window', synced: 0, newCount: 0 })
     }
 
@@ -496,6 +498,8 @@ async function runSync(request) {
       console.error('Pipeline auto-attach threw (non-fatal):', paErr.message)
     }
 
+    await recordSyncSuccess(supabaseAdmin, 'old_crm', synced)
+
     return Response.json({
       success:  errors === 0,
       total:    rows.length,
@@ -514,6 +518,7 @@ async function runSync(request) {
 
   } catch (err) {
     console.error('Sync error:', err)
+    await recordSyncFailure(supabaseAdmin, 'old_crm', err.message)
     return Response.json({ success: false, error: err.message }, { status: 500 })
   } finally {
     if (conn) await conn.end()

@@ -34,6 +34,7 @@ if (!APP_URL || !CRON_SECRET) {
 }
 
 const ENDPOINT             = `${APP_URL}/api/sync-purchases?days=${SYNC_DAYS}`
+const NEW_CRM_ENDPOINT     = `${APP_URL}/api/sync-new-crm`
 const EOD_ENDPOINT         = `${APP_URL}/api/eod-inventory-snapshot`
 const AT_RISK_ENDPOINT     = `${APP_URL}/api/consignments?action=bidding_at_risk_summary`
 const SECTION1_AUDIT_URL   = `${APP_URL}/api/bidding/section1-audit`
@@ -43,6 +44,7 @@ const HEADERS              = { Authorization: `Bearer ${CRON_SECRET}` }
 const EOD_HEADERS          = { 'x-cron-token': CRON_SECRET, 'Content-Type': 'application/json' }
 
 let inFlight             = false   // guard against overlap if a sync runs longer than the interval
+let inFlightNewCrm       = false   // separate guard so a slow new-CRM sync can't block the old-CRM tick
 let lastEodDate          = ''      // YYYY-MM-DD (IST) of the last successful EOD snapshot — keeps us idempotent within a day
 let lastAtRiskDate       = ''      // YYYY-MM-DD (IST) of the last 7pm at-risk log — once per day
 let lastSection1AuditDate = ''     // YYYY-MM-DD (IST) of the last 23:30 Section 1 audit — once per day
@@ -144,6 +146,32 @@ async function maybeRunEodSnapshot() {
   }
 }
 
+// New-CRM (Postgres) sync — runs every tick alongside the old-CRM sync. Until
+// now NOTHING triggered this endpoint on a schedule, so new-CRM data only
+// refreshed when someone clicked "Sync CRM" in the UI — which is how it sat
+// ~5h stale on 16-Jun. Separate in-flight guard so it can't block old-CRM.
+async function syncNewCrmOnce() {
+  if (inFlightNewCrm) return
+  inFlightNewCrm = true
+  const startedAt = Date.now()
+  try {
+    const res  = await fetch(NEW_CRM_ENDPOINT, { headers: HEADERS })
+    const text = await res.text()
+    let body
+    try { body = JSON.parse(text) } catch { body = { raw: text } }
+    const ms = Date.now() - startedAt
+    if (!res.ok || body.success === false) {
+      console.error(new Date().toISOString(), `[cron-sync] NEW-CRM FAIL ${res.status} (${ms}ms)`, body.error || body.message || text.slice(0, 200))
+    } else {
+      console.log(new Date().toISOString(), `[cron-sync] new-crm ok (${ms}ms)`, body.message || `synced ${body.synced}`)
+    }
+  } catch (err) {
+    console.error(new Date().toISOString(), '[cron-sync] new-crm threw:', err?.message || err)
+  } finally {
+    inFlightNewCrm = false
+  }
+}
+
 async function syncOnce() {
   if (inFlight) {
     console.log(new Date().toISOString(), '[cron-sync] previous run still in flight, skipping tick')
@@ -167,6 +195,10 @@ async function syncOnce() {
   } finally {
     inFlight = false
   }
+
+  // New-CRM sync — fire-and-forget each tick (own in-flight guard). Keeps the
+  // new CRM as fresh as the old one instead of waiting for a manual click.
+  syncNewCrmOnce().catch(() => null)
 
   // Piggy-back the daily EOD snapshot on this tick — runs at most once per
   // IST day, only after 23:30 IST. Fire-and-forget; sync health isn't tied to it.
