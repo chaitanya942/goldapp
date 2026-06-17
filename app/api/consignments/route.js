@@ -1333,14 +1333,22 @@ export async function GET(req) {
     return Response.json({ branches, total: { bills: tBills, net_wt: tNet, gross_wt: tGross } })
   }
 
-  // ── Melting incoming — today's Bangalore purchases + outstation consignments
-  // arriving at HO, grouped by branch (drill to cases). Shows expected arrival,
-  // booked/unbooked split, and the booking rate for booked cases. With
-  // ?audited=1 it returns only auditor-touched cases (Collection Audit OR the
-  // Bangalore EOD audit). Powers the Melting sub-modules.
+  // ── Melting pool — gold by stock_status, grouped by branch (drill to cases).
+  //   ?status=in_consignment → 1st tab (in transit to HO)
+  //   ?status=at_ho          → 2nd tab (arrived at HO)
+  // Columns surface the consignment (dispatch) date, booked/unbooked split, the
+  // arrival date (expected for in-transit, actual received_at for at_ho), and an
+  // audited flag. Approved, non-deleted bills only.
   if (action === 'melting_incoming') {
-    const auditedOnly = searchParams.get('audited') === '1'
-    const today = istToday()
+    const status = searchParams.get('status') === 'at_ho' ? 'at_ho' : 'in_consignment'
+    // at_ho is the entire standing HO inventory (~100k bills) — not a melt
+    // worklist. Scope it to recently-purchased gold so the tab is a usable,
+    // performant "to melt" list. Window is configurable via ?days= (default 7).
+    const days = Math.max(1, Math.min(60, parseInt(searchParams.get('days') || '7', 10) || 7))
+    const cutoff = (() => {
+      const d = new Date(Date.now() + 5.5 * 3600_000 - days * 86400_000)
+      return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`
+    })()
     const round = (n) => Math.round((Number(n) || 0) * 100) / 100
     const istDateOf = (utcIso) => {
       if (!utcIso) return null
@@ -1351,33 +1359,36 @@ export async function GET(req) {
     const { data: branchRows } = await supabase.from('branches').select('name, region, delivery_tat_hours')
     const meta = {}
     for (const b of (branchRows || [])) meta[b.name] = b
-    const bangaloreNames = (branchRows || []).filter(b => b.region === 'Bangalore').map(b => b.name)
 
-    const FIELDS = 'id, application_id, crm_source, branch_name, current_branch, customer_name, gross_weight, net_weight, total_amount, purchase_date, stock_status, dispatched_at, booking_id, audited_at, audit_consumed_at'
+    const FIELDS = 'id, application_id, crm_source, branch_name, current_branch, customer_name, gross_weight, net_weight, total_amount, purchase_date, stock_status, dispatched_at, received_at, booking_id, audited_at, audit_consumed_at'
 
-    // 1) Today's Bangalore purchases (booked + unbooked) → arrive at HO next working day.
-    let bang = []
-    if (bangaloreNames.length) {
-      const { data } = await supabase.from('purchases').select(FIELDS)
-        .in('branch_name', bangaloreNames)
-        .eq('purchase_date', today)
-        .eq('crm_status', 'approved').eq('is_deleted', false)
-      bang = (data || []).map(b => ({ ...b, _arrival: addWorkingDaysSkipSunday(today, 1), _source: 'bangalore' }))
+    // Paginate — at_ho (HO inventory awaiting melt) can exceed the 1000-row cap.
+    const rows = []
+    const CHUNK = 1000
+    for (let from = 0; ; from += CHUNK) {
+      let qy = supabase.from('purchases').select(FIELDS)
+        .eq('stock_status', status).eq('crm_status', 'approved').eq('is_deleted', false)
+        .order('purchase_date', { ascending: false })
+        .range(from, from + CHUNK - 1)
+      if (status === 'at_ho') qy = qy.gte('purchase_date', cutoff)   // recent worklist only
+      const { data, error } = await qy
+      if (error) return Response.json({ error: error.message }, { status: 500 })
+      rows.push(...(data || []))
+      if (!data || data.length < CHUNK) break
     }
 
-    // 2) Outstation in-transit consignments → arrive per branch TAT (working days).
-    const { data: out } = await supabase.from('purchases').select(FIELDS)
-      .eq('stock_status', 'in_consignment').eq('crm_status', 'approved').eq('is_deleted', false)
-      .not('dispatched_at', 'is', null)
-    const outstation = (out || [])
-      .filter(b => (meta[b.branch_name]?.region) !== 'Bangalore')
-      .map(b => {
-        const tat = meta[b.branch_name]?.delivery_tat_hours || 24
-        return { ...b, _arrival: addWorkingDaysSkipSunday(istDateOf(b.dispatched_at), Math.max(1, Math.ceil(tat / 24))), _source: 'consignment' }
-      })
-
-    let all = [...bang, ...outstation].map(b => ({ ...b, _audited: !!(b.audited_at || b.audit_consumed_at) }))
-    if (auditedOnly) all = all.filter(b => b._audited)
+    const all = rows.map(b => {
+      const owner = b.current_branch || b.branch_name
+      const region = meta[owner]?.region || meta[b.branch_name]?.region || 'Unknown'
+      let arrival
+      if (status === 'at_ho') {
+        arrival = istDateOf(b.received_at)                         // actual arrival
+      } else {
+        const tat = meta[b.branch_name]?.delivery_tat_hours || 24  // expected arrival
+        arrival = b.dispatched_at ? addWorkingDaysSkipSunday(istDateOf(b.dispatched_at), Math.max(1, Math.ceil(tat / 24))) : null
+      }
+      return { ...b, _source: region === 'Bangalore' ? 'bangalore' : 'consignment', _arrival: arrival, _audited: !!(b.audited_at || b.audit_consumed_at) }
+    })
 
     const byBranch = {}
     for (const b of all) {
@@ -1423,7 +1434,7 @@ export async function GET(req) {
       unbooked_bills: all.filter(b => !b.booking_id).length,
       audited_bills: all.filter(b => b._audited).length,
     }
-    return Response.json({ today, branches, total, auditedOnly })
+    return Response.json({ status, branches, total, days: status === 'at_ho' ? days : null, cutoff: status === 'at_ho' ? cutoff : null })
   }
 
   if (action === 'bidding_bookings') {

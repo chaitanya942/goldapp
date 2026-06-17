@@ -34,8 +34,8 @@ const NAV_ITEMS = [
   },
   { id: 'melting', label: 'Melting', icon: 'M17.657 18.657A8 8 0 016.343 7.343S7 9 9 10c0-2 .5-5 2.986-7C14 5 16.09 5.777 17.656 7.343A7.975 7.975 0 0120 13a7.975 7.975 0 01-2.343 5.657z', desc: 'Processing',
     children: [
-      { id: 'melting-incoming', label: 'Incoming', dot: '#e9a942' },
-      { id: 'melting-audited',  label: 'Audited',  dot: '#3aaa6a' },
+      { id: 'melting-incoming', label: 'In Consignment', dot: '#e9a942' },
+      { id: 'melting-at-ho',    label: 'At HO',          dot: '#3aaa6a' },
     ],
   },
   { id: 'sales',   label: 'Sales',   icon: 'M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z', desc: 'Revenue',

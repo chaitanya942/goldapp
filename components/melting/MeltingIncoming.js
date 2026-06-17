@@ -27,9 +27,10 @@ const fmtDates = (arr) => (arr && arr.length ? arr.map(fmtDate).join(', ') : '�
 const GRID = '22px 112px minmax(0,1fr) 64px 96px 104px 96px'
 const CASE_GRID = '112px 116px minmax(0,1fr) 92px 96px 70px'
 
-export default function MeltingIncoming({ auditedOnly = false }) {
+export default function MeltingIncoming({ status = 'in_consignment' }) {
   const { theme } = useApp()
   const c = THEMES[theme] || THEMES.dark
+  const atHo = status === 'at_ho'
 
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -39,11 +40,11 @@ export default function MeltingIncoming({ auditedOnly = false }) {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const res = await authedFetch(`/api/consignments?action=melting_incoming${auditedOnly ? '&audited=1' : ''}`)
+      const res = await authedFetch(`/api/consignments?action=melting_incoming&status=${status}`)
       const j = await res.json()
       if (!j.error) setData(j)
     } catch { /* keep last */ } finally { setLoading(false) }
-  }, [auditedOnly])
+  }, [status])
 
   useEffect(() => { load() }, [load])
 
@@ -79,12 +80,10 @@ export default function MeltingIncoming({ auditedOnly = false }) {
       <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
         <div>
           <h2 style={{ margin: 0, fontSize: 22, fontWeight: 300, color: c.text1, letterSpacing: '-.01em' }}>
-            {auditedOnly ? 'Audited · For Melting' : 'Incoming for Melting'}
+            {atHo ? 'At HO · For Melting' : 'In Consignment · For Melting'}
           </h2>
           <div style={{ fontSize: 12, color: c.text3, marginTop: 4 }}>
-            Today's Bangalore purchases + outstation consignments arriving at HO
-            {data?.today ? ` · ${fmtDate(data.today)}` : ''}
-            {auditedOnly ? ' · auditor-verified only' : ''}
+            {atHo ? `Gold arrived at HO — ready to melt${data?.days ? ` · last ${data.days} days` : ''}` : 'Gold in transit to HO (in consignment)'}
           </div>
         </div>
         <button onClick={load} style={{ padding: '7px 14px', borderRadius: 8, border: `1px solid ${c.border}`, background: c.card, color: c.text2, fontSize: 12, cursor: 'pointer' }}>↻ Refresh</button>
@@ -97,7 +96,7 @@ export default function MeltingIncoming({ auditedOnly = false }) {
         <Stat c={c} label="Net Weight" value={loading ? '…' : `${fmt(total.net)} g`} accent={c.text1} />
         <Stat c={c} label="Booked" value={loading ? '…' : fmt(total.booked, 0)} sub="bills" accent={c.blue} />
         <Stat c={c} label="Unbooked" value={loading ? '…' : fmt(total.unbooked, 0)} sub="bills" accent={c.orange || '#e58a3b'} />
-        {!auditedOnly && <Stat c={c} label="Audited" value={loading ? '…' : fmt(total.audited, 0)} sub="bills" accent={c.green} />}
+        <Stat c={c} label="Audited" value={loading ? '…' : fmt(total.audited, 0)} sub="bills" accent={c.green} />
       </div>
 
       {/* Region filter — All + every region present (derived from data) */}
@@ -124,7 +123,7 @@ export default function MeltingIncoming({ auditedOnly = false }) {
           <div style={{ padding: 28, textAlign: 'center', color: c.text4, fontSize: 13 }}>Loading…</div>
         ) : branches.length === 0 ? (
           <div style={{ padding: 28, textAlign: 'center', color: c.text4, fontSize: 13 }}>
-            {auditedOnly ? 'No audited cases incoming for melting.' : 'No gold incoming for melting.'}
+            {atHo ? 'No gold at HO for melting.' : 'No gold in consignment.'}
           </div>
         ) : branches.map((b) => {
           const isOpen = open.has(b.branch_name)

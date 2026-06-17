@@ -250,9 +250,9 @@ function DashboardShell() {
       case 'discrepancy-cases':       return <DiscrepancyCases />
       case 'purchase-register':       return <PurchaseRegister />
       case 'consignment-analytics':  return <ConsignmentAnalytics />
-      case 'melting':             return <MeltingIncoming />
-      case 'melting-incoming':    return <MeltingIncoming />
-      case 'melting-audited':     return <MeltingIncoming auditedOnly />
+      case 'melting':             return <MeltingIncoming status="in_consignment" />
+      case 'melting-incoming':    return <MeltingIncoming status="in_consignment" />
+      case 'melting-at-ho':       return <MeltingIncoming status="at_ho" />
       case 'sales':               return <ComingSoon title="Sales" />
       case 'cal-table':           return <CalTable />
       case 'live-market-rates':   return <LiveMarketRates />
