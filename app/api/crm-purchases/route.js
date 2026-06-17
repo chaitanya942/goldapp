@@ -223,9 +223,19 @@ export async function GET(req) {
             FROM "Transaction" t
             LEFT JOIN "Branch" b ON b.id = t.branch_id
             LEFT JOIN (
-              SELECT q.transaction_id, SUM(o.gross_weight) AS gross_weight
-              FROM "Quotation" q JOIN "Ornament" o ON o.quotation_id = q.id
-              GROUP BY q.transaction_id
+              -- Union-dedup gross (estimation OR quotation link, deduped by
+              -- ornament_id) — same basis as the Live Feed "Total Today", so the
+              -- dashboard Walked-In weight matches it. Quotation-only missed all
+              -- estimation-stage gross (undercounted ~2.1 kg on a 189-walk-in day).
+              SELECT tid AS transaction_id, SUM(gw) AS gross_weight FROM (
+                SELECT DISTINCT ON (tid, COALESCE(ornament_id, oid)) tid, gw FROM (
+                  SELECT q.transaction_id tid, o.ornament_id, o.id::text oid, o.gross_weight gw, o.approve ap, o.created_at ca, 2 sr
+                  FROM "Quotation" q JOIN "Ornament" o ON o.quotation_id = q.id
+                  UNION ALL
+                  SELECT e.transaction_id, o.ornament_id, o.id::text, o.gross_weight, o.approve, o.created_at, 1
+                  FROM "Estimation" e JOIN "Ornament" o ON o.estimation_id = e.id
+                ) z ORDER BY tid, COALESCE(ornament_id, oid), sr DESC, ap DESC NULLS LAST, ca DESC
+              ) y GROUP BY tid
             ) ow ON ow.transaction_id = t.id
             WHERE t.created_at BETWEEN ${dayStart} AND ${dayEnd}
             GROUP BY b.name
