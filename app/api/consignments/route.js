@@ -4462,35 +4462,43 @@ export async function POST(req) {
   }
 
   // ── Unbook a list of bills ────────────────────────────────────────────────
-  // Used by the StuckBookingsBanner's "Unbook" action. Takes a list of
-  // application_ids and clears booking_id + booked_at on each. Defensive:
-  // only flips bills that are CURRENTLY booked AND still at_branch — refuses
-  // to touch a bill whose consignment has since fired (booking_id may now be
-  // referenced by an in-flight consignment). Returns per-id outcome so the
-  // banner can show which succeeded and which were skipped.
+  // Used by the StuckBookingsBanner + Bidding "Booked · no consignment" Unbook
+  // action. Takes a list of application_ids and clears booking_id + booked_at.
+  // Defensive: only flips bills that are CURRENTLY booked AND not yet in a
+  // dispatched consignment — i.e. stock_status is at_branch OR at_ho. Bills
+  // that are in_consignment (or downstream: sent_for_melting / melted) are
+  // refused, since their consignment has fired. NOTE: at_ho must be allowed —
+  // the Bangalore lifecycle and the manual at_ho SQL moves leave booked-but-
+  // unconsigned bills at_ho, and ops still needs to release them.
   if (action === 'unbook_bills') {
     const { application_ids } = body
     if (!Array.isArray(application_ids) || application_ids.length === 0) {
       return Response.json({ error: 'application_ids[] required' }, { status: 400 })
     }
 
+    const UNBOOKABLE_STATUS = new Set(['at_branch', 'at_ho'])
     const { data: rows, error: fErr } = await supabase
       .from('purchases')
       .select('id, application_id, stock_status, booking_id, is_deleted, audit_consumed_at')
       .in('application_id', application_ids)
     if (fErr) return Response.json({ error: fErr.message }, { status: 500 })
 
-    const byApp = new Map((rows || []).map(r => [r.application_id, r]))
-    const toUnbook = []
+    // A WGKA number can exist in BOTH crm_sources; only one is the booked row.
+    // So evaluate every fetched row and unbook each that qualifies, rather than
+    // keying one row per application_id (which could pick the unbooked twin).
+    const qualifies = (r) => !r.is_deleted && !r.audit_consumed_at && r.booking_id && UNBOOKABLE_STATUS.has(r.stock_status)
+    const toUnbook = (rows || []).filter(qualifies).map(r => r.id)
     const skipped  = []
     for (const appId of application_ids) {
-      const r = byApp.get(appId)
-      if (!r)                            { skipped.push({ application_id: appId, reason: 'Not found' });           continue }
-      if (r.is_deleted)                  { skipped.push({ application_id: appId, reason: 'Deleted' });             continue }
-      if (r.audit_consumed_at)           { skipped.push({ application_id: appId, reason: 'Already audit-consumed' }); continue }
-      if (!r.booking_id)                 { skipped.push({ application_id: appId, reason: 'Not booked' });          continue }
-      if (r.stock_status !== 'at_branch'){ skipped.push({ application_id: appId, reason: `Stock status is ${r.stock_status}` }); continue }
-      toUnbook.push(r.id)
+      const rs = (rows || []).filter(r => r.application_id === appId)
+      if (rs.length === 0)      { skipped.push({ application_id: appId, reason: 'Not found' }); continue }
+      if (rs.some(qualifies))   continue   // at least one row (the booked one) is being unbooked
+      const r = rs[0]
+      const reason = r.is_deleted ? 'Deleted'
+        : r.audit_consumed_at ? 'Already audit-consumed'
+        : !r.booking_id ? 'Not booked'
+        : `In a consignment (${r.stock_status})`
+      skipped.push({ application_id: appId, reason })
     }
 
     if (toUnbook.length === 0) {
