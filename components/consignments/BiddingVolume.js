@@ -2560,15 +2560,56 @@ function BookingsList({ t, card, bookings, onUpdateStatus, onRequestCancel, onCl
                                   </tr>
                                 </thead>
                                 <tbody>
-                                  {bd.branches.map((br, i) => (
-                                    <tr key={br.branch_name} style={{ borderTop: `1px solid ${t.border}25` }}>
-                                      <td style={btd('center', t.text4)}>{i + 1}</td>
-                                      <td style={btd('left', t.text1, 700)}>{br.branch_name}</td>
-                                      <td style={btd('left', REGION_COLORS[br.region] || t.text3, 600)}>{br.region || '—'}</td>
-                                      <td style={btd('right', t.text2, 600)}>{br.bills.length}</td>
-                                      <td style={{ ...btd('right', t.gold, 700), fontFamily: 'monospace' }}>{fmt(br.net_wt, 2)} g</td>
-                                    </tr>
-                                  ))}
+                                  {bd.branches.map((br, i) => {
+                                    const bkey   = `${b.id}::${br.branch_name}`
+                                    const brOpen = openBranches.has(bkey)
+                                    return (
+                                    <Fragment key={br.branch_name}>
+                                      <tr style={{ borderTop: `1px solid ${t.border}25`, cursor: 'pointer' }}
+                                          onClick={() => toggleBranch(bkey)}
+                                          title="Click to see the bills in this branch">
+                                        <td style={btd('center', t.text4)}>{i + 1}</td>
+                                        <td style={btd('left', t.text1, 700)}>
+                                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                                            <span style={{ width: 9, display: 'inline-block', fontSize: 9, color: t.text4 }}>{brOpen ? '▾' : '▸'}</span>
+                                            {br.branch_name}
+                                          </span>
+                                        </td>
+                                        <td style={btd('left', REGION_COLORS[br.region] || t.text3, 600)}>{br.region || '—'}</td>
+                                        <td style={btd('right', t.text2, 600)}>{br.bills.length}</td>
+                                        <td style={{ ...btd('right', t.gold, 700), fontFamily: 'monospace' }}>{fmt(br.net_wt, 2)} g</td>
+                                      </tr>
+                                      {brOpen && (
+                                        <tr>
+                                          <td colSpan={5} style={{ padding: 0, background: `${t.card2 || t.card}80` }}>
+                                            <div style={{ padding: '4px 10px 10px 38px' }}>
+                                              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                                                <thead>
+                                                  <tr>
+                                                    <th style={bth('left')}>Bill No</th>
+                                                    <th style={bth('left')}>Customer</th>
+                                                    <th style={bth('left')}>Status</th>
+                                                    <th style={bth('right')}>Net Wt</th>
+                                                  </tr>
+                                                </thead>
+                                                <tbody>
+                                                  {br.bills.map((bill, j) => (
+                                                    <tr key={bill.application_id || j} style={{ borderTop: `1px solid ${t.border}18` }}>
+                                                      <td style={{ ...btd('left', t.gold, 600), fontFamily: 'monospace', fontSize: 11.5 }}>{bill.application_id || '—'}</td>
+                                                      <td style={btd('left', t.text2, 500)}>{bill.customer_name || '—'}</td>
+                                                      <td style={btd('left', t.text3, 500)}>{(bill.stock_status || '').replace(/_/g, ' ') || '—'}</td>
+                                                      <td style={{ ...btd('right', t.text1, 600), fontFamily: 'monospace' }}>{fmt(bill.net_weight, 2)} g</td>
+                                                    </tr>
+                                                  ))}
+                                                </tbody>
+                                              </table>
+                                            </div>
+                                          </td>
+                                        </tr>
+                                      )}
+                                    </Fragment>
+                                    )
+                                  })}
                                 </tbody>
                                 <tfoot>
                                   <tr style={{ borderTop: `2px solid ${t.gold}40`, background: `${t.gold}08` }}>
