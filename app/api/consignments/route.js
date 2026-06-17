@@ -1333,6 +1333,105 @@ export async function GET(req) {
     return Response.json({ branches, total: { bills: tBills, net_wt: tNet, gross_wt: tGross } })
   }
 
+  // ── Melting incoming — today's Bangalore purchases + outstation consignments
+  // arriving at HO, grouped by branch (drill to cases). Shows expected arrival,
+  // booked/unbooked split, and the booking rate for booked cases. With
+  // ?audited=1 it returns only auditor-touched cases (Collection Audit OR the
+  // Bangalore EOD audit). Powers the Melting sub-modules.
+  if (action === 'melting_incoming') {
+    const auditedOnly = searchParams.get('audited') === '1'
+    const today = istToday()
+    const round = (n) => Math.round((Number(n) || 0) * 100) / 100
+    const istDateOf = (utcIso) => {
+      if (!utcIso) return null
+      const d = new Date(new Date(utcIso).getTime() + 5.5 * 3600_000)
+      return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`
+    }
+
+    const { data: branchRows } = await supabase.from('branches').select('name, region, delivery_tat_hours')
+    const meta = {}
+    for (const b of (branchRows || [])) meta[b.name] = b
+    const bangaloreNames = (branchRows || []).filter(b => b.region === 'Bangalore').map(b => b.name)
+
+    const FIELDS = 'id, application_id, crm_source, branch_name, current_branch, customer_name, gross_weight, net_weight, total_amount, purchase_date, stock_status, dispatched_at, booking_id, audited_at, audit_consumed_at'
+
+    // 1) Today's Bangalore purchases (booked + unbooked) → arrive at HO next working day.
+    let bang = []
+    if (bangaloreNames.length) {
+      const { data } = await supabase.from('purchases').select(FIELDS)
+        .in('branch_name', bangaloreNames)
+        .eq('purchase_date', today)
+        .eq('crm_status', 'approved').eq('is_deleted', false)
+      bang = (data || []).map(b => ({ ...b, _arrival: addWorkingDaysSkipSunday(today, 1), _source: 'bangalore' }))
+    }
+
+    // 2) Outstation in-transit consignments → arrive per branch TAT (working days).
+    const { data: out } = await supabase.from('purchases').select(FIELDS)
+      .eq('stock_status', 'in_consignment').eq('crm_status', 'approved').eq('is_deleted', false)
+      .not('dispatched_at', 'is', null)
+    const outstation = (out || [])
+      .filter(b => (meta[b.branch_name]?.region) !== 'Bangalore')
+      .map(b => {
+        const tat = meta[b.branch_name]?.delivery_tat_hours || 24
+        return { ...b, _arrival: addWorkingDaysSkipSunday(istDateOf(b.dispatched_at), Math.max(1, Math.ceil(tat / 24))), _source: 'consignment' }
+      })
+
+    let all = [...bang, ...outstation].map(b => ({ ...b, _audited: !!(b.audited_at || b.audit_consumed_at) }))
+    if (auditedOnly) all = all.filter(b => b._audited)
+
+    // Booking rates for the booked cases.
+    const bookingIds = [...new Set(all.map(b => b.booking_id).filter(Boolean))]
+    const rateBy = {}
+    if (bookingIds.length) {
+      const { data: q } = await supabase.from('cal_quotas').select('id, rate, party').in('id', bookingIds)
+      for (const r of (q || [])) rateBy[r.id] = { rate: Number(r.rate) || 0, party: r.party }
+    }
+
+    const byBranch = {}
+    for (const b of all) {
+      const owner = b.current_branch || b.branch_name
+      if (!byBranch[owner]) byBranch[owner] = {
+        branch_name: owner, region: meta[owner]?.region || meta[b.branch_name]?.region || 'Unknown',
+        cases: [], net: 0, gross: 0, booked_net: 0, unbooked_net: 0, booked_bills: 0, unbooked_bills: 0,
+        audited_bills: 0, _arrivals: new Set(), _rates: new Set(),
+      }
+      const g = byBranch[owner]
+      const booked = !!b.booking_id
+      const rate = booked ? (rateBy[b.booking_id]?.rate || null) : null
+      g.cases.push({
+        application_id: b.application_id, crm_source: b.crm_source, customer_name: b.customer_name,
+        gross_weight: round(b.gross_weight), net_weight: round(b.net_weight),
+        stock_status: b.stock_status, source: b._source, expected_arrival: b._arrival,
+        booked, rate, party: booked ? rateBy[b.booking_id]?.party : null, audited: b._audited,
+      })
+      g.net += Number(b.net_weight || 0); g.gross += Number(b.gross_weight || 0)
+      if (b._audited) g.audited_bills++
+      if (booked) { g.booked_net += Number(b.net_weight || 0); g.booked_bills++; if (rate) g._rates.add(rate) }
+      else { g.unbooked_net += Number(b.net_weight || 0); g.unbooked_bills++ }
+      if (b._arrival) g._arrivals.add(b._arrival)
+    }
+    const branches = Object.values(byBranch).map(g => ({
+      branch_name: g.branch_name, region: g.region,
+      bills: g.cases.length,
+      net: round(g.net), gross: round(g.gross),
+      booked_net: round(g.booked_net), unbooked_net: round(g.unbooked_net),
+      booked_bills: g.booked_bills, unbooked_bills: g.unbooked_bills, audited_bills: g.audited_bills,
+      arrivals: [...g._arrivals].sort(),
+      rates: [...g._rates].sort((a, b) => a - b),
+      cases: g.cases.sort((a, b) => b.net_weight - a.net_weight),
+    })).sort((a, b) => b.net - a.net)
+
+    const total = {
+      bills: all.length,
+      net: round(all.reduce((s, b) => s + Number(b.net_weight || 0), 0)),
+      gross: round(all.reduce((s, b) => s + Number(b.gross_weight || 0), 0)),
+      booked_bills: all.filter(b => b.booking_id).length,
+      unbooked_bills: all.filter(b => !b.booking_id).length,
+      audited_bills: all.filter(b => b._audited).length,
+    }
+    return Response.json({ today, branches, total, auditedOnly })
+  }
+
   if (action === 'bidding_bookings') {
     // Accept either `bidding_date` (NEW: filter by created_at IST date —
     // the day the booking was placed) or `date` (LEGACY: filter by

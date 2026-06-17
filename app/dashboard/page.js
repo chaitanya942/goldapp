@@ -48,6 +48,7 @@ import DialogHost from '../../components/ui/ConfirmDialog'
 import AuditAccessGuard from '../../components/AuditAccessGuard'
 import CancelRequestNotifier from '../../components/consignments/CancelRequestNotifier'
 import SyncHealthNotifier from '../../components/consignments/SyncHealthNotifier'
+import MeltingIncoming from '../../components/melting/MeltingIncoming'
 
 const THEMES = {
   dark:  { bg: '#0a0a0a', card: '#111111', text1: '#f0e6c8', text2: '#c8b89a', text3: '#7a6a4a', text4: '#4a3a2a', gold: '#c9a84c', border: '#1e1e1e', red: '#e05555' },
@@ -249,7 +250,9 @@ function DashboardShell() {
       case 'discrepancy-cases':       return <DiscrepancyCases />
       case 'purchase-register':       return <PurchaseRegister />
       case 'consignment-analytics':  return <ConsignmentAnalytics />
-      case 'melting':             return <ComingSoon title="Melting" />
+      case 'melting':             return <MeltingIncoming />
+      case 'melting-incoming':    return <MeltingIncoming />
+      case 'melting-audited':     return <MeltingIncoming auditedOnly />
       case 'sales':               return <ComingSoon title="Sales" />
       case 'cal-table':           return <CalTable />
       case 'live-market-rates':   return <LiveMarketRates />
