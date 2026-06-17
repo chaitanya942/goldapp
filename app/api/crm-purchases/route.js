@@ -213,24 +213,48 @@ export async function GET(req) {
         try {
           const dayStart = `${todayIST}T00:00:00+05:30`
           const dayEnd   = `${todayIST}T23:59:59+05:30`
-          const ncRows = await ncSql`
+          // Walk-ins = every transaction created today (provisional gross
+          // weight). Dated by created_at — a walk-in belongs to the day the
+          // customer came in.
+          const ncWalkRows = await ncSql`
             SELECT b.name AS branch,
                    COUNT(*)::int AS c,
-                   COALESCE(ROUND(SUM(ow.gross_weight)::numeric, 2), 0) AS wt,
-                   COUNT(*) FILTER (WHERE t.status = 'FINAL_PAYMENT_COMPLETED')::int AS done,
-                   COALESCE(ROUND(SUM(ow.net_weight)   FILTER (WHERE t.status = 'FINAL_PAYMENT_COMPLETED')::numeric, 2), 0) AS done_net,
-                   COALESCE(ROUND(SUM(ow.final_amount) FILTER (WHERE t.status = 'FINAL_PAYMENT_COMPLETED')::numeric, 0), 0) AS done_val
+                   COALESCE(ROUND(SUM(ow.gross_weight)::numeric, 2), 0) AS wt
             FROM "Transaction" t
             LEFT JOIN "Branch" b ON b.id = t.branch_id
             LEFT JOIN (
-              SELECT q.transaction_id,
-                     SUM(o.gross_weight) AS gross_weight,
-                     SUM(o.net_weight)   AS net_weight,
-                     MAX(q.final_amount) AS final_amount
+              SELECT q.transaction_id, SUM(o.gross_weight) AS gross_weight
               FROM "Quotation" q JOIN "Ornament" o ON o.quotation_id = q.id
               GROUP BY q.transaction_id
             ) ow ON ow.transaction_id = t.id
             WHERE t.created_at BETWEEN ${dayStart} AND ${dayEnd}
+            GROUP BY b.name
+          `
+          // Purchases (completed) — IDENTICAL basis to the Live Feed COMPLETED
+          // card and the master: final-payment date (== invoice day), APPROVED
+          // ornaments only, deduped by ornament_id. Keeps the dashboard's
+          // Purchased number/weight in lockstep with the Live Feed.
+          const ncDoneRows = await ncSql`
+            WITH ap AS (
+              SELECT q.transaction_id tid, o.ornament_id, o.id::text oid, o.net_weight nw, o.created_at ca
+              FROM "Quotation" q JOIN "Ornament" o ON o.quotation_id = q.id WHERE o.approve = true
+              UNION ALL
+              SELECT e.transaction_id, o.ornament_id, o.id::text, o.net_weight, o.created_at
+              FROM "Estimation" e JOIN "Ornament" o ON o.estimation_id = e.id WHERE o.approve = true
+            ),
+            dd AS (SELECT DISTINCT ON (tid, COALESCE(ornament_id, oid)) tid, nw FROM ap ORDER BY tid, COALESCE(ornament_id, oid), ca DESC),
+            ow AS (SELECT tid, SUM(nw) n FROM dd GROUP BY tid)
+            SELECT b.name AS branch,
+                   COUNT(*)::int AS done,
+                   COALESCE(ROUND(SUM(ow.n)::numeric, 2), 0) AS done_net,
+                   COALESCE(ROUND(SUM(q.final_amount)::numeric, 0), 0) AS done_val
+            FROM "Transaction" t
+            LEFT JOIN "Branch" b ON b.id = t.branch_id
+            JOIN LATERAL (SELECT MAX(created_at) fp FROM "Payment" WHERE transaction_id = t.id AND status = 'COMPLETED' AND type = 'FINAL_PAYMENT') f ON true
+            LEFT JOIN ow ON ow.tid = t.id
+            LEFT JOIN LATERAL (SELECT final_amount FROM "Quotation" WHERE transaction_id = t.id ORDER BY updated_at DESC LIMIT 1) q ON true
+            WHERE t.status = 'FINAL_PAYMENT_COMPLETED'
+              AND (f.fp AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata')::date = ${todayIST}::date
             GROUP BY b.name
           `
           let regionByName = null
@@ -239,12 +263,18 @@ export async function GET(req) {
             regionByName = {}
             for (const b of (brAll || [])) regionByName[(b.name || '').trim().toLowerCase()] = b.region
           }
-          for (const r of ncRows) {
-            r.branch = aliasBranchName(r.branch)   // stale-CRM-name → canonical
-            if (needRegionMap && !allowedSet.has(regionByName[(r.branch || '').trim().toLowerCase()] || '')) continue
-            walkedInCount    += Number(r.c)        || 0
-            walkedInWt       += parseFloat(r.wt)   || 0
-            ncCompleted      += Number(r.done)     || 0
+          const inAllowedBranch = (name) => {
+            const canon = aliasBranchName(name)
+            return !needRegionMap || allowedSet.has(regionByName[(canon || '').trim().toLowerCase()] || '')
+          }
+          for (const r of ncWalkRows) {
+            if (!inAllowedBranch(r.branch)) continue
+            walkedInCount += Number(r.c)      || 0
+            walkedInWt    += parseFloat(r.wt) || 0
+          }
+          for (const r of ncDoneRows) {
+            if (!inAllowedBranch(r.branch)) continue
+            ncCompleted      += Number(r.done)         || 0
             ncCompletedNet   += parseFloat(r.done_net) || 0
             ncCompletedValue += parseFloat(r.done_val) || 0
           }
