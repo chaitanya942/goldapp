@@ -1379,36 +1379,30 @@ export async function GET(req) {
     let all = [...bang, ...outstation].map(b => ({ ...b, _audited: !!(b.audited_at || b.audit_consumed_at) }))
     if (auditedOnly) all = all.filter(b => b._audited)
 
-    // Booking rates for the booked cases.
-    const bookingIds = [...new Set(all.map(b => b.booking_id).filter(Boolean))]
-    const rateBy = {}
-    if (bookingIds.length) {
-      const { data: q } = await supabase.from('cal_quotas').select('id, rate, party').in('id', bookingIds)
-      for (const r of (q || [])) rateBy[r.id] = { rate: Number(r.rate) || 0, party: r.party }
-    }
-
     const byBranch = {}
     for (const b of all) {
       const owner = b.current_branch || b.branch_name
       if (!byBranch[owner]) byBranch[owner] = {
         branch_name: owner, region: meta[owner]?.region || meta[b.branch_name]?.region || 'Unknown',
         cases: [], net: 0, gross: 0, booked_net: 0, unbooked_net: 0, booked_bills: 0, unbooked_bills: 0,
-        audited_bills: 0, _arrivals: new Set(), _rates: new Set(),
+        audited_bills: 0, _arrivals: new Set(), _cdates: new Set(),
       }
       const g = byBranch[owner]
       const booked = !!b.booking_id
-      const rate = booked ? (rateBy[b.booking_id]?.rate || null) : null
+      const consignmentDate = istDateOf(b.dispatched_at)   // when the consignment was created/dispatched
       g.cases.push({
         application_id: b.application_id, crm_source: b.crm_source, customer_name: b.customer_name,
         gross_weight: round(b.gross_weight), net_weight: round(b.net_weight),
-        stock_status: b.stock_status, source: b._source, expected_arrival: b._arrival,
-        booked, rate, party: booked ? rateBy[b.booking_id]?.party : null, audited: b._audited,
+        stock_status: b.stock_status, source: b._source,
+        consignment_date: consignmentDate, expected_arrival: b._arrival,
+        booked, audited: b._audited,
       })
       g.net += Number(b.net_weight || 0); g.gross += Number(b.gross_weight || 0)
       if (b._audited) g.audited_bills++
-      if (booked) { g.booked_net += Number(b.net_weight || 0); g.booked_bills++; if (rate) g._rates.add(rate) }
+      if (booked) { g.booked_net += Number(b.net_weight || 0); g.booked_bills++ }
       else { g.unbooked_net += Number(b.net_weight || 0); g.unbooked_bills++ }
       if (b._arrival) g._arrivals.add(b._arrival)
+      if (consignmentDate) g._cdates.add(consignmentDate)
     }
     const branches = Object.values(byBranch).map(g => ({
       branch_name: g.branch_name, region: g.region,
@@ -1417,9 +1411,9 @@ export async function GET(req) {
       booked_net: round(g.booked_net), unbooked_net: round(g.unbooked_net),
       booked_bills: g.booked_bills, unbooked_bills: g.unbooked_bills, audited_bills: g.audited_bills,
       arrivals: [...g._arrivals].sort(),
-      rates: [...g._rates].sort((a, b) => a - b),
-      cases: g.cases.sort((a, b) => b.net_weight - a.net_weight),
-    })).sort((a, b) => b.net - a.net)
+      consignment_dates: [...g._cdates].sort(),
+      cases: g.cases.sort((a, b) => b.gross_weight - a.gross_weight),
+    })).sort((a, b) => b.gross - a.gross)
 
     const total = {
       bills: all.length,
