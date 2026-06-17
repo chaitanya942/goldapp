@@ -188,9 +188,7 @@ function FlashCard({ t, accent, label, value, unit, sub, loading, isMobile, prog
   )
 }
 
-// Mini weight formatter — switches to kg above 1000g for compactness.
+// Weight formatter — always grams (with thousands separator), e.g. "5,340 g".
 function fmtWt(g) {
-  const n = Number(g || 0)
-  if (n >= 1000) return `${(n / 1000).toFixed(2)} kg`
-  return `${n.toFixed(0)} g`
+  return `${Math.round(Number(g || 0)).toLocaleString('en-IN')} g`
 }

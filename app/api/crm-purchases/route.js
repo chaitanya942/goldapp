@@ -197,7 +197,7 @@ export async function GET(req) {
       //    completed feed the LIVE purchased calc below. Best-effort +
       //    region-scoped; if the new CRM is unreachable we keep the synced
       //    numbers.
-      let ncCompleted = 0, ncCompletedNet = 0, ncCompletedValue = 0, ncLiveOk = false
+      let ncCompleted = 0, ncCompletedNet = 0, ncCompletedGross = 0, ncCompletedValue = 0, ncLiveOk = false
       try {
         const sslOpt = process.env.NEW_CRM_DB_CA
           ? { ca: process.env.NEW_CRM_DB_CA, rejectUnauthorized: true }
@@ -246,17 +246,18 @@ export async function GET(req) {
           // Purchased number/weight in lockstep with the Live Feed.
           const ncDoneRows = await ncSql`
             WITH ap AS (
-              SELECT q.transaction_id tid, o.ornament_id, o.id::text oid, o.net_weight nw, o.created_at ca
+              SELECT q.transaction_id tid, o.ornament_id, o.id::text oid, o.net_weight nw, o.gross_weight gw, o.created_at ca
               FROM "Quotation" q JOIN "Ornament" o ON o.quotation_id = q.id WHERE o.approve = true
               UNION ALL
-              SELECT e.transaction_id, o.ornament_id, o.id::text, o.net_weight, o.created_at
+              SELECT e.transaction_id, o.ornament_id, o.id::text, o.net_weight, o.gross_weight, o.created_at
               FROM "Estimation" e JOIN "Ornament" o ON o.estimation_id = e.id WHERE o.approve = true
             ),
-            dd AS (SELECT DISTINCT ON (tid, COALESCE(ornament_id, oid)) tid, nw FROM ap ORDER BY tid, COALESCE(ornament_id, oid), ca DESC),
-            ow AS (SELECT tid, SUM(nw) n FROM dd GROUP BY tid)
+            dd AS (SELECT DISTINCT ON (tid, COALESCE(ornament_id, oid)) tid, nw, gw FROM ap ORDER BY tid, COALESCE(ornament_id, oid), ca DESC),
+            ow AS (SELECT tid, SUM(nw) n, SUM(gw) g FROM dd GROUP BY tid)
             SELECT b.name AS branch,
                    COUNT(*)::int AS done,
                    COALESCE(ROUND(SUM(ow.n)::numeric, 2), 0) AS done_net,
+                   COALESCE(ROUND(SUM(ow.g)::numeric, 2), 0) AS done_gross,
                    COALESCE(ROUND(SUM(q.final_amount)::numeric, 0), 0) AS done_val
             FROM "Transaction" t
             LEFT JOIN "Branch" b ON b.id = t.branch_id
@@ -284,9 +285,10 @@ export async function GET(req) {
           }
           for (const r of ncDoneRows) {
             if (!inAllowedBranch(r.branch)) continue
-            ncCompleted      += Number(r.done)         || 0
-            ncCompletedNet   += parseFloat(r.done_net) || 0
-            ncCompletedValue += parseFloat(r.done_val) || 0
+            ncCompleted      += Number(r.done)           || 0
+            ncCompletedNet   += parseFloat(r.done_net)   || 0
+            ncCompletedGross += parseFloat(r.done_gross) || 0
+            ncCompletedValue += parseFloat(r.done_val)   || 0
           }
           ncLiveOk = true
         } finally { await ncSql.end() }
@@ -296,22 +298,24 @@ export async function GET(req) {
       // (LIVE completed from the query above). The synced purchases table lags
       // the new CRM, so subtract the synced new_crm slice and add the live
       // completed counts — old CRM stays from the aggregate.
+      // purchased_wt is GROSS (the dashboard card shows gross weight, matching
+      // the Live Feed "Total Today" gross basis).
       const kpis = agg?.data?.kpis || {}
       let purchasedCount = Number(kpis.total_count) || 0
-      let purchasedWt    = Number(kpis.total_net)   || 0
+      let purchasedWt    = Number(kpis.total_gross) || 0
       let approvedValue  = Number(kpis.total_value) || 0
       if (ncLiveOk) {
         let nsq = supabase.from('purchases')
-          .select('net_weight, total_amount')
+          .select('gross_weight, total_amount')
           .eq('crm_source', 'new_crm').eq('crm_status', 'approved')
           .eq('purchase_date', todayIST)
         if (regionBranches) nsq = nsq.in('branch_name', regionBranches)
         const { data: nsRows } = await nsq
         const nsCount = (nsRows || []).length
-        const nsNet   = (nsRows || []).reduce((s, r) => s + (Number(r.net_weight)   || 0), 0)
+        const nsGross = (nsRows || []).reduce((s, r) => s + (Number(r.gross_weight) || 0), 0)
         const nsVal   = (nsRows || []).reduce((s, r) => s + (Number(r.total_amount) || 0), 0)
         purchasedCount = Math.max(0, purchasedCount - nsCount + ncCompleted)
-        purchasedWt    = Math.max(0, purchasedWt    - nsNet   + ncCompletedNet)
+        purchasedWt    = Math.max(0, purchasedWt    - nsGross + ncCompletedGross)
         approvedValue  = Math.max(0, approvedValue  - nsVal   + ncCompletedValue)
       }
 
