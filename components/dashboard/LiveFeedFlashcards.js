@@ -96,7 +96,7 @@ export default function LiveFeedFlashcards({ t, isMobile, liveFeedAction }) {
           label="Walked In"
           value={walkinCount}
           unit={null}
-          sub={walkinWt > 0 ? `${fmtWt(walkinWt)} gold` : 'no weight yet'}
+          sub={walkinWt > 0 ? `${fmtWt(walkinWt)} gross weight` : 'no weight yet'}
           loading={loading && !data}
           isMobile={isMobile}
         />
@@ -105,7 +105,7 @@ export default function LiveFeedFlashcards({ t, isMobile, liveFeedAction }) {
           label="Purchased"
           value={purchasedCount}
           unit={null}
-          sub={purchasedWt > 0 ? `${fmtWt(purchasedWt)} gold` : '—'}
+          sub={purchasedWt > 0 ? `${fmtWt(purchasedWt)} gross weight` : '—'}
           loading={loading && !data}
           isMobile={isMobile}
         />
@@ -169,7 +169,7 @@ function FlashCard({ t, accent, label, value, unit, sub, loading, isMobile, prog
       }
 
       {sub && !loading && (
-        <div style={{ fontSize: isMobile ? 9.5 : 10, color: t.text4, marginTop: isMobile ? 5 : 7, lineHeight: 1.35 }}>{sub}</div>
+        <div style={{ fontSize: isMobile ? 9.5 : 10.5, color: t.text3, fontWeight: 700, marginTop: isMobile ? 5 : 7, lineHeight: 1.35 }}>{sub}</div>
       )}
 
       {/* Progress bar for the Conversion tile */}
