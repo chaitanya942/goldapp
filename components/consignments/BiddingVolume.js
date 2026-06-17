@@ -2882,11 +2882,11 @@ function SourceSection({
         }
         const canSelect = !!onAutoSelect && metrics.unbookedNet > 0
         const cards = [
-          { key: 'total',    label: 'Total Net',         icon: 'Σ', color: t.text1, val: metrics.totalNet,     sub: 'booked + unbooked' },
-          { key: 'booked',   label: 'Booked Net',        icon: '◆', color: blue,    val: metrics.bookedNet,    sub: 'already booked' },
-          { key: 'unbooked', label: 'Unbooked Net',      icon: '○', color: tone,    val: metrics.unbookedNet,  sub: 'still to book' },
+          { key: 'total',    label: 'Total Net',         icon: 'Σ', color: t.text1, val: metrics.totalNet,     bills: totalBills,    sub: 'booked + unbooked' },
+          { key: 'booked',   label: 'Booked Net',        icon: '◆', color: blue,    val: metrics.bookedNet,    bills: bookedBills,   sub: 'already booked' },
+          { key: 'unbooked', label: 'Unbooked Net',      icon: '○', color: tone,    val: metrics.unbookedNet,  bills: unbookedBills, sub: 'still to book' },
           { key: 'gain',     label: 'Gain on Unbooked',  icon: '↗', color: green,   val: metrics.gainNet,      gain: true },
-          { key: 'avail',    label: 'Available to Book', icon: '✓', color: green,   val: metrics.availableNet, sub: canSelect ? 'tap to select →' : 'unbooked + gain', strong: true, onClick: canSelect ? onAutoSelect : null },
+          { key: 'avail',    label: 'Available to Book', icon: '✓', color: green,   val: metrics.availableNet, bills: unbookedBills, sub: canSelect ? 'tap to select →' : 'unbooked + gain', strong: true, onClick: canSelect ? onAutoSelect : null },
         ]
         return (
           <div style={{
@@ -2921,6 +2921,11 @@ function SourceSection({
                 <div style={{ display: 'flex', alignItems: 'baseline', gap: 4 }}>
                   <span style={{ fontSize: 23, color: c.color, fontFamily: 'monospace', fontWeight: c.strong ? 800 : 700, lineHeight: 1, letterSpacing: '-.01em' }}>{fmt(c.val, 2)}</span>
                   <span style={{ fontSize: 12, color: t.text3, fontWeight: 700 }}>g</span>
+                  {c.bills != null && (
+                    <span style={{ fontSize: 10.5, color: t.text4, fontWeight: 700, marginLeft: 4 }}>
+                      · {c.bills} {c.bills === 1 ? 'bill' : 'bills'}
+                    </span>
+                  )}
                 </div>
                 {/* Sub-line — editable gain: % rate (shared) or absolute g (per-section) */}
                 {c.gain ? (
