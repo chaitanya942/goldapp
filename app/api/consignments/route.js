@@ -1174,9 +1174,12 @@ export async function GET(req) {
         .eq('is_deleted',   false)
         .is('booking_id',   null)
       if (s3Err) return Response.json({ error: s3Err.message }, { status: 500 })
-      klS3Bills = (s3 || [])
-        .filter(b => !klS2BillToConsignment[b.id])   // drop leaf→hub INTERNAL (those are S2)
-        .map(b => ({ ...b, branch_name: b.current_branch || b.branch_name }))
+      // Group by ORIGIN branch (branch_name), NOT current_branch. A hub→HO
+      // consignment consolidates bills from several leaf branches at the hub, so
+      // grouping by current_branch lumps every bill under that one hub (e.g. all
+      // under KL-THRISSUR). Keeping branch_name shows each bill under the branch
+      // it was actually bought at.
+      klS3Bills = (s3 || []).filter(b => !klS2BillToConsignment[b.id])   // drop leaf→hub INTERNAL (those are S2)
     }
 
     // S2 "may slip" heuristic — flag bills whose INTERNAL consignment was
