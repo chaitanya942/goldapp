@@ -4065,7 +4065,7 @@ function BookingModal({ t, arrivalDate, availablePool, remainingQty, incomingNet
     }
     if (overBy > 0 && !attrGain && !attrPipeline) {
       console.warn('[BookingModal] guard: overBy attribution required', overBy)
-      if (onSubmitGuardFail) onSubmitGuardFail(`Booking is ${overBy.toFixed(2)} g over total — tick Additional gain or Pipeline first.`)
+      if (onSubmitGuardFail) onSubmitGuardFail(`Booking is ${overBy.toFixed(2)} g over total — tick ${isKerala ? 'Pipeline' : 'Additional gain or Pipeline'} first.`)
       return
     }
     setBusy(true)
@@ -4100,7 +4100,10 @@ function BookingModal({ t, arrivalDate, availablePool, remainingQty, incomingNet
         notes:       compositeNotes,
         pipeline_remaining_g:        pipelineRemainingG,
         pipeline_region:             pipelineRegion,
-        pipeline_include_in_transit: !!(attrPipeline && overBy > 0 && !isKerala && pipelineIncludeInTransit),
+        // Kerala always back-fills pipeline from BOTH S1 (hub stock) and S2
+        // (branch → hub) — no opt-in toggle. KA·AP·TS keeps the per-booking
+        // "also use 24h in-transit" opt-in.
+        pipeline_include_in_transit: !!(attrPipeline && overBy > 0 && (isKerala || pipelineIncludeInTransit)),
         // Breakdown — each component of the operator-built total.
         bills_net_weight_g:   Number(netFromSelection.toFixed(3)),
         gain_applied_g:       Number(addedGainsW.toFixed(3)),
@@ -4405,11 +4408,13 @@ function BookingModal({ t, arrivalDate, availablePool, remainingQty, incomingNet
                     </span>
                   </div>
                   <div style={{ fontSize: 11, color: t.text3, marginBottom: 8, fontWeight: 600 }}>
-                    Booking weight is {fmt(overBy, 2)} g over the total bidding weight ({fmt(totalBiddingW, 2)} g). Pick where this comes from — tick one or both:
+                    Booking weight is {fmt(overBy, 2)} g over the total bidding weight ({fmt(totalBiddingW, 2)} g). {isKerala ? 'Booked against tomorrow’s incoming (hub stock + branch → hub) — tick Pipeline:' : 'Pick where this comes from — tick one or both:'}
                   </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-                    <Box checked={attrGain}     onClick={() => setAttrGain(v => !v)}     accent={t.orange || '#e58a3b'} label="Additional gain"  hint={`Realize more than the ${(liveGainRate * 100).toFixed(2)} % default`} />
-                    <Box checked={attrPipeline} onClick={() => setAttrPipeline(v => !v)} accent={t.purple || '#8c5ac8'} label="Pipeline"          hint="Book against tomorrow's incoming" />
+                  <div style={{ display: 'grid', gridTemplateColumns: isKerala ? '1fr' : '1fr 1fr', gap: 10 }}>
+                    {!isKerala && (
+                      <Box checked={attrGain} onClick={() => setAttrGain(v => !v)} accent={t.orange || '#e58a3b'} label="Additional gain" hint={`Realize more than the ${(liveGainRate * 100).toFixed(2)} % default`} />
+                    )}
+                    <Box checked={attrPipeline} onClick={() => setAttrPipeline(v => !v)} accent={t.purple || '#8c5ac8'} label="Pipeline" hint={isKerala ? 'Back-fill from hub stock + branch → hub' : "Book against tomorrow's incoming"} />
                   </div>
                   {/* Sub-option: when pipeline is ticked AND it's not a Kerala
                       booking, allow the auto-attacher to also pull from
@@ -4447,7 +4452,7 @@ function BookingModal({ t, arrivalDate, availablePool, remainingQty, incomingNet
                   )}
                   {needsAttr && (
                     <div style={{ fontSize: 10.5, color: amberTone, marginTop: 8, fontWeight: 700, letterSpacing: '.01em' }}>
-                      Tick at least one to enable Create Booking.
+                      {isKerala ? 'Tick Pipeline to enable Create Booking.' : 'Tick at least one to enable Create Booking.'}
                     </div>
                   )}
                 </div>
