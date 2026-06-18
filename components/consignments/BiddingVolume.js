@@ -536,6 +536,14 @@ export default function BiddingVolume() {
   const klS3Total       = klSections.s3_created_not_booked?.total || { bills: 0, gross_wt: 0, net_wt: 0 }
   const klS4Total       = klSections.s4_booked_pending?.total || { bills: 0, gross_wt: 0, net_wt: 0 }
   const klS5Total       = klSections.s5_at_leaf?.total        || { bills: 0, gross_wt: 0, net_wt: 0 }
+  // Section 2 "Branch → Hub" = in-movement runs + bills already received at hub,
+  // shown as ONE card (both are the branch→hub flow, just at different stages).
+  const klS2Merged      = [...klS2Branches, ...klS1LeafBranches]
+  const klS2MergedTotal = {
+    bills:    (klS2Total.bills    || 0) + (klS1LeafTotal.bills    || 0),
+    gross_wt: (klS2Total.gross_wt || 0) + (klS1LeafTotal.gross_wt || 0),
+    net_wt:   (klS2Total.net_wt   || 0) + (klS1LeafTotal.net_wt   || 0),
+  }
   // Hubs that already cut their hub→HO E-invoice today — their incoming
   // bills (S1 + S2) have been server-side excluded from this bid because
   // they'll ride tomorrow's truck. Surfaced as a banner above the picker.
@@ -1657,17 +1665,17 @@ export default function BiddingVolume() {
           emptyMsg="No hub-origin bills sitting at the Kerala hubs."
         />)}
 
-        {/* 2 · Branch → Hub — in-movement runs, then bills already received at hub */}
-        {(activeSection === '2') && (<>
+        {/* 2 · Branch → Hub — one card: in-movement runs + already received at hub */}
+        {(activeSection === '2') && (
         <SourceSection
           t={t} card={card}
           index={2}
           icon="⇒"
-          title="Branch → Hub · in movement"
-          subtitle={`On an INTERNAL run to a KL hub · expected to reach hub today, dispatch to HO tonight · arrives ${fmtDate(arrivalDate)}`}
+          title="Branch → Hub"
+          subtitle={`Leaf → hub: in transit now, plus bills already received at the hub · part of tonight's hub → HO dispatch · arrives ${fmtDate(arrivalDate)}`}
           accent={t.blue}
-          branches={klS2Branches}
-          total={klS2Total}
+          branches={klS2Merged}
+          total={klS2MergedTotal}
           prefix="M"
           selectable
           selected={selected}
@@ -1676,30 +1684,8 @@ export default function BiddingVolume() {
           onToggleBranchAll={toggleBranchAll}
           onToggleRegionAll={toggleRegionAll}
           branchSelectionState={branchSelectionState}
-          emptyMsg="No leaf → hub movements currently in transit."
-        />
-        {klS1LeafBranches.length > 0 && (
-          <SourceSection
-            t={t} card={card}
-            index={2}
-            icon="↪"
-            title="Received at hub · from leaf branches"
-            subtitle="Leaf bills already received at a hub — part of tonight's hub → HO pool, grouped by their origin leaf."
-            accent={t.blue}
-            branches={klS1LeafBranches}
-            total={klS1LeafTotal}
-            prefix="M"
-            selectable
-            selected={selected}
-            branchLocked={branchLocked}
-            onToggleBill={toggleBill}
-            onToggleBranchAll={toggleBranchAll}
-            onToggleRegionAll={toggleRegionAll}
-            branchSelectionState={branchSelectionState}
-            emptyMsg=""
-          />
-        )}
-        </>)}
+          emptyMsg="No branch → hub bills right now."
+        />)}
 
         {/* 3 · Consignment created · not booked */}
         {(activeSection === '3') && (
