@@ -37,24 +37,39 @@ async function runAudit(actor) {
     return { audit_date: auditDate, swept: { count: 0, net_wt: 0 }, attributed: { count: 0, net_wt: 0 }, held: { count: 0, net_wt: 0 }, details: { reason: 'no_bangalore_branches' } }
   }
 
-  // ── Pass 1: Auto-attach sweep ─────────────────────────────────────────────
-  // Re-run the existing process_pipeline_attachments RPC to catch any
-  // stragglers that arrived between the last sync and now. Non-fatal — if
-  // it errors we keep going with attribution.
+  // ── Pass 1a: EOD auto-attach (overshoot allowed, debits gain) ─────────────
+  // Unlike the daytime no-overshoot attacher, the EOD attacher attaches a
+  // leftover bill to a booking with pipeline still owed EVEN IF it overshoots,
+  // so a real purchased bill is never left in standalone-gain limbo while a
+  // pipeline is owed. The overshoot debits that booking's realized gain.
+  // (sql/eod-pipeline-attach-overshoot-debit.sql)
   let sweptCount    = 0
   let sweptWeight   = 0
+  let gainDebited   = 0
   try {
-    const { data: attachRows, error: paErr } = await supabase.rpc('process_pipeline_attachments')
+    const { data: attachRows, error: paErr } = await supabase.rpc('process_pipeline_attachments_eod')
     if (paErr) {
-      console.warn('[section1-audit] process_pipeline_attachments failed:', paErr.message)
+      console.warn('[section1-audit] process_pipeline_attachments_eod failed:', paErr.message)
     } else if (Array.isArray(attachRows)) {
       for (const r of attachRows) {
         sweptCount  += Number(r.bills_attached  || 0)
         sweptWeight += Number(r.weight_attached || 0)
+        gainDebited += Number(r.gain_debited_g  || 0)
       }
     }
   } catch (paErr) {
-    console.warn('[section1-audit] auto-attach threw:', paErr?.message)
+    console.warn('[section1-audit] EOD auto-attach threw:', paErr?.message)
+  }
+
+  // ── Pass 1b: Close stale pipelines → gain ─────────────────────────────────
+  // Any pipeline STILL owed after the attach pass (no more bills to fill it)
+  // converts to realized gain — "whatever is left in the pipeline at midnight
+  // is gain". (close_stale_pipelines, sql/cal_quotas_pipeline_phase2.sql)
+  try {
+    const { error: csErr } = await supabase.rpc('close_stale_pipelines')
+    if (csErr) console.warn('[section1-audit] close_stale_pipelines failed:', csErr.message)
+  } catch (csErr) {
+    console.warn('[section1-audit] close_stale_pipelines threw:', csErr?.message)
   }
 
   // ── Pass 2: Attribute stragglers to gain ──────────────────────────────────
@@ -110,7 +125,7 @@ async function runAudit(actor) {
     attributed_net_wt: Number(attributedWeight.toFixed(3)),
     held_count:        heldCount,
     held_net_wt:       Number(heldWeight.toFixed(3)),
-    details:           { actor: actor || 'cron', bangalore_branches: bangaloreNames.length },
+    details:           { actor: actor || 'cron', bangalore_branches: bangaloreNames.length, gain_debited_g: Number(gainDebited.toFixed(3)) },
   }
   const { data: savedLog, error: logErr } = await supabase
     .from('bidding_audit_log')
