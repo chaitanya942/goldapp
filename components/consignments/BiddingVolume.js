@@ -3888,6 +3888,10 @@ function BookingModal({ t, arrivalDate, availablePool, remainingQty, incomingNet
   const defaultBookingWeight = totalBiddingW
   const [bookingWeight, setBookingWeight] = useState(() => defaultBookingWeight > 0 ? defaultBookingWeight.toFixed(2) : '')
   const [bookingWeightDirty, setBookingWeightDirty] = useState(false)
+  // Kerala "accept excess" — book the typed (under) bid while keeping ALL
+  // selected bills attached (the over-attached gold is the company's realized
+  // gain). Reset whenever the bid changes so a fresh under-bid must be re-accepted.
+  const [acceptExcess, setAcceptExcess] = useState(false)
   const [party,       setParty]       = useState('')
   const [rate,        setRate]        = useState('')
   const [busy,        setBusy]        = useState(false)
@@ -4058,9 +4062,11 @@ function BookingModal({ t, arrivalDate, availablePool, remainingQty, incomingNet
       if (onSubmitGuardFail) onSubmitGuardFail('Rate is missing or invalid.')
       return
     }
-    if (excessBy > 0.05) {
+    if (excessBy > 0.05 && !acceptExcess) {
       console.warn('[BookingModal] guard: excess not reconciled', excessBy)
-      if (onSubmitGuardFail) onSubmitGuardFail(`Bid is ${excessBy.toFixed(2)} g under the selected weight — reduce gain or detach Bangalore bills first.`)
+      if (onSubmitGuardFail) onSubmitGuardFail(isKerala
+        ? `Bid is ${excessBy.toFixed(2)} g under the selected weight — tap "Accept excess" to keep all bills on the booking.`
+        : `Bid is ${excessBy.toFixed(2)} g under the selected weight — reduce gain or detach Bangalore bills first.`)
       return
     }
     if (overBy > 0 && !attrGain && !attrPipeline) {
@@ -4121,7 +4127,7 @@ function BookingModal({ t, arrivalDate, availablePool, remainingQty, incomingNet
     }
   }
 
-  const valid = party.trim() && Number.isFinite(w) && w > 0 && Number.isFinite(r) && r > 0 && (overBy === 0 || attrGain || attrPipeline) && excessBy <= 0.05
+  const valid = party.trim() && Number.isFinite(w) && w > 0 && Number.isFinite(r) && r > 0 && (overBy === 0 || attrGain || attrPipeline) && (excessBy <= 0.05 || acceptExcess)
 
   // Portal to document.body — the dashboard <main> uses overflow: clip on
   // its x-axis, which (with overflow-y: auto) creates a clipping/paint
@@ -4328,7 +4334,7 @@ function BookingModal({ t, arrivalDate, availablePool, remainingQty, incomingNet
                   <span style={{ fontSize: 9.5, color: 'rgba(255,255,255,.4)', letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 700 }}>Bidding weight · round-off</span>
                   {totalBiddingW > 0 && Math.abs(Number(bookingWeight || 0) - totalBiddingW) > 0.005 && (
                     <button type="button"
-                      onClick={() => { setBookingWeight(totalBiddingW.toFixed(2)); setBookingWeightDirty(true) }}
+                      onClick={() => { setBookingWeight(totalBiddingW.toFixed(2)); setBookingWeightDirty(true); setAcceptExcess(false) }}
                       title={`Reset to total · ${fmt(totalBiddingW, 2)} g`}
                       style={{
                         background: `${t.gold}18`, border: `1px solid ${t.gold}55`,
@@ -4343,7 +4349,7 @@ function BookingModal({ t, arrivalDate, availablePool, remainingQty, incomingNet
                   )}
                 </span>
                 <input value={bookingWeight} className="bidInput"
-                  onChange={e => { setBookingWeight(e.target.value.replace(/[^\d.]/g, '')); setBookingWeightDirty(true) }}
+                  onChange={e => { setBookingWeight(e.target.value.replace(/[^\d.]/g, '')); setBookingWeightDirty(true); setAcceptExcess(false) }}
                   placeholder="e.g. 1500"
                   inputMode="decimal"
                   style={{ ...inputStyle(t), fontFamily: 'monospace', fontSize: 17, fontWeight: 800, padding: '10px 12px', color: t.gold, borderColor: wValid ? `${t.gold}66` : t.border }} />
@@ -4486,15 +4492,18 @@ function BookingModal({ t, arrivalDate, availablePool, remainingQty, incomingNet
                   </div>
                   {isKerala ? (
                     /* Kerala — no gain to trim and no Bangalore bills to detach.
-                       Accept the excess by booking the full attached weight so
-                       all selected bills stay on the booking and nothing's left
-                       over (raises the bid to the selected weight). */
+                       Accept the excess: keep the typed bid AND all attached
+                       bills on the booking; the extra net is the company's
+                       realized gain. The server reconcile no-ops for KL (no
+                       Bangalore bills), so all bills stay attached. */
                     <button type="button"
-                      onClick={() => { setBookingWeight(selectedBookingW.toFixed(2)); setBookingWeightDirty(true) }}
-                      style={actBtn(true, t.purple || '#8c5ac8')}>
-                      <div style={{ fontSize: 12, fontWeight: 800, color: t.purple || '#8c5ac8' }}>Accept excess — book full {fmt(selectedBookingW, 2)} g</div>
+                      onClick={() => setAcceptExcess(v => !v)}
+                      style={actBtn(true, acceptExcess ? (t.green || '#3aaa6a') : (t.purple || '#8c5ac8'))}>
+                      <div style={{ fontSize: 12, fontWeight: 800, color: acceptExcess ? (t.green || '#3aaa6a') : (t.purple || '#8c5ac8') }}>
+                        {acceptExcess ? `✓ Excess accepted — booking ${fmt(w, 2)} g, all ${selected.size} bills attached` : `Accept excess — book ${fmt(w, 2)} g, keep all bills`}
+                      </div>
                       <div style={{ fontSize: 10.5, color: t.text3, marginTop: 2, fontWeight: 500, lineHeight: 1.35 }}>
-                        Keeps all attached bills · raises the bid by {fmt(excessBy, 2)} g so no gold is left over
+                        Keeps your {fmt(w, 2)} g bid with all {selected.size} bills attached · the extra {fmt(excessBy, 2)} g is realized as gain
                       </div>
                     </button>
                   ) : (
