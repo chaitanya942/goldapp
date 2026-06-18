@@ -1602,8 +1602,8 @@ export default function BiddingVolume() {
             return `${day} · ${fmtDateShort(d)}`
           }
           const navKL = [
-            { id: '1', label: 'Hub Stock',                    accent: t.purple || '#8c5ac8', bills: (klS1Total.bills || 0) + (klS1LeafTotal.bills || 0), date: arrivalDate },
-            { id: '2', label: 'Branch → Hub',                 accent: t.blue,                bills: klS2Total.bills || 0, date: arrivalDate },
+            { id: '1', label: 'Hub Stock',                    accent: t.purple || '#8c5ac8', bills: klS1Total.bills || 0, date: arrivalDate },
+            { id: '2', label: 'Branch → Hub',                 accent: t.blue,                bills: (klS2Total.bills || 0) + (klS1LeafTotal.bills || 0), date: arrivalDate },
             { id: '3', label: 'Consignment · not booked',     accent: t.orange,              bills: klS3Total.bills || 0, date: null },
             { id: '4', label: 'Booked · no consignment',      accent: t.red,                 bills: klS4Total.bills || 0, date: null },
             { id: '5', label: 'At branch · dispatch pending', accent: t.teal || '#0e9aa7',   bills: klS5Total.bills || 0, date: null },
@@ -1635,52 +1635,30 @@ export default function BiddingVolume() {
           )
         })()}
 
-        {/* 1 · Hub Stock — hub-origin bills, then a received-from-leaf sub-group */}
-        {(activeSection === '1') && (<>
-          <SourceSection
-            t={t} card={card}
-            index={1}
-            icon="🏛"
-            title="Hub Stock — hub's own bills"
-            subtitle={`Bought at the hub · at_branch · ready for tonight's hub → HO dispatch · arrives at HO ${fmtDate(arrivalDate)}`}
-            accent={t.purple || '#8c5ac8'}
-            branches={klS1Branches}
-            total={klS1Total}
-            prefix="H"
-            selectable
-            selected={selected}
-            branchLocked={branchLocked}
-            onToggleBill={toggleBill}
-            onToggleBranchAll={toggleBranchAll}
-            onToggleRegionAll={toggleRegionAll}
-            branchSelectionState={branchSelectionState}
-            emptyMsg="No hub-origin bills sitting at the Kerala hubs."
-          />
-          {klS1LeafBranches.length > 0 && (
-            <SourceSection
-              t={t} card={card}
-              index={1}
-              icon="↪"
-              title="Received at hub · from leaf branches"
-              subtitle="Leaf bills already received at a hub — part of tonight's hub → HO pool, grouped by their origin leaf."
-              accent={t.purple || '#8c5ac8'}
-              branches={klS1LeafBranches}
-              total={klS1LeafTotal}
-              prefix="H"
-              selectable
-              selected={selected}
-              branchLocked={branchLocked}
-              onToggleBill={toggleBill}
-              onToggleBranchAll={toggleBranchAll}
-              onToggleRegionAll={toggleRegionAll}
-              branchSelectionState={branchSelectionState}
-              emptyMsg=""
-            />
-          )}
-        </>)}
+        {/* 1 · Hub Stock — hub-origin bills only */}
+        {(activeSection === '1') && (
+        <SourceSection
+          t={t} card={card}
+          index={1}
+          icon="🏛"
+          title="Hub Stock — hub's own bills"
+          subtitle={`Bought at the hub · at_branch · ready for tonight's hub → HO dispatch · arrives at HO ${fmtDate(arrivalDate)}`}
+          accent={t.purple || '#8c5ac8'}
+          branches={klS1Branches}
+          total={klS1Total}
+          prefix="H"
+          selectable
+          selected={selected}
+          branchLocked={branchLocked}
+          onToggleBill={toggleBill}
+          onToggleBranchAll={toggleBranchAll}
+          onToggleRegionAll={toggleRegionAll}
+          branchSelectionState={branchSelectionState}
+          emptyMsg="No hub-origin bills sitting at the Kerala hubs."
+        />)}
 
-        {/* 2 · Branch → Hub (leaf → hub, in movement) */}
-        {(activeSection === '2') && (
+        {/* 2 · Branch → Hub — in-movement runs, then bills already received at hub */}
+        {(activeSection === '2') && (<>
         <SourceSection
           t={t} card={card}
           index={2}
@@ -1699,7 +1677,29 @@ export default function BiddingVolume() {
           onToggleRegionAll={toggleRegionAll}
           branchSelectionState={branchSelectionState}
           emptyMsg="No leaf → hub movements currently in transit."
-        />)}
+        />
+        {klS1LeafBranches.length > 0 && (
+          <SourceSection
+            t={t} card={card}
+            index={2}
+            icon="↪"
+            title="Received at hub · from leaf branches"
+            subtitle="Leaf bills already received at a hub — part of tonight's hub → HO pool, grouped by their origin leaf."
+            accent={t.blue}
+            branches={klS1LeafBranches}
+            total={klS1LeafTotal}
+            prefix="M"
+            selectable
+            selected={selected}
+            branchLocked={branchLocked}
+            onToggleBill={toggleBill}
+            onToggleBranchAll={toggleBranchAll}
+            onToggleRegionAll={toggleRegionAll}
+            branchSelectionState={branchSelectionState}
+            emptyMsg=""
+          />
+        )}
+        </>)}
 
         {/* 3 · Consignment created · not booked */}
         {(activeSection === '3') && (
