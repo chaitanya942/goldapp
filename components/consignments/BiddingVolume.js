@@ -4484,6 +4484,20 @@ function BookingModal({ t, arrivalDate, availablePool, remainingQty, incomingNet
                   <div style={{ fontSize: 11, color: t.text3, marginBottom: 8, fontWeight: 600 }}>
                     Bid ({fmt(w, 2)} g) is {fmt(excessBy, 2)} g under the selected booking weight ({fmt(selectedBookingW, 2)} g). Take it off:
                   </div>
+                  {isKerala ? (
+                    /* Kerala — no gain to trim and no Bangalore bills to detach.
+                       Accept the excess by booking the full attached weight so
+                       all selected bills stay on the booking and nothing's left
+                       over (raises the bid to the selected weight). */
+                    <button type="button"
+                      onClick={() => { setBookingWeight(selectedBookingW.toFixed(2)); setBookingWeightDirty(true) }}
+                      style={actBtn(true, t.purple || '#8c5ac8')}>
+                      <div style={{ fontSize: 12, fontWeight: 800, color: t.purple || '#8c5ac8' }}>Accept excess — book full {fmt(selectedBookingW, 2)} g</div>
+                      <div style={{ fontSize: 10.5, color: t.text3, marginTop: 2, fontWeight: 500, lineHeight: 1.35 }}>
+                        Keeps all attached bills · raises the bid by {fmt(excessBy, 2)} g so no gold is left over
+                      </div>
+                    </button>
+                  ) : (
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
                     <button type="button" onClick={trimFromGain} disabled={!canTrimGain}
                       style={actBtn(canTrimGain, t.green || '#3aaa6a')}>
@@ -4500,6 +4514,7 @@ function BookingModal({ t, arrivalDate, availablePool, remainingQty, incomingNet
                       </div>
                     </button>
                   </div>
+                  )}
                 </div>
               )
             })()}
