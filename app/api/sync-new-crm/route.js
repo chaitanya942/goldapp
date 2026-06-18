@@ -185,9 +185,14 @@ async function runSync(request) {
       const svcAmount   = parseFloat(r.service_charge_amount) || 0
       const customerName = [r.first_name, r.last_name].filter(Boolean).join(' ').trim() || null
 
-      // Normalize code: strip any spaces, ensure WGKA prefix (new CRM uses WGKA-XXXXX)
-      const rawCode  = String(r.code || '').trim().replace(/-/g, '')
-      const appId    = rawCode.toUpperCase().startsWith('WGKA') ? rawCode.toUpperCase() : `WGKA${rawCode}`
+      // PRESERVE the new-CRM native code format. The source `code` is already
+      // hyphenated (WGKA-XXXXX) and that hyphen is exactly what distinguishes a
+      // new-CRM bill (WGKA-XXXX) from an old-CRM bill (WGKAXXXX). We used to strip
+      // it, which collapsed both CRMs onto the SAME application_id and caused the
+      // dual-CRM collisions. Keep the hyphen; only normalize whitespace + case,
+      // and add a hyphenated WGKA- prefix if a bare code (no prefix) ever appears.
+      const rawCode  = String(r.code || '').trim().replace(/\s+/g, '')
+      const appId    = rawCode.toUpperCase().startsWith('WGKA') ? rawCode.toUpperCase() : `WGKA-${rawCode}`
 
       return {
         application_id:             appId,

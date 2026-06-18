@@ -184,8 +184,11 @@ async function main() {
 
   // ── Build records ─────────────────────────────────────────────────────────
   const allRecords = rows.map(r => {
-    const rawCode  = String(r.code || '').trim().replace(/-/g, '')
-    const appId    = rawCode.toUpperCase().startsWith('WGKA') ? rawCode.toUpperCase() : `WGKA${rawCode}`
+    // PRESERVE the new-CRM native hyphenated code (WGKA-XXXXX). The hyphen is
+    // what distinguishes new-CRM (WGKA-XXXX) from old-CRM (WGKAXXXX); stripping it
+    // collapsed both onto the same application_id. Keep it — see sync-new-crm route.
+    const rawCode  = String(r.code || '').trim().replace(/\s+/g, '')
+    const appId    = rawCode.toUpperCase().startsWith('WGKA') ? rawCode.toUpperCase() : `WGKA-${rawCode}`
     const finalAmount = parseFloat(r.final_amount)  || 0
     // Clamp the service-charge % to a sane 0–100 range. Some new-CRM quotations
     // carry garbage values (e.g. 1685.94) that overflow the numeric column and,
