@@ -7,6 +7,7 @@ import Badge from '../ui/Badge'
 import { CONSIGNMENT_THEMES as THEMES } from '../../lib/consignmentTheme'
 import { istNow, istStr } from '../../lib/dateIst'
 import { getCache, setCache } from '../../lib/moduleCache'
+import { appIdVariants } from '../../lib/appIdSearch'
 
 // Cache key for a page query — covers every input that changes the result set,
 // so a re-open with the same filters paints instantly from memory.
@@ -260,7 +261,13 @@ export default function PurchaseData() {
       ? supabase.from('purchases').select('*', { count: 'exact' })
       : supabase.from('purchases').select('*')
     q = q.eq('is_deleted', false).neq('crm_status', 'deleted')
-    if (search)            q = q.or(`customer_name.ilike.%${search}%,application_id.ilike.%${search}%,branch_name.ilike.%${search}%`)
+    if (search) {
+      // Hyphen-insensitive on application_id: expand the term into WGKA-XXXX /
+      // WGKAXXXX variants so new- and old-CRM ids both match regardless of how
+      // the user types the hyphen.
+      const appIdOr = appIdVariants(search).map(v => `application_id.ilike.%${v}%`).join(',')
+      q = q.or(`customer_name.ilike.%${search}%,${appIdOr},branch_name.ilike.%${search}%`)
+    }
     if (filterCrmStatus)   q = q.eq('crm_status', filterCrmStatus)
     if (filterCrmSource)   q = q.eq('crm_source', filterCrmSource)
     if (filterStatus)      q = q.eq('stock_status', filterStatus)

@@ -23,6 +23,7 @@ import GoldSpinner from '../ui/GoldSpinner'
 import { authedFetch } from '../../lib/authedFetch'
 import { CONSIGNMENT_THEMES as THEMES, useMobile } from '../../lib/consignmentTheme'
 import { istToday, istDaysAgo } from '../../lib/dateIst'
+import { appIdMatches } from '../../lib/appIdSearch'
 
 const fmtWt        = (n) => n != null ? `${Number(n).toFixed(3)}g` : '—'
 const fmtSignedWt  = (n) => {
@@ -137,7 +138,7 @@ export default function AuditReport() {
   const filteredLog = useMemo(() => rowsWithShift.filter(r =>
     shiftMatches(r) && (
       !q
-      || (r.application_id   || '').toLowerCase().includes(q)
+      || appIdMatches(r.application_id, q)
       || (r.customer_name    || '').toLowerCase().includes(q)
       || (r.branch_name      || '').toLowerCase().includes(q)
       || (r.audited_by_name  || '').toLowerCase().includes(q)

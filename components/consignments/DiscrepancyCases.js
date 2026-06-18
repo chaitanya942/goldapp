@@ -15,6 +15,7 @@ import { useApp } from '../../lib/context'
 import GoldSpinner from '../ui/GoldSpinner'
 import { authedFetch } from '../../lib/authedFetch'
 import { CONSIGNMENT_THEMES as THEMES, useMobile } from '../../lib/consignmentTheme'
+import { appIdMatches } from '../../lib/appIdSearch'
 
 const fmtWt        = (n) => n != null ? `${Number(n).toFixed(3)}g` : '—'
 const fmtSignedWt  = (n) => {
@@ -53,7 +54,7 @@ export default function DiscrepancyCases() {
 
   const q = search.trim().toLowerCase()
   const visible = useMemo(() => !q ? cases : cases.filter(c =>
-    (c.purchase?.application_id || '').toLowerCase().includes(q)
+    appIdMatches(c.purchase?.application_id, q)
     || (c.purchase?.customer_name || '').toLowerCase().includes(q)
     || (c.purchase?.branch_name   || '').toLowerCase().includes(q)
     || (c.auditor?.name           || '').toLowerCase().includes(q)

@@ -16,6 +16,7 @@ import { WorkflowStrip, canActOnStep } from './workflowParts'
 import PreviewModal from './PreviewModal'
 import { istToday, istDaysAgo, istStartOfDayIso, istEndOfDayIso } from '../../lib/dateIst'
 import { docFilename } from '../../lib/docFilename'
+import { appIdMatches } from '../../lib/appIdSearch'
 
 async function triggerDownload(url, filename, onError) {
   const res  = await authedFetch(url)
@@ -367,7 +368,7 @@ export default function ConsignmentData() {
       bills = bills.filter(p =>
         p.customer_name?.toLowerCase().includes(q) ||
         p.phone_number?.includes(q) ||
-        p.application_id?.toLowerCase().includes(q))
+        appIdMatches(p.application_id, q))
     }
     return [...bills].sort((a, b) => {
       if (sortBy === 'date_desc')   return new Date(b.purchase_date) - new Date(a.purchase_date)
