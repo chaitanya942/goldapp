@@ -4215,11 +4215,11 @@ function BookingModal({ t, arrivalDate, availablePool, remainingQty, incomingNet
 
                 <div style={{ height: 1, background: `${t.border}60`, margin: '2px 0' }} />
 
-                {/* + Gains — defaults to 3.5 % of selected, overrideable.
-                    type="text" + inputMode="decimal" so we don't get the
-                    browser's native up/down spinner (which made the field
-                    feel chunky). */}
-                {row('Add gains',
+                {/* + Gains — KA·AP·TS only. Kerala has no gain, so the whole row
+                    is hidden for KL bookings. Defaults to the company % of
+                    selected, overrideable. type="text" + inputMode="decimal"
+                    avoids the native spinner. */}
+                {!isKerala && row('Add gains',
                   <input type="text" value={gainsEntry}
                     onChange={e => { setGainsEntry(e.target.value.replace(/[^\d.]/g, '')); setGainsEntryDirty(true) }}
                     onDoubleClick={() => setGainsEntryDirty(false)}
