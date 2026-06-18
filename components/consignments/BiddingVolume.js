@@ -363,11 +363,12 @@ export default function BiddingVolume() {
   // today — excluded from Incoming by default; operator ticks manually.
   // Reads supply directly (not the picker-side klS*Total consts) so this
   // block can sit anywhere in render order without a TDZ issue.
-  const _klS1 = supply?.kerala_sections?.s1_hub_stock?.total   || {}
-  const _klS2 = supply?.kerala_sections?.s2_in_movement?.total || {}
-  const klSupplyNet   = Number(_klS1.net_wt   || 0) + Number(_klS2.net_wt   || 0)
-  const klSupplyGross = Number(_klS1.gross_wt || 0) + Number(_klS2.gross_wt || 0)
-  const klSupplyBills = Number(_klS1.bills    || 0) + Number(_klS2.bills    || 0)
+  const _klS1   = supply?.kerala_sections?.s1_hub_stock?.total   || {}
+  const _klS1Lf = supply?.kerala_sections?.s1_hub_stock?.received_from_leaf?.total || {}
+  const _klS2   = supply?.kerala_sections?.s2_in_movement?.total || {}
+  const klSupplyNet   = Number(_klS1.net_wt   || 0) + Number(_klS1Lf.net_wt   || 0) + Number(_klS2.net_wt   || 0)
+  const klSupplyGross = Number(_klS1.gross_wt || 0) + Number(_klS1Lf.gross_wt || 0) + Number(_klS2.gross_wt || 0)
+  const klSupplyBills = Number(_klS1.bills    || 0) + Number(_klS1Lf.bills    || 0) + Number(_klS2.bills    || 0)
 
   // Others — S1 (all Bangalore) + non-Kerala S2 only. S4 is intentionally
   // omitted; those bills only count when explicitly selected. Filter
@@ -520,14 +521,21 @@ export default function BiddingVolume() {
   // Editing the gain in grams sets a per-section absolute override.
   const handleSectionGainGrams = (idx, g) => setSectionGainGrams(o => ({ ...o, [idx]: g }))
 
-  // KL tab source picker — three sections from the new kerala_sections payload.
-  const klSections     = supply?.kerala_sections || {}
-  const klS1Branches   = klSections.s1_hub_stock?.branches   || []
-  const klS2Branches   = klSections.s2_in_movement?.branches || []
-  const klS3Branches   = klSections.s3_at_leaf?.branches     || []
-  const klS1Total      = klSections.s1_hub_stock?.total      || { bills: 0, gross_wt: 0, net_wt: 0 }
-  const klS2Total      = klSections.s2_in_movement?.total    || { bills: 0, gross_wt: 0, net_wt: 0 }
-  const klS3Total      = klSections.s3_at_leaf?.total        || { bills: 0, gross_wt: 0, net_wt: 0 }
+  // KL tab source picker — five sections from the kerala_sections payload,
+  // mirroring the KA·AP·TS section layout.
+  const klSections      = supply?.kerala_sections || {}
+  const klS1Branches    = klSections.s1_hub_stock?.branches   || []                       // S1 hub-origin
+  const klS1LeafBranches= klSections.s1_hub_stock?.received_from_leaf?.branches || []      // S1 received-from-leaf
+  const klS2Branches    = klSections.s2_in_movement?.branches || []                       // S2 leaf→hub in movement
+  const klS3Branches    = klSections.s3_created_not_booked?.branches || []                 // S3 consignment, not booked
+  const klS4Branches    = klSections.s4_booked_pending?.branches || []                     // S4 booked, no consignment
+  const klS5Branches    = klSections.s5_at_leaf?.branches     || []                        // S5 at leaf, dispatch pending
+  const klS1Total       = klSections.s1_hub_stock?.total      || { bills: 0, gross_wt: 0, net_wt: 0 }
+  const klS1LeafTotal   = klSections.s1_hub_stock?.received_from_leaf?.total || { bills: 0, gross_wt: 0, net_wt: 0 }
+  const klS2Total       = klSections.s2_in_movement?.total    || { bills: 0, gross_wt: 0, net_wt: 0 }
+  const klS3Total       = klSections.s3_created_not_booked?.total || { bills: 0, gross_wt: 0, net_wt: 0 }
+  const klS4Total       = klSections.s4_booked_pending?.total || { bills: 0, gross_wt: 0, net_wt: 0 }
+  const klS5Total       = klSections.s5_at_leaf?.total        || { bills: 0, gross_wt: 0, net_wt: 0 }
   // Hubs that already cut their hub→HO E-invoice today — their incoming
   // bills (S1 + S2) have been server-side excluded from this bid because
   // they'll ride tomorrow's truck. Surfaced as a banner above the picker.
@@ -544,12 +552,14 @@ export default function BiddingVolume() {
     for (const b of pendBookBranches) m[b.branch_name] = { ...b, group: 'transit_pending_booking' }
     for (const b of bangPendBranches) m[b.branch_name] = { ...b, group: 'bangalore_pending_booking' }
     for (const b of preEodBranches)   m[b.branch_name] = { ...b, group: 'branch_pre_eod' }
-    // Kerala-tab buckets — keyed by destination hub for S1/S2 and by leaf for S3.
-    for (const b of klS1Branches)   m[b.branch_name] = { ...b, group: 'kl_hub_stock' }
-    for (const b of klS2Branches)   m[b.branch_name] = { ...b, group: 'kl_in_movement' }
-    for (const b of klS3Branches)   m[b.branch_name] = { ...b, group: 'kl_at_leaf' }
+    // Kerala-tab buckets — five sections, keyed by branch_name.
+    for (const b of klS1Branches)     m[b.branch_name] = { ...b, group: 'kl_hub_stock' }
+    for (const b of klS1LeafBranches) m[b.branch_name] = { ...b, group: 'kl_hub_from_leaf' }
+    for (const b of klS2Branches)     m[b.branch_name] = { ...b, group: 'kl_in_movement' }
+    for (const b of klS3Branches)     m[b.branch_name] = { ...b, group: 'kl_created_not_booked' }
+    for (const b of klS5Branches)     m[b.branch_name] = { ...b, group: 'kl_at_leaf' }
     return m
-  }, [bangBranches, inTBranches, t48hBranches, t72hBranches, pendBookBranches, bangPendBranches, preEodBranches, klS1Branches, klS2Branches, klS3Branches])
+  }, [bangBranches, inTBranches, t48hBranches, t72hBranches, pendBookBranches, bangPendBranches, preEodBranches, klS1Branches, klS1LeafBranches, klS2Branches, klS3Branches, klS5Branches])
 
   // Bill-level catalogue across every selectable section in either tab.
   // Tagging via _group lets autoSelectRemaining + selectionMode + branchLocked
@@ -572,10 +582,12 @@ export default function BiddingVolume() {
     collect(bangPendBranches, 'bangalore_pending_booking')
     collect(preEodBranches,   'branch_pre_eod')
     collect(klS1Branches,     'kl_hub_stock')
+    collect(klS1LeafBranches, 'kl_hub_from_leaf')
     collect(klS2Branches,     'kl_in_movement')
-    collect(klS3Branches,     'kl_at_leaf')
+    collect(klS3Branches,     'kl_created_not_booked')
+    collect(klS5Branches,     'kl_at_leaf')
     return m
-  }, [bangBranches, inTBranches, t48hBranches, t72hBranches, pendBookBranches, bangPendBranches, preEodBranches, klS1Branches, klS2Branches, klS3Branches])
+  }, [bangBranches, inTBranches, t48hBranches, t72hBranches, pendBookBranches, bangPendBranches, preEodBranches, klS1Branches, klS1LeafBranches, klS2Branches, klS3Branches, klS5Branches])
 
   const selectedTotal = useMemo(() => {
     let s = 0
@@ -666,7 +678,7 @@ export default function BiddingVolume() {
     //   KA·AP·TS: Bangalore today → 24h transit (pre-EOD S4 excluded — contingent).
     //   KL:       Hub stock S1     → In-movement S2 (leaf S3 excluded — contingent).
     const sectionOrder = pool === 'kerala'
-      ? { kl_hub_stock: 1, kl_in_movement: 2 }
+      ? { kl_hub_stock: 1, kl_hub_from_leaf: 1, kl_in_movement: 2 }
       : { bangalore: 1, transit_24h: 2 }
     const eligibleGroups = new Set(Object.keys(sectionOrder))
     const eligible = []
@@ -716,7 +728,7 @@ export default function BiddingVolume() {
   // KA·AP·TS-pool. (We don't fall back to _region because the picker bills
   // are pre-segregated by group; using _group keeps the rule tied to the
   // section the bill came from.)
-  const KL_GROUPS = new Set(['kl_hub_stock', 'kl_in_movement', 'kl_at_leaf'])
+  const KL_GROUPS = new Set(['kl_hub_stock', 'kl_hub_from_leaf', 'kl_in_movement', 'kl_created_not_booked', 'kl_at_leaf'])
   const isKeralaBill = (id) => KL_GROUPS.has(billsById[id]?._group)
   const isKeralaBranch = (b) => b?.region === 'Kerala'
   const selectionMode = useMemo(() => {
@@ -1559,12 +1571,13 @@ export default function BiddingVolume() {
       </>)}
 
       {/* ───────────────────── KL TAB — Kerala source picker ─────────────────────
-          Three sections per the Kerala leaf → hub → HO model:
-            S1 · Hub Stock     (at_branch at a KL hub, certain)
-            S2 · In Movement   (leaf → hub in transit, likely)
-            S3 · At Leaf Branch (at_branch at a KL leaf, contingent — manual select)
-          S3 is rendered last and visually dimmer to reinforce that it isn't
-          auto-pulled by the Remaining tile. */}
+          Five sections mirroring the KA·AP·TS layout, adapted to the Kerala
+          leaf → hub → HO flow. One section shown at a time via the chip nav:
+            1 · Hub Stock                (hub-origin at hub + received-from-leaf)
+            2 · Branch → Hub             (leaf → hub INTERNAL, in movement)
+            3 · Consignment · not booked (in_consignment, no booking, not S2)
+            4 · Booked · no consignment  (at_branch + booked)
+            5 · At branch · dispatch pending (leaf, at_branch, not consigned) */}
       {activeTab === 'bidding' && regionTab === 'kl' && (<>
         {klHubsDispatchedToday.length > 0 && (
           <div style={{ ...card, padding: '10px 14px', borderColor: `${t.orange}55`, background: `${t.orange}10`, fontSize: '12px', color: t.text2, display: 'flex', alignItems: 'flex-start', gap: 10 }}>
@@ -1580,33 +1593,99 @@ export default function BiddingVolume() {
           </div>
         )}
 
-        {/* 1 · Hub Stock */}
-        <SourceSection
-          t={t} card={card}
-          index={1}
-          icon="🏛"
-          title="Hub Stock"
-          subtitle={`At KL hubs · ready for tonight's hub → HO dispatch · arrives at HO ${fmtDate(arrivalDate)}`}
-          accent={t.purple || '#8c5ac8'}
-          branches={klS1Branches}
-          total={klS1Total}
-          prefix="H"
-          selectable
-          selected={selected}
-          branchLocked={branchLocked}
-          onToggleBill={toggleBill}
-          onToggleBranchAll={toggleBranchAll}
-          onToggleRegionAll={toggleRegionAll}
-          branchSelectionState={branchSelectionState}
-          emptyMsg="No bills currently sitting at the Kerala hubs."
-        />
+        {/* ── Section navigator (KL) — one section at a time, mirrors KA ── */}
+        {(() => {
+          const dddDate = (d) => {
+            if (!d) return ''
+            const dt = new Date(`${d}T00:00:00+05:30`)
+            const day = dt.toLocaleDateString('en-IN', { weekday: 'short', timeZone: 'Asia/Kolkata' })
+            return `${day} · ${fmtDateShort(d)}`
+          }
+          const navKL = [
+            { id: '1', label: 'Hub Stock',                    accent: t.purple || '#8c5ac8', bills: (klS1Total.bills || 0) + (klS1LeafTotal.bills || 0), date: arrivalDate },
+            { id: '2', label: 'Branch → Hub',                 accent: t.blue,                bills: klS2Total.bills || 0, date: arrivalDate },
+            { id: '3', label: 'Consignment · not booked',     accent: t.orange,              bills: klS3Total.bills || 0, date: null },
+            { id: '4', label: 'Booked · no consignment',      accent: t.red,                 bills: klS4Total.bills || 0, date: null },
+            { id: '5', label: 'At branch · dispatch pending', accent: t.teal || '#0e9aa7',   bills: klS5Total.bills || 0, date: null },
+          ]
+          const baseChip = (active, accent) => ({
+            display: 'flex', alignItems: 'center', gap: 7, padding: '6px 12px',
+            borderRadius: 9, cursor: 'pointer', whiteSpace: 'nowrap',
+            border: `1px solid ${active ? accent : t.border}`,
+            background: active ? `${accent}1f` : 'transparent',
+            color: active ? accent : t.text2,
+            fontSize: 12, fontWeight: active ? 800 : 600, letterSpacing: '.01em',
+          })
+          return (
+            <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap', alignItems: 'stretch', overflowX: 'auto', paddingBottom: 2 }}>
+              {navKL.map(sx => {
+                const active = activeSection === sx.id
+                return (
+                  <button key={sx.id} onClick={() => setActiveSection(sx.id)} style={baseChip(active, sx.accent)}>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', minWidth: 18, height: 18, borderRadius: 5, background: active ? sx.accent : `${sx.accent}26`, color: active ? '#fff' : sx.accent, fontSize: 10, fontWeight: 800, flexShrink: 0 }}>{sx.id}</span>
+                    <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', lineHeight: 1.2 }}>
+                      <span>{sx.label}</span>
+                      {sx.date && <span style={{ fontSize: 10, color: sx.accent, fontWeight: 800, letterSpacing: '.01em' }}>→ HO {dddDate(sx.date)}</span>}
+                    </span>
+                    <span style={{ fontSize: 10.5, color: active ? sx.accent : t.text4, fontWeight: 700, fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>{sx.bills}</span>
+                  </button>
+                )
+              })}
+            </div>
+          )
+        })()}
 
-        {/* 2 · In Movement (leaf → hub) */}
+        {/* 1 · Hub Stock — hub-origin bills, then a received-from-leaf sub-group */}
+        {(activeSection === '1') && (<>
+          <SourceSection
+            t={t} card={card}
+            index={1}
+            icon="🏛"
+            title="Hub Stock — hub's own bills"
+            subtitle={`Bought at the hub · at_branch · ready for tonight's hub → HO dispatch · arrives at HO ${fmtDate(arrivalDate)}`}
+            accent={t.purple || '#8c5ac8'}
+            branches={klS1Branches}
+            total={klS1Total}
+            prefix="H"
+            selectable
+            selected={selected}
+            branchLocked={branchLocked}
+            onToggleBill={toggleBill}
+            onToggleBranchAll={toggleBranchAll}
+            onToggleRegionAll={toggleRegionAll}
+            branchSelectionState={branchSelectionState}
+            emptyMsg="No hub-origin bills sitting at the Kerala hubs."
+          />
+          {klS1LeafBranches.length > 0 && (
+            <SourceSection
+              t={t} card={card}
+              index={1}
+              icon="↪"
+              title="Received at hub · from leaf branches"
+              subtitle="Leaf bills already received at a hub — part of tonight's hub → HO pool, grouped by their origin leaf."
+              accent={t.purple || '#8c5ac8'}
+              branches={klS1LeafBranches}
+              total={klS1LeafTotal}
+              prefix="H"
+              selectable
+              selected={selected}
+              branchLocked={branchLocked}
+              onToggleBill={toggleBill}
+              onToggleBranchAll={toggleBranchAll}
+              onToggleRegionAll={toggleRegionAll}
+              branchSelectionState={branchSelectionState}
+              emptyMsg=""
+            />
+          )}
+        </>)}
+
+        {/* 2 · Branch → Hub (leaf → hub, in movement) */}
+        {(activeSection === '2') && (
         <SourceSection
           t={t} card={card}
           index={2}
           icon="⇒"
-          title="In Movement · Leaf → Hub"
+          title="Branch → Hub · in movement"
           subtitle={`On an INTERNAL run to a KL hub · expected to reach hub today, dispatch to HO tonight · arrives ${fmtDate(arrivalDate)}`}
           accent={t.blue}
           branches={klS2Branches}
@@ -1620,12 +1699,32 @@ export default function BiddingVolume() {
           onToggleRegionAll={toggleRegionAll}
           branchSelectionState={branchSelectionState}
           emptyMsg="No leaf → hub movements currently in transit."
-        />
+        />)}
 
-        {/* 4 · Booked but consignment not created (Kerala slice) — sits
-            between S2 and S3 per the same layout ordering as the KA tab's
-            Section 5: stalled-booking risk surface ahead of the still-
-            contingent At-Leaf section below. */}
+        {/* 3 · Consignment created · not booked */}
+        {(activeSection === '3') && (
+        <SourceSection
+          t={t} card={card}
+          index={3}
+          icon="⇒"
+          title="Consignment created · not booked"
+          subtitle="On a consignment (e.g. hub → HO) but no booking attached yet — still bookable."
+          accent={t.orange}
+          branches={klS3Branches}
+          total={klS3Total}
+          prefix="C"
+          selectable
+          selected={selected}
+          branchLocked={branchLocked}
+          onToggleBill={toggleBill}
+          onToggleBranchAll={toggleBranchAll}
+          onToggleRegionAll={toggleRegionAll}
+          branchSelectionState={branchSelectionState}
+          emptyMsg="No in-transit Kerala bills awaiting a booking."
+        />)}
+
+        {/* 4 · Booked but consignment not created */}
+        {(activeSection === '4') && (
         <SourceSection
           t={t} card={card}
           index={4}
@@ -1633,25 +1732,26 @@ export default function BiddingVolume() {
           title="Booked — consignment not created"
           subtitle="Already attached to a booking but still at the branch · create the consignment or release the booking"
           accent={t.red}
-          branches={klSections.s4_booked_pending?.branches || []}
-          total={klSections.s4_booked_pending?.total}
+          branches={klS4Branches}
+          total={klS4Total}
           selectable={false}
           viewOnly
           onCreateConsignment={handleCreateConsignment}
           onUnbookBranch={handleUnbookBranch}
           emptyMsg="No stalled bookings in Kerala — every booked bill is in motion or already received."
-        />
+        />)}
 
-        {/* 3 · At Leaf Branch (contingent — manual select only) */}
+        {/* 5 · At leaf branch — dispatch pending (contingent — manual select) */}
+        {(activeSection === '5') && (
         <SourceSection
           t={t} card={card}
-          index={3}
+          index={5}
           icon="◐"
-          title="At Leaf Branch — dispatch pending"
-          subtitle={`Still at the leaf · needs leaf → hub pickup to fire before tonight's hub → HO dispatch. Contingent, not in auto-select.`}
-          accent={t.orange}
-          branches={klS3Branches}
-          total={klS3Total}
+          title="At branch — dispatch pending"
+          subtitle="Still at a leaf branch · needs leaf → hub pickup to fire before tonight's hub → HO dispatch. Contingent, not in auto-select."
+          accent={t.teal || '#0e9aa7'}
+          branches={klS5Branches}
+          total={klS5Total}
           prefix="L"
           selectable
           selected={selected}
@@ -1661,7 +1761,7 @@ export default function BiddingVolume() {
           onToggleRegionAll={toggleRegionAll}
           branchSelectionState={branchSelectionState}
           emptyMsg="No bills sitting at KL leaf branches right now."
-        />
+        />)}
       </>)}
 
       {/* Sticky selection bar — shared across both region tabs. Appears the

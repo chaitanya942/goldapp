@@ -1056,9 +1056,15 @@ export async function GET(req) {
     const klHubNames   = (branchRows || []).filter(b => b.region === 'Kerala' &&  b.is_hub).map(b => b.name)
     const klLeafNames  = (branchRows || []).filter(b => b.region === 'Kerala' && !b.is_hub).map(b => b.name)
 
-    // S1 — at_branch at a Kerala hub. Filter on current_branch (the physical
-    // location) so transferred-in bills land here, not under the original leaf.
-    let klS1Bills = []
+    const allKlNames = [...klHubNames, ...klLeafNames]
+
+    // S1 — bills physically AT a Kerala hub (at_branch, unbooked), split by
+    // ORIGIN: hub-origin (the hub's own purchases) vs received-from-leaf (leaf
+    // bills already transferred in and now sitting at the hub). Both belong to
+    // tonight's hub→HO pool; surfaced as distinct sub-groups so a leaf bill that
+    // has reached the hub is never hidden, while its origin stays visible.
+    let klS1HubOrigin = []   // branch_name = hub
+    let klS1FromLeaf  = []   // branch_name = leaf, current_branch = hub
     if (klHubNames.length) {
       const list = klHubNames.map(n => `"${n}"`).join(',')
       const { data: s1, error: s1Err } = await supabase
@@ -1070,7 +1076,11 @@ export async function GET(req) {
         .eq('is_deleted',   false)
         .is('booking_id',   null)
       if (s1Err) return Response.json({ error: s1Err.message }, { status: 500 })
-      klS1Bills = (s1 || []).map(b => ({ ...b, branch_name: b.current_branch || b.branch_name }))
+      const hubSet = new Set(klHubNames)
+      for (const b of s1 || []) {
+        if (hubSet.has(b.branch_name)) klS1HubOrigin.push({ ...b })
+        else klS1FromLeaf.push({ ...b, _at_hub: b.current_branch })  // group under origin leaf, tag hub
+      }
     }
 
     // S2 — bills sitting on an active INTERNAL consignment whose destination
@@ -1132,11 +1142,11 @@ export async function GET(req) {
       }
     }
 
-    // S3 — at_branch at a Kerala leaf (not a hub), waiting to be dispatched.
-    let klS3Bills = []
+    // S5 — at_branch at a Kerala leaf (not a hub), dispatch to hub yet to fire.
+    let klS5Bills = []
     if (klLeafNames.length) {
       const list = klLeafNames.map(n => `"${n}"`).join(',')
-      const { data: s3, error: s3Err } = await supabase
+      const { data: s5, error: s5Err } = await supabase
         .from('purchases')
         .select('id, application_id, branch_name, current_branch, customer_name, gross_weight, net_weight, total_amount, purchase_date, stock_status, dispatched_at, crm_status')
         .or(`current_branch.in.(${list}),and(current_branch.is.null,branch_name.in.(${list}))`)
@@ -1144,8 +1154,29 @@ export async function GET(req) {
         .eq('crm_status',   'approved')
         .eq('is_deleted',   false)
         .is('booking_id',   null)
+      if (s5Err) return Response.json({ error: s5Err.message }, { status: 500 })
+      klS5Bills = (s5 || []).map(b => ({ ...b, branch_name: b.current_branch || b.branch_name }))
+    }
+
+    // S3 — "consignment created · not booked": any Kerala bill that is
+    // in_consignment with no booking and ISN'T already on a leaf→hub INTERNAL
+    // run (those are S2). In practice this is the hub→HO EXTERNAL dispatches
+    // plus any other stray in-transit gold still awaiting a booking.
+    let klS3Bills = []
+    if (allKlNames.length) {
+      const list = allKlNames.map(n => `"${n}"`).join(',')
+      const { data: s3, error: s3Err } = await supabase
+        .from('purchases')
+        .select('id, application_id, branch_name, current_branch, customer_name, gross_weight, net_weight, total_amount, purchase_date, stock_status, dispatched_at, crm_status')
+        .or(`branch_name.in.(${list}),current_branch.in.(${list})`)
+        .eq('stock_status', 'in_consignment')
+        .eq('crm_status',   'approved')
+        .eq('is_deleted',   false)
+        .is('booking_id',   null)
       if (s3Err) return Response.json({ error: s3Err.message }, { status: 500 })
-      klS3Bills = (s3 || []).map(b => ({ ...b, branch_name: b.current_branch || b.branch_name }))
+      klS3Bills = (s3 || [])
+        .filter(b => !klS2BillToConsignment[b.id])   // drop leaf→hub INTERNAL (those are S2)
+        .map(b => ({ ...b, branch_name: b.current_branch || b.branch_name }))
     }
 
     // S2 "may slip" heuristic — flag bills whose INTERNAL consignment was
@@ -1197,17 +1228,22 @@ export async function GET(req) {
       // if its closest hub has post-dispatched, ops will just route it to
       // the other hub or hold it for tomorrow.
       if (klHubsDispatchedToday.size > 0) {
-        klS1Bills = klS1Bills.filter(b => !klHubsDispatchedToday.has(b.branch_name))
-        klS2Bills = klS2Bills.filter(b => !klHubsDispatchedToday.has(b.branch_name))
+        klS1HubOrigin = klS1HubOrigin.filter(b => !klHubsDispatchedToday.has(b.branch_name))
+        klS1FromLeaf  = klS1FromLeaf.filter(b  => !klHubsDispatchedToday.has(b._at_hub))
+        klS2Bills     = klS2Bills.filter(b     => !klHubsDispatchedToday.has(b.branch_name))
       }
     }
 
-    const klS1ByHub  = groupByBranch(klS1Bills)
-    const klS2ByHub  = groupByBranch(klS2Bills)
-    const klS3ByLeaf = groupByBranch(klS3Bills)
-    const klS1Total  = sumOf(klS1ByHub)
-    const klS2Total  = sumOf(klS2ByHub)
-    const klS3Total  = sumOf(klS3ByLeaf)
+    const klS1ByHub      = groupByBranch(klS1HubOrigin)
+    const klS1LeafByLeaf = groupByBranch(klS1FromLeaf)
+    const klS2ByHub      = groupByBranch(klS2Bills)
+    const klS3ByBranch   = groupByBranch(klS3Bills)
+    const klS5ByLeaf     = groupByBranch(klS5Bills)
+    const klS1Total      = sumOf(klS1ByHub)
+    const klS1LeafTotal  = sumOf(klS1LeafByLeaf)
+    const klS2Total      = sumOf(klS2ByHub)
+    const klS3Total      = sumOf(klS3ByBranch)
+    const klS5Total      = sumOf(klS5ByLeaf)
 
     return Response.json({
       data: {
@@ -1237,11 +1273,17 @@ export async function GET(req) {
         kerala_sections: {
           hubs:                  klHubNames,
           hubs_dispatched_today: [...klHubsDispatchedToday],
-          s1_hub_stock:          { branches: klS1ByHub,  total: klS1Total  },
-          s2_in_movement:        { branches: klS2ByHub,  total: klS2Total  },
-          s3_at_leaf:            { branches: klS3ByLeaf, total: klS3Total  },
-          // Kerala counterpart of booked_pending_dispatch.
+          // S1 — hub stock: hub-origin bills + a received-from-leaf sub-group.
+          s1_hub_stock:          { branches: klS1ByHub, total: klS1Total,
+                                   received_from_leaf: { branches: klS1LeafByLeaf, total: klS1LeafTotal } },
+          // S2 — leaf→hub INTERNAL runs in movement.
+          s2_in_movement:        { branches: klS2ByHub, total: klS2Total },
+          // S3 — consignment created (→HO etc.) but not booked.
+          s3_created_not_booked: { branches: klS3ByBranch, total: klS3Total },
+          // S4 — booked, consignment not created.
           s4_booked_pending:     { branches: bookedKlByBranch, total: bookedKlTotal },
+          // S5 — at leaf branch, dispatch pending.
+          s5_at_leaf:            { branches: klS5ByLeaf, total: klS5Total },
         },
         grand_total: grandTotal,
         pending: {
