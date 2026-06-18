@@ -521,6 +521,18 @@ export default function BiddingVolume() {
   // Editing the gain in grams sets a per-section absolute override.
   const handleSectionGainGrams = (idx, g) => setSectionGainGrams(o => ({ ...o, [idx]: g }))
 
+  // KL has no gain, so Available to Book = Unbooked Net. These build the metric
+  // strip for the Kerala sections with gain forced to 0 (the company % rate that
+  // sectionMetrics applies must NOT leak into the Kerala pool).
+  const klMetrics = (netWt) => {
+    const u = Number(netWt || 0)
+    return { totalNet: u, bookedNet: 0, unbookedNet: u, gainNet: 0, availableNet: u, rate: 0, gainOverride: null }
+  }
+  const klBookedMetrics = (netWt) => {
+    const b = Number(netWt || 0)
+    return { totalNet: b, bookedNet: b, unbookedNet: 0, gainNet: 0, availableNet: 0, rate: 0, gainOverride: null }
+  }
+
   // KL tab source picker — five sections from the kerala_sections payload,
   // mirroring the KA·AP·TS section layout.
   const klSections      = supply?.kerala_sections || {}
@@ -1654,6 +1666,8 @@ export default function BiddingVolume() {
           accent={t.purple || '#8c5ac8'}
           branches={klS1Branches}
           total={klS1Total}
+          metrics={klMetrics(klS1Total.net_wt)}
+          onAutoSelect={() => selectSectionBills(['kl_hub_stock'])}
           prefix="H"
           selectable
           selected={selected}
@@ -1676,6 +1690,8 @@ export default function BiddingVolume() {
           accent={t.blue}
           branches={klS2Merged}
           total={klS2MergedTotal}
+          metrics={klMetrics(klS2MergedTotal.net_wt)}
+          onAutoSelect={() => selectSectionBills(['kl_in_movement', 'kl_hub_from_leaf'])}
           prefix="M"
           selectable
           selected={selected}
@@ -1698,6 +1714,8 @@ export default function BiddingVolume() {
           accent={t.orange}
           branches={klS3Branches}
           total={klS3Total}
+          metrics={klMetrics(klS3Total.net_wt)}
+          onAutoSelect={() => selectSectionBills(['kl_created_not_booked'])}
           prefix="C"
           selectable
           selected={selected}
@@ -1720,6 +1738,7 @@ export default function BiddingVolume() {
           accent={t.red}
           branches={klS4Branches}
           total={klS4Total}
+          metrics={klBookedMetrics(klS4Total.net_wt)}
           selectable={false}
           viewOnly
           onCreateConsignment={handleCreateConsignment}
@@ -1738,6 +1757,8 @@ export default function BiddingVolume() {
           accent={t.teal || '#0e9aa7'}
           branches={klS5Branches}
           total={klS5Total}
+          metrics={klMetrics(klS5Total.net_wt)}
+          onAutoSelect={() => selectSectionBills(['kl_at_leaf'])}
           prefix="L"
           selectable
           selected={selected}
