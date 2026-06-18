@@ -1146,77 +1146,9 @@ export default function BiddingVolume() {
           (Total / Booked / Unbooked / Gain / Available) under each section
           now carry these numbers section-wise. */}
 
-      {regionTab === 'kl' && (<>
-      {/* Kerala KPI strip (single row — was previously Row 2 on KA·AP·TS).
-          Reads klSupplyNet built from S1+S2 of the new kerala_sections payload. */}
-      <div>
-        <div style={{ fontSize: 10.5, color: t.purple || '#8c5ac8', letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 800, marginBottom: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ width: 6, height: 6, borderRadius: '50%', background: t.purple || '#8c5ac8', display: 'inline-block' }} />
-          Kerala
-          <span style={{ color: t.text4, fontWeight: 600, letterSpacing: 0, textTransform: 'none' }}>· leaf → hub flow</span>
-        </div>
-        <div className="bidKpi" style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(6, 1fr)', gap: '10px' }}>
-          <KpiCard
-            label="Incoming"
-            value={<AnimatedNumber target={klSupplyNet} decimals={2} suffix=" g"
-                     fromPrevious animateOnMount={false} replayable={false} duration={650} />}
-            sub={`${klSupplyBills} bill${klSupplyBills === 1 ? '' : 's'} · gross ${fmt(klSupplyGross, 2)} g`}
-            accent={t.purple || '#8c5ac8'} card={card} t={t} variant="source" />
-
-          <KpiCard
-            op="+"
-            label="Gain"
-            value={<AnimatedNumber target={klGain} decimals={2} suffix=" g"
-                     fromPrevious animateOnMount={false} replayable={false} duration={650} />}
-            sub={'Kerala default · 0 %'}
-            accent={t.text3} card={card} t={t} variant="source" />
-
-          <KpiCard
-            op="="
-            label="Available"
-            value={<AnimatedNumber target={klAvailable} decimals={2} suffix=" g"
-                     fromPrevious animateOnMount={false} replayable={false} duration={650} />}
-            sub={'Kerala hub pool for tomorrow’s bid'}
-            accent={t.purple || '#8c5ac8'} card={card} t={t}
-            variant="result" />
-
-          <KpiCard
-            op="·"
-            label="Booked"
-            value={<AnimatedNumber target={klBookedQty} decimals={2} suffix=" g"
-                     fromPrevious animateOnMount={false} replayable={false} duration={650} />}
-            sub={pipelineKLG > 0
-              ? `${klBookings} booking${klBookings === 1 ? '' : 's'} · ${fmt(pipelineKLG, 2)} g still pipeline · ${fmtINR(klBookedValue)}`
-              : `${klBookings} booking${klBookings === 1 ? '' : 's'} · ${fmtINR(klBookedValue)}`}
-            accent={t.blue} card={card} t={t} variant="consumed" />
-
-          <KpiCard
-            op="−"
-            label="Pipeline Booked"
-            value={<AnimatedNumber target={pipelineKLG} decimals={2} suffix=" g"
-                     fromPrevious animateOnMount={false} replayable={false} duration={650} />}
-            sub={pipelineKLG > 0
-              ? 'against today’s leaf → hub flow'
-              : 'No pipeline commitments'}
-            accent={t.purple || '#8c5ac8'} card={card} t={t}
-            variant={pipelineKLG > 0 ? 'consumed' : 'source'} />
-
-          <KpiCard
-            op="="
-            label={klOverbooked ? 'Pipeline Over' : 'Remaining'}
-            value={<AnimatedNumber target={Math.abs(klRemaining)} prefix={klOverbooked ? '−' : ''} decimals={2} suffix=" g"
-                     fromPrevious animateOnMount={false} replayable={false} duration={650} />}
-            sub={klOverbooked
-              ? `Pipeline owes ${fmt(Math.abs(klRemaining), 2)} g more than the hub pool can supply`
-              : (pipelineKLG > 0 ? 'After pipeline back-fill' : 'Full hub pool free · no pipeline commitments')}
-            accent={klOverbooked ? t.red : t.green} card={card} t={t}
-            variant="state" pulse={klOverbooked}
-            onClick={!klOverbooked && klRemaining > 0 ? () => autoSelectRemaining('kerala', klRemaining) : null}
-            actionHint={!klOverbooked && klRemaining > 0 ? 'Click to auto-select bills' : null}
-          />
-        </div>
-      </div>
-      </>)}
+      {/* KL top KPI strip removed — the per-section metric cards (Total / Booked /
+          Unbooked, with Unbooked clickable to select) now carry these numbers
+          section-wise, so the top summary row is redundant. */}
 
       {regionTab === 'ka_ap_ts' && poolNegative && (
         <div style={{ ...card, padding: '10px 16px', borderColor: `${t.red}55`, background: `${t.red}10`, fontSize: '12px', color: t.red, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -1667,6 +1599,7 @@ export default function BiddingVolume() {
           branches={klS1Branches}
           total={klS1Total}
           metrics={klMetrics(klS1Total.net_wt)}
+          noGain
           onAutoSelect={() => selectSectionBills(['kl_hub_stock'])}
           prefix="H"
           selectable
@@ -1691,6 +1624,7 @@ export default function BiddingVolume() {
           branches={klS2Merged}
           total={klS2MergedTotal}
           metrics={klMetrics(klS2MergedTotal.net_wt)}
+          noGain
           onAutoSelect={() => selectSectionBills(['kl_in_movement', 'kl_hub_from_leaf'])}
           prefix="M"
           selectable
@@ -1715,6 +1649,7 @@ export default function BiddingVolume() {
           branches={klS3Branches}
           total={klS3Total}
           metrics={klMetrics(klS3Total.net_wt)}
+          noGain
           onAutoSelect={() => selectSectionBills(['kl_created_not_booked'])}
           prefix="C"
           selectable
@@ -1739,6 +1674,7 @@ export default function BiddingVolume() {
           branches={klS4Branches}
           total={klS4Total}
           metrics={klBookedMetrics(klS4Total.net_wt)}
+          noGain
           selectable={false}
           viewOnly
           onCreateConsignment={handleCreateConsignment}
@@ -1758,6 +1694,7 @@ export default function BiddingVolume() {
           branches={klS5Branches}
           total={klS5Total}
           metrics={klMetrics(klS5Total.net_wt)}
+          noGain
           onAutoSelect={() => selectSectionBills(['kl_at_leaf'])}
           prefix="L"
           selectable
@@ -2854,6 +2791,10 @@ function SourceSection({
   onRateChange,
   onSetGainGrams,
   onAutoSelect,
+  // When true (Kerala — no gain), the strip drops the Gain + Available cards and
+  // makes the Unbooked Net card itself the clickable selector (Available =
+  // Unbooked, so a separate card is redundant).
+  noGain = false,
   emptyMsg,
 }) {
   const tone = accent || t.gold
@@ -3029,7 +2970,13 @@ function SourceSection({
           setEditRate(false)
         }
         const canSelect = !!onAutoSelect && metrics.unbookedNet > 0
-        const cards = [
+        const cards = noGain ? [
+          // Kerala — 3 cards; Unbooked Net IS the selector (no gain, so
+          // Available == Unbooked and a separate card would be redundant).
+          { key: 'total',    label: 'Total Net',    icon: 'Σ', color: t.text1, val: metrics.totalNet,    bills: totalBills,    sub: 'booked + unbooked' },
+          { key: 'booked',   label: 'Booked Net',   icon: '◆', color: blue,    val: metrics.bookedNet,   bills: bookedBills,   sub: 'already booked' },
+          { key: 'unbooked', label: 'Unbooked Net', icon: canSelect ? '✓' : '○', color: canSelect ? green : tone, val: metrics.unbookedNet, bills: unbookedBills, sub: canSelect ? 'tap to select →' : 'still to book', strong: canSelect, onClick: canSelect ? onAutoSelect : null },
+        ] : [
           { key: 'total',    label: 'Total Net',         icon: 'Σ', color: t.text1, val: metrics.totalNet,     bills: totalBills,    sub: 'booked + unbooked' },
           { key: 'booked',   label: 'Booked Net',        icon: '◆', color: blue,    val: metrics.bookedNet,    bills: bookedBills,   sub: 'already booked' },
           { key: 'unbooked', label: 'Unbooked Net',      icon: '○', color: tone,    val: metrics.unbookedNet,  bills: unbookedBills, sub: 'still to book' },
