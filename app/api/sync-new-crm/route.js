@@ -157,15 +157,21 @@ async function runSync(request) {
         FROM "Quotation" WHERE transaction_id = t.id ORDER BY created_at DESC LIMIT 1
       ) q ON true
       LEFT JOIN LATERAL (
+        -- Final-payment "event" timestamp. COMPLETED = a done purchase. A payout
+        -- that's been initiated at RazorpayX but is still 'processing' (status
+        -- PENDING) counts the SAME — the customer was paid and left; only
+        -- RazorpayX's confirmation/UTR is lagging. Both mark the purchase moment.
         SELECT MAX(created_at) fp FROM "Payment"
-        WHERE transaction_id = t.id AND status = 'COMPLETED' AND type = 'FINAL_PAYMENT'
+        WHERE transaction_id = t.id AND type = 'FINAL_PAYMENT'
+          AND (status = 'COMPLETED' OR (status = 'PENDING' AND provider_status = 'processing'))
       ) fpay ON true
       LEFT JOIN orn ON orn.transaction_id = t.id
       -- Window on the FINAL-PAYMENT date, not created_at: a bill walked-in before
       -- the cutoff but PAID recently is a recent purchase and must still sync.
-      -- (created_at-based windowing silently dropped such bills from the master.)
+      -- Include FINAL_PAYMENT_PENDING so RazorpayX-processing payouts are pulled
+      -- (the fpay filter above keeps only the ones actually initiated/processing).
       WHERE fpay.fp >= $1
-        AND t.status = 'FINAL_PAYMENT_COMPLETED'
+        AND t.status IN ('FINAL_PAYMENT_COMPLETED', 'FINAL_PAYMENT_PENDING')
       ORDER BY fpay.fp DESC
     `, [cutoffDate])
 
@@ -197,7 +203,10 @@ async function runSync(request) {
       return {
         application_id:             appId,
         crm_source:                 'new_crm',
-        crm_status:                 mapStatus(r.status),
+        // Every row returned is an effective purchase — a COMPLETED final payment
+        // OR one initiated at RazorpayX and still 'processing' (treated as
+        // completed; only the payout confirmation lags). So always 'approved'.
+        crm_status:                 'approved',
         // Purchase date/time = when the final payment was made (== invoice date).
         // Falls back to created_at only if a completed bill somehow lacks a
         // final-payment row (shouldn't happen for FINAL_PAYMENT_COMPLETED).
