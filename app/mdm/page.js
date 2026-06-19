@@ -14,6 +14,7 @@ export default function MdmHome() {
   const router = useRouter()
   const [state, setState] = useState('loading')   // loading | nosession | nomember | inactive | ok
   const [member, setMember] = useState(null)
+  const [forms, setForms] = useState([])
 
   const blue = '#2563eb', slate = '#0f172a', sub = '#64748b', amber = '#d97706'
 
@@ -28,6 +29,10 @@ export default function MdmHome() {
     // Forced password reset (temp-password first login) takes precedence — but
     // only once they're enabled (an inactive user can't pass the gate at all).
     if (j.member.active && j.member.must_reset) { setState('mustreset'); return }
+    if (j.member.active) {
+      const fr = await authedFetch('/api/mdm/forms')
+      if (fr.ok) { const fj = await fr.json(); setForms(fj.forms || []) }
+    }
     setState(j.member.active ? 'ok' : 'inactive')
   }
 
@@ -79,17 +84,33 @@ export default function MdmHome() {
   return (
     <Shell>
       {member?.role === 'admin' && (
-        <a href="/mdm/admin" style={{ display: 'block', textDecoration: 'none', background: '#fff', border: '1px solid #e2e8f0', borderRadius: 14, padding: 20, marginBottom: 16 }}>
-          <div style={{ fontSize: '.95rem', fontWeight: 700, color: slate }}>Manage users →</div>
-          <div style={{ fontSize: '.78rem', color: sub, marginTop: 4 }}>Invite users and switch access on/off.</div>
-        </a>
-      )}
-      <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 14, padding: 24 }}>
-        <div style={{ fontSize: '.95rem', fontWeight: 700, color: slate, marginBottom: 6 }}>Forms & data</div>
-        <div style={{ fontSize: '.8rem', color: sub, lineHeight: 1.6 }}>
-          Coming next: the IT admin builds forms (any fields + document uploads) and you fill them in here. Phase 1 (login, invites, access control) is live.
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
+          <a href="/mdm/admin" style={{ textDecoration: 'none', background: '#fff', border: '1px solid #e2e8f0', borderRadius: 14, padding: 18 }}>
+            <div style={{ fontSize: '.9rem', fontWeight: 700, color: slate }}>Manage users →</div>
+            <div style={{ fontSize: '.74rem', color: sub, marginTop: 3 }}>Invite + access on/off.</div>
+          </a>
+          <a href="/mdm/admin/forms" style={{ textDecoration: 'none', background: '#fff', border: '1px solid #e2e8f0', borderRadius: 14, padding: 18 }}>
+            <div style={{ fontSize: '.9rem', fontWeight: 700, color: slate }}>Form builder →</div>
+            <div style={{ fontSize: '.74rem', color: sub, marginTop: 3 }}>Create forms + fields.</div>
+          </a>
         </div>
-      </div>
+      )}
+      <div style={{ fontSize: '.7rem', color: sub, textTransform: 'uppercase', letterSpacing: '.08em', fontWeight: 700, margin: '4px 2px 10px' }}>Forms</div>
+      {forms.length === 0 ? (
+        <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 14, padding: 24, fontSize: '.82rem', color: sub }}>
+          No forms yet.{member?.role === 'admin' ? ' Use the Form builder to create one.' : ' Your admin hasn’t published any forms yet.'}
+        </div>
+      ) : (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 12 }}>
+          {forms.map(f => (
+            <a key={f.id} href={`/mdm/form/${f.id}`} style={{ textDecoration: 'none', background: '#fff', border: '1px solid #e2e8f0', borderRadius: 14, padding: 18 }}>
+              <div style={{ fontSize: '.92rem', fontWeight: 700, color: slate }}>{f.name}</div>
+              {f.description && <div style={{ fontSize: '.74rem', color: sub, marginTop: 3 }}>{f.description}</div>}
+              <div style={{ fontSize: '.7rem', color: sub, marginTop: 8 }}>{f._counts?.records || 0} entries</div>
+            </a>
+          ))}
+        </div>
+      )}
     </Shell>
   )
 }
