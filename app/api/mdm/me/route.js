@@ -10,9 +10,11 @@ import { getMdmMember, mdmAdmin } from '../../../../lib/mdmAuth'
 export async function GET(req) {
   const r = await getMdmMember(req)
   if (!r.ok) return Response.json({ error: r.error }, { status: r.status })
+  // must_reset lives in app_metadata (service-role only → user can't bypass it).
+  const must_reset = r.user?.app_metadata?.mdm_must_reset === true
   // Best-effort last-login stamp for active members.
-  if (r.member?.active) {
+  if (r.member?.active && !must_reset) {
     try { await mdmAdmin.from('mdm_users').update({ last_login_at: new Date().toISOString() }).eq('id', r.member.id) } catch {}
   }
-  return Response.json({ member: r.member })
+  return Response.json({ member: r.member ? { ...r.member, must_reset } : null })
 }

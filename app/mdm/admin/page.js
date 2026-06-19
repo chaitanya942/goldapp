@@ -18,6 +18,7 @@ export default function MdmAdmin() {
   const [activateNow, setActivateNow] = useState(false)
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState(null)   // { ok, text }
+  const [tempCred, setTempCred] = useState(null)   // { email, password } shown once
 
   const blue = '#2563eb', slate = '#0f172a', sub = '#64748b', green = '#16a34a', red = '#dc2626'
 
@@ -38,7 +39,8 @@ export default function MdmAdmin() {
   useEffect(() => { init() }, [init])
 
   const invite = async () => {
-    setMsg(null); setBusy(true)
+    setMsg(null); setTempCred(null); setBusy(true)
+    const created = email.trim().toLowerCase()
     const r = await authedFetch('/api/mdm/users', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -46,8 +48,9 @@ export default function MdmAdmin() {
     })
     const j = await r.json().catch(() => ({}))
     setBusy(false)
-    if (!r.ok) { setMsg({ ok: false, text: j.error || 'Invite failed' }); return }
-    setMsg({ ok: true, text: `Invited ${email}. They'll get an email to set a password.` })
+    if (!r.ok) { setMsg({ ok: false, text: j.error || 'Create failed' }); return }
+    // Show the temp password ONCE — it's never stored or shown again.
+    setTempCred({ email: created, password: j.temp_password })
     setEmail(''); setName(''); setRole('user'); setActivateNow(false)
     refresh()
   }
@@ -102,10 +105,22 @@ export default function MdmAdmin() {
               Enable access immediately
             </label>
             <button onClick={invite} disabled={busy || !email.trim()} style={{ marginLeft: 'auto', padding: '9px 18px', background: blue, border: 'none', borderRadius: 9, color: '#fff', fontSize: '.8rem', fontWeight: 700, cursor: busy || !email.trim() ? 'not-allowed' : 'pointer', opacity: busy || !email.trim() ? .6 : 1 }}>
-              {busy ? 'Inviting…' : 'Send invite'}
+              {busy ? 'Creating…' : 'Create user'}
             </button>
           </div>
           {msg && <div style={{ marginTop: 12, padding: '9px 12px', borderRadius: 8, background: msg.ok ? '#f0fdf4' : '#fef2f2', border: `1px solid ${msg.ok ? '#bbf7d0' : '#fecaca'}`, color: msg.ok ? green : red, fontSize: '.76rem' }}>{msg.text}</div>}
+          {tempCred && (
+            <div style={{ marginTop: 12, padding: '14px 16px', borderRadius: 10, background: '#fffbeb', border: '1px solid #fde68a' }}>
+              <div style={{ fontSize: '.78rem', fontWeight: 700, color: '#92400e', marginBottom: 8 }}>Temporary password — copy & share now (shown once)</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                <code style={{ fontSize: '.8rem', color: slate, background: '#fff', border: '1px solid #fde68a', borderRadius: 7, padding: '6px 10px' }}>{tempCred.email}</code>
+                <code style={{ fontSize: '.85rem', fontWeight: 700, color: slate, background: '#fff', border: '1px solid #fde68a', borderRadius: 7, padding: '6px 10px', letterSpacing: '.04em' }}>{tempCred.password}</code>
+                <button onClick={() => { navigator.clipboard?.writeText(tempCred.password); }} style={{ fontSize: '.74rem', fontWeight: 600, color: '#92400e', background: '#fef3c7', border: '1px solid #fde68a', borderRadius: 7, padding: '6px 12px', cursor: 'pointer' }}>Copy password</button>
+                <button onClick={() => setTempCred(null)} style={{ fontSize: '.74rem', color: sub, background: 'transparent', border: 'none', cursor: 'pointer', marginLeft: 'auto' }}>Done</button>
+              </div>
+              <div style={{ fontSize: '.68rem', color: '#a16207', marginTop: 8 }}>They'll be forced to set their own password on first login.</div>
+            </div>
+          )}
         </div>
 
         {/* Users list */}

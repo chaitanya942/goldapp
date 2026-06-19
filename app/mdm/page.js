@@ -25,11 +25,15 @@ export default function MdmHome() {
     const j = await r.json()
     if (!j.member) { setState('nomember'); return }
     setMember(j.member)
+    // Forced password reset (temp-password first login) takes precedence — but
+    // only once they're enabled (an inactive user can't pass the gate at all).
+    if (j.member.active && j.member.must_reset) { setState('mustreset'); return }
     setState(j.member.active ? 'ok' : 'inactive')
   }
 
   useEffect(() => { load() }, [])
   useEffect(() => { if (state === 'nosession') router.replace('/mdm/login') }, [state, router])
+  useEffect(() => { if (state === 'mustreset') router.replace('/mdm/reset') }, [state, router])
 
   const signOut = async () => { await supabase.auth.signOut(); router.replace('/mdm/login') }
 
@@ -46,7 +50,7 @@ export default function MdmHome() {
     </div>
   )
 
-  if (state === 'loading' || state === 'nosession')
+  if (state === 'loading' || state === 'nosession' || state === 'mustreset')
     return <div style={{ minHeight: '100vh', background: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center', color: sub, fontFamily: 'var(--font-jakarta), system-ui, sans-serif' }}>Loading…</div>
 
   if (state === 'nomember')

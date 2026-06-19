@@ -6,9 +6,22 @@
 //   PATCH → toggle a user's `active` (the IT-admin master switch) or `role`.
 // All admin-only (requireMdmAuth requireAdmin).
 
+import crypto from 'crypto'
 import { requireMdmAuth, mdmAdmin } from '../../../../lib/mdmAuth'
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
+// One-time temporary password — shown once to the admin, never stored. The
+// user is forced to reset it on first login (app_metadata.mdm_must_reset).
+// 12 chars, unambiguous alphabet, guaranteed an upper + lower + digit.
+function genTempPassword() {
+  const U = 'ABCDEFGHJKLMNPQRSTUVWXYZ', L = 'abcdefghijkmnpqrstuvwxyz', D = '23456789'
+  const all = U + L + D
+  const b = crypto.randomBytes(12)
+  let p = U[b[0] % U.length] + L[b[1] % L.length] + D[b[2] % D.length]
+  for (let i = 3; i < 12; i++) p += all[b[i] % all.length]
+  return p
+}
 
 export async function GET(req) {
   const auth = await requireMdmAuth(req, { requireAdmin: true })
@@ -31,28 +44,34 @@ export async function POST(req) {
       return Response.json({ error: 'Valid email is required.' }, { status: 400 })
     }
     const cleanRole = role === 'admin' ? 'admin' : 'user'
+    const tempPassword = genTempPassword()
 
-    // 1. Invite via Supabase Auth → user gets an email to set a password.
-    //    redirectTo lands them on the isolated MDM set-password page.
-    const site = process.env.NEXT_PUBLIC_SITE_URL || ''
-    const { data: invited, error: invErr } = await mdmAdmin.auth.admin.inviteUserByEmail(
-      cleanEmail,
-      { redirectTo: `${site}/mdm/confirm`, data: { full_name: String(full_name || '').trim(), mdm: true } },
-    )
-    let userId = invited?.user?.id
-    // If the auth user already exists, look them up so we can still add/refresh
-    // the mdm_users row (invite fails on duplicate email).
-    if (invErr) {
-      if (/already.*registered|exists/i.test(invErr.message || '')) {
+    // 1. Create the auth account with the temp password. email_confirm:true so
+    //    they can log in straight away (no email step); mdm_must_reset forces a
+    //    password reset on first login.
+    const { data: created, error: cErr } = await mdmAdmin.auth.admin.createUser({
+      email:         cleanEmail,
+      password:      tempPassword,
+      email_confirm: true,
+      user_metadata: { full_name: String(full_name || '').trim() },
+      app_metadata:  { mdm_must_reset: true },
+    })
+    let userId = created?.user?.id
+    // Existing auth user → reset their temp password + re-arm must_reset.
+    if (cErr) {
+      if (/already|exists|registered/i.test(cErr.message || '')) {
         const { data: list } = await mdmAdmin.auth.admin.listUsers()
         const existing = (list?.users || []).find(u => (u.email || '').toLowerCase() === cleanEmail)
-        if (!existing) return Response.json({ error: invErr.message }, { status: 400 })
+        if (!existing) return Response.json({ error: cErr.message }, { status: 400 })
         userId = existing.id
+        await mdmAdmin.auth.admin.updateUserById(userId, {
+          password: tempPassword, app_metadata: { mdm_must_reset: true },
+        })
       } else {
-        return Response.json({ error: invErr.message }, { status: 400 })
+        return Response.json({ error: cErr.message }, { status: 400 })
       }
     }
-    if (!userId) return Response.json({ error: 'Could not resolve the invited user.' }, { status: 500 })
+    if (!userId) return Response.json({ error: 'Could not create the user.' }, { status: 500 })
 
     // 2. Membership row — active defaults to false unless the admin opts in now.
     const { error: upErr } = await mdmAdmin.from('mdm_users').upsert({
@@ -63,9 +82,10 @@ export async function POST(req) {
       active:     active === true,
       invited_by: auth.member.id,
     }, { onConflict: 'id' })
-    if (upErr) return Response.json({ error: `Invite sent but membership failed: ${upErr.message}` }, { status: 500 })
+    if (upErr) return Response.json({ error: `User created but membership failed: ${upErr.message}` }, { status: 500 })
 
-    return Response.json({ success: true, userId })
+    // temp_password is returned ONCE for the admin to copy + share. Never stored.
+    return Response.json({ success: true, userId, temp_password: tempPassword })
   } catch (err) {
     return Response.json({ error: err.message || 'Server error' }, { status: 500 })
   }

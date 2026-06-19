@@ -15,11 +15,22 @@ export default function MdmLogin() {
 
   const blue = '#2563eb', slate = '#0f172a', sub = '#64748b'
 
+  const [notice, setNotice] = useState('')
+
   const signIn = async () => {
-    setErr(''); setBusy(true)
+    setErr(''); setNotice(''); setBusy(true)
     const { error } = await supabase.auth.signInWithPassword({ email: email.trim().toLowerCase(), password })
     if (error) { setErr(error.message || 'Sign-in failed'); setBusy(false); return }
-    router.push('/mdm')
+    router.push('/mdm')   // the gate decides: forced reset / lock screen / portal
+  }
+
+  const forgot = async () => {
+    setErr(''); setNotice('')
+    const e = email.trim().toLowerCase()
+    if (!e) { setErr('Enter your email first, then tap “Forgot password”.'); return }
+    const { error } = await supabase.auth.resetPasswordForEmail(e, { redirectTo: `${window.location.origin}/mdm/reset` })
+    if (error) { setErr(error.message || 'Could not send reset email'); return }
+    setNotice(`If ${e} has an account, a password-reset link is on its way.`)
   }
 
   return (
@@ -40,9 +51,13 @@ export default function MdmLogin() {
             placeholder="••••••••" autoComplete="current-password"
             style={{ width: '100%', padding: '11px 13px', border: '1px solid #cbd5e1', borderRadius: 9, fontSize: '.85rem', color: slate, outline: 'none', marginBottom: 18, boxSizing: 'border-box' }} />
           {err && <div style={{ padding: '9px 12px', borderRadius: 8, background: '#fef2f2', border: '1px solid #fecaca', color: '#dc2626', fontSize: '.74rem', marginBottom: 14 }}>{err}</div>}
+          {notice && <div style={{ padding: '9px 12px', borderRadius: 8, background: '#eff6ff', border: '1px solid #bfdbfe', color: blue, fontSize: '.74rem', marginBottom: 14 }}>{notice}</div>}
           <button onClick={signIn} disabled={busy}
             style={{ width: '100%', padding: 12, background: blue, border: 'none', borderRadius: 9, color: '#fff', fontSize: '.85rem', fontWeight: 700, cursor: busy ? 'not-allowed' : 'pointer', opacity: busy ? .7 : 1 }}>
             {busy ? 'Signing in…' : 'Sign in →'}
+          </button>
+          <button onClick={forgot} style={{ width: '100%', marginTop: 12, background: 'transparent', border: 'none', color: sub, fontSize: '.74rem', fontWeight: 600, cursor: 'pointer' }}>
+            Forgot password?
           </button>
         </div>
         <div style={{ textAlign: 'center', marginTop: 16, fontSize: '.66rem', color: sub }}>Access is controlled by your IT admin.</div>
