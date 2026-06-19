@@ -12,13 +12,14 @@ export default function MdmAdmin() {
   const [state, setState] = useState('loading')   // loading | denied | ok
   const [me, setMe] = useState(null)
   const [users, setUsers] = useState([])
+  const [username, setUsername] = useState('')
   const [email, setEmail] = useState('')
   const [name, setName] = useState('')
   const [role, setRole] = useState('user')
   const [activateNow, setActivateNow] = useState(false)
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState(null)   // { ok, text }
-  const [tempCred, setTempCred] = useState(null)   // { email, password } shown once
+  const [tempCred, setTempCred] = useState(null)   // { login, password } shown once
 
   const blue = '#2563eb', slate = '#0f172a', sub = '#64748b', green = '#16a34a', red = '#dc2626'
 
@@ -40,18 +41,18 @@ export default function MdmAdmin() {
 
   const invite = async () => {
     setMsg(null); setTempCred(null); setBusy(true)
-    const created = email.trim().toLowerCase()
+    const login = username.trim()
     const r = await authedFetch('/api/mdm/users', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, full_name: name, role, active: activateNow }),
+      body: JSON.stringify({ username, email, full_name: name, role, active: activateNow }),
     })
     const j = await r.json().catch(() => ({}))
     setBusy(false)
     if (!r.ok) { setMsg({ ok: false, text: j.error || 'Create failed' }); return }
     // Show the temp password ONCE — it's never stored or shown again.
-    setTempCred({ email: created, password: j.temp_password })
-    setEmail(''); setName(''); setRole('user'); setActivateNow(false)
+    setTempCred({ login, password: j.temp_password })
+    setUsername(''); setEmail(''); setName(''); setRole('user'); setActivateNow(false)
     refresh()
   }
 
@@ -60,9 +61,12 @@ export default function MdmAdmin() {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id, ...body }),
     })
-    if (!r.ok) { const j = await r.json().catch(() => ({})); setMsg({ ok: false, text: j.error || 'Update failed' }); return }
+    const j = await r.json().catch(() => ({}))
+    if (!r.ok) { setMsg({ ok: false, text: j.error || 'Update failed' }); return }
+    if (j.temp_password) setTempCred({ login: body._login || 'user', password: j.temp_password })   // reset-password result
     refresh()
   }
+  const resetPwd = (u) => patch(u.id, { reset_password: true, _login: u.username || u.email })
 
   if (state === 'loading') return <div style={{ minHeight: '100vh', background: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center', color: sub, fontFamily: 'var(--font-jakarta), system-ui, sans-serif' }}>Loading…</div>
   if (state === 'denied') return (
@@ -90,10 +94,15 @@ export default function MdmAdmin() {
       <div style={{ maxWidth: 880, margin: '0 auto', padding: '24px 22px' }}>
         {/* Invite */}
         <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 14, padding: 20, marginBottom: 18 }}>
-          <div style={{ fontSize: '.92rem', fontWeight: 700, color: slate, marginBottom: 14 }}>Invite a user</div>
+          <div style={{ fontSize: '.92rem', fontWeight: 700, color: slate, marginBottom: 4 }}>Add a user</div>
+          <div style={{ fontSize: '.72rem', color: sub, marginBottom: 14 }}>Login can be anything — email, employee ID, phone, or name. Email is optional (only used for self-service password reset).</div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
-            <input value={email} onChange={e => setEmail(e.target.value)} placeholder="email@company.com" style={input} />
+            <input value={username} onChange={e => setUsername(e.target.value)} placeholder="Username — email / emp ID / phone / name" style={input} />
             <input value={name} onChange={e => setName(e.target.value)} placeholder="Full name" style={input} />
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
+            <input value={email} onChange={e => setEmail(e.target.value)} placeholder="Email (optional)" style={input} />
+            <div />
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
             <select value={role} onChange={e => setRole(e.target.value)} style={{ ...input, width: 'auto', padding: '9px 12px' }}>
@@ -104,16 +113,16 @@ export default function MdmAdmin() {
               <input type="checkbox" checked={activateNow} onChange={e => setActivateNow(e.target.checked)} />
               Enable access immediately
             </label>
-            <button onClick={invite} disabled={busy || !email.trim()} style={{ marginLeft: 'auto', padding: '9px 18px', background: blue, border: 'none', borderRadius: 9, color: '#fff', fontSize: '.8rem', fontWeight: 700, cursor: busy || !email.trim() ? 'not-allowed' : 'pointer', opacity: busy || !email.trim() ? .6 : 1 }}>
+            <button onClick={invite} disabled={busy || !username.trim()} style={{ marginLeft: 'auto', padding: '9px 18px', background: blue, border: 'none', borderRadius: 9, color: '#fff', fontSize: '.8rem', fontWeight: 700, cursor: busy || !username.trim() ? 'not-allowed' : 'pointer', opacity: busy || !username.trim() ? .6 : 1 }}>
               {busy ? 'Creating…' : 'Create user'}
             </button>
           </div>
           {msg && <div style={{ marginTop: 12, padding: '9px 12px', borderRadius: 8, background: msg.ok ? '#f0fdf4' : '#fef2f2', border: `1px solid ${msg.ok ? '#bbf7d0' : '#fecaca'}`, color: msg.ok ? green : red, fontSize: '.76rem' }}>{msg.text}</div>}
           {tempCred && (
             <div style={{ marginTop: 12, padding: '14px 16px', borderRadius: 10, background: '#fffbeb', border: '1px solid #fde68a' }}>
-              <div style={{ fontSize: '.78rem', fontWeight: 700, color: '#92400e', marginBottom: 8 }}>Temporary password — copy & share now (shown once)</div>
+              <div style={{ fontSize: '.78rem', fontWeight: 700, color: '#92400e', marginBottom: 8 }}>Login + temporary password — copy & share now (shown once)</div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-                <code style={{ fontSize: '.8rem', color: slate, background: '#fff', border: '1px solid #fde68a', borderRadius: 7, padding: '6px 10px' }}>{tempCred.email}</code>
+                <code style={{ fontSize: '.8rem', color: slate, background: '#fff', border: '1px solid #fde68a', borderRadius: 7, padding: '6px 10px' }}>{tempCred.login}</code>
                 <code style={{ fontSize: '.85rem', fontWeight: 700, color: slate, background: '#fff', border: '1px solid #fde68a', borderRadius: 7, padding: '6px 10px', letterSpacing: '.04em' }}>{tempCred.password}</code>
                 <button onClick={() => { navigator.clipboard?.writeText(tempCred.password); }} style={{ fontSize: '.74rem', fontWeight: 600, color: '#92400e', background: '#fef3c7', border: '1px solid #fde68a', borderRadius: 7, padding: '6px 12px', cursor: 'pointer' }}>Copy password</button>
                 <button onClick={() => setTempCred(null)} style={{ fontSize: '.74rem', color: sub, background: 'transparent', border: 'none', cursor: 'pointer', marginLeft: 'auto' }}>Done</button>
@@ -130,9 +139,14 @@ export default function MdmAdmin() {
           {users.map(u => (
             <div key={u.id} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '12px 18px', borderBottom: '1px solid #f8fafc' }}>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: '.84rem', fontWeight: 600, color: slate, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.full_name || u.email}</div>
-                <div style={{ fontSize: '.7rem', color: sub }}>{u.email}{u.last_login_at ? '' : ' · never signed in'}</div>
+                <div style={{ fontSize: '.84rem', fontWeight: 600, color: slate, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.full_name || u.username || u.email}</div>
+                <div style={{ fontSize: '.7rem', color: sub }}>
+                  {u.username || u.email}
+                  {u.email && !/@mdm\.local$/.test(u.email) && u.email !== u.username ? ` · ${u.email}` : ''}
+                  {u.last_login_at ? '' : ' · never signed in'}
+                </div>
               </div>
+              <button onClick={() => resetPwd(u)} title="Issue a new temporary password" style={{ fontSize: '.72rem', color: sub, background: 'transparent', border: '1px solid #e2e8f0', borderRadius: 7, padding: '5px 10px', cursor: 'pointer' }}>Reset password</button>
               <select value={u.role} onChange={e => patch(u.id, { role: e.target.value })} style={{ fontSize: '.74rem', padding: '5px 8px', border: '1px solid #e2e8f0', borderRadius: 7, color: slate, background: '#fff' }}>
                 <option value="user">User</option>
                 <option value="admin">Admin</option>

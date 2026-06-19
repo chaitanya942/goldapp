@@ -8,26 +8,31 @@ import { supabase } from '../../../lib/supabase'
 // /mdm; the gate there refuses entry unless the IT admin has enabled the user.
 export default function MdmLogin() {
   const router = useRouter()
-  const [email, setEmail] = useState('')
+  const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
+  const [notice, setNotice] = useState('')
 
   const blue = '#2563eb', slate = '#0f172a', sub = '#64748b'
-
-  const [notice, setNotice] = useState('')
+  const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
   const signIn = async () => {
     setErr(''); setNotice(''); setBusy(true)
-    const { error } = await supabase.auth.signInWithPassword({ email: email.trim().toLowerCase(), password })
-    if (error) { setErr(error.message || 'Sign-in failed'); setBusy(false); return }
+    // Username can be anything (name / employee id / phone / email). The server
+    // resolves it to the auth email and signs in.
+    const r = await fetch('/api/mdm/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: username.trim(), password }) })
+    const j = await r.json().catch(() => ({}))
+    if (!r.ok) { setErr(j.error || 'Sign-in failed'); setBusy(false); return }
+    const { error } = await supabase.auth.setSession({ access_token: j.access_token, refresh_token: j.refresh_token })
+    if (error) { setErr('Could not start session. Try again.'); setBusy(false); return }
     router.push('/mdm')   // the gate decides: forced reset / lock screen / portal
   }
 
   const forgot = async () => {
     setErr(''); setNotice('')
-    const e = email.trim().toLowerCase()
-    if (!e) { setErr('Enter your email first, then tap “Forgot password”.'); return }
+    const e = username.trim().toLowerCase()
+    if (!EMAIL_RE.test(e)) { setErr('Enter your email above to reset by email. If you log in with a name/ID, ask your IT admin to reset your password.'); return }
     const { error } = await supabase.auth.resetPasswordForEmail(e, { redirectTo: `${window.location.origin}/mdm/reset` })
     if (error) { setErr(error.message || 'Could not send reset email'); return }
     setNotice(`If ${e} has an account, a password-reset link is on its way.`)
@@ -42,9 +47,9 @@ export default function MdmLogin() {
         </div>
         <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 14, padding: 28, boxShadow: '0 4px 24px rgba(15,23,42,.06)' }}>
           <div style={{ fontSize: '1rem', fontWeight: 700, color: slate, marginBottom: 18 }}>Sign in</div>
-          <label style={{ display: 'block', fontSize: '.62rem', color: sub, textTransform: 'uppercase', letterSpacing: '.08em', fontWeight: 700, marginBottom: 6 }}>Email</label>
-          <input value={email} onChange={e => setEmail(e.target.value)} onKeyDown={e => e.key === 'Enter' && signIn()}
-            placeholder="you@company.com" autoComplete="username"
+          <label style={{ display: 'block', fontSize: '.62rem', color: sub, textTransform: 'uppercase', letterSpacing: '.08em', fontWeight: 700, marginBottom: 6 }}>Username</label>
+          <input value={username} onChange={e => setUsername(e.target.value)} onKeyDown={e => e.key === 'Enter' && signIn()}
+            placeholder="email, employee ID, phone, or name" autoComplete="username"
             style={{ width: '100%', padding: '11px 13px', border: '1px solid #cbd5e1', borderRadius: 9, fontSize: '.85rem', color: slate, outline: 'none', marginBottom: 14, boxSizing: 'border-box' }} />
           <label style={{ display: 'block', fontSize: '.62rem', color: sub, textTransform: 'uppercase', letterSpacing: '.08em', fontWeight: 700, marginBottom: 6 }}>Password</label>
           <input type="password" value={password} onChange={e => setPassword(e.target.value)} onKeyDown={e => e.key === 'Enter' && signIn()}
