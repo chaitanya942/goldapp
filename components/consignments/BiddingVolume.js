@@ -1355,6 +1355,7 @@ export default function BiddingVolume() {
         onSetGainGrams={(g) => handleSectionGainGrams(2, g)}
         onAutoSelect={() => selectSectionBills(['transit_24h'])}
         prefix="T"
+        dateFilter
         selectable
         selected={selected}
         branchLocked={branchLocked}
@@ -1384,6 +1385,7 @@ export default function BiddingVolume() {
         onSetGainGrams={(g) => handleSectionGainGrams(3, g)}
         onAutoSelect={() => selectSectionBills(['transit_48h'])}
         prefix="D"
+        dateFilter
         selectable
         selected={selected}
         branchLocked={branchLocked}
@@ -1413,6 +1415,7 @@ export default function BiddingVolume() {
         onSetGainGrams={(g) => handleSectionGainGrams(4, g)}
         onAutoSelect={() => selectSectionBills(['transit_72h'])}
         prefix="E"
+        dateFilter
         selectable
         selected={selected}
         branchLocked={branchLocked}
@@ -1510,6 +1513,7 @@ export default function BiddingVolume() {
         onSetGainGrams={(g) => handleSectionGainGrams(7, g)}
         onAutoSelect={() => selectSectionBills(['branch_pre_eod'])}
         prefix="P"
+        dateFilter
         selectable
         selected={selected}
         branchLocked={branchLocked}
@@ -2795,6 +2799,10 @@ function SourceSection({
   // makes the Unbooked Net card itself the clickable selector (Available =
   // Unbooked, so a separate card is redundant).
   noGain = false,
+  // When true, renders a row of purchase-date chips under the hero strip and
+  // re-rolls the branch lists + hero metrics to the selected date(s). Used by
+  // the transit sections (2/3/4) and branch-pickup-pending (7).
+  dateFilter = false,
   emptyMsg,
 }) {
   const tone = accent || t.gold
@@ -2821,6 +2829,51 @@ function SourceSection({
     if (next.has(region)) next.delete(region); else next.add(region)
     return next
   })
+
+  // ── Optional purchase-date filter (sections 2/3/4/7) ──────────────────────
+  // Self-contained: derive the distinct purchase dates from THIS section's own
+  // bills, then (when any are selected) re-roll the branch lists, hero totals
+  // and hero metrics to only those dates. Gain rate is taken from the passed
+  // metrics so the recomputed Gain / Available stay consistent.
+  const [selectedDates, setSelectedDates] = useState(() => new Set())
+  const toggleDate = (d) => setSelectedDates(prev => {
+    const next = new Set(prev); next.has(d) ? next.delete(d) : next.add(d); return next
+  })
+  let dateChipsAvailable = []
+  if (dateFilter) {
+    const ds = new Set()
+    const scan = (arr) => { for (const br of arr || []) for (const bl of br.bills || []) if (bl.purchase_date) ds.add(bl.purchase_date) }
+    scan(branches); scan(bookedBranches); scan(subGroup?.branches)
+    dateChipsAvailable = Array.from(ds).sort()   // 'YYYY-MM-DD' sorts oldest→latest
+  }
+  if (dateFilter && selectedDates.size) {
+    const rollBranch = (br) => {
+      const bills = (br.bills || []).filter(bl => selectedDates.has(bl.purchase_date))
+      let g = 0, n = 0, a = 0
+      for (const bl of bills) { g += Number(bl.gross_weight) || 0; n += Number(bl.net_weight) || 0; a += Number(bl.total_amount) || 0 }
+      return { ...br, bills, total_bills: bills.length, total_gross_wt: g, total_net_wt: n, total_amount: a }
+    }
+    const filterArr = (arr) => (arr || []).map(rollBranch).filter(br => br.bills.length > 0)
+    const sumNet  = (arr) => (arr || []).reduce((s, b) => s + (Number(b.total_net_wt)   || 0), 0)
+    const rollTot = (arr) => (arr || []).reduce((acc, b) => ({
+      bills:    acc.bills    + (b.total_bills    || 0),
+      gross_wt: acc.gross_wt + (b.total_gross_wt || 0),
+      net_wt:   acc.net_wt   + (b.total_net_wt   || 0),
+      amount:   acc.amount   + (b.total_amount   || 0),
+    }), { bills: 0, gross_wt: 0, net_wt: 0, amount: 0 })
+
+    branches       = filterArr(branches)
+    bookedBranches = filterArr(bookedBranches)
+    if (subGroup) subGroup = { ...subGroup, branches: filterArr(subGroup.branches), total: rollTot(filterArr(subGroup.branches)) }
+    if (total) total = { ...total, ...rollTot(branches) }
+    if (metrics) {
+      const unbookedNet = sumNet(branches)
+      const bookedNet   = sumNet(bookedBranches)
+      const rate = metrics.unbookedNet > 0 ? (Number(metrics.gainNet) || 0) / metrics.unbookedNet : 0
+      const gainNet = noGain ? 0 : unbookedNet * rate
+      metrics = { ...metrics, totalNet: unbookedNet + bookedNet, bookedNet, unbookedNet, gainNet, availableNet: unbookedNet + gainNet, gainOverride: null }
+    }
+  }
   const toSet = (v) => {
     if (!v) return null
     if (v instanceof Set) return v
@@ -3068,6 +3121,33 @@ function SourceSection({
           </div>
         )
       })()}
+
+      {/* Purchase-date chips — filter this section by purchase date (oldest→latest, multi-select) */}
+      {dateFilter && dateChipsAvailable.length > 0 && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', padding: '2px 14px 12px' }}>
+          <span style={{ fontSize: 9, color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 800 }}>Purchase&nbsp;dates</span>
+          {dateChipsAvailable.map(d => {
+            const active = selectedDates.has(d)
+            return (
+              <button key={d} onClick={() => toggleDate(d)} title="Filter by purchase date — select multiple"
+                style={{
+                  padding: '5px 11px', borderRadius: 999, cursor: 'pointer', fontSize: 10.5, fontWeight: 700, whiteSpace: 'nowrap',
+                  border: `1px solid ${active ? tone : t.border}`,
+                  background: active ? `${tone}22` : 'transparent',
+                  color: active ? tone : t.text3, transition: 'all .15s',
+                }}>
+                {fmtDate(d)}
+              </button>
+            )
+          })}
+          {selectedDates.size > 0 && (
+            <button onClick={() => setSelectedDates(new Set())}
+              style={{ padding: '5px 9px', borderRadius: 999, cursor: 'pointer', fontSize: 10, fontWeight: 700, border: `1px solid ${t.border}`, background: 'transparent', color: t.text4 }}>
+              ✕ Clear ({selectedDates.size})
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Body */}
       {isEmpty ? (
