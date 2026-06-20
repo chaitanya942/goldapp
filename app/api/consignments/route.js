@@ -2553,6 +2553,12 @@ export async function POST(req) {
   }
   if (!auth.ok) return auth.response
 
+  // Region scoping — same contract as GET. Some read-only POST actions
+  // (e.g. bidding_stuck_summary) filter by branch, so they need this too;
+  // null = no restriction (admin/founders or users without allowed_regions).
+  const allowedRegions  = getRegionFilter(auth)
+  const allowedBranches = allowedRegions ? await resolveAllowedBranchNames(supabase, auth) : null
+
   // Identity is now derived from the verified session — never from the body.
   // Callers can no longer spoof created_by / approver_email / cancelled_by.
   const actorEmail = auth.profile?.email || auth.user?.email || 'unknown'
