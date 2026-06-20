@@ -91,16 +91,33 @@ async function newCrmBankMap(from, to) {
         FROM "Payment" WHERE action='DEBITED' AND type='FINAL_PAYMENT'
         ORDER BY transaction_id, created_at DESC
       ),
+      bank AS (
+        -- Customer's beneficiary account captured by ANY payment on the txn
+        -- (typically the RazorpayX penny-drop verification). Used to back-fill
+        -- OFFLINE / manually-settled final payments, which don't record the
+        -- bank on the payout row itself.
+        SELECT DISTINCT ON (transaction_id) transaction_id, bank_name, account_holder_name, account_number, ifsc_code
+        FROM "Payment" WHERE account_number IS NOT NULL AND account_number <> ''
+        ORDER BY transaction_id, created_at DESC
+      ),
       quo AS (
         SELECT DISTINCT ON (transaction_id) transaction_id, COALESCE(release_amount,0) takeover
         FROM "Quotation" ORDER BY transaction_id, created_at DESC
       )
       -- Date by the FINAL-PAYMENT day (== purchase_date in the master), not
       -- created_at — so re-walk-ins (walked in earlier, paid in range) match.
+      -- bankName/payRef come from the payout row (processor + UTR — keeps
+      -- "OFFLINE" for manual payments); the customer bank columns fall back to
+      -- the penny-drop row when the payout row didn't capture them.
       SELECT t.code, COALESCE(quo.takeover,0) takeover,
-             fp.utr, fp.processor, fp.bank_name, fp.account_holder_name, fp.account_number, fp.ifsc_code
+             fp.utr, fp.processor,
+             COALESCE(NULLIF(fp.bank_name,''),           bank.bank_name)           AS bank_name,
+             COALESCE(NULLIF(fp.account_holder_name,''), bank.account_holder_name) AS account_holder_name,
+             COALESCE(NULLIF(fp.account_number,''),      bank.account_number)      AS account_number,
+             COALESCE(NULLIF(fp.ifsc_code,''),           bank.ifsc_code)           AS ifsc_code
       FROM "Transaction" t
       JOIN fp ON fp.transaction_id=t.id
+      LEFT JOIN bank ON bank.transaction_id=t.id
       LEFT JOIN quo ON quo.transaction_id=t.id
       WHERE fp.pay_date BETWEEN $1 AND $2
     `, [from, to])
@@ -170,12 +187,17 @@ async function fetchFppNewCrm(from, to) {
         FROM orn_dedup GROUP BY transaction_id
       ),
       quo AS (SELECT DISTINCT ON (transaction_id) transaction_id, service_charge, service_charge_amount, final_amount, COALESCE(release_amount,0) takeover FROM "Quotation" ORDER BY transaction_id, created_at DESC),
-      pay AS (SELECT DISTINCT ON (transaction_id) transaction_id, utr, processor, bank_name, account_holder_name, account_number, ifsc_code FROM "Payment" WHERE action='DEBITED' ORDER BY transaction_id, created_at DESC)
+      pay AS (SELECT DISTINCT ON (transaction_id) transaction_id, utr, processor, bank_name, account_holder_name, account_number, ifsc_code FROM "Payment" WHERE action='DEBITED' ORDER BY transaction_id, created_at DESC),
+      bank AS (SELECT DISTINCT ON (transaction_id) transaction_id, bank_name, account_holder_name, account_number, ifsc_code FROM "Payment" WHERE account_number IS NOT NULL AND account_number <> '' ORDER BY transaction_id, created_at DESC)
       SELECT t.code, t.created_at, t.transaction_type,
              trim(coalesce(NULLIF(btrim(w.first_name),''), cu.first_name, '')||' '||coalesce(NULLIF(btrim(w.last_name),''), cu.last_name, '')) cust, cu.mobile, b.name branch,
              orn.grs, orn.stone, orn.wastage, orn.net, orn.purity, orn.gross_amount,
              quo.service_charge, quo.service_charge_amount, quo.final_amount, quo.takeover,
-             pay.utr, pay.processor, pay.bank_name, pay.account_holder_name, pay.account_number, pay.ifsc_code
+             pay.utr, pay.processor,
+             COALESCE(NULLIF(pay.bank_name,''),           bank.bank_name)           AS bank_name,
+             COALESCE(NULLIF(pay.account_holder_name,''), bank.account_holder_name) AS account_holder_name,
+             COALESCE(NULLIF(pay.account_number,''),      bank.account_number)      AS account_number,
+             COALESCE(NULLIF(pay.ifsc_code,''),           bank.ifsc_code)           AS ifsc_code
       FROM "Transaction" t
       LEFT JOIN "Customer" cu ON cu.id=t.customer_id
       LEFT JOIN "Branch"   b  ON b.id=t.branch_id
