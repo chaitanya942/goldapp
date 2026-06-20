@@ -268,6 +268,35 @@ export async function GET(req) {
               AND (f.fp AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata')::date = ${todayIST}::date
             GROUP BY b.name
           `
+          // Re-walk-ins — a customer who walked in on an EARLIER day and CLOSED
+          // (final payment completed) TODAY. The NEW CRM stores only the first
+          // walk-in + the closing payment, so the re-visit is inferred from
+          // final-payment date ≠ walk-in (created) date. Counted as a walk-in on
+          // the closing day, so Total walk-ins = fresh + re-walk-ins. Same
+          // provisional union-dedup gross basis as the fresh walk-in query.
+          const ncRewalkRows = await ncSql`
+            SELECT b.name AS branch,
+                   COUNT(*)::int AS c,
+                   COALESCE(ROUND(SUM(ow.gross_weight)::numeric, 2), 0) AS wt
+            FROM "Transaction" t
+            LEFT JOIN "Branch" b ON b.id = t.branch_id
+            JOIN LATERAL (SELECT MAX(created_at) fp FROM "Payment" WHERE transaction_id = t.id AND status = 'COMPLETED' AND type = 'FINAL_PAYMENT') f ON true
+            LEFT JOIN (
+              SELECT tid AS transaction_id, SUM(gw) AS gross_weight FROM (
+                SELECT DISTINCT ON (tid, COALESCE(ornament_id, oid)) tid, gw FROM (
+                  SELECT q.transaction_id tid, o.ornament_id, o.id::text oid, o.gross_weight gw, o.approve ap, o.created_at ca, 2 sr
+                  FROM "Quotation" q JOIN "Ornament" o ON o.quotation_id = q.id
+                  UNION ALL
+                  SELECT e.transaction_id, o.ornament_id, o.id::text, o.gross_weight, o.approve, o.created_at, 1
+                  FROM "Estimation" e JOIN "Ornament" o ON o.estimation_id = e.id
+                ) z ORDER BY tid, COALESCE(ornament_id, oid), sr DESC, ap DESC NULLS LAST, ca DESC
+              ) y GROUP BY tid
+            ) ow ON ow.transaction_id = t.id
+            WHERE t.status = 'FINAL_PAYMENT_COMPLETED'
+              AND (f.fp AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata')::date = ${todayIST}::date
+              AND t.created_at < ${dayStart}
+            GROUP BY b.name
+          `
           let regionByName = null
           if (needRegionMap) {
             const { data: brAll } = await supabase.from('branches').select('name, region').not('region', 'is', null)
@@ -279,6 +308,12 @@ export async function GET(req) {
             return !needRegionMap || allowedSet.has(regionByName[(canon || '').trim().toLowerCase()] || '')
           }
           for (const r of ncWalkRows) {
+            if (!inAllowedBranch(r.branch)) continue
+            walkedInCount += Number(r.c)      || 0
+            walkedInWt    += parseFloat(r.wt) || 0
+          }
+          // Add re-walk-ins (walked in earlier, closed today) to the walk-in total.
+          for (const r of ncRewalkRows) {
             if (!inAllowedBranch(r.branch)) continue
             walkedInCount += Number(r.c)      || 0
             walkedInWt    += parseFloat(r.wt) || 0
