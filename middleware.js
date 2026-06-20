@@ -2,6 +2,33 @@ import { createServerClient } from '@supabase/ssr'
 import { NextResponse } from 'next/server'
 
 export async function middleware(request) {
+  // ── MDM portal — served on its OWN domain at the root (no /mdm in the URL) ──
+  // The MDM pages physically live at /mdm/*. On the MDM domain we transparently
+  // render them at the root, and redirect any explicit /mdm prefix back to the
+  // clean path. On the main (GoldApp) domain we bounce /mdm/* to the MDM domain
+  // so there's one canonical, clean URL. (DevOps points mdm-prod.up.railway.app
+  // at this same Railway service; everything else is host-based routing here.)
+  const host = (request.headers.get('host') || '').toLowerCase()
+  const MDM_HOSTS = (process.env.MDM_HOSTS || 'mdm-prod.up.railway.app')
+    .split(',').map(s => s.trim().toLowerCase()).filter(Boolean)
+  {
+    const { pathname, search } = request.nextUrl
+    if (MDM_HOSTS.includes(host)) {
+      if (pathname === '/mdm' || pathname.startsWith('/mdm/')) {
+        const url = request.nextUrl.clone()
+        url.pathname = pathname.replace(/^\/mdm/, '') || '/'
+        return NextResponse.redirect(url)                        // strip /mdm → clean URL
+      }
+      const url = request.nextUrl.clone()
+      url.pathname = '/mdm' + (pathname === '/' ? '' : pathname)  // render the MDM page
+      return NextResponse.rewrite(url)
+    }
+    if (pathname === '/mdm' || pathname.startsWith('/mdm/')) {
+      const clean = pathname.replace(/^\/mdm/, '') || '/'
+      return NextResponse.redirect(`https://${MDM_HOSTS[0]}${clean}${search || ''}`)
+    }
+  }
+
   let supabaseResponse = NextResponse.next({ request })
 
   const supabase = createServerClient(

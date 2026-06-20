@@ -33,7 +33,7 @@ export default function MdmLogin() {
     setErr(''); setNotice('')
     const e = username.trim().toLowerCase()
     if (!EMAIL_RE.test(e)) { setErr('Enter your email above to reset by email. If you log in with a name/ID, ask your IT admin to reset your password.'); return }
-    const { error } = await supabase.auth.resetPasswordForEmail(e, { redirectTo: `${window.location.origin}/mdm/reset` })
+    const { error } = await supabase.auth.resetPasswordForEmail(e, { redirectTo: `${window.location.origin}/reset` })
     if (error) { setErr(error.message || 'Could not send reset email'); return }
     setNotice(`If ${e} has an account, a password-reset link is on its way.`)
   }
