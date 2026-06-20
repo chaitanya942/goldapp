@@ -1119,7 +1119,15 @@ export async function GET(req) {
               FROM txn_orn ORDER BY tid, COALESCE(ornament_id, oid), ca DESC
             ),
             orn AS (SELECT tid, SUM(gw) g, SUM(nw) n FROM orn_dd GROUP BY tid)
-            SELECT t.code AS bill_no, t.transaction_type, b.name AS branch_name,
+            SELECT t.code AS bill_no, t.transaction_type, b.name AS branch_name, t.status,
+                   -- Date/time are the ORIGINAL walk-in (created_at) — for re-walk-ins
+                   -- this shows the earlier day they first came in; the detail table
+                   -- needs these + name/phone/amount to render like the other metrics.
+                   TO_CHAR(t.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM-DD') AS txn_date,
+                   TO_CHAR(t.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata', 'HH24:MI:SS') AS txn_time,
+                   TRIM(COALESCE(NULLIF(btrim(wk.first_name),''), c.first_name, '') || ' ' || COALESCE(NULLIF(btrim(wk.last_name),''), c.last_name, '')) AS cust_name,
+                   c.mobile AS cust_mobile,
+                   COALESCE(NULLIF(q.final_amount,0), 0)::float AS amount,
                    COALESCE(orn.g, 0)::float AS gross_weight,
                    COALESCE(orn.n, 0)::float AS net_weight,
                    -- re_walkin = walked in on an EARLIER day but closed today (the
@@ -1128,6 +1136,9 @@ export async function GET(req) {
                    ((t.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata')::date <> ${todayIST}::date) AS re_walkin
             FROM "Transaction" t
             LEFT JOIN "Branch" b ON b.id = t.branch_id
+            LEFT JOIN "Customer" c ON c.id = t.customer_id
+            LEFT JOIN LATERAL (SELECT first_name, last_name FROM "Walkin" WHERE transaction_id = t.id ORDER BY created_at DESC LIMIT 1) wk ON true
+            LEFT JOIN LATERAL (SELECT final_amount FROM "Quotation" WHERE transaction_id = t.id ORDER BY created_at DESC LIMIT 1) q ON true
             LEFT JOIN orn ON orn.tid = t.id
             JOIN LATERAL (
               SELECT MAX(created_at) fp FROM "Payment"

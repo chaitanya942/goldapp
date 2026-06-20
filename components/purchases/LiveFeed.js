@@ -1871,9 +1871,7 @@ function NewCrmTab({ t, newCrmTxns, completedToday, newCrmError, regionFilter, r
           ))}
         </div>
         <div className="lf-hero" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0, flexWrap: 'wrap', background: t.surface, borderRadius: 16, border: `1px solid ${t.border}`, padding: '28px 16px', boxShadow: `0 4px 20px rgba(0,0,0,.12), inset 0 1px 0 ${t.border}`, backdropFilter: 'blur(4px)' }}>
-          <HeroNum label="Today's Total Walk-ins" value={totalWalkins} color={t.gold} t={t} grossWt={totalWalkinsGr} netWt={totalWalkinsWt} />
-          <FlowArrow t={t} pct={null} />
-          {/* Walk-in breakdown — mirrors the "Breakdown of N" box: Fresh + Re-walk-ins */}
+          {/* Today's walk-ins — total in the badge, split into Fresh + Re-walk-ins */}
           <div style={{
             position:'relative',
             background:`linear-gradient(160deg, ${t.bg} 0%, ${t.card} 60%, ${t.bg} 100%)`,
@@ -1885,12 +1883,12 @@ function NewCrmTab({ t, newCrmTxns, completedToday, newCrmError, regionFilter, r
             <div style={{ position:'absolute', inset:-1, borderRadius:22, background:`radial-gradient(ellipse at 50% 0%, ${t.gold}18 0%, transparent 65%)`, pointerEvents:'none' }}/>
             <div style={{ position:'absolute', inset:0, borderRadius:22, backgroundImage:`radial-gradient(${t.gold}18 1px, transparent 1px)`, backgroundSize:'18px 18px', pointerEvents:'none', opacity:.6 }}/>
             <div style={{ position:'absolute', top:-14, left:'50%', transform:'translateX(-50%)', background:`linear-gradient(90deg,${t.gold}ee,${t.gold}bb)`, borderRadius:20, padding:'4px 14px', boxShadow:`0 4px 14px ${t.gold}55, 0 0 0 1px ${t.gold}30`, whiteSpace:'nowrap' }}>
-              <span style={{ fontSize:'.52rem', letterSpacing:'.14em', textTransform:'uppercase', color:'#fff', fontWeight:900 }}>today's walk-ins</span>
+              <span style={{ fontSize:'.52rem', letterSpacing:'.14em', textTransform:'uppercase', color:'#fff', fontWeight:900 }}>today's {fmtNum(totalWalkins)} walk-ins</span>
             </div>
             <div style={{ position:'relative', display:'flex', alignItems:'center', gap:8 }}>
               {[
                 { node: <HeroNum label="Fresh Walk-ins" value={total}     color={t.blue}   t={t} grossWt={totalGr}    netWt={totalWt}    noWtCount={noWt(txns)} active={activeMetric==='total'} onClick={() => toggleMetric('total')} />, color: t.blue },
-                { node: <HeroNum label="Re-walk-ins"    value={reWalkins} color={t.purple} t={t} grossWt={reWalkinGr} netWt={reWalkinWt} />, color: t.purple },
+                { node: <HeroNum label="Re-walk-ins"    value={reWalkins} color={t.purple} t={t} grossWt={reWalkinGr} netWt={reWalkinWt} active={activeMetric==='rewalkin'} onClick={() => toggleMetric('rewalkin')} />, color: t.purple },
               ].map((item, i) => (
                 <div key={i} style={{ display:'flex', alignItems:'center', gap:8 }}>
                   {i > 0 && <FlowSep t={t} />}
@@ -1908,8 +1906,6 @@ function NewCrmTab({ t, newCrmTxns, completedToday, newCrmError, regionFilter, r
               ))}
             </div>
           </div>
-          <FlowSep t={t} />
-          <HeroNum label="Total Today"  value={total}      color={t.blue}   t={t} grossWt={totalGr} netWt={totalWt}      noWtCount={noWt(txns)}          active={activeMetric==='total'}      onClick={() => toggleMetric('total')} />
           <FlowArrow t={t} pct={progressedPct || null} />
           <div style={{
             position:'relative',
@@ -2132,7 +2128,7 @@ function NewCrmTab({ t, newCrmTxns, completedToday, newCrmError, regionFilter, r
 
       {/* ──────── 4. DETAIL TABLE ──────── */}
       {activeMetric && (
-        <NewCrmDetail t={t} activeMetric={activeMetric} txns={txns} />
+        <NewCrmDetail t={t} activeMetric={activeMetric} txns={txns} reWalkins={reWalkinSet} />
       )}
 
       {/* ──────── 5. LIVE TIMELINE ──────── */}
@@ -2178,12 +2174,13 @@ function NewCrmTab({ t, newCrmTxns, completedToday, newCrmError, regionFilter, r
 }
 
 /* ── New CRM Detail Table ── */
-function NewCrmDetail({ t, activeMetric, txns }) {
+function NewCrmDetail({ t, activeMetric, txns, reWalkins }) {
   const [search, setSearch] = useState('')
 
   let rows, label
   switch (activeMetric) {
     case 'total':      rows = txns; label = 'All Transactions'; break
+    case 'rewalkin':   rows = reWalkins || []; label = 'Re-walk-ins · walked in earlier, closed today'; break
     case 'walkin':     rows = txns.filter(tx => tx.status === 'WALKIN'); label = 'Still at Walk-in'; break
     case 'inprogress': rows = txns.filter(tx => IN_PROGRESS_STATUSES.includes(tx.status)); label = 'In Progress'; break
     case 'completed':  rows = txns.filter(tx => tx.status === 'FINAL_PAYMENT_COMPLETED'); label = 'Completed'; break
