@@ -167,6 +167,33 @@ export async function GET(req) {
     return Response.json({ list: data || [] })
   }
 
+  // Per-(branch, purchase_date) breakdown for the date-chip filter. Lets the
+  // client offer "show only stock purchased on these day(s)" and re-aggregate
+  // the branch table + region cards without a precomputed date dimension.
+  if (date && url.searchParams.get('breakdown') === 'dates') {
+    const CHUNK = 1000
+    let from = 0
+    const map = {}
+    while (true) {
+      const { data, error } = await supabase
+        .from('eod_branch_stock_items')
+        .select('branch_name, region, purchase_date, gross_weight, net_weight, total_amount')
+        .eq('snapshot_date', date)
+        .range(from, from + CHUNK - 1)
+      if (error) return Response.json({ error: error.message }, { status: 500 })
+      if (!data?.length) break
+      for (const it of data) {
+        const key = `${it.branch_name}||${it.purchase_date || ''}`
+        if (!map[key]) map[key] = { branch_name: it.branch_name, region: it.region, purchase_date: it.purchase_date, bills: 0, gross_wt: 0, net_wt: 0, gross_amt: 0 }
+        const a = map[key]
+        a.bills++; a.gross_wt += Number(it.gross_weight || 0); a.net_wt += Number(it.net_weight || 0); a.gross_amt += Number(it.total_amount || 0)
+      }
+      if (data.length < CHUNK) break
+      from += CHUNK
+    }
+    return Response.json({ by_branch_date: Object.values(map) })
+  }
+
   // Drill-down: the cases (bills) for one branch on one date.
   if (date && branch) {
     const { data, error } = await supabase

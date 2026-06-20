@@ -58,17 +58,29 @@ export default function EodBranchStockReport() {
   const [branchCases,  setBranchCases]  = useState({})
   const [sortKey,      setSortKey]      = useState('net_wt')
   const [sortDir,      setSortDir]      = useState(-1)
+  // Per-(branch, purchase_date) rows for the date-chip filter + selected dates.
+  const [byBranchDate, setByBranchDate] = useState(null)
+  const [selectedDates, setSelectedDates] = useState(() => new Set())
 
   const fetchSnapshot = useCallback(async (date) => {
     setLoading(true)
     setOpenBranch(null)
+    setSelectedDates(new Set())
+    setByBranchDate(null)
     const url = date ? `/api/eod-branch-snapshot?date=${date}` : '/api/eod-branch-snapshot'
     const res = await authedFetch(url)
     if (res.status === 404) { setSnapshot(null); setSelectedDate(date || null); setLoading(false); return }
     const j = await res.json().catch(() => ({}))
     setSnapshot(j.snapshot || null)
-    setSelectedDate(j.snapshot?.snapshot_date || date || null)
+    const snapDate = j.snapshot?.snapshot_date || date || null
+    setSelectedDate(snapDate)
     setLoading(false)
+    // Per-(branch, purchase_date) breakdown powers the date chips + filtering.
+    if (snapDate) {
+      const bd = await authedFetch(`/api/eod-branch-snapshot?date=${snapDate}&breakdown=dates`)
+      const bj = await bd.json().catch(() => ({}))
+      setByBranchDate(bj.by_branch_date || [])
+    }
   }, [])
 
   useEffect(() => {
@@ -85,9 +97,63 @@ export default function EodBranchStockReport() {
     ]
   }, [snapshot])
 
+  // ── Date chips — distinct purchase dates of the at-branch stock, oldest→latest ──
+  const datesAvailable = useMemo(() => {
+    const set = new Set((byBranchDate || []).map(r => r.purchase_date).filter(Boolean))
+    return Array.from(set).sort()   // 'YYYY-MM-DD' sorts chronologically (oldest→latest)
+  }, [byBranchDate])
+
+  // Rows after applying the selected-date filter (empty selection = all dates).
+  const filteredBBD = useMemo(() => {
+    if (!byBranchDate) return null
+    if (!selectedDates.size) return byBranchDate
+    return byBranchDate.filter(r => selectedDates.has(r.purchase_date))
+  }, [byBranchDate, selectedDates])
+
+  // Re-aggregate the date-filtered rows into branch / region / total rollups so the
+  // table, hero cards and totals all respond to the date selection. Falls back to
+  // the precomputed snapshot while the breakdown is still loading.
+  const aggByBranch = useMemo(() => {
+    if (!filteredBBD) return null
+    const m = {}
+    for (const r of filteredBBD) {
+      if (!m[r.branch_name]) m[r.branch_name] = { branch_name: r.branch_name, region: r.region, bills: 0, gross_wt: 0, net_wt: 0, gross_amt: 0 }
+      const a = m[r.branch_name]
+      a.bills += r.bills; a.gross_wt += r.gross_wt; a.net_wt += r.net_wt; a.gross_amt += r.gross_amt
+    }
+    return Object.values(m)
+  }, [filteredBBD])
+
+  const aggByRegion = useMemo(() => {
+    if (!filteredBBD) return null
+    const m = {}, sets = {}
+    for (const r of filteredBBD) {
+      if (!m[r.region]) { m[r.region] = { gross_wt: 0, net_wt: 0, gross_amt: 0, bills: 0 }; sets[r.region] = new Set() }
+      const a = m[r.region]
+      a.bills += r.bills; a.gross_wt += r.gross_wt; a.net_wt += r.net_wt; a.gross_amt += r.gross_amt
+      sets[r.region].add(r.branch_name)
+    }
+    for (const reg in m) m[reg].branches = sets[reg].size
+    return m
+  }, [filteredBBD])
+
+  const aggTotal = useMemo(() => {
+    if (!filteredBBD) return null
+    const a = { gross_wt: 0, net_wt: 0, gross_amt: 0, bills: 0 }, bset = new Set()
+    for (const r of filteredBBD) { a.bills += r.bills; a.gross_wt += r.gross_wt; a.net_wt += r.net_wt; a.gross_amt += r.gross_amt; bset.add(r.branch_name) }
+    a.branches = bset.size
+    return a
+  }, [filteredBBD])
+
+  const toggleDate = (d) => setSelectedDates(prev => {
+    const next = new Set(prev)
+    next.has(d) ? next.delete(d) : next.add(d)
+    return next
+  })
+
   // ── Branch rows (filtered by region card + search, sorted) ───────────────
   const branchRows = useMemo(() => {
-    const rows = snapshot?.by_branch || []
+    const rows = aggByBranch || snapshot?.by_branch || []
     const q = search.trim().toLowerCase()
     return rows
       .filter(b => !activeRegion || b.region === activeRegion)
@@ -98,7 +164,7 @@ export default function EodBranchStockReport() {
         if (sortKey === 'region')      return (a.region || '').localeCompare(b.region || '') * sortDir
         return ((Number(a[sortKey]) || 0) - (Number(b[sortKey]) || 0)) * sortDir
       })
-  }, [snapshot, activeRegion, search, sortKey, sortDir])
+  }, [snapshot, aggByBranch, activeRegion, search, sortKey, sortDir])
 
   const totals = useMemo(() => branchRows.reduce((acc, b) => ({
     bills:     acc.bills     + Number(b.bills     || 0),
@@ -147,7 +213,8 @@ export default function EodBranchStockReport() {
   }
   const SortIcon = ({ col }) => <span style={{ marginLeft: 4, fontSize: '8px', color: sortKey === col ? t.gold : t.text4 }}>{sortKey === col ? (sortDir === -1 ? '↓' : '↑') : '⇅'}</span>
 
-  const total = snapshot?.total || {}
+  const total = aggTotal || snapshot?.total || {}
+  const byRegionEff = aggByRegion || snapshot?.by_region || {}
 
   return (
     <div style={s.wrap}>
@@ -211,7 +278,7 @@ export default function EodBranchStockReport() {
               )
             })()}
             {regions.map(r => {
-              const stats = snapshot.by_region[r] || {}
+              const stats = byRegionEff[r] || {}
               const color = REGION_COLORS[r] || t.text3
               const icon  = REGION_ICONS[r] || '📍'
               const active = activeRegion === r
@@ -240,6 +307,34 @@ export default function EodBranchStockReport() {
               )
             })}
           </div>
+
+          {/* ── Date chips — filter stock by purchase date (oldest→latest, multi-select) ── */}
+          {datesAvailable.length > 0 && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: isMobile ? 'nowrap' : 'wrap', overflowX: isMobile ? 'auto' : 'visible', WebkitOverflowScrolling: 'touch', scrollbarWidth: 'none' }}>
+              <span style={{ fontSize: '9px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 700, flexShrink: 0 }}>Purchase&nbsp;dates</span>
+              {datesAvailable.map(d => {
+                const active = selectedDates.has(d)
+                return (
+                  <button key={d} onClick={() => toggleDate(d)} title="Click to filter — select multiple"
+                    style={{
+                      flexShrink: 0, padding: '6px 12px', borderRadius: '999px', cursor: 'pointer',
+                      fontSize: '11px', fontWeight: 600, whiteSpace: 'nowrap',
+                      border: `1px solid ${active ? t.gold : t.border}`,
+                      background: active ? `${t.gold}20` : 'transparent',
+                      color: active ? t.gold : t.text3, transition: 'all .15s',
+                    }}>
+                    {fmtDate(d)}
+                  </button>
+                )
+              })}
+              {selectedDates.size > 0 && (
+                <button onClick={() => setSelectedDates(new Set())}
+                  style={{ flexShrink: 0, padding: '6px 10px', borderRadius: '999px', cursor: 'pointer', fontSize: '10px', fontWeight: 600, border: `1px solid ${t.border}`, background: 'transparent', color: t.text4, whiteSpace: 'nowrap' }}>
+                  ✕ Clear ({selectedDates.size})
+                </button>
+              )}
+            </div>
+          )}
 
           {/* Controls */}
           <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
@@ -274,7 +369,7 @@ export default function EodBranchStockReport() {
               <tbody>
                 {branchRows.length === 0 ? (
                   <tr><td colSpan={7} style={{ ...s.td('center'), textAlign: 'center', color: t.text4, padding: '48px' }}>
-                    {search || activeRegion ? 'No branches match' : 'No branch held stock at EOD on this date'}
+                    {search || activeRegion || selectedDates.size ? 'No branches match the current filters' : 'No branch held stock at EOD on this date'}
                   </td></tr>
                 ) : branchRows.map((b, i) => {
                   const expanded = openBranch === b.branch_name
@@ -313,7 +408,7 @@ export default function EodBranchStockReport() {
                                     </tr>
                                   </thead>
                                   <tbody>
-                                    {cases.items.map((c, j) => (
+                                    {cases.items.filter(c => !selectedDates.size || selectedDates.has(c.purchase_date)).map((c, j) => (
                                       <tr key={c.application_id || j} style={{ borderTop: `1px solid ${t.border}20` }}>
                                         <td style={{ ...s.td('left'), fontFamily: 'monospace', color: t.gold }}>{c.application_id || '—'}</td>
                                         <td style={{ ...s.td('left'), color: t.text1 }}>{c.customer_name || '—'}</td>
