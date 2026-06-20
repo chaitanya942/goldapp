@@ -205,6 +205,7 @@ async function fetchFppNewCrm(from, to) {
       LEFT JOIN orn ON orn.transaction_id=t.id
       LEFT JOIN quo ON quo.transaction_id=t.id
       LEFT JOIN pay ON pay.transaction_id=t.id
+      LEFT JOIN bank ON bank.transaction_id=t.id
       WHERE t.status='FINAL_PAYMENT_PENDING'
         AND (t.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata')::date BETWEEN $1 AND $2
     `, [from, to])
