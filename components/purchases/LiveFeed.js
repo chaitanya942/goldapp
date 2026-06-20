@@ -89,6 +89,7 @@ const PING_CSS = `
 @keyframes shimmer{0%{opacity:1}50%{opacity:.55}100%{opacity:1}}
 @media(max-width:900px){.ws-item{flex:0 0 33.334%!important;border-bottom:1px solid #2a2a2a}}
 @media(max-width:600px){.ws-item{flex:0 0 50%!important}}
+.lf-hero>*{flex-shrink:0}
 @media(max-width:700px){.lf-hero{padding:16px 8px!important}.sum-bar-item{padding:8px 10px!important}.lf-region{overflow-x:auto}}
 @media(max-width:600px){.tl-row{grid-template-columns:70px 28px 1fr!important}.tl-wt,.tl-amt,.tl-hdr-wt,.tl-hdr-amt{display:none!important}}
 `
@@ -712,6 +713,22 @@ function OldCrmTab({
   const freshWalkins  = Math.max(0, totalWalkins - reWalkins)
   const freshWalkinWt = (todayWalkins || []).filter(w => !w.re_walkin).reduce((s, w) => s + validWt(w), 0)
 
+  // ── 3-group journey (mirrors NEW CRM) ────────────────────────────────────
+  // Group 2 = Purchases (approved bills today), split by whether the buyer is a
+  //   re-walk-in (their phone shows up in an earlier walk-in) → Old-day buy, else
+  //   Same-day buy. Group 3 = Total walk-ins − Total purchases = walk-ins that
+  //   haven't converted, split by reason (pending / rejected / KYC / unbilled).
+  const reWalkinMobiles = new Set(reWalkinRows.map(w => w.cust_mobile).filter(Boolean))
+  const approvedBills   = todayTxns.filter(t => t.trxn_status === 'approved')
+  const oldDayBuyRows   = approvedBills.filter(t => t.cust_mobile && reWalkinMobiles.has(t.cust_mobile))
+  const oldDayBuy       = oldDayBuyRows.length
+  const oldDayBuyWt     = oldDayBuyRows.reduce((s, t) => s + csvSum(t.grms_wet_csv), 0)
+  const sameDayBuyRows  = approvedBills.filter(t => !(t.cust_mobile && reWalkinMobiles.has(t.cust_mobile)))
+  const sameDayBuy      = sameDayBuyRows.length
+  const sameDayBuyWt    = sameDayBuyRows.reduce((s, t) => s + csvSum(t.grms_wet_csv), 0)
+  const totalPurchases  = approved
+  const pendingCount    = Math.max(0, totalWalkins - totalPurchases)
+
   // Ghost purchases: approved physical bills with NO walk-in entry for this customer today
   const walkinMobiles  = new Set(todayWalkins.map(w => w.cust_mobile).filter(Boolean))
   const ghostPurchases = todayTxns.filter(t =>
@@ -755,10 +772,10 @@ function OldCrmTab({
 
         {/* ── Main hero panel ── */}
         <div className="lf-hero" style={{
-          position:'relative', overflow:'hidden',
-          display: 'flex', alignItems: isMobile ? 'stretch' : 'center', justifyContent: 'center',
+          position:'relative', overflowX: isMobile ? 'visible' : 'auto', overflowY: 'hidden',
+          display: 'flex', alignItems: isMobile ? 'stretch' : 'center', justifyContent: isMobile ? 'center' : 'flex-start',
           flexDirection: isMobile ? 'column' : 'row',
-          gap: isMobile ? 12 : 0, flexWrap: isMobile ? undefined : 'wrap',
+          gap: isMobile ? 12 : 0, flexWrap: isMobile ? undefined : 'nowrap',
           background: `linear-gradient(160deg, ${t.surface} 0%, ${t.card} 50%, ${t.surface} 100%)`,
           borderRadius: 16,
           border: `1px solid ${t.border}`,
@@ -806,30 +823,25 @@ function OldCrmTab({
               ))}
             </div>
           </div>
-          {!isMobile && <FlowArrow t={t} pct={billedPct} />}
-          <HeroNum label="Bills Submitted" value={totalBilled} color={t.gold} t={t} weight={goldPurchased+goldPending+goldRejected} active={activeMetric==='billed'} onClick={() => toggleMetric('billed')} />
-          {!isMobile && <FlowArrow t={t} pct={approvedPctBilled} />}
-
-          {/* ── Breakdown stage ── */}
+          {!isMobile && <FlowArrow t={t} pct={totalWalkins > 0 ? Math.round(totalPurchases / totalWalkins * 100) : null} />}
+          {/* GROUP 2 — Total purchases (approved bills): same-day vs old-day walk-in */}
           <div style={{
             position:'relative',
             background:`linear-gradient(160deg, ${t.bg} 0%, ${t.card} 60%, ${t.bg} 100%)`,
-            border:`1.5px solid ${t.gold}55`,
+            border:`1.5px solid ${t.green}55`,
             borderRadius:22,
-            boxShadow:`0 0 0 1px ${t.gold}12, 0 16px 48px ${t.gold}20, 0 4px 16px rgba(0,0,0,.16), inset 0 0 60px ${t.gold}08, inset 0 1px 0 ${t.gold}35`,
+            boxShadow:`0 0 0 1px ${t.green}12, 0 16px 48px ${t.green}20, 0 4px 16px rgba(0,0,0,.16), inset 0 0 60px ${t.green}08, inset 0 1px 0 ${t.green}35`,
             padding:'22px 14px 14px',
           }}>
-            <div style={{ position:'absolute', inset:-1, borderRadius:22, background:`radial-gradient(ellipse at 50% 0%, ${t.gold}18 0%, transparent 65%)`, pointerEvents:'none' }}/>
-            <div style={{ position:'absolute', inset:0, borderRadius:22, backgroundImage:`radial-gradient(${t.gold}18 1px, transparent 1px)`, backgroundSize:'18px 18px', pointerEvents:'none', opacity:.6 }}/>
-            <div style={{ position:'absolute', top:-14, left:'50%', transform:'translateX(-50%)', background:`linear-gradient(90deg,${t.gold}ee,${t.gold}bb)`, borderRadius:20, padding:'4px 14px', boxShadow:`0 4px 14px ${t.gold}55, 0 0 0 1px ${t.gold}30`, whiteSpace:'nowrap' }}>
-              <span style={{ fontSize:'.52rem', letterSpacing:'.14em', textTransform:'uppercase', color:'#0a0a0a', fontWeight:900 }}>breakdown of {fmtNum(totalBilled)}</span>
+            <div style={{ position:'absolute', inset:-1, borderRadius:22, background:`radial-gradient(ellipse at 50% 0%, ${t.green}18 0%, transparent 65%)`, pointerEvents:'none' }}/>
+            <div style={{ position:'absolute', inset:0, borderRadius:22, backgroundImage:`radial-gradient(${t.green}18 1px, transparent 1px)`, backgroundSize:'18px 18px', pointerEvents:'none', opacity:.6 }}/>
+            <div style={{ position:'absolute', top:-14, left:'50%', transform:'translateX(-50%)', background:`linear-gradient(90deg,${t.green}ee,${t.green}bb)`, borderRadius:20, padding:'4px 14px', boxShadow:`0 4px 14px ${t.green}55, 0 0 0 1px ${t.green}30`, whiteSpace:'nowrap' }}>
+              <span style={{ fontSize:'.52rem', letterSpacing:'.14em', textTransform:'uppercase', color:'#fff', fontWeight:900 }}>today's {fmtNum(totalPurchases)} purchases</span>
             </div>
-            <div style={{ position:'relative', display: isMobile ? 'grid' : 'flex', gridTemplateColumns: isMobile ? '1fr 1fr' : undefined, alignItems: isMobile ? undefined : 'center', gap: isMobile ? 8 : 8 }}>
+            <div style={{ position:'relative', display: isMobile ? 'grid' : 'flex', gridTemplateColumns: isMobile ? '1fr 1fr' : undefined, alignItems: isMobile ? undefined : 'center', gap:8 }}>
               {[
-                { node: <HeroNum label="Purchased" value={approved} color={t.green} t={t} weight={goldPurchased} active={activeMetric==='purchased'} onClick={() => toggleMetric('purchased')} />, color: t.green },
-                { node: <HeroNum label="In Pipeline" value={pending} color={t.orange} t={t} small weight={goldPending} active={activeMetric==='pending'} onClick={() => toggleMetric('pending')} />, color: t.orange },
-                { node: <HeroNum label="Bill Rejected" value={trueRejected} color={t.red} t={t} small weight={goldRejected} active={activeMetric==='rejected'} onClick={() => toggleMetric('rejected')} />, color: t.red },
-                { node: <HeroNum label="Re-billed & Approved" value={wrongEntry} color={t.orange} t={t} small active={activeMetric==='rebilled'} onClick={() => toggleMetric('rebilled')} />, color: t.orange },
+                { node: <HeroNum label="Same-day Buy"  value={sameDayBuy} color={t.green}  t={t} weight={sameDayBuyWt} active={activeMetric==='purchased_same'} onClick={() => toggleMetric('purchased_same')} />, color: t.green },
+                { node: <HeroNum label="Re-walk-in Buy" value={oldDayBuy} color={t.purple} t={t} weight={oldDayBuyWt} active={activeMetric==='purchased_old'} onClick={() => toggleMetric('purchased_old')} />, color: t.purple },
               ].map((item, i) => (
                 <div key={i} style={{ display:'flex', alignItems:'center', gap:8 }}>
                   {!isMobile && i > 0 && <FlowSep t={t} />}
@@ -849,25 +861,43 @@ function OldCrmTab({
             </div>
           </div>
 
-          <FlowSep t={t} />
-          {/* ── Secondary outcomes box ── */}
+          {!isMobile && <FlowArrow t={t} pct={null} />}
+          {/* GROUP 3 — Walk-ins − Purchases (didn't convert), split by reason */}
           <div style={{
             position:'relative',
             background:`linear-gradient(160deg, ${t.bg} 0%, ${t.card} 60%, ${t.bg} 100%)`,
-            border:`1px solid ${t.border2}`,
-            borderRadius:18,
-            boxShadow:`0 4px 20px rgba(0,0,0,.10), inset 0 1px 0 ${t.border}`,
-            padding:'18px 12px 10px',
+            border:`1.5px solid ${t.orange}55`,
+            borderRadius:22,
+            boxShadow:`0 0 0 1px ${t.orange}12, 0 16px 48px ${t.orange}20, 0 4px 16px rgba(0,0,0,.16), inset 0 0 60px ${t.orange}08, inset 0 1px 0 ${t.orange}35`,
+            padding:'22px 14px 14px',
           }}>
-            <div style={{ position:'absolute', top:-11, left:'50%', transform:'translateX(-50%)', background:t.card2, border:`1px solid ${t.border2}`, borderRadius:20, padding:'3px 12px', whiteSpace:'nowrap' }}>
-              <span style={{ fontSize:'.46rem', letterSpacing:'.12em', textTransform:'uppercase', color:t.text4, fontWeight:700 }}>other outcomes</span>
+            <div style={{ position:'absolute', inset:-1, borderRadius:22, background:`radial-gradient(ellipse at 50% 0%, ${t.orange}18 0%, transparent 65%)`, pointerEvents:'none' }}/>
+            <div style={{ position:'absolute', inset:0, borderRadius:22, backgroundImage:`radial-gradient(${t.orange}18 1px, transparent 1px)`, backgroundSize:'18px 18px', pointerEvents:'none', opacity:.6 }}/>
+            <div style={{ position:'absolute', top:-14, left:'50%', transform:'translateX(-50%)', background:`linear-gradient(90deg,${t.orange}ee,${t.orange}bb)`, borderRadius:20, padding:'4px 14px', boxShadow:`0 4px 14px ${t.orange}55, 0 0 0 1px ${t.orange}30`, whiteSpace:'nowrap' }}>
+              <span style={{ fontSize:'.52rem', letterSpacing:'.14em', textTransform:'uppercase', color:'#fff', fontWeight:900 }}>yet to purchase · {fmtNum(pendingCount)}</span>
             </div>
-            <div style={{ display:'flex', alignItems:'center', gap:6, flexWrap:'wrap' }}>
-              <HeroNum label="KYC Blocked" value={kycBlacklistedCnt} color={t.purple} t={t} small weight={kycBlacklistedWt} active={activeMetric==='kyc_blocked'} onClick={() => toggleMetric('kyc_blocked')} />
-              {kycOverriddenCnt > 0 && <FlowSep t={t} />}
-              {kycOverriddenCnt > 0 && <HeroNum label="KYC Cleared Later" value={kycOverriddenCnt} color={t.blue} t={t} small active={activeMetric==='kyc_cleared'} onClick={() => toggleMetric('kyc_cleared')} />}
-              <FlowSep t={t} />
-              <HeroNum label="Left Unbilled" value={notBilledCnt} color={t.text3} t={t} small muted weight={goldNotBilled} active={activeMetric==='unbilled'} onClick={() => toggleMetric('unbilled')} />
+            <div style={{ position:'relative', display: isMobile ? 'grid' : 'flex', gridTemplateColumns: isMobile ? '1fr 1fr' : undefined, alignItems: isMobile ? undefined : 'center', gap:8 }}>
+              {[
+                { node: <HeroNum label="In Pipeline"   value={pending}            color={t.orange} t={t} small weight={goldPending}        active={activeMetric==='pending'}     onClick={() => toggleMetric('pending')} />, color: t.orange },
+                { node: <HeroNum label="Bill Rejected" value={trueRejected}       color={t.red}    t={t} small weight={goldRejected}       active={activeMetric==='rejected'}    onClick={() => toggleMetric('rejected')} />, color: t.red },
+                { node: <HeroNum label="KYC Blocked"   value={kycBlacklistedCnt}  color={t.purple} t={t} small weight={kycBlacklistedWt}   active={activeMetric==='kyc_blocked'} onClick={() => toggleMetric('kyc_blocked')} />, color: t.purple },
+                { node: <HeroNum label="Left Unbilled" value={notBilledCnt}       color={t.text3}  t={t} small muted weight={goldNotBilled} active={activeMetric==='unbilled'}    onClick={() => toggleMetric('unbilled')} />, color: t.text3 },
+              ].map((item, i) => (
+                <div key={i} style={{ display:'flex', alignItems:'center', gap:8 }}>
+                  {!isMobile && i > 0 && <FlowSep t={t} />}
+                  <div style={{
+                    background:`linear-gradient(160deg, ${t.card2} 0%, ${t.card} 100%)`,
+                    border:`1px solid ${item.color}30`,
+                    borderTop:`2px solid ${item.color}70`,
+                    borderRadius:14,
+                    boxShadow:`0 8px 24px rgba(0,0,0,.14), 0 2px 6px rgba(0,0,0,.10), inset 0 1px 0 ${item.color}18`,
+                    transform: isMobile ? 'none' : 'translateY(-5px)',
+                    width: isMobile ? '100%' : undefined,
+                  }}>
+                    {item.node}
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
         </div>
@@ -1305,6 +1335,8 @@ function LiveDetail({ t, activeMetric, todayTxns, todayWalkins, kycRows, notBill
     case 'rewalkin':     rows = todayWalkins.filter(w =>  w.re_walkin); type = 'walkin'; label = `Re-walk-ins · repeat visitors`; break
     case 'billed':    rows = todayTxns;   type = 'txn';    label = `All Bills Submitted`; break
     case 'purchased': rows = todayTxns.filter(t => t.trxn_status === 'approved'); type = 'txn'; label = `Purchased`; break
+    case 'purchased_same': { const rwm = new Set((todayWalkins||[]).filter(w => w.re_walkin).map(w => w.cust_mobile).filter(Boolean)); rows = todayTxns.filter(t => t.trxn_status === 'approved' && !(t.cust_mobile && rwm.has(t.cust_mobile))); type = 'txn'; label = `Same-day Purchases · walked in & bought today`; break }
+    case 'purchased_old':  { const rwm = new Set((todayWalkins||[]).filter(w => w.re_walkin).map(w => w.cust_mobile).filter(Boolean)); rows = todayTxns.filter(t => t.trxn_status === 'approved' &&  (t.cust_mobile && rwm.has(t.cust_mobile))); type = 'txn'; label = `Re-walk-in Purchases · walked in earlier`; break }
     case 'pending':   rows = todayTxns.filter(t => t.trxn_status === 'pending');  type = 'txn'; label = `In Pipeline`; break
     case 'rejected':  rows = todayTxns.filter(t => t.trxn_status === 'rejected' && !approvedMobiles.has(t.cust_mobile)); type = 'txn'; label = `Bill Rejected`; break
     case 'rebilled':  rows = todayTxns.filter(t => t.trxn_status === 'rejected' &&  approvedMobiles.has(t.cust_mobile)); type = 'txn'; label = `Re-billed & Approved`; break
@@ -1932,7 +1964,7 @@ function NewCrmTab({ t, newCrmTxns, completedToday, newCrmError, regionFilter, r
             </button>
           ))}
         </div>
-        <div className="lf-hero" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0, flexWrap: 'wrap', background: t.surface, borderRadius: 16, border: `1px solid ${t.border}`, padding: '28px 16px', boxShadow: `0 4px 20px rgba(0,0,0,.12), inset 0 1px 0 ${t.border}`, backdropFilter: 'blur(4px)' }}>
+        <div className="lf-hero" style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-start', gap: 0, flexWrap: 'nowrap', overflowX: 'auto', background: t.surface, borderRadius: 16, border: `1px solid ${t.border}`, padding: '28px 16px', boxShadow: `0 4px 20px rgba(0,0,0,.12), inset 0 1px 0 ${t.border}`, backdropFilter: 'blur(4px)' }}>
           {/* Today's walk-ins — total in the badge, split into Fresh + Re-walk-ins */}
           <div style={{
             position:'relative',
