@@ -54,7 +54,8 @@ async function oldCrmBankMap(from, to) {
     const B = {}; bnk.forEach(r => { if (!B[String(r.trnxnn_id)]) B[String(r.trnxnn_id)] = r })
     for (const t of txns) {
       const bd = B[String(t.id)] || {}
-      const appId = String(t.bill_no || '').toUpperCase().startsWith('WGKA') ? String(t.bill_no).toUpperCase() : `WGKA${t.bill_no}`
+      const raw = String(t.bill_no || '').trim().replace(/-/g, '').toUpperCase()
+      const appId = raw.startsWith('WGKA') ? raw : `WGKA${raw}`
       map[appId] = {
         takeover: parseFloat(t.tkvr_amnt) || 0,
         bankName: t.pmt_bank_name || '',
@@ -81,27 +82,33 @@ async function newCrmBankMap(from, to) {
   await client.connect()
   try {
     const { rows } = await client.query(`
-      WITH pay AS (
+      WITH fp AS (
+        -- The actual customer payout: latest FINAL_PAYMENT debit per txn. Bank
+        -- details (UTR / customer bank / account / IFSC) live on this row.
         SELECT DISTINCT ON (transaction_id) transaction_id, utr, processor, bank_name,
-               account_holder_name, account_number, ifsc_code
-        FROM "Payment" WHERE action='DEBITED' ORDER BY transaction_id, created_at DESC
+               account_holder_name, account_number, ifsc_code,
+               (created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata')::date AS pay_date
+        FROM "Payment" WHERE action='DEBITED' AND type='FINAL_PAYMENT'
+        ORDER BY transaction_id, created_at DESC
       ),
       quo AS (
         SELECT DISTINCT ON (transaction_id) transaction_id, COALESCE(release_amount,0) takeover
         FROM "Quotation" ORDER BY transaction_id, created_at DESC
       )
+      -- Date by the FINAL-PAYMENT day (== purchase_date in the master), not
+      -- created_at — so re-walk-ins (walked in earlier, paid in range) match.
       SELECT t.code, COALESCE(quo.takeover,0) takeover,
-             pay.utr, pay.processor, pay.bank_name, pay.account_holder_name, pay.account_number, pay.ifsc_code
+             fp.utr, fp.processor, fp.bank_name, fp.account_holder_name, fp.account_number, fp.ifsc_code
       FROM "Transaction" t
-      LEFT JOIN pay ON pay.transaction_id=t.id
+      JOIN fp ON fp.transaction_id=t.id
       LEFT JOIN quo ON quo.transaction_id=t.id
-      WHERE t.status='FINAL_PAYMENT_COMPLETED'
-        AND (t.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata')::date BETWEEN $1 AND $2
+      WHERE fp.pay_date BETWEEN $1 AND $2
     `, [from, to])
     const map = {}
     for (const r of rows) {
-      const code = String(r.code || '').trim().replace(/-/g, '').toUpperCase()
-      const appId = code.startsWith('WGKA') ? code : `WGKA${code}`
+      // Key hyphen-insensitively (WGKA-57225 → WGKA57225) so the lookup matches
+      // regardless of the stored hyphen form.
+      const appId = String(r.code || '').trim().replace(/-/g, '').toUpperCase()
       map[appId] = {
         takeover: parseFloat(r.takeover) || 0,
         bankName: r.processor || '',
@@ -181,7 +188,9 @@ async function fetchFppNewCrm(from, to) {
     `, [from, to])
     const istDate = (u) => { const d = new Date(new Date(u).getTime() + 5.5 * 3600000); return `${String(d.getUTCDate()).padStart(2,'0')}-${String(d.getUTCMonth()+1).padStart(2,'0')}-${d.getUTCFullYear()}` }
     return rows.map(r => {
-      const code = String(r.code || '').trim().replace(/-/g, '').toUpperCase()
+      // Preserve the native hyphen for new-CRM app ids (WGKA-#### convention).
+      const rawCode = String(r.code || '').trim().toUpperCase()
+      const appId = rawCode.startsWith('WGKA') ? rawCode : `WGKA-${rawCode}`
       const final = parseFloat(r.final_amount) || 0
       const takeover = parseFloat(r.takeover) || 0
       return {
@@ -199,7 +208,7 @@ async function fetchFppNewCrm(from, to) {
           'Balance Amount': n2(final - takeover),
           'Final Amount': n2(final),
           'Transaction Type': String(r.transaction_type || '').toUpperCase().includes('RELEASED') ? 'TAKEOVER' : 'PHYSICAL',
-          'Application No.': code.startsWith('WGKA') ? code : `WGKA${code}`,
+          'Application No.': appId,
           'Bank Name': r.processor || '', 'Payment Ref No': r.utr || '',
           'Customer Bank Name': r.bank_name || '', 'Account Holder Name': r.account_holder_name || '',
           'Bank Branch': '', 'Customer Account number': r.account_number ? `="${r.account_number}"` : '',
@@ -241,7 +250,11 @@ export async function GET(req) {
   // Completed (approved) records from master data, enriched with bank details.
   const completedRecords = rows.map(r => {
     const isNew = r.crm_source === 'new_crm'
-    const bank = (isNew ? newMap : oldMap)[r.application_id] || {}
+    // Both bank maps are keyed hyphen-insensitively (WGKA-57225 → WGKA57225),
+    // so normalise the master application_id the same way before the lookup —
+    // post-hyphen-migration the master stores WGKA-#### for new CRM.
+    const bankKey = String(r.application_id || '').trim().replace(/-/g, '').toUpperCase()
+    const bank = (isNew ? newMap : oldMap)[bankKey] || {}
     const final = parseFloat(r.final_amount_crm) || 0
     const takeover = parseFloat(bank.takeover) || 0
     return {
