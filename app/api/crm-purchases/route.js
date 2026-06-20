@@ -697,12 +697,21 @@ export async function GET(req) {
           SELECT cw.id, cw.cust_name, cw.cust_mobile, cw.time,
             cw.walkin_status, cw.item_type, cw.gms_weight,
             cw.walk_reason, cw.source, cw.cust_rmrks,
-            cw.branch_id, b.brnch_name AS branch_name
+            cw.branch_id, b.brnch_name AS branch_name,
+            -- Re-walk-in = repeat visitor: this customer's phone also shows up in
+            -- an EARLIER walk-in record. Blank/null mobiles are excluded so they
+            -- don't all match each other. (1 = re-walk-in, 0 = fresh.)
+            (prev.cust_mobile IS NOT NULL) AS re_walkin
           FROM customer_walkin cw
           LEFT JOIN branch_tbl b ON b.brnch_id = cw.branch_id
+          LEFT JOIN (
+            SELECT DISTINCT cust_mobile FROM customer_walkin
+            WHERE DATE(date + INTERVAL 330 MINUTE) < ?
+              AND cust_mobile IS NOT NULL AND cust_mobile <> ''
+          ) prev ON prev.cust_mobile = cw.cust_mobile
           WHERE DATE(cw.date + INTERVAL 330 MINUTE) = ?
           ORDER BY cw.time DESC
-        `, [todayIST]),
+        `, [todayIST, todayIST]),
 
         // 7. KYC blacklisted today — full detail for region filter + detail table
         conn.execute(`

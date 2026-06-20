@@ -701,6 +701,17 @@ function OldCrmTab({
   const physicalApproved  = goldPipeline?.physical?.approved || 0
   const releaseApproved   = goldPipeline?.released?.approved || 0
 
+  // Walk-in split — Re-walk-ins = repeat visitors (same phone walked in on an
+  // earlier day, flagged per-row by the API); Fresh = first-ever visitors. Total
+  // is unchanged, just split. Weight uses the same sanity guard as the SQL
+  // aggregate (a phone number jammed into gms_weight is excluded from the sum).
+  const validWt       = (w) => { const x = Number(w.gms_weight) || 0; return (x < 10000 || x !== Math.floor(x)) ? x : 0 }
+  const reWalkinRows  = (todayWalkins || []).filter(w => w.re_walkin)
+  const reWalkins     = reWalkinRows.length
+  const reWalkinWt    = reWalkinRows.reduce((s, w) => s + validWt(w), 0)
+  const freshWalkins  = Math.max(0, totalWalkins - reWalkins)
+  const freshWalkinWt = (todayWalkins || []).filter(w => !w.re_walkin).reduce((s, w) => s + validWt(w), 0)
+
   // Ghost purchases: approved physical bills with NO walk-in entry for this customer today
   const walkinMobiles  = new Set(todayWalkins.map(w => w.cust_mobile).filter(Boolean))
   const ghostPurchases = todayTxns.filter(t =>
@@ -759,7 +770,42 @@ function OldCrmTab({
           {/* Bottom accent line */}
           <div style={{ position:'absolute', bottom:0, left:'10%', right:'10%', height:1, background:`linear-gradient(90deg,transparent,${t.gold}30,transparent)` }}/>
 
-          <HeroNum label="Walked In" value={totalWalkins} color={t.blue} t={t} weight={goldWalkedIn} active={activeMetric==='walkin'} onClick={() => toggleMetric('walkin')} />
+          {/* Today's walk-ins — total in the badge, split into Fresh + Re-walk-ins (repeat visitors) */}
+          <div style={{
+            position:'relative',
+            background:`linear-gradient(160deg, ${t.bg} 0%, ${t.card} 60%, ${t.bg} 100%)`,
+            border:`1.5px solid ${t.blue}55`,
+            borderRadius:22,
+            boxShadow:`0 0 0 1px ${t.blue}12, 0 16px 48px ${t.blue}20, 0 4px 16px rgba(0,0,0,.16), inset 0 0 60px ${t.blue}08, inset 0 1px 0 ${t.blue}35`,
+            padding:'22px 14px 14px',
+          }}>
+            <div style={{ position:'absolute', inset:-1, borderRadius:22, background:`radial-gradient(ellipse at 50% 0%, ${t.blue}18 0%, transparent 65%)`, pointerEvents:'none' }}/>
+            <div style={{ position:'absolute', inset:0, borderRadius:22, backgroundImage:`radial-gradient(${t.blue}18 1px, transparent 1px)`, backgroundSize:'18px 18px', pointerEvents:'none', opacity:.6 }}/>
+            <div style={{ position:'absolute', top:-14, left:'50%', transform:'translateX(-50%)', background:`linear-gradient(90deg,${t.blue}ee,${t.blue}bb)`, borderRadius:20, padding:'4px 14px', boxShadow:`0 4px 14px ${t.blue}55, 0 0 0 1px ${t.blue}30`, whiteSpace:'nowrap' }}>
+              <span style={{ fontSize:'.52rem', letterSpacing:'.14em', textTransform:'uppercase', color:'#fff', fontWeight:900 }}>today's {fmtNum(totalWalkins)} walk-ins</span>
+            </div>
+            <div style={{ position:'relative', display: isMobile ? 'grid' : 'flex', gridTemplateColumns: isMobile ? '1fr 1fr' : undefined, alignItems: isMobile ? undefined : 'center', gap:8 }}>
+              {[
+                { node: <HeroNum label="Fresh Walk-ins" value={freshWalkins} color={t.blue}   t={t} weight={freshWalkinWt} active={activeMetric==='walkin_fresh'} onClick={() => toggleMetric('walkin_fresh')} />, color: t.blue },
+                { node: <HeroNum label="Re-walk-ins"    value={reWalkins}    color={t.purple} t={t} weight={reWalkinWt}    active={activeMetric==='rewalkin'}     onClick={() => toggleMetric('rewalkin')} />, color: t.purple },
+              ].map((item, i) => (
+                <div key={i} style={{ display:'flex', alignItems:'center', gap:8 }}>
+                  {!isMobile && i > 0 && <FlowSep t={t} />}
+                  <div style={{
+                    background:`linear-gradient(160deg, ${t.card2} 0%, ${t.card} 100%)`,
+                    border:`1px solid ${item.color}30`,
+                    borderTop:`2px solid ${item.color}70`,
+                    borderRadius:14,
+                    boxShadow:`0 8px 24px rgba(0,0,0,.14), 0 2px 6px rgba(0,0,0,.10), inset 0 1px 0 ${item.color}18`,
+                    transform: isMobile ? 'none' : 'translateY(-5px)',
+                    width: isMobile ? '100%' : undefined,
+                  }}>
+                    {item.node}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
           {!isMobile && <FlowArrow t={t} pct={billedPct} />}
           <HeroNum label="Bills Submitted" value={totalBilled} color={t.gold} t={t} weight={goldPurchased+goldPending+goldRejected} active={activeMetric==='billed'} onClick={() => toggleMetric('billed')} />
           {!isMobile && <FlowArrow t={t} pct={approvedPctBilled} />}
@@ -1254,7 +1300,9 @@ function LiveDetail({ t, activeMetric, todayTxns, todayWalkins, kycRows, notBill
 
   let rows, type, label
   switch (activeMetric) {
-    case 'walkin':    rows = todayWalkins; type = 'walkin'; label = `All Walk-ins`; break
+    case 'walkin':       rows = todayWalkins; type = 'walkin'; label = `All Walk-ins`; break
+    case 'walkin_fresh': rows = todayWalkins.filter(w => !w.re_walkin); type = 'walkin'; label = `Fresh Walk-ins · first-ever visit`; break
+    case 'rewalkin':     rows = todayWalkins.filter(w =>  w.re_walkin); type = 'walkin'; label = `Re-walk-ins · repeat visitors`; break
     case 'billed':    rows = todayTxns;   type = 'txn';    label = `All Bills Submitted`; break
     case 'purchased': rows = todayTxns.filter(t => t.trxn_status === 'approved'); type = 'txn'; label = `Purchased`; break
     case 'pending':   rows = todayTxns.filter(t => t.trxn_status === 'pending');  type = 'txn'; label = `In Pipeline`; break
