@@ -1883,6 +1883,20 @@ function NewCrmTab({ t, newCrmTxns, completedToday, newCrmError, regionFilter, r
   const completedOfProgPct  = (inProgress + completed) > 0 ? Math.round(completed / (inProgress + completed) * 100) : 0
   const avgWt               = completed > 0 && completedWt > 0 ? completedWt / completed : 0
 
+  // ── 3-group journey ──────────────────────────────────────────────────────
+  // Group 2 = Total purchases (everything that CLOSED today = ctSet), split by
+  //   • Same-day  — walked in today AND bought today (fresh completed)
+  //   • Old-day   — walked in earlier, bought today (re-walk-ins; all of them closed)
+  // Group 3 = Total walk-ins − Total purchases = walk-ins still in the pipeline,
+  //   shown as the per-stage split (At Walk-in / Estimation / KYC / Payment / Walkout).
+  const totalPurchases = completed
+  const oldDayPurch    = reWalkins
+  const oldDayPurchWt  = reWalkinWt,  oldDayPurchGr = reWalkinGr
+  const sameDayPurch   = Math.max(0, completed   - reWalkins)
+  const sameDayPurchWt = Math.max(0, completedWt - reWalkinWt)
+  const sameDayPurchGr = Math.max(0, completedGr - reWalkinGr)
+  const pendingCount   = Math.max(0, totalWalkins - totalPurchases)
+
   if (!total) {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: 300, gap: 12 }}>
@@ -1954,27 +1968,28 @@ function NewCrmTab({ t, newCrmTxns, completedToday, newCrmError, regionFilter, r
               ))}
             </div>
           </div>
-          <FlowArrow t={t} pct={progressedPct || null} />
+          <FlowArrow t={t} pct={totalWalkins > 0 ? Math.round(totalPurchases / totalWalkins * 100) : null} />
+          {/* GROUP 2 — Total purchases (closed today): same-day vs old-day walk-in */}
           <div style={{
             position:'relative',
             background:`linear-gradient(160deg, ${t.bg} 0%, ${t.card} 60%, ${t.bg} 100%)`,
-            border:`1.5px solid ${t.blue}55`,
+            border:`1.5px solid ${t.green}55`,
             borderRadius:22,
-            boxShadow:`0 0 0 1px ${t.blue}12, 0 16px 48px ${t.blue}20, 0 4px 16px rgba(0,0,0,.16), inset 0 0 60px ${t.blue}08, inset 0 1px 0 ${t.blue}35`,
+            boxShadow:`0 0 0 1px ${t.green}12, 0 16px 48px ${t.green}20, 0 4px 16px rgba(0,0,0,.16), inset 0 0 60px ${t.green}08, inset 0 1px 0 ${t.green}35`,
             padding:'22px 14px 14px',
           }}>
-            <div style={{ position:'absolute', inset:-1, borderRadius:22, background:`radial-gradient(ellipse at 50% 0%, ${t.blue}18 0%, transparent 65%)`, pointerEvents:'none' }}/>
-            <div style={{ position:'absolute', inset:0, borderRadius:22, backgroundImage:`radial-gradient(${t.blue}18 1px, transparent 1px)`, backgroundSize:'18px 18px', pointerEvents:'none', opacity:.6 }}/>
-            <div style={{ position:'absolute', top:-14, left:'50%', transform:'translateX(-50%)', background:`linear-gradient(90deg,${t.blue}ee,${t.blue}bb)`, borderRadius:20, padding:'4px 14px', boxShadow:`0 4px 14px ${t.blue}55, 0 0 0 1px ${t.blue}30`, whiteSpace:'nowrap' }}>
-              <span style={{ fontSize:'.52rem', letterSpacing:'.14em', textTransform:'uppercase', color:'#fff', fontWeight:900 }}>breakdown of {fmtNum(total)}</span>
+            <div style={{ position:'absolute', inset:-1, borderRadius:22, background:`radial-gradient(ellipse at 50% 0%, ${t.green}18 0%, transparent 65%)`, pointerEvents:'none' }}/>
+            <div style={{ position:'absolute', inset:0, borderRadius:22, backgroundImage:`radial-gradient(${t.green}18 1px, transparent 1px)`, backgroundSize:'18px 18px', pointerEvents:'none', opacity:.6 }}/>
+            <div style={{ position:'absolute', top:-14, left:'50%', transform:'translateX(-50%)', background:`linear-gradient(90deg,${t.green}ee,${t.green}bb)`, borderRadius:20, padding:'4px 14px', boxShadow:`0 4px 14px ${t.green}55, 0 0 0 1px ${t.green}30`, whiteSpace:'nowrap' }}>
+              <span style={{ fontSize:'.52rem', letterSpacing:'.14em', textTransform:'uppercase', color:'#fff', fontWeight:900 }}>today's {fmtNum(totalPurchases)} purchases</span>
             </div>
             <div style={{ position:'relative', display:'flex', alignItems:'center', gap:8 }}>
               {[
-                { node: <HeroNum label="In Progress" value={inProgress} color={t.orange} t={t} grossWt={inProgressGr} netWt={inProgressWt} noWtCount={noWt(inProgressTxns)} active={activeMetric==='inprogress'} onClick={() => toggleMetric('inprogress')} />, color: t.orange },
-                { node: <HeroNum label="Completed"   value={completed}  color={t.green}  t={t} grossWt={completedGr} netWt={completedWt}  noWtCount={noWt(ctSet || completedTxns)}  active={activeMetric==='completed'}  onClick={() => toggleMetric('completed')}  />, color: t.green  },
+                { node: <HeroNum label="Same-day Buy"  value={sameDayPurch} color={t.green}  t={t} grossWt={sameDayPurchGr} netWt={sameDayPurchWt} noWtCount={noWt(completedTxns)} active={activeMetric==='completed'} onClick={() => toggleMetric('completed')} />, color: t.green },
+                { node: <HeroNum label="Re-walk-in Buy" value={oldDayPurch} color={t.purple} t={t} grossWt={oldDayPurchGr} netWt={oldDayPurchWt} active={activeMetric==='rewalkin'} onClick={() => toggleMetric('rewalkin')} />, color: t.purple },
               ].map((item, i) => (
                 <div key={i} style={{ display:'flex', alignItems:'center', gap:8 }}>
-                  {i > 0 && <FlowArrow t={t} pct={completedOfProgPct || null} />}
+                  {i > 0 && <FlowSep t={t} />}
                   <div style={{
                     background:`linear-gradient(160deg, ${t.card2} 0%, ${t.card} 100%)`,
                     border:`1px solid ${item.color}30`,
@@ -1989,16 +2004,45 @@ function NewCrmTab({ t, newCrmTxns, completedToday, newCrmError, regionFilter, r
               ))}
             </div>
           </div>
-          <FlowSep t={t} />
-          <HeroNum label="At Walk-in"   value={walkinTxns.length}     color={t.blue}   t={t} small grossWt={walkinGr} netWt={walkinWt}         noWtCount={noWt(walkinTxns)}     active={activeMetric==='walkin'}     onClick={() => toggleMetric('walkin')} />
-          <FlowSep t={t} />
-          <HeroNum label="Estimation"   value={estimationTxns.length} color={t.orange} t={t} small grossWt={estimationGr} netWt={estimationWt} noWtCount={noWt(estimationTxns)} active={activeMetric==='estimation'} onClick={() => toggleMetric('estimation')} />
-          <FlowSep t={t} />
-          <HeroNum label="KYC"          value={kycTxns.length}        color={t.purple} t={t} small grossWt={kycGr} netWt={kycWt}               noWtCount={noWt(kycTxns)}        active={activeMetric==='kyc'}        onClick={() => toggleMetric('kyc')} />
-          <FlowSep t={t} />
-          <HeroNum label="Payment Due"  value={paymentTxns.length}    color={t.gold}   t={t} small grossWt={paymentGr} netWt={paymentWt}       noWtCount={noWt(paymentTxns)}    active={activeMetric==='payment'}    onClick={() => toggleMetric('payment')} />
-          <FlowSep t={t} />
-          <HeroNum label="Walkout"      value={walkout}                color={t.red}    t={t} small grossWt={walkoutGr} netWt={walkoutWt}       noWtCount={noWt(walkoutTxns)}    active={activeMetric==='walkout'}    onClick={() => toggleMetric('walkout')} />
+          <FlowArrow t={t} pct={null} />
+          {/* GROUP 3 — Walk-ins − Purchases (still in the pipeline), per-stage split */}
+          <div style={{
+            position:'relative',
+            background:`linear-gradient(160deg, ${t.bg} 0%, ${t.card} 60%, ${t.bg} 100%)`,
+            border:`1.5px solid ${t.orange}55`,
+            borderRadius:22,
+            boxShadow:`0 0 0 1px ${t.orange}12, 0 16px 48px ${t.orange}20, 0 4px 16px rgba(0,0,0,.16), inset 0 0 60px ${t.orange}08, inset 0 1px 0 ${t.orange}35`,
+            padding:'22px 14px 14px',
+          }}>
+            <div style={{ position:'absolute', inset:-1, borderRadius:22, background:`radial-gradient(ellipse at 50% 0%, ${t.orange}18 0%, transparent 65%)`, pointerEvents:'none' }}/>
+            <div style={{ position:'absolute', inset:0, borderRadius:22, backgroundImage:`radial-gradient(${t.orange}18 1px, transparent 1px)`, backgroundSize:'18px 18px', pointerEvents:'none', opacity:.6 }}/>
+            <div style={{ position:'absolute', top:-14, left:'50%', transform:'translateX(-50%)', background:`linear-gradient(90deg,${t.orange}ee,${t.orange}bb)`, borderRadius:20, padding:'4px 14px', boxShadow:`0 4px 14px ${t.orange}55, 0 0 0 1px ${t.orange}30`, whiteSpace:'nowrap' }}>
+              <span style={{ fontSize:'.52rem', letterSpacing:'.14em', textTransform:'uppercase', color:'#fff', fontWeight:900 }}>yet to purchase · {fmtNum(pendingCount)}</span>
+            </div>
+            <div style={{ position:'relative', display:'flex', alignItems:'center', gap:8 }}>
+              {[
+                { node: <HeroNum label="At Walk-in"  value={walkinTxns.length}     color={t.blue}   t={t} small grossWt={walkinGr} netWt={walkinWt}         noWtCount={noWt(walkinTxns)}     active={activeMetric==='walkin'}     onClick={() => toggleMetric('walkin')} />, color: t.blue },
+                { node: <HeroNum label="Estimation"  value={estimationTxns.length} color={t.orange} t={t} small grossWt={estimationGr} netWt={estimationWt} noWtCount={noWt(estimationTxns)} active={activeMetric==='estimation'} onClick={() => toggleMetric('estimation')} />, color: t.orange },
+                { node: <HeroNum label="KYC"         value={kycTxns.length}        color={t.purple} t={t} small grossWt={kycGr} netWt={kycWt}               noWtCount={noWt(kycTxns)}        active={activeMetric==='kyc'}        onClick={() => toggleMetric('kyc')} />, color: t.purple },
+                { node: <HeroNum label="Payment Due" value={paymentTxns.length}    color={t.gold}   t={t} small grossWt={paymentGr} netWt={paymentWt}       noWtCount={noWt(paymentTxns)}    active={activeMetric==='payment'}    onClick={() => toggleMetric('payment')} />, color: t.gold },
+                { node: <HeroNum label="Walkout"     value={walkout}               color={t.red}    t={t} small grossWt={walkoutGr} netWt={walkoutWt}       noWtCount={noWt(walkoutTxns)}    active={activeMetric==='walkout'}    onClick={() => toggleMetric('walkout')} />, color: t.red },
+              ].map((item, i) => (
+                <div key={i} style={{ display:'flex', alignItems:'center', gap:8 }}>
+                  {i > 0 && <FlowSep t={t} />}
+                  <div style={{
+                    background:`linear-gradient(160deg, ${t.card2} 0%, ${t.card} 100%)`,
+                    border:`1px solid ${item.color}30`,
+                    borderTop:`2px solid ${item.color}70`,
+                    borderRadius:14,
+                    boxShadow:`0 8px 24px rgba(0,0,0,.14), 0 2px 6px rgba(0,0,0,.10), inset 0 1px 0 ${item.color}18`,
+                    transform:'translateY(-5px)',
+                  }}>
+                    {item.node}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
         {/* ── Stats ribbon ── */}
         <div style={{ display:'flex', gap:0, marginTop:10, background:t.card, border:`1px solid ${t.border}`, borderRadius:14, overflow:'hidden', flexWrap:'wrap', boxShadow:`0 2px 8px rgba(0,0,0,.08)` }}>
@@ -2231,7 +2275,7 @@ function NewCrmDetail({ t, activeMetric, txns, reWalkins }) {
     case 'rewalkin':   rows = reWalkins || []; label = 'Re-walk-ins · walked in earlier, closed today'; break
     case 'walkin':     rows = txns.filter(tx => tx.status === 'WALKIN'); label = 'Still at Walk-in'; break
     case 'inprogress': rows = txns.filter(tx => IN_PROGRESS_STATUSES.includes(tx.status)); label = 'In Progress'; break
-    case 'completed':  rows = txns.filter(tx => tx.status === 'FINAL_PAYMENT_COMPLETED'); label = 'Completed'; break
+    case 'completed':  rows = txns.filter(tx => tx.status === 'FINAL_PAYMENT_COMPLETED'); label = 'Same-day Purchases · walked in & bought today'; break
     case 'walkout':    rows = txns.filter(tx => tx.status === 'WALKOUT'); label = 'Walkout'; break
     case 'estimation': rows = txns.filter(tx => ['ESTIMATION_PENDING','PLEDGE_ESTIMATION_PENDING','REVALUATION_PENDING','SALES_NEGOTIATION_PENDING','QUOTATION_PENDING'].includes(tx.status)); label = 'Estimation / Valuation'; break
     case 'kyc':        rows = txns.filter(tx => ['KYC_PENDING','BRANCH_KYC_PENDING','PLEDGE_APPROVAL_PENDING'].includes(tx.status)); label = 'KYC Pending'; break
