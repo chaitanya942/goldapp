@@ -58,5 +58,5 @@ COMMIT;
 -- Today's Bangalore pool should now be (almost) all unbooked again:
 --   SELECT (booking_id IS NOT NULL) AS booked, count(*), round(sum(net_weight)::numeric,2)
 --     FROM purchases p JOIN branches b ON b.name = p.branch_name
---    WHERE b.region = 'Bangalore' AND p.purchase_date = '2026-06-13' AND p.is_deleted = false
+--    WHERE b.region = 'Bangalore' AND p.purchase_date = '2026-06-15' AND p.is_deleted = false
 --    GROUP BY 1;
