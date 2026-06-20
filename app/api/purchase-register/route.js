@@ -290,6 +290,18 @@ export async function GET(req) {
     lines.push(COLUMNS.map(c => csvCell(c === 'SL' ? i + 1 : rec.cell[c])).join(','))
   })
 
+  // Array-of-arrays for the .xlsx export — same rows, but with the CSV
+  // text-guard (="…") unwrapped so the account number is a plain text cell.
+  const aoa = [COLUMNS]
+  all.forEach((rec, i) => {
+    aoa.push(COLUMNS.map(c => {
+      if (c === 'SL') return i + 1
+      let v = rec.cell[c]
+      if (typeof v === 'string') { const m = v.match(/^="(.*)"$/); if (m) v = m[1] }
+      return v == null ? '' : v
+    }))
+  })
+
   const completedCount = completedRecords.length
   const pendingCount   = fppRecords.length
   const newCount = all.filter(r => r.crm === 'new').length
@@ -300,5 +312,6 @@ export async function GET(req) {
     total: all.length, oldCount, newCount, completedCount, pendingCount,
     errors: errors.length ? errors : null,
     csv: '﻿' + lines.join('\r\n'),
+    aoa,
   })
 }

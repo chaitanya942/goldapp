@@ -11,6 +11,16 @@ import { authedFetch } from '../../lib/authedFetch'
 import { CONSIGNMENT_THEMES as THEMES } from '../../lib/consignmentTheme'
 import { istToday, istDaysAgo } from '../../lib/dateIst'
 
+// Lazy-load SheetJS from CDN (same pattern as PurchaseData / BranchManagement).
+function loadScript(src) {
+  return new Promise((resolve, reject) => {
+    if (document.querySelector(`script[src="${src}"]`)) { resolve(); return }
+    const s = document.createElement('script'); s.src = src
+    s.onload = resolve; s.onerror = reject
+    document.head.appendChild(s)
+  })
+}
+
 export default function PurchaseRegister() {
   const { theme } = useApp()
   const t = THEMES[theme] || THEMES.dark
@@ -39,13 +49,28 @@ export default function PurchaseRegister() {
 
   useEffect(() => { run(today, today) }, [])   // auto-load today on mount
 
-  const download = () => {
+  const baseName = () => res.from === res.to ? `purchase-register-${res.from}` : `purchase-register-${res.from}_to_${res.to}`
+
+  // Excel (.xlsx) — preferred. Falls back to CSV if the SheetJS CDN can't load.
+  const download = async () => {
+    if (!res?.aoa?.length) { downloadCsv(); return }
+    try {
+      await loadScript('https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js')
+      const XLSX = window.XLSX
+      const ws = XLSX.utils.aoa_to_sheet(res.aoa)
+      const wb = XLSX.utils.book_new()
+      XLSX.utils.book_append_sheet(wb, ws, 'Purchase Register')
+      XLSX.writeFile(wb, `${baseName()}.xlsx`)
+    } catch { downloadCsv() }
+  }
+
+  const downloadCsv = () => {
     if (!res?.csv) return
     const blob = new Blob([res.csv], { type: 'text/csv;charset=utf-8;' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = res.from === res.to ? `purchase-register-${res.from}.csv` : `purchase-register-${res.from}_to_${res.to}.csv`
+    a.download = `${baseName()}.csv`
     document.body.appendChild(a); a.click(); a.remove()
     URL.revokeObjectURL(url)
   }
@@ -72,7 +97,7 @@ export default function PurchaseRegister() {
         <h1 style={{ fontSize: 24, fontWeight: 800, color: t.text1, margin: 0 }}>Purchase Register</h1>
         <p style={{ fontSize: 13, color: t.text3, marginTop: 4 }}>
           Daily bills across <strong>both CRMs</strong> — completed purchases plus any at the
-          <strong> payment-pending</strong> stage (payment done, final payment not yet made). 25-column report, download as CSV (opens in Excel).
+          <strong> payment-pending</strong> stage (payment done, final payment not yet made). 25-column report, downloads as an Excel (.xlsx) file.
         </p>
       </div>
 
@@ -125,7 +150,7 @@ export default function PurchaseRegister() {
           <div style={{ marginTop: 16, display: 'flex', alignItems: 'center', gap: 12 }}>
             <button onClick={download} disabled={!res.total}
               style={{ background: t.gold, color: '#1a0a00', border: 'none', borderRadius: 9, padding: '10px 22px', fontSize: 14, fontWeight: 800, cursor: res.total ? 'pointer' : 'default', opacity: res.total ? 1 : 0.5, boxShadow: `0 2px 8px ${t.gold}44` }}>
-              ↓ Download CSV ({res.total} rows)
+              ↓ Download Excel ({res.total} rows)
             </button>
             <span style={{ fontSize: 12, color: t.text4 }}>
               {res.from === res.to ? res.from : `${res.from} → ${res.to}`} · 25 columns
