@@ -1871,9 +1871,43 @@ function NewCrmTab({ t, newCrmTxns, completedToday, newCrmError, regionFilter, r
           ))}
         </div>
         <div className="lf-hero" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0, flexWrap: 'wrap', background: t.surface, borderRadius: 16, border: `1px solid ${t.border}`, padding: '28px 16px', boxShadow: `0 4px 20px rgba(0,0,0,.12), inset 0 1px 0 ${t.border}`, backdropFilter: 'blur(4px)' }}>
-          <HeroNum label="Total Walk-ins" value={totalWalkins} color={t.gold}   t={t} grossWt={totalWalkinsGr} netWt={totalWalkinsWt} />
-          <FlowSep t={t} />
-          <HeroNum label="Re-walk-ins"    value={reWalkins}    color={t.purple} t={t} small grossWt={reWalkinGr} netWt={reWalkinWt} />
+          <HeroNum label="Today's Total Walk-ins" value={totalWalkins} color={t.gold} t={t} grossWt={totalWalkinsGr} netWt={totalWalkinsWt} />
+          <FlowArrow t={t} pct={null} />
+          {/* Walk-in breakdown — mirrors the "Breakdown of N" box: Fresh + Re-walk-ins */}
+          <div style={{
+            position:'relative',
+            background:`linear-gradient(160deg, ${t.bg} 0%, ${t.card} 60%, ${t.bg} 100%)`,
+            border:`1.5px solid ${t.gold}55`,
+            borderRadius:22,
+            boxShadow:`0 0 0 1px ${t.gold}12, 0 16px 48px ${t.gold}20, 0 4px 16px rgba(0,0,0,.16), inset 0 0 60px ${t.gold}08, inset 0 1px 0 ${t.gold}35`,
+            padding:'22px 14px 14px',
+          }}>
+            <div style={{ position:'absolute', inset:-1, borderRadius:22, background:`radial-gradient(ellipse at 50% 0%, ${t.gold}18 0%, transparent 65%)`, pointerEvents:'none' }}/>
+            <div style={{ position:'absolute', inset:0, borderRadius:22, backgroundImage:`radial-gradient(${t.gold}18 1px, transparent 1px)`, backgroundSize:'18px 18px', pointerEvents:'none', opacity:.6 }}/>
+            <div style={{ position:'absolute', top:-14, left:'50%', transform:'translateX(-50%)', background:`linear-gradient(90deg,${t.gold}ee,${t.gold}bb)`, borderRadius:20, padding:'4px 14px', boxShadow:`0 4px 14px ${t.gold}55, 0 0 0 1px ${t.gold}30`, whiteSpace:'nowrap' }}>
+              <span style={{ fontSize:'.52rem', letterSpacing:'.14em', textTransform:'uppercase', color:'#fff', fontWeight:900 }}>today's walk-ins</span>
+            </div>
+            <div style={{ position:'relative', display:'flex', alignItems:'center', gap:8 }}>
+              {[
+                { node: <HeroNum label="Fresh Walk-ins" value={total}     color={t.blue}   t={t} grossWt={totalGr}    netWt={totalWt}    noWtCount={noWt(txns)} active={activeMetric==='total'} onClick={() => toggleMetric('total')} />, color: t.blue },
+                { node: <HeroNum label="Re-walk-ins"    value={reWalkins} color={t.purple} t={t} grossWt={reWalkinGr} netWt={reWalkinWt} />, color: t.purple },
+              ].map((item, i) => (
+                <div key={i} style={{ display:'flex', alignItems:'center', gap:8 }}>
+                  {i > 0 && <FlowSep t={t} />}
+                  <div style={{
+                    background:`linear-gradient(160deg, ${t.card2} 0%, ${t.card} 100%)`,
+                    border:`1px solid ${item.color}30`,
+                    borderTop:`2px solid ${item.color}70`,
+                    borderRadius:14,
+                    boxShadow:`0 8px 24px rgba(0,0,0,.14), 0 2px 6px rgba(0,0,0,.10), inset 0 1px 0 ${item.color}18`,
+                    transform:'translateY(-5px)',
+                  }}>
+                    {item.node}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
           <FlowSep t={t} />
           <HeroNum label="Total Today"  value={total}      color={t.blue}   t={t} grossWt={totalGr} netWt={totalWt}      noWtCount={noWt(txns)}          active={activeMetric==='total'}      onClick={() => toggleMetric('total')} />
           <FlowArrow t={t} pct={progressedPct || null} />

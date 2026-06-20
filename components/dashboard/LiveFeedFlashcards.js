@@ -44,10 +44,14 @@ export default function LiveFeedFlashcards({ t, isMobile, liveFeedAction }) {
 
   // ── Derived metrics — keep keys aligned with the Live Feed page ──────────
   const walkinCount    = data?.walkinSummary?.total                       || 0
+  // Conversion is measured against FRESH walk-ins only (those who walked in
+  // today) — re-walk-ins closed today walked in on an earlier day, so counting
+  // them in the denominator would understate today's true conversion.
+  const freshWalkins   = data?.walkinSummary?.fresh ?? walkinCount
   const walkinWt       = parseFloat(data?.goldPipeline?.walked_in_wt)     || 0
   const purchasedCount = data?.summary?.approved                          || 0
   const purchasedWt    = parseFloat(data?.goldPipeline?.purchased_wt)     || 0
-  const conversionPct  = walkinCount > 0 ? Math.round((purchasedCount / walkinCount) * 100) : 0
+  const conversionPct  = freshWalkins > 0 ? Math.round((purchasedCount / freshWalkins) * 100) : 0
 
   const minsAgo = lastUpdated ? Math.floor((Date.now() - lastUpdated.getTime()) / 60000) : null
   const liveLabel = !lastUpdated ? 'loading…' : minsAgo === 0 ? 'just now' : `${minsAgo}m ago`
@@ -114,7 +118,7 @@ export default function LiveFeedFlashcards({ t, isMobile, liveFeedAction }) {
           label="Conversion"
           value={conversionPct}
           unit="%"
-          sub={walkinCount > 0 ? `${purchasedCount} / ${walkinCount}` : 'awaiting walk-ins'}
+          sub={freshWalkins > 0 ? `${purchasedCount} / ${freshWalkins} fresh` : 'awaiting walk-ins'}
           loading={loading && !data}
           isMobile={isMobile}
           progress={Math.min(100, conversionPct)}

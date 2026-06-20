@@ -185,6 +185,7 @@ export async function GET(req) {
 
       let walkedInCount = 0
       let walkedInWt    = 0
+      let reWalkinCount = 0   // subset of walkedInCount that walked in earlier (re-walk-ins)
       for (const r of walkinRows) {
         if (!inAllowed(r.branch_id)) continue
         walkedInCount += Number(r.bills) || 0
@@ -313,10 +314,12 @@ export async function GET(req) {
             walkedInWt    += parseFloat(r.wt) || 0
           }
           // Add re-walk-ins (walked in earlier, closed today) to the walk-in total.
+          // Tracked separately so ratios (conversion) can use FRESH walk-ins only.
           for (const r of ncRewalkRows) {
             if (!inAllowedBranch(r.branch)) continue
             walkedInCount += Number(r.c)      || 0
             walkedInWt    += parseFloat(r.wt) || 0
+            reWalkinCount += Number(r.c)      || 0
           }
           for (const r of ncDoneRows) {
             if (!inAllowedBranch(r.branch)) continue
@@ -357,7 +360,9 @@ export async function GET(req) {
       const result = {
         todayIST,
         walkinSummary: {
-          total:         walkedInCount,
+          total:         walkedInCount,                              // fresh + re-walk-ins (display)
+          fresh:         Math.max(0, walkedInCount - reWalkinCount), // walked in today only (ratio basis)
+          rewalkin:      reWalkinCount,
           total_gold_wt: Number(walkedInWt.toFixed(2)),
         },
         summary: {
