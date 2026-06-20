@@ -72,6 +72,31 @@ export async function GET(req) {
   // the dashboard reads at_branch and in_consignment from the same RPC and
   // they stay in lock-step semantically (per-bill counts, oldest = MIN
   // purchase_date, etc.). Defaults to at_branch for backwards-compat.
+  // Per-(branch, purchase_date) breakdown for the Branch Stock Overview date
+  // chips. Same RPC contract as branch_overview, grouped by purchase_date too.
+  if (action === 'branch_overview_dates') {
+    const stockStatus = searchParams.get('status') || 'at_branch'
+    if (!['at_branch', 'in_consignment'].includes(stockStatus)) {
+      return Response.json({ by_branch_date: [], error: `Invalid status '${stockStatus}'.` }, { status: 400 })
+    }
+    const { data: rows, error } = await supabase.rpc('branch_stock_by_date', { p_stock_status: stockStatus })
+    if (error) {
+      return Response.json({ by_branch_date: [], error: `branch_stock_by_date RPC missing. Apply sql/branch_stock_by_date_rpc.sql. ${error.message}` })
+    }
+    let out = rows || []
+    if (allowedBranches) { const set = new Set(allowedBranches); out = out.filter(r => set.has(r.branch_name)) }
+    return Response.json({
+      by_branch_date: out.map(r => ({
+        branch_name:  r.branch_name,
+        purchase_date: r.purchase_date ? String(r.purchase_date).slice(0, 10) : null,
+        bills:        Number(r.bills || 0),
+        net_wt:       Number(r.net_wt || 0),
+        gross_wt:     Number(r.gross_wt || 0),
+        gross_value:  Number(r.gross_value || 0),
+      })),
+    })
+  }
+
   if (action === 'branch_overview') {
     const stockStatus = searchParams.get('status') || 'at_branch'
     if (!['at_branch', 'in_consignment'].includes(stockStatus)) {

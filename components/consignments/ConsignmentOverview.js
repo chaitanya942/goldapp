@@ -31,11 +31,17 @@ const fmtINR  = (n) => {
   if (v >= 1e5) return `₹${(v / 1e5).toFixed(2)}L`
   return `₹${Math.round(v).toLocaleString('en-IN')}`
 }
+const MONTHS_ABBR = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
 const fmtDate = (d) => {
   if (!d) return '—'
   const [y, m, day] = d.split('-')
-  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-  return `${day} ${months[+m - 1]}`
+  return `${day} ${MONTHS_ABBR[+m - 1]}`
+}
+// Year-inclusive label for the date chips, e.g. "17 Jun 2026".
+const fmtDateY = (d) => {
+  if (!d) return ''
+  const [y, m, day] = d.split('-')
+  return `${+day} ${MONTHS_ABBR[+m - 1]} ${y}`
 }
 const daysFromNow = (d) => {
   if (!d) return null
@@ -247,6 +253,9 @@ export default function ConsignmentOverview() {
   // wants to see the biggest exposures at the top without clicking.
   const [sortKey,      setSortKey]      = useState('total_net_wt')
   const [sortDir,      setSortDir]      = useState(-1)   // -1 = desc, 1 = asc
+  // Per-(branch, purchase_date) breakdown for the date-chip filter + selection.
+  const [byBranchDate,  setByBranchDate]  = useState(null)
+  const [selectedDates, setSelectedDates] = useState(() => new Set())
   const [lastRefresh,  setLastRefresh]  = useState(null)
   const [tick,         setTick]         = useState(0)   // for live clock
   // Only the flat sortable table is rendered now — the grouped region-card
@@ -311,6 +320,12 @@ export default function ConsignmentOverview() {
       setData(next)
       setLastRefresh(new Date())
       setLoadError(null)
+      // Per-(branch, purchase_date) breakdown powers the date chips (best-effort).
+      try {
+        const bdRes  = await authedFetch(`/api/consignments?action=branch_overview_dates`)
+        const bdJson = await bdRes.json().catch(() => ({}))
+        if (!bdJson.error) setByBranchDate(bdJson.by_branch_date || [])
+      } catch { /* chips just won't show */ }
     } catch (e) {
       console.error('[branch-overview] load failed:', e)
       setLoadError(e?.message || 'Failed to load branch stock')
@@ -578,13 +593,67 @@ export default function ConsignmentOverview() {
   // Every downstream computation (regions, filtered table, KPI tiles) reads
   // scopeData instead of data so the Bangalore tab and Outside tab stay
   // cleanly partitioned.
+  // ── Date-chip filter ──────────────────────────────────────────────────────
+  // When dates are selected, re-derive each branch's row from the per-(branch,
+  // purchase_date) breakdown so the table, region cards and totals all reflect
+  // only stock purchased on those days. Today/pending split + oldest date are
+  // recomputed; pickup / last-moved meta is preserved from the live row.
+  const todayIst = istToday()
+  const effectiveData = useMemo(() => {
+    if (!selectedDates.size || !byBranchDate) return data
+    const base = Object.fromEntries(data.map(b => [b.branch_name, b]))
+    const m = {}
+    for (const r of byBranchDate) {
+      if (!selectedDates.has(r.purchase_date)) continue
+      let s = m[r.branch_name]
+      if (!s) {
+        const b0 = base[r.branch_name]
+        if (!b0) continue   // branch not in current scope/data
+        s = m[r.branch_name] = {
+          ...b0,
+          today_bills: 0, today_net_wt: 0, today_gross_value: 0,
+          older_bills: 0, older_net_wt: 0, older_gross_value: 0,
+          total_gross_wt: 0, total_net_wt: 0, total_gross_value: 0,
+          oldest_date: null,
+        }
+      }
+      const isToday = r.purchase_date === todayIst
+      s[isToday ? 'today_bills'       : 'older_bills']       += r.bills
+      s[isToday ? 'today_net_wt'      : 'older_net_wt']      += r.net_wt
+      s[isToday ? 'today_gross_value' : 'older_gross_value'] += r.gross_value
+      s.total_gross_wt    += r.gross_wt
+      s.total_net_wt      += r.net_wt
+      s.total_gross_value += r.gross_value
+      if (!s.oldest_date || r.purchase_date < s.oldest_date) s.oldest_date = r.purchase_date
+    }
+    for (const s of Object.values(m)) s.oldest_age_days = ageDaysFromDate(s.oldest_date)
+    return Object.values(m)
+  }, [data, byBranchDate, selectedDates, todayIst])
+
+  // Distinct purchase dates of the in-scope stock, oldest→latest, for the chips.
+  const datesAvailable = useMemo(() => {
+    if (!byBranchDate) return []
+    const scopeBranches = new Set(
+      (scopeTab === 'bangalore' ? data.filter(b => b.region === 'Bangalore') : data.filter(b => b.region !== 'Bangalore'))
+        .map(b => b.branch_name)
+    )
+    const set = new Set(byBranchDate.filter(r => r.purchase_date && scopeBranches.has(r.branch_name)).map(r => r.purchase_date))
+    return Array.from(set).sort()   // 'YYYY-MM-DD' sorts chronologically
+  }, [byBranchDate, data, scopeTab])
+
+  const toggleDate = (d) => setSelectedDates(prev => {
+    const next = new Set(prev)
+    next.has(d) ? next.delete(d) : next.add(d)
+    return next
+  })
+
   const scopeData = useMemo(() => {
     if (scopeTab === 'bangalore') {
-      const ks = data.filter(b => b.region === 'Bangalore')
+      const ks = effectiveData.filter(b => b.region === 'Bangalore')
       return ks
     }
-    return data.filter(b => b.region !== 'Bangalore')
-  }, [data, scopeTab])
+    return effectiveData.filter(b => b.region !== 'Bangalore')
+  }, [effectiveData, scopeTab])
 
   // ── Region summary ────────────────────────────────────────────────────────
   // Custom order — Rest of Karnataka first, then Kerala / AP / Telangana.
@@ -1141,6 +1210,34 @@ export default function ConsignmentOverview() {
           <div style={{ fontSize: '10px', color: `${t.gold}80`, marginTop: '4px' }}>all stock gross</div>
         </div>
       </div>
+      )}
+
+      {/* ── Date chips — filter stock by purchase date (oldest→latest, multi-select) ── */}
+      {datesAvailable.length > 0 && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: isMobile ? 'nowrap' : 'wrap', overflowX: isMobile ? 'auto' : 'visible', WebkitOverflowScrolling: 'touch', scrollbarWidth: 'none' }}>
+          <span style={{ fontSize: '9px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 700, flexShrink: 0 }}>Purchase&nbsp;dates</span>
+          {datesAvailable.map(d => {
+            const active = selectedDates.has(d)
+            return (
+              <button key={d} onClick={() => toggleDate(d)} title="Click to filter — select multiple"
+                style={{
+                  flexShrink: 0, padding: '6px 12px', borderRadius: '999px', cursor: 'pointer',
+                  fontSize: '11px', fontWeight: 600, whiteSpace: 'nowrap',
+                  border: `1px solid ${active ? t.gold : t.border2}`,
+                  background: active ? `${t.gold}20` : 'transparent',
+                  color: active ? t.gold : t.text3, transition: 'all .15s',
+                }}>
+                {fmtDateY(d)}
+              </button>
+            )
+          })}
+          {selectedDates.size > 0 && (
+            <button onClick={() => setSelectedDates(new Set())}
+              style={{ flexShrink: 0, padding: '6px 10px', borderRadius: '999px', cursor: 'pointer', fontSize: '10px', fontWeight: 600, border: `1px solid ${t.border2}`, background: 'transparent', color: t.text4, whiteSpace: 'nowrap' }}>
+              ✕ Clear ({selectedDates.size})
+            </button>
+          )}
+        </div>
       )}
 
       {/* ── Search + quick filters + CSV export ── */}
