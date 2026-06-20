@@ -1116,7 +1116,11 @@ export async function GET(req) {
             orn AS (SELECT tid, SUM(gw) g, SUM(nw) n FROM orn_dd GROUP BY tid)
             SELECT t.code AS bill_no, t.transaction_type, b.name AS branch_name,
                    COALESCE(orn.g, 0)::float AS gross_weight,
-                   COALESCE(orn.n, 0)::float AS net_weight
+                   COALESCE(orn.n, 0)::float AS net_weight,
+                   -- re_walkin = walked in on an EARLIER day but closed today (the
+                   -- walk-in/created date differs from the final-payment day). These
+                   -- aren't in "Total Today" (created today) — counted as re-walk-ins.
+                   ((t.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata')::date <> ${todayIST}::date) AS re_walkin
             FROM "Transaction" t
             LEFT JOIN "Branch" b ON b.id = t.branch_id
             LEFT JOIN orn ON orn.tid = t.id

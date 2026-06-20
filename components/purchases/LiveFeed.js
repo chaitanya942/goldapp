@@ -1820,6 +1820,13 @@ function NewCrmTab({ t, newCrmTxns, completedToday, newCrmError, regionFilter, r
   const kycWt        = netW(kycTxns),        kycGr        = grossW(kycTxns)
   const paymentWt    = netW(paymentTxns),    paymentGr    = grossW(paymentTxns)
 
+  // Walk-in split — New (walked in today) + Re-walk-ins (walked in on an earlier
+  // day but came back and CLOSED today, flagged on the completed-today set) =
+  // Total walk-ins. Region + type filtered, consistent with the rest of the view.
+  const reWalkins    = (ctSet || []).filter(r => r.re_walkin).length
+  const newWalkins   = total
+  const totalWalkins = newWalkins + reWalkins
+
   const conversionPct       = total > 0 ? Math.round(completed / total * 100) : 0
   const walkoutRate         = total > 0 ? Math.round(walkout / total * 100) : 0
   const progressedPct       = total > 0 ? Math.round((inProgress + completed) / total * 100) : 0
@@ -1859,6 +1866,20 @@ function NewCrmTab({ t, newCrmTxns, completedToday, newCrmError, regionFilter, r
             }}>
               {o.label} <span style={{ opacity: .6, fontFamily: 'ui-monospace,monospace' }}>{o.n}</span>
             </button>
+          ))}
+        </div>
+        {/* Walk-in split — Total = New (today) + Re-walk-ins (came back & closed today) */}
+        <div style={{ display: 'flex', gap: 10, marginBottom: 14, flexWrap: 'wrap' }}>
+          {[
+            { label: 'Total Walk-ins', value: totalWalkins, sub: 'new + re-walk-ins',                color: t.gold },
+            { label: 'New Walk-ins',   value: newWalkins,   sub: 'walked in today',                  color: t.blue },
+            { label: 'Re-walk-ins',    value: reWalkins,    sub: 'walked in earlier · closed today', color: t.purple },
+          ].map(c => (
+            <div key={c.label} style={{ flex: '1 1 160px', minWidth: 150, background: t.surface, border: `1px solid ${t.border}`, borderTop: `2px solid ${c.color}`, borderRadius: 12, padding: '12px 14px' }}>
+              <div style={{ fontSize: '.56rem', color: t.text4, letterSpacing: '.08em', textTransform: 'uppercase', fontWeight: 700 }}>{c.label}</div>
+              <div style={{ fontSize: '1.5rem', fontWeight: 800, color: c.color, fontFamily: 'ui-monospace,monospace', marginTop: 2, lineHeight: 1.1 }}>{fmtNum(c.value)}</div>
+              <div style={{ fontSize: '.56rem', color: t.text4, marginTop: 3 }}>{c.sub}</div>
+            </div>
           ))}
         </div>
         <div className="lf-hero" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0, flexWrap: 'wrap', background: t.surface, borderRadius: 16, border: `1px solid ${t.border}`, padding: '28px 16px', boxShadow: `0 4px 20px rgba(0,0,0,.12), inset 0 1px 0 ${t.border}`, backdropFilter: 'blur(4px)' }}>
