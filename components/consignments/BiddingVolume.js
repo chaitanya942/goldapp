@@ -1322,6 +1322,7 @@ export default function BiddingVolume() {
         branches={bangBranches}
         total={supply?.bangalore?.total}
         metrics={sectionMetrics(supply?.bangalore?.total?.net_wt, supply?.bangalore?.booked?.net_wt, 1)}
+        pipelineG={pipelineOtherG}
         bookedBranches={supply?.bangalore?.booked?.branches}
         onRateChange={(p) => handleSectionRate(1, p)}
         onSetGainGrams={(g) => handleSectionGainGrams(1, g)}
@@ -2803,6 +2804,9 @@ function SourceSection({
   // re-rolls the branch lists + hero metrics to the selected date(s). Used by
   // the transit sections (2/3/4) and branch-pickup-pending (7).
   dateFilter = false,
+  // When a number, renders an extra "Pipeline" hero card after Gain (the
+  // carried-over pipeline owed against this pool). Section 1 passes it.
+  pipelineG = null,
   emptyMsg,
 }) {
   const tone = accent || t.gold
@@ -3006,8 +3010,9 @@ function SourceSection({
           Available to book. Gain applies to the UNBOOKED portion only, so
           Available = Unbooked + its gain. The Gain card's % is editable. */}
       {metrics && (() => {
-        const green = t.green || '#3fa66a'
-        const blue  = t.blue  || '#4a90d9'
+        const green  = t.green  || '#3fa66a'
+        const blue   = t.blue   || '#4a90d9'
+        const orange = t.orange || '#e08a3c'
         const canEditGain = !!(onRateChange || onSetGainGrams)
         const openGainEdit = () => {
           if (metrics.gainOverride != null) { setGainMode('abs'); setGainDraft(String(metrics.gainOverride)) }
@@ -3034,6 +3039,9 @@ function SourceSection({
           { key: 'booked',   label: 'Booked Net',        icon: '◆', color: blue,    val: metrics.bookedNet,    bills: bookedBills,   sub: 'already booked' },
           { key: 'unbooked', label: 'Unbooked Net',      icon: '○', color: tone,    val: metrics.unbookedNet,  bills: unbookedBills, sub: 'still to book' },
           { key: 'gain',     label: 'Gain on Unbooked',  icon: '↗', color: green,   val: metrics.gainNet,      gain: true },
+          ...(pipelineG != null ? [
+          { key: 'pipeline', label: 'Pipeline',          icon: '⇄', color: orange,  val: pipelineG,            sub: 'owed from prior bids' },
+          ] : []),
           { key: 'avail',    label: 'Available to Book', icon: '✓', color: green,   val: metrics.availableNet, bills: unbookedBills, sub: canSelect ? 'tap to select →' : 'unbooked + gain', strong: true, onClick: canSelect ? onAutoSelect : null },
         ]
         return (
