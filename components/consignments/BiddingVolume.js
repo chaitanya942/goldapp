@@ -1481,6 +1481,7 @@ export default function BiddingVolume() {
         dateFilter
         altDateFilter={{ field: '_consignment_created_at', label: 'Consignment date' }}
         subGroupInTotals
+        exportable
         selectable
         selected={selected}
         branchLocked={branchLocked}
@@ -2943,6 +2944,9 @@ function SourceSection({
   // When true, adds a delivery-TAT chip row (24h / 48h / 72h) that filters the
   // branches by their tat_hours. Section 7 (all-TAT branch-pickup view).
   tatFilter = false,
+  // When true, shows in-section Excel + PNG export buttons (case-wise list of
+  // this section's bills, respecting the active filters). Section 5.
+  exportable = false,
   // When true, the section's hero totals/metrics include the subGroup band too
   // (Section 5: main Bangalore-pending + outstation-pending are both unbooked).
   // Default false — most sections show the subGroup as a separate band only.
@@ -2960,6 +2964,7 @@ function SourceSection({
   const [editRate, setEditRate] = useState(false)
   const [gainMode, setGainMode] = useState('pct')   // 'pct' | 'abs'
   const [gainDraft, setGainDraft] = useState('')
+  const [exporting, setExporting] = useState(null)   // 'xlsx' | 'png' | null
   // Already-booked band — collapsed by default (just the summary row).
   const [bookedOpen, setBookedOpen] = useState(false)
   // Per-branch expand state for the bill drill-down. Keyed by branch_name
@@ -3125,6 +3130,74 @@ function SourceSection({
   //   [checkbox] [name + chips ...........]  [gross]  [net]  [bills]  [▾]
   const rowGrid = '20px minmax(0, 1fr) 92px 100px 70px 22px'
 
+  // ── In-section case-wise export (respects the active filters) ─────────────
+  const exportName = String(title || 'Section').replace(/[·•|/\\:]+/g, '-').replace(/\s+/g, ' ').trim()
+  const gatherSectionCases = () => {
+    const rows = []
+    const push = (arr) => { for (const br of arr || []) for (const bl of br.bills || []) {
+      const isBlr  = br.region === 'Bangalore'
+      const cdate  = isBlr ? bl.purchase_date : istDayOf(bl._consignment_created_at)
+      const arrival = bl._arrival_date || (isBlr && bl.purchase_date ? addWorkingDaysSkipSunday(bl.purchase_date, 1) : null)
+      rows.push({
+        branch: br.branch_name || '—', region: br.region || '—',
+        app_id: bl.application_id || '—', customer: bl.customer_name || '—',
+        consignment_date: cdate ? fmtDate(cdate) : (bl.stock_status === 'at_branch' ? 'pending' : ''),
+        purchase_date: bl.purchase_date ? fmtDate(bl.purchase_date) : '',
+        expected_arrival: arrival ? fmtDate(arrival) : '',
+        net_wt: Number(bl.net_weight || 0), gross_wt: Number(bl.gross_weight || 0), amount: Number(bl.total_amount || 0),
+      })
+    } }
+    push(branches); push(subGroup?.branches)
+    return rows
+  }
+  const exportSectionExcel = async () => {
+    setExporting('xlsx')
+    try {
+      const cases = gatherSectionCases()
+      if (!cases.length) return
+      await loadScript('https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js')
+      const XLSX = window.XLSX
+      const header = ['#', 'Branch', 'Region', 'App ID', 'Customer', 'Consignment Date', 'Purchase Date', 'Net Wt (g)', 'Expected Arrival', 'Gross Wt (g)', 'Amount (₹)']
+      const aoa = [header, ...cases.map((c, i) => [i + 1, c.branch, c.region, c.app_id, c.customer, c.consignment_date, c.purchase_date, c.net_wt.toFixed(2), c.expected_arrival, c.gross_wt.toFixed(2), Math.round(c.amount)])]
+      const ws = XLSX.utils.aoa_to_sheet(aoa)
+      const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Cases')
+      XLSX.writeFile(wb, `${exportName}.xlsx`)
+    } finally { setExporting(null) }
+  }
+  const exportSectionPng = async () => {
+    setExporting('png')
+    try {
+      const cases = gatherSectionCases()
+      if (!cases.length) return
+      await loadScript('https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js')
+      const esc = (s) => String(s == null ? '' : s).replace(/[&<>]/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[m]))
+      const totNet = cases.reduce((s, c) => s + c.net_wt, 0)
+      const rowsHtml = cases.map((c, i) => `<tr style="border-top:1px solid #eee">
+        <td style="padding:4px 8px;color:#999">${i + 1}</td>
+        <td style="padding:4px 8px">${esc(c.branch)}</td>
+        <td style="padding:4px 8px;color:#777">${esc(c.region)}</td>
+        <td style="padding:4px 8px;font-family:monospace;color:#a07a1f">${esc(c.app_id)}</td>
+        <td style="padding:4px 8px">${esc(c.customer)}</td>
+        <td style="padding:4px 8px">${esc(c.consignment_date)}</td>
+        <td style="padding:4px 8px">${esc(c.purchase_date)}</td>
+        <td style="padding:4px 8px;text-align:right;font-family:monospace">${c.net_wt.toFixed(2)}</td>
+        <td style="padding:4px 8px">${esc(c.expected_arrival)}</td>
+      </tr>`).join('')
+      const el = document.createElement('div')
+      el.style.cssText = 'position:fixed;left:-99999px;top:0;background:#fff;color:#111;padding:20px;font-family:system-ui,Arial,sans-serif;width:1040px'
+      el.innerHTML = `<div style="font-size:18px;font-weight:800;margin-bottom:3px">${esc(exportName)}</div>
+        <div style="font-size:12px;color:#666;margin-bottom:12px">${cases.length} cases · ${totNet.toFixed(2)} g net</div>
+        <table style="width:100%;border-collapse:collapse;font-size:12px">
+          <thead><tr style="background:#f3eee0;text-align:left">
+            <th style="padding:6px 8px">#</th><th style="padding:6px 8px">Branch</th><th style="padding:6px 8px">Region</th><th style="padding:6px 8px">App ID</th><th style="padding:6px 8px">Customer</th><th style="padding:6px 8px">Consignment</th><th style="padding:6px 8px">Purchase</th><th style="padding:6px 8px;text-align:right">Net g</th><th style="padding:6px 8px">Arrival</th>
+          </tr></thead><tbody>${rowsHtml}</tbody></table>`
+      document.body.appendChild(el)
+      const canvas = await window.html2canvas(el, { scale: 2, backgroundColor: '#ffffff' })
+      document.body.removeChild(el)
+      const a = document.createElement('a'); a.href = canvas.toDataURL('image/png'); a.download = `${exportName}.png`; a.click()
+    } finally { setExporting(null) }
+  }
+
   return (
     <div style={{
       ...card,
@@ -3167,22 +3240,35 @@ function SourceSection({
             {subtitle && <div style={{ fontSize: 12, color: t.text2, marginTop: 5, lineHeight: 1.5, fontWeight: 500 }}>{subtitle}</div>}
           </div>
         </div>
-        {/* Header total — hidden when the metric strip is shown (the Total
-            Net card already carries it; showing it twice confused ops). */}
-        {!metrics && (
-          <div style={{ textAlign: 'right', flexShrink: 0 }}>
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: 5, justifyContent: 'flex-end' }}>
-              <span style={{ fontSize: 26, color: tone, fontFamily: 'monospace', fontWeight: 700, lineHeight: 1, letterSpacing: '-.01em' }}>{fmt(totalNet, 2)}</span>
-              <span style={{ fontSize: 13, color: t.text2, fontWeight: 700 }}>g</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
+          {/* In-section case-wise export (Section 5) */}
+          {exportable && !isEmpty && (
+            <div style={{ display: 'flex', gap: 6 }}>
+              <button onClick={exportSectionExcel} disabled={!!exporting} title="Export these cases to Excel"
+                style={{ padding: '5px 11px', borderRadius: 7, border: `1px solid ${t.border2 || t.border}`, background: 'transparent', color: exporting ? t.text4 : t.gold, fontSize: 11, fontWeight: 700, cursor: exporting ? 'not-allowed' : 'pointer', whiteSpace: 'nowrap' }}>
+                {exporting === 'xlsx' ? 'Exporting…' : '↓ Excel'}
+              </button>
+              <button onClick={exportSectionPng} disabled={!!exporting} title="Export these cases as a PNG image"
+                style={{ padding: '5px 11px', borderRadius: 7, border: `1px solid ${t.border2 || t.border}`, background: 'transparent', color: exporting ? t.text4 : (t.blue || '#4a90d9'), fontSize: 11, fontWeight: 700, cursor: exporting ? 'not-allowed' : 'pointer', whiteSpace: 'nowrap' }}>
+                {exporting === 'png' ? 'Rendering…' : '↓ PNG'}
+              </button>
             </div>
-            <div style={{ fontSize: 11, color: t.text3, marginTop: 5, letterSpacing: '.04em', fontWeight: 700 }}>{totalBills} bill{totalBills === 1 ? '' : 's'}</div>
-          </div>
-        )}
-        {/* When the strip is shown, keep just the bill count on the right so
-            the header still reads "N bills" at a glance. */}
-        {metrics && (
-          <div style={{ fontSize: 11, color: t.text3, letterSpacing: '.04em', fontWeight: 700, flexShrink: 0 }}>{totalBills} bill{totalBills === 1 ? '' : 's'}</div>
-        )}
+          )}
+          {/* Header total — hidden when the metric strip is shown (the Total
+              Net card already carries it; showing it twice confused ops). */}
+          {!metrics && (
+            <div style={{ textAlign: 'right' }}>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: 5, justifyContent: 'flex-end' }}>
+                <span style={{ fontSize: 26, color: tone, fontFamily: 'monospace', fontWeight: 700, lineHeight: 1, letterSpacing: '-.01em' }}>{fmt(totalNet, 2)}</span>
+                <span style={{ fontSize: 13, color: t.text2, fontWeight: 700 }}>g</span>
+              </div>
+              <div style={{ fontSize: 11, color: t.text3, marginTop: 5, letterSpacing: '.04em', fontWeight: 700 }}>{totalBills} bill{totalBills === 1 ? '' : 's'}</div>
+            </div>
+          )}
+          {metrics && (
+            <div style={{ fontSize: 11, color: t.text3, letterSpacing: '.04em', fontWeight: 700 }}>{totalBills} bill{totalBills === 1 ? '' : 's'}</div>
+          )}
+        </div>
       </div>
 
       {/* Metric strip — Total / Booked / Unbooked / Gain on unbooked /
