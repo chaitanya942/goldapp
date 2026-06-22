@@ -730,13 +730,17 @@ export default function BiddingVolume() {
 
   // Click a section's "Available to Book" card → select every unbooked
   // (non-held) bill in that section's group(s).
-  const selectSectionBills = useCallback((groups) => {
+  // groups: section _group tags. dates (optional Set): when ops has a date
+  // filter active, restrict the auto-select to bills purchased on those days —
+  // so "Available to Book" picks only what's visible under the filter.
+  const selectSectionBills = useCallback((groups, dates = null) => {
     const gset = new Set(groups)
+    const dset = dates && dates.size ? dates : null
     setSelected(prev => {
       const next = new Set(prev)
       for (const id of Object.keys(billsById)) {
         const bl = billsById[id]
-        if (gset.has(bl._group) && !bl.audit_hold) next.add(id)
+        if (gset.has(bl._group) && !bl.audit_hold && (!dset || dset.has(bl.purchase_date))) next.add(id)
       }
       return next
     })
@@ -1326,8 +1330,9 @@ export default function BiddingVolume() {
         bookedBranches={supply?.bangalore?.booked?.branches}
         onRateChange={(p) => handleSectionRate(1, p)}
         onSetGainGrams={(g) => handleSectionGainGrams(1, g)}
-        onAutoSelect={() => selectSectionBills(['bangalore'])}
+        onAutoSelect={(dates) => selectSectionBills(['bangalore'], dates)}
         prefix="B"
+        dateFilter
         selectable
         selected={selected}
         branchLocked={branchLocked}
@@ -1354,7 +1359,7 @@ export default function BiddingVolume() {
         bookedBranches={t24Booked}
         onRateChange={(p) => handleSectionRate(2, p)}
         onSetGainGrams={(g) => handleSectionGainGrams(2, g)}
-        onAutoSelect={() => selectSectionBills(['transit_24h'])}
+        onAutoSelect={(dates) => selectSectionBills(['transit_24h'], dates)}
         prefix="T"
         dateFilter
         selectable
@@ -1384,7 +1389,7 @@ export default function BiddingVolume() {
         bookedBranches={t48Booked}
         onRateChange={(p) => handleSectionRate(3, p)}
         onSetGainGrams={(g) => handleSectionGainGrams(3, g)}
-        onAutoSelect={() => selectSectionBills(['transit_48h'])}
+        onAutoSelect={(dates) => selectSectionBills(['transit_48h'], dates)}
         prefix="D"
         dateFilter
         selectable
@@ -1414,7 +1419,7 @@ export default function BiddingVolume() {
         bookedBranches={t72Booked}
         onRateChange={(p) => handleSectionRate(4, p)}
         onSetGainGrams={(g) => handleSectionGainGrams(4, g)}
-        onAutoSelect={() => selectSectionBills(['transit_72h'])}
+        onAutoSelect={(dates) => selectSectionBills(['transit_72h'], dates)}
         prefix="E"
         dateFilter
         selectable
@@ -1451,7 +1456,8 @@ export default function BiddingVolume() {
         metrics={sectionMetrics((supply?.bangalore_pending_booking?.total?.net_wt || 0) + (supply?.consignment_pending_booking?.total?.net_wt || 0), 0, 5)}
         onRateChange={(p) => handleSectionRate(5, p)}
         onSetGainGrams={(g) => handleSectionGainGrams(5, g)}
-        onAutoSelect={() => selectSectionBills(['bangalore_pending_booking', 'transit_pending_booking'])}
+        onAutoSelect={(dates) => selectSectionBills(['bangalore_pending_booking', 'transit_pending_booking'], dates)}
+        dateFilter
         selectable
         selected={selected}
         branchLocked={branchLocked}
@@ -1491,6 +1497,7 @@ export default function BiddingVolume() {
         metrics={sectionMetrics(0, supply?.booked_pending_dispatch?.total?.net_wt)}
         selectable={false}
         viewOnly
+        dateFilter
         consolidateRegions={['Bangalore']}
         onCreateConsignment={handleCreateConsignment}
         onUnbookBranch={handleUnbookBranch}
@@ -1512,7 +1519,7 @@ export default function BiddingVolume() {
         bookedBranches={preEodBooked}
         onRateChange={(p) => handleSectionRate(7, p)}
         onSetGainGrams={(g) => handleSectionGainGrams(7, g)}
-        onAutoSelect={() => selectSectionBills(['branch_pre_eod'])}
+        onAutoSelect={(dates) => selectSectionBills(['branch_pre_eod'], dates)}
         prefix="P"
         dateFilter
         selectable
@@ -1605,8 +1612,9 @@ export default function BiddingVolume() {
           total={klS1Total}
           metrics={klMetrics(klS1Total.net_wt)}
           noGain
-          onAutoSelect={() => selectSectionBills(['kl_hub_stock'])}
+          onAutoSelect={(dates) => selectSectionBills(['kl_hub_stock'], dates)}
           prefix="H"
+          dateFilter
           selectable
           selected={selected}
           branchLocked={branchLocked}
@@ -1630,8 +1638,9 @@ export default function BiddingVolume() {
           total={klS2MergedTotal}
           metrics={klMetrics(klS2MergedTotal.net_wt)}
           noGain
-          onAutoSelect={() => selectSectionBills(['kl_in_movement', 'kl_hub_from_leaf'])}
+          onAutoSelect={(dates) => selectSectionBills(['kl_in_movement', 'kl_hub_from_leaf'], dates)}
           prefix="M"
+          dateFilter
           selectable
           selected={selected}
           branchLocked={branchLocked}
@@ -1655,8 +1664,9 @@ export default function BiddingVolume() {
           total={klS3Total}
           metrics={klMetrics(klS3Total.net_wt)}
           noGain
-          onAutoSelect={() => selectSectionBills(['kl_created_not_booked'])}
+          onAutoSelect={(dates) => selectSectionBills(['kl_created_not_booked'], dates)}
           prefix="C"
+          dateFilter
           selectable
           selected={selected}
           branchLocked={branchLocked}
@@ -1700,8 +1710,9 @@ export default function BiddingVolume() {
           total={klS5Total}
           metrics={klMetrics(klS5Total.net_wt)}
           noGain
-          onAutoSelect={() => selectSectionBills(['kl_at_leaf'])}
+          onAutoSelect={(dates) => selectSectionBills(['kl_at_leaf'], dates)}
           prefix="L"
+          dateFilter
           selectable
           selected={selected}
           branchLocked={branchLocked}
@@ -3028,12 +3039,15 @@ function SourceSection({
           setEditRate(false)
         }
         const canSelect = !!onAutoSelect && metrics.unbookedNet > 0
+        // Auto-select honours the date filter: when dates are picked, only those
+        // bills get selected for booking (passed up to selectSectionBills).
+        const doAutoSelect = () => onAutoSelect && onAutoSelect(dateFilter && selectedDates.size ? selectedDates : null)
         const cards = noGain ? [
           // Kerala — 3 cards; Unbooked Net IS the selector (no gain, so
           // Available == Unbooked and a separate card would be redundant).
           { key: 'total',    label: 'Total Net',    icon: 'Σ', color: t.text1, val: metrics.totalNet,    bills: totalBills,    sub: 'booked + unbooked' },
           { key: 'booked',   label: 'Booked Net',   icon: '◆', color: blue,    val: metrics.bookedNet,   bills: bookedBills,   sub: 'already booked' },
-          { key: 'unbooked', label: 'Unbooked Net', icon: canSelect ? '✓' : '○', color: canSelect ? green : tone, val: metrics.unbookedNet, bills: unbookedBills, sub: canSelect ? 'tap to select →' : 'still to book', strong: canSelect, onClick: canSelect ? onAutoSelect : null },
+          { key: 'unbooked', label: 'Unbooked Net', icon: canSelect ? '✓' : '○', color: canSelect ? green : tone, val: metrics.unbookedNet, bills: unbookedBills, sub: canSelect ? 'tap to select →' : 'still to book', strong: canSelect, onClick: canSelect ? doAutoSelect : null },
         ] : [
           { key: 'total',    label: 'Total Net',         icon: 'Σ', color: t.text1, val: metrics.totalNet,     bills: totalBills,    sub: 'booked + unbooked' },
           { key: 'booked',   label: 'Booked Net',        icon: '◆', color: blue,    val: metrics.bookedNet,    bills: bookedBills,   sub: 'already booked' },
@@ -3042,7 +3056,7 @@ function SourceSection({
           ...(pipelineG != null ? [
           { key: 'pipeline', label: 'Pipeline',          icon: '⇄', color: orange,  val: pipelineG,            sub: 'owed from prior bids' },
           ] : []),
-          { key: 'avail',    label: 'Available to Book', icon: '✓', color: green,   val: metrics.availableNet, bills: unbookedBills, sub: canSelect ? 'tap to select →' : 'unbooked + gain', strong: true, onClick: canSelect ? onAutoSelect : null },
+          { key: 'avail',    label: 'Available to Book', icon: '✓', color: green,   val: metrics.availableNet, bills: unbookedBills, sub: canSelect ? 'tap to select →' : 'unbooked + gain', strong: true, onClick: canSelect ? doAutoSelect : null },
         ]
         return (
           <div style={{
