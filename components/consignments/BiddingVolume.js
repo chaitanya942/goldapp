@@ -740,17 +740,19 @@ export default function BiddingVolume() {
   // groups: section _group tags. dates (optional Set): when ops has a date
   // filter active, restrict the auto-select to bills purchased on those days —
   // so "Available to Book" picks only what's visible under the filter.
-  const selectSectionBills = useCallback((groups, dates = null, cdates = null) => {
+  const selectSectionBills = useCallback((groups, dates = null, cdates = null, tats = null) => {
     const gset = new Set(groups)
     const dset = dates  && dates.size  ? dates  : null
     const cset = cdates && cdates.size ? cdates : null
+    const tset = tats   && tats.size   ? tats   : null
     setSelected(prev => {
       const next = new Set(prev)
       for (const id of Object.keys(billsById)) {
         const bl = billsById[id]
         if (gset.has(bl._group) && !bl.audit_hold
             && (!dset || dset.has(bl.purchase_date))
-            && (!cset || cset.has(istDayOf(bl._consignment_created_at)))) next.add(id)
+            && (!cset || cset.has(istDayOf(bl._consignment_created_at)))
+            && (!tset || tset.has(Number(bl._tat_hours)))) next.add(id)
       }
       return next
     })
@@ -1525,7 +1527,7 @@ export default function BiddingVolume() {
         index={7}
         icon="◐"
         title="Branch Stock — pickup pending today"
-        subtitle={`Currently at_branch · will move by EOD · arrives at HO ${fmtDate(arrivalDate)}`}
+        subtitle="Currently at_branch · pickup pending · all delivery TATs (24h / 48h / 72h) — filter below"
         accent={t.orange}
         branches={preEodBranches}
         total={sumBranches(preEodBranches)}
@@ -1533,9 +1535,10 @@ export default function BiddingVolume() {
         bookedBranches={preEodBooked}
         onRateChange={(p) => handleSectionRate(7, p)}
         onSetGainGrams={(g) => handleSectionGainGrams(7, g)}
-        onAutoSelect={(dates) => selectSectionBills(['branch_pre_eod'], dates)}
+        onAutoSelect={(dates, alt, tats) => selectSectionBills(['branch_pre_eod'], dates, null, tats)}
         prefix="P"
         dateFilter
+        tatFilter
         selectable
         selected={selected}
         branchLocked={branchLocked}
@@ -2833,6 +2836,9 @@ function SourceSection({
   // IST day of bill[field] (a timestamp). Section 5 → consignment-created date,
   // Section 6 → booking date. Composes with the purchase-date filter.
   altDateFilter = null,
+  // When true, adds a delivery-TAT chip row (24h / 48h / 72h) that filters the
+  // branches by their tat_hours. Section 7 (all-TAT branch-pickup view).
+  tatFilter = false,
   // When true, the section's hero totals/metrics include the subGroup band too
   // (Section 5: main Bangalore-pending + outstation-pending are both unbooked).
   // Default false — most sections show the subGroup as a separate band only.
@@ -2878,22 +2884,30 @@ function SourceSection({
   // metrics so the recomputed Gain / Available stay consistent.
   const [selectedDates,    setSelectedDates]    = useState(() => new Set())
   const [selectedAltDates, setSelectedAltDates] = useState(() => new Set())   // secondary dim (consignment / booking date)
+  const [selectedTats,     setSelectedTats]     = useState(() => new Set())   // delivery-TAT filter (24/48/72)
   const toggleDate    = (d) => setSelectedDates(prev    => { const n = new Set(prev); n.has(d) ? n.delete(d) : n.add(d); return n })
   const toggleAltDate = (d) => setSelectedAltDates(prev => { const n = new Set(prev); n.has(d) ? n.delete(d) : n.add(d); return n })
+  const toggleTat     = (v) => setSelectedTats(prev     => { const n = new Set(prev); n.has(v) ? n.delete(v) : n.add(v); return n })
   const altField = altDateFilter?.field || null
   let dateChipsAvailable = []
   let altChipsAvailable  = []
-  if (dateFilter || altField) {
-    const ds = new Set(), as = new Set()
-    const scan = (arr) => { for (const br of arr || []) for (const bl of br.bills || []) {
-      if (dateFilter && bl.purchase_date) ds.add(bl.purchase_date)
-      if (altField) { const ad = istDayOf(bl[altField]); if (ad) as.add(ad) }
+  let tatsAvailable      = []
+  if (dateFilter || altField || tatFilter) {
+    const ds = new Set(), as = new Set(), ts = new Set()
+    const scan = (arr) => { for (const br of arr || []) {
+      if (tatFilter && br.tat_hours != null) ts.add(Number(br.tat_hours))
+      for (const bl of br.bills || []) {
+        if (dateFilter && bl.purchase_date) ds.add(bl.purchase_date)
+        if (altField) { const ad = istDayOf(bl[altField]); if (ad) as.add(ad) }
+      }
     } }
     scan(branches); scan(bookedBranches); scan(subGroup?.branches)
     dateChipsAvailable = Array.from(ds).sort()   // 'YYYY-MM-DD' sorts oldest→latest
     altChipsAvailable  = Array.from(as).sort()
+    tatsAvailable      = Array.from(ts).sort((a, b) => a - b)
   }
-  if ((dateFilter && selectedDates.size) || (altField && selectedAltDates.size)) {
+  if ((dateFilter && selectedDates.size) || (altField && selectedAltDates.size) || (tatFilter && selectedTats.size)) {
+    const tatPass = (br) => !(tatFilter && selectedTats.size) || selectedTats.has(Number(br.tat_hours))
     const keep = (bl) =>
       (!selectedDates.size    || selectedDates.has(bl.purchase_date)) &&
       (!selectedAltDates.size || selectedAltDates.has(istDayOf(bl[altField])))
@@ -2903,7 +2917,7 @@ function SourceSection({
       for (const bl of bills) { g += Number(bl.gross_weight) || 0; n += Number(bl.net_weight) || 0; a += Number(bl.total_amount) || 0 }
       return { ...br, bills, total_bills: bills.length, total_gross_wt: g, total_net_wt: n, total_amount: a }
     }
-    const filterArr = (arr) => (arr || []).map(rollBranch).filter(br => br.bills.length > 0)
+    const filterArr = (arr) => (arr || []).filter(tatPass).map(rollBranch).filter(br => br.bills.length > 0)
     const sumNet  = (arr) => (arr || []).reduce((s, b) => s + (Number(b.total_net_wt)   || 0), 0)
     const rollTot = (arr) => (arr || []).reduce((acc, b) => ({
       bills:    acc.bills    + (b.total_bills    || 0),
@@ -3094,6 +3108,7 @@ function SourceSection({
         const doAutoSelect = () => onAutoSelect && onAutoSelect(
           dateFilter && selectedDates.size ? selectedDates : null,
           altField && selectedAltDates.size ? selectedAltDates : null,
+          tatFilter && selectedTats.size ? selectedTats : null,
         )
         const cards = noGain ? [
           // Kerala — 3 cards; Unbooked Net IS the selector (no gain, so
@@ -3246,6 +3261,33 @@ function SourceSection({
             <button onClick={() => setSelectedAltDates(new Set())}
               style={{ padding: '5px 9px', borderRadius: 999, cursor: 'pointer', fontSize: 10, fontWeight: 700, border: `1px solid ${t.border}`, background: 'transparent', color: t.text4 }}>
               ✕ Clear ({selectedAltDates.size})
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Delivery-TAT chips (Section 7) — filter the branch list by TAT bucket */}
+      {tatFilter && tatsAvailable.length > 0 && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', padding: '2px 14px 12px' }}>
+          <span style={{ fontSize: 9, color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 800 }}>Delivery&nbsp;TAT</span>
+          {tatsAvailable.map(v => {
+            const active = selectedTats.has(v)
+            return (
+              <button key={v} onClick={() => toggleTat(v)} title="Filter by delivery TAT — select multiple"
+                style={{
+                  padding: '5px 11px', borderRadius: 999, cursor: 'pointer', fontSize: 10.5, fontWeight: 700, whiteSpace: 'nowrap',
+                  border: `1px solid ${active ? tone : t.border}`,
+                  background: active ? `${tone}22` : 'transparent',
+                  color: active ? tone : t.text3, transition: 'all .15s',
+                }}>
+                {v}h
+              </button>
+            )
+          })}
+          {selectedTats.size > 0 && (
+            <button onClick={() => setSelectedTats(new Set())}
+              style={{ padding: '5px 9px', borderRadius: 999, cursor: 'pointer', fontSize: 10, fontWeight: 700, border: `1px solid ${t.border}`, background: 'transparent', color: t.text4 }}>
+              ✕ Clear ({selectedTats.size})
             </button>
           )}
         </div>

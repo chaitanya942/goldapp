@@ -571,7 +571,9 @@ export async function GET(req) {
     const todayDow   = new Date().toLocaleDateString('en-US', { timeZone: 'Asia/Kolkata', weekday: 'short' })
     const preEodEligibleBranchNames = (branchRows || []).filter(b => {
       if (b.region === 'Bangalore')                          return false
-      if (Number(b.delivery_tat_hours || 0) > 24)            return false   // 48h-TAT picked up today arrives day-after, not tomorrow
+      // All delivery TATs (24h / 48h / 72h) are surfaced here now — Section 7 is
+      // a full branch-pickup-pending view (like Branch Stock), with a TAT filter
+      // on the client. (Bid pool stays S1+S2 only; this section isn't summed in.)
       if (b.region === 'Kerala' && !b.is_hub)                return false   // Kerala: hub-only (leaves consolidate at hub first)
       // Kerala hubs are ALWAYS included — they receive transferred bills
       // from leaf branches throughout the day and dispatch to HO at EOD.
@@ -738,7 +740,11 @@ export async function GET(req) {
       // bill at a leaf branch transferred to a hub that has already dispatched
       // today must be excluded the same way.
       preEodBills = (pb || [])
-        .map(b => ({ ...b, branch_name: b.current_branch || b.branch_name }))
+        .map(b => {
+          const owner = b.current_branch || b.branch_name
+          const tat   = branchMeta[owner]?.delivery_tat_hours ?? branchMeta[b.branch_name]?.delivery_tat_hours ?? null
+          return { ...b, branch_name: owner, _tat_hours: tat }
+        })
         .filter(b => !postDispatchedBranches.has(b.branch_name))
     }
 
