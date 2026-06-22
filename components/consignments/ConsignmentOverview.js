@@ -235,7 +235,10 @@ export default function ConsignmentOverview() {
   const [data,         setData]         = useState(() => getCache('co:branch-overview') ?? [])
   const [loading,      setLoading]      = useState(() => !getCache('co:branch-overview'))
   const [search,       setSearch]       = useState('')
-  const [activeRegion, setActiveRegion] = useState(null)
+  const [activeRegions, setActiveRegions] = useState(() => new Set())   // multi-select region filter
+  const toggleRegion = (r) => setActiveRegions(prev => {
+    const next = new Set(prev); next.has(r) ? next.delete(r) : next.add(r); return next
+  })
   // Scope tab — 'outside' = outstation branches (historical default),
   // 'bangalore' = Bangalore-only view. Both tabs treat every branch as
   // independent: click a row to deep-link into Consignment Data and
@@ -633,13 +636,15 @@ export default function ConsignmentOverview() {
   // Distinct purchase dates of the in-scope stock, oldest→latest, for the chips.
   const datesAvailable = useMemo(() => {
     if (!byBranchDate) return []
-    const scopeBranches = new Set(
-      (scopeTab === 'bangalore' ? data.filter(b => b.region === 'Bangalore') : data.filter(b => b.region !== 'Bangalore'))
-        .map(b => b.branch_name)
-    )
+    // Dates dynamically follow the scope tab AND the selected region(s): pick
+    // Telangana and the chips show only Telangana's purchase dates.
+    const inScope = (b) =>
+      (scopeTab === 'bangalore' ? b.region === 'Bangalore' : b.region !== 'Bangalore') &&
+      (!activeRegions.size || activeRegions.has(b.region))
+    const scopeBranches = new Set(data.filter(inScope).map(b => b.branch_name))
     const set = new Set(byBranchDate.filter(r => r.purchase_date && scopeBranches.has(r.branch_name)).map(r => r.purchase_date))
     return Array.from(set).sort()   // 'YYYY-MM-DD' sorts chronologically
-  }, [byBranchDate, data, scopeTab])
+  }, [byBranchDate, data, scopeTab, activeRegions])
 
   const toggleDate = (d) => setSelectedDates(prev => {
     const next = new Set(prev)
@@ -701,7 +706,7 @@ export default function ConsignmentOverview() {
       // Hide branches with zero stock — empty rows are noise. The flash cards
       // above show 'X / Y branches' so the operator knows how many are hidden.
       .filter(b => ((b.today_net_wt || 0) + (b.older_net_wt || 0)) > 0)
-      .filter(b => !activeRegion || b.region === activeRegion)
+      .filter(b => !activeRegions.size || activeRegions.has(b.region))
       .filter(b => !searchQ || (b.branch_name || '').toLowerCase().includes(searchQ) || (b.region || '').toLowerCase().includes(searchQ))
       .slice()
       .sort((a, b) => {
@@ -719,7 +724,7 @@ export default function ConsignmentOverview() {
         if (sortKey === 'total_bills')        { av = (a.today_bills  || 0) + (a.older_bills  || 0); bv = (b.today_bills  || 0) + (b.older_bills  || 0) }
         return (av - bv) * sortDir
       })
-  }, [scopeTab, scopeData, activeRegion, search, sortKey, sortDir])
+  }, [scopeTab, scopeData, activeRegions, search, sortKey, sortDir])
 
   // ── Group filtered rows by region for the collapsible card view. Keys keep
   // the canonical REGION_ORDER so cards render Karnataka → Kerala → AP → Telangana.
@@ -811,7 +816,7 @@ export default function ConsignmentOverview() {
             ].map(tab => {
               const active = scopeTab === tab.key
               return (
-                <button key={tab.key} onClick={() => { setScopeTab(tab.key); setActiveRegion(null) }}
+                <button key={tab.key} onClick={() => { setScopeTab(tab.key); setActiveRegions(new Set()) }}
                   style={{
                     background: active ? `${tab.accent}1d` : 'transparent',
                     border:     `1px solid ${active ? `${tab.accent}80` : 'transparent'}`,
@@ -830,8 +835,8 @@ export default function ConsignmentOverview() {
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
           {/* View-mode segmented toggle. Default 'grouped' rolls 73 branches up
               into ~4 region cards; 'flat' is the dense table for power users. */}
-          {(activeRegion || search) && (
-            <button onClick={() => { setActiveRegion(null); setSearch('') }}
+          {(activeRegions.size > 0 || search) && (
+            <button onClick={() => { setActiveRegions(new Set()); setSearch('') }}
               style={{ background: 'transparent', border: `1px solid ${t.border2}`, borderRadius: '8px', padding: '7px 13px', fontSize: '11px', color: t.text3, cursor: 'pointer' }}>
               Clear
             </button>
@@ -1023,9 +1028,9 @@ export default function ConsignmentOverview() {
             const allTodayBills = scopeData.reduce((s, b) => s + (b.today_bills || 0), 0)
             const activeBranches = scopeData.filter(b => ((b.today_net_wt || 0) + (b.older_net_wt || 0)) > 0).length
             const w = fmtWtCard(allNetWt)
-            const isActive = !activeRegion
+            const isActive = activeRegions.size === 0
             return (
-              <div onClick={() => setActiveRegion(null)}
+              <div onClick={() => setActiveRegions(new Set())}
                 style={{
                   background: isActive ? `linear-gradient(145deg, ${t.gold}18, ${t.gold}06)` : `linear-gradient(145deg, ${t.card}, ${t.card2})`,
                   border: `1px solid ${isActive ? t.gold + '60' : t.border}`,
@@ -1062,10 +1067,10 @@ export default function ConsignmentOverview() {
             const stats  = regionStats[r] || {}
             const color  = REGION_COLORS[r] || t.text3
             const icon   = REGION_ICONS[r] || '📍'
-            const active = activeRegion === r
+            const active = activeRegions.has(r)
             const w      = fmtWtCard(stats.total_net_wt)
             return (
-              <div key={r} onClick={() => setActiveRegion(active ? null : r)}
+              <div key={r} onClick={() => toggleRegion(r)}
                 style={{
                   background: active ? `linear-gradient(145deg, ${color}18, ${color}06)` : `linear-gradient(145deg, ${t.card}, ${t.card2})`,
                   border: `1px solid ${active ? color + '60' : t.border}`,
@@ -1276,7 +1281,7 @@ export default function ConsignmentOverview() {
             <div style={{ ...card, padding: '80px', display: 'flex', justifyContent: 'center' }}><GoldSpinner size={32} /></div>
           ) : groupedByRegion.length === 0 ? (
             <div style={{ ...card, padding: '80px', textAlign: 'center', color: t.text4, fontSize: '13px' }}>
-              {search || activeRegion ? 'No branches match your filter' : 'No stock at any branch'}
+              {search || activeRegions.size ? 'No branches match your filter' : 'No stock at any branch'}
             </div>
           ) : groupedByRegion.map(g => {
             const rColor    = REGION_COLORS[g.region] || t.text3
@@ -1506,7 +1511,7 @@ export default function ConsignmentOverview() {
             <div style={{ padding: '80px', display: 'flex', justifyContent: 'center' }}><GoldSpinner size={32} /></div>
           ) : filtered.length === 0 ? (
             <div style={{ padding: '80px', textAlign: 'center', color: t.text4, fontSize: '13px' }}>
-              {search || activeRegion ? 'No branches match your filter' : 'No stock at any branch'}
+              {search || activeRegions.size ? 'No branches match your filter' : 'No stock at any branch'}
             </div>
           ) : (
             <div style={{ overflowX: 'auto' }}>
