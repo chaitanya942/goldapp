@@ -1384,21 +1384,34 @@ export async function GET(req) {
     // what made this come back empty while the Net Wt showed 2898 g.
     const { data: bills, error: bErr } = await supabase
       .from('purchases')
-      .select('application_id, customer_name, branch_name, current_branch, gross_weight, net_weight, total_amount, purchase_date, stock_status')
+      .select('application_id, customer_name, branch_name, current_branch, gross_weight, net_weight, total_amount, purchase_date, stock_status, dispatched_at, received_at')
       .eq('booking_id', bookingId)
       .order('net_weight', { ascending: false })
     if (bErr) return Response.json({ error: bErr.message }, { status: 500 })
-    const { data: brs } = await supabase.from('branches').select('name, region')
+    const { data: brs } = await supabase.from('branches').select('name, region, delivery_tat_hours')
     const regionBy = Object.fromEntries((brs || []).map(x => [x.name, x.region]))
+    const tatBy    = Object.fromEntries((brs || []).map(x => [x.name, Number(x.delivery_tat_hours) || 24]))
+    const istDateOf = (utcIso) => {
+      if (!utcIso) return null
+      const d = new Date(new Date(utcIso).getTime() + 5.5 * 3600_000)
+      return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`
+    }
     const byBranch = {}
     let tBills = 0, tNet = 0, tGross = 0
     for (const p of bills || []) {
       const owner = p.current_branch || p.branch_name
       if (!byBranch[owner]) byBranch[owner] = { branch_name: owner, region: regionBy[owner] || 'Unknown', bills: [], net_wt: 0, gross_wt: 0 }
       const g = byBranch[owner]
+      // Expected arrival: at_ho → actual received day; in_consignment → dispatched
+      // + TAT (working days, Sunday-skipped); at_branch → not dispatched yet.
+      const tat = tatBy[p.branch_name] || 24
+      const expected_arrival = p.stock_status === 'at_ho'
+        ? istDateOf(p.received_at)
+        : (p.dispatched_at ? addWorkingDaysSkipSunday(istDateOf(p.dispatched_at), Math.max(1, Math.ceil(tat / 24))) : null)
       g.bills.push({
         application_id: p.application_id, customer_name: p.customer_name,
         purchase_date: p.purchase_date, stock_status: p.stock_status,
+        expected_arrival,
         net_weight: Number(p.net_weight || 0), gross_weight: Number(p.gross_weight || 0),
         total_amount: Number(p.total_amount || 0),
       })

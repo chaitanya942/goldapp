@@ -52,6 +52,15 @@ const fmtDateShort = (d) => {
   const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
   return `${day} ${months[+m - 1]}`
 }
+// Lazy-load a CDN script once (SheetJS / html2canvas for the case exports).
+function loadScript(src) {
+  return new Promise((resolve, reject) => {
+    if (document.querySelector(`script[src="${src}"]`)) { resolve(); return }
+    const s = document.createElement('script'); s.src = src
+    s.onload = resolve; s.onerror = reject
+    document.head.appendChild(s)
+  })
+}
 // ISO timestamp → IST calendar day (YYYY-MM-DD). Used for the consignment-
 // created-date filter (Section 5), whose source field is a full timestamp.
 const istDayOf = (ts) => {
@@ -1786,6 +1795,7 @@ export default function BiddingVolume() {
           <BookingsList
             t={t} card={card}
             bookings={tabBookings}
+            biddingDate={bookingsDate}
             onUpdateStatus={updateStatus}
             onRequestCancel={(b) => setCancelTarget(b)}
             onClosePipeline={closeBookingPipeline}
@@ -2261,9 +2271,10 @@ const DISPATCH_META = {
   at_risk: { label: '⚠ at risk',           tone: 'red'    },
 }
 
-function BookingsList({ t, card, bookings, onUpdateStatus, onRequestCancel, onClosePipeline, onReconcile, onUnbook, onCreateConsignment, onCreate }) {
+function BookingsList({ t, card, bookings, biddingDate, onUpdateStatus, onRequestCancel, onClosePipeline, onReconcile, onUnbook, onCreateConsignment, onCreate }) {
   const [actionBusy, setActionBusy] = useState(null)  // booking id currently mid-action
   const [hideCancelled, setHideCancelled] = useState(true)
+  const [exporting, setExporting] = useState(null)    // 'xlsx' | 'png' | null
   // Branch-wise breakdown drill-down — click a booking's Net Wt to see every
   // attached bill grouped by branch.
   const [openBooking,   setOpenBooking]   = useState(null)
@@ -2287,6 +2298,82 @@ function BookingsList({ t, card, bookings, onUpdateStatus, onRequestCancel, onCl
   const visible       = hideCancelled ? bookings.filter(b => b.status !== 'cancelled') : bookings
   const activeRows    = visible.filter(b => b.status !== 'cancelled')
   const activeWeight  = activeRows.reduce((s, b) => s + Number(b.weight || 0), 0)
+
+  // ── Case-wise export (all booked bills for this bidding day) ──────────────
+  const fileBase = `Cases booked on ${biddingDate ? fmtDate(biddingDate) : 'date'}`
+  const gatherCases = async () => {
+    const rows = []
+    for (const bk of activeRows) {
+      let bd = breakdowns[bk.id]
+      if (!bd || !bd.branches || !bd.branches.length) {
+        try {
+          const res = await authedFetch(`/api/consignments?action=booking_bills&booking_id=${bk.id}`)
+          const j = await res.json().catch(() => ({}))
+          bd = { branches: j.branches || [] }
+        } catch { bd = { branches: [] } }
+      }
+      for (const br of bd.branches || []) {
+        for (const bill of br.bills || []) {
+          rows.push({
+            party: bk.party || '—', branch: br.branch_name || '—', region: br.region || '—',
+            app_id: bill.application_id || '—', customer: bill.customer_name || '—',
+            purchase_date: bill.purchase_date ? fmtDate(bill.purchase_date) : '',
+            expected_arrival: bill.expected_arrival ? fmtDate(bill.expected_arrival) : (bill.stock_status === 'at_branch' ? 'pickup pending' : ''),
+            net_wt: Number(bill.net_weight || 0), gross_wt: Number(bill.gross_weight || 0),
+            amount: Number(bill.total_amount || 0), status: (bill.stock_status || '').replace(/_/g, ' '),
+          })
+        }
+      }
+    }
+    return rows
+  }
+  const exportExcel = async () => {
+    setExporting('xlsx')
+    try {
+      const cases = await gatherCases()
+      if (!cases.length) return
+      await loadScript('https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js')
+      const XLSX = window.XLSX
+      const header = ['#', 'Party', 'Branch', 'Region', 'App ID', 'Customer', 'Purchase Date', 'Expected Arrival', 'Net Wt (g)', 'Gross Wt (g)', 'Amount (₹)', 'Status']
+      const aoa = [header, ...cases.map((c, i) => [i + 1, c.party, c.branch, c.region, c.app_id, c.customer, c.purchase_date, c.expected_arrival, c.net_wt.toFixed(2), c.gross_wt.toFixed(2), Math.round(c.amount), c.status])]
+      const ws = XLSX.utils.aoa_to_sheet(aoa)
+      const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Booked cases')
+      XLSX.writeFile(wb, `${fileBase}.xlsx`)
+    } finally { setExporting(null) }
+  }
+  const exportPng = async () => {
+    setExporting('png')
+    try {
+      const cases = await gatherCases()
+      if (!cases.length) return
+      await loadScript('https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js')
+      const esc = (s) => String(s == null ? '' : s).replace(/[&<>]/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[m]))
+      const totNet = cases.reduce((s, c) => s + c.net_wt, 0)
+      const rowsHtml = cases.map((c, i) => `<tr style="border-top:1px solid #eee">
+        <td style="padding:4px 8px;color:#999">${i + 1}</td>
+        <td style="padding:4px 8px">${esc(c.party)}</td>
+        <td style="padding:4px 8px">${esc(c.branch)}</td>
+        <td style="padding:4px 8px;color:#777">${esc(c.region)}</td>
+        <td style="padding:4px 8px;font-family:monospace;color:#a07a1f">${esc(c.app_id)}</td>
+        <td style="padding:4px 8px">${esc(c.customer)}</td>
+        <td style="padding:4px 8px">${esc(c.purchase_date)}</td>
+        <td style="padding:4px 8px">${esc(c.expected_arrival)}</td>
+        <td style="padding:4px 8px;text-align:right;font-family:monospace">${c.net_wt.toFixed(2)}</td>
+      </tr>`).join('')
+      const el = document.createElement('div')
+      el.style.cssText = 'position:fixed;left:-99999px;top:0;background:#fff;color:#111;padding:20px;font-family:system-ui,Arial,sans-serif;width:1040px'
+      el.innerHTML = `<div style="font-size:18px;font-weight:800;margin-bottom:3px">${esc(fileBase)}</div>
+        <div style="font-size:12px;color:#666;margin-bottom:12px">${cases.length} cases · ${totNet.toFixed(2)} g net</div>
+        <table style="width:100%;border-collapse:collapse;font-size:12px">
+          <thead><tr style="background:#f3eee0;text-align:left">
+            <th style="padding:6px 8px">#</th><th style="padding:6px 8px">Party</th><th style="padding:6px 8px">Branch</th><th style="padding:6px 8px">Region</th><th style="padding:6px 8px">App ID</th><th style="padding:6px 8px">Customer</th><th style="padding:6px 8px">Purchase</th><th style="padding:6px 8px">Arrival</th><th style="padding:6px 8px;text-align:right">Net g</th>
+          </tr></thead><tbody>${rowsHtml}</tbody></table>`
+      document.body.appendChild(el)
+      const canvas = await window.html2canvas(el, { scale: 2, backgroundColor: '#ffffff' })
+      document.body.removeChild(el)
+      const a = document.createElement('a'); a.href = canvas.toDataURL('image/png'); a.download = `${fileBase}.png`; a.click()
+    } finally { setExporting(null) }
+  }
   const activeValue   = activeRows.reduce((s, b) => s + Number(b.weight || 0) * Number(b.rate || 0), 0)
   // Column-wise totals across active rows. Gain + Pipeline come straight
   // from the API's derived gain model (derived_gain_g / derived_pipeline_g)
@@ -2334,6 +2421,19 @@ function BookingsList({ t, card, bookings, onUpdateStatus, onRequestCancel, onCl
           Bookings <span style={{ color: t.text3, fontWeight: 700 }}>({visible.length})</span>
         </div>
         <div style={{ flex: 1 }} />
+        {/* Case-wise export of every booked bill on this bidding day */}
+        {activeRows.length > 0 && (
+          <>
+            <button onClick={exportExcel} disabled={!!exporting} title="Download all booked cases as Excel"
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '6px 12px', borderRadius: 7, border: `1px solid ${t.border2 || t.border}`, background: 'transparent', color: exporting ? t.text4 : t.gold, fontSize: 11, fontWeight: 700, cursor: exporting ? 'not-allowed' : 'pointer', whiteSpace: 'nowrap' }}>
+              {exporting === 'xlsx' ? 'Exporting…' : '↓ Excel'}
+            </button>
+            <button onClick={exportPng} disabled={!!exporting} title="Download all booked cases as a PNG image"
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '6px 12px', borderRadius: 7, border: `1px solid ${t.border2 || t.border}`, background: 'transparent', color: exporting ? t.text4 : t.blue, fontSize: 11, fontWeight: 700, cursor: exporting ? 'not-allowed' : 'pointer', whiteSpace: 'nowrap' }}>
+              {exporting === 'png' ? 'Rendering…' : '↓ PNG'}
+            </button>
+          </>
+        )}
         <label style={{ display: 'inline-flex', alignItems: 'center', gap: 7, fontSize: 12, color: t.text2, cursor: 'pointer', fontWeight: 600 }}>
           <input type="checkbox" checked={hideCancelled} onChange={e => setHideCancelled(e.target.checked)} />
           Hide cancelled
@@ -2663,18 +2763,18 @@ function BookingsList({ t, card, bookings, onUpdateStatus, onRequestCancel, onCl
                                               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                                                 <thead>
                                                   <tr>
-                                                    <th style={bth('left')}>Bill No</th>
+                                                    <th style={bth('left')}>Purchase Date</th>
                                                     <th style={bth('left')}>Customer</th>
-                                                    <th style={bth('left')}>Status</th>
+                                                    <th style={bth('left')}>Expected Arrival</th>
                                                     <th style={bth('right')}>Net Wt</th>
                                                   </tr>
                                                 </thead>
                                                 <tbody>
                                                   {br.bills.map((bill, j) => (
                                                     <tr key={bill.application_id || j} style={{ borderTop: `1px solid ${t.border}18` }}>
-                                                      <td style={{ ...btd('left', t.gold, 600), fontFamily: 'monospace', fontSize: 11.5 }}>{bill.application_id || '—'}</td>
+                                                      <td style={btd('left', t.text2, 600)}>{bill.purchase_date ? fmtDate(bill.purchase_date) : '—'}</td>
                                                       <td style={btd('left', t.text2, 500)}>{bill.customer_name || '—'}</td>
-                                                      <td style={btd('left', t.text3, 500)}>{(bill.stock_status || '').replace(/_/g, ' ') || '—'}</td>
+                                                      <td style={btd('left', t.text3, 500)}>{bill.expected_arrival ? fmtDate(bill.expected_arrival) : (bill.stock_status === 'at_branch' ? 'pickup pending' : '—')}</td>
                                                       <td style={{ ...btd('right', t.text1, 600), fontFamily: 'monospace' }}>{fmt(bill.net_weight, 2)} g</td>
                                                     </tr>
                                                   ))}
