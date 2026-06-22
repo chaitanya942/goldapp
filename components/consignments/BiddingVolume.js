@@ -2317,6 +2317,7 @@ function BookingsList({ t, card, bookings, biddingDate, onUpdateStatus, onReques
           rows.push({
             party: bk.party || '—', branch: br.branch_name || '—', region: br.region || '—',
             app_id: bill.application_id || '—', customer: bill.customer_name || '—',
+            consignment_date: bill.consignment_date ? fmtDate(bill.consignment_date) : (bill.stock_status === 'at_branch' ? 'pending' : ''),
             purchase_date: bill.purchase_date ? fmtDate(bill.purchase_date) : '',
             expected_arrival: bill.expected_arrival ? fmtDate(bill.expected_arrival) : (bill.stock_status === 'at_branch' ? 'pickup pending' : ''),
             net_wt: Number(bill.net_weight || 0), gross_wt: Number(bill.gross_weight || 0),
@@ -2334,8 +2335,8 @@ function BookingsList({ t, card, bookings, biddingDate, onUpdateStatus, onReques
       if (!cases.length) return
       await loadScript('https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js')
       const XLSX = window.XLSX
-      const header = ['#', 'Party', 'Branch', 'Region', 'App ID', 'Customer', 'Purchase Date', 'Expected Arrival', 'Net Wt (g)', 'Gross Wt (g)', 'Amount (₹)', 'Status']
-      const aoa = [header, ...cases.map((c, i) => [i + 1, c.party, c.branch, c.region, c.app_id, c.customer, c.purchase_date, c.expected_arrival, c.net_wt.toFixed(2), c.gross_wt.toFixed(2), Math.round(c.amount), c.status])]
+      const header = ['#', 'Party', 'Branch', 'Region', 'App ID', 'Consignment Date', 'Purchase Date', 'Customer', 'Net Wt (g)', 'Expected Arrival', 'Gross Wt (g)', 'Amount (₹)', 'Status']
+      const aoa = [header, ...cases.map((c, i) => [i + 1, c.party, c.branch, c.region, c.app_id, c.consignment_date, c.purchase_date, c.customer, c.net_wt.toFixed(2), c.expected_arrival, c.gross_wt.toFixed(2), Math.round(c.amount), c.status])]
       const ws = XLSX.utils.aoa_to_sheet(aoa)
       const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Booked cases')
       XLSX.writeFile(wb, `${fileBase}.xlsx`)
@@ -2355,10 +2356,11 @@ function BookingsList({ t, card, bookings, biddingDate, onUpdateStatus, onReques
         <td style="padding:4px 8px">${esc(c.branch)}</td>
         <td style="padding:4px 8px;color:#777">${esc(c.region)}</td>
         <td style="padding:4px 8px;font-family:monospace;color:#a07a1f">${esc(c.app_id)}</td>
-        <td style="padding:4px 8px">${esc(c.customer)}</td>
+        <td style="padding:4px 8px">${esc(c.consignment_date)}</td>
         <td style="padding:4px 8px">${esc(c.purchase_date)}</td>
-        <td style="padding:4px 8px">${esc(c.expected_arrival)}</td>
+        <td style="padding:4px 8px">${esc(c.customer)}</td>
         <td style="padding:4px 8px;text-align:right;font-family:monospace">${c.net_wt.toFixed(2)}</td>
+        <td style="padding:4px 8px">${esc(c.expected_arrival)}</td>
       </tr>`).join('')
       const el = document.createElement('div')
       el.style.cssText = 'position:fixed;left:-99999px;top:0;background:#fff;color:#111;padding:20px;font-family:system-ui,Arial,sans-serif;width:1040px'
@@ -2366,7 +2368,7 @@ function BookingsList({ t, card, bookings, biddingDate, onUpdateStatus, onReques
         <div style="font-size:12px;color:#666;margin-bottom:12px">${cases.length} cases · ${totNet.toFixed(2)} g net</div>
         <table style="width:100%;border-collapse:collapse;font-size:12px">
           <thead><tr style="background:#f3eee0;text-align:left">
-            <th style="padding:6px 8px">#</th><th style="padding:6px 8px">Party</th><th style="padding:6px 8px">Branch</th><th style="padding:6px 8px">Region</th><th style="padding:6px 8px">App ID</th><th style="padding:6px 8px">Customer</th><th style="padding:6px 8px">Purchase</th><th style="padding:6px 8px">Arrival</th><th style="padding:6px 8px;text-align:right">Net g</th>
+            <th style="padding:6px 8px">#</th><th style="padding:6px 8px">Party</th><th style="padding:6px 8px">Branch</th><th style="padding:6px 8px">Region</th><th style="padding:6px 8px">App ID</th><th style="padding:6px 8px">Consignment</th><th style="padding:6px 8px">Purchase</th><th style="padding:6px 8px">Customer</th><th style="padding:6px 8px;text-align:right">Net g</th><th style="padding:6px 8px">Arrival</th>
           </tr></thead><tbody>${rowsHtml}</tbody></table>`
       document.body.appendChild(el)
       const canvas = await window.html2canvas(el, { scale: 2, backgroundColor: '#ffffff' })
@@ -2763,19 +2765,21 @@ function BookingsList({ t, card, bookings, biddingDate, onUpdateStatus, onReques
                                               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                                                 <thead>
                                                   <tr>
+                                                    <th style={bth('left')}>Consignment Date</th>
                                                     <th style={bth('left')}>Purchase Date</th>
                                                     <th style={bth('left')}>Customer</th>
-                                                    <th style={bth('left')}>Expected Arrival</th>
                                                     <th style={bth('right')}>Net Wt</th>
+                                                    <th style={bth('left')}>Expected Arrival</th>
                                                   </tr>
                                                 </thead>
                                                 <tbody>
                                                   {br.bills.map((bill, j) => (
                                                     <tr key={bill.application_id || j} style={{ borderTop: `1px solid ${t.border}18` }}>
+                                                      <td style={btd('left', t.text2, 600)}>{bill.consignment_date ? fmtDate(bill.consignment_date) : (bill.stock_status === 'at_branch' ? 'pending' : '—')}</td>
                                                       <td style={btd('left', t.text2, 600)}>{bill.purchase_date ? fmtDate(bill.purchase_date) : '—'}</td>
                                                       <td style={btd('left', t.text2, 500)}>{bill.customer_name || '—'}</td>
-                                                      <td style={btd('left', t.text3, 500)}>{bill.expected_arrival ? fmtDate(bill.expected_arrival) : (bill.stock_status === 'at_branch' ? 'pickup pending' : '—')}</td>
                                                       <td style={{ ...btd('right', t.text1, 600), fontFamily: 'monospace' }}>{fmt(bill.net_weight, 2)} g</td>
+                                                      <td style={btd('left', t.text3, 500)}>{bill.expected_arrival ? fmtDate(bill.expected_arrival) : (bill.stock_status === 'at_branch' ? 'pickup pending' : '—')}</td>
                                                     </tr>
                                                   ))}
                                                 </tbody>

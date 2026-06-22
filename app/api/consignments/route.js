@@ -1402,16 +1402,22 @@ export async function GET(req) {
       const owner = p.current_branch || p.branch_name
       if (!byBranch[owner]) byBranch[owner] = { branch_name: owner, region: regionBy[owner] || 'Unknown', bills: [], net_wt: 0, gross_wt: 0 }
       const g = byBranch[owner]
-      // Expected arrival: at_ho → actual received day; in_consignment → dispatched
-      // + TAT (working days, Sunday-skipped); at_branch → not dispatched yet.
+      const isBlr = (regionBy[owner] || regionBy[p.branch_name]) === 'Bangalore'
       const tat = tatBy[p.branch_name] || 24
-      const expected_arrival = p.stock_status === 'at_ho'
-        ? istDateOf(p.received_at)
-        : (p.dispatched_at ? addWorkingDaysSkipSunday(istDateOf(p.dispatched_at), Math.max(1, Math.ceil(tat / 24))) : null)
+      // Consignment date: Bangalore moves same-day → = purchase date; outstation
+      // → the actual dispatch day.
+      const consignment_date = isBlr ? p.purchase_date : istDateOf(p.dispatched_at)
+      // Expected arrival: at_ho → actual received day; Bangalore → consignment
+      // (= purchase) day + 24h; outstation → dispatch + TAT (working days,
+      // Sunday-skipped); at_branch outstation → not dispatched yet.
+      let expected_arrival
+      if (p.stock_status === 'at_ho')      expected_arrival = istDateOf(p.received_at)
+      else if (isBlr)                      expected_arrival = p.purchase_date ? addWorkingDaysSkipSunday(p.purchase_date, 1) : null
+      else                                 expected_arrival = p.dispatched_at ? addWorkingDaysSkipSunday(istDateOf(p.dispatched_at), Math.max(1, Math.ceil(tat / 24))) : null
       g.bills.push({
         application_id: p.application_id, customer_name: p.customer_name,
         purchase_date: p.purchase_date, stock_status: p.stock_status,
-        expected_arrival,
+        consignment_date, expected_arrival,
         net_weight: Number(p.net_weight || 0), gross_weight: Number(p.gross_weight || 0),
         total_amount: Number(p.total_amount || 0),
       })
