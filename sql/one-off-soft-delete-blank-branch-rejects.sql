@@ -23,3 +23,14 @@ SELECT count(*) AS live_blank_branch
   FROM purchases
  WHERE (branch_name IS NULL OR branch_name = '')
    AND is_deleted = false;
+
+-- ── Also: the lone "Branch" placeholder row (new CRM WGKA-55434) ─────────────
+-- A pure TEST entry (customer "TEST ASBEER MK", 0 wt / ₹0, ESTIMATION_PENDING,
+-- branch literally "Branch"). Soft-deleted so the junk placeholder branch stops
+-- appearing in reports.
+UPDATE purchases SET is_deleted = true
+ WHERE branch_name = 'Branch' AND application_id = 'WGKA-55434';
+
+-- VERIFY — expect 0 live "Branch" rows
+SELECT count(*) AS live_branch_placeholder
+  FROM purchases WHERE branch_name = 'Branch' AND is_deleted = false;
