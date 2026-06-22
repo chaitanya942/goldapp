@@ -52,6 +52,13 @@ const fmtDateShort = (d) => {
   const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
   return `${day} ${months[+m - 1]}`
 }
+// ISO timestamp → IST calendar day (YYYY-MM-DD). Used for the consignment-
+// created-date filter (Section 5), whose source field is a full timestamp.
+const istDayOf = (ts) => {
+  if (!ts) return null
+  const d = new Date(new Date(ts).getTime() + 5.5 * 3600000)
+  return Number.isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10)
+}
 const dateDiff = (a, b) => {
   const A = new Date(a + 'T00:00:00Z').getTime()
   const B = new Date(b + 'T00:00:00Z').getTime()
@@ -733,14 +740,17 @@ export default function BiddingVolume() {
   // groups: section _group tags. dates (optional Set): when ops has a date
   // filter active, restrict the auto-select to bills purchased on those days —
   // so "Available to Book" picks only what's visible under the filter.
-  const selectSectionBills = useCallback((groups, dates = null) => {
+  const selectSectionBills = useCallback((groups, dates = null, cdates = null) => {
     const gset = new Set(groups)
-    const dset = dates && dates.size ? dates : null
+    const dset = dates  && dates.size  ? dates  : null
+    const cset = cdates && cdates.size ? cdates : null
     setSelected(prev => {
       const next = new Set(prev)
       for (const id of Object.keys(billsById)) {
         const bl = billsById[id]
-        if (gset.has(bl._group) && !bl.audit_hold && (!dset || dset.has(bl.purchase_date))) next.add(id)
+        if (gset.has(bl._group) && !bl.audit_hold
+            && (!dset || dset.has(bl.purchase_date))
+            && (!cset || cset.has(istDayOf(bl._consignment_created_at)))) next.add(id)
       }
       return next
     })
@@ -1456,8 +1466,9 @@ export default function BiddingVolume() {
         metrics={sectionMetrics((supply?.bangalore_pending_booking?.total?.net_wt || 0) + (supply?.consignment_pending_booking?.total?.net_wt || 0), 0, 5)}
         onRateChange={(p) => handleSectionRate(5, p)}
         onSetGainGrams={(g) => handleSectionGainGrams(5, g)}
-        onAutoSelect={(dates) => selectSectionBills(['bangalore_pending_booking', 'transit_pending_booking'], dates)}
+        onAutoSelect={(dates, cdates) => selectSectionBills(['bangalore_pending_booking', 'transit_pending_booking'], dates, cdates)}
         dateFilter
+        consignmentDateFilter
         selectable
         selected={selected}
         branchLocked={branchLocked}
@@ -2815,12 +2826,16 @@ function SourceSection({
   // re-rolls the branch lists + hero metrics to the selected date(s). Used by
   // the transit sections (2/3/4) and branch-pickup-pending (7).
   dateFilter = false,
+  // When true, adds a SECOND chip row "Consignment date" (filters by the bill's
+  // consignment-created day). Section 5 passes it. Composes with dateFilter.
+  consignmentDateFilter = false,
   // When a number, renders an extra "Pipeline" hero card after Gain (the
   // carried-over pipeline owed against this pool). Section 1 passes it.
   pipelineG = null,
   emptyMsg,
 }) {
   const tone = accent || t.gold
+  const blueAccent = t.blue || '#4a90d9'   // consignment-date chips (distinct from purchase-date)
   const [editRate, setEditRate] = useState(false)
   const [gainMode, setGainMode] = useState('pct')   // 'pct' | 'abs'
   const [gainDraft, setGainDraft] = useState('')
@@ -2850,20 +2865,28 @@ function SourceSection({
   // bills, then (when any are selected) re-roll the branch lists, hero totals
   // and hero metrics to only those dates. Gain rate is taken from the passed
   // metrics so the recomputed Gain / Available stay consistent.
-  const [selectedDates, setSelectedDates] = useState(() => new Set())
-  const toggleDate = (d) => setSelectedDates(prev => {
-    const next = new Set(prev); next.has(d) ? next.delete(d) : next.add(d); return next
-  })
-  let dateChipsAvailable = []
-  if (dateFilter) {
-    const ds = new Set()
-    const scan = (arr) => { for (const br of arr || []) for (const bl of br.bills || []) if (bl.purchase_date) ds.add(bl.purchase_date) }
+  const [selectedDates,  setSelectedDates]  = useState(() => new Set())
+  const [selectedCDates, setSelectedCDates] = useState(() => new Set())   // consignment-created dates
+  const toggleDate  = (d) => setSelectedDates(prev  => { const n = new Set(prev); n.has(d) ? n.delete(d) : n.add(d); return n })
+  const toggleCDate = (d) => setSelectedCDates(prev => { const n = new Set(prev); n.has(d) ? n.delete(d) : n.add(d); return n })
+  let dateChipsAvailable  = []
+  let cdateChipsAvailable = []
+  if (dateFilter || consignmentDateFilter) {
+    const ds = new Set(), cs = new Set()
+    const scan = (arr) => { for (const br of arr || []) for (const bl of br.bills || []) {
+      if (dateFilter && bl.purchase_date) ds.add(bl.purchase_date)
+      if (consignmentDateFilter) { const cd = istDayOf(bl._consignment_created_at); if (cd) cs.add(cd) }
+    } }
     scan(branches); scan(bookedBranches); scan(subGroup?.branches)
-    dateChipsAvailable = Array.from(ds).sort()   // 'YYYY-MM-DD' sorts oldest→latest
+    dateChipsAvailable  = Array.from(ds).sort()   // 'YYYY-MM-DD' sorts oldest→latest
+    cdateChipsAvailable = Array.from(cs).sort()
   }
-  if (dateFilter && selectedDates.size) {
+  if ((dateFilter && selectedDates.size) || (consignmentDateFilter && selectedCDates.size)) {
+    const keep = (bl) =>
+      (!selectedDates.size  || selectedDates.has(bl.purchase_date)) &&
+      (!selectedCDates.size || selectedCDates.has(istDayOf(bl._consignment_created_at)))
     const rollBranch = (br) => {
-      const bills = (br.bills || []).filter(bl => selectedDates.has(bl.purchase_date))
+      const bills = (br.bills || []).filter(keep)
       let g = 0, n = 0, a = 0
       for (const bl of bills) { g += Number(bl.gross_weight) || 0; n += Number(bl.net_weight) || 0; a += Number(bl.total_amount) || 0 }
       return { ...br, bills, total_bills: bills.length, total_gross_wt: g, total_net_wt: n, total_amount: a }
@@ -3041,7 +3064,10 @@ function SourceSection({
         const canSelect = !!onAutoSelect && metrics.unbookedNet > 0
         // Auto-select honours the date filter: when dates are picked, only those
         // bills get selected for booking (passed up to selectSectionBills).
-        const doAutoSelect = () => onAutoSelect && onAutoSelect(dateFilter && selectedDates.size ? selectedDates : null)
+        const doAutoSelect = () => onAutoSelect && onAutoSelect(
+          dateFilter && selectedDates.size ? selectedDates : null,
+          consignmentDateFilter && selectedCDates.size ? selectedCDates : null,
+        )
         const cards = noGain ? [
           // Kerala — 3 cards; Unbooked Net IS the selector (no gain, so
           // Available == Unbooked and a separate card would be redundant).
@@ -3166,6 +3192,33 @@ function SourceSection({
             <button onClick={() => setSelectedDates(new Set())}
               style={{ padding: '5px 9px', borderRadius: 999, cursor: 'pointer', fontSize: 10, fontWeight: 700, border: `1px solid ${t.border}`, background: 'transparent', color: t.text4 }}>
               ✕ Clear ({selectedDates.size})
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Consignment-created-date chips (Section 5) — filter by the day the consignment was created */}
+      {consignmentDateFilter && cdateChipsAvailable.length > 0 && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', padding: '2px 14px 12px' }}>
+          <span style={{ fontSize: 9, color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 800 }}>Consignment&nbsp;date</span>
+          {cdateChipsAvailable.map(d => {
+            const active = selectedCDates.has(d)
+            return (
+              <button key={d} onClick={() => toggleCDate(d)} title="Filter by consignment-created date — select multiple"
+                style={{
+                  padding: '5px 11px', borderRadius: 999, cursor: 'pointer', fontSize: 10.5, fontWeight: 700, whiteSpace: 'nowrap',
+                  border: `1px solid ${active ? blueAccent : t.border}`,
+                  background: active ? `${blueAccent}22` : 'transparent',
+                  color: active ? blueAccent : t.text3, transition: 'all .15s',
+                }}>
+                {fmtDate(d)}
+              </button>
+            )
+          })}
+          {selectedCDates.size > 0 && (
+            <button onClick={() => setSelectedCDates(new Set())}
+              style={{ padding: '5px 9px', borderRadius: 999, cursor: 'pointer', fontSize: 10, fontWeight: 700, border: `1px solid ${t.border}`, background: 'transparent', color: t.text4 }}>
+              ✕ Clear ({selectedCDates.size})
             </button>
           )}
         </div>
