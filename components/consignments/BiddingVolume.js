@@ -1468,7 +1468,7 @@ export default function BiddingVolume() {
         onSetGainGrams={(g) => handleSectionGainGrams(5, g)}
         onAutoSelect={(dates, cdates) => selectSectionBills(['bangalore_pending_booking', 'transit_pending_booking'], dates, cdates)}
         dateFilter
-        consignmentDateFilter
+        altDateFilter={{ field: '_consignment_created_at', label: 'Consignment date' }}
         subGroupInTotals
         selectable
         selected={selected}
@@ -1510,6 +1510,8 @@ export default function BiddingVolume() {
         selectable={false}
         viewOnly
         dateFilter
+        altDateFilter={{ field: 'booked_at', label: 'Booking date' }}
+        branchesBooked
         consolidateRegions={['Bangalore']}
         onCreateConsignment={handleCreateConsignment}
         onUnbookBranch={handleUnbookBranch}
@@ -2827,13 +2829,17 @@ function SourceSection({
   // re-rolls the branch lists + hero metrics to the selected date(s). Used by
   // the transit sections (2/3/4) and branch-pickup-pending (7).
   dateFilter = false,
-  // When true, adds a SECOND chip row "Consignment date" (filters by the bill's
-  // consignment-created day). Section 5 passes it. Composes with dateFilter.
-  consignmentDateFilter = false,
+  // Optional SECOND chip row, configurable: { field, label }. Filters by the
+  // IST day of bill[field] (a timestamp). Section 5 → consignment-created date,
+  // Section 6 → booking date. Composes with the purchase-date filter.
+  altDateFilter = null,
   // When true, the section's hero totals/metrics include the subGroup band too
   // (Section 5: main Bangalore-pending + outstation-pending are both unbooked).
   // Default false — most sections show the subGroup as a separate band only.
   subGroupInTotals = false,
+  // When true, this section's `branches` are ALREADY-BOOKED bills (Section 6 red
+  // flag), so a filter re-roll feeds Booked Net (not Unbooked). Default false.
+  branchesBooked = false,
   // When a number, renders an extra "Pipeline" hero card after Gain (the
   // carried-over pipeline owed against this pool). Section 1 passes it.
   pipelineG = null,
@@ -2870,26 +2876,27 @@ function SourceSection({
   // bills, then (when any are selected) re-roll the branch lists, hero totals
   // and hero metrics to only those dates. Gain rate is taken from the passed
   // metrics so the recomputed Gain / Available stay consistent.
-  const [selectedDates,  setSelectedDates]  = useState(() => new Set())
-  const [selectedCDates, setSelectedCDates] = useState(() => new Set())   // consignment-created dates
-  const toggleDate  = (d) => setSelectedDates(prev  => { const n = new Set(prev); n.has(d) ? n.delete(d) : n.add(d); return n })
-  const toggleCDate = (d) => setSelectedCDates(prev => { const n = new Set(prev); n.has(d) ? n.delete(d) : n.add(d); return n })
-  let dateChipsAvailable  = []
-  let cdateChipsAvailable = []
-  if (dateFilter || consignmentDateFilter) {
-    const ds = new Set(), cs = new Set()
+  const [selectedDates,    setSelectedDates]    = useState(() => new Set())
+  const [selectedAltDates, setSelectedAltDates] = useState(() => new Set())   // secondary dim (consignment / booking date)
+  const toggleDate    = (d) => setSelectedDates(prev    => { const n = new Set(prev); n.has(d) ? n.delete(d) : n.add(d); return n })
+  const toggleAltDate = (d) => setSelectedAltDates(prev => { const n = new Set(prev); n.has(d) ? n.delete(d) : n.add(d); return n })
+  const altField = altDateFilter?.field || null
+  let dateChipsAvailable = []
+  let altChipsAvailable  = []
+  if (dateFilter || altField) {
+    const ds = new Set(), as = new Set()
     const scan = (arr) => { for (const br of arr || []) for (const bl of br.bills || []) {
       if (dateFilter && bl.purchase_date) ds.add(bl.purchase_date)
-      if (consignmentDateFilter) { const cd = istDayOf(bl._consignment_created_at); if (cd) cs.add(cd) }
+      if (altField) { const ad = istDayOf(bl[altField]); if (ad) as.add(ad) }
     } }
     scan(branches); scan(bookedBranches); scan(subGroup?.branches)
-    dateChipsAvailable  = Array.from(ds).sort()   // 'YYYY-MM-DD' sorts oldest→latest
-    cdateChipsAvailable = Array.from(cs).sort()
+    dateChipsAvailable = Array.from(ds).sort()   // 'YYYY-MM-DD' sorts oldest→latest
+    altChipsAvailable  = Array.from(as).sort()
   }
-  if ((dateFilter && selectedDates.size) || (consignmentDateFilter && selectedCDates.size)) {
+  if ((dateFilter && selectedDates.size) || (altField && selectedAltDates.size)) {
     const keep = (bl) =>
-      (!selectedDates.size  || selectedDates.has(bl.purchase_date)) &&
-      (!selectedCDates.size || selectedCDates.has(istDayOf(bl._consignment_created_at)))
+      (!selectedDates.size    || selectedDates.has(bl.purchase_date)) &&
+      (!selectedAltDates.size || selectedAltDates.has(istDayOf(bl[altField])))
     const rollBranch = (br) => {
       const bills = (br.bills || []).filter(keep)
       let g = 0, n = 0, a = 0
@@ -2919,11 +2926,17 @@ function SourceSection({
       : mainTot
     if (total) total = { ...total, ...hdrTot }
     if (metrics) {
-      const unbookedNet = hdrTot.net_wt
-      const bookedNet   = sumNet(bookedBranches)
-      const rate = metrics.unbookedNet > 0 ? (Number(metrics.gainNet) || 0) / metrics.unbookedNet : 0
-      const gainNet = noGain ? 0 : unbookedNet * rate
-      metrics = { ...metrics, totalNet: unbookedNet + bookedNet, bookedNet, unbookedNet, gainNet, availableNet: unbookedNet + gainNet, gainOverride: null }
+      if (branchesBooked) {
+        // Section 6: the branches ARE the booked bills — feed Booked Net.
+        const bookedNet = hdrTot.net_wt
+        metrics = { ...metrics, totalNet: bookedNet, bookedNet, unbookedNet: 0, gainNet: 0, availableNet: 0, gainOverride: null }
+      } else {
+        const unbookedNet = hdrTot.net_wt
+        const bookedNet   = sumNet(bookedBranches)
+        const rate = metrics.unbookedNet > 0 ? (Number(metrics.gainNet) || 0) / metrics.unbookedNet : 0
+        const gainNet = noGain ? 0 : unbookedNet * rate
+        metrics = { ...metrics, totalNet: unbookedNet + bookedNet, bookedNet, unbookedNet, gainNet, availableNet: unbookedNet + gainNet, gainOverride: null }
+      }
     }
   }
   const toSet = (v) => {
@@ -3080,7 +3093,7 @@ function SourceSection({
         // bills get selected for booking (passed up to selectSectionBills).
         const doAutoSelect = () => onAutoSelect && onAutoSelect(
           dateFilter && selectedDates.size ? selectedDates : null,
-          consignmentDateFilter && selectedCDates.size ? selectedCDates : null,
+          altField && selectedAltDates.size ? selectedAltDates : null,
         )
         const cards = noGain ? [
           // Kerala — 3 cards; Unbooked Net IS the selector (no gain, so
@@ -3211,14 +3224,14 @@ function SourceSection({
         </div>
       )}
 
-      {/* Consignment-created-date chips (Section 5) — filter by the day the consignment was created */}
-      {consignmentDateFilter && cdateChipsAvailable.length > 0 && (
+      {/* Secondary date chips — Section 5: consignment date · Section 6: booking date */}
+      {altField && altChipsAvailable.length > 0 && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', padding: '2px 14px 12px' }}>
-          <span style={{ fontSize: 9, color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 800 }}>Consignment&nbsp;date</span>
-          {cdateChipsAvailable.map(d => {
-            const active = selectedCDates.has(d)
+          <span style={{ fontSize: 9, color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 800 }}>{altDateFilter.label}</span>
+          {altChipsAvailable.map(d => {
+            const active = selectedAltDates.has(d)
             return (
-              <button key={d} onClick={() => toggleCDate(d)} title="Filter by consignment-created date — select multiple"
+              <button key={d} onClick={() => toggleAltDate(d)} title={`Filter by ${altDateFilter.label.toLowerCase()} — select multiple`}
                 style={{
                   padding: '5px 11px', borderRadius: 999, cursor: 'pointer', fontSize: 10.5, fontWeight: 700, whiteSpace: 'nowrap',
                   border: `1px solid ${active ? blueAccent : t.border}`,
@@ -3229,10 +3242,10 @@ function SourceSection({
               </button>
             )
           })}
-          {selectedCDates.size > 0 && (
-            <button onClick={() => setSelectedCDates(new Set())}
+          {selectedAltDates.size > 0 && (
+            <button onClick={() => setSelectedAltDates(new Set())}
               style={{ padding: '5px 9px', borderRadius: 999, cursor: 'pointer', fontSize: 10, fontWeight: 700, border: `1px solid ${t.border}`, background: 'transparent', color: t.text4 }}>
-              ✕ Clear ({selectedCDates.size})
+              ✕ Clear ({selectedAltDates.size})
             </button>
           )}
         </div>
