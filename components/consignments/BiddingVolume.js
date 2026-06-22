@@ -1469,6 +1469,7 @@ export default function BiddingVolume() {
         onAutoSelect={(dates, cdates) => selectSectionBills(['bangalore_pending_booking', 'transit_pending_booking'], dates, cdates)}
         dateFilter
         consignmentDateFilter
+        subGroupInTotals
         selectable
         selected={selected}
         branchLocked={branchLocked}
@@ -2829,6 +2830,10 @@ function SourceSection({
   // When true, adds a SECOND chip row "Consignment date" (filters by the bill's
   // consignment-created day). Section 5 passes it. Composes with dateFilter.
   consignmentDateFilter = false,
+  // When true, the section's hero totals/metrics include the subGroup band too
+  // (Section 5: main Bangalore-pending + outstation-pending are both unbooked).
+  // Default false — most sections show the subGroup as a separate band only.
+  subGroupInTotals = false,
   // When a number, renders an extra "Pipeline" hero card after Gain (the
   // carried-over pipeline owed against this pool). Section 1 passes it.
   pipelineG = null,
@@ -2902,10 +2907,19 @@ function SourceSection({
 
     branches       = filterArr(branches)
     bookedBranches = filterArr(bookedBranches)
-    if (subGroup) subGroup = { ...subGroup, branches: filterArr(subGroup.branches), total: rollTot(filterArr(subGroup.branches)) }
-    if (total) total = { ...total, ...rollTot(branches) }
+    let fSub = []
+    if (subGroup) { fSub = filterArr(subGroup.branches); subGroup = { ...subGroup, branches: fSub, total: rollTot(fSub) } }
+    // Header total + hero metrics. When the section counts its subGroup toward
+    // its own totals (Section 5), fold the filtered subGroup in — otherwise the
+    // hero reads 0 while a subGroup-only bill is still listed below.
+    const mainTot = rollTot(branches)
+    const subTot  = rollTot(fSub)
+    const hdrTot  = subGroupInTotals
+      ? { bills: mainTot.bills + subTot.bills, gross_wt: mainTot.gross_wt + subTot.gross_wt, net_wt: mainTot.net_wt + subTot.net_wt, amount: mainTot.amount + subTot.amount }
+      : mainTot
+    if (total) total = { ...total, ...hdrTot }
     if (metrics) {
-      const unbookedNet = sumNet(branches)
+      const unbookedNet = hdrTot.net_wt
       const bookedNet   = sumNet(bookedBranches)
       const rate = metrics.unbookedNet > 0 ? (Number(metrics.gainNet) || 0) / metrics.unbookedNet : 0
       const gainNet = noGain ? 0 : unbookedNet * rate
