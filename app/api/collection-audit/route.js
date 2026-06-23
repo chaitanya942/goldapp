@@ -676,6 +676,9 @@ export async function POST(req) {
   if (action === 'report_extra_received') {
     const customer = (body.customer || '').trim()
     const grossG   = Number(body.gross_g)
+    if (!customer) {
+      return Response.json({ error: 'Enter the customer name of the extra bill.' }, { status: 400 })
+    }
     if (!Number.isFinite(grossG) || grossG <= 0) {
       return Response.json({ error: 'Enter the gross weight of the extra bill.' }, { status: 400 })
     }

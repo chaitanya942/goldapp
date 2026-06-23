@@ -1022,7 +1022,7 @@ function BranchDrilldown({ drill, outstationByBranch, bangaloreByBranch, t, onBa
   const [extraBusy,  setExtraBusy]  = useState(false)
   const submitExtra = async (cid) => {
     const gross = parseFloat(extraForm.gross)
-    if (!Number.isFinite(gross) || gross <= 0) return
+    if (!extraForm.customer.trim() || !Number.isFinite(gross) || gross <= 0) return
     setExtraBusy(true)
     const ok = await onReportExtra?.({ consignmentId: cid, customer: extraForm.customer.trim(), gross, note: extraForm.note.trim() })
     setExtraBusy(false)
@@ -1162,16 +1162,21 @@ function BranchDrilldown({ drill, outstationByBranch, bangaloreByBranch, t, onBa
                   {extraFor === cid && (
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', padding: '10px 12px', background: `${(t.blue || '#4a90d9')}0c`, border: `1px solid ${(t.blue || '#4a90d9')}30`, borderRadius: 10, marginTop: 8 }}>
                       <span style={{ fontSize: '11px', color: t.blue || '#4a90d9', fontWeight: 700 }}>Extra bill received — report to ops</span>
-                      <input value={extraForm.customer} onChange={e => setExtraForm(f => ({ ...f, customer: e.target.value }))} placeholder="Customer name (optional)"
+                      <input value={extraForm.customer} onChange={e => setExtraForm(f => ({ ...f, customer: e.target.value }))} placeholder="Customer name *"
                         style={{ background: t.card, border: `1px solid ${t.border2}`, borderRadius: 7, padding: '6px 10px', fontSize: '12px', color: t.text1, width: 180, outline: 'none' }} />
                       <input value={extraForm.gross} onChange={e => setExtraForm(f => ({ ...f, gross: e.target.value.replace(/[^0-9.]/g, '') }))} placeholder="Gross g *" type="text" inputMode="decimal" className="ca-weight-input"
                         style={{ background: t.card, border: `1px solid ${t.border2}`, borderRadius: 7, padding: '6px 10px', fontFamily: 'monospace', fontSize: '12px', color: t.text1, width: 110, outline: 'none' }} />
                       <input value={extraForm.note} onChange={e => setExtraForm(f => ({ ...f, note: e.target.value }))} placeholder="Note (optional)"
                         style={{ flex: 1, minWidth: 140, background: t.card, border: `1px solid ${t.border2}`, borderRadius: 7, padding: '6px 10px', fontSize: '12px', color: t.text1, outline: 'none' }} />
-                      <button onClick={() => submitExtra(cid)} disabled={extraBusy || !(parseFloat(extraForm.gross) > 0)}
-                        style={{ background: parseFloat(extraForm.gross) > 0 ? (t.blue || '#4a90d9') : t.card2, color: parseFloat(extraForm.gross) > 0 ? '#fff' : t.text4, border: 'none', borderRadius: 8, padding: '7px 14px', fontSize: '11px', fontWeight: 800, cursor: parseFloat(extraForm.gross) > 0 ? 'pointer' : 'not-allowed' }}>
-                        {extraBusy ? 'Sending…' : 'Send to ops'}
-                      </button>
+                      {(() => {
+                        const ready = !!extraForm.customer.trim() && parseFloat(extraForm.gross) > 0
+                        return (
+                          <button onClick={() => submitExtra(cid)} disabled={extraBusy || !ready}
+                            style={{ background: ready ? (t.blue || '#4a90d9') : t.card2, color: ready ? '#fff' : t.text4, border: 'none', borderRadius: 8, padding: '7px 14px', fontSize: '11px', fontWeight: 800, cursor: ready ? 'pointer' : 'not-allowed' }}>
+                            {extraBusy ? 'Sending…' : 'Send to ops'}
+                          </button>
+                        )
+                      })()}
                     </div>
                   )}
                 </div>
