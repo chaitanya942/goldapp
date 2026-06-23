@@ -34,6 +34,7 @@
 import { createClient } from '@supabase/supabase-js'
 import { requireAuthForPage } from '../../../lib/apiAuth'
 import { istDateStr, addWorkingDaysSkipSunday } from '../../../lib/dateIst'
+import { appIdVariants } from '../../../lib/appIdSearch'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
@@ -643,6 +644,70 @@ export async function POST(req) {
 
   const body = await req.json().catch(() => ({}))
   const { purchase_id, purchase_ids, audit_gross_weight, action, remark, acknowledged_diff } = body
+
+  // ── 'report_not_received' — bill IS in the audit data but no physical gold ──
+  // arrived. One-click → straight to ops as a discrepancy case (no Audit-Head
+  // review, no reason required from the auditor).
+  if (action === 'report_not_received') {
+    if (!purchase_id) return Response.json({ error: 'purchase_id required' }, { status: 400 })
+    const { data: p, error: pErr } = await supabase
+      .from('purchases').select('id, gross_weight').eq('id', purchase_id).single()
+    if (pErr || !p) return Response.json({ error: pErr?.message || 'Bill not found' }, { status: 404 })
+    const { error: insErr } = await supabase.from('audit_discrepancy_cases').insert({
+      case_type:              'not_received',
+      purchase_id:            p.id,
+      snapshot_crm_gross_g:   p.gross_weight,
+      snapshot_audit_gross_g: 0,
+      snapshot_discrepancy_g: -(Number(p.gross_weight) || 0),
+      auditor_note:           (remark || '').trim() || null,
+      consignment_id:         body.consignment_id || null,
+      sent_by:                auth.user?.id || null,
+    })
+    if (insErr) {
+      if (insErr.code === '23505') return Response.json({ ok: true, already: true })   // already reported
+      return Response.json({ error: insErr.message }, { status: 500 })
+    }
+    return Response.json({ ok: true })
+  }
+
+  // ── 'report_extra_received' — physical bill that ISN'T in the audit data ────
+  // (the 5th of 5 vs 4 consigned). App ID optional: if given we link + snapshot
+  // the matching bill, else it's a count+weight report. Straight to ops.
+  if (action === 'report_extra_received') {
+    const appId  = (body.app_id || '').trim()
+    const grossG = Number(body.gross_g)
+    if (!Number.isFinite(grossG) || grossG <= 0) {
+      return Response.json({ error: 'Enter the gross weight of the extra bill.' }, { status: 400 })
+    }
+    let matched = null
+    if (appId) {
+      const variants = appIdVariants(appId)
+      const { data: pm } = await supabase
+        .from('purchases')
+        .select('id, application_id, customer_name, branch_name, gross_weight')
+        .or(variants.map(v => `application_id.eq.${v}`).join(','))
+        .limit(1)
+      matched = (pm && pm[0]) || null
+    }
+    const { error: insErr } = await supabase.from('audit_discrepancy_cases').insert({
+      case_type:              'extra_received',
+      purchase_id:            matched?.id || null,
+      snapshot_crm_gross_g:   matched?.gross_weight ?? null,
+      snapshot_audit_gross_g: grossG,
+      snapshot_discrepancy_g: matched?.gross_weight != null ? (grossG - Number(matched.gross_weight)) : null,
+      extra_app_id:           appId || matched?.application_id || null,
+      extra_branch:           matched?.branch_name || body.branch || null,
+      extra_gross_g:          grossG,
+      auditor_note:           (remark || body.note || '').trim() || null,
+      consignment_id:         body.consignment_id || null,
+      sent_by:                auth.user?.id || null,
+    })
+    if (insErr) {
+      if (insErr.code === '23505') return Response.json({ ok: true, already: true })
+      return Response.json({ error: insErr.message }, { status: 500 })
+    }
+    return Response.json({ ok: true })
+  }
 
   // ── 'mark_received' — count audit, single OR bulk ────────────────────────
   // Bulk mode (purchase_ids array) lets the auditor mark an entire truck's

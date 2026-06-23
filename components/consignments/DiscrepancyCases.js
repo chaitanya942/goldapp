@@ -189,17 +189,26 @@ export default function DiscrepancyCases() {
                         {c.auditor?.name || '—'}
                       </td>
                       <td style={s.td}>
+                        {(() => {
+                          const tm = c.case_type === 'not_received'  ? { label: 'Not received',  color: t.red }
+                                   : c.case_type === 'extra_received' ? { label: 'Extra received', color: t.blue || '#4a90d9' }
+                                   : { label: 'Weight', color: t.gold }
+                          return (
+                            <div style={{ display: 'inline-flex', alignItems: 'center', fontSize: '9px', fontWeight: 800, letterSpacing: '.06em', textTransform: 'uppercase', color: tm.color, background: `${tm.color}1c`, border: `1px solid ${tm.color}44`, borderRadius: 4, padding: '1px 6px', marginBottom: 4 }}>{tm.label}</div>
+                          )
+                        })()}
                         <div style={{ fontWeight: 600, color: t.text1, fontFamily: 'monospace', fontSize: '11.5px' }}>
-                          {p.application_id || '—'}
+                          {c.display_app_id || '—'}
                         </div>
-                        <div style={{ fontSize: '11px', color: t.text2, marginTop: '2px' }}>{p.customer_name || '—'}</div>
-                        <div style={{ fontSize: '10px', color: t.text4, marginTop: '1px' }}>{p.branch_name || '—'}</div>
+                        <div style={{ fontSize: '11px', color: t.text2, marginTop: '2px' }}>{c.display_customer || '—'}</div>
+                        <div style={{ fontSize: '10px', color: t.text4, marginTop: '1px' }}>{c.display_branch || '—'}</div>
+                        {c.auditor_note && <div style={{ fontSize: '10px', color: t.text3, marginTop: '3px', fontStyle: 'italic' }}>“{c.auditor_note}”</div>}
                       </td>
                       <td style={{ ...s.td, textAlign: 'right', fontFamily: 'monospace', color: t.gold, whiteSpace: 'nowrap' }}>
-                        {fmtWt(c.snapshot_crm_gross_g)}
+                        {c.display_crm_gross != null ? fmtWt(c.display_crm_gross) : '—'}
                       </td>
                       <td style={{ ...s.td, textAlign: 'right', fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
-                        {fmtWt(c.snapshot_audit_gross_g)}
+                        {c.case_type === 'not_received' ? '—' : fmtWt(c.display_audit_gross)}
                       </td>
                       <td style={{ ...s.td, textAlign: 'right', fontFamily: 'monospace', color: discColor, fontWeight: 700, whiteSpace: 'nowrap' }}>
                         {d === 0 ? '—' : fmtSignedWt(d)}

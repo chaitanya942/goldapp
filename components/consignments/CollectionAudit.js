@@ -647,6 +647,33 @@ export default function CollectionAudit() {
               return false
             }
           }}
+          onReportNotReceived={async (bill, consignmentId) => {
+            // Bill IS in the audit data but no physical gold — one-click → ops.
+            try {
+              const res = await authedFetch('/api/collection-audit', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'report_not_received', purchase_id: bill.id, consignment_id: consignmentId || null }),
+              })
+              const j = await res.json().catch(() => ({}))
+              if (!res.ok || j.error) { setToast({ msg: j.error || 'Report failed', type: 'error', key: Date.now() }); return false }
+              setToast({ msg: j.already ? `${bill.application_id} already reported.` : `${bill.application_id} reported to ops — not received.`, type: 'success', key: Date.now() })
+              fetchAll()
+              return true
+            } catch (e) { setToast({ msg: e.message || 'Report failed', type: 'error', key: Date.now() }); return false }
+          }}
+          onReportExtra={async ({ consignmentId, appId, gross, note }) => {
+            // Physical bill that ISN'T in the audit data — App ID optional.
+            try {
+              const res = await authedFetch('/api/collection-audit', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'report_extra_received', consignment_id: consignmentId || null, app_id: appId || null, gross_g: gross, note: note || null }),
+              })
+              const j = await res.json().catch(() => ({}))
+              if (!res.ok || j.error) { setToast({ msg: j.error || 'Report failed', type: 'error', key: Date.now() }); return false }
+              setToast({ msg: `Extra bill reported to ops${appId ? ` (${appId})` : ''}.`, type: 'success', key: Date.now() })
+              return true
+            } catch (e) { setToast({ msg: e.message || 'Report failed', type: 'error', key: Date.now() }); return false }
+          }}
         />
       ) : (
         <>
@@ -1068,12 +1095,24 @@ function BranchCard({ branch, billCount, extraLabel, oldestAt, dispatchedYmd, ar
 }
 
 // ─── Drill-down (Level 1) ───────────────────────────────────────────────────
-function BranchDrilldown({ drill, outstationByBranch, bangaloreByBranch, t, onBack, onAudit, onMarkReceived, onVerifySeal }) {
+function BranchDrilldown({ drill, outstationByBranch, bangaloreByBranch, t, onBack, onAudit, onMarkReceived, onVerifySeal, onReportNotReceived, onReportExtra }) {
   // Per-consignment input + in-flight state for the tamper-seal verifier.
   // Keyed by consignment id so multiple verifiers can be open at once
   // (e.g. a hub receiving two trucks in the same hour).
   const [sealInputs, setSealInputs] = useState({})
   const [sealBusy,   setSealBusy]   = useState({})
+  // Extra-bill report form — open for one consignment at a time.
+  const [extraFor,   setExtraFor]   = useState(null)   // consignment id or null
+  const [extraForm,  setExtraForm]  = useState({ appId: '', gross: '', note: '' })
+  const [extraBusy,  setExtraBusy]  = useState(false)
+  const submitExtra = async (cid) => {
+    const gross = parseFloat(extraForm.gross)
+    if (!Number.isFinite(gross) || gross <= 0) return
+    setExtraBusy(true)
+    const ok = await onReportExtra?.({ consignmentId: cid, appId: extraForm.appId.trim(), gross, note: extraForm.note.trim() })
+    setExtraBusy(false)
+    if (ok) { setExtraFor(null); setExtraForm({ appId: '', gross: '', note: '' }) }
+  }
   const source = drill.pool === 'outstation'
     ? outstationByBranch.find(b => b.branch === drill.name)
     : bangaloreByBranch.find(b => b.branch === drill.name)
@@ -1222,8 +1261,30 @@ function BranchDrilldown({ drill, outstationByBranch, bangaloreByBranch, t, onBa
                           ✓ Mark all {eligibleBills.length} as received
                         </button>
                       )}
+                      {onReportExtra && (
+                        <button onClick={() => { setExtraFor(extraFor === cid ? null : cid); setExtraForm({ appId: '', gross: '', note: '' }) }}
+                          title="A physical bill arrived that isn't listed here — report it to ops"
+                          style={{ background: 'transparent', color: t.blue || '#4a90d9', border: `1px solid ${(t.blue || '#4a90d9')}50`, borderRadius: '8px', padding: '6px 12px', fontSize: '10.5px', fontWeight: 700, letterSpacing: '.02em', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                          {extraFor === cid ? '✕ Cancel' : '+ Extra bill received'}
+                        </button>
+                      )}
                     </span>
                   </div>
+                  {extraFor === cid && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', padding: '10px 12px', background: `${(t.blue || '#4a90d9')}0c`, border: `1px solid ${(t.blue || '#4a90d9')}30`, borderRadius: 10, marginTop: 8 }}>
+                      <span style={{ fontSize: '11px', color: t.blue || '#4a90d9', fontWeight: 700 }}>Extra bill received — report to ops</span>
+                      <input value={extraForm.appId} onChange={e => setExtraForm(f => ({ ...f, appId: e.target.value }))} placeholder="App ID (optional)"
+                        style={{ background: t.card, border: `1px solid ${t.border2}`, borderRadius: 7, padding: '6px 10px', fontFamily: 'monospace', fontSize: '12px', color: t.text1, width: 150, outline: 'none', textTransform: 'uppercase' }} />
+                      <input value={extraForm.gross} onChange={e => setExtraForm(f => ({ ...f, gross: e.target.value }))} placeholder="Gross g *" type="number" step="0.01"
+                        style={{ background: t.card, border: `1px solid ${t.border2}`, borderRadius: 7, padding: '6px 10px', fontFamily: 'monospace', fontSize: '12px', color: t.text1, width: 110, outline: 'none' }} />
+                      <input value={extraForm.note} onChange={e => setExtraForm(f => ({ ...f, note: e.target.value }))} placeholder="Note (optional)"
+                        style={{ flex: 1, minWidth: 140, background: t.card, border: `1px solid ${t.border2}`, borderRadius: 7, padding: '6px 10px', fontSize: '12px', color: t.text1, outline: 'none' }} />
+                      <button onClick={() => submitExtra(cid)} disabled={extraBusy || !(parseFloat(extraForm.gross) > 0)}
+                        style={{ background: parseFloat(extraForm.gross) > 0 ? (t.blue || '#4a90d9') : t.card2, color: parseFloat(extraForm.gross) > 0 ? '#fff' : t.text4, border: 'none', borderRadius: 8, padding: '7px 14px', fontSize: '11px', fontWeight: 800, cursor: parseFloat(extraForm.gross) > 0 ? 'pointer' : 'not-allowed' }}>
+                        {extraBusy ? 'Sending…' : 'Send to ops'}
+                      </button>
+                    </div>
+                  )}
                   {!sealVerified && (
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                       <span style={{ fontSize: '11px', color: t.orange, fontWeight: 700, letterSpacing: '.02em', display: 'inline-flex', alignItems: 'center', gap: 5 }}>
@@ -1277,7 +1338,8 @@ function BranchDrilldown({ drill, outstationByBranch, bangaloreByBranch, t, onBa
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '10px' }}>
               {g.bills.map(bill => <BillCard key={bill.id} bill={bill} t={t} dateField={dateF}
                 onAudit={() => onAudit(bill)}
-                onMarkReceived={() => onMarkReceived?.(bill)} />)}
+                onMarkReceived={() => onMarkReceived?.(bill)}
+                onReportNotReceived={() => onReportNotReceived?.(bill, g.consignment?.id)} />)}
             </div>
           </Fragment>
         )
@@ -1286,7 +1348,7 @@ function BranchDrilldown({ drill, outstationByBranch, bangaloreByBranch, t, onBa
   )
 }
 
-function BillCard({ bill, t, onAudit, onMarkReceived, dateField }) {
+function BillCard({ bill, t, onAudit, onMarkReceived, onReportNotReceived, dateField }) {
   const previouslyAudited = bill.audit_gross_weight != null
   const countReceived     = !!bill.count_received_at && !previouslyAudited
   const age   = ageBadge(bill[dateField], t)
@@ -1366,6 +1428,19 @@ function BillCard({ bill, t, onAudit, onMarkReceived, dateField }) {
           </span>
         )}
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          {!previouslyAudited && onReportNotReceived && (
+            <button onClick={() => { if (window.confirm(`Report ${bill.application_id} to ops as NOT RECEIVED (no physical gold)?`)) onReportNotReceived() }}
+              title="Bill is in the audit data but no physical gold arrived — report to ops"
+              style={{
+                background: 'transparent', color: t.red, border: `1px solid ${t.red}50`,
+                borderRadius: '8px', padding: '7px 12px', fontSize: '11px', fontWeight: 700,
+                letterSpacing: '.02em', cursor: 'pointer', whiteSpace: 'nowrap',
+              }}
+              onMouseEnter={e => { e.currentTarget.style.background = `${t.red}12` }}
+              onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}>
+              ⚠ Not received
+            </button>
+          )}
           {!previouslyAudited && !countReceived && (
             <button onClick={onMarkReceived}
               title="Bill is physically here — defer the weight audit"
@@ -1430,7 +1505,10 @@ function AuditModal({ bill, t, isMobile, onClose, onDone, onError }) {
 
   const measured = parseFloat(weight)
   const valid    = Number.isFinite(measured) && measured > 0
-  const remarkNeeded = reweighRequired && !revealed   // entering a fresh reading after Re-weigh
+  // Spec: the auditor just enters a weight and moves on — including on a
+  // re-weigh. No reason / remark is required (the remark field stays available
+  // but optional).
+  const remarkNeeded = false
   const remarkLocked = hasReweighed && !!revealed     // re-weigh completed → remark is final
 
   function onWeightChange(v) {
@@ -1445,10 +1523,6 @@ function AuditModal({ bill, t, isMobile, onClose, onDone, onError }) {
 
   async function submit(action) {
     if (!valid) { onError('Enter a valid measured gross weight'); return }
-    if (remarkNeeded && action === 'receive' && !remark.trim()) {
-      onError('Re-weigh requires a remark explaining what changed.')
-      return
-    }
     setBusy(true)
     try {
       const res = await authedFetch('/api/collection-audit', {

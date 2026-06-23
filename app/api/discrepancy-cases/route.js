@@ -38,7 +38,7 @@ export async function GET(req) {
 
   let q = supabase
     .from('audit_discrepancy_cases')
-    .select('id, purchase_id, snapshot_crm_gross_g, snapshot_audit_gross_g, snapshot_discrepancy_g, sent_by, sent_at, status, reason, resolved_by, resolved_at')
+    .select('id, purchase_id, case_type, snapshot_crm_gross_g, snapshot_audit_gross_g, snapshot_discrepancy_g, extra_app_id, extra_branch, extra_gross_g, auditor_note, consignment_id, sent_by, sent_at, status, reason, resolved_by, resolved_at')
     .order('sent_at', { ascending: false })
     .limit(2000)
   if (status === 'pending' || status === 'resolved') q = q.eq('status', status)
@@ -49,8 +49,9 @@ export async function GET(req) {
   if (!cases || cases.length === 0) return Response.json({ cases: [] })
 
   // Enrich with purchase snapshot + auditor + resolver in batched lookups
-  // so the screen has everything it needs in one round-trip.
-  const purchaseIds = [...new Set(cases.map(c => c.purchase_id))]
+  // so the screen has everything it needs in one round-trip. (extra_received
+  // cases may have no purchase_id — they carry their own app id / branch.)
+  const purchaseIds = [...new Set(cases.map(c => c.purchase_id).filter(Boolean))]
   const userIds     = [...new Set(cases.flatMap(c => [c.sent_by, c.resolved_by]).filter(Boolean))]
 
   const [{ data: purchases }, { data: profiles }] = await Promise.all([
@@ -69,12 +70,22 @@ export async function GET(req) {
   const purchaseById = new Map((purchases || []).map(p => [p.id, p]))
   const profileById  = new Map((profiles  || []).map(p => [p.id, { name: p.full_name || p.email || '—', email: p.email || '—' }]))
 
-  const enriched = cases.map(c => ({
-    ...c,
-    purchase:  purchaseById.get(c.purchase_id) || null,
-    auditor:   profileById.get(c.sent_by)      || null,
-    resolver:  c.resolved_by ? (profileById.get(c.resolved_by) || null) : null,
-  }))
+  const enriched = cases.map(c => {
+    const p = c.purchase_id ? purchaseById.get(c.purchase_id) : null
+    return {
+      ...c,
+      purchase:  p || null,
+      auditor:   profileById.get(c.sent_by) || null,
+      resolver:  c.resolved_by ? (profileById.get(c.resolved_by) || null) : null,
+      // Unified display fields — work for weight/not_received (purchase-linked)
+      // AND extra_received (may have only the auditor-entered app id / branch).
+      display_app_id:      p?.application_id || c.extra_app_id || '—',
+      display_customer:    p?.customer_name  || '—',
+      display_branch:      p?.branch_name    || c.extra_branch || '—',
+      display_crm_gross:   c.snapshot_crm_gross_g,
+      display_audit_gross: c.snapshot_audit_gross_g,
+    }
+  })
 
   return Response.json({ cases: enriched })
 }
