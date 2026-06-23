@@ -51,6 +51,7 @@ async function newCrmPayments(from, to) {
     const { rows } = await client.query(`
       WITH pays AS (
         SELECT transaction_id,
+          SUM(CASE WHEN type='PENNY_DROP'      AND action='DEBITED'  THEN amount ELSE 0 END) penny,
           SUM(CASE WHEN type='FINAL_PAYMENT'   AND action='DEBITED'  THEN amount ELSE 0 END) fin,
           SUM(CASE WHEN type='RELEASE_PAYMENT' AND action='DEBITED'  THEN amount ELSE 0 END) rel,
           SUM(CASE WHEN type='FINAL_PAYMENT'   AND action='CREDITED' THEN amount ELSE 0 END) rev,
@@ -74,7 +75,7 @@ async function newCrmPayments(from, to) {
         FROM "Payment" WHERE type='FINAL_PAYMENT' AND action='DEBITED'
         ORDER BY transaction_id, created_at DESC
       )
-      SELECT t.code, p.fin, p.rel, p.rev, (p.fin + p.rel - p.rev) AS paid_crm,
+      SELECT t.code, p.penny, p.fin, p.rel, p.rev, (p.fin + p.rel - p.rev) AS paid_crm,
              p.utrs, p.processors,
              fa.account_number fin_acct, fa.ifsc_code fin_ifsc, fa.account_holder_name fin_holder, fa.bank_name fin_bank,
              pa.account_number pen_acct, pa.ifsc_code pen_ifsc,
@@ -90,6 +91,7 @@ async function newCrmPayments(from, to) {
     for (const r of rows) {
       map[norm(r.code)] = {
         paidCrm:   Number(r.paid_crm) || 0,
+        penny:     Number(r.penny) || 0,
         fin:       Number(r.fin) || 0,
         rel:       Number(r.rel) || 0,
         rev:       Number(r.rev) || 0,
@@ -130,43 +132,76 @@ async function oldCrmBank(from, to) {
   } finally { await conn.end() }
 }
 
-// ── RazorpayX Payouts (env-gated): real money-out keyed by UTR ────────────────
-async function razorpayPayoutsByUtr(from, to) {
-  const keyId   = process.env.RAZORPAY_KEY_ID
-  const secret  = process.env.RAZORPAY_KEY_SECRET
-  const acct    = process.env.RAZORPAYX_ACCOUNT_NUMBER
-  if (!keyId || !secret || !acct) return { linked: false, byUtr: {} }
+// ── RazorpayX Payouts (env-gated): real money-out, multi-tagged per case ──────
+// A single CRM final payment can be settled by MANY payouts (₹30L paid as
+// 6×₹5L). We pull every payout in the window and index it three ways so a case
+// can claim all of its splits:
+//   • by UTR          — the CRM-recorded UTR(s)
+//   • by reference_id — if the payments team stamps the App ID on the payout
+//   • by notes.*      — App ID dropped into a notes field
+// Each payout carries its beneficiary account (fund_account.bank_account) so we
+// can confirm the money went to the right account, and an array form so the UI
+// can list every split.
+async function razorpayPayouts(from, to) {
+  const keyId  = process.env.RAZORPAY_KEY_ID
+  const secret = process.env.RAZORPAY_KEY_SECRET
+  const acct   = process.env.RAZORPAYX_ACCOUNT_NUMBER
+  if (!keyId || !secret || !acct) return { linked: false, list: [], byUtr: {}, byRef: {} }
 
   const auth = 'Basic ' + Buffer.from(`${keyId}:${secret}`).toString('base64')
-  // Epoch window, padded ±3 days so payouts created just outside the
-  // final-payment day still match (payout vs CRM-stamp timing skew).
   const fromEpoch = Math.floor(new Date(`${addDays(from, -3)}T00:00:00+05:30`).getTime() / 1000)
   const toEpoch   = Math.floor(new Date(`${addDays(to, 3)}T23:59:59+05:30`).getTime() / 1000)
 
-  const byUtr = {}
+  const list = [], byUtr = {}, byRef = {}
+  const refKeys = (p) => {
+    const out = []
+    if (p.reference_id) out.push(norm(p.reference_id))
+    for (const v of Object.values(p.notes || {})) if (v) out.push(norm(v))
+    return [...new Set(out)]
+  }
   try {
     let skip = 0
-    for (let page = 0; page < 200; page++) {   // hard cap: 200×100 = 20k payouts
-      const url = `https://api.razorpay.com/v1/payouts?account_number=${encodeURIComponent(acct)}&count=100&skip=${skip}&from=${fromEpoch}&to=${toEpoch}`
+    for (let page = 0; page < 300; page++) {            // cap 30k payouts
+      const url = `https://api.razorpay.com/v1/payouts?account_number=${encodeURIComponent(acct)}&count=100&skip=${skip}&from=${fromEpoch}&to=${toEpoch}&expand[]=fund_account.bank_account`
       const res = await fetch(url, { headers: { Authorization: auth } })
       if (!res.ok) {
         const txt = await res.text().catch(() => '')
-        return { linked: true, byUtr, error: `Razorpay ${res.status}: ${txt.slice(0, 200)}` }
+        return { linked: true, list, byUtr, byRef, error: `Razorpay ${res.status}: ${txt.slice(0, 200)}` }
       }
       const j = await res.json()
       const items = Array.isArray(j.items) ? j.items : []
       for (const p of items) {
-        if (!p.utr) continue
-        // amount is in paise. Keep the latest/processed view per UTR.
-        byUtr[String(p.utr).trim()] = { amount: Number(p.amount || 0) / 100, status: p.status || '', payout_id: p.id || '' }
+        const po = {
+          payout_id: p.id || '',
+          utr:       p.utr ? String(p.utr).trim() : '',
+          amount:    Number(p.amount || 0) / 100,     // paise → ₹
+          status:    p.status || '',
+          benef_acct: p.fund_account?.bank_account?.account_number || '',
+          benef_ifsc: p.fund_account?.bank_account?.ifsc || '',
+          refs:      refKeys(p),
+        }
+        list.push(po)
+        if (po.utr) byUtr[po.utr] = po
+        for (const k of po.refs) (byRef[k] = byRef[k] || []).push(po)
       }
       if (items.length < 100) break
       skip += 100
     }
-    return { linked: true, byUtr }
+    return { linked: true, list, byUtr, byRef }
   } catch (e) {
-    return { linked: true, byUtr, error: e.message }
+    return { linked: true, list, byUtr, byRef, error: e.message }
   }
+}
+
+// Gather every payout belonging to one case: union of UTR matches and App-ID
+// (reference_id / notes) matches, de-duped by payout_id.
+function matchPayouts(rzp, key, utrs) {
+  if (!rzp.linked) return []
+  const seen = new Set(), out = []
+  const take = (po) => { if (po && !seen.has(po.payout_id)) { seen.add(po.payout_id); out.push(po) } }
+  for (const u of utrs || []) take(rzp.byUtr[String(u).trim()])
+  for (const po of (rzp.byRef[key] || [])) take(po)
+  return out
 }
 
 export async function GET(req) {
@@ -191,7 +226,7 @@ export async function GET(req) {
   for (let offset = 0; ; offset += 1000) {
     const { data, error } = await supabase
       .from('purchases')
-      .select('application_id, customer_name, branch_name, crm_source, purchase_date, final_amount_crm, gross_weight, transaction_type')
+      .select('application_id, customer_name, branch_name, crm_source, purchase_date, final_amount_crm, gross_weight, transaction_type, pan_number')
       .gte('purchase_date', from).lte('purchase_date', to)
       .eq('is_deleted', false).eq('crm_status', 'approved')
       .order('purchase_date', { ascending: false })
@@ -206,7 +241,7 @@ export async function GET(req) {
   const [newMap, oldMap, rzp] = await Promise.all([
     newCrmPayments(from, to).catch(e => ({ __err: e.message })),
     oldCrmBank(from, to).catch(e => ({ __err: e.message })),
-    razorpayPayoutsByUtr(from, to).catch(e => ({ linked: false, byUtr: {}, error: e.message })),
+    razorpayPayouts(from, to).catch(e => ({ linked: false, list: [], byUtr: {}, byRef: {}, error: e.message })),
   ])
   const newErr = newMap.__err || null
   const oldErr = oldMap.__err || null
@@ -219,31 +254,41 @@ export async function GET(req) {
     const np = !newMap.__err ? newMap[key] : null
     const op = !oldMap.__err ? oldMap[key] : null
 
-    let paidCrm = null, paidBank = null, payoutStatus = null, processor = '', utr = '',
+    let paidCrm = null, penny = null, release = null, final = null, processor = '', utrs = [],
         finAcct = '', finIfsc = '', penAcct = '', penIfsc = '', acctMatch = null
+    let paidBank = null, payoutStatus = null, payouts = [], payoutSumMatch = null, payoutAcctMatch = null
 
     if (isNew && np) {
       paidCrm   = np.paidCrm
+      penny     = np.penny
+      release   = np.rel
+      final     = np.fin
       processor = np.processor
-      utr       = (np.utrs[0] || '')
+      utrs      = np.utrs
       finAcct   = np.finAcct; finIfsc = np.finIfsc
       penAcct   = np.penAcct; penIfsc = np.penIfsc
-      // account-match: final-payment a/c vs penny-drop a/c (number + IFSC)
+      // Account-match: did the FINAL_PAYMENT go to the penny-drop-verified a/c?
       if (finAcct && penAcct) {
         acctMatch = (norm(finAcct) === norm(penAcct)) && (norm(finIfsc) === norm(penIfsc))
       }
-      // RazorpayX real money-out: sum payouts across this case's UTRs
-      if (rzp.linked && Object.keys(rzp.byUtr).length) {
-        let sum = 0, statuses = [], hit = false
-        for (const u of np.utrs) {
-          const po = rzp.byUtr[String(u).trim()]
-          if (po) { sum += po.amount; statuses.push(po.status); hit = true }
+      // RazorpayX: gather EVERY payout for this case (split payments tagged by
+      // UTR or App-ID), sum the real money-out, and validate.
+      if (rzp.linked) {
+        const matched = matchPayouts(rzp, key, np.utrs)
+        if (matched.length) {
+          paidBank = Number(matched.reduce((s, po) => s + po.amount, 0).toFixed(2))
+          payoutStatus = [...new Set(matched.map(po => po.status))].join(',')
+          payouts = matched.map(po => ({ utr: po.utr, amount: po.amount, status: po.status, acct: po.benef_acct }))
+          // Sum of payouts should equal CRM final + release.
+          payoutSumMatch = Math.abs(paidBank - (np.fin + np.rel)) <= 1
+          // Every payout must have gone to the verified account.
+          const ver = norm(penAcct || finAcct)
+          payoutAcctMatch = ver ? matched.every(po => !po.benef_acct || norm(po.benef_acct) === ver) : null
         }
-        if (hit) { paidBank = sum; payoutStatus = [...new Set(statuses)].join(',') }
       }
     } else if (!isNew && op) {
       processor = op.processor
-      utr       = op.payRef
+      utrs      = op.payRef ? [op.payRef] : []
       penAcct   = op.acctNo; penIfsc = op.ifsc   // old CRM: only the customer bank is known
     }
 
@@ -251,12 +296,15 @@ export async function GET(req) {
     rows.push({
       app_id: p.application_id, customer: p.customer_name, branch: p.branch_name,
       region: regionByBranch[p.branch_name] || '', crm: isNew ? 'new' : 'old', purchase_date: p.purchase_date,
-      txn_type: p.transaction_type, gross_weight: Number(p.gross_weight) || 0,
+      txn_type: p.transaction_type, gross_weight: Number(p.gross_weight) || 0, pan: p.pan_number || '',
       billed,
+      penny, release, final,
       paid_crm: paidCrm, paid_bank: paidBank, payout_status: payoutStatus,
+      payouts, payout_count: payouts.length, payout_sum_match: payoutSumMatch, payout_acct_match: payoutAcctMatch,
       paid,
       diff: paid != null ? Number((billed - paid).toFixed(2)) : null,
-      processor, utr, fin_acct: finAcct, fin_ifsc: finIfsc, pen_acct: penAcct, pen_ifsc: penIfsc,
+      processor, utr: utrs[0] || '', utrs, utr_count: utrs.length,
+      fin_acct: finAcct, fin_ifsc: finIfsc, pen_acct: penAcct, pen_ifsc: penIfsc,
       acct_match: acctMatch,
     })
   }
@@ -273,6 +321,7 @@ export async function GET(req) {
     amount_mismatch:  rows.filter(r => r.paid != null && Math.abs(r.diff) > AMT_EPS).length,
     unpaid:           rows.filter(r => r.paid == null || r.paid === 0).length,
     account_mismatch: rows.filter(r => r.acct_match === false).length,
+    payout_mismatch:  rows.filter(r => r.payout_sum_match === false || r.payout_acct_match === false).length,
   }
 
   return Response.json({

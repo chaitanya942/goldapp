@@ -1,9 +1,11 @@
 'use client'
 
 // Billed vs Paid — case-wise reconciliation (Accounts module).
-// Compares what each case shows as PURCHASED (billed) against what actually
-// left our bank (CRM payout, and the live RazorpayX payout when linked), and
-// flags whether the final payment went to the penny-drop-verified account.
+// Per case: each payment (Penny Drop / Release / Final), the customer's
+// Account / IFSC / PAN / UTR, what the case shows as purchased (Billed), and
+// what actually left our bank (CRM payout + live RazorpayX payouts matched by
+// UTR / App-ID — a single final payment may be many split payouts). Rows that
+// don't fully reconcile are flagged.
 
 import { useState, useCallback, useEffect, useMemo } from 'react'
 import { useApp } from '../../lib/context'
@@ -21,8 +23,19 @@ function loadScript(src) {
   })
 }
 
-const fmtMoney = (n) => n == null ? '—' : '₹' + Math.round(Number(n)).toLocaleString('en-IN')
-const fmtDate  = (d) => { if (!d) return '—'; const [y, m, dd] = d.split('-'); return `${dd} ${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][+m-1]} ${y}` }
+const money  = (n) => n == null ? '—' : '₹' + Math.round(Number(n)).toLocaleString('en-IN')
+const fmtDate = (d) => { if (!d) return '—'; const [y, m, dd] = d.split('-'); return `${dd} ${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][+m-1]} ${y}` }
+
+// Per-row reconciliation issues → drives the Status column + row highlight.
+function issues(r) {
+  const out = []
+  if (r.paid == null || r.paid === 0)          out.push({ k: 'unpaid', label: 'Unpaid' })
+  if (r.paid != null && Math.abs(r.diff) > 1)  out.push({ k: 'amount', label: 'Amount ≠' })
+  if (r.acct_match === false)                  out.push({ k: 'acct',   label: 'Wrong a/c' })
+  if (r.payout_sum_match === false)            out.push({ k: 'psum',   label: 'Payout ≠' })
+  if (r.payout_acct_match === false)           out.push({ k: 'pacct',  label: 'Payout a/c' })
+  return out
+}
 
 export default function BilledVsPaid() {
   const { theme } = useApp()
@@ -36,7 +49,7 @@ export default function BilledVsPaid() {
   const [res, setRes] = useState(null)
   const [err, setErr] = useState(null)
   const [q,   setQ]   = useState('')
-  const [filter, setFilter] = useState('all')   // all | mismatch | acct | unpaid
+  const [filter, setFilter] = useState('all')   // all | flagged | acct | payout | unpaid
 
   const run = useCallback(async (f = from, t2 = to) => {
     setLoading(true); setErr(null)
@@ -55,11 +68,13 @@ export default function BilledVsPaid() {
     const all = res?.rows || []
     const term = q.trim().toLowerCase()
     return all.filter(r => {
-      if (filter === 'mismatch' && !(r.paid != null && Math.abs(r.diff) > 1)) return false
-      if (filter === 'acct'     && r.acct_match !== false) return false
-      if (filter === 'unpaid'   && !(r.paid == null || r.paid === 0)) return false
+      const iss = issues(r)
+      if (filter === 'flagged' && !iss.length) return false
+      if (filter === 'acct'    && r.acct_match !== false) return false
+      if (filter === 'payout'  && !(r.payout_sum_match === false || r.payout_acct_match === false)) return false
+      if (filter === 'unpaid'  && !(r.paid == null || r.paid === 0)) return false
       if (!term) return true
-      return [r.app_id, r.customer, r.branch, r.region, r.utr].some(v => String(v || '').toLowerCase().includes(term))
+      return [r.app_id, r.customer, r.branch, r.region, r.pan, r.utr, ...(r.utrs || [])].some(v => String(v || '').toLowerCase().includes(term))
     })
   }, [res, q, filter])
 
@@ -69,16 +84,22 @@ export default function BilledVsPaid() {
     if (!rows.length) return
     await loadScript('https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js')
     const XLSX = window.XLSX
-    const header = ['#', 'Bill / App ID', 'Customer', 'Branch', 'Region', 'CRM', 'Purchase Date',
-      'Billed (₹)', 'Paid – CRM (₹)', 'Paid – Bank (₹)', 'Payout Status', 'Diff (₹)',
-      'Account Match', 'Final A/c', 'Verified A/c', 'UTR', 'Processor']
+    const header = ['#', 'Customer', 'Bill / App ID', 'Branch', 'Region', 'CRM', 'Purchase Date',
+      'Penny Drop (₹)', 'Release (₹)', 'Final (₹)', 'Billed (₹)',
+      'Paid – CRM (₹)', 'Paid – Bank (₹)', 'Payouts', 'Payout Status',
+      'Diff (₹)', 'Account No', 'IFSC', 'PAN', 'UTR(s)',
+      'Account Match', 'Payout Sum Match', 'Payout A/c Match', 'Issues']
     const aoa = [header, ...rows.map((r, i) => [
-      i + 1, r.app_id, r.customer, r.branch, r.region, r.crm.toUpperCase(), r.purchase_date,
-      Math.round(r.billed), r.paid_crm == null ? '' : Math.round(r.paid_crm),
-      r.paid_bank == null ? '' : Math.round(r.paid_bank), r.payout_status || '',
-      r.diff == null ? '' : Math.round(r.diff),
+      i + 1, r.customer, r.app_id, r.branch, r.region, r.crm.toUpperCase(), r.purchase_date,
+      r.penny == null ? '' : Math.round(r.penny), r.release == null ? '' : Math.round(r.release), r.final == null ? '' : Math.round(r.final),
+      Math.round(r.billed),
+      r.paid_crm == null ? '' : Math.round(r.paid_crm), r.paid_bank == null ? '' : Math.round(r.paid_bank),
+      r.payout_count || '', r.payout_status || '',
+      r.diff == null ? '' : Math.round(r.diff), r.fin_acct || r.pen_acct, r.fin_ifsc || r.pen_ifsc, r.pan, (r.utrs || []).join(' '),
       r.acct_match == null ? '' : (r.acct_match ? 'MATCH' : 'MISMATCH'),
-      r.fin_acct, r.pen_acct, r.utr, r.processor,
+      r.payout_sum_match == null ? '' : (r.payout_sum_match ? 'MATCH' : 'MISMATCH'),
+      r.payout_acct_match == null ? '' : (r.payout_acct_match ? 'MATCH' : 'MISMATCH'),
+      issues(r).map(x => x.label).join('; '),
     ])]
     const ws = XLSX.utils.aoa_to_sheet(aoa)
     const wb = XLSX.utils.book_new()
@@ -87,15 +108,16 @@ export default function BilledVsPaid() {
   }
 
   const Stat = ({ label, value, color, sub }) => (
-    <div style={{ ...card, padding: '14px 16px', flex: 1, minWidth: 150 }}>
+    <div style={{ ...card, padding: '14px 16px', flex: 1, minWidth: 140 }}>
       <div style={{ fontSize: 10, color: t.text4, letterSpacing: '.08em', textTransform: 'uppercase', fontWeight: 700 }}>{label}</div>
-      <div style={{ fontSize: 20, color: color || t.text1, fontWeight: 700, marginTop: 4, fontFamily: 'monospace' }}>{value}</div>
+      <div style={{ fontSize: 19, color: color || t.text1, fontWeight: 700, marginTop: 4, fontFamily: 'monospace' }}>{value}</div>
       {sub && <div style={{ fontSize: 10.5, color: t.text4, marginTop: 2 }}>{sub}</div>}
     </div>
   )
 
-  const th = { textAlign: 'left', padding: '9px 10px', fontSize: 10, color: t.text4, letterSpacing: '.05em', textTransform: 'uppercase', fontWeight: 700, whiteSpace: 'nowrap', borderBottom: `1px solid ${t.border}` }
-  const td = { padding: '9px 10px', fontSize: 12, color: t.text2, borderBottom: `1px solid ${t.border}40`, whiteSpace: 'nowrap' }
+  const th = { textAlign: 'left', padding: '9px 10px', fontSize: 9.5, color: t.text4, letterSpacing: '.04em', textTransform: 'uppercase', fontWeight: 700, whiteSpace: 'nowrap', borderBottom: `1px solid ${t.border}` }
+  const td = { padding: '8px 10px', fontSize: 11.5, color: t.text2, borderBottom: `1px solid ${t.border}40`, whiteSpace: 'nowrap', verticalAlign: 'top' }
+  const num = { ...td, textAlign: 'right', fontFamily: 'monospace' }
 
   return (
     <div style={{ padding: '18px 16px', display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -104,7 +126,7 @@ export default function BilledVsPaid() {
         <div>
           <div style={{ fontSize: '1.4rem', fontWeight: 300, color: t.text1, letterSpacing: '.03em' }}>Billed vs Paid</div>
           <div style={{ fontSize: 11, color: t.text3, marginTop: 4 }}>
-            Case-wise: purchased value vs money actually paid from our bank, and whether it went to the verified account.
+            Case-wise: each payment, customer bank/PAN/UTR, billed value, and the real money paid from our bank (RazorpayX) — flagged where it doesn't reconcile.
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -127,7 +149,7 @@ export default function BilledVsPaid() {
       {/* Razorpay-link status */}
       {res && !res.razorpay_linked && (
         <div style={{ ...card, padding: '10px 14px', borderColor: `${t.orange}50`, background: `${t.orange}0c`, fontSize: 11.5, color: t.orange }}>
-          ⚠ RazorpayX not linked — the <strong>Paid – Bank</strong> column is blank. Add <code>RAZORPAY_KEY_ID</code>, <code>RAZORPAY_KEY_SECRET</code> and <code>RAZORPAYX_ACCOUNT_NUMBER</code> on Railway to verify the real money-out against the bank. Until then, <strong>Paid – CRM</strong> (what the CRM recorded) is shown.
+          ⚠ RazorpayX not linked — <strong>Paid – Bank</strong> and payout validation are off. Add <code>RAZORPAY_KEY_ID</code>, <code>RAZORPAY_KEY_SECRET</code> and <code>RAZORPAYX_ACCOUNT_NUMBER</code> on Railway to verify the real money-out (incl. split payouts). Until then, <strong>Paid – CRM</strong> (what the CRM recorded) is shown.
         </div>
       )}
       {res?.warnings?.length > 0 && (
@@ -135,17 +157,17 @@ export default function BilledVsPaid() {
           {res.warnings.map((w, i) => <div key={i}>{w}</div>)}
         </div>
       )}
-
       {err && <div style={{ ...card, padding: 14, color: t.red, fontSize: 12 }}>{err}</div>}
 
       {/* Summary */}
       {s && (
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
           <Stat label="Cases" value={s.cases} sub={`${fmtDate(res.from)} → ${fmtDate(res.to)}`} />
-          <Stat label="Total Billed" value={fmtMoney(s.total_billed)} color={t.gold} />
-          <Stat label={res.razorpay_linked ? 'Paid (Bank)' : 'Paid (CRM)'} value={fmtMoney(res.razorpay_linked ? s.total_paid_bank : s.total_paid_crm)} color={t.green} />
-          <Stat label="Amount Mismatch" value={s.amount_mismatch} color={s.amount_mismatch ? t.red : t.text2} sub="billed ≠ paid" />
-          <Stat label="Account Mismatch" value={s.account_mismatch} color={s.account_mismatch ? t.red : t.text2} sub="paid ≠ verified a/c" />
+          <Stat label="Total Billed" value={money(s.total_billed)} color={t.gold} />
+          <Stat label={res.razorpay_linked ? 'Paid (Bank)' : 'Paid (CRM)'} value={money(res.razorpay_linked ? s.total_paid_bank : s.total_paid_crm)} color={t.green} />
+          <Stat label="Amount ≠" value={s.amount_mismatch} color={s.amount_mismatch ? t.red : t.text2} sub="billed ≠ paid" />
+          <Stat label="Wrong A/c" value={s.account_mismatch} color={s.account_mismatch ? t.red : t.text2} sub="paid ≠ verified" />
+          {res.razorpay_linked && <Stat label="Payout ≠" value={s.payout_mismatch} color={s.payout_mismatch ? t.red : t.text2} sub="bank vs CRM" />}
           <Stat label="Unpaid" value={s.unpaid} color={s.unpaid ? t.orange : t.text2} />
         </div>
       )}
@@ -153,13 +175,13 @@ export default function BilledVsPaid() {
       {/* Filter + search */}
       {res && (
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-          {[['all', 'All'], ['mismatch', 'Amount mismatch'], ['acct', 'Account mismatch'], ['unpaid', 'Unpaid']].map(([k, label]) => (
+          {[['all', 'All'], ['flagged', 'Flagged'], ['acct', 'Wrong account'], ['payout', 'Payout mismatch'], ['unpaid', 'Unpaid']].map(([k, label]) => (
             <button key={k} onClick={() => setFilter(k)}
               style={{ background: filter === k ? `${t.gold}1d` : 'transparent', border: `1px solid ${filter === k ? `${t.gold}80` : t.border}`, color: filter === k ? t.gold : t.text3, borderRadius: 99, padding: '5px 13px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>
               {label}
             </button>
           ))}
-          <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search bill / customer / branch / UTR…"
+          <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search bill / customer / branch / PAN / UTR…"
             style={{ flex: 1, minWidth: 200, background: t.card2 || t.card, border: `1px solid ${t.border}`, borderRadius: 8, padding: '7px 12px', fontSize: 12, color: t.text1, outline: 'none' }} />
         </div>
       )}
@@ -173,46 +195,58 @@ export default function BilledVsPaid() {
             <thead><tr>
               <th style={th}>Customer · Bill</th>
               <th style={th}>Branch</th>
-              <th style={th}>Date</th>
+              <th style={{ ...th, textAlign: 'right' }}>Penny</th>
+              <th style={{ ...th, textAlign: 'right' }}>Release</th>
+              <th style={{ ...th, textAlign: 'right' }}>Final</th>
               <th style={{ ...th, textAlign: 'right' }}>Billed</th>
-              <th style={{ ...th, textAlign: 'right' }}>Paid (CRM)</th>
               <th style={{ ...th, textAlign: 'right' }}>Paid (Bank)</th>
-              <th style={{ ...th, textAlign: 'right' }}>Diff</th>
-              <th style={{ ...th, textAlign: 'center' }}>Account</th>
-              <th style={th}>UTR · Processor</th>
+              <th style={th}>Account · IFSC</th>
+              <th style={th}>PAN</th>
+              <th style={th}>UTR</th>
+              <th style={th}>Status</th>
             </tr></thead>
             <tbody>
               {rows.map((r, i) => {
-                const mism = r.paid != null && Math.abs(r.diff) > 1
+                const iss = issues(r)
+                const bg = iss.some(x => ['acct', 'pacct'].includes(x.k)) ? `${t.red}10`
+                         : iss.length ? `${t.orange}0c` : 'transparent'
+                const acct = r.fin_acct || r.pen_acct
+                const ifsc = r.fin_ifsc || r.pen_ifsc
                 return (
-                  <tr key={r.app_id + i} style={{ background: r.acct_match === false ? `${t.red}0c` : mism ? `${t.orange}08` : 'transparent' }}>
+                  <tr key={r.app_id + i} style={{ background: bg }}>
                     <td style={td}>
                       <div style={{ color: t.text1, fontWeight: 600 }}>{r.customer || '—'}</div>
-                      <div style={{ fontSize: 10.5, color: t.text4, fontFamily: 'monospace' }}>{r.app_id} · <span style={{ color: r.crm === 'new' ? t.gold : t.text4 }}>{r.crm}</span></div>
+                      <div style={{ fontSize: 10, color: t.text4, fontFamily: 'monospace' }}>{r.app_id} · <span style={{ color: r.crm === 'new' ? t.gold : t.text4 }}>{r.crm}</span></div>
                     </td>
-                    <td style={td}>{r.branch || '—'}<div style={{ fontSize: 10, color: t.text4 }}>{r.region || ''}</div></td>
-                    <td style={{ ...td, fontSize: 11 }}>{fmtDate(r.purchase_date)}</td>
-                    <td style={{ ...td, textAlign: 'right', fontFamily: 'monospace', color: t.gold }}>{fmtMoney(r.billed)}</td>
-                    <td style={{ ...td, textAlign: 'right', fontFamily: 'monospace' }}>{fmtMoney(r.paid_crm)}</td>
-                    <td style={{ ...td, textAlign: 'right', fontFamily: 'monospace' }}>
-                      {fmtMoney(r.paid_bank)}
-                      {r.payout_status && <div style={{ fontSize: 9, color: /processed/i.test(r.payout_status) ? t.green : t.red, textTransform: 'uppercase', fontWeight: 700 }}>{r.payout_status}</div>}
+                    <td style={td}>{r.branch || '—'}<div style={{ fontSize: 9.5, color: t.text4 }}>{r.region}</div></td>
+                    <td style={{ ...num, color: r.penny ? t.green : t.text4 }} title={r.penny ? 'Penny-drop verified' : 'No penny drop'}>{r.penny == null ? '—' : (r.penny > 0 ? '✓' : '—')}</td>
+                    <td style={num}>{money(r.release)}</td>
+                    <td style={num}>{money(r.final)}</td>
+                    <td style={{ ...num, color: t.gold }}>{money(r.billed)}</td>
+                    <td style={num}>
+                      {res.razorpay_linked ? money(r.paid_bank) : <span style={{ color: t.text4 }} title="CRM-recorded">{money(r.paid_crm)}*</span>}
+                      {r.payout_count > 0 && <div style={{ fontSize: 9, color: t.text4 }}>{r.payout_count} payout{r.payout_count === 1 ? '' : 's'}{r.payout_status ? ` · ${r.payout_status}` : ''}</div>}
                     </td>
-                    <td style={{ ...td, textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: r.diff == null ? t.text4 : Math.abs(r.diff) > 1 ? t.red : t.green }}>
-                      {r.diff == null ? '—' : (r.diff > 0 ? '+' : '') + fmtMoney(r.diff).replace('₹', '₹')}
+                    <td style={{ ...td, fontFamily: 'monospace', fontSize: 10.5 }}>
+                      {acct || '—'}<div style={{ fontSize: 9.5, color: t.text4 }}>{ifsc || ''}</div>
                     </td>
-                    <td style={{ ...td, textAlign: 'center' }}>
-                      {r.acct_match == null
-                        ? <span style={{ color: t.text4 }}>—</span>
-                        : r.acct_match
-                          ? <span style={{ color: t.green, fontWeight: 800 }} title={`Paid to verified a/c ${r.fin_acct}`}>✓</span>
-                          : <span style={{ color: t.red, fontWeight: 800 }} title={`Paid to ${r.fin_acct} · verified ${r.pen_acct}`}>✗</span>}
+                    <td style={{ ...td, fontFamily: 'monospace', fontSize: 10.5 }}>{r.pan || '—'}</td>
+                    <td style={{ ...td, fontFamily: 'monospace', fontSize: 10 }}>
+                      {r.utr || '—'}{r.utr_count > 1 && <span style={{ color: t.text4 }}> +{r.utr_count - 1}</span>}
                     </td>
-                    <td style={{ ...td, fontFamily: 'monospace', fontSize: 10.5 }}>{r.utr || '—'}<div style={{ fontSize: 9.5, color: t.text4 }}>{r.processor}</div></td>
+                    <td style={td}>
+                      {iss.length === 0
+                        ? <span style={{ color: t.green, fontWeight: 700, fontSize: 11 }}>✓ OK</span>
+                        : <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                            {iss.map(x => (
+                              <span key={x.k} style={{ fontSize: 9, fontWeight: 800, color: ['acct','pacct'].includes(x.k) ? t.red : t.orange, background: `${['acct','pacct'].includes(x.k) ? t.red : t.orange}1c`, borderRadius: 4, padding: '1px 6px', whiteSpace: 'nowrap' }}>{x.label}</span>
+                            ))}
+                          </div>}
+                    </td>
                   </tr>
                 )
               })}
-              {!rows.length && <tr><td colSpan={9} style={{ ...td, textAlign: 'center', color: t.text4, padding: 40 }}>No cases for this range / filter.</td></tr>}
+              {!rows.length && <tr><td colSpan={11} style={{ ...td, textAlign: 'center', color: t.text4, padding: 40 }}>No cases for this range / filter.</td></tr>}
             </tbody>
           </table>
         </div>
