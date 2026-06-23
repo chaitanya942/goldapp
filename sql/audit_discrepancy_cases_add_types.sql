@@ -16,8 +16,9 @@ ALTER TABLE audit_discrepancy_cases
                            CHECK (case_type IN ('weight', 'not_received', 'extra_received')),
   ADD COLUMN IF NOT EXISTS auditor_note   text,        -- auditor's free note on the exception
   ADD COLUMN IF NOT EXISTS consignment_id uuid,        -- consignment the exception was reported against
-  ADD COLUMN IF NOT EXISTS extra_app_id   text,        -- extra bill's App ID (if the auditor had it)
-  ADD COLUMN IF NOT EXISTS extra_branch   text,        -- extra bill's branch (auto-filled if App ID matched)
+  ADD COLUMN IF NOT EXISTS extra_app_id   text,        -- extra bill's App ID (legacy / optional)
+  ADD COLUMN IF NOT EXISTS extra_customer text,        -- extra bill's customer name (auditor-entered)
+  ADD COLUMN IF NOT EXISTS extra_branch   text,        -- extra bill's branch (filled from the consignment)
   ADD COLUMN IF NOT EXISTS extra_gross_g  numeric;     -- extra bill's weighed gross
 
 -- An extra-received bill with no App ID has no purchase to point at.

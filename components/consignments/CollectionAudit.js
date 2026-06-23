@@ -613,16 +613,16 @@ export default function CollectionAudit() {
               return true
             } catch (e) { setToast({ msg: e.message || 'Report failed', type: 'error', key: Date.now() }); return false }
           }}
-          onReportExtra={async ({ consignmentId, appId, gross, note }) => {
-            // Physical bill that ISN'T in the audit data — App ID optional.
+          onReportExtra={async ({ consignmentId, customer, gross, note }) => {
+            // Physical bill that ISN'T in the audit data — customer name optional.
             try {
               const res = await authedFetch('/api/collection-audit', {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ action: 'report_extra_received', consignment_id: consignmentId || null, app_id: appId || null, gross_g: gross, note: note || null }),
+                body: JSON.stringify({ action: 'report_extra_received', consignment_id: consignmentId || null, customer: customer || null, gross_g: gross, note: note || null }),
               })
               const j = await res.json().catch(() => ({}))
               if (!res.ok || j.error) { setToast({ msg: j.error || 'Report failed', type: 'error', key: Date.now() }); return false }
-              setToast({ msg: `Extra bill reported to ops${appId ? ` (${appId})` : ''}.`, type: 'success', key: Date.now() })
+              setToast({ msg: `Extra bill reported to ops${customer ? ` (${customer})` : ''}.`, type: 'success', key: Date.now() })
               return true
             } catch (e) { setToast({ msg: e.message || 'Report failed', type: 'error', key: Date.now() }); return false }
           }}
@@ -1018,15 +1018,15 @@ function BranchDrilldown({ drill, outstationByBranch, bangaloreByBranch, t, onBa
   const [sealBusy,   setSealBusy]   = useState({})
   // Extra-bill report form — open for one consignment at a time.
   const [extraFor,   setExtraFor]   = useState(null)   // consignment id or null
-  const [extraForm,  setExtraForm]  = useState({ appId: '', gross: '', note: '' })
+  const [extraForm,  setExtraForm]  = useState({ customer: '', gross: '', note: '' })
   const [extraBusy,  setExtraBusy]  = useState(false)
   const submitExtra = async (cid) => {
     const gross = parseFloat(extraForm.gross)
     if (!Number.isFinite(gross) || gross <= 0) return
     setExtraBusy(true)
-    const ok = await onReportExtra?.({ consignmentId: cid, appId: extraForm.appId.trim(), gross, note: extraForm.note.trim() })
+    const ok = await onReportExtra?.({ consignmentId: cid, customer: extraForm.customer.trim(), gross, note: extraForm.note.trim() })
     setExtraBusy(false)
-    if (ok) { setExtraFor(null); setExtraForm({ appId: '', gross: '', note: '' }) }
+    if (ok) { setExtraFor(null); setExtraForm({ customer: '', gross: '', note: '' }) }
   }
   const source = drill.pool === 'outstation'
     ? outstationByBranch.find(b => b.branch === drill.name)
@@ -1151,7 +1151,7 @@ function BranchDrilldown({ drill, outstationByBranch, bangaloreByBranch, t, onBa
                         </button>
                       )}
                       {onReportExtra && (
-                        <button onClick={() => { setExtraFor(extraFor === cid ? null : cid); setExtraForm({ appId: '', gross: '', note: '' }) }}
+                        <button onClick={() => { setExtraFor(extraFor === cid ? null : cid); setExtraForm({ customer: '', gross: '', note: '' }) }}
                           title="A physical bill arrived that isn't listed here — report it to ops"
                           style={{ background: 'transparent', color: t.blue || '#4a90d9', border: `1px solid ${(t.blue || '#4a90d9')}50`, borderRadius: '8px', padding: '6px 12px', fontSize: '10.5px', fontWeight: 700, letterSpacing: '.02em', cursor: 'pointer', whiteSpace: 'nowrap' }}>
                           {extraFor === cid ? '✕ Cancel' : '+ Extra bill received'}
@@ -1162,8 +1162,8 @@ function BranchDrilldown({ drill, outstationByBranch, bangaloreByBranch, t, onBa
                   {extraFor === cid && (
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', padding: '10px 12px', background: `${(t.blue || '#4a90d9')}0c`, border: `1px solid ${(t.blue || '#4a90d9')}30`, borderRadius: 10, marginTop: 8 }}>
                       <span style={{ fontSize: '11px', color: t.blue || '#4a90d9', fontWeight: 700 }}>Extra bill received — report to ops</span>
-                      <input value={extraForm.appId} onChange={e => setExtraForm(f => ({ ...f, appId: e.target.value }))} placeholder="App ID (optional)"
-                        style={{ background: t.card, border: `1px solid ${t.border2}`, borderRadius: 7, padding: '6px 10px', fontFamily: 'monospace', fontSize: '12px', color: t.text1, width: 150, outline: 'none', textTransform: 'uppercase' }} />
+                      <input value={extraForm.customer} onChange={e => setExtraForm(f => ({ ...f, customer: e.target.value }))} placeholder="Customer name (optional)"
+                        style={{ background: t.card, border: `1px solid ${t.border2}`, borderRadius: 7, padding: '6px 10px', fontSize: '12px', color: t.text1, width: 180, outline: 'none' }} />
                       <input value={extraForm.gross} onChange={e => setExtraForm(f => ({ ...f, gross: e.target.value.replace(/[^0-9.]/g, '') }))} placeholder="Gross g *" type="text" inputMode="decimal" className="ca-weight-input"
                         style={{ background: t.card, border: `1px solid ${t.border2}`, borderRadius: 7, padding: '6px 10px', fontFamily: 'monospace', fontSize: '12px', color: t.text1, width: 110, outline: 'none' }} />
                       <input value={extraForm.note} onChange={e => setExtraForm(f => ({ ...f, note: e.target.value }))} placeholder="Note (optional)"

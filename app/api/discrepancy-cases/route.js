@@ -38,7 +38,7 @@ export async function GET(req) {
 
   let q = supabase
     .from('audit_discrepancy_cases')
-    .select('id, purchase_id, case_type, snapshot_crm_gross_g, snapshot_audit_gross_g, snapshot_discrepancy_g, extra_app_id, extra_branch, extra_gross_g, auditor_note, consignment_id, sent_by, sent_at, status, reason, resolved_by, resolved_at')
+    .select('id, purchase_id, case_type, snapshot_crm_gross_g, snapshot_audit_gross_g, snapshot_discrepancy_g, extra_app_id, extra_customer, extra_branch, extra_gross_g, auditor_note, consignment_id, sent_by, sent_at, status, reason, resolved_by, resolved_at')
     .order('sent_at', { ascending: false })
     .limit(2000)
   if (status === 'pending' || status === 'resolved') q = q.eq('status', status)
@@ -80,7 +80,7 @@ export async function GET(req) {
       // Unified display fields — work for weight/not_received (purchase-linked)
       // AND extra_received (may have only the auditor-entered app id / branch).
       display_app_id:      p?.application_id || c.extra_app_id || '—',
-      display_customer:    p?.customer_name  || '—',
+      display_customer:    p?.customer_name  || c.extra_customer || '—',
       display_branch:      p?.branch_name    || c.extra_branch || '—',
       display_crm_gross:   c.snapshot_crm_gross_g,
       display_audit_gross: c.snapshot_audit_gross_g,

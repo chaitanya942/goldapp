@@ -674,29 +674,27 @@ export async function POST(req) {
   // (the 5th of 5 vs 4 consigned). App ID optional: if given we link + snapshot
   // the matching bill, else it's a count+weight report. Straight to ops.
   if (action === 'report_extra_received') {
-    const appId  = (body.app_id || '').trim()
-    const grossG = Number(body.gross_g)
+    const customer = (body.customer || '').trim()
+    const grossG   = Number(body.gross_g)
     if (!Number.isFinite(grossG) || grossG <= 0) {
       return Response.json({ error: 'Enter the gross weight of the extra bill.' }, { status: 400 })
     }
-    let matched = null
-    if (appId) {
-      const variants = appIdVariants(appId)
-      const { data: pm } = await supabase
-        .from('purchases')
-        .select('id, application_id, customer_name, branch_name, gross_weight')
-        .or(variants.map(v => `application_id.eq.${v}`).join(','))
-        .limit(1)
-      matched = (pm && pm[0]) || null
+    // The extra bill physically arrived with this consignment, so its branch is
+    // the consignment's source branch — fill it so ops sees where it came from.
+    let branch = null
+    if (body.consignment_id) {
+      const { data: cg } = await supabase
+        .from('consignments').select('branch_name').eq('id', body.consignment_id).maybeSingle()
+      branch = cg?.branch_name || null
     }
     const { error: insErr } = await supabase.from('audit_discrepancy_cases').insert({
       case_type:              'extra_received',
-      purchase_id:            matched?.id || null,
-      snapshot_crm_gross_g:   matched?.gross_weight ?? null,
+      purchase_id:            null,
+      snapshot_crm_gross_g:   null,
       snapshot_audit_gross_g: grossG,
-      snapshot_discrepancy_g: matched?.gross_weight != null ? (grossG - Number(matched.gross_weight)) : null,
-      extra_app_id:           appId || matched?.application_id || null,
-      extra_branch:           matched?.branch_name || body.branch || null,
+      snapshot_discrepancy_g: null,
+      extra_customer:         customer || null,
+      extra_branch:           branch,
       extra_gross_g:          grossG,
       auditor_note:           (remark || body.note || '').trim() || null,
       consignment_id:         body.consignment_id || null,
