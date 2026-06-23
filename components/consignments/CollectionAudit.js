@@ -1106,23 +1106,11 @@ function BranchDrilldown({ drill, outstationByBranch, bangaloreByBranch, t, onBa
         return (
           <Fragment key={g.consignment?.id || gi}>
             {g.consignment && (() => {
-              const cid          = g.consignment.id
-              const sealVerified = !!g.consignment.seal_verified_at
-              const sealInput    = sealInputs[cid] || ''
-              const verifyBusy   = !!sealBusy[cid]
-              const submitSeal   = async () => {
-                if (!sealInput.trim() || verifyBusy) return
-                setSealBusy(prev => ({ ...prev, [cid]: true }))
-                const ok = await onVerifySeal?.(cid, sealInput.trim())
-                setSealBusy(prev => { const { [cid]: _, ...rest } = prev; return rest })
-                if (ok) setSealInputs(prev => { const { [cid]: _, ...rest } = prev; return rest })
-              }
+              const cid = g.consignment.id
               return (
                 <div style={{
                   display: 'flex', flexDirection: 'column', gap: 8,
                   padding: '8px 10px',
-                  background: sealVerified ? 'transparent' : `${t.orange}08`,
-                  border: sealVerified ? 'none' : `1px solid ${t.orange}30`,
                   borderRadius: 8,
                 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
@@ -1131,25 +1119,11 @@ function BranchDrilldown({ drill, outstationByBranch, bangaloreByBranch, t, onBa
                       {g.consignment.branch_name} <span style={{ color: t.text4 }}>→</span> {g.consignment.movement_type === 'INTERNAL' ? g.consignment.dest_branch : 'HO'}
                     </span>
                     <span style={{ fontSize: '10px', color: t.text4, fontFamily: 'monospace' }}>{g.consignment.challan_no}</span>
-                    {sealVerified && (
-                      <span title={g.consignment.seal_verified_by_email ? `Verified by ${g.consignment.seal_verified_by_email}` : 'Tamper seal verified'}
-                        style={{
-                          fontSize: '10px', color: t.green,
-                          background: `${t.green}18`,
-                          border: `1px solid ${t.green}50`,
-                          borderRadius: '5px',
-                          padding: '3px 9px',
-                          fontWeight: 800, letterSpacing: '.06em',
-                          textTransform: 'uppercase',
-                        }}>
-                        ✓ Seal verified
-                      </span>
-                    )}
                     <span style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: '12px' }}>
                       <span style={{ fontSize: '10px', color: t.text3 }}>
                         <strong style={{ color: t.text2 }}>{g.bills.length}</strong> bill{g.bills.length === 1 ? '' : 's'}
                       </span>
-                      {sealVerified && eligibleBills.length > 0 && (
+                      {eligibleBills.length > 0 && (
                         <button
                           onClick={() => onMarkReceived?.({
                             ids:   eligibleBills.map(b => b.id),
@@ -1190,60 +1164,13 @@ function BranchDrilldown({ drill, outstationByBranch, bangaloreByBranch, t, onBa
                       <span style={{ fontSize: '11px', color: t.blue || '#4a90d9', fontWeight: 700 }}>Extra bill received — report to ops</span>
                       <input value={extraForm.appId} onChange={e => setExtraForm(f => ({ ...f, appId: e.target.value }))} placeholder="App ID (optional)"
                         style={{ background: t.card, border: `1px solid ${t.border2}`, borderRadius: 7, padding: '6px 10px', fontFamily: 'monospace', fontSize: '12px', color: t.text1, width: 150, outline: 'none', textTransform: 'uppercase' }} />
-                      <input value={extraForm.gross} onChange={e => setExtraForm(f => ({ ...f, gross: e.target.value }))} placeholder="Gross g *" type="number" step="0.01"
+                      <input value={extraForm.gross} onChange={e => setExtraForm(f => ({ ...f, gross: e.target.value.replace(/[^0-9.]/g, '') }))} placeholder="Gross g *" type="text" inputMode="decimal" className="ca-weight-input"
                         style={{ background: t.card, border: `1px solid ${t.border2}`, borderRadius: 7, padding: '6px 10px', fontFamily: 'monospace', fontSize: '12px', color: t.text1, width: 110, outline: 'none' }} />
                       <input value={extraForm.note} onChange={e => setExtraForm(f => ({ ...f, note: e.target.value }))} placeholder="Note (optional)"
                         style={{ flex: 1, minWidth: 140, background: t.card, border: `1px solid ${t.border2}`, borderRadius: 7, padding: '6px 10px', fontSize: '12px', color: t.text1, outline: 'none' }} />
                       <button onClick={() => submitExtra(cid)} disabled={extraBusy || !(parseFloat(extraForm.gross) > 0)}
                         style={{ background: parseFloat(extraForm.gross) > 0 ? (t.blue || '#4a90d9') : t.card2, color: parseFloat(extraForm.gross) > 0 ? '#fff' : t.text4, border: 'none', borderRadius: 8, padding: '7px 14px', fontSize: '11px', fontWeight: 800, cursor: parseFloat(extraForm.gross) > 0 ? 'pointer' : 'not-allowed' }}>
                         {extraBusy ? 'Sending…' : 'Send to ops'}
-                      </button>
-                    </div>
-                  )}
-                  {!sealVerified && (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                      <span style={{ fontSize: '11px', color: t.orange, fontWeight: 700, letterSpacing: '.02em', display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-                        🔒 Tamper seal not verified
-                      </span>
-                      <span style={{ fontSize: '10.5px', color: t.text3 }}>
-                        Receive is locked. Type the number printed on the physical bag to unlock.
-                      </span>
-                      <input
-                        value={sealInput}
-                        onChange={e => setSealInputs(prev => ({ ...prev, [cid]: e.target.value }))}
-                        onKeyDown={e => { if (e.key === 'Enter') submitSeal() }}
-                        placeholder="e.g. WG000004"
-                        disabled={verifyBusy}
-                        style={{
-                          marginLeft: 'auto',
-                          background: t.card,
-                          border: `1px solid ${t.border2}`,
-                          borderRadius: 7,
-                          padding: '6px 10px',
-                          fontFamily: 'monospace',
-                          fontSize: '12px',
-                          color: t.text1,
-                          width: 150,
-                          outline: 'none',
-                          textTransform: 'uppercase',
-                        }} />
-                      <button
-                        onClick={submitSeal}
-                        disabled={verifyBusy || !sealInput.trim()}
-                        style={{
-                          background: verifyBusy ? t.card2 : (sealInput.trim() ? t.gold : t.card2),
-                          color:      sealInput.trim() ? '#1a0a00' : t.text4,
-                          border:     'none',
-                          borderRadius: 7,
-                          padding: '7px 14px',
-                          fontSize: 11,
-                          fontWeight: 800,
-                          letterSpacing: '.04em',
-                          textTransform: 'uppercase',
-                          cursor: verifyBusy || !sealInput.trim() ? 'not-allowed' : 'pointer',
-                          opacity: verifyBusy ? 0.6 : 1,
-                        }}>
-                        {verifyBusy ? 'Verifying…' : 'Verify Seal'}
                       </button>
                     </div>
                   )}
@@ -1563,9 +1490,9 @@ function AuditModal({ bill, t, isMobile, onClose, onDone, onError }) {
                 }} />
                 Blind Weight Entry
               </div>
-              <div style={{ fontSize: '24px', color: t.text1, fontFamily: 'monospace', fontWeight: 800, marginTop: '8px', letterSpacing: '-.02em', lineHeight: 1.1 }}>{bill.application_id}</div>
+              <div style={{ fontSize: '24px', color: t.text1, fontWeight: 800, marginTop: '8px', letterSpacing: '-.02em', lineHeight: 1.1 }}>{bill.customer_name || '—'}</div>
               <div style={{ fontSize: '11.5px', color: t.text3, marginTop: '5px', fontWeight: 500 }}>
-                <span style={{ color: t.text2 }}>{bill.customer_name}</span> <span style={{ opacity: 0.4 }}>·</span> {bill.branch_name} <span style={{ opacity: 0.4 }}>·</span> {fmtDate(bill.purchase_date)}
+                {bill.branch_name} <span style={{ opacity: 0.4 }}>·</span> {fmtDate(bill.purchase_date)}
               </div>
             </div>
           </div>
