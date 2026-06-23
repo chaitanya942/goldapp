@@ -35,6 +35,7 @@ import AuditRoster from '../../components/consignments/AuditRoster'
 import AuditReport from '../../components/consignments/AuditReport'
 import DiscrepancyCases from '../../components/consignments/DiscrepancyCases'
 import PurchaseRegister from '../../components/consignments/PurchaseRegister'
+import BilledVsPaid from '../../components/consignments/BilledVsPaid'
 import ConsignmentAnalytics from '../../components/consignments/ConsignmentAnalytics'
 import ConsignmentApprovals from '../../components/consignments/ConsignmentApprovals'
 import EodStockReport from '../../components/consignments/EodStockReport'
@@ -249,6 +250,7 @@ function DashboardShell() {
       case 'audit-report':            return <AuditReport />
       case 'discrepancy-cases':       return <DiscrepancyCases />
       case 'purchase-register':       return <PurchaseRegister />
+      case 'billed-vs-paid':          return <BilledVsPaid />
       case 'consignment-analytics':  return <ConsignmentAnalytics />
       case 'melting':             return <MeltingIncoming status="in_consignment" />
       case 'melting-incoming':    return <MeltingIncoming status="in_consignment" />
