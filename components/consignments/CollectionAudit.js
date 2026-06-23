@@ -192,6 +192,9 @@ export default function CollectionAudit() {
   // arriving on different days shows under each respective filter, with
   // only that day's truck's bills inside).
   const [arrivalFilter, setArrivalFilter] = useState('today')
+  // Active region tab within the current arrival filter. null → fall back to
+  // the first region in the (bill-count-sorted) list.
+  const [activeRegion, setActiveRegion] = useState(null)
   // Region collapse state. Tracked as EXPANDED set so the default
   // (empty set) means every region starts collapsed — Bangalore has
   // ~30 branches and scrolling past them every page load was wasted
@@ -268,6 +271,7 @@ export default function CollectionAudit() {
     if (!arr) return false
     if (arrivalFilter === 'today')    return arr.diff === 0
     if (arrivalFilter === 'tomorrow') return arr.diff === 1
+    if (arrivalFilter === 'others')   return arr.diff > 1     // arriving day-after or later
     if (arrivalFilter === 'overdue')  return arr.diff < 0
     return false
   }, [arrivalFilter, t])
@@ -353,13 +357,25 @@ export default function CollectionAudit() {
     return entries.map(({ region, branches }) => ({ region, branches }))
   }, [filteredOutstationByBranch])
 
+  // Region tabs: the active region falls back to the first available one
+  // whenever the current selection isn't present (arrival filter / search
+  // narrowed it away). Derived — no effect needed.
+  const effectiveRegion = useMemo(() => {
+    const names = outstationByRegion.map(r => r.region)
+    return (activeRegion && names.includes(activeRegion)) ? activeRegion : (names[0] || null)
+  }, [outstationByRegion, activeRegion])
+  const activeRegionData = useMemo(
+    () => outstationByRegion.find(r => r.region === effectiveRegion) || null,
+    [outstationByRegion, effectiveRegion],
+  )
+
   // Bucket counts for the filter chips. Counts distinct branches that have
   // at least one consignment matching that arrival bucket — same shape as
   // what the filter will show when clicked. Computed from the raw
   // outstation list (not the already-filtered one) so the chip badge for
   // a non-active bucket still reflects what's there.
   const arrivalCounts = useMemo(() => {
-    const today = new Set(), tomorrow = new Set(), overdue = new Set()
+    const today = new Set(), tomorrow = new Set(), others = new Set(), overdue = new Set()
     for (const g of outstation) {
       if (!g.consignment?.expected_arrival_date) continue
       const arr = arrivalLabel(g.consignment.expected_arrival_date, t)
@@ -367,12 +383,13 @@ export default function CollectionAudit() {
       for (const bill of g.bills) {
         const k = bill.branch_name || g.consignment.branch_name
         if (!k) continue
-        if (arr.diff < 0)       overdue.add(k)
+        if (arr.diff < 0)        overdue.add(k)
         else if (arr.diff === 0) today.add(k)
         else if (arr.diff === 1) tomorrow.add(k)
+        else                     others.add(k)
       }
     }
-    return { today: today.size, tomorrow: tomorrow.size, overdue: overdue.size }
+    return { today: today.size, tomorrow: tomorrow.size, others: others.size, overdue: overdue.size }
   }, [outstation, t])
 
   const kpis = {
@@ -453,81 +470,10 @@ export default function CollectionAudit() {
         }
       `}</style>
 
-      {/* ─── Hero header ─── */}
-      <div style={{
-        background:  `linear-gradient(135deg, ${t.card} 0%, ${t.card2 || t.card} 100%)`,
-        border:      `1px solid ${t.border}`,
-        borderRadius: '16px',
-        padding:     '22px 26px',
-        display:     'flex',
-        flexDirection: 'column',
-        gap:         '18px',
-        position:    'relative',
-        overflow:    'hidden',
-        boxShadow:   `0 1px 3px ${t.border}40`,
-      }}>
-        {/* Subtle gold sheen (gradient ellipse) + animated shimmer line */}
-        <div style={{ position: 'absolute', top: '-50%', right: '-10%', width: '50%', height: '200%', background: `radial-gradient(ellipse at center, ${t.gold}10 0%, transparent 70%)`, pointerEvents: 'none' }} />
-        <div style={{
-          position: 'absolute', top: 0, left: 0, right: 0, height: '2px',
-          background: `linear-gradient(90deg, transparent, ${t.gold}80, transparent)`,
-          backgroundSize: '200% 100%',
-          animation: 'caAuditShimmer 4s linear infinite',
-          opacity: 0.5,
-          pointerEvents: 'none',
-        }} />
-
-        {/* Row 1: title + stats + refresh */}
-        <div style={{
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          gap: '20px', flexWrap: 'wrap', zIndex: 1,
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '18px' }}>
-            <div style={{
-              width: '54px', height: '54px', borderRadius: '14px',
-              background: `linear-gradient(135deg, ${t.gold}25, ${t.gold}10)`,
-              border:     `1px solid ${t.gold}40`,
-              display:    'flex', alignItems: 'center', justifyContent: 'center',
-              fontSize:   '26px',
-            }}>
-              ⚖
-            </div>
-            <div>
-              <div style={{ fontSize: '1.6rem', fontWeight: 300, color: t.text1, letterSpacing: '.02em', lineHeight: 1.1 }}>Audit Data</div>
-              <div style={{ fontSize: '12px', color: t.text3, marginTop: '6px', maxWidth: '520px' }}>
-                Drill into a branch, weigh each inbound bill, and match it against the CRM gross — without seeing the CRM number first.
-              </div>
-            </div>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-            <HeroStat t={t} label={hasSearchActive ? 'Matching bills' : 'Total bills'} value={totalBills} color={t.gold} />
-            <HeroStat t={t} label="Branches"    value={totalBranches} color={t.text2} />
-            {kpis.discrepancies > 0 && <HeroStat t={t} label="Discrepancies" value={kpis.discrepancies} color={t.red} />}
-            <button onClick={fetchAll}
-              title="Reload pending audits"
-              className="ca-refresh"
-              style={{
-                background: 'transparent',
-                border: `1px solid ${t.border}`,
-                borderRadius: '10px',
-                padding: '9px 16px',
-                fontSize: '11px',
-                color: t.text3,
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-                transition: 'color .2s ease, border-color .2s ease, background .2s ease',
-              }}
-              onMouseEnter={e => { e.currentTarget.style.color = t.gold; e.currentTarget.style.borderColor = `${t.gold}60`; e.currentTarget.style.background = `${t.gold}08` }}
-              onMouseLeave={e => { e.currentTarget.style.color = t.text3; e.currentTarget.style.borderColor = t.border; e.currentTarget.style.background = 'transparent' }}>
-              <span className="ca-refresh-icon">⟳</span> Refresh
-            </button>
-          </div>
-        </div>
-
-        {/* Row 2: search box, full-width */}
-        <div style={{ position: 'relative', zIndex: 1 }}>
+      {/* ─── Search bar (simple) ─── */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+        {/* search box, takes the row */}
+        <div style={{ position: 'relative', flex: 1 }}>
           <span style={{
             position: 'absolute', top: '50%', left: '14px', transform: 'translateY(-50%)',
             fontSize: '14px', color: t.text4, pointerEvents: 'none',
@@ -566,6 +512,12 @@ export default function CollectionAudit() {
             </button>
           )}
         </div>
+        <button onClick={fetchAll} title="Reload" className="ca-refresh"
+          style={{ background: 'transparent', border: `1px solid ${t.border}`, borderRadius: '10px', padding: '10px 14px', fontSize: '11px', color: t.text3, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px', whiteSpace: 'nowrap' }}
+          onMouseEnter={e => { e.currentTarget.style.color = t.gold; e.currentTarget.style.borderColor = `${t.gold}60` }}
+          onMouseLeave={e => { e.currentTarget.style.color = t.text3; e.currentTarget.style.borderColor = t.border }}>
+          <span className="ca-refresh-icon">⟳</span> Refresh
+        </button>
       </div>
 
       {loading ? (
@@ -686,9 +638,10 @@ export default function CollectionAudit() {
           }}>
             <span style={{ fontSize: '10px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 600, marginRight: '4px' }}>Filter</span>
             {[
-              { id: 'today',    label: 'Arriving today',count: arrivalCounts.today,    color: t.gold,  attract: true },
-              { id: 'tomorrow', label: 'Tomorrow',      count: arrivalCounts.tomorrow, color: t.green, attract: false },
-              { id: 'overdue',  label: 'Overdue',       count: arrivalCounts.overdue,  color: t.red,   attract: true },
+              { id: 'today',    label: 'Arriving today',    count: arrivalCounts.today,    color: t.gold,            attract: true  },
+              { id: 'tomorrow', label: 'Arriving tomorrow', count: arrivalCounts.tomorrow, color: t.green,           attract: false },
+              { id: 'others',   label: 'Others',            count: arrivalCounts.others,   color: t.blue || '#4a90d9', attract: false },
+              { id: 'overdue',  label: 'Overdue',           count: arrivalCounts.overdue,  color: t.red,             attract: true  },
             ].map(chip => {
               const active = arrivalFilter === chip.id
               const dim    = chip.count === 0 && !active
@@ -776,97 +729,69 @@ export default function CollectionAudit() {
                 </div>
               </div>
             ) : (
-              <div style={{ padding: '6px 16px 18px' }}>
-                {outstationByRegion.map(({ region, branches }, regionIdx) => {
-                  const regionBills = branches.reduce((s, b) => s + b.bills.length, 0)
-                  const collapsed   = !expandedRegions.has(region)
-                  return (
-                    <div key={region} style={{ marginTop: regionIdx === 0 ? '10px' : '20px' }}>
-                      {/* Region band — clickable to collapse/expand. Heavier
-                          visual presence than a dot so it scans well; chevron
-                          on the right rotates with state so the affordance is
-                          obvious without a tooltip. */}
-                      <button
-                        type="button"
-                        onClick={() => toggleRegion(region)}
-                        aria-expanded={!collapsed}
+              <div style={{ padding: '14px 16px 18px' }}>
+                {/* Region tabs — one per region present in the active arrival
+                    bucket. Selecting a tab swaps the branch grid below. */}
+                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', paddingBottom: '14px', marginBottom: '14px', borderBottom: `1px solid ${t.border}` }}>
+                  {outstationByRegion.map(({ region, branches }) => {
+                    const regionBills = branches.reduce((s, b) => s + b.bills.length, 0)
+                    const active = region === effectiveRegion
+                    return (
+                      <button key={region} type="button" onClick={() => setActiveRegion(region)}
                         style={{
-                          display: 'flex', alignItems: 'center', gap: '12px',
-                          width: '100%',
-                          margin: '0 0 12px', padding: '8px 4px',
-                          borderBottom: `1px solid ${t.border}`,
-                          background: 'transparent', border: 'none', borderTop: 'none',
-                          borderLeft: 'none', borderRight: 'none',
-                          textAlign: 'left',
+                          background: active ? `${t.orange}18` : 'transparent',
+                          border: `1px solid ${active ? `${t.orange}80` : t.border}`,
+                          borderRadius: '999px',
+                          padding: '7px 15px',
+                          fontSize: '11.5px',
+                          color: active ? t.orange : t.text2,
                           cursor: 'pointer',
-                          position: 'relative',
-                          transition: 'background .15s ease',
-                          borderRadius: '4px',
+                          fontWeight: active ? 700 : 600,
+                          letterSpacing: '.04em',
+                          textTransform: 'uppercase',
+                          display: 'inline-flex', alignItems: 'center', gap: '8px',
+                          transition: 'color .15s ease, background .15s ease, border-color .15s ease',
+                          boxShadow: active ? `0 0 0 4px ${t.orange}12` : 'none',
                         }}
-                        onMouseEnter={e => { e.currentTarget.style.background = `${t.orange}06` }}
-                        onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}>
-                        <span style={{
-                          width: '3px', alignSelf: 'stretch', borderRadius: '2px',
-                          background: `linear-gradient(180deg, ${t.orange}, ${t.orange}40)`,
-                        }} />
-                        <span style={{
-                          fontSize: '12px', color: t.text1, fontWeight: 700,
-                          letterSpacing: '.06em', textTransform: 'uppercase',
-                        }}>{region}</span>
+                        onMouseEnter={e => { if (!active) { e.currentTarget.style.borderColor = `${t.orange}60`; e.currentTarget.style.color = t.orange } }}
+                        onMouseLeave={e => { if (!active) { e.currentTarget.style.borderColor = t.border; e.currentTarget.style.color = t.text2 } }}>
+                        {region}
                         <span style={{
                           fontSize: '10px',
-                          color: t.text3,
-                          background: `${t.orange}10`,
-                          border: `1px solid ${t.orange}25`,
-                          borderRadius: '999px',
-                          padding: '2px 9px',
-                          fontWeight: 600,
-                          fontFamily: 'monospace',
-                        }}>
-                          {branches.length} · {regionBills} bill{regionBills === 1 ? '' : 's'}
-                        </span>
-                        <span style={{
-                          marginLeft: 'auto',
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          width: '20px', height: '20px',
-                          color: t.text3,
-                          fontSize: '11px',
-                          fontWeight: 700,
-                          transform: collapsed ? 'rotate(-90deg)' : 'rotate(0deg)',
-                          transition: 'transform .2s ease, color .15s ease',
-                        }}>▾</span>
+                          color: active ? t.orange : t.text4,
+                          background: active ? `${t.orange}25` : `${t.border}80`,
+                          borderRadius: '999px', padding: '1px 7px', fontWeight: 700, fontFamily: 'monospace', minWidth: '20px', textAlign: 'center',
+                        }}>{regionBills}</span>
                       </button>
-                      {!collapsed && (
-                        <div style={{
-                          display: 'grid',
-                          gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-                          gap: '5px',
-                        }}>
-                          {branches.map((b, i) => (
-                            <div key={b.branch}
-                                 className="ca-card-enter"
-                                 style={{ animationDelay: `${Math.min(i * 30, 400)}ms` }}>
-                              <BranchCard
-                                t={t}
-                                accent={t.orange}
-                                branch={b.branch}
-                                billCount={b.bills.length}
-                                extraLabel={`${b.consignments.length} consignment${b.consignments.length === 1 ? '' : 's'}`}
-                                oldestAt={oldestAge(b.consignments, 'dispatched_at')}
-                                dispatchedYmd={latestDispatchDate(b.consignments)}
-                                arrivalAt={earliestArrival(b.consignments)}
-                                discrepancies={b.bills.filter(x => x.audit_gross_weight != null).length}
-                                onPick={() => setDrillBranch({ name: b.branch, pool: 'outstation' })}
-                              />
-                            </div>
-                          ))}
-                        </div>
-                      )}
+                    )
+                  })}
+                </div>
+
+                {/* Active region's branch cards */}
+                <div style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+                  gap: '5px',
+                }}>
+                  {(activeRegionData?.branches || []).map((b, i) => (
+                    <div key={b.branch}
+                         className="ca-card-enter"
+                         style={{ animationDelay: `${Math.min(i * 30, 400)}ms` }}>
+                      <BranchCard
+                        t={t}
+                        accent={t.orange}
+                        branch={b.branch}
+                        billCount={b.bills.length}
+                        extraLabel={`${b.consignments.length} consignment${b.consignments.length === 1 ? '' : 's'}`}
+                        oldestAt={oldestAge(b.consignments, 'dispatched_at')}
+                        dispatchedYmd={latestDispatchDate(b.consignments)}
+                        arrivalAt={earliestArrival(b.consignments)}
+                        discrepancies={b.bills.filter(x => x.audit_gross_weight != null).length}
+                        onPick={() => setDrillBranch({ name: b.branch, pool: 'outstation' })}
+                      />
                     </div>
-                  )
-                })}
+                  ))}
+                </div>
               </div>
             )}
           </div>
