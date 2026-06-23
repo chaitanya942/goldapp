@@ -1279,12 +1279,38 @@ export async function GET(req) {
     const klS3Total      = sumOf(klS3ByBranch)
     const klS5Total      = sumOf(klS5ByLeaf)
 
+    // ── Today's purchases by region (ops header summary) ──────────────────────
+    // A flat "what was bought today" tally — bills + net weight grouped by
+    // region, independent of the arrival windows. Region scope is inherited via
+    // branchMeta (already filtered to allowedRegions), so a bill at an
+    // out-of-scope branch is skipped. Kerala lands here too; the client shows it
+    // only on the KL tab.
+    const { data: todaysPurchaseRows } = await supabase
+      .from('purchases')
+      .select('net_weight, branch_name')
+      .eq('purchase_date', today)
+      .eq('crm_status', 'approved')
+      .eq('is_deleted', false)
+      .limit(5000)
+    const todaysByRegionMap = {}
+    for (const p of todaysPurchaseRows || []) {
+      const region = branchMeta[p.branch_name]?.region
+      if (!region) continue
+      if (!todaysByRegionMap[region]) todaysByRegionMap[region] = { region, bills: 0, net_wt: 0 }
+      todaysByRegionMap[region].bills  += 1
+      todaysByRegionMap[region].net_wt += Number(p.net_weight || 0)
+    }
+    const todays_purchases_by_region = Object.values(todaysByRegionMap)
+      .sort((a, b) => b.net_wt - a.net_wt)
+
     return Response.json({
       data: {
         arrival_date:            arrivalDate,
         day_after_arrival:       dayAfterArrival,
         day_after_2_arrival:     dayAfter2Arrival,
         bangalore_purchase_date: bangalorePurchaseDate,
+        todays_purchase_date:    today,
+        todays_purchases_by_region,
         bangalore:      { branches: bangaloreByBranch,  total: bangTotal,       booked: bookedSection(bookedBang)        },
         transit_24h:    { branches: transit24hByBranch, total: transit24hTotal, booked: bookedSection(bookedT24)         },
         transit_48h:    { branches: transit48hByBranch, total: transit48hTotal, booked: bookedSection(bookedT48)         },   // selectable

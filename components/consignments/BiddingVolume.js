@@ -1105,6 +1105,32 @@ export default function BiddingVolume() {
             (<strong style={{ color: t.text1 }}>{fmtDate(arrivalDate)}</strong>)
           </div>
         </div>
+
+        {/* ── Today's purchases · region-wise (ops summary) ── */}
+        {(() => {
+          const SHORT = { 'Bangalore': 'Bangalore', 'Rest of Karnataka': 'Rest of KA', 'Andhra Pradesh': 'Andhra', 'Telangana': 'Telangana', 'Kerala': 'Kerala' }
+          const rows  = supply?.todays_purchases_by_region || []
+          const want  = regionTab === 'kl' ? rows.filter(r => r.region === 'Kerala') : rows.filter(r => r.region !== 'Kerala')
+          if (!want.length) return <div style={{ flex: 1 }} />
+          const accent = regionTab === 'kl' ? (t.purple || '#8c5ac8') : t.gold
+          return (
+            <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
+              <div style={{ fontSize: 9.5, color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 700 }}>
+                Today's purchases{supply?.todays_purchase_date ? ` · ${fmtDateShort(supply.todays_purchase_date)}` : ''}
+              </div>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
+                {want.map(r => (
+                  <div key={r.region} style={{ display: 'inline-flex', alignItems: 'center', gap: 9, background: t.card2, border: `1px solid ${t.border}`, borderRadius: 99, padding: '5px 13px' }}>
+                    <span style={{ fontSize: 10, color: accent, fontWeight: 800, letterSpacing: '.03em', textTransform: 'uppercase' }}>{SHORT[r.region] || r.region}</span>
+                    <span style={{ fontSize: 12.5, color: t.text1, fontWeight: 700, fontFamily: 'monospace' }}>{Number(r.net_wt || 0).toFixed(2)}<span style={{ fontSize: 9, color: t.text4 }}>g</span></span>
+                    <span style={{ fontSize: 9.5, color: t.text4 }}>{r.bills} bill{r.bills === 1 ? '' : 's'}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )
+        })()}
+
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           {/* Date navigator removed from the header — moved next to the
               Bidding/Bookings tab switcher and now pivots on BIDDING DAY
