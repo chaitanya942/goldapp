@@ -693,18 +693,8 @@ export default function CollectionAudit() {
             })}
           </div>
 
-          {/* Outstation pool wrapper. Per-region sections render inside. */}
+          {/* Outstation pool wrapper. Region tabs + cards render inside. */}
           <div style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: '14px', overflow: 'hidden', position: 'relative', boxShadow: `0 1px 3px ${t.border}40` }}>
-            <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '3px', background: `linear-gradient(90deg, ${t.orange} 0%, ${t.orange}30 60%, transparent 100%)` }} />
-            <div style={{ padding: '18px 22px', borderBottom: `1px solid ${t.border}`, display: 'flex', alignItems: 'center', gap: '14px' }}>
-              <span style={{ fontSize: '10px', color: t.orange, background: `${t.orange}18`, borderRadius: '6px', padding: '5px 11px', fontWeight: 700, letterSpacing: '.1em' }}>OUTSTATION</span>
-              <div>
-                <div style={{ fontSize: '15px', color: t.text1, fontWeight: 600, letterSpacing: '-.01em' }}>In-Transit Branches</div>
-                <div style={{ fontSize: '11px', color: t.text4, marginTop: '3px' }}>
-                  {`${kpis.outstationBranches} branch${kpis.outstationBranches === 1 ? '' : 'es'} · ${kpis.outstationBills} bill${kpis.outstationBills === 1 ? '' : 's'}`}
-                </div>
-              </div>
-            </div>
             {outstationByRegion.length === 0 ? (
               <div style={{ padding: '70px 20px 80px', textAlign: 'center' }}>
                 <div style={{
