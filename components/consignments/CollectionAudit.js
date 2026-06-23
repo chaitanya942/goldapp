@@ -1312,19 +1312,17 @@ function BillCard({ bill, t, onAudit, onMarkReceived, onReportNotReceived, dateF
         e.currentTarget.style.borderColor = borderColor
       }}>
 
-      {/* Top row: App ID + Type + Age */}
+      {/* Top row: Customer + Type + Age (blind audit identifies by customer,
+          not the CRM application id) */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '8px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-          <span style={{ fontSize: '13px', color: t.gold, fontFamily: 'monospace', fontWeight: 700, letterSpacing: '-.01em' }}>{bill.application_id}</span>
+          <span style={{ fontSize: '15px', color: t.text1, fontWeight: 600, lineHeight: 1.2, letterSpacing: '-.01em' }}>{bill.customer_name || '—'}</span>
           <span style={{ fontSize: '9px', color: isTakeover ? t.purple : t.gold, background: isTakeover ? `${t.purple}18` : `${t.gold}18`, borderRadius: '4px', padding: '2px 7px', fontWeight: 700, letterSpacing: '.05em' }}>
             {bill.transaction_type || '—'}
           </span>
         </div>
         <span style={{ fontSize: '9px', color: age.color, background: age.bg, borderRadius: '4px', padding: '2px 7px', fontWeight: 700, whiteSpace: 'nowrap' }}>{age.label}</span>
       </div>
-
-      {/* Customer */}
-      <div style={{ fontSize: '14px', color: t.text1, fontWeight: 500, lineHeight: 1.2 }}>{bill.customer_name || '—'}</div>
 
       {/* Meta */}
       <div style={{ fontSize: '11px', color: t.text4, display: 'flex', gap: '12px', flexWrap: 'wrap' }}>

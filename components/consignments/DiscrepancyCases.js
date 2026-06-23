@@ -164,7 +164,7 @@ export default function DiscrepancyCases() {
                 <tr style={{ background: t.card2 || t.card }}>
                   <th style={s.th}>Sent At</th>
                   <th style={s.th}>Auditor</th>
-                  <th style={s.th}>Bill</th>
+                  <th style={s.th}>Customer · Branch</th>
                   <th style={{ ...s.th, textAlign: 'right' }}>CRM Gross</th>
                   <th style={{ ...s.th, textAlign: 'right' }}>Audit Weight</th>
                   <th style={{ ...s.th, textAlign: 'right' }}>Δ</th>
@@ -197,11 +197,13 @@ export default function DiscrepancyCases() {
                             <div style={{ display: 'inline-flex', alignItems: 'center', fontSize: '9px', fontWeight: 800, letterSpacing: '.06em', textTransform: 'uppercase', color: tm.color, background: `${tm.color}1c`, border: `1px solid ${tm.color}44`, borderRadius: 4, padding: '1px 6px', marginBottom: 4 }}>{tm.label}</div>
                           )
                         })()}
-                        <div style={{ fontWeight: 600, color: t.text1, fontFamily: 'monospace', fontSize: '11.5px' }}>
-                          {c.display_app_id || '—'}
+                        <div style={{ fontWeight: 600, color: t.text1, fontSize: '13px', lineHeight: 1.2 }}>
+                          {c.display_customer || '—'}
                         </div>
-                        <div style={{ fontSize: '11px', color: t.text2, marginTop: '2px' }}>{c.display_customer || '—'}</div>
-                        <div style={{ fontSize: '10px', color: t.text4, marginTop: '1px' }}>{c.display_branch || '—'}</div>
+                        <div style={{ fontSize: '11px', color: t.text2, marginTop: '3px' }}>{c.display_branch || '—'}</div>
+                        {c.display_app_id && c.display_app_id !== '—' && (
+                          <div style={{ fontSize: '10px', color: t.text4, marginTop: '1px', fontFamily: 'monospace' }}>{c.display_app_id}</div>
+                        )}
                         {c.auditor_note && <div style={{ fontSize: '10px', color: t.text3, marginTop: '3px', fontStyle: 'italic' }}>“{c.auditor_note}”</div>}
                       </td>
                       <td style={{ ...s.td, textAlign: 'right', fontFamily: 'monospace', color: t.gold, whiteSpace: 'nowrap' }}>
