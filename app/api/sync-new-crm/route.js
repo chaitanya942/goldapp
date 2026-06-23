@@ -283,6 +283,20 @@ async function runSync(request) {
     // separately in failedIds; they don't mean the sync is down.
     await recordSyncSuccess(supabaseAdmin, 'new_crm', synced)
 
+    // Pipeline auto-attach — the New-CRM sync is what brings Bangalore bills in,
+    // so close any owed pipeline against them immediately (no-overshoot). Without
+    // this the pipeline waits for a /api/sync-purchases run or the 23:30 EOD job.
+    // Non-fatal: a failure here never fails the sync.
+    try {
+      const { data: attachRows, error: attachErr } = await supabaseAdmin.rpc('process_pipeline_attachments')
+      if (attachErr) console.warn('[sync-new-crm] process_pipeline_attachments failed (non-fatal):', attachErr.message)
+      else if (Array.isArray(attachRows) && attachRows.length) {
+        const bills = attachRows.reduce((s, r) => s + Number(r.bills_attached || 0), 0)
+        const wt    = attachRows.reduce((s, r) => s + Number(r.weight_attached || 0), 0)
+        console.log(`[sync-new-crm] pipeline auto-attach: ${attachRows.length} booking(s), ${bills} bill(s), ${wt.toFixed(2)}g`)
+      }
+    } catch (paErr) { console.warn('[sync-new-crm] pipeline auto-attach threw (non-fatal):', paErr?.message) }
+
     return Response.json({
       success:   errors === 0,
       total:     rows.length,
