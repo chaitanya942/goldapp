@@ -17,7 +17,7 @@ const DEFAULT_ROLES = [
   { value: 'branch_staff',    label: 'Branch Staff',     color: '#c9981f' },
   { value: 'viewer',          label: 'View Only',        color: '#7a6a4a' },
   { value: 'telesales',       label: 'Telesales',        color: '#e07840' },
-  { value: 'audit',           label: 'Collection Audit', color: '#5ec1d6' },
+  { value: 'audit',           label: 'Accounts',         color: '#5ec1d6' },
 ]
 
 const REGION_COLOR = {
