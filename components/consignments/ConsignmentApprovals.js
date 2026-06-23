@@ -544,7 +544,7 @@ export default function ConsignmentApprovals() {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: '14px', flexWrap: 'wrap' }}>
           <div style={{ fontSize: '1.35rem', fontWeight: 300, color: t.text1, letterSpacing: '.02em' }}>
-            Approvals
+            Consignment EWB/E-Invoice
           </div>
           {(tab === 'approved' || tab === 'rejected') && (
             <div style={{ fontSize: '11px', color: t.text3 }}>
