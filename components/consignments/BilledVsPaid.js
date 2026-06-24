@@ -149,7 +149,7 @@ export default function BilledVsPaid() {
       {/* Razorpay-link status */}
       {res && !res.razorpay_linked && (
         <div style={{ ...card, padding: '10px 14px', borderColor: `${t.orange}50`, background: `${t.orange}0c`, fontSize: 11.5, color: t.orange }}>
-          ⚠ RazorpayX not linked — <strong>Paid – Bank</strong> and payout validation are off. Add <code>RAZORPAY_KEY_ID</code>, <code>RAZORPAY_KEY_SECRET</code> and <code>RAZORPAYX_ACCOUNT_NUMBER</code> on Railway to verify the real money-out (incl. split payouts). Until then, <strong>Paid – CRM</strong> (what the CRM recorded) is shown.
+          ⚠ No RazorpayX payouts captured yet — <strong>Paid – Bank</strong> and payout validation are off. Point the Razorpay <strong>webhook</strong> at <code>/api/razorpay-webhook</code> (set <code>RAZORPAY_WEBHOOK_SECRET</code> on Railway) so payouts flow into the app; run the one-time backfill for history. No money-capable API key is stored. Until payouts arrive, <strong>Paid – CRM</strong> (what the CRM recorded) is shown.
         </div>
       )}
       {res?.warnings?.length > 0 && (

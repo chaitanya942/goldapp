@@ -16,9 +16,11 @@
 // Scope: both CRMs. OLD CRM has no clean paid-amount or payout account, so its
 // rows carry billed + customer bank only (paid / account-match shown blank).
 //
-// RazorpayX is env-gated: set RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET and
-// RAZORPAYX_ACCOUNT_NUMBER to light up the live "bank-settled" column. Without
-// them the module still works off the CRM-recorded payout.
+// RazorpayX "Paid (Bank)" data comes from the webhook-fed `razorpay_payouts`
+// table — Razorpay pushes payout.* events to /api/razorpay-webhook. The app
+// holds NO money-capable API key (only the webhook signing secret lives on the
+// server). Until payouts are captured, the module works off the CRM-recorded
+// payout.
 
 import { createClient } from '@supabase/supabase-js'
 import { Client } from 'pg'
@@ -132,65 +134,48 @@ async function oldCrmBank(from, to) {
   } finally { await conn.end() }
 }
 
-// ── RazorpayX Payouts (env-gated): real money-out, multi-tagged per case ──────
-// A single CRM final payment can be settled by MANY payouts (₹30L paid as
-// 6×₹5L). We pull every payout in the window and index it three ways so a case
-// can claim all of its splits:
-//   • by UTR          — the CRM-recorded UTR(s)
-//   • by reference_id — if the payments team stamps the App ID on the payout
-//   • by notes.*      — App ID dropped into a notes field
-// Each payout carries its beneficiary account (fund_account.bank_account) so we
-// can confirm the money went to the right account, and an array form so the UI
-// can list every split.
+// ── RazorpayX payouts — read from the webhook-fed `razorpay_payouts` table ────
+// SAFEST design: this app holds NO money-capable Razorpay API key. Razorpay
+// pushes payout.* events to /api/razorpay-webhook (verified by a webhook signing
+// secret that CANNOT move money or call the API), and those rows are read here.
+// A single CRM final payment can be settled by MANY payouts (₹30L as 6×₹5L), so
+// every payout is indexed by UTR and by App-ID (reference_id / notes) — a case
+// claims all of its splits.
 async function razorpayPayouts(from, to) {
-  const keyId  = process.env.RAZORPAY_KEY_ID
-  const secret = process.env.RAZORPAY_KEY_SECRET
-  const acct   = process.env.RAZORPAYX_ACCOUNT_NUMBER
-  if (!keyId || !secret || !acct) return { linked: false, list: [], byUtr: {}, byRef: {} }
-
-  const auth = 'Basic ' + Buffer.from(`${keyId}:${secret}`).toString('base64')
-  const fromEpoch = Math.floor(new Date(`${addDays(from, -3)}T00:00:00+05:30`).getTime() / 1000)
-  const toEpoch   = Math.floor(new Date(`${addDays(to, 3)}T23:59:59+05:30`).getTime() / 1000)
-
-  const list = [], byUtr = {}, byRef = {}
   const refKeys = (p) => {
     const out = []
     if (p.reference_id) out.push(norm(p.reference_id))
-    for (const v of Object.values(p.notes || {})) if (v) out.push(norm(v))
+    const notes = p.notes && typeof p.notes === 'object' ? p.notes : {}
+    for (const v of Object.values(notes)) if (v) out.push(norm(v))
     return [...new Set(out)]
   }
-  try {
-    let skip = 0
-    for (let page = 0; page < 300; page++) {            // cap 30k payouts
-      const url = `https://api.razorpay.com/v1/payouts?account_number=${encodeURIComponent(acct)}&count=100&skip=${skip}&from=${fromEpoch}&to=${toEpoch}&expand[]=fund_account.bank_account`
-      const res = await fetch(url, { headers: { Authorization: auth } })
-      if (!res.ok) {
-        const txt = await res.text().catch(() => '')
-        return { linked: true, list, byUtr, byRef, error: `Razorpay ${res.status}: ${txt.slice(0, 200)}` }
-      }
-      const j = await res.json()
-      const items = Array.isArray(j.items) ? j.items : []
-      for (const p of items) {
-        const po = {
-          payout_id: p.id || '',
-          utr:       p.utr ? String(p.utr).trim() : '',
-          amount:    Number(p.amount || 0) / 100,     // paise → ₹
-          status:    p.status || '',
-          benef_acct: p.fund_account?.bank_account?.account_number || '',
-          benef_ifsc: p.fund_account?.bank_account?.ifsc || '',
-          refs:      refKeys(p),
-        }
-        list.push(po)
-        if (po.utr) byUtr[po.utr] = po
-        for (const k of po.refs) (byRef[k] = byRef[k] || []).push(po)
-      }
-      if (items.length < 100) break
-      skip += 100
+  // Bound the read to the case window (±3 days) on the payout date.
+  const lo = new Date(`${addDays(from, -3)}T00:00:00+05:30`).toISOString()
+  const hi = new Date(`${addDays(to,    3)}T23:59:59+05:30`).toISOString()
+  const { data, error } = await supabase
+    .from('razorpay_payouts')
+    .select('payout_id, utr, amount, status, reference_id, benef_account, benef_ifsc, notes, payout_created_at')
+    .gte('payout_created_at', lo).lte('payout_created_at', hi)
+    .limit(20000)
+  if (error)               return { linked: false, list: [], byUtr: {}, byRef: {}, error: error.message }
+  if (!data || !data.length) return { linked: false, list: [], byUtr: {}, byRef: {} }   // no payouts captured yet
+
+  const list = [], byUtr = {}, byRef = {}
+  for (const p of data) {
+    const po = {
+      payout_id:  p.payout_id || '',
+      utr:        p.utr ? String(p.utr).trim() : '',
+      amount:     Number(p.amount || 0),          // already stored in ₹
+      status:     p.status || '',
+      benef_acct: p.benef_account || '',
+      benef_ifsc: p.benef_ifsc || '',
+      refs:       refKeys(p),
     }
-    return { linked: true, list, byUtr, byRef }
-  } catch (e) {
-    return { linked: true, list, byUtr, byRef, error: e.message }
+    list.push(po)
+    if (po.utr) byUtr[po.utr] = po
+    for (const k of po.refs) (byRef[k] = byRef[k] || []).push(po)
   }
+  return { linked: true, list, byUtr, byRef }
 }
 
 // Gather every payout belonging to one case: union of UTR matches and App-ID
