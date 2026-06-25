@@ -592,21 +592,19 @@ export async function GET(req) {
       return true
     }).map(b => b.name)
 
-    // 1) Bangalore — unbooked bills from today's purchase day PLUS the previous
-    //    working day. Today's feed tomorrow's bid; yesterday's already arrived
-    //    at HO but were never committed to a booking, so they stay bookable here
-    //    under their own purchase-date chip instead of vanishing once their bid
-    //    day passes. Scoped to yesterday only (not older) — most Bangalore gold
-    //    legitimately ends at_ho-unbooked over time. Any stock_status — the
-    //    time-of-day lifecycle moves today's at 19:30 IST (at_branch →
-    //    in_consignment → at_ho).
+    // 1) Bangalore — bills purchased on bangalorePurchaseDate, status approved.
+    //    Include any stock_status: the time-of-day lifecycle moves them at
+    //    19:30 IST so depending on when this endpoint is queried they could
+    //    be at_branch, in_consignment, or at_ho. All of them count toward
+    //    tomorrow's bid. (Yesterday's stragglers that were attributed to gain
+    //    are surfaced separately as bangalore_gain_rebookable below.)
     let bangBills = []
     if (bangaloreBranchNames.length) {
       const { data: bb, error: bbErr } = await supabase
         .from('purchases')
         .select('id, application_id, branch_name, customer_name, gross_weight, net_weight, total_amount, purchase_date, stock_status, dispatched_at, crm_status, audit_hold, audit_consumed_at')
         .in('branch_name', bangaloreBranchNames)
-        .gte('purchase_date', subWorkingDaySkipSunday(bangalorePurchaseDate))
+        .gte('purchase_date', bangalorePurchaseDate)
         .lt('purchase_date',  addDays(bangalorePurchaseDate, 1))
         .eq('crm_status', 'approved')
         .eq('is_deleted', false)
@@ -689,6 +687,28 @@ export async function GET(req) {
         .is('booking_id', null)
       bangalorePendingBooking = (bpb || [])
         .filter(b => !b.audit_consumed_at && !section1Ids.has(b.id))
+        .map(b => ({ ...b, branch_name: b.current_branch || b.branch_name }))
+    }
+
+    // Bangalore bills the EOD audit already attributed to GAIN that ops may want
+    // to LATE-BOOK to a customer. Surfaced as a separate, clearly-labelled,
+    // selectable group — NOT folded into the Section 1 totals, so it never
+    // double-counts against gain. Booking one reverses the gain attribution (see
+    // create_booking, which clears audit_consumed_at/audit_attributed_to).
+    // Scoped to the previous working day onward (today's aren't consumed yet).
+    let bangaloreGainRebookable = []
+    if (bangaloreBranchNames.length) {
+      const { data: gbr } = await supabase
+        .from('purchases')
+        .select('id, application_id, branch_name, current_branch, customer_name, gross_weight, net_weight, total_amount, purchase_date, stock_status, crm_status, audit_attributed_to')
+        .in('branch_name', bangaloreBranchNames)
+        .eq('crm_status', 'approved')
+        .eq('is_deleted', false)
+        .is('booking_id', null)
+        .eq('audit_attributed_to', 'gain')
+        .gte('purchase_date', subWorkingDaySkipSunday(bangalorePurchaseDate))
+        .lt('purchase_date',  addDays(bangalorePurchaseDate, 1))
+      bangaloreGainRebookable = (gbr || [])
         .map(b => ({ ...b, branch_name: b.current_branch || b.branch_name }))
     }
 
@@ -921,6 +941,7 @@ export async function GET(req) {
     const transit72hByBranch = groupByBranch(inflight72h)
     const pendingBookingByBranch     = annotateConsignmentMeta(groupByBranch(inflightPendingBooking))
     const bangPendingBookingByBranch = annotateConsignmentMeta(groupByBranch(bangalorePendingBooking))
+    const bangGainRebookableByBranch = groupByBranch(bangaloreGainRebookable)
     const preEodByBranch     = groupByBranch(preEodBills)
 
     // For booked-pending: also fold in branch-level booking summaries
@@ -1031,6 +1052,7 @@ export async function GET(req) {
     const transit72hTotal   = sumOf(transit72hByBranch)
     const pendingBookingTotal     = sumOf(pendingBookingByBranch)
     const bangPendingBookingTotal = sumOf(bangPendingBookingByBranch)
+    const bangGainRebookableTotal = sumOf(bangGainRebookableByBranch)
     const preEodTotal       = sumOf(preEodByBranch)
     const bookedNonKlTotal  = sumOf(bookedNonKlByBranch)
     const bookedKlTotal     = sumOf(bookedKlByBranch)
@@ -1325,6 +1347,7 @@ export async function GET(req) {
         // Bangalore counterpart — rendered as a consolidated drill-down
         // sub-group inside Section 1 (Bangalore's own section).
         bangalore_pending_booking:   { branches: bangPendingBookingByBranch, total: bangPendingBookingTotal },
+        bangalore_gain_rebookable:   { branches: bangGainRebookableByBranch, total: bangGainRebookableTotal },
         branch_pre_eod: { branches: preEodByBranch,     total: preEodTotal, booked: bookedSection(bookedPreEod, true), _debug: debugSection4 },
         // Section 5 — booked but consignment not yet created (at_branch +
         // booking_id IS NOT NULL). View-only; intentionally excluded from
@@ -3865,7 +3888,10 @@ export async function POST(req) {
         const bookedAt = new Date().toISOString()
         await supabase
           .from('purchases')
-          .update({ booking_id: data.id, booked_at: bookedAt })
+          // Booking a bill reverses any prior "consumed as gain" attribution —
+          // the gold is now committed to this booking, not company gain. No-op
+          // for normal bills (those columns are already null).
+          .update({ booking_id: data.id, booked_at: bookedAt, audit_consumed_at: null, audit_attributed_to: null })
           .in('id', bill_ids)
           .is('booking_id', null)        // never re-claim a bill that's already booked
       } catch (linkErr) {

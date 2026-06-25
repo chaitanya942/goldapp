@@ -479,6 +479,7 @@ export default function BiddingVolume() {
   const preEodBranchesRaw = supply?.branch_pre_eod?.branches || []
   const pendBookRaw    = supply?.consignment_pending_booking?.branches || []
   const bangPendRaw    = supply?.bangalore_pending_booking?.branches    || []
+  const bangGainRaw    = supply?.bangalore_gain_rebookable?.branches    || []
   const bookedPendRaw  = supply?.booked_pending_dispatch?.branches      || []
   const inTBranches    = useMemo(() => inTBranchesRaw.filter(b => b.region !== 'Kerala'),    [inTBranchesRaw])
   // Consignment-created-but-booking-pending bills — already non-Kerala
@@ -486,6 +487,8 @@ export default function BiddingVolume() {
   const pendBookBranches = useMemo(() => pendBookRaw.filter(b => b.region !== 'Kerala'), [pendBookRaw])
   // Bangalore counterpart — feeds Section 1's consolidated sub-group.
   const bangPendBranches = useMemo(() => bangPendRaw, [bangPendRaw])
+  // Bangalore bills consumed as gain that ops can late-book (separate, flagged).
+  const bangGainBranches = useMemo(() => bangGainRaw, [bangGainRaw])
   const t48hBranches   = useMemo(() => t48hBranchesRaw.filter(b => b.region !== 'Kerala'),   [t48hBranchesRaw])
   const t72hBranches   = useMemo(() => t72hBranchesRaw.filter(b => b.region !== 'Kerala'),   [t72hBranchesRaw])
   const preEodBranches = useMemo(() => preEodBranchesRaw.filter(b => b.region !== 'Kerala'), [preEodBranchesRaw])
@@ -587,6 +590,7 @@ export default function BiddingVolume() {
     for (const b of t72hBranches)     m[b.branch_name] = { ...b, group: 'transit_72h' }
     for (const b of pendBookBranches) m[b.branch_name] = { ...b, group: 'transit_pending_booking' }
     for (const b of bangPendBranches) m[b.branch_name] = { ...b, group: 'bangalore_pending_booking' }
+    for (const b of bangGainBranches) m[b.branch_name] = { ...b, group: 'bangalore_gain_rebookable' }
     for (const b of preEodBranches)   m[b.branch_name] = { ...b, group: 'branch_pre_eod' }
     // Kerala-tab buckets — five sections, keyed by branch_name.
     for (const b of klS1Branches)     m[b.branch_name] = { ...b, group: 'kl_hub_stock' }
@@ -595,7 +599,7 @@ export default function BiddingVolume() {
     for (const b of klS3Branches)     m[b.branch_name] = { ...b, group: 'kl_created_not_booked' }
     for (const b of klS5Branches)     m[b.branch_name] = { ...b, group: 'kl_at_leaf' }
     return m
-  }, [bangBranches, inTBranches, t48hBranches, t72hBranches, pendBookBranches, bangPendBranches, preEodBranches, klS1Branches, klS1LeafBranches, klS2Branches, klS3Branches, klS5Branches])
+  }, [bangBranches, inTBranches, t48hBranches, t72hBranches, pendBookBranches, bangPendBranches, bangGainBranches, preEodBranches, klS1Branches, klS1LeafBranches, klS2Branches, klS3Branches, klS5Branches])
 
   // Bill-level catalogue across every selectable section in either tab.
   // Tagging via _group lets autoSelectRemaining + selectionMode + branchLocked
@@ -616,6 +620,7 @@ export default function BiddingVolume() {
     collect(t72hBranches,     'transit_72h')
     collect(pendBookBranches, 'transit_pending_booking')
     collect(bangPendBranches, 'bangalore_pending_booking')
+    collect(bangGainBranches, 'bangalore_gain_rebookable')
     collect(preEodBranches,   'branch_pre_eod')
     collect(klS1Branches,     'kl_hub_stock')
     collect(klS1LeafBranches, 'kl_hub_from_leaf')
@@ -623,7 +628,7 @@ export default function BiddingVolume() {
     collect(klS3Branches,     'kl_created_not_booked')
     collect(klS5Branches,     'kl_at_leaf')
     return m
-  }, [bangBranches, inTBranches, t48hBranches, t72hBranches, pendBookBranches, bangPendBranches, preEodBranches, klS1Branches, klS1LeafBranches, klS2Branches, klS3Branches, klS5Branches])
+  }, [bangBranches, inTBranches, t48hBranches, t72hBranches, pendBookBranches, bangPendBranches, bangGainBranches, preEodBranches, klS1Branches, klS1LeafBranches, klS2Branches, klS3Branches, klS5Branches])
 
   const selectedTotal = useMemo(() => {
     let s = 0
@@ -1389,6 +1394,37 @@ export default function BiddingVolume() {
         branchSelectionState={branchSelectionState}
         onToggleHold={toggleBillHold}
         emptyMsg="No Bangalore purchases recorded today yet."
+      />)}
+
+      {/* 1b · Consumed as gain — late-book. Earlier Bangalore bills the EOD
+            audit attributed to gain; selectable here so ops can pull one back
+            into a booking. Booking reverses the gain attribution server-side.
+            Kept SEPARATE from Section 1's totals so it never double-counts. */}
+      {(activeSection === '1') && bangGainBranches.length > 0 && (
+      <SourceSection
+        t={t} card={card}
+        index={1}
+        icon="♻"
+        title="Consumed as gain · late-book"
+        subtitle="Earlier Bangalore bills attributed to gain at EOD — select to pull one back from gain into a booking."
+        accent={t.orange}
+        branches={bangGainBranches}
+        total={supply?.bangalore_gain_rebookable?.total}
+        metrics={sectionMetrics(supply?.bangalore_gain_rebookable?.total?.net_wt, 0, 1)}
+        onRateChange={(p) => handleSectionRate(1, p)}
+        onSetGainGrams={(g) => handleSectionGainGrams(1, g)}
+        onAutoSelect={(dates) => selectSectionBills(['bangalore_gain_rebookable'], dates)}
+        prefix="G"
+        dateFilter
+        selectable
+        selected={selected}
+        branchLocked={branchLocked}
+        onToggleBill={toggleBill}
+        onToggleBranchAll={toggleBranchAll}
+        onToggleRegionAll={toggleRegionAll}
+        branchSelectionState={branchSelectionState}
+        onToggleHold={toggleBillHold}
+        emptyMsg=""
       />)}
 
       {/* 2 · In Consignment — arriving tomorrow (24h) */}
