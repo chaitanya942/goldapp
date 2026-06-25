@@ -592,18 +592,21 @@ export async function GET(req) {
       return true
     }).map(b => b.name)
 
-    // 1) Bangalore — bills purchased on bangalorePurchaseDate, status approved.
-    //    Include any stock_status: the time-of-day lifecycle moves them at
-    //    19:30 IST so depending on when this endpoint is queried they could
-    //    be at_branch, in_consignment, or at_ho. All of them count toward
-    //    tomorrow's bid.
+    // 1) Bangalore — unbooked bills from today's purchase day PLUS the previous
+    //    working day. Today's feed tomorrow's bid; yesterday's already arrived
+    //    at HO but were never committed to a booking, so they stay bookable here
+    //    under their own purchase-date chip instead of vanishing once their bid
+    //    day passes. Scoped to yesterday only (not older) — most Bangalore gold
+    //    legitimately ends at_ho-unbooked over time. Any stock_status — the
+    //    time-of-day lifecycle moves today's at 19:30 IST (at_branch →
+    //    in_consignment → at_ho).
     let bangBills = []
     if (bangaloreBranchNames.length) {
       const { data: bb, error: bbErr } = await supabase
         .from('purchases')
         .select('id, application_id, branch_name, customer_name, gross_weight, net_weight, total_amount, purchase_date, stock_status, dispatched_at, crm_status, audit_hold, audit_consumed_at')
         .in('branch_name', bangaloreBranchNames)
-        .gte('purchase_date', bangalorePurchaseDate)
+        .gte('purchase_date', subWorkingDaySkipSunday(bangalorePurchaseDate))
         .lt('purchase_date',  addDays(bangalorePurchaseDate, 1))
         .eq('crm_status', 'approved')
         .eq('is_deleted', false)
@@ -676,21 +679,15 @@ export async function GET(req) {
     let bangalorePendingBooking = []
     if (bangaloreBranchNames.length) {
       const section1Ids = new Set(bangBills.map(b => b.id))
-      const sel = 'id, application_id, branch_name, current_branch, customer_name, gross_weight, net_weight, total_amount, purchase_date, dispatched_at, stock_status, crm_status, audit_consumed_at'
-      const base = () => supabase.from('purchases').select(sel)
+      const { data: bpb } = await supabase
+        .from('purchases')
+        .select('id, application_id, branch_name, current_branch, customer_name, gross_weight, net_weight, total_amount, purchase_date, dispatched_at, stock_status, crm_status, audit_consumed_at')
         .in('branch_name', bangaloreBranchNames)
-        .eq('crm_status', 'approved').eq('is_deleted', false).is('booking_id', null)
-      // (a) still in transit, unbooked — recent by nature, any date.
-      const { data: inT } = await base().eq('stock_status', 'in_consignment')
-      // (b) ARRIVED at HO but never booked — recent stragglers ONLY (last 7
-      //     purchase days, excluding today's pool in Section 1). Without the
-      //     window this would surface the entire ~69k historical at_ho backlog,
-      //     since most Bangalore gold legitimately ends at_ho unbooked.
-      const strCutoff = addDays(bangalorePurchaseDate, -7)
-      const { data: arrived } = await base()
-        .eq('stock_status', 'at_ho')
-        .gte('purchase_date', strCutoff).lt('purchase_date', bangalorePurchaseDate)
-      bangalorePendingBooking = [...(inT || []), ...(arrived || [])]
+        .eq('stock_status', 'in_consignment')
+        .eq('crm_status', 'approved')
+        .eq('is_deleted', false)
+        .is('booking_id', null)
+      bangalorePendingBooking = (bpb || [])
         .filter(b => !b.audit_consumed_at && !section1Ids.has(b.id))
         .map(b => ({ ...b, branch_name: b.current_branch || b.branch_name }))
     }
