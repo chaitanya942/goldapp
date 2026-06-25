@@ -676,15 +676,21 @@ export async function GET(req) {
     let bangalorePendingBooking = []
     if (bangaloreBranchNames.length) {
       const section1Ids = new Set(bangBills.map(b => b.id))
-      const { data: bpb } = await supabase
-        .from('purchases')
-        .select('id, application_id, branch_name, current_branch, customer_name, gross_weight, net_weight, total_amount, purchase_date, dispatched_at, stock_status, crm_status, audit_consumed_at')
+      const sel = 'id, application_id, branch_name, current_branch, customer_name, gross_weight, net_weight, total_amount, purchase_date, dispatched_at, stock_status, crm_status, audit_consumed_at'
+      const base = () => supabase.from('purchases').select(sel)
         .in('branch_name', bangaloreBranchNames)
-        .eq('stock_status', 'in_consignment')
-        .eq('crm_status', 'approved')
-        .eq('is_deleted', false)
-        .is('booking_id', null)
-      bangalorePendingBooking = (bpb || [])
+        .eq('crm_status', 'approved').eq('is_deleted', false).is('booking_id', null)
+      // (a) still in transit, unbooked — recent by nature, any date.
+      const { data: inT } = await base().eq('stock_status', 'in_consignment')
+      // (b) ARRIVED at HO but never booked — recent stragglers ONLY (last 7
+      //     purchase days, excluding today's pool in Section 1). Without the
+      //     window this would surface the entire ~69k historical at_ho backlog,
+      //     since most Bangalore gold legitimately ends at_ho unbooked.
+      const strCutoff = addDays(bangalorePurchaseDate, -7)
+      const { data: arrived } = await base()
+        .eq('stock_status', 'at_ho')
+        .gte('purchase_date', strCutoff).lt('purchase_date', bangalorePurchaseDate)
+      bangalorePendingBooking = [...(inT || []), ...(arrived || [])]
         .filter(b => !b.audit_consumed_at && !section1Ids.has(b.id))
         .map(b => ({ ...b, branch_name: b.current_branch || b.branch_name }))
     }
