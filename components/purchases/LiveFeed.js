@@ -235,7 +235,10 @@ export default function LiveFeed() {
   useEffect(() => {
     load()
     if (!isToday) return  // historical dates: no auto-refresh
-    timerRef.current = setInterval(() => load(), REFRESH_SECS * 1000)
+    timerRef.current = setInterval(() => {
+      if (typeof document !== 'undefined' && document.hidden) return  // skip backgrounded tabs (heavy 3-DB endpoint)
+      load()
+    }, REFRESH_SECS * 1000)
     return () => clearInterval(timerRef.current)
   }, [load, isToday])
 

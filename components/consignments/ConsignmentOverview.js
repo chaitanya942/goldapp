@@ -350,9 +350,10 @@ export default function ConsignmentOverview() {
     fetchData(haveCache)
     triggerSync({ minIntervalMs: 0 }).then(res => { if (res) fetchData(true) })  // silent: data already on screen
     const interval = setInterval(() => {
-      triggerSync()
+      if (typeof document !== 'undefined' && document.hidden) return         // skip backgrounded tabs
+      triggerSync()                                                          // throttled to 2min; cron is primary
       fetchData(true)                                                        // silent: background poll
-    }, 15 * 1000)
+    }, 45 * 1000)
     return () => clearInterval(interval)
   }, [fetchData])
 
@@ -365,6 +366,7 @@ export default function ConsignmentOverview() {
     const channel = supabase
       .channel('co-branch-overview-live')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'purchases' }, () => {
+        if (typeof document !== 'undefined' && document.hidden) return       // don't refetch on backgrounded tabs
         if (timer) clearTimeout(timer)
         timer = setTimeout(() => fetchData(true), 1200)
       })
