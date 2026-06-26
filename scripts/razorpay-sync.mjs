@@ -25,9 +25,14 @@ import { resolve, dirname } from 'path'
 import { fileURLToPath } from 'url'
 
 const __dir = dirname(fileURLToPath(import.meta.url))
-const env = readFileSync(resolve(__dir, '../.env.local'), 'utf8')
-  .split('\n').filter(l => l.trim() && !l.startsWith('#'))
-  .reduce((a, l) => { const i = l.indexOf('='); if (i > -1) a[l.slice(0, i).trim()] = l.slice(i + 1).trim().replace(/^["']|["']$/g, ''); return a }, {})
+let env = {}
+try {
+  env = readFileSync(resolve(__dir, '../.env.local'), 'utf8')
+    .split('\n').filter(l => l.trim() && !l.startsWith('#'))
+    .reduce((a, l) => { const i = l.indexOf('='); if (i > -1) a[l.slice(0, i).trim()] = l.slice(i + 1).trim().replace(/^["']|["']$/g, ''); return a }, {})
+} catch { /* no .env.local — fall back to process.env below */ }
+const SB_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || env.NEXT_PUBLIC_SUPABASE_URL
+const SB_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_SERVICE_ROLE_KEY
 
 const KEY    = process.env.RAZORPAY_KEY_ID
 const SECRET = process.env.RAZORPAY_KEY_SECRET
@@ -42,7 +47,8 @@ const [from = tenAgo, to = today] = process.argv.slice(2)
 const fromEpoch = Math.floor(new Date(`${from}T00:00:00+05:30`).getTime() / 1000)
 const toEpoch   = Math.floor(new Date(`${to}T23:59:59+05:30`).getTime() / 1000)
 
-const supabase = createClient(env.NEXT_PUBLIC_SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY)
+if (!SB_URL || !SB_KEY) { console.error('Missing Supabase creds (NEXT_PUBLIC_SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY) — set in .env.local or env. Aborting.'); process.exit(1) }
+const supabase = createClient(SB_URL, SB_KEY)
 const auth = 'Basic ' + Buffer.from(`${KEY}:${SECRET}`).toString('base64')
 
 console.log(`Syncing RazorpayX transactions ${from} → ${to} …`)
