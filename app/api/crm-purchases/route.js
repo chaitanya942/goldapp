@@ -1059,8 +1059,8 @@ export async function GET(req) {
             pledge AS (
               SELECT r.transaction_id tid, SUM(pc.gross_weight) g, SUM(pc.net_weight) n, SUM(pc.final_amount) amt,
                      -- PledgeCompany.purity is free text; weight only the numeric ones
-                     SUM(pc.net_weight * CASE WHEN btrim(COALESCE(pc.purity,'')) ~ '^[0-9.]+$' THEN pc.purity::float END) pw,
-                     SUM(CASE WHEN btrim(COALESCE(pc.purity,'')) ~ '^[0-9.]+$' THEN pc.net_weight END) pwn
+                     SUM(pc.net_weight * CASE WHEN btrim(COALESCE(pc.purity,'')) ~ '^[0-9]*\.?[0-9]+$' THEN pc.purity::float END) pw,
+                     SUM(CASE WHEN btrim(COALESCE(pc.purity,'')) ~ '^[0-9]*\.?[0-9]+$' THEN pc.net_weight END) pwn
               FROM "Release" r JOIN "PledgeCompany" pc ON pc.release_id = r.id GROUP BY r.transaction_id
             ),
             rel AS (SELECT transaction_id tid, SUM(total_release_amount) tot FROM "Release" GROUP BY transaction_id),
