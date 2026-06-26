@@ -178,7 +178,11 @@ export default function LiveFeed() {
 
   const [viewDate,      setViewDate]      = useState(todayIST)
   const isToday = viewDate === todayIST
-  const [crmTab,        setCrmTab]        = useState('old')
+  // Default to NEW CRM (fall back to whatever the user can actually see).
+  const [crmTab,        setCrmTab]        = useState(() =>
+    canSee('livefeed.new_crm_tab') ? 'new'
+    : canSee('livefeed.old_crm_tab') ? 'old'
+    : 'combined')
   const regionAccess = useRegionAccess()
   // Default region filter: if user is restricted to a single region, lock to it.
   const [regionFilter,  setRegionFilter]  = useState(regionAccess.single ? regionAccess.regions[0] : '')
