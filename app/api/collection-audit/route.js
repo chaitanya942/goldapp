@@ -574,9 +574,6 @@ async function handleGet(req) {
 const BUILD_MARKER = 'ca-v3-2026-06-11'
 
 export async function GET(req) {
-  // Unique log line on EVERY request — if we don't see this in Railway
-  // logs, the route file isn't being executed at all.
-  console.log('[collection-audit][' + BUILD_MARKER + '] GET start')
   try {
     const res = await handleGet(req)
     // Echo the marker in a header so the browser can verify which build

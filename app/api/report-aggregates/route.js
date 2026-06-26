@@ -50,9 +50,6 @@ export async function GET(request) {
     debugInfo.fresh_allowed_regions = allowedRegions
     debugInfo.fresh_query_error = profErr?.message || null
 
-    console.log('[report-aggregates] role=%s allowed_regions=%j incoming.regionBranchArr=%j',
-      auth.role, allowedRegions, regionBranchArr)
-
     if (allowedRegions.length > 0) {
       const { data: bs } = await supabaseAdmin
         .from('branches').select('name').in('region', allowedRegions)
@@ -66,7 +63,6 @@ export async function GET(request) {
         return Response.json({ empty: true, _debug: debugInfo })
       }
     }
-    console.log('[report-aggregates] final p_region_branches=%j', regionBranchArr)
   }
   debugInfo.final_filter = regionBranchArr
 

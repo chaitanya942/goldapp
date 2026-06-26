@@ -1,4 +1,4 @@
-const CACHE_NAME = 'wg-v2'
+const CACHE_NAME = 'wg-v3'
 
 self.addEventListener('install', (e) => {
   self.skipWaiting()
