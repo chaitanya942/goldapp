@@ -225,7 +225,9 @@ async function main() {
       final_amount_mismatch:      false,
       stock_status:               'at_branch',
       is_duplicate:               false,
-      is_deleted:                 false,
+      // is_deleted intentionally OMITTED so a manually soft-deleted bill (e.g. customer
+      // took the gold back before New CRM reversed it) is not resurrected on re-sync.
+      // DB default false applies on INSERT; ON CONFLICT leaves the existing flag untouched.
     }
   })
 

@@ -235,7 +235,11 @@ async function runSync(request) {
         // stock_status intentionally omitted — DB default 'at_branch' applies on INSERT,
         // existing rows keep their current status (in_consignment, at_ho, etc.)
         is_duplicate:               false,
-        is_deleted:                 false,
+        // is_deleted intentionally OMITTED (same reasoning as stock_status): it is an
+        // operational flag, not a CRM field. When a bill is manually soft-deleted — e.g.
+        // the customer took the gold back before New CRM reversed the transaction — it
+        // must STAY deleted across the 60s re-syncs. Forcing false here resurrected it
+        // every cycle. DB default false applies on INSERT; ON CONFLICT leaves it untouched.
       }
     })
 
