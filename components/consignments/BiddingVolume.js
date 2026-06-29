@@ -935,6 +935,31 @@ export default function BiddingVolume() {
     }
   }
 
+  // Apply the currently-selected bills to the region's OPEN pipeline (owed from
+  // prior bids) instead of booking a fresh quota. Server attaches them FIFO to
+  // the oldest open-pipeline bookings and recomputes each residual.
+  const closePipelineFromSelected = async () => {
+    const billIds = [...selected]
+    if (!billIds.length) return
+    try {
+      const r = await authedFetch('/api/consignments?action=attach_selected_to_pipeline', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bill_ids: billIds, is_kl: regionTab === 'kl', bidding_date: bookingsDate }),
+      })
+      const j = await r.json().catch(() => null)
+      if (!r.ok || j?.error) { showToast(j?.error || `Couldn't close pipeline (HTTP ${r.status})`, 'error'); return }
+      const d = j?.data || {}
+      let msg = `Pipeline back-filled — ${d.attached_bills} bill${d.attached_bills === 1 ? '' : 's'}, ${fmt(d.pipeline_closed_g || 0, 2)} g closed`
+      if (d.bookings_closed > 0) msg += ` · ${d.bookings_closed} booking${d.bookings_closed === 1 ? '' : 's'} fully closed`
+      if (d.skipped > 0) msg += ` · ${d.skipped} bill${d.skipped === 1 ? '' : 's'} didn't fit (no open pipeline left)`
+      showToast(msg + '.', 'success')
+      setSelected(new Set())
+      fetchAll(true)
+    } catch (err) {
+      showToast(err?.message || 'Close pipeline failed — network error', 'error')
+    }
+  }
+
   const updateStatus = async (id, status, reason) => {
     const r = await authedFetch('/api/consignments?action=update_booking_status', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -1845,6 +1870,13 @@ export default function BiddingVolume() {
               style={{ background: 'transparent', border: `1px solid ${t.border2}`, borderRadius: 8, padding: '8px 16px', fontSize: 12, color: t.text2, fontWeight: 700, cursor: 'pointer' }}>
               Clear
             </button>
+            {(regionTab === 'kl' ? pipelineKLG : pipelineOtherG) > 0.001 && (
+              <button onClick={closePipelineFromSelected}
+                title="Apply the selected bills to the open pipeline owed from prior bids (back-fill it) instead of creating a new booking"
+                style={{ background: `${t.orange || '#d98a3a'}1a`, color: t.orange || '#d98a3a', border: `1px solid ${t.orange || '#d98a3a'}80`, borderRadius: 8, padding: '9px 18px', fontSize: 12.5, fontWeight: 800, cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                ⇄ Close Pipeline
+              </button>
+            )}
             <button onClick={() => setShowBookModal(true)}
               style={{ background: t.gold, color: '#1a0a00', border: 'none', borderRadius: 8, padding: '10px 24px', fontSize: 13, fontWeight: 900, cursor: 'pointer', letterSpacing: '.02em', boxShadow: `0 3px 12px ${t.gold}66` }}>
               Book Selected →

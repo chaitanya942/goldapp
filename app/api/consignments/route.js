@@ -4650,6 +4650,111 @@ export async function POST(req) {
     return Response.json({ data: { closed: true, residual_g: Number(residual.toFixed(3)) } })
   }
 
+  // ── Manually close pipeline using a SELECTED set of bills ──────────────────
+  // The bid desk picks specific in-transit/branch bills and applies them to the
+  // open pipeline owed from prior bids (instead of waiting for the auto-attacher
+  // or booking a fresh quota). Attaches the bills FIFO to the region's
+  // open-pipeline bookings (oldest first), filling each booking's residual
+  // before spilling to the next. Mirrors the live residual math used elsewhere:
+  //   residual = weight − (attached_net + pending) × (1 + rate)
+  if (action === 'attach_selected_to_pipeline') {
+    const { bill_ids, is_kl, bidding_date } = body
+    if (!Array.isArray(bill_ids) || bill_ids.length === 0) {
+      return Response.json({ error: 'bill_ids[] required' }, { status: 400 })
+    }
+    // bidding_date scopes which bookings' pipeline we close — it MUST match the
+    // bid desk's displayed pipeline (bookings created on that IST day). Without
+    // it the FIFO would target ancient carried-over bookings, not what ops sees.
+    if (!bidding_date) return Response.json({ error: 'bidding_date required' }, { status: 400 })
+    const klFlag = !!is_kl
+
+    // 1) Selected bills that are actually free to attach (unbooked, approved).
+    const { data: billRows, error: bErr } = await supabase
+      .from('purchases')
+      .select('id, application_id, net_weight, booking_id')
+      .in('id', bill_ids)
+      .eq('is_deleted', false)
+    if (bErr) return Response.json({ error: bErr.message }, { status: 500 })
+    const eligible = (billRows || []).filter(b => !b.booking_id)
+    if (eligible.length === 0) {
+      return Response.json({ error: 'None of the selected bills are free to attach (already booked?).' }, { status: 400 })
+    }
+
+    // 2) Region's open-pipeline bookings FOR THAT BIDDING DAY (created_at IST =
+    //    bidding_date), oldest first — the same set the bid desk sums as the
+    //    pipeline. Day-scoped so we never touch carried-over historical bookings.
+    const { data: bookings, error: qErr } = await supabase
+      .from('cal_quotas')
+      .select('id, weight, gain_rate, pending_g, is_kl, status, pipeline_closed_at, created_at')
+      .eq('is_kl', klFlag)
+      .neq('status', 'cancelled')
+      .is('pipeline_closed_at', null)
+      .gte('created_at', istStartOfDayIso(bidding_date))
+      .lt('created_at',  istEndOfDayIso(bidding_date))
+      .order('created_at', { ascending: true })
+    if (qErr) return Response.json({ error: qErr.message }, { status: 500 })
+
+    // Current attached net per booking → live residual.
+    const bkIds = (bookings || []).map(b => b.id)
+    const attachedByBk = {}
+    for (let i = 0; i < bkIds.length; i += 100) {
+      const { data: rows } = await supabase
+        .from('purchases').select('booking_id, net_weight').in('booking_id', bkIds.slice(i, i + 100))
+      for (const r of rows || []) attachedByBk[r.booking_id] = (attachedByBk[r.booking_id] || 0) + Number(r.net_weight || 0)
+    }
+    const open = (bookings || []).map(b => {
+      const rate     = b.gain_rate != null ? Number(b.gain_rate) : (b.is_kl ? 0 : 0.035)
+      const attached = attachedByBk[b.id] || 0
+      const residual = Math.max(0, Number(b.weight || 0) - (attached + Number(b.pending_g || 0)) * (1 + rate))
+      return { id: b.id, weight: Number(b.weight || 0), rate, attached, pending_g: Number(b.pending_g || 0), residual }
+    }).filter(b => b.residual > 0.001)
+    if (open.length === 0) {
+      return Response.json({ error: 'No open pipeline for this region to close.' }, { status: 400 })
+    }
+
+    // 3) FIFO-assign bills to bookings. A bill contributes net×(1+rate) toward a
+    //    booking's residual; the boundary bill may slightly overshoot (folds in).
+    const assign = {}            // booking_id → [bill ids]
+    const netAdded = {}          // booking_id → net grams added
+    let bi = 0, remaining = open[0].residual
+    for (const bill of eligible) {
+      if (bi >= open.length) break
+      const bk = open[bi]
+      ;(assign[bk.id]   = assign[bk.id]   || []).push(bill.id)
+      netAdded[bk.id]   = (netAdded[bk.id] || 0) + Number(bill.net_weight || 0)
+      remaining        -= Number(bill.net_weight || 0) * (1 + bk.rate)
+      if (remaining <= 0.001) { bi++; if (bi < open.length) remaining = open[bi].residual }
+    }
+    const attachedCount = Object.values(assign).reduce((s, a) => s + a.length, 0)
+    if (attachedCount === 0) return Response.json({ error: 'Nothing could be attached.' }, { status: 400 })
+
+    // 4) Apply: attach bills + recompute each touched booking's residual.
+    const nowIso = new Date().toISOString()
+    let closedBookings = 0, closedG = 0
+    for (const bk of open) {
+      const ids = assign[bk.id]
+      if (!ids || !ids.length) continue
+      const { error: upErr } = await supabase
+        .from('purchases')
+        .update({ booking_id: bk.id, booked_at: nowIso, audit_consumed_at: null, audit_attributed_to: null })
+        .in('id', ids)
+      if (upErr) return Response.json({ error: upErr.message }, { status: 500 })
+      const newResidual = Math.max(0, bk.weight - (bk.attached + (netAdded[bk.id] || 0) + bk.pending_g) * (1 + bk.rate))
+      const upd = { pipeline_remaining_g: newResidual }
+      if (newResidual <= 0.001) { upd.pipeline_closed_at = nowIso; closedBookings++ }
+      await supabase.from('cal_quotas').update(upd).eq('id', bk.id)
+      closedG += Math.min(bk.residual, (netAdded[bk.id] || 0) * (1 + bk.rate))
+    }
+
+    return Response.json({ data: {
+      attached_bills:  attachedCount,
+      bookings_touched: Object.keys(assign).length,
+      bookings_closed: closedBookings,
+      pipeline_closed_g: Number(closedG.toFixed(3)),
+      skipped: eligible.length - attachedCount,
+    } })
+  }
+
   // ── Unbook a list of bills ────────────────────────────────────────────────
   // Used by the StuckBookingsBanner + Bidding "Booked · no consignment" Unbook
   // action. Takes a list of application_ids and clears booking_id + booked_at.
