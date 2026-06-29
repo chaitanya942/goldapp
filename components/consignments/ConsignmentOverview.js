@@ -36,6 +36,21 @@ const REGION_ICONS = {
 // gets sorted alphabetically and appended (defensive for new regions).
 const REGION_ORDER = ['Rest of Karnataka', 'Kerala', 'Andhra Pradesh', 'Telangana']
 
+// The three scope tabs and the regions each one covers. KL (Kerala) is split
+// out of the old "Outside Bangalore" so it gets its own tab, mirroring Bidding
+// Volume's KA·AP·TS / KL split.
+const SCOPE_TABS = [
+  { key: 'bangalore', label: 'Bangalore',     regions: ['Bangalore'] },
+  { key: 'rokapts',   label: 'ROK · AP · TS', regions: ['Rest of Karnataka', 'Andhra Pradesh', 'Telangana'] },
+  { key: 'kl',        label: 'KL',            regions: ['Kerala'] },
+]
+// Does a region belong to the active scope tab? ROK·AP·TS = everything that
+// isn't Bangalore or Kerala (defensive against new non-Kerala regions).
+const regionInScope = (scopeTab, region) =>
+  scopeTab === 'bangalore' ? region === 'Bangalore'
+  : scopeTab === 'kl'      ? region === 'Kerala'
+  :                          (region !== 'Bangalore' && region !== 'Kerala')
+
 const fmt     = (n, d = 3) => n != null ? Number(n).toFixed(d) : '—'
 const fmtNum  = (n) => n != null ? Number(n).toLocaleString('en-IN') : '—'
 const fmtINR  = (n) => {
@@ -253,19 +268,35 @@ export default function ConsignmentOverview() {
   const toggleRegion = (r) => setActiveRegions(prev => {
     const next = new Set(prev); next.has(r) ? next.delete(r) : next.add(r); return next
   })
-  // Scope tab — 'outside' = outstation branches (historical default),
-  // 'bangalore' = Bangalore-only view. Both tabs treat every branch as
-  // independent: click a row to deep-link into Consignment Data and
-  // create a consignment for that branch (destination — Hub or HO —
-  // chosen on the consignment screen, not here).
-  // Restricted users (no Bangalore access) only see 'outside'.
+  // Scope tab — three tabs (SCOPE_TABS): 'bangalore', 'rokapts' (Rest of
+  // Karnataka + AP + Telangana, the default), and 'kl' (Kerala). Every tab
+  // treats each branch as independent: click a row to deep-link into
+  // Consignment Data and create a consignment for that branch. Region-restricted
+  // users only see tabs that intersect their permitted regions (visibleScopeTabs).
   const [scopeTab, setScopeTab] = useState(() => {
-    if (typeof window === 'undefined') return 'outside'
-    return window.localStorage.getItem('cstock.scopeTab') || 'outside'
+    if (typeof window === 'undefined') return 'rokapts'
+    const saved = window.localStorage.getItem('cstock.scopeTab')
+    // Migrate the old two-tab value: 'outside' → 'rokapts' (KL now its own tab).
+    if (saved === 'outside' || !saved) return 'rokapts'
+    return saved
   })
   useEffect(() => {
     if (typeof window !== 'undefined') window.localStorage.setItem('cstock.scopeTab', scopeTab)
   }, [scopeTab])
+  // Everything except Bangalore shares the same column layout / region cards /
+  // Move action — only the region filter differs between ROK·AP·TS and KL.
+  const isOutside = scopeTab !== 'bangalore'
+  // Tabs the user is allowed to see (region-restricted users only get tabs that
+  // intersect their permitted regions).
+  const visibleScopeTabs = useMemo(() => SCOPE_TABS.filter(tab =>
+    !regionAccess.restricted || tab.regions.some(r => regionAccess.regions.includes(r))
+  ), [regionAccess.restricted, regionAccess.regions])
+  // If the persisted/active tab isn't permitted, fall back to the first allowed.
+  useEffect(() => {
+    if (visibleScopeTabs.length && !visibleScopeTabs.some(t => t.key === scopeTab)) {
+      setScopeTab(visibleScopeTabs[0].key)
+    }
+  }, [visibleScopeTabs, scopeTab])
   // Default sort: total net weight desc (largest stockholders first). Management
   // wants to see the biggest exposures at the top without clicking.
   const [sortKey,      setSortKey]      = useState('total_net_wt')
@@ -612,7 +643,7 @@ export default function ConsignmentOverview() {
   // on the PNG header and the Excel sheet name so an export self-describes the
   // exact slice it represents.
   const exportScopeMeta = () => ({
-    scope:   scopeTab === 'bangalore' ? 'Bangalore' : 'Outside-Bangalore',
+    scope:   SCOPE_TABS.find(t => t.key === scopeTab)?.label || scopeTab,
     regions: activeRegions.size ? [...activeRegions].join(' + ') : 'All regions',
     dates:   selectedDates.size ? [...selectedDates].sort().map(fmtDate).join(', ') : 'All dates',
   })
@@ -714,7 +745,7 @@ export default function ConsignmentOverview() {
     // Dates dynamically follow the scope tab AND the selected region(s): pick
     // Telangana and the chips show only Telangana's purchase dates.
     const inScope = (b) =>
-      (scopeTab === 'bangalore' ? b.region === 'Bangalore' : b.region !== 'Bangalore') &&
+      regionInScope(scopeTab, b.region) &&
       (!activeRegions.size || activeRegions.has(b.region))
     const scopeBranches = new Set(data.filter(inScope).map(b => b.branch_name))
     const set = new Set(byBranchDate.filter(r => r.purchase_date && scopeBranches.has(r.branch_name)).map(r => r.purchase_date))
@@ -727,13 +758,9 @@ export default function ConsignmentOverview() {
     return next
   })
 
-  const scopeData = useMemo(() => {
-    if (scopeTab === 'bangalore') {
-      const ks = effectiveData.filter(b => b.region === 'Bangalore')
-      return ks
-    }
-    return effectiveData.filter(b => b.region !== 'Bangalore')
-  }, [effectiveData, scopeTab])
+  const scopeData = useMemo(() =>
+    effectiveData.filter(b => regionInScope(scopeTab, b.region))
+  , [effectiveData, scopeTab])
 
   // ── Region summary ────────────────────────────────────────────────────────
   // Custom order — Rest of Karnataka first, then Kerala / AP / Telangana.
@@ -875,7 +902,7 @@ export default function ConsignmentOverview() {
             })()}
           </div>
           <div style={{ fontSize: '11px', color: t.text3, marginTop: '4px' }}>
-            {scopeTab === 'bangalore' ? 'Bangalore branches' : 'Outside-Bangalore branches'} ·
+            {(SCOPE_TABS.find(t => t.key === scopeTab)?.label || '') + ' branches'} ·
             {lastRefresh && (
               <span style={{ color: minsAgo === 0 ? t.green : t.text4, marginLeft: '4px' }}>
                 {minsAgo === 0 ? 'just refreshed' : `${minsAgo}m ago`} · {lastRefresh.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}
@@ -885,17 +912,17 @@ export default function ConsignmentOverview() {
           {/* Scope tab strip — Outside | Bangalore. Clicking flips the data
               source and (for Bangalore) swaps the region cards for hub cards. */}
           <div style={{ display: 'inline-flex', background: t.card2, border: `1px solid ${t.border}`, borderRadius: 10, padding: 3, gap: 2, marginTop: 10 }}>
-            {[
-              { key: 'outside',   label: 'Outside Bangalore', accent: t.gold },
-              { key: 'bangalore', label: 'Bangalore',         accent: REGION_COLORS['Bangalore'] || t.gold },
-            ].map(tab => {
+            {visibleScopeTabs.map(tab => {
+              const accent = tab.key === 'kl' ? (REGION_COLORS['Kerala'] || t.gold)
+                : tab.key === 'bangalore' ? (REGION_COLORS['Bangalore'] || t.gold)
+                : t.gold
               const active = scopeTab === tab.key
               return (
                 <button key={tab.key} onClick={() => { setScopeTab(tab.key); setActiveRegions(new Set()) }}
                   style={{
-                    background: active ? `${tab.accent}1d` : 'transparent',
-                    border:     `1px solid ${active ? `${tab.accent}80` : 'transparent'}`,
-                    color:      active ? tab.accent : t.text3,
+                    background: active ? `${accent}1d` : 'transparent',
+                    border:     `1px solid ${active ? `${accent}80` : 'transparent'}`,
+                    color:      active ? accent : t.text3,
                     borderRadius: 8, padding: '6px 14px',
                     fontSize: 11.5, fontWeight: 800, letterSpacing: '.04em',
                     cursor: 'pointer',
@@ -949,7 +976,7 @@ export default function ConsignmentOverview() {
       {/* Pickup Approaching banner is meaningful only for outstation BVC
           pickups — Bangalore branches run on a same-day pickup schedule
           where a 30-min countdown isn't meaningful. Hide on Bangalore. */}
-      {scopeTab === 'outside' && pickupAlerts.length > 0 && (
+      {isOutside && pickupAlerts.length > 0 && (
         <div style={{
           background: `linear-gradient(135deg, ${t.orange}18, ${t.orange}08)`,
           border: `1px solid ${t.orange}50`,
@@ -1084,7 +1111,7 @@ export default function ConsignmentOverview() {
 
       {/* ── Region Flashcards (Outside tab only) — horizontal scroll-snap on mobile ── */}
       {/* Hidden entirely when user is restricted to a single region (one card = no value) */}
-      {scopeTab === 'outside' && canSee('element.consignment-overview.region_cards') && !regionAccess.single && (
+      {isOutside && canSee('element.consignment-overview.region_cards') && !regionAccess.single && (
         <div style={{
           display: 'flex', gap: '10px',
           flexWrap: isMobile ? 'nowrap' : 'wrap',
@@ -1236,7 +1263,7 @@ export default function ConsignmentOverview() {
            Hidden on the Bangalore tab — every Bangalore bill of the day
            reaches HO the same day, so today/pending decomposition doesn't
            model the workflow. */}
-      {scopeTab === 'outside' && (
+      {isOutside && (
       <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(auto-fit, minmax(160px, 1fr))', gap: '10px' }}>
 
         {/* Branches */}
@@ -1642,7 +1669,7 @@ export default function ConsignmentOverview() {
                     {/* Sortable: Pending — hidden on Bangalore tab because
                         every Bangalore bill reaches HO the same day, so a
                         'pending' bucket has no operational meaning. */}
-                    {scopeTab === 'outside' && (<>
+                    {isOutside && (<>
                     <th style={{ ...thBase, textAlign: 'right', cursor: 'pointer', color: sortKey === 'older_bills' ? t.orange : t.text4 }}
                         onClick={() => handleSort('older_bills')}>
                       Pending Bills <SortIcon col="older_bills" />
@@ -1673,7 +1700,7 @@ export default function ConsignmentOverview() {
                         pickup-time tooltip target so ops still see the schedule).
                         Hidden on the Bangalore tab — branch-level Move doesn't
                         apply when dispatch happens at the hub level. */}
-                    {scopeTab === 'outside' && <th style={{ ...thBase, textAlign: 'center' }}>Move</th>}
+                    {isOutside && <th style={{ ...thBase, textAlign: 'center' }}>Move</th>}
                   </tr>
 
                   {/* Totals row pinned to the top inside <thead> — the whole
@@ -1703,7 +1730,7 @@ export default function ConsignmentOverview() {
                     <td style={{ padding: '8px 8px', textAlign: 'right', fontSize: '11px', color: t.blue, fontFamily: 'monospace', fontWeight: 700, background: `${t.gold}14` }}>
                       {grandTodayVal ? fmtINR(grandTodayVal) : '—'}
                     </td>
-                    {scopeTab === 'outside' && (<>
+                    {isOutside && (<>
                     <td style={{ padding: '8px 8px', textAlign: 'right', fontSize: '13px', color: t.orange, fontFamily: 'monospace', fontWeight: 700, background: `${t.gold}14` }}>
                       {grandOlder || '—'}
                     </td>
@@ -1814,7 +1841,7 @@ export default function ConsignmentOverview() {
                             : <span style={{ fontSize: '11px', color: t.text4 }}>—</span>}
                         </td>
 
-                        {scopeTab === 'outside' && (<>
+                        {isOutside && (<>
                         {/* Pending Bills */}
                         <td style={{ padding: '11px 14px', textAlign: 'right' }}>
                           {hasPending
@@ -1860,7 +1887,7 @@ export default function ConsignmentOverview() {
                             Hidden on Bangalore: hub-level dispatch happens
                             from the flashcards, branch-level move doesn't
                             apply. */}
-                        {scopeTab === 'outside' && (
+                        {isOutside && (
                           <td style={{ padding: tdPad, textAlign: 'center' }} onClick={e => e.stopPropagation()}>
                             <button
                               title={b.pickup_time ? `Pickup at ${b.pickup_time}` : 'No pickup time set'}
@@ -1891,7 +1918,7 @@ export default function ConsignmentOverview() {
 
       {/* Footer note — describes the Pending column, so only meaningful on
           the Outside tab where the Pending columns render. */}
-      {scopeTab === 'outside' && (
+      {isOutside && (
         <div style={{ fontSize: '10px', color: t.text4, textAlign: 'right' }}>
           Pending = <code style={{ background: t.card2, padding: '1px 4px', borderRadius: '3px', color: t.text3 }}>stock_status = at_branch</code> before today · Age alert: &gt;3d orange, &gt;7d red
         </div>
