@@ -1870,7 +1870,12 @@ export default function BiddingVolume() {
               style={{ background: 'transparent', border: `1px solid ${t.border2}`, borderRadius: 8, padding: '8px 16px', fontSize: 12, color: t.text2, fontWeight: 700, cursor: 'pointer' }}>
               Clear
             </button>
-            {(regionTab === 'kl' ? pipelineKLG : pipelineOtherG) > 0.001 && (
+            {/* Only when there's open pipeline AND the selected booking weight
+                fits inside it — closing with more than the pipeline would
+                overshoot the bookings, so the button hides until the operator
+                deselects down to ≤ pipeline. */}
+            {(regionTab === 'kl' ? pipelineKLG : pipelineOtherG) > 0.001 &&
+             selBookingWt <= (regionTab === 'kl' ? pipelineKLG : pipelineOtherG) + 0.001 && (
               <button onClick={closePipelineFromSelected}
                 title="Apply the selected bills to the open pipeline owed from prior bids (back-fill it) instead of creating a new booking"
                 style={{ background: `${t.orange || '#d98a3a'}1a`, color: t.orange || '#d98a3a', border: `1px solid ${t.orange || '#d98a3a'}80`, borderRadius: 8, padding: '9px 18px', fontSize: 12.5, fontWeight: 800, cursor: 'pointer', whiteSpace: 'nowrap' }}>
