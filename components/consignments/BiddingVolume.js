@@ -1569,7 +1569,6 @@ export default function BiddingVolume() {
         dateFilter
         altDateFilter={{ field: '_consignment_created_at', label: 'Consignment date' }}
         subGroupInTotals
-        exportable
         selectable
         selected={selected}
         branchLocked={branchLocked}
@@ -3044,9 +3043,11 @@ function SourceSection({
   // When true, adds a delivery-TAT chip row (24h / 48h / 72h) that filters the
   // branches by their tat_hours. Section 7 (all-TAT branch-pickup view).
   tatFilter = false,
-  // When true, shows in-section Excel + PNG export buttons (case-wise list of
-  // this section's bills, respecting the active filters). Section 5.
-  exportable = false,
+  // Shows in-section Excel + PNG export buttons (case-wise list of this
+  // section's bills, respecting the active filters). Defaults ON for every
+  // section; the buttons auto-hide when the section is empty (exportable &&
+  // !isEmpty) and the export no-ops if a section's branches carry no bills.
+  exportable = true,
   // When true, the section's hero totals/metrics include the subGroup band too
   // (Section 5: main Bangalore-pending + outstation-pending are both unbooked).
   // Default false — most sections show the subGroup as a separate band only.
