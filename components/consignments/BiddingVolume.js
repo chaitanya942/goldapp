@@ -3377,7 +3377,11 @@ function SourceSection({
           ...(pipelineG != null ? [
           { key: 'pipeline', label: 'Pipeline',          icon: '⇄', color: orange,  val: pipelineG,            sub: 'owed from prior bids' },
           ] : []),
-          { key: 'avail',    label: 'Available to Book', icon: '✓', color: green,   val: metrics.availableNet, bills: unbookedBills, sub: canSelect ? 'tap to select →' : 'unbooked + gain', strong: true, onClick: canSelect ? doAutoSelect : null },
+          // Available to Book = Unbooked Net + Gain − Pipeline. The pipeline owed
+          // from prior bids must be back-filled from this pool first, so it nets
+          // out of what's genuinely free to book (goes negative when pipeline
+          // exceeds unbooked + gain).
+          { key: 'avail',    label: 'Available to Book', icon: '✓', color: (metrics.availableNet - (Number(pipelineG) || 0)) < 0 ? (t.red || '#d9534f') : green, val: metrics.availableNet - (Number(pipelineG) || 0), bills: unbookedBills, sub: canSelect ? 'tap to select →' : (pipelineG != null ? 'unbooked + gain − pipeline' : 'unbooked + gain'), strong: true, onClick: canSelect ? doAutoSelect : null },
         ]
         return (
           <div style={{
