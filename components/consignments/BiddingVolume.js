@@ -424,6 +424,12 @@ export default function BiddingVolume() {
   // realised to gain at EOD). No availablePool>=0 guard: even if the pool dips
   // negative, an unclosed over-pipeline still needs the warning.
   const othersOverbooked  = pipelineOtherG > 0 && othersRemaining < 0
+  // ANY open pipeline keeps the band up until it's closed — even when today's
+  // pool could cover it, the bills aren't attached yet, so ops still needs the
+  // reminder to back-fill / close it. othersOverbooked above marks the harsher
+  // "pool can't cover it" case; these just gate visibility.
+  const othersHasPipeline = pipelineOtherG > 0.001
+  const klHasPipeline     = pipelineKLG    > 0.001
 
   const remainingQty    = availablePool - pipelineTotalG
   const bookedPct       = availablePool > 0 ? Math.min(100, (pipelineTotalG / availablePool) * 100) : 0
@@ -951,6 +957,7 @@ export default function BiddingVolume() {
       const d = j?.data || {}
       let msg = `Pipeline back-filled — ${d.attached_bills} bill${d.attached_bills === 1 ? '' : 's'}, ${fmt(d.pipeline_closed_g || 0, 2)} g closed`
       if (d.bookings_closed > 0) msg += ` · ${d.bookings_closed} booking${d.bookings_closed === 1 ? '' : 's'} fully closed`
+      if (d.gain_folded_g > 0.001) msg += ` · ${fmt(d.gain_folded_g, 2)} g excess → gain`
       if (d.skipped > 0) msg += ` · ${d.skipped} bill${d.skipped === 1 ? '' : 's'} didn't fit (no open pipeline left)`
       showToast(msg + '.', 'success')
       setSelected(new Set())
@@ -1239,18 +1246,28 @@ export default function BiddingVolume() {
         </div>
       )}
 
-      {regionTab === 'ka_ap_ts' && othersOverbooked && (
-        <div style={{ ...card, padding: '10px 16px', borderColor: `${t.red}55`, background: `${t.red}10`, fontSize: '12px', color: t.red, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ fontSize: 14 }}>⚠</span>
-          <strong>Bangalore &amp; Others</strong> · pipeline commitments exceed the pool by <strong>{fmt(Math.abs(othersRemaining), 2)} g</strong>. The auto-attacher won't be able to back-fill every booking from today's incoming.
-        </div>
-      )}
-      {regionTab === 'kl' && klOverbooked && (
-        <div style={{ ...card, padding: '10px 16px', borderColor: `${t.red}55`, background: `${t.red}10`, fontSize: '12px', color: t.red, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ fontSize: 14 }}>⚠</span>
-          <strong>Kerala</strong> · pipeline commitments exceed the hub pool by <strong>{fmt(Math.abs(klRemaining), 2)} g</strong>. More bills need to reach the hubs (or pipeline closes to gain at EOD).
-        </div>
-      )}
+      {regionTab === 'ka_ap_ts' && othersHasPipeline && (() => {
+        const accent = othersOverbooked ? t.red : (t.orange || '#d98a3a')
+        return (
+          <div style={{ ...card, padding: '10px 16px', borderColor: `${accent}55`, background: `${accent}10`, fontSize: '12px', color: accent, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontSize: 14 }}>⚠</span>
+            {othersOverbooked
+              ? <span><strong>Bangalore &amp; Others</strong> · pipeline commitments exceed the pool by <strong>{fmt(Math.abs(othersRemaining), 2)} g</strong>. The auto-attacher won't be able to back-fill every booking from today's incoming.</span>
+              : <span><strong>Bangalore &amp; Others</strong> · <strong>{fmt(pipelineOtherG, 2)} g</strong> pipeline still open from prior bids — back-fill it from today's incoming or close it manually (else it folds to gain at EOD).</span>}
+          </div>
+        )
+      })()}
+      {regionTab === 'kl' && klHasPipeline && (() => {
+        const accent = klOverbooked ? t.red : (t.orange || '#d98a3a')
+        return (
+          <div style={{ ...card, padding: '10px 16px', borderColor: `${accent}55`, background: `${accent}10`, fontSize: '12px', color: accent, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontSize: 14 }}>⚠</span>
+            {klOverbooked
+              ? <span><strong>Kerala</strong> · pipeline commitments exceed the hub pool by <strong>{fmt(Math.abs(klRemaining), 2)} g</strong>. More bills need to reach the hubs (or pipeline closes to gain at EOD).</span>
+              : <span><strong>Kerala</strong> · <strong>{fmt(pipelineKLG, 2)} g</strong> pipeline still open — back-fill from the hubs or it closes to gain at EOD.</span>}
+          </div>
+        )
+      })()}
 
       {/* ── Tab nav (Bidding / Bookings) + Bookings-day date nav ──
           The Bidding tab + the hero strips above always show today's bid
@@ -1869,18 +1886,23 @@ export default function BiddingVolume() {
               style={{ background: 'transparent', border: `1px solid ${t.border2}`, borderRadius: 8, padding: '8px 16px', fontSize: 12, color: t.text2, fontWeight: 700, cursor: 'pointer' }}>
               Clear
             </button>
-            {/* Only when there's open pipeline AND the selected booking weight
-                fits inside it — closing with more than the pipeline would
-                overshoot the bookings, so the button hides until the operator
-                deselects down to ≤ pipeline. */}
-            {(regionTab === 'kl' ? pipelineKLG : pipelineOtherG) > 0.001 &&
-             selBookingWt <= (regionTab === 'kl' ? pipelineKLG : pipelineOtherG) + 0.001 && (
-              <button onClick={closePipelineFromSelected}
-                title="Apply the selected bills to the open pipeline owed from prior bids (back-fill it) instead of creating a new booking"
-                style={{ background: `${t.orange || '#d98a3a'}1a`, color: t.orange || '#d98a3a', border: `1px solid ${t.orange || '#d98a3a'}80`, borderRadius: 8, padding: '9px 18px', fontSize: 12.5, fontWeight: 800, cursor: 'pointer', whiteSpace: 'nowrap' }}>
-                ⇄ Close Pipeline
-              </button>
-            )}
+            {/* Show when there's open pipeline AND the selection either fits
+                inside it OR overshoots by ≤10 g (the excess folds into gain).
+                Beyond 10 g over, the button hides — deselect to fit. */}
+            {(() => {
+              const regionPipe = regionTab === 'kl' ? pipelineKLG : pipelineOtherG
+              if (regionPipe <= 0.001 || selBookingWt > regionPipe + 10) return null
+              const excess = Math.max(0, selBookingWt - regionPipe)
+              return (
+                <button onClick={closePipelineFromSelected}
+                  title={excess > 0.001
+                    ? `Close the ${fmt(regionPipe, 2)} g pipeline with these bills — the ${fmt(excess, 2)} g excess folds into gain`
+                    : 'Apply the selected bills to the open pipeline owed from prior bids (back-fill it)'}
+                  style={{ background: `${t.orange || '#d98a3a'}1a`, color: t.orange || '#d98a3a', border: `1px solid ${t.orange || '#d98a3a'}80`, borderRadius: 8, padding: '9px 18px', fontSize: 12.5, fontWeight: 800, cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                  ⇄ Close Pipeline{excess > 0.001 ? ` · +${fmt(excess, 2)}g gain` : ''}
+                </button>
+              )
+            })()}
             <button onClick={() => setShowBookModal(true)}
               style={{ background: t.gold, color: '#1a0a00', border: 'none', borderRadius: 8, padding: '10px 24px', fontSize: 13, fontWeight: 900, cursor: 'pointer', letterSpacing: '.02em', boxShadow: `0 3px 12px ${t.gold}66` }}>
               Book Selected →

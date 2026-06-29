@@ -4685,7 +4685,7 @@ export async function POST(req) {
     //    pipeline. Day-scoped so we never touch carried-over historical bookings.
     const { data: bookings, error: qErr } = await supabase
       .from('cal_quotas')
-      .select('id, weight, gain_rate, pending_g, is_kl, status, pipeline_closed_at, created_at')
+      .select('id, weight, gain_rate, pending_g, additional_gain_g, is_kl, status, pipeline_closed_at, created_at')
       .eq('is_kl', klFlag)
       .neq('status', 'cancelled')
       .is('pipeline_closed_at', null)
@@ -4706,7 +4706,7 @@ export async function POST(req) {
       const rate     = b.gain_rate != null ? Number(b.gain_rate) : (b.is_kl ? 0 : 0.035)
       const attached = attachedByBk[b.id] || 0
       const residual = Math.max(0, Number(b.weight || 0) - (attached + Number(b.pending_g || 0)) * (1 + rate))
-      return { id: b.id, weight: Number(b.weight || 0), rate, attached, pending_g: Number(b.pending_g || 0), residual }
+      return { id: b.id, weight: Number(b.weight || 0), rate, attached, pending_g: Number(b.pending_g || 0), additional_gain_g: Number(b.additional_gain_g || 0), residual }
     }).filter(b => b.residual > 0.001)
     if (open.length === 0) {
       return Response.json({ error: 'No open pipeline for this region to close.' }, { status: 400 })
@@ -4728,30 +4728,47 @@ export async function POST(req) {
     const attachedCount = Object.values(assign).reduce((s, a) => s + a.length, 0)
     if (attachedCount === 0) return Response.json({ error: 'Nothing could be attached.' }, { status: 400 })
 
-    // 4) Apply: attach bills + recompute each touched booking's residual.
-    const nowIso = new Date().toISOString()
-    let closedBookings = 0, closedG = 0
+    // 4) Plan each touched booking — new residual + any OVERSHOOT (sourced beyond
+    //    committed). A small overshoot (≤ 10 g) closes the pipeline and folds the
+    //    excess into the booking's gain. Bigger than that is refused so a single
+    //    fat bill can't dump huge "free" gain — deselect instead. Validate the
+    //    whole plan BEFORE any write so a rejection leaves nothing half-applied.
+    const plan = []
     for (const bk of open) {
       const ids = assign[bk.id]
       if (!ids || !ids.length) continue
+      const sourcedAfter  = (bk.attached + (netAdded[bk.id] || 0) + bk.pending_g) * (1 + bk.rate)
+      const residualAfter = Math.max(0, bk.weight - sourcedAfter)
+      const overshoot     = Math.max(0, sourcedAfter - bk.weight)
+      if (overshoot > 10.001) {
+        return Response.json({ error: `Selection overshoots a booking by ${overshoot.toFixed(2)} g — only up to 10 g can fold into gain. Deselect a bill.` }, { status: 400 })
+      }
+      plan.push({ bk, ids, residualAfter, overshoot })
+    }
+
+    // 5) Apply the validated plan.
+    const nowIso = new Date().toISOString()
+    let closedBookings = 0, closedG = 0, gainFoldedG = 0
+    for (const p of plan) {
       const { error: upErr } = await supabase
         .from('purchases')
-        .update({ booking_id: bk.id, booked_at: nowIso, audit_consumed_at: null, audit_attributed_to: null })
-        .in('id', ids)
+        .update({ booking_id: p.bk.id, booked_at: nowIso, audit_consumed_at: null, audit_attributed_to: null })
+        .in('id', p.ids)
       if (upErr) return Response.json({ error: upErr.message }, { status: 500 })
-      const newResidual = Math.max(0, bk.weight - (bk.attached + (netAdded[bk.id] || 0) + bk.pending_g) * (1 + bk.rate))
-      const upd = { pipeline_remaining_g: newResidual }
-      if (newResidual <= 0.001) { upd.pipeline_closed_at = nowIso; closedBookings++ }
-      await supabase.from('cal_quotas').update(upd).eq('id', bk.id)
-      closedG += Math.min(bk.residual, (netAdded[bk.id] || 0) * (1 + bk.rate))
+      const upd = { pipeline_remaining_g: p.residualAfter }
+      if (p.residualAfter <= 0.001) { upd.pipeline_closed_at = nowIso; closedBookings++ }
+      if (p.overshoot > 0.001) { upd.additional_gain_g = p.bk.additional_gain_g + p.overshoot; gainFoldedG += p.overshoot }
+      await supabase.from('cal_quotas').update(upd).eq('id', p.bk.id)
+      closedG += (p.bk.residual - p.residualAfter)   // grams of pipeline actually closed
     }
 
     return Response.json({ data: {
-      attached_bills:  attachedCount,
-      bookings_touched: Object.keys(assign).length,
-      bookings_closed: closedBookings,
+      attached_bills:   attachedCount,
+      bookings_touched: plan.length,
+      bookings_closed:  closedBookings,
       pipeline_closed_g: Number(closedG.toFixed(3)),
-      skipped: eligible.length - attachedCount,
+      gain_folded_g:    Number(gainFoldedG.toFixed(3)),
+      skipped:          eligible.length - attachedCount,
     } })
   }
 
