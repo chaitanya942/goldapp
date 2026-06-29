@@ -1246,28 +1246,22 @@ export default function BiddingVolume() {
         </div>
       )}
 
-      {regionTab === 'ka_ap_ts' && othersHasPipeline && (() => {
-        const accent = othersOverbooked ? t.red : (t.orange || '#d98a3a')
-        return (
-          <div style={{ ...card, padding: '10px 16px', borderColor: `${accent}55`, background: `${accent}10`, fontSize: '12px', color: accent, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ fontSize: 14 }}>⚠</span>
-            {othersOverbooked
-              ? <span><strong>Bangalore &amp; Others</strong> · pipeline commitments exceed the pool by <strong>{fmt(Math.abs(othersRemaining), 2)} g</strong>. The auto-attacher won't be able to back-fill every booking from today's incoming.</span>
-              : <span><strong>Bangalore &amp; Others</strong> · <strong>{fmt(pipelineOtherG, 2)} g</strong> pipeline still open from prior bids — back-fill it from today's incoming or close it manually (else it folds to gain at EOD).</span>}
-          </div>
-        )
-      })()}
-      {regionTab === 'kl' && klHasPipeline && (() => {
-        const accent = klOverbooked ? t.red : (t.orange || '#d98a3a')
-        return (
-          <div style={{ ...card, padding: '10px 16px', borderColor: `${accent}55`, background: `${accent}10`, fontSize: '12px', color: accent, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ fontSize: 14 }}>⚠</span>
-            {klOverbooked
-              ? <span><strong>Kerala</strong> · pipeline commitments exceed the hub pool by <strong>{fmt(Math.abs(klRemaining), 2)} g</strong>. More bills need to reach the hubs (or pipeline closes to gain at EOD).</span>
-              : <span><strong>Kerala</strong> · <strong>{fmt(pipelineKLG, 2)} g</strong> pipeline still open — back-fill from the hubs or it closes to gain at EOD.</span>}
-          </div>
-        )
-      })()}
+      {regionTab === 'ka_ap_ts' && othersHasPipeline && (
+        <div style={{ ...card, padding: '10px 16px', borderColor: `${t.red}55`, background: `${t.red}10`, fontSize: '12px', color: t.red, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontSize: 14 }}>⚠</span>
+          {othersOverbooked
+            ? <span><strong>Bangalore &amp; Others</strong> · pipeline commitments exceed the pool by <strong>{fmt(Math.abs(othersRemaining), 2)} g</strong>. The auto-attacher won't be able to back-fill every booking from today's incoming.</span>
+            : <span><strong>Bangalore &amp; Others</strong> · <strong>{fmt(pipelineOtherG, 2)} g</strong> pipeline still open from prior bids.</span>}
+        </div>
+      )}
+      {regionTab === 'kl' && klHasPipeline && (
+        <div style={{ ...card, padding: '10px 16px', borderColor: `${t.red}55`, background: `${t.red}10`, fontSize: '12px', color: t.red, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontSize: 14 }}>⚠</span>
+          {klOverbooked
+            ? <span><strong>Kerala</strong> · pipeline commitments exceed the hub pool by <strong>{fmt(Math.abs(klRemaining), 2)} g</strong>. More bills need to reach the hubs (or pipeline closes to gain at EOD).</span>
+            : <span><strong>Kerala</strong> · <strong>{fmt(pipelineKLG, 2)} g</strong> pipeline still open.</span>}
+        </div>
+      )}
 
       {/* ── Tab nav (Bidding / Bookings) + Bookings-day date nav ──
           The Bidding tab + the hero strips above always show today's bid
