@@ -358,21 +358,16 @@ export default function BiddingVolume() {
   // The two regions have separate supply chains and separate pipeline
   // mechanics, so the hero strip splits into two rows.
   //
-  // Bangalore & Others Hero = Section 1 (Bangalore today) + non-Kerala
-  // Section 2 (24h transit). Section 4 (branch stock pre-EOD) is NOT
-  // counted in the hero math — those bills only enter the booking when
-  // the operator explicitly picks them. Per ops spec.
+  // Bangalore & Others pool = Section 1 (Bangalore today) ONLY. Section 2 (24h
+  // transit) and Section 4 (branch stock pre-EOD) are NOT counted in the pool /
+  // pipeline-deficit math — those bills only enter a booking when the operator
+  // explicitly picks them, and the Bangalore pipeline back-fills from today's
+  // incoming, not from outstation in-transit. Per ops spec.
   //
   // Kerala Hero = Kerala bills wherever they appear in supply — both
   // Section 2 (rare: Kerala 24h transit) and Section 4 (the common
   // case: hub at_branch stock waiting for EOD dispatch). Section 1 is
   // Bangalore-only so it contributes nothing here.
-  const s2BranchesAll = supply?.transit_24h?.branches    || supply?.in_transit?.branches || []
-  const s4BranchesAll = supply?.branch_pre_eod?.branches || []
-  const sumWt    = (arr) => arr.reduce((s, b) => s + Number(b.total_net_wt   || 0), 0)
-  const sumGross = (arr) => arr.reduce((s, b) => s + Number(b.total_gross_wt || 0), 0)
-  const sumBills = (arr) => arr.reduce((s, b) => s + Number(b.total_bills    || 0), 0)
-  const isKL = (b) => b.region === 'Kerala'
 
   // Kerala "certain pool" for tomorrow = S1 hub stock + S2 in-movement to hub.
   // S3 (still at leaf) is contingent on the leaf→hub pickup actually firing
@@ -386,13 +381,15 @@ export default function BiddingVolume() {
   const klSupplyGross = Number(_klS1.gross_wt || 0) + Number(_klS1Lf.gross_wt || 0) + Number(_klS2.gross_wt || 0)
   const klSupplyBills = Number(_klS1.bills    || 0) + Number(_klS1Lf.bills    || 0) + Number(_klS2.bills    || 0)
 
-  // Others — S1 (all Bangalore) + non-Kerala S2 only. S4 is intentionally
-  // omitted; those bills only count when explicitly selected. Filter
-  // s2BranchesAll inline (rather than reading the picker-side inTBranches
-  // const) so this block stays free of TDZ-bound references.
-  const othersSupplyNet   = s1Net   + sumWt(s2BranchesAll.filter(b => !isKL(b)))
-  const othersSupplyGross = s1Gross + sumGross(s2BranchesAll.filter(b => !isKL(b)))
-  const othersSupplyBills = s1Bills + sumBills(s2BranchesAll.filter(b => !isKL(b)))
+  // Others pipeline pool — Section 1 (today's Bangalore purchases) ONLY. Per ops:
+  // the Bangalore pipeline is back-filled from today's INCOMING Bangalore stock,
+  // not from outstation in-transit (Section 2) — so S2 must NOT pad this pool.
+  // Folding S2 in made the "exceeds pool" deficit read smaller than the real open
+  // pipeline (e.g. 330 g shown vs 378.69 g actually owed). S4 is likewise
+  // excluded (it only counts when the operator explicitly picks those bills).
+  const othersSupplyNet   = s1Net
+  const othersSupplyGross = s1Gross
+  const othersSupplyBills = s1Bills
 
   // Gain — Kerala default is 0 % (leaf→hub flow already absorbs refining
   // loss upstream). Others use the standard 3.5 % (or the operator's
@@ -422,7 +419,11 @@ export default function BiddingVolume() {
   const klRemaining     = klAvailable     - pipelineKLG
   const othersRemaining = othersAvailable - pipelineOtherG
   const klOverbooked      = klAvailable >= 0 && pipelineKLG > 0 && klRemaining < 0
-  const othersOverbooked  = othersAvailable >= 0 && pipelineOtherG > 0 && othersRemaining < 0
+  // Stays red for as long as there's open pipeline the Section-1 pool can't
+  // cover — i.e. until the pipeline is closed (back-filled by incoming, or
+  // realised to gain at EOD). No availablePool>=0 guard: even if the pool dips
+  // negative, an unclosed over-pipeline still needs the warning.
+  const othersOverbooked  = pipelineOtherG > 0 && othersRemaining < 0
 
   const remainingQty    = availablePool - pipelineTotalG
   const bookedPct       = availablePool > 0 ? Math.min(100, (pipelineTotalG / availablePool) * 100) : 0
