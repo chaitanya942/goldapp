@@ -653,20 +653,48 @@ export async function GET(req) {
     const inflight24h = inflightWithArrival.filter(b => b._arrival_date === arrivalDate)
     const inflight48h = inflightWithArrival.filter(b => b._arrival_date === dayAfterArrival)
     const inflight72h = inflightWithArrival.filter(b => b._arrival_date === dayAfter2Arrival)
+    // Manually-flagged at_ho bills (purchases.force_pending_booking = true) that
+    // ops wants surfaced as pending-booking even though they're already received
+    // at HO. Section 5's normal pool is in_consignment only; this pulls in
+    // SPECIFIC received-but-unbooked bills WITHOUT widening the rule to the whole
+    // at_ho backlog. Appended ONLY to inflightPendingBooking below, so they never
+    // touch the forward bid-window math (Sections 2/3) or bid targets.
+    let forcePending = []
+    if (outsideBranchNames.length) {
+      const { data: fp, error: fpErr } = await supabase
+        .from('purchases')
+        .select('id, application_id, branch_name, customer_name, gross_weight, net_weight, total_amount, purchase_date, dispatched_at, stock_status, crm_status')
+        .in('branch_name', outsideBranchNames)
+        .eq('stock_status', 'at_ho')
+        .eq('force_pending_booking', true)
+        .eq('is_deleted', false)
+        .is('booking_id', null)
+      if (fpErr) return Response.json({ error: fpErr.message }, { status: 500 })
+      forcePending = (fp || []).map(b => {
+        const tat = branchMeta[b.branch_name]?.delivery_tat_hours || 24
+        const dispatchDate = b.dispatched_at ? istDateOf(b.dispatched_at) : null
+        const arrivalIst = dispatchDate ? addWorkingDaysSkipSunday(dispatchDate, Math.max(1, Math.ceil(tat / 24))) : null
+        return { ...b, _arrival_date: arrivalIst, _tat_hours: tat }
+      })
+    }
+
     // Consignment created · booking pending — in_consignment + unbooked bills
     // whose computed arrival is NEITHER tomorrow (Section 2 main) NOR the day
     // after (Section 3). These are consignments already dispatched that fell
     // outside the forward bid windows: arrival already passed (stuck, never
     // received) or held back to book later. Ops created the movement but
-    // never attached a booking. Surfaced as a flagged, still-bookable
-    // sub-group inside Section 2 so they don't get lost. Non-Kerala only —
+    // never attached a booking. PLUS the manually-flagged at_ho bills above.
+    // Surfaced as a flagged, still-bookable sub-group. Non-Kerala only —
     // the KL tab has its own movement sections.
-    const inflightPendingBooking = inflightWithArrival.filter(b =>
-      b._arrival_date !== arrivalDate &&
-      b._arrival_date !== dayAfterArrival &&
-      b._arrival_date !== dayAfter2Arrival &&
-      (branchMeta[b.branch_name]?.region) !== 'Kerala',
-    )
+    const inflightPendingBooking = [
+      ...inflightWithArrival.filter(b =>
+        b._arrival_date !== arrivalDate &&
+        b._arrival_date !== dayAfterArrival &&
+        b._arrival_date !== dayAfter2Arrival &&
+        (branchMeta[b.branch_name]?.region) !== 'Kerala',
+      ),
+      ...forcePending.filter(b => (branchMeta[b.branch_name]?.region) !== 'Kerala'),
+    ]
 
     // Bangalore counterpart — Bangalore bills currently in_consignment with
     // no booking attached, EXCLUDING those already surfaced in Section 1
