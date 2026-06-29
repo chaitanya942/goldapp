@@ -11,6 +11,20 @@ import { getCache, setCache } from '../../lib/moduleCache'
 import { CONSIGNMENT_THEMES as THEMES, REGION_COLORS, useMobile } from '../../lib/consignmentTheme'
 import { istToday, istNow } from '../../lib/dateIst'
 
+// Lazy-load SheetJS from CDN only when the user actually exports to Excel —
+// keeps it out of the main bundle. Mirrors the pattern in BranchManagement.
+function loadScript(src) {
+  return new Promise((resolve, reject) => {
+    if (typeof document === 'undefined') return reject(new Error('no document'))
+    if (document.querySelector(`script[src="${src}"]`)) return resolve()
+    const s = document.createElement('script')
+    s.src = src
+    s.onload = () => resolve()
+    s.onerror = () => reject(new Error('failed to load ' + src))
+    document.head.appendChild(s)
+  })
+}
+
 const REGION_ICONS = {
   'Rest of Karnataka': '🏛',
   'Andhra Pradesh':    '🌊',
@@ -592,6 +606,65 @@ export default function ConsignmentOverview() {
     a.download = `branch-stock-overview_${istToday()}.csv`
     a.click()
     URL.revokeObjectURL(url)
+  }
+
+  // Active scope (region + date selection + Bangalore/outside tab) — surfaced
+  // on the PNG header and the Excel sheet name so an export self-describes the
+  // exact slice it represents.
+  const exportScopeMeta = () => ({
+    scope:   scopeTab === 'bangalore' ? 'Bangalore' : 'Outside-Bangalore',
+    regions: activeRegions.size ? [...activeRegions].join(' + ') : 'All regions',
+    dates:   selectedDates.size ? [...selectedDates].sort().map(fmtDate).join(', ') : 'All dates',
+  })
+
+  // Excel (.xlsx) export of the current (filtered + sorted) view. Same columns
+  // as the CSV but a real workbook — numbers stay numeric so management can
+  // pivot/sum without re-typing. Dynamic to the active region + date filters.
+  async function exportXLSX(rows) {
+    await loadScript('https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js')
+    const XLSX = window.XLSX
+    const headers = [
+      'Branch', 'Region', 'Total Net Wt (g)',
+      "Today's Bills", "Today's Net Wt (g)", "Today's Value (₹)",
+      'Pending Bills', 'Pending Net Wt (g)', 'Pending Value (₹)',
+      'Oldest Bill (days)', 'Oldest Bill Date', 'Last Moved (days ago)', 'Pickup Time', 'Total Gross Wt (g)',
+    ]
+    const aoa = [headers]
+    for (const b of rows) {
+      const totalNet = Number(b.today_net_wt || 0) + Number(b.older_net_wt || 0)
+      aoa.push([
+        b.branch_name, b.region, +totalNet.toFixed(3),
+        b.today_bills || 0, +Number(b.today_net_wt || 0).toFixed(3), +Number(b.today_gross_value || 0).toFixed(2),
+        b.older_bills || 0, +Number(b.older_net_wt || 0).toFixed(3), +Number(b.older_gross_value || 0).toFixed(2),
+        b.oldest_age_days != null ? b.oldest_age_days : '', b.oldest_date || '',
+        b.last_moved_days_ago != null ? b.last_moved_days_ago : '', b.pickup_time || '',
+        +Number(b.total_gross_wt || 0).toFixed(3),
+      ])
+    }
+    const ws = XLSX.utils.aoa_to_sheet(aoa)
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'Branch Stock')
+    XLSX.writeFile(wb, `branch-stock-overview_${istToday()}.xlsx`)
+  }
+
+  // PNG export — POSTs the filtered rows + active scope to the server, which
+  // renders the table via @napi-rs/canvas and streams back a shareable PNG.
+  async function downloadPng(rows) {
+    if (!rows.length) return
+    try {
+      const res = await authedFetch('/api/branch-stock-png', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rows, meta: exportScopeMeta() }),
+      })
+      if (!res.ok) return
+      const blob = await res.blob()
+      const a = document.createElement('a')
+      a.href = URL.createObjectURL(blob)
+      a.download = `BranchStockOverview_${istToday()}.png`
+      a.click()
+      URL.revokeObjectURL(a.href)
+    } catch { /* network/abort — silent, ops can retry */ }
   }
 
   // ── Scope-filtered data ───────────────────────────────────────────────────
@@ -1269,6 +1342,24 @@ export default function ConsignmentOverview() {
               cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '5px',
             }}>
             ↓ CSV
+          </button>
+          <button onClick={() => exportXLSX(filtered)} title="Download the current view (region + dates) as Excel"
+            style={{
+              padding: '6px 12px', borderRadius: '6px',
+              background: 'transparent', border: `1px solid ${t.border2}`,
+              color: t.text2, fontSize: '11px', fontWeight: 600,
+              cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '5px',
+            }}>
+            ↓ Excel
+          </button>
+          <button onClick={() => downloadPng(filtered)} title="Download the current view (region + dates) as a PNG image"
+            style={{
+              padding: '6px 12px', borderRadius: '6px',
+              background: `${t.gold}10`, border: `1px solid ${t.gold}50`,
+              color: t.gold, fontSize: '11px', fontWeight: 700,
+              cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '5px',
+            }}>
+            ↓ PNG
           </button>
         </div>
       </div>
