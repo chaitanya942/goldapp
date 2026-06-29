@@ -1015,6 +1015,11 @@ export async function GET(req) {
           .eq('crm_status', 'approved')
           .eq('is_deleted', false)
           .not('booking_id', 'is', null)
+          // Only in_consignment + at_branch are ever bucketed below (bookedInflight
+          // / bookedPreEod). Excluding at_ho keeps this from paginating the entire
+          // booked-and-received backlog (e.g. the 68k pre-GoldApp historical-close
+          // bills) on every load — that was making bidding_volume crawl.
+          .in('stock_status', ['in_consignment', 'at_branch'])
           .range(from, from + CHUNK - 1)
         if (bwErr || !bw?.length) break
         bookedWindowBills.push(...bw.map(b => ({ ...b, _owner: b.current_branch || b.branch_name })))
