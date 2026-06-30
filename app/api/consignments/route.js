@@ -16,6 +16,17 @@ import { istToday, istStartOfDayIso, istEndOfDayIso, addWorkingDaysSkipSunday } 
 import { cancelEWayBill, cancelEInvoice } from '../../../lib/clearTaxClient'
 import { REGION_TO_STATE_CODE } from '../../../lib/stateMap'
 
+// Purchase-date lock helper — returns the subset of `dates` (YYYY-MM-DD) that
+// fall inside any active lock range (bidding_purchase_date_locks). Used to block
+// booking of locked-date bills in create_booking + attach_selected_to_pipeline.
+async function lockedPurchaseDates(sb, dates) {
+  const uniq = [...new Set((dates || []).filter(Boolean).map(d => String(d).slice(0, 10)))]
+  if (!uniq.length) return []
+  const { data: locks } = await sb.from('bidding_purchase_date_locks').select('from_date, to_date')
+  if (!locks || !locks.length) return []
+  return uniq.filter(d => locks.some(l => d >= l.from_date && d <= l.to_date))
+}
+
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
   process.env.SUPABASE_SERVICE_ROLE_KEY || 'placeholder'
@@ -66,6 +77,16 @@ export async function GET(req) {
   // expressed as region names — useful when joining via branches.region.
   const allowedRegions  = getRegionFilter(auth)
   const allowedBranches = allowedRegions ? await resolveAllowedBranchNames(supabase, auth) : null
+
+  // ── Purchase-date locks — ranges ops have locked out of booking ──────────
+  if (action === 'date_locks') {
+    const { data, error } = await supabase
+      .from('bidding_purchase_date_locks')
+      .select('id, from_date, to_date, note, locked_by, locked_at')
+      .order('from_date', { ascending: true })
+    if (error) return Response.json({ locks: [], error: error.message })
+    return Response.json({ locks: data || [] })
+  }
 
   // ── Branch Stock / In Transit Overview (new landing view) ────────────────
   // Single endpoint serves both lifecycle states via the ?status= param so
@@ -2676,7 +2697,7 @@ export async function POST(req) {
   // can see the Bidding Volume page (page.consignment-bidding) rather than
   // a hardcoded role group — so the gate can never lock out whichever role
   // ops actually grant the page to (the KT §VII trap-2 lesson).
-  const BIDDING_WRITES = new Set(['set_bidding_pending', 'create_booking', 'reconcile_booking', 'update_booking_status', 'close_booking_pipeline', 'toggle_bill_hold', 'unbook_bills'])
+  const BIDDING_WRITES = new Set(['set_bidding_pending', 'create_booking', 'reconcile_booking', 'update_booking_status', 'close_booking_pipeline', 'toggle_bill_hold', 'unbook_bills', 'attach_selected_to_pipeline', 'lock_dates', 'unlock_dates'])
   let auth
   if (BIDDING_WRITES.has(action)) {
     auth = await requireAuthForPage(req, 'consignment-bidding')
@@ -2697,6 +2718,27 @@ export async function POST(req) {
   // Identity is now derived from the verified session — never from the body.
   // Callers can no longer spoof created_by / approver_email / cancelled_by.
   const actorEmail = auth.profile?.email || auth.user?.email || 'unknown'
+
+  // ── Lock / unlock a purchase-date range (ops lock-out of booking) ─────────
+  if (action === 'lock_dates') {
+    const { from, to, note } = body
+    if (!from || !to) return Response.json({ error: 'from and to (YYYY-MM-DD) required' }, { status: 400 })
+    if (String(to) < String(from)) return Response.json({ error: 'to must be on/after from' }, { status: 400 })
+    const { data, error } = await supabase
+      .from('bidding_purchase_date_locks')
+      .insert({ from_date: from, to_date: to, note: note ? String(note).trim() : null, locked_by: actorEmail })
+      .select('id, from_date, to_date, note, locked_by, locked_at')
+      .single()
+    if (error) return Response.json({ error: error.message }, { status: 500 })
+    return Response.json({ data })
+  }
+  if (action === 'unlock_dates') {
+    const { id } = body
+    if (!id) return Response.json({ error: 'lock id required' }, { status: 400 })
+    const { error } = await supabase.from('bidding_purchase_date_locks').delete().eq('id', id)
+    if (error) return Response.json({ error: error.message }, { status: 500 })
+    return Response.json({ data: { unlocked: true } })
+  }
 
   // ── Create consignment ───────────────────────────────────────────────────
   if (action === 'create_consignment') {
@@ -3781,6 +3823,17 @@ export async function POST(req) {
       return Response.json({ error: "purity must be one of '24K', '22K', '18K'" }, { status: 400 })
     }
 
+    // Purchase-date lock — refuse to book any bill whose purchase_date ops has
+    // locked. Checked BEFORE the booking row is created so a rejection leaves
+    // no orphan quota.
+    if (Array.isArray(bill_ids) && bill_ids.length > 0) {
+      const { data: lockChk } = await supabase.from('purchases').select('purchase_date').in('id', bill_ids)
+      const locked = await lockedPurchaseDates(supabase, (lockChk || []).map(b => b.purchase_date))
+      if (locked.length) {
+        return Response.json({ error: `Can't book — purchase date${locked.length > 1 ? 's' : ''} locked: ${locked.join(', ')}. Unlock to book these bills.` }, { status: 409 })
+      }
+    }
+
     // Pipeline attribution — when the operator commits more weight than the
     // currently selected bills cover, the excess can be tagged as "pipeline"
     // and auto-back-filled from incoming purchases as they sync. Server
@@ -4671,13 +4724,18 @@ export async function POST(req) {
     // 1) Selected bills that are actually free to attach (unbooked, approved).
     const { data: billRows, error: bErr } = await supabase
       .from('purchases')
-      .select('id, application_id, net_weight, booking_id')
+      .select('id, application_id, net_weight, booking_id, purchase_date')
       .in('id', bill_ids)
       .eq('is_deleted', false)
     if (bErr) return Response.json({ error: bErr.message }, { status: 500 })
     const eligible = (billRows || []).filter(b => !b.booking_id)
     if (eligible.length === 0) {
       return Response.json({ error: 'None of the selected bills are free to attach (already booked?).' }, { status: 400 })
+    }
+    // Purchase-date lock — refuse locked-date bills.
+    const lockedDates = await lockedPurchaseDates(supabase, eligible.map(b => b.purchase_date))
+    if (lockedDates.length) {
+      return Response.json({ error: `Can't close pipeline — purchase date${lockedDates.length > 1 ? 's' : ''} locked: ${lockedDates.join(', ')}.` }, { status: 409 })
     }
 
     // 2) Region's open-pipeline bookings FOR THAT BIDDING DAY (created_at IST =

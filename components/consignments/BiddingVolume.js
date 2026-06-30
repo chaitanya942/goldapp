@@ -156,6 +156,53 @@ export default function BiddingVolume() {
     return () => { cancelled = true }
   }, [bookingsResp])
 
+  // ── Purchase-date locks ─────────────────────────────────────────────────────
+  // Ops lock a date range so those bills can't be selected/booked until
+  // unlocked. Persisted server-side (bidding_purchase_date_locks) so the lock
+  // survives refresh / re-open. The server ALSO enforces it on create_booking /
+  // attach_selected_to_pipeline — the client guards are just UX.
+  const [dateLocks, setDateLocks] = useState([])
+  const refreshLocks = useCallback(() => {
+    authedFetch('/api/consignments?action=date_locks').then(r => r.json()).then(j => {
+      if (Array.isArray(j.locks)) setDateLocks(j.locks)
+    }).catch(() => {})
+  }, [])
+  useEffect(() => { refreshLocks() }, [refreshLocks])
+  const isDateLocked = useCallback((d) => {
+    if (!d) return false
+    const day = String(d).slice(0, 10)
+    return dateLocks.some(l => day >= l.from_date && day <= l.to_date)
+  }, [dateLocks])
+  const [lockPanelOpen, setLockPanelOpen] = useState(false)
+  const [lockFrom, setLockFrom] = useState('')
+  const [lockTo,   setLockTo]   = useState('')
+  const doLock = async () => {
+    const from = lockFrom, to = lockTo || lockFrom
+    if (!from) { showToast('Pick at least a from date.', 'error'); return }
+    try {
+      const r = await authedFetch('/api/consignments?action=lock_dates', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ from, to }),
+      })
+      const j = await r.json().catch(() => null)
+      if (!r.ok || j?.error) { showToast(j?.error || 'Lock failed', 'error'); return }
+      showToast(`Locked ${from}${to !== from ? ` → ${to}` : ''}.`, 'success')
+      setLockFrom(''); setLockTo(''); refreshLocks()
+      setSelected(new Set())   // drop any selection that may now be locked
+    } catch (e) { showToast(e?.message || 'Lock failed', 'error') }
+  }
+  const doUnlock = async (id) => {
+    try {
+      const r = await authedFetch('/api/consignments?action=unlock_dates', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id }),
+      })
+      const j = await r.json().catch(() => null)
+      if (!r.ok || j?.error) { showToast(j?.error || 'Unlock failed', 'error'); return }
+      showToast('Unlocked.', 'success'); refreshLocks()
+    } catch (e) { showToast(e?.message || 'Unlock failed', 'error') }
+  }
+
   // Gain — projected refining recovery on incoming net weight. Two-mode:
   //   - Default: percent rate (3.5%) baked into the company; gain in grams
   //     computed from incoming on each render.
@@ -650,11 +697,14 @@ export default function BiddingVolume() {
   const selBookingWt = selectedTotal + selGain
 
   // Single-bill toggle (used by the drill-down checkbox).
-  const toggleBill = (billId) => setSelected(prev => {
-    const next = new Set(prev)
-    if (next.has(billId)) next.delete(billId); else next.add(billId)
-    return next
-  })
+  const toggleBill = (billId) => {
+    if (isDateLocked(billsById[billId]?.purchase_date)) return   // locked purchase date — not bookable
+    setSelected(prev => {
+      const next = new Set(prev)
+      if (next.has(billId)) next.delete(billId); else next.add(billId)
+      return next
+    })
+  }
   // Tri-state branch toggle — checking a branch row selects every one of its
   // bills; clicking again clears them. If only some of the branch's bills
   // are currently selected, the click promotes to ALL (most useful default).
@@ -662,7 +712,7 @@ export default function BiddingVolume() {
     // Exclude held bills so 'all/partial/none' reflects the actually-
     // selectable rows. A branch where every non-held bill is ticked reads
     // as 'all' even if a held bill sits among them.
-    const bills = (branch?.bills || []).filter(b => !b.audit_hold)
+    const bills = (branch?.bills || []).filter(b => !b.audit_hold && !isDateLocked(b.purchase_date))
     if (!bills.length) return 'none'
     let sel = 0
     for (const b of bills) if (selected.has(b.id)) sel++
@@ -672,10 +722,10 @@ export default function BiddingVolume() {
   }
   const toggleBranchAll = (branch) => setSelected(prev => {
     const next  = new Set(prev)
-    // Held bills (audit_hold=true) are excluded from select-all: ops parked
-    // them outside the bidding pool and shouldn't sweep them back in by
-    // accident. They can still be ticked individually if needed.
-    const bills = (branch?.bills || []).filter(b => !b.audit_hold)
+    // Held bills (audit_hold=true) and locked-date bills are excluded from
+    // select-all: ops parked / locked them outside the bidding pool and
+    // shouldn't sweep them back in by accident.
+    const bills = (branch?.bills || []).filter(b => !b.audit_hold && !isDateLocked(b.purchase_date))
     const state = (() => {
       if (!bills.length) return 'none'
       let sel = 0
@@ -692,7 +742,7 @@ export default function BiddingVolume() {
   // of the region. Used by the "Select all" link in each region header.
   const toggleRegionAll = (branchRows) => setSelected(prev => {
     const next   = new Set(prev)
-    const allIds = branchRows.flatMap(r => (r.bills || []).filter(b => !b.audit_hold).map(b => b.id))
+    const allIds = branchRows.flatMap(r => (r.bills || []).filter(b => !b.audit_hold && !isDateLocked(b.purchase_date)).map(b => b.id))
     if (!allIds.length) return next
     const allOn = allIds.every(id => next.has(id))
     if (allOn) for (const id of allIds) next.delete(id)
@@ -733,9 +783,10 @@ export default function BiddingVolume() {
     for (const id of Object.keys(billsById)) {
       const bill = billsById[id]
       if (!eligibleGroups.has(bill._group)) continue
-      // Skip bills the operator has parked outside the audit pool — they
-      // shouldn't get auto-pulled into a booking.
+      // Skip bills the operator has parked outside the audit pool, or whose
+      // purchase date is locked — neither should get auto-pulled into a booking.
       if (bill.audit_hold) continue
+      if (isDateLocked(bill.purchase_date)) continue
       eligible.push(bill)
     }
     eligible.sort((a, b) => {
@@ -754,7 +805,7 @@ export default function BiddingVolume() {
       sum += Number(bill.net_weight || 0)
     }
     setSelected(chosen)
-  }, [billsById])
+  }, [billsById, isDateLocked])
 
   // Click a section's "Available to Book" card → select every unbooked
   // (non-held) bill in that section's group(s).
@@ -770,14 +821,14 @@ export default function BiddingVolume() {
       const next = new Set(prev)
       for (const id of Object.keys(billsById)) {
         const bl = billsById[id]
-        if (gset.has(bl._group) && !bl.audit_hold
+        if (gset.has(bl._group) && !bl.audit_hold && !isDateLocked(bl.purchase_date)
             && (!dset || dset.has(bl.purchase_date))
             && (!cset || cset.has(istDayOf(bl._consignment_created_at)))
             && (!tset || tset.has(Number(bl._tat_hours)))) next.add(id)
       }
       return next
     })
-  }, [billsById])
+  }, [billsById, isDateLocked])
 
   // Kerala (KL) no-mix rule — Kerala bookings must be exclusive. With
   // bill-level selection, the cleanest signal is the _group tag set when
@@ -1169,11 +1220,39 @@ export default function BiddingVolume() {
           )
         })()}
 
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          {/* Date navigator removed from the header — moved next to the
-              Bidding/Bookings tab switcher and now pivots on BIDDING DAY
-              (created_at IST) rather than arrival date, since ops wants
-              to find bookings under the day they were placed. */}
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', position: 'relative' }}>
+          {/* Purchase-date lock — ops lock date ranges out of booking. */}
+          <button onClick={() => setLockPanelOpen(o => !o)}
+            title="Lock purchase dates so their bills can't be selected or booked"
+            style={{ background: dateLocks.length ? `${t.red}14` : 'transparent', border: `1px solid ${dateLocks.length ? `${t.red}66` : t.border}`, borderRadius: 8, padding: '7px 14px', fontSize: 12, color: dateLocks.length ? t.red : t.text2, cursor: 'pointer', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
+            🔒 {dateLocks.length ? `${dateLocks.length} date${dateLocks.length === 1 ? '' : 's'} locked` : 'Lock dates'}
+          </button>
+          {lockPanelOpen && (
+            <div style={{ position: 'absolute', top: 'calc(100% + 6px)', right: 0, zIndex: 60, width: 340, background: t.card, border: `1px solid ${t.border}`, borderRadius: 12, boxShadow: '0 14px 40px rgba(0,0,0,.30)', padding: 14 }}>
+              <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: '.08em', textTransform: 'uppercase', color: t.text3, marginBottom: 8 }}>Lock purchase dates</div>
+              <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 8 }}>
+                <input type="date" value={lockFrom} onChange={e => setLockFrom(e.target.value)}
+                  style={{ flex: 1, minWidth: 0, background: t.card2, border: `1px solid ${t.border2}`, borderRadius: 6, padding: '6px 8px', fontSize: 11, color: t.text1, fontFamily: 'monospace' }} />
+                <span style={{ color: t.text4 }}>→</span>
+                <input type="date" value={lockTo} onChange={e => setLockTo(e.target.value)}
+                  style={{ flex: 1, minWidth: 0, background: t.card2, border: `1px solid ${t.border2}`, borderRadius: 6, padding: '6px 8px', fontSize: 11, color: t.text1, fontFamily: 'monospace' }} />
+                <button onClick={doLock}
+                  style={{ background: t.red, color: '#fff', border: 'none', borderRadius: 6, padding: '7px 13px', fontSize: 11, fontWeight: 800, cursor: 'pointer' }}>Lock</button>
+              </div>
+              <div style={{ fontSize: 10, color: t.text4, marginBottom: 10, lineHeight: 1.5 }}>Leave the 2nd date empty to lock a single day. Locked-date bills can't be selected or booked until unlocked — persists across refresh.</div>
+              {dateLocks.length === 0
+                ? <div style={{ fontSize: 11, color: t.text4 }}>No dates locked.</div>
+                : <div style={{ display: 'flex', flexDirection: 'column', gap: 5, maxHeight: 200, overflowY: 'auto' }}>
+                    {dateLocks.map(l => (
+                      <div key={l.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, background: `${t.red}0c`, border: `1px solid ${t.red}33`, borderRadius: 6, padding: '6px 9px' }}>
+                        <span style={{ fontSize: 11, color: t.text1, fontWeight: 600 }}>🔒 {fmtDateShort(l.from_date)}{l.to_date !== l.from_date ? ` → ${fmtDateShort(l.to_date)}` : ''}</span>
+                        <button onClick={() => doUnlock(l.id)}
+                          style={{ background: 'transparent', border: `1px solid ${t.border2}`, borderRadius: 5, padding: '3px 10px', fontSize: 10, color: t.text2, cursor: 'pointer', fontWeight: 700 }}>Unlock</button>
+                      </div>
+                    ))}
+                  </div>}
+            </div>
+          )}
           <button onClick={() => fetchAll()} disabled={loading}
             style={{ background: loading ? t.card2 : 'transparent', border: `1px solid ${t.border}`, borderRadius: '8px', padding: '7px 14px', fontSize: '12px', color: loading ? t.text4 : t.text2, cursor: loading ? 'default' : 'pointer', fontWeight: 500, display: 'flex', alignItems: 'center', gap: 6 }}>
             <span style={{ display: 'inline-block', animation: loading ? 'spin 1s linear infinite' : 'none', fontSize: '13px' }}>⟳</span>
@@ -1424,7 +1503,7 @@ export default function BiddingVolume() {
         dateFilter
         selectable
         selected={selected}
-        branchLocked={branchLocked}
+        branchLocked={branchLocked} isDateLocked={isDateLocked}
         onToggleBill={toggleBill}
         onToggleBranchAll={toggleBranchAll}
         onToggleRegionAll={toggleRegionAll}
@@ -1455,7 +1534,7 @@ export default function BiddingVolume() {
         dateFilter
         selectable
         selected={selected}
-        branchLocked={branchLocked}
+        branchLocked={branchLocked} isDateLocked={isDateLocked}
         onToggleBill={toggleBill}
         onToggleBranchAll={toggleBranchAll}
         onToggleRegionAll={toggleRegionAll}
@@ -1484,7 +1563,7 @@ export default function BiddingVolume() {
         dateFilter
         selectable
         selected={selected}
-        branchLocked={branchLocked}
+        branchLocked={branchLocked} isDateLocked={isDateLocked}
         onToggleBill={toggleBill}
         onToggleBranchAll={toggleBranchAll}
         onToggleRegionAll={toggleRegionAll}
@@ -1514,7 +1593,7 @@ export default function BiddingVolume() {
         dateFilter
         selectable
         selected={selected}
-        branchLocked={branchLocked}
+        branchLocked={branchLocked} isDateLocked={isDateLocked}
         onToggleBill={toggleBill}
         onToggleBranchAll={toggleBranchAll}
         onToggleRegionAll={toggleRegionAll}
@@ -1544,7 +1623,7 @@ export default function BiddingVolume() {
         dateFilter
         selectable
         selected={selected}
-        branchLocked={branchLocked}
+        branchLocked={branchLocked} isDateLocked={isDateLocked}
         onToggleBill={toggleBill}
         onToggleBranchAll={toggleBranchAll}
         onToggleRegionAll={toggleRegionAll}
@@ -1582,7 +1661,7 @@ export default function BiddingVolume() {
         subGroupInTotals
         selectable
         selected={selected}
-        branchLocked={branchLocked}
+        branchLocked={branchLocked} isDateLocked={isDateLocked}
         onToggleBill={toggleBill}
         onToggleBranchAll={toggleBranchAll}
         onToggleRegionAll={toggleRegionAll}
@@ -1649,7 +1728,7 @@ export default function BiddingVolume() {
         tatFilter
         selectable
         selected={selected}
-        branchLocked={branchLocked}
+        branchLocked={branchLocked} isDateLocked={isDateLocked}
         onToggleBill={toggleBill}
         onToggleBranchAll={toggleBranchAll}
         onToggleRegionAll={toggleRegionAll}
@@ -1742,7 +1821,7 @@ export default function BiddingVolume() {
           dateFilter
           selectable
           selected={selected}
-          branchLocked={branchLocked}
+          branchLocked={branchLocked} isDateLocked={isDateLocked}
           onToggleBill={toggleBill}
           onToggleBranchAll={toggleBranchAll}
           onToggleRegionAll={toggleRegionAll}
@@ -1768,7 +1847,7 @@ export default function BiddingVolume() {
           dateFilter
           selectable
           selected={selected}
-          branchLocked={branchLocked}
+          branchLocked={branchLocked} isDateLocked={isDateLocked}
           onToggleBill={toggleBill}
           onToggleBranchAll={toggleBranchAll}
           onToggleRegionAll={toggleRegionAll}
@@ -1794,7 +1873,7 @@ export default function BiddingVolume() {
           dateFilter
           selectable
           selected={selected}
-          branchLocked={branchLocked}
+          branchLocked={branchLocked} isDateLocked={isDateLocked}
           onToggleBill={toggleBill}
           onToggleBranchAll={toggleBranchAll}
           onToggleRegionAll={toggleRegionAll}
@@ -1840,7 +1919,7 @@ export default function BiddingVolume() {
           dateFilter
           selectable
           selected={selected}
-          branchLocked={branchLocked}
+          branchLocked={branchLocked} isDateLocked={isDateLocked}
           onToggleBill={toggleBill}
           onToggleBranchAll={toggleBranchAll}
           onToggleRegionAll={toggleRegionAll}
@@ -2999,7 +3078,7 @@ function ActionPill({ label, color, onClick, t, subtle = false }) {
 function SourceSection({
   t, card, index, icon, title, subtitle, accent,
   branches = [], total, selectable = false, viewOnly = false,
-  selected, branchLocked,
+  selected, branchLocked, isDateLocked,
   onToggleBill, onToggleBranchAll, onToggleRegionAll, branchSelectionState,
   // Per-bill audit_hold override — when provided, renders a small Hold /
   // Held control on each bill row. Currently passed only for the Bangalore
@@ -3950,10 +4029,12 @@ function SourceSection({
                               {billRows.map((bill, idx) => {
                                 const billChecked = selectable && selected?.has(bill.id)
                                 const isHeld      = !!bill.audit_hold
+                                const dateLocked  = isDateLocked ? isDateLocked(bill.purchase_date) : false
+                                const noPick      = locked || isHeld || dateLocked
                                 return (
                                   <div key={bill.id ?? idx}
-                                    onClick={() => { if (selectable && !locked && !isHeld) onToggleBill?.(bill.id) }}
-                                    onMouseEnter={(e) => { if (selectable && !locked && !isHeld) e.currentTarget.style.background = `${tone}10` }}
+                                    onClick={() => { if (selectable && !noPick) onToggleBill?.(bill.id) }}
+                                    onMouseEnter={(e) => { if (selectable && !noPick) e.currentTarget.style.background = `${tone}10` }}
                                     onMouseLeave={(e) => { e.currentTarget.style.background = billChecked ? `${tone}1c` : (isHeld ? `${t.orange || '#c9981f'}0c` : (idx % 2 === 1 ? `${t.card2}40` : 'transparent')) }}
                                     style={{
                                       display: 'grid',
@@ -3962,10 +4043,11 @@ function SourceSection({
                                       columnGap: 14, padding: '5px 8px', borderRadius: 5,
                                       background: billChecked ? `${tone}1c` : (isHeld ? `${t.orange || '#c9981f'}0c` : (idx % 2 === 1 ? `${t.card2}40` : 'transparent')),
                                       fontFamily: 'monospace', fontSize: 12,
-                                      cursor: selectable ? (locked || isHeld ? 'not-allowed' : 'pointer') : 'default',
-                                      opacity: (selectable && locked) || isHeld ? 0.55 : 1,
+                                      cursor: selectable ? (noPick ? 'not-allowed' : 'pointer') : 'default',
+                                      opacity: (selectable && locked) || isHeld || dateLocked ? 0.55 : 1,
                                       transition: 'background .12s ease',
-                                    }}>
+                                    }}
+                                    title={dateLocked ? 'Purchase date locked — unlock to book this bill' : undefined}>
                                     {selectable && (
                                       <span style={{
                                         width: 14, height: 14, borderRadius: 3,
@@ -3976,9 +4058,9 @@ function SourceSection({
                                         transition: 'all .12s ease',
                                       }}>{billChecked ? '✓' : ''}</span>
                                     )}
-                                    {/* Purchase date — compact "10 Jun" form. */}
-                                    <span style={{ color: t.text3, fontWeight: 600, whiteSpace: 'nowrap' }}>
-                                      {bill.purchase_date ? fmtDateShort(bill.purchase_date) : '—'}
+                                    {/* Purchase date — compact "10 Jun" form; 🔒 when its date is locked. */}
+                                    <span style={{ color: dateLocked ? t.red : t.text3, fontWeight: 600, whiteSpace: 'nowrap' }}>
+                                      {dateLocked && '🔒 '}{bill.purchase_date ? fmtDateShort(bill.purchase_date) : '—'}
                                     </span>
                                     <span style={{ color: t.gold, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{bill.application_id || '—'}</span>
                                     {/* Customer cell — stacked with optional booking caption (only
