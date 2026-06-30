@@ -3258,6 +3258,33 @@ function SourceSection({
       }
     }
   }
+
+  // ── Exclude locked-date bills from the bookable metrics ───────────────────
+  // Locked bills stay VISIBLE (greyed) in the list, but they can't be booked,
+  // so Unbooked / Gain / Available to Book (and the matching Total) must not
+  // count them. The held-out amount is surfaced as a 🔒 note on the strip.
+  let lockedNetG = 0, lockedBillsN = 0
+  if (isDateLocked && metrics && !branchesBooked) {
+    const tally = (arr) => { for (const br of arr || []) for (const bl of br.bills || []) {
+      if (isDateLocked(bl.purchase_date)) { lockedNetG += Number(bl.net_weight) || 0; lockedBillsN += 1 }
+    } }
+    tally(branches)
+    if (subGroupInTotals) tally(subGroup?.branches)
+    if (lockedNetG > 0.0001) {
+      const rate        = metrics.unbookedNet > 0 ? (Number(metrics.gainNet) || 0) / metrics.unbookedNet : 0
+      const newUnbooked = Math.max(0, Number(metrics.unbookedNet || 0) - lockedNetG)
+      const newGain     = noGain ? 0 : newUnbooked * rate
+      metrics = { ...metrics,
+        unbookedNet:  newUnbooked,
+        gainNet:      newGain,
+        availableNet: newUnbooked + newGain,
+        totalNet:     newUnbooked + Number(metrics.bookedNet || 0),
+        _lockedNet:   lockedNetG,
+        _lockedBills: lockedBillsN,
+      }
+    }
+  }
+
   const toSet = (v) => {
     if (!v) return null
     if (v instanceof Set) return v
@@ -3462,7 +3489,14 @@ function SourceSection({
             </div>
           )}
           {metrics && (
-            <div style={{ fontSize: 11, color: t.text3, letterSpacing: '.04em', fontWeight: 700 }}>{totalBills} bill{totalBills === 1 ? '' : 's'}</div>
+            <div style={{ fontSize: 11, color: t.text3, letterSpacing: '.04em', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'flex-end' }}>
+              <span>{totalBills} bill{totalBills === 1 ? '' : 's'}</span>
+              {metrics?._lockedBills > 0 && (
+                <span title="Locked-date bills — excluded from the bookable totals" style={{ color: t.red, fontWeight: 800, background: `${t.red}14`, border: `1px solid ${t.red}40`, borderRadius: 5, padding: '2px 7px', whiteSpace: 'nowrap' }}>
+                  🔒 {metrics._lockedBills} locked · {fmt(metrics._lockedNet, 2)}g
+                </span>
+              )}
+            </div>
           )}
         </div>
       </div>
@@ -3608,15 +3642,16 @@ function SourceSection({
           <span style={{ fontSize: 9, color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 800 }}>Purchase&nbsp;dates</span>
           {dateChipsAvailable.map(d => {
             const active = selectedDates.has(d)
+            const dlock  = isDateLocked ? isDateLocked(d) : false
             return (
-              <button key={d} onClick={() => toggleDate(d)} title="Filter by purchase date — select multiple"
+              <button key={d} onClick={() => toggleDate(d)} title={dlock ? 'Locked purchase date — these bills can\'t be booked' : 'Filter by purchase date — select multiple'}
                 style={{
                   padding: '5px 11px', borderRadius: 999, cursor: 'pointer', fontSize: 10.5, fontWeight: 700, whiteSpace: 'nowrap',
-                  border: `1px solid ${active ? tone : t.border}`,
-                  background: active ? `${tone}22` : 'transparent',
-                  color: active ? tone : t.text3, transition: 'all .15s',
+                  border: `1px solid ${dlock ? `${t.red}66` : (active ? tone : t.border)}`,
+                  background: dlock ? `${t.red}12` : (active ? `${tone}22` : 'transparent'),
+                  color: dlock ? t.red : (active ? tone : t.text3), transition: 'all .15s',
                 }}>
-                {fmtDate(d)}
+                {dlock && '🔒 '}{fmtDate(d)}
               </button>
             )
           })}
@@ -3875,6 +3910,13 @@ function SourceSection({
                           the 24h TAT chip instead of stacking a new line. */}
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
                         <span style={{ fontSize: 13.5, color: t.text1, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{b.branch_name}</span>
+                        {(() => {
+                          const lk = isDateLocked ? (b.bills || []).filter(bl => isDateLocked(bl.purchase_date)).length : 0
+                          return lk > 0 ? (
+                            <span title={`${lk} bill${lk === 1 ? '' : 's'} on a locked purchase date — not bookable`}
+                              style={{ fontSize: 10, color: t.red, background: `${t.red}14`, border: `1px solid ${t.red}40`, borderRadius: 4, padding: '1px 7px', whiteSpace: 'nowrap', fontWeight: 800, flexShrink: 0 }}>🔒 {lk}</span>
+                          ) : null
+                        })()}
                         {b.tat_hours != null && (
                           <span title={`Delivery TAT ${b.tat_hours}h`} style={{ fontSize: 10.5, color: t.text3, background: `${t.text4}1c`, border: `1px solid ${t.text4}2e`, borderRadius: 4, padding: '1px 8px', whiteSpace: 'nowrap', fontWeight: 700, letterSpacing: '.03em' }}>{b.tat_hours}h TAT</span>
                         )}
