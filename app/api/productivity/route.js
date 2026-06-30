@@ -46,6 +46,7 @@ const med = (arr) => { const a = arr.filter(x => x != null && x >= 0); if (!a.le
 const avg = (arr) => { const a = arr.filter(x => x != null && x >= 0); return a.length ? a.reduce((s, x) => s + x, 0) / a.length : null }
 const r1 = (x) => x == null ? null : Math.round(x * 10) / 10
 const dmin = (a, b) => (a != null && b != null) ? (b - a) / 60 : null
+const metricOf = (rows, metric) => { if (metric === 'count') return rows.length; const a = rows.map(r => r.total); return metric === 'avg' ? r1(avg(a)) : r1(med(a)) }
 function normState(code, name) {
   const c = (code || '').toUpperCase().trim()
   if (c === 'KA' || c === 'KARNATAKA') return 'KARNATAKA'
@@ -177,15 +178,37 @@ function stageMedians(rows, stageMeta) {
   out.total = { median: r1(med(rows.map(r => r.total))), n: rows.filter(r => r.total != null).length }
   return out
 }
-function buildReport(all, { groupByKey, stageMeta, isNew, bucket, filt }) {
+function buildReport(all, { groupByKey, stageMeta, isNew, bucket, filt, splitBy, metric, slaMin }) {
   const rows = applyFilters(all, filt)
   const done = rows.filter(c => c.completed)
   const open = isNew ? rows.filter(c => !c.completed && c.status !== 'WALKOUT') : []
   const totals = done.map(r => r.total).filter(x => x != null)
   const kpis = { completed: done.length, open: open.length, total: rows.length, medianTat: r1(med(totals)), avgTat: r1(avg(totals)), fastest: totals.length ? r1(Math.min(...totals)) : null, slowest: totals.length ? r1(Math.max(...totals)) : null }
   const stages = stageMedians(done, stageMeta)
-  const gmap = {}; done.forEach(c => { const k = c[groupByKey] ?? '—'; (gmap[k] = gmap[k] || []).push(c) })
-  const groups = Object.entries(gmap).map(([key, rs]) => ({ key, n: rs.length, medianTat: r1(med(rs.map(r => r.total))), stages: Object.fromEntries(stageMeta.map(s => [s.key, r1(med(rs.map(r => r.stages[s.key])))])) })).sort((a, b) => b.n - a.n)
+  // ── pivot: rows = groupBy, columns = splitBy (a dimension, 'stage', or 'none') ──
+  const splitField = (splitBy && splitBy !== 'stage' && splitBy !== 'none') ? DIM[splitBy] : null
+  let cols = []
+  if (splitBy === 'stage') cols = stageMeta.map(s => ({ key: s.key, label: s.label.split('·')[1]?.trim() || s.label }))
+  else if (splitField) { const cnt = {}; done.forEach(c => { const v = c[splitField]; if (v != null) cnt[v] = (cnt[v] || 0) + 1 }); cols = Object.entries(cnt).sort((a, b) => b[1] - a[1]).slice(0, 12).map(([v]) => ({ key: String(v), label: String(v) })) }
+  const rmap = {}; done.forEach(c => { const k = String(c[groupByKey] ?? '—'); (rmap[k] = rmap[k] || []).push(c) })
+  const pivotRows = Object.entries(rmap).map(([key, rs]) => {
+    const cells = {}
+    if (splitBy === 'stage') stageMeta.forEach(s => { cells[s.key] = { val: r1(med(rs.map(x => x.stages[s.key]))), n: rs.length } })
+    else if (splitField) cols.forEach(col => { const cc = rs.filter(x => String(x[splitField]) === col.key); cells[col.key] = { val: metricOf(cc, metric), n: cc.length } })
+    return { key, n: rs.length, total: metricOf(rs, metric), cells }
+  }).sort((a, b) => b.n - a.n)
+  const pivot = { rows: pivotRows, cols, metric, splitBy: splitBy || 'none', groupBy: Object.keys(DIM).find(k => DIM[k] === groupByKey) || 'state' }
+  // ── TAT distribution histogram (over completed totals) ──
+  const totalsArr = done.map(c => c.total).filter(x => x != null)
+  const BINS = [[0, 15, '<15m'], [15, 30, '15–30m'], [30, 60, '30–60m'], [60, 120, '1–2h'], [120, 240, '2–4h'], [240, Infinity, '>4h']]
+  const histogram = BINS.map(([lo, hi, label]) => ({ label, count: totalsArr.filter(v => v >= lo && v < hi).length }))
+  // ── SLA breach (only when a threshold is supplied) ──
+  let sla = null
+  if (slaMin) {
+    const over = totalsArr.filter(v => v > slaMin)
+    sla = { threshold: slaMin, n: totalsArr.length, breached: over.length, pct: r1(totalsArr.length ? over.length / totalsArr.length * 100 : 0),
+      byGroup: pivotRows.map(r => { const ts = rmap[r.key].map(x => x.total).filter(v => v != null); const b = ts.filter(v => v > slaMin).length; return { key: r.key, n: ts.length, breached: b, pct: r1(ts.length ? b / ts.length * 100 : 0) } }).sort((a, b) => b.pct - a.pct) }
+  }
   // trend
   const tmap = {}; done.forEach(c => { if (!c.openedDate) return; const k = bucket === 'week' ? isoWeek(c.openedDate) : c.openedDate; (tmap[k] = tmap[k] || []).push(c.total) })
   const trend = Object.entries(tmap).map(([bucket, arr]) => ({ bucket, n: arr.length, medianTat: r1(med(arr)) })).sort((a, b) => a.bucket < b.bucket ? -1 : 1)
@@ -196,7 +219,7 @@ function buildReport(all, { groupByKey, stageMeta, isNew, bucket, filt }) {
   const cases = [...done].sort((a, b) => (b.total ?? 0) - (a.total ?? 0)).slice(0, 400).map(c => ({ code: c.code, branch: c.branch, state: c.state, type: c.type, stone: c.stone, ornCnt: c.ornCnt, opener: c.opener, openedDate: c.openedDate, openedIst: c.openedIst, total: r1(c.total), stages: Object.fromEntries(stageMeta.map(s => [s.key, r1(c.stages[s.key])])) }))
   const uniq = (field) => [...new Set(all.map(c => c[field]).filter(Boolean))].sort()
   const facets = { state: uniq('state'), region: uniq('region'), branch: uniq('branch'), type: uniq('type'), stone: uniq('stone'), ornaments: ['1', '2-5', '6-10', '>10', 'unknown'].filter(b => all.some(c => c.ornBucket === b)), status: uniq('status'), employee: uniq('opener') }
-  return { kpis, stages, groups, trend, wip, oldestOpen, cases, facets, stageMeta, groupBy: Object.keys(DIM).find(k => DIM[k] === groupByKey) || 'state' }
+  return { kpis, stages, pivot, histogram, sla, trend, wip, oldestOpen, cases, facets, stageMeta, groupBy: pivot.groupBy }
 }
 function peopleAgg(cases, stageMeta) {
   const ppl = {}
@@ -274,10 +297,15 @@ export async function GET(req) {
       return Response.json({ people: peopleAgg(applyFilters(cases, filt), NEW_STAGES), stageMeta: NEW_STAGES })
     }
     // report
-    const out = { source, window: { from, to }, bucket, sources: {} }
+    const groupByKey = DIM[sp.get('groupBy')] || 'state'
+    const splitBy = sp.get('splitBy') || 'none'
+    const metric = ['median', 'avg', 'count'].includes(sp.get('metric')) ? sp.get('metric') : 'median'
+    const slaMin = sp.get('sla') ? Math.max(0, parseFloat(sp.get('sla'))) : null
+    const opts = { groupByKey, bucket, filt, splitBy, metric, slaMin }
+    const out = { source, window: { from, to }, bucket, metric, splitBy, sources: {} }
     const tasks = []
-    if (source === 'new' || source === 'compare') tasks.push(newCrmPull(from, to).then(c => { out.sources.new = buildReport(c, { groupByKey: DIM[sp.get('groupBy')] || 'state', stageMeta: NEW_STAGES, isNew: true, bucket, filt }) }))
-    if (source === 'old' || source === 'compare') tasks.push(oldCrmPull(from, to).then(c => { out.sources.old = buildReport(c, { groupByKey: DIM[sp.get('groupBy')] || 'state', stageMeta: OLD_STAGES, isNew: false, bucket, filt }) }))
+    if (source === 'new' || source === 'compare') tasks.push(newCrmPull(from, to).then(c => { out.sources.new = buildReport(c, { ...opts, stageMeta: NEW_STAGES, isNew: true }) }))
+    if (source === 'old' || source === 'compare') tasks.push(oldCrmPull(from, to).then(c => { out.sources.old = buildReport(c, { ...opts, stageMeta: OLD_STAGES, isNew: false }) }))
     await Promise.all(tasks)
     return Response.json(out)
   } catch (err) {
