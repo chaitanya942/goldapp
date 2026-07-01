@@ -1799,7 +1799,13 @@ export async function GET(req) {
         const sourced  = attached + pending
         // Settled = arrival day passed OR ops manually closed a small
         // residual pipeline. Either way the leftover folds into gain.
-        const settled  = !!(r.date && String(r.date) < todayIst) || !!r.pipeline_closed_at
+        // Settle by the pipeline's ARRIVAL date, not the booking date — a
+        // back-dated booking (e.g. booked on a past bidding day) can still carry
+        // an open pipeline expected to fill from future incoming. For every
+        // normal booking arrival_date == date, so this is a no-op; it only keeps
+        // an intentionally back-dated open pipeline from folding into gain.
+        const settleDate = r.pipeline_arrival_date || r.date
+        const settled  = !!(settleDate && String(settleDate) < todayIst) || !!r.pipeline_closed_at
         // additional_gain_g — incremental gain added outside the rate-based
         // formula (e.g. when the weight column was floored to an integer and
         // the fractional remainder was parked here, or when a small residual
