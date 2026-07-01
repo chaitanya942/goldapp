@@ -3200,17 +3200,34 @@ function SourceSection({
   let unbookedDateSet    = new Set()   // purchase dates that still have BOOKABLE (unbooked) stock
   if (dateFilter || altField || tatFilter) {
     const ds = new Set(), as = new Set(), ts = new Set(), dsBook = new Set()
+    // Cross-filtering: each chip row narrows to what's still reachable given the
+    // OTHER active selections — selecting a consignment date shrinks the
+    // purchase-date chips to only those present in that consignment, and vice
+    // versa. Each facet ignores its OWN selection (so you can widen it again).
+    const matchDate = (bl) => !selectedDates.size    || selectedDates.has(bl.purchase_date)
+    const matchAlt  = (bl) => !altField || !selectedAltDates.size || selectedAltDates.has(istDayOf(bl[altField]))
+    const matchTat  = (br) => !selectedTats.size     || selectedTats.has(Number(br.tat_hours))
     // bookable=true → this list contributes selectable stock (unbooked branches +
     // subgroup); the already-booked list is scanned for chips but NOT marked
     // bookable, so a fully-booked date is segregated out below.
     const scan = (arr, bookable) => { for (const br of arr || []) {
-      if (tatFilter && br.tat_hours != null) ts.add(Number(br.tat_hours))
+      const tatOk = matchTat(br)
+      let branchCross = false
       for (const bl of br.bills || []) {
-        if (dateFilter && bl.purchase_date) { ds.add(bl.purchase_date); if (bookable) dsBook.add(bl.purchase_date) }
-        if (altField) { const ad = istDayOf(bl[altField]); if (ad) as.add(ad) }
+        // purchase-date facet — respects the selected consignment date(s) + TAT
+        if (dateFilter && bl.purchase_date && tatOk && matchAlt(bl)) { ds.add(bl.purchase_date); if (bookable) dsBook.add(bl.purchase_date) }
+        // consignment-date facet — respects the selected purchase date(s) + TAT
+        if (altField && tatOk && matchDate(bl)) { const ad = istDayOf(bl[altField]); if (ad) as.add(ad) }
+        if (matchDate(bl) && matchAlt(bl)) branchCross = true
       }
+      // TAT facet — respects the selected purchase + consignment dates
+      if (tatFilter && br.tat_hours != null && branchCross) ts.add(Number(br.tat_hours))
     } }
     scan(branches, true); scan(bookedBranches, false); scan(subGroup?.branches, true)
+    // Keep already-selected values visible so they stay deselectable even when
+    // the cross-filter would otherwise drop them.
+    selectedDates.forEach(d => ds.add(d))
+    if (altField) selectedAltDates.forEach(d => as.add(d))
     unbookedDateSet = dsBook
     // Bookable dates first (oldest→latest), then fully-booked dates (dimmed in the UI).
     const allDates = Array.from(ds).sort()
