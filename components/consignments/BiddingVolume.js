@@ -3957,7 +3957,7 @@ function SourceSection({
                           if (!cds.length) return null
                           const label = cds.length === 1 ? fmtDateShort(cds[0]) : `${fmtDateShort(cds[0])} → ${fmtDateShort(cds[cds.length - 1])}`
                           return (
-                            <span title={`Consignment created ${label}`} style={{ fontSize: 10.5, color: t.blue, background: `${t.blue}14`, border: `1px solid ${t.blue}33`, borderRadius: 4, padding: '1px 8px', whiteSpace: 'nowrap', fontWeight: 700, letterSpacing: '.03em', flexShrink: 0 }}>⇒ {label}</span>
+                            <span title={`Consignment created on ${label}`} style={{ fontSize: 10.5, color: t.blue, background: `${t.blue}14`, border: `1px solid ${t.blue}33`, borderRadius: 4, padding: '1px 8px', whiteSpace: 'nowrap', fontWeight: 700, letterSpacing: '.03em', flexShrink: 0 }}>Consignment created on {label}</span>
                           )
                         })()}
                         {/* Pickup time intentionally suppressed — pickups
