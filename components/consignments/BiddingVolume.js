@@ -4191,16 +4191,53 @@ function SourceSection({
                     {fmt(bookedNet, 2)} g · {bookedBills} bill{bookedBills === 1 ? '' : 's'}
                   </span>
                 </div>
-                {bookedOpen && bookedRows.map(b => (
-                  <div key={`bk-${b.branch_name}`} style={{ display: 'grid', gridTemplateColumns: rowGrid, alignItems: 'center', columnGap: 14, padding: '8px 11px', borderRadius: 8, opacity: 0.72 }}>
-                    <span style={{ width: 16, height: 16, borderRadius: 4, background: `${bk}22`, color: bk, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 900 }}>✓</span>
-                    <span style={{ fontSize: 13, color: t.text2, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{b.branch_name}</span>
-                    <span style={{ textAlign: 'right', color: t.text3, fontWeight: 600 }}>{fmt(b.total_gross_wt, 2)}<span style={{ fontSize: 10, color: t.text4, marginLeft: 2 }}>g</span></span>
-                    <span style={{ textAlign: 'right', color: bk, fontWeight: 800 }}>{fmt(b.total_net_wt, 2)}<span style={{ fontSize: 10, color: t.text4, marginLeft: 2 }}>g</span></span>
-                    <span style={{ textAlign: 'right', color: t.text3, fontWeight: 700 }}>{b.total_bills} bill{b.total_bills === 1 ? '' : 's'}</span>
-                    <span />
-                  </div>
-                ))}
+                {bookedOpen && bookedRows.map(b => {
+                  const bexp   = openBranches.has('bk:' + b.branch_name)
+                  const bbills = Array.isArray(b.bills) ? b.bills : []
+                  const bkCols = '78px 130px minmax(0, 1fr) 100px 100px 130px'
+                  return (
+                    <Fragment key={`bk-${b.branch_name}`}>
+                    <div style={{ display: 'grid', gridTemplateColumns: rowGrid, alignItems: 'center', columnGap: 14, padding: '8px 11px', borderRadius: 8, opacity: 0.85 }}>
+                      <span style={{ width: 16, height: 16, borderRadius: 4, background: `${bk}22`, color: bk, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 900 }}>✓</span>
+                      <span style={{ fontSize: 13, color: t.text2, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{b.branch_name}</span>
+                      <span style={{ textAlign: 'right', color: t.text3, fontWeight: 600 }}>{fmt(b.total_gross_wt, 2)}<span style={{ fontSize: 10, color: t.text4, marginLeft: 2 }}>g</span></span>
+                      <span style={{ textAlign: 'right', color: bk, fontWeight: 800 }}>{fmt(b.total_net_wt, 2)}<span style={{ fontSize: 10, color: t.text4, marginLeft: 2 }}>g</span></span>
+                      <span style={{ textAlign: 'right', color: t.text3, fontWeight: 700 }}>{b.total_bills} bill{b.total_bills === 1 ? '' : 's'}</span>
+                      <span onClick={() => toggleBranchExpand('bk:' + b.branch_name)} title={bexp ? 'Hide bills' : 'Show bills'}
+                        style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 24, height: 24, borderRadius: 6, cursor: 'pointer', color: bexp ? bk : t.text3, fontSize: 13, fontWeight: 800, background: bexp ? `${bk}18` : 'transparent', border: `1px solid ${bexp ? `${bk}66` : 'transparent'}`, opacity: bbills.length === 0 ? 0.25 : 1, pointerEvents: bbills.length === 0 ? 'none' : 'auto' }}>
+                        {bexp ? '▾' : '▸'}
+                      </span>
+                    </div>
+                    {bexp && bbills.length > 0 && (
+                      <div style={{ marginLeft: 30, marginTop: 2, marginBottom: 8, paddingLeft: 12, paddingTop: 5, paddingBottom: 5, borderLeft: `2px solid ${bk}40` }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: bkCols, columnGap: 14, padding: '4px 8px', fontSize: 10, color: t.text3, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 800 }}>
+                          <span>Date</span><span>App ID</span><span>Customer</span>
+                          <span style={{ textAlign: 'right' }}>Gross</span><span style={{ textAlign: 'right' }}>Net</span><span style={{ textAlign: 'right' }}>Amount</span>
+                        </div>
+                        {bbills.map((bill, idx) => (
+                          <div key={bill.id ?? idx} style={{ display: 'grid', gridTemplateColumns: bkCols, alignItems: 'center', columnGap: 14, padding: '5px 8px', borderRadius: 5, background: idx % 2 === 1 ? `${t.card2}40` : 'transparent', fontFamily: 'monospace', fontSize: 12 }}>
+                            <span style={{ color: t.text3, fontWeight: 600, whiteSpace: 'nowrap' }}>{bill.purchase_date ? fmtDateShort(bill.purchase_date) : '—'}</span>
+                            <span style={{ color: t.gold, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{bill.application_id || '—'}</span>
+                            <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0, overflow: 'hidden' }}>
+                              <span style={{ color: t.text1, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{bill.customer_name || '—'}</span>
+                              {(bill._booking_party || bill.booked_at) && (
+                                <span style={{ fontSize: 10, color: t.text4, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', marginTop: 2 }}>
+                                  {bill._booking_party && <span style={{ color: t.red, fontWeight: 700 }}>{bill._booking_party}</span>}
+                                  {bill.booked_at && <> · {fmtTS(bill.booked_at)}</>}
+                                  {bill._booking_created_by && <> · by {bill._booking_created_by}</>}
+                                </span>
+                              )}
+                            </span>
+                            <span style={{ color: t.text2, textAlign: 'right', fontWeight: 600 }}>{fmt(bill.gross_weight, 2)}<span style={{ fontSize: 10, color: t.text4, marginLeft: 2 }}>g</span></span>
+                            <span style={{ color: bk, textAlign: 'right', fontWeight: 800 }}>{fmt(bill.net_weight, 2)}<span style={{ fontSize: 10, color: t.text3, marginLeft: 2 }}>g</span></span>
+                            <span style={{ color: t.blue, textAlign: 'right', fontWeight: 700 }}>{bill.total_amount != null ? `₹${Math.round(Number(bill.total_amount)).toLocaleString('en-IN')}` : '—'}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    </Fragment>
+                  )
+                })}
               </div>
             )
           })()}
