@@ -2931,6 +2931,7 @@ function BookingsList({ t, card, bookings, biddingDate, onUpdateStatus, onReques
                                     <th style={bth('left')}>Region</th>
                                     <th style={bth('right')}>No. of Bills</th>
                                     <th style={bth('right')}>Net Weight</th>
+                                    <th style={bth('left')}>Section</th>
                                   </tr>
                                 </thead>
                                 <tbody>
@@ -2952,10 +2953,11 @@ function BookingsList({ t, card, bookings, biddingDate, onUpdateStatus, onReques
                                         <td style={btd('left', REGION_COLORS[br.region] || t.text3, 600)}>{br.region || '—'}</td>
                                         <td style={btd('right', t.text2, 600)}>{br.bills.length}</td>
                                         <td style={{ ...btd('right', t.gold, 700), fontFamily: 'monospace' }}>{fmt(br.net_wt, 2)} g</td>
+                                        <td style={btd('left', t.text3, 600)}>{(br.sections || []).join(' · ') || '—'}</td>
                                       </tr>
                                       {brOpen && (
                                         <tr>
-                                          <td colSpan={5} style={{ padding: 0, background: `${t.card2 || t.card}80` }}>
+                                          <td colSpan={6} style={{ padding: 0, background: `${t.card2 || t.card}80` }}>
                                             <div style={{ padding: '4px 10px 10px 38px' }}>
                                               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                                                 <thead>
@@ -2965,6 +2967,7 @@ function BookingsList({ t, card, bookings, biddingDate, onUpdateStatus, onReques
                                                     <th style={bth('left')}>Customer</th>
                                                     <th style={bth('right')}>Net Wt</th>
                                                     <th style={bth('left')}>Expected Arrival</th>
+                                                    <th style={bth('left')}>Section</th>
                                                   </tr>
                                                 </thead>
                                                 <tbody>
@@ -2975,6 +2978,7 @@ function BookingsList({ t, card, bookings, biddingDate, onUpdateStatus, onReques
                                                       <td style={btd('left', t.text2, 500)}>{bill.customer_name || '—'}</td>
                                                       <td style={{ ...btd('right', t.text1, 600), fontFamily: 'monospace' }}>{fmt(bill.net_weight, 2)} g</td>
                                                       <td style={btd('left', t.text3, 500)}>{bill.expected_arrival ? fmtDate(bill.expected_arrival) : (bill.stock_status === 'at_branch' ? 'pickup pending' : '—')}</td>
+                                                      <td style={btd('left', t.text3, 600)}>{bill.section || '—'}</td>
                                                     </tr>
                                                   ))}
                                                 </tbody>

@@ -1511,11 +1511,29 @@ export async function GET(req) {
       const d = new Date(new Date(utcIso).getTime() + 5.5 * 3600_000)
       return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`
     }
+    // Which Bidding section a bill would sit in — derived from region +
+    // stock_status + expected arrival (relative to today). Approximate for
+    // already-booked bills since their state can move after booking, but it
+    // tells ops where each source came from (Bangalore vs 24/48/72h transit vs
+    // older consignment vs branch pickup).
+    const todayIst = istDateOf(new Date().toISOString())
+    const arr1 = addWorkingDaysSkipSunday(todayIst, 1)
+    const arr2 = addWorkingDaysSkipSunday(todayIst, 2)
+    const arr3 = addWorkingDaysSkipSunday(todayIst, 3)
+    const classifySection = (p, isBlr, ea) => {
+      if (p.stock_status === 'at_ho')     return 'At HO'
+      if (isBlr)                          return 'S1 · Bangalore'
+      if (p.stock_status === 'at_branch') return 'S7 · Branch pickup'
+      if (ea === arr1) return 'S2 · 24h'
+      if (ea === arr2) return 'S3 · 48h'
+      if (ea === arr3) return 'S4 · 72h'
+      return 'S5 · Created'
+    }
     const byBranch = {}
     let tBills = 0, tNet = 0, tGross = 0
     for (const p of bills || []) {
       const owner = p.current_branch || p.branch_name
-      if (!byBranch[owner]) byBranch[owner] = { branch_name: owner, region: regionBy[owner] || 'Unknown', bills: [], net_wt: 0, gross_wt: 0 }
+      if (!byBranch[owner]) byBranch[owner] = { branch_name: owner, region: regionBy[owner] || 'Unknown', bills: [], net_wt: 0, gross_wt: 0, _sections: new Set() }
       const g = byBranch[owner]
       const isBlr = (regionBy[owner] || regionBy[p.branch_name]) === 'Bangalore'
       const tat = tatBy[p.branch_name] || 24
@@ -1529,17 +1547,21 @@ export async function GET(req) {
       if (p.stock_status === 'at_ho')      expected_arrival = istDateOf(p.received_at)
       else if (isBlr)                      expected_arrival = p.purchase_date ? addWorkingDaysSkipSunday(p.purchase_date, 1) : null
       else                                 expected_arrival = p.dispatched_at ? addWorkingDaysSkipSunday(istDateOf(p.dispatched_at), Math.max(1, Math.ceil(tat / 24))) : null
+      const section = classifySection(p, isBlr, expected_arrival)
+      g._sections.add(section)
       g.bills.push({
         application_id: p.application_id, customer_name: p.customer_name,
         purchase_date: p.purchase_date, stock_status: p.stock_status,
-        consignment_date, expected_arrival,
+        consignment_date, expected_arrival, section,
         net_weight: Number(p.net_weight || 0), gross_weight: Number(p.gross_weight || 0),
         total_amount: Number(p.total_amount || 0),
       })
       g.net_wt += Number(p.net_weight || 0); g.gross_wt += Number(p.gross_weight || 0)
       tBills += 1; tNet += Number(p.net_weight || 0); tGross += Number(p.gross_weight || 0)
     }
+    const SECT_ORDER = ['S1 · Bangalore', 'S2 · 24h', 'S3 · 48h', 'S4 · 72h', 'S5 · Created', 'S7 · Branch pickup', 'At HO']
     const branches = Object.values(byBranch).sort((a, b) => b.net_wt - a.net_wt)
+    for (const g of branches) { g.sections = [...g._sections].sort((a, b) => SECT_ORDER.indexOf(a) - SECT_ORDER.indexOf(b)); delete g._sections }
     return Response.json({ branches, total: { bills: tBills, net_wt: tNet, gross_wt: tGross } })
   }
 
