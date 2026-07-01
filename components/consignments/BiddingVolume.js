@@ -3984,17 +3984,11 @@ function SourceSection({
                             the API attaches _consignment_earliest + creators.
                             Tells ops who dispatched the consignment and when,
                             so they can chase the missing booking. */}
-                        {(b._consignment_earliest || (b._consignment_creators && b._consignment_creators.length > 0)) && (
+                        {/* Date now lives in the "Consignment created on …" chip
+                            above — keep only the creator here to avoid repeating it. */}
+                        {b._consignment_creators && b._consignment_creators.length > 0 && (
                           <span style={{ fontSize: 11, color: t.text3, fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0 }}>
-                            {b._consignment_earliest && (
-                              <>
-                                created {fmtTS(b._consignment_earliest)}
-                                {b._consignment_latest && b._consignment_latest !== b._consignment_earliest ? ` → ${fmtTS(b._consignment_latest)}` : ''}
-                              </>
-                            )}
-                            {b._consignment_creators && b._consignment_creators.length > 0 && (
-                              <> · by {b._consignment_creators.join(', ')}</>
-                            )}
+                            by {b._consignment_creators.join(', ')}
                           </span>
                         )}
                         {/* Branch-level actions for booked-pending rows only.
