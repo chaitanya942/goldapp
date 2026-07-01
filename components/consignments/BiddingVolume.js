@@ -3197,17 +3197,24 @@ function SourceSection({
   let dateChipsAvailable = []
   let altChipsAvailable  = []
   let tatsAvailable      = []
+  let unbookedDateSet    = new Set()   // purchase dates that still have BOOKABLE (unbooked) stock
   if (dateFilter || altField || tatFilter) {
-    const ds = new Set(), as = new Set(), ts = new Set()
-    const scan = (arr) => { for (const br of arr || []) {
+    const ds = new Set(), as = new Set(), ts = new Set(), dsBook = new Set()
+    // bookable=true → this list contributes selectable stock (unbooked branches +
+    // subgroup); the already-booked list is scanned for chips but NOT marked
+    // bookable, so a fully-booked date is segregated out below.
+    const scan = (arr, bookable) => { for (const br of arr || []) {
       if (tatFilter && br.tat_hours != null) ts.add(Number(br.tat_hours))
       for (const bl of br.bills || []) {
-        if (dateFilter && bl.purchase_date) ds.add(bl.purchase_date)
+        if (dateFilter && bl.purchase_date) { ds.add(bl.purchase_date); if (bookable) dsBook.add(bl.purchase_date) }
         if (altField) { const ad = istDayOf(bl[altField]); if (ad) as.add(ad) }
       }
     } }
-    scan(branches); scan(bookedBranches); scan(subGroup?.branches)
-    dateChipsAvailable = Array.from(ds).sort()   // 'YYYY-MM-DD' sorts oldest→latest
+    scan(branches, true); scan(bookedBranches, false); scan(subGroup?.branches, true)
+    unbookedDateSet = dsBook
+    // Bookable dates first (oldest→latest), then fully-booked dates (dimmed in the UI).
+    const allDates = Array.from(ds).sort()
+    dateChipsAvailable = [...allDates.filter(d => dsBook.has(d)), ...allDates.filter(d => !dsBook.has(d))]
     altChipsAvailable  = Array.from(as).sort()
     tatsAvailable      = Array.from(ts).sort((a, b) => a - b)
   }
@@ -3643,15 +3650,20 @@ function SourceSection({
           {dateChipsAvailable.map(d => {
             const active = selectedDates.has(d)
             const dlock  = isDateLocked ? isDateLocked(d) : false
+            const bookedOnly = !dlock && !unbookedDateSet.has(d)   // every bill on this date is already booked
             return (
-              <button key={d} onClick={() => toggleDate(d)} title={dlock ? 'Locked purchase date — these bills can\'t be booked' : 'Filter by purchase date — select multiple'}
+              <button key={d} onClick={() => toggleDate(d)}
+                title={dlock ? 'Locked purchase date — these bills can\'t be booked'
+                  : bookedOnly ? 'All stock on this date is already booked — nothing to book here'
+                  : 'Filter by purchase date — select multiple'}
                 style={{
                   padding: '5px 11px', borderRadius: 999, cursor: 'pointer', fontSize: 10.5, fontWeight: 700, whiteSpace: 'nowrap',
-                  border: `1px solid ${dlock ? `${t.red}66` : (active ? tone : t.border)}`,
+                  border: `1px ${bookedOnly ? 'dashed' : 'solid'} ${dlock ? `${t.red}66` : (active ? tone : t.border)}`,
                   background: dlock ? `${t.red}12` : (active ? `${tone}22` : 'transparent'),
-                  color: dlock ? t.red : (active ? tone : t.text3), transition: 'all .15s',
+                  color: dlock ? t.red : bookedOnly ? t.text4 : (active ? tone : t.text3),
+                  opacity: bookedOnly ? 0.6 : 1, transition: 'all .15s',
                 }}>
-                {dlock && '🔒 '}{fmtDate(d)}
+                {dlock && '🔒 '}{fmtDate(d)}{bookedOnly && ' · booked'}
               </button>
             )
           })}
