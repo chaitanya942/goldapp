@@ -968,6 +968,11 @@ export async function GET(req) {
     }
     await stampConsignmentMeta(inflightPendingBooking)
     await stampConsignmentMeta(bangalorePendingBooking)
+    // Transit tiers (Sections 2/3/4) — stamp so each branch row can show its
+    // consignment-created date next to the TAT chip. inflight24h/48h/72h are
+    // filtered views of inflightWithArrival (same object refs), so stamping the
+    // parent here — before groupByBranch snapshots the bills — covers all three.
+    await stampConsignmentMeta(inflightWithArrival)
 
     // Annotate each pending-booking branch row with the consignment-creation
     // summary (earliest/latest stamp + unique creators) so the collapsed
