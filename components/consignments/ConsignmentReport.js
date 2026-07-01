@@ -607,12 +607,39 @@ export default function ConsignmentReport() {
   }
   const tdPad = '10px 12px'
 
-  // ── Region card stats — derived from the *date-filtered* caseData (not the
-  //     region-filtered rows). That way clicking "Rest of Karnataka" filters
-  //     the table below but each region card keeps showing its own region's
-  //     totals for the date window. "All Regions" stays at the grand total.
+  // ── Cards base — caseData decorated with expected_delivery_date and run
+  //     through the SAME date / search / EXPECTED-DELIVERY filters as the table,
+  //     but NOT the region chip (so each region card keeps its own total and
+  //     "All Regions" is the grand total). This is what makes the hero cards
+  //     honour the Expected-Delivery filter so they match the table below —
+  //     previously they aggregated raw caseData and ignored it.
+  const cardsBaseRows = useMemo(() => caseData
+    .filter(r => {
+      if (caseSinceRange.from || caseSinceRange.to) {
+        const axisTs = r.consignment_created_at || r.dispatched_at
+        if (!axisTs) return false
+        const day = new Date(axisTs).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' })
+        if (caseSinceRange.from && day < caseSinceRange.from) return false
+        if (caseSinceRange.to   && day > caseSinceRange.to)   return false
+      }
+      if (searchQ) {
+        const hay = `${r.application_id || ''} ${r.customer_name || ''} ${r.branch_name || ''}`.toLowerCase()
+        if (!hay.includes(searchQ)) return false
+      }
+      return true
+    })
+    .map(r => {
+      const tatHours     = Number(r.delivery_tat_hours) || 24
+      const workDays     = Math.max(1, Math.ceil(tatHours / 24))
+      const dispatchDate = r.dispatched_at ? istDateStr(new Date(r.dispatched_at)) : null
+      const expDate      = dispatchDate ? addWorkingDaysSkipSunday(dispatchDate, workDays) : null
+      return { ...r, expected_delivery_date: expDate }
+    })
+    .filter(r => expDelivMatch(r.expected_delivery_date))
+  , [caseData, caseSinceRange, searchQ, expDelivRange])
+
   const regionStatsView = useMemo(() => regions.reduce((acc, r) => {
-    const rows        = caseData.filter(row => row.region === r)
+    const rows        = cardsBaseRows.filter(row => row.region === r)
     const branchNames = new Set(rows.map(row => row.branch_name))
     acc[r] = {
       branches:        branchNames.size,
@@ -621,14 +648,14 @@ export default function ConsignmentReport() {
       total_net_wt:    rows.reduce((s, row) => s + Number(row.net_weight || 0), 0),
     }
     return acc
-  }, {}), [regions, caseData])
+  }, {}), [regions, cardsBaseRows])
 
   const allStatsView = useMemo(() => ({
-    allBills:       caseData.length,
-    allNetWt:       caseData.reduce((s, r) => s + Number(r.net_weight || 0), 0),
-    activeBranches: new Set(caseData.map(r => r.branch_name)).size,
-    totalBranches:  new Set(caseData.map(r => r.branch_name)).size,
-  }), [caseData])
+    allBills:       cardsBaseRows.length,
+    allNetWt:       cardsBaseRows.reduce((s, r) => s + Number(r.net_weight || 0), 0),
+    activeBranches: new Set(cardsBaseRows.map(r => r.branch_name)).size,
+    totalBranches:  new Set(cardsBaseRows.map(r => r.branch_name)).size,
+  }), [cardsBaseRows])
 
   return (
     <div style={{ padding: '18px 16px', display: 'flex', flexDirection: 'column', gap: '16px', position: 'relative' }}>
