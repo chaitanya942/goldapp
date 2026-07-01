@@ -36,6 +36,22 @@ const REGION_ICONS = {
 // puts today's approved Bangalore bills in flight).
 const REGION_ORDER = ['Rest of Karnataka', 'Kerala', 'Andhra Pradesh', 'Telangana', 'Bangalore']
 
+// Expected-delivery date with the ops region rule overriding the stored branch TAT:
+//   Bangalore branches → SAME DAY (arrive HO the day they're dispatched)
+//   Kerala branches    → 24h (next working day, Sundays skipped)
+//   everyone else      → the branch's own delivery_tat_hours (default 24h)
+function regionExpectedDelivery(baseDate, region, branchTatHours) {
+  if (!baseDate) return null
+  if (region === 'Bangalore') return baseDate                        // same day
+  const hours = region === 'Kerala' ? 24 : (Number(branchTatHours) || 24)
+  return addWorkingDaysSkipSunday(baseDate, Math.max(1, Math.ceil(hours / 24)))
+}
+// Effective TAT hours after the region override — for the cell badge.
+const regionEffTat = (region, branchTatHours) =>
+  region === 'Bangalore' ? 0 : (region === 'Kerala' ? 24 : (Number(branchTatHours) || 24))
+// Human label for the TAT badge — 0h ⇒ "same day".
+const tatLabel = (h) => (h === 0 || h === '0') ? 'same day' : `${h}h`
+
 const fmt     = (n, d = 3) => n != null ? Number(n).toFixed(d) : '—'
 const fmtNum  = (n) => n != null ? Number(n).toLocaleString('en-IN') : '—'
 const fmtINR  = (n) => {
@@ -259,7 +275,7 @@ export default function ConsignmentReport() {
         Number(g.gross_weight || 0).toFixed(2),
         Number(g.net_weight   || 0).toFixed(2),
         Number(g.total_amount || 0).toFixed(2),
-        g.delivery_tat_hours || 24,
+        g.delivery_tat_hours != null ? tatLabel(g.delivery_tat_hours) : '24h',
         g.expected_delivery_date || '',
       ].map(csvEscape).join(','))
     }
@@ -369,10 +385,8 @@ export default function ConsignmentReport() {
     // branch dispatching Saturday lands Tuesday, not Monday.
     for (const g of groups.values()) {
       if (!g.consignment_date) { g.expected_delivery_date = null; continue }
-      const tatHours  = tatByBranch[g.branch_name] || 24
-      const workDays  = Math.max(1, Math.ceil(tatHours / 24))
-      g.expected_delivery_date = addWorkingDaysSkipSunday(g.consignment_date, workDays)
-      g.delivery_tat_hours = tatHours   // surface on the row for the cell badge
+      g.expected_delivery_date = regionExpectedDelivery(g.consignment_date, g.region, tatByBranch[g.branch_name])
+      g.delivery_tat_hours = regionEffTat(g.region, tatByBranch[g.branch_name])   // surface on the row for the cell badge
     }
     return Array.from(groups.values())
   }, [caseData, branchToRegion])
@@ -438,11 +452,10 @@ export default function ConsignmentReport() {
     // computation: dispatch IST day + ceil(TAT_hours / 24) working days,
     // skipping Sundays. Defaults to 24h TAT if the row didn't return one.
     .map(r => {
-      const tatHours     = Number(r.delivery_tat_hours) || 24
-      const workDays     = Math.max(1, Math.ceil(tatHours / 24))
+      const region       = r.region || branchToRegion[r.branch_name]
       const dispatchDate = r.dispatched_at ? istDateStr(new Date(r.dispatched_at)) : null
-      const expDate      = dispatchDate ? addWorkingDaysSkipSunday(dispatchDate, workDays) : null
-      return { ...r, expected_delivery_date: expDate, _tat_hours_effective: tatHours }
+      const expDate      = regionExpectedDelivery(dispatchDate, region, r.delivery_tat_hours)
+      return { ...r, expected_delivery_date: expDate, _tat_hours_effective: regionEffTat(region, r.delivery_tat_hours) }
     })
     // Expected-delivery filter applied AFTER decoration (the date is derived
     // in the map above, so it can't be filtered before this point).
@@ -629,14 +642,13 @@ export default function ConsignmentReport() {
       return true
     })
     .map(r => {
-      const tatHours     = Number(r.delivery_tat_hours) || 24
-      const workDays     = Math.max(1, Math.ceil(tatHours / 24))
+      const region       = r.region || branchToRegion[r.branch_name]
       const dispatchDate = r.dispatched_at ? istDateStr(new Date(r.dispatched_at)) : null
-      const expDate      = dispatchDate ? addWorkingDaysSkipSunday(dispatchDate, workDays) : null
+      const expDate      = regionExpectedDelivery(dispatchDate, region, r.delivery_tat_hours)
       return { ...r, expected_delivery_date: expDate }
     })
     .filter(r => expDelivMatch(r.expected_delivery_date))
-  , [caseData, caseSinceRange, searchQ, expDelivRange])
+  , [caseData, caseSinceRange, searchQ, expDelivRange, branchToRegion])
 
   const regionStatsView = useMemo(() => regions.reduce((acc, r) => {
     const rows        = cardsBaseRows.filter(row => row.region === r)
@@ -1059,9 +1071,9 @@ export default function ConsignmentReport() {
                         <td style={{ ...tdR, color: t.text2 }}>{fmtAmt(g.total_amount)}</td>
                         <td style={{ ...tdC, color: t.green, whiteSpace: 'nowrap', paddingLeft: 32 }}>
                           {fmtCellDate(g.expected_delivery_date)}
-                          {g.delivery_tat_hours > 24 && (
-                            <span style={{ marginLeft: 6, fontSize: 9, color: t.orange, background: `${t.orange}18`, borderRadius: 4, padding: '1px 5px', fontWeight: 700, letterSpacing: '.04em' }}>
-                              {g.delivery_tat_hours}h
+                          {g.delivery_tat_hours != null && (
+                            <span style={{ marginLeft: 6, fontSize: 9, color: g.delivery_tat_hours > 24 ? t.orange : t.text4, background: g.delivery_tat_hours > 24 ? `${t.orange}18` : `${t.text4}14`, borderRadius: 4, padding: '1px 5px', fontWeight: 700, letterSpacing: '.04em' }}>
+                              {tatLabel(g.delivery_tat_hours)}
                             </span>
                           )}
                         </td>
@@ -1206,9 +1218,9 @@ export default function ConsignmentReport() {
                         </td>
                         <td style={{ ...caseTdC, color: t.green, fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
                           {fmtCellDate(r.expected_delivery_date)}
-                          {r._tat_hours_effective > 24 && (
-                            <span style={{ marginLeft: 6, fontSize: 9, color: t.orange, background: `${t.orange}18`, borderRadius: 4, padding: '1px 5px', fontWeight: 700, letterSpacing: '.04em' }}>
-                              {r._tat_hours_effective}h
+                          {r._tat_hours_effective != null && (
+                            <span style={{ marginLeft: 6, fontSize: 9, color: r._tat_hours_effective > 24 ? t.orange : t.text4, background: r._tat_hours_effective > 24 ? `${t.orange}18` : `${t.text4}14`, borderRadius: 4, padding: '1px 5px', fontWeight: 700, letterSpacing: '.04em' }}>
+                              {tatLabel(r._tat_hours_effective)}
                             </span>
                           )}
                         </td>
