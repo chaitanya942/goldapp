@@ -3949,6 +3949,17 @@ function SourceSection({
                         {b.tat_hours != null && (
                           <span title={`Delivery TAT ${b.tat_hours}h`} style={{ fontSize: 10.5, color: t.text3, background: `${t.text4}1c`, border: `1px solid ${t.text4}2e`, borderRadius: 4, padding: '1px 8px', whiteSpace: 'nowrap', fontWeight: 700, letterSpacing: '.03em' }}>{b.tat_hours}h TAT</span>
                         )}
+                        {(() => {
+                          // Consignment-created date, derived from this branch's in-consignment
+                          // bills. Shows a single date, or earliest→latest when they span days.
+                          // Renders nothing when the bills aren't in a consignment yet (Section 1).
+                          const cds = [...new Set((b.bills || []).map(bl => bl._consignment_created_at ? istDayOf(bl._consignment_created_at) : null).filter(Boolean))].sort()
+                          if (!cds.length) return null
+                          const label = cds.length === 1 ? fmtDateShort(cds[0]) : `${fmtDateShort(cds[0])} → ${fmtDateShort(cds[cds.length - 1])}`
+                          return (
+                            <span title={`Consignment created ${label}`} style={{ fontSize: 10.5, color: t.blue, background: `${t.blue}14`, border: `1px solid ${t.blue}33`, borderRadius: 4, padding: '1px 8px', whiteSpace: 'nowrap', fontWeight: 700, letterSpacing: '.03em', flexShrink: 0 }}>⇒ {label}</span>
+                          )
+                        })()}
                         {/* Pickup time intentionally suppressed — pickups
                             can run late and we don't want ops to think a
                             branch is "done" just because the scheduled
