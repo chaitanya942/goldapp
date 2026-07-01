@@ -1704,20 +1704,11 @@ export default function DashboardHome() {
               <div style={{ width:3, height:20, borderRadius:2, background:`linear-gradient(180deg,${t.orange},${t.orange}40)`, boxShadow:`0 0 8px ${t.orange}60` }}/>
               <div style={{ fontSize:14, color:t.text2, letterSpacing:'.12em', textTransform:'uppercase', fontWeight:700 }}>Consignment Overview</div>
             </div>
-            {!consignOpen && consignStats && (
-              <div style={{ display:'flex', gap: isMobile ? 10 : 22, alignItems:'center', fontSize: isMobile ? 11 : 12, color: t.text3, marginLeft: isMobile ? 0 : 14, flexWrap:'wrap' }}>
-                <span style={{ display:'inline-flex', alignItems:'center', gap:6 }}>
-                  <span style={{ width:6, height:6, borderRadius:'50%', background:t.orange, boxShadow:`0 0 6px ${t.orange}` }}/>
-                  <strong style={{ color: t.orange, fontWeight: 700, fontFamily:'monospace' }}>{Number(consignStats.branchWeight || 0).toFixed(0)}g</strong>
-                  <span style={{ color: t.text4 }}>at branch</span>
-                </span>
-                <span style={{ display:'inline-flex', alignItems:'center', gap:6 }}>
-                  <span style={{ width:6, height:6, borderRadius:'50%', background:t.blue, boxShadow:`0 0 6px ${t.blue}` }}/>
-                  <strong style={{ color: t.blue, fontWeight: 700, fontFamily:'monospace' }}>{Number(consignStats.movementWeight || 0).toFixed(0)}g</strong>
-                  <span style={{ color: t.text4 }}>in movement</span>
-                </span>
-              </div>
-            )}
+            {/* Collapsed inline summary removed — branchWeight/movementWeight are
+                gross totals over a broader consignment set and didn't match the
+                expanded view's net in_consignment figures, which confused ops.
+                Expand the section for the accurate Branch-in-stock / In-transit
+                breakdown. */}
             <div style={{ marginLeft:'auto', width:28, height:28, borderRadius:8, background:`${t.orange}12`, border:`1px solid ${t.orange}28`, display:'flex', alignItems:'center', justifyContent:'center', color:t.orange, fontSize:11, transition:'transform .35s cubic-bezier(.4,0,.2,1)', transform: consignOpen ? 'rotate(0deg)' : 'rotate(-90deg)' }}>▼</div>
           </div>
           {consignOpen && (
