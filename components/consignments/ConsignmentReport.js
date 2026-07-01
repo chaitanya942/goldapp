@@ -452,9 +452,13 @@ export default function ConsignmentReport() {
     // computation: dispatch IST day + ceil(TAT_hours / 24) working days,
     // skipping Sundays. Defaults to 24h TAT if the row didn't return one.
     .map(r => {
-      const region       = r.region || branchToRegion[r.branch_name]
-      const dispatchDate = r.dispatched_at ? istDateStr(new Date(r.dispatched_at)) : null
-      const expDate      = regionExpectedDelivery(dispatchDate, region, r.delivery_tat_hours)
+      const region   = r.region || branchToRegion[r.branch_name]
+      // Base for expected arrival: dispatch day, else the consignment-creation
+      // day, else purchase day — so Kerala leaf bills (no dispatched_at yet)
+      // still get an expected arrival date, not just the TAT badge.
+      const baseTs   = r.dispatched_at || r.consignment_created_at
+      const baseDate = baseTs ? istDateStr(new Date(baseTs)) : (r.purchase_date || null)
+      const expDate  = regionExpectedDelivery(baseDate, region, r.delivery_tat_hours)
       return { ...r, expected_delivery_date: expDate, _tat_hours_effective: regionEffTat(region, r.delivery_tat_hours) }
     })
     // Expected-delivery filter applied AFTER decoration (the date is derived
@@ -642,9 +646,13 @@ export default function ConsignmentReport() {
       return true
     })
     .map(r => {
-      const region       = r.region || branchToRegion[r.branch_name]
-      const dispatchDate = r.dispatched_at ? istDateStr(new Date(r.dispatched_at)) : null
-      const expDate      = regionExpectedDelivery(dispatchDate, region, r.delivery_tat_hours)
+      const region   = r.region || branchToRegion[r.branch_name]
+      // Base for expected arrival: dispatch day, else the consignment-creation
+      // day, else purchase day — so Kerala leaf bills (no dispatched_at yet)
+      // still get an expected arrival date, not just the TAT badge.
+      const baseTs   = r.dispatched_at || r.consignment_created_at
+      const baseDate = baseTs ? istDateStr(new Date(baseTs)) : (r.purchase_date || null)
+      const expDate  = regionExpectedDelivery(baseDate, region, r.delivery_tat_hours)
       return { ...r, expected_delivery_date: expDate }
     })
     .filter(r => expDelivMatch(r.expected_delivery_date))
