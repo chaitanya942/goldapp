@@ -1086,6 +1086,10 @@ export async function GET(req) {
     const bookedT24 = bookedInflight.filter(b => b._arrival_date === arrivalDate)
     const bookedT48 = bookedInflight.filter(b => b._arrival_date === dayAfterArrival)
     const bookedT72 = bookedInflight.filter(b => b._arrival_date === dayAfter2Arrival)
+    // Stamp the ALREADY-BOOKED transit bills too, so their booked rows can show
+    // the consignment-created date. bookedT24/48/72 are filtered views of
+    // bookedInflight (same refs), so stamping the parent before bookedSection.
+    await stampConsignmentMeta(bookedInflight)
     // Section 7 (branch pre-EOD): booked at_branch bills at the eligible branches.
     const preEodOwnerSet = new Set(preEodEligibleAfterDispatch)
     const bookedPreEod = bookedWindowBills.filter(b => b.stock_status === 'at_branch' && preEodOwnerSet.has(b._owner))

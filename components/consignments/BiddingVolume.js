@@ -4223,11 +4223,16 @@ function SourceSection({
                   const bexp   = openBranches.has('bk:' + b.branch_name)
                   const bbills = Array.isArray(b.bills) ? b.bills : []
                   const bkCols = '78px 130px minmax(0, 1fr) 100px 100px 130px'
+                  const bcds   = [...new Set(bbills.map(bl => bl._consignment_created_at ? istDayOf(bl._consignment_created_at) : null).filter(Boolean))].sort()
+                  const bclabel = bcds.length ? (bcds.length === 1 ? fmtDateShort(bcds[0]) : `${fmtDateShort(bcds[0])} → ${fmtDateShort(bcds[bcds.length - 1])}`) : null
                   return (
                     <Fragment key={`bk-${b.branch_name}`}>
                     <div style={{ display: 'grid', gridTemplateColumns: rowGrid, alignItems: 'center', columnGap: 14, padding: '8px 11px', borderRadius: 8, opacity: 0.85 }}>
                       <span style={{ width: 16, height: 16, borderRadius: 4, background: `${bk}22`, color: bk, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 900 }}>✓</span>
-                      <span style={{ fontSize: 13, color: t.text2, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{b.branch_name}</span>
+                      <span style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                        <span style={{ fontSize: 13, color: t.text2, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{b.branch_name}</span>
+                        {bclabel && <span title={`Consignment created on ${bclabel}`} style={{ fontSize: 10.5, color: t.blue, background: `${t.blue}14`, border: `1px solid ${t.blue}33`, borderRadius: 4, padding: '1px 8px', whiteSpace: 'nowrap', fontWeight: 700, letterSpacing: '.03em', flexShrink: 0 }}>Consignment created on {bclabel}</span>}
+                      </span>
                       <span style={{ textAlign: 'right', color: t.text3, fontWeight: 600 }}>{fmt(b.total_gross_wt, 2)}<span style={{ fontSize: 10, color: t.text4, marginLeft: 2 }}>g</span></span>
                       <span style={{ textAlign: 'right', color: bk, fontWeight: 800 }}>{fmt(b.total_net_wt, 2)}<span style={{ fontSize: 10, color: t.text4, marginLeft: 2 }}>g</span></span>
                       <span style={{ textAlign: 'right', color: t.text3, fontWeight: 700 }}>{b.total_bills} bill{b.total_bills === 1 ? '' : 's'}</span>
