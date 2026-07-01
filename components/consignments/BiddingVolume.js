@@ -3690,7 +3690,7 @@ function SourceSection({
           })}
           {selectedDates.size > 0 && (
             <button onClick={() => setSelectedDates(new Set())}
-              style={{ padding: '5px 9px', borderRadius: 999, cursor: 'pointer', fontSize: 10, fontWeight: 700, border: `1px solid ${t.border}`, background: 'transparent', color: t.text4 }}>
+              style={{ padding: '5px 9px', borderRadius: 999, cursor: 'pointer', fontSize: 10, fontWeight: 800, border: `1px solid ${t.red}66`, background: `${t.red}14`, color: t.red }}>
               ✕ Clear ({selectedDates.size})
             </button>
           )}
@@ -3717,7 +3717,7 @@ function SourceSection({
           })}
           {selectedAltDates.size > 0 && (
             <button onClick={() => setSelectedAltDates(new Set())}
-              style={{ padding: '5px 9px', borderRadius: 999, cursor: 'pointer', fontSize: 10, fontWeight: 700, border: `1px solid ${t.border}`, background: 'transparent', color: t.text4 }}>
+              style={{ padding: '5px 9px', borderRadius: 999, cursor: 'pointer', fontSize: 10, fontWeight: 800, border: `1px solid ${t.red}66`, background: `${t.red}14`, color: t.red }}>
               ✕ Clear ({selectedAltDates.size})
             </button>
           )}
@@ -3744,7 +3744,7 @@ function SourceSection({
           })}
           {selectedTats.size > 0 && (
             <button onClick={() => setSelectedTats(new Set())}
-              style={{ padding: '5px 9px', borderRadius: 999, cursor: 'pointer', fontSize: 10, fontWeight: 700, border: `1px solid ${t.border}`, background: 'transparent', color: t.text4 }}>
+              style={{ padding: '5px 9px', borderRadius: 999, cursor: 'pointer', fontSize: 10, fontWeight: 800, border: `1px solid ${t.red}66`, background: `${t.red}14`, color: t.red }}>
               ✕ Clear ({selectedTats.size})
             </button>
           )}
