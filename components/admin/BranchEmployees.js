@@ -91,6 +91,9 @@ export default function BranchEmployees() {
       list = list.filter(e =>
         e.name?.toLowerCase().includes(q) ||
         e.designation?.toLowerCase().includes(q) ||
+        e.emp_id?.toLowerCase().includes(q) ||
+        e.email?.toLowerCase().includes(q) ||
+        e.role?.toLowerCase().includes(q) ||
         branchMap[e.branch_id]?.name?.toLowerCase().includes(q) ||
         e.crm_branch_name?.toLowerCase().includes(q) ||
         e.mobile_phone?.includes(q) ||
@@ -143,12 +146,17 @@ export default function BranchEmployees() {
             </div>
           )}
           {[
-            ['Designation',  emp.designation || '—'],
-            ['Branch',       branch?.name || emp.crm_branch_name || '—'],
-            ['Branch Code',  branch?.branch_code || emp.crm_branch_code || '—'],
-            ['Status',       emp.emp_status === 'active' ? 'Active' : 'Inactive'],
-            ['Mobile',       emp.mobile_phone || '—'],
-            ['Office Phone', emp.contact_phone || '—'],
+            ['Emp ID',          emp.emp_id || '—'],
+            ['Designation',     emp.designation || '—'],
+            ['Role',            emp.role || '—'],
+            ['Access Level',    emp.access_level || '—'],
+            ['Branch',          branch?.name || emp.crm_branch_name || '—'],
+            ['Branch Code',     branch?.branch_code || emp.crm_branch_code || '—'],
+            ['Status',          emp.emp_status === 'active' ? 'Active' : 'Inactive'],
+            ['Mobile',          emp.mobile_phone || '—'],
+            ['Email',           emp.email || '—'],
+            ['PAN',             emp.pan_number || '—'],
+            ['Date of Joining', emp.date_of_joining || '—'],
           ].map(([label, val]) => (
             <div key={label} style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
               <span style={{ fontSize: '.62rem', color: t.text3, textTransform: 'uppercase', letterSpacing: '.05em' }}>{label}</span>
@@ -165,7 +173,7 @@ export default function BranchEmployees() {
       <div style={s.header}>
         <div>
           <div style={s.title}>Branch Employees</div>
-          <div style={s.sub}>All CRM staff synced from CRM database</div>
+          <div style={s.sub}>All staff synced from the NEW CRM</div>
         </div>
         <button onClick={syncFromCRM} disabled={syncing} style={{ ...s.syncBtn, opacity: syncing ? .6 : 1 }}>
           {syncing ? 'Syncing…' : '↻ Sync from CRM'}
@@ -249,11 +257,13 @@ export default function BranchEmployees() {
           <table style={s.table}>
             <thead>
               <tr>
+                <th style={s.th}>Emp ID</th>
                 <th style={s.th}>Name</th>
                 <th style={s.th}>Designation</th>
+                <th style={s.th}>Role</th>
                 <th style={s.th}>Branch</th>
                 <th style={s.th}>Mobile</th>
-                <th style={s.th}>Office</th>
+                <th style={s.th}>Email</th>
                 <th style={s.th}>Status</th>
               </tr>
             </thead>
@@ -268,6 +278,7 @@ export default function BranchEmployees() {
                     onMouseEnter={e => e.currentTarget.style.background = `${t.gold}08`}
                     onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
                   >
+                    <td style={{ ...s.td, fontFamily: 'monospace', fontSize: '.66rem', color: t.text3 }}>{emp.emp_id || '—'}</td>
                     <td style={s.td}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                         {emp.is_manager && (
@@ -277,6 +288,7 @@ export default function BranchEmployees() {
                       </div>
                     </td>
                     <td style={{ ...s.td, color: t.text3, fontSize: '.68rem' }}>{emp.designation || '—'}</td>
+                    <td style={{ ...s.td, fontSize: '.64rem', color: t.text3, whiteSpace: 'nowrap' }}>{emp.role || '—'}</td>
                     <td style={s.td}>
                       <div style={{ fontSize: '.7rem', color: branch ? t.text2 : t.text3 }}>
                         {branch?.name || emp.crm_branch_name || '—'}
@@ -290,8 +302,8 @@ export default function BranchEmployees() {
                     <td style={{ ...s.td, fontFamily: 'monospace', fontSize: '.68rem', color: emp.mobile_phone ? t.text2 : t.text4 }}>
                       {emp.mobile_phone || '—'}
                     </td>
-                    <td style={{ ...s.td, fontFamily: 'monospace', fontSize: '.68rem', color: emp.contact_phone ? t.text2 : t.text4 }}>
-                      {emp.contact_phone || '—'}
+                    <td style={{ ...s.td, fontSize: '.64rem', color: emp.email ? t.text2 : t.text4, maxWidth: 190, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={emp.email || ''}>
+                      {emp.email || '—'}
                     </td>
                     <td style={s.td}>
                       <span style={{ background: emp.emp_status === 'active' ? `${t.green}20` : `${t.red}20`, color: emp.emp_status === 'active' ? t.green : t.red, borderRadius: '4px', padding: '2px 7px', fontSize: '.62rem', fontWeight: 500 }}>
