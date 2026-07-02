@@ -37,8 +37,34 @@ function myPool() {
 }
 let _pg = null
 function pgPool() {
-  if (!_pg) _pg = new pg.Pool({ host: process.env.NEW_CRM_DB_HOST, port: parseInt(process.env.NEW_CRM_DB_PORT || '5432'), database: process.env.NEW_CRM_DB_NAME, user: process.env.NEW_CRM_DB_USER, password: process.env.NEW_CRM_DB_PASSWORD, ssl: { rejectUnauthorized: false }, max: 3, connectionTimeoutMillis: 20000, idleTimeoutMillis: 10000 })
+  if (!_pg) {
+    _pg = new pg.Pool({
+      host: process.env.NEW_CRM_DB_HOST, port: parseInt(process.env.NEW_CRM_DB_PORT || '5432'),
+      database: process.env.NEW_CRM_DB_NAME, user: process.env.NEW_CRM_DB_USER, password: process.env.NEW_CRM_DB_PASSWORD,
+      ssl: { rejectUnauthorized: false }, max: 4, keepAlive: true,
+      // NEW CRM kills idle sessions at 60s (idle_session_timeout). Close our
+      // idle clients well before that so we never hand out a server-killed one.
+      connectionTimeoutMillis: 10000, idleTimeoutMillis: 15000,
+    })
+    // Without a listener, a server-killed idle client surfaces as an unhandled
+    // pool 'error' event (process crash). Swallow it and drop the pool so the
+    // next call rebuilds fresh connections.
+    _pg.on('error', (err) => { console.warn('[productivity] pg pool idle error:', err?.message); try { _pg?.end() } catch {} _pg = null })
+  }
   return _pg
+}
+// Run a NEW-CRM read with one retry on a stale/killed connection — resets the
+// pool and re-runs (all NEW-CRM work here is read-only, so retry is safe).
+async function withPgRetry(fn) {
+  try { return await fn() }
+  catch (err) {
+    if (/terminat|connection|ECONNRESET|socket|idle|timeout/i.test(String(err?.message))) {
+      try { await _pg?.end() } catch {}
+      _pg = null
+      return await fn()
+    }
+    throw err
+  }
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -289,11 +315,11 @@ export async function GET(req) {
 
   try {
     if (action === 'case') {
-      const d = await newCaseDetail(sp.get('code'))
+      const d = await withPgRetry(() => newCaseDetail(sp.get('code')))
       return d ? Response.json({ detail: d }) : Response.json({ error: 'Case not found' }, { status: 404 })
     }
     if (action === 'people') {
-      const cases = await newCrmPull(from, to)
+      const cases = await withPgRetry(() => newCrmPull(from, to))
       return Response.json({ people: peopleAgg(applyFilters(cases, filt), NEW_STAGES), stageMeta: NEW_STAGES })
     }
     // report
@@ -304,7 +330,7 @@ export async function GET(req) {
     const opts = { groupByKey, bucket, filt, splitBy, metric, slaMin }
     const out = { source, window: { from, to }, bucket, metric, splitBy, sources: {} }
     const tasks = []
-    if (source === 'new' || source === 'compare') tasks.push(newCrmPull(from, to).then(c => { out.sources.new = buildReport(c, { ...opts, stageMeta: NEW_STAGES, isNew: true }) }))
+    if (source === 'new' || source === 'compare') tasks.push(withPgRetry(() => newCrmPull(from, to)).then(c => { out.sources.new = buildReport(c, { ...opts, stageMeta: NEW_STAGES, isNew: true }) }))
     if (source === 'old' || source === 'compare') tasks.push(oldCrmPull(from, to).then(c => { out.sources.old = buildReport(c, { ...opts, stageMeta: OLD_STAGES, isNew: false }) }))
     await Promise.all(tasks)
     return Response.json(out)
