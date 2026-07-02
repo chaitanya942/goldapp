@@ -23,8 +23,9 @@ const fmtAgo = (iso) => {
 import { CONSIGNMENT_THEMES as THEMES } from '../../lib/consignmentTheme'
 
 export default function BranchEmployees() {
-  const { theme } = useApp()
+  const { theme, setActiveNav, canSee } = useApp()
   const t = THEMES[theme]
+  const [view, setView] = useState('directory')   // 'directory' | 'insights'
 
   const [employees, setEmployees]   = useState([])
   const [branches,  setBranches]    = useState([])
@@ -182,6 +183,15 @@ export default function BranchEmployees() {
         </div>
       </div>
 
+      {/* Tabs */}
+      <div style={{ display: 'flex', gap: 6, marginBottom: 16, borderBottom: `1px solid ${t.border}` }}>
+        {[['directory', 'Directory'], ['insights', '★ Insights']].map(([v, lbl]) => (
+          <button key={v} onClick={() => setView(v)} style={{ background: 'none', border: 'none', borderBottom: view === v ? `2px solid ${t.gold}` : '2px solid transparent', color: view === v ? t.gold : t.text3, padding: '8px 14px', fontSize: '.78rem', fontWeight: 600, cursor: 'pointer' }}>{lbl}</button>
+        ))}
+      </div>
+
+      {view === 'insights' ? <EmployeeInsights t={t} setActiveNav={setActiveNav} canSee={canSee} /> : (<>
+
       {/* Stats */}
       <div style={s.statsRow}>
         {[
@@ -313,8 +323,156 @@ export default function BranchEmployees() {
           </table>
         </div>
       )}
+      </>)}
 
       {selected && <DetailPanel emp={selected} />}
+    </div>
+  )
+}
+
+// ── Insights tab — live from NEW CRM (performance, throughput, rollups) ────────
+function EmployeeInsights({ t, setActiveNav, canSee }) {
+  const [d, setD] = useState(null)
+  const [err, setErr] = useState(null)
+  const [tab, setTab] = useState('performance')
+  const [sortStage, setSortStage] = useState('cases')
+
+  useEffect(() => {
+    let live = true
+    authedFetch('/api/branch-employees/insights').then(r => r.json()).then(j => { if (!live) return; j.error ? setErr(j.error) : setD(j) }).catch(e => setErr(e.message))
+    return () => { live = false }
+  }, [])
+
+  const fmtM = (m) => m == null ? '—' : m >= 60 ? (m / 60).toFixed(1) + 'h' : m.toFixed(0) + 'm'
+  const num  = (n) => n == null ? '—' : Number(n).toLocaleString('en-IN')
+  const card = { background: t.card, border: `1px solid ${t.border}`, borderRadius: 10 }
+  const th = { padding: '7px 10px', fontSize: '.6rem', color: t.text4, textTransform: 'uppercase', letterSpacing: '.05em', fontWeight: 700, textAlign: 'left', borderBottom: `1px solid ${t.border}`, background: t.card, whiteSpace: 'nowrap' }
+  const td = { padding: '7px 10px', fontSize: '.72rem', color: t.text2, borderBottom: `1px solid ${t.border}66`, whiteSpace: 'nowrap' }
+  const STAGE_LBL = { val: 'Valuation', estneg: 'Estim+Nego', quoprep: 'Quo prep', quoappr: 'Quo appr', kyc: 'KYC', pay: 'Payment' }
+
+  if (err) return <div style={{ ...card, padding: 16, color: t.red, fontSize: '.75rem' }}>⚠ {err}</div>
+  if (!d)  return <div style={{ padding: 40, textAlign: 'center', color: t.text3, fontSize: '.75rem' }}>Computing insights from CRM…</div>
+
+  const T = d.totals
+  const stages = d.stages || []
+  const perfRows = [...d.people].filter(p => p.active && p.perf?.cases > 0)
+    .sort((a, b) => sortStage === 'cases' ? (b.perf.cases - a.perf.cases) : ((a.perf[sortStage] ?? 1e9) - (b.perf[sortStage] ?? 1e9)))
+    .slice(0, 40)
+  const goProductivity = () => canSee?.('productivity') && setActiveNav?.('productivity')
+
+  const Kpi = ({ label, val, color }) => (
+    <div style={{ ...card, padding: '11px 14px', flex: 1, minWidth: 120, borderLeft: `3px solid ${color || t.gold}` }}>
+      <div style={{ fontSize: '1.25rem', fontWeight: 700, color: color || t.gold, fontFamily: 'monospace' }}>{val}</div>
+      <div style={{ fontSize: '.6rem', color: t.text3, marginTop: 3, textTransform: 'uppercase', letterSpacing: '.05em' }}>{label}</div>
+    </div>
+  )
+  const TabBtn = ({ id, label }) => <button onClick={() => setTab(id)} style={{ background: tab === id ? `${t.gold}18` : 'none', border: `1px solid ${tab === id ? t.gold : t.border}`, borderRadius: 6, color: tab === id ? t.gold : t.text3, padding: '5px 12px', fontSize: '.7rem', fontWeight: 600, cursor: 'pointer' }}>{label}</button>
+  const Leader = ({ title, rows, valFn, sub }) => (
+    <div style={{ ...card, overflow: 'hidden' }}>
+      <div style={{ padding: '9px 12px', borderBottom: `1px solid ${t.border}`, fontSize: '.72rem', fontWeight: 700, color: t.text1 }}>{title} <span style={{ color: t.text4, fontWeight: 400, fontSize: '.62rem' }}>{sub}</span></div>
+      {rows.map((p, i) => (
+        <div key={p.emp_id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 12px', borderBottom: `1px solid ${t.border}44` }}>
+          <span style={{ width: 16, color: t.text4, fontSize: '.62rem' }}>{i + 1}</span>
+          <span style={{ flex: 1, color: t.text1, fontSize: '.72rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name} <span style={{ color: t.text4, fontSize: '.6rem' }}>· {p.branch}</span></span>
+          <span style={{ color: t.gold, fontWeight: 700, fontFamily: 'monospace', fontSize: '.72rem' }}>{valFn(p)}</span>
+        </div>
+      ))}
+    </div>
+  )
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      {/* KPIs */}
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+        <Kpi label="Active Staff" val={num(T.active)} color={t.green} />
+        <Kpi label="With CRM Activity" val={num(T.with_activity)} color={t.blue} />
+        <Kpi label="Cases Opened" val={num(T.total_cases_opened)} />
+        <Kpi label="Org Median TAT" val={fmtM(T.median_org_tat)} color={t.gold} />
+        <Kpi label="Idle 30d+" val={num(T.idle_30d)} color={t.red} />
+        <Kpi label="Exits" val={num(T.exits)} color={t.text3} />
+      </div>
+
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+        <TabBtn id="performance" label="Performance" />
+        <TabBtn id="branches" label="Branch rollup" />
+        <TabBtn id="leaders" label="Leaders" />
+        <TabBtn id="lifecycle" label="Idle / Joiners / Exits" />
+        {canSee?.('productivity') && <button onClick={goProductivity} style={{ marginLeft: 'auto', background: 'none', border: `1px solid ${t.border}`, borderRadius: 6, color: t.blue, padding: '5px 12px', fontSize: '.7rem', fontWeight: 600, cursor: 'pointer' }}>Open Productivity →</button>}
+      </div>
+
+      {tab === 'performance' && (
+        <div style={{ ...card, overflow: 'hidden' }}>
+          <div style={{ padding: '9px 12px', borderBottom: `1px solid ${t.border}`, fontSize: '.72rem', fontWeight: 700, color: t.text1 }}>Performance — per-employee stage TAT medians <span style={{ color: t.text4, fontWeight: 400, fontSize: '.62rem' }}>· click a stage to rank by it (fastest first) · top 40 by cases</span></div>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead><tr>
+                <th style={th}>Employee</th><th style={th}>Branch</th>
+                <th onClick={() => setSortStage('cases')} style={{ ...th, textAlign: 'right', cursor: 'pointer', color: sortStage === 'cases' ? t.gold : t.text4 }}>Cases{sortStage === 'cases' ? ' ▾' : ''}</th>
+                {stages.map(sk => <th key={sk} onClick={() => setSortStage(sk)} style={{ ...th, textAlign: 'right', cursor: 'pointer', color: sortStage === sk ? t.gold : t.text4 }}>{STAGE_LBL[sk]}{sortStage === sk ? ' ▾' : ''}</th>)}
+                <th style={{ ...th, textAlign: 'right', color: t.gold }}>Total</th>
+              </tr></thead>
+              <tbody>{perfRows.map(p => (
+                <tr key={p.emp_id}>
+                  <td style={{ ...td, color: t.text1, fontWeight: 600 }}>{p.name}</td>
+                  <td style={td}>{p.branch}</td>
+                  <td style={{ ...td, textAlign: 'right', fontWeight: 700 }}>{num(p.perf.cases)}</td>
+                  {stages.map(sk => <td key={sk} style={{ ...td, textAlign: 'right', color: sortStage === sk ? t.gold : t.text2 }}>{fmtM(p.perf[sk])}</td>)}
+                  <td style={{ ...td, textAlign: 'right', color: t.gold, fontWeight: 700 }}>{fmtM(p.perf.total)}</td>
+                </tr>
+              ))}</tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {tab === 'branches' && (
+        <div style={{ ...card, overflow: 'hidden' }}>
+          <div style={{ padding: '9px 12px', borderBottom: `1px solid ${t.border}`, fontSize: '.72rem', fontWeight: 700, color: t.text1 }}>Branch rollup <span style={{ color: t.text4, fontWeight: 400, fontSize: '.62rem' }}>· staff · manager coverage · cases · median TAT</span></div>
+          <div style={{ overflowX: 'auto', maxHeight: 500 }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead><tr><th style={th}>Branch</th><th style={{ ...th, textAlign: 'right' }}>Staff</th><th style={{ ...th, textAlign: 'right' }}>Managers</th><th style={{ ...th, textAlign: 'right' }}>Cases opened</th><th style={{ ...th, textAlign: 'right' }}>Median TAT</th></tr></thead>
+              <tbody>{d.byBranch.map(b => (
+                <tr key={b.key}>
+                  <td style={{ ...td, color: t.text1, fontWeight: 600 }}>{b.key}</td>
+                  <td style={{ ...td, textAlign: 'right' }}>{num(b.staff)}</td>
+                  <td style={{ ...td, textAlign: 'right', color: b.managers === 0 ? t.red : t.text2 }}>{num(b.managers)}</td>
+                  <td style={{ ...td, textAlign: 'right' }}>{num(b.cases_opened)}</td>
+                  <td style={{ ...td, textAlign: 'right', color: t.gold, fontWeight: 700 }}>{fmtM(b.median_tat)}</td>
+                </tr>
+              ))}</tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {tab === 'leaders' && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 12 }}>
+          <Leader title="Top openers" sub="· cases opened" rows={d.topOpeners} valFn={p => num(p.cases_opened)} />
+          <Leader title="Top handlers" sub="· cases touched" rows={d.topHandlers} valFn={p => num(p.cases_handled)} />
+          <Leader title="Fastest (≥5 cases)" sub="· median total TAT" rows={d.fastest} valFn={p => fmtM(p.perf.total)} />
+          <div style={{ ...card, overflow: 'hidden' }}>
+            <div style={{ padding: '9px 12px', borderBottom: `1px solid ${t.border}`, fontSize: '.72rem', fontWeight: 700, color: t.text1 }}>By role</div>
+            {d.byRole.map(r => <div key={r.key} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 12px', borderBottom: `1px solid ${t.border}44`, fontSize: '.72rem' }}><span style={{ color: t.text2 }}>{r.key}</span><span style={{ color: t.gold, fontWeight: 700 }}>{num(r.staff)}</span></div>)}
+          </div>
+        </div>
+      )}
+
+      {tab === 'lifecycle' && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 12 }}>
+          <div style={{ ...card, overflow: 'hidden' }}>
+            <div style={{ padding: '9px 12px', borderBottom: `1px solid ${t.border}`, fontSize: '.72rem', fontWeight: 700, color: t.red }}>Idle 30d+ <span style={{ color: t.text4, fontWeight: 400, fontSize: '.62rem' }}>· no CRM activity</span></div>
+            {d.idle.map(p => <div key={p.emp_id} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, padding: '6px 12px', borderBottom: `1px solid ${t.border}44`, fontSize: '.7rem' }}><span style={{ color: t.text1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name} <span style={{ color: t.text4, fontSize: '.6rem' }}>· {p.branch}</span></span><span style={{ color: t.red, fontWeight: 600, whiteSpace: 'nowrap' }}>{p.idle_days == null ? 'never' : `${p.idle_days}d`}</span></div>)}
+          </div>
+          <div style={{ ...card, overflow: 'hidden' }}>
+            <div style={{ padding: '9px 12px', borderBottom: `1px solid ${t.border}`, fontSize: '.72rem', fontWeight: 700, color: t.green }}>New joiners <span style={{ color: t.text4, fontWeight: 400, fontSize: '.62rem' }}>· ≤3 months</span></div>
+            {d.newJoiners.length ? d.newJoiners.map(p => <div key={p.emp_id} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, padding: '6px 12px', borderBottom: `1px solid ${t.border}44`, fontSize: '.7rem' }}><span style={{ color: t.text1 }}>{p.name} <span style={{ color: t.text4, fontSize: '.6rem' }}>· {p.branch}</span></span><span style={{ color: t.green, whiteSpace: 'nowrap' }}>{p.tenure_months}mo</span></div>) : <div style={{ padding: 12, color: t.text4, fontSize: '.7rem' }}>None (date-of-joining sparse in CRM)</div>}
+          </div>
+          <div style={{ ...card, overflow: 'hidden' }}>
+            <div style={{ padding: '9px 12px', borderBottom: `1px solid ${t.border}`, fontSize: '.72rem', fontWeight: 700, color: t.text3 }}>Exits <span style={{ color: t.text4, fontWeight: 400, fontSize: '.62rem' }}>· active=false · {d.exits.length}</span></div>
+            {d.exits.slice(0, 40).map(p => <div key={p.emp_id} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, padding: '6px 12px', borderBottom: `1px solid ${t.border}44`, fontSize: '.7rem' }}><span style={{ color: t.text2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</span><span style={{ color: t.text4, fontSize: '.6rem', whiteSpace: 'nowrap' }}>{p.branch}</span></div>)}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
