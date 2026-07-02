@@ -11,6 +11,15 @@ async function fetchEmployees() {
   return data.employees || []
 }
 
+const fmtAgo = (iso) => {
+  if (!iso) return '—'
+  const mins = Math.floor((Date.now() - new Date(iso)) / 60000)
+  if (mins < 1)    return 'just now'
+  if (mins < 60)   return `${mins}m ago`
+  if (mins < 1440) return `${Math.floor(mins / 60)}h ago`
+  return new Date(iso).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
+}
+
 import { CONSIGNMENT_THEMES as THEMES } from '../../lib/consignmentTheme'
 
 export default function BranchEmployees() {
@@ -20,8 +29,6 @@ export default function BranchEmployees() {
   const [employees, setEmployees]   = useState([])
   const [branches,  setBranches]    = useState([])
   const [loading,   setLoading]     = useState(false)
-  const [syncing,   setSyncing]     = useState(false)
-  const [syncMsg,   setSyncMsg]     = useState('')
   const [search,    setSearch]      = useState('')
   const [filterBranch,    setFilterBranch]    = useState('')
   const [filterRole,      setFilterRole]      = useState('all')
@@ -50,25 +57,6 @@ export default function BranchEmployees() {
     setEmployees(emps)
     if (brs) setBranches(brs)
     setLoading(false)
-  }
-
-  const syncFromCRM = async () => {
-    setSyncing(true)
-    setSyncMsg('')
-    try {
-      const res  = await authedFetch('/api/sync-branch-employees', { method: 'POST' })
-      const data = await res.json()
-      if (data.success) {
-        const s = data.summary
-        setSyncMsg(`Synced ${s.inserted} employees: ${s.managers} managers, ${s.active} active, ${s.unmatched} unmatched branch.`)
-        await load()
-      } else {
-        setSyncMsg(`Error: ${data.error}${data.details ? `. ${data.details}` : ''}`)
-      }
-    } catch (e) {
-      setSyncMsg(`Error: ${e.message}`)
-    }
-    setSyncing(false)
   }
 
   // Branch lookup map
@@ -102,6 +90,11 @@ export default function BranchEmployees() {
     }
     return list
   }, [employees, filterStatus, filterRole, filterBranch, search, branchMap])
+
+  const lastSynced = useMemo(() => {
+    const ts = employees.map(e => e.synced_at).filter(Boolean).sort()
+    return ts.length ? ts[ts.length - 1] : null
+  }, [employees])
 
   // Stats
   const stats = useMemo(() => ({
@@ -157,6 +150,11 @@ export default function BranchEmployees() {
             ['Email',           emp.email || '—'],
             ['PAN',             emp.pan_number || '—'],
             ['Date of Joining', emp.date_of_joining || '—'],
+            ['— CRM Activity —', ''],
+            ['Cases Opened',    emp.cases_opened  != null ? String(emp.cases_opened)  : '—'],
+            ['Cases Handled',   emp.cases_handled != null ? String(emp.cases_handled) : '—'],
+            ['Last Activity',   emp.last_txn_at  ? fmtAgo(emp.last_txn_at)  : '—'],
+            ['Last Login',      emp.logged_in_at ? fmtAgo(emp.logged_in_at) : '—'],
           ].map(([label, val]) => (
             <div key={label} style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
               <span style={{ fontSize: '.62rem', color: t.text3, textTransform: 'uppercase', letterSpacing: '.05em' }}>{label}</span>
@@ -175,16 +173,14 @@ export default function BranchEmployees() {
           <div style={s.title}>Branch Employees</div>
           <div style={s.sub}>All staff synced from the NEW CRM</div>
         </div>
-        <button onClick={syncFromCRM} disabled={syncing} style={{ ...s.syncBtn, opacity: syncing ? .6 : 1 }}>
-          {syncing ? 'Syncing…' : '↻ Sync from CRM'}
-        </button>
-      </div>
-
-      {syncMsg && (
-        <div style={{ background: syncMsg.startsWith('✓') ? `${t.green}18` : `${t.red}18`, border: `1px solid ${syncMsg.startsWith('✓') ? t.green : t.red}40`, borderRadius: '6px', padding: '8px 14px', fontSize: '.72rem', color: syncMsg.startsWith('✓') ? t.green : t.red, marginBottom: '16px' }}>
-          {syncMsg}
+        <div style={{ textAlign: 'right', fontSize: '.68rem', color: t.text3, lineHeight: 1.5 }}>
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: t.green, fontWeight: 600 }}>
+            <span style={{ width: 6, height: 6, borderRadius: '50%', background: t.green, boxShadow: `0 0 5px ${t.green}` }} />
+            Auto-synced daily · midnight
+          </div>
+          <div style={{ color: t.text4 }}>Last synced {fmtAgo(lastSynced)}</div>
         </div>
-      )}
+      </div>
 
       {/* Stats */}
       <div style={s.statsRow}>

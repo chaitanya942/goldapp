@@ -11,8 +11,15 @@ const supabase = createClient(
 // Wipes the table and re-inserts every employee with their full profile. Branch
 // is matched to a Supabase branch by name (NEW CRM Branch.name).
 export async function POST(req) {
-  const auth = await requireAuth(req, { requiredRoles: ROLE_GROUPS.ADMIN })
-  if (!auth.ok) return auth.response
+  // Cron-token bypass (server-to-server, no session) — the daily midnight sync in
+  // scripts/cron-sync.mjs calls this with x-cron-token. Interactive callers still
+  // need ADMIN.
+  const cronToken = req.headers.get('x-cron-token') || (req.headers.get('authorization') || '').replace(/^Bearer\s+/i, '')
+  const isCron = process.env.CRON_SECRET && cronToken === process.env.CRON_SECRET
+  if (!isCron) {
+    const auth = await requireAuth(req, { requiredRoles: ROLE_GROUPS.ADMIN })
+    if (!auth.ok) return auth.response
+  }
 
   let client
   try {
@@ -33,7 +40,7 @@ export async function POST(req) {
              e.email, e.phone, e.pan_number, e.designation,
              e.role::text         AS role,
              e.access_level::text AS access_level,
-             e.date_of_joining, e.active, e.status,
+             e.date_of_joining, e.active, e.status, e.logged_in_at,
              e.branch_id AS crm_branch_uuid,
              b.name AS crm_branch_name, b.state AS crm_branch_state, b.code AS crm_branch_code
         FROM "Employee" e
@@ -41,7 +48,31 @@ export async function POST(req) {
        WHERE trim(coalesce(e.first_name,'') || ' ' || coalesce(e.last_name,'')) <> ''
        ORDER BY b.name, e.designation, e.first_name
     `)
+    // ── CRM activity per employee (keyed by emp_id code) ──
+    // cases opened = transactions they created; cases handled = distinct
+    // transactions they touched in ANY stage (opener / negotiation / quotation /
+    // payment / order / KYC), normalised to emp_id via the Employee table.
+    const { rows: opened } = await client.query(`
+      SELECT emp_id, count(*)::int n, max(created_at) last_txn
+        FROM "Transaction" WHERE emp_id IS NOT NULL GROUP BY emp_id`)
+    const { rows: handled } = await client.query(`
+      WITH h AS (
+        SELECT id tid, emp_id hk FROM "Transaction" WHERE emp_id IS NOT NULL
+        UNION ALL SELECT transaction_id, negotiation_approved_id FROM "Estimation" WHERE negotiation_approved_id IS NOT NULL
+        UNION ALL SELECT transaction_id, quotation_approved_id FROM "Quotation" WHERE quotation_approved_id IS NOT NULL
+        UNION ALL SELECT transaction_id, employee_id FROM "Payment" WHERE employee_id IS NOT NULL
+        UNION ALL SELECT transaction_id, emp_id FROM "Order" WHERE emp_id IS NOT NULL
+        UNION ALL SELECT k.transaction_id, l.emp_id FROM "KycLog" l JOIN "Kyc" k ON k.id=l.kyc_id WHERE l.emp_id IS NOT NULL
+      ), norm AS (
+        SELECT h.tid, COALESCE(e1.emp_id, e2.emp_id) emp FROM h
+        LEFT JOIN "Employee" e1 ON e1.emp_id = h.hk
+        LEFT JOIN "Employee" e2 ON e2.id = h.hk
+      )
+      SELECT emp, count(DISTINCT tid)::int n FROM norm WHERE emp IS NOT NULL GROUP BY emp`)
     await client.end(); client = null
+
+    const openedBy  = Object.fromEntries(opened.map(r => [r.emp_id, r]))
+    const handledBy = Object.fromEntries(handled.map(r => [r.emp, r.n]))
 
     if (!employees.length) return Response.json({ success: true, summary: { total: 0, inserted: 0, source: 'NEW_CRM' } })
 
@@ -75,13 +106,18 @@ export async function POST(req) {
         mobile_phone:    phone,
         emp_status:      emp.active === false ? 'inactive' : 'active',
         is_manager:      /manager/i.test(desig),
+        // CRM activity
+        cases_opened:    openedBy[emp.emp_id]?.n ?? 0,
+        cases_handled:   handledBy[emp.emp_id] ?? 0,
+        last_txn_at:     openedBy[emp.emp_id]?.last_txn || null,
+        logged_in_at:    emp.logged_in_at || null,
         synced_at:       new Date().toISOString(),
       }
     }).filter(r => r.name)
 
     // Insert in chunks. If the richer columns aren't in the table yet, strip them
     // and insert the core set (so the sync still works before the migration runs).
-    const NEW_COLS = ['emp_id', 'email', 'pan_number', 'role', 'access_level', 'date_of_joining']
+    const NEW_COLS = ['emp_id', 'email', 'pan_number', 'role', 'access_level', 'date_of_joining', 'cases_opened', 'cases_handled', 'last_txn_at', 'logged_in_at']
     let inserted = 0, stripped = false
     const CHUNK = 500
     for (let i = 0; i < rows.length; i += CHUNK) {

@@ -38,6 +38,7 @@ const NEW_CRM_ENDPOINT     = `${APP_URL}/api/sync-new-crm`
 const EOD_ENDPOINT         = `${APP_URL}/api/eod-inventory-snapshot`
 const AT_RISK_ENDPOINT     = `${APP_URL}/api/consignments?action=bidding_at_risk_summary`
 const SECTION1_AUDIT_URL   = `${APP_URL}/api/bidding/section1-audit`
+const EMPLOYEE_SYNC_URL    = `${APP_URL}/api/sync-branch-employees`
 const HEADERS              = { Authorization: `Bearer ${CRON_SECRET}` }
 // /api/eod-inventory-snapshot POST + /api/bidding/section1-audit POST both
 // gate on x-cron-token (not Bearer).
@@ -48,6 +49,7 @@ let inFlightNewCrm       = false   // separate guard so a slow new-CRM sync can'
 let lastEodDate          = ''      // YYYY-MM-DD (IST) of the last successful EOD snapshot — keeps us idempotent within a day
 let lastAtRiskDate       = ''      // YYYY-MM-DD (IST) of the last 7pm at-risk log — once per day
 let lastSection1AuditDate = ''     // YYYY-MM-DD (IST) of the last 23:30 Section 1 audit — once per day
+let lastEmployeeSyncDate  = ''     // YYYY-MM-DD (IST) of the last branch-employee refresh — once per day (midnight)
 
 // IST date helper — Asia/Kolkata is fixed UTC+5:30, no DST so we can shift manually.
 const istNow = () => new Date(Date.now() + 5.5 * 60 * 60 * 1000)
@@ -172,6 +174,29 @@ async function syncNewCrmOnce() {
   }
 }
 
+async function maybeSyncEmployees() {
+  // Once per IST day — the first tick of a new IST day (just after midnight)
+  // refreshes the full branch-employee directory from the NEW CRM. Also runs
+  // once on worker startup so a deploy picks up the latest roster immediately.
+  const today = istDateStr()
+  if (lastEmployeeSyncDate === today) return
+  try {
+    const res = await fetch(EMPLOYEE_SYNC_URL, { method: 'POST', headers: { 'x-cron-token': CRON_SECRET } })
+    const txt = await res.text()
+    let body
+    try { body = JSON.parse(txt) } catch { body = { raw: txt } }
+    if (!res.ok || body.success === false) {
+      console.error(new Date().toISOString(), `[cron-sync] employee sync FAIL ${res.status}`, body.error || txt.slice(0, 200))
+      return
+    }
+    lastEmployeeSyncDate = today
+    const s = body.summary || {}
+    console.log(new Date().toISOString(), `[cron-sync] employee sync ok for ${today}: ${s.inserted} staff · ${s.matched} matched · ${s.managers} managers`)
+  } catch (err) {
+    console.error(new Date().toISOString(), '[cron-sync] employee sync threw:', err?.message || err)
+  }
+}
+
 async function syncOnce() {
   if (inFlight) {
     console.log(new Date().toISOString(), '[cron-sync] previous run still in flight, skipping tick')
@@ -215,6 +240,11 @@ async function syncOnce() {
   // then attributes leftovers to refinery gain. Independent of the EOD
   // snapshot path so a failure on either doesn't cascade.
   maybeRunSection1Audit().catch(() => null)
+
+  // Piggy-back the daily branch-employee refresh — once per IST day (first tick
+  // after midnight) + once on startup. Pulls the full roster + CRM activity from
+  // the NEW CRM. Fire-and-forget; sync health isn't tied to it.
+  maybeSyncEmployees().catch(() => null)
 }
 
 console.log(`[cron-sync] starting — ${ENDPOINT} every ${INTERVAL_MS}ms`)
