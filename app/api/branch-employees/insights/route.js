@@ -29,7 +29,7 @@ export async function GET(req) {
     })
     client.on('error', () => {})
     const Q = (s) => client.query(s).then(r => r.rows)
-    const [emps, opened, handled, cohort, est, quo, pay, klog, daily] = await Promise.all([
+    const [emps, opened, handled, cohort, est, quo, pay, klog, daily, hours, kycRoles] = await Promise.all([
       Q(`SELECT e.id, e.emp_id, trim(coalesce(e.first_name,'')||' '||coalesce(e.last_name,'')) name,
                 e.role::text role, e.designation, e.active, e.logged_in_at, e.date_of_joining,
                 b.name branch, b.state
@@ -51,6 +51,8 @@ export async function GET(req) {
       Q(`SELECT transaction_id tid, EXTRACT(EPOCH FROM min(created_at)) ts, (array_agg(employee_id))[1] emp FROM "Payment" GROUP BY 1`),
       Q(`SELECT k.transaction_id tid, EXTRACT(EPOCH FROM min(l.created_at) FILTER (WHERE l.employee_class='KYC_MAKER')) km, EXTRACT(EPOCH FROM max(l.created_at) FILTER (WHERE l.employee_class='KYC_CHECKER')) kc, (array_agg(l.emp_id) FILTER (WHERE l.employee_class='KYC_CHECKER'))[1] emp FROM "KycLog" l JOIN "Kyc" k ON k.id=l.kyc_id GROUP BY 1`),
       Q(`SELECT emp_id, to_char((created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata')::date,'YYYY-MM-DD') d, count(*)::int n FROM "Transaction" WHERE emp_id IS NOT NULL AND created_at >= (now() AT TIME ZONE 'UTC') - interval '30 days' GROUP BY 1,2`),
+      Q(`SELECT extract(hour FROM (created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata'))::int hr, count(*)::int n FROM "Transaction" WHERE created_at IS NOT NULL GROUP BY 1`),
+      Q(`SELECT l.emp_id, l.employee_class cls, count(DISTINCT k.transaction_id)::int n FROM "KycLog" l JOIN "Kyc" k ON k.id=l.kyc_id WHERE l.emp_id IS NOT NULL AND l.employee_class IN ('KYC_MAKER','KYC_CHECKER') GROUP BY 1,2`),
     ])
     await client.end(); client = null
 
@@ -91,7 +93,15 @@ export async function GET(req) {
     for (const r of daily) { (empDay[r.emp_id] = empDay[r.emp_id] || {})[r.d] = r.n }
     const sparkOf = (emp) => dayList.map(d => empDay[emp]?.[d] || 0)
     const orgTrend = dayList.map(d => daily.filter(r => r.d === d).reduce((s, r) => s + r.n, 0))
-    const perfOf = (emp) => { const g = stagePerf[emp]; if (!g) return null; const out = { cases: g.cases, total: r1(med(g.total)), p90: r1(pct(g.total, 90)) }; STAGES.forEach(s => { out[s] = r1(med(g[s])); out[`${s}_n`] = g[s].filter(v => v != null && v >= 0).length }); return out }
+    // SLA line = 2× the org median total TAT (relative, no hardcoded business SLA).
+    const slaLine = med(orgStages.total) ? med(orgStages.total) * 2 : null
+    const perfOf = (emp) => { const g = stagePerf[emp]; if (!g) return null; const out = { cases: g.cases, total: r1(med(g.total)), p90: r1(pct(g.total, 90)) }; STAGES.forEach(s => { out[s] = r1(med(g[s])); out[`${s}_n`] = g[s].filter(v => v != null && v >= 0).length }); const tv = g.total.filter(v => v != null && v >= 0); out.sla_breach = (slaLine && tv.length) ? Math.round(tv.filter(v => v > slaLine).length / tv.length * 100) : null; return out }
+
+    // KYC maker vs checker — cases per employee in each role.
+    const kycOf = {}
+    for (const r of kycRoles) { const e = norm(r.emp_id); if (!e) continue; const g = kycOf[e] = kycOf[e] || { maker: 0, checker: 0 }; if (r.cls === 'KYC_MAKER') g.maker += r.n; else g.checker += r.n }
+    // org activity-by-hour (0–23 IST), for the heatmap.
+    const hourly = Array.from({ length: 24 }, (_, h) => (hours.find(r => r.hr === h)?.n) || 0)
 
     const openedBy = Object.fromEntries(opened.map(r => [r.emp_id, r]))
     const handledBy = Object.fromEntries(handled.map(r => [r.emp, r.n]))
@@ -109,6 +119,7 @@ export async function GET(req) {
         last_active: lastActive, idle_days: daysSince(lastActive),
         tenure_months: tenureMonths(e.date_of_joining), date_of_joining: e.date_of_joining || null,
         perf: perfOf(e.emp_id), spark: sparkOf(e.emp_id),
+        kyc_maker: kycOf[e.emp_id]?.maker || 0, kyc_checker: kycOf[e.emp_id]?.checker || 0,
       }
     })
     const active = people.filter(p => p.active)
@@ -149,6 +160,10 @@ export async function GET(req) {
     const idle = active.filter(p => p.idle_days == null || p.idle_days >= 30).sort((a, b) => (b.idle_days ?? 1e9) - (a.idle_days ?? 1e9)).slice(0, 40)
     const newJoiners = people.filter(p => p.tenure_months != null && p.tenure_months <= 3).sort((a, b) => (a.tenure_months) - (b.tenure_months)).slice(0, 30)
     const exits = people.filter(p => !p.active)
+    const topMakers   = [...active].filter(p => p.kyc_maker > 0).sort((a, b) => b.kyc_maker - a.kyc_maker).slice(0, 15)
+    const topCheckers = [...active].filter(p => p.kyc_checker > 0).sort((a, b) => b.kyc_checker - a.kyc_checker).slice(0, 15)
+    // SLA offenders: enough cases + a real breach rate, worst first.
+    const slaOffenders = [...active].filter(p => (p.perf?.cases || 0) >= 5 && p.perf?.sla_breach > 0).sort((a, b) => b.perf.sla_breach - a.perf.sla_breach).slice(0, 20)
 
     return Response.json({
       totals: {
@@ -159,7 +174,8 @@ export async function GET(req) {
         median_org_tat: r1(med(active.map(p => p.perf?.total).filter(v => v != null))),
       },
       byBranch, byRegion, byRole, topOpeners, topHandlers, fastest, idle, newJoiners, exits, people,
-      bottleneck, orgTrend, trendDays: dayList,
+      bottleneck, orgTrend, trendDays: dayList, hourly,
+      topMakers, topCheckers, slaOffenders, slaLine: r1(slaLine),
       stages: STAGES, generated_at: new Date().toISOString(),
     })
   } catch (err) {

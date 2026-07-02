@@ -51,6 +51,17 @@ export default function Productivity() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
 
+  // Deep-link from Branch-Employees Insights: pre-filter to one employee.
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem('productivity_prefilter')
+      if (!raw) return
+      sessionStorage.removeItem('productivity_prefilter')
+      const pf = JSON.parse(raw)
+      if (pf?.employee) { setSource('new'); setGroupBy('employee'); setFilters(f => ({ ...f, employee: pf.employee })); setTab('people') }
+    } catch {}
+  }, [])
+
   const setF = (k, v) => setFilters(f => ({ ...f, [k]: v }))
   const activeFilters = Object.entries(filters).filter(([, v]) => v)
   const qbase = useCallback((extra = {}) => { const qs = new URLSearchParams({ from, to, source, bucket, metric, groupBy, splitBy, sla: String(sla), ...extra }); Object.entries(filters).forEach(([k, v]) => { if (v) qs.set(k, v) }); return qs }, [from, to, source, bucket, metric, groupBy, splitBy, sla, filters])

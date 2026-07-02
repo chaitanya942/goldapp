@@ -432,6 +432,22 @@ function EmployeeInsights({ t, setActiveNav, canSee }) {
         </div>
       </div>
 
+      {/* Activity-by-hour heatmap (org, IST) */}
+      {(d.hourly || []).some(v => v > 0) && (() => { const mx = Math.max(1, ...d.hourly); const fmtH = (h) => `${((h + 11) % 12) + 1}${h < 12 ? 'a' : 'p'}`
+        return (
+          <div style={{ ...card, padding: '11px 14px' }}>
+            <div style={{ fontSize: '.72rem', fontWeight: 700, color: t.text1, marginBottom: 8 }}>Activity by hour <span style={{ color: t.text4, fontWeight: 400, fontSize: '.62rem' }}>· when transactions are opened · IST</span></div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(24, 1fr)', gap: 2 }}>
+              {d.hourly.map((v, h) => (
+                <div key={h} title={`${fmtH(h)} · ${v} txns`} style={{ height: 26, borderRadius: 3, background: v ? `${t.blue}${Math.round(20 + (v / mx) * 220).toString(16).padStart(2, '0')}` : `${t.border}44`, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
+                  <span style={{ fontSize: '.42rem', color: v / mx > 0.5 ? '#fff' : t.text4, paddingBottom: 1 }}>{h % 3 === 0 ? fmtH(h) : ''}</span>
+                </div>
+              ))}
+            </div>
+            <div style={{ fontSize: '.55rem', color: t.text4, marginTop: 4 }}>Peak: {fmtH(d.hourly.indexOf(mx))} ({mx} txns). Darker = busier.</div>
+          </div>
+        ) })()}
+
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
         <TabBtn id="performance" label="Performance" />
         <TabBtn id="branches" label="Branch rollup" />
@@ -450,13 +466,18 @@ function EmployeeInsights({ t, setActiveNav, canSee }) {
                 <div style={{ fontSize: '.95rem', fontWeight: 700, color: t.text1 }}>{p.name}</div>
                 <div style={{ fontSize: '.66rem', color: t.text3, marginTop: 2 }}>{p.branch}{p.state ? ` · ${p.state}` : ''} · {p.role || p.designation || '—'}{p.tenure_months != null ? ` · ${p.tenure_months}mo tenure` : ''}{p.idle_days != null ? ` · last active ${p.idle_days}d ago` : ''}</div>
               </div>
-              <button onClick={() => setSelEmp(null)} style={{ background: 'none', border: `1px solid ${t.border}`, borderRadius: 6, color: t.text3, padding: '3px 10px', fontSize: '.66rem', cursor: 'pointer' }}>✕ close</button>
+              <div style={{ display: 'flex', gap: 6 }}>
+                {canSee?.('productivity') && <button onClick={() => { try { sessionStorage.setItem('productivity_prefilter', JSON.stringify({ employee: p.name })) } catch {} ; goProductivity() }} style={{ background: `${t.blue}14`, border: `1px solid ${t.blue}66`, borderRadius: 6, color: t.blue, padding: '3px 10px', fontSize: '.66rem', fontWeight: 600, cursor: 'pointer' }}>View in Productivity →</button>}
+                <button onClick={() => setSelEmp(null)} style={{ background: 'none', border: `1px solid ${t.border}`, borderRadius: 6, color: t.text3, padding: '3px 10px', fontSize: '.66rem', cursor: 'pointer' }}>✕ close</button>
+              </div>
             </div>
             <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap', margin: '12px 0', alignItems: 'center' }}>
               <div><div style={{ fontSize: '1.15rem', fontWeight: 700, color: t.gold, fontFamily: 'monospace' }}>{num(p.perf.cases)}</div><div style={{ fontSize: '.58rem', color: t.text4, textTransform: 'uppercase' }}>Cases</div></div>
               <div><div style={{ fontSize: '1.15rem', fontWeight: 700, color: t.blue, fontFamily: 'monospace' }}>{num(p.cases_handled)}</div><div style={{ fontSize: '.58rem', color: t.text4, textTransform: 'uppercase' }}>Handled</div></div>
               <div><div style={{ fontSize: '1.15rem', fontWeight: 700, color: t.text1, fontFamily: 'monospace' }}>{fmtM(p.perf.total)}</div><div style={{ fontSize: '.58rem', color: t.text4, textTransform: 'uppercase' }}>Median TAT</div></div>
               <div><div style={{ fontSize: '1.15rem', fontWeight: 700, color: t.text2, fontFamily: 'monospace' }}>{fmtM(p.perf.p90)}</div><div style={{ fontSize: '.58rem', color: t.text4, textTransform: 'uppercase' }}>p90 (worst)</div></div>
+              <div><div style={{ fontSize: '1.15rem', fontWeight: 700, fontFamily: 'monospace', color: p.perf.sla_breach >= 25 ? t.red : t.text2 }}>{p.perf.sla_breach == null ? '—' : p.perf.sla_breach + '%'}</div><div style={{ fontSize: '.58rem', color: t.text4, textTransform: 'uppercase' }}>SLA breach</div></div>
+              {(p.kyc_maker > 0 || p.kyc_checker > 0) && <div><div style={{ fontSize: '1.15rem', fontWeight: 700, color: t.text2, fontFamily: 'monospace' }}>{num(p.kyc_maker)}/{num(p.kyc_checker)}</div><div style={{ fontSize: '.58rem', color: t.text4, textTransform: 'uppercase' }}>KYC make/check</div></div>}
               {w && <div><div style={{ fontSize: '1.15rem', fontWeight: 700, fontFamily: 'monospace', color: w.up ? t.green : t.red }}>{w.up ? '▲' : '▼'} {Math.abs(w.pct)}%</div><div style={{ fontSize: '.58rem', color: t.text4, textTransform: 'uppercase' }}>WoW ({w.last} vs {w.prev})</div></div>}
               <div style={{ marginLeft: 'auto' }}><div style={{ fontSize: '.58rem', color: t.text4, textTransform: 'uppercase', marginBottom: 3 }}>30-day activity</div><Sparkline data={p.spark} color={t.blue} w={160} h={34} /></div>
             </div>
@@ -488,6 +509,7 @@ function EmployeeInsights({ t, setActiveNav, canSee }) {
                 <th onClick={() => setSortStage('cases')} style={{ ...th, textAlign: 'right', cursor: 'pointer', color: sortStage === 'cases' ? t.gold : t.text4 }}>Cases{sortStage === 'cases' ? ' ▾' : ''}</th>
                 {stages.map(sk => <th key={sk} onClick={() => setSortStage(sk)} style={{ ...th, textAlign: 'right', cursor: 'pointer', color: sortStage === sk ? t.gold : t.text4 }}>{STAGE_LBL[sk]}{sortStage === sk ? ' ▾' : ''}</th>)}
                 <th style={{ ...th, textAlign: 'right', color: t.gold }}>Total</th>
+                <th style={{ ...th, textAlign: 'right' }} title={`% of cases past the SLA line (2× org median${d.slaLine != null ? ` = ${fmtM(d.slaLine)}` : ''})`}>SLA%</th>
                 <th style={{ ...th, textAlign: 'center' }}>30d activity</th>
               </tr></thead>
               <tbody>{perfRows.map(p => (
@@ -497,6 +519,7 @@ function EmployeeInsights({ t, setActiveNav, canSee }) {
                   <td style={{ ...td, textAlign: 'right', fontWeight: 700 }}>{num(p.perf.cases)}</td>
                   {stages.map(sk => <td key={sk} style={{ ...td, textAlign: 'right', color: sortStage === sk ? t.gold : t.text2 }}>{fmtM(p.perf[sk])}</td>)}
                   <td style={{ ...td, textAlign: 'right', color: t.gold, fontWeight: 700 }}>{fmtM(p.perf.total)}</td>
+                  <td style={{ ...td, textAlign: 'right', color: p.perf.sla_breach >= 25 ? t.red : t.text3 }}>{p.perf.sla_breach == null ? '—' : p.perf.sla_breach + '%'}</td>
                   <td style={{ ...td, padding: '2px 10px' }}><Sparkline data={p.spark} color={t.blue} /></td>
                 </tr>
               ))}</tbody>
@@ -552,6 +575,9 @@ function EmployeeInsights({ t, setActiveNav, canSee }) {
           <Leader title="Top openers" sub="· cases opened" rows={d.topOpeners} valFn={p => num(p.cases_opened)} />
           <Leader title="Top handlers" sub="· cases touched" rows={d.topHandlers} valFn={p => num(p.cases_handled)} />
           <Leader title="Fastest (≥5 cases)" sub="· median total TAT" rows={d.fastest} valFn={p => fmtM(p.perf.total)} />
+          {d.topMakers?.length > 0 && <Leader title="KYC makers" sub="· cases made" rows={d.topMakers} valFn={p => num(p.kyc_maker)} />}
+          {d.topCheckers?.length > 0 && <Leader title="KYC checkers" sub="· cases checked" rows={d.topCheckers} valFn={p => num(p.kyc_checker)} />}
+          {d.slaOffenders?.length > 0 && <Leader title="SLA offenders (≥5 cases)" sub={`· % past ${fmtM(d.slaLine)}`} rows={d.slaOffenders} valFn={p => p.perf.sla_breach + '%'} />}
           <div style={{ ...card, overflow: 'hidden' }}>
             <div style={{ padding: '9px 12px', borderBottom: `1px solid ${t.border}`, fontSize: '.72rem', fontWeight: 700, color: t.text1 }}>By role</div>
             {d.byRole.map(r => <div key={r.key} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 12px', borderBottom: `1px solid ${t.border}44`, fontSize: '.72rem' }}><span style={{ color: t.text2 }}>{r.key}</span><span style={{ color: t.gold, fontWeight: 700 }}>{num(r.staff)}</span></div>)}
