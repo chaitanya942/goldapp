@@ -367,6 +367,19 @@ function EmployeeInsights({ t, setActiveNav, canSee }) {
     </div>
   )
   const TabBtn = ({ id, label }) => <button onClick={() => setTab(id)} style={{ background: tab === id ? `${t.gold}18` : 'none', border: `1px solid ${tab === id ? t.gold : t.border}`, borderRadius: 6, color: tab === id ? t.gold : t.text3, padding: '5px 12px', fontSize: '.7rem', fontWeight: 600, cursor: 'pointer' }}>{label}</button>
+  // tiny inline SVG sparkline (30-day daily throughput)
+  const Sparkline = ({ data, color, w = 92, h = 22 }) => {
+    if (!data || !data.length) return <span style={{ color: t.text4, fontSize: '.62rem' }}>—</span>
+    const mx = Math.max(1, ...data), n = data.length
+    const pts = data.map((v, i) => `${(i / (n - 1)) * w},${h - (v / mx) * (h - 3) - 1}`).join(' ')
+    const area = `0,${h} ${pts} ${w},${h}`
+    return (
+      <svg width={w} height={h} style={{ display: 'block' }}>
+        <polygon points={area} fill={`${color || t.blue}22`} />
+        <polyline points={pts} fill="none" stroke={color || t.blue} strokeWidth="1.4" strokeLinejoin="round" strokeLinecap="round" />
+      </svg>
+    )
+  }
   const Leader = ({ title, rows, valFn, sub }) => (
     <div style={{ ...card, overflow: 'hidden' }}>
       <div style={{ padding: '9px 12px', borderBottom: `1px solid ${t.border}`, fontSize: '.72rem', fontWeight: 700, color: t.text1 }}>{title} <span style={{ color: t.text4, fontWeight: 400, fontSize: '.62rem' }}>{sub}</span></div>
@@ -392,9 +405,34 @@ function EmployeeInsights({ t, setActiveNav, canSee }) {
         <Kpi label="Exits" val={num(T.exits)} color={t.text3} />
       </div>
 
+      {/* Overview: org 30-day throughput trend + stage bottleneck */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 12 }}>
+        <div style={{ ...card, padding: '11px 14px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+            <span style={{ fontSize: '.72rem', fontWeight: 700, color: t.text1 }}>Org throughput <span style={{ color: t.text4, fontWeight: 400, fontSize: '.62rem' }}>· cases/day · last 30d</span></span>
+            <span style={{ fontSize: '.72rem', fontFamily: 'monospace', color: t.blue }}>{num((d.orgTrend || []).reduce((s, v) => s + v, 0))} total</span>
+          </div>
+          <div style={{ marginTop: 8 }}><Sparkline data={d.orgTrend} color={t.blue} w={520} h={44} /></div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '.55rem', color: t.text4, marginTop: 2 }}>
+            <span>{(d.trendDays || [])[0]}</span><span>{(d.trendDays || []).slice(-1)[0]}</span>
+          </div>
+        </div>
+        <div style={{ ...card, padding: '11px 14px' }}>
+          <div style={{ fontSize: '.72rem', fontWeight: 700, color: t.text1, marginBottom: 8 }}>Stage bottleneck <span style={{ color: t.text4, fontWeight: 400, fontSize: '.62rem' }}>· org median hrs/stage · where time goes</span></div>
+          {(() => { const st = (d.bottleneck || []).filter(b => b.stage !== 'total'); const mx = Math.max(1, ...st.map(b => b.median || 0)); return st.map(b => (
+            <div key={b.stage} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 5 }}>
+              <span style={{ width: 78, fontSize: '.62rem', color: t.text3, textAlign: 'right' }}>{STAGE_LBL[b.stage] || b.stage}</span>
+              <div style={{ flex: 1, height: 12, background: `${t.border}55`, borderRadius: 3, overflow: 'hidden' }}><div style={{ width: `${((b.median || 0) / mx) * 100}%`, height: '100%', background: b.median === mx ? t.red : t.gold, borderRadius: 3 }} /></div>
+              <span style={{ width: 48, fontSize: '.62rem', fontFamily: 'monospace', color: b.median === mx ? t.red : t.text2, textAlign: 'right' }}>{fmtM(b.median)}</span>
+            </div>
+          )) })()}
+        </div>
+      </div>
+
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
         <TabBtn id="performance" label="Performance" />
         <TabBtn id="branches" label="Branch rollup" />
+        <TabBtn id="regions" label="Region rollup" />
         <TabBtn id="leaders" label="Leaders" />
         <TabBtn id="lifecycle" label="Idle / Joiners / Exits" />
         {canSee?.('productivity') && <button onClick={goProductivity} style={{ marginLeft: 'auto', background: 'none', border: `1px solid ${t.border}`, borderRadius: 6, color: t.blue, padding: '5px 12px', fontSize: '.7rem', fontWeight: 600, cursor: 'pointer' }}>Open Productivity →</button>}
@@ -410,6 +448,7 @@ function EmployeeInsights({ t, setActiveNav, canSee }) {
                 <th onClick={() => setSortStage('cases')} style={{ ...th, textAlign: 'right', cursor: 'pointer', color: sortStage === 'cases' ? t.gold : t.text4 }}>Cases{sortStage === 'cases' ? ' ▾' : ''}</th>
                 {stages.map(sk => <th key={sk} onClick={() => setSortStage(sk)} style={{ ...th, textAlign: 'right', cursor: 'pointer', color: sortStage === sk ? t.gold : t.text4 }}>{STAGE_LBL[sk]}{sortStage === sk ? ' ▾' : ''}</th>)}
                 <th style={{ ...th, textAlign: 'right', color: t.gold }}>Total</th>
+                <th style={{ ...th, textAlign: 'center' }}>30d activity</th>
               </tr></thead>
               <tbody>{perfRows.map(p => (
                 <tr key={p.emp_id}>
@@ -418,6 +457,7 @@ function EmployeeInsights({ t, setActiveNav, canSee }) {
                   <td style={{ ...td, textAlign: 'right', fontWeight: 700 }}>{num(p.perf.cases)}</td>
                   {stages.map(sk => <td key={sk} style={{ ...td, textAlign: 'right', color: sortStage === sk ? t.gold : t.text2 }}>{fmtM(p.perf[sk])}</td>)}
                   <td style={{ ...td, textAlign: 'right', color: t.gold, fontWeight: 700 }}>{fmtM(p.perf.total)}</td>
+                  <td style={{ ...td, padding: '2px 10px' }}><Sparkline data={p.spark} color={t.blue} /></td>
                 </tr>
               ))}</tbody>
             </table>
@@ -438,6 +478,26 @@ function EmployeeInsights({ t, setActiveNav, canSee }) {
                   <td style={{ ...td, textAlign: 'right', color: b.managers === 0 ? t.red : t.text2 }}>{num(b.managers)}</td>
                   <td style={{ ...td, textAlign: 'right' }}>{num(b.cases_opened)}</td>
                   <td style={{ ...td, textAlign: 'right', color: t.gold, fontWeight: 700 }}>{fmtM(b.median_tat)}</td>
+                </tr>
+              ))}</tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {tab === 'regions' && (
+        <div style={{ ...card, overflow: 'hidden' }}>
+          <div style={{ padding: '9px 12px', borderBottom: `1px solid ${t.border}`, fontSize: '.72rem', fontWeight: 700, color: t.text1 }}>Region rollup <span style={{ color: t.text4, fontWeight: 400, fontSize: '.62rem' }}>· staff · branches · cases · median TAT</span></div>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead><tr><th style={th}>Region</th><th style={{ ...th, textAlign: 'right' }}>Staff</th><th style={{ ...th, textAlign: 'right' }}>Branches</th><th style={{ ...th, textAlign: 'right' }}>Cases opened</th><th style={{ ...th, textAlign: 'right' }}>Median TAT</th></tr></thead>
+              <tbody>{(d.byRegion || []).map(r => (
+                <tr key={r.key}>
+                  <td style={{ ...td, color: t.text1, fontWeight: 600 }}>{r.key}</td>
+                  <td style={{ ...td, textAlign: 'right' }}>{num(r.staff)}</td>
+                  <td style={{ ...td, textAlign: 'right' }}>{num(r.branches)}</td>
+                  <td style={{ ...td, textAlign: 'right' }}>{num(r.cases_opened)}</td>
+                  <td style={{ ...td, textAlign: 'right', color: t.gold, fontWeight: 700 }}>{fmtM(r.median_tat)}</td>
                 </tr>
               ))}</tbody>
             </table>

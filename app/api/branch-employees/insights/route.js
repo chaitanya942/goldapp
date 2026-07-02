@@ -28,7 +28,7 @@ export async function GET(req) {
     })
     client.on('error', () => {})
     const Q = (s) => client.query(s).then(r => r.rows)
-    const [emps, opened, handled, cohort, est, quo, pay, klog] = await Promise.all([
+    const [emps, opened, handled, cohort, est, quo, pay, klog, daily] = await Promise.all([
       Q(`SELECT e.id, e.emp_id, trim(coalesce(e.first_name,'')||' '||coalesce(e.last_name,'')) name,
                 e.role::text role, e.designation, e.active, e.logged_in_at, e.date_of_joining,
                 b.name branch, b.state
@@ -49,6 +49,7 @@ export async function GET(req) {
       Q(`SELECT transaction_id tid, EXTRACT(EPOCH FROM min(created_at)) ts, EXTRACT(EPOCH FROM max(updated_at)) upd, (array_agg(quotation_approved_id) FILTER (WHERE quotation_approved_id IS NOT NULL))[1] appr FROM "Quotation" GROUP BY 1`),
       Q(`SELECT transaction_id tid, EXTRACT(EPOCH FROM min(created_at)) ts, (array_agg(employee_id))[1] emp FROM "Payment" GROUP BY 1`),
       Q(`SELECT k.transaction_id tid, EXTRACT(EPOCH FROM min(l.created_at) FILTER (WHERE l.employee_class='KYC_MAKER')) km, EXTRACT(EPOCH FROM max(l.created_at) FILTER (WHERE l.employee_class='KYC_CHECKER')) kc, (array_agg(l.emp_id) FILTER (WHERE l.employee_class='KYC_CHECKER'))[1] emp FROM "KycLog" l JOIN "Kyc" k ON k.id=l.kyc_id GROUP BY 1`),
+      Q(`SELECT emp_id, to_char((created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata')::date,'YYYY-MM-DD') d, count(*)::int n FROM "Transaction" WHERE emp_id IS NOT NULL AND created_at >= (now() AT TIME ZONE 'UTC') - interval '30 days' GROUP BY 1,2`),
     ])
     await client.end(); client = null
 
@@ -59,9 +60,17 @@ export async function GET(req) {
     const idx = (a) => Object.fromEntries(a.map(r => [r.tid, r]))
     const E = idx(est), Qn = idx(quo), P = idx(pay), K = idx(klog)
 
-    // Per-employee stage duration buckets (attribute each stage to its handler).
+    // Per-employee stage duration buckets (attribute each stage to its handler),
+    // plus org-wide buckets for the bottleneck view.
     const stagePerf = {}   // emp_id → { val:[], estneg:[], ... , total:[] }
-    const push = (emp, stage, val) => { if (!emp || val == null) return; const g = stagePerf[emp] = stagePerf[emp] || { val: [], estneg: [], quoprep: [], quoappr: [], kyc: [], pay: [], total: [], cases: 0 }; g[stage].push(val) }
+    const orgStages = { val: [], estneg: [], quoprep: [], quoappr: [], kyc: [], pay: [], total: [] }
+    const push = (emp, stage, val) => {
+      if (val == null || val < 0) return
+      orgStages[stage].push(val)
+      if (!emp) return
+      const g = stagePerf[emp] = stagePerf[emp] || { val: [], estneg: [], quoprep: [], quoappr: [], kyc: [], pay: [], total: [], cases: 0 }
+      g[stage].push(val)
+    }
     for (const t of cohort) {
       const e = E[t.id], q = Qn[t.id], p = P[t.id], k = K[t.id]
       const opener = t.opener
@@ -71,8 +80,16 @@ export async function GET(req) {
       push(norm(q?.appr), 'quoappr', dmin(q?.ts, q?.upd))
       push(norm(k?.emp), 'kyc', dmin(k?.km, k?.kc))
       push(norm(p?.emp), 'pay', dmin(k?.kc ?? q?.upd, p?.ts))
-      if (opener) { const g = stagePerf[opener]; if (g) { g.cases++; const tot = dmin(t.o, t.c); if (tot != null) g.total.push(tot) } }
+      const tot = dmin(t.o, t.c)
+      if (tot != null) orgStages.total.push(tot)
+      if (opener) { const g = stagePerf[opener] = stagePerf[opener] || { val: [], estneg: [], quoprep: [], quoappr: [], kyc: [], pay: [], total: [], cases: 0 }; g.cases++; if (tot != null) g.total.push(tot) }
     }
+    // 30-day daily throughput → per-employee sparkline + org trend.
+    const dayList = Array.from({ length: 30 }, (_, i) => { const dt = new Date(Date.now() - (29 - i) * 86400000 + 5.5 * 3600000); return dt.toISOString().slice(0, 10) })
+    const empDay = {}
+    for (const r of daily) { (empDay[r.emp_id] = empDay[r.emp_id] || {})[r.d] = r.n }
+    const sparkOf = (emp) => dayList.map(d => empDay[emp]?.[d] || 0)
+    const orgTrend = dayList.map(d => daily.filter(r => r.d === d).reduce((s, r) => s + r.n, 0))
     const perfOf = (emp) => { const g = stagePerf[emp]; if (!g) return null; const out = { cases: g.cases, total: r1(med(g.total)) }; STAGES.forEach(s => { out[s] = r1(med(g[s])); out[`${s}_n`] = g[s].filter(v => v != null && v >= 0).length }); return out }
 
     const openedBy = Object.fromEntries(opened.map(r => [r.emp_id, r]))
@@ -90,10 +107,19 @@ export async function GET(req) {
         cases_opened: o?.n || 0, cases_handled: handledBy[e.emp_id] || 0,
         last_active: lastActive, idle_days: daysSince(lastActive),
         tenure_months: tenureMonths(e.date_of_joining), date_of_joining: e.date_of_joining || null,
-        perf: perfOf(e.emp_id),
+        perf: perfOf(e.emp_id), spark: sparkOf(e.emp_id),
       }
     })
     const active = people.filter(p => p.active)
+
+    // region rollup (region derived from state) — staff, cases, median TAT.
+    const regionOf = (st) => { const s = (st || '').toLowerCase(); if (!s) return 'Unknown'; if (s.includes('kerala')) return 'Kerala'; if (s.includes('karnataka')) return 'Karnataka'; if (s.includes('tamil')) return 'Tamil Nadu'; if (s.includes('andhra') || s.includes('telangana')) return 'Andhra/Telangana'; return st }
+    const rmap = {}
+    for (const p of active) { const k = regionOf(p.state); const g = rmap[k] = rmap[k] || { key: k, staff: 0, branches: new Set(), cases_opened: 0, tats: [] }; g.staff++; g.branches.add(p.branch); g.cases_opened += p.cases_opened; if (p.perf?.total != null) g.tats.push(p.perf.total) }
+    const byRegion = Object.values(rmap).map(g => ({ key: g.key, staff: g.staff, branches: g.branches.size, cases_opened: g.cases_opened, median_tat: r1(med(g.tats)) })).sort((a, b) => b.staff - a.staff)
+
+    // org-wide stage bottleneck — median hours per stage across all cases.
+    const bottleneck = [...STAGES, 'total'].map(s => ({ stage: s, median: r1(med(orgStages[s])), n: orgStages[s].filter(v => v != null && v >= 0).length }))
 
     // branch rollup — staff, managers, cases, avg total TAT (median of members' medians)
     const bmap = {}
@@ -123,7 +149,8 @@ export async function GET(req) {
         total_cases_opened: active.reduce((s, p) => s + p.cases_opened, 0),
         median_org_tat: r1(med(active.map(p => p.perf?.total).filter(v => v != null))),
       },
-      byBranch, byRole, topOpeners, topHandlers, fastest, idle, newJoiners, exits, people,
+      byBranch, byRegion, byRole, topOpeners, topHandlers, fastest, idle, newJoiners, exits, people,
+      bottleneck, orgTrend, trendDays: dayList,
       stages: STAGES, generated_at: new Date().toISOString(),
     })
   } catch (err) {
