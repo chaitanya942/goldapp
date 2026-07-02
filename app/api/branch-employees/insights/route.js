@@ -9,6 +9,7 @@ import { requireAuth, ROLE_GROUPS } from '../../../../lib/apiAuth'
 //   • branch rollups (staff, managers, cases, avg total TAT)
 //   • role distribution · tenure / new-joiners / exits
 const med = (a) => { const x = a.filter(v => v != null && v >= 0).sort((p, q) => p - q); if (!x.length) return null; const m = Math.floor(x.length / 2); return x.length % 2 ? x[m] : (x[m - 1] + x[m]) / 2 }
+const pct = (a, p) => { const x = a.filter(v => v != null && v >= 0).sort((m, n) => m - n); if (!x.length) return null; const i = Math.min(x.length - 1, Math.floor((p / 100) * x.length)); return x[i] }
 const r1  = (x) => x == null ? null : Math.round(x * 10) / 10
 const dmin = (a, b) => (a != null && b != null && b >= a) ? (b - a) / 60 : null
 const STAGES = ['val', 'estneg', 'quoprep', 'quoappr', 'kyc', 'pay']
@@ -90,7 +91,7 @@ export async function GET(req) {
     for (const r of daily) { (empDay[r.emp_id] = empDay[r.emp_id] || {})[r.d] = r.n }
     const sparkOf = (emp) => dayList.map(d => empDay[emp]?.[d] || 0)
     const orgTrend = dayList.map(d => daily.filter(r => r.d === d).reduce((s, r) => s + r.n, 0))
-    const perfOf = (emp) => { const g = stagePerf[emp]; if (!g) return null; const out = { cases: g.cases, total: r1(med(g.total)) }; STAGES.forEach(s => { out[s] = r1(med(g[s])); out[`${s}_n`] = g[s].filter(v => v != null && v >= 0).length }); return out }
+    const perfOf = (emp) => { const g = stagePerf[emp]; if (!g) return null; const out = { cases: g.cases, total: r1(med(g.total)), p90: r1(pct(g.total, 90)) }; STAGES.forEach(s => { out[s] = r1(med(g[s])); out[`${s}_n`] = g[s].filter(v => v != null && v >= 0).length }); return out }
 
     const openedBy = Object.fromEntries(opened.map(r => [r.emp_id, r]))
     const handledBy = Object.fromEntries(handled.map(r => [r.emp, r.n]))
@@ -125,12 +126,20 @@ export async function GET(req) {
     const bmap = {}
     for (const p of active) {
       const k = p.branch || '—'
-      const g = bmap[k] = bmap[k] || { key: k, state: p.state, staff: 0, managers: 0, cases_opened: 0, tats: [] }
+      const g = bmap[k] = bmap[k] || { key: k, state: p.state, staff: 0, managers: 0, cases_opened: 0, handled: [], tats: [], st: { val: [], estneg: [], quoprep: [], quoappr: [], kyc: [], pay: [] } }
       g.staff++; if (/manager/i.test(p.designation || '')) g.managers++
       g.cases_opened += p.cases_opened
+      g.handled.push(p.cases_handled || 0)
       if (p.perf?.total != null) g.tats.push(p.perf.total)
+      if (p.perf) STAGES.forEach(s => { if (p.perf[s] != null) g.st[s].push(p.perf[s]) })
     }
-    const byBranch = Object.values(bmap).map(g => ({ key: g.key, state: g.state, staff: g.staff, managers: g.managers, cases_opened: g.cases_opened, median_tat: r1(med(g.tats)) })).sort((a, b) => b.staff - a.staff)
+    const byBranch = Object.values(bmap).map(g => {
+      const sm = {}; STAGES.forEach(s => sm[s] = r1(med(g.st[s])))
+      const worst = STAGES.reduce((w, s) => (sm[s] != null && (w == null || sm[s] > sm[w])) ? s : w, null)
+      // workload concentration: top handler's share of the branch's handled cases
+      const tot = g.handled.reduce((a, b) => a + b, 0), top = Math.max(0, ...g.handled)
+      return { key: g.key, state: g.state, staff: g.staff, managers: g.managers, cases_opened: g.cases_opened, median_tat: r1(med(g.tats)), stages: sm, worst, concentration: tot ? Math.round((top / tot) * 100) : null }
+    }).sort((a, b) => b.staff - a.staff)
     const byRole = Object.values(active.reduce((m, p) => { const k = p.role || '—'; m[k] = (m[k] || 0) + 1; return m }, {})).length ? Object.entries(active.reduce((m, p) => { const k = p.role || '—'; m[k] = (m[k] || 0) + 1; return m }, {})).map(([key, staff]) => ({ key, staff })).sort((a, b) => b.staff - a.staff) : []
 
     const topOpeners  = [...active].filter(p => p.cases_opened > 0).sort((a, b) => b.cases_opened - a.cases_opened).slice(0, 15)

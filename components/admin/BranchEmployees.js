@@ -336,6 +336,7 @@ function EmployeeInsights({ t, setActiveNav, canSee }) {
   const [err, setErr] = useState(null)
   const [tab, setTab] = useState('performance')
   const [sortStage, setSortStage] = useState('cases')
+  const [selEmp, setSelEmp] = useState(null)
 
   useEffect(() => {
     let live = true
@@ -359,6 +360,8 @@ function EmployeeInsights({ t, setActiveNav, canSee }) {
     .sort((a, b) => sortStage === 'cases' ? (b.perf.cases - a.perf.cases) : ((a.perf[sortStage] ?? 1e9) - (b.perf[sortStage] ?? 1e9)))
     .slice(0, 40)
   const goProductivity = () => canSee?.('productivity') && setActiveNav?.('productivity')
+  const orgMed = Object.fromEntries((d.bottleneck || []).map(b => [b.stage, b.median]))
+  const wow = (spark) => { if (!spark || spark.length < 14) return null; const last = spark.slice(-7).reduce((a, b) => a + b, 0), prev = spark.slice(-14, -7).reduce((a, b) => a + b, 0); if (!prev && !last) return null; if (!prev) return { pct: 100, up: true, last, prev }; return { pct: Math.round(((last - prev) / prev) * 100), up: last >= prev, last, prev } }
 
   const Kpi = ({ label, val, color }) => (
     <div style={{ ...card, padding: '11px 14px', flex: 1, minWidth: 120, borderLeft: `3px solid ${color || t.gold}` }}>
@@ -438,9 +441,46 @@ function EmployeeInsights({ t, setActiveNav, canSee }) {
         {canSee?.('productivity') && <button onClick={goProductivity} style={{ marginLeft: 'auto', background: 'none', border: `1px solid ${t.border}`, borderRadius: 6, color: t.blue, padding: '5px 12px', fontSize: '.7rem', fontWeight: 600, cursor: 'pointer' }}>Open Productivity →</button>}
       </div>
 
+      {tab === 'performance' && selEmp && (() => {
+        const p = selEmp, w = wow(p.spark)
+        return (
+          <div style={{ ...card, padding: 14, borderLeft: `3px solid ${t.gold}` }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10, flexWrap: 'wrap' }}>
+              <div>
+                <div style={{ fontSize: '.95rem', fontWeight: 700, color: t.text1 }}>{p.name}</div>
+                <div style={{ fontSize: '.66rem', color: t.text3, marginTop: 2 }}>{p.branch}{p.state ? ` · ${p.state}` : ''} · {p.role || p.designation || '—'}{p.tenure_months != null ? ` · ${p.tenure_months}mo tenure` : ''}{p.idle_days != null ? ` · last active ${p.idle_days}d ago` : ''}</div>
+              </div>
+              <button onClick={() => setSelEmp(null)} style={{ background: 'none', border: `1px solid ${t.border}`, borderRadius: 6, color: t.text3, padding: '3px 10px', fontSize: '.66rem', cursor: 'pointer' }}>✕ close</button>
+            </div>
+            <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap', margin: '12px 0', alignItems: 'center' }}>
+              <div><div style={{ fontSize: '1.15rem', fontWeight: 700, color: t.gold, fontFamily: 'monospace' }}>{num(p.perf.cases)}</div><div style={{ fontSize: '.58rem', color: t.text4, textTransform: 'uppercase' }}>Cases</div></div>
+              <div><div style={{ fontSize: '1.15rem', fontWeight: 700, color: t.blue, fontFamily: 'monospace' }}>{num(p.cases_handled)}</div><div style={{ fontSize: '.58rem', color: t.text4, textTransform: 'uppercase' }}>Handled</div></div>
+              <div><div style={{ fontSize: '1.15rem', fontWeight: 700, color: t.text1, fontFamily: 'monospace' }}>{fmtM(p.perf.total)}</div><div style={{ fontSize: '.58rem', color: t.text4, textTransform: 'uppercase' }}>Median TAT</div></div>
+              <div><div style={{ fontSize: '1.15rem', fontWeight: 700, color: t.text2, fontFamily: 'monospace' }}>{fmtM(p.perf.p90)}</div><div style={{ fontSize: '.58rem', color: t.text4, textTransform: 'uppercase' }}>p90 (worst)</div></div>
+              {w && <div><div style={{ fontSize: '1.15rem', fontWeight: 700, fontFamily: 'monospace', color: w.up ? t.green : t.red }}>{w.up ? '▲' : '▼'} {Math.abs(w.pct)}%</div><div style={{ fontSize: '.58rem', color: t.text4, textTransform: 'uppercase' }}>WoW ({w.last} vs {w.prev})</div></div>}
+              <div style={{ marginLeft: 'auto' }}><div style={{ fontSize: '.58rem', color: t.text4, textTransform: 'uppercase', marginBottom: 3 }}>30-day activity</div><Sparkline data={p.spark} color={t.blue} w={160} h={34} /></div>
+            </div>
+            <div style={{ fontSize: '.62rem', color: t.text3, fontWeight: 700, textTransform: 'uppercase', marginBottom: 6 }}>Stage TAT vs org median</div>
+            {stages.map(sk => { const v = p.perf[sk], o = orgMed[sk], mx = Math.max(v || 0, o || 0, 1); const slower = v != null && o != null && v > o
+              return (
+                <div key={sk} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 5 }}>
+                  <span style={{ width: 78, fontSize: '.62rem', color: t.text3, textAlign: 'right' }}>{STAGE_LBL[sk]}</span>
+                  <div style={{ flex: 1, position: 'relative', height: 14, background: `${t.border}44`, borderRadius: 3 }}>
+                    <div style={{ position: 'absolute', left: 0, top: 0, height: '100%', width: `${((v || 0) / mx) * 100}%`, background: slower ? t.red : t.green, borderRadius: 3, opacity: .85 }} />
+                    {o != null && <div title="org median" style={{ position: 'absolute', left: `${(o / mx) * 100}%`, top: -2, height: 18, width: 2, background: t.text2 }} />}
+                  </div>
+                  <span style={{ width: 52, fontSize: '.62rem', fontFamily: 'monospace', color: slower ? t.red : t.text2, textAlign: 'right' }}>{fmtM(v)}</span>
+                  <span style={{ width: 60, fontSize: '.58rem', color: t.text4, textAlign: 'right' }}>org {fmtM(o)}</span>
+                </div>
+              ) })}
+            <div style={{ fontSize: '.55rem', color: t.text4, marginTop: 4 }}>Bar = this employee · vertical marker = org median · green = at/below org, red = slower.</div>
+          </div>
+        )
+      })()}
+
       {tab === 'performance' && (
         <div style={{ ...card, overflow: 'hidden' }}>
-          <div style={{ padding: '9px 12px', borderBottom: `1px solid ${t.border}`, fontSize: '.72rem', fontWeight: 700, color: t.text1 }}>Performance — per-employee stage TAT medians <span style={{ color: t.text4, fontWeight: 400, fontSize: '.62rem' }}>· click a stage to rank by it (fastest first) · top 40 by cases</span></div>
+          <div style={{ padding: '9px 12px', borderBottom: `1px solid ${t.border}`, fontSize: '.72rem', fontWeight: 700, color: t.text1 }}>Performance — per-employee stage TAT medians <span style={{ color: t.text4, fontWeight: 400, fontSize: '.62rem' }}>· click a row for the deep-dive · click a stage header to rank · top 40 by cases</span></div>
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead><tr>
@@ -451,7 +491,7 @@ function EmployeeInsights({ t, setActiveNav, canSee }) {
                 <th style={{ ...th, textAlign: 'center' }}>30d activity</th>
               </tr></thead>
               <tbody>{perfRows.map(p => (
-                <tr key={p.emp_id}>
+                <tr key={p.emp_id} onClick={() => setSelEmp(p)} style={{ cursor: 'pointer', background: selEmp?.emp_id === p.emp_id ? `${t.gold}12` : 'transparent' }}>
                   <td style={{ ...td, color: t.text1, fontWeight: 600 }}>{p.name}</td>
                   <td style={td}>{p.branch}</td>
                   <td style={{ ...td, textAlign: 'right', fontWeight: 700 }}>{num(p.perf.cases)}</td>
@@ -470,7 +510,7 @@ function EmployeeInsights({ t, setActiveNav, canSee }) {
           <div style={{ padding: '9px 12px', borderBottom: `1px solid ${t.border}`, fontSize: '.72rem', fontWeight: 700, color: t.text1 }}>Branch rollup <span style={{ color: t.text4, fontWeight: 400, fontSize: '.62rem' }}>· staff · manager coverage · cases · median TAT</span></div>
           <div style={{ overflowX: 'auto', maxHeight: 500 }}>
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead><tr><th style={th}>Branch</th><th style={{ ...th, textAlign: 'right' }}>Staff</th><th style={{ ...th, textAlign: 'right' }}>Managers</th><th style={{ ...th, textAlign: 'right' }}>Cases opened</th><th style={{ ...th, textAlign: 'right' }}>Median TAT</th></tr></thead>
+              <thead><tr><th style={th}>Branch</th><th style={{ ...th, textAlign: 'right' }}>Staff</th><th style={{ ...th, textAlign: 'right' }}>Managers</th><th style={{ ...th, textAlign: 'right' }}>Cases opened</th><th style={{ ...th, textAlign: 'right' }}>Median TAT</th><th style={th}>Slowest stage</th><th style={{ ...th, textAlign: 'right' }} title="Top handler's share of the branch's handled cases — high = key-person risk">Top-handler load</th></tr></thead>
               <tbody>{d.byBranch.map(b => (
                 <tr key={b.key}>
                   <td style={{ ...td, color: t.text1, fontWeight: 600 }}>{b.key}</td>
@@ -478,6 +518,8 @@ function EmployeeInsights({ t, setActiveNav, canSee }) {
                   <td style={{ ...td, textAlign: 'right', color: b.managers === 0 ? t.red : t.text2 }}>{num(b.managers)}</td>
                   <td style={{ ...td, textAlign: 'right' }}>{num(b.cases_opened)}</td>
                   <td style={{ ...td, textAlign: 'right', color: t.gold, fontWeight: 700 }}>{fmtM(b.median_tat)}</td>
+                  <td style={{ ...td, color: t.text3 }}>{b.worst ? `${STAGE_LBL[b.worst] || b.worst} · ${fmtM(b.stages?.[b.worst])}` : '—'}</td>
+                  <td style={{ ...td, textAlign: 'right', color: b.concentration >= 70 ? t.red : t.text2 }}>{b.concentration == null ? '—' : `${b.concentration}%`}</td>
                 </tr>
               ))}</tbody>
             </table>
