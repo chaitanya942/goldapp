@@ -161,9 +161,14 @@ async function runSync(request) {
         -- that's been initiated at RazorpayX but is still 'processing' (status
         -- PENDING) counts the SAME — the customer was paid and left; only
         -- RazorpayX's confirmation/UTR is lagging. Both mark the purchase moment.
+        -- CONFIRMED is another terminal success state RazorpayX reports (distinct
+        -- from COMPLETED, provider_status 'processed'/null) — the customer was
+        -- paid, so it counts too. Without it, CONFIRMED bills (a completed txn
+        -- whose only final payment is CONFIRMED) were silently dropped from the
+        -- sync and stayed at their stale/zero values (e.g. WGKA-59290).
         SELECT MAX(created_at) fp FROM "Payment"
         WHERE transaction_id = t.id AND type = 'FINAL_PAYMENT'
-          AND (status = 'COMPLETED' OR (status = 'PENDING' AND provider_status = 'processing'))
+          AND (status IN ('COMPLETED', 'CONFIRMED') OR (status = 'PENDING' AND provider_status = 'processing'))
       ) fpay ON true
       LEFT JOIN orn ON orn.transaction_id = t.id
       -- Window on the FINAL-PAYMENT date, not created_at: a bill walked-in before
