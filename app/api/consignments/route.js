@@ -1499,7 +1499,7 @@ export async function GET(req) {
     // what made this come back empty while the Net Wt showed 2898 g.
     const { data: bills, error: bErr } = await supabase
       .from('purchases')
-      .select('id, application_id, customer_name, branch_name, current_branch, gross_weight, net_weight, total_amount, purchase_date, stock_status, dispatched_at, received_at')
+      .select('id, application_id, customer_name, branch_name, current_branch, gross_weight, net_weight, total_amount, purchase_date, stock_status, dispatched_at, received_at, booked_at')
       .eq('booking_id', bookingId)
       .order('net_weight', { ascending: false })
     if (bErr) return Response.json({ error: bErr.message }, { status: 500 })
@@ -1511,26 +1511,39 @@ export async function GET(req) {
       const d = new Date(new Date(utcIso).getTime() + 5.5 * 3600_000)
       return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`
     }
-    // Does each bill have a consignment created? — to tell S6 (booked, no
-    // consignment) apart from the transit tiers.
+    // Consignment created_at per bill (latest non-cancelled) — used to place each
+    // bill in the section it was in AT BOOKING TIME.
     const billIds = (bills || []).map(b => b.id).filter(Boolean)
-    const consignedSet = new Set()
+    const consMap = {}   // purchase_id → consignment created_at
     for (let i = 0; i < billIds.length; i += 200) {
-      const { data: ci } = await supabase.from('consignment_items').select('purchase_id').in('purchase_id', billIds.slice(i, i + 200))
-      ;(ci || []).forEach(x => consignedSet.add(x.purchase_id))
+      const { data: ci } = await supabase
+        .from('consignment_items')
+        .select('purchase_id, consignment:consignment_id(created_at, status)')
+        .in('purchase_id', billIds.slice(i, i + 200))
+      for (const l of ci || []) {
+        const c = l.consignment
+        if (!c || c.status === 'cancelled' || c.status === 'seed') continue
+        if (!consMap[l.purchase_id] || new Date(c.created_at) > new Date(consMap[l.purchase_id])) consMap[l.purchase_id] = c.created_at
+      }
     }
-    // Which Bidding SECTION a bill was booked from — region + status + delivery
-    // TAT + consignment, independent of its CURRENT arrival status (an at_ho bill
-    // still shows its origin section, e.g. S1, not "At HO"):
-    //   S1 Bangalore · S2/S3/S4 outstation transit (24/48/72h) · S6 booked-with-
-    //   no-consignment · S7 outstation branch-pickup. (S5 is unbooked, so it
-    //   never appears in a booked breakup.)
+    const nowIstDate = istDateOf(new Date().toISOString())
+    // Section the bill was booked FROM — reconstructed as of its booking day:
+    //   S1 Bangalore · S2/S3/S4 outstation transit arriving +1/+2/+3 working days
+    //   from the booking day · S5 consignment created but its arrival had already
+    //   passed the booking day (the stuck/older pool) · S6 booked with no
+    //   consignment · S7 outstation branch-pickup (no consignment, still at branch).
     const classifySection = (p, isBlr) => {
-      if (isBlr)                          return 'S1'
-      if (p.stock_status === 'at_branch') return 'S7'
-      if (!consignedSet.has(p.id))        return 'S6'
+      if (isBlr) return 'S1'
+      const cc = consMap[p.id]
+      if (!cc) return p.stock_status === 'at_branch' ? 'S7' : 'S6'
+      const dispatchDate = p.dispatched_at ? istDateOf(p.dispatched_at) : istDateOf(cc)
       const tat = tatBy[p.branch_name] || 24
-      return tat <= 24 ? 'S2' : tat <= 48 ? 'S3' : 'S4'
+      const ea = addWorkingDaysSkipSunday(dispatchDate, Math.max(1, Math.ceil(tat / 24)))
+      const bday = p.booked_at ? istDateOf(p.booked_at) : nowIstDate
+      if (ea === addWorkingDaysSkipSunday(bday, 1)) return 'S2'
+      if (ea === addWorkingDaysSkipSunday(bday, 2)) return 'S3'
+      if (ea === addWorkingDaysSkipSunday(bday, 3)) return 'S4'
+      return 'S5'
     }
     const byBranch = {}
     let tBills = 0, tNet = 0, tGross = 0
