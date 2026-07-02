@@ -41,7 +41,7 @@ function pgPool() {
     _pg = new pg.Pool({
       host: process.env.NEW_CRM_DB_HOST, port: parseInt(process.env.NEW_CRM_DB_PORT || '5432'),
       database: process.env.NEW_CRM_DB_NAME, user: process.env.NEW_CRM_DB_USER, password: process.env.NEW_CRM_DB_PASSWORD,
-      ssl: { rejectUnauthorized: false }, max: 4, keepAlive: true,
+      ssl: { rejectUnauthorized: false }, max: 6, keepAlive: true,
       // NEW CRM kills idle sessions at 60s (idle_session_timeout). Close our
       // idle clients well before that so we never hand out a server-killed one.
       connectionTimeoutMillis: 10000, idleTimeoutMillis: 15000,
@@ -65,6 +65,15 @@ async function withPgRetry(fn) {
     }
     throw err
   }
+}
+// Employee lookup (712 rows) rarely changes — cache 5 min to save a ~110ms
+// round-trip on every report/people/case call.
+let _empCache = null
+async function getEmployees(p) {
+  if (_empCache && Date.now() - _empCache.at < 300000) return _empCache.rows
+  const rows = (await p.query(`SELECT id, emp_id, trim(coalesce(first_name,'')||' '||coalesce(last_name,'')) nm, role FROM "Employee"`)).rows
+  _empCache = { at: Date.now(), rows }
+  return rows
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -116,7 +125,7 @@ async function newCrmPull(from, to) {
   const WIN = `(t.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata')::date BETWEEN $1 AND $2`
   const q = (sql) => p.query(sql, [from, to]).then(r => r.rows)
   const [emps, cohort, est, quo, pay, ord, klog, rel, agr, orn] = await Promise.all([
-    p.query(`SELECT id, emp_id, trim(coalesce(first_name,'')||' '||coalesce(last_name,'')) nm, role FROM "Employee"`).then(r => r.rows),
+    getEmployees(p),
     q(`SELECT t.id, t.code, t.status, t.transaction_type ttype, t.emp_id opener, b.name branch, b.state bstate,
           EXTRACT(EPOCH FROM t.created_at) opened_s, EXTRACT(EPOCH FROM t.updated_at) completed_s,
           to_char((t.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata'),'YYYY-MM-DD') opened_date,
@@ -269,7 +278,7 @@ async function newCaseDetail(code) {
   const id = tx.id
   const one = (sql) => p.query(sql, [id]).then(r => r.rows[0])
   const [emps, e, qr, pr, o, kl, rr, a] = await Promise.all([
-    p.query(`SELECT id, emp_id, trim(coalesce(first_name,'')||' '||coalesce(last_name,'')) nm, role FROM "Employee"`).then(r => r.rows),
+    getEmployees(p),
     one(`SELECT EXTRACT(EPOCH FROM min(created_at)) ts, EXTRACT(EPOCH FROM max(updated_at)) upd, (array_agg(negotiation_approved_id) FILTER (WHERE negotiation_approved_id IS NOT NULL))[1] neg, (array_agg(service_charge_approved_id) FILTER (WHERE service_charge_approved_id IS NOT NULL))[1] svc FROM "Estimation" WHERE transaction_id=$1`),
     one(`SELECT EXTRACT(EPOCH FROM min(created_at)) ts, EXTRACT(EPOCH FROM max(updated_at)) upd, (array_agg(quotation_approved_id) FILTER (WHERE quotation_approved_id IS NOT NULL))[1] appr FROM "Quotation" WHERE transaction_id=$1`),
     one(`SELECT EXTRACT(EPOCH FROM min(created_at)) ts, (array_agg(employee_id))[1] emp, (array_agg(sales_emp_id))[1] sales FROM "Payment" WHERE transaction_id=$1`),
