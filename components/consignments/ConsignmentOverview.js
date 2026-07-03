@@ -66,6 +66,13 @@ const fmtDate = (d) => {
   const [y, m, day] = d.split('-')
   return `${day} ${MONTHS_ABBR[+m - 1]}`
 }
+// Timestamp (UTC ISO) → "DD Mon" in IST. last_moved_at is a created_at
+// timestamp, not a date-only string, so it needs TZ-correct extraction.
+const fmtTsDate = (ts) => {
+  if (!ts) return '—'
+  const d = new Date(new Date(ts).getTime() + 5.5 * 3600000)
+  return `${d.getUTCDate()} ${MONTHS_ABBR[d.getUTCMonth()]}`
+}
 // Year-inclusive label for the date chips, e.g. "17 Jun 2026".
 const fmtDateY = (d) => {
   if (!d) return ''
@@ -1876,6 +1883,9 @@ export default function ConsignmentOverview() {
                           {b.last_moved_days_ago != null
                             ? <span style={{ fontSize: '11px', color: t.purple, background: `${t.purple}15`, borderRadius: '5px', padding: '2px 8px', fontWeight: 600, whiteSpace: 'nowrap' }}>{b.last_moved_days_ago}d ago</span>
                             : <span style={{ fontSize: '11px', color: t.text4 }}>never</span>}
+                          {b.last_moved_at && (
+                            <div style={{ fontSize: '10px', color: t.text4, marginTop: '3px' }}>{fmtTsDate(b.last_moved_at)}</div>
+                          )}
                         </td>
                         </>)}
 
