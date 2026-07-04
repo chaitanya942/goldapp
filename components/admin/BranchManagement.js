@@ -56,6 +56,7 @@ export default function BranchManagement() {
   const [pickerSearch, setPickerSearch] = useState('')
   const [sortKey,      setSortKey]      = useState('name')
   const [sortDir,      setSortDir]      = useState(1)
+  const [activity,     setActivity]     = useState(null)   // { branch_name: last_bill_date } — absent = upcoming
 
   // Google address auto-resolution state
   const [resolveOpen,    setResolveOpen]    = useState(false)
@@ -64,13 +65,21 @@ export default function BranchManagement() {
   const [resolveResults, setResolveResults] = useState([])  // [{ branch_name, suggestion?, error?, accepted }]
   const [savingResolved, setSavingResolved] = useState(false)
 
-  useEffect(() => { load(); loadTmap() }, [])
+  useEffect(() => { load(); loadTmap(); loadActivity() }, [])
 
   const load = async () => {
     setLoading(true)
     const { data } = await supabase.from('branches').select('*').order('name')
     if (data) setBranches(data)
     setLoading(false)
+  }
+
+  const loadActivity = async () => {
+    try {
+      const res = await authedFetch('/api/branch-activity')
+      const data = await res.json()
+      setActivity(data.activity || {})
+    } catch { setActivity({}) }
   }
 
   const loadTmap = async () => {
@@ -121,12 +130,16 @@ export default function BranchManagement() {
   const incompleteBranches = branches.filter(b => !b.state || !b.region || !b.cluster)
   const regions = [...new Set(branches.map(b => b.region).filter(Boolean))].sort()
 
+  // Upcoming = branch is active but has never billed (only known once activity loads).
+  const isUpcoming = (b) => activity != null && b.is_active && !activity[b.name]
+
   const q = search.trim().toLowerCase()
   const filtered = branches.filter(b => {
     if (filterIncomplete && (b.state && b.region && b.cluster)) return false
     if (selRegions.size  && !selRegions.has(b.region)) return false
     if (statusFilter === 'active'   && !b.is_active)  return false
     if (statusFilter === 'inactive' &&  b.is_active)  return false
+    if (statusFilter === 'upcoming' && !isUpcoming(b)) return false
     if (selBranches.size && !selBranches.has(b.name)) return false
     if (q) return [b.name, b.state, b.region, b.cluster, b.branch_code, b.crm_branch_id].some(v => v?.toLowerCase().includes(q))
     return true
@@ -140,7 +153,7 @@ export default function BranchManagement() {
   const toggleRegion = (r) => setSelRegions(s => { const n = new Set(s); n.has(r) ? n.delete(r) : n.add(r); return n })
   const toggleBranch = (name) => setSelBranches(s => { const n = new Set(s); n.has(name) ? n.delete(name) : n.add(name); return n })
   const toggleSort = (k) => { if (sortKey === k) setSortDir(d => -d); else { setSortKey(k); setSortDir(1) } }
-  const stats = { total: branches.length, active: branches.filter(b => b.is_active).length, inactive: branches.filter(b => !b.is_active).length, regions: regions.length }
+  const stats = { total: branches.length, active: branches.filter(b => b.is_active).length, inactive: branches.filter(b => !b.is_active).length, upcoming: branches.filter(isUpcoming).length, regions: regions.length }
 
   const save = async () => {
     if (!form.name || !form.state || !form.region || !form.cluster) { setMsg('Please fill all required fields'); return }
@@ -379,9 +392,6 @@ export default function BranchManagement() {
           <div style={s.sub}>Add, activate, and manage all branches · new branches auto-add daily when they start purchasing</div>
         </div>
         <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-          <button onClick={openResolve} disabled={resolving} style={{ ...s.btnOutline, opacity: resolving ? .6 : 1 }}>
-            {resolving ? 'Resolving…' : 'Auto-resolve addresses'}
-          </button>
           <button style={s.btnGold} onClick={() => formOpen ? cancelForm() : setFormOpen(true)}>
             {formOpen ? 'Cancel' : 'Add branch'}
           </button>
@@ -556,7 +566,7 @@ export default function BranchManagement() {
 
       {/* STATS */}
       <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', marginBottom: '14px' }}>
-        {[['Total', stats.total, t.text1], ['Active', stats.active, t.green], ['Inactive', stats.inactive, '#e05555'], ['Regions', stats.regions, t.gold]].map(([label, val, color]) => (
+        {[['Total', stats.total, t.text1], ['Active', stats.active, t.green], ['Upcoming', stats.upcoming, '#6b8cce'], ['Inactive', stats.inactive, '#e05555'], ['Regions', stats.regions, t.gold]].map(([label, val, color]) => (
           <div key={label} style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: '8px', padding: '8px 16px', minWidth: '92px' }}>
             <div style={{ fontSize: '1.15rem', fontWeight: 600, color, fontFamily: 'monospace' }}>{val}</div>
             <div style={{ fontSize: '.56rem', color: t.text3, textTransform: 'uppercase', letterSpacing: '.08em', marginTop: '2px' }}>{label}</div>
@@ -574,8 +584,8 @@ export default function BranchManagement() {
           })}
         </div>
         <div style={{ display: 'flex', border: `1px solid ${t.border}`, borderRadius: '6px', overflow: 'hidden' }}>
-          {['all', 'active', 'inactive'].map(v => (
-            <button key={v} onClick={() => setStatusFilter(v)} style={{ background: statusFilter === v ? `${t.gold}22` : 'transparent', border: 'none', color: statusFilter === v ? t.gold : t.text3, padding: '5px 12px', fontSize: '.66rem', cursor: 'pointer', textTransform: 'capitalize', borderRight: v !== 'inactive' ? `1px solid ${t.border}` : 'none' }}>{v}</button>
+          {['all', 'active', 'upcoming', 'inactive'].map((v, i, arr) => (
+            <button key={v} onClick={() => setStatusFilter(v)} style={{ background: statusFilter === v ? `${t.gold}22` : 'transparent', border: 'none', color: statusFilter === v ? t.gold : t.text3, padding: '5px 12px', fontSize: '.66rem', cursor: 'pointer', textTransform: 'capitalize', borderRight: i !== arr.length - 1 ? `1px solid ${t.border}` : 'none' }}>{v}</button>
           ))}
         </div>
 
@@ -652,6 +662,7 @@ export default function BranchManagement() {
                   <td style={{ ...s.td, textAlign: 'center', color: t.text3, fontSize: '.65rem', width: '40px' }}>{i + 1}</td>
                   <td style={{ ...s.td, color: t.gold, fontWeight: 400 }}>
                     {b.name}
+                    {isUpcoming(b) && <span style={{ marginLeft: '6px', fontSize: '.58rem', color: '#6b8cce', border: '1px solid #6b8cce55', borderRadius: '3px', padding: '1px 5px', textTransform: 'uppercase', letterSpacing: '.04em' }}>upcoming</span>}
                     {(!b.state || !b.region || !b.cluster) && <span style={{ marginLeft: '6px', fontSize: '.58rem', color: t.gold, opacity: .6, border: `1px solid ${t.gold}44`, borderRadius: '3px', padding: '1px 4px' }}>incomplete</span>}
                   </td>
                   <td style={{ ...s.td, fontFamily: 'monospace', fontSize: '.68rem', color: b.crm_branch_id ? t.text2 : t.text4 }}>
