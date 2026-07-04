@@ -175,14 +175,16 @@ export default function Logistics({ embedded = false } = {}) {
   // Header stats. Bangalore branches don't have pickup/TAT/days (daily
   // executive pickup), so "missing" only flags them if partner is unset
   // or — for leaves — the hub isn't assigned yet.
+  // Bangalore + Kerala = daily pickup with a fixed region delivery rule
+  // (Bangalore same-day, Kerala next-day/24h) — no per-branch pickup time or TAT.
+  const isDailyRegion = (r) => r === 'Bangalore' || r === 'Kerala'
   const stats = useMemo(() => {
     const total = branches.length
-    const withPickup = branches.filter(b => b.region === 'Bangalore' || b.pickup_time).length
-    const withTat    = branches.filter(b => b.region === 'Bangalore' || b.delivery_tat_hours).length
+    const withPickup = branches.filter(b => isDailyRegion(b.region) || b.pickup_time).length
+    const withTat    = branches.filter(b => isDailyRegion(b.region) || b.delivery_tat_hours).length
     const missingAny = branches.filter(b => {
-      if (b.region === 'Bangalore') {
-        return !b.logistics_partner || (!b.is_hub && !b.hub_branch_name)
-      }
+      if (b.region === 'Bangalore') return !b.logistics_partner || (!b.is_hub && !b.hub_branch_name)
+      if (b.region === 'Kerala')    return false   // fully rule-based, nothing to configure
       return !b.pickup_time || !b.delivery_tat_hours || !b.logistics_partner
     }).length
     return { total, withPickup, withTat, missingAny }
@@ -246,7 +248,7 @@ export default function Logistics({ embedded = false } = {}) {
           {!embedded && <div style={{ fontSize: '.6rem', color: t.text4, letterSpacing: '.18em', textTransform: 'uppercase', fontWeight: 600 }}>Admin</div>}
           {!embedded && <div style={{ fontSize: '1.5rem', fontWeight: 200, color: t.text1, letterSpacing: '.02em', marginTop: '4px' }}>Logistics</div>}
           <div style={{ fontSize: '11px', color: t.text3, marginTop: embedded ? 0 : '4px' }}>
-            Configure courier partner, pickup time and delivery TAT per outstation branch.
+            Pickup time &amp; delivery TAT per outstation branch. Bangalore &amp; Kerala are daily pickup — Bangalore delivers same-day, Kerala next-day (24h).
           </div>
         </div>
         <button onClick={fetchAll}
@@ -304,9 +306,8 @@ export default function Logistics({ embedded = false } = {}) {
           const accent = t.gold
           const collapsed = collapsedRegions.has(r)
           const configuredCount = list.filter(b => {
-            if (b.region === 'Bangalore') {
-              return !!b.logistics_partner && (b.is_hub || !!b.hub_branch_name)
-            }
+            if (b.region === 'Bangalore') return !!b.logistics_partner && (b.is_hub || !!b.hub_branch_name)
+            if (b.region === 'Kerala')    return true   // rule-based (daily · next-day)
             return b.logistics_partner && b.pickup_time && b.delivery_tat_hours && (b.pickup_days || []).length
           }).length
           return (
@@ -323,8 +324,8 @@ export default function Logistics({ embedded = false } = {}) {
                     <thead>
                       <tr>
                         <th style={thL}>Branch</th>
-                        {r === 'Bangalore'
-                          ? <th style={thL} colSpan={3}>Hub · schedule</th>
+                        {isDailyRegion(r)
+                          ? <th style={thL} colSpan={3}>{r === 'Bangalore' ? 'Hub · schedule' : 'Schedule'}</th>
                           : <><th style={thL}>Pickup</th><th style={thL}>TAT</th><th style={thL}>Days</th></>}
                         <th style={{ ...thL, textAlign: 'right' }}>Action</th>
                       </tr>
@@ -606,6 +607,8 @@ function BranchRow({ t, branch, busy, onSave, regionAccent, partnerOptions, onAd
   const [hub,     setHub]     = useState(branch.hub_branch_name || '')
 
   const isBangalore  = branch.region === 'Bangalore'
+  const isKerala     = branch.region === 'Kerala'
+  const isDaily      = isBangalore || isKerala   // daily pickup, fixed region delivery
   const showHubField = isBangalore && !branch.is_hub && bangaloreHubs.length > 0
 
   useEffect(() => { setPartner(branch.logistics_partner || defaultPartner) }, [branch.logistics_partner, defaultPartner])
@@ -614,17 +617,16 @@ function BranchRow({ t, branch, busy, onSave, regionAccent, partnerOptions, onAd
   useEffect(() => { setDays(branch.pickup_days || ['Mon','Tue','Wed','Thu','Fri','Sat']) }, [branch.pickup_days])
   useEffect(() => { setHub(branch.hub_branch_name || '') }, [branch.hub_branch_name])
 
-  const partnerDirty = !isBangalore && ((partner || null) !== (branch.logistics_partner || null))
-  const scheduleDirty = !isBangalore && (
+  const scheduleDirty = !isDaily && (
     (pickup || '')                    !== (branch.pickup_time       || '')   ||
     Number(tat)                       !== Number(branch.delivery_tat_hours || 24)  ||
     JSON.stringify([...days].sort()) !== JSON.stringify([...(branch.pickup_days || ['Mon','Tue','Wed','Thu','Fri','Sat'])].sort())
   )
-  const dirty = partnerDirty || scheduleDirty || (showHubField && (hub || '') !== (branch.hub_branch_name || ''))
+  const dirty = scheduleDirty || (showHubField && (hub || '') !== (branch.hub_branch_name || ''))
 
   const onSubmit = async () => {
     const patch = { partner }
-    if (!isBangalore) { patch.pickup_time = pickup; patch.delivery_tat_hours = tat; patch.pickup_days = days }
+    if (!isDaily) { patch.pickup_time = pickup; patch.delivery_tat_hours = tat; patch.pickup_days = days }
     if (showHubField) patch.hub_branch_name = hub
     await onSave(branch.name, patch)
   }
@@ -637,7 +639,9 @@ function BranchRow({ t, branch, busy, onSave, regionAccent, partnerOptions, onAd
   const accent = regionAccent || t.gold
   const configured = isBangalore
     ? !!branch.logistics_partner && (branch.is_hub || !!branch.hub_branch_name)
-    : !!branch.logistics_partner && !!branch.pickup_time && !!branch.delivery_tat_hours && (branch.pickup_days || []).length > 0
+    : isKerala
+      ? true   // rule-based (daily · next-day 24h)
+      : !!branch.logistics_partner && !!branch.pickup_time && !!branch.delivery_tat_hours && (branch.pickup_days || []).length > 0
 
   const [, tickPickup] = useState(0)
   useEffect(() => {
@@ -663,19 +667,23 @@ function BranchRow({ t, branch, busy, onSave, regionAccent, partnerOptions, onAd
         </div>
       </td>
 
-      {isBangalore ? (
+      {isDaily ? (
         <td style={{ ...td }} colSpan={3}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
-            {showHubField ? (
+            {isBangalore && showHubField && (
               <select value={hub} onChange={e => setHub(e.target.value)} disabled={busy}
                 style={{ ...inp((hub || '') !== (branch.hub_branch_name || '')), minWidth: '160px', cursor: busy ? 'not-allowed' : 'pointer' }}>
                 <option value="">— Assign hub —</option>
                 {bangaloreHubs.map(h => <option key={h} value={h}>{h}</option>)}
               </select>
-            ) : branch.is_hub ? (
+            )}
+            {isBangalore && branch.is_hub && (
               <span style={{ fontSize: '11px', color: t.text3, fontWeight: 600 }}>Consolidation hub</span>
-            ) : null}
-            <span style={{ fontSize: '11px', color: t.text4 }}>◷ Daily pickup — executives sweep this {branch.is_hub ? 'hub' : 'branch'} every day.</span>
+            )}
+            <span style={{ fontSize: '11px', color: t.text3 }}>
+              ◷ <strong style={{ color: t.text2 }}>Daily pickup</strong>
+              <span style={{ color: t.text4 }}> · {isBangalore ? 'same-day delivery' : 'next-day delivery (24h)'}</span>
+            </span>
           </div>
         </td>
       ) : (
