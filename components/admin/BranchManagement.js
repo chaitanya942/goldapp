@@ -48,6 +48,15 @@ export default function BranchManagement() {
   const [syncMsg,          setSyncMsg]          = useState('')
   const [filterIncomplete, setFilterIncomplete] = useState(false)
 
+  // Filters
+  const [selRegions,   setSelRegions]   = useState(() => new Set())  // multi-select region
+  const [statusFilter, setStatusFilter] = useState('all')            // all | active | inactive
+  const [selBranches,  setSelBranches]  = useState(() => new Set())  // multi-select specific branches
+  const [pickerOpen,   setPickerOpen]   = useState(false)
+  const [pickerSearch, setPickerSearch] = useState('')
+  const [sortKey,      setSortKey]      = useState('name')
+  const [sortDir,      setSortDir]      = useState(1)
+
   // Google address auto-resolution state
   const [resolveOpen,    setResolveOpen]    = useState(false)
   const [resolving,      setResolving]      = useState(false)
@@ -110,11 +119,28 @@ export default function BranchManagement() {
   }
 
   const incompleteBranches = branches.filter(b => !b.state || !b.region || !b.cluster)
+  const regions = [...new Set(branches.map(b => b.region).filter(Boolean))].sort()
 
+  const q = search.trim().toLowerCase()
   const filtered = branches.filter(b => {
-    if (filterIncomplete) return !b.state || !b.region || !b.cluster
-    return [b.name, b.state, b.region, b.cluster].some(v => v?.toLowerCase().includes(search.toLowerCase()))
+    if (filterIncomplete && (b.state && b.region && b.cluster)) return false
+    if (selRegions.size  && !selRegions.has(b.region)) return false
+    if (statusFilter === 'active'   && !b.is_active)  return false
+    if (statusFilter === 'inactive' &&  b.is_active)  return false
+    if (selBranches.size && !selBranches.has(b.name)) return false
+    if (q) return [b.name, b.state, b.region, b.cluster, b.branch_code, b.crm_branch_id].some(v => v?.toLowerCase().includes(q))
+    return true
+  }).sort((a, b) => {
+    if (sortKey === 'status') return (Number(b.is_active) - Number(a.is_active)) * sortDir
+    return String(a[sortKey] || '').localeCompare(String(b[sortKey] || '')) * sortDir
   })
+
+  const anyFilter = q || filterIncomplete || selRegions.size || statusFilter !== 'all' || selBranches.size
+  const clearAllFilters = () => { setSearch(''); setFilterIncomplete(false); setSelRegions(new Set()); setStatusFilter('all'); setSelBranches(new Set()) }
+  const toggleRegion = (r) => setSelRegions(s => { const n = new Set(s); n.has(r) ? n.delete(r) : n.add(r); return n })
+  const toggleBranch = (name) => setSelBranches(s => { const n = new Set(s); n.has(name) ? n.delete(name) : n.add(name); return n })
+  const toggleSort = (k) => { if (sortKey === k) setSortDir(d => -d); else { setSortKey(k); setSortDir(1) } }
+  const stats = { total: branches.length, active: branches.filter(b => b.is_active).length, inactive: branches.filter(b => !b.is_active).length, regions: regions.length }
 
   const save = async () => {
     if (!form.name || !form.state || !form.region || !form.cluster) { setMsg('Please fill all required fields'); return }
@@ -528,12 +554,67 @@ export default function BranchManagement() {
         </div>
       )}
 
+      {/* STATS */}
+      <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', marginBottom: '14px' }}>
+        {[['Total', stats.total, t.text1], ['Active', stats.active, t.green], ['Inactive', stats.inactive, '#e05555'], ['Regions', stats.regions, t.gold]].map(([label, val, color]) => (
+          <div key={label} style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: '8px', padding: '8px 16px', minWidth: '92px' }}>
+            <div style={{ fontSize: '1.15rem', fontWeight: 600, color, fontFamily: 'monospace' }}>{val}</div>
+            <div style={{ fontSize: '.56rem', color: t.text3, textTransform: 'uppercase', letterSpacing: '.08em', marginTop: '2px' }}>{label}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* FILTER BAR */}
+      <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center', marginBottom: '10px' }}>
+        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', alignItems: 'center' }}>
+          <span style={{ fontSize: '.58rem', color: t.text3, textTransform: 'uppercase', letterSpacing: '.08em', marginRight: '2px' }}>Region</span>
+          {regions.map(r => {
+            const on = selRegions.has(r)
+            return <button key={r} onClick={() => toggleRegion(r)} style={{ background: on ? `${t.gold}22` : 'transparent', border: `1px solid ${on ? t.gold : t.border}`, color: on ? t.gold : t.text3, borderRadius: '999px', padding: '4px 11px', fontSize: '.66rem', cursor: 'pointer', whiteSpace: 'nowrap' }}>{r}</button>
+          })}
+        </div>
+        <div style={{ display: 'flex', border: `1px solid ${t.border}`, borderRadius: '6px', overflow: 'hidden' }}>
+          {['all', 'active', 'inactive'].map(v => (
+            <button key={v} onClick={() => setStatusFilter(v)} style={{ background: statusFilter === v ? `${t.gold}22` : 'transparent', border: 'none', color: statusFilter === v ? t.gold : t.text3, padding: '5px 12px', fontSize: '.66rem', cursor: 'pointer', textTransform: 'capitalize', borderRight: v !== 'inactive' ? `1px solid ${t.border}` : 'none' }}>{v}</button>
+          ))}
+        </div>
+
+        {/* Multi-select branch picker */}
+        <div style={{ position: 'relative' }}>
+          <button onClick={() => setPickerOpen(o => !o)} style={{ background: selBranches.size ? `${t.gold}22` : 'transparent', border: `1px solid ${selBranches.size ? t.gold : t.border}`, color: selBranches.size ? t.gold : t.text3, borderRadius: '6px', padding: '5px 12px', fontSize: '.66rem', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}>
+            {selBranches.size ? `${selBranches.size} branch${selBranches.size > 1 ? 'es' : ''} selected` : 'Select branches'} <span style={{ opacity: .6 }}>▾</span>
+          </button>
+          {pickerOpen && (
+            <>
+              <div onClick={() => setPickerOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 40 }} />
+              <div style={{ position: 'absolute', top: '115%', left: 0, zIndex: 50, width: '290px', background: t.card, border: `1px solid ${t.border}`, borderRadius: '8px', boxShadow: '0 12px 34px rgba(0,0,0,.45)', padding: '8px' }}>
+                <div style={{ display: 'flex', gap: '6px', marginBottom: '6px' }}>
+                  <input autoFocus value={pickerSearch} onChange={e => setPickerSearch(e.target.value)} placeholder="Filter branches…" style={{ ...s.input, padding: '5px 8px', fontSize: '.7rem' }} />
+                  {selBranches.size > 0 && <button onClick={() => setSelBranches(new Set())} style={{ background: 'transparent', border: `1px solid ${t.border}`, color: t.text3, borderRadius: '5px', padding: '0 9px', fontSize: '.62rem', cursor: 'pointer', whiteSpace: 'nowrap' }}>Clear</button>}
+                </div>
+                <div style={{ maxHeight: '250px', overflowY: 'auto' }}>
+                  {branches.filter(b => !pickerSearch || b.name.toLowerCase().includes(pickerSearch.toLowerCase())).map(b => (
+                    <label key={b.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '4px 6px', fontSize: '.72rem', color: t.text1, cursor: 'pointer' }}>
+                      <input type="checkbox" checked={selBranches.has(b.name)} onChange={() => toggleBranch(b.name)} />
+                      <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.name}</span>
+                      {!b.is_active && <span style={{ fontSize: '.54rem', color: t.text4, textTransform: 'uppercase' }}>inactive</span>}
+                    </label>
+                  ))}
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+
+        {anyFilter ? <button onClick={clearAllFilters} style={{ background: 'transparent', border: '1px solid #e0555544', color: '#e05555', borderRadius: '6px', padding: '5px 12px', fontSize: '.66rem', fontWeight: 600, cursor: 'pointer' }}>Clear all</button> : null}
+      </div>
+
       {/* SEARCH + EXPORT */}
       <div style={{ marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
         <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
           <input
             style={s.search}
-            placeholder="🔍  Search by name, state, region, cluster..."
+            placeholder="🔍  Search name, code, CRM ID, region…"
             value={search}
             onChange={e => setSearch(e.target.value)}
           />
@@ -544,9 +625,7 @@ export default function BranchManagement() {
             >✕</button>
           )}
         </div>
-        {(search || filterIncomplete) && (
-          <span style={{ fontSize: '.7rem', color: t.text3 }}>{filtered.length} of {branches.length} branches</span>
-        )}
+        <span style={{ fontSize: '.7rem', color: t.text3 }}>{anyFilter ? `${filtered.length} of ${branches.length}` : `${branches.length}`} branches</span>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: '8px' }}>
           <button style={s.btnOutline} onClick={exportCSV}>↓ CSV</button>
           <button style={s.btnOutline} onClick={exportXLSX}>↓ XLSX</button>
@@ -561,8 +640,10 @@ export default function BranchManagement() {
         <div style={s.tblWrap}>
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
-              <tr>{['#', 'Branch Name', 'CRM ID', 'Code', 'Address', 'State', 'Region', 'Model', 'Status', 'Action'].map(h =>
-                  <th key={h} style={{ ...s.th, textAlign: h === '#' ? 'center' : 'left' }}>{h}</th>
+              <tr>{[['#', null], ['Branch Name', 'name'], ['CRM ID', null], ['Code', null], ['Address', null], ['State', 'state'], ['Region', 'region'], ['Model', null], ['Status', 'status'], ['Action', null]].map(([h, key]) =>
+                  <th key={h} onClick={key ? () => toggleSort(key) : undefined} style={{ ...s.th, textAlign: h === '#' ? 'center' : 'left', cursor: key ? 'pointer' : 'default', color: key && sortKey === key ? t.gold : t.text3, userSelect: 'none' }}>
+                    {h}{key && sortKey === key ? (sortDir === 1 ? ' ▲' : ' ▼') : ''}
+                  </th>
                 )}</tr>
             </thead>
             <tbody>
@@ -609,7 +690,7 @@ export default function BranchManagement() {
               ))}
               {filtered.length === 0 && (
                 <tr><td colSpan={10} style={{ ...s.td, textAlign: 'center', color: t.text4, padding: '48px' }}>
-                  {search ? `No branches matching "${search}"` : 'No branches yet.'}
+                  {anyFilter ? 'No branches match the current filters.' : 'No branches yet.'}
                 </td></tr>
               )}
             </tbody>
