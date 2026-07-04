@@ -45,7 +45,6 @@ export default function BranchManagement() {
   const [newCluster, setNewCluster] = useState('')
 
   const [confirmDelete,    setConfirmDelete]    = useState(null)
-  const [syncing,          setSyncing]          = useState(false)
   const [syncMsg,          setSyncMsg]          = useState('')
   const [filterIncomplete, setFilterIncomplete] = useState(false)
 
@@ -180,31 +179,6 @@ export default function BranchManagement() {
     await supabase.from('branches').delete().eq('id', id)
     setConfirmDelete(null)
     load()
-  }
-
-  const syncFromCRM = async () => {
-    setSyncing(true); setSyncMsg('')
-    try {
-      const res  = await authedFetch('/api/sync-branch-addresses', { method: 'POST' })
-      const data = await res.json()
-      if (data.success) {
-        const s = data.summary
-        const parts = [`${s.new_branches_added} new added`, `${s.crm_id_stamped || 0} linked`, `${s.already_existed} unchanged`]
-        if (s.errors) parts.push(`${s.errors} errors`)
-        let msg = parts.join(', ')
-        if (data.errors?.length) {
-          msg += '\nFailed: ' + data.errors.map(e => `${e.name} (${e.error})`).join(' | ')
-        }
-        if (data.new_branches?.length) {
-          msg += '\nAdded: ' + data.new_branches.join(', ')
-        }
-        setSyncMsg(msg)
-        if (s.new_branches_added > 0) load()
-      } else {
-        setSyncMsg(`Error: ${data.error}${data.details ? `. ${data.details}` : ''}`)
-      }
-    } catch (e) { setSyncMsg(`Error: ${e.message}`) }
-    setSyncing(false)
   }
 
   // Open the Google auto-resolve panel. Builds the candidate list:
@@ -376,14 +350,11 @@ export default function BranchManagement() {
       <div style={s.header}>
         <div>
           <div style={s.title}>Branch Management</div>
-          <div style={s.sub}>Add, activate, and manage all branches across states</div>
+          <div style={s.sub}>Add, activate, and manage all branches · new branches auto-add daily when they start purchasing</div>
         </div>
         <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
           <button onClick={openResolve} disabled={resolving} style={{ ...s.btnOutline, opacity: resolving ? .6 : 1 }}>
             {resolving ? 'Resolving…' : 'Auto-resolve addresses'}
-          </button>
-          <button onClick={syncFromCRM} disabled={syncing} style={{ ...s.btnOutline, opacity: syncing ? .6 : 1 }}>
-            {syncing ? 'Syncing…' : 'Sync CRM'}
           </button>
           <button style={s.btnGold} onClick={() => formOpen ? cancelForm() : setFormOpen(true)}>
             {formOpen ? 'Cancel' : 'Add branch'}

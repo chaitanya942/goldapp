@@ -39,6 +39,7 @@ const EOD_ENDPOINT         = `${APP_URL}/api/eod-inventory-snapshot`
 const AT_RISK_ENDPOINT     = `${APP_URL}/api/consignments?action=bidding_at_risk_summary`
 const SECTION1_AUDIT_URL   = `${APP_URL}/api/bidding/section1-audit`
 const EMPLOYEE_SYNC_URL    = `${APP_URL}/api/sync-branch-employees`
+const BRANCH_SYNC_URL      = `${APP_URL}/api/sync-branches-auto`
 const HEADERS              = { Authorization: `Bearer ${CRON_SECRET}` }
 // /api/eod-inventory-snapshot POST + /api/bidding/section1-audit POST both
 // gate on x-cron-token (not Bearer).
@@ -50,6 +51,7 @@ let lastEodDate          = ''      // YYYY-MM-DD (IST) of the last successful EO
 let lastAtRiskDate       = ''      // YYYY-MM-DD (IST) of the last 7pm at-risk log — once per day
 let lastSection1AuditDate = ''     // YYYY-MM-DD (IST) of the last 23:30 Section 1 audit — once per day
 let lastEmployeeSyncDate  = ''     // YYYY-MM-DD (IST) of the last branch-employee refresh — once per day (midnight)
+let lastBranchSyncDate    = ''     // YYYY-MM-DD (IST) of the last branch auto-add — once per day
 
 // IST date helper — Asia/Kolkata is fixed UTC+5:30, no DST so we can shift manually.
 const istNow = () => new Date(Date.now() + 5.5 * 60 * 60 * 1000)
@@ -197,6 +199,28 @@ async function maybeSyncEmployees() {
   }
 }
 
+async function maybeSyncBranches() {
+  // Once per IST day — auto-add any NEW CRM branch that has started purchasing
+  // to the branch master (replaces the retired manual "Sync CRM" button). Also
+  // runs once on worker startup.
+  const today = istDateStr()
+  if (lastBranchSyncDate === today) return
+  try {
+    const res = await fetch(BRANCH_SYNC_URL, { method: 'POST', headers: { 'x-cron-token': CRON_SECRET } })
+    const txt = await res.text()
+    let body
+    try { body = JSON.parse(txt) } catch { body = { raw: txt } }
+    if (!res.ok || body.success === false) {
+      console.error(new Date().toISOString(), `[cron-sync] branch sync FAIL ${res.status}`, body.error || txt.slice(0, 200))
+      return
+    }
+    lastBranchSyncDate = today
+    console.log(new Date().toISOString(), `[cron-sync] branch sync ok for ${today}: ${body.added || 0} added${body.branches?.length ? ' — ' + body.branches.join(', ') : ''}`)
+  } catch (err) {
+    console.error(new Date().toISOString(), '[cron-sync] branch sync threw:', err?.message || err)
+  }
+}
+
 async function syncOnce() {
   if (inFlight) {
     console.log(new Date().toISOString(), '[cron-sync] previous run still in flight, skipping tick')
@@ -245,6 +269,10 @@ async function syncOnce() {
   // after midnight) + once on startup. Pulls the full roster + CRM activity from
   // the NEW CRM. Fire-and-forget; sync health isn't tied to it.
   maybeSyncEmployees().catch(() => null)
+
+  // Piggy-back the daily branch auto-add — once per IST day + on startup. Any
+  // NEW CRM branch that has started purchasing is added to the branch master.
+  maybeSyncBranches().catch(() => null)
 }
 
 console.log(`[cron-sync] starting — ${ENDPOINT} every ${INTERVAL_MS}ms`)
