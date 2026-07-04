@@ -201,6 +201,7 @@ export default function Logistics() {
 
   const card = { background: t.card, border: `1px solid ${t.border}`, borderRadius: '12px' }
   const inp  = { background: t.card2 || t.card, border: `1px solid ${t.border}`, borderRadius: '7px', padding: '7px 11px', fontSize: '12px', color: t.text1, outline: 'none' }
+  const thL  = { padding: '9px 12px', textAlign: 'left', fontSize: '10px', color: t.text4, letterSpacing: '.08em', textTransform: 'uppercase', fontWeight: 600, borderBottom: `1px solid ${t.border}`, whiteSpace: 'nowrap' }
 
   return (
     <div style={{ padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: '14px', maxWidth: '1400px', margin: '0 auto' }}>
@@ -327,25 +328,34 @@ export default function Logistics() {
                 onToggleCollapse={() => toggleRegionCollapsed(r)}
               />
               {!collapsed && (
-                <div style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))',
-                  gap: '10px',
-                }}>
-                  {list.map((b, i) => (
-                    <BranchCard
-                      key={b.name}
-                      t={t}
-                      branch={b}
-                      busy={busyName === b.name}
-                      onSave={saveBranch}
-                      regionAccent={accent}
-                      partnerOptions={allPartners}
-                      onAddPartner={addCustomPartner}
-                      bangaloreHubs={bangaloreHubs}
-                      delayMs={Math.min(i * 25, 300)}
-                    />
-                  ))}
+                <div style={{ ...card, overflow: 'visible' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                    <thead>
+                      <tr>
+                        <th style={thL}>Branch</th>
+                        <th style={thL}>Partner</th>
+                        {r === 'Bangalore'
+                          ? <th style={thL} colSpan={3}>Hub · schedule</th>
+                          : <><th style={thL}>Pickup</th><th style={thL}>TAT</th><th style={thL}>Days</th></>}
+                        <th style={{ ...thL, textAlign: 'right' }}>Action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {list.map(b => (
+                        <BranchRow
+                          key={b.name}
+                          t={t}
+                          branch={b}
+                          busy={busyName === b.name}
+                          onSave={saveBranch}
+                          regionAccent={accent}
+                          partnerOptions={allPartners}
+                          onAddPartner={addCustomPartner}
+                          bangaloreHubs={bangaloreHubs}
+                        />
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
               )}
             </div>
@@ -595,93 +605,51 @@ function RegionBanner({ t, accent, regionName, list, configuredCount, collapsed,
   )
 }
 
-// Per-branch editor card. Partner picker uses partnerOptions (merged default +
-// per-branch existing + runtime-added) and can add new partners via
-// onAddPartner. No checkbox / no bulk affordance — pure single-branch edit.
-//
-// Bangalore-only field: hub_branch_name — which HUB this leaf branch hands
-// its day's bills to. Hidden for non-Bangalore branches and for hubs
-// themselves (a hub can't be its own hub).
-function BranchCard({ t, branch, busy, onSave, regionAccent, partnerOptions, onAddPartner, bangaloreHubs = [], delayMs = 0 }) {
+// Per-branch editor ROW (table). Same inline editors as the old card — partner
+// picker, pickup time, TAT, days, hub — laid out horizontally. Save/Cancel
+// appear in the Action cell when the row is dirty.
+function BranchRow({ t, branch, busy, onSave, regionAccent, partnerOptions, onAddPartner, bangaloreHubs = [] }) {
   const defaultPartner = branch.region === 'Bangalore' ? 'Transaction Executives' : 'BVC'
-  const [partner,      setPartner]      = useState(branch.logistics_partner || defaultPartner)
+  const [partner, setPartner] = useState(branch.logistics_partner || defaultPartner)
   const [pickup,  setPickup]  = useState(branch.pickup_time || '')
   const [tat,     setTat]     = useState(branch.delivery_tat_hours || 24)
   const [days,    setDays]    = useState(branch.pickup_days || ['Mon','Tue','Wed','Thu','Fri','Sat'])
   const [hub,     setHub]     = useState(branch.hub_branch_name || '')
-  const [hover,   setHover]   = useState(false)
 
   const isBangalore  = branch.region === 'Bangalore'
   const showHubField = isBangalore && !branch.is_hub && bangaloreHubs.length > 0
 
-  // Reset on branch row update (after save)
   useEffect(() => { setPartner(branch.logistics_partner || defaultPartner) }, [branch.logistics_partner, defaultPartner])
   useEffect(() => { setPickup(branch.pickup_time || '') }, [branch.pickup_time])
   useEffect(() => { setTat(branch.delivery_tat_hours || 24) }, [branch.delivery_tat_hours])
   useEffect(() => { setDays(branch.pickup_days || ['Mon','Tue','Wed','Thu','Fri','Sat']) }, [branch.pickup_days])
   useEffect(() => { setHub(branch.hub_branch_name || '') }, [branch.hub_branch_name])
 
-  // Bangalore partner is locked (no picker), so don't count partner mismatch
-  // as dirty for those cards — even if the DB still has a legacy value, the
-  // user can't change it from here. Save still pushes the locked value so
-  // any DB drift gets corrected on the next hub edit.
-  //
-  // Bangalore branches also don't show pickup/TAT/days — pickup happens daily
-  // by Transaction Executives at the hub. So those fields aren't dirty either.
   const partnerDirty = !isBangalore && ((partner || null) !== (branch.logistics_partner || null))
   const scheduleDirty = !isBangalore && (
     (pickup || '')                    !== (branch.pickup_time       || '')   ||
     Number(tat)                       !== Number(branch.delivery_tat_hours || 24)  ||
     JSON.stringify([...days].sort()) !== JSON.stringify([...(branch.pickup_days || ['Mon','Tue','Wed','Thu','Fri','Sat'])].sort())
   )
-  const dirty = (
-    partnerDirty ||
-    scheduleDirty ||
-    (showHubField && (hub || '')     !== (branch.hub_branch_name || ''))
-  )
+  const dirty = partnerDirty || scheduleDirty || (showHubField && (hub || '') !== (branch.hub_branch_name || ''))
 
   const onSubmit = async () => {
     const patch = { partner }
-    if (!isBangalore) {
-      patch.pickup_time        = pickup
-      patch.delivery_tat_hours = tat
-      patch.pickup_days        = days
-    }
+    if (!isBangalore) { patch.pickup_time = pickup; patch.delivery_tat_hours = tat; patch.pickup_days = days }
     if (showHubField) patch.hub_branch_name = hub
     await onSave(branch.name, patch)
   }
-
   const onReset = () => {
     setPartner(branch.logistics_partner || defaultPartner)
-    setPickup(branch.pickup_time || '')
-    setTat(branch.delivery_tat_hours || 24)
-    setDays(branch.pickup_days || ['Mon','Tue','Wed','Thu','Fri','Sat'])
-    setHub(branch.hub_branch_name || '')
+    setPickup(branch.pickup_time || ''); setTat(branch.delivery_tat_hours || 24)
+    setDays(branch.pickup_days || ['Mon','Tue','Wed','Thu','Fri','Sat']); setHub(branch.hub_branch_name || '')
   }
 
   const accent = regionAccent || t.gold
-  const baseBg = t.card2 || t.card
-
-  const inp = (isDirty) => ({
-    background: t.card,
-    border: `1px solid ${isDirty ? t.gold : t.border}`,
-    borderRadius: '6px',
-    padding: '5px 8px',
-    fontSize: '12px',
-    color: t.text1,
-    outline: 'none',
-    transition: 'border-color .15s ease',
-  })
-
-  // Configured indicator — green tick when all required ops fields are set.
-  // Bangalore: partner is always Transaction Executives + (if leaf) hub assigned.
-  // Outstation: partner + pickup time + TAT + at least one pickup day.
   const configured = isBangalore
     ? !!branch.logistics_partner && (branch.is_hub || !!branch.hub_branch_name)
     : !!branch.logistics_partner && !!branch.pickup_time && !!branch.delivery_tat_hours && (branch.pickup_days || []).length > 0
 
-  // Live 'next pickup' clock — refreshes every minute so the in-line indicator
-  // stays accurate without a full page refetch.
   const [, tickPickup] = useState(0)
   useEffect(() => {
     if (!branch.pickup_time || !(branch.pickup_days || []).length) return
@@ -692,228 +660,112 @@ function BranchCard({ t, branch, busy, onSave, regionAccent, partnerOptions, onA
   const pickColors = { now: t.red, today: t.green, missed: t.orange, tomorrow: t.blue, soon: t.text2, later: t.text4 }
   const pickColor  = pickColors[nextPick?.tier] || t.text4
 
-  // Field row helper — label on the left, control on the right, both share
-  // a consistent baseline so every card lines up internally.
-  const Row = ({ label, children }) => (
-    <div style={{ display: 'grid', gridTemplateColumns: '64px 1fr', alignItems: 'center', gap: '10px' }}>
-      <span style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 700 }}>{label}</span>
-      <div style={{ minWidth: 0 }}>{children}</div>
-    </div>
-  )
+  const td  = { padding: '9px 12px', borderBottom: `1px solid ${t.border}30`, fontSize: '12px', color: t.text1, verticalAlign: 'middle' }
+  const inp = (isDirty) => ({ background: t.card, border: `1px solid ${isDirty ? t.gold : t.border}`, borderRadius: '6px', padding: '5px 8px', fontSize: '12px', color: t.text1, outline: 'none' })
 
   return (
-    <div
-      className="logi-card"
-      onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
-      style={{
-        position: 'relative', overflow: 'hidden',
-        background: hover
-          ? `linear-gradient(180deg, ${accent}10 0%, ${baseBg} 60%)`
-          : (configured ? baseBg : `${t.orange}06`),
-        // Subtle striped overlay for HUB cards so they stand out from leaf
-        // branches at a glance. Pattern is painted on top of the base bg.
-        backgroundImage: branch.is_hub
-          ? `repeating-linear-gradient(135deg, transparent 0 10px, ${t.gold}06 10px 11px)`
-          : 'none',
-        border: `1px solid ${hover ? `${accent}55` : (configured ? t.border : `${t.orange}25`)}`,
-        borderRadius: '12px',
-        boxShadow: hover ? `0 6px 22px ${accent}26` : '0 1px 3px rgba(0,0,0,.15)',
-        transform: hover ? 'translateY(-2px)' : 'translateY(0)',
-        transition: 'background .25s ease, border-color .2s ease, box-shadow .25s ease, transform .15s ease',
-        padding: '14px 16px',
-        animation: 'logiCardIn .35s cubic-bezier(.4,0,.2,1) backwards',
-        animationDelay: `${delayMs}ms`,
-      }}>
-      {/* Accent gradient top stripe */}
-      <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '2px',
-        background: `linear-gradient(90deg, ${accent} 0%, ${accent}40 60%, transparent 100%)` }} />
-      {dirty && <div className="logi-pulse-bar" style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '2px', background: t.gold, opacity: .8 }} />}
-
-      {/* Card header — purely informational (no selection / bulk affordance). */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '12px' }}>
-        <span style={{
-          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-          height: '22px', padding: '0 8px',
-          fontSize: '10px', fontWeight: 700, letterSpacing: '.05em',
-          color: '#fff', background: accent, borderRadius: '5px',
-          fontFamily: 'monospace', flexShrink: 0,
-          boxShadow: `0 2px 6px ${accent}40`,
-        }}>{branch.name.split('-')[0]}</span>
-        <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <span style={{ fontSize: '14px', color: t.text1, fontWeight: 700, letterSpacing: '-.005em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{branch.name}</span>
-          {branch.is_hub && (
-            <span style={{ fontSize: '8.5px', color: t.gold, background: `${t.gold}15`, border: `1px solid ${t.gold}40`, borderRadius: '3px', padding: '1px 6px', fontWeight: 700, letterSpacing: '.06em', flexShrink: 0 }}>HUB</span>
-          )}
+    <tr style={{ background: dirty ? `${t.gold}08` : (configured ? 'transparent' : `${t.orange}05`) }}>
+      {/* Branch */}
+      <td style={{ ...td, whiteSpace: 'nowrap' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', height: '20px', padding: '0 7px', fontSize: '9.5px', fontWeight: 700, color: '#fff', background: accent, borderRadius: '4px', fontFamily: 'monospace', flexShrink: 0 }}>{branch.name.split('-')[0]}</span>
+          <span style={{ fontWeight: 600, color: t.text1 }}>{branch.name}</span>
+          {branch.is_hub && <span style={{ fontSize: '8px', color: t.gold, background: `${t.gold}15`, border: `1px solid ${t.gold}40`, borderRadius: '3px', padding: '1px 5px', fontWeight: 700, letterSpacing: '.06em' }}>HUB</span>}
+          <span title={configured ? 'Fully configured' : 'Some fields are missing'} className={configured ? '' : 'logi-pulse'} style={{ width: '7px', height: '7px', borderRadius: '50%', background: configured ? t.green : t.orange, color: configured ? t.green : t.orange }} />
         </div>
-        <span title={configured ? 'Fully configured' : 'Some fields are missing'}
-          className={configured ? '' : 'logi-pulse'}
-          style={{ width: '8px', height: '8px', borderRadius: '50%', background: configured ? t.green : t.orange, color: configured ? t.green : t.orange, flexShrink: 0 }} />
-      </div>
+      </td>
+      {/* Partner */}
+      <td style={{ ...td, minWidth: '175px' }}>
+        {isBangalore ? (
+          <div title="Bangalore branches are serviced by our in-house Transaction Executives — not editable here."
+            style={{ display: 'flex', alignItems: 'center', gap: '7px', background: `${accent}10`, border: `1px dashed ${accent}55`, borderRadius: '7px', padding: '5px 9px', fontSize: '11.5px', color: t.text1 }}>
+            <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: accent, flexShrink: 0 }} />
+            <span style={{ fontWeight: 600 }}>Transaction Executives</span>
+            <span style={{ marginLeft: 'auto', fontSize: '8.5px', color: t.text4, textTransform: 'uppercase', fontWeight: 700 }}>locked</span>
+          </div>
+        ) : (
+          <PartnerPicker
+            t={t} accent={accent} busy={busy}
+            value={partner} onChange={setPartner}
+            dirty={partner !== (branch.logistics_partner || null)}
+            options={partnerOptions || PARTNERS}
+            onAddPartner={(name) => { if (onAddPartner) onAddPartner(name); setPartner(name) }}
+          />
+        )}
+      </td>
 
-      {/* Field rows — consistent label / control grid */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-        <Row label="Partner">
-          {isBangalore ? (
-            // Bangalore is always Transaction Executives — no picker. The
-            // value still lives in the DB so the consignment / EWB flow
-            // can read it like any other partner.
-            <div title="Bangalore branches are always serviced by our in-house Transaction Executives — not editable here."
-              style={{
-                display: 'flex', alignItems: 'center', gap: '8px',
-                background: `${accent}10`,
-                border: `1px dashed ${accent}55`,
-                borderRadius: '7px',
-                padding: '6px 10px',
-                fontSize: '12px',
-                color: t.text1,
-              }}>
-              <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: accent, flexShrink: 0, boxShadow: `0 0 0 2px ${accent}25` }} />
-              <span style={{ fontWeight: 600 }}>Transaction Executives</span>
-              <span style={{ marginLeft: 'auto', fontSize: '9px', color: t.text4, letterSpacing: '.08em', textTransform: 'uppercase', fontWeight: 700 }}>locked</span>
-            </div>
-          ) : (
-            <PartnerPicker
-              t={t} accent={accent} busy={busy}
-              value={partner} onChange={setPartner}
-              dirty={partner !== (branch.logistics_partner || null)}
-              options={partnerOptions || PARTNERS}
-              onAddPartner={(name) => {
-                if (onAddPartner) onAddPartner(name)
-                setPartner(name)
-              }}
-            />
-          )}
-        </Row>
-        {showHubField && (
-          <Row label="Hub">
-            <select value={hub} onChange={e => setHub(e.target.value)} disabled={busy}
-              style={{
-                ...inp((hub || '') !== (branch.hub_branch_name || '')),
-                width: '100%', appearance: 'none',
-                paddingRight: '24px', cursor: busy ? 'not-allowed' : 'pointer',
-                backgroundImage: `url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='${encodeURIComponent(t.text4)}' stroke-width='2.5' stroke-linecap='round'><path d='M6 9l6 6 6-6'/></svg>")`,
-                backgroundRepeat: 'no-repeat',
-                backgroundPosition: 'right 8px center',
-              }}>
-              <option value="">— Not assigned —</option>
-              {bangaloreHubs.map(h => <option key={h} value={h}>{h}</option>)}
-            </select>
-          </Row>
-        )}
-        {!isBangalore && (
-          <Row label="Pickup">
-            <div>
-              <input type="time" value={pickup} onChange={e => setPickup(e.target.value)} disabled={busy}
-                style={{ ...inp((pickup || '') !== (branch.pickup_time || '')), width: '100%' }} />
-              {nextPick && (
-                <div style={{ fontSize: '10px', marginTop: '4px', color: pickColor, fontWeight: 600, display: 'flex', alignItems: 'center', gap: '5px' }}>
-                  <span style={{
-                    width: '5px', height: '5px', borderRadius: '50%', background: pickColor, display: 'inline-block',
-                    ...(nextPick.tier === 'now' || nextPick.tier === 'missed' ? { color: pickColor } : {}),
-                  }}
-                    className={nextPick.tier === 'now' ? 'logi-pulse' : ''} />
-                  Next pickup · {nextPick.label}
-                </div>
-              )}
-            </div>
-          </Row>
-        )}
-        {!isBangalore && (
-          <Row label="TAT">
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '4px' }}>
+      {isBangalore ? (
+        <td style={{ ...td }} colSpan={3}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+            {showHubField ? (
+              <select value={hub} onChange={e => setHub(e.target.value)} disabled={busy}
+                style={{ ...inp((hub || '') !== (branch.hub_branch_name || '')), minWidth: '160px', cursor: busy ? 'not-allowed' : 'pointer' }}>
+                <option value="">— Assign hub —</option>
+                {bangaloreHubs.map(h => <option key={h} value={h}>{h}</option>)}
+              </select>
+            ) : branch.is_hub ? (
+              <span style={{ fontSize: '11px', color: t.text3, fontWeight: 600 }}>Consolidation hub</span>
+            ) : null}
+            <span style={{ fontSize: '11px', color: t.text4 }}>◷ Daily pickup — executives sweep this {branch.is_hub ? 'hub' : 'branch'} every day.</span>
+          </div>
+        </td>
+      ) : (
+        <>
+          {/* Pickup */}
+          <td style={{ ...td, minWidth: '128px' }}>
+            <input type="time" value={pickup} onChange={e => setPickup(e.target.value)} disabled={busy}
+              style={{ ...inp((pickup || '') !== (branch.pickup_time || '')), width: '108px' }} />
+            {nextPick && (
+              <div style={{ fontSize: '9.5px', marginTop: '3px', color: pickColor, fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}>
+                <span className={nextPick.tier === 'now' ? 'logi-pulse' : ''} style={{ width: '5px', height: '5px', borderRadius: '50%', background: pickColor, color: pickColor, display: 'inline-block' }} />
+                {nextPick.label}
+              </div>
+            )}
+          </td>
+          {/* TAT */}
+          <td style={{ ...td }}>
+            <div style={{ display: 'flex', gap: '4px' }}>
               {[24, 48, 72].map(h => {
                 const active = Number(tat) === h
                 return (
                   <button key={h} onClick={() => setTat(h)} disabled={busy}
-                    style={{
-                      background:   active ? t.gold : 'transparent',
-                      color:        active ? '#1a0a00' : t.text3,
-                      border:       `1px solid ${active ? t.gold : t.border}`,
-                      borderRadius: '6px',
-                      padding:      '6px 0',
-                      fontSize:     '11px',
-                      fontWeight:   active ? 700 : 500,
-                      cursor:       'pointer',
-                      transition:   'all .12s ease',
-                      boxShadow:    active ? `0 1px 4px ${t.gold}45` : 'none',
-                    }}>
+                    style={{ background: active ? t.gold : 'transparent', color: active ? '#1a0a00' : t.text3, border: `1px solid ${active ? t.gold : t.border}`, borderRadius: '5px', padding: '5px 9px', fontSize: '10.5px', fontWeight: active ? 700 : 500, cursor: 'pointer' }}>
                     {h}h
                   </button>
                 )
               })}
             </div>
-          </Row>
-        )}
-        {!isBangalore && (
-          <Row label="Days">
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '3px' }}>
+          </td>
+          {/* Days */}
+          <td style={{ ...td }}>
+            <div style={{ display: 'flex', gap: '3px' }}>
               {DAYS.map(d => {
                 const active = days.includes(d)
                 return (
-                  <button key={d} onClick={() => setDays(prev => active ? prev.filter(x => x !== d) : [...prev, d])} disabled={busy}
-                    title={d}
-                    style={{
-                      background:   active ? `${accent}28` : 'transparent',
-                      color:        active ? accent : t.text4,
-                      border:       `1px solid ${active ? `${accent}70` : t.border}`,
-                      borderRadius: '5px',
-                      padding:      '5px 0',
-                      fontSize:     '10px',
-                      fontWeight:   700,
-                      cursor:       'pointer',
-                      transition:   'all .12s ease',
-                    }}>
+                  <button key={d} onClick={() => setDays(prev => active ? prev.filter(x => x !== d) : [...prev, d])} disabled={busy} title={d}
+                    style={{ background: active ? `${accent}28` : 'transparent', color: active ? accent : t.text4, border: `1px solid ${active ? `${accent}70` : t.border}`, borderRadius: '4px', width: '22px', padding: '4px 0', fontSize: '9.5px', fontWeight: 700, cursor: 'pointer' }}>
                     {d[0]}
                   </button>
                 )
               })}
             </div>
-          </Row>
-        )}
-        {isBangalore && (
-          <div style={{
-            display: 'flex', alignItems: 'center', gap: '8px',
-            padding: '7px 10px', marginTop: '2px',
-            background: `${accent}06`,
-            border: `1px dashed ${accent}30`,
-            borderRadius: '7px',
-            fontSize: '11px', color: t.text3, lineHeight: 1.45,
-          }}>
-            <span style={{ fontSize: '13px', color: accent }}>◷</span>
-            <span><strong style={{ color: t.text2 }}>Daily pickup</strong> — executives sweep this {branch.is_hub ? 'hub' : 'branch'} every day. No fixed time, TAT, or off-days.</span>
-          </div>
-        )}
-      </div>
-
-      {/* Footer — save / cancel slides in when dirty */}
-      {dirty && (
-        <div style={{
-          marginTop: '12px', paddingTop: '12px',
-          borderTop: `1px solid ${t.border}`,
-          display: 'flex', alignItems: 'center', gap: '8px',
-        }}>
-          <span style={{ fontSize: '10px', color: t.gold, fontWeight: 600, letterSpacing: '.04em', flex: 1 }}>
-            <span style={{ display: 'inline-block', width: '6px', height: '6px', borderRadius: '50%', background: t.gold, marginRight: '6px' }} />
-            Unsaved changes
-          </span>
-          <button onClick={onReset} disabled={busy}
-            style={{ background: 'transparent', border: `1px solid ${t.border}`, borderRadius: '6px', padding: '6px 12px', fontSize: '10px', color: t.text3, cursor: busy ? 'wait' : 'pointer', fontWeight: 600 }}>
-            Cancel
-          </button>
-          <button onClick={onSubmit} disabled={busy}
-            style={{
-              background: `linear-gradient(180deg, ${t.gold} 0%, ${t.gold} 100%)`,
-              color: '#1a0a00', border: 'none',
-              borderRadius: '6px', padding: '6px 16px',
-              fontSize: '10px', fontWeight: 700,
-              cursor: busy ? 'wait' : 'pointer',
-              boxShadow: `0 2px 10px ${t.gold}65`,
-              opacity: busy ? 0.7 : 1,
-            }}>
-            {busy ? 'Saving…' : 'Save changes'}
-          </button>
-        </div>
+          </td>
+        </>
       )}
-    </div>
+
+      {/* Action */}
+      <td style={{ ...td, whiteSpace: 'nowrap', textAlign: 'right' }}>
+        {dirty ? (
+          <div style={{ display: 'flex', gap: '6px', justifyContent: 'flex-end' }}>
+            <button onClick={onReset} disabled={busy}
+              style={{ background: 'transparent', border: `1px solid ${t.border}`, borderRadius: '5px', padding: '5px 11px', fontSize: '10px', color: t.text3, cursor: busy ? 'wait' : 'pointer', fontWeight: 600 }}>Cancel</button>
+            <button onClick={onSubmit} disabled={busy}
+              style={{ background: t.gold, color: '#1a0a00', border: 'none', borderRadius: '5px', padding: '5px 15px', fontSize: '10px', fontWeight: 700, cursor: busy ? 'wait' : 'pointer', boxShadow: `0 2px 8px ${t.gold}55` }}>{busy ? 'Saving…' : 'Save'}</button>
+          </div>
+        ) : (
+          <span style={{ color: t.text4, fontSize: '11px' }}>—</span>
+        )}
+      </td>
+    </tr>
   )
 }
