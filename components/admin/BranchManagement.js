@@ -127,15 +127,18 @@ export default function BranchManagement() {
     setNewCluster(''); setAddingCluster(false)
   }
 
-  const incompleteBranches = branches.filter(b => !b.state || !b.region || !b.cluster)
   const regions = [...new Set(branches.map(b => b.region).filter(Boolean))].sort()
 
   // Upcoming = branch is active but has never billed (only known once activity loads).
   const isUpcoming = (b) => activity != null && b.is_active && !activity[b.name]
+  // Incomplete = missing core master data — but only nag OPERATIONAL branches,
+  // not upcoming ones (they get cluster/address assigned when they go live).
+  const isIncomplete = (b) => (!b.state || !b.region || !b.cluster) && !isUpcoming(b)
+  const incompleteBranches = branches.filter(isIncomplete)
 
   const q = search.trim().toLowerCase()
   const filtered = branches.filter(b => {
-    if (filterIncomplete && (b.state && b.region && b.cluster)) return false
+    if (filterIncomplete && !isIncomplete(b)) return false
     if (selRegions.size  && !selRegions.has(b.region)) return false
     if (statusFilter === 'active'   && !b.is_active)  return false
     if (statusFilter === 'inactive' &&  b.is_active)  return false
@@ -663,7 +666,7 @@ export default function BranchManagement() {
                   <td style={{ ...s.td, color: t.gold, fontWeight: 400 }}>
                     {b.name}
                     {isUpcoming(b) && <span style={{ marginLeft: '6px', fontSize: '.58rem', color: '#6b8cce', border: '1px solid #6b8cce55', borderRadius: '3px', padding: '1px 5px', textTransform: 'uppercase', letterSpacing: '.04em' }}>upcoming</span>}
-                    {(!b.state || !b.region || !b.cluster) && <span style={{ marginLeft: '6px', fontSize: '.58rem', color: t.gold, opacity: .6, border: `1px solid ${t.gold}44`, borderRadius: '3px', padding: '1px 4px' }}>incomplete</span>}
+                    {isIncomplete(b) && <span style={{ marginLeft: '6px', fontSize: '.58rem', color: t.gold, opacity: .6, border: `1px solid ${t.gold}44`, borderRadius: '3px', padding: '1px 4px' }}>incomplete</span>}
                   </td>
                   <td style={{ ...s.td, fontFamily: 'monospace', fontSize: '.68rem', color: b.crm_branch_id ? t.text2 : t.text4 }}>
                     {b.crm_branch_id || '—'}

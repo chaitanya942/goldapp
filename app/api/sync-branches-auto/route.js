@@ -45,7 +45,7 @@ export async function POST(req) {
 
     // 2) Which of those aren't in the master yet.
     const { data: existing, error: exErr } = await supabase
-      .from('branches').select('name, region, state, model_type, branch_code')
+      .from('branches').select('name, region, state, model_type, branch_code, cluster')
     if (exErr) return Response.json({ success: false, error: exErr.message }, { status: 500 })
     const have = new Set((existing || []).map(b => b.name))
     const candidates = valid.filter(n => !have.has(n) && n.length >= 3 && !IGNORE_NAMES.has(n.toUpperCase()))
@@ -65,7 +65,7 @@ export async function POST(req) {
     const rows = toAdd.map(name => {
       const f = deriveBranchFields(name, existing || [])
       const code = autoBranchCode(name, used); used.add(code)
-      return { name, region: f.region, state: f.state, model_type: f.model_type, branch_code: code, is_active: true, opening_date: today }
+      return { name, region: f.region, state: f.state, model_type: f.model_type, cluster: f.cluster, branch_code: code, is_active: true, opening_date: today }
     })
     const { error: insErr } = await supabase.from('branches').insert(rows)
     if (insErr) return Response.json({ success: false, error: insErr.message }, { status: 500 })
