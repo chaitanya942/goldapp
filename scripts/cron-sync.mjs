@@ -215,7 +215,7 @@ async function maybeSyncBranches() {
       return
     }
     lastBranchSyncDate = today
-    console.log(new Date().toISOString(), `[cron-sync] branch sync ok for ${today}: ${body.added || 0} added${body.branches?.length ? ' — ' + body.branches.join(', ') : ''}`)
+    console.log(new Date().toISOString(), `[cron-sync] branch sync ok for ${today}: ${body.added || 0} added${body.branches?.length ? ' — ' + body.branches.join(', ') : ''} · ${body.addresses_filled || 0} addresses filled`)
   } catch (err) {
     console.error(new Date().toISOString(), '[cron-sync] branch sync threw:', err?.message || err)
   }
