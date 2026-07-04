@@ -19,7 +19,7 @@ function useMobile() {
   return m
 }
 
-export default function BranchManagement() {
+export default function BranchManagement({ embedded = false } = {}) {
   const { theme, loadBranches } = useApp()
   const t = THEMES[theme]
   const isMobile = useMobile()
@@ -388,13 +388,15 @@ export default function BranchManagement() {
   )
 
   return (
-    <div style={s.wrap}>
-      <div style={s.header}>
-        <div>
-          <div style={s.title}>Branch Management</div>
-          <div style={s.sub}>Add, activate, and manage all branches · new branches auto-add daily when they start purchasing</div>
-        </div>
-        <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+    <div style={{ ...s.wrap, paddingTop: embedded ? '10px' : s.wrap.padding }}>
+      <div style={{ ...s.header, marginBottom: embedded ? '12px' : s.header.marginBottom }}>
+        {!embedded && (
+          <div>
+            <div style={s.title}>Branch Management</div>
+            <div style={s.sub}>Add, activate, and manage all branches · new branches auto-add daily when they start purchasing</div>
+          </div>
+        )}
+        <div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginLeft: 'auto' }}>
           <button style={s.btnGold} onClick={() => formOpen ? cancelForm() : setFormOpen(true)}>
             {formOpen ? 'Cancel' : 'Add branch'}
           </button>

@@ -7,12 +7,11 @@ import HeatmapTracker from '../../components/analytics/HeatmapTracker'
 import Sidebar from '../../components/Sidebar'
 import Topbar from '../../components/Topbar'
 import DashboardHome from '../../components/dashboard/DashboardHome'
-import BranchManagement from '../../components/admin/BranchManagement'
+import Branches from '../../components/admin/Branches'
 import UserManagement from '../../components/admin/UserManagement'
 import CompanySettings from '../../components/admin/CompanySettings'
 import GoldBuyingRate from '../../components/admin/GoldBuyingRate'
 import ConsignmentSeeds from '../../components/admin/ConsignmentSeeds'
-import Logistics from '../../components/admin/Logistics'
 import HolidayCalendar from '../../components/admin/HolidayCalendar'
 import BranchEmployees from '../../components/admin/BranchEmployees'
 import ImportLogs from '../../components/admin/ImportLogs'
@@ -261,12 +260,12 @@ function DashboardShell() {
       case 'cal-table':           return <CalTable />
       case 'live-market-rates':   return <LiveMarketRates />
       case 'reports':             return <ComingSoon title="Reports" />
-      case 'branch-management':   return <BranchManagement />
+      case 'branch-management':   return <Branches />
       case 'user-management':     return <UserManagement />
       case 'company-settings':    return <CompanySettings />
       case 'gold-buying-rate':    return <GoldBuyingRate />
       case 'consignment-seeds':   return <ConsignmentSeeds />
-      case 'logistics':           return <Logistics />
+      case 'logistics':           return <Branches initialView="logistics" />
       case 'holiday-calendar':    return <HolidayCalendar />
       case 'branch-employees':    return <BranchEmployees />
       case 'import-logs':         return <ImportLogs />

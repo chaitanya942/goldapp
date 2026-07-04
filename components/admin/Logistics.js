@@ -69,7 +69,7 @@ function nextPickup(pickupTime, pickupDays, now = new Date()) {
 // of the 6 hubs first, executives sweep the hubs).
 const PARTNERS = ['BVC', 'Transaction Executives']
 
-export default function Logistics() {
+export default function Logistics({ embedded = false } = {}) {
   const { theme } = useApp()
   const t = THEMES[theme]
 
@@ -204,7 +204,7 @@ export default function Logistics() {
   const thL  = { padding: '9px 12px', textAlign: 'left', fontSize: '10px', color: t.text4, letterSpacing: '.08em', textTransform: 'uppercase', fontWeight: 600, borderBottom: `1px solid ${t.border}`, whiteSpace: 'nowrap' }
 
   return (
-    <div style={{ padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: '14px', maxWidth: '1400px', margin: '0 auto' }}>
+    <div style={{ padding: embedded ? '8px 24px 20px' : '20px 24px', display: 'flex', flexDirection: 'column', gap: '14px', maxWidth: '1400px', margin: '0 auto' }}>
       {/* Global animations + interactive states for the page. */}
       <style>{`
         @keyframes logiCardIn {
@@ -243,9 +243,9 @@ export default function Logistics() {
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', flexWrap: 'wrap', gap: '12px' }}>
         <div>
-          <div style={{ fontSize: '.6rem', color: t.text4, letterSpacing: '.18em', textTransform: 'uppercase', fontWeight: 600 }}>Admin</div>
-          <div style={{ fontSize: '1.5rem', fontWeight: 200, color: t.text1, letterSpacing: '.02em', marginTop: '4px' }}>Logistics</div>
-          <div style={{ fontSize: '11px', color: t.text3, marginTop: '4px' }}>
+          {!embedded && <div style={{ fontSize: '.6rem', color: t.text4, letterSpacing: '.18em', textTransform: 'uppercase', fontWeight: 600 }}>Admin</div>}
+          {!embedded && <div style={{ fontSize: '1.5rem', fontWeight: 200, color: t.text1, letterSpacing: '.02em', marginTop: '4px' }}>Logistics</div>}
+          <div style={{ fontSize: '11px', color: t.text3, marginTop: embedded ? 0 : '4px' }}>
             Configure courier partner, pickup time and delivery TAT per outstation branch.
           </div>
         </div>
