@@ -260,7 +260,7 @@ export default function Logistics() {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px' }}>
         <Stat t={t} label="Outstation branches" value={stats.total} sub="active rows" accent={t.gold}   icon="◉" />
         <Stat t={t} label="With pickup time"    value={`${stats.withPickup} / ${stats.total}`} sub="config complete"     accent={t.green}  icon="◷" />
-        <Stat t={t} label="With TAT"            value={`${stats.withTat} / ${stats.total}`}    sub="delivery target set" accent={t.blue}   icon="⇄" />
+        <Stat t={t} label="With TAT"            value={`${stats.withTat} / ${stats.total}`}    sub="delivery target set" accent={t.text2}  icon="⇄" />
         <Stat t={t} label="Needs attention"     value={stats.missingAny} sub={stats.missingAny ? 'missing pickup, TAT, or partner' : 'all configured'} accent={stats.missingAny ? t.orange : t.green} icon="!" pulse={stats.missingAny > 0} />
       </div>
 
@@ -288,19 +288,9 @@ export default function Logistics() {
             <span style={{ fontSize: '10px', color: t.text4, letterSpacing: '.08em', textTransform: 'uppercase', fontWeight: 600, marginRight: '2px' }}>Region</span>
             <FilterChip t={t} active={!region} color={t.gold} onClick={() => setRegion('')}>All</FilterChip>
             {regions.map(r => (
-              <FilterChip key={r} t={t} active={region === r} color={REGION_COLORS[r] || t.gold} onClick={() => setRegion(region === r ? '' : r)}>{r}</FilterChip>
+              <FilterChip key={r} t={t} active={region === r} color={t.gold} onClick={() => setRegion(region === r ? '' : r)}>{r}</FilterChip>
             ))}
           </div>
-          {/* Partner chips */}
-          {partners.length > 0 && (
-            <div style={{ display: 'flex', gap: '4px', alignItems: 'center', flexWrap: 'wrap' }}>
-              <span style={{ fontSize: '10px', color: t.text4, letterSpacing: '.08em', textTransform: 'uppercase', fontWeight: 600, marginRight: '2px' }}>Partner</span>
-              <FilterChip t={t} active={!partner} color={t.gold} onClick={() => setPartner('')}>All</FilterChip>
-              {partners.map(p => (
-                <FilterChip key={p} t={t} active={partner === p} color={t.blue} onClick={() => setPartner(partner === p ? '' : p)}>{p}</FilterChip>
-              ))}
-            </div>
-          )}
         </div>
       </div>
 
@@ -311,7 +301,7 @@ export default function Logistics() {
         <div style={{ ...card, padding: '60px 20px', textAlign: 'center', color: t.text4, fontSize: '13px' }}>No branches match the current filter.</div>
       ) : (
         Object.entries(grouped).map(([r, list]) => {
-          const accent = REGION_COLORS[r] || t.gold
+          const accent = t.gold
           const collapsed = collapsedRegions.has(r)
           const configuredCount = list.filter(b => {
             if (b.region === 'Bangalore') {
@@ -333,7 +323,6 @@ export default function Logistics() {
                     <thead>
                       <tr>
                         <th style={thL}>Branch</th>
-                        <th style={thL}>Partner</th>
                         {r === 'Bangalore'
                           ? <th style={thL} colSpan={3}>Hub · schedule</th>
                           : <><th style={thL}>Pickup</th><th style={thL}>TAT</th><th style={thL}>Days</th></>}
@@ -657,7 +646,7 @@ function BranchRow({ t, branch, busy, onSave, regionAccent, partnerOptions, onAd
     return () => clearInterval(id)
   }, [branch.pickup_time, branch.pickup_days])
   const nextPick = nextPickup(branch.pickup_time, branch.pickup_days)
-  const pickColors = { now: t.red, today: t.green, missed: t.orange, tomorrow: t.blue, soon: t.text2, later: t.text4 }
+  const pickColors = { now: t.red, today: t.green, missed: t.orange, tomorrow: t.text2, soon: t.text2, later: t.text4 }
   const pickColor  = pickColors[nextPick?.tier] || t.text4
 
   const td  = { padding: '9px 12px', borderBottom: `1px solid ${t.border}30`, fontSize: '12px', color: t.text1, verticalAlign: 'middle' }
@@ -668,30 +657,10 @@ function BranchRow({ t, branch, busy, onSave, regionAccent, partnerOptions, onAd
       {/* Branch */}
       <td style={{ ...td, whiteSpace: 'nowrap' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', height: '20px', padding: '0 7px', fontSize: '9.5px', fontWeight: 700, color: '#fff', background: accent, borderRadius: '4px', fontFamily: 'monospace', flexShrink: 0 }}>{branch.name.split('-')[0]}</span>
           <span style={{ fontWeight: 600, color: t.text1 }}>{branch.name}</span>
           {branch.is_hub && <span style={{ fontSize: '8px', color: t.gold, background: `${t.gold}15`, border: `1px solid ${t.gold}40`, borderRadius: '3px', padding: '1px 5px', fontWeight: 700, letterSpacing: '.06em' }}>HUB</span>}
           <span title={configured ? 'Fully configured' : 'Some fields are missing'} className={configured ? '' : 'logi-pulse'} style={{ width: '7px', height: '7px', borderRadius: '50%', background: configured ? t.green : t.orange, color: configured ? t.green : t.orange }} />
         </div>
-      </td>
-      {/* Partner */}
-      <td style={{ ...td, minWidth: '175px' }}>
-        {isBangalore ? (
-          <div title="Bangalore branches are serviced by our in-house Transaction Executives — not editable here."
-            style={{ display: 'flex', alignItems: 'center', gap: '7px', background: `${accent}10`, border: `1px dashed ${accent}55`, borderRadius: '7px', padding: '5px 9px', fontSize: '11.5px', color: t.text1 }}>
-            <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: accent, flexShrink: 0 }} />
-            <span style={{ fontWeight: 600 }}>Transaction Executives</span>
-            <span style={{ marginLeft: 'auto', fontSize: '8.5px', color: t.text4, textTransform: 'uppercase', fontWeight: 700 }}>locked</span>
-          </div>
-        ) : (
-          <PartnerPicker
-            t={t} accent={accent} busy={busy}
-            value={partner} onChange={setPartner}
-            dirty={partner !== (branch.logistics_partner || null)}
-            options={partnerOptions || PARTNERS}
-            onAddPartner={(name) => { if (onAddPartner) onAddPartner(name); setPartner(name) }}
-          />
-        )}
       </td>
 
       {isBangalore ? (
