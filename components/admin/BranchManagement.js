@@ -7,7 +7,8 @@ import { authedFetch } from '../../lib/authedFetch'
 
 import { CONSIGNMENT_THEMES as THEMES } from '../../lib/consignmentTheme'
 
-const EMPTY_FORM = { name: '', opening_date: '', state: '', region: '', cluster: '', model_type: 'outside_bangalore', branch_code: '', address: '', city: '', pin_code: '', branch_gstin: '', crm_branch_id: '', pickup_time: '', contact_person: '', contact_phone: '', contact_email: '' }
+const EMPTY_FORM = { name: '', opening_date: '', state: '', region: '', cluster: '', model_type: 'outside_bangalore', branch_code: '', address: '', city: '', pin_code: '', branch_gstin: '', crm_branch_id: '', pickup_time: '', delivery_tat_hours: 24, pickup_days: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'], tamper_next: '', contact_person: '', contact_phone: '', contact_email: '' }
+const WEEK_DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 
 function useMobile() {
   const [m, setM] = useState(false)
@@ -57,6 +58,7 @@ export default function BranchManagement({ embedded = false } = {}) {
   const [sortKey,      setSortKey]      = useState('name')
   const [sortDir,      setSortDir]      = useState(1)
   const [activity,     setActivity]     = useState(null)   // { branch_name: last_bill_date } — absent = upcoming
+  const [tamper,       setTamper]       = useState({})     // { branch_name: last_used_tmp_no (numeric) }
 
   // Google address auto-resolution state
   const [resolveOpen,    setResolveOpen]    = useState(false)
@@ -65,7 +67,19 @@ export default function BranchManagement({ embedded = false } = {}) {
   const [resolveResults, setResolveResults] = useState([])  // [{ branch_name, suggestion?, error?, accepted }]
   const [savingResolved, setSavingResolved] = useState(false)
 
-  useEffect(() => { load(); loadTmap(); loadActivity() }, [])
+  useEffect(() => { load(); loadTmap(); loadActivity(); loadTamper() }, [])
+
+  const loadTamper = async () => {
+    try {
+      const res = await authedFetch('/api/branch-tamper')
+      const data = await res.json()
+      setTamper(data.lastTmp || {})
+    } catch { setTamper({}) }
+  }
+  // Format a numeric tamper-proof to WG######; helpers for last/next.
+  const fmtTmp = (n) => (n && n > 0) ? `WG${String(n).padStart(6, '0')}` : '—'
+  const lastTmpOf = (name) => tamper[name] || 0
+  const nextTmpOf = (name) => fmtTmp((tamper[name] || 0) + 1)
 
   const load = async () => {
     setLoading(true)
@@ -175,7 +189,12 @@ export default function BranchManagement({ embedded = false } = {}) {
       city: form.city || null,
       pin_code: form.pin_code || null,
       branch_gstin: form.branch_gstin || null,
-      pickup_time: form.pickup_time || null,
+      // Logistics — Bangalore/Kerala are rule-based (daily pickup; Bangalore
+      // same-day, Kerala next-day 24h), so we don't store a pickup time/days for
+      // them; delivery_tat_hours is stamped to the region rule (0 / 24).
+      pickup_time:        (form.region === 'Bangalore' || form.region === 'Kerala') ? null : (form.pickup_time || null),
+      delivery_tat_hours: form.region === 'Bangalore' ? 0 : form.region === 'Kerala' ? 24 : (Number(form.delivery_tat_hours) || 24),
+      pickup_days:        (form.region === 'Bangalore' || form.region === 'Kerala') ? null : (form.pickup_days?.length ? form.pickup_days : null),
       // Branch contact — prints on Delivery Challan / Issue Voucher. The
       // Create Consignment modal pre-fills from these defaults, and any
       // override entered there sticks back here, so this row is the live
@@ -191,6 +210,23 @@ export default function BranchManagement({ embedded = false } = {}) {
       ? await supabase.from('branches').update(payload).eq('id', editId)
       : await supabase.from('branches').insert(payload)
     if (error) { setMsg(error.message); setSaving(false); return }
+
+    // Tamper-proof: if the operator set a Next number different from the current
+    // one, seed a consignment row at (next − 1) so the generator issues exactly
+    // that number next (same mechanism as the Bangalore seal seeding).
+    const wantNext = parseInt(String(form.tamper_next || '').replace(/\D/g, '')) || 0
+    const curNext  = (tamper[payload.name] || 0) + 1
+    if (wantNext > 0 && wantNext !== curNext) {
+      const seedNo = `WG${String(wantNext - 1).padStart(6, '0')}`
+      const sc = (payload.name.match(/^([A-Z]{2})-/) || [])[1] || 'KA'
+      await supabase.from('consignments').insert({
+        consignment_no: `SEED-${payload.name}-${seedNo}`, tmp_prf_no: seedNo,
+        external_no: `SEED-${payload.name}-${seedNo}`, challan_no: `SEED-${payload.name}-${seedNo}`,
+        branch_name: payload.name, branch_code: payload.branch_code || payload.name.substring(0, 3).toUpperCase(),
+        state_code: sc, movement_type: 'EXTERNAL', status: 'seed', total_bills: 0, total_net_wt: 0, total_amount: 0, created_by: 'SYSTEM_SEED',
+      })
+      loadTamper()
+    }
     setMsg(editId ? 'Branch updated successfully' : 'Branch added successfully')
     setForm(EMPTY_FORM); setFormOpen(false); setEditId(null)
     load(); loadBranches()
@@ -209,6 +245,9 @@ export default function BranchManagement({ embedded = false } = {}) {
       branch_gstin: b.branch_gstin || '',
       crm_branch_id: b.crm_branch_id || '',
       pickup_time: b.pickup_time || '',
+      delivery_tat_hours: b.delivery_tat_hours || 24,
+      pickup_days: b.pickup_days || ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'],
+      tamper_next: nextTmpOf(b.name) === '—' ? '' : nextTmpOf(b.name),
       contact_person: b.contact_person || '',
       contact_phone:  b.contact_phone  || '',
       contact_email:  b.contact_email  || '',
@@ -559,6 +598,58 @@ export default function BranchManagement({ embedded = false } = {}) {
             </div>
           </div>
 
+          {/* Logistics — pickup / delivery TAT / days. Bangalore & Kerala are
+              rule-based (daily pickup; Bangalore same-day, Kerala next-day 24h). */}
+          <div style={{ borderTop: `1px solid ${t.border}`, marginTop: '20px', paddingTop: '20px' }}>
+            <div style={{ fontSize: '.7rem', color: t.text3, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: '12px', fontWeight: 600 }}>Logistics</div>
+            {(form.region === 'Bangalore' || form.region === 'Kerala') ? (
+              <div style={{ fontSize: '.72rem', color: t.text3, background: `${t.gold}0a`, border: `1px solid ${t.gold}30`, borderRadius: '6px', padding: '10px 14px' }}>
+                ◷ <strong>Daily pickup</strong> — {form.region === 'Bangalore' ? 'same-day delivery' : 'next-day delivery (24h)'}. Rule-based; {form.region} branches don't set a pickup time or days.
+              </div>
+            ) : (
+              <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '16px' }}>
+                <div>
+                  <label style={s.label}>Pickup Time</label>
+                  <input type="time" style={s.input} value={form.pickup_time} onChange={e => setField('pickup_time', e.target.value)} />
+                </div>
+                <div>
+                  <label style={s.label}>Delivery TAT</label>
+                  <div style={{ display: 'flex', gap: '6px' }}>
+                    {[24, 48, 72].map(h => { const on = Number(form.delivery_tat_hours) === h
+                      return <button key={h} type="button" onClick={() => setField('delivery_tat_hours', h)}
+                        style={{ flex: 1, background: on ? t.gold : 'transparent', color: on ? '#1a0a00' : t.text3, border: `1px solid ${on ? t.gold : t.border}`, borderRadius: '6px', padding: '8px 0', fontSize: '.72rem', fontWeight: on ? 700 : 500, cursor: 'pointer' }}>{h}h</button>
+                    })}
+                  </div>
+                </div>
+                <div style={{ gridColumn: isMobile ? 'auto' : '1 / -1' }}>
+                  <label style={s.label}>Pickup Days</label>
+                  <div style={{ display: 'flex', gap: '4px' }}>
+                    {WEEK_DAYS.map(d => { const on = (form.pickup_days || []).includes(d)
+                      return <button key={d} type="button" title={d} onClick={() => setField('pickup_days', on ? (form.pickup_days || []).filter(x => x !== d) : [...(form.pickup_days || []), d])}
+                        style={{ width: '38px', background: on ? `${t.gold}22` : 'transparent', color: on ? t.gold : t.text4, border: `1px solid ${on ? t.gold : t.border}`, borderRadius: '6px', padding: '7px 0', fontSize: '.7rem', fontWeight: 700, cursor: 'pointer' }}>{d[0]}</button>
+                    })}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Tamper-proof seal — last used (derived) + next (editable → seeds). */}
+          <div style={{ borderTop: `1px solid ${t.border}`, marginTop: '20px', paddingTop: '20px' }}>
+            <div style={{ fontSize: '.7rem', color: t.text3, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: '12px', fontWeight: 600 }}>Tamper-proof seal</div>
+            <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '16px' }}>
+              <div>
+                <label style={s.label}>Last used <span style={{ color: t.text4, fontWeight: 400 }}>(from consignments)</span></label>
+                <input style={{ ...s.input, color: t.text3, background: `${t.border}22`, cursor: 'not-allowed' }} value={editId ? fmtTmp(lastTmpOf(form.name)) : '—'} readOnly />
+              </div>
+              <div>
+                <label style={s.label}>Next number <span style={{ color: t.text4, fontWeight: 400 }}>(editable)</span></label>
+                <input style={s.input} placeholder="WG000123" value={form.tamper_next} onChange={e => setField('tamper_next', e.target.value.toUpperCase())} />
+              </div>
+            </div>
+            <div style={{ fontSize: '.6rem', color: t.text4, marginTop: '6px' }}>Setting Next writes a seed so the branch's next consignment uses exactly that seal number.</div>
+          </div>
+
           <div style={s.row}>
             <button style={s.btnGold} onClick={save} disabled={saving}>
               {saving ? 'Saving...' : editId ? 'Update Branch' : 'Save Branch'}
@@ -655,7 +746,7 @@ export default function BranchManagement({ embedded = false } = {}) {
         <div style={s.tblWrap}>
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
-              <tr>{[['#', null], ['Branch Name', 'name'], ['CRM ID', null], ['Code', null], ['Address', null], ['State', 'state'], ['Region', 'region'], ['Model', null], ['Status', 'status'], ['Action', null]].map(([h, key]) =>
+              <tr>{[['#', null], ['Branch Name', 'name'], ['CRM ID', null], ['Code', null], ['Address', null], ['State', 'state'], ['Region', 'region'], ['Model', null], ['Status', 'status'], ['Next TMP', null], ['Action', null]].map(([h, key]) =>
                   <th key={h} onClick={key ? () => toggleSort(key) : undefined} style={{ ...s.th, textAlign: h === '#' ? 'center' : 'left', cursor: key ? 'pointer' : 'default', color: key && sortKey === key ? t.gold : t.text3, userSelect: 'none' }}>
                     {h}{key && sortKey === key ? (sortDir === 1 ? ' ▲' : ' ▼') : ''}
                   </th>
@@ -687,6 +778,7 @@ export default function BranchManagement({ embedded = false } = {}) {
                   <td style={{ ...s.td, fontSize: '.62rem', letterSpacing: '.1em', textTransform: 'uppercase', color: b.is_active ? t.green : t.text4 }}>
                     {b.is_active ? 'Active' : 'Inactive'}
                   </td>
+                  <td style={{ ...s.td, fontFamily: 'monospace', fontSize: '.68rem', color: nextTmpOf(b.name) === '—' ? t.text4 : t.gold }}>{nextTmpOf(b.name)}</td>
                   <td style={{ ...s.td, display: 'flex', gap: '6px', alignItems: 'center' }}>
                     <button onClick={() => startEdit(b)} style={{ background: 'transparent', border: `1px solid ${t.gold}40`, color: t.gold, borderRadius: '5px', padding: '4px 10px', fontSize: '.62rem', cursor: 'pointer' }}>Edit</button>
                     <button onClick={() => toggleActive(b.id, b.is_active)} style={{ background: 'transparent', border: `1px solid ${b.is_active ? '#e0555540' : t.gold + '40'}`, color: b.is_active ? '#e05555' : t.gold, borderRadius: '5px', padding: '4px 10px', fontSize: '.62rem', cursor: 'pointer' }}>
@@ -705,7 +797,7 @@ export default function BranchManagement({ embedded = false } = {}) {
                 </tr>
               ))}
               {filtered.length === 0 && (
-                <tr><td colSpan={10} style={{ ...s.td, textAlign: 'center', color: t.text4, padding: '48px' }}>
+                <tr><td colSpan={11} style={{ ...s.td, textAlign: 'center', color: t.text4, padding: '48px' }}>
                   {anyFilter ? 'No branches match the current filters.' : 'No branches yet.'}
                 </td></tr>
               )}
