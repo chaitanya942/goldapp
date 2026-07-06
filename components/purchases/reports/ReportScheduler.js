@@ -136,15 +136,21 @@ export default function ReportScheduler() {
     } catch (e) { flash('err', e.message || 'Preview failed') } finally { setPreviewBusy(false) }
   }
 
-  const downloadXlsx = () => {
-    if (!preview?.xlsxBase64) return
-    const bin = atob(preview.xlsxBase64)
+  const b64ToBlob = (b64, type) => {
+    const bin = atob(b64)
     const bytes = new Uint8Array(bin.length)
     for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
-    const blob = new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a'); a.href = url; a.download = preview.filename || 'report.xlsx'; a.click()
+    return new Blob([bytes], { type: type || 'application/octet-stream' })
+  }
+  const downloadAttachment = (att) => {
+    const url = URL.createObjectURL(b64ToBlob(att.contentBase64, att.contentType))
+    const a = document.createElement('a'); a.href = url; a.download = att.filename; a.click()
     URL.revokeObjectURL(url)
+  }
+  const attLabel = (att) => {
+    if (att.contentType?.includes('spreadsheet')) return 'Excel'
+    if (att.contentType === 'image/png') return att.filename.replace(/^Consignment_/, '').replace(/_\d{4}-\d{2}-\d{2}\.png$/, '').replace(/_/g, ' ') || 'PNG'
+    return att.filename
   }
 
   const downloadPng = async () => {
@@ -280,8 +286,10 @@ export default function ReportScheduler() {
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
               <input type="date" style={inp} value={previewDate} max={istToday()} onChange={e => setPreviewDate(e.target.value)} />
               <button style={btn(t.blue, '#fff')} disabled={previewBusy} onClick={runPreview}>{previewBusy ? 'Building…' : 'Preview'}</button>
-              {preview && !preview.isEmpty && <button style={btn(t.card2, t.text1)} onClick={downloadXlsx}>⬇ Excel</button>}
-              {preview && !preview.isEmpty && <button style={btn(t.card2, t.text1)} disabled={pngBusy} onClick={downloadPng}>{pngBusy ? 'Rendering…' : '⬇ PNG'}</button>}
+              {preview && !preview.isEmpty && (preview.attachments || []).map(att => (
+                <button key={att.filename} style={btn(t.card2, t.text1)} onClick={() => downloadAttachment(att)}>⬇ {attLabel(att)}</button>
+              ))}
+              {preview && !preview.isEmpty && <button style={btn(t.card2, t.text1)} disabled={pngBusy} onClick={downloadPng}>{pngBusy ? 'Rendering…' : '⬇ Summary PNG'}</button>}
               <button style={btn(t.amber, '#0c0c0c')} disabled={sendBusy} onClick={sendTest}>{sendBusy ? 'Sending…' : 'Send now →'}</button>
             </div>
             {preview && preview.isEmpty && (

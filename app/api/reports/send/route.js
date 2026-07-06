@@ -31,16 +31,14 @@ export async function POST(req) {
 
   try {
     const built = await report.build(date)
+    const attachments = (built.attachments || []).map(a => ({
+      filename: a.filename, content: a.contentBase64, encoding: 'base64', contentType: a.contentType,
+    }))
     const res = await sendMail({
       to, cc,
       subject: built.subject,
       html: built.html,
-      attachments: built.xlsxBase64 ? [{
-        filename: built.filename,
-        content: built.xlsxBase64,
-        encoding: 'base64',
-        contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      }] : [],
+      attachments,
     })
     return Response.json({ success: true, sentBy: auth.profile?.email, to, cc, isEmpty: built.isEmpty, messageId: res.messageId })
   } catch (e) {

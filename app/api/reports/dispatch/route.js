@@ -80,10 +80,9 @@ async function runDispatch({ force, onlyId } = {}) {
       const sendRes = await sendMail({
         to: s.recipients, cc: s.cc || [],
         subject: built.subject, html: built.html,
-        attachments: built.xlsxBase64 ? [{
-          filename: built.filename, content: built.xlsxBase64, encoding: 'base64',
-          contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        }] : [],
+        attachments: (built.attachments || []).map(a => ({
+          filename: a.filename, content: a.contentBase64, encoding: 'base64', contentType: a.contentType,
+        })),
       })
       await supabase.from('report_schedules').update({
         last_sent_date: now.date, last_sent_at: new Date().toISOString(),

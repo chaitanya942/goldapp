@@ -11,6 +11,7 @@ import {
 } from '../../../lib/consignmentUtils'
 import { logConsignmentEvent } from '../../../lib/consignmentLog'
 import { applyConsignmentApproval } from '../../../lib/consignmentApproval'
+import { fetchInTransitStock } from '../../../lib/consignmentReportData'
 import { requireAuth, requireAuthForPage, ROLE_GROUPS, getRegionFilter, resolveAllowedBranchNames } from '../../../lib/apiAuth'
 import { istToday, istStartOfDayIso, istEndOfDayIso, addWorkingDaysSkipSunday } from '../../../lib/dateIst'
 import { cancelEWayBill, cancelEInvoice } from '../../../lib/clearTaxClient'
@@ -2442,106 +2443,17 @@ export async function GET(req) {
     // moved on a particular date" — a bill received last week still appears
     // when its dispatch date is in the window. Without the params we fall
     // back to the original "currently in transit" snapshot.
+    // Data build extracted to lib/consignmentReportData.js so the scheduled
+    // consignment email report renders identical rows. See there for the full
+    // rationale (created-date window, per-bill de-dup, region/TAT enrichment).
     const fromDate = searchParams.get('from')
     const toDate   = searchParams.get('to')
-
-    // ── Permanent ledger of consignments CREATED per day ──────────────────
-    // Step 1 — ONE paginated, server-side-filtered query on consignment_items
-    // embedding consignments!inner (the only FK consignment_items actually
-    // has). The embedded filter does the created-date window + approved+ +
-    // not-cancelled scoping server-side, so we never build a giant
-    // .in([consignment_ids]) list. Returns (purchase_id, consignment) pairs.
-    // So a consignment created last month still appears (with its bills) even
-    // after the bills were received at HO.
-    const PAGE = 1000
-    const MAX_PAGES = 60          // safety cap (~60k item rows) for the 'All' chip
-    let offset = 0
-    const itemRows = []
-    for (let page = 0; page < MAX_PAGES; page++) {
-      let q = supabase
-        .from('consignment_items')
-        .select('purchase_id, consignments!inner(id, tmp_prf_no, branch_name, dest_branch, movement_type, status, approval_status, dispatched_at, created_at)')
-        .neq('consignments.status', 'cancelled')
-        .neq('consignments.status', 'seed')
-        .not('consignments.dispatched_at', 'is', null)
-        .order('purchase_id', { ascending: true })
-        .range(offset, offset + PAGE - 1)
-      if (fromDate) q = q.gte('consignments.created_at', `${fromDate}T00:00:00+05:30`)
-      if (toDate)   q = q.lte('consignments.created_at', `${toDate}T23:59:59+05:30`)
-      if (allowedBranches) q = q.in('consignments.branch_name', allowedBranches)
-      const { data, error } = await q
-      if (error) return Response.json({ error: error.message }, { status: 500 })
-      if (!data?.length) break
-      itemRows.push(...data)
-      if (data.length < PAGE) break
-      offset += PAGE
+    try {
+      const enriched = await fetchInTransitStock({ from: fromDate, to: toDate, allowedBranches })
+      return Response.json({ data: enriched })
+    } catch (e) {
+      return Response.json({ error: e.message }, { status: 500 })
     }
-    if (!itemRows.length) return Response.json({ data: [] })
-
-    // De-dup per bill: a bill re-consigned across two active consignments
-    // keeps the most-recently-created one (cancelled already excluded).
-    const consByPurchase = {}   // purchase_id → consignment row
-    for (const row of itemRows) {
-      const c = row.consignments
-      if (!c) continue
-      const prev = consByPurchase[row.purchase_id]
-      if (!prev || new Date(c.created_at) > new Date(prev.created_at)) {
-        consByPurchase[row.purchase_id] = c
-      }
-    }
-    const purchaseIds = Object.keys(consByPurchase)
-    if (!purchaseIds.length) return Response.json({ data: [] })
-
-    // Step 2 — fetch the bills. consignment_items has NO FK to purchases, so
-    // we can't embed it; fetch by id instead. Chunk at a URL-SAFE 100 (a
-    // 1000-id .in() overflows PostgREST's URL budget → 'Bad Request') and run
-    // the chunks in bounded-parallel waves so latency stays low without
-    // hammering the connection pool.
-    const P_CHUNK = 100
-    const WAVE    = 10
-    const PCOLS   = 'id, application_id, branch_name, customer_name, purchase_date, gross_weight, net_weight, total_amount, dispatched_at, booked_at, stock_status'
-    const bills = []
-    for (let i = 0; i < purchaseIds.length; i += P_CHUNK * WAVE) {
-      const waveSlices = []
-      for (let j = i; j < Math.min(i + P_CHUNK * WAVE, purchaseIds.length); j += P_CHUNK) {
-        waveSlices.push(purchaseIds.slice(j, j + P_CHUNK))
-      }
-      const results = await Promise.all(waveSlices.map(slice =>
-        supabase.from('purchases').select(PCOLS).in('id', slice).eq('is_deleted', false)
-      ))
-      for (const r of results) {
-        if (r.error) return Response.json({ error: r.error.message }, { status: 500 })
-        bills.push(...(r.data || []))
-      }
-    }
-    if (!bills.length) return Response.json({ data: [] })
-
-    // Branch region + delivery TAT (drives the Expected Delivery column).
-    const branchNames = [...new Set(bills.map(b => b.branch_name).filter(Boolean))]
-    const { data: brRows } = branchNames.length
-      ? await supabase.from('branches').select('name, region, delivery_tat_hours').in('name', branchNames)
-      : { data: [] }
-    const regionByBranch = Object.fromEntries((brRows || []).map(b => [b.name, b.region]))
-    const tatByBranch    = Object.fromEntries((brRows || []).map(b => [b.name, Number(b.delivery_tat_hours) || null]))
-
-    const enriched = bills.map(b => {
-      const c = consByPurchase[b.id]
-      return {
-        ...b,
-        region: regionByBranch[b.branch_name] || null,
-        delivery_tat_hours: tatByBranch[b.branch_name] ?? null,
-        // The report's date axis = the owning consignment's CREATION date.
-        consignment_created_at: c?.created_at || null,
-        consignment: c ? {
-          id: c.id, tmp_prf_no: c.tmp_prf_no,
-          source: c.branch_name, dest: c.dest_branch,
-          movement_type: c.movement_type,
-          status: c.status, approval_status: c.approval_status,
-          dispatched_at: c.dispatched_at, created_at: c.created_at,
-        } : null,
-      }
-    })
-    return Response.json({ data: enriched })
   }
 
   // ── Get all consignments ─────────────────────────────────────────────────
