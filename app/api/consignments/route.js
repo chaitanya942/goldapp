@@ -3992,11 +3992,21 @@ export async function POST(req) {
     if (Number.isFinite(Number(pending_g)))           breakdownPayload.pending_g           = Number(pending_g)
     if (Number.isFinite(Number(additional_gain_g)))   breakdownPayload.additional_gain_g   = Number(additional_gain_g)
     if (Number.isFinite(Number(pipeline_original_g))) breakdownPayload.pipeline_original_g = Number(pipeline_original_g)
-    // gain_rate — the booking's refining-margin rate. Kerala = 0,
-    // everything else the 3.5 % standard. The new gain model derives
-    // gain = sourced_net × gain_rate, so this is the single number that
-    // ties net weight to bid weight.
-    breakdownPayload.gain_rate = is_kl ? 0 : 0.035
+    // gain_rate — the booking's refining-margin rate. The live gain model
+    // derives gain = sourced_net × gain_rate, so gain_rate must reflect the
+    // gain the operator actually applied on the modal (gain_applied_g), NOT a
+    // hardcoded 3.5 %. Without this, a manual grams override (e.g. 30 g) was
+    // ignored and gain snapped back to 3.5 % of sourced. Default (no override)
+    // still lands on ~0.035 because gain_applied_g = net × 3.5 % by default.
+    // Kerala = 0. Falls back to the 3.5 % standard when net is unknown.
+    {
+      const netForRate  = Number(bills_net_weight_g) || 0
+      const appliedGain = Number(gain_applied_g)
+      breakdownPayload.gain_rate = is_kl ? 0
+        : (netForRate > 0 && Number.isFinite(appliedGain) && appliedGain >= 0)
+          ? Number((appliedGain / netForRate).toFixed(6))
+          : 0.035
+    }
     if (Object.keys(breakdownPayload).length > 0) {
       try {
         const { error: brkErr } = await supabase
