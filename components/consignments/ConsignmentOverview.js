@@ -727,8 +727,8 @@ export default function ConsignmentOverview() {
         if (!b0) continue   // branch not in current scope/data
         s = m[r.branch_name] = {
           ...b0,
-          today_bills: 0, today_net_wt: 0, today_gross_value: 0,
-          older_bills: 0, older_net_wt: 0, older_gross_value: 0,
+          today_bills: 0, today_net_wt: 0, today_gross_wt: 0, today_gross_value: 0,
+          older_bills: 0, older_net_wt: 0, older_gross_wt: 0, older_gross_value: 0,
           total_gross_wt: 0, total_net_wt: 0, total_gross_value: 0,
           oldest_date: null,
         }
@@ -736,6 +736,7 @@ export default function ConsignmentOverview() {
       const isToday = r.purchase_date === todayIst
       s[isToday ? 'today_bills'       : 'older_bills']       += r.bills
       s[isToday ? 'today_net_wt'      : 'older_net_wt']      += r.net_wt
+      s[isToday ? 'today_gross_wt'    : 'older_gross_wt']    += r.gross_wt
       s[isToday ? 'today_gross_value' : 'older_gross_value'] += r.gross_value
       s.total_gross_wt    += r.gross_wt
       s.total_net_wt      += r.net_wt
@@ -853,16 +854,18 @@ export default function ConsignmentOverview() {
   }
 
   // ── Grand totals ──────────────────────────────────────────────────────────
-  const { grandToday, grandTodayWt, grandTodayVal, grandOlder, grandOlderWt, grandOlderVal, grandGrossWt } = useMemo(() => {
-    const acc = { grandToday: 0, grandTodayWt: 0, grandTodayVal: 0, grandOlder: 0, grandOlderWt: 0, grandOlderVal: 0, grandGrossWt: 0 }
+  const { grandToday, grandTodayWt, grandTodayGrossWt, grandTodayVal, grandOlder, grandOlderWt, grandOlderGrossWt, grandOlderVal, grandGrossWt } = useMemo(() => {
+    const acc = { grandToday: 0, grandTodayWt: 0, grandTodayGrossWt: 0, grandTodayVal: 0, grandOlder: 0, grandOlderWt: 0, grandOlderGrossWt: 0, grandOlderVal: 0, grandGrossWt: 0 }
     for (const b of filtered) {
-      acc.grandToday    += b.today_bills        || 0
-      acc.grandTodayWt  += b.today_net_wt       || 0
-      acc.grandTodayVal += b.today_gross_value  || 0
-      acc.grandOlder    += b.older_bills        || 0
-      acc.grandOlderWt  += b.older_net_wt       || 0
-      acc.grandOlderVal += b.older_gross_value  || 0
-      acc.grandGrossWt  += b.total_gross_wt     || 0
+      acc.grandToday        += b.today_bills        || 0
+      acc.grandTodayWt      += b.today_net_wt       || 0
+      acc.grandTodayGrossWt += b.today_gross_wt     || 0
+      acc.grandTodayVal     += b.today_gross_value  || 0
+      acc.grandOlder        += b.older_bills        || 0
+      acc.grandOlderWt      += b.older_net_wt       || 0
+      acc.grandOlderGrossWt += b.older_gross_wt     || 0
+      acc.grandOlderVal     += b.older_gross_value  || 0
+      acc.grandGrossWt      += b.total_gross_wt     || 0
     }
     return acc
   }, [filtered])
@@ -1293,6 +1296,12 @@ export default function ConsignmentOverview() {
           <div style={{ fontSize: '10px', color: `${t.blue}80`, marginTop: '4px' }}>net gold today</div>
         </div>
 
+        <div style={{ ...card, padding: '14px 18px', borderLeft: `3px solid ${t.blue}`, background: `${t.blue}08` }}>
+          <div style={{ fontSize: '9px', color: t.blue, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: '8px', fontWeight: 600 }}>Today's Gross Wt</div>
+          <div style={{ fontSize: '26px', fontWeight: 200, color: t.blue, fontFamily: 'monospace', lineHeight: 1 }}>{fmt(grandTodayGrossWt, 2)}<span style={{ fontSize: '13px', marginLeft: '3px' }}>g</span></div>
+          <div style={{ fontSize: '10px', color: `${t.blue}80`, marginTop: '4px' }}>gross gold today</div>
+        </div>
+
         {/* Pending group */}
         <div style={{ ...card, padding: '14px 18px', borderLeft: `3px solid ${t.orange}`, background: `${t.orange}08` }}>
           <div style={{ fontSize: '9px', color: t.orange, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: '8px', fontWeight: 600 }}>Pending Bills</div>
@@ -1304,6 +1313,12 @@ export default function ConsignmentOverview() {
           <div style={{ fontSize: '9px', color: t.orange, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: '8px', fontWeight: 600 }}>Pending Net Wt</div>
           <div style={{ fontSize: '26px', fontWeight: 200, color: t.orange, fontFamily: 'monospace', lineHeight: 1 }}>{fmt(grandOlderWt, 2)}<span style={{ fontSize: '13px', marginLeft: '3px' }}>g</span></div>
           <div style={{ fontSize: '10px', color: `${t.orange}80`, marginTop: '4px' }}>closing stock</div>
+        </div>
+
+        <div style={{ ...card, padding: '14px 18px', borderLeft: `3px solid ${t.orange}`, background: `${t.orange}08` }}>
+          <div style={{ fontSize: '9px', color: t.orange, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: '8px', fontWeight: 600 }}>Pending Gross Wt</div>
+          <div style={{ fontSize: '26px', fontWeight: 200, color: t.orange, fontFamily: 'monospace', lineHeight: 1 }}>{fmt(grandOlderGrossWt, 2)}<span style={{ fontSize: '13px', marginLeft: '3px' }}>g</span></div>
+          <div style={{ fontSize: '10px', color: `${t.orange}80`, marginTop: '4px' }}>gross closing stock</div>
         </div>
 
         <div style={{ ...card, padding: '14px 18px', borderLeft: `3px solid ${t.gold}`, background: `${t.gold}06` }}>
