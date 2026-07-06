@@ -24,6 +24,7 @@
     "music-metadata": "^11.12.3",
     "mysql2": "^3.20.0",
     "next": "16.1.6",
+    "nodemailer": "^9.0.3",
     "pg": "^8.20.0",
     "postgres": "^3.4.9",
     "qrcode": "^1.5.4",
@@ -31,7 +32,8 @@
     "react-dom": "19.2.3",
     "recharts": "^3.8.1",
     "socket.io-client": "^4.8.3",
-    "tar": "^7.5.13"
+    "tar": "^7.5.13",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

@@ -40,6 +40,7 @@ const AT_RISK_ENDPOINT     = `${APP_URL}/api/consignments?action=bidding_at_risk
 const SECTION1_AUDIT_URL   = `${APP_URL}/api/bidding/section1-audit`
 const EMPLOYEE_SYNC_URL    = `${APP_URL}/api/sync-branch-employees`
 const BRANCH_SYNC_URL      = `${APP_URL}/api/sync-branches-auto`
+const REPORT_DISPATCH_URL  = `${APP_URL}/api/reports/dispatch`
 const HEADERS              = { Authorization: `Bearer ${CRON_SECRET}` }
 // /api/eod-inventory-snapshot POST + /api/bidding/section1-audit POST both
 // gate on x-cron-token (not Bearer).
@@ -221,6 +222,31 @@ async function maybeSyncBranches() {
   }
 }
 
+async function maybeSendScheduledReports() {
+  // Every tick, ask the app to fire any report schedule that is due right now
+  // (IST). The endpoint is idempotent (one send per schedule per IST day) so
+  // calling it each tick is safe — it only actually mails when a schedule's
+  // send_time has arrived and it hasn't already gone out today.
+  try {
+    const res = await fetch(REPORT_DISPATCH_URL, { method: 'POST', headers: { 'x-cron-token': CRON_SECRET, 'Content-Type': 'application/json' }, body: '{}' })
+    const txt = await res.text()
+    let body
+    try { body = JSON.parse(txt) } catch { body = { raw: txt } }
+    if (!res.ok || body.success === false) {
+      console.error(new Date().toISOString(), `[cron-sync] report dispatch FAIL ${res.status}`, body.error || body.reason || txt.slice(0, 200))
+      return
+    }
+    const sent = (body.results || []).filter(r => r.status === 'sent')
+    if (sent.length) {
+      console.log(new Date().toISOString(), `[cron-sync] report dispatch: ${sent.map(r => `${r.id.slice(0,8)}→${(r.to||[]).length} rcpt${r.isEmpty ? ' (empty)' : ''}`).join(', ')}`)
+    }
+    const errs = (body.results || []).filter(r => r.status === 'error')
+    if (errs.length) console.error(new Date().toISOString(), `[cron-sync] report dispatch errors: ${errs.map(r => `${r.id.slice(0,8)}: ${r.error}`).join(' | ')}`)
+  } catch (err) {
+    console.error(new Date().toISOString(), '[cron-sync] report dispatch threw:', err?.message || err)
+  }
+}
+
 async function syncOnce() {
   if (inFlight) {
     console.log(new Date().toISOString(), '[cron-sync] previous run still in flight, skipping tick')
@@ -273,6 +299,11 @@ async function syncOnce() {
   // Piggy-back the daily branch auto-add — once per IST day + on startup. Any
   // NEW CRM branch that has started purchasing is added to the branch master.
   maybeSyncBranches().catch(() => null)
+
+  // Piggy-back scheduled report delivery — checked every tick; the endpoint is
+  // idempotent and only mails when a schedule is actually due (send_time
+  // reached, not yet sent today).
+  maybeSendScheduledReports().catch(() => null)
 }
 
 console.log(`[cron-sync] starting — ${ENDPOINT} every ${INTERVAL_MS}ms`)
