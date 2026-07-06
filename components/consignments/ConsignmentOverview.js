@@ -1257,7 +1257,7 @@ export default function ConsignmentOverview() {
           })}
           {selectedDates.size > 0 && (
             <button onClick={() => setSelectedDates(new Set())}
-              style={{ flexShrink: 0, padding: '6px 10px', borderRadius: '999px', cursor: 'pointer', fontSize: '10px', fontWeight: 600, border: `1px solid ${t.border2}`, background: 'transparent', color: t.text4, whiteSpace: 'nowrap' }}>
+              style={{ flexShrink: 0, padding: '6px 10px', borderRadius: '999px', cursor: 'pointer', fontSize: '10px', fontWeight: 800, border: `1px solid ${t.red}66`, background: `${t.red}14`, color: t.red, whiteSpace: 'nowrap' }}>
               ✕ Clear ({selectedDates.size})
             </button>
           )}
