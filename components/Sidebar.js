@@ -16,7 +16,7 @@ const NAV_ITEMS = [
     children: [
       { id: 'consignment-overview',   label: 'Branch Stock',          dot: '#3aaa6a' },
       { id: 'consignment-data',       label: 'Consignment Data',      dot: '#c9a84c' },
-      { id: 'consignment-bidding',    label: 'Bidding Volume',        dot: '#c9a84c' },
+      { id: 'consignment-bidding',    label: 'Booking Volume',        dot: '#c9a84c' },
       { id: 'consignment-report',     label: 'Reports',               dot: '#3a8fbf' },
     ]
   },
