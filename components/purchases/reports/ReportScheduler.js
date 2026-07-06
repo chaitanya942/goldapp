@@ -58,18 +58,26 @@ export default function ReportScheduler() {
 
   const flash = (kind, text) => { setMsg({ kind, text }); setTimeout(() => setMsg(null), 6000) }
 
-  const load = useCallback(async () => {
-    setLoading(true)
+  const load = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true)
     try {
       const data = await authedJson('/api/reports/schedules')
       setSchedules(data.schedules || [])
       setReports(data.reports || [])
     } catch (e) {
-      flash('err', e.message || 'Failed to load schedules')
-    } finally { setLoading(false) }
+      if (!silent) flash('err', e.message || 'Failed to load schedules')
+    } finally { if (!silent) setLoading(false) }
   }, [])
 
   useEffect(() => { if (allowed) load() }, [allowed, load])
+
+  // Poll every 30s so "last sent" / status updates after the cron dispatches,
+  // without needing a manual refresh. Silent (no loading flash).
+  useEffect(() => {
+    if (!allowed) return
+    const iv = setInterval(() => load(true), 30000)
+    return () => clearInterval(iv)
+  }, [allowed, load])
 
   const startNew = () => setForm({ ...EMPTY })
   const startEdit = (s) => setForm({
@@ -181,7 +189,12 @@ export default function ReportScheduler() {
           <div style={{ fontSize: 18, fontWeight: 800, color: t.text1 }}>Scheduled Reports</div>
           <div style={{ fontSize: 12, color: t.text3, marginTop: 2 }}>Auto-email reports to Finance on a daily / weekly / custom schedule.</div>
         </div>
-        {!form && <button style={btn(t.gold, '#0c0c0c')} onClick={startNew}>+ New schedule</button>}
+        {!form && (
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button style={btn(t.card2, t.text2)} onClick={() => load()} title="Refresh status">↻ Refresh</button>
+            <button style={btn(t.gold, '#0c0c0c')} onClick={startNew}>+ New schedule</button>
+          </div>
+        )}
       </div>
 
       {msg && (
