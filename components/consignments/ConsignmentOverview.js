@@ -716,7 +716,17 @@ export default function ConsignmentOverview() {
   // recomputed; pickup / last-moved meta is preserved from the live row.
   const todayIst = istToday()
   const effectiveData = useMemo(() => {
-    if (!selectedDates.size || !byBranchDate) return data
+    // The RPC splits net weight + value by today/older but NOT gross weight
+    // (it only returns total_gross_wt). Derive the today/older gross split from
+    // the per-(branch, date) breakdown so the hero cards can show it.
+    const grossSplit = {}
+    for (const r of byBranchDate || []) {
+      const g = grossSplit[r.branch_name] || (grossSplit[r.branch_name] = { today_gross_wt: 0, older_gross_wt: 0 })
+      g[r.purchase_date === todayIst ? 'today_gross_wt' : 'older_gross_wt'] += Number(r.gross_wt || 0)
+    }
+    if (!selectedDates.size || !byBranchDate) {
+      return data.map(b => ({ ...b, ...(grossSplit[b.branch_name] || { today_gross_wt: 0, older_gross_wt: 0 }) }))
+    }
     const base = Object.fromEntries(data.map(b => [b.branch_name, b]))
     const m = {}
     for (const r of byBranchDate) {
@@ -1275,13 +1285,6 @@ export default function ConsignmentOverview() {
            model the workflow. */}
       {isOutside && (
       <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(auto-fit, minmax(160px, 1fr))', gap: '10px' }}>
-
-        {/* Branches */}
-        <div style={{ ...card, padding: '14px 18px' }}>
-          <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: '8px' }}>Branches</div>
-          <div style={{ fontSize: '26px', fontWeight: 200, color: t.text1, fontFamily: 'monospace', lineHeight: 1 }}>{filtered.length}</div>
-          <div style={{ fontSize: '10px', color: t.text4, marginTop: '4px' }}>of {scopeData.length} total</div>
-        </div>
 
         {/* Today group */}
         <div style={{ ...card, padding: '14px 18px', borderLeft: `3px solid ${t.blue}`, background: `${t.blue}08` }}>
