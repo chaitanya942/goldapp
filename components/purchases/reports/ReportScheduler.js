@@ -1,8 +1,18 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useApp } from '../../../lib/context'
 import { authedFetch, authedJson } from '../../../lib/authedFetch'
+
+// Lazy-load a script once (same pattern as the SheetJS/xlsx loader elsewhere).
+function loadScript(src) {
+  return new Promise((resolve, reject) => {
+    if (document.querySelector(`script[src="${src}"]`)) return resolve()
+    const s = document.createElement('script')
+    s.src = src; s.onload = () => resolve(); s.onerror = () => reject(new Error(`failed to load ${src}`))
+    document.head.appendChild(s)
+  })
+}
 
 const THEMES = {
   dark:  { bg: '#0c0c0c', card: '#141414', card2: '#1a1a1a', text1: '#f0e6c8', text2: '#c8bda0', text3: '#8a7f66', gold: '#c9a84c', border: '#242424', green: '#3aaa6a', red: '#e05555', blue: '#3a8fbf', amber: '#e58a3b' },
@@ -43,6 +53,8 @@ export default function ReportScheduler() {
   const [preview, setPreview] = useState(null)  // { html, filename, xlsxBase64, subject, counts }
   const [previewBusy, setPreviewBusy] = useState(false)
   const [sendBusy, setSendBusy] = useState(false)
+  const [pngBusy, setPngBusy] = useState(false)
+  const previewRef = useRef(null)
 
   const flash = (kind, text) => { setMsg({ kind, text }); setTimeout(() => setMsg(null), 6000) }
 
@@ -125,6 +137,21 @@ export default function ReportScheduler() {
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a'); a.href = url; a.download = preview.filename || 'report.xlsx'; a.click()
     URL.revokeObjectURL(url)
+  }
+
+  const downloadPng = async () => {
+    if (!previewRef.current) return
+    setPngBusy(true)
+    try {
+      await loadScript('https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js')
+      const canvas = await window.html2canvas(previewRef.current, { scale: 2, backgroundColor: '#ffffff', useCORS: true })
+      canvas.toBlob((blob) => {
+        if (!blob) return
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a'); a.href = url; a.download = `Purchase_Report_${previewDate}.png`; a.click()
+        URL.revokeObjectURL(url)
+      }, 'image/png')
+    } catch (e) { flash('err', e.message || 'PNG export failed') } finally { setPngBusy(false) }
   }
 
   const sendTest = async () => {
@@ -240,13 +267,19 @@ export default function ReportScheduler() {
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
               <input type="date" style={inp} value={previewDate} max={istToday()} onChange={e => setPreviewDate(e.target.value)} />
               <button style={btn(t.blue, '#fff')} disabled={previewBusy} onClick={runPreview}>{previewBusy ? 'Building…' : 'Preview'}</button>
-              {preview && <button style={btn(t.card2, t.text1)} onClick={downloadXlsx}>⬇ Excel</button>}
+              {preview && !preview.isEmpty && <button style={btn(t.card2, t.text1)} onClick={downloadXlsx}>⬇ Excel</button>}
+              {preview && !preview.isEmpty && <button style={btn(t.card2, t.text1)} disabled={pngBusy} onClick={downloadPng}>{pngBusy ? 'Rendering…' : '⬇ PNG'}</button>}
               <button style={btn(t.amber, '#0c0c0c')} disabled={sendBusy} onClick={sendTest}>{sendBusy ? 'Sending…' : 'Send now →'}</button>
             </div>
-            {preview && (
+            {preview && preview.isEmpty && (
+              <div style={{ marginTop: 12, padding: '10px 14px', borderRadius: 8, fontSize: 13, background: `${t.amber}18`, border: `1px solid ${t.amber}55`, color: t.amber }}>
+                No purchases on {previewDate} — branches were likely closed (Sunday / holiday). Scheduled sends automatically skip empty days, so Finance won’t get a blank email. Pick a working day to preview a populated report.
+              </div>
+            )}
+            {preview && !preview.isEmpty && (
               <div style={{ marginTop: 12 }}>
                 <div style={{ fontSize: 12, color: t.text3, marginBottom: 6 }}>Subject: <span style={{ color: t.text1 }}>{preview.subject}</span></div>
-                <div style={{ background: '#fff', borderRadius: 8, padding: 16, maxHeight: 480, overflow: 'auto', border: `1px solid ${t.border}` }}
+                <div ref={previewRef} style={{ background: '#fff', borderRadius: 8, padding: 16, maxHeight: 480, overflow: 'auto', border: `1px solid ${t.border}` }}
                   dangerouslySetInnerHTML={{ __html: preview.html }} />
               </div>
             )}

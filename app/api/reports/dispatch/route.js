@@ -66,6 +66,17 @@ async function runDispatch({ force, onlyId } = {}) {
     }
     try {
       const built = await report.build(reportDate)
+      // Skip empty days (Sundays / holidays with no purchases) — don't email a
+      // blank report to Finance. Mark it handled for today so we don't rebuild
+      // every tick.
+      if (built.isEmpty) {
+        await supabase.from('report_schedules').update({
+          last_sent_date: now.date, last_sent_at: new Date().toISOString(),
+          last_status: 'skipped_empty', last_error: null,
+        }).eq('id', s.id)
+        results.push({ id: s.id, status: 'skipped_empty', reportDate })
+        continue
+      }
       const sendRes = await sendMail({
         to: s.recipients, cc: s.cc || [],
         subject: built.subject, html: built.html,
