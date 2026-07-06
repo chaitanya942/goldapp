@@ -590,28 +590,23 @@ export async function GET(req) {
     // bills already consolidate at hub before moving to HO).
     const nowIstHHMM = new Date().toLocaleTimeString('en-GB', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: false })
     const todayDow   = new Date().toLocaleDateString('en-US', { timeZone: 'Asia/Kolkata', weekday: 'short' })
+    // Section 7 = full branch-pickup-pending view: ALL non-Bangalore branches
+    // (Kerala hub-only — leaves consolidate at hub first). Each branch is
+    // flagged `pickup_today` so the client can offer a Today / All filter. Note:
+    // grandTotal below counts ONLY the pickup-today subset (bid-pool math is
+    // unchanged); the extra non-pickup-today branches are display-only.
     const preEodEligibleBranchNames = (branchRows || []).filter(b => {
-      if (b.region === 'Bangalore')                          return false
-      // All delivery TATs (24h / 48h / 72h) are surfaced here now — Section 7 is
-      // a full branch-pickup-pending view (like Branch Stock), with a TAT filter
-      // on the client. (Bid pool stays S1+S2 only; this section isn't summed in.)
-      if (b.region === 'Kerala' && !b.is_hub)                return false   // Kerala: hub-only (leaves consolidate at hub first)
-      // Kerala hubs are ALWAYS included — they receive transferred bills
-      // from leaf branches throughout the day and dispatch to HO at EOD.
-      // The logistics module often leaves their pickup_time blank because
-      // the schedule is implicit ("end of day"); we don't want that to hide
-      // them.
-      if (b.region === 'Kerala' && b.is_hub) return true
-      // Non-Kerala: include branches whose pickup_days lists today. We
-      // intentionally do NOT filter by pickup_time — pickups can run
-      // late, and ops needs to keep seeing the bills sitting at the
-      // branch *after* the scheduled time so delayed pickups aren't
-      // hidden from the bidding pool. pickup_time is treated as
-      // informational only, not a gate.
-      if (!Array.isArray(b.pickup_days))                     return false
-      if (!b.pickup_days.includes(todayDow))                 return false
+      if (b.region === 'Bangalore')           return false
+      if (b.region === 'Kerala' && !b.is_hub) return false   // Kerala: hub-only
       return true
     }).map(b => b.name)
+    // Subset whose pickup is scheduled TODAY. Kerala hubs = daily (always today).
+    // pickup_time is NOT a gate (pickups run late; ops keeps seeing the stock).
+    const pickupTodaySet = new Set((branchRows || []).filter(b => {
+      if (b.region === 'Bangalore') return false
+      if (b.region === 'Kerala')    return b.is_hub
+      return Array.isArray(b.pickup_days) && b.pickup_days.includes(todayDow)
+    }).map(b => b.name))
 
     // 1) Bangalore — bills purchased on bangalorePurchaseDate, status approved.
     //    Include any stock_status: the time-of-day lifecycle moves them at
@@ -997,6 +992,8 @@ export async function GET(req) {
     const bangPendingBookingByBranch = annotateConsignmentMeta(groupByBranch(bangalorePendingBooking))
     const bangGainRebookableByBranch = groupByBranch(bangaloreGainRebookable)
     const preEodByBranch     = groupByBranch(preEodBills)
+    // Flag whether each branch's pickup is today (Today/All client filter).
+    for (const b of preEodByBranch) b.pickup_today = pickupTodaySet.has(b.branch_name)
 
     // For booked-pending: also fold in branch-level booking summaries
     // (earliest + latest booked_at, unique parties, unique created_by) so
@@ -1116,16 +1113,18 @@ export async function GET(req) {
     const pendingBookingTotal     = sumOf(pendingBookingByBranch)
     const bangPendingBookingTotal = sumOf(bangPendingBookingByBranch)
     const bangGainRebookableTotal = sumOf(bangGainRebookableByBranch)
-    const preEodTotal       = sumOf(preEodByBranch)
+    const preEodTotal       = sumOf(preEodByBranch)   // full set (section baseline = All view)
+    // grandTotal (bid-pool math) counts ONLY the pickup-today subset — unchanged.
+    const preEodTotalToday  = sumOf(preEodByBranch.filter(b => b.pickup_today))
     const bookedNonKlTotal  = sumOf(bookedNonKlByBranch)
     const bookedKlTotal     = sumOf(bookedKlByBranch)
     // Bookable pool = sections that can actually arrive at HO on arrivalDate.
     // Section 3 (transit_48h) is informational only — excluded from grandTotal.
     const grandTotal = {
-      bills:    bangTotal.bills    + transit24hTotal.bills    + preEodTotal.bills,
-      gross_wt: bangTotal.gross_wt + transit24hTotal.gross_wt + preEodTotal.gross_wt,
-      net_wt:   bangTotal.net_wt   + transit24hTotal.net_wt   + preEodTotal.net_wt,
-      amount:   bangTotal.amount   + transit24hTotal.amount   + preEodTotal.amount,
+      bills:    bangTotal.bills    + transit24hTotal.bills    + preEodTotalToday.bills,
+      gross_wt: bangTotal.gross_wt + transit24hTotal.gross_wt + preEodTotalToday.gross_wt,
+      net_wt:   bangTotal.net_wt   + transit24hTotal.net_wt   + preEodTotalToday.net_wt,
+      amount:   bangTotal.amount   + transit24hTotal.amount   + preEodTotalToday.amount,
     }
     // Back-compat alias for the existing UI (which reads `in_transit.total`).
     const inflightTotal = transit24hTotal
@@ -1411,7 +1410,7 @@ export async function GET(req) {
         // sub-group inside Section 1 (Bangalore's own section).
         bangalore_pending_booking:   { branches: bangPendingBookingByBranch, total: bangPendingBookingTotal },
         bangalore_gain_rebookable:   { branches: bangGainRebookableByBranch, total: bangGainRebookableTotal },
-        branch_pre_eod: { branches: preEodByBranch,     total: preEodTotal, booked: bookedSection(bookedPreEod, true), _debug: debugSection4 },
+        branch_pre_eod: { branches: preEodByBranch,     total: preEodTotalToday, total_all: preEodTotal, booked: bookedSection(bookedPreEod, true), _debug: debugSection4 },
         // Section 5 — booked but consignment not yet created (at_branch +
         // booking_id IS NOT NULL). View-only; intentionally excluded from
         // bookable totals (the booking row already counts this weight).

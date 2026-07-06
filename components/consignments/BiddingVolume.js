@@ -1726,6 +1726,7 @@ export default function BiddingVolume() {
         prefix="P"
         dateFilter
         tatFilter
+        pickupFilter
         selectable
         selected={selected}
         branchLocked={branchLocked} isDateLocked={isDateLocked}
@@ -3142,6 +3143,9 @@ function SourceSection({
   // When true, adds a delivery-TAT chip row (24h / 48h / 72h) that filters the
   // branches by their tat_hours. Section 7 (all-TAT branch-pickup view).
   tatFilter = false,
+  // When true, adds a Today / All toggle. 'today' keeps only branches whose
+  // pickup is scheduled today (br.pickup_today); 'all' shows every branch.
+  pickupFilter = false,
   // Shows in-section Excel + PNG export buttons (case-wise list of this
   // section's bills, respecting the active filters). Defaults ON for every
   // section; the buttons auto-hide when the section is empty (exportable &&
@@ -3194,9 +3198,13 @@ function SourceSection({
   const [selectedDates,    setSelectedDates]    = useState(() => new Set())
   const [selectedAltDates, setSelectedAltDates] = useState(() => new Set())   // secondary dim (consignment / booking date)
   const [selectedTats,     setSelectedTats]     = useState(() => new Set())   // delivery-TAT filter (24/48/72)
+  const [selectedPickup,   setSelectedPickup]   = useState('today')          // Section 7 pickup filter: 'today' | 'all'
   const toggleDate    = (d) => setSelectedDates(prev    => { const n = new Set(prev); n.has(d) ? n.delete(d) : n.add(d); return n })
   const toggleAltDate = (d) => setSelectedAltDates(prev => { const n = new Set(prev); n.has(d) ? n.delete(d) : n.add(d); return n })
   const toggleTat     = (v) => setSelectedTats(prev     => { const n = new Set(prev); n.has(v) ? n.delete(v) : n.add(v); return n })
+  // Section 7 pickup gate: 'today' keeps only branches whose pickup is today.
+  const pickupToday = pickupFilter && selectedPickup === 'today'
+  const pickupPass  = (br) => !pickupToday || br.pickup_today
   const altField = altDateFilter?.field || null
   let dateChipsAvailable = []
   let altChipsAvailable  = []
@@ -3215,6 +3223,7 @@ function SourceSection({
     // subgroup); the already-booked list is scanned for chips but NOT marked
     // bookable, so a fully-booked date is segregated out below.
     const scan = (arr, bookable) => { for (const br of arr || []) {
+      if (!pickupPass(br)) continue
       const tatOk = matchTat(br)
       let branchCross = false
       for (const bl of br.bills || []) {
@@ -3239,7 +3248,7 @@ function SourceSection({
     altChipsAvailable  = Array.from(as).sort()
     tatsAvailable      = Array.from(ts).sort((a, b) => a - b)
   }
-  if ((dateFilter && selectedDates.size) || (altField && selectedAltDates.size) || (tatFilter && selectedTats.size)) {
+  if ((dateFilter && selectedDates.size) || (altField && selectedAltDates.size) || (tatFilter && selectedTats.size) || pickupFilter) {
     const tatPass = (br) => !(tatFilter && selectedTats.size) || selectedTats.has(Number(br.tat_hours))
     const keep = (bl) =>
       (!selectedDates.size    || selectedDates.has(bl.purchase_date)) &&
@@ -3250,7 +3259,7 @@ function SourceSection({
       for (const bl of bills) { g += Number(bl.gross_weight) || 0; n += Number(bl.net_weight) || 0; a += Number(bl.total_amount) || 0 }
       return { ...br, bills, total_bills: bills.length, total_gross_wt: g, total_net_wt: n, total_amount: a }
     }
-    const filterArr = (arr) => (arr || []).filter(tatPass).map(rollBranch).filter(br => br.bills.length > 0)
+    const filterArr = (arr) => (arr || []).filter(tatPass).filter(pickupPass).map(rollBranch).filter(br => br.bills.length > 0)
     const sumNet  = (arr) => (arr || []).reduce((s, b) => s + (Number(b.total_net_wt)   || 0), 0)
     const rollTot = (arr) => (arr || []).reduce((acc, b) => ({
       bills:    acc.bills    + (b.total_bills    || 0),
@@ -3721,6 +3730,24 @@ function SourceSection({
               ✕ Clear ({selectedAltDates.size})
             </button>
           )}
+        </div>
+      )}
+
+      {/* Pickup Today / All toggle (Section 7) */}
+      {pickupFilter && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', padding: '2px 14px 12px' }}>
+          <span style={{ fontSize: 9, color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 800 }}>Pickup</span>
+          {['today', 'all'].map(v => {
+            const active = selectedPickup === v
+            return (
+              <button key={v} onClick={() => setSelectedPickup(v)}
+                title={v === 'today' ? 'Only branches whose pickup is scheduled today' : 'All branches with stock pending pickup (today + not today)'}
+                style={{ padding: '5px 14px', borderRadius: 999, cursor: 'pointer', fontSize: 10.5, fontWeight: 700, textTransform: 'capitalize',
+                  border: `1px solid ${active ? tone : t.border}`, background: active ? `${tone}22` : 'transparent', color: active ? tone : t.text3, transition: 'all .15s' }}>
+                {v}
+              </button>
+            )
+          })}
         </div>
       )}
 
