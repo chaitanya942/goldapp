@@ -241,10 +241,15 @@ export async function GET(req) {
       s.oldest_date        = row.oldest_pending_date
     }
 
+    // Age counts are IST CALENDAR-day differences (not rolling 24h elapsed), so
+    // "Xd" / "Xd ago" always agrees with the IST date shown beside it. A bill
+    // dated 04 Jul reads "2d" today (06 Jul) whether it landed at 9am or 9pm.
+    const istDateStr = (v) => new Date(new Date(v).getTime() + 5.5 * 3600000).toISOString().slice(0, 10)
+    const istToday   = istDateStr(Date.now())
+    const calDaysAgo = (v) => Math.round((Date.parse(istToday) - Date.parse(istDateStr(v))) / 86400000)
     const result = Object.values(summary).map(s => {
-      const oldestMs   = s.oldest_date ? new Date(s.oldest_date).getTime() : null
-      const oldestDays = oldestMs ? Math.floor((Date.now() - oldestMs) / 86400000) : 0
-      const lastMovedDays = s.last_moved_at ? Math.floor((Date.now() - new Date(s.last_moved_at).getTime()) / 86400000) : null
+      const oldestDays    = s.oldest_date   ? calDaysAgo(s.oldest_date)   : 0
+      const lastMovedDays = s.last_moved_at ? calDaysAgo(s.last_moved_at) : null
       return { ...s, oldest_age_days: oldestDays, last_moved_days_ago: lastMovedDays }
     }).sort((a, b) => b.total_gross_wt - a.total_gross_wt)
 
