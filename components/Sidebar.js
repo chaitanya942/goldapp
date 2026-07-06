@@ -12,7 +12,7 @@ const NAV_ITEMS = [
       { id: 'purchase-reports', label: 'Purchase Reports & Analytics', dot: '#8c5ac8' },
     ]
   },
-  { id: 'consignments', label: 'Consignments', icon: 'M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4', desc: 'In transit',
+  { id: 'consignments', label: 'Operations', icon: 'M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4', desc: 'In transit',
     children: [
       { id: 'consignment-overview',   label: 'Branch Stock',          dot: '#3aaa6a' },
       { id: 'consignment-data',       label: 'Consignment Data',      dot: '#c9a84c' },
