@@ -20,14 +20,16 @@ const NAV_ITEMS = [
       { id: 'consignment-report',     label: 'Reports',               dot: '#3a8fbf' },
     ]
   },
-  { id: 'collection-audit', label: 'Accounts', icon: 'M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z', desc: 'At-HO weight check',
+  { id: 'collection-audit', label: 'Finance and Accounts', icon: 'M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z', desc: 'At-HO weight check',
     children: [
       { id: 'audit-data',           label: 'Audit Data',                 dot: '#5ec1d6' },
       { id: 'audit-roster',         label: 'Audit Roster',               dot: '#c9a84c' },
       { id: 'audit-report',         label: 'Audit Report',               dot: '#8c5ac8' },
       { id: 'discrepancy-cases',    label: 'Discrepancy Cases',          dot: '#e9a942' },
       { id: 'consignment-approvals', label: 'Consignment EWB/E-Invoice', dot: '#c9a84c' },
-      { id: 'purchase-register',    label: 'Purchase Register',          dot: '#3a8fbf' },
+      // 'purchase-register' id reused for the F&A Reports (Email Reports) module
+      // so existing role visibility carries over; it now renders the scheduler.
+      { id: 'purchase-register',    label: 'F&A Reports',                dot: '#3a8fbf' },
       { id: 'billed-vs-paid',       label: 'Billed vs Paid',             dot: '#e05555' },
     ],
   },

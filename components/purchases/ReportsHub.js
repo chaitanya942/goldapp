@@ -4,9 +4,6 @@ import { useState, useEffect } from 'react'
 import { useApp } from '../../lib/context'
 import PurchaseReports      from './reports/PurchaseReports'
 import PurchaseIntelligence from './intelligence/PurchaseIntelligence'
-import ReportScheduler      from './reports/ReportScheduler'
-
-const SCHEDULE_ROLES = ['super_admin', 'founders_office', 'admin', 'accounts']
 
 const THEMES = {
   dark:  { card: '#111111', text1: '#f0e6c8', text3: '#9a8a6a', gold: '#c9a84c', border: '#1e1e1e', purple: '#8c5ac8', blue: '#3a8fbf' },
@@ -16,11 +13,10 @@ const THEMES = {
 const TABS = [
   { id: 'analytics',    label: 'Analytics',    icon: '↗', desc: 'Charts, trends, branch performance' },
   { id: 'intelligence', label: 'Intelligence', icon: '◈', desc: 'Branch health, repeat customers, alerts' },
-  { id: 'scheduled',    label: 'Email Reports', icon: '✉', desc: 'Auto-email reports to Finance' },
 ]
 
 export default function ReportsHub() {
-  const { theme, canSee, role } = useApp()
+  const { theme, canSee } = useApp()
   const t = THEMES[theme] || THEMES.dark
   const [activeTab, setActiveTab] = useState('analytics')
   const [isMobile, setIsMobile] = useState(false)
@@ -30,12 +26,7 @@ export default function ReportsHub() {
     return () => window.removeEventListener('resize', check)
   }, [])
 
-  const visibleTabs = TABS.filter(tab => {
-    // The scheduler is an admin/accounts config surface — gate by role, not the
-    // generic per-tab permission key (which defaults to unrestricted).
-    if (tab.id === 'scheduled') return SCHEDULE_ROLES.includes(role)
-    return canSee(`tab.purchase-reports.${tab.id}`)
-  })
+  const visibleTabs = TABS.filter(tab => canSee(`tab.purchase-reports.${tab.id}`))
   const active = visibleTabs.some(t => t.id === activeTab) ? activeTab : (visibleTabs[0]?.id ?? 'analytics')
 
   return (
@@ -48,7 +39,7 @@ export default function ReportsHub() {
       }}>
         {visibleTabs.map(tab => {
           const isActive = active === tab.id
-          const accent = tab.id === 'intelligence' ? t.purple : tab.id === 'scheduled' ? t.blue : t.gold
+          const accent = tab.id === 'intelligence' ? t.purple : t.gold
           return (
             <button key={tab.id} onClick={() => setActiveTab(tab.id)} style={{
               background: 'transparent', border: 'none',
@@ -71,7 +62,6 @@ export default function ReportsHub() {
       {/* No extra padding — child components handle their own layout */}
       {active === 'analytics'    && <PurchaseReports />}
       {active === 'intelligence' && <PurchaseIntelligence />}
-      {active === 'scheduled'    && <ReportScheduler />}
     </div>
   )
 }
