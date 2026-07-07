@@ -47,6 +47,7 @@ const PAGE_TITLES = {
   'consignment-seeds':   'Consignment Seeds',
   'import-logs':         'Import Logs',
   'inbound-bot':         'Inbound Bot Testing',
+  'purchase-register':   'F&A Reports',
 }
 
 const SECTION_LABELS = {
@@ -65,6 +66,7 @@ const SECTION_LABELS = {
   'company-settings':    'Admin',
   'consignment-seeds':   'Admin',
   'import-logs':         'Admin',
+  'purchase-register':   'Finance and Accounts',
 }
 
 // ─── Theme Toggle ─────────────────────────────────────────────────────────────

@@ -37,6 +37,65 @@ function cadenceText(s) {
   return `${s.frequency === 'weekly' ? 'Weekly' : 'Custom'} · ${days} · ${time}`
 }
 
+// Per-report icon + accent colour (keyed on report_key, graceful fallback).
+const REPORT_META = {
+  purchase_report:    { icon: '📊', color: '#c9a84c' },
+  purchase_register:  { icon: '📒', color: '#3a8fbf' },
+  consignment_report: { icon: '📦', color: '#3aaa6a' },
+}
+const reportMeta = (key) => REPORT_META[key] || { icon: '📄', color: '#8a7f66' }
+
+// Human status pill for last_status.
+function statusMeta(s, t) {
+  const st = s.last_status
+  if (!s.last_sent_at || !st) return { label: 'Never sent', color: t.text3 }
+  if (st === 'sent')          return { label: 'Sent', color: t.green }
+  if (st === 'sent_empty')    return { label: 'Sent · no bills', color: t.green }
+  if (st === 'skipped_empty') return { label: 'Skipped · no bills', color: t.amber }
+  if (st === 'error')         return { label: 'Error', color: t.red }
+  return { label: st, color: t.text3 }
+}
+
+// Relative "x ago" from an ISO timestamp.
+function relTime(iso) {
+  if (!iso) return ''
+  const diff = Date.now() - new Date(iso).getTime()
+  const m = Math.round(diff / 60000)
+  if (m < 1) return 'just now'
+  if (m < 60) return `${m}m ago`
+  const h = Math.round(m / 60)
+  if (h < 24) return `${h}h ago`
+  const d = Math.round(h / 24)
+  return `${d}d ago`
+}
+
+// Next scheduled fire time (IST), or null if paused / none in the next week.
+function nextRun(s) {
+  if (!s.enabled) return null
+  const [hh, mm] = (s.send_time || '09:00').split(':').map(Number)
+  const now = new Date(Date.now() + 5.5 * 3600000)   // IST wall-clock in UTC fields
+  for (let d = 0; d < 8; d++) {
+    const cand = new Date(now)
+    cand.setUTCDate(cand.getUTCDate() + d)
+    cand.setUTCHours(hh, mm, 0, 0)
+    if (cand <= now) continue
+    const wd = cand.getUTCDay()
+    const ok = s.frequency === 'daily' || ((s.frequency === 'weekly' || s.frequency === 'custom') && (s.weekdays || []).includes(wd))
+    if (ok) return cand
+  }
+  return null
+}
+function nextRunLabel(s) {
+  const cand = nextRun(s)
+  if (!cand) return null
+  const now = new Date(Date.now() + 5.5 * 3600000)
+  const time = `${String(cand.getUTCHours()).padStart(2, '0')}:${String(cand.getUTCMinutes()).padStart(2, '0')}`
+  const dayDiff = Math.floor((Date.UTC(cand.getUTCFullYear(), cand.getUTCMonth(), cand.getUTCDate()) - Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())) / 86400000)
+  if (dayDiff === 0) return `Today ${time}`
+  if (dayDiff === 1) return `Tomorrow ${time}`
+  return `${WEEKDAYS[cand.getUTCDay()]} ${time}`
+}
+
 export default function ReportScheduler() {
   const { theme, role } = useApp()
   const t = THEMES[theme] || THEMES.dark
@@ -308,35 +367,83 @@ export default function ReportScheduler() {
         </div>
       )}
 
+      {/* ── SUMMARY STRIP ──────────────────────────────────────────────── */}
+      {!loading && schedules.length > 0 && (() => {
+        const active = schedules.filter(s => s.enabled)
+        const upcoming = active.map(s => ({ s, at: nextRun(s) })).filter(x => x.at).sort((a, b) => a.at - b.at)[0]
+        const stat = (label, value, color) => (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <span style={{ fontSize: 18, fontWeight: 800, color: color || t.text1, lineHeight: 1 }}>{value}</span>
+            <span style={{ fontSize: 10.5, color: t.text3, textTransform: 'uppercase', letterSpacing: '.04em', fontWeight: 700 }}>{label}</span>
+          </div>
+        )
+        return (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 28, flexWrap: 'wrap', background: t.card, border: `1px solid ${t.border}`, borderRadius: 10, padding: '14px 20px', margin: '4px 0 14px' }}>
+            {stat('Schedules', schedules.length)}
+            {stat('Active', active.length, t.green)}
+            {stat('Paused', schedules.length - active.length, schedules.length - active.length ? t.amber : t.text3)}
+            <div style={{ width: 1, alignSelf: 'stretch', background: t.border }} />
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <span style={{ fontSize: 13, fontWeight: 700, color: t.text1, lineHeight: 1.3 }}>
+                {upcoming ? `${reportMeta(upcoming.s.report_key).icon} ${nextRunLabel(upcoming.s)}` : '—'}
+              </span>
+              <span style={{ fontSize: 10.5, color: t.text3, textTransform: 'uppercase', letterSpacing: '.04em', fontWeight: 700 }}>Next send{upcoming ? ` · ${upcoming.s.label || (reports.find(r => r.key === upcoming.s.report_key)?.label) || upcoming.s.report_key}` : ''}</span>
+            </div>
+          </div>
+        )
+      })()}
+
       {/* ── SCHEDULE LIST ──────────────────────────────────────────────── */}
-      <div style={{ marginTop: 16 }}>
+      <div>
         {loading ? (
           <div style={{ color: t.text3, fontSize: 13, padding: 20 }}>Loading…</div>
         ) : schedules.length === 0 ? (
-          <div style={{ color: t.text3, fontSize: 13, padding: 20, textAlign: 'center', border: `1px dashed ${t.border}`, borderRadius: 10 }}>
+          <div style={{ color: t.text3, fontSize: 13, padding: 40, textAlign: 'center', border: `1px dashed ${t.border}`, borderRadius: 10 }}>
+            <div style={{ fontSize: 26, marginBottom: 8 }}>✉</div>
             No schedules yet. Click <b>+ New schedule</b> to email a report automatically.
           </div>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             {schedules.map(s => {
               const rpt = reports.find(r => r.key === s.report_key)
+              const meta = reportMeta(s.report_key)
+              const st = statusMeta(s, t)
+              const nrl = nextRunLabel(s)
+              const chip = { display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, padding: '3px 9px', borderRadius: 6, background: t.card2, color: t.text2, border: `1px solid ${t.border}`, whiteSpace: 'nowrap' }
+              const mailChip = { fontSize: 11, padding: '2px 8px', borderRadius: 6, background: t.card2, color: t.text2, border: `1px solid ${t.border}` }
               return (
-                <div key={s.id} style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: 10, padding: 14, display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
+                <div key={s.id} style={{ background: t.card, border: `1px solid ${t.border}`, borderLeft: `3px solid ${s.enabled ? meta.color : t.border}`, borderRadius: 10, padding: 16, display: 'flex', alignItems: 'flex-start', gap: 14, flexWrap: 'wrap', opacity: s.enabled ? 1 : 0.72 }}>
+                  {/* toggle */}
                   <button onClick={() => toggleEnabled(s)} title={s.enabled ? 'Enabled — click to pause' : 'Paused — click to enable'}
-                    style={{ width: 40, height: 22, borderRadius: 11, border: 'none', cursor: 'pointer', position: 'relative', background: s.enabled ? t.green : t.border, flexShrink: 0 }}>
+                    style={{ width: 40, height: 22, borderRadius: 11, border: 'none', cursor: 'pointer', position: 'relative', background: s.enabled ? t.green : t.border, flexShrink: 0, marginTop: 4 }}>
                     <span style={{ position: 'absolute', top: 2, left: s.enabled ? 20 : 2, width: 18, height: 18, borderRadius: '50%', background: '#fff', transition: 'left .15s' }} />
                   </button>
-                  <div style={{ minWidth: 200, flex: 1 }}>
-                    <div style={{ fontSize: 14, fontWeight: 700, color: t.text1 }}>{s.label || rpt?.label || s.report_key}</div>
-                    <div style={{ fontSize: 12, color: t.text3, marginTop: 2 }}>{cadenceText(s)} · covers {s.report_date_basis === 'today' ? 'same day' : 'previous day'}</div>
-                    <div style={{ fontSize: 12, color: t.text2, marginTop: 4 }}>→ {(s.recipients || []).join(', ')}{s.cc?.length ? ` · cc ${s.cc.join(', ')}` : ''}</div>
+                  {/* icon */}
+                  <div style={{ width: 38, height: 38, borderRadius: 9, background: `${meta.color}1e`, border: `1px solid ${meta.color}44`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, flexShrink: 0 }}>{meta.icon}</div>
+                  {/* main */}
+                  <div style={{ minWidth: 220, flex: 1 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                      <span style={{ fontSize: 14.5, fontWeight: 800, color: t.text1 }}>{s.label || rpt?.label || s.report_key}</span>
+                      <span style={{ fontSize: 10.5, fontWeight: 700, color: meta.color, background: `${meta.color}14`, border: `1px solid ${meta.color}33`, borderRadius: 5, padding: '1px 7px' }}>{rpt?.label || s.report_key}</span>
+                    </div>
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
+                      <span style={chip}>🕘 {cadenceText(s)}</span>
+                      <span style={chip}>covers {s.report_date_basis === 'today' ? 'same day' : 'previous day'}</span>
+                      {nrl && s.enabled && <span style={{ ...chip, background: `${t.blue}12`, borderColor: `${t.blue}40`, color: t.blue }}>→ next {nrl}</span>}
+                    </div>
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8, alignItems: 'center' }}>
+                      <span style={{ fontSize: 10.5, color: t.text3, fontWeight: 700, textTransform: 'uppercase' }}>To</span>
+                      {(s.recipients || []).map(r => <span key={r} style={mailChip}>{r}</span>)}
+                      {s.cc?.length ? <><span style={{ fontSize: 10.5, color: t.text3, fontWeight: 700, textTransform: 'uppercase', marginLeft: 4 }}>Cc</span>{s.cc.map(r => <span key={r} style={{ ...mailChip, opacity: 0.75 }}>{r}</span>)}</> : null}
+                    </div>
                   </div>
-                  <div style={{ fontSize: 11, color: t.text3, textAlign: 'right', minWidth: 130 }}>
-                    {s.last_sent_at
-                      ? <>last: <span style={{ color: s.last_status?.startsWith('sent') ? t.green : t.red }}>{s.last_status}</span><br />{new Date(s.last_sent_at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'short' })}</>
-                      : 'never sent'}
-                    {s.last_error && <div style={{ color: t.red, marginTop: 2, maxWidth: 180 }}>{s.last_error.slice(0, 80)}</div>}
+                  {/* status */}
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4, minWidth: 130 }}>
+                    <span style={{ fontSize: 11, fontWeight: 800, padding: '3px 10px', borderRadius: 20, background: `${st.color}1c`, color: st.color, border: `1px solid ${st.color}55` }}>{st.label}</span>
+                    {s.last_sent_at && <span style={{ fontSize: 11, color: t.text3 }} title={new Date(s.last_sent_at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'short' })}>{relTime(s.last_sent_at)}</span>}
+                    {s.last_error && <span style={{ fontSize: 10.5, color: t.red, maxWidth: 180, textAlign: 'right' }}>{s.last_error.slice(0, 80)}</span>}
                   </div>
+                  {/* actions */}
                   <div style={{ display: 'flex', gap: 6 }}>
                     <button style={btn(t.card2, t.text1)} onClick={() => startEdit(s)}>Edit</button>
                     <button style={{ ...btn('transparent', t.red), border: `1px solid ${t.red}66` }} onClick={() => remove(s)}>Delete</button>
