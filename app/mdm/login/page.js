@@ -46,9 +46,12 @@ export default function MdmLogin() {
 
   const signInGoogle = async () => {
     setErr(''); setNotice(''); setBusy(true)
+    // Return to THIS exact login page (whatever path/domain it's served at) so
+    // the hash-token handler above adopts the session. Robust to custom domains
+    // / path rewrites — no hardcoded /mdm/login assumption.
     const { data, error } = await supabase.auth.signInWithSSO({
       domain: SSO_DOMAIN,
-      options: { redirectTo: `${window.location.origin}/mdm/login` },
+      options: { redirectTo: window.location.origin + window.location.pathname },
     })
     if (error || !data?.url) { setErr(error?.message || 'Could not start Google sign-in.'); setBusy(false); return }
     window.location.href = data.url   // → Google → back here with the session
