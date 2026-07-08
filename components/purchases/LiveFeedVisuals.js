@@ -89,7 +89,7 @@ export default function LiveFeedVisuals({ t, stages, totals, typeSplit, regionRo
                 data={[{ name: 'Conversion', value: totals.conversionPct, fill: t.green }]}
                 startAngle={90} endAngle={90 - (360 * totals.conversionPct / 100)}>
                 <PolarAngleAxis type="number" domain={[0, 100]} angleAxisId={0} tick={false} />
-                <RadialBar background={{ fill: `${t.green}1e` }} dataKey="value" cornerRadius={12} angleAxisId={0} />
+                <RadialBar background={{ fill: `${t.green}1e` }} dataKey="value" cornerRadius={12} angleAxisId={0} isAnimationActive={false} />
               </RadialBarChart>
             </ResponsiveContainer>
             <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' }}>
@@ -107,7 +107,7 @@ export default function LiveFeedVisuals({ t, stages, totals, typeSplit, regionRo
               <XAxis type="number" tick={axis} axisLine={false} tickLine={false} />
               <YAxis type="category" dataKey="name" tick={axis} axisLine={false} tickLine={false} width={78} />
               <Tooltip cursor={{ fill: `${t.text3}12` }} content={(p) => <ChartTip t={t} {...p} />} />
-              <Bar dataKey="count" radius={[0, 6, 6, 0]} isAnimationActive>
+              <Bar dataKey="count" radius={[0, 6, 6, 0]} isAnimationActive={false}>
                 {journey.map((d, i) => <Cell key={i} fill={d.fill} />)}
                 <LabelList dataKey="count" position="right" style={{ fill: t.text2, fontSize: 11, fontWeight: 700 }} />
               </Bar>
@@ -122,7 +122,7 @@ export default function LiveFeedVisuals({ t, stages, totals, typeSplit, regionRo
               <XAxis dataKey="name" tick={axis} axisLine={false} tickLine={false} interval={0} />
               <YAxis tick={axis} axisLine={false} tickLine={false} width={40} />
               <Tooltip cursor={{ fill: `${t.text3}12` }} content={(p) => <ChartTip t={t} unit="wt" {...p} />} />
-              <Bar dataKey="wt" name="Net wt" radius={[6, 6, 0, 0]}>
+              <Bar dataKey="wt" name="Net wt" radius={[6, 6, 0, 0]} isAnimationActive={false}>
                 {journey.filter(j => j.key !== 'completed').map((d, i) => <Cell key={i} fill={d.fill} />)}
                 <LabelList dataKey="wt" position="top" formatter={(v) => fmtKg(v)} style={{ fill: t.text3, fontSize: 10, fontWeight: 700 }} />
               </Bar>
@@ -135,7 +135,7 @@ export default function LiveFeedVisuals({ t, stages, totals, typeSplit, regionRo
           {pipelineStages.length ? (
             <ResponsiveContainer width="100%" height={200}>
               <PieChart>
-                <Pie data={pipelineStages} dataKey="value" nameKey="name" innerRadius={48} outerRadius={78} paddingAngle={2} stroke="none">
+                <Pie data={pipelineStages} dataKey="value" nameKey="name" innerRadius={48} outerRadius={78} paddingAngle={2} stroke="none" isAnimationActive={false}>
                   {pipelineStages.map((d, i) => <Cell key={i} fill={d.fill} />)}
                 </Pie>
                 <Tooltip content={(p) => <ChartTip t={t} {...p} />} />
@@ -153,8 +153,8 @@ export default function LiveFeedVisuals({ t, stages, totals, typeSplit, regionRo
                 <XAxis dataKey="region" tick={axis} axisLine={false} tickLine={false} interval={0} />
                 <YAxis tick={axis} axisLine={false} tickLine={false} width={32} />
                 <Tooltip cursor={{ fill: `${t.text3}12` }} content={(p) => <ChartTip t={t} {...p} />} />
-                <Bar dataKey="completed" name="Completed" stackId="a" fill={t.green} radius={[0, 0, 0, 0]} />
-                <Bar dataKey="pending"   name="In pipeline" stackId="a" fill={t.orange} radius={[6, 6, 0, 0]}>
+                <Bar dataKey="completed" name="Completed" stackId="a" fill={t.green} radius={[0, 0, 0, 0]} isAnimationActive={false} />
+                <Bar dataKey="pending"   name="In pipeline" stackId="a" fill={t.orange} radius={[6, 6, 0, 0]} isAnimationActive={false}>
                   <LabelList dataKey="conversion" position="top" formatter={(v) => `${v}%`} style={{ fill: t.text3, fontSize: 10, fontWeight: 700 }} />
                 </Bar>
               </BarChart>
@@ -167,7 +167,7 @@ export default function LiveFeedVisuals({ t, stages, totals, typeSplit, regionRo
           {typePie.length ? (
             <ResponsiveContainer width="100%" height={200}>
               <PieChart>
-                <Pie data={typePie} dataKey="value" nameKey="name" innerRadius={48} outerRadius={78} paddingAngle={2} stroke="none">
+                <Pie data={typePie} dataKey="value" nameKey="name" innerRadius={48} outerRadius={78} paddingAngle={2} stroke="none" isAnimationActive={false}>
                   {typePie.map((d, i) => <Cell key={i} fill={d.fill} />)}
                 </Pie>
                 <Tooltip content={(p) => <ChartTip t={t} {...p} />} />
