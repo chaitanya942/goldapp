@@ -1,5 +1,7 @@
 'use client'
 
+import { Fragment } from 'react'
+
 // LiveFeedVisuals — the "Visualise" mode for the New-CRM Customer Journey.
 // Turns the same day's data (respecting the active date / region / type filters)
 // into insight-driven charts: conversion, where customers are stuck, where the
@@ -42,8 +44,55 @@ function ChartTip({ t, active, payload, unit }) {
   )
 }
 
-export default function LiveFeedVisuals({ t, stages, totals, typeSplit, regionRows, viewDate, regionFilter, onClose }) {
+const STAGE_ORDER = ['walkin', 'estimation', 'kyc', 'payment', 'completed', 'walkout']
+const STAGE_LABEL = { walkin: 'Walk-in', estimation: 'Estim.', kyc: 'KYC', payment: 'Payment', completed: 'Done', walkout: 'Walkout' }
+
+export default function LiveFeedVisuals({ t, stages, totals, typeSplit, regionRows, txns, allTxns, stageOf, viewDate, regionFilter, onClose }) {
   const stage = (k) => stages.find(s => s.key === k) || { count: 0, wt: 0, color: t.text3 }
+  const stageColor = (k) => stage(k).color
+  const outcomeOf = (s) => { const g = stageOf ? stageOf(s) : 'other'; return g === 'completed' ? 'completed' : g === 'walkout' ? 'walkout' : 'pipeline' }
+
+  // ── Walk-ins by hour (stacked by outcome) ─────────────────────────────────
+  const hourMap = new Map()
+  for (const tx of (txns || [])) {
+    const hh = parseInt(String(tx.time || '').split(':')[0])
+    if (!Number.isFinite(hh)) continue
+    const row = hourMap.get(hh) || { hour: hh, completed: 0, pipeline: 0, walkout: 0 }
+    row[outcomeOf(tx.status)]++; hourMap.set(hh, row)
+  }
+  const hours = [...hourMap.keys()]
+  const hourly = hours.length
+    ? Array.from({ length: Math.max(...hours) - Math.min(...hours) + 1 }, (_, i) => {
+        const hh = Math.min(...hours) + i
+        const r = hourMap.get(hh) || { hour: hh, completed: 0, pipeline: 0, walkout: 0 }
+        return { ...r, label: `${(hh % 12) || 12}${hh < 12 ? 'a' : 'p'}` }
+      })
+    : []
+
+  // ── Branch leaderboard (within current filter) ────────────────────────────
+  const bMap = new Map()
+  for (const tx of (txns || [])) {
+    const b = tx.branch_name || '—'
+    const row = bMap.get(b) || { branch: b, walkins: 0, completed: 0, wt: 0 }
+    row.walkins++
+    if (stageOf && stageOf(tx.status) === 'completed') row.completed++
+    row.wt += Number(tx.net_weight) || 0
+    bMap.set(b, row)
+  }
+  const branches = [...bMap.values()]
+    .map(r => ({ ...r, conversion: r.walkins ? Math.round(r.completed / r.walkins * 100) : 0 }))
+    .sort((a, b) => b.walkins - a.walkins).slice(0, 8)
+
+  // ── Region × Stage heatmap (all regions) ──────────────────────────────────
+  const hmRegions = [...new Set((allTxns || []).map(x => x.region).filter(Boolean))]
+  const heat = hmRegions.map(rg => {
+    const cells = {}
+    STAGE_ORDER.forEach(s => { cells[s] = 0 })
+    for (const tx of allTxns) if (tx.region === rg) { const g = stageOf ? stageOf(tx.status) : 'other'; if (cells[g] != null) cells[g]++ }
+    const total = STAGE_ORDER.reduce((a, s) => a + cells[s], 0)
+    return { region: rg, cells, total }
+  }).filter(r => r.total > 0).sort((a, b) => b.total - a.total)
+  const heatMax = Math.max(1, ...heat.flatMap(r => STAGE_ORDER.map(s => r.cells[s])))
   // Journey order (pipeline → completed). Walkout shown separately.
   const journey = ['walkin', 'estimation', 'kyc', 'payment', 'completed'].map(k => {
     const s = stage(k)
@@ -175,6 +224,81 @@ export default function LiveFeedVisuals({ t, stages, totals, typeSplit, regionRo
             </ResponsiveContainer>
           ) : <Empty t={t} />}
           <Legend t={t} items={typePie} total={typeSplit.physical + typeSplit.takeover} />
+        </Panel>
+
+        {/* 7. Walk-ins by hour (with outcome) */}
+        <Panel t={t} title="Activity by hour" hint="When customers walk in — and how those visits are trending (completed / in-pipeline / walkout)" span={2}>
+          {hourly.length ? (
+            <ResponsiveContainer width="100%" height={220}>
+              <BarChart data={hourly} margin={{ left: 0, right: 8, top: 8, bottom: 4 }} barCategoryGap="18%">
+                <XAxis dataKey="label" tick={axis} axisLine={false} tickLine={false} interval={0} />
+                <YAxis tick={axis} axisLine={false} tickLine={false} width={28} allowDecimals={false} />
+                <Tooltip cursor={{ fill: `${t.text3}12` }} content={(p) => <ChartTip t={t} {...p} />} />
+                <Bar dataKey="completed" name="Completed"  stackId="h" fill={t.green}  isAnimationActive={false} />
+                <Bar dataKey="pipeline"  name="In pipeline" stackId="h" fill={t.orange} isAnimationActive={false} />
+                <Bar dataKey="walkout"   name="Walkout"     stackId="h" fill={t.red}    radius={[4, 4, 0, 0]} isAnimationActive={false} />
+              </BarChart>
+            </ResponsiveContainer>
+          ) : <Empty t={t} />}
+        </Panel>
+
+        {/* 8. Branch leaderboard */}
+        <Panel t={t} title="Top branches" hint="Walk-ins today, with conversion — spot the leaders & laggards" span={2}>
+          {branches.length ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 7, marginTop: 4 }}>
+              {branches.map((b, i) => {
+                const max = branches[0].walkins || 1
+                return (
+                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: '.68rem' }}>
+                    <span style={{ width: 128, color: t.text2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={b.branch}>{b.branch}</span>
+                    <div style={{ flex: 1, height: 16, background: `${t.text3}14`, borderRadius: 4, overflow: 'hidden', position: 'relative' }}>
+                      <div style={{ width: `${Math.round(b.walkins / max * 100)}%`, height: '100%', background: t.blue, borderRadius: 4 }} />
+                      <div style={{ position: 'absolute', left: 0, top: 0, width: `${Math.round(b.completed / max * 100)}%`, height: '100%', background: t.green, borderRadius: 4 }} />
+                    </div>
+                    <span style={{ width: 30, textAlign: 'right', color: t.text1, fontWeight: 700 }}>{b.walkins}</span>
+                    <span style={{ width: 46, textAlign: 'right', color: b.conversion >= 40 ? t.green : b.conversion >= 20 ? t.gold : t.text3, fontWeight: 700 }}>{b.conversion}%</span>
+                    <span style={{ width: 60, textAlign: 'right', color: t.text3 }}>{fmtKg(b.wt)}</span>
+                  </div>
+                )
+              })}
+              <div style={{ display: 'flex', gap: 14, marginTop: 6, justifyContent: 'flex-end', fontSize: '.6rem', color: t.text4 }}>
+                <span><span style={{ display: 'inline-block', width: 8, height: 8, background: t.blue, borderRadius: 2, marginRight: 4 }} />walk-ins</span>
+                <span><span style={{ display: 'inline-block', width: 8, height: 8, background: t.green, borderRadius: 2, marginRight: 4 }} />completed</span>
+                <span>conv%</span><span>net wt</span>
+              </div>
+            </div>
+          ) : <Empty t={t} />}
+        </Panel>
+
+        {/* 9. Region × Stage heatmap */}
+        <Panel t={t} title="Region × stage heatmap" hint="Where each region's customers are concentrated — darker = more" span={2}>
+          {heat.length ? (
+            <div style={{ overflowX: 'auto' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: `120px repeat(${STAGE_ORDER.length}, 1fr) 54px`, gap: 3, minWidth: 460, marginTop: 4 }}>
+                <div />
+                {STAGE_ORDER.map(s => <div key={s} style={{ fontSize: '.56rem', color: t.text3, textAlign: 'center', fontWeight: 700, textTransform: 'uppercase', paddingBottom: 2 }}>{STAGE_LABEL[s]}</div>)}
+                <div style={{ fontSize: '.56rem', color: t.text3, textAlign: 'right', fontWeight: 700, textTransform: 'uppercase' }}>Total</div>
+                {heat.map(r => (
+                  <Fragment key={r.region}>
+                    <div style={{ fontSize: '.64rem', color: t.text2, display: 'flex', alignItems: 'center', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={r.region}>{r.region}</div>
+                    {STAGE_ORDER.map(s => {
+                      const v = r.cells[s]; const intensity = v / heatMax
+                      const col = stageColor(s)
+                      return (
+                        <div key={s} title={`${r.region} · ${STAGE_LABEL[s]}: ${v}`}
+                          style={{ height: 30, borderRadius: 5, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            background: v ? `${col}${Math.round(18 + intensity * 220).toString(16).padStart(2, '0')}` : `${t.text3}0d`,
+                            color: intensity > 0.5 ? '#fff' : t.text2, fontSize: '.64rem', fontWeight: 700 }}>
+                          {v || ''}
+                        </div>
+                      )
+                    })}
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', fontSize: '.64rem', color: t.text1, fontWeight: 800 }}>{r.total}</div>
+                  </Fragment>
+                ))}
+              </div>
+            </div>
+          ) : <Empty t={t} />}
         </Panel>
       </div>
     </div>

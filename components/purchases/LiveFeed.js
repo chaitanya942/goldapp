@@ -1843,6 +1843,16 @@ const IN_PROGRESS_STATUSES = [
   'KYC_PENDING', 'BRANCH_KYC_PENDING', 'PLEDGE_APPROVAL_PENDING',
   'PENNY_DROP_PENDING', 'FINAL_PAYMENT_PENDING', 'RELEASE_PENDING', 'RELEASE_AGREEMENT_PENDING',
 ]
+// Journey stage a raw status maps to — shared with the Visualise dashboard.
+export function stageOfStatus(status) {
+  if (status === 'WALKIN') return 'walkin'
+  if (['ESTIMATION_PENDING', 'PLEDGE_ESTIMATION_PENDING', 'REVALUATION_PENDING', 'SALES_NEGOTIATION_PENDING', 'QUOTATION_PENDING'].includes(status)) return 'estimation'
+  if (['KYC_PENDING', 'BRANCH_KYC_PENDING', 'PLEDGE_APPROVAL_PENDING'].includes(status)) return 'kyc'
+  if (['FINAL_PAYMENT_PENDING', 'PENNY_DROP_PENDING', 'RELEASE_PENDING', 'RELEASE_AGREEMENT_PENDING'].includes(status)) return 'payment'
+  if (status === 'FINAL_PAYMENT_COMPLETED') return 'completed'
+  if (status === 'WALKOUT') return 'walkout'
+  return 'other'
+}
 
 function NewCrmTab({ t, newCrmTxns, completedToday, newCrmError, regionFilter, regions, isToday, viewDate, showVisuals, onExitVisuals, newEventCount, clearNewEvents }) {
   const [activeMetric, setActiveMetric] = useState(null)
@@ -1984,6 +1994,7 @@ function NewCrmTab({ t, newCrmTxns, completedToday, newCrmError, regionFilter, r
         totals={{ totalWalkins, completed, pendingCount, conversionPct, walkoutRate }}
         typeSplit={{ physical, takeover }}
         regionRows={regionRows}
+        txns={txns} allTxns={newCrmTxns} stageOf={stageOfStatus}
         viewDate={viewDate} regionFilter={regionFilter}
         onClose={onExitVisuals} />
     )
