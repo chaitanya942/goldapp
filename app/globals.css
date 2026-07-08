@@ -84,12 +84,12 @@ svg.recharts-surface { pointer-events: none !important; }
 
 /* ── Mobile responsive ─────────────────────────────────────────── */
 
-/* LiveFeed hero: always wrap */
-.lf-hero {
-  flex-wrap: wrap !important;
-}
-
 @media (max-width: 767px) {
+  /* LiveFeed hero: wrap only on narrow screens — desktop keeps a single row
+     (the inline flexWrap:nowrap + overflowX:auto drives a horizontal scroll
+     instead of dropping the "Yet to purchase" group onto a second row). */
+  .lf-hero { flex-wrap: wrap !important; }
+
   /* ── LiveFeed: TimelineRow → card layout ── */
   .event-row {
     display: grid !important;
