@@ -181,8 +181,7 @@ export default function LiveFeed() {
   // Default to NEW CRM (fall back to whatever the user can actually see).
   const [crmTab,        setCrmTab]        = useState(() =>
     canSee('livefeed.new_crm_tab') ? 'new'
-    : canSee('livefeed.old_crm_tab') ? 'old'
-    : 'combined')
+    : 'old')
   const regionAccess = useRegionAccess()
   // Default region filter: if user is restricted to a single region, lock to it.
   const [regionFilter,  setRegionFilter]  = useState(regionAccess.single ? regionAccess.regions[0] : '')
@@ -411,12 +410,11 @@ export default function LiveFeed() {
           </div>
 
           {/* CRM tabs */}
-          {(canSee('livefeed.old_crm_tab') || canSee('livefeed.new_crm_tab') || canSee('livefeed.combined_tab')) && (
+          {(canSee('livefeed.new_crm_tab') || canSee('livefeed.old_crm_tab')) && (
             <div style={{ display: 'flex', background: t.card, borderRadius: 8, border: `1px solid ${t.border}`, overflow: 'hidden' }}>
-              {[['old', isMobile ? 'Old' : 'Old CRM'], ['new', isMobile ? 'New' : 'New CRM'], ['combined', 'Both']].filter(([key]) => {
-                if (key === 'old')      return canSee('livefeed.old_crm_tab')
+              {[['new', isMobile ? 'New' : 'New CRM'], ['old', isMobile ? 'Old' : 'Old CRM']].filter(([key]) => {
                 if (key === 'new')      return canSee('livefeed.new_crm_tab')
-                if (key === 'combined') return canSee('livefeed.combined_tab')
+                if (key === 'old')      return canSee('livefeed.old_crm_tab')
                 return false
               }).map(([key, label]) => (
                 <button key={key} onClick={() => { setCrmTab(key); setNewEventCount(0) }} style={{
