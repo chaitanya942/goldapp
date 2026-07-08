@@ -5,6 +5,10 @@ import { useRouter } from 'next/navigation'
 import { supabase } from '../../../lib/supabase'
 
 const SSO_DOMAIN = 'sell-gold.in'
+// Flip to true once the Google OIDC provider is enabled in Supabase (needs a
+// Google Cloud OAuth Client ID/Secret). Until then, Option B shows a preview
+// note instead of bouncing to Supabase's "provider is not enabled" error page.
+const OIDC_ENABLED = false
 
 const GoogleG = () => (
   <svg width="17" height="17" viewBox="0 0 48 48" aria-hidden="true">
@@ -40,6 +44,7 @@ export default function MdmLogin() {
     const errDesc = params.get('error_description') || params.get('error')
     if (errDesc) {
       setErr(decodeURIComponent(errDesc))
+      setBusy(false)
       window.history.replaceState(null, '', window.location.pathname)
       return
     }
@@ -63,6 +68,15 @@ export default function MdmLogin() {
     }
   }, [router])
 
+  // Re-enable the buttons if the user comes BACK to this page after a redirect
+  // (browser bfcache restores JS state, so `busy` could otherwise stay true and
+  // lock every button). pageshow fires on both fresh load and bfcache restore.
+  useEffect(() => {
+    const onShow = () => setBusy(false)
+    window.addEventListener('pageshow', onShow)
+    return () => window.removeEventListener('pageshow', onShow)
+  }, [])
+
   const redirectHere = () => window.location.origin + window.location.pathname
 
   // Option A — Google Workspace SSO via SAML (routes the whole domain through
@@ -81,7 +95,12 @@ export default function MdmLogin() {
   // chooser every time (prompt=select_account) and hints the org domain (hd).
   // Non-domain accounts are rejected by the domain check in the effect above.
   const signInGoogleOAuth = async () => {
-    setErr(''); setNotice(''); setBusy(true)
+    setErr(''); setNotice('')
+    if (!OIDC_ENABLED) {
+      setNotice('Option B (Google account chooser) is a UX preview — it goes live the moment the Google OAuth client is connected in Supabase. Use Option A (SAML) meanwhile.')
+      return
+    }
+    setBusy(true)
     const { data, error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: {
@@ -138,7 +157,7 @@ export default function MdmLogin() {
                 <div style={{ height: 10 }} />
 
                 <button onClick={signInGoogleOAuth} disabled={busy} style={gbtn}><GoogleG /> Sign in with Google</button>
-                <div style={cap}>Option B · Account chooser (OAuth / OIDC)</div>
+                <div style={cap}>Option B · Account chooser (OAuth / OIDC){OIDC_ENABLED ? '' : ' · preview'}</div>
               </>
             )
           })()}
