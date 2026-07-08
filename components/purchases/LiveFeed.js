@@ -5,6 +5,7 @@ import { useApp, useRegionAccess } from '../../lib/context'
 import { authedFetch } from '../../lib/authedFetch'
 import { istToday } from '../../lib/dateIst'
 import { getCache, setCache } from '../../lib/moduleCache'
+import LiveFeedVisuals from './LiveFeedVisuals'
 
 const REFRESH_SECS = 60
 
@@ -182,6 +183,7 @@ export default function LiveFeed() {
   const [crmTab,        setCrmTab]        = useState(() =>
     canSee('livefeed.new_crm_tab') ? 'new'
     : 'old')
+  const [showVisuals,   setShowVisuals]   = useState(false)
   const regionAccess = useRegionAccess()
   // Default region filter: if user is restricted to a single region, lock to it.
   const [regionFilter,  setRegionFilter]  = useState(regionAccess.single ? regionAccess.regions[0] : '')
@@ -452,6 +454,16 @@ export default function LiveFeed() {
             }}>
               {isMobile ? '↻' : 'Refresh'}
             </button>
+            {/* Visualise toggle — swaps the New-CRM journey into a chart dashboard */}
+            {crmTab === 'new' && (
+              <button onClick={() => setShowVisuals(v => !v)} title="Toggle chart insights" style={{
+                background: showVisuals ? t.gold : t.card, border: `1px solid ${showVisuals ? t.gold : t.border}`, borderRadius: 6,
+                padding: isMobile ? '5px 8px' : '5px 12px', fontSize: '.6rem', fontWeight: 700,
+                color: showVisuals ? '#000' : t.text2, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5,
+              }}>
+                <span>📊</span>{!isMobile && (showVisuals ? 'Cards' : 'Visualise')}
+              </button>
+            )}
           </div>
         </div>
 
@@ -537,6 +549,7 @@ export default function LiveFeed() {
             <NewCrmTab t={t} stages={stages} newCrmTxns={newCrmTxns} completedToday={newCrmCompletedToday} newCrmError={newCrmError}
               regionFilter={regionFilter} regions={regions}
               viewDate={viewDate} isToday={isToday}
+              showVisuals={showVisuals} onExitVisuals={() => setShowVisuals(false)}
               newEventCount={newEventCount} clearNewEvents={() => setNewEventCount(0)} />
           </div>
         ) : (
@@ -1831,7 +1844,7 @@ const IN_PROGRESS_STATUSES = [
   'PENNY_DROP_PENDING', 'FINAL_PAYMENT_PENDING', 'RELEASE_PENDING', 'RELEASE_AGREEMENT_PENDING',
 ]
 
-function NewCrmTab({ t, newCrmTxns, completedToday, newCrmError, regionFilter, regions, isToday, newEventCount, clearNewEvents }) {
+function NewCrmTab({ t, newCrmTxns, completedToday, newCrmError, regionFilter, regions, isToday, viewDate, showVisuals, onExitVisuals, newEventCount, clearNewEvents }) {
   const [activeMetric, setActiveMetric] = useState(null)
   const [typeFilter, setTypeFilter] = useState('')   // '' | 'physical' | 'takeover'
   const [tlOpen, setTlOpen] = useState(false)
@@ -1941,6 +1954,38 @@ function NewCrmTab({ t, newCrmTxns, completedToday, newCrmError, regionFilter, r
         <span style={{ fontSize: '.82rem', color: t.text3 }}>No activity recorded yet</span>
         <span style={{ fontSize: '.62rem', color: t.text4 }}>Data will appear as transactions come in</span>
       </div>
+    )
+  }
+
+  // ── Visualise mode — swap the journey cards for a chart dashboard ──────────
+  if (showVisuals) {
+    const vStages = [
+      { key: 'walkin',     label: 'At Walk-in', count: walkinTxns.length,     wt: walkinWt,     color: t.blue },
+      { key: 'estimation', label: 'Estimation', count: estimationTxns.length, wt: estimationWt, color: t.orange },
+      { key: 'kyc',        label: 'KYC',        count: kycTxns.length,        wt: kycWt,        color: t.purple },
+      { key: 'payment',    label: 'Payment',    count: paymentTxns.length,    wt: paymentWt,    color: t.gold },
+      { key: 'completed',  label: 'Completed',  count: completed,             wt: completedWt,  color: t.green },
+      { key: 'walkout',    label: 'Walkout',    count: walkout,               wt: walkoutWt,    color: t.red },
+    ]
+    // Type mix respects the region filter but ignores the type filter (show the real split).
+    const physical = regionTxns.filter(tx => tx.transaction_type === 'PHYSICAL_GOLD').length
+    const takeover = regionTxns.filter(tx => tx.transaction_type === 'RELEASED_GOLD').length
+    // Per-region performance — all regions (for comparison), independent of the region filter.
+    const regionRows = (regions || []).map(rg => {
+      const inR  = newCrmTxns.filter(tx => tx.region === rg)
+      const comp = (completedToday || []).filter(r => r.region === rg).length
+      const pend = inR.filter(tx => IN_PROGRESS_STATUSES.includes(tx.status) || tx.status === 'WALKIN').length
+      const walk = inR.length + comp
+      return { region: rg, walkins: walk, completed: comp, pending: pend, conversion: walk ? Math.round(comp / walk * 100) : 0 }
+    }).filter(r => r.walkins > 0)
+    return (
+      <LiveFeedVisuals t={t}
+        stages={vStages}
+        totals={{ totalWalkins, completed, pendingCount, conversionPct, walkoutRate }}
+        typeSplit={{ physical, takeover }}
+        regionRows={regionRows}
+        viewDate={viewDate} regionFilter={regionFilter}
+        onClose={onExitVisuals} />
     )
   }
 
