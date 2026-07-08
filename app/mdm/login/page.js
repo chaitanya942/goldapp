@@ -6,6 +6,15 @@ import { supabase } from '../../../lib/supabase'
 
 const SSO_DOMAIN = 'sell-gold.in'
 
+const GoogleG = () => (
+  <svg width="17" height="17" viewBox="0 0 48 48" aria-hidden="true">
+    <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>
+    <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>
+    <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/>
+    <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/>
+  </svg>
+)
+
 // MDM portal login — isolated from GoldApp. A valid sign-in only gets you to
 // /mdm; the gate there refuses entry unless the IT admin has enabled the user.
 export default function MdmLogin() {
@@ -19,9 +28,11 @@ export default function MdmLogin() {
   const blue = '#2563eb', slate = '#0f172a', sub = '#64748b'
   const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
-  // After the Google SAML redirect, Supabase returns the session as URL-hash
-  // tokens (implicit flow, detectSessionInUrl:false → we adopt them by hand,
-  // mirroring the invite/reset pages). Also surfaces any SSO error param.
+  // After a Google redirect (SAML SSO or OIDC), Supabase returns the session as
+  // URL-hash tokens (implicit flow, detectSessionInUrl:false → we adopt them by
+  // hand, mirroring the invite/reset pages). Then we enforce the allowed domain
+  // so a wrong account is rejected cleanly (this only runs on federated returns,
+  // never the username/password path). Also surfaces any provider error param.
   useEffect(() => {
     const hash = window.location.hash?.slice(1) || ''
     const search = window.location.search?.slice(1) || ''
@@ -36,25 +47,51 @@ export default function MdmLogin() {
     const refresh_token = params.get('refresh_token')
     if (access_token && refresh_token) {
       setBusy(true)
-      supabase.auth.setSession({ access_token, refresh_token }).then(({ error }) => {
+      supabase.auth.setSession({ access_token, refresh_token }).then(async ({ data, error }) => {
         window.history.replaceState(null, '', window.location.pathname)
-        if (error) { setErr('Could not complete Google sign-in. Try again.'); setBusy(false) }
-        else router.push('/mdm')   // gate provisions/locks/admits
+        if (error) { setErr('Could not complete Google sign-in. Try again.'); setBusy(false); return }
+        const email = (data?.user?.email || '').toLowerCase()
+        if (email && !email.endsWith('@' + SSO_DOMAIN)) {
+          // Wrong account (e.g. a personal / non-org Google login) → reject.
+          await supabase.auth.signOut()
+          setErr(`Only @${SSO_DOMAIN} Google accounts can sign in here — you used ${email}.`)
+          setBusy(false)
+          return
+        }
+        router.push('/mdm')   // gate provisions/locks/admits
       })
     }
   }, [router])
 
-  const signInGoogle = async () => {
+  const redirectHere = () => window.location.origin + window.location.pathname
+
+  // Option A — Google Workspace SSO via SAML (routes the whole domain through
+  // the Google IdP; account picker is Google-controlled).
+  const signInGoogleSaml = async () => {
     setErr(''); setNotice(''); setBusy(true)
-    // Return to THIS exact login page (whatever path/domain it's served at) so
-    // the hash-token handler above adopts the session. Robust to custom domains
-    // / path rewrites — no hardcoded /mdm/login assumption.
     const { data, error } = await supabase.auth.signInWithSSO({
       domain: SSO_DOMAIN,
-      options: { redirectTo: window.location.origin + window.location.pathname },
+      options: { redirectTo: redirectHere() },
     })
     if (error || !data?.url) { setErr(error?.message || 'Could not start Google sign-in.'); setBusy(false); return }
-    window.location.href = data.url   // → Google → back here with the session
+    window.location.href = data.url
+  }
+
+  // Option B — Google OIDC ("Sign in with Google" / OAuth). Forces the account
+  // chooser every time (prompt=select_account) and hints the org domain (hd).
+  // Non-domain accounts are rejected by the domain check in the effect above.
+  const signInGoogleOAuth = async () => {
+    setErr(''); setNotice(''); setBusy(true)
+    const { data, error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        redirectTo: redirectHere(),
+        skipBrowserRedirect: true,
+        queryParams: { prompt: 'select_account', hd: SSO_DOMAIN },
+      },
+    })
+    if (error || !data?.url) { setErr(error?.message || 'Could not start Google sign-in. (Is the Google provider enabled in Supabase?)'); setBusy(false); return }
+    window.location.href = data.url
   }
 
   const signIn = async () => {
@@ -88,17 +125,23 @@ export default function MdmLogin() {
         <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 14, padding: 28, boxShadow: '0 4px 24px rgba(15,23,42,.06)' }}>
           <div style={{ fontSize: '1rem', fontWeight: 700, color: slate, marginBottom: 18 }}>Sign in</div>
 
-          {/* Google Workspace SSO (SAML) — primary path for @sell-gold.in staff */}
-          <button onClick={signInGoogle} disabled={busy}
-            style={{ width: '100%', padding: 11, background: '#fff', border: '1px solid #cbd5e1', borderRadius: 9, color: slate, fontSize: '.85rem', fontWeight: 600, cursor: busy ? 'not-allowed' : 'pointer', opacity: busy ? .7 : 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10 }}>
-            <svg width="17" height="17" viewBox="0 0 48 48" aria-hidden="true">
-              <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>
-              <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>
-              <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/>
-              <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/>
-            </svg>
-            Sign in with Google
-          </button>
+          {/* Two Google sign-in options (for the IT-Head comparison / pitch):
+              A = Workspace SSO (SAML), B = Account chooser (OAuth/OIDC). */}
+          {(() => {
+            const gbtn = { width: '100%', padding: 11, background: '#fff', border: '1px solid #cbd5e1', borderRadius: 9, color: slate, fontSize: '.85rem', fontWeight: 600, cursor: busy ? 'not-allowed' : 'pointer', opacity: busy ? .7 : 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10 }
+            const cap  = { fontSize: '.62rem', color: sub, textAlign: 'center', margin: '5px 0 0' }
+            return (
+              <>
+                <button onClick={signInGoogleSaml} disabled={busy} style={gbtn}><GoogleG /> Sign in with Google</button>
+                <div style={cap}>Option A · Workspace SSO (SAML 2.0)</div>
+
+                <div style={{ height: 10 }} />
+
+                <button onClick={signInGoogleOAuth} disabled={busy} style={gbtn}><GoogleG /> Sign in with Google</button>
+                <div style={cap}>Option B · Account chooser (OAuth / OIDC)</div>
+              </>
+            )
+          })()}
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '16px 0' }}>
             <div style={{ flex: 1, height: 1, background: '#e2e8f0' }} />
