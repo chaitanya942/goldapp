@@ -4931,7 +4931,7 @@ export async function POST(req) {
     // 1) Selected bills that are free to attach (unbooked, not deleted).
     const { data: billRows, error: bErr } = await supabase
       .from('purchases')
-      .select('id, application_id, net_weight, booking_id, purchase_date')
+      .select('id, application_id, net_weight, booking_id, purchase_date, branch_name, current_branch')
       .in('id', bill_ids)
       .eq('is_deleted', false)
     if (bErr) return Response.json({ error: bErr.message }, { status: 500 })
@@ -4940,6 +4940,10 @@ export async function POST(req) {
     const lockedDates = await lockedPurchaseDates(supabase, eligible.map(b => b.purchase_date))
     if (lockedDates.length) return Response.json({ error: `Can't book — purchase date${lockedDates.length > 1 ? 's' : ''} locked: ${lockedDates.join(', ')}.` }, { status: 409 })
     const billNet = eligible.reduce((s, b) => s + Number(b.net_weight || 0), 0)
+    // "Sources: …" audit note — same convention as create_booking, so the
+    // Bookings tab shows the italic sources line + the ▸ view breakup link.
+    const srcBranches = [...new Set(eligible.map(b => b.current_branch || b.branch_name).filter(Boolean))].sort()
+    const sourcesNote = srcBranches.length ? `Sources: ${srcBranches.join(', ')}` : null
 
     // 2) Region's open-pipeline bookings for that bidding day, oldest first —
     //    the same set the bid desk sums (and attach_selected_to_pipeline uses).
@@ -4992,7 +4996,7 @@ export async function POST(req) {
       date: bookDate, party: String(party).trim(),
       buyer_phone: buyer_phone ? String(buyer_phone).trim() : null,
       weight: wNew, rate: rNew, is_kl: klFlag, purity: purity || null,
-      notes: notes ? String(notes).trim() : null, status: 'booked',
+      notes: notes ? String(notes).trim() : sourcesNote, status: 'booked',
       created_by: actorUuid || actorEmail,
     }
     let { data: newBk, error: insErr } = await supabase.from('cal_quotas').insert(baseInsert).select().single()
