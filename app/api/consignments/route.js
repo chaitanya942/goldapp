@@ -2690,6 +2690,45 @@ async function allocDeltaByBooking(supabase, bookingIds) {
   return delta
 }
 
+// ── Reopen a booking's pipeline after bills are detached ─────────────────────
+// When bills are unbooked (e.g. they won't reach HO), the freed weight is gold
+// the buyer is STILL owed — it must show as pipeline, not fold into gain. If the
+// booking was fully sourced before (pipeline_closed_at set, or its arrival day
+// passed), it would otherwise stay "settled" and the derived model reports the
+// shortfall as gain (gain = weight − sourced). This recomputes the live sourced
+// net (allocation-aware) and, when under-booked, clears pipeline_closed_at, sets
+// pipeline_remaining_g, and keeps the arrival date non-past so the shortfall
+// surfaces as an OPEN pipeline. Returns true if it reopened one.
+async function reopenBookingPipeline(supabase, bookingId) {
+  if (!bookingId) return false
+  const { data: bk } = await supabase
+    .from('cal_quotas')
+    .select('id, weight, gain_rate, pending_g, is_kl, status, date, pipeline_arrival_date, pipeline_region, pipeline_closed_at')
+    .eq('id', bookingId)
+    .maybeSingle()
+  if (!bk || bk.status === 'cancelled') return false
+  const rate = bk.gain_rate != null ? Number(bk.gain_rate) : (bk.is_kl ? 0 : 0.035)
+  const { data: bills } = await supabase.from('purchases').select('net_weight').eq('booking_id', bookingId)
+  const attached = (bills || []).reduce((s, x) => s + Number(x.net_weight || 0), 0)
+  const delta    = await allocDeltaByBooking(supabase, [bookingId])
+  const sourced  = Math.max(0, attached + (delta[bookingId] || 0)) + Number(bk.pending_g || 0)
+  const W        = Number(bk.weight || 0)
+  const shortfall = W - sourced * (1 + rate)
+  if (shortfall <= 0.001) return false   // still fully sourced — nothing to reopen
+  const todayIst = istToday()
+  const patch = {
+    pipeline_remaining_g: Number(shortfall.toFixed(3)),
+    pipeline_closed_at:   null,
+    pipeline_region:      bk.pipeline_region || (bk.is_kl ? 'Kerala' : 'Bangalore'),
+  }
+  // Keep it unsettled so the shortfall reads as pipeline, not gain: if the
+  // settle date has already passed, bump the pipeline arrival to today.
+  const settleDate = bk.pipeline_arrival_date || bk.date
+  if (!settleDate || String(settleDate) < todayIst) patch.pipeline_arrival_date = todayIst
+  await supabase.from('cal_quotas').update(patch).eq('id', bookingId)
+  return true
+}
+
 // ── POST handler ──────────────────────────────────────────────────────────────
 export async function POST(req) {
   const body   = await req.json()
@@ -4897,13 +4936,26 @@ export async function POST(req) {
       return Response.json({ data: { unbooked: 0, skipped } })
     }
 
+    // Capture the bookings we're pulling bills FROM before detaching, so we can
+    // reopen their pipeline afterwards.
+    const affectedBookingIds = [...new Set((rows || []).filter(qualifies).map(r => r.booking_id).filter(Boolean))]
+
     const { error: uErr } = await supabase
       .from('purchases')
       .update({ booking_id: null, booked_at: null })
       .in('id', toUnbook)
     if (uErr) return Response.json({ error: uErr.message }, { status: 500 })
 
-    return Response.json({ data: { unbooked: toUnbook.length, skipped } })
+    // Reopen pipeline on each affected booking — the freed weight is gold the
+    // buyer is still owed, so it must show as PIPELINE, not fold into gain. A
+    // booking whose pipeline was previously closed (pipeline_closed_at set)
+    // would otherwise stay "settled" and report the shortfall as gain.
+    let reopened = 0
+    for (const bid of affectedBookingIds) {
+      try { if (await reopenBookingPipeline(supabase, bid)) reopened++ } catch (e) { console.warn('[unbook_bills] reopen pipeline failed', bid, e?.message) }
+    }
+
+    return Response.json({ data: { unbooked: toUnbook.length, skipped, pipeline_reopened: reopened } })
   }
 
   // ── Split a big bill: close open pipeline(s) + book the remainder ──────────
