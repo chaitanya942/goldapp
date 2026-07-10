@@ -4679,6 +4679,30 @@ function SplitBookingModal({ t, regionPipe, selectedTotal, selGainRate, bidders,
   const [weight, setWeight] = useState(() => remainderCommitted > 0 ? remainderCommitted.toFixed(2) : '')
   const [weightDirty, setWeightDirty] = useState(false)
   const [busy, setBusy]     = useState(false)
+  const [localBidders, setLocalBidders] = useState(() => {
+    if (typeof window === 'undefined') return []
+    try { return JSON.parse(window.localStorage.getItem('bidding.localBidders') || '[]') } catch { return [] }
+  })
+  const saveNewBidder = (name) => {
+    const nm = String(name || '').trim()
+    if (!nm) return
+    setLocalBidders(prev => {
+      if (prev.some(b => b.toLowerCase() === nm.toLowerCase())) return prev
+      const next = [...prev, nm]
+      if (typeof window !== 'undefined') { try { window.localStorage.setItem('bidding.localBidders', JSON.stringify(next)) } catch {} }
+      return next
+    })
+  }
+
+  // Lock background scroll while the modal is open (body + html + the
+  // dashboard's own scrolling <main>, mirroring BookingModal).
+  useEffect(() => {
+    if (typeof document === 'undefined') return
+    const html = document.documentElement, body = document.body, main = document.querySelector('main')
+    const prev = { body: body.style.overflow, html: html.style.overflow, main: main?.style.overflowY }
+    body.style.overflow = 'hidden'; html.style.overflow = 'hidden'; if (main) main.style.overflowY = 'hidden'
+    return () => { body.style.overflow = prev.body; html.style.overflow = prev.html; if (main) main.style.overflowY = prev.main ?? 'auto' }
+  }, [])
 
   useEffect(() => {
     if (weightDirty) return
@@ -4693,9 +4717,9 @@ function SplitBookingModal({ t, regionPipe, selectedTotal, selGainRate, bidders,
 
   const allBidders = useMemo(() => {
     const seen = new Set(); const out = []
-    for (const b of bidders || []) { const k = String(b || '').trim().toLowerCase(); if (k && !seen.has(k)) { seen.add(k); out.push(b) } }
+    for (const b of [...(bidders || []), ...localBidders]) { const k = String(b || '').trim().toLowerCase(); if (k && !seen.has(k)) { seen.add(k); out.push(b) } }
     return out.sort((a, b) => a.localeCompare(b))
-  }, [bidders])
+  }, [bidders, localBidders])
 
   const submit = async () => {
     if (!canSubmit) return
@@ -4726,8 +4750,15 @@ function SplitBookingModal({ t, regionPipe, selectedTotal, selGainRate, bidders,
         {/* New booking form */}
         <div style={{ padding: '18px 22px' }}>
           <label style={lbl}>Buyer</label>
-          <input value={party} onChange={e => setParty(e.target.value)} list="split-bidders" placeholder="e.g. MAHALASA" autoFocus style={{ ...inp, marginBottom: 14 }} />
-          <datalist id="split-bidders">{allBidders.map(b => <option key={b} value={b} />)}</datalist>
+          <div style={{ marginBottom: 14 }}>
+            <BidderCombobox
+              t={t}
+              value={party}
+              onChange={setParty}
+              options={allBidders}
+              onAddNew={(name) => { setParty(name); saveNewBidder(name) }}
+            />
+          </div>
 
           <div style={{ display: 'flex', gap: 12, marginBottom: 14 }}>
             <div style={{ flex: 1 }}>
