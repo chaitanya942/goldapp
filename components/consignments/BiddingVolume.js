@@ -117,6 +117,7 @@ export default function BiddingVolume() {
   const [loading,      setLoading]      = useState(true)
   const [error,        setError]        = useState(null)
   const [showBookModal, setShowBookModal] = useState(false)
+  const [showSplitModal, setShowSplitModal] = useState(false)
   const [cancelTarget, setCancelTarget] = useState(null)
   const [toast,        setToast]        = useState(null)
   // 'bidding' = source picker (sections 1-4); 'bookings' = committed bookings
@@ -275,7 +276,7 @@ export default function BiddingVolume() {
   // moment they finish (clear the selection / close the modal) polling
   // resumes with an immediate catch-up fetch so they're not stuck on stale
   // numbers for up to 30 s.
-  const pollPaused = selected.size > 0 || showBookModal || cancelTarget != null || editingGain || editingPending
+  const pollPaused = selected.size > 0 || showBookModal || showSplitModal || cancelTarget != null || editingGain || editingPending
   const pollPausedRef = useRef(pollPaused)
   const wasPausedRef   = useRef(pollPaused)
   useEffect(() => {
@@ -1015,6 +1016,39 @@ export default function BiddingVolume() {
       fetchAll(true)
     } catch (err) {
       showToast(err?.message || 'Close pipeline failed — network error', 'error')
+    }
+  }
+
+  // Split a big selected bill: part closes the day's open pipeline(s), the
+  // remainder seeds a NEW booking (party/rate/weight from the modal). One
+  // atomic server call (split_close_and_book) — the physical bill stays whole.
+  const splitCloseAndBook = async (payload) => {
+    const billIds = [...selected]
+    if (!billIds.length) return false
+    const ctrl = new AbortController()
+    const tid  = setTimeout(() => ctrl.abort(), 20_000)
+    try {
+      const r = await authedFetch('/api/consignments?action=split_close_and_book', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...payload, bill_ids: billIds, is_kl: regionTab === 'kl', bidding_date: bookingsDate, arrival_date: arrivalDate }),
+        signal: ctrl.signal,
+      })
+      clearTimeout(tid)
+      let j = null; try { j = await r.json() } catch {}
+      if (!r.ok || j?.error) { showToast(j?.error || `Split failed (HTTP ${r.status})`, 'error'); return false }
+      const d = j?.data || {}
+      let msg = `Pipeline ${fmt(d.closed_pipeline_g || 0, 2)} g closed · new booking ${fmt(d.new_booking_weight_g || 0, 2)} g`
+      if (d.new_booking_pipeline_g > 0.001) msg += ` (${fmt(d.new_booking_pipeline_g, 2)} g new pipeline)`
+      showToast(msg + '.', 'success')
+      setShowSplitModal(false)
+      setSelected(new Set())
+      setActiveTab('bookings')
+      fetchAll(true)
+      return true
+    } catch (err) {
+      clearTimeout(tid)
+      showToast(err?.name === 'AbortError' ? 'Split timed out (20s) — try again.' : (err?.message || 'Split failed — network error'), 'error')
+      return false
     }
   }
 
@@ -1977,6 +2011,22 @@ export default function BiddingVolume() {
                 </button>
               )
             })()}
+            {/* Split: shown when the selection OVERSHOOTS the open pipeline by
+                more than the 10 g gain-fold cap — i.e. exactly where the plain
+                Close Pipeline button hides. Closes the pipeline with part of the
+                bill and books the remainder to a new buyer. */}
+            {(() => {
+              const regionPipe = regionTab === 'kl' ? pipelineKLG : pipelineOtherG
+              if (regionPipe <= 0.001 || selBookingWt <= regionPipe + 10) return null
+              const remainder = selBookingWt - regionPipe
+              return (
+                <button onClick={() => setShowSplitModal(true)}
+                  title={`Close the ${fmt(regionPipe, 2)} g pipeline with part of this, and book the remaining ${fmt(remainder, 2)} g to a new buyer`}
+                  style={{ background: `${t.gold}14`, color: t.gold, border: `1px solid ${t.gold}80`, borderRadius: 8, padding: '9px 18px', fontSize: 12.5, fontWeight: 800, cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                  ⇉ Close {fmt(regionPipe, 2)}g + book {fmt(remainder, 2)}g
+                </button>
+              )
+            })()}
             <button onClick={() => setShowBookModal(true)}
               style={{ background: t.gold, color: '#1a0a00', border: 'none', borderRadius: 8, padding: '10px 24px', fontSize: 13, fontWeight: 900, cursor: 'pointer', letterSpacing: '.02em', boxShadow: `0 3px 12px ${t.gold}66` }}>
               Book Selected →
@@ -2037,6 +2087,20 @@ export default function BiddingVolume() {
             for (const id of ids) next.delete(id)
             return next
           })}
+        />
+      )}
+
+      {/* ── Split booking modal — close open pipeline + book the remainder ── */}
+      {showSplitModal && (
+        <SplitBookingModal
+          t={t}
+          regionPipe={regionTab === 'kl' ? pipelineKLG : pipelineOtherG}
+          selectedTotal={selectedTotal}
+          selGainRate={selGainRate}
+          bidders={bidders}
+          isKerala={regionTab === 'kl'}
+          onSubmit={splitCloseAndBook}
+          onClose={() => setShowSplitModal(false)}
         />
       )}
 
@@ -4598,6 +4662,107 @@ function hashAvatarBg(s, t) {
 //
 // Selected sources display: compact by default — chip strip is collapsed
 // to "first 6 + (N more)" so 20+ branches don't blow up the modal height.
+// Split modal — the sanctioned path when a selected bill is too big to fold
+// into an open pipeline (> 10 g overshoot). Part of the bill closes the day's
+// open pipeline(s); the remainder books a fresh buyer. The bill is never
+// physically split — the pipeline fill is an accounting allocation server-side.
+function SplitBookingModal({ t, regionPipe, selectedTotal, selGainRate, bidders, isKerala, onSubmit, onClose }) {
+  const rate = isKerala ? 0 : Number(selGainRate || 0)
+  // Net grams of the bill needed to close the committed pipeline, and the
+  // remainder that seeds the new booking.
+  const netToClose   = rate >= 0 ? regionPipe / (1 + rate) : regionPipe
+  const remainderNet = Math.max(0, selectedTotal - netToClose)
+  const remainderCommitted = remainderNet * (1 + rate)   // == selBookingWt − regionPipe
+
+  const [party, setParty]   = useState('')
+  const [price, setPrice]   = useState('')
+  const [weight, setWeight] = useState(() => remainderCommitted > 0 ? remainderCommitted.toFixed(2) : '')
+  const [weightDirty, setWeightDirty] = useState(false)
+  const [busy, setBusy]     = useState(false)
+
+  useEffect(() => {
+    if (weightDirty) return
+    setWeight(remainderCommitted > 0 ? remainderCommitted.toFixed(2) : '')
+  }, [remainderCommitted, weightDirty])
+
+  const w = Number(weight), pr = Number(price)
+  const wValid = Number.isFinite(w) && w > 0
+  const prValid = Number.isFinite(pr) && pr > 0
+  const newPipeline = wValid ? Math.max(0, w - remainderNet * (1 + rate)) : 0
+  const canSubmit = party.trim().length > 0 && wValid && prValid && !busy
+
+  const allBidders = useMemo(() => {
+    const seen = new Set(); const out = []
+    for (const b of bidders || []) { const k = String(b || '').trim().toLowerCase(); if (k && !seen.has(k)) { seen.add(k); out.push(b) } }
+    return out.sort((a, b) => a.localeCompare(b))
+  }, [bidders])
+
+  const submit = async () => {
+    if (!canSubmit) return
+    setBusy(true)
+    const ok = await onSubmit?.({ party: party.trim(), rate: pr, weight: w, gain_rate: rate })
+    if (!ok) setBusy(false)
+  }
+
+  const lbl = { display: 'block', fontSize: 11, fontWeight: 700, color: t.text3, marginBottom: 5, letterSpacing: '.02em' }
+  const inp = { width: '100%', padding: '10px 12px', border: `1px solid ${t.border2}`, borderRadius: 8, fontSize: 14, color: t.text, background: t.card2, outline: 'none', boxSizing: 'border-box' }
+  const row = { display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', padding: '6px 0', fontSize: 12.5 }
+
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.55)', zIndex: 2000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+      <div onClick={e => e.stopPropagation()} style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: 14, width: '100%', maxWidth: 460, boxShadow: '0 24px 60px rgba(0,0,0,.4)', overflow: 'hidden' }}>
+        <div style={{ padding: '18px 22px', borderBottom: `1px solid ${t.border}` }}>
+          <div style={{ fontSize: 16, fontWeight: 900, color: t.text, letterSpacing: '-.01em' }}>Split · close pipeline + book rest</div>
+          <div style={{ fontSize: 12, color: t.text3, marginTop: 3 }}>One bill, two purposes — the bill stays whole; the split is accounting only.</div>
+        </div>
+
+        {/* Split preview */}
+        <div style={{ padding: '14px 22px', background: t.card2, borderBottom: `1px solid ${t.border}` }}>
+          <div style={row}><span style={{ color: t.text3 }}>Selected bill(s) · net</span><strong style={{ color: t.text }}>{fmt(selectedTotal, 2)} g</strong></div>
+          <div style={row}><span style={{ color: t.text3 }}>Closes open pipeline</span><strong style={{ color: t.orange || '#d98a3a' }}>{fmt(regionPipe, 2)} g <span style={{ fontWeight: 500, color: t.text4 }}>(≈{fmt(netToClose, 2)} g net)</span></strong></div>
+          <div style={{ ...row, borderTop: `1px dashed ${t.border2}`, marginTop: 4, paddingTop: 8 }}><span style={{ color: t.text3 }}>Remainder → new booking</span><strong style={{ color: t.gold }}>{fmt(remainderNet, 2)} g net · {fmt(remainderCommitted, 2)} g committed</strong></div>
+        </div>
+
+        {/* New booking form */}
+        <div style={{ padding: '18px 22px' }}>
+          <label style={lbl}>Buyer</label>
+          <input value={party} onChange={e => setParty(e.target.value)} list="split-bidders" placeholder="e.g. MAHALASA" autoFocus style={{ ...inp, marginBottom: 14 }} />
+          <datalist id="split-bidders">{allBidders.map(b => <option key={b} value={b} />)}</datalist>
+
+          <div style={{ display: 'flex', gap: 12, marginBottom: 14 }}>
+            <div style={{ flex: 1 }}>
+              <label style={lbl}>Booking weight (g)</label>
+              <input value={weight} onChange={e => { setWeight(e.target.value); setWeightDirty(true) }} inputMode="decimal" style={inp} />
+            </div>
+            <div style={{ flex: 1 }}>
+              <label style={lbl}>Rate (₹/g)</label>
+              <input value={price} onChange={e => setPrice(e.target.value)} inputMode="decimal" placeholder="e.g. 14770" style={inp} />
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: t.text3, marginBottom: 4 }}>
+            <span>New booking value</span>
+            <strong style={{ color: t.text }}>{wValid && prValid ? fmtINR(w * pr) : '—'}</strong>
+          </div>
+          {newPipeline > 0.001 && (
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: t.text3 }}>
+              <span>New booking carries pipeline</span>
+              <strong style={{ color: t.orange || '#d98a3a' }}>{fmt(newPipeline, 2)} g</strong>
+            </div>
+          )}
+        </div>
+
+        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', padding: '14px 22px', borderTop: `1px solid ${t.border}` }}>
+          <button onClick={onClose} disabled={busy} style={{ background: 'transparent', border: `1px solid ${t.border2}`, borderRadius: 8, padding: '9px 18px', fontSize: 13, fontWeight: 700, color: t.text2, cursor: busy ? 'not-allowed' : 'pointer' }}>Cancel</button>
+          <button onClick={submit} disabled={!canSubmit} style={{ background: canSubmit ? t.gold : t.border2, color: canSubmit ? '#1a0a00' : t.text4, border: 'none', borderRadius: 8, padding: '10px 22px', fontSize: 13, fontWeight: 900, cursor: canSubmit ? 'pointer' : 'not-allowed', letterSpacing: '.01em' }}>
+            {busy ? 'Working…' : 'Close pipeline & book →'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function BookingModal({ t, arrivalDate, availablePool, remainingQty, incomingNetWt, gainGrams, pendingGrams, onSavePending, savingPending, bookedQty, selected, selectedTotal, billsById, bidders, effectiveGainRate, isKerala, onSubmit, onClose, onSuccess, onSubmitGuardFail, onDetachBills }) {
   // The quantity committed to a bidder is a *negotiated* figure against the
   // whole available pool (Incoming + Gain ± Pending), not the exact sum of

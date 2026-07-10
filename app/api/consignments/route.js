@@ -1768,6 +1768,11 @@ export async function GET(req) {
         billsByBooking[p.booking_id].push(p)
       }
 
+      // Fold in split allocations so a booking that closed another's pipeline
+      // (or was closed by a split bill) shows its TRUE sourced net, not the raw
+      // booking_id sum. Zero for every normal whole-bill booking.
+      var splitDelta = await allocDeltaByBooking(supabase, ids)
+
       // Pull pickup_time for every source branch we touch so at_risk can use
       // the published pickup + 2h buffer as the cutoff. One query, keyed by
       // branch name.
@@ -1788,7 +1793,7 @@ export async function GET(req) {
       const MOVED = new Set(['in_consignment', 'at_ho'])
 
       for (const r of rows) {
-        r.attached_net_weight_g = sumByBooking[r.id]   || 0
+        r.attached_net_weight_g = Math.max(0, (sumByBooking[r.id] || 0) + (splitDelta[r.id] || 0))
         r.attached_bills_count  = countByBooking[r.id] || 0
 
         // dispatch_state: per attached bill, is it still at_branch or has the
@@ -2580,7 +2585,11 @@ async function reconcileBookingOverAttachment({ supabase, bookingId, bookedWeigh
       return { detached: [], residual_pipeline_g: 0, error: null }
     }
 
-    const attachedNet        = attached.reduce((s, b) => s + Number(b.net_weight || 0), 0)
+    // Allocation-aware: if this booking gave net away to close another's
+    // pipeline (a split bill), its effective sourced net is lower — so it isn't
+    // really over-attached and reconcile must not rip the split bill off it.
+    const recDelta           = await allocDeltaByBooking(supabase, [bookingId])
+    const attachedNet        = attached.reduce((s, b) => s + Number(b.net_weight || 0), 0) + (recDelta[bookingId] || 0)
     const effectiveCommitted = attachedNet * (1 + gainRate)
     const excessEffective    = effectiveCommitted - bookedWeight
 
@@ -2645,6 +2654,40 @@ async function reconcileBookingOverAttachment({ supabase, bookingId, bookedWeigh
     residual_pipeline_g: Number(residualPipelineG.toFixed(3)),
     error:               null,
   }
+}
+
+// ── Split-allocation delta per booking ──────────────────────────────────────
+// A bill split across bookings (see booking_split_allocations + the
+// split_close_and_book action) contributes net grams to the pipeline booking
+// it closed while giving up the same grams from its own (primary) booking. So
+// a booking's TRUE sourced net = raw Σ(booking_id) + delta, where
+//   delta(B) = Σ(net_g to_booking=B) − Σ(net_g from_booking=B).
+// Returns { [bookingId]: deltaNet }. Delta is 0 for every normal whole-bill
+// booking (no allocation rows). Degrades to {} if the table doesn't exist yet
+// (migration not run) so callers never break.
+async function allocDeltaByBooking(supabase, bookingIds) {
+  const delta = {}
+  const ids = [...new Set((bookingIds || []).filter(Boolean))]
+  if (!ids.length) return delta
+  try {
+    for (let i = 0; i < ids.length; i += 100) {
+      const slice = ids.slice(i, i + 100)
+      // Two separate queries (not an or()) — PostgREST mis-parses uuid lists
+      // with dashes inside or() expressions.
+      const [outRes, inRes] = await Promise.all([
+        supabase.from('booking_split_allocations').select('from_booking_id, net_g').in('from_booking_id', slice),
+        supabase.from('booking_split_allocations').select('to_booking_id,   net_g').in('to_booking_id',   slice),
+      ])
+      if (outRes.error || inRes.error) {
+        const msg = outRes.error?.message || inRes.error?.message || ''
+        if (/does not exist/i.test(msg)) return {}   // table missing — treat as no splits
+        continue
+      }
+      for (const a of outRes.data || []) delta[a.from_booking_id] = (delta[a.from_booking_id] || 0) - Number(a.net_g || 0)
+      for (const a of inRes.data  || []) delta[a.to_booking_id]   = (delta[a.to_booking_id]   || 0) + Number(a.net_g || 0)
+    }
+  } catch { return {} }
+  return delta
 }
 
 // ── POST handler ──────────────────────────────────────────────────────────────
@@ -4739,9 +4782,10 @@ export async function POST(req) {
         .from('purchases').select('booking_id, net_weight').in('booking_id', bkIds.slice(i, i + 100))
       for (const r of rows || []) attachedByBk[r.booking_id] = (attachedByBk[r.booking_id] || 0) + Number(r.net_weight || 0)
     }
+    const attachDelta = await allocDeltaByBooking(supabase, bkIds)
     const open = (bookings || []).map(b => {
       const rate     = b.gain_rate != null ? Number(b.gain_rate) : (b.is_kl ? 0 : 0.035)
-      const attached = attachedByBk[b.id] || 0
+      const attached = (attachedByBk[b.id] || 0) + (attachDelta[b.id] || 0)
       const residual = Math.max(0, Number(b.weight || 0) - (attached + Number(b.pending_g || 0)) * (1 + rate))
       return { id: b.id, weight: Number(b.weight || 0), rate, attached, pending_g: Number(b.pending_g || 0), additional_gain_g: Number(b.additional_gain_g || 0), residual }
     }).filter(b => b.residual > 0.001)
@@ -4860,6 +4904,166 @@ export async function POST(req) {
     if (uErr) return Response.json({ error: uErr.message }, { status: 500 })
 
     return Response.json({ data: { unbooked: toUnbook.length, skipped } })
+  }
+
+  // ── Split a big bill: close open pipeline(s) + book the remainder ──────────
+  // Ops selected one (or a few) bill(s) too big to just fold into gain (the
+  // >10 g overshoot wall in attach_selected_to_pipeline). This does BOTH in one
+  // motion, atomically:
+  //   1) FIFO-close the day's open pipeline(s) with part of the bill's net
+  //   2) create a NEW booking (party/rate/weight) sourced from the remainder
+  // The physical bill stays whole (booking_id = the new booking). The pipeline
+  // fill is recorded as an accounting allocation (booking_split_allocations),
+  // so total sourced gold is conserved and the CRM re-sync never disturbs it.
+  if (action === 'split_close_and_book') {
+    const { bill_ids, is_kl, bidding_date, party, rate, weight, purity, buyer_phone, notes, arrival_date, gain_rate } = body
+    if (!Array.isArray(bill_ids) || bill_ids.length === 0) return Response.json({ error: 'bill_ids[] required' }, { status: 400 })
+    if (!bidding_date) return Response.json({ error: 'bidding_date required' }, { status: 400 })
+    if (!party || !String(party).trim()) return Response.json({ error: 'Buyer name required' }, { status: 400 })
+    const bookDate = arrival_date || bidding_date
+    const wNew = Number(weight), rNew = Number(rate)
+    if (!Number.isFinite(wNew) || wNew <= 0) return Response.json({ error: 'weight must be a positive number' }, { status: 400 })
+    if (!Number.isFinite(rNew) || rNew <= 0) return Response.json({ error: 'rate must be a positive number' }, { status: 400 })
+    if (purity && !['24K', '22K', '18K'].includes(purity)) return Response.json({ error: "purity must be one of '24K', '22K', '18K'" }, { status: 400 })
+    const klFlag  = !!is_kl
+    const newRate = klFlag ? 0 : (Number.isFinite(Number(gain_rate)) ? Number(gain_rate) : 0.035)
+
+    // 1) Selected bills that are free to attach (unbooked, not deleted).
+    const { data: billRows, error: bErr } = await supabase
+      .from('purchases')
+      .select('id, application_id, net_weight, booking_id, purchase_date')
+      .in('id', bill_ids)
+      .eq('is_deleted', false)
+    if (bErr) return Response.json({ error: bErr.message }, { status: 500 })
+    const eligible = (billRows || []).filter(b => !b.booking_id)
+    if (eligible.length === 0) return Response.json({ error: 'Selected bill(s) are already booked.' }, { status: 400 })
+    const lockedDates = await lockedPurchaseDates(supabase, eligible.map(b => b.purchase_date))
+    if (lockedDates.length) return Response.json({ error: `Can't book — purchase date${lockedDates.length > 1 ? 's' : ''} locked: ${lockedDates.join(', ')}.` }, { status: 409 })
+    const billNet = eligible.reduce((s, b) => s + Number(b.net_weight || 0), 0)
+
+    // 2) Region's open-pipeline bookings for that bidding day, oldest first —
+    //    the same set the bid desk sums (and attach_selected_to_pipeline uses).
+    const { data: bookings, error: qErr } = await supabase
+      .from('cal_quotas')
+      .select('id, weight, gain_rate, pending_g, additional_gain_g, is_kl, status, pipeline_closed_at, created_at')
+      .eq('is_kl', klFlag)
+      .neq('status', 'cancelled')
+      .is('pipeline_closed_at', null)
+      .gte('created_at', istStartOfDayIso(bidding_date))
+      .lt('created_at',  istEndOfDayIso(bidding_date))
+      .order('created_at', { ascending: true })
+    if (qErr) return Response.json({ error: qErr.message }, { status: 500 })
+    const bkIds = (bookings || []).map(b => b.id)
+    const attachedByBk = {}
+    for (let i = 0; i < bkIds.length; i += 100) {
+      const { data: rws } = await supabase.from('purchases').select('booking_id, net_weight').in('booking_id', bkIds.slice(i, i + 100))
+      for (const r of rws || []) attachedByBk[r.booking_id] = (attachedByBk[r.booking_id] || 0) + Number(r.net_weight || 0)
+    }
+    const alloc0 = await allocDeltaByBooking(supabase, bkIds)
+    const open = (bookings || []).map(b => {
+      const bRate    = b.gain_rate != null ? Number(b.gain_rate) : (b.is_kl ? 0 : 0.035)
+      const attached = (attachedByBk[b.id] || 0) + (alloc0[b.id] || 0)
+      const residual = Math.max(0, Number(b.weight || 0) - (attached + Number(b.pending_g || 0)) * (1 + bRate))
+      return { id: b.id, rate: bRate, residual }
+    }).filter(b => b.residual > 0.001)
+    if (open.length === 0) return Response.json({ error: 'No open pipeline for this region/day to close.' }, { status: 400 })
+
+    // 3) FIFO-allocate the bill's net to close pipeline residuals (committed
+    //    grams closed = net × (1 + booking rate)). Record each allocation.
+    let remainingNet = billNet
+    const allocations = []   // { to_booking_id, net_g, rate, residualAfter }
+    for (const bk of open) {
+      if (remainingNet <= 0.001) break
+      const netNeeded = bk.residual / (1 + bk.rate)
+      const use = Math.min(remainingNet, netNeeded)
+      if (use <= 0.001) continue
+      const residualAfter = Math.max(0, bk.residual - use * (1 + bk.rate))
+      allocations.push({ to_booking_id: bk.id, net_g: Number(use.toFixed(4)), rate: bk.rate, residualAfter })
+      remainingNet -= use
+    }
+    const closedNet    = billNet - remainingNet
+    const remainderNet = remainingNet
+    if (closedNet <= 0.001)     return Response.json({ error: 'Nothing to close — selection did not cover any pipeline.' }, { status: 400 })
+    if (remainderNet <= 0.001)  return Response.json({ error: 'Selection fully absorbed by the pipeline — use “Close Pipeline” instead (no remainder to book).' }, { status: 400 })
+
+    // 4) Create the new booking (same created_by UUID/TEXT resilience as create_booking).
+    const actorUuid = auth.user?.id || null
+    const baseInsert = {
+      date: bookDate, party: String(party).trim(),
+      buyer_phone: buyer_phone ? String(buyer_phone).trim() : null,
+      weight: wNew, rate: rNew, is_kl: klFlag, purity: purity || null,
+      notes: notes ? String(notes).trim() : null, status: 'booked',
+      created_by: actorUuid || actorEmail,
+    }
+    let { data: newBk, error: insErr } = await supabase.from('cal_quotas').insert(baseInsert).select().single()
+    if (insErr && /invalid input syntax for type uuid/i.test(insErr.message || '') && actorUuid) {
+      const retry = await supabase.from('cal_quotas').insert({ ...baseInsert, created_by: actorEmail }).select().single()
+      newBk = retry.data; insErr = retry.error
+    } else if (insErr && /invalid input syntax for type uuid/i.test(insErr.message || '')) {
+      const retry = await supabase.from('cal_quotas').insert({ ...baseInsert, created_by: null }).select().single()
+      newBk = retry.data; insErr = retry.error
+    }
+    if (insErr || !newBk) return Response.json({ error: insErr?.message || 'Could not create booking.' }, { status: 500 })
+
+    // 5) Attach the physical bill(s) to the new booking.
+    const bookedAt = new Date().toISOString()
+    const { error: attErr } = await supabase
+      .from('purchases')
+      .update({ booking_id: newBk.id, booked_at: bookedAt, audit_consumed_at: null, audit_attributed_to: null })
+      .in('id', eligible.map(b => b.id))
+      .is('booking_id', null)
+    if (attErr) {
+      await supabase.from('cal_quotas').delete().eq('id', newBk.id)   // roll back the orphan booking
+      return Response.json({ error: `Could not attach bill(s): ${attErr.message}` }, { status: 500 })
+    }
+
+    // 6) Record allocations (credit the pipeline bookings from the new booking).
+    //    If the ledger table is missing, roll the whole thing back so we never
+    //    leave a half-applied split.
+    const primaryBillId = eligible[0]?.id || null
+    const allocRows = allocations.map(a => ({
+      purchase_id: primaryBillId, from_booking_id: newBk.id, to_booking_id: a.to_booking_id,
+      net_g: a.net_g, created_by: actorEmail,
+    }))
+    if (allocRows.length) {
+      const { error: aErr } = await supabase.from('booking_split_allocations').insert(allocRows)
+      if (aErr) {
+        await supabase.from('purchases').update({ booking_id: null, booked_at: null }).in('id', eligible.map(b => b.id))
+        await supabase.from('cal_quotas').delete().eq('id', newBk.id)
+        return Response.json({ error: `Split allocation failed (apply sql/booking_split_allocations.sql): ${aErr.message}` }, { status: 500 })
+      }
+    }
+
+    // 7) Close the pipeline booking(s) that were fully covered.
+    let closedBookings = 0
+    for (const a of allocations) {
+      const upd = { pipeline_remaining_g: Number(a.residualAfter.toFixed(3)) }
+      if (a.residualAfter <= 0.001) { upd.pipeline_closed_at = bookedAt; closedBookings++ }
+      await supabase.from('cal_quotas').update(upd).eq('id', a.to_booking_id)
+    }
+
+    // 8) Set the new booking's own pipeline + breakdown from the remainder.
+    const newSourced  = remainderNet
+    const newPipeline = Math.max(0, wNew - newSourced * (1 + newRate))
+    const pipelineRegion = klFlag ? 'Kerala' : 'Bangalore'
+    await supabase.from('cal_quotas').update({
+      gain_rate:             newRate,
+      bills_net_weight_g:    Number(newSourced.toFixed(3)),
+      gain_applied_g:        Number((newSourced * newRate).toFixed(3)),
+      pipeline_original_g:   Number(newPipeline.toFixed(3)),
+      pipeline_remaining_g:  newPipeline > 0.001 ? Number(newPipeline.toFixed(3)) : 0,
+      pipeline_region:       newPipeline > 0.001 ? pipelineRegion : null,
+      pipeline_arrival_date: bookDate,
+    }).eq('id', newBk.id)
+
+    return Response.json({ data: {
+      booking_id:             newBk.id,
+      closed_pipeline_g:      Number(allocations.reduce((s, a) => s + a.net_g * (1 + a.rate), 0).toFixed(3)),
+      bookings_closed:        closedBookings,
+      remainder_net_g:        Number(remainderNet.toFixed(3)),
+      new_booking_weight_g:   wNew,
+      new_booking_pipeline_g: Number(newPipeline.toFixed(3)),
+    } })
   }
 
   return Response.json({ error: 'Invalid action' }, { status: 400 })
