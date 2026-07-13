@@ -1579,11 +1579,11 @@ export default function ConsignmentOverview() {
                     </th>
 
                     {/* Sortable: Today */}
-                    <th style={{ ...thBase, ...todayCol, textAlign: 'center', cursor: 'pointer', color: sortKey === 'today_bills' ? t.blue : t.text4 }}
+                    <th style={{ ...thBase, textAlign: 'center', cursor: 'pointer', color: sortKey === 'today_bills' ? t.blue : t.text4 }}
                         onClick={() => handleSort('today_bills')}>
                       Today's Bills <SortIcon col="today_bills" />
                     </th>
-                    <th style={{ ...thBase, ...sep, ...todayCol, textAlign: 'center', cursor: 'pointer', color: sortKey === 'today_net_wt' ? t.blue : t.text4 }}
+                    <th style={{ ...thBase, ...sep, textAlign: 'center', cursor: 'pointer', color: sortKey === 'today_net_wt' ? t.blue : t.text4 }}
                         onClick={() => handleSort('today_net_wt')}>
                       {scopeTab === 'bangalore' ? "Today's Gross Wt" : "Today's Net Wt"} <SortIcon col="today_net_wt" />
                     </th>
@@ -1592,11 +1592,11 @@ export default function ConsignmentOverview() {
                         every Bangalore bill reaches HO the same day, so a
                         'pending' bucket has no operational meaning. */}
                     {isOutside && (<>
-                    <th style={{ ...thBase, ...pendCol, textAlign: 'center', cursor: 'pointer', color: sortKey === 'older_bills' ? t.orange : t.text4 }}
+                    <th style={{ ...thBase, textAlign: 'center', cursor: 'pointer', color: sortKey === 'older_bills' ? t.orange : t.text4 }}
                         onClick={() => handleSort('older_bills')}>
                       Pending Bills <SortIcon col="older_bills" />
                     </th>
-                    <th style={{ ...thBase, ...sep, ...pendCol, textAlign: 'center', cursor: 'pointer', color: sortKey === 'older_net_wt' ? t.orange : t.text4 }}
+                    <th style={{ ...thBase, ...sep, textAlign: 'center', cursor: 'pointer', color: sortKey === 'older_net_wt' ? t.orange : t.text4 }}
                         onClick={() => handleSort('older_net_wt')}>
                       Pending Net Wt <SortIcon col="older_net_wt" />
                     </th>
