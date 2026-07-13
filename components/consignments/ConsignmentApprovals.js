@@ -87,6 +87,11 @@ export default function ConsignmentApprovals() {
   const [history, setHistory] = useState([])  // approved or rejected, depending on tab
   const [cancellations, setCancellations] = useState([])  // ewb_cancelled / einvoice_cancelled events
   const [cancelRequests, setCancelRequests] = useState([])  // pending cancellation requests from ops
+  // Cancelled here but the EWB/IRN is STILL LIVE on NIC/IRP (force-local cancels).
+  // Surfaced so an active government document can never sit unnoticed against gold
+  // that isn't moving — and so accounts can retry the cancel from the app.
+  const [portalPending, setPortalPending] = useState([])
+  const [portalBusy,    setPortalBusy]    = useState(null)
   // Modal state for the reject-cancellation flow (reason input).
   const [rejectCancelTarget,    setRejectCancelTarget]    = useState(null)
   const [rejectCancelReason,    setRejectCancelReason]    = useState('')
@@ -147,6 +152,31 @@ export default function ConsignmentApprovals() {
     setLoading(false)
   }, [])
 
+  // Consignments cancelled here whose EWB/IRN is still LIVE on the portal.
+  const fetchPortalPending = useCallback(async () => {
+    const r = await authedFetch(`/api/consignments?action=portal_cleanup_pending`)
+    const j = await r.json()
+    setPortalPending(j.data || [])
+  }, [])
+
+  // Retry the NIC/IRP cancel from the app, so accounts never has to go to the
+  // portal by hand. Only clears the local doc fields once the portal confirms.
+  const retryPortalCancel = useCallback(async (c) => {
+    setPortalBusy(c.id)
+    try {
+      const r = await authedFetch('/api/consignments', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'retry_portal_cancel', id: c.id }),
+      })
+      const j = await r.json()
+      if (!r.ok || j.error) { showToast(j.error || 'Portal cancel failed', 'error'); return }
+      showToast(j.message || 'Cancelled on the portal.', 'success')
+      fetchPortalPending()
+    } catch (e) {
+      showToast(e?.message || 'Portal cancel failed', 'error')
+    } finally { setPortalBusy(null) }
+  }, [fetchPortalPending])
+
   // Fetches pending cancellation requests filed by operations. Oldest first so
   // accounts works through them FIFO (matches the API ordering).
   const fetchCancelRequests = useCallback(async (silent = false) => {
@@ -183,6 +213,10 @@ export default function ConsignmentApprovals() {
     else if (tab === 'settings')           fetchSettings()
     else                                   fetchHistory(tab)
   }, [tab, fetchHistory, fetchCancelRequests, fetchCancellations, fetchReport, fetchSettings, reportFrom, reportTo])
+
+  // Portal-cleanup queue is page-level (not per-tab) — a live EWB on NIC is urgent
+  // regardless of which tab accounts happens to be on.
+  useEffect(() => { fetchPortalPending() }, [fetchPortalPending])
 
   // Save a single E-Invoice sequence row (state + last_seq).
   const saveSeq = useCallback(async (state_code, fy_code, last_seq) => {
@@ -605,6 +639,47 @@ export default function ConsignmentApprovals() {
           )
         })}
       </div>
+
+      {/* PORTAL CLEANUP — cancelled here, still LIVE on NIC/IRP.
+          A "cancellation" that never reached NIC isn't a cancellation: the govt still
+          has an active document against gold that isn't moving. Surface it loudly and
+          let accounts cancel it from HERE rather than logging into the portal. */}
+      {portalPending.length > 0 && (
+        <div style={{ background: '#e0555512', border: '2px solid #e0555566', borderRadius: '10px', padding: '14px 16px', marginBottom: '16px' }}>
+          <div style={{ fontSize: '13px', fontWeight: 800, color: '#e05555', marginBottom: '4px' }}>
+            ⚠ {portalPending.length} consignment{portalPending.length === 1 ? '' : 's'} cancelled in GoldApp but STILL LIVE on the portal
+          </div>
+          <div style={{ fontSize: '11px', color: t.text3, marginBottom: '11px', lineHeight: 1.5 }}>
+            The E-Way Bill was never cancelled on NIC. Cancel it here — no need to log in to the portal.
+          </div>
+          {portalPending.map(c => (
+            <div key={c.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap', padding: '9px 0', borderTop: `1px solid ${t.border}` }}>
+              <div style={{ fontSize: '11.5px', color: t.text2 }}>
+                <strong style={{ fontFamily: 'monospace', color: t.text1 }}>{c.tmp_prf_no}</strong>
+                {'  '}{c.branch_name} → {c.dest_branch || 'HO'}
+                {c.eway_bill_no && (
+                  <> · EWB <strong style={{ fontFamily: 'monospace', color: '#e05555' }}>{c.eway_bill_no}</strong>
+                    {c.ewb_age_hours != null && <span style={{ color: t.text4 }}> ({c.ewb_age_hours}h old)</span>}
+                  </>
+                )}
+                {c.irn && <> · IRN <span style={{ fontFamily: 'monospace' }}>{String(c.irn).slice(0, 16)}…</span></>}
+              </div>
+              {c.expires_only ? (
+                <span style={{ fontSize: '10.5px', color: t.text3, fontStyle: 'italic' }}>
+                  Past NIC&apos;s 24h window — can only expire on its own
+                </span>
+              ) : (
+                <button
+                  onClick={() => retryPortalCancel(c)}
+                  disabled={portalBusy === c.id}
+                  style={{ background: '#e05555', color: '#fff', border: 'none', borderRadius: '7px', padding: '7px 14px', fontSize: '11.5px', fontWeight: 700, cursor: portalBusy === c.id ? 'wait' : 'pointer', opacity: portalBusy === c.id ? 0.6 : 1, whiteSpace: 'nowrap' }}>
+                  {portalBusy === c.id ? 'Cancelling on NIC…' : 'Cancel on NIC now'}
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
 
       {(tab === 'approved' || tab === 'rejected') && history.length === 0 ? (
         /* Empty state — history tab */

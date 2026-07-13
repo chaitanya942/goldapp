@@ -469,6 +469,35 @@ export async function GET(req) {
     })
   }
 
+  // ── Portal cleanup pending ────────────────────────────────────────────────
+  // Consignments cancelled in GoldApp whose EWB / IRN is STILL LIVE on NIC/IRP —
+  // i.e. force-local cancels. Without this queue they are invisible: the row reads
+  // "cancelled" here while the government still has an active document against gold
+  // that isn't moving. Each row can be retried against NIC from the UI
+  // (action=retry_portal_cancel), so accounts never has to go to the portal by hand.
+  if (action === 'portal_cleanup_pending') {
+    const { data, error } = await supabase
+      .from('consignments')
+      .select('id, tmp_prf_no, branch_name, dest_branch, movement_type, status, eway_bill_no, ewb_generated_at, irn, einvoice_generated_at, cancelled_at, cancellation_reason_final')
+      .eq('status', 'cancelled')
+      .or('eway_bill_no.not.is.null,irn.not.is.null')
+      .order('cancelled_at', { ascending: false })
+    if (error) return Response.json({ data: [], error: error.message })
+    const now = Date.now()
+    const rows = (data || []).map(c => {
+      const ageH = c.ewb_generated_at ? (now - new Date(c.ewb_generated_at).getTime()) / 3600000 : null
+      return {
+        ...c,
+        ewb_age_hours:      ageH != null ? Number(ageH.toFixed(1)) : null,
+        // NIC only allows cancellation within 24h of generation. Past that the EWB
+        // can ONLY expire — retrying is pointless and we should say so.
+        can_cancel_on_nic:  !!c.eway_bill_no && ageH != null && ageH < 24,
+        expires_only:       !!c.eway_bill_no && ageH != null && ageH >= 24,
+      }
+    })
+    return Response.json({ data: rows })
+  }
+
   // ── Pending approvals — accounts team queue ────────────────────────────
   // EWB-route consignments (INTERNAL, or KA-source EXTERNAL) are now
   // operations self-service: ops previews/generates the EWB on Consignment
@@ -3572,6 +3601,20 @@ export async function POST(req) {
         const reasonLine = nicErrorMsg
           ? `NIC said: ${nicErrorMsg}${nicErrorCode ? ` (code ${nicErrorCode})` : ''}.`
           : (err?.message || 'unknown error')
+        // PERSIST the failure. This used to go only to the Railway console, so the
+        // real NIC reason was lost the moment the tab closed — which is how we ended
+        // up with a generic "Failed to cancel E-Way Bill" and a pointless force-local.
+        await logConsignmentEvent(supabase, {
+          consignment_id: id,
+          event_type:     'ewb_cancel_failed',
+          actor_email:    actorEmail,
+          actor_role:     auth.role,
+          details: {
+            ewb_no: c.eway_bill_no, nic_error_code: nicErrorCode || null,
+            nic_error_message: nicErrorMsg || null, ewb_age_hours: ewbAgeHours,
+            error: err?.message || String(err), raw_response: nicResponse ?? null,
+          },
+        })
         return Response.json({
           error:           `Could not cancel the E-Way Bill on NIC. ${reasonLine}${hint ? `\n\n${hint}` : ' Nothing has been changed. Try again or escalate if NIC is down.'}`,
           nic_error_code:  nicErrorCode || null,
@@ -3780,6 +3823,102 @@ export async function POST(req) {
       forced_local:      !!force_local,
       portal_still_live: stillLiveOnPortal,
     })
+  }
+
+  // ── Retry the PORTAL cancellation for a consignment already cancelled here ──
+  // The force-local escape hatch cancels in GoldApp but leaves the EWB/IRN LIVE on
+  // NIC/IRP. That is not a cancellation — it just makes us disagree with the
+  // government, and it dumps the real work on accounts (go cancel it on the portal
+  // by hand). This action closes that loop: it re-attempts the NIC/IRP cancel from
+  // the app for a consignment whose portal doc is still standing, and only clears
+  // the local doc fields once the portal actually confirms.
+  //
+  // NIC still enforces its own 24h window — if that has closed, the EWB genuinely
+  // cannot be cancelled and can only expire. We say so explicitly rather than
+  // pretending.
+  if (action === 'retry_portal_cancel') {
+    const { id } = body
+    if (!id) return Response.json({ error: 'Missing id' }, { status: 400 })
+
+    const { data: c, error: fErr } = await supabase.from('consignments').select('*').eq('id', id).single()
+    if (fErr || !c)                    return Response.json({ error: 'Consignment not found' }, { status: 404 })
+    if (!c.eway_bill_no && !c.irn)     return Response.json({ error: 'Nothing left on the portal for this consignment.' }, { status: 400 })
+
+    const { data: branch } = await supabase.from('branches').select('branch_gstin, region').eq('name', c.branch_name).single()
+    const { data: companySettings } = await supabase.from('company_settings').select('*').single()
+    const stateCode  = REGION_TO_STATE_CODE[branch?.region]
+    const stateGstin = stateCode ? companySettings?.[`gstin_${stateCode.toLowerCase()}`] : null
+    const gstinFor   = c.source_gstin || stateGstin || branch?.branch_gstin || process.env.WG_GSTIN
+
+    const cleared = {}
+    const done    = []
+
+    if (c.eway_bill_no) {
+      const ageMs = c.ewb_generated_at ? Date.now() - new Date(c.ewb_generated_at).getTime() : null
+      const ageH  = ageMs != null ? ageMs / 3600000 : null
+      if (ageH != null && ageH >= 24) {
+        return Response.json({
+          error: `NIC's 24h cancel window has closed (EWB is ${ageH.toFixed(1)}h old). ${c.eway_bill_no} can no longer be cancelled on NIC — it will expire on its own. Nothing to do on the portal.`,
+          window_closed: true,
+        }, { status: 400 })
+      }
+      try {
+        const r = await cancelEWayBill({
+          ewbNumber:     c.eway_bill_no,
+          reasonCode:    '2',
+          remark:        String(c.cancellation_reason || 'Consignment cancelled').slice(0, 100),
+          gstinOverride: gstinFor,
+        })
+        cleared.eway_bill_no = null
+        cleared.ewb_valid_until = null
+        cleared.ewb_generated_at = null
+        cleared.ewb_generation_started_at = null
+        done.push(`EWB ${c.eway_bill_no} cancelled on NIC`)
+        await logConsignmentEvent(supabase, {
+          consignment_id: id, event_type: 'ewb_cancelled', actor_email: actorEmail, actor_role: auth.role,
+          details: { ewb_no: c.eway_bill_no, via: 'retry_portal_cancel', not_active_at_nic: !!r?.ewb_not_found },
+        })
+      } catch (e) {
+        // PERSIST the failure. Previously this only hit the Railway console, so the
+        // real NIC reason was lost and accounts was left with "Failed to cancel".
+        const raw   = e?.cleartaxResponse
+        const first = Array.isArray(raw) ? raw[0] : raw
+        const govt  = first?.govt_response
+        const rawD  = govt?.ErrorDetails || govt?.errorDetails || first?.ErrorDetails || first?.errorDetails
+        const dets  = rawD == null ? null : (Array.isArray(rawD) ? rawD : [rawD])
+        const code  = dets ? dets.map(x => x?.error_code || x?.errorCode).filter(Boolean).join(', ') : (govt?.error_code || null)
+        const msg   = dets ? dets.map(x => x?.error_message || x?.errorMessage || x?.message).filter(Boolean).join('; ')
+                           : (govt?.info || govt?.status_desc || null)
+        await logConsignmentEvent(supabase, {
+          consignment_id: id, event_type: 'ewb_cancel_failed', actor_email: actorEmail, actor_role: auth.role,
+          details: { ewb_no: c.eway_bill_no, nic_error_code: code || null, nic_error_message: msg || null,
+                     error: e?.message || String(e), raw_response: raw ?? null },
+        })
+        return Response.json({
+          error: `NIC refused to cancel EWB ${c.eway_bill_no}${code ? ` (${code})` : ''}: ${msg || e?.message || 'no reason returned'}`,
+          nic_error_code: code || null,
+          nic_error_message: msg || null,
+        }, { status: 502 })
+      }
+    }
+
+    if (c.irn) {
+      try {
+        await cancelEInvoice({ irn: c.irn, reasonCode: '2', remark: String(c.cancellation_reason || 'Consignment cancelled').slice(0, 100), gstinOverride: gstinFor })
+        cleared.irn = null; cleared.ack_no = null; cleared.ack_dt = null
+        cleared.signed_qr_code = null; cleared.einvoice_generated_at = null
+        done.push(`IRN cancelled on IRP`)
+        await logConsignmentEvent(supabase, {
+          consignment_id: id, event_type: 'einvoice_cancelled', actor_email: actorEmail, actor_role: auth.role,
+          details: { irn: c.irn, via: 'retry_portal_cancel' },
+        })
+      } catch (e) {
+        return Response.json({ error: `IRP refused to cancel the IRN: ${e?.message || e}` }, { status: 502 })
+      }
+    }
+
+    if (Object.keys(cleared).length) await supabase.from('consignments').update(cleared).eq('id', id)
+    return Response.json({ data: { id }, message: `${done.join(' · ')}. Portal is now in sync — no manual action needed.` })
   }
 
   // ── Reject a pending cancellation request (accounts side) ────────────────
