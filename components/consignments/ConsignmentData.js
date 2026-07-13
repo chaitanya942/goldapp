@@ -1951,21 +1951,6 @@ export default function ConsignmentData() {
                               <span style={{ fontSize: '10px', color: t.text4 }}>{b.region}</span>
                             </div>
                           ))}
-                          {/* Escape hatch — the open list covers the Head Office
-                              button below it, so offer HO from inside the list. */}
-                          <div
-                            onClick={() => { setMoveType('EXTERNAL'); setDestBranch(''); setDestSearch(''); setDestOpen(false) }}
-                            style={{
-                              position: 'sticky', bottom: 0, padding: '11px 14px', cursor: 'pointer',
-                              fontSize: '12px', fontWeight: 700, color: t.gold, background: t.card,
-                              borderTop: `1px solid ${t.border2}`,
-                              display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px',
-                            }}
-                            onMouseEnter={e => e.currentTarget.style.background = `${t.gold}14`}
-                            onMouseLeave={e => e.currentTarget.style.background = t.card}>
-                            <span>🏛 Send to Head Office instead</span>
-                            <span style={{ fontSize: '10px', color: t.text4, fontWeight: 500 }}>Esc to close</span>
-                          </div>
                         </div>
                       )}
                     </div>
