@@ -2,6 +2,7 @@ import mysql from 'mysql2/promise'
 import { createClient } from '@supabase/supabase-js'
 import { requireAuth, ROLE_GROUPS } from '../../../lib/apiAuth'
 import { recordSyncSuccess, recordSyncFailure } from '../../../lib/syncHeartbeat'
+import { aliasBranchName } from '../../../lib/crmBranchAlias'
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
@@ -216,7 +217,11 @@ async function runSync(request) {
       const finalAmount = parseFloat(r.final_amount_crm) || 0
       const svcPct      = parseFloat(r.service_charge_pct) || 0
       const svcAmount   = finalAmount * (svcPct / 100)
-      const branchName  = (branchMap[r.branch_id] || String(r.branch_id))?.trim()
+      // Normalize through the SAME alias map the new-CRM sync uses. The old CRM
+      // stores bare Karnataka names ("ADUGODI", "MYSURU"); without this, every
+      // old-CRM bill it touches would overwrite the canonical KA- name and orphan
+      // the bill from its branch. Both syncs must agree on the canonical name.
+      const branchName  = aliasBranchName((branchMap[r.branch_id] || String(r.branch_id))?.trim())
       const txnType     = r.transaction_type?.trim()?.toLowerCase()
       const appId       = normalizeAppId(r.application_id)
 
