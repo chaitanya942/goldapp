@@ -8,6 +8,14 @@ import { authedFetch } from '../../lib/authedFetch'
 import { CONSIGNMENT_THEMES as THEMES } from '../../lib/consignmentTheme'
 
 const EMPTY_FORM = { name: '', opening_date: '', state: '', region: '', cluster: '', model_type: 'outside_bangalore', branch_code: '', address: '', city: '', pin_code: '', branch_gstin: '', crm_branch_id: '', pickup_time: '', delivery_tat_hours: 24, pickup_days: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'], tamper_next: '', contact_person: '', contact_phone: '', contact_email: '' }
+
+// Logistics is RULE-BASED in these regions — no per-branch pickup time/days are
+// stored and the TAT is stamped from the region rule (Bangalore = same-day HO = 0h,
+// Kerala = next-day = 24h). Everywhere else, TAT + pickup days are a per-branch OPS
+// decision we must never guess. Single source of truth for both save() and the
+// "needs logistics setup" nag, so the two can't drift apart.
+const RULE_BASED_REGIONS = new Set(['Bangalore', 'Kerala'])
+const isRuleBasedRegion  = (r) => RULE_BASED_REGIONS.has(r)
 const WEEK_DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 
 function useMobile() {
@@ -48,6 +56,7 @@ export default function BranchManagement({ embedded = false } = {}) {
   const [confirmDelete,    setConfirmDelete]    = useState(null)
   const [syncMsg,          setSyncMsg]          = useState('')
   const [filterIncomplete, setFilterIncomplete] = useState(false)
+  const [filterLogistics,  setFilterLogistics]  = useState(false)
 
   // Filters
   const [selRegions,   setSelRegions]   = useState(() => new Set())  // multi-select region
@@ -150,9 +159,29 @@ export default function BranchManagement({ embedded = false } = {}) {
   const isIncomplete = (b) => (!b.state || !b.region || !b.cluster) && !isUpcoming(b)
   const incompleteBranches = branches.filter(isIncomplete)
 
+  // ── Logistics setup ───────────────────────────────────────────────────────
+  // delivery TAT + pickup days are ops decisions we must never guess: TAT drives
+  // the HO-arrival math in Booking Volume, and pickup days decide whether a branch
+  // enters the "pickup pending today" pool at all. A branch missing them is
+  // INVISIBLE to the bid desk and its arrival silently falls back to 24h. Unlike
+  // isIncomplete, this DOES nag upcoming branches — they must be configured BEFORE
+  // they start purchasing, not after.
+  const isBlank = (v) => v === null || v === undefined || String(v).trim() === '' || (Array.isArray(v) && v.length === 0)
+  // Bangalore/Kerala are rule-based (TAT stamped from the region, no stored pickup
+  // days) — a null there is CORRECT, so they must never trip this nag.
+  const needsLogistics = (b) => b.is_active && !isRuleBasedRegion(b.region)
+    && (isBlank(b.delivery_tat_hours) || isBlank(b.pickup_days))
+  const logisticsBranches = branches.filter(needsLogistics)
+  // Softer nudge: pickup_time only feeds the "at-risk" dispatch flag. Scoped to
+  // non-rule-based regions too, else all 72 Bangalore/Kerala branches (correctly
+  // null) would show up as a phantom backlog.
+  const noPickupTime = branches.filter(b => b.is_active && !isRuleBasedRegion(b.region)
+    && !needsLogistics(b) && isBlank(b.pickup_time))
+
   const q = search.trim().toLowerCase()
   const filtered = branches.filter(b => {
     if (filterIncomplete && !isIncomplete(b)) return false
+    if (filterLogistics  && !needsLogistics(b)) return false
     if (selRegions.size  && !selRegions.has(b.region)) return false
     if (statusFilter === 'active'   && !b.is_active)  return false
     if (statusFilter === 'inactive' &&  b.is_active)  return false
@@ -165,8 +194,8 @@ export default function BranchManagement({ embedded = false } = {}) {
     return String(a[sortKey] || '').localeCompare(String(b[sortKey] || '')) * sortDir
   })
 
-  const anyFilter = q || filterIncomplete || selRegions.size || statusFilter !== 'all' || selBranches.size
-  const clearAllFilters = () => { setSearch(''); setFilterIncomplete(false); setSelRegions(new Set()); setStatusFilter('all'); setSelBranches(new Set()) }
+  const anyFilter = q || filterIncomplete || filterLogistics || selRegions.size || statusFilter !== 'all' || selBranches.size
+  const clearAllFilters = () => { setSearch(''); setFilterIncomplete(false); setFilterLogistics(false); setSelRegions(new Set()); setStatusFilter('all'); setSelBranches(new Set()) }
   const toggleRegion = (r) => setSelRegions(s => { const n = new Set(s); n.has(r) ? n.delete(r) : n.add(r); return n })
   const toggleBranch = (name) => setSelBranches(s => { const n = new Set(s); n.has(name) ? n.delete(name) : n.add(name); return n })
   const toggleSort = (k) => { if (sortKey === k) setSortDir(d => -d); else { setSortKey(k); setSortDir(1) } }
@@ -192,9 +221,14 @@ export default function BranchManagement({ embedded = false } = {}) {
       // Logistics — Bangalore/Kerala are rule-based (daily pickup; Bangalore
       // same-day, Kerala next-day 24h), so we don't store a pickup time/days for
       // them; delivery_tat_hours is stamped to the region rule (0 / 24).
-      pickup_time:        (form.region === 'Bangalore' || form.region === 'Kerala') ? null : (form.pickup_time || null),
-      delivery_tat_hours: form.region === 'Bangalore' ? 0 : form.region === 'Kerala' ? 24 : (Number(form.delivery_tat_hours) || 24),
-      pickup_days:        (form.region === 'Bangalore' || form.region === 'Kerala') ? null : (form.pickup_days?.length ? form.pickup_days : null),
+      pickup_time:        isRuleBasedRegion(form.region) ? null : (form.pickup_time || null),
+      // Blank stays NULL — never silently fall back to 24h. A guessed TAT quietly
+      // mis-predicts HO arrival in Booking Volume, so the branch keeps showing in
+      // the "needs logistics setup" banner until ops actually enters a number.
+      delivery_tat_hours: form.region === 'Bangalore' ? 0 : form.region === 'Kerala' ? 24
+                          : (form.delivery_tat_hours === '' || form.delivery_tat_hours == null
+                              ? null : (Number(form.delivery_tat_hours) || null)),
+      pickup_days:        isRuleBasedRegion(form.region) ? null : (form.pickup_days?.length ? form.pickup_days : null),
       // Branch contact — prints on Delivery Challan / Issue Voucher. The
       // Create Consignment modal pre-fills from these defaults, and any
       // override entered there sticks back here, so this row is the live
@@ -245,8 +279,11 @@ export default function BranchManagement({ embedded = false } = {}) {
       branch_gstin: b.branch_gstin || '',
       crm_branch_id: b.crm_branch_id || '',
       pickup_time: b.pickup_time || '',
-      delivery_tat_hours: b.delivery_tat_hours || 24,
-      pickup_days: b.pickup_days || ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'],
+      // Leave genuinely-unset logistics BLANK so ops has to make a deliberate
+      // choice — prefilling 24h / Mon–Sat would let a guess become truth on a
+      // single Save. (?? not ||, so a real 0h Bangalore TAT isn't clobbered.)
+      delivery_tat_hours: b.delivery_tat_hours ?? '',
+      pickup_days: b.pickup_days ?? [],
       tamper_next: nextTmpOf(b.name) === '—' ? '' : nextTmpOf(b.name),
       contact_person: b.contact_person || '',
       contact_phone:  b.contact_phone  || '',
@@ -445,6 +482,42 @@ export default function BranchManagement({ embedded = false } = {}) {
       {syncMsg && (
         <div style={{ background: syncMsg.startsWith('✓') ? `${t.green}18` : `${t.red}18`, border: `1px solid ${syncMsg.startsWith('✓') ? t.green : t.red}40`, borderRadius: '6px', padding: '8px 14px', fontSize: '.72rem', color: syncMsg.startsWith('✓') ? t.green : t.red, marginBottom: '16px', whiteSpace: 'pre-line' }}>
           {syncMsg}
+        </div>
+      )}
+
+      {/* Logistics setup needed — ops must set delivery TAT + pickup days per
+          branch. We never guess these: a wrong TAT mis-predicts HO arrival in
+          Booking Volume, and missing pickup days hides the branch from the bid
+          desk entirely. Click a chip to jump straight into that branch's Edit form. */}
+      {logisticsBranches.length > 0 && (
+        <div style={{ background: '#e0555510', border: '1px solid #e0555555', borderRadius: '8px', padding: '12px 14px', marginBottom: '16px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', flexWrap: 'wrap' }}>
+            <span style={{ fontSize: '.74rem', color: '#e05555', fontWeight: 700 }}>
+              ⚠ {logisticsBranches.length} {logisticsBranches.length === 1 ? 'branch needs' : 'branches need'} logistics setup — delivery TAT &amp; pickup days not set
+            </span>
+            <button
+              onClick={() => setFilterLogistics(f => !f)}
+              style={{ background: filterLogistics ? '#e0555522' : 'transparent', border: '1px solid #e0555566', borderRadius: '6px', padding: '4px 12px', fontSize: '.66rem', color: '#e05555', cursor: 'pointer', fontWeight: 700 }}>
+              {filterLogistics ? 'Clear filter' : 'View them'}
+            </button>
+          </div>
+          <div style={{ fontSize: '.66rem', color: t.text3, marginTop: '6px', lineHeight: 1.5 }}>
+            Until ops sets these, the branch is <strong>invisible to the bid desk</strong> (it never enters &quot;pickup pending today&quot;) and its HO arrival silently falls back to <strong>24h</strong>. Set them per branch — they&apos;re an ops call, not a default.
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '9px' }}>
+            {logisticsBranches.map(b => (
+              <button key={b.id} onClick={() => startEdit(b)}
+                title={`Set TAT & pickup days for ${b.name}`}
+                style={{ background: '#e0555514', border: '1px solid #e0555544', borderRadius: '20px', padding: '3px 11px', fontSize: '.65rem', color: t.text1, cursor: 'pointer', fontWeight: 600 }}>
+                {b.name} <span style={{ color: '#e05555', marginLeft: '3px' }}>↗</span>
+              </button>
+            ))}
+          </div>
+          {noPickupTime.length > 0 && (
+            <div style={{ fontSize: '.62rem', color: t.text4, marginTop: '9px', borderTop: `1px solid ${t.border}`, paddingTop: '7px' }}>
+              {noPickupTime.length} more {noPickupTime.length === 1 ? 'branch has' : 'branches have'} no pickup time — lower priority, it only drives the &quot;at-risk&quot; dispatch flag.
+            </div>
+          )}
         </div>
       )}
 
