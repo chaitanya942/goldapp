@@ -1578,10 +1578,6 @@ export default function ConsignmentOverview() {
                         onClick={() => handleSort('today_net_wt')}>
                       {scopeTab === 'bangalore' ? "Today's Gross Wt" : "Today's Net Wt"} <SortIcon col="today_net_wt" />
                     </th>
-                    <th style={{ ...thBase, textAlign: 'right', cursor: 'pointer', color: sortKey === 'today_gross_value' ? t.blue : t.text4 }}
-                        onClick={() => handleSort('today_gross_value')}>
-                      Today's Value <SortIcon col="today_gross_value" />
-                    </th>
 
                     {/* Sortable: Pending — hidden on Bangalore tab because
                         every Bangalore bill reaches HO the same day, so a
@@ -1594,10 +1590,6 @@ export default function ConsignmentOverview() {
                     <th style={{ ...thBase, textAlign: 'right', cursor: 'pointer', color: sortKey === 'older_net_wt' ? t.orange : t.text4 }}
                         onClick={() => handleSort('older_net_wt')}>
                       Pending Net Wt <SortIcon col="older_net_wt" />
-                    </th>
-                    <th style={{ ...thBase, textAlign: 'right', cursor: 'pointer', color: sortKey === 'older_gross_value' ? t.orange : t.text4 }}
-                        onClick={() => handleSort('older_gross_value')}>
-                      Pending Value <SortIcon col="older_gross_value" />
                     </th>
 
                     {/* Sortable: Age */}
@@ -1644,18 +1636,12 @@ export default function ConsignmentOverview() {
                     <td style={{ padding: '8px 8px', textAlign: 'right', fontSize: '12px', color: t.blue, fontFamily: 'monospace', fontWeight: 600, background: `${t.gold}14` }}>
                       {fmt(scopeTab === 'bangalore' ? grandGrossWt : grandTodayWt, 2)}<span style={{ fontSize: '10px', marginLeft: '2px' }}>g</span>
                     </td>
-                    <td style={{ padding: '8px 8px', textAlign: 'right', fontSize: '11px', color: t.blue, fontFamily: 'monospace', fontWeight: 700, background: `${t.gold}14` }}>
-                      {grandTodayVal ? fmtINR(grandTodayVal) : '—'}
-                    </td>
                     {isOutside && (<>
                     <td style={{ padding: '8px 8px', textAlign: 'right', fontSize: '13px', color: t.orange, fontFamily: 'monospace', fontWeight: 700, background: `${t.gold}14` }}>
                       {grandOlder || '—'}
                     </td>
                     <td style={{ padding: '8px 8px', textAlign: 'right', fontSize: '12px', color: t.orange, fontFamily: 'monospace', fontWeight: 600, background: `${t.gold}14` }}>
                       {fmt(grandOlderWt, 2)}<span style={{ fontSize: '10px', marginLeft: '2px' }}>g</span>
-                    </td>
-                    <td style={{ padding: '8px 8px', textAlign: 'right', fontSize: '11px', color: t.orange, fontFamily: 'monospace', fontWeight: 700, background: `${t.gold}14` }}>
-                      {grandOlderVal ? fmtINR(grandOlderVal) : '—'}
                     </td>
                     <td colSpan={3} style={{ padding: '8px 8px', background: `${t.gold}14` }} />
                     </>)}
@@ -1751,13 +1737,6 @@ export default function ConsignmentOverview() {
                             : <span style={{ fontSize: '11px', color: t.text4 }}>—</span>}
                         </td>
 
-                        {/* Today's Value */}
-                        <td style={{ padding: '11px 14px', textAlign: 'right' }}>
-                          {hasToday
-                            ? <span style={{ fontSize: '12px', color: t.blue, fontFamily: 'monospace' }}>{fmtINR(b.today_gross_value)}</span>
-                            : <span style={{ fontSize: '11px', color: t.text4 }}>—</span>}
-                        </td>
-
                         {isOutside && (<>
                         {/* Pending Bills */}
                         <td style={{ padding: '11px 14px', textAlign: 'right' }}>
@@ -1770,13 +1749,6 @@ export default function ConsignmentOverview() {
                         <td style={{ padding: '11px 14px', textAlign: 'right' }}>
                           {hasPending
                             ? <span style={{ fontSize: '13px', color: t.orange, fontFamily: 'monospace' }}>{fmt(b.older_net_wt, 2)}<span style={{ fontSize: '10px', marginLeft: '2px' }}>g</span></span>
-                            : <span style={{ fontSize: '11px', color: t.text4 }}>—</span>}
-                        </td>
-
-                        {/* Pending Value */}
-                        <td style={{ padding: '11px 14px', textAlign: 'right' }}>
-                          {hasPending
-                            ? <span style={{ fontSize: '12px', color: t.orange, fontFamily: 'monospace' }}>{fmtINR(b.older_gross_value)}</span>
                             : <span style={{ fontSize: '11px', color: t.text4 }}>—</span>}
                         </td>
 
