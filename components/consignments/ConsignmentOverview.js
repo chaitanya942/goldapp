@@ -897,6 +897,10 @@ export default function ConsignmentOverview() {
   }
   // Body cells use the same horizontal rhythm so the table aligns and stays compact.
   const tdPad = '12px 9px'
+  // Vertical rule closing each metric GROUP — Total | Today | Pending | Age.
+  // Applied to the last column of each group (the net-weight cells) so the three
+  // blocks read as distinct instead of one undifferentiated wall of numbers.
+  const sep = { borderRight: `1px solid ${t.border}` }
 
   return (
     <div style={{ padding: '18px 16px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
@@ -1564,7 +1568,7 @@ export default function ConsignmentOverview() {
                         title="Today's bills + pending bills currently at this branch">
                       Total Bills <SortIcon col="total_bills" />
                     </th>
-                    <th style={{ ...thBase, textAlign: 'right', cursor: 'pointer', color: sortKey === 'total_net_wt' ? t.gold : t.text4 }}
+                    <th style={{ ...thBase, ...sep, textAlign: 'right', cursor: 'pointer', color: sortKey === 'total_net_wt' ? t.gold : t.text4 }}
                         onClick={() => handleSort('total_net_wt')}>
                       {scopeTab === 'bangalore' ? 'Total Gross Wt' : 'Total Net Wt'} <SortIcon col="total_net_wt" />
                     </th>
@@ -1574,7 +1578,7 @@ export default function ConsignmentOverview() {
                         onClick={() => handleSort('today_bills')}>
                       Today's Bills <SortIcon col="today_bills" />
                     </th>
-                    <th style={{ ...thBase, textAlign: 'right', cursor: 'pointer', color: sortKey === 'today_net_wt' ? t.blue : t.text4 }}
+                    <th style={{ ...thBase, ...sep, textAlign: 'right', cursor: 'pointer', color: sortKey === 'today_net_wt' ? t.blue : t.text4 }}
                         onClick={() => handleSort('today_net_wt')}>
                       {scopeTab === 'bangalore' ? "Today's Gross Wt" : "Today's Net Wt"} <SortIcon col="today_net_wt" />
                     </th>
@@ -1587,7 +1591,7 @@ export default function ConsignmentOverview() {
                         onClick={() => handleSort('older_bills')}>
                       Pending Bills <SortIcon col="older_bills" />
                     </th>
-                    <th style={{ ...thBase, textAlign: 'right', cursor: 'pointer', color: sortKey === 'older_net_wt' ? t.orange : t.text4 }}
+                    <th style={{ ...thBase, ...sep, textAlign: 'right', cursor: 'pointer', color: sortKey === 'older_net_wt' ? t.orange : t.text4 }}
                         onClick={() => handleSort('older_net_wt')}>
                       Pending Net Wt <SortIcon col="older_net_wt" />
                     </th>
@@ -1625,7 +1629,7 @@ export default function ConsignmentOverview() {
                       {(grandToday + grandOlder) || '—'}
                     </td>
                     {/* Total Net Wt / Total Gross Wt (Bangalore) */}
-                    <td style={{ padding: '10px 9px', textAlign: 'right', fontSize: '13.5px', color: t.gold, fontFamily: 'monospace', fontWeight: 700, background: `${t.gold}14` }}>
+                    <td style={{ ...sep, padding: '10px 9px', textAlign: 'right', fontSize: '13.5px', color: t.gold, fontFamily: 'monospace', fontWeight: 700, background: `${t.gold}14` }}>
                       {fmt(scopeTab === 'bangalore' ? grandGrossWt : (grandTodayWt + grandOlderWt), 2)}<span style={{ fontSize: '11px', marginLeft: '2px' }}>g</span>
                     </td>
                     {/* Today's Bills */}
@@ -1633,14 +1637,14 @@ export default function ConsignmentOverview() {
                       {grandToday || '—'}
                     </td>
                     {/* Today's Net Wt / Today's Gross Wt (Bangalore — same-day flow so today === total gross) */}
-                    <td style={{ padding: '10px 9px', textAlign: 'right', fontSize: '13.5px', color: t.blue, fontFamily: 'monospace', fontWeight: 600, background: `${t.gold}14` }}>
+                    <td style={{ ...sep, padding: '10px 9px', textAlign: 'right', fontSize: '13.5px', color: t.blue, fontFamily: 'monospace', fontWeight: 600, background: `${t.gold}14` }}>
                       {fmt(scopeTab === 'bangalore' ? grandGrossWt : grandTodayWt, 2)}<span style={{ fontSize: '11px', marginLeft: '2px' }}>g</span>
                     </td>
                     {isOutside && (<>
                     <td style={{ padding: '10px 9px', textAlign: 'right', fontSize: '15px', color: t.orange, fontFamily: 'monospace', fontWeight: 700, background: `${t.gold}14` }}>
                       {grandOlder || '—'}
                     </td>
-                    <td style={{ padding: '10px 9px', textAlign: 'right', fontSize: '13.5px', color: t.orange, fontFamily: 'monospace', fontWeight: 600, background: `${t.gold}14` }}>
+                    <td style={{ ...sep, padding: '10px 9px', textAlign: 'right', fontSize: '13.5px', color: t.orange, fontFamily: 'monospace', fontWeight: 600, background: `${t.gold}14` }}>
                       {fmt(grandOlderWt, 2)}<span style={{ fontSize: '11px', marginLeft: '2px' }}>g</span>
                     </td>
                     <td colSpan={3} style={{ padding: '10px 9px', background: `${t.gold}14` }} />
@@ -1715,7 +1719,7 @@ export default function ConsignmentOverview() {
                             ? (b.total_gross_wt || 0)
                             : (b.today_net_wt || 0) + (b.older_net_wt || 0)
                           return (
-                            <td style={{ padding: tdPad, textAlign: 'right' }}>
+                            <td style={{ ...sep, padding: tdPad, textAlign: 'right' }}>
                               <span style={{ fontSize: '15px', color: t.gold, fontFamily: 'monospace', fontWeight: 600 }}>
                                 {fmt(total, 2)}<span style={{ fontSize: '11px', marginLeft: '2px' }}>g</span>
                               </span>
@@ -1731,7 +1735,7 @@ export default function ConsignmentOverview() {
                         </td>
 
                         {/* Today's Net Wt / Today's Gross Wt (Bangalore — same-day flow so today === total gross) */}
-                        <td style={{ padding: '13px 14px', textAlign: 'right' }}>
+                        <td style={{ ...sep, padding: '13px 14px', textAlign: 'right' }}>
                           {hasToday
                             ? <span style={{ fontSize: '15px', color: t.blue, fontFamily: 'monospace' }}>{fmt(scopeTab === 'bangalore' ? (b.total_gross_wt || 0) : (b.today_net_wt || 0), 2)}<span style={{ fontSize: '11px', marginLeft: '2px' }}>g</span></span>
                             : <span style={{ fontSize: '12.5px', color: t.text4 }}>—</span>}
@@ -1746,7 +1750,7 @@ export default function ConsignmentOverview() {
                         </td>
 
                         {/* Pending Net Wt */}
-                        <td style={{ padding: '13px 14px', textAlign: 'right' }}>
+                        <td style={{ ...sep, padding: '13px 14px', textAlign: 'right' }}>
                           {hasPending
                             ? <span style={{ fontSize: '15px', color: t.orange, fontFamily: 'monospace' }}>{fmt(b.older_net_wt, 2)}<span style={{ fontSize: '11px', marginLeft: '2px' }}>g</span></span>
                             : <span style={{ fontSize: '12.5px', color: t.text4 }}>—</span>}
