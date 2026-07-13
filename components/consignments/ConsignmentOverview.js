@@ -1821,7 +1821,7 @@ export default function ConsignmentOverview() {
           the Outside tab where the Pending columns render. */}
       {isOutside && (
         <div style={{ fontSize: '10px', color: t.text4, textAlign: 'right' }}>
-          Pending = <code style={{ background: t.card2, padding: '1px 4px', borderRadius: '3px', color: t.text3 }}>stock_status = at_branch</code> before today · Age alert: &gt;3d orange, &gt;7d red
+          Previous = <code style={{ background: t.card2, padding: '1px 4px', borderRadius: '3px', color: t.text3 }}>stock_status = at_branch</code> before today · Age alert: &gt;3d orange, &gt;7d red
         </div>
       )}
 
