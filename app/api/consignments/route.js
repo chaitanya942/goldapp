@@ -766,7 +766,10 @@ export async function GET(req) {
         .is('booking_id', null)
       bangalorePendingBooking = (bpb || [])
         .filter(b => !b.audit_consumed_at && !section1Ids.has(b.id))
-        .map(b => ({ ...b, branch_name: b.current_branch || b.branch_name }))
+        // Keep the ORIGIN branch. branch_name gets re-keyed to the owning branch so the
+        // bill groups under the hub it was transferred INTO — which silently hides where
+        // the gold actually came from. Ops needs that on the bill row.
+        .map(b => ({ ...b, _origin_branch: b.branch_name, branch_name: b.current_branch || b.branch_name }))
     }
 
     // Bangalore bills the EOD audit already attributed to GAIN that ops may want
@@ -788,7 +791,10 @@ export async function GET(req) {
         .gte('purchase_date', subWorkingDaySkipSunday(bangalorePurchaseDate))
         .lt('purchase_date',  addDays(bangalorePurchaseDate, 1))
       bangaloreGainRebookable = (gbr || [])
-        .map(b => ({ ...b, branch_name: b.current_branch || b.branch_name }))
+        // Keep the ORIGIN branch. branch_name gets re-keyed to the owning branch so the
+        // bill groups under the hub it was transferred INTO — which silently hides where
+        // the gold actually came from. Ops needs that on the bill row.
+        .map(b => ({ ...b, _origin_branch: b.branch_name, branch_name: b.current_branch || b.branch_name }))
     }
 
     // Back-compat alias for the existing UI (renders only the 24h bucket).
@@ -845,7 +851,10 @@ export async function GET(req) {
         .map(b => {
           const owner = b.current_branch || b.branch_name
           const tat   = branchMeta[owner]?.delivery_tat_hours ?? branchMeta[b.branch_name]?.delivery_tat_hours ?? null
-          return { ...b, branch_name: owner, _tat_hours: tat }
+          // _origin_branch = where the gold actually came from. branch_name is re-keyed
+          // to the owning branch so the bill groups under the hub it was transferred
+          // INTO, which otherwise hides its origin from ops entirely.
+          return { ...b, _origin_branch: b.branch_name, branch_name: owner, _tat_hours: tat }
         })
         .filter(b => !postDispatchedBranches.has(b.branch_name))
     }
@@ -876,7 +885,7 @@ export async function GET(req) {
         .eq('is_deleted',   false)
         .not('booking_id',  'is', null)
       if (bpErr) return Response.json({ error: bpErr.message }, { status: 500 })
-      bookedPendingBills = (bp || []).map(b => ({ ...b, branch_name: b.current_branch || b.branch_name }))
+      bookedPendingBills = (bp || []).map(b => ({ ...b, _origin_branch: b.branch_name, branch_name: b.current_branch || b.branch_name }))
     }
 
     // Booking metadata join — fetch the cal_quotas row each bill is attached
@@ -1308,7 +1317,7 @@ export async function GET(req) {
         .eq('is_deleted',   false)
         .is('booking_id',   null)
       if (s5Err) return Response.json({ error: s5Err.message }, { status: 500 })
-      klS5Bills = (s5 || []).map(b => ({ ...b, branch_name: b.current_branch || b.branch_name }))
+      klS5Bills = (s5 || []).map(b => ({ ...b, _origin_branch: b.branch_name, branch_name: b.current_branch || b.branch_name }))
     }
 
     // S3 — "consignment created · not booked": any Kerala bill that is

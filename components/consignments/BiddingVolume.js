@@ -31,6 +31,24 @@ import { CONSIGNMENT_THEMES as THEMES, REGION_COLORS, useMobile } from '../../li
 import { istToday, addWorkingDaysSkipSunday } from '../../lib/dateIst'
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
+// A bill that was internally transferred (branch → hub) groups under the branch it
+// moved INTO, so its origin is invisible. Show it next to the customer so ops knows
+// where the gold actually came from. Silent for bills sitting at their own branch.
+function OriginChip({ t, bill }) {
+  const origin = bill?._origin_branch
+  if (!origin || origin === bill?.branch_name) return null
+  return (
+    <span title={`Transferred in from ${origin}`}
+      style={{
+        fontSize: 9.5, color: t.purple, background: `${t.purple}18`,
+        border: `1px solid ${t.purple}44`, borderRadius: 4, padding: '1px 5px',
+        fontWeight: 700, whiteSpace: 'nowrap', flexShrink: 0, letterSpacing: '.02em',
+      }}>
+      ← {origin}
+    </span>
+  )
+}
+
 const fmt    = (n, d = 3) => n != null ? Number(n).toFixed(d) : '—'
 const fmtNum = (n) => n != null ? Number(n).toLocaleString('en-IN') : '—'
 const fmtINR = (n) => {
@@ -4239,7 +4257,10 @@ function SourceSection({
                                         booking metadata fields are absent, this renders identical
                                         to the original single-line span. */}
                                     <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0, overflow: 'hidden' }}>
-                                      <span style={{ color: t.text1, fontFamily: 'inherit', fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{bill.customer_name || '—'}</span>
+                                      <span style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                                        <span style={{ color: t.text1, fontFamily: 'inherit', fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{bill.customer_name || '—'}</span>
+                                        <OriginChip t={t} bill={bill} />
+                                      </span>
                                       {(bill._booking_party || bill.booked_at) && (
                                         <span style={{ fontSize: 10, color: t.text4, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', marginTop: 2 }}>
                                           {bill._booking_party && <span style={{ color: t.red, fontWeight: 700 }}>{bill._booking_party}</span>}
@@ -4341,7 +4362,10 @@ function SourceSection({
                             <span style={{ color: t.text3, fontWeight: 600, whiteSpace: 'nowrap' }}>{bill.purchase_date ? fmtDateShort(bill.purchase_date) : '—'}</span>
                             <span style={{ color: t.gold, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{bill.application_id || '—'}</span>
                             <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0, overflow: 'hidden' }}>
-                              <span style={{ color: t.text1, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{bill.customer_name || '—'}</span>
+                              <span style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                                <span style={{ color: t.text1, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{bill.customer_name || '—'}</span>
+                                <OriginChip t={t} bill={bill} />
+                              </span>
                               {(bill._booking_party || bill.booked_at) && (
                                 <span style={{ fontSize: 10, color: t.text4, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', marginTop: 2 }}>
                                   {bill._booking_party && <span style={{ color: t.red, fontWeight: 700 }}>{bill._booking_party}</span>}
