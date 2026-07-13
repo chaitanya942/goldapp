@@ -913,11 +913,16 @@ export default function ConsignmentData() {
                   // Selection wins over urgency (gold tint), purple for hub
                   // transferred-in wins over both (those are mandatory anyway).
                   const isOverdue = days != null && days > 7
+                  // Base tint separates TODAY's bills from PREVIOUS days' at a glance —
+                  // same language as Branch Stock (today = blue, previous = orange). It's
+                  // the bottom layer: transferred-in / selected / overdue still win.
+                  const isToday  = days === 0
+                  const dayBg    = isToday ? `${t.blue}07` : days != null ? `${t.orange}07` : 'transparent'
                   const restingBg =
                     fromOther  ? `${t.purple}06`
                     : isSel    ? `${t.gold}08`
                     : isOverdue ? `${t.red}06`
-                    : 'transparent'
+                    : dayBg
                   return (
                     <tr key={row.id} onClick={() => { if (!fromOther) toggleRow(row.id) }}
                       style={{
@@ -926,7 +931,7 @@ export default function ConsignmentData() {
                         background:   restingBg,
                         cursor:       fromOther ? 'not-allowed' : 'pointer',
                       }}
-                      onMouseEnter={e => { if (!fromOther && !isSel && !isOverdue) e.currentTarget.style.background = `${t.gold}04` }}
+                      onMouseEnter={e => { if (!fromOther && !isSel && !isOverdue) e.currentTarget.style.background = `${t.gold}0e` }}
                       onMouseLeave={e => { if (!fromOther && !isSel) e.currentTarget.style.background = restingBg }}>
                       <td style={{ padding: '10px 14px' }} onClick={e => e.stopPropagation()}>
                         <input type="checkbox"
