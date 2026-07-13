@@ -890,13 +890,13 @@ export default function ConsignmentOverview() {
   }
 
   const thBase = {
-    padding: '9px 8px', fontSize: '10px', color: t.text4,
+    padding: '11px 9px', fontSize: '11.5px', color: t.text4,
     letterSpacing: '.06em', textTransform: 'uppercase',
     background: t.card2, borderBottom: `1px solid ${t.border}`,
     whiteSpace: 'nowrap', fontWeight: 600, userSelect: 'none',
   }
   // Body cells use the same horizontal rhythm so the table aligns and stays compact.
-  const tdPad = '10px 8px'
+  const tdPad = '12px 9px'
 
   return (
     <div style={{ padding: '18px 16px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
@@ -1617,33 +1617,33 @@ export default function ConsignmentOverview() {
                       as the user scrolls. Single source of truth — no <tfoot>
                       duplicate at the bottom. */}
                   <tr style={{ background: `${t.gold}14`, borderTop: `1px solid ${t.border}`, borderBottom: `2px solid ${t.gold}40` }}>
-                    <td style={{ padding: '8px 8px 8px 7px', fontSize: '10px', color: t.text2, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', background: `${t.gold}14`, whiteSpace: 'nowrap' }}>
+                    <td style={{ padding: '8px 8px 8px 7px', fontSize: '11px', color: t.text2, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', background: `${t.gold}14`, whiteSpace: 'nowrap' }}>
                       Σ Totals · {filtered.length}
                     </td>
                     {/* Total Bills */}
-                    <td style={{ padding: '8px 8px', textAlign: 'right', fontSize: '13px', color: t.gold, fontFamily: 'monospace', fontWeight: 700, background: `${t.gold}14` }}>
+                    <td style={{ padding: '10px 9px', textAlign: 'right', fontSize: '15px', color: t.gold, fontFamily: 'monospace', fontWeight: 700, background: `${t.gold}14` }}>
                       {(grandToday + grandOlder) || '—'}
                     </td>
                     {/* Total Net Wt / Total Gross Wt (Bangalore) */}
-                    <td style={{ padding: '8px 8px', textAlign: 'right', fontSize: '12px', color: t.gold, fontFamily: 'monospace', fontWeight: 700, background: `${t.gold}14` }}>
-                      {fmt(scopeTab === 'bangalore' ? grandGrossWt : (grandTodayWt + grandOlderWt), 2)}<span style={{ fontSize: '10px', marginLeft: '2px' }}>g</span>
+                    <td style={{ padding: '10px 9px', textAlign: 'right', fontSize: '13.5px', color: t.gold, fontFamily: 'monospace', fontWeight: 700, background: `${t.gold}14` }}>
+                      {fmt(scopeTab === 'bangalore' ? grandGrossWt : (grandTodayWt + grandOlderWt), 2)}<span style={{ fontSize: '11px', marginLeft: '2px' }}>g</span>
                     </td>
                     {/* Today's Bills */}
-                    <td style={{ padding: '8px 8px', textAlign: 'right', fontSize: '13px', color: t.blue, fontFamily: 'monospace', fontWeight: 700, background: `${t.gold}14` }}>
+                    <td style={{ padding: '10px 9px', textAlign: 'right', fontSize: '15px', color: t.blue, fontFamily: 'monospace', fontWeight: 700, background: `${t.gold}14` }}>
                       {grandToday || '—'}
                     </td>
                     {/* Today's Net Wt / Today's Gross Wt (Bangalore — same-day flow so today === total gross) */}
-                    <td style={{ padding: '8px 8px', textAlign: 'right', fontSize: '12px', color: t.blue, fontFamily: 'monospace', fontWeight: 600, background: `${t.gold}14` }}>
-                      {fmt(scopeTab === 'bangalore' ? grandGrossWt : grandTodayWt, 2)}<span style={{ fontSize: '10px', marginLeft: '2px' }}>g</span>
+                    <td style={{ padding: '10px 9px', textAlign: 'right', fontSize: '13.5px', color: t.blue, fontFamily: 'monospace', fontWeight: 600, background: `${t.gold}14` }}>
+                      {fmt(scopeTab === 'bangalore' ? grandGrossWt : grandTodayWt, 2)}<span style={{ fontSize: '11px', marginLeft: '2px' }}>g</span>
                     </td>
                     {isOutside && (<>
-                    <td style={{ padding: '8px 8px', textAlign: 'right', fontSize: '13px', color: t.orange, fontFamily: 'monospace', fontWeight: 700, background: `${t.gold}14` }}>
+                    <td style={{ padding: '10px 9px', textAlign: 'right', fontSize: '15px', color: t.orange, fontFamily: 'monospace', fontWeight: 700, background: `${t.gold}14` }}>
                       {grandOlder || '—'}
                     </td>
-                    <td style={{ padding: '8px 8px', textAlign: 'right', fontSize: '12px', color: t.orange, fontFamily: 'monospace', fontWeight: 600, background: `${t.gold}14` }}>
-                      {fmt(grandOlderWt, 2)}<span style={{ fontSize: '10px', marginLeft: '2px' }}>g</span>
+                    <td style={{ padding: '10px 9px', textAlign: 'right', fontSize: '13.5px', color: t.orange, fontFamily: 'monospace', fontWeight: 600, background: `${t.gold}14` }}>
+                      {fmt(grandOlderWt, 2)}<span style={{ fontSize: '11px', marginLeft: '2px' }}>g</span>
                     </td>
-                    <td colSpan={3} style={{ padding: '8px 8px', background: `${t.gold}14` }} />
+                    <td colSpan={3} style={{ padding: '10px 9px', background: `${t.gold}14` }} />
                     </>)}
                   </tr>
                 </thead>
@@ -1703,8 +1703,8 @@ export default function ConsignmentOverview() {
                           return (
                             <td style={{ padding: tdPad, textAlign: 'right' }}>
                               {totalBills
-                                ? <span style={{ fontSize: '13px', color: t.gold, fontFamily: 'monospace', fontWeight: 600 }}>{totalBills}</span>
-                                : <span style={{ fontSize: '11px', color: t.text4 }}>—</span>}
+                                ? <span style={{ fontSize: '15px', color: t.gold, fontFamily: 'monospace', fontWeight: 600 }}>{totalBills}</span>
+                                : <span style={{ fontSize: '12.5px', color: t.text4 }}>—</span>}
                             </td>
                           )
                         })()}
@@ -1716,57 +1716,57 @@ export default function ConsignmentOverview() {
                             : (b.today_net_wt || 0) + (b.older_net_wt || 0)
                           return (
                             <td style={{ padding: tdPad, textAlign: 'right' }}>
-                              <span style={{ fontSize: '13px', color: t.gold, fontFamily: 'monospace', fontWeight: 600 }}>
-                                {fmt(total, 2)}<span style={{ fontSize: '10px', marginLeft: '2px' }}>g</span>
+                              <span style={{ fontSize: '15px', color: t.gold, fontFamily: 'monospace', fontWeight: 600 }}>
+                                {fmt(total, 2)}<span style={{ fontSize: '11px', marginLeft: '2px' }}>g</span>
                               </span>
                             </td>
                           )
                         })()}
 
                         {/* Today's Bills */}
-                        <td style={{ padding: '11px 14px', textAlign: 'right' }}>
+                        <td style={{ padding: '13px 14px', textAlign: 'right' }}>
                           {hasToday
-                            ? <span style={{ fontSize: '13px', color: t.blue, fontFamily: 'monospace', fontWeight: 600 }}>{b.today_bills}</span>
-                            : <span style={{ fontSize: '11px', color: t.text4 }}>—</span>}
+                            ? <span style={{ fontSize: '15px', color: t.blue, fontFamily: 'monospace', fontWeight: 600 }}>{b.today_bills}</span>
+                            : <span style={{ fontSize: '12.5px', color: t.text4 }}>—</span>}
                         </td>
 
                         {/* Today's Net Wt / Today's Gross Wt (Bangalore — same-day flow so today === total gross) */}
-                        <td style={{ padding: '11px 14px', textAlign: 'right' }}>
+                        <td style={{ padding: '13px 14px', textAlign: 'right' }}>
                           {hasToday
-                            ? <span style={{ fontSize: '13px', color: t.blue, fontFamily: 'monospace' }}>{fmt(scopeTab === 'bangalore' ? (b.total_gross_wt || 0) : (b.today_net_wt || 0), 2)}<span style={{ fontSize: '10px', marginLeft: '2px' }}>g</span></span>
-                            : <span style={{ fontSize: '11px', color: t.text4 }}>—</span>}
+                            ? <span style={{ fontSize: '15px', color: t.blue, fontFamily: 'monospace' }}>{fmt(scopeTab === 'bangalore' ? (b.total_gross_wt || 0) : (b.today_net_wt || 0), 2)}<span style={{ fontSize: '11px', marginLeft: '2px' }}>g</span></span>
+                            : <span style={{ fontSize: '12.5px', color: t.text4 }}>—</span>}
                         </td>
 
                         {isOutside && (<>
                         {/* Pending Bills */}
-                        <td style={{ padding: '11px 14px', textAlign: 'right' }}>
+                        <td style={{ padding: '13px 14px', textAlign: 'right' }}>
                           {hasPending
-                            ? <span style={{ fontSize: '14px', color: t.orange, fontFamily: 'monospace', fontWeight: 700 }}>{b.older_bills}</span>
-                            : <span style={{ fontSize: '11px', color: t.text4 }}>—</span>}
+                            ? <span style={{ fontSize: '15.5px', color: t.orange, fontFamily: 'monospace', fontWeight: 700 }}>{b.older_bills}</span>
+                            : <span style={{ fontSize: '12.5px', color: t.text4 }}>—</span>}
                         </td>
 
                         {/* Pending Net Wt */}
-                        <td style={{ padding: '11px 14px', textAlign: 'right' }}>
+                        <td style={{ padding: '13px 14px', textAlign: 'right' }}>
                           {hasPending
-                            ? <span style={{ fontSize: '13px', color: t.orange, fontFamily: 'monospace' }}>{fmt(b.older_net_wt, 2)}<span style={{ fontSize: '10px', marginLeft: '2px' }}>g</span></span>
-                            : <span style={{ fontSize: '11px', color: t.text4 }}>—</span>}
+                            ? <span style={{ fontSize: '15px', color: t.orange, fontFamily: 'monospace' }}>{fmt(b.older_net_wt, 2)}<span style={{ fontSize: '11px', marginLeft: '2px' }}>g</span></span>
+                            : <span style={{ fontSize: '12.5px', color: t.text4 }}>—</span>}
                         </td>
 
                         {/* Oldest Bill */}
                         <td style={{ padding: tdPad, textAlign: 'center' }}>
                           <AgeBadge days={b.oldest_age_days} t={t} />
                           {b.oldest_date && (
-                            <div style={{ fontSize: '10px', color: t.text4, marginTop: '3px' }}>{fmtDate(b.oldest_date)}</div>
+                            <div style={{ fontSize: '11px', color: t.text4, marginTop: '3px' }}>{fmtDate(b.oldest_date)}</div>
                           )}
                         </td>
 
                         {/* Last Moved */}
                         <td style={{ padding: tdPad, textAlign: 'center' }}>
                           {b.last_moved_days_ago != null
-                            ? <span style={{ fontSize: '11px', color: t.purple, background: `${t.purple}15`, borderRadius: '5px', padding: '2px 8px', fontWeight: 600, whiteSpace: 'nowrap' }}>{b.last_moved_days_ago}d ago</span>
-                            : <span style={{ fontSize: '11px', color: t.text4 }}>never</span>}
+                            ? <span style={{ fontSize: '12.5px', color: t.purple, background: `${t.purple}15`, borderRadius: '5px', padding: '2px 8px', fontWeight: 600, whiteSpace: 'nowrap' }}>{b.last_moved_days_ago}d ago</span>
+                            : <span style={{ fontSize: '12.5px', color: t.text4 }}>never</span>}
                           {b.last_moved_at && (
-                            <div style={{ fontSize: '10px', color: t.text4, marginTop: '3px' }}>{fmtTsDate(b.last_moved_at)}</div>
+                            <div style={{ fontSize: '11px', color: t.text4, marginTop: '3px' }}>{fmtTsDate(b.last_moved_at)}</div>
                           )}
                         </td>
                         </>)}
@@ -1789,7 +1789,7 @@ export default function ConsignmentOverview() {
                               }}
                               onMouseEnter={e => { e.currentTarget.style.background = `${t.gold}30`; e.currentTarget.style.borderColor = t.gold }}
                               onMouseLeave={e => { e.currentTarget.style.background = `${t.gold}18`; e.currentTarget.style.borderColor = `${t.gold}50` }}
-                              style={{ background: `${t.gold}18`, border: `1px solid ${t.gold}50`, borderRadius: '7px', padding: '5px 12px', fontSize: '11px', color: t.gold, cursor: 'pointer', fontWeight: 600, whiteSpace: 'nowrap', transition: 'all .15s' }}>
+                              style={{ background: `${t.gold}18`, border: `1px solid ${t.gold}50`, borderRadius: '7px', padding: '5px 12px', fontSize: '12.5px', color: t.gold, cursor: 'pointer', fontWeight: 600, whiteSpace: 'nowrap', transition: 'all .15s' }}>
                               Move →
                             </button>
                           </td>
