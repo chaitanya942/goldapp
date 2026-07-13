@@ -2041,6 +2041,33 @@ export async function GET(req) {
     const byId = new Map(consignmentsAll.map(c => [c.id, c]))
     const inScope = (c) => !allowedBranches || (c && allowedBranches.includes(c.branch_name))
 
+    // Recover the DOC NUMBERS. consignments.eway_bill_no / irn are NULLED at cancel
+    // time, and the cancel event itself often carries nothing (the generic
+    // cancellation_approved / forced_local paths) — which is why most rows showed no
+    // number at all. The GENERATION events survive untouched, so read the EWB / IRN
+    // from there. That is the only durable record of what document was cancelled.
+    const genByConsignment = new Map()   // id → { ewb_no, irn }
+    if (ids.length) {
+      for (let i = 0; i < ids.length; i += 100) {
+        const slice = ids.slice(i, i + 100)
+        const { data: gens } = await supabase
+          .from('consignment_activity_log')
+          .select('consignment_id, event_type, details, created_at')
+          .in('consignment_id', slice)
+          .in('event_type', ['ewb_generated', 'einvoice_generated'])
+          .order('created_at', { ascending: true })
+        for (const g of gens || []) {
+          const cur = genByConsignment.get(g.consignment_id) || {}
+          if (g.event_type === 'ewb_generated') {
+            cur.ewb_no = g.details?.ewb_no || g.details?.eway_bill_no || cur.ewb_no
+          } else {
+            cur.irn = g.details?.irn || cur.irn
+          }
+          genByConsignment.set(g.consignment_id, cur)
+        }
+      }
+    }
+
     // For non-specific fallbacks ('cancelled' and 'cancellation_approved'),
     // infer the doc-type label from the event's details payload so the
     // UI's badge logic continues to work (it switches on event_type ===
@@ -2104,15 +2131,18 @@ export async function GET(req) {
       // directly; for fallbacks we read it from the consignment row, or
       // from the portal_cancelled array as a last resort).
       const synthDetails = { ...(e.details || {}) }
+      const gen = genByConsignment.get(e.consignment_id) || {}
       if (inferredType === 'ewb_cancelled' && !synthDetails.ewb_no) {
         const portal = e.details?.portal_cancelled
         const ewbFromPortal = Array.isArray(portal)
           ? (portal.find(p => /ewb\s+\S+/i.test(String(p))) || '').match(/ewb\s+(\S+)/i)?.[1]
           : null
-        synthDetails.ewb_no = ewbFromPortal || c?.eway_bill_no || null
+        // …falling back to the generation event, which still has the number even
+        // though the consignment column was nulled at cancel time.
+        synthDetails.ewb_no = ewbFromPortal || c?.eway_bill_no || gen.ewb_no || null
       }
       if (inferredType === 'einvoice_cancelled' && !synthDetails.irn) {
-        synthDetails.irn = c?.irn || null
+        synthDetails.irn = c?.irn || gen.irn || null
       }
       return [{
         ...e,

@@ -978,8 +978,26 @@ export default function ConsignmentApprovals() {
                       ⚠ NOT CANCELLED ON PORTAL
                     </span>
                   )}
-                  {c.tmp_prf_no && <span style={{ fontSize: '13px', color: t.gold, fontWeight: 700, fontFamily: 'monospace', letterSpacing: '.02em' }}>{c.tmp_prf_no}</span>}
-                  {docNo && <span style={{ fontSize: '11px', color: t.text2, fontFamily: 'monospace' }}>{docNo}</span>}
+                  {/* Lead with the DOC NUMBER — that's what accounts actually needs to
+                      find the document on NIC/IRP. The tamper-proof (TMP PRF) number is
+                      internal, so it drops back to a secondary chip. */}
+                  {docNo ? (
+                    <span title={isEwb ? 'E-Way Bill number' : 'IRN'}
+                      style={{ fontSize: '13.5px', color: accent, fontWeight: 800, fontFamily: 'monospace', letterSpacing: '.02em' }}>
+                      {isEwb ? docNo : `${String(docNo).slice(0, 24)}…`}
+                    </span>
+                  ) : (
+                    <span title="The document number was not recorded before it was cleared"
+                      style={{ fontSize: '11px', color: t.text4, fontStyle: 'italic' }}>
+                      {docWord} no. not recorded
+                    </span>
+                  )}
+                  {c.tmp_prf_no && (
+                    <span title="Tamper-proof / TMP PRF number (internal)"
+                      style={{ fontSize: '10.5px', color: t.text3, fontFamily: 'monospace', background: `${t.text3}12`, borderRadius: '4px', padding: '2px 6px' }}>
+                      {c.tmp_prf_no}
+                    </span>
+                  )}
                   {c.movement_type && (
                     <span style={{ fontSize: '9px', color: isType ? t.purple : t.orange, background: `${isType ? t.purple : t.orange}15`, borderRadius: '4px', padding: '2px 7px', fontWeight: 600, letterSpacing: '.04em' }}>
                       {isType ? 'BRANCH → HUB' : 'BRANCH → HO'}
