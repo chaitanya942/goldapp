@@ -1982,7 +1982,7 @@ export async function GET(req) {
       .in('event_type', [
         'ewb_cancelled', 'einvoice_cancelled', 'cancelled',
         'ewb_cancel_skipped', 'einvoice_cancel_skipped',
-        'cancellation_approved',
+        'cancellation_approved', 'cancellation_forced_local',
       ])
       .order('created_at', { ascending: false })
     if (evErr) return Response.json({ error: evErr.message }, { status: 500 })
@@ -2033,7 +2033,7 @@ export async function GET(req) {
       // what it expects without another round trip.
       const { data: cs, error: cErr } = await supabase
         .from('consignments')
-        .select('id, tmp_prf_no, branch_name, dest_branch, movement_type, total_bills, total_amount, total_net_wt, approval_status, status, rejection_reason, created_at, eway_bill_no, irn')
+        .select('id, tmp_prf_no, branch_name, dest_branch, movement_type, state_code, total_bills, total_amount, total_net_wt, approval_status, status, rejection_reason, created_at, eway_bill_no, irn')
         .in('id', ids)
       if (cErr) return Response.json({ error: cErr.message }, { status: 500 })
       consignmentsAll = (cs || []).map(c => ({ ...c, total_gross_value: c.total_amount }))
@@ -2055,13 +2055,34 @@ export async function GET(req) {
       // placeholder.
       if (c && !inScope(c)) return []
       let inferredType = e.event_type
-      // Generic fallback events carry no doc type of their own. The
-      // consignment's eway_bill_no / irn are NULLED at cancel time, so they
-      // can't be trusted here — derive from the event's own details (which
-      // survive). EWB takes priority in combo cases (it's the movement doc).
+      // Which document does this consignment's ROUTE actually carry? Same rule the
+      // rest of the app uses (see ConsignmentData):
+      //   INTERNAL (branch → hub)            → EWB
+      //   EXTERNAL from a KA source (→ HO)   → EWB (intrastate)
+      //   EXTERNAL from a non-KA source      → E-Invoice (interstate hub → HO)
+      // This is the ONLY trustworthy source of the doc type for the fallback events:
+      // eway_bill_no / irn are nulled at cancel time, and the event itself may carry
+      // nothing. Previously these fell through to the generic 'cancelled', and the UI
+      // painted anything that wasn't 'ewb_cancelled' as "E-INVOICE CANCELLED" — which
+      // mislabelled every branch→hub and KA→HO move (all of them EWB) as an E-Invoice.
+      const docTypeOf = (cc) => {
+        if (!cc) return 'cancelled'
+        const isInternal = cc.movement_type === 'INTERNAL'
+        const isKaSource = cc.state_code === 'KA'
+        return (!isInternal && !isKaSource) ? 'einvoice_cancelled' : 'ewb_cancelled'
+      }
+      // Did anything actually get cancelled on the portal? A force-local cancel (or a
+      // cancel we wrongly read as failed) touches NIC/IRP not at all — claiming
+      // "EWB CANCELLED" there would be a lie.
+      let portalUntouched = false
+
       if (e.event_type === 'cancelled') {
         if (e.details?.had_ewb) inferredType = 'ewb_cancelled'
         else if (e.details?.had_irn) inferredType = 'einvoice_cancelled'
+        else inferredType = docTypeOf(c)
+      } else if (e.event_type === 'cancellation_forced_local') {
+        inferredType    = docTypeOf(c)
+        portalUntouched = true
       } else if (e.event_type === 'cancellation_approved') {
         // portal_cancelled is a free-form string array: ["EWB 123 cancelled on NIC", "E-Invoice cancelled on IRP", ...]
         // Sniff for the EWB pattern first so combo cases (had both) prefer EWB.
@@ -2070,7 +2091,12 @@ export async function GET(req) {
         const hasIrn = Array.isArray(portal) && portal.some(p => /e-?invoice|irp|irn/i.test(String(p)))
         if (hasEwb) inferredType = 'ewb_cancelled'
         else if (hasIrn) inferredType = 'einvoice_cancelled'
-        else if (c?.status === 'cancelled') inferredType = 'cancelled'
+        else {
+          // Nothing recorded as cancelled on the portal — name the doc from the route
+          // and flag that the portal was never touched.
+          inferredType    = docTypeOf(c)
+          portalUntouched = true
+        }
       }
       // Also surface the doc number on the synthesized details so the UI
       // shows something useful even when only the cancellation_approved
@@ -2094,6 +2120,11 @@ export async function GET(req) {
         details:              synthDetails,
         consignment:          c || null,
         consignment_missing:  !c,
+        // true = cancelled in GoldApp only; the EWB/IRN was never cancelled on the
+        // portal. The UI badges this differently so it can't be read as a clean
+        // portal cancellation.
+        portal_untouched:     portalUntouched,
+        doc_label:            inferredType === 'ewb_cancelled' ? 'EWB' : inferredType === 'einvoice_cancelled' ? 'E-Invoice' : null,
       }]
     })
     // Opt-in diagnostics: ?action=cancellation_history&debug=1 returns a
