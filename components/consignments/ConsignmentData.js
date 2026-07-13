@@ -99,6 +99,23 @@ export default function ConsignmentData() {
   const [destBranch,          setDestBranch]         = useState('')
   const [destSearch,          setDestSearch]         = useState('')
   const [destOpen,            setDestOpen]           = useState(false)
+  // The open hub list is absolutely positioned OVER the "OR" divider and the
+  // Head Office button beneath it, so an operator who opened it by mistake had
+  // no way back to HO — clicking where HO appears just hit a hub row. Make the
+  // list dismissable: outside-click and Escape both close it (capture phase, so
+  // Escape closes the list without also closing the whole modal).
+  const destBoxRef = useRef(null)
+  useEffect(() => {
+    if (!destOpen) return
+    const onDown = (e) => { if (destBoxRef.current && !destBoxRef.current.contains(e.target)) setDestOpen(false) }
+    const onKey  = (e) => { if (e.key === 'Escape') { e.stopPropagation(); setDestOpen(false) } }
+    document.addEventListener('mousedown', onDown, true)
+    document.addEventListener('keydown',   onKey,  true)
+    return () => {
+      document.removeEventListener('mousedown', onDown, true)
+      document.removeEventListener('keydown',   onKey,  true)
+    }
+  }, [destOpen])
   // Suggested destination from history — surfaces a small hint next to
   // the destination picker so ops knows where the default came from and
   // can override it without confusion.
@@ -1871,7 +1888,7 @@ export default function ConsignmentData() {
                     </div>
 
                     {/* Zone 1: Hub picker */}
-                    <div style={{ position: 'relative', opacity: isExternal ? 0.45 : 1, transition: 'opacity .15s' }}>
+                    <div ref={destBoxRef} style={{ position: 'relative', opacity: isExternal ? 0.45 : 1, transition: 'opacity .15s' }}>
                       <input
                         value={destBranch && !destOpen ? destBranch : destSearch}
                         onFocus={() => {
@@ -1898,13 +1915,24 @@ export default function ConsignmentData() {
                           cursor: candidateHubs.length === 0 ? 'not-allowed' : 'text',
                           transition: 'border-color .15s',
                         }} />
-                      {isHubPicked && (
+                      {isHubPicked && !destOpen && (
                         <span title="Destination hub picked"
                           style={{
                             position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)',
                             color: t.purple, fontSize: '15px', fontWeight: 800,
                             pointerEvents: 'none',
                           }}>✓</span>
+                      )}
+                      {/* Explicit dismiss — the way out when the list was opened by mistake. */}
+                      {destOpen && (
+                        <button type="button"
+                          onClick={() => { setDestOpen(false); setDestSearch('') }}
+                          title="Close (Esc)"
+                          style={{
+                            position: 'absolute', right: '8px', top: '50%', transform: 'translateY(-50%)',
+                            background: 'transparent', border: 'none', color: t.text3,
+                            fontSize: '15px', lineHeight: 1, cursor: 'pointer', padding: '4px 7px',
+                          }}>✕</button>
                       )}
                       {destOpen && !isExternal && (
                         <div style={{ position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0, background: t.card, border: `1px solid ${t.border2}`, borderRadius: '9px', maxHeight: '240px', overflowY: 'auto', zIndex: 10, boxShadow: '0 12px 36px rgba(0,0,0,.45)' }}>
@@ -1923,6 +1951,21 @@ export default function ConsignmentData() {
                               <span style={{ fontSize: '10px', color: t.text4 }}>{b.region}</span>
                             </div>
                           ))}
+                          {/* Escape hatch — the open list covers the Head Office
+                              button below it, so offer HO from inside the list. */}
+                          <div
+                            onClick={() => { setMoveType('EXTERNAL'); setDestBranch(''); setDestSearch(''); setDestOpen(false) }}
+                            style={{
+                              position: 'sticky', bottom: 0, padding: '11px 14px', cursor: 'pointer',
+                              fontSize: '12px', fontWeight: 700, color: t.gold, background: t.card,
+                              borderTop: `1px solid ${t.border2}`,
+                              display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px',
+                            }}
+                            onMouseEnter={e => e.currentTarget.style.background = `${t.gold}14`}
+                            onMouseLeave={e => e.currentTarget.style.background = t.card}>
+                            <span>🏛 Send to Head Office instead</span>
+                            <span style={{ fontSize: '10px', color: t.text4, fontWeight: 500 }}>Esc to close</span>
+                          </div>
                         </div>
                       )}
                     </div>
