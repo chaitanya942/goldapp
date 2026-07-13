@@ -8,12 +8,20 @@ import { Fragment } from 'react'
 // GOLD (capital) is stuck, region performance, and physical-vs-takeover mix.
 import {
   BarChart, Bar, PieChart, Pie, Cell, RadialBarChart, RadialBar, PolarAngleAxis,
+  AreaChart, Area, CartesianGrid, ReferenceLine,
   XAxis, YAxis, Tooltip, ResponsiveContainer, LabelList,
 } from 'recharts'
 
 const fmtNum = (n) => Number(n || 0).toLocaleString('en-IN')
 const fmtWt  = (n) => Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 const fmtKg  = (g) => g >= 1000 ? `${(g / 1000).toFixed(2)}kg` : `${Math.round(g)}g`
+const fmtINR = (n) => {
+  const v = Number(n || 0)
+  if (v >= 1e7) return `₹${(v / 1e7).toFixed(2)}Cr`
+  if (v >= 1e5) return `₹${(v / 1e5).toFixed(2)}L`
+  if (v >= 1e3) return `₹${(v / 1e3).toFixed(1)}K`
+  return `₹${Math.round(v)}`
+}
 
 // Stable SVG-gradient id from a colour hex, so bars/donuts can fill with a
 // vertical (id) or horizontal (id+'h') gradient defined once in <Gradients/>.
@@ -35,6 +43,10 @@ function Gradients({ colors }) {
             <linearGradient id={`${gradId(c)}h`} x1="0" y1="0" x2="1" y2="0">
               <stop offset="0%"  stopColor={c} stopOpacity={0.55} />
               <stop offset="100%" stopColor={c} stopOpacity={1} />
+            </linearGradient>
+            <linearGradient id={`${gradId(c)}a`} x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%"  stopColor={c} stopOpacity={0.42} />
+              <stop offset="100%" stopColor={c} stopOpacity={0.02} />
             </linearGradient>
           </Fragment>
         ))}
@@ -77,7 +89,7 @@ function Kpi({ t, icon, label, value, sub, accent }) {
         <span style={{ width: 28, height: 28, borderRadius: 9, background: `${accent}1e`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15 }}>{icon}</span>
         <span style={{ fontSize: '.6rem', fontWeight: 800, color: t.text3, textTransform: 'uppercase', letterSpacing: '.07em' }}>{label}</span>
       </div>
-      <div style={{ fontSize: '1.7rem', fontWeight: 800, color: t.text1, lineHeight: 1, letterSpacing: '-.02em' }}>{value}</div>
+      <div style={{ fontSize: '1.55rem', fontWeight: 800, color: t.text1, lineHeight: 1, letterSpacing: '-.02em' }}>{value}</div>
       {sub && <div style={{ fontSize: '.61rem', color: t.text4, marginTop: 6 }}>{sub}</div>}
     </div>
   )
@@ -91,19 +103,29 @@ function ChartTip({ t, active, payload, unit }) {
         <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <span style={{ width: 8, height: 8, borderRadius: 3, background: p.color || p.payload?.fill }} />
           <span style={{ color: t.text3 }}>{p.name}:</span>
-          <b>{unit === 'wt' ? fmtWt(p.value) + 'g' : fmtNum(p.value)}</b>
+          <b>{unit === 'wt' ? fmtWt(p.value) + 'g' : unit === 'pct' ? `${p.value}%` : fmtNum(p.value)}</b>
         </div>
       ))}
     </div>
   )
 }
 
-// Donut with a centred total in the hole.
 function DonutCenter({ t, value, label }) {
   return (
     <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' }}>
       <span style={{ fontSize: '1.5rem', fontWeight: 800, color: t.text1, lineHeight: 1 }}>{value}</span>
       {label && <span style={{ fontSize: '.56rem', color: t.text4, marginTop: 3, textTransform: 'uppercase', letterSpacing: '.06em' }}>{label}</span>}
+    </div>
+  )
+}
+
+// A single figure inside the Value & throughput card.
+function Stat({ t, label, value, accent, sub }) {
+  return (
+    <div style={{ background: `${accent}0e`, border: `1px solid ${accent}22`, borderRadius: 11, padding: '11px 13px' }}>
+      <div style={{ fontSize: '.57rem', color: t.text3, textTransform: 'uppercase', letterSpacing: '.06em', fontWeight: 800 }}>{label}</div>
+      <div style={{ fontSize: '1.1rem', fontWeight: 800, color: accent, marginTop: 5, letterSpacing: '-.01em' }}>{value}</div>
+      {sub && <div style={{ fontSize: '.58rem', color: t.text4, marginTop: 3 }}>{sub}</div>}
     </div>
   )
 }
@@ -133,6 +155,16 @@ export default function LiveFeedVisuals({ t, stages, totals, typeSplit, regionRo
       })
     : []
 
+  // Cumulative momentum through the day — walk-ins vs completed, running totals.
+  const momentum = (() => {
+    let cw = 0, cc = 0
+    return hourly.map(h => {
+      cw += h.completed + h.pipeline + h.walkout
+      cc += h.completed
+      return { label: h.label, walkins: cw, completed: cc }
+    })
+  })()
+
   // ── Branch leaderboard (within current filter) ────────────────────────────
   const bMap = new Map()
   for (const tx of (txns || [])) {
@@ -147,6 +179,21 @@ export default function LiveFeedVisuals({ t, stages, totals, typeSplit, regionRo
     .map(r => ({ ...r, conversion: r.walkins ? Math.round(r.completed / r.walkins * 100) : 0 }))
     .sort((a, b) => b.walkins - a.walkins).slice(0, 8)
 
+  // ── Value & throughput (money + gold actually bought today) ───────────────
+  const completedTxns  = (txns || []).filter(tx => (stageOf ? stageOf(tx.status) : '') === 'completed')
+  const completedN     = completedTxns.length || totals.completed || 0
+  const completedValue = completedTxns.reduce((s, tx) => s + (Number(tx.amount) || 0), 0)
+  const completedNetWt = completedTxns.reduce((s, tx) => s + (Number(tx.net_weight) || 0), 0)
+  const completedGrsWt = completedTxns.reduce((s, tx) => s + (Number(tx.gross_weight) || 0), 0)
+  const avgTicket      = completedN > 0 ? completedValue / completedN : 0
+  const avgWt          = completedN > 0 ? completedNetWt / completedN : 0
+  // Purity proxy: net / gross across completed gold (how much of what walked in was pure).
+  const yieldPct       = completedGrsWt > 0 ? Math.round(completedNetWt / completedGrsWt * 100) : 0
+
+  // Physical vs Takeover — by weight, not just count (takeover deals run bigger).
+  const physWt = (txns || []).filter(tx => tx.transaction_type === 'PHYSICAL_GOLD').reduce((s, tx) => s + (Number(tx.net_weight) || 0), 0)
+  const takeWt = (txns || []).filter(tx => tx.transaction_type === 'RELEASED_GOLD').reduce((s, tx) => s + (Number(tx.net_weight) || 0), 0)
+
   // ── Region × Stage heatmap (all regions) ──────────────────────────────────
   const hmRegions = [...new Set((allTxns || []).map(x => x.region).filter(Boolean))]
   const heat = hmRegions.map(rg => {
@@ -157,6 +204,7 @@ export default function LiveFeedVisuals({ t, stages, totals, typeSplit, regionRo
     return { region: rg, cells, total }
   }).filter(r => r.total > 0).sort((a, b) => b.total - a.total)
   const heatMax = Math.max(1, ...heat.flatMap(r => STAGE_ORDER.map(s => r.cells[s])))
+
   // Journey order (pipeline → completed). Walkout shown separately.
   const journey = ['walkin', 'estimation', 'kyc', 'payment', 'completed'].map(k => {
     const s = stage(k)
@@ -166,13 +214,80 @@ export default function LiveFeedVisuals({ t, stages, totals, typeSplit, regionRo
     const s = stage(k); return { name: s.label, value: s.count, fill: s.color }
   }).filter(d => d.value > 0)
 
+  // ── Conversion funnel — how many REACHED each stage (cumulative) ──────────
+  // A customer sitting at stage X has, by definition, passed every stage before
+  // it; completed customers passed them all. So reach(X) = completed + everyone
+  // currently at X or later. That makes the series monotonically decreasing and
+  // exposes the true step-to-step drop-off.
+  const funnel = (() => {
+    const order = ['walkin', 'estimation', 'kyc', 'payment']
+    const reach = {}
+    let acc = totals.completed || 0
+    for (let i = order.length - 1; i >= 0; i--) { acc += stage(order[i]).count; reach[order[i]] = acc }
+    const rows = [...order.map(k => ({ key: k, name: stage(k).label, reached: reach[k], fill: stage(k).color })),
+                  { key: 'completed', name: stage('completed').label, reached: totals.completed || 0, fill: stage('completed').color }]
+    const top = rows[0]?.reached || 1
+    return rows.map((r, i) => ({
+      ...r,
+      pct:  Math.round(r.reached / top * 100),
+      drop: i > 0 ? rows[i - 1].reached - r.reached : 0,
+      dropPct: i > 0 && rows[i - 1].reached > 0 ? Math.round((rows[i - 1].reached - r.reached) / rows[i - 1].reached * 100) : 0,
+    }))
+  })()
+
   const pendingWt = journey.filter(j => j.key !== 'completed').reduce((a, j) => a + j.wt, 0)
   const typePie = [
     { name: 'Physical', value: typeSplit.physical, fill: t.blue },
     { name: 'Takeover', value: typeSplit.takeover, fill: t.purple },
   ].filter(d => d.value > 0)
+  const typeTotal = (typeSplit.physical || 0) + (typeSplit.takeover || 0)
 
   const regions = (regionRows || []).slice().sort((a, b) => b.walkins - a.walkins)
+  const rankRegions = (regionRows || []).slice().filter(r => r.walkins > 0).sort((a, b) => b.conversion - a.conversion)
+
+  // ── "What stands out" — auto-derived narrative bullets ────────────────────
+  const insights = []
+  {
+    const bottleneck = [...pipelineStages].sort((a, b) => b.value - a.value)[0]
+    if (bottleneck && totals.pendingCount > 0) {
+      insights.push({ icon: '⛔', color: t.orange, text: <><b>{bottleneck.name}</b> is the biggest hold-up — <b>{fmtNum(bottleneck.value)}</b> customer{bottleneck.value === 1 ? '' : 's'} ({Math.round(bottleneck.value / totals.pendingCount * 100)}% of the pipeline) waiting there.</> })
+    }
+    const ranked = rankRegions.filter(r => r.walkins >= 3)
+    if (ranked.length) {
+      const best = ranked[0]
+      insights.push({ icon: '🏅', color: t.green, text: <><b>{best.region}</b> converts best at <b>{best.conversion}%</b> ({fmtNum(best.completed)} of {fmtNum(best.walkins)}).</> })
+      const worst = ranked[ranked.length - 1]
+      if (worst.region !== best.region) {
+        insights.push({ icon: '📉', color: t.red, text: <><b>{worst.region}</b> lags at <b>{worst.conversion}%</b> — {fmtNum(worst.walkins - worst.completed)} still unconverted.</> })
+      }
+    }
+    if ((totals.walkoutRate || 0) >= 30) {
+      insights.push({ icon: '🚪', color: t.red, text: <>High walkout — <b>{totals.walkoutRate}%</b> left without completing. Worth reviewing branch engagement.</> })
+    }
+    // Biggest single-step drop in the funnel (excluding the entry step).
+    const worstStep = [...funnel.slice(1)].sort((a, b) => b.drop - a.drop)[0]
+    if (worstStep && worstStep.drop > 0) {
+      insights.push({ icon: '🕳️', color: t.purple, text: <>Biggest drop-off is into <b>{worstStep.name}</b> — <b>{fmtNum(worstStep.drop)}</b> customers ({worstStep.dropPct}%) fell away at that step.</> })
+    }
+    if (hourly.length) {
+      const peak = [...hourly].sort((a, b) => (b.completed + b.pipeline + b.walkout) - (a.completed + a.pipeline + a.walkout))[0]
+      const n = peak.completed + peak.pipeline + peak.walkout
+      if (n > 0) insights.push({ icon: '⏰', color: t.blue, text: <>Busiest hour was <b>{peak.label}</b> with <b>{fmtNum(n)}</b> walk-in{n === 1 ? '' : 's'}.</> })
+    }
+    if (branches.length) {
+      const heavy = [...branches].sort((a, b) => b.wt - a.wt)[0]
+      if (heavy.wt > 0) insights.push({ icon: '🏬', color: t.gold, text: <><b>{heavy.branch}</b> brought the most gold — <b>{fmtKg(heavy.wt)}</b> across {fmtNum(heavy.walkins)} walk-ins.</> })
+    }
+    if (completedValue > 0) {
+      insights.push({ icon: '💰', color: t.green, text: <><b>{fmtINR(completedValue)}</b> purchased today · average ticket <b>{fmtINR(avgTicket)}</b>.</> })
+    }
+    if (typeTotal > 0 && typeSplit.takeover > 0) {
+      insights.push({ icon: '⚖️', color: t.purple, text: <>Takeover is <b>{Math.round(typeSplit.takeover / typeTotal * 100)}%</b> of deals but <b>{takeWt + physWt > 0 ? Math.round(takeWt / (takeWt + physWt) * 100) : 0}%</b> of the gold by weight.</> })
+    }
+    if (pendingWt > 0) {
+      insights.push({ icon: '🪙', color: t.orange, text: <><b>{fmtKg(pendingWt)}</b> of gold is still sitting in the pipeline, un-purchased.</> })
+    }
+  }
 
   const axis = { fontSize: 10, fill: t.text3 }
   const grid = { gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 14 }
@@ -191,6 +306,8 @@ export default function LiveFeedVisuals({ t, stages, totals, typeSplit, regionRo
         .lfv-kpi:hover  { transform: translateY(-2px); box-shadow: 0 10px 24px rgba(0,0,0,.09); }
         .lfv-brow { transition: background .15s ease; border-radius: 8px; }
         .lfv-brow:hover { background: ${t.text3}0c; }
+        .lfv-ins { transition: background .15s ease; }
+        .lfv-ins:hover { background: ${t.text3}0a; }
       `}</style>
       <Gradients colors={gradColors} />
 
@@ -208,12 +325,38 @@ export default function LiveFeedVisuals({ t, stages, totals, typeSplit, regionRo
       </div>
 
       {/* KPI hero strip */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 12, marginBottom: 14 }}>
-        <Kpi t={t} icon="👣" accent={t.blue}  label="Walk-ins"     value={fmtNum(totals.totalWalkins)} sub={`${dateLabel}`} />
-        <Kpi t={t} icon="✅" accent={t.green} label="Completed"    value={fmtNum(totals.completed)}    sub={`${totals.conversionPct}% conversion`} />
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(178px, 1fr))', gap: 12, marginBottom: 14 }}>
+        <Kpi t={t} icon="👣" accent={t.blue}   label="Walk-ins"     value={fmtNum(totals.totalWalkins)} sub={dateLabel} />
+        <Kpi t={t} icon="✅" accent={t.green}  label="Completed"    value={fmtNum(totals.completed)}    sub={`${totals.conversionPct}% conversion`} />
         <Kpi t={t} icon="⏳" accent={t.orange} label="In pipeline"  value={fmtNum(totals.pendingCount)} sub="not yet purchased" />
-        <Kpi t={t} icon="🪙" accent={t.gold}  label="Gold pending" value={fmtKg(pendingWt)}            sub="net weight in journey" />
+        <Kpi t={t} icon="🚪" accent={t.red}    label="Walkout rate" value={`${totals.walkoutRate || 0}%`} sub="left without buying" />
+        <Kpi t={t} icon="💰" accent={t.green}  label="Value bought" value={fmtINR(completedValue)}      sub="completed deals" />
+        <Kpi t={t} icon="🧾" accent={t.purple} label="Avg ticket"   value={fmtINR(avgTicket)}           sub={`${fmtWt(avgWt)}g avg net wt`} />
+        <Kpi t={t} icon="⚖️" accent={t.gold}   label="Gold bought"  value={fmtKg(completedNetWt)}       sub={yieldPct ? `${yieldPct}% net of gross` : 'net weight'} />
+        <Kpi t={t} icon="🪙" accent={t.orange} label="Gold pending" value={fmtKg(pendingWt)}            sub="still in journey" />
       </div>
+
+      {/* What stands out — auto-derived narrative */}
+      {insights.length > 0 && (
+        <div className="lfv-card" style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: 16, overflow: 'hidden', marginBottom: 14, boxShadow: '0 1px 3px rgba(0,0,0,.05)' }}>
+          <div style={{ height: 3, background: `linear-gradient(90deg, ${t.gold}, ${t.green}88, ${t.blue}44, transparent)` }} />
+          <div style={{ padding: '15px 18px 17px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginBottom: 12 }}>
+              <span style={{ width: 27, height: 27, borderRadius: 9, background: `${t.gold}1e`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14 }}>💡</span>
+              <div style={{ fontSize: '.83rem', fontWeight: 800, color: t.text1, letterSpacing: '-.01em' }}>What stands out</div>
+              <span style={{ fontSize: '.58rem', color: t.text4 }}>auto-read from today&apos;s data</span>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 4 }}>
+              {insights.map((ins, i) => (
+                <div key={i} className="lfv-ins" style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '8px 10px', borderRadius: 10 }}>
+                  <span style={{ width: 24, height: 24, borderRadius: 8, background: `${ins.color}1e`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, flexShrink: 0, marginTop: 1 }}>{ins.icon}</span>
+                  <span style={{ fontSize: '.7rem', color: t.text2, lineHeight: 1.5 }}>{ins.text}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       <div style={{ display: 'grid', ...grid }}>
         {/* 1. Conversion gauge */}
@@ -235,7 +378,32 @@ export default function LiveFeedVisuals({ t, stages, totals, typeSplit, regionRo
           </div>
         </Panel>
 
-        {/* 2. Journey stage distribution */}
+        {/* 2. Conversion funnel — where they fall away */}
+        <Panel t={t} title="Conversion funnel" icon="🕳️" accent={t.purple} hint="How many reached each stage — and how many fell away at each step">
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 4 }}>
+            {funnel.map((f, i) => (
+              <div key={f.key}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '.66rem' }}>
+                  <span style={{ width: 66, color: t.text2, fontWeight: 700, flexShrink: 0 }}>{f.name}</span>
+                  <div style={{ flex: 1, height: 20, background: `${t.text3}10`, borderRadius: 6, overflow: 'hidden' }}>
+                    <div style={{ width: `${Math.max(f.pct, 1)}%`, height: '100%', background: `linear-gradient(90deg, ${f.fill}88, ${f.fill})`, borderRadius: 6 }} />
+                  </div>
+                  <span style={{ width: 34, textAlign: 'right', color: t.text1, fontWeight: 800 }}>{fmtNum(f.reached)}</span>
+                  <span style={{ width: 34, textAlign: 'right', color: t.text4 }}>{f.pct}%</span>
+                </div>
+                {i < funnel.length - 1 && funnel[i + 1].drop > 0 && (
+                  <div style={{ display: 'flex', justifyContent: 'center', margin: '2px 0' }}>
+                    <span style={{ fontSize: '.55rem', color: t.red, background: `${t.red}12`, borderRadius: 20, padding: '1px 8px', fontWeight: 700 }}>
+                      ▼ {fmtNum(funnel[i + 1].drop)} dropped ({funnel[i + 1].dropPct}%)
+                    </span>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </Panel>
+
+        {/* 3. Journey stage distribution */}
         <Panel t={t} title="Where customers are" icon="📍" accent={t.gold} hint="Count at each journey stage — the tallest bar is your bottleneck">
           <ResponsiveContainer width="100%" height={200}>
             <BarChart data={journey} layout="vertical" margin={{ left: 8, right: 26, top: 4, bottom: 4 }}>
@@ -250,7 +418,7 @@ export default function LiveFeedVisuals({ t, stages, totals, typeSplit, regionRo
           </ResponsiveContainer>
         </Panel>
 
-        {/* 3. Gold stuck by stage (capital view) */}
+        {/* 4. Gold stuck by stage (capital view) */}
         <Panel t={t} title="Gold in the pipeline" icon="🪙" accent={t.gold} hint={`${fmtKg(pendingWt)} of gold not yet completed — by stage (net wt)`}>
           <ResponsiveContainer width="100%" height={200}>
             <BarChart data={journey.filter(j => j.key !== 'completed')} margin={{ left: 0, right: 8, top: 16, bottom: 4 }}>
@@ -265,7 +433,7 @@ export default function LiveFeedVisuals({ t, stages, totals, typeSplit, regionRo
           </ResponsiveContainer>
         </Panel>
 
-        {/* 4. Pending bottleneck donut */}
+        {/* 5. Pending bottleneck donut */}
         <Panel t={t} title="Pipeline bottleneck" icon="🔀" accent={t.purple} hint="How the not-yet-purchased split across stages">
           {pipelineStages.length ? (
             <div style={{ position: 'relative', height: 200 }}>
@@ -283,7 +451,21 @@ export default function LiveFeedVisuals({ t, stages, totals, typeSplit, regionRo
           <Legend t={t} items={pipelineStages} total={totals.pendingCount} />
         </Panel>
 
-        {/* 5. Region performance */}
+        {/* 6. Value & throughput */}
+        <Panel t={t} title="Value & throughput" icon="💰" accent={t.green} hint="What today's completed deals actually brought in">
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 9, marginTop: 4 }}>
+            <Stat t={t} accent={t.green}  label="Value bought" value={fmtINR(completedValue)} sub={`${fmtNum(completedN)} deals`} />
+            <Stat t={t} accent={t.purple} label="Avg ticket"   value={fmtINR(avgTicket)}      sub="per completed deal" />
+            <Stat t={t} accent={t.gold}   label="Net gold"     value={fmtKg(completedNetWt)}  sub={`${fmtWt(avgWt)}g avg`} />
+            <Stat t={t} accent={t.blue}   label="Gross gold"   value={fmtKg(completedGrsWt)}  sub={yieldPct ? `${yieldPct}% net yield` : '—'} />
+          </div>
+          <div style={{ marginTop: 10, display: 'flex', gap: 8 }}>
+            <Stat t={t} accent={t.blue}   label="Physical gold" value={fmtKg(physWt)} sub={`${typeSplit.physical || 0} deals`} />
+            <Stat t={t} accent={t.purple} label="Takeover gold" value={fmtKg(takeWt)} sub={`${typeSplit.takeover || 0} deals`} />
+          </div>
+        </Panel>
+
+        {/* 7. Region performance */}
         <Panel t={t} title="Region performance" icon="🗺️" accent={t.green} hint="Completed vs still-in-pipeline, by region" span={2}>
           {regions.length ? (
             <ResponsiveContainer width="100%" height={220}>
@@ -300,7 +482,27 @@ export default function LiveFeedVisuals({ t, stages, totals, typeSplit, regionRo
           ) : <Empty t={t} />}
         </Panel>
 
-        {/* 6. Physical vs Takeover */}
+        {/* 8. Region conversion ranking (vs overall benchmark) */}
+        <Panel t={t} title="Conversion ranking" icon="🏅" accent={t.gold} hint={`Best → worst by conversion. Dashed line = overall ${totals.conversionPct}%`}>
+          {rankRegions.length ? (
+            <ResponsiveContainer width="100%" height={200}>
+              <BarChart data={rankRegions} layout="vertical" margin={{ left: 8, right: 34, top: 4, bottom: 4 }}>
+                <XAxis type="number" domain={[0, 100]} tick={axis} axisLine={false} tickLine={false} />
+                <YAxis type="category" dataKey="region" tick={axis} axisLine={false} tickLine={false} width={92} />
+                <Tooltip cursor={{ fill: `${t.text3}10` }} content={(p) => <ChartTip t={t} unit="pct" {...p} />} />
+                <ReferenceLine x={totals.conversionPct} stroke={t.text3} strokeDasharray="4 4" />
+                <Bar dataKey="conversion" name="Conversion" radius={[0, 7, 7, 0]} isAnimationActive={false}>
+                  {rankRegions.map((d, i) => (
+                    <Cell key={i} fill={hFill(d.conversion >= totals.conversionPct ? t.green : t.orange)} />
+                  ))}
+                  <LabelList dataKey="conversion" position="right" formatter={(v) => `${v}%`} style={{ fill: t.text2, fontSize: 10, fontWeight: 800 }} />
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          ) : <Empty t={t} />}
+        </Panel>
+
+        {/* 9. Physical vs Takeover */}
         <Panel t={t} title="Physical vs Takeover" icon="⚖️" accent={t.blue} hint="Transaction-type mix">
           {typePie.length ? (
             <div style={{ position: 'relative', height: 200 }}>
@@ -312,13 +514,29 @@ export default function LiveFeedVisuals({ t, stages, totals, typeSplit, regionRo
                   <Tooltip content={(p) => <ChartTip t={t} {...p} />} />
                 </PieChart>
               </ResponsiveContainer>
-              <DonutCenter t={t} value={fmtNum(typeSplit.physical + typeSplit.takeover)} label="deals" />
+              <DonutCenter t={t} value={fmtNum(typeTotal)} label="deals" />
             </div>
           ) : <Empty t={t} />}
-          <Legend t={t} items={typePie} total={typeSplit.physical + typeSplit.takeover} />
+          <Legend t={t} items={typePie} total={typeTotal} />
         </Panel>
 
-        {/* 7. Walk-ins by hour (with outcome) */}
+        {/* 10. Day momentum — cumulative */}
+        <Panel t={t} title="Day momentum" icon="📈" accent={t.blue} hint="Cumulative walk-ins vs completed — the gap is your open pipeline" span={2}>
+          {momentum.length ? (
+            <ResponsiveContainer width="100%" height={220}>
+              <AreaChart data={momentum} margin={{ left: 0, right: 8, top: 8, bottom: 4 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke={`${t.text3}18`} vertical={false} />
+                <XAxis dataKey="label" tick={axis} axisLine={false} tickLine={false} interval={0} />
+                <YAxis tick={axis} axisLine={false} tickLine={false} width={30} allowDecimals={false} />
+                <Tooltip content={(p) => <ChartTip t={t} {...p} />} />
+                <Area type="monotone" dataKey="walkins"   name="Walk-ins"  stroke={t.blue}  strokeWidth={2} fill={`url(#${gradId(t.blue)}a)`}  isAnimationActive={false} />
+                <Area type="monotone" dataKey="completed" name="Completed" stroke={t.green} strokeWidth={2} fill={`url(#${gradId(t.green)}a)`} isAnimationActive={false} />
+              </AreaChart>
+            </ResponsiveContainer>
+          ) : <Empty t={t} />}
+        </Panel>
+
+        {/* 11. Walk-ins by hour (with outcome) */}
         <Panel t={t} title="Activity by hour" icon="🕐" accent={t.blue} hint="When customers walk in — and how those visits are trending (completed / in-pipeline / walkout)" span={2}>
           {hourly.length ? (
             <ResponsiveContainer width="100%" height={220}>
@@ -334,7 +552,7 @@ export default function LiveFeedVisuals({ t, stages, totals, typeSplit, regionRo
           ) : <Empty t={t} />}
         </Panel>
 
-        {/* 8. Branch leaderboard */}
+        {/* 12. Branch leaderboard */}
         <Panel t={t} title="Top branches" icon="🏆" accent={t.gold} hint="Walk-ins today, with conversion — spot the leaders & laggards" span={2}>
           {branches.length ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 3, marginTop: 4 }}>
@@ -363,7 +581,7 @@ export default function LiveFeedVisuals({ t, stages, totals, typeSplit, regionRo
           ) : <Empty t={t} />}
         </Panel>
 
-        {/* 9. Region × Stage heatmap */}
+        {/* 13. Region × Stage heatmap */}
         <Panel t={t} title="Region × stage heatmap" icon="🔥" accent={t.orange} hint="Where each region's customers are concentrated — darker = more" span={2}>
           {heat.length ? (
             <div style={{ overflowX: 'auto' }}>
