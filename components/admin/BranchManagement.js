@@ -358,6 +358,18 @@ export default function BranchManagement({ embedded = false } = {}) {
   }
 
   const cancelForm = () => { setFormOpen(false); setEditId(null); setForm(EMPTY_FORM); setMsg('') }
+
+  // The branch form opens as a focused full-screen sheet (ops sees ONLY the branch
+  // they clicked, not an inline block above a 125-row table), so lock the page
+  // behind it and let Escape close it.
+  useEffect(() => {
+    if (!formOpen) return
+    const onKey = (e) => { if (e.key === 'Escape') cancelForm() }
+    document.addEventListener('keydown', onKey)
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => { document.removeEventListener('keydown', onKey); document.body.style.overflow = prev }
+  }, [formOpen])   // eslint-disable-line react-hooks/exhaustive-deps
   const toggleActive = async (id, current) => { await supabase.from('branches').update({ is_active: !current }).eq('id', id); load() }
   const setField = (key, val) => setForm(f => ({ ...f, [key]: val }))
 
@@ -501,10 +513,7 @@ export default function BranchManagement({ embedded = false } = {}) {
               {filterLogistics ? 'Clear filter' : 'View them'}
             </button>
           </div>
-          <div style={{ fontSize: '.66rem', color: t.text3, marginTop: '6px', lineHeight: 1.5 }}>
-            Until ops sets these, the branch is <strong>invisible to the bid desk</strong> (it never enters &quot;pickup pending today&quot;) and its HO arrival silently falls back to <strong>24h</strong>. Set them per branch — they&apos;re an ops call, not a default.
-          </div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '9px' }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '10px' }}>
             {logisticsBranches.map(b => (
               <button key={b.id} onClick={() => startEdit(b)}
                 title={`Set TAT & pickup days for ${b.name}`}
@@ -531,16 +540,26 @@ export default function BranchManagement({ embedded = false } = {}) {
         </div>
       )}
 
-      {/* FORM */}
+      {/* FORM — focused full-screen sheet: only the clicked branch, nothing else. */}
       {formOpen && (
-        <div style={s.card}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
-            <span style={{ fontSize: '.65rem', color: t.text3, letterSpacing: '.1em', textTransform: 'uppercase' }}>
-              {editId ? `Editing: ${form.name}` : 'New Branch'}
-            </span>
-            {form.crm_branch_id && (
-              <span style={{ fontSize: '.65rem', color: t.text3, fontFamily: 'monospace' }}>CRM ID: <span style={{ color: t.gold }}>{form.crm_branch_id}</span></span>
-            )}
+        <div onClick={cancelForm}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.55)', zIndex: 1000, display: 'flex', justifyContent: 'center', alignItems: 'flex-start', padding: '24px', overflowY: 'auto' }}>
+        <div onClick={e => e.stopPropagation()}
+          style={{ ...s.card, width: '100%', maxWidth: '1120px', margin: 0, maxHeight: 'calc(100vh - 48px)', overflowY: 'auto', boxShadow: '0 24px 70px rgba(0,0,0,.5)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px', gap: '12px' }}>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: '10px', minWidth: 0 }}>
+              <span style={{ fontSize: '.65rem', color: t.text3, letterSpacing: '.1em', textTransform: 'uppercase' }}>
+                {editId ? 'Editing branch' : 'New Branch'}
+              </span>
+              {editId && <span style={{ fontSize: '1.05rem', fontWeight: 800, color: t.text1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{form.name}</span>}
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexShrink: 0 }}>
+              {form.crm_branch_id && (
+                <span style={{ fontSize: '.65rem', color: t.text3, fontFamily: 'monospace' }}>CRM ID: <span style={{ color: t.gold }}>{form.crm_branch_id}</span></span>
+              )}
+              <button onClick={cancelForm} title="Close (Esc)"
+                style={{ background: 'transparent', border: `1px solid ${t.border}`, borderRadius: '8px', width: '30px', height: '30px', color: t.text3, fontSize: '15px', cursor: 'pointer', lineHeight: 1 }}>✕</button>
+            </div>
           </div>
           <div style={s.grid4}>
             <div>
@@ -730,6 +749,7 @@ export default function BranchManagement({ embedded = false } = {}) {
             <button style={s.btnOutline} onClick={cancelForm}>Cancel</button>
             {msg && <span style={{ fontSize: '.72rem', color: msg.includes('success') ? t.green : '#e05555' }}>{msg}</span>}
           </div>
+        </div>
         </div>
       )}
 
