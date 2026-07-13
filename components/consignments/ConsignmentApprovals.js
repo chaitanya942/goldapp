@@ -923,11 +923,13 @@ export default function ConsignmentApprovals() {
             const reasonCode = ev.details?.reason_code
             const remark  = ev.details?.remark
             const ack     = isEwb ? ev.details?.nic_ack : ev.details?.irp_ack
-            // portal_untouched = cancelled in GoldApp only; the EWB/IRN was NEVER
-            // cancelled on NIC/IRP. Badging that as a clean "EWB CANCELLED" would be
-            // a lie, so it gets its own amber pill.
+            // Colour encodes the DOCUMENT TYPE — green = EWB, purple = E-Invoice —
+            // so the tab reads at a glance. Whether the portal was actually cancelled
+            // is a separate fact, carried by its own amber chip below rather than by
+            // hijacking the doc colour.
             const localOnly = !!ev.portal_untouched
-            const accent  = localOnly ? (t.orange || '#d98a3a') : isEwb ? t.green : t.purple
+            const accent  = isEwb ? t.green : t.purple
+            const warn    = t.orange || '#d98a3a'
             const isType  = c.movement_type === 'INTERNAL'
             const dest    = isType ? c.dest_branch : 'Head Office'
             const docWord = isEwb ? 'EWB' : 'E-INVOICE'
@@ -935,8 +937,14 @@ export default function ConsignmentApprovals() {
               <div key={ev.id} style={{ ...card, padding: '12px 16px 12px 18px', borderLeft: `3px solid ${accent}`, display: 'flex', flexDirection: 'column', gap: '6px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                   <span style={{ fontSize: '9px', color: accent, background: `${accent}15`, borderRadius: '4px', padding: '2px 7px', fontWeight: 700, letterSpacing: '.04em' }}>
-                    {localOnly ? `${docWord} — NOT CANCELLED ON PORTAL` : `${docWord} CANCELLED`}
+                    {docWord} CANCELLED
                   </span>
+                  {localOnly && (
+                    <span title="Cancelled in GoldApp only — the document was never cancelled on NIC/IRP"
+                      style={{ fontSize: '9px', color: warn, background: `${warn}18`, border: `1px solid ${warn}55`, borderRadius: '4px', padding: '2px 7px', fontWeight: 700, letterSpacing: '.04em' }}>
+                      ⚠ NOT CANCELLED ON PORTAL
+                    </span>
+                  )}
                   {c.tmp_prf_no && <span style={{ fontSize: '13px', color: t.gold, fontWeight: 700, fontFamily: 'monospace', letterSpacing: '.02em' }}>{c.tmp_prf_no}</span>}
                   {docNo && <span style={{ fontSize: '11px', color: t.text2, fontFamily: 'monospace' }}>{docNo}</span>}
                   {c.movement_type && (
