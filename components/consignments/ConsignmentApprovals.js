@@ -86,6 +86,7 @@ export default function ConsignmentApprovals() {
 
   const [history, setHistory] = useState([])  // approved or rejected, depending on tab
   const [cancellations, setCancellations] = useState([])  // ewb_cancelled / einvoice_cancelled events
+  const [cancelDocFilter, setCancelDocFilter] = useState('all')  // all | ewb | einvoice
   const [cancelRequests, setCancelRequests] = useState([])  // pending cancellation requests from ops
   // Cancelled here but the EWB/IRN is STILL LIVE on NIC/IRP (force-local cancels).
   // Surfaced so an active government document can never sit unnoticed against gold
@@ -913,7 +914,39 @@ export default function ConsignmentApprovals() {
       ) : tab === 'cancellations' ? (
         /* Cancellation log — every doc cancellation, all time */
         <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-          {cancellations.map(ev => {
+          {/* Doc-type filter — same green/purple language as the pills. */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap', marginBottom: '2px' }}>
+            {[
+              { id: 'all',      label: 'All',       color: t.text2,
+                n: cancellations.length },
+              { id: 'ewb',      label: 'EWB',       color: t.green,
+                n: cancellations.filter(e => e.event_type === 'ewb_cancelled').length },
+              { id: 'einvoice', label: 'E-Invoice', color: t.purple,
+                n: cancellations.filter(e => e.event_type === 'einvoice_cancelled').length },
+            ].map(o => {
+              const on = cancelDocFilter === o.id
+              return (
+                <button key={o.id} onClick={() => setCancelDocFilter(o.id)}
+                  style={{
+                    background: on ? `${o.color}1e` : 'transparent',
+                    border: `1px solid ${on ? o.color : t.border}`,
+                    color: on ? o.color : t.text3,
+                    borderRadius: '999px', padding: '5px 13px', fontSize: '11px',
+                    fontWeight: 700, cursor: 'pointer', display: 'inline-flex',
+                    alignItems: 'center', gap: '6px', letterSpacing: '.02em',
+                  }}>
+                  {o.label}
+                  <span style={{ fontFamily: 'monospace', fontSize: '10px', opacity: .8 }}>{o.n}</span>
+                </button>
+              )
+            })}
+          </div>
+
+          {cancellations
+            .filter(ev => cancelDocFilter === 'all'
+              || (cancelDocFilter === 'ewb'      && ev.event_type === 'ewb_cancelled')
+              || (cancelDocFilter === 'einvoice' && ev.event_type === 'einvoice_cancelled'))
+            .map(ev => {
             const c       = ev.consignment || {}
             // The API resolves event_type to ewb_cancelled / einvoice_cancelled
             // and ranks EWB above E-Invoice for combo consignments, so a bare
