@@ -978,9 +978,9 @@ export default function ConsignmentApprovals() {
                       ⚠ NOT CANCELLED ON PORTAL
                     </span>
                   )}
-                  {/* Lead with the DOC NUMBER — that's what accounts actually needs to
-                      find the document on NIC/IRP. The tamper-proof (TMP PRF) number is
-                      internal, so it drops back to a secondary chip. */}
+                  {/* The DOC NUMBER is the only reference that matters here — it's what
+                      accounts pastes into NIC/IRP. The tamper-proof (TMP PRF) number is
+                      purely internal, so it isn't shown on this tab at all. */}
                   {docNo ? (
                     <span title={isEwb ? 'E-Way Bill number' : 'IRN'}
                       style={{ fontSize: '13.5px', color: accent, fontWeight: 800, fontFamily: 'monospace', letterSpacing: '.02em' }}>
@@ -990,12 +990,6 @@ export default function ConsignmentApprovals() {
                     <span title="The document number was not recorded before it was cleared"
                       style={{ fontSize: '11px', color: t.text4, fontStyle: 'italic' }}>
                       {docWord} no. not recorded
-                    </span>
-                  )}
-                  {c.tmp_prf_no && (
-                    <span title="Tamper-proof / TMP PRF number (internal)"
-                      style={{ fontSize: '10.5px', color: t.text3, fontFamily: 'monospace', background: `${t.text3}12`, borderRadius: '4px', padding: '2px 6px' }}>
-                      {c.tmp_prf_no}
                     </span>
                   )}
                   {c.movement_type && (
