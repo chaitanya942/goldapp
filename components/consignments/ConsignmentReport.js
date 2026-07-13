@@ -1287,7 +1287,7 @@ export default function ConsignmentReport() {
 
       {/* Footer note */}
       <div style={{ fontSize: '10px', color: t.text4, textAlign: 'right' }}>
-        Permanent ledger of consignments created (approved onward, excludes cancelled) · &quot;Consignment date&quot; = <code style={{ background: t.card2, padding: '1px 4px', borderRadius: '3px', color: t.text3 }}>consignments.created_at</code> (IST) · persists after receipt
+        Permanent ledger of consignments created (approved onward, excludes cancelled) · <strong style={{ color: t.text3 }}>movements to HO only</strong> — branch → hub transfers are excluded; a hub&apos;s bills (incl. those transferred in) appear when it ships to HO · &quot;Consignment date&quot; = <code style={{ background: t.card2, padding: '1px 4px', borderRadius: '3px', color: t.text3 }}>consignments.created_at</code> (IST) · persists after receipt
       </div>
 
       {toast && <Toast msg={toast.msg} type={toast.type} onDone={() => setToast(null)} />}
