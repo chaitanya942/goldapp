@@ -3706,30 +3706,44 @@ export async function POST(req) {
         .eq('id', id)
     }
 
-    // Clear the portal-doc fields locally so the UI stops showing them as
-    // active. Done after the RPC so the RPC's "already cancelled" guard
-    // doesn't trip on a row we've just cancelled.
+    // Clear the portal-doc fields locally so the UI stops showing them as active.
+    //
+    // NEVER do this on a FORCE-LOCAL cancel. In that path we deliberately skipped
+    // NIC/IRP, so the EWB / IRN is STILL LIVE on the government portal — wiping the
+    // number here would destroy the only reference anyone could use to go cancel it
+    // there, leaving an active E-Way Bill with no matching movement and no record of
+    // it on our side. Keep the numbers; the row is already marked cancelled, so the
+    // UI shows it as cancelled either way, and accounts retains what it needs to
+    // clean up the portal (or let the EWB expire).
     const clearUpdate = {}
-    if (c.eway_bill_no) {
-      clearUpdate.eway_bill_no = null
-      clearUpdate.ewb_valid_until = null
-      clearUpdate.ewb_generated_at = null
-      clearUpdate.ewb_generation_started_at = null
+    if (!force_local) {
+      if (c.eway_bill_no) {
+        clearUpdate.eway_bill_no = null
+        clearUpdate.ewb_valid_until = null
+        clearUpdate.ewb_generated_at = null
+        clearUpdate.ewb_generation_started_at = null
+      }
+      if (c.irn) {
+        clearUpdate.irn = null
+        clearUpdate.ack_no = null
+        clearUpdate.ack_dt = null
+        clearUpdate.signed_qr_code = null
+        clearUpdate.einvoice_generated_at = null
+      }
+      if (Object.keys(clearUpdate).length) {
+        await supabase.from('consignments').update(clearUpdate).eq('id', id)
+      }
     }
-    if (c.irn) {
-      clearUpdate.irn = null
-      clearUpdate.ack_no = null
-      clearUpdate.ack_dt = null
-      clearUpdate.signed_qr_code = null
-      clearUpdate.einvoice_generated_at = null
-    }
-    if (Object.keys(clearUpdate).length) {
-      await supabase.from('consignments').update(clearUpdate).eq('id', id)
-    }
+
+    // What is still live on the portal after this cancel? Force-local always leaves
+    // the doc standing; the normal path leaves nothing.
+    const stillLiveOnPortal = force_local
+      ? [c.eway_bill_no ? `EWB ${c.eway_bill_no}` : null, c.irn ? `IRN ${c.irn}` : null].filter(Boolean)
+      : []
 
     await logConsignmentEvent(supabase, {
       consignment_id: id,
-      event_type:     'cancellation_approved',
+      event_type:     force_local ? 'cancellation_forced_local' : 'cancellation_approved',
       actor_email:    actorEmail,
       actor_role:     auth.role,
       details: {
@@ -3737,16 +3751,34 @@ export async function POST(req) {
         requested_by:      c.cancellation_requested_by,
         requested_at:      c.cancellation_requested_at,
         portal_cancelled:  portalCancelled,
+        // The whole point of the force-local escape hatch: these documents are
+        // STILL VALID on NIC/IRP. Recorded so an auditor can always find them.
+        portal_still_live: stillLiveOnPortal,
+        forced_local:      !!force_local,
+        eway_bill_no:      c.eway_bill_no || null,
+        irn:               c.irn || null,
       },
     })
 
-    // Compose a user-facing message that names what was cancelled where.
-    const parts = ['Cancellation approved.', 'Bills returned to source branch.']
-    if (portalCancelled.length) parts.push(portalCancelled.join(' · ') + '.')
+    // Compose a user-facing message that names what was cancelled where — and,
+    // crucially, what was NOT. A bare "Cancellation approved." on a force-local
+    // cancel reads as success when the E-Way Bill is still live on NIC.
+    const parts = []
+    if (force_local) {
+      parts.push('Cancelled in GoldApp only. Bills returned to source branch.')
+      if (stillLiveOnPortal.length) {
+        parts.push(`⚠ ${stillLiveOnPortal.join(' and ')} is STILL ACTIVE on the portal — cancel it on NIC/IRP or let it expire. The number has been kept on this consignment.`)
+      }
+    } else {
+      parts.push('Cancellation approved.', 'Bills returned to source branch.')
+      if (portalCancelled.length) parts.push(portalCancelled.join(' · ') + '.')
+    }
 
     return Response.json({
-      data:    rpcCancelled || { id, status: 'cancelled' },
-      message: parts.join(' '),
+      data:              rpcCancelled || { id, status: 'cancelled' },
+      message:           parts.join(' '),
+      forced_local:      !!force_local,
+      portal_still_live: stillLiveOnPortal,
     })
   }
 

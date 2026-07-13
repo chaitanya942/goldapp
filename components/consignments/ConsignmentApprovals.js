@@ -748,7 +748,7 @@ export default function ConsignmentApprovals() {
                             : `The EWB ${c.eway_bill_no || ''} will remain on NIC — it expires naturally or can be cancelled on the NIC portal.`
                           const okForce = await openConfirm({
                             title: `Force cancel ${c.tmp_prf_no} locally?`,
-                            message: `${portalLabel} rejected the cancel call:\n\n${j.error}\n\nForcing local cancellation will:\n1. Mark the consignment cancelled in our DB\n2. Return all attached bills to source branch\n3. Clear EWB / IRN fields locally\n\n${portalNote}\n\nThis is irreversible from our side. Proceed only if you've verified the portal state.`,
+                            message: `${portalLabel} rejected the cancel call:\n\n${j.error}\n\nForcing local cancellation will:\n1. Mark the consignment cancelled in our DB\n2. Return all attached bills to source branch\n3. KEEP the EWB / IRN number on record (so you can still cancel it on the portal)\n\n${portalNote}\n\nThe document stays LIVE on the portal — this only cancels it in GoldApp. Irreversible from our side.`,
                             confirmLabel: 'Force cancel locally',
                             danger: true,
                           })
@@ -759,7 +759,12 @@ export default function ConsignmentApprovals() {
                           })
                           const j2 = await r2.json()
                           if (!r2.ok || j2.error) { showToast(j2.error || 'Force-cancel failed', 'error'); return }
-                          showToast(j2.message || 'Cancellation force-applied locally. Verify portal state separately.', 'success')
+                          // A force-local cancel is NOT a clean success — the portal doc is
+                          // still live. Surface it as a warning so accounts follows up.
+                          showToast(
+                            j2.message || 'Cancelled in GoldApp only — the portal document is still live.',
+                            j2.portal_still_live?.length ? 'error' : 'success',
+                          )
                           fetchCancelRequests(true)
                           return
                         }
@@ -2435,13 +2440,15 @@ function CancelModal({ state, t, onChange, onClose, onConfirm, onCreditNote }) {
           {forceLocalConfirm && (
             <div style={{ background: `${t.orange}10`, border: `2px solid ${t.orange}`, borderRadius: '8px', padding: '14px', marginTop: '14px' }}>
               <div style={{ fontSize: '12px', color: t.orange, fontWeight: 700, marginBottom: '6px' }}>
-                ⚠ Force Cancel — clear local state without NIC
+                ⚠ Force Cancel — cancels in GoldApp only, NOT on NIC
               </div>
               <div style={{ fontSize: '11px', color: t.text2, lineHeight: 1.6, marginBottom: '10px' }}>
-                This will mark the consignment as cancelled in our system, release the bills back to source, and clear the EWB fields. However the <strong>E-Way Bill {c.eway_bill_no} stays live on NIC</strong> until it expires naturally (or you cancel it manually on ewaybillgst.gov.in).
+                This marks the consignment cancelled in our system and releases the bills back to source. The <strong>E-Way Bill {c.eway_bill_no} stays LIVE on NIC</strong> until it expires naturally — you must cancel it yourself on ewaybillgst.gov.in.
+                <br /><br />
+                The EWB number is <strong>kept on this consignment</strong> so you can still find it to cancel on the portal.
               </div>
               <div style={{ fontSize: '10px', color: t.text3, lineHeight: 1.5 }}>
-                Use this only when NIC keeps refusing (24h expired, GSTIN mismatch, NIC outage). The action is logged as <code style={{ fontFamily: 'monospace', color: t.orange }}>ewb_cancelled_local_only</code> for audit. <br/>
+                Use this only when NIC keeps refusing (24h expired, GSTIN mismatch, NIC outage). Logged as <code style={{ fontFamily: 'monospace', color: t.orange }}>cancellation_forced_local</code> with the live EWB/IRN recorded for audit. <br/>
                 <strong>Cannot be undone.</strong>
               </div>
             </div>
