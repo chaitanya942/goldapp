@@ -256,8 +256,8 @@ function AgeBadge({ days, t }) {
 const SORT_COLS = [
   { key: 'today_bills',   label: "Today's Bills",   align: 'right'  },
   { key: 'today_net_wt',  label: "Today's Net Wt",  align: 'right'  },
-  { key: 'older_bills',   label: 'Pending Bills',   align: 'right'  },
-  { key: 'older_net_wt',  label: 'Pending Net Wt',  align: 'right'  },
+  { key: 'older_bills',   label: 'Previous Bills',  align: 'right'  },
+  { key: 'older_net_wt',  label: 'Previous Net Wt', align: 'right'  },
   { key: 'oldest_age',    label: 'Oldest Bill',     align: 'center' },
 ]
 
@@ -621,7 +621,7 @@ export default function ConsignmentOverview() {
     const headers = [
       'Branch','Region','Total Net Wt (g)',
       "Today's Bills","Today's Net Wt (g)","Today's Value (₹)",
-      'Pending Bills','Pending Net Wt (g)','Pending Value (₹)',
+      'Previous Bills','Previous Net Wt (g)','Previous Value (₹)',
       'Oldest Bill (days)','Oldest Bill Date',
       'Last Moved (days ago)','Pickup Time','Total Gross Wt (g)',
     ]
@@ -665,7 +665,7 @@ export default function ConsignmentOverview() {
     const headers = [
       'Branch', 'Region', 'Total Net Wt (g)',
       "Today's Bills", "Today's Net Wt (g)", "Today's Value (₹)",
-      'Pending Bills', 'Pending Net Wt (g)', 'Pending Value (₹)',
+      'Previous Bills', 'Previous Net Wt (g)', 'Previous Value (₹)',
       'Oldest Bill (days)', 'Oldest Bill Date', 'Last Moved (days ago)', 'Pickup Time', 'Total Gross Wt (g)',
     ]
     const aoa = [headers]
@@ -1594,11 +1594,11 @@ export default function ConsignmentOverview() {
                     {isOutside && (<>
                     <th style={{ ...thBase, textAlign: 'center', cursor: 'pointer', color: sortKey === 'older_bills' ? t.orange : t.text4 }}
                         onClick={() => handleSort('older_bills')}>
-                      Pending Bills <SortIcon col="older_bills" />
+                      Previous Bills <SortIcon col="older_bills" />
                     </th>
                     <th style={{ ...thBase, ...sep, textAlign: 'center', cursor: 'pointer', color: sortKey === 'older_net_wt' ? t.orange : t.text4 }}
                         onClick={() => handleSort('older_net_wt')}>
-                      Pending Net Wt <SortIcon col="older_net_wt" />
+                      Previous Net Wt <SortIcon col="older_net_wt" />
                     </th>
 
                     {/* Sortable: Age */}
@@ -1747,14 +1747,14 @@ export default function ConsignmentOverview() {
                         </td>
 
                         {isOutside && (<>
-                        {/* Pending Bills */}
+                        {/* Previous Bills */}
                         <td style={{ ...pendCol, padding: '13px 14px', textAlign: 'center' }}>
                           {hasPending
                             ? <span style={{ fontSize: '15.5px', color: t.orange, fontFamily: 'monospace', fontWeight: 700 }}>{b.older_bills}</span>
                             : <span style={{ fontSize: '12.5px', color: t.text4 }}>—</span>}
                         </td>
 
-                        {/* Pending Net Wt */}
+                        {/* Previous Net Wt */}
                         <td style={{ ...sep, ...pendCol, padding: '13px 14px', textAlign: 'center' }}>
                           {hasPending
                             ? <span style={{ fontSize: '15px', color: t.orange, fontFamily: 'monospace' }}>{fmt(b.older_net_wt, 2)}<span style={{ fontSize: '11px', marginLeft: '2px' }}>g</span></span>
