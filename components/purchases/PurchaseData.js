@@ -590,26 +590,6 @@ export default function PurchaseData() {
             </button>
           )
         })}
-        <div style={{ width: '1px', height: '18px', background: t.border, margin: '0 6px', flexShrink: 0 }} />
-        {[
-          ['Today', setToday],
-          ['Yesterday', setYesterday],
-          ['This Week', setThisWeek],
-          ['This Month', setThisMonth],
-        ].map(([label, fn]) => (
-          <button key={label} onClick={fn}
-            style={{ padding: '5px 12px', borderRadius: '100px', border: `1px solid ${t.border}`, background: 'transparent', color: t.text3, fontSize: '.65rem', cursor: 'pointer', transition: 'all .15s', letterSpacing: '.04em' }}
-            onMouseEnter={e => { e.currentTarget.style.borderColor = t.gold; e.currentTarget.style.color = t.gold }}
-            onMouseLeave={e => { e.currentTarget.style.borderColor = t.border; e.currentTarget.style.color = t.text3 }}>
-            {label}
-          </button>
-        ))}
-        {(fromDate || toDate || dispatchedFrom || dispatchedTo || filterBranch || filterStatus || filterTxn || search || filterCrmStatus || filterCrmSource) && (
-          <button onClick={clearFilters}
-            style={{ padding: '5px 12px', borderRadius: '100px', border: `1px solid ${t.red}40`, background: 'transparent', color: t.red, fontSize: '.65rem', cursor: 'pointer', marginLeft: '8px' }}>
-            Clear all
-          </button>
-        )}
       </div>
 
       {/* FILTERS */}
@@ -634,6 +614,26 @@ export default function PurchaseData() {
           <span style={{ fontSize: '.68rem', color: t.text4 }}>→</span>
           <input type="date" style={{ ...s.select, width: 'auto' }} value={toDate} onChange={e => { setToDate(e.target.value); setPage(0) }} />
         </div>
+        {/* Quick date shortcuts — sit beside the Purchase range since they set it */}
+        {[
+          ['Today', setToday],
+          ['Yesterday', setYesterday],
+          ['This Week', setThisWeek],
+          ['This Month', setThisMonth],
+        ].map(([label, fn]) => (
+          <button key={label} onClick={fn}
+            style={{ padding: '6px 12px', borderRadius: '100px', border: `1px solid ${t.border}`, background: 'transparent', color: t.text3, fontSize: '.65rem', cursor: 'pointer', transition: 'all .15s', letterSpacing: '.04em' }}
+            onMouseEnter={e => { e.currentTarget.style.borderColor = t.gold; e.currentTarget.style.color = t.gold }}
+            onMouseLeave={e => { e.currentTarget.style.borderColor = t.border; e.currentTarget.style.color = t.text3 }}>
+            {label}
+          </button>
+        ))}
+        {(fromDate || toDate || filterBranch || filterStatus || filterTxn || search || filterCrmStatus || filterCrmSource) && (
+          <button onClick={clearFilters}
+            style={{ padding: '6px 12px', borderRadius: '100px', border: `1px solid ${t.red}40`, background: 'transparent', color: t.red, fontSize: '.65rem', cursor: 'pointer' }}>
+            Clear all
+          </button>
+        )}
         {/* Dispatched-date filter and CSV export removed — Excel is the only export,
             and it sits at the right end of the filter row where Dispatched used to be. */}
         <button style={{ ...s.btnSmall, marginLeft: 'auto' }} disabled={exporting} onClick={() => handleExport('xlsx')}
