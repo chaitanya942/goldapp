@@ -351,13 +351,25 @@ export default function ConsignmentOverview() {
   // complained the constant flicker was irritating. First-load + the manual
   // Refresh click still set loading; the new-arrival pulse + the freshness
   // timestamp signal that data is moving.
+  // Signature-guarded data setter. The mount fires 2-3 fetches in quick succession
+  // (initial load + post-sync refetch + a realtime burst), and the 45s poll fires
+  // more — almost always with IDENTICAL rows. Replacing `data` with a fresh array
+  // each time repainted the whole table for no change, and that repeated repaint was
+  // the flicker. Compare a cheap signature of the visible fields and skip setData
+  // when nothing changed, so redundant fetches become true no-ops.
+  const dataSigRef = useRef(null)
+  const applyData = useCallback((rows) => {
+    const sig = rows.map(b =>
+      `${b.branch_name}|${b.total_bills || 0}|${b.today_bills || 0}|${b.older_bills || 0}|${b.total_net_wt || 0}|${b.today_net_wt || 0}|${b.older_net_wt || 0}|${b.total_gross_wt || 0}|${b.last_moved_at || ''}|${b.oldest_date || ''}`
+    ).join('¦')
+    if (sig === dataSigRef.current) return
+    dataSigRef.current = sig
+    setData(rows)
+  }, [])
+
   const fetchData = useCallback(async (silent = false) => {
     const ck = ckFor(scopeTab)
-    // Repaint from THIS tab's own cache first, so a tab switch never shows the
-    // previous tab's rows while the new fetch is in flight (that was the flicker).
-    const cached = getCache(ck)
-    if (cached) setData(cached)
-    if (!silent && !cached) setLoading(true)
+    if (!silent && !getCache(ck)) setLoading(true)
     try {
       // Pull Bangalore branches into the response only when the Bangalore
       // scope tab is active. Outstation view keeps its lighter payload.
@@ -388,7 +400,7 @@ export default function ConsignmentOverview() {
         setTimeout(() => setRecentlyChanged(new Set()), 6000)
       }
       setCache(ck, next)
-      setData(next)
+      applyData(next)
       setLastRefresh(new Date())
       setLoadError(null)
       // Per-(branch, purchase_date) breakdown powers the date chips (best-effort).
@@ -414,6 +426,9 @@ export default function ConsignmentOverview() {
   useEffect(() => {
     // If we already have cached rows from a previous mount, refresh silently
     // so the screen never flips to a spinner on re-open.
+    // On a tab switch, swap straight to THIS tab's cached rows (or empty) before the
+    // fetch resolves — never leave the previous tab's rows on screen for a frame.
+    applyData(getCache(ckFor(scopeTab)) ?? [])
     const haveCache = !!getCache(ckFor(scopeTab))
     fetchData(haveCache)
     triggerSync({ minIntervalMs: 0 }).then(res => { if (res) fetchData(true) })  // silent: data already on screen
