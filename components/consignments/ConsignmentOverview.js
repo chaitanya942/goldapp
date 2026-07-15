@@ -45,6 +45,14 @@ const SCOPE_TABS = [
   { key: 'rokapts',   label: 'ROK · AP · TS', regions: ['Rest of Karnataka', 'Andhra Pradesh', 'Telangana'] },
   { key: 'kl',        label: 'KL',            regions: ['Kerala'] },
 ]
+// The scope tab persisted from a prior visit — pure, so both the scopeTab state and
+// the cache-seed initializers can call it without ordering constraints.
+function readInitialScope() {
+  if (typeof window === 'undefined') return 'rokapts'
+  const saved = window.localStorage.getItem('cstock.scopeTab')
+  if (saved === 'outside' || !saved) return 'rokapts'   // migrate old two-tab value
+  return saved
+}
 // Does a region belong to the active scope tab? ROK·AP·TS = everything that
 // isn't Bangalore or Kerala (defensive against new non-Kerala regions).
 const regionInScope = (scopeTab, region) =>
@@ -267,10 +275,18 @@ export default function ConsignmentOverview() {
   const t = THEMES[theme]
   const isMobile = useMobile()
 
+  // Cache is keyed PER SCOPE TAB. Bangalore and ROK·AP·TS return different branch
+  // sets (Bangalore is only fetched with include_bangalore=true), so a single shared
+  // key made switching tabs paint the other tab's rows for a frame — the Bangalore
+  // tab briefly showing "0 of 90" outstation rows before its own data arrived. That
+  // frame IS the flicker. Per-scope keys mean each tab only ever reads its own cache.
+  const initialScope = readInitialScope()
+  const ckFor = (scope) => `co:branch-overview:${scope}`
+
   // Seed from in-memory cache so a re-open paints instantly while a fresh
   // fetch runs silently in the background (stale-while-revalidate).
-  const [data,         setData]         = useState(() => getCache('co:branch-overview') ?? [])
-  const [loading,      setLoading]      = useState(() => !getCache('co:branch-overview'))
+  const [data,         setData]         = useState(() => getCache(ckFor(initialScope)) ?? [])
+  const [loading,      setLoading]      = useState(() => !getCache(ckFor(initialScope)))
   const [search,       setSearch]       = useState('')
   const [activeRegions, setActiveRegions] = useState(() => new Set())   // multi-select region filter
   const toggleRegion = (r) => setActiveRegions(prev => {
@@ -281,13 +297,7 @@ export default function ConsignmentOverview() {
   // treats each branch as independent: click a row to deep-link into
   // Consignment Data and create a consignment for that branch. Region-restricted
   // users only see tabs that intersect their permitted regions (visibleScopeTabs).
-  const [scopeTab, setScopeTab] = useState(() => {
-    if (typeof window === 'undefined') return 'rokapts'
-    const saved = window.localStorage.getItem('cstock.scopeTab')
-    // Migrate the old two-tab value: 'outside' → 'rokapts' (KL now its own tab).
-    if (saved === 'outside' || !saved) return 'rokapts'
-    return saved
-  })
+  const [scopeTab, setScopeTab] = useState(initialScope)
   useEffect(() => {
     if (typeof window !== 'undefined') window.localStorage.setItem('cstock.scopeTab', scopeTab)
   }, [scopeTab])
@@ -342,7 +352,12 @@ export default function ConsignmentOverview() {
   // Refresh click still set loading; the new-arrival pulse + the freshness
   // timestamp signal that data is moving.
   const fetchData = useCallback(async (silent = false) => {
-    if (!silent) setLoading(true)
+    const ck = ckFor(scopeTab)
+    // Repaint from THIS tab's own cache first, so a tab switch never shows the
+    // previous tab's rows while the new fetch is in flight (that was the flicker).
+    const cached = getCache(ck)
+    if (cached) setData(cached)
+    if (!silent && !cached) setLoading(true)
     try {
       // Pull Bangalore branches into the response only when the Bangalore
       // scope tab is active. Outstation view keeps its lighter payload.
@@ -372,7 +387,7 @@ export default function ConsignmentOverview() {
         setRecentlyChanged(justChanged)
         setTimeout(() => setRecentlyChanged(new Set()), 6000)
       }
-      setCache('co:branch-overview', next)
+      setCache(ck, next)
       setData(next)
       setLastRefresh(new Date())
       setLoadError(null)
@@ -399,7 +414,7 @@ export default function ConsignmentOverview() {
   useEffect(() => {
     // If we already have cached rows from a previous mount, refresh silently
     // so the screen never flips to a spinner on re-open.
-    const haveCache = !!getCache('co:branch-overview')
+    const haveCache = !!getCache(ckFor(scopeTab))
     fetchData(haveCache)
     triggerSync({ minIntervalMs: 0 }).then(res => { if (res) fetchData(true) })  // silent: data already on screen
     const interval = setInterval(() => {
