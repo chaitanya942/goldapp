@@ -475,13 +475,6 @@ export default function PurchaseData() {
           </div>
         </div>
         <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
-          {/* Auto-sync freshness indicator — replaces the removed manual Sync CRM
-              button; the goldapp-cron worker pulls the CRM roughly every 60s. */}
-          <div title="CRM data syncs automatically every ~60s via the background worker"
-            style={{ display: 'flex', alignItems: 'center', gap: '7px', padding: '6px 13px', borderRadius: '100px', border: `1px solid ${t.green}44`, background: `${t.green}12` }}>
-            <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: t.green, boxShadow: `0 0 0 3px ${t.green}22` }} />
-            <span style={{ fontSize: '.66rem', color: t.green, fontWeight: 600, letterSpacing: '.03em' }}>Auto-synced</span>
-          </div>
           {/* "Delete All" mass-delete removed — data is CRM-synced and auto-maintained.
               Per-row "Delete N Selected" is kept below for targeted cleanup. */}
           {isSuperAdmin && selectedIds.size > 0 && (
@@ -641,24 +634,13 @@ export default function PurchaseData() {
           <span style={{ fontSize: '.68rem', color: t.text4 }}>→</span>
           <input type="date" style={{ ...s.select, width: 'auto' }} value={toDate} onChange={e => { setToDate(e.target.value); setPage(0) }} />
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }} title="Filter by 'In Consignment Since' — when the bill transitioned at_branch → in_consignment">
-          <span style={{ fontSize: '.68rem', color: t.text4 }}>Dispatched</span>
-          <input type="date" style={{ ...s.select, width: 'auto' }} value={dispatchedFrom} onChange={e => { setDispatchedFrom(e.target.value); setPage(0) }} />
-          <span style={{ fontSize: '.68rem', color: t.text4 }}>→</span>
-          <input type="date" style={{ ...s.select, width: 'auto' }} value={dispatchedTo} onChange={e => { setDispatchedTo(e.target.value); setPage(0) }} />
-        </div>
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: '6px', alignItems: 'center' }}>
-          <button style={s.btnSmall} disabled={exporting} onClick={() => handleExport('csv')}
-            onMouseEnter={e => { e.currentTarget.style.color = t.gold; e.currentTarget.style.borderColor = `${t.gold}60` }}
-            onMouseLeave={e => { e.currentTarget.style.color = t.text3; e.currentTarget.style.borderColor = t.border }}>
-            {exporting ? '...' : '↓ CSV'}
-          </button>
-          <button style={s.btnSmall} disabled={exporting} onClick={() => handleExport('xlsx')}
-            onMouseEnter={e => { e.currentTarget.style.color = t.gold; e.currentTarget.style.borderColor = `${t.gold}60` }}
-            onMouseLeave={e => { e.currentTarget.style.color = t.text3; e.currentTarget.style.borderColor = t.border }}>
-            {exporting ? '...' : '↓ Excel'}
-          </button>
-        </div>
+        {/* Dispatched-date filter and CSV export removed — Excel is the only export,
+            and it sits at the right end of the filter row where Dispatched used to be. */}
+        <button style={{ ...s.btnSmall, marginLeft: 'auto' }} disabled={exporting} onClick={() => handleExport('xlsx')}
+          onMouseEnter={e => { e.currentTarget.style.color = t.gold; e.currentTarget.style.borderColor = `${t.gold}60` }}
+          onMouseLeave={e => { e.currentTarget.style.color = t.text3; e.currentTarget.style.borderColor = t.border }}>
+          {exporting ? '...' : '↓ Excel'}
+        </button>
       </div>
 
       {/* PAGINATION INFO */}
