@@ -1014,23 +1014,28 @@ export default function BiddingVolume() {
   // Apply the currently-selected bills to the region's OPEN pipeline (owed from
   // prior bids) instead of booking a fresh quota. Server attaches them FIFO to
   // the oldest open-pipeline bookings and recomputes each residual.
-  const closePipelineFromSelected = async () => {
+  // overattach=false → close the pipeline, small excess folds to gain (>10g refused).
+  // overattach=true  → close AND keep the excess attached to the SAME booking as
+  //                    over-attachment (net > booked), instead of a new booking.
+  const closePipelineFromSelected = async (overattach = false) => {
     const billIds = [...selected]
     if (!billIds.length) return
     try {
       const r = await authedFetch('/api/consignments?action=attach_selected_to_pipeline', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ bill_ids: billIds, is_kl: regionTab === 'kl', bidding_date: bookingsDate }),
+        body: JSON.stringify({ bill_ids: billIds, is_kl: regionTab === 'kl', bidding_date: bookingsDate, allow_overattach: overattach }),
       })
       const j = await r.json().catch(() => null)
       if (!r.ok || j?.error) { showToast(j?.error || `Couldn't close pipeline (HTTP ${r.status})`, 'error'); return }
       const d = j?.data || {}
       let msg = `Pipeline back-filled — ${d.attached_bills} bill${d.attached_bills === 1 ? '' : 's'}, ${fmt(d.pipeline_closed_g || 0, 2)} g closed`
       if (d.bookings_closed > 0) msg += ` · ${d.bookings_closed} booking${d.bookings_closed === 1 ? '' : 's'} fully closed`
+      if (d.over_attached_g > 0.001) msg += ` · ${fmt(d.over_attached_g, 2)} g over-attached`
       if (d.gain_folded_g > 0.001) msg += ` · ${fmt(d.gain_folded_g, 2)} g excess → gain`
       if (d.skipped > 0) msg += ` · ${d.skipped} bill${d.skipped === 1 ? '' : 's'} didn't fit (no open pipeline left)`
       showToast(msg + '.', 'success')
       setSelected(new Set())
+      setActiveTab('bookings')
       fetchAll(true)
     } catch (err) {
       showToast(err?.message || 'Close pipeline failed — network error', 'error')
@@ -2038,11 +2043,20 @@ export default function BiddingVolume() {
               if (regionPipe <= 0.001 || selBookingWt <= regionPipe + 10) return null
               const remainder = selBookingWt - regionPipe
               return (
-                <button onClick={() => setShowSplitModal(true)}
-                  title={`Close the ${fmt(regionPipe, 2)} g pipeline with part of this, and book the remaining ${fmt(remainder, 2)} g to a new buyer`}
-                  style={{ background: `${t.gold}14`, color: t.gold, border: `1px solid ${t.gold}80`, borderRadius: 8, padding: '9px 18px', fontSize: 12.5, fontWeight: 800, cursor: 'pointer', whiteSpace: 'nowrap' }}>
-                  ⇉ Close {fmt(regionPipe, 2)}g + book {fmt(remainder, 2)}g
-                </button>
+                <span style={{ display: 'inline-flex', gap: 8 }}>
+                  <button onClick={() => setShowSplitModal(true)}
+                    title={`Close the ${fmt(regionPipe, 2)} g pipeline with part of this, and book the remaining ${fmt(remainder, 2)} g to a NEW buyer`}
+                    style={{ background: `${t.gold}14`, color: t.gold, border: `1px solid ${t.gold}80`, borderRadius: 8, padding: '9px 18px', fontSize: 12.5, fontWeight: 800, cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                    ⇉ Close {fmt(regionPipe, 2)}g + book {fmt(remainder, 2)}g
+                  </button>
+                  {/* Alternative: close the pipeline and keep the ~remainder attached
+                      to the SAME booking as over-attachment, instead of a new booking. */}
+                  <button onClick={() => closePipelineFromSelected(true)}
+                    title={`Close the ${fmt(regionPipe, 2)} g pipeline and OVER-ATTACH the remaining ${fmt(remainder, 2)} g to that same booking (net will exceed booked)`}
+                    style={{ background: `${t.orange || '#d98a3a'}14`, color: t.orange || '#d98a3a', border: `1px solid ${t.orange || '#d98a3a'}80`, borderRadius: 8, padding: '9px 18px', fontSize: 12.5, fontWeight: 800, cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                    ⇉ Close + over-attach {fmt(remainder, 2)}g
+                  </button>
+                </span>
               )
             })()}
             <button onClick={() => setShowBookModal(true)}

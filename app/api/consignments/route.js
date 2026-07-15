@@ -5013,7 +5013,14 @@ export async function POST(req) {
   // before spilling to the next. Mirrors the live residual math used elsewhere:
   //   residual = weight − (attached_net + pending) × (1 + rate)
   if (action === 'attach_selected_to_pipeline') {
-    const { bill_ids, is_kl, bidding_date } = body
+    // allow_overattach: ops chose "close & over-attach" instead of splitting the
+    // remainder into a new booking. The selected bill fills the open pipeline and
+    // the EXCESS stays attached to that same booking as over-attachment (net now
+    // exceeds booked). We skip the >10 g refusal, and — unlike a clean close — we do
+    // NOT settle the booking or fold the excess into gain: the over-attachment is
+    // derived live from net > booked (the "⚠ over-attached" chip + Auto-fix), and
+    // folding would double-count it.
+    const { bill_ids, is_kl, bidding_date, allow_overattach } = body
     if (!Array.isArray(bill_ids) || bill_ids.length === 0) {
       return Response.json({ error: 'bill_ids[] required' }, { status: 400 })
     }
@@ -5101,15 +5108,15 @@ export async function POST(req) {
       const sourcedAfter  = (bk.attached + (netAdded[bk.id] || 0) + bk.pending_g) * (1 + bk.rate)
       const residualAfter = Math.max(0, bk.weight - sourcedAfter)
       const overshoot     = Math.max(0, sourcedAfter - bk.weight)
-      if (overshoot > 10.001) {
-        return Response.json({ error: `Selection overshoots a booking by ${overshoot.toFixed(2)} g — only up to 10 g can fold into gain. Deselect a bill.` }, { status: 400 })
+      if (!allow_overattach && overshoot > 10.001) {
+        return Response.json({ error: `Selection overshoots a booking by ${overshoot.toFixed(2)} g — only up to 10 g can fold into gain. Use “Close & over-attach”, or deselect a bill.` }, { status: 400 })
       }
       plan.push({ bk, ids, residualAfter, overshoot })
     }
 
     // 5) Apply the validated plan.
     const nowIso = new Date().toISOString()
-    let closedBookings = 0, closedG = 0, gainFoldedG = 0
+    let closedBookings = 0, closedG = 0, gainFoldedG = 0, overAttachedG = 0
     for (const p of plan) {
       const { error: upErr } = await supabase
         .from('purchases')
@@ -5117,8 +5124,20 @@ export async function POST(req) {
         .in('id', p.ids)
       if (upErr) return Response.json({ error: upErr.message }, { status: 500 })
       const upd = { pipeline_remaining_g: p.residualAfter }
-      if (p.residualAfter <= 0.001) { upd.pipeline_closed_at = nowIso; closedBookings++ }
-      if (p.overshoot > 0.001) { upd.additional_gain_g = p.bk.additional_gain_g + p.overshoot; gainFoldedG += p.overshoot }
+      // A big overshoot in over-attach mode: the pipeline is filled (remaining 0) but
+      // the booking now holds MORE than booked. Leave it UNSETTLED (no pipeline_closed_at)
+      // and DON'T fold into gain, so it surfaces as "⚠ over-attached" with Auto-fix —
+      // exactly the state ops asked for. A small (≤10 g) overshoot still closes cleanly
+      // and folds into gain, same as before.
+      const overAttach = allow_overattach && p.overshoot > 10.001
+      if (p.residualAfter <= 0.001) {
+        if (overAttach) {
+          overAttachedG += p.overshoot
+        } else {
+          upd.pipeline_closed_at = nowIso; closedBookings++
+          if (p.overshoot > 0.001) { upd.additional_gain_g = p.bk.additional_gain_g + p.overshoot; gainFoldedG += p.overshoot }
+        }
+      }
       await supabase.from('cal_quotas').update(upd).eq('id', p.bk.id)
       closedG += (p.bk.residual - p.residualAfter)   // grams of pipeline actually closed
     }
@@ -5129,6 +5148,7 @@ export async function POST(req) {
       bookings_closed:  closedBookings,
       pipeline_closed_g: Number(closedG.toFixed(3)),
       gain_folded_g:    Number(gainFoldedG.toFixed(3)),
+      over_attached_g:  Number(overAttachedG.toFixed(3)),
       skipped:          eligible.length - attachedCount,
     } })
   }
