@@ -472,14 +472,9 @@ export default function PurchaseData() {
           <div style={s.sub}>Live data synced from CRM · {totalCount.toLocaleString('en-IN')} records</div>
         </div>
         <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
-          {isSuperAdmin && totalCount > 0 && (
-            <button style={{ ...s.btnDanger, borderColor: `${t.red}80` }}
-              onClick={() => { setDeleteAllMode(true); setShowDeleteConfirm(true) }}
-              onMouseEnter={e => { e.currentTarget.style.background = `${t.red}15` }}
-              onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}>
-              🗑 Delete All {totalCount.toLocaleString('en-IN')}
-            </button>
-          )}
+          {/* "Delete All" mass-delete removed — data is CRM-synced and auto-maintained;
+              a bulk wipe of the whole table is not an operation ops should have one click away.
+              Per-row "Delete N Selected" is kept below for targeted cleanup. */}
           {isSuperAdmin && selectedIds.size > 0 && (
             <button style={s.btnDanger}
               onClick={() => { setDeleteAllMode(false); setShowDeleteConfirm(true) }}

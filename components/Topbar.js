@@ -408,15 +408,8 @@ export default function Topbar({ onMenuToggle, isMobile }) {
       {/* ── Right actions ── */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
 
-        {/* View As (super_admin only) */}
-        {role === 'super_admin' && <ViewAsDropdown previewRole={previewRole} setPreviewRole={setPreviewRole} t={t} />}
-        {role === 'super_admin' && <div style={{ width: '1px', height: '22px', background: t.border, flexShrink: 0 }} />}
-
-        {/* Sync CRM */}
-        {canSync && !previewRole && <SyncButton syncing={syncing} onSync={handleSync} t={t} />}
-
-        {/* Divider */}
-        {canSync && !previewRole && <div style={{ width: '1px', height: '22px', background: t.border, flexShrink: 0 }} />}
+        {/* View As and manual Sync CRM removed — the cron worker (goldapp-cron)
+            now syncs the CRM automatically every 60s, so manual sync is redundant. */}
 
         {/* Theme toggle */}
         <ThemeToggle theme={theme} setTheme={setTheme} t={t} />
