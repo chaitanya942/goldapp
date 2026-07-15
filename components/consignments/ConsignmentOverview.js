@@ -1633,9 +1633,7 @@ export default function ConsignmentOverview() {
                     {/* Sortable: Pending — hidden on Bangalore tab because
                         every Bangalore bill reaches HO the same day, so a
                         'pending' bucket has no operational meaning. */}
-                    {/* Previous — same-day Bangalore has no pending bucket, so kept
-                        outside-only. */}
-                    {isOutside && (<>
+                    {/* Previous — shown on EVERY tab (Bangalore too). */}
                     <th style={{ ...thBase, textAlign: 'center', cursor: 'pointer', color: sortKey === 'older_bills' ? t.orange : t.text4 }}
                         onClick={() => handleSort('older_bills')}>
                       Previous Bills <SortIcon col="older_bills" />
@@ -1644,9 +1642,9 @@ export default function ConsignmentOverview() {
                         onClick={() => handleSort('older_net_wt')}>
                       Previous Net Wt <SortIcon col="older_net_wt" />
                     </th>
-                    </>)}
 
-                    {/* Oldest / Last Moved / Move — shown on EVERY tab (Bangalore too). */}
+                    {/* Oldest / Last Moved — outside only (Bangalore is same-day). */}
+                    {isOutside && (<>
                     <th style={{ ...thBase, textAlign: 'center', cursor: 'pointer', color: sortKey === 'oldest_age' ? t.red : t.text4 }}
                         onClick={() => handleSort('oldest_age')}>
                       Oldest Bill <SortIcon col="oldest_age" />
@@ -1655,6 +1653,8 @@ export default function ConsignmentOverview() {
                         onClick={() => handleSort('last_moved_days_ago')}>
                       Last Moved <SortIcon col="last_moved_days_ago" />
                     </th>
+                    </>)}
+
                     <th style={{ ...thBase, textAlign: 'center' }}>Move</th>
                   </tr>
 
@@ -1682,16 +1682,17 @@ export default function ConsignmentOverview() {
                     <td style={{ ...sep, padding: '10px 9px', textAlign: 'center', fontSize: '13.5px', color: t.blue, fontFamily: 'monospace', fontWeight: 600, background: `${t.gold}14` }}>
                       {fmt(scopeTab === 'bangalore' ? grandGrossWt : grandTodayWt, 2)}<span style={{ fontSize: '11px', marginLeft: '2px' }}>g</span>
                     </td>
-                    {isOutside && (<>
+                    {/* Previous totals — all tabs */}
                     <td style={{ padding: '10px 9px', textAlign: 'center', fontSize: '15px', color: t.orange, fontFamily: 'monospace', fontWeight: 700, background: `${t.gold}14` }}>
                       {grandOlder || '—'}
                     </td>
                     <td style={{ ...sep, padding: '10px 9px', textAlign: 'center', fontSize: '13.5px', color: t.orange, fontFamily: 'monospace', fontWeight: 600, background: `${t.gold}14` }}>
                       {fmt(grandOlderWt, 2)}<span style={{ fontSize: '11px', marginLeft: '2px' }}>g</span>
                     </td>
-                    </>)}
-                    {/* Oldest · Last Moved · Move — all tabs */}
-                    <td colSpan={3} style={{ padding: '10px 9px', background: `${t.gold}14` }} />
+                    {/* Oldest + Last Moved filler — outside only */}
+                    {isOutside && <td colSpan={2} style={{ padding: '10px 9px', background: `${t.gold}14` }} />}
+                    {/* Move filler — all tabs */}
+                    <td style={{ padding: '10px 9px', background: `${t.gold}14` }} />
                   </tr>
                 </thead>
                 <tbody>
@@ -1784,32 +1785,28 @@ export default function ConsignmentOverview() {
                             : <span style={{ fontSize: '12.5px', color: t.text4 }}>—</span>}
                         </td>
 
-                        {/* Previous — outside only (Bangalore is same-day, always empty). */}
-                        {isOutside && (<>
-                        {/* Previous Bills */}
+                        {/* Previous Bills — all tabs */}
                         <td style={{ ...pendCol, padding: '13px 14px', textAlign: 'center' }}>
                           {hasPending
                             ? <span style={{ fontSize: '15.5px', color: t.orange, fontFamily: 'monospace', fontWeight: 700 }}>{b.older_bills}</span>
                             : <span style={{ fontSize: '12.5px', color: t.text4 }}>—</span>}
                         </td>
 
-                        {/* Previous Net Wt */}
+                        {/* Previous Net Wt — all tabs */}
                         <td style={{ ...sep, ...pendCol, padding: '13px 14px', textAlign: 'center' }}>
                           {hasPending
                             ? <span style={{ fontSize: '15px', color: t.orange, fontFamily: 'monospace' }}>{fmt(b.older_net_wt, 2)}<span style={{ fontSize: '11px', marginLeft: '2px' }}>g</span></span>
                             : <span style={{ fontSize: '12.5px', color: t.text4 }}>—</span>}
                         </td>
-                        </>)}
 
-                        {/* Oldest Bill — all tabs */}
+                        {/* Oldest Bill + Last Moved — outside only (Bangalore is same-day). */}
+                        {isOutside && (<>
                         <td style={{ padding: tdPad, textAlign: 'center' }}>
                           <AgeBadge days={b.oldest_age_days} t={t} />
                           {b.oldest_date && (
                             <div style={{ fontSize: '11px', color: t.text4, marginTop: '3px' }}>{fmtDate(b.oldest_date)}</div>
                           )}
                         </td>
-
-                        {/* Last Moved — all tabs */}
                         <td style={{ padding: tdPad, textAlign: 'center' }}>
                           {b.last_moved_days_ago != null
                             ? <span style={{ fontSize: '12.5px', color: t.purple, background: `${t.purple}15`, borderRadius: '5px', padding: '2px 8px', fontWeight: 600, whiteSpace: 'nowrap' }}>{b.last_moved_days_ago}d ago</span>
@@ -1818,6 +1815,7 @@ export default function ConsignmentOverview() {
                             <div style={{ fontSize: '11px', color: t.text4, marginTop: '3px' }}>{fmtTsDate(b.last_moved_at)}</div>
                           )}
                         </td>
+                        </>)}
 
                         {/* Move — all tabs. Deep-links into Consignment Data for this
                             branch; pickup time lives in the tooltip. */}
