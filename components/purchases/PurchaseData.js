@@ -469,11 +469,20 @@ export default function PurchaseData() {
       <div style={s.header}>
         <div>
           <div style={s.title}>Purchase Data</div>
-          <div style={s.sub}>Live data synced from CRM · {totalCount.toLocaleString('en-IN')} records</div>
+          <div style={s.sub}>
+            Live from CRM · {totalCount.toLocaleString('en-IN')} records
+            {kpis?.min_date ? ` · ${(() => { const f = d => new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }); return kpis.min_date === kpis.max_date ? f(kpis.min_date) : `${f(kpis.min_date)} – ${f(kpis.max_date)}` })()}` : ''}
+          </div>
         </div>
         <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
-          {/* "Delete All" mass-delete removed — data is CRM-synced and auto-maintained;
-              a bulk wipe of the whole table is not an operation ops should have one click away.
+          {/* Auto-sync freshness indicator — replaces the removed manual Sync CRM
+              button; the goldapp-cron worker pulls the CRM roughly every 60s. */}
+          <div title="CRM data syncs automatically every ~60s via the background worker"
+            style={{ display: 'flex', alignItems: 'center', gap: '7px', padding: '6px 13px', borderRadius: '100px', border: `1px solid ${t.green}44`, background: `${t.green}12` }}>
+            <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: t.green, boxShadow: `0 0 0 3px ${t.green}22` }} />
+            <span style={{ fontSize: '.66rem', color: t.green, fontWeight: 600, letterSpacing: '.03em' }}>Auto-synced</span>
+          </div>
+          {/* "Delete All" mass-delete removed — data is CRM-synced and auto-maintained.
               Per-row "Delete N Selected" is kept below for targeted cleanup. */}
           {isSuperAdmin && selectedIds.size > 0 && (
             <button style={s.btnDanger}
@@ -493,34 +502,45 @@ export default function PurchaseData() {
         </div>
       )}
       {kpis && (() => {
-        const fmtD = (d) => d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'
-        const dateRange = kpis.min_date
-          ? (kpis.min_date === kpis.max_date ? fmtD(kpis.min_date) : `${fmtD(kpis.min_date)} — ${fmtD(kpis.max_date)}`)
-          : '—'
-        const cards = [
-          { label: 'Total Records',  value: Number(kpis.total_count).toLocaleString('en-IN'),                                                     color: t.gold,    size: '1.8rem' },
-          { label: 'Date Range',     value: dateRange,                                                                                            color: t.text2,   size: '.85rem' },
-          { label: 'Branches',       value: Number(kpis.branch_count),                                                                            color: '#7eb8d4', size: '1.8rem' },
-          { label: 'Total Gross Wt', value: `${Number(kpis.total_gross).toLocaleString('en-IN', { maximumFractionDigits: 2 })}g`,                 color: t.text1,   size: '1.2rem' },
-          { label: 'Total Net Wt',   value: `${Number(kpis.total_net).toLocaleString('en-IN', { maximumFractionDigits: 2 })}g`,                   color: t.gold,    size: '1.2rem' },
-          { label: 'Total Value',    value: `₹${Number(kpis.total_value).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`,                 color: t.green,   size: '1rem'   },
-          { label: 'Physical',       value: Number(kpis.physical_count).toLocaleString('en-IN'),                                                  color: '#7eb8d4', size: '1.8rem' },
-          { label: 'Takeover',       value: Number(kpis.takeover_count).toLocaleString('en-IN'),                                                  color: '#c9981f', size: '1.8rem' },
+        const inr   = (n) => `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
+        const grams = (n) => `${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 2 })}g`
+        // Primary = money / weight (what the business is actually tracking); given
+        // visual priority. Secondary = counts, shown smaller and muted below.
+        const primary = [
+          { label: 'Total Value',    value: inr(kpis.total_value),   color: t.green },
+          { label: 'Total Gross Wt', value: grams(kpis.total_gross), color: t.text1 },
+          { label: 'Total Net Wt',   value: grams(kpis.total_net),   color: t.gold  },
+        ]
+        const secondary = [
+          { label: 'Total Records', value: Number(kpis.total_count).toLocaleString('en-IN'),    color: t.gold    },
+          { label: 'Physical',      value: Number(kpis.physical_count).toLocaleString('en-IN'), color: '#7eb8d4' },
+          { label: 'Takeover',      value: Number(kpis.takeover_count).toLocaleString('en-IN'), color: '#c9981f' },
+          { label: 'Branches',      value: Number(kpis.branch_count).toLocaleString('en-IN'),   color: '#7eb8d4' },
         ]
         return (
-          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(4, 1fr)', gap: '14px', marginBottom: '28px' }}>
-            {cards.map(c => (
-              <div key={c.label} style={{ ...s.card, textAlign: 'center', padding: '20px 16px', marginBottom: 0 }}>
-                <div style={{ fontSize: c.size, fontWeight: 200, color: c.color, lineHeight: 1.15 }}>{c.value}</div>
-                <div style={{ fontSize: '.6rem', color: t.text3, letterSpacing: '.12em', textTransform: 'uppercase', marginTop: '6px' }}>{c.label}</div>
-              </div>
-            ))}
-          </div>
+          <>
+            <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, 1fr)', gap: '14px', marginBottom: '14px' }}>
+              {primary.map(c => (
+                <div key={c.label} style={{ ...s.card, textAlign: 'center', padding: '22px 16px', marginBottom: 0 }}>
+                  <div style={{ fontSize: 'clamp(1.2rem, 2.4vw, 1.7rem)', fontWeight: 200, color: c.color, lineHeight: 1.1, letterSpacing: '-.01em' }}>{c.value}</div>
+                  <div style={{ fontSize: '.62rem', color: t.text3, letterSpacing: '.13em', textTransform: 'uppercase', marginTop: '8px' }}>{c.label}</div>
+                </div>
+              ))}
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(4, 1fr)', gap: '12px', marginBottom: '24px' }}>
+              {secondary.map(c => (
+                <div key={c.label} style={{ ...s.card, textAlign: 'center', padding: '14px 12px', marginBottom: 0 }}>
+                  <div style={{ fontSize: '1.35rem', fontWeight: 200, color: c.color, lineHeight: 1.1 }}>{c.value}</div>
+                  <div style={{ fontSize: '.58rem', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', marginTop: '6px' }}>{c.label}</div>
+                </div>
+              ))}
+            </div>
+          </>
         )
       })()}
 
-      {/* CRM SOURCE PILLS */}
-      <div style={{ display: 'flex', gap: '8px', marginBottom: '10px', alignItems: 'center' }}>
+      {/* FILTER CHIPS — CRM source · status · quick dates, condensed to one row */}
+      <div style={{ display: 'flex', gap: '8px', marginBottom: '16px', alignItems: 'center', flexWrap: 'wrap' }}>
         {[
           { key: '',        label: 'All Sources' },
           { key: 'old_crm', label: 'Old CRM' },
@@ -546,10 +566,7 @@ export default function PurchaseData() {
             </button>
           )
         })}
-      </div>
-
-      {/* CRM STATUS PILLS */}
-      <div style={{ display: 'flex', gap: '8px', marginBottom: '20px', alignItems: 'center' }}>
+        <div style={{ width: '1px', height: '18px', background: t.border, margin: '0 6px', flexShrink: 0 }} />
         {[
           { key: '',         label: 'All Data' },
           { key: 'approved', label: 'Approved' },
@@ -562,12 +579,12 @@ export default function PurchaseData() {
             <button key={key}
               onClick={() => { setFilterCrmStatus(key); setPage(0) }}
               style={{
-                padding: '7px 20px',
+                padding: '5px 16px',
                 borderRadius: '100px',
                 border: `1px solid ${active ? accent : t.border}`,
                 background: active ? `${accent}18` : 'transparent',
                 color: active ? accent : t.text3,
-                fontSize: '.72rem',
+                fontSize: '.68rem',
                 fontWeight: active ? 600 : 400,
                 letterSpacing: '.05em',
                 cursor: 'pointer',
@@ -580,10 +597,7 @@ export default function PurchaseData() {
             </button>
           )
         })}
-      </div>
-
-      {/* QUICK FILTERS */}
-      <div style={{ display: 'flex', gap: '6px', marginBottom: '12px', flexWrap: 'wrap', alignItems: 'center' }}>
+        <div style={{ width: '1px', height: '18px', background: t.border, margin: '0 6px', flexShrink: 0 }} />
         {[
           ['Today', setToday],
           ['Yesterday', setYesterday],
