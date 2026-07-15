@@ -1633,6 +1633,8 @@ export default function ConsignmentOverview() {
                     {/* Sortable: Pending — hidden on Bangalore tab because
                         every Bangalore bill reaches HO the same day, so a
                         'pending' bucket has no operational meaning. */}
+                    {/* Previous — same-day Bangalore has no pending bucket, so kept
+                        outside-only. */}
                     {isOutside && (<>
                     <th style={{ ...thBase, textAlign: 'center', cursor: 'pointer', color: sortKey === 'older_bills' ? t.orange : t.text4 }}
                         onClick={() => handleSort('older_bills')}>
@@ -1642,25 +1644,18 @@ export default function ConsignmentOverview() {
                         onClick={() => handleSort('older_net_wt')}>
                       Previous Net Wt <SortIcon col="older_net_wt" />
                     </th>
+                    </>)}
 
-                    {/* Sortable: Age */}
+                    {/* Oldest / Last Moved / Move — shown on EVERY tab (Bangalore too). */}
                     <th style={{ ...thBase, textAlign: 'center', cursor: 'pointer', color: sortKey === 'oldest_age' ? t.red : t.text4 }}
                         onClick={() => handleSort('oldest_age')}>
                       Oldest Bill <SortIcon col="oldest_age" />
                     </th>
-
-                    {/* Last Moved */}
                     <th style={{ ...thBase, textAlign: 'center', cursor: 'pointer', color: sortKey === 'last_moved_days_ago' ? t.purple : t.text4 }}
                         onClick={() => handleSort('last_moved_days_ago')}>
                       Last Moved <SortIcon col="last_moved_days_ago" />
                     </th>
-                    </>)}
-
-                    {/* Move — explicit action button (also doubles as the
-                        pickup-time tooltip target so ops still see the schedule).
-                        Hidden on the Bangalore tab — branch-level Move doesn't
-                        apply when dispatch happens at the hub level. */}
-                    {isOutside && <th style={{ ...thBase, textAlign: 'center' }}>Move</th>}
+                    <th style={{ ...thBase, textAlign: 'center' }}>Move</th>
                   </tr>
 
                   {/* Totals row pinned to the top inside <thead> — the whole
@@ -1694,8 +1689,9 @@ export default function ConsignmentOverview() {
                     <td style={{ ...sep, padding: '10px 9px', textAlign: 'center', fontSize: '13.5px', color: t.orange, fontFamily: 'monospace', fontWeight: 600, background: `${t.gold}14` }}>
                       {fmt(grandOlderWt, 2)}<span style={{ fontSize: '11px', marginLeft: '2px' }}>g</span>
                     </td>
-                    <td colSpan={3} style={{ padding: '10px 9px', background: `${t.gold}14` }} />
                     </>)}
+                    {/* Oldest · Last Moved · Move — all tabs */}
+                    <td colSpan={3} style={{ padding: '10px 9px', background: `${t.gold}14` }} />
                   </tr>
                 </thead>
                 <tbody>
@@ -1788,6 +1784,7 @@ export default function ConsignmentOverview() {
                             : <span style={{ fontSize: '12.5px', color: t.text4 }}>—</span>}
                         </td>
 
+                        {/* Previous — outside only (Bangalore is same-day, always empty). */}
                         {isOutside && (<>
                         {/* Previous Bills */}
                         <td style={{ ...pendCol, padding: '13px 14px', textAlign: 'center' }}>
@@ -1802,8 +1799,9 @@ export default function ConsignmentOverview() {
                             ? <span style={{ fontSize: '15px', color: t.orange, fontFamily: 'monospace' }}>{fmt(b.older_net_wt, 2)}<span style={{ fontSize: '11px', marginLeft: '2px' }}>g</span></span>
                             : <span style={{ fontSize: '12.5px', color: t.text4 }}>—</span>}
                         </td>
+                        </>)}
 
-                        {/* Oldest Bill */}
+                        {/* Oldest Bill — all tabs */}
                         <td style={{ padding: tdPad, textAlign: 'center' }}>
                           <AgeBadge days={b.oldest_age_days} t={t} />
                           {b.oldest_date && (
@@ -1811,7 +1809,7 @@ export default function ConsignmentOverview() {
                           )}
                         </td>
 
-                        {/* Last Moved */}
+                        {/* Last Moved — all tabs */}
                         <td style={{ padding: tdPad, textAlign: 'center' }}>
                           {b.last_moved_days_ago != null
                             ? <span style={{ fontSize: '12.5px', color: t.purple, background: `${t.purple}15`, borderRadius: '5px', padding: '2px 8px', fontWeight: 600, whiteSpace: 'nowrap' }}>{b.last_moved_days_ago}d ago</span>
@@ -1820,31 +1818,22 @@ export default function ConsignmentOverview() {
                             <div style={{ fontSize: '11px', color: t.text4, marginTop: '3px' }}>{fmtTsDate(b.last_moved_at)}</div>
                           )}
                         </td>
-                        </>)}
 
-                        {/* Move — explicit affordance for the deep-link nav.
-                            Row click still works; this button restores the
-                            visible CTA the ops team relied on. The pickup
-                            time (was the previous column's data) now lives
-                            in the tooltip so it isn't lost.
-                            Hidden on Bangalore: hub-level dispatch happens
-                            from the flashcards, branch-level move doesn't
-                            apply. */}
-                        {isOutside && (
-                          <td style={{ padding: tdPad, textAlign: 'center' }} onClick={e => e.stopPropagation()}>
-                            <button
-                              title={b.pickup_time ? `Pickup at ${b.pickup_time}` : 'No pickup time set'}
-                              onClick={() => {
-                                setConsignmentDeepLink({ branch: b.branch_name, region: b.region })
-                                setActiveNav('consignment-data')
-                              }}
-                              onMouseEnter={e => { e.currentTarget.style.background = `${t.gold}30`; e.currentTarget.style.borderColor = t.gold }}
-                              onMouseLeave={e => { e.currentTarget.style.background = `${t.gold}18`; e.currentTarget.style.borderColor = `${t.gold}50` }}
-                              style={{ background: `${t.gold}18`, border: `1px solid ${t.gold}50`, borderRadius: '7px', padding: '5px 12px', fontSize: '12.5px', color: t.gold, cursor: 'pointer', fontWeight: 600, whiteSpace: 'nowrap', transition: 'all .15s' }}>
-                              Move →
-                            </button>
-                          </td>
-                        )}
+                        {/* Move — all tabs. Deep-links into Consignment Data for this
+                            branch; pickup time lives in the tooltip. */}
+                        <td style={{ padding: tdPad, textAlign: 'center' }} onClick={e => e.stopPropagation()}>
+                          <button
+                            title={b.pickup_time ? `Pickup at ${b.pickup_time}` : 'No pickup time set'}
+                            onClick={() => {
+                              setConsignmentDeepLink({ branch: b.branch_name, region: b.region })
+                              setActiveNav('consignment-data')
+                            }}
+                            onMouseEnter={e => { e.currentTarget.style.background = `${t.gold}30`; e.currentTarget.style.borderColor = t.gold }}
+                            onMouseLeave={e => { e.currentTarget.style.background = `${t.gold}18`; e.currentTarget.style.borderColor = `${t.gold}50` }}
+                            style={{ background: `${t.gold}18`, border: `1px solid ${t.gold}50`, borderRadius: '7px', padding: '5px 12px', fontSize: '12.5px', color: t.gold, cursor: 'pointer', fontWeight: 600, whiteSpace: 'nowrap', transition: 'all .15s' }}>
+                            Move →
+                          </button>
+                        </td>
 
                       </tr>
                     )
