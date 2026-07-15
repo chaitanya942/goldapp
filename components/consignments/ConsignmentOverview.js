@@ -298,6 +298,10 @@ export default function ConsignmentOverview() {
   // Consignment Data and create a consignment for that branch. Region-restricted
   // users only see tabs that intersect their permitted regions (visibleScopeTabs).
   const [scopeTab, setScopeTab] = useState(initialScope)
+  // Always-current scope, read by in-flight fetches to discard themselves if the
+  // user has since switched tabs (the stale-response guard in fetchData).
+  const scopeRef = useRef(scopeTab)
+  scopeRef.current = scopeTab
   useEffect(() => {
     if (typeof window !== 'undefined') window.localStorage.setItem('cstock.scopeTab', scopeTab)
   }, [scopeTab])
@@ -368,18 +372,26 @@ export default function ConsignmentOverview() {
   }, [])
 
   const fetchData = useCallback(async (silent = false) => {
-    const ck = ckFor(scopeTab)
+    const scope = scopeTab                 // the tab THIS fetch is for
+    const ck = ckFor(scope)
     if (!silent && !getCache(ck)) setLoading(true)
     try {
       // Pull Bangalore branches into the response only when the Bangalore
       // scope tab is active. Outstation view keeps its lighter payload.
-      const qs = scopeTab === 'bangalore' ? '&include_bangalore=true' : ''
+      const qs = scope === 'bangalore' ? '&include_bangalore=true' : ''
       const res  = await authedFetch(`/api/consignments?action=branch_overview${qs}`)
       const json = await res.json()
       // The API returns {data, error} even on 200 when the RPC is missing —
       // surface that instead of silently wiping the screen to "No stock".
       if (json.error) throw new Error(json.error)
       const next = json.data || []
+      // STALE-RESPONSE GUARD. A fetch fired for the previous tab (e.g. the
+      // ROK·AP·TS post-sync refetch) can resolve AFTER the user switches to
+      // Bangalore. Without this it would overwrite the Bangalore rows with
+      // outstation data — 90 branches, none Bangalore → "0 of 90 · No stock".
+      // Only the freshest tab's response is allowed to touch the screen. We still
+      // warm that tab's own cache so returning to it is instant.
+      if (scopeRef.current !== scope) { setCache(ck, next); return }
       // Detect branches whose today_bills count rose since the last poll —
       // flash them so the operator notices new arrivals without scanning every
       // row. Use undefined as the "never seen" sentinel so first load doesn't
