@@ -930,8 +930,8 @@ export default function BranchManagement({ embedded = false } = {}) {
                     {isUpcoming(b) && <span style={{ marginLeft: '6px', fontSize: '.58rem', color: '#6b8cce', border: '1px solid #6b8cce55', borderRadius: '3px', padding: '1px 5px', textTransform: 'uppercase', letterSpacing: '.04em' }}>upcoming</span>}
                     {isIncomplete(b) && <span style={{ marginLeft: '6px', fontSize: '.58rem', color: t.gold, opacity: .6, border: `1px solid ${t.gold}44`, borderRadius: '3px', padding: '1px 4px' }}>incomplete</span>}
                   </td>
-                  <td style={{ ...s.td, fontFamily: 'monospace', fontSize: '.68rem', color: b.crm_branch_id ? t.text2 : t.text4 }}>{b.crm_branch_id || '—'}</td>
-                  <td style={{ ...s.td, fontFamily: 'monospace', fontSize: '.72rem', color: b.branch_code ? t.gold : t.text4 }}>{b.branch_code || '—'}</td>
+                  <td style={{ ...s.td, fontFamily: 'monospace', fontSize: '.68rem', color: b.crm_branch_id ? t.text2 : t.text4, whiteSpace: 'nowrap' }}>{b.crm_branch_id || '—'}</td>
+                  <td style={{ ...s.td, fontFamily: 'monospace', fontSize: '.72rem', color: b.branch_code ? t.gold : t.text4, whiteSpace: 'nowrap' }}>{b.branch_code || '—'}</td>
                   <td style={{ ...s.td, fontSize: '.68rem', color: b.address ? t.text2 : t.text4, maxWidth: '220px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={b.address || ''}>{b.address || '—'}</td>
                   <td style={{ ...s.td, fontSize: '.7rem', color: b.city ? t.text2 : t.text4, whiteSpace: 'nowrap' }}>{b.city || '—'}</td>
                   <td style={{ ...s.td, fontSize: '.72rem', color: b.cluster ? t.text2 : '#c9a84c88', whiteSpace: 'nowrap' }}>{b.cluster || '⚠ missing'}</td>
