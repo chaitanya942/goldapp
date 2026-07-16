@@ -439,7 +439,7 @@ export default function BranchManagement({ embedded = false } = {}) {
     input:      { width: '100%', background: t.bg, border: `1px solid ${t.border}`, borderRadius: '8px', padding: '9px 12px', color: t.text1, fontSize: '.8rem', boxSizing: 'border-box', transition: 'border-color .15s, box-shadow .15s' },
     // Elevated section card (t.card) sits on the recessed editor page (t.bg).
     section:    { background: t.card, border: `1px solid ${t.border}`, borderRadius: '14px', padding: '22px 24px', marginBottom: '16px', boxShadow: '0 1px 2px rgba(40,28,0,.05), 0 10px 30px rgba(40,28,0,.03)' },
-    secHead:    { marginBottom: '18px', paddingBottom: '13px', borderBottom: `1px solid ${t.border}`, display: 'flex', flexDirection: 'column', gap: '3px' },
+    secHead:    { marginBottom: '20px', paddingBottom: '14px', borderBottom: `1px solid ${t.border}`, display: 'flex', alignItems: 'center', gap: '12px' },
     secTitle:   { fontSize: '.94rem', fontWeight: 650, color: t.text1, letterSpacing: '.005em' },
     secDesc:    { fontSize: '.68rem', color: t.text4, lineHeight: 1.5 },
     grid4:      { display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(4, 1fr)', gap: isMobile ? '12px' : '16px' },
@@ -455,11 +455,23 @@ export default function BranchManagement({ embedded = false } = {}) {
     addTrigger: { padding: '7px 10px', fontSize: '.68rem', color: t.gold, cursor: 'pointer', borderTop: `1px solid ${t.border}`, display: 'block', background: 'transparent', border: 'none', width: '100%', textAlign: 'left' },
   }
 
-  // Section header — title + one-line description, with a hairline underneath.
-  const SectionHead = ({ title, desc }) => (
+  // Section header — a gold icon chip + title + one-line description, hairline under.
+  const SEC_ICONS = {
+    identity:  (<><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9h4M7 13h7"/><circle cx="15.5" cy="9.5" r="1.6"/></>),
+    address:   (<><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0z"/><circle cx="12" cy="10" r="2.6"/></>),
+    contact:   (<path d="M22 16.9v2.5a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.7 2 2 0 0 1 4.1 2.5h2.5a2 2 0 0 1 2 1.7c.1 1 .4 1.9.7 2.8a2 2 0 0 1-.5 2.1L7.6 10.4a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.5c.9.3 1.8.6 2.8.7a2 2 0 0 1 1.7 2z"/>),
+    logistics: (<><rect x="1" y="5" width="13" height="11" rx="1"/><path d="M14 9h4l3 3v4h-7z"/><circle cx="6" cy="18" r="1.6"/><circle cx="18" cy="18" r="1.6"/></>),
+    seal:      (<><path d="M12 3l7 3v5c0 5-3.4 8-7 9-3.6-1-7-4-7-9V6z"/><path d="M9.2 12l2 2 3.6-3.8"/></>),
+  }
+  const SectionHead = ({ icon, title, desc }) => (
     <div style={s.secHead}>
-      <div style={s.secTitle}>{title}</div>
-      {desc && <div style={s.secDesc}>{desc}</div>}
+      <span style={{ width: '32px', height: '32px', borderRadius: '9px', background: `${t.gold}18`, border: `1px solid ${t.gold}33`, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={t.gold} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">{SEC_ICONS[icon]}</svg>
+      </span>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', minWidth: 0 }}>
+        <div style={s.secTitle}>{title}</div>
+        {desc && <div style={s.secDesc}>{desc}</div>}
+      </div>
     </div>
   )
 
@@ -571,6 +583,11 @@ export default function BranchManagement({ embedded = false } = {}) {
             <div style={{ display: 'flex', alignItems: 'center', gap: '14px', minWidth: 0 }}>
               <button onClick={cancelForm} title="Back to branches (Esc)"
                 style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'transparent', border: `1px solid ${t.border}`, borderRadius: '8px', padding: '6px 12px', color: t.text2, fontSize: '.72rem', cursor: 'pointer', flexShrink: 0 }}>← Back</button>
+              {editId && form.name && (
+                <span style={{ width: '34px', height: '34px', borderRadius: '9px', background: `linear-gradient(135deg, ${t.gold}, ${t.gold}bb)`, color: '#1a0a00', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '.72rem', fontWeight: 800, letterSpacing: '.02em', flexShrink: 0 }}>
+                  {(form.name.match(/^([A-Za-z]{2})-/)?.[1] || form.name.slice(0, 2)).toUpperCase()}
+                </span>
+              )}
               <div style={{ display: 'flex', alignItems: 'baseline', gap: '10px', minWidth: 0 }}>
                 <span style={{ fontSize: '.65rem', color: t.text3, letterSpacing: '.1em', textTransform: 'uppercase' }}>
                   {editId ? 'Editing branch' : 'New Branch'}
@@ -591,7 +608,7 @@ export default function BranchManagement({ embedded = false } = {}) {
           {/* Centered content column — wide so the form fills the screen */}
           <div style={{ width: '100%', maxWidth: '1440px', margin: '0 auto', padding: '28px 32px 32px' }}>
           <div style={s.section}>
-          <SectionHead title="Identity & classification" desc="What the branch is called, and where it sits in the state → region → cluster hierarchy." />
+          <SectionHead icon="identity" title="Identity & classification" desc="What the branch is called, and where it sits in the state → region → cluster hierarchy." />
           <div style={s.grid4}>
             <div>
               <label style={s.label}>Branch Name *</label>
@@ -617,6 +634,8 @@ export default function BranchManagement({ embedded = false } = {}) {
                 newVal={newState} setNewVal={setNewState}
               />
             </div>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, 1fr)', gap: isMobile ? '12px' : '16px', marginTop: '16px' }}>
             <div>
               <label style={s.label}>Region *</label>
               <SmartSelect
@@ -629,8 +648,6 @@ export default function BranchManagement({ embedded = false } = {}) {
                 newVal={newRegion} setNewVal={setNewRegion}
               />
             </div>
-          </div>
-          <div style={s.grid2}>
             <div>
               <label style={s.label}>Cluster *</label>
               <SmartSelect
@@ -653,18 +670,20 @@ export default function BranchManagement({ embedded = false } = {}) {
           </div>
 
           {form.model_type === 'outside_bangalore' && (
-            <div style={{ marginTop: '16px' }}>
-              <label style={s.label}>Logistics Pickup Time</label>
-              <input style={s.input} placeholder="e.g. Mon/Wed/Fri 4 PM"
-                value={form.pickup_time} onChange={e => setField('pickup_time', e.target.value)} />
-              <div style={{ fontSize: '.6rem', color: t.text4, marginTop: '4px' }}>Shown in Branch Stock Overview · free-form text</div>
+            <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, 1fr)', gap: isMobile ? '12px' : '16px', marginTop: '16px' }}>
+              <div>
+                <label style={s.label}>Logistics Pickup Time</label>
+                <input style={s.input} placeholder="e.g. Mon/Wed/Fri 4 PM"
+                  value={form.pickup_time} onChange={e => setField('pickup_time', e.target.value)} />
+                <div style={{ fontSize: '.6rem', color: t.text4, marginTop: '4px' }}>Shown in Branch Stock Overview · free-form text</div>
+              </div>
             </div>
           )}
           </div>
 
           {/* Address */}
           <div style={s.section}>
-            <SectionHead title="Address" desc="Prints as the branch's dispatch address on the Delivery Challan, Issue Voucher and E-Invoice." />
+            <SectionHead icon="address" title="Address" desc="Prints as the branch's dispatch address on the Delivery Challan, Issue Voucher and E-Invoice." />
             <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '2fr 1fr 1fr 1fr', gap: isMobile ? '12px' : '16px' }}>
               <div>
                 <label style={s.label}>Full Address</label>
@@ -694,7 +713,7 @@ export default function BranchManagement({ embedded = false } = {}) {
               any edit made via the Create Consignment modal sticks back to
               these fields automatically. */}
           <div style={s.section}>
-            <SectionHead title="Branch contact" desc="Name + phone print on the Delivery Challan / Issue Voucher. Operators can also edit these during Create Consignment — changes there sync back here." />
+            <SectionHead icon="contact" title="Branch contact" desc="Name + phone print on the Delivery Challan / Issue Voucher. Operators can also edit these during Create Consignment — changes there sync back here." />
             <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr 1.4fr', gap: isMobile ? '12px' : '16px' }}>
               <div>
                 <label style={s.label}>Name</label>
@@ -718,7 +737,7 @@ export default function BranchManagement({ embedded = false } = {}) {
           {/* Logistics — pickup / delivery TAT / days. Bangalore & Kerala are
               rule-based (daily pickup; Bangalore same-day, Kerala next-day 24h). */}
           <div style={s.section}>
-            <SectionHead title="Logistics" desc="Pickup schedule and delivery TAT — drives dispatch timing and whether the branch shows on the bid desk." />
+            <SectionHead icon="logistics" title="Logistics" desc="Pickup schedule and delivery TAT — drives dispatch timing and whether the branch shows on the bid desk." />
             {(form.region === 'Bangalore' || form.region === 'Kerala') ? (
               <div style={{ fontSize: '.72rem', color: t.text3, background: `${t.gold}0a`, border: `1px solid ${t.gold}30`, borderRadius: '6px', padding: '10px 14px' }}>
                 ◷ <strong>Daily pickup</strong> — {form.region === 'Bangalore' ? 'same-day delivery' : 'next-day delivery (24h)'}. Rule-based; {form.region} branches don't set a pickup time or days.
@@ -753,7 +772,7 @@ export default function BranchManagement({ embedded = false } = {}) {
 
           {/* Tamper-proof seal — last used (derived) + next (editable → seeds). */}
           <div style={s.section}>
-            <SectionHead title="Tamper-proof seal" desc="The tamper-proof number sequence used on this branch's consignments." />
+            <SectionHead icon="seal" title="Tamper-proof seal" desc="The tamper-proof number sequence used on this branch's consignments." />
             <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '16px' }}>
               <div>
                 <label style={s.label}>Last used <span style={{ color: t.text4, fontWeight: 400 }}>(from consignments)</span></label>
