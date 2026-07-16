@@ -3231,6 +3231,20 @@ export async function POST(req) {
       .then(() => {})
       .catch(() => {})
 
+    // Per-consignment transporter (BVC / Branch Employee / Other) — a SEPARATE
+    // fire-and-forget update so that if the transporter columns aren't deployed
+    // yet (sql/consignment_transporter.sql), it no-ops without taking down the
+    // ops_confirmed / branch-contact patch above. Empty → left NULL so the
+    // Delivery Challan falls back to the company default (BVC).
+    const transporter = (typeof body.transporter_name === 'string') ? body.transporter_name.trim().slice(0, 60) : ''
+    const transMode   = (typeof body.transport_mode   === 'string') ? body.transport_mode.trim().slice(0, 40)   : ''
+    if (transporter || transMode) {
+      const tp = {}
+      if (transporter) tp.transporter_name = transporter
+      if (transMode)   tp.transport_mode   = transMode
+      supabase.from('consignments').update(tp).eq('id', rpcConsignment.id).then(() => {}).catch(() => {})
+    }
+
     // INTERNAL (Branch → Hub): bills become hub stock the moment the voucher
     // is created. Mirrors the Bangalore hub-create flow and the documented
     // model at the top of this handler — instantaneous transfer, no receive

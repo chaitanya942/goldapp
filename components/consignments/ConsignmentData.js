@@ -128,6 +128,8 @@ export default function ConsignmentData() {
   // Voucher prints. Null/empty → fall back to branch defaults at generation.
   const [branchContactName,   setBranchContactName]  = useState('')
   const [branchContactPhone,  setBranchContactPhone] = useState('')
+  const [transporterMode,     setTransporterMode]    = useState('bvc')   // 'bvc' | 'branch_employee' | 'other'
+  const [transporterOther,    setTransporterOther]   = useState('')
   const [showModal,           setShowModal]          = useState(false)
   const [lastConsignment,     setLastConsignment]    = useState(null)
   // Re-render every 60s so the "approval pending · 5m" timer in the ALL
@@ -453,6 +455,17 @@ export default function ConsignmentData() {
     })
     if (!ok) return
 
+    // Transporter chosen on the modal → prints on the Delivery Challan. Default
+    // BVC; Branch Employee for self-carry; Other = free-text courier name.
+    const TRANSPORTERS = {
+      bvc:             { name: 'BVC LOGISTICS PVT. LTD.', mode: 'BY AIR & ROAD' },
+      branch_employee: { name: 'BRANCH EMPLOYEE',         mode: 'BY ROAD' },
+    }
+    const transporter_name = transporterMode === 'other'
+      ? (transporterOther.trim() || 'OTHER')
+      : TRANSPORTERS[transporterMode].name
+    const transport_mode   = transporterMode === 'other' ? 'BY ROAD' : TRANSPORTERS[transporterMode].mode
+
     setCreating(true)
     try {
       const res = await authedFetch('/api/consignments', {
@@ -470,6 +483,8 @@ export default function ConsignmentData() {
           // to null so the PDF generator falls back to the live branch row.
           branch_contact_name:  branchContactName.trim()  || null,
           branch_contact_phone: branchContactPhone.trim() || null,
+          transporter_name,
+          transport_mode,
         }),
       })
       const result = await res.json()
@@ -483,6 +498,7 @@ export default function ConsignmentData() {
       setShowModal(false)
       setDestBranch(''); setEwayBillNo('')
       setBranchContactName(''); setBranchContactPhone('')
+      setTransporterMode('bvc'); setTransporterOther('')
       await fetchAll()
       // Return to Active Consignments list with the new one highlighted
       setNav(null)
@@ -865,6 +881,7 @@ export default function ConsignmentData() {
                   const br = branches.find(b => b.name === nav?.branch)
                   setBranchContactName(br?.contact_person || '')
                   setBranchContactPhone(br?.contact_phone  || '')
+                  setTransporterMode('bvc'); setTransporterOther('')   // default each dispatch to BVC
                   setShowModal(true)
                   fetchPreviewNumbers()
                 }} style={btnGold}>
@@ -2099,6 +2116,37 @@ export default function ConsignmentData() {
                       />
                     </div>
                   </div>
+
+                  {/* Transporter — who physically carries this consignment.
+                      Prints on the Delivery Challan (EXTERNAL only; the Issue
+                      Voucher has its own fillable Carrier field). Default BVC;
+                      Branch Employee for self-carry; Other = free text. */}
+                  {moveType !== 'INTERNAL' && (
+                    <div style={{ marginBottom: '14px' }}>
+                      <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', marginBottom: '6px', fontWeight: 700 }}>
+                        Transporter <span style={{ textTransform: 'none', fontWeight: 400, color: t.text4 }}>(prints on Delivery Challan)</span>
+                      </div>
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                        {[['bvc', 'BVC Logistics'], ['branch_employee', 'Branch Employee'], ['other', 'Other']].map(([val, label]) => {
+                          const on = transporterMode === val
+                          return (
+                            <button key={val} type="button" onClick={() => setTransporterMode(val)}
+                              style={{ flex: 1, padding: '10px 8px', borderRadius: '9px', border: `1px solid ${on ? t.gold : t.border2}`, background: on ? `${t.gold}18` : t.card2, color: on ? t.gold : t.text2, fontSize: '12px', fontWeight: on ? 700 : 500, cursor: 'pointer', transition: 'all .12s' }}>
+                              {label}
+                            </button>
+                          )
+                        })}
+                      </div>
+                      {transporterMode === 'other' && (
+                        <input
+                          value={transporterOther}
+                          onChange={e => setTransporterOther(e.target.value.slice(0, 50))}
+                          placeholder="Courier / transporter name"
+                          style={{ width: '100%', marginTop: '8px', background: t.card2, border: `1px solid ${t.border2}`, borderRadius: '9px', padding: '11px 14px', fontSize: '13px', color: t.text1, outline: 'none', boxSizing: 'border-box' }}
+                        />
+                      )}
+                    </div>
+                  )}
                 </>
               )
             })()}
