@@ -53,12 +53,15 @@ function readInitialScope() {
   if (saved === 'outside' || !saved) return 'rokapts'   // migrate old two-tab value
   return saved
 }
-// Does a region belong to the active scope tab? ROK·AP·TS = everything that
-// isn't Bangalore or Kerala (defensive against new non-Kerala regions).
-const regionInScope = (scopeTab, region) =>
-  scopeTab === 'bangalore' ? region === 'Bangalore'
+// Which scope tab a branch belongs to. The "Bangalore" tab means SAME-DAY HO
+// (model_type === 'bangalore'), NOT the Bangalore region — so KA-KOLAR
+// (geographically Rest of Karnataka but same-day HO) shows in the Bangalore
+// tab. Kerala tab stays region-based; everything else (non-same-day, non-
+// Kerala) is the outstation tab.
+const branchInScope = (scopeTab, region, modelType) =>
+  scopeTab === 'bangalore' ? modelType === 'bangalore'
   : scopeTab === 'kl'      ? region === 'Kerala'
-  :                          (region !== 'Bangalore' && region !== 'Kerala')
+  :                          (modelType !== 'bangalore' && region !== 'Kerala')
 
 const fmt     = (n, d = 3) => n != null ? Number(n).toFixed(d) : '—'
 const fmtNum  = (n) => n != null ? Number(n).toLocaleString('en-IN') : '—'
@@ -806,7 +809,7 @@ export default function ConsignmentOverview() {
     // Dates dynamically follow the scope tab AND the selected region(s): pick
     // Telangana and the chips show only Telangana's purchase dates.
     const inScope = (b) =>
-      regionInScope(scopeTab, b.region) &&
+      branchInScope(scopeTab, b.region, b.model_type) &&
       (!activeRegions.size || activeRegions.has(b.region))
     const scopeBranches = new Set(data.filter(inScope).map(b => b.branch_name))
     const set = new Set(byBranchDate.filter(r => r.purchase_date && scopeBranches.has(r.branch_name)).map(r => r.purchase_date))
@@ -820,7 +823,7 @@ export default function ConsignmentOverview() {
   })
 
   const scopeData = useMemo(() =>
-    effectiveData.filter(b => regionInScope(scopeTab, b.region))
+    effectiveData.filter(b => branchInScope(scopeTab, b.region, b.model_type))
   , [effectiveData, scopeTab])
 
   // ── Region summary ────────────────────────────────────────────────────────

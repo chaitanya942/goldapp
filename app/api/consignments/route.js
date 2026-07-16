@@ -170,9 +170,13 @@ export async function GET(req) {
     const includeBangalore =
       searchParams.get('include_bangalore_today') === 'true'
       || searchParams.get('include_bangalore') === 'true'
+    // Same-day-HO membership is the MODEL, not the region — so KA-KOLAR
+    // (geographically Rest of Karnataka, but same-day HO) sits in the Bangalore
+    // stock tab alongside the city branches. Mirrors the outsideBranches filter
+    // above, which already keys off model_type.
     const bangaloreBranches = new Set(
       includeBangalore
-        ? (branches || []).filter(b => b.region === 'Bangalore').map(b => b.name)
+        ? (branches || []).filter(b => b.model_type === 'bangalore').map(b => b.name)
         : []
     )
 
@@ -193,9 +197,9 @@ export async function GET(req) {
     // include_bangalore_today flag is set (Dashboard's Consignment Overview).
     const summary = {}
     const populateZeroRow = (branchName) => {
-      const meta = branchMeta[branchName] || { region: 'Unknown', pickup_time: null, pickup_days: null, is_hub: false, hub_branch_name: null }
+      const meta = branchMeta[branchName] || { region: 'Unknown', model_type: null, pickup_time: null, pickup_days: null, is_hub: false, hub_branch_name: null }
       summary[branchName] = {
-        branch_name: branchName, region: meta.region, pickup_time: meta.pickup_time,
+        branch_name: branchName, region: meta.region, model_type: meta.model_type, pickup_time: meta.pickup_time,
         pickup_days: meta.pickup_days,
         is_hub:          !!meta.is_hub,
         hub_branch_name: meta.hub_branch_name || null,
@@ -615,8 +619,10 @@ export async function GET(req) {
     const branchMeta = {}
     for (const b of branchRows || []) branchMeta[b.name] = b
 
-    const bangaloreBranchNames = (branchRows || []).filter(b => b.region === 'Bangalore').map(b => b.name)
-    const outsideBranchNames   = (branchRows || []).filter(b => b.region !== 'Bangalore').map(b => b.name)
+    // Booking-volume eligibility keys off the MODEL: same-day-HO branches
+    // (bangalore model, incl. KA-KOLAR) never consign, everyone else does.
+    const bangaloreBranchNames = (branchRows || []).filter(b => b.model_type === 'bangalore').map(b => b.name)
+    const outsideBranchNames   = (branchRows || []).filter(b => b.model_type !== 'bangalore').map(b => b.name)
 
     // Section 4 eligibility: at_branch bills at non-Bangalore branches whose
     // pickup is STILL AHEAD today, AND whose TAT lets them arrive at HO on
