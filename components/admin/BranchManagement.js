@@ -540,27 +540,35 @@ export default function BranchManagement({ embedded = false } = {}) {
         </div>
       )}
 
-      {/* FORM — focused full-screen sheet: only the clicked branch, nothing else. */}
+      {/* FORM — full-screen editor. The clicked branch opens as its own screen
+          (opaque, edge-to-edge), not a floating modal over the dimmed list. */}
       {formOpen && (
-        <div onClick={cancelForm}
-          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.55)', zIndex: 1000, display: 'flex', justifyContent: 'center', alignItems: 'flex-start', padding: '24px', overflowY: 'auto' }}>
-        <div onClick={e => e.stopPropagation()}
-          style={{ ...s.card, width: '100%', maxWidth: '1120px', margin: 0, maxHeight: 'calc(100vh - 48px)', overflowY: 'auto', boxShadow: '0 24px 70px rgba(0,0,0,.5)' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px', gap: '12px' }}>
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: '10px', minWidth: 0 }}>
-              <span style={{ fontSize: '.65rem', color: t.text3, letterSpacing: '.1em', textTransform: 'uppercase' }}>
-                {editId ? 'Editing branch' : 'New Branch'}
-              </span>
-              {editId && <span style={{ fontSize: '1.05rem', fontWeight: 800, color: t.text1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{form.name}</span>}
+        <div style={{ position: 'fixed', inset: 0, background: t.card, zIndex: 1000, overflowY: 'auto' }}>
+          {/* Sticky top bar: back · title · CRM id · save · close */}
+          <div style={{ position: 'sticky', top: 0, zIndex: 2, background: t.card, borderBottom: `1px solid ${t.border}`, padding: '14px 24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '14px', minWidth: 0 }}>
+              <button onClick={cancelForm} title="Back to branches (Esc)"
+                style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'transparent', border: `1px solid ${t.border}`, borderRadius: '8px', padding: '6px 12px', color: t.text2, fontSize: '.72rem', cursor: 'pointer', flexShrink: 0 }}>← Back</button>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: '10px', minWidth: 0 }}>
+                <span style={{ fontSize: '.65rem', color: t.text3, letterSpacing: '.1em', textTransform: 'uppercase' }}>
+                  {editId ? 'Editing branch' : 'New Branch'}
+                </span>
+                {editId && <span style={{ fontSize: '1.05rem', fontWeight: 800, color: t.text1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{form.name}</span>}
+              </div>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexShrink: 0 }}>
               {form.crm_branch_id && (
                 <span style={{ fontSize: '.65rem', color: t.text3, fontFamily: 'monospace' }}>CRM ID: <span style={{ color: t.gold }}>{form.crm_branch_id}</span></span>
               )}
+              <button style={s.btnGold} onClick={save} disabled={saving}>
+                {saving ? 'Saving…' : editId ? 'Update Branch' : 'Save Branch'}
+              </button>
               <button onClick={cancelForm} title="Close (Esc)"
                 style={{ background: 'transparent', border: `1px solid ${t.border}`, borderRadius: '8px', width: '30px', height: '30px', color: t.text3, fontSize: '15px', cursor: 'pointer', lineHeight: 1 }}>✕</button>
             </div>
           </div>
+          {/* Centered content column */}
+          <div style={{ width: '100%', maxWidth: '1120px', margin: '0 auto', padding: '24px 24px 56px' }}>
           <div style={s.grid4}>
             <div>
               <label style={s.label}>Branch Name *</label>
