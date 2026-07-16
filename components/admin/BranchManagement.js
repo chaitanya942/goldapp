@@ -435,8 +435,13 @@ export default function BranchManagement({ embedded = false } = {}) {
     btnGold:    { background: t.gold, color: '#1a0a00', border: 'none', borderRadius: '7px', padding: '9px 20px', fontSize: '.72rem', fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase', cursor: 'pointer' },
     btnOutline: { background: 'transparent', color: t.text3, border: `1px solid ${t.border}`, borderRadius: '7px', padding: '9px 20px', fontSize: '.72rem', letterSpacing: '.08em', textTransform: 'uppercase', cursor: 'pointer' },
     card:       { background: t.card, border: `1px solid ${t.border}`, borderRadius: '10px', padding: '20px', marginBottom: '24px' },
-    label:      { fontSize: '.62rem', color: t.text3, letterSpacing: '.08em', textTransform: 'uppercase', marginBottom: '5px', display: 'block' },
-    input:      { width: '100%', background: t.card, border: `1px solid ${t.border}`, borderRadius: '6px', padding: '8px 10px', color: t.text1, fontSize: '.78rem', boxSizing: 'border-box' },
+    label:      { fontSize: '.62rem', color: t.text3, letterSpacing: '.07em', textTransform: 'uppercase', marginBottom: '6px', display: 'block', fontWeight: 600 },
+    input:      { width: '100%', background: t.bg, border: `1px solid ${t.border}`, borderRadius: '8px', padding: '9px 12px', color: t.text1, fontSize: '.8rem', boxSizing: 'border-box', transition: 'border-color .15s, box-shadow .15s' },
+    // Elevated section card (t.card) sits on the recessed editor page (t.bg).
+    section:    { background: t.card, border: `1px solid ${t.border}`, borderRadius: '14px', padding: '22px 24px', marginBottom: '16px', boxShadow: '0 1px 2px rgba(40,28,0,.05), 0 10px 30px rgba(40,28,0,.03)' },
+    secHead:    { marginBottom: '18px', paddingBottom: '13px', borderBottom: `1px solid ${t.border}`, display: 'flex', flexDirection: 'column', gap: '3px' },
+    secTitle:   { fontSize: '.94rem', fontWeight: 650, color: t.text1, letterSpacing: '.005em' },
+    secDesc:    { fontSize: '.68rem', color: t.text4, lineHeight: 1.5 },
     grid4:      { display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(4, 1fr)', gap: isMobile ? '12px' : '16px' },
     grid2:      { display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(2, 1fr)', gap: isMobile ? '12px' : '16px', marginTop: '12px' },
     row:        { display: 'flex', gap: '12px', alignItems: 'center', marginTop: '16px' },
@@ -449,6 +454,14 @@ export default function BranchManagement({ embedded = false } = {}) {
     addBtn:     { background: t.gold, color: '#1a0a00', border: 'none', borderRadius: '4px', padding: '3px 8px', fontSize: '.62rem', fontWeight: 700, cursor: 'pointer' },
     addTrigger: { padding: '7px 10px', fontSize: '.68rem', color: t.gold, cursor: 'pointer', borderTop: `1px solid ${t.border}`, display: 'block', background: 'transparent', border: 'none', width: '100%', textAlign: 'left' },
   }
+
+  // Section header — title + one-line description, with a hairline underneath.
+  const SectionHead = ({ title, desc }) => (
+    <div style={s.secHead}>
+      <div style={s.secTitle}>{title}</div>
+      {desc && <div style={s.secDesc}>{desc}</div>}
+    </div>
+  )
 
   // Reusable select with inline add
   const SmartSelect = ({ value, onChange, options, placeholder, onAdd, adding, setAdding, newVal, setNewVal }) => (
@@ -546,7 +559,13 @@ export default function BranchManagement({ embedded = false } = {}) {
           the breadcrumb bar and the stuck-bookings banner) — a real "new screen",
           not a box floating inside the content column. */}
       {formOpen && typeof document !== 'undefined' && createPortal((
-        <div style={{ position: 'fixed', inset: 0, background: t.card, zIndex: 4000, display: 'flex', flexDirection: 'column' }}>
+        <div className="bm-editor" style={{ position: 'fixed', inset: 0, background: t.bg, zIndex: 4000, display: 'flex', flexDirection: 'column' }}>
+          <style>{`
+            .bm-editor input:focus, .bm-editor select:focus, .bm-editor textarea:focus {
+              outline: none; border-color: ${t.gold}; box-shadow: 0 0 0 3px ${t.gold}22;
+            }
+            .bm-editor input::placeholder, .bm-editor textarea::placeholder { color: ${t.text4}; opacity: 1; }
+          `}</style>
           {/* Header bar: back · title · CRM id · close */}
           <div style={{ flexShrink: 0, background: t.card, borderBottom: `1px solid ${t.border}`, padding: '14px 24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '14px', minWidth: 0 }}>
@@ -570,7 +589,9 @@ export default function BranchManagement({ embedded = false } = {}) {
           {/* Scrollable middle — between the header and the footer action bar */}
           <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
           {/* Centered content column — wide so the form fills the screen */}
-          <div style={{ width: '100%', maxWidth: '1440px', margin: '0 auto', padding: '24px 32px 28px' }}>
+          <div style={{ width: '100%', maxWidth: '1440px', margin: '0 auto', padding: '28px 32px 32px' }}>
+          <div style={s.section}>
+          <SectionHead title="Identity & classification" desc="What the branch is called, and where it sits in the state → region → cluster hierarchy." />
           <div style={s.grid4}>
             <div>
               <label style={s.label}>Branch Name *</label>
@@ -639,12 +660,11 @@ export default function BranchManagement({ embedded = false } = {}) {
               <div style={{ fontSize: '.6rem', color: t.text4, marginTop: '4px' }}>Shown in Branch Stock Overview · free-form text</div>
             </div>
           )}
+          </div>
 
           {/* Address */}
-          <div style={{ borderTop: `1px solid ${t.border}`, marginTop: '20px', paddingTop: '20px' }}>
-            <div style={{ fontSize: '.7rem', color: t.text3, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: '16px', fontWeight: 600 }}>
-              Address (for Delivery Challan)
-            </div>
+          <div style={s.section}>
+            <SectionHead title="Address" desc="Prints as the branch's dispatch address on the Delivery Challan, Issue Voucher and E-Invoice." />
             <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '2fr 1fr 1fr 1fr', gap: isMobile ? '12px' : '16px' }}>
               <div>
                 <label style={s.label}>Full Address</label>
@@ -673,13 +693,8 @@ export default function BranchManagement({ embedded = false } = {}) {
               (no document uses it). Changes here are the source of truth;
               any edit made via the Create Consignment modal sticks back to
               these fields automatically. */}
-          <div style={{ borderTop: `1px solid ${t.border}`, marginTop: '20px', paddingTop: '20px' }}>
-            <div style={{ fontSize: '.7rem', color: t.text3, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: '4px', fontWeight: 600 }}>
-              Branch Contact
-            </div>
-            <div style={{ fontSize: '.65rem', color: t.text4, marginBottom: '16px' }}>
-              Name + phone print on Delivery Challan / Issue Voucher. Operators can also edit Name &amp; Phone during Create Consignment — any edit there auto-syncs back here.
-            </div>
+          <div style={s.section}>
+            <SectionHead title="Branch contact" desc="Name + phone print on the Delivery Challan / Issue Voucher. Operators can also edit these during Create Consignment — changes there sync back here." />
             <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr 1.4fr', gap: isMobile ? '12px' : '16px' }}>
               <div>
                 <label style={s.label}>Name</label>
@@ -702,8 +717,8 @@ export default function BranchManagement({ embedded = false } = {}) {
 
           {/* Logistics — pickup / delivery TAT / days. Bangalore & Kerala are
               rule-based (daily pickup; Bangalore same-day, Kerala next-day 24h). */}
-          <div style={{ borderTop: `1px solid ${t.border}`, marginTop: '20px', paddingTop: '20px' }}>
-            <div style={{ fontSize: '.7rem', color: t.text3, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: '12px', fontWeight: 600 }}>Logistics</div>
+          <div style={s.section}>
+            <SectionHead title="Logistics" desc="Pickup schedule and delivery TAT — drives dispatch timing and whether the branch shows on the bid desk." />
             {(form.region === 'Bangalore' || form.region === 'Kerala') ? (
               <div style={{ fontSize: '.72rem', color: t.text3, background: `${t.gold}0a`, border: `1px solid ${t.gold}30`, borderRadius: '6px', padding: '10px 14px' }}>
                 ◷ <strong>Daily pickup</strong> — {form.region === 'Bangalore' ? 'same-day delivery' : 'next-day delivery (24h)'}. Rule-based; {form.region} branches don't set a pickup time or days.
@@ -737,8 +752,8 @@ export default function BranchManagement({ embedded = false } = {}) {
           </div>
 
           {/* Tamper-proof seal — last used (derived) + next (editable → seeds). */}
-          <div style={{ borderTop: `1px solid ${t.border}`, marginTop: '20px', paddingTop: '20px' }}>
-            <div style={{ fontSize: '.7rem', color: t.text3, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: '12px', fontWeight: 600 }}>Tamper-proof seal</div>
+          <div style={s.section}>
+            <SectionHead title="Tamper-proof seal" desc="The tamper-proof number sequence used on this branch's consignments." />
             <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '16px' }}>
               <div>
                 <label style={s.label}>Last used <span style={{ color: t.text4, fontWeight: 400 }}>(from consignments)</span></label>
