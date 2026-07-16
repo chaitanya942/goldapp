@@ -444,17 +444,6 @@ export default function ConsignmentData() {
       return
     }
 
-    // Final confirmation gate — themed dialog so creation never fires from a
-    // single click. Restates the destination, bills, weight, value so the user
-    // can't claim they didn't see it. Cancel here is a clean no-op.
-    const dest = moveType === 'INTERNAL' ? destBranch : 'Head Office'
-    const ok = await openConfirm({
-      title: 'Create this consignment?',
-      message: `${nav.branch} → ${dest}\n\n· ${selected.size} bill${selected.size === 1 ? '' : 's'}\n· ${fmtWt(totalSelWt)} net weight\n· ₹${fmt(Math.round(totalSelAmt))} value\n· ${moveType === 'INTERNAL' ? 'Issue Voucher' : 'Delivery Challan'} will be issued\n\nOnce created, the bills are locked to this consignment until accounts approves or the consignment is voided.`,
-      confirmLabel: 'Yes, create now',
-    })
-    if (!ok) return
-
     // Transporter chosen on the modal → prints on the Delivery Challan. Default
     // BVC; Branch Employee for self-carry; Other = free-text courier name.
     const TRANSPORTERS = {
@@ -465,6 +454,20 @@ export default function ConsignmentData() {
       ? (transporterOther.trim() || 'OTHER')
       : TRANSPORTERS[transporterMode].name
     const transport_mode   = transporterMode === 'other' ? 'BY ROAD' : TRANSPORTERS[transporterMode].mode
+
+    // Final confirmation gate — themed dialog so creation never fires from a
+    // single click. Restates destination, bills, weight, value AND the
+    // transporter. The transporter selector sits below the modal fold, so this
+    // line is the safety net: ops who never scrolled still see it here and can
+    // cancel to fix it before the consignment is created.
+    const dest = moveType === 'INTERNAL' ? destBranch : 'Head Office'
+    const transLine = moveType === 'INTERNAL' ? '' : `\n· Transporter: ${transporter_name}`
+    const ok = await openConfirm({
+      title: 'Create this consignment?',
+      message: `${nav.branch} → ${dest}\n\n· ${selected.size} bill${selected.size === 1 ? '' : 's'}\n· ${fmtWt(totalSelWt)} net weight\n· ₹${fmt(Math.round(totalSelAmt))} value\n· ${moveType === 'INTERNAL' ? 'Issue Voucher' : 'Delivery Challan'} will be issued${transLine}\n\nOnce created, the bills are locked to this consignment until accounts approves or the consignment is voided.`,
+      confirmLabel: 'Yes, create now',
+    })
+    if (!ok) return
 
     setCreating(true)
     try {
