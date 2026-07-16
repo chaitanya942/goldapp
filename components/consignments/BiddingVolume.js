@@ -2025,7 +2025,7 @@ export default function BiddingVolume() {
               if (regionPipe <= 0.001 || selBookingWt > regionPipe + 10) return null
               const excess = Math.max(0, selBookingWt - regionPipe)
               return (
-                <button onClick={closePipelineFromSelected}
+                <button onClick={() => closePipelineFromSelected(false)}
                   title={excess > 0.001
                     ? `Close the ${fmt(regionPipe, 2)} g pipeline with these bills — the ${fmt(excess, 2)} g excess folds into gain`
                     : 'Apply the selected bills to the open pipeline owed from prior bids (back-fill it)'}
