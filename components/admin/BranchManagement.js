@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { createPortal } from 'react-dom'
 import { supabase } from '../../lib/supabase'
 import { useApp } from '../../lib/context'
 import { authedFetch } from '../../lib/authedFetch'
@@ -540,12 +541,14 @@ export default function BranchManagement({ embedded = false } = {}) {
         </div>
       )}
 
-      {/* FORM — full-screen editor. The clicked branch opens as its own screen
-          (opaque, edge-to-edge), not a floating modal over the dimmed list. */}
-      {formOpen && (
-        <div style={{ position: 'fixed', inset: 0, background: t.card, zIndex: 1000, overflowY: 'auto' }}>
-          {/* Sticky top bar: back · title · CRM id · save · close */}
-          <div style={{ position: 'sticky', top: 0, zIndex: 2, background: t.card, borderBottom: `1px solid ${t.border}`, padding: '14px 24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
+      {/* FORM — full-screen editor. Portalled to <body> so it escapes any
+          transformed ancestor and covers the TRUE viewport (hides the sidebar,
+          the breadcrumb bar and the stuck-bookings banner) — a real "new screen",
+          not a box floating inside the content column. */}
+      {formOpen && typeof document !== 'undefined' && createPortal((
+        <div style={{ position: 'fixed', inset: 0, background: t.card, zIndex: 4000, display: 'flex', flexDirection: 'column' }}>
+          {/* Header bar: back · title · CRM id · close */}
+          <div style={{ flexShrink: 0, background: t.card, borderBottom: `1px solid ${t.border}`, padding: '14px 24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '14px', minWidth: 0 }}>
               <button onClick={cancelForm} title="Back to branches (Esc)"
                 style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'transparent', border: `1px solid ${t.border}`, borderRadius: '8px', padding: '6px 12px', color: t.text2, fontSize: '.72rem', cursor: 'pointer', flexShrink: 0 }}>← Back</button>
@@ -560,15 +563,14 @@ export default function BranchManagement({ embedded = false } = {}) {
               {form.crm_branch_id && (
                 <span style={{ fontSize: '.65rem', color: t.text3, fontFamily: 'monospace' }}>CRM ID: <span style={{ color: t.gold }}>{form.crm_branch_id}</span></span>
               )}
-              <button style={s.btnGold} onClick={save} disabled={saving}>
-                {saving ? 'Saving…' : editId ? 'Update Branch' : 'Save Branch'}
-              </button>
               <button onClick={cancelForm} title="Close (Esc)"
                 style={{ background: 'transparent', border: `1px solid ${t.border}`, borderRadius: '8px', width: '30px', height: '30px', color: t.text3, fontSize: '15px', cursor: 'pointer', lineHeight: 1 }}>✕</button>
             </div>
           </div>
-          {/* Centered content column */}
-          <div style={{ width: '100%', maxWidth: '1120px', margin: '0 auto', padding: '24px 24px 56px' }}>
+          {/* Scrollable middle — between the header and the footer action bar */}
+          <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
+          {/* Centered content column — wide so the form fills the screen */}
+          <div style={{ width: '100%', maxWidth: '1440px', margin: '0 auto', padding: '24px 32px 28px' }}>
           <div style={s.grid4}>
             <div>
               <label style={s.label}>Branch Name *</label>
@@ -750,16 +752,20 @@ export default function BranchManagement({ embedded = false } = {}) {
             <div style={{ fontSize: '.6rem', color: t.text4, marginTop: '6px' }}>Setting Next writes a seed so the branch's next consignment uses exactly that seal number.</div>
           </div>
 
-          <div style={s.row}>
-            <button style={s.btnGold} onClick={save} disabled={saving}>
-              {saving ? 'Saving...' : editId ? 'Update Branch' : 'Save Branch'}
-            </button>
-            <button style={s.btnOutline} onClick={cancelForm}>Cancel</button>
-            {msg && <span style={{ fontSize: '.72rem', color: msg.includes('success') ? t.green : '#e05555' }}>{msg}</span>}
+          </div>
+          </div>
+          {/* Footer action bar — anchored at the bottom so a short form leaves no void */}
+          <div style={{ flexShrink: 0, borderTop: `1px solid ${t.border}`, background: t.card, padding: '12px 32px' }}>
+            <div style={{ width: '100%', maxWidth: '1440px', margin: '0 auto', display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <button style={s.btnGold} onClick={save} disabled={saving}>
+                {saving ? 'Saving...' : editId ? 'Update Branch' : 'Save Branch'}
+              </button>
+              <button style={s.btnOutline} onClick={cancelForm}>Cancel</button>
+              {msg && <span style={{ fontSize: '.72rem', color: msg.includes('success') ? t.green : '#e05555' }}>{msg}</span>}
+            </div>
           </div>
         </div>
-        </div>
-      )}
+      ), document.body)}
 
       {/* STATS */}
       <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', marginBottom: '14px' }}>
