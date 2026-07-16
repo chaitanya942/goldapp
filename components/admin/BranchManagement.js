@@ -358,7 +358,7 @@ export default function BranchManagement({ embedded = false } = {}) {
     setSavingResolved(false)
   }
 
-  const cancelForm = () => { setFormOpen(false); setEditId(null); setForm(EMPTY_FORM); setMsg('') }
+  const cancelForm = () => { setFormOpen(false); setEditId(null); setForm(EMPTY_FORM); setMsg(''); setConfirmDelete(null) }
 
   // The branch form opens as a focused full-screen sheet (ops sees ONLY the branch
   // they clicked, not an inline block above a 125-row table), so lock the page
@@ -799,6 +799,28 @@ export default function BranchManagement({ embedded = false } = {}) {
               </button>
               <button style={s.btnOutline} onClick={cancelForm}>Cancel</button>
               {msg && <span style={{ fontSize: '.72rem', color: msg.includes('success') ? t.green : '#e05555' }}>{msg}</span>}
+              {/* Deactivate / Remove live here now — off the list row, safely tucked
+                  inside the editor so they can't be hit by a stray row click. */}
+              {editId && (() => {
+                const eb = branches.find(x => x.id === editId)
+                return (
+                  <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <button onClick={() => toggleActive(editId, eb?.is_active)}
+                      style={{ background: 'transparent', border: `1px solid ${eb?.is_active ? '#e0555555' : t.gold + '55'}`, color: eb?.is_active ? '#e05555' : t.gold, borderRadius: '7px', padding: '9px 18px', fontSize: '.72rem', letterSpacing: '.06em', textTransform: 'uppercase', cursor: 'pointer' }}>
+                      {eb?.is_active ? 'Deactivate' : 'Activate'}
+                    </button>
+                    {confirmDelete === editId ? (
+                      <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span style={{ fontSize: '.72rem', color: '#e05555' }}>Remove this branch permanently?</span>
+                        <button onClick={async () => { await removeBranch(editId); cancelForm() }} style={{ background: '#e05555', border: 'none', color: '#fff', borderRadius: '7px', padding: '9px 16px', fontSize: '.72rem', fontWeight: 700, cursor: 'pointer' }}>Yes, remove</button>
+                        <button onClick={() => setConfirmDelete(null)} style={{ background: 'transparent', border: `1px solid ${t.border}`, color: t.text3, borderRadius: '7px', padding: '9px 16px', fontSize: '.72rem', cursor: 'pointer' }}>Cancel</button>
+                      </span>
+                    ) : (
+                      <button onClick={() => setConfirmDelete(editId)} style={{ background: 'transparent', border: '1px solid #e0555555', color: '#e05555', borderRadius: '7px', padding: '9px 18px', fontSize: '.72rem', letterSpacing: '.06em', textTransform: 'uppercase', cursor: 'pointer' }}>Remove</button>
+                    )}
+                  </div>
+                )
+              })()}
             </div>
           </div>
         </div>
@@ -890,15 +912,18 @@ export default function BranchManagement({ embedded = false } = {}) {
         <div style={s.tblWrap}>
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
-              <tr>{[['#', null], ['Branch Name', 'name'], ['CRM ID', null], ['Code', null], ['State', 'state'], ['Region', 'region'], ['Cluster', 'cluster'], ['Address', null], ['City', null], ['PIN', null], ['GSTIN', null], ['Contact', null], ['Phone', null], ['Email', null], ['Model', null], ['Opening', null], ['Pickup', null], ['TAT', null], ['Status', 'status'], ['Next TMP', null], ['Action', null]].map(([h, key]) =>
-                  <th key={h} onClick={key ? () => toggleSort(key) : undefined} style={{ ...s.th, textAlign: h === '#' ? 'center' : 'left', cursor: key ? 'pointer' : 'default', color: key && sortKey === key ? t.gold : t.text3, userSelect: 'none' }}>
+              <tr>{[['Sl No', null], ['Branch Name', 'name'], ['CRM ID', null], ['Branch Code', null], ['Address', null], ['City', null], ['Cluster', 'cluster'], ['Region', 'region'], ['State', 'state'], ['Pin Code', null], ['GSTIN', null], ['Contact', null], ['Phone', null], ['Email Id', null], ['Model', null], ['Opening Date', null], ['Pickup Time', null], ['TAT', null], ['Next TMP', null], ['Status', 'status'], ['Action', null]].map(([h, key]) =>
+                  <th key={h} onClick={key ? () => toggleSort(key) : undefined} style={{ ...s.th, textAlign: h === 'Sl No' ? 'center' : 'left', cursor: key ? 'pointer' : 'default', color: key && sortKey === key ? t.gold : t.text3, userSelect: 'none', whiteSpace: 'nowrap' }}>
                     {h}{key && sortKey === key ? (sortDir === 1 ? ' ▲' : ' ▼') : ''}
                   </th>
                 )}</tr>
             </thead>
             <tbody>
               {filtered.map((b, i) => (
-                <tr key={b.id} style={{ background: editId === b.id ? `${t.gold}08` : (!b.state || !b.region || !b.cluster) ? '#c9a84c06' : 'transparent' }}>
+                <tr key={b.id} onClick={() => startEdit(b)} title="Click to edit this branch"
+                  style={{ background: editId === b.id ? `${t.gold}08` : (!b.state || !b.region || !b.cluster) ? '#c9a84c06' : 'transparent', cursor: 'pointer', transition: 'background .12s' }}
+                  onMouseEnter={e => { if (editId !== b.id) e.currentTarget.style.background = `${t.gold}0c` }}
+                  onMouseLeave={e => { if (editId !== b.id) e.currentTarget.style.background = (!b.state || !b.region || !b.cluster) ? '#c9a84c06' : 'transparent' }}>
                   <td style={{ ...s.td, textAlign: 'center', color: t.text3, fontSize: '.65rem', width: '40px' }}>{i + 1}</td>
                   <td style={{ ...s.td, color: t.gold, fontWeight: 400, whiteSpace: 'nowrap' }}>
                     {b.name}
@@ -907,11 +932,11 @@ export default function BranchManagement({ embedded = false } = {}) {
                   </td>
                   <td style={{ ...s.td, fontFamily: 'monospace', fontSize: '.68rem', color: b.crm_branch_id ? t.text2 : t.text4 }}>{b.crm_branch_id || '—'}</td>
                   <td style={{ ...s.td, fontFamily: 'monospace', fontSize: '.72rem', color: b.branch_code ? t.gold : t.text4 }}>{b.branch_code || '—'}</td>
-                  <td style={{ ...s.td, color: b.state ? t.text1 : '#c9a84c88', whiteSpace: 'nowrap' }}>{b.state || '⚠ missing'}</td>
-                  <td style={{ ...s.td, color: b.region ? t.text1 : '#c9a84c88', whiteSpace: 'nowrap' }}>{b.region || '⚠ missing'}</td>
-                  <td style={{ ...s.td, fontSize: '.72rem', color: b.cluster ? t.text2 : '#c9a84c88', whiteSpace: 'nowrap' }}>{b.cluster || '⚠ missing'}</td>
                   <td style={{ ...s.td, fontSize: '.68rem', color: b.address ? t.text2 : t.text4, maxWidth: '220px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={b.address || ''}>{b.address || '—'}</td>
                   <td style={{ ...s.td, fontSize: '.7rem', color: b.city ? t.text2 : t.text4, whiteSpace: 'nowrap' }}>{b.city || '—'}</td>
+                  <td style={{ ...s.td, fontSize: '.72rem', color: b.cluster ? t.text2 : '#c9a84c88', whiteSpace: 'nowrap' }}>{b.cluster || '⚠ missing'}</td>
+                  <td style={{ ...s.td, color: b.region ? t.text1 : '#c9a84c88', whiteSpace: 'nowrap' }}>{b.region || '⚠ missing'}</td>
+                  <td style={{ ...s.td, color: b.state ? t.text1 : '#c9a84c88', whiteSpace: 'nowrap' }}>{b.state || '⚠ missing'}</td>
                   <td style={{ ...s.td, fontFamily: 'monospace', fontSize: '.68rem', color: b.pin_code ? t.text2 : t.text4 }}>{b.pin_code || '—'}</td>
                   <td style={{ ...s.td, fontFamily: 'monospace', fontSize: '.62rem', color: b.branch_gstin ? t.text2 : t.text4, whiteSpace: 'nowrap' }}>{b.branch_gstin || '—'}</td>
                   <td style={{ ...s.td, fontSize: '.7rem', color: b.contact_person ? t.text2 : t.text4, whiteSpace: 'nowrap' }}>{b.contact_person || '—'}</td>
@@ -921,22 +946,10 @@ export default function BranchManagement({ embedded = false } = {}) {
                   <td style={{ ...s.td, fontSize: '.66rem', color: b.opening_date ? t.text2 : t.text4, whiteSpace: 'nowrap' }}>{b.opening_date ? new Date(b.opening_date).toLocaleDateString('en-GB') : '—'}</td>
                   <td style={{ ...s.td, fontSize: '.66rem', color: b.pickup_time ? t.text2 : t.text4, whiteSpace: 'nowrap' }}>{b.pickup_time || '—'}</td>
                   <td style={{ ...s.td, fontSize: '.66rem', color: b.delivery_tat_hours ? t.text2 : t.text4 }}>{b.delivery_tat_hours ? b.delivery_tat_hours + 'h' : '—'}</td>
-                  <td style={{ ...s.td, fontSize: '.62rem', letterSpacing: '.1em', textTransform: 'uppercase', color: b.is_active ? t.green : t.text4 }}>{b.is_active ? 'Active' : 'Inactive'}</td>
                   <td style={{ ...s.td, fontFamily: 'monospace', fontSize: '.68rem', color: nextTmpOf(b.name) === '—' ? t.text4 : t.gold }}>{nextTmpOf(b.name)}</td>
-                  <td style={{ ...s.td, display: 'flex', gap: '6px', alignItems: 'center' }}>
-                    <button onClick={() => startEdit(b)} style={{ background: 'transparent', border: `1px solid ${t.gold}40`, color: t.gold, borderRadius: '5px', padding: '4px 10px', fontSize: '.62rem', cursor: 'pointer' }}>Edit</button>
-                    <button onClick={() => toggleActive(b.id, b.is_active)} style={{ background: 'transparent', border: `1px solid ${b.is_active ? '#e0555540' : t.gold + '40'}`, color: b.is_active ? '#e05555' : t.gold, borderRadius: '5px', padding: '4px 10px', fontSize: '.62rem', cursor: 'pointer' }}>
-                      {b.is_active ? 'Deactivate' : 'Activate'}
-                    </button>
-                    {confirmDelete === b.id ? (
-                      <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                        <span style={{ fontSize: '.62rem', color: '#e05555' }}>Sure?</span>
-                        <button onClick={() => removeBranch(b.id)} style={{ background: '#e05555', border: 'none', color: '#fff', borderRadius: '5px', padding: '4px 8px', fontSize: '.62rem', cursor: 'pointer' }}>Yes</button>
-                        <button onClick={() => setConfirmDelete(null)} style={{ background: 'transparent', border: `1px solid ${t.border}`, color: t.text3, borderRadius: '5px', padding: '4px 8px', fontSize: '.62rem', cursor: 'pointer' }}>No</button>
-                      </span>
-                    ) : (
-                      <button onClick={() => setConfirmDelete(b.id)} style={{ background: 'transparent', border: '1px solid #e0555540', color: '#e05555', borderRadius: '5px', padding: '4px 10px', fontSize: '.62rem', cursor: 'pointer' }}>Remove</button>
-                    )}
+                  <td style={{ ...s.td, fontSize: '.62rem', letterSpacing: '.1em', textTransform: 'uppercase', color: b.is_active ? t.green : t.text4 }}>{b.is_active ? 'Active' : 'Inactive'}</td>
+                  <td style={{ ...s.td }}>
+                    <button onClick={(e) => { e.stopPropagation(); startEdit(b) }} style={{ background: 'transparent', border: `1px solid ${t.gold}40`, color: t.gold, borderRadius: '5px', padding: '4px 14px', fontSize: '.62rem', cursor: 'pointer' }}>Edit</button>
                   </td>
                 </tr>
               ))}
