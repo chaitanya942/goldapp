@@ -1993,16 +1993,17 @@ export default function BiddingVolume() {
       {activeTab === 'bidding' && selected.size > 0 && (
         <div style={{
           position: 'sticky', bottom: 16, zIndex: 50,
-          alignSelf: 'center', minWidth: 380, maxWidth: 760,
+          alignSelf: 'center', width: 'auto', maxWidth: '96%', minWidth: 420,
           background: `linear-gradient(180deg, ${t.card} 0%, ${t.gold}0b 100%)`,
           border: `1px solid ${t.gold}66`,
           borderRadius: 16,
-          padding: '13px 14px 13px 20px',
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 20,
+          padding: '13px 16px 13px 20px',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 28,
+          flexWrap: 'nowrap',
           boxShadow: `0 16px 44px ${t.gold}30, 0 2px 0 ${t.gold}22 inset`,
           backdropFilter: 'blur(10px)',
         }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexShrink: 0 }}>
             <span style={{ width: 9, height: 9, borderRadius: '50%', background: t.gold, boxShadow: `0 0 0 4px ${t.gold}22`, flexShrink: 0 }} />
             <div>
               <div style={{ fontSize: 10.5, color: t.text3, letterSpacing: '.13em', textTransform: 'uppercase', fontWeight: 800 }}>Booking weight</div>
@@ -2018,9 +2019,9 @@ export default function BiddingVolume() {
               )}
             </div>
           </div>
-          <div style={{ display: 'flex', gap: 9, alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: 9, alignItems: 'center', flexShrink: 0, flexWrap: 'nowrap' }}>
             <button onClick={() => setSelected(new Set())}
-              style={{ background: 'transparent', border: `1px solid ${t.border2}`, borderRadius: 8, padding: '8px 16px', fontSize: 12, color: t.text2, fontWeight: 700, cursor: 'pointer' }}>
+              style={{ background: 'transparent', border: `1px solid ${t.border2}`, borderRadius: 8, padding: '8px 16px', fontSize: 12, color: t.text2, fontWeight: 700, cursor: 'pointer', flexShrink: 0 }}>
               Clear
             </button>
             {/* Show when there's open pipeline AND the selection either fits
@@ -2035,7 +2036,7 @@ export default function BiddingVolume() {
                   title={excess > 0.001
                     ? `Close the ${fmt(regionPipe, 2)} g pipeline with these bills — the ${fmt(excess, 2)} g excess folds into gain`
                     : 'Apply the selected bills to the open pipeline owed from prior bids (back-fill it)'}
-                  style={{ background: `${t.orange || '#d98a3a'}1a`, color: t.orange || '#d98a3a', border: `1px solid ${t.orange || '#d98a3a'}80`, borderRadius: 8, padding: '9px 18px', fontSize: 12.5, fontWeight: 800, cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                  style={{ background: `${t.orange || '#d98a3a'}1a`, color: t.orange || '#d98a3a', border: `1px solid ${t.orange || '#d98a3a'}80`, borderRadius: 8, padding: '9px 18px', fontSize: 12.5, fontWeight: 800, cursor: 'pointer', whiteSpace: 'nowrap', flexShrink: 0 }}>
                   ⇄ Close Pipeline{excess > 0.001 ? ` · +${fmt(excess, 2)}g gain` : ''}
                 </button>
               )
@@ -2049,24 +2050,24 @@ export default function BiddingVolume() {
               if (regionPipe <= 0.001 || selBookingWt <= regionPipe + 10) return null
               const remainder = selBookingWt - regionPipe
               return (
-                <span style={{ display: 'inline-flex', gap: 8 }}>
+                <span style={{ display: 'inline-flex', gap: 8, flexShrink: 0 }}>
                   <button onClick={() => setShowSplitModal(true)}
                     title={`Close the ${fmt(regionPipe, 2)} g pipeline with part of this, and book the remaining ${fmt(remainder, 2)} g to a NEW buyer`}
-                    style={{ background: `${t.gold}14`, color: t.gold, border: `1px solid ${t.gold}80`, borderRadius: 8, padding: '9px 18px', fontSize: 12.5, fontWeight: 800, cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                    style={{ background: `${t.gold}14`, color: t.gold, border: `1px solid ${t.gold}80`, borderRadius: 8, padding: '9px 18px', fontSize: 12.5, fontWeight: 800, cursor: 'pointer', whiteSpace: 'nowrap', flexShrink: 0 }}>
                     ⇉ Close {fmt(regionPipe, 2)}g + book {fmt(remainder, 2)}g
                   </button>
                   {/* Alternative: close the pipeline and keep the ~remainder attached
                       to the SAME booking as over-attachment, instead of a new booking. */}
                   <button onClick={() => closePipelineFromSelected(true)}
                     title={`Close the ${fmt(regionPipe, 2)} g pipeline and OVER-ATTACH the remaining ${fmt(remainder, 2)} g to that same booking (net will exceed booked)`}
-                    style={{ background: `${t.orange || '#d98a3a'}14`, color: t.orange || '#d98a3a', border: `1px solid ${t.orange || '#d98a3a'}80`, borderRadius: 8, padding: '9px 18px', fontSize: 12.5, fontWeight: 800, cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                    style={{ background: `${t.orange || '#d98a3a'}14`, color: t.orange || '#d98a3a', border: `1px solid ${t.orange || '#d98a3a'}80`, borderRadius: 8, padding: '9px 18px', fontSize: 12.5, fontWeight: 800, cursor: 'pointer', whiteSpace: 'nowrap', flexShrink: 0 }}>
                     ⇉ Close + over-attach {fmt(remainder, 2)}g
                   </button>
                 </span>
               )
             })()}
             <button onClick={() => setShowBookModal(true)}
-              style={{ background: t.gold, color: '#1a0a00', border: 'none', borderRadius: 8, padding: '10px 24px', fontSize: 13, fontWeight: 900, cursor: 'pointer', letterSpacing: '.02em', boxShadow: `0 3px 12px ${t.gold}66` }}>
+              style={{ background: t.gold, color: '#1a0a00', border: 'none', borderRadius: 8, padding: '10px 24px', fontSize: 13, fontWeight: 900, cursor: 'pointer', letterSpacing: '.02em', boxShadow: `0 3px 12px ${t.gold}66`, whiteSpace: 'nowrap', flexShrink: 0 }}>
               Book Selected →
             </button>
           </div>
