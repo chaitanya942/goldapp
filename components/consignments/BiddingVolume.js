@@ -1993,23 +1993,29 @@ export default function BiddingVolume() {
       {activeTab === 'bidding' && selected.size > 0 && (
         <div style={{
           position: 'sticky', bottom: 16, zIndex: 50,
-          alignSelf: 'center', minWidth: 360, maxWidth: 720,
-          background: t.card,
-          border: `1px solid ${t.gold}55`,
-          borderRadius: 14,
-          padding: '12px 18px',
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 18,
-          boxShadow: `0 10px 30px ${t.gold}33, 0 1px 0 ${t.gold}22 inset`,
-          backdropFilter: 'blur(8px)',
+          alignSelf: 'center', minWidth: 380, maxWidth: 760,
+          background: `linear-gradient(180deg, ${t.card} 0%, ${t.gold}0b 100%)`,
+          border: `1px solid ${t.gold}66`,
+          borderRadius: 16,
+          padding: '13px 14px 13px 20px',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 20,
+          boxShadow: `0 16px 44px ${t.gold}30, 0 2px 0 ${t.gold}22 inset`,
+          backdropFilter: 'blur(10px)',
         }}>
-          <div>
-            <div style={{ fontSize: 11, color: t.text3, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 800 }}>Booking weight</div>
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: 7, marginTop: 3 }}>
-              <span style={{ fontSize: 26, color: t.gold, fontFamily: 'monospace', fontWeight: 700, letterSpacing: '-.01em' }}>{fmt(selBookingWt, 2)}</span>
-              <span style={{ fontSize: 13, color: t.text2, fontWeight: 700 }}>g · {selected.size} bill{selected.size === 1 ? '' : 's'}</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+            <span style={{ width: 9, height: 9, borderRadius: '50%', background: t.gold, boxShadow: `0 0 0 4px ${t.gold}22`, flexShrink: 0 }} />
+            <div>
+              <div style={{ fontSize: 10.5, color: t.text3, letterSpacing: '.13em', textTransform: 'uppercase', fontWeight: 800 }}>Booking weight</div>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: 5, marginTop: 2 }}>
+                <span style={{ fontSize: 29, color: t.gold, fontFamily: 'monospace', fontWeight: 800, letterSpacing: '-.02em', lineHeight: 1 }}>{fmt(selBookingWt, 2)}</span>
+                <span style={{ fontSize: 14, color: t.text2, fontWeight: 800 }}>g</span>
+              </div>
             </div>
-            <div style={{ fontSize: 10.5, color: t.text4, fontWeight: 600, marginTop: 2 }}>
-              net {fmt(selectedTotal, 2)} g{selGainRate > 0 && <> + gain {fmt(selGain, 2)} g · {fmt(gainRatePct, 2)}%</>}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 5, alignItems: 'flex-start' }}>
+              <span style={{ fontSize: 11, color: t.text3, fontWeight: 700, whiteSpace: 'nowrap' }}>{selected.size} bill{selected.size === 1 ? '' : 's'} · net {fmt(selectedTotal, 2)} g</span>
+              {selGainRate > 0 && (
+                <span style={{ fontSize: 10.5, color: t.green, fontWeight: 800, background: `${t.green}16`, border: `1px solid ${t.green}44`, borderRadius: 100, padding: '3px 9px', whiteSpace: 'nowrap' }}>↗ +{fmt(selGain, 2)} g gain · {fmt(gainRatePct, 2)}%</span>
+              )}
             </div>
           </div>
           <div style={{ display: 'flex', gap: 9, alignItems: 'center' }}>
