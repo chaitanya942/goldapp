@@ -374,11 +374,14 @@ export default function BranchManagement({ embedded = false } = {}) {
   const toggleActive = async (id, current) => { await supabase.from('branches').update({ is_active: !current }).eq('id', id); load() }
   const setField = (key, val) => setForm(f => ({ ...f, [key]: val }))
 
-  const EXPORT_COLS = ['#', 'Branch Name', 'State', 'Region', 'Cluster', 'Opening Date', 'Model', 'Status']
+  const EXPORT_COLS = ['#', 'Branch Name', 'CRM ID', 'Code', 'State', 'Region', 'Cluster', 'Address', 'City', 'PIN', 'GSTIN', 'Contact', 'Phone', 'Email', 'Model', 'Opening Date', 'Pickup', 'TAT (h)', 'Status']
   const exportRows = () => filtered.map((b, i) => [
-    i + 1, b.name, b.state, b.region, b.cluster,
-    b.opening_date ? new Date(b.opening_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '',
+    i + 1, b.name, b.crm_branch_id || '', b.branch_code || '', b.state, b.region, b.cluster,
+    (b.address || '').replace(/\s+/g, ' ').trim(), b.city || '', b.pin_code || '', b.branch_gstin || '',
+    b.contact_person || '', b.contact_phone || '', b.contact_email || '',
     b.model_type === 'bangalore' ? 'Same-day HO' : 'Consignment',
+    b.opening_date ? new Date(b.opening_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '',
+    b.pickup_time || '', b.delivery_tat_hours || '',
     b.is_active ? 'Active' : 'Inactive',
   ])
 
@@ -419,10 +422,10 @@ export default function BranchManagement({ embedded = false } = {}) {
       head: [EXPORT_COLS],
       body: exportRows(),
       theme: 'grid',
-      headStyles: { fillColor: [30, 20, 0], textColor: [201, 168, 76], fontSize: 7, fontStyle: 'bold' },
-      bodyStyles: { fillColor: [20, 20, 20], textColor: [240, 230, 200], fontSize: 7 },
+      headStyles: { fillColor: [30, 20, 0], textColor: [201, 168, 76], fontSize: 5.5, fontStyle: 'bold' },
+      bodyStyles: { fillColor: [20, 20, 20], textColor: [240, 230, 200], fontSize: 5.5 },
       alternateRowStyles: { fillColor: [26, 26, 26] },
-      styles: { cellPadding: 3 },
+      styles: { cellPadding: 1.5, overflow: 'linebreak' },
     })
     doc.save('branches.pdf')
   }
@@ -887,7 +890,7 @@ export default function BranchManagement({ embedded = false } = {}) {
         <div style={s.tblWrap}>
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
-              <tr>{[['#', null], ['Branch Name', 'name'], ['CRM ID', null], ['Code', null], ['Address', null], ['State', 'state'], ['Region', 'region'], ['Model', null], ['Status', 'status'], ['Next TMP', null], ['Action', null]].map(([h, key]) =>
+              <tr>{[['#', null], ['Branch Name', 'name'], ['CRM ID', null], ['Code', null], ['State', 'state'], ['Region', 'region'], ['Cluster', 'cluster'], ['Address', null], ['City', null], ['PIN', null], ['GSTIN', null], ['Contact', null], ['Phone', null], ['Email', null], ['Model', null], ['Opening', null], ['Pickup', null], ['TAT', null], ['Status', 'status'], ['Next TMP', null], ['Action', null]].map(([h, key]) =>
                   <th key={h} onClick={key ? () => toggleSort(key) : undefined} style={{ ...s.th, textAlign: h === '#' ? 'center' : 'left', cursor: key ? 'pointer' : 'default', color: key && sortKey === key ? t.gold : t.text3, userSelect: 'none' }}>
                     {h}{key && sortKey === key ? (sortDir === 1 ? ' ▲' : ' ▼') : ''}
                   </th>
@@ -897,28 +900,28 @@ export default function BranchManagement({ embedded = false } = {}) {
               {filtered.map((b, i) => (
                 <tr key={b.id} style={{ background: editId === b.id ? `${t.gold}08` : (!b.state || !b.region || !b.cluster) ? '#c9a84c06' : 'transparent' }}>
                   <td style={{ ...s.td, textAlign: 'center', color: t.text3, fontSize: '.65rem', width: '40px' }}>{i + 1}</td>
-                  <td style={{ ...s.td, color: t.gold, fontWeight: 400 }}>
+                  <td style={{ ...s.td, color: t.gold, fontWeight: 400, whiteSpace: 'nowrap' }}>
                     {b.name}
                     {isUpcoming(b) && <span style={{ marginLeft: '6px', fontSize: '.58rem', color: '#6b8cce', border: '1px solid #6b8cce55', borderRadius: '3px', padding: '1px 5px', textTransform: 'uppercase', letterSpacing: '.04em' }}>upcoming</span>}
                     {isIncomplete(b) && <span style={{ marginLeft: '6px', fontSize: '.58rem', color: t.gold, opacity: .6, border: `1px solid ${t.gold}44`, borderRadius: '3px', padding: '1px 4px' }}>incomplete</span>}
                   </td>
-                  <td style={{ ...s.td, fontFamily: 'monospace', fontSize: '.68rem', color: b.crm_branch_id ? t.text2 : t.text4 }}>
-                    {b.crm_branch_id || '—'}
-                  </td>
-                  <td style={{ ...s.td, fontFamily: 'monospace', fontSize: '.72rem', color: b.branch_code ? t.gold : t.text4 }}>
-                    {b.branch_code || '—'}
-                  </td>
-                  <td style={{ ...s.td, fontSize: '.68rem', color: b.address ? t.text2 : t.text4, maxWidth: '200px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {b.address || '—'}
-                  </td>
-                  <td style={{ ...s.td, color: b.state ? t.text1 : '#c9a84c88' }}>{b.state || '⚠ missing'}</td>
-                  <td style={{ ...s.td, color: b.region ? t.text1 : '#c9a84c88' }}>{b.region || '⚠ missing'}</td>
-                  <td style={{ ...s.td, fontSize: '.65rem', color: b.model_type === 'bangalore' ? t.green : t.text3 }}>
-                    {b.model_type === 'bangalore' ? 'Same-day HO' : 'Consignment'}
-                  </td>
-                  <td style={{ ...s.td, fontSize: '.62rem', letterSpacing: '.1em', textTransform: 'uppercase', color: b.is_active ? t.green : t.text4 }}>
-                    {b.is_active ? 'Active' : 'Inactive'}
-                  </td>
+                  <td style={{ ...s.td, fontFamily: 'monospace', fontSize: '.68rem', color: b.crm_branch_id ? t.text2 : t.text4 }}>{b.crm_branch_id || '—'}</td>
+                  <td style={{ ...s.td, fontFamily: 'monospace', fontSize: '.72rem', color: b.branch_code ? t.gold : t.text4 }}>{b.branch_code || '—'}</td>
+                  <td style={{ ...s.td, color: b.state ? t.text1 : '#c9a84c88', whiteSpace: 'nowrap' }}>{b.state || '⚠ missing'}</td>
+                  <td style={{ ...s.td, color: b.region ? t.text1 : '#c9a84c88', whiteSpace: 'nowrap' }}>{b.region || '⚠ missing'}</td>
+                  <td style={{ ...s.td, fontSize: '.72rem', color: b.cluster ? t.text2 : '#c9a84c88', whiteSpace: 'nowrap' }}>{b.cluster || '⚠ missing'}</td>
+                  <td style={{ ...s.td, fontSize: '.68rem', color: b.address ? t.text2 : t.text4, maxWidth: '220px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={b.address || ''}>{b.address || '—'}</td>
+                  <td style={{ ...s.td, fontSize: '.7rem', color: b.city ? t.text2 : t.text4, whiteSpace: 'nowrap' }}>{b.city || '—'}</td>
+                  <td style={{ ...s.td, fontFamily: 'monospace', fontSize: '.68rem', color: b.pin_code ? t.text2 : t.text4 }}>{b.pin_code || '—'}</td>
+                  <td style={{ ...s.td, fontFamily: 'monospace', fontSize: '.62rem', color: b.branch_gstin ? t.text2 : t.text4, whiteSpace: 'nowrap' }}>{b.branch_gstin || '—'}</td>
+                  <td style={{ ...s.td, fontSize: '.7rem', color: b.contact_person ? t.text2 : t.text4, whiteSpace: 'nowrap' }}>{b.contact_person || '—'}</td>
+                  <td style={{ ...s.td, fontFamily: 'monospace', fontSize: '.68rem', color: b.contact_phone ? t.text2 : t.text4, whiteSpace: 'nowrap' }}>{b.contact_phone || '—'}</td>
+                  <td style={{ ...s.td, fontSize: '.66rem', color: b.contact_email ? t.gold : t.text4, whiteSpace: 'nowrap' }}>{b.contact_email || '—'}</td>
+                  <td style={{ ...s.td, fontSize: '.65rem', color: b.model_type === 'bangalore' ? t.green : t.text3, whiteSpace: 'nowrap' }}>{b.model_type === 'bangalore' ? 'Same-day HO' : 'Consignment'}</td>
+                  <td style={{ ...s.td, fontSize: '.66rem', color: b.opening_date ? t.text2 : t.text4, whiteSpace: 'nowrap' }}>{b.opening_date ? new Date(b.opening_date).toLocaleDateString('en-GB') : '—'}</td>
+                  <td style={{ ...s.td, fontSize: '.66rem', color: b.pickup_time ? t.text2 : t.text4, whiteSpace: 'nowrap' }}>{b.pickup_time || '—'}</td>
+                  <td style={{ ...s.td, fontSize: '.66rem', color: b.delivery_tat_hours ? t.text2 : t.text4 }}>{b.delivery_tat_hours ? b.delivery_tat_hours + 'h' : '—'}</td>
+                  <td style={{ ...s.td, fontSize: '.62rem', letterSpacing: '.1em', textTransform: 'uppercase', color: b.is_active ? t.green : t.text4 }}>{b.is_active ? 'Active' : 'Inactive'}</td>
                   <td style={{ ...s.td, fontFamily: 'monospace', fontSize: '.68rem', color: nextTmpOf(b.name) === '—' ? t.text4 : t.gold }}>{nextTmpOf(b.name)}</td>
                   <td style={{ ...s.td, display: 'flex', gap: '6px', alignItems: 'center' }}>
                     <button onClick={() => startEdit(b)} style={{ background: 'transparent', border: `1px solid ${t.gold}40`, color: t.gold, borderRadius: '5px', padding: '4px 10px', fontSize: '.62rem', cursor: 'pointer' }}>Edit</button>
@@ -938,7 +941,7 @@ export default function BranchManagement({ embedded = false } = {}) {
                 </tr>
               ))}
               {filtered.length === 0 && (
-                <tr><td colSpan={11} style={{ ...s.td, textAlign: 'center', color: t.text4, padding: '48px' }}>
+                <tr><td colSpan={21} style={{ ...s.td, textAlign: 'center', color: t.text4, padding: '48px' }}>
                   {anyFilter ? 'No branches match the current filters.' : 'No branches yet.'}
                 </td></tr>
               )}
