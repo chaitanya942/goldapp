@@ -90,6 +90,7 @@ export async function POST(req) {
       lng: typeof m.lng === 'number' ? m.lng : null,
       gps_accuracy: typeof m.gps_accuracy === 'number' ? m.gps_accuracy : null,
       address: m.address || null,
+      source: m.source === 'upload' ? 'upload' : 'camera',
       uploaded_by: auth.user?.id || null,
       uploaded_by_name: uploader,
     }).select('id, is_plate_shot').single()

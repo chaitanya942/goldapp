@@ -21,4 +21,9 @@ alter table bus_audit_buses
 alter table bus_audit_photos add column if not exists address       text;
 alter table bus_audit_buses  add column if not exists audit_address text;
 
+-- Integrity: how the photo entered — 'camera' (live capture) vs 'upload'
+-- (picked from gallery, treated as unverified since its GPS is the device's
+-- location at submit time, not the photo's origin).
+alter table bus_audit_photos add column if not exists source text;
+
 NOTIFY pgrst, 'reload schema';

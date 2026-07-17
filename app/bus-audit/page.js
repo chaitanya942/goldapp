@@ -9,6 +9,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '../../lib/supabase'
 import { authedFetch } from '../../lib/authedFetch'
+import { normalizePlate } from '../../lib/busPlate'
 
 const C = {
   paper: '#F2F0E9', paper2: '#E8E4D9', card: '#FFFFFF',
@@ -20,7 +21,7 @@ const C = {
   red: '#BC3A22', redSoft: '#F9E8E2',
   amber: '#A5711A', amberSoft: '#F6EDD5',
 }
-const MIN_PHOTOS = 1, MAX_PHOTOS = 5, BLUR_MIN = 55
+const MIN_PHOTOS = 1, MAX_PHOTOS = 5, BLUR_MIN = 55, ACC_MAX = 150   // reject GPS fixes rougher than 150 m
 const MONO = 'var(--font-dm-mono), ui-monospace, monospace'
 const SANS = 'var(--font-jakarta), system-ui, sans-serif'
 
@@ -156,15 +157,15 @@ export default function BusAuditPage() {
     if (r.ok) setStats(await r.json())
   }, [])
 
-  async function onFiles(fileList) {
+  async function onFiles(fileList, source = 'camera') {
     setResult(null)
-    if (geoState !== 'ok') captureGeo()   // refresh a fix as they shoot
+    captureGeo()   // refresh a fix as they shoot
     const files = Array.from(fileList || []).filter(f => f.type.startsWith('image/'))
     for (const file of files) {
       if (photos.length >= MAX_PHOTOS) break
       const key = Math.random().toString(36).slice(2)
       let proc; try { proc = await processImage(file) } catch { continue }
-      setPhotos(p => [...p, { key, previewUrl: proc.previewUrl, blob: proc.blob, blur: proc.blur, reading: { status: 'reading' }, isPlateShot: false }].slice(0, MAX_PHOTOS))
+      setPhotos(p => [...p, { key, previewUrl: proc.previewUrl, blob: proc.blob, blur: proc.blur, reading: { status: 'reading' }, isPlateShot: false, source }].slice(0, MAX_PHOTOS))
       readPlate(key, proc.blob)
     }
   }
@@ -196,13 +197,13 @@ export default function BusAuditPage() {
   }, [manualQ])
 
   async function submit() {
-    if (!bus || photos.length < MIN_PHOTOS || submitting || geoState !== 'ok') return
+    if (!bus || photos.length < MIN_PHOTOS || submitting || !(geoState === 'ok' && geo && geo.accuracy <= ACC_MAX)) return
     setSubmitting(true); setResult(null)
     try {
       const fd = new FormData()
       fd.append('reg_norm', bus.reg_norm)
       const address = geoFull || geoPlace || null
-      const meta = photos.map(p => ({ is_plate_shot: p.isPlateShot, blur_score: Math.round(p.blur), detected_number: p.reading?.registration || null, confidence: p.reading?.confidence ?? null, lat: geo?.lat ?? null, lng: geo?.lng ?? null, gps_accuracy: geo?.accuracy ?? null, address }))
+      const meta = photos.map(p => ({ is_plate_shot: p.isPlateShot, blur_score: Math.round(p.blur), detected_number: p.reading?.registration || null, confidence: p.reading?.confidence ?? null, lat: geo?.lat ?? null, lng: geo?.lng ?? null, gps_accuracy: geo?.accuracy ?? null, address, source: p.source || 'camera' }))
       fd.append('meta', JSON.stringify(meta))
       // Burn the geotag banner (map + place + coords + time) into each photo.
       const info = { lat: geo.lat, lng: geo.lng, place: geoPlace || `${geo.lat.toFixed(5)}, ${geo.lng.toFixed(5)}`, address: geoFull || geoPlace || '', when: fmtStamp(new Date()), mapUrl: `/api/bus-audit/static-map?lat=${geo.lat}&lng=${geo.lng}` }
@@ -222,7 +223,9 @@ export default function BusAuditPage() {
   const plateShot = photos.find(p => p.isPlateShot)
   const anyReading = photos.some(p => p.reading?.status === 'reading')
   const readCandidate = photos.map(p => p.reading).find(r => r?.status === 'done' && r.registration && !r.match)
-  const canSubmit = bus && photos.length >= MIN_PHOTOS && plateShot && geoState === 'ok' && !submitting
+  const geoAccurate = geoState === 'ok' && geo && geo.accuracy <= ACC_MAX
+  const plateMismatch = plateShot?.reading?.status === 'done' && plateShot.reading.registration && bus && normalizePlate(plateShot.reading.registration) !== bus.reg_norm
+  const canSubmit = bus && photos.length >= MIN_PHOTOS && plateShot && geoAccurate && !submitting
   const pct = stats && stats.total ? Math.round((stats.audited / stats.total) * 100) : 0
 
   return (
@@ -265,10 +268,11 @@ export default function BusAuditPage() {
           )}
 
           {/* location status */}
-          <button onClick={geoState === 'ok' ? undefined : captureGeo} style={{ ...s.geo, cursor: geoState === 'ok' ? 'default' : 'pointer', borderColor: geoState === 'ok' ? C.green : geoState === 'locating' ? C.line : C.amber, background: geoState === 'ok' ? C.greenSoft : geoState === 'locating' ? C.card : C.amberSoft }}>
-            <span style={{ color: geoState === 'ok' ? C.green : geoState === 'locating' ? C.ink3 : C.amber, display: 'flex' }}>{Icon.pin({ s: 16 })}</span>
+          <button onClick={geoAccurate ? undefined : captureGeo} style={{ ...s.geo, cursor: geoAccurate ? 'default' : 'pointer', borderColor: geoAccurate ? C.green : geoState === 'locating' ? C.line : C.amber, background: geoAccurate ? C.greenSoft : geoState === 'locating' ? C.card : C.amberSoft }}>
+            <span style={{ color: geoAccurate ? C.green : geoState === 'locating' ? C.ink3 : C.amber, display: 'flex' }}>{Icon.pin({ s: 16 })}</span>
             <span style={{ fontSize: 12.5, fontWeight: 600, color: C.ink2 }}>
-              {geoState === 'ok' ? <>{geoPlace ? <span style={{ color: C.ink }}>{geoPlace}</span> : 'Location tagged'} <span style={{ fontFamily: MONO, color: C.ink3 }}>{geo.lat.toFixed(4)}, {geo.lng.toFixed(4)} · ±{Math.round(geo.accuracy)}m</span></>
+              {geoAccurate ? <>{geoPlace ? <span style={{ color: C.ink }}>{geoPlace}</span> : 'Location tagged'} <span style={{ fontFamily: MONO, color: C.ink3 }}>{geo.lat.toFixed(4)}, {geo.lng.toFixed(4)} · ±{Math.round(geo.accuracy)}m</span></>
+                : geoState === 'ok' ? <span style={{ color: C.amber }}>Location too rough · ±{Math.round(geo.accuracy)}m — move to open sky, tap to retry</span>
                 : geoState === 'locating' ? 'Getting location…'
                 : geoState === 'denied' ? 'Location blocked — tap to enable (required)'
                 : geoState === 'unsupported' ? 'Location not available on this device'
@@ -313,6 +317,12 @@ export default function BusAuditPage() {
                 </div>
               )}
 
+              {plateMismatch && (
+                <div style={{ ...s.banner, background: C.amberSoft, borderColor: C.amber, display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+                  <span style={{ color: C.amber, display: 'flex', flexShrink: 0, marginTop: 1 }}>{Icon.pin({ s: 15 })}</span>
+                  <span style={{ color: C.ink2 }}>The plate photo reads <b style={{ fontFamily: MONO, color: C.ink }}>{plateShot.reading.registration}</b>, but the selected bus is <b style={{ fontFamily: MONO, color: C.ink }}>{bus.reg_number}</b>. Double-check you've picked the right bus.</span>
+                </div>
+              )}
               <div style={s.grid}>
                 {photos.map(p => {
                   const r = p.reading || {}; const blurry = p.blur < BLUR_MIN
@@ -321,6 +331,7 @@ export default function BusAuditPage() {
                       <img src={p.previewUrl} alt="" style={s.thumbImg} />
                       <button onClick={() => removePhoto(p.key)} style={s.rm}>{Icon.x({ s: 13, w: 2.2 })}</button>
                       {p.isPlateShot && <div style={s.plateTag}>PLATE</div>}
+                      {p.source === 'upload' && <div style={{ ...s.uploadTag, top: p.isPlateShot ? 27 : 5 }}>GALLERY</div>}
                       <div style={s.thumbFoot}>
                         {r.status === 'reading' ? <span style={{ color: '#fff', opacity: .85 }}>reading…</span>
                           : blurry ? <span style={{ color: '#ffb4a4' }}>blurry</span>
@@ -332,14 +343,14 @@ export default function BusAuditPage() {
                     </div>
                   )
                 })}
-                {photos.length < MAX_PHOTOS && <button onClick={() => galRef.current?.click()} style={s.addTile}>+</button>}
+                {photos.length < MAX_PHOTOS && <button onClick={() => camRef.current?.click()} style={s.addTile}>+</button>}
               </div>
             </>
           )}
 
           <div style={s.capRow}>
-            <input ref={camRef} type="file" accept="image/*" capture="environment" style={{ display: 'none' }} onChange={e => { onFiles(e.target.files); e.target.value = '' }} />
-            <input ref={galRef} type="file" accept="image/*" multiple style={{ display: 'none' }} onChange={e => { onFiles(e.target.files); e.target.value = '' }} />
+            <input ref={camRef} type="file" accept="image/*" capture="environment" style={{ display: 'none' }} onChange={e => { onFiles(e.target.files, 'camera'); e.target.value = '' }} />
+            <input ref={galRef} type="file" accept="image/*" multiple style={{ display: 'none' }} onChange={e => { onFiles(e.target.files, 'upload'); e.target.value = '' }} />
             <button onClick={() => camRef.current?.click()} disabled={photos.length >= MAX_PHOTOS} style={{ ...s.cap, ...(photos.length >= MAX_PHOTOS ? s.disabled : {}) }}>{Icon.cam({ s: 18 })} Take photo</button>
             <button onClick={() => galRef.current?.click()} disabled={photos.length >= MAX_PHOTOS} style={{ ...s.cap, ...s.capAlt, ...(photos.length >= MAX_PHOTOS ? s.disabled : {}) }}>{Icon.img({ s: 18 })} Upload</button>
           </div>
@@ -352,8 +363,8 @@ export default function BusAuditPage() {
                   : photos.length < MIN_PHOTOS ? `Add ${MIN_PHOTOS - photos.length} more photo${MIN_PHOTOS - photos.length === 1 ? '' : 's'}`
                   : !bus ? 'Select the bus'
                   : !plateShot ? 'Mark the plate photo'
-                  : geoState !== 'ok' ? 'Enable location to submit'
-                  : <>Submit {photos.length} photos {Icon.arrow({ s: 17 })}</>}
+                  : !geoAccurate ? (geoState === 'ok' ? 'Location too rough — retry' : 'Enable location to submit')
+                  : <>Submit {photos.length} photo{photos.length === 1 ? '' : 's'} {Icon.arrow({ s: 17 })}</>}
               </button>
             </div>
           )}
@@ -426,6 +437,7 @@ const s = {
   thumbImg: { width: '100%', height: '100%', objectFit: 'cover', display: 'block' },
   rm: { position: 'absolute', top: 5, right: 5, width: 23, height: 23, borderRadius: '50%', background: 'rgba(15,18,25,.62)', color: '#fff', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0 },
   plateTag: { position: 'absolute', top: 5, left: 5, background: C.goldSolid, color: '#231800', fontSize: 9, fontWeight: 800, padding: '2px 6px', borderRadius: 5, letterSpacing: '.06em' },
+  uploadTag: { position: 'absolute', left: 5, background: C.amber, color: '#fff', fontSize: 8.5, fontWeight: 800, padding: '2px 6px', borderRadius: 5, letterSpacing: '.06em' },
   thumbFoot: { position: 'absolute', bottom: 0, left: 0, right: 0, background: 'linear-gradient(transparent, rgba(0,0,0,.82))', padding: '15px 6px 5px', fontSize: 11, fontWeight: 700, display: 'flex', flexDirection: 'column', gap: 3, alignItems: 'flex-start' },
   setPlate: { background: 'rgba(255,255,255,.92)', color: C.navyInk, border: 'none', borderRadius: 5, padding: '2px 6px', fontSize: 9.5, fontWeight: 800, cursor: 'pointer', fontFamily: SANS },
   addTile: { aspectRatio: '3/4', borderRadius: 11, border: `2px dashed ${C.line}`, background: C.card, color: C.ink3, fontSize: 28, cursor: 'pointer', fontWeight: 300 },
