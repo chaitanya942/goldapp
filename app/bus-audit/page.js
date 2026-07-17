@@ -124,6 +124,8 @@ export default function BusAuditPage() {
   const [geoState, setGeoState] = useState('idle') // idle|locating|ok|denied|unsupported
   const [geoPlace, setGeoPlace] = useState(null)   // "Mangalore, Karnataka, India"
   const [geoFull, setGeoFull] = useState(null)     // detailed address line
+  const [geoResolved, setGeoResolved] = useState(false) // reverse-geocode attempt done
+  const [zoom, setZoom] = useState(null)           // full-screen preview url
   const camRef = useRef(null), galRef = useRef(null)
 
   const reverseGeocode = useCallback(async (lat, lng) => {
@@ -132,11 +134,12 @@ export default function BusAuditPage() {
       if (!r.ok) return
       const j = await r.json(); setGeoPlace(j.place || null); setGeoFull(j.address || null)
     } catch {}
+    finally { setGeoResolved(true) }
   }, [])
 
   const captureGeo = useCallback(() => {
     if (typeof navigator === 'undefined' || !navigator.geolocation) { setGeoState('unsupported'); return }
-    setGeoState('locating')
+    setGeoState('locating'); setGeoResolved(false)
     navigator.geolocation.getCurrentPosition(
       p => { setGeo({ lat: p.coords.latitude, lng: p.coords.longitude, accuracy: p.coords.accuracy, at: Date.now() }); setGeoState('ok'); reverseGeocode(p.coords.latitude, p.coords.longitude) },
       () => setGeoState('denied'),
@@ -196,6 +199,22 @@ export default function BusAuditPage() {
     return () => { live = false; clearTimeout(t) }
   }, [manualQ])
 
+  // Live geotag stamp — burn the location into each preview so the user sees
+  // exactly what will be uploaded, and only uploads on Submit (confirm).
+  useEffect(() => {
+    const acc = geoState === 'ok' && geo && geo.accuracy <= ACC_MAX
+    if (!acc || !geoResolved) return
+    const pending = photos.filter(p => !p.stamped && !p.stamping)
+    if (!pending.length) return
+    const info = { lat: geo.lat, lng: geo.lng, place: geoPlace || `${geo.lat.toFixed(5)}, ${geo.lng.toFixed(5)}`, address: geoFull || geoPlace || '', when: fmtStamp(new Date()), mapUrl: `/api/bus-audit/static-map?lat=${geo.lat}&lng=${geo.lng}` }
+    setPhotos(prev => prev.map(p => pending.some(q => q.key === p.key) ? { ...p, stamping: true } : p))
+    pending.forEach(p => {
+      stampImage(p.blob, info)
+        .then(sb => { const url = URL.createObjectURL(sb); setPhotos(prev => prev.map(x => x.key === p.key ? (URL.revokeObjectURL(x.previewUrl), { ...x, blob: sb, previewUrl: url, stamped: true, stamping: false }) : x)) })
+        .catch(() => setPhotos(prev => prev.map(x => x.key === p.key ? { ...x, stamping: false } : x)))
+    })
+  }, [photos, geoState, geo, geoResolved, geoPlace, geoFull])
+
   async function submit() {
     if (!bus || photos.length < MIN_PHOTOS || submitting || !(geoState === 'ok' && geo && geo.accuracy <= ACC_MAX)) return
     setSubmitting(true); setResult(null)
@@ -207,7 +226,8 @@ export default function BusAuditPage() {
       fd.append('meta', JSON.stringify(meta))
       // Burn the geotag banner (map + place + coords + time) into each photo.
       const info = { lat: geo.lat, lng: geo.lng, place: geoPlace || `${geo.lat.toFixed(5)}, ${geo.lng.toFixed(5)}`, address: geoFull || geoPlace || '', when: fmtStamp(new Date()), mapUrl: `/api/bus-audit/static-map?lat=${geo.lat}&lng=${geo.lng}` }
-      const stamped = await Promise.all(photos.map(p => stampImage(p.blob, info).catch(() => p.blob)))
+      // Photos are already stamped live; stamp any straggler as a fallback.
+      const stamped = await Promise.all(photos.map(p => p.stamped ? Promise.resolve(p.blob) : stampImage(p.blob, info).catch(() => p.blob)))
       stamped.forEach((b, i) => fd.append('images', b, `bus_${i}.jpg`))
       const r = await authedFetch('/api/bus-audit/submit', { method: 'POST', body: fd })
       const j = await r.json()
@@ -328,7 +348,8 @@ export default function BusAuditPage() {
                   const r = p.reading || {}; const blurry = p.blur < BLUR_MIN
                   return (
                     <div key={p.key} style={{ ...s.thumb, borderColor: p.isPlateShot ? C.goldSolid : C.line }}>
-                      <img src={p.previewUrl} alt="" style={s.thumbImg} />
+                      <img src={p.previewUrl} alt="" style={{ ...s.thumbImg, cursor: 'zoom-in' }} onClick={() => setZoom(p.previewUrl)} />
+                      {p.stamping && <div style={s.stamping}><span className="ba-spin" style={{ width: 14, height: 14, borderRadius: '50%', border: '2px solid rgba(255,255,255,.4)', borderTopColor: '#fff', display: 'inline-block' }} /></div>}
                       <button onClick={() => removePhoto(p.key)} style={s.rm}>{Icon.x({ s: 13, w: 2.2 })}</button>
                       {p.isPlateShot && <div style={s.plateTag}>PLATE</div>}
                       {p.source === 'upload' && <div style={{ ...s.uploadTag, top: p.isPlateShot ? 27 : 5 }}>GALLERY</div>}
@@ -408,6 +429,12 @@ export default function BusAuditPage() {
           )}
         </div>
       )}
+      {zoom && (
+        <div onClick={() => setZoom(null)} style={s.zoomWrap}>
+          <img src={zoom} alt="" style={s.zoomImg} />
+          <div style={s.zoomHint}>Geotag is stamped on the photo · tap to close</div>
+        </div>
+      )}
       <style>{`@keyframes ba-spin{to{transform:rotate(360deg)}} .ba-spin{animation:ba-spin .7s linear infinite}`}</style>
     </div>
   )
@@ -441,6 +468,10 @@ const s = {
   thumbFoot: { position: 'absolute', bottom: 0, left: 0, right: 0, background: 'linear-gradient(transparent, rgba(0,0,0,.82))', padding: '15px 6px 5px', fontSize: 11, fontWeight: 700, display: 'flex', flexDirection: 'column', gap: 3, alignItems: 'flex-start' },
   setPlate: { background: 'rgba(255,255,255,.92)', color: C.navyInk, border: 'none', borderRadius: 5, padding: '2px 6px', fontSize: 9.5, fontWeight: 800, cursor: 'pointer', fontFamily: SANS },
   addTile: { aspectRatio: '3/4', borderRadius: 11, border: `2px dashed ${C.line}`, background: C.card, color: C.ink3, fontSize: 28, cursor: 'pointer', fontWeight: 300 },
+  stamping: { position: 'absolute', top: 5, right: 32, width: 22, height: 22, borderRadius: '50%', background: 'rgba(15,18,25,.55)', display: 'flex', alignItems: 'center', justifyContent: 'center' },
+  zoomWrap: { position: 'fixed', inset: 0, background: 'rgba(10,12,16,.94)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14, zIndex: 200, padding: 16, cursor: 'zoom-out' },
+  zoomImg: { maxWidth: '100%', maxHeight: '82vh', objectFit: 'contain', borderRadius: 8 },
+  zoomHint: { color: 'rgba(255,255,255,.8)', fontSize: 12.5, fontWeight: 600 },
   capRow: { display: 'flex', gap: 10, marginTop: 2 },
   cap: { flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '14px 0', borderRadius: 11, border: 'none', background: C.navy, color: '#fff', fontWeight: 700, fontSize: 14, cursor: 'pointer', fontFamily: SANS },
   capAlt: { background: C.card, color: C.navy, border: `1px solid ${C.line}` },
