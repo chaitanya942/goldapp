@@ -113,6 +113,11 @@ export default function BusAuditPage() {
   const [me, setMe] = useState(null)
   const [tab, setTab] = useState('capture')
   const [stats, setStats] = useState(null)
+  const [statusTab, setStatusTab] = useState('pending')  // progress sub-tab
+  const [busQ, setBusQ] = useState('')
+  const [busRows, setBusRows] = useState([])
+  const [busTotal, setBusTotal] = useState(0)
+  const [busLoading, setBusLoading] = useState(false)
 
   const [photos, setPhotos] = useState([])
   const [bus, setBus] = useState(null)
@@ -159,6 +164,24 @@ export default function BusAuditPage() {
     const r = await authedFetch('/api/bus-audit/stats')
     if (r.ok) setStats(await r.json())
   }, [])
+
+  const fetchBuses = useCallback(async (reset, curRows) => {
+    setBusLoading(true)
+    const offset = reset ? 0 : curRows.length
+    const p = new URLSearchParams({ status: statusTab, q: busQ, offset: String(offset), limit: '100' })
+    const r = await authedFetch('/api/bus-audit/buses?' + p.toString())
+    const j = r.ok ? await r.json() : { rows: [], total: 0 }
+    setBusRows(reset ? j.rows : [...curRows, ...j.rows])
+    setBusTotal(j.total || 0)
+    setBusLoading(false)
+  }, [statusTab, busQ])
+
+  useEffect(() => {
+    if (tab !== 'progress') return
+    const t = setTimeout(() => fetchBuses(true, []), 200)
+    return () => clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, statusTab, busQ])
 
   async function onFiles(fileList, source = 'camera') {
     setResult(null)
@@ -399,32 +422,24 @@ export default function BusAuditPage() {
                   <div key={l} style={s.stat}><div style={{ fontFamily: MONO, fontSize: 24, fontWeight: 500, color: col }}>{v}</div><div style={s.statLbl}>{l}</div></div>
                 ))}
               </div>
-              <div style={s.sectionLbl}>By region</div>
-              {stats.by_region.map(r => (
-                <div key={r.region} style={s.regionRow}>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
-                      <span style={{ fontSize: 13.5, fontWeight: 600, color: C.ink, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.region}</span>
-                      <span style={{ fontFamily: MONO, fontSize: 12.5, color: C.ink2, flexShrink: 0 }}>{r.audited}/{r.total}</span>
-                    </div>
-                    <div style={s.regionTrack}><div style={{ ...s.fill, width: `${r.total ? (r.audited / r.total) * 100 : 0}%` }} /></div>
-                  </div>
-                </div>
-              ))}
-              {stats.recent.length > 0 && <>
-                <div style={s.sectionLbl}>Recent audits</div>
-                {stats.recent.map((r, i) => (
-                  <div key={i} style={s.recent}>
-                    <div style={{ minWidth: 0, overflow: 'hidden' }}>
-                      <span style={{ fontFamily: MONO, fontWeight: 500, color: C.ink }}>{r.reg_number}</span>
-                      <span style={{ color: C.ink3, fontSize: 12, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}> · {r.audit_address || r.region || '—'}</span>
-                    </div>
-                    {r.audit_lat != null
-                      ? <a href={`https://www.google.com/maps?q=${r.audit_lat},${r.audit_lng}`} target="_blank" rel="noreferrer" style={{ color: C.navy, fontSize: 12, fontWeight: 700, textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 3, flexShrink: 0 }}>{Icon.pin({ s: 13 })} map</a>
-                      : <span style={{ color: C.ink3, fontSize: 12, flexShrink: 0 }}>{r.audited_by_name || ''}</span>}
+              <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+                <button onClick={() => setStatusTab('pending')} style={{ ...s.subTab, ...(statusTab === 'pending' ? s.subTabOn : {}) }}>Pending · {stats.pending}</button>
+                <button onClick={() => setStatusTab('audited')} style={{ ...s.subTab, ...(statusTab === 'audited' ? s.subTabOn : {}) }}>Audited · {stats.audited}</button>
+              </div>
+              <div style={{ position: 'relative' }}>
+                <span style={{ position: 'absolute', left: 11, top: 11, color: C.ink3 }}>{Icon.search({ s: 16 })}</span>
+                <input value={busQ} onChange={e => setBusQ(e.target.value)} placeholder="Search bus number" style={s.search} autoCapitalize="characters" />
+              </div>
+              <div style={{ fontSize: 11.5, color: C.ink3, fontWeight: 700, margin: '0 2px' }}>{busTotal.toLocaleString('en-IN')} {statusTab}</div>
+              {busLoading && busRows.length === 0 ? <div style={{ color: C.ink3, padding: 16 }}>Loading…</div>
+                : busRows.length === 0 ? <div style={{ color: C.ink3, textAlign: 'center', padding: 24 }}>No buses.</div>
+                : busRows.map(b => (
+                  <div key={b.reg_norm} style={s.busListRow}>
+                    <span style={{ fontFamily: MONO, fontWeight: 500, color: C.ink, fontSize: 14 }}>{b.reg_number}</span>
+                    <span style={{ fontSize: 12, color: C.ink3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', marginLeft: 10, textAlign: 'right' }}>{b.region || '—'}{b.depot ? ` · ${b.depot}` : ''}{statusTab === 'audited' && b.photo_count ? ` · ${b.photo_count} 📷` : ''}</span>
                   </div>
                 ))}
-              </>}
+              {busRows.length < busTotal && <button onClick={() => fetchBuses(false, busRows)} disabled={busLoading} style={s.more2}>{busLoading ? 'Loading…' : `Load more (${busTotal - busRows.length} left)`}</button>}
             </>
           )}
         </div>
@@ -484,4 +499,8 @@ const s = {
   regionRow: { display: 'flex', alignItems: 'center', gap: 12, padding: '8px 2px' },
   regionTrack: { height: 5, background: C.paper2, borderRadius: 3, overflow: 'hidden', marginTop: 5 },
   recent: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '9px 2px', borderBottom: `1px solid ${C.line2}` },
+  subTab: { flex: 1, padding: '10px 0', borderRadius: 9, border: `1px solid ${C.line}`, background: C.card, color: C.ink3, fontWeight: 700, fontSize: 13, cursor: 'pointer', fontFamily: SANS },
+  subTabOn: { background: C.navy, color: '#fff', borderColor: C.navy },
+  busListRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, background: C.card, border: `1px solid ${C.line}`, borderRadius: 9, padding: '10px 12px' },
+  more2: { marginTop: 4, padding: '11px 0', borderRadius: 10, border: `1px solid ${C.line}`, background: C.card, color: C.navy, fontWeight: 700, fontSize: 13, cursor: 'pointer', fontFamily: SANS },
 }
