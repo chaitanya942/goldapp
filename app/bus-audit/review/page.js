@@ -120,6 +120,7 @@ export default function ReviewPage() {
                 : detail.error ? <div style={{ color: C.red, padding: 20 }}>{detail.error}</div>
                 : (<>
                   <div style={{ fontSize: 12.5, color: C.ink2, marginBottom: 4 }}>{detail.bus.region || '—'}{detail.bus.depot ? ` · ${detail.bus.depot}` : ''}{detail.bus.route ? ` · ${detail.bus.route}` : ''}</div>
+                  {detail.bus.ad_type && <div style={{ fontSize: 12.5, color: C.navy, fontWeight: 600, marginBottom: 8 }}>Should have: {detail.bus.ad_type}{detail.bus.mounting_date ? ` · mounted ${new Date(detail.bus.mounting_date + 'T00:00:00').toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}` : ''}</div>}
                   <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12 }}>
                     <span style={{ ...s.chip, background: detail.bus.status === 'audited' ? C.greenSoft : C.amberSoft, color: detail.bus.status === 'audited' ? C.green : C.amber }}>{detail.bus.status}</span>
                     {detail.bus.audited_by_name && <span style={{ fontSize: 12, color: C.ink2 }}>by {detail.bus.audited_by_name}</span>}

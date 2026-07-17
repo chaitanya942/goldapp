@@ -3,7 +3,7 @@
 // pending, per-region breakdown, and the most recent audits.
 
 import { createClient } from '@supabase/supabase-js'
-import { requireAuth } from '@/lib/apiAuth'
+import { requireAuth, ROLE_GROUPS } from '@/lib/apiAuth'
 
 export const runtime = 'nodejs'
 
@@ -14,7 +14,7 @@ const admin = createClient(
 )
 
 export async function GET(req) {
-  const auth = await requireAuth(req, {})
+  const auth = await requireAuth(req, { requiredRoles: ROLE_GROUPS.BUS_AUDIT })
   if (!auth.ok) return auth.response
 
   const { count: total } = await admin.from('bus_audit_buses').select('id', { count: 'exact', head: true })

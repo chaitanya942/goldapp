@@ -12,7 +12,7 @@
 //   images   : one or more image files (getAll)
 
 import { createClient } from '@supabase/supabase-js'
-import { requireAuth } from '@/lib/apiAuth'
+import { requireAuth, ROLE_GROUPS } from '@/lib/apiAuth'
 import { normalizePlate } from '@/lib/busPlate'
 
 export const runtime = 'nodejs'
@@ -30,7 +30,7 @@ const MIN_PHOTOS = 1   // a single plate shot is enough to audit; up to 5 allowe
 const extFor = (t) => (t === 'image/png' ? 'png' : t === 'image/webp' ? 'webp' : 'jpg')
 
 export async function POST(req) {
-  const auth = await requireAuth(req, {})
+  const auth = await requireAuth(req, { requiredRoles: ROLE_GROUPS.BUS_AUDIT })
   if (!auth.ok) return auth.response
   const uploader = auth.profile?.full_name || auth.profile?.email || 'unknown'
 

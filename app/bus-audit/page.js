@@ -27,6 +27,7 @@ const SANS = 'var(--font-jakarta), system-ui, sans-serif'
 // label, not the code-terminal look of a monospace face.
 const MONO = SANS
 const NUM = { fontFamily: SANS, fontVariantNumeric: 'tabular-nums' }
+const fmtDate = (d) => d ? new Date(d + 'T00:00:00').toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : ''
 
 // ── icons (stroke, currentColor) ──────────────────────────────────────────
 const svg = (d, o = {}) => <svg width={o.s || 18} height={o.s || 18} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={o.w || 1.8} strokeLinecap="round" strokeLinejoin="round">{d}</svg>
@@ -113,6 +114,7 @@ async function stampImage(blob, info) {
 export default function BusAuditPage() {
   const router = useRouter()
   const [ready, setReady] = useState(false)
+  const [denied, setDenied] = useState(false)
   const [me, setMe] = useState(null)
   const [tab, setTab] = useState('capture')
   const [stats, setStats] = useState(null)
@@ -165,6 +167,7 @@ export default function BusAuditPage() {
 
   const loadStats = useCallback(async () => {
     const r = await authedFetch('/api/bus-audit/stats')
+    if (r.status === 403) { setDenied(true); return }
     if (r.ok) setStats(await r.json())
   }, [])
 
@@ -265,6 +268,7 @@ export default function BusAuditPage() {
   }
 
   if (!ready) return <div style={{ ...s.app, alignItems: 'center', justifyContent: 'center' }}><span style={{ color: C.ink3 }}>Loading…</span></div>
+  if (denied) return <div style={{ ...s.app, alignItems: 'center', justifyContent: 'center', textAlign: 'center', padding: 30 }}><div><div style={{ color: C.navy, display: 'flex', justifyContent: 'center' }}>{Icon.bus({ s: 32, w: 1.5 })}</div><div style={{ fontWeight: 800, fontSize: 17, marginTop: 12 }}>No access</div><div style={{ color: C.ink2, marginTop: 6, fontSize: 13.5, maxWidth: 280 }}>The Bus Audit is for the marketing team. Ask an admin to grant your account access.</div></div></div>
 
   const plateShot = photos.find(p => p.isPlateShot)
   const anyReading = photos.some(p => p.reading?.status === 'reading')
@@ -350,6 +354,7 @@ export default function BusAuditPage() {
                     <div style={s.microLabel}><span style={{ color: C.green, display: 'inline-flex', verticalAlign: '-2px' }}>{Icon.check({ s: 13, w: 2.4 })}</span> {bus.source === 'auto' ? 'Plate matched' : 'Selected bus'}</div>
                     <div style={{ ...NUM, fontSize: 23, fontWeight: 800, color: C.ink, letterSpacing: '.01em', margin: '3px 0 3px' }}>{bus.reg_number}</div>
                     <div style={{ fontSize: 12.5, color: C.ink2 }}>{bus.region || 'Region —'}{bus.depot ? ` · ${bus.depot}` : ''} · {bus.status === 'audited' ? `already ${bus.photo_count}/5` : `${bus.photo_count || 0}/5 on file`}</div>
+                    {bus.ad_type && <div style={{ fontSize: 12, color: C.navy, fontWeight: 600, marginTop: 3 }}>Should have: {bus.ad_type}{bus.mounting_date ? ` · mounted ${fmtDate(bus.mounting_date)}` : ''}</div>}
                   </div>
                   <button onClick={() => setBus(null)} style={s.change}>Change</button>
                 </div>

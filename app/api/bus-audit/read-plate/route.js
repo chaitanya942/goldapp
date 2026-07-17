@@ -6,7 +6,7 @@
 
 import Anthropic from '@anthropic-ai/sdk'
 import { createClient } from '@supabase/supabase-js'
-import { requireAuth } from '@/lib/apiAuth'
+import { requireAuth, ROLE_GROUPS } from '@/lib/apiAuth'
 import { normalizePlate, looksLikePlate, matchPlate } from '@/lib/busPlate'
 
 export const runtime = 'nodejs'
@@ -47,7 +47,7 @@ const TOOL = {
 }
 
 export async function POST(req) {
-  const auth = await requireAuth(req, {})
+  const auth = await requireAuth(req, { requiredRoles: ROLE_GROUPS.BUS_AUDIT })
   if (!auth.ok) return auth.response
 
   let form
@@ -106,7 +106,7 @@ export async function POST(req) {
     } else if (looksLikePlate(detectedNorm)) {
       const { data: sameLen } = await admin
         .from('bus_audit_buses')
-        .select('id, reg_number, reg_norm, region, status, photo_count')
+        .select('id, reg_number, reg_norm, region, depot, status, photo_count, ad_type, mounting_date')
         .filter('reg_norm', 'like', `${detectedNorm[0]}%`)   // cheap prefix narrow
       const m = matchPlate(detectedNorm, (sameLen || []).map(b => b.reg_norm))
       if (m) {

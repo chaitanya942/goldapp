@@ -4,13 +4,13 @@
 // us send a compliant User-Agent to OpenStreetMap Nominatim). Best-effort —
 // returns { address: null } on any failure so the client falls back to coords.
 
-import { requireAuth } from '@/lib/apiAuth'
+import { requireAuth, ROLE_GROUPS } from '@/lib/apiAuth'
 
 export const runtime = 'nodejs'
 export const maxDuration = 15
 
 export async function GET(req) {
-  const auth = await requireAuth(req, {})
+  const auth = await requireAuth(req, { requiredRoles: ROLE_GROUPS.BUS_AUDIT })
   if (!auth.ok) return auth.response
 
   const u = new URL(req.url)

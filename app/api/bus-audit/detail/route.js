@@ -23,7 +23,7 @@ export async function GET(req) {
 
   const { data: bus, error: busErr } = await admin
     .from('bus_audit_buses')
-    .select('reg_number, reg_norm, region, depot, route, status, photo_count, first_audited_at, audited_by_name, audit_lat, audit_lng, audit_address')
+    .select('reg_number, reg_norm, region, depot, route, ad_type, mounting_date, status, photo_count, first_audited_at, audited_by_name, audit_lat, audit_lng, audit_address')
     .eq('reg_norm', regNorm)
     .maybeSingle()
   if (busErr) return Response.json({ error: busErr.message }, { status: 500 })

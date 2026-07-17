@@ -4,7 +4,7 @@
 // (the marketing team needs their work list). Minimal fields only.
 
 import { createClient } from '@supabase/supabase-js'
-import { requireAuth } from '@/lib/apiAuth'
+import { requireAuth, ROLE_GROUPS } from '@/lib/apiAuth'
 import { normalizePlate } from '@/lib/busPlate'
 
 export const runtime = 'nodejs'
@@ -16,7 +16,7 @@ const admin = createClient(
 )
 
 export async function GET(req) {
-  const auth = await requireAuth(req, {})
+  const auth = await requireAuth(req, { requiredRoles: ROLE_GROUPS.BUS_AUDIT })
   if (!auth.ok) return auth.response
 
   const p = new URL(req.url).searchParams

@@ -4,7 +4,7 @@
 // typing (with or without spaces/dashes) works.
 
 import { createClient } from '@supabase/supabase-js'
-import { requireAuth } from '@/lib/apiAuth'
+import { requireAuth, ROLE_GROUPS } from '@/lib/apiAuth'
 import { normalizePlate } from '@/lib/busPlate'
 
 export const runtime = 'nodejs'
@@ -16,7 +16,7 @@ const admin = createClient(
 )
 
 export async function GET(req) {
-  const auth = await requireAuth(req, {})
+  const auth = await requireAuth(req, { requiredRoles: ROLE_GROUPS.BUS_AUDIT })
   if (!auth.ok) return auth.response
 
   const q = normalizePlate(new URL(req.url).searchParams.get('q') || '')
@@ -24,7 +24,7 @@ export async function GET(req) {
 
   const { data, error } = await admin
     .from('bus_audit_buses')
-    .select('id, reg_number, reg_norm, region, status, photo_count')
+    .select('id, reg_number, reg_norm, region, depot, status, photo_count, ad_type, mounting_date')
     .like('reg_norm', `%${q}%`)
     .order('reg_norm')
     .limit(20)
