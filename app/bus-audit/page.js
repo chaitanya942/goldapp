@@ -22,8 +22,11 @@ const C = {
   amber: '#A5711A', amberSoft: '#F6EDD5',
 }
 const MIN_PHOTOS = 1, MAX_PHOTOS = 5, BLUR_MIN = 55, ACC_MAX = 150   // reject GPS fixes rougher than 150 m
-const MONO = 'var(--font-dm-mono), ui-monospace, monospace'
 const SANS = 'var(--font-jakarta), system-ui, sans-serif'
+// Plate numbers + stats: the UI sans with tabular figures reads like a clean
+// label, not the code-terminal look of a monospace face.
+const MONO = SANS
+const NUM = { fontFamily: SANS, fontVariantNumeric: 'tabular-nums' }
 
 // ── icons (stroke, currentColor) ──────────────────────────────────────────
 const svg = (d, o = {}) => <svg width={o.s || 18} height={o.s || 18} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={o.w || 1.8} strokeLinecap="round" strokeLinejoin="round">{d}</svg>
@@ -283,7 +286,7 @@ export default function BusAuditPage() {
           </div>
         </div>
         <div style={{ textAlign: 'right' }}>
-          <div style={{ fontFamily: MONO, fontSize: 17, fontWeight: 500, color: C.ink }}>{stats ? `${stats.audited}` : '—'}<span style={{ color: C.ink3 }}>/{stats?.total ?? '—'}</span></div>
+          <div style={{ ...NUM, fontSize: 18, fontWeight: 800, color: C.ink, letterSpacing: '-.01em' }}>{stats ? `${stats.audited}` : '—'}<span style={{ color: C.ink3, fontWeight: 600 }}>/{stats?.total ?? '—'}</span></div>
           <div style={{ fontSize: 10, color: C.ink3, textTransform: 'uppercase', letterSpacing: '.11em', fontWeight: 700 }}>audited</div>
         </div>
       </div>
@@ -337,7 +340,7 @@ export default function BusAuditPage() {
                 <div style={s.busCard}>
                   <div style={{ minWidth: 0 }}>
                     <div style={s.microLabel}><span style={{ color: C.green, display: 'inline-flex', verticalAlign: '-2px' }}>{Icon.check({ s: 13, w: 2.4 })}</span> {bus.source === 'auto' ? 'Plate matched' : 'Selected bus'}</div>
-                    <div style={{ fontFamily: MONO, fontSize: 24, fontWeight: 500, color: C.ink, letterSpacing: '.01em', margin: '3px 0 3px' }}>{bus.reg_number}</div>
+                    <div style={{ ...NUM, fontSize: 23, fontWeight: 800, color: C.ink, letterSpacing: '.01em', margin: '3px 0 3px' }}>{bus.reg_number}</div>
                     <div style={{ fontSize: 12.5, color: C.ink2 }}>{bus.region || 'Region —'}{bus.depot ? ` · ${bus.depot}` : ''} · {bus.status === 'audited' ? `already ${bus.photo_count}/5` : `${bus.photo_count || 0}/5 on file`}</div>
                   </div>
                   <button onClick={() => setBus(null)} style={s.change}>Change</button>
@@ -419,7 +422,7 @@ export default function BusAuditPage() {
             <>
               <div style={{ display: 'flex', gap: 9 }}>
                 {[['Total', stats.total, C.ink], ['Audited', stats.audited, C.green], ['Pending', stats.pending, C.amber]].map(([l, v, col]) => (
-                  <div key={l} style={s.stat}><div style={{ fontFamily: MONO, fontSize: 24, fontWeight: 500, color: col }}>{v}</div><div style={s.statLbl}>{l}</div></div>
+                  <div key={l} style={s.stat}><div style={{ ...NUM, fontSize: 26, fontWeight: 800, color: col, letterSpacing: '-.02em' }}>{v.toLocaleString('en-IN')}</div><div style={s.statLbl}>{l}</div></div>
                 ))}
               </div>
               <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
@@ -435,7 +438,7 @@ export default function BusAuditPage() {
                 : busRows.length === 0 ? <div style={{ color: C.ink3, textAlign: 'center', padding: 24 }}>No buses.</div>
                 : busRows.map(b => (
                   <div key={b.reg_norm} style={s.busListRow}>
-                    <span style={{ fontFamily: MONO, fontWeight: 500, color: C.ink, fontSize: 14 }}>{b.reg_number}</span>
+                    <span style={{ ...NUM, fontWeight: 700, color: C.ink, fontSize: 14.5, letterSpacing: '.01em' }}>{b.reg_number}</span>
                     <span style={{ fontSize: 12, color: C.ink3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', marginLeft: 10, textAlign: 'right' }}>{b.region || '—'}{b.depot ? ` · ${b.depot}` : ''}{statusTab === 'audited' && b.photo_count ? ` · ${b.photo_count} 📷` : ''}</span>
                   </div>
                 ))}
