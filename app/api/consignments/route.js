@@ -611,7 +611,7 @@ export async function GET(req) {
     // only Kerala hubs (not leaf branches that already consolidate at hub).
     let branchQ = supabase
       .from('branches')
-      .select('name, region, state, delivery_tat_hours, pickup_time, pickup_days, is_hub, logistics_partner')
+      .select('name, region, state, model_type, delivery_tat_hours, pickup_time, pickup_days, is_hub, logistics_partner')
       .eq('is_active', true)
     if (allowedRegions) branchQ = branchQ.in('region', allowedRegions)
     const { data: branchRows, error: bErr } = await branchQ
