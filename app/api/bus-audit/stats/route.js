@@ -40,7 +40,7 @@ export async function GET(req) {
 
   const { data: recent } = await admin
     .from('bus_audit_buses')
-    .select('reg_number, region, photo_count, first_audited_at, audited_by_name')
+    .select('reg_number, region, photo_count, first_audited_at, audited_by_name, audit_lat, audit_lng, audit_address')
     .eq('status', 'audited')
     .order('first_audited_at', { ascending: false })
     .limit(10)

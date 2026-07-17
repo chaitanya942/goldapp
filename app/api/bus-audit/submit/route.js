@@ -25,7 +25,7 @@ const admin = createClient(
 )
 
 const MAX_PHOTOS = 5
-const MIN_PHOTOS = 3
+const MIN_PHOTOS = 1   // a single plate shot is enough to audit; up to 5 allowed
 
 const extFor = (t) => (t === 'image/png' ? 'png' : t === 'image/webp' ? 'webp' : 'jpg')
 
@@ -89,6 +89,7 @@ export async function POST(req) {
       lat: typeof m.lat === 'number' ? m.lat : null,
       lng: typeof m.lng === 'number' ? m.lng : null,
       gps_accuracy: typeof m.gps_accuracy === 'number' ? m.gps_accuracy : null,
+      address: m.address || null,
       uploaded_by: auth.user?.id || null,
       uploaded_by_name: uploader,
     }).select('id, is_plate_shot').single()
@@ -112,7 +113,7 @@ export async function POST(req) {
     patch.audited_by_name = uploader
     // Stamp the audit location from the plate shot (falling back to any photo).
     const geoMeta = meta.find(m => m.is_plate_shot && typeof m.lat === 'number') || meta.find(m => typeof m.lat === 'number')
-    if (geoMeta) { patch.audit_lat = geoMeta.lat; patch.audit_lng = geoMeta.lng }
+    if (geoMeta) { patch.audit_lat = geoMeta.lat; patch.audit_lng = geoMeta.lng; patch.audit_address = geoMeta.address || null }
   }
   const { data: updated } = await admin
     .from('bus_audit_buses')

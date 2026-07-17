@@ -17,4 +17,8 @@ alter table bus_audit_buses
   add column if not exists audit_lat numeric,
   add column if not exists audit_lng numeric;
 
+-- Human-readable place resolved from the GPS fix (reverse-geocoded).
+alter table bus_audit_photos add column if not exists address       text;
+alter table bus_audit_buses  add column if not exists audit_address text;
+
 NOTIFY pgrst, 'reload schema';

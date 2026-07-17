@@ -20,7 +20,7 @@ const C = {
   red: '#BC3A22', redSoft: '#F9E8E2',
   amber: '#A5711A', amberSoft: '#F6EDD5',
 }
-const MIN_PHOTOS = 3, MAX_PHOTOS = 5, BLUR_MIN = 55
+const MIN_PHOTOS = 1, MAX_PHOTOS = 5, BLUR_MIN = 55
 const MONO = 'var(--font-dm-mono), ui-monospace, monospace'
 const SANS = 'var(--font-jakarta), system-ui, sans-serif'
 
@@ -62,6 +62,50 @@ async function processImage(file) {
   return { blob, blur, previewUrl: URL.createObjectURL(blob) }
 }
 
+// ── geotag stamp (burns map + place + coords + time into the photo) ─────────
+function loadUrlImage(src) { return new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = src }) }
+function fmtStamp(d) {
+  const p = n => String(n).padStart(2, '0')
+  let h = d.getHours(); const ap = h >= 12 ? 'PM' : 'AM'; h = h % 12 || 12
+  const off = -d.getTimezoneOffset(), os = off >= 0 ? '+' : '-'
+  return `${p(d.getDate())}/${p(d.getMonth() + 1)}/${String(d.getFullYear()).slice(2)} ${p(h)}:${p(d.getMinutes())} ${ap} GMT ${os}${p(Math.floor(Math.abs(off) / 60))}:${p(Math.abs(off) % 60)}`
+}
+function clip(g, text, maxW) { text = text || ''; if (g.measureText(text).width <= maxW) return text; let t = text; while (t.length && g.measureText(t + '…').width > maxW) t = t.slice(0, -1); return t + '…' }
+function wrapText(g, text, x, y, maxW, lh, maxLines) {
+  const words = (text || '').split(/\s+/).filter(Boolean); let line = '', used = 0
+  for (let i = 0; i < words.length; i++) {
+    const test = line ? line + ' ' + words[i] : words[i]
+    if (g.measureText(test).width > maxW && line) {
+      g.fillText(line, x, y); y += lh; used++; line = words[i]
+      if (used >= maxLines - 1) { g.fillText(clip(g, words.slice(i).join(' '), maxW), x, y); return y + lh }
+    } else line = test
+  }
+  if (line) { g.fillText(clip(g, line, maxW), x, y); y += lh }
+  return y
+}
+async function stampImage(blob, info) {
+  const img = await loadImage(blob)
+  const cv = document.createElement('canvas'); cv.width = img.width; cv.height = img.height
+  const g = cv.getContext('2d'); g.drawImage(img, 0, 0)
+  const W = cv.width, H = cv.height
+  const bh = Math.max(112, Math.round(H * 0.20))
+  g.fillStyle = 'rgba(12,14,20,0.58)'; g.fillRect(0, H - bh, W, bh)
+  const pad = Math.round(bh * 0.11), mapS = bh - pad * 2
+  try { const m = await loadUrlImage(info.mapUrl); g.drawImage(m, pad, H - bh + pad, mapS, mapS); g.strokeStyle = 'rgba(255,255,255,.6)'; g.lineWidth = Math.max(1, W / 900); g.strokeRect(pad, H - bh + pad, mapS, mapS) } catch {}
+  const tx = pad * 2 + mapS, tw = W - tx - pad; let ty = H - bh + pad
+  const base = Math.max(13, Math.round(bh * 0.132)), ff = 'Arial, "Helvetica Neue", sans-serif'
+  g.textBaseline = 'top'
+  g.fillStyle = '#fff'; g.font = `700 ${Math.round(base * 1.18)}px ${ff}`
+  g.fillText(clip(g, info.place, tw), tx, ty); ty += Math.round(base * 1.55)
+  g.fillStyle = 'rgba(255,255,255,.9)'; g.font = `400 ${base}px ${ff}`
+  ty = wrapText(g, info.address, tx, ty, tw, Math.round(base * 1.28), 2); ty += Math.round(base * 0.12)
+  g.fillStyle = '#fff'; g.font = `600 ${base}px ${ff}`
+  g.fillText(`Lat ${info.lat.toFixed(6)}°  Long ${info.lng.toFixed(6)}°`, tx, ty); ty += Math.round(base * 1.34)
+  g.fillStyle = 'rgba(255,255,255,.82)'; g.font = `400 ${Math.round(base * 0.92)}px ${ff}`
+  g.fillText(info.when, tx, ty)
+  return await new Promise(r => cv.toBlob(r, 'image/jpeg', 0.82))
+}
+
 export default function BusAuditPage() {
   const router = useRouter()
   const [ready, setReady] = useState(false)
@@ -77,17 +121,27 @@ export default function BusAuditPage() {
   const [result, setResult] = useState(null)
   const [geo, setGeo] = useState(null)          // {lat,lng,accuracy,at}
   const [geoState, setGeoState] = useState('idle') // idle|locating|ok|denied|unsupported
+  const [geoPlace, setGeoPlace] = useState(null)   // "Mangalore, Karnataka, India"
+  const [geoFull, setGeoFull] = useState(null)     // detailed address line
   const camRef = useRef(null), galRef = useRef(null)
+
+  const reverseGeocode = useCallback(async (lat, lng) => {
+    try {
+      const r = await authedFetch(`/api/bus-audit/reverse-geo?lat=${lat}&lng=${lng}`)
+      if (!r.ok) return
+      const j = await r.json(); setGeoPlace(j.place || null); setGeoFull(j.address || null)
+    } catch {}
+  }, [])
 
   const captureGeo = useCallback(() => {
     if (typeof navigator === 'undefined' || !navigator.geolocation) { setGeoState('unsupported'); return }
     setGeoState('locating')
     navigator.geolocation.getCurrentPosition(
-      p => { setGeo({ lat: p.coords.latitude, lng: p.coords.longitude, accuracy: p.coords.accuracy, at: Date.now() }); setGeoState('ok') },
+      p => { setGeo({ lat: p.coords.latitude, lng: p.coords.longitude, accuracy: p.coords.accuracy, at: Date.now() }); setGeoState('ok'); reverseGeocode(p.coords.latitude, p.coords.longitude) },
       () => setGeoState('denied'),
       { enableHighAccuracy: true, timeout: 12000, maximumAge: 20000 },
     )
-  }, [])
+  }, [reverseGeocode])
 
   useEffect(() => {
     (async () => {
@@ -147,9 +201,13 @@ export default function BusAuditPage() {
     try {
       const fd = new FormData()
       fd.append('reg_norm', bus.reg_norm)
-      const meta = photos.map(p => ({ is_plate_shot: p.isPlateShot, blur_score: Math.round(p.blur), detected_number: p.reading?.registration || null, confidence: p.reading?.confidence ?? null, lat: geo?.lat ?? null, lng: geo?.lng ?? null, gps_accuracy: geo?.accuracy ?? null }))
+      const address = geoFull || geoPlace || null
+      const meta = photos.map(p => ({ is_plate_shot: p.isPlateShot, blur_score: Math.round(p.blur), detected_number: p.reading?.registration || null, confidence: p.reading?.confidence ?? null, lat: geo?.lat ?? null, lng: geo?.lng ?? null, gps_accuracy: geo?.accuracy ?? null, address }))
       fd.append('meta', JSON.stringify(meta))
-      photos.forEach((p, i) => fd.append('images', p.blob, `bus_${i}.jpg`))
+      // Burn the geotag banner (map + place + coords + time) into each photo.
+      const info = { lat: geo.lat, lng: geo.lng, place: geoPlace || `${geo.lat.toFixed(5)}, ${geo.lng.toFixed(5)}`, address: geoFull || geoPlace || '', when: fmtStamp(new Date()), mapUrl: `/api/bus-audit/static-map?lat=${geo.lat}&lng=${geo.lng}` }
+      const stamped = await Promise.all(photos.map(p => stampImage(p.blob, info).catch(() => p.blob)))
+      stamped.forEach((b, i) => fd.append('images', b, `bus_${i}.jpg`))
       const r = await authedFetch('/api/bus-audit/submit', { method: 'POST', body: fd })
       const j = await r.json()
       if (!r.ok) { setResult({ ok: false, ...j }); setSubmitting(false); return }
@@ -210,7 +268,7 @@ export default function BusAuditPage() {
           <button onClick={geoState === 'ok' ? undefined : captureGeo} style={{ ...s.geo, cursor: geoState === 'ok' ? 'default' : 'pointer', borderColor: geoState === 'ok' ? C.green : geoState === 'locating' ? C.line : C.amber, background: geoState === 'ok' ? C.greenSoft : geoState === 'locating' ? C.card : C.amberSoft }}>
             <span style={{ color: geoState === 'ok' ? C.green : geoState === 'locating' ? C.ink3 : C.amber, display: 'flex' }}>{Icon.pin({ s: 16 })}</span>
             <span style={{ fontSize: 12.5, fontWeight: 600, color: C.ink2 }}>
-              {geoState === 'ok' ? <>Location tagged <span style={{ fontFamily: MONO, color: C.ink3 }}>{geo.lat.toFixed(4)}, {geo.lng.toFixed(4)} · ±{Math.round(geo.accuracy)}m</span></>
+              {geoState === 'ok' ? <>{geoPlace ? <span style={{ color: C.ink }}>{geoPlace}</span> : 'Location tagged'} <span style={{ fontFamily: MONO, color: C.ink3 }}>{geo.lat.toFixed(4)}, {geo.lng.toFixed(4)} · ±{Math.round(geo.accuracy)}m</span></>
                 : geoState === 'locating' ? 'Getting location…'
                 : geoState === 'denied' ? 'Location blocked — tap to enable (required)'
                 : geoState === 'unsupported' ? 'Location not available on this device'
@@ -325,8 +383,13 @@ export default function BusAuditPage() {
                 <div style={s.sectionLbl}>Recent audits</div>
                 {stats.recent.map((r, i) => (
                   <div key={i} style={s.recent}>
-                    <span style={{ fontFamily: MONO, fontWeight: 500, color: C.ink }}>{r.reg_number}</span>
-                    <span style={{ color: C.ink3, fontSize: 12 }}>{r.region || '—'} · {r.audited_by_name || ''}</span>
+                    <div style={{ minWidth: 0, overflow: 'hidden' }}>
+                      <span style={{ fontFamily: MONO, fontWeight: 500, color: C.ink }}>{r.reg_number}</span>
+                      <span style={{ color: C.ink3, fontSize: 12, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}> · {r.audit_address || r.region || '—'}</span>
+                    </div>
+                    {r.audit_lat != null
+                      ? <a href={`https://www.google.com/maps?q=${r.audit_lat},${r.audit_lng}`} target="_blank" rel="noreferrer" style={{ color: C.navy, fontSize: 12, fontWeight: 700, textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 3, flexShrink: 0 }}>{Icon.pin({ s: 13 })} map</a>
+                      : <span style={{ color: C.ink3, fontSize: 12, flexShrink: 0 }}>{r.audited_by_name || ''}</span>}
                   </div>
                 ))}
               </>}
