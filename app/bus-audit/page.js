@@ -1,56 +1,63 @@
 'use client'
 // app/bus-audit/page.js
-// Bus Advertising Audit — field capture app (standalone, mobile-first).
-// Marketing shoots 3–5 photos of an ad-wrapped bus; Claude reads the plate,
-// we match it to the master list and mark the bus audited. Navy + gold to match
-// the on-bus creative.
+// Bus Advertising Audit — field capture app.
+// Light, high-contrast field UI (built to be read outdoors in daylight),
+// flat surfaces, real iconography. GPS is captured at photo time and stored
+// with every shot so location can be verified.
 
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '../../lib/supabase'
 import { authedFetch } from '../../lib/authedFetch'
 
-const T = {
-  bg: '#0a1533', bgGrad: 'radial-gradient(1200px 600px at 50% -10%, #12245a 0%, #0a1533 55%, #070f26 100%)',
-  card: '#101d45', card2: '#16255400', line: '#24356e', line2: '#1a2a5e',
-  gold: '#e8b53d', goldSoft: '#f0c85e', text: '#f4f1e8', text2: '#b9c3e0', text3: '#8593bd',
-  green: '#3fbf7f', greenBg: 'rgba(63,191,127,.14)', red: '#e8664d', redBg: 'rgba(232,102,77,.14)',
-  amber: '#e8a53d', amberBg: 'rgba(232,165,61,.14)',
+const C = {
+  paper: '#F2F0E9', paper2: '#E8E4D9', card: '#FFFFFF',
+  ink: '#181A1F', ink2: '#585B63', ink3: '#93949B',
+  line: '#E2DED3', line2: '#EDEAE1',
+  navy: '#1B3A6B', navyInk: '#12294D', navySoft: '#ECF1F8',
+  gold: '#9C7620', goldSolid: '#C89A33', goldSoft: '#F6EFD8',
+  green: '#1C824A', greenSoft: '#E4F2E9',
+  red: '#BC3A22', redSoft: '#F9E8E2',
+  amber: '#A5711A', amberSoft: '#F6EDD5',
 }
 const MIN_PHOTOS = 3, MAX_PHOTOS = 5, BLUR_MIN = 55
+const MONO = 'var(--font-dm-mono), ui-monospace, monospace'
+const SANS = 'var(--font-jakarta), system-ui, sans-serif'
 
-// ── image processing (compress + sharpness) ───────────────────────────────
+// ── icons (stroke, currentColor) ──────────────────────────────────────────
+const svg = (d, o = {}) => <svg width={o.s || 18} height={o.s || 18} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={o.w || 1.8} strokeLinecap="round" strokeLinejoin="round">{d}</svg>
+const Icon = {
+  cam: (o) => svg(<><path d="M4 8h3l1.5-2h7L17 8h3v11H4z" /><circle cx="12" cy="13" r="3.2" /></>, o),
+  img: (o) => svg(<><rect x="3" y="4" width="18" height="16" rx="1.5" /><circle cx="8.5" cy="9" r="1.6" /><path d="M21 16l-5-5-8 8" /></>, o),
+  chart: (o) => svg(<><path d="M4 20V4" /><path d="M4 20h16" /><rect x="7" y="11" width="3" height="6" /><rect x="12" y="7" width="3" height="10" /><rect x="17" y="13" width="3" height="4" /></>, o),
+  pin: (o) => svg(<><path d="M12 21s7-6.3 7-11a7 7 0 1 0-14 0c0 4.7 7 11 7 11z" /><circle cx="12" cy="10" r="2.4" /></>, o),
+  check: (o) => svg(<path d="M4 12.5l5 5 11-11" />, o),
+  x: (o) => svg(<><path d="M6 6l12 12" /><path d="M18 6L6 18" /></>, o),
+  bus: (o) => svg(<><rect x="4" y="4" width="16" height="13" rx="2" /><path d="M4 11h16" /><circle cx="8" cy="20" r="1.4" /><circle cx="16" cy="20" r="1.4" /><path d="M4 17v2M20 17v2" /></>, o),
+  arrow: (o) => svg(<path d="M5 12h14M13 6l6 6-6 6" />, o),
+  search: (o) => svg(<><circle cx="11" cy="11" r="6.5" /><path d="M20 20l-4-4" /></>, o),
+}
+
+// ── image processing (compress + sharpness) ────────────────────────────────
 function loadImage(file) {
-  return new Promise((res, rej) => {
-    const img = new Image()
-    img.onload = () => res(img)
-    img.onerror = rej
-    img.src = URL.createObjectURL(file)
-  })
+  return new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = URL.createObjectURL(file) })
 }
 function laplacianVar(ctx, w, h) {
   const { data } = ctx.getImageData(0, 0, w, h)
   const g = new Float32Array(w * h)
   for (let i = 0; i < w * h; i++) g[i] = 0.299 * data[i * 4] + 0.587 * data[i * 4 + 1] + 0.114 * data[i * 4 + 2]
-  let sum = 0, sum2 = 0, n = 0
-  for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) {
-    const i = y * w + x
-    const lap = g[i - 1] + g[i + 1] + g[i - w] + g[i + w] - 4 * g[i]
-    sum += lap; sum2 += lap * lap; n++
-  }
-  return n ? sum2 / n - (sum / n) ** 2 : 0
+  let s = 0, s2 = 0, n = 0
+  for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) { const i = y * w + x; const l = g[i - 1] + g[i + 1] + g[i - w] + g[i + w] - 4 * g[i]; s += l; s2 += l * l; n++ }
+  return n ? s2 / n - (s / n) ** 2 : 0
 }
 async function processImage(file) {
   const img = await loadImage(file)
-  const maxDim = 1280
-  const scale = Math.min(1, maxDim / Math.max(img.width, img.height))
+  const scale = Math.min(1, 1280 / Math.max(img.width, img.height))
   const w = Math.max(1, Math.round(img.width * scale)), h = Math.max(1, Math.round(img.height * scale))
-  const canvas = document.createElement('canvas')
-  canvas.width = w; canvas.height = h
-  const ctx = canvas.getContext('2d', { willReadFrequently: true })
-  ctx.drawImage(img, 0, 0, w, h)
+  const cv = document.createElement('canvas'); cv.width = w; cv.height = h
+  const ctx = cv.getContext('2d', { willReadFrequently: true }); ctx.drawImage(img, 0, 0, w, h)
   const blur = laplacianVar(ctx, w, h)
-  const blob = await new Promise(r => canvas.toBlob(r, 'image/jpeg', 0.72))
+  const blob = await new Promise(r => cv.toBlob(r, 'image/jpeg', 0.72))
   URL.revokeObjectURL(img.src)
   return { blob, blur, previewUrl: URL.createObjectURL(blob) }
 }
@@ -62,284 +69,264 @@ export default function BusAuditPage() {
   const [tab, setTab] = useState('capture')
   const [stats, setStats] = useState(null)
 
-  // capture state
-  const [photos, setPhotos] = useState([])          // {key, previewUrl, blob, blur, reading}
-  const [bus, setBus] = useState(null)              // resolved/confirmed bus
+  const [photos, setPhotos] = useState([])
+  const [bus, setBus] = useState(null)
   const [manualQ, setManualQ] = useState('')
   const [manualHits, setManualHits] = useState([])
   const [submitting, setSubmitting] = useState(false)
   const [result, setResult] = useState(null)
+  const [geo, setGeo] = useState(null)          // {lat,lng,accuracy,at}
+  const [geoState, setGeoState] = useState('idle') // idle|locating|ok|denied|unsupported
   const camRef = useRef(null), galRef = useRef(null)
+
+  const captureGeo = useCallback(() => {
+    if (typeof navigator === 'undefined' || !navigator.geolocation) { setGeoState('unsupported'); return }
+    setGeoState('locating')
+    navigator.geolocation.getCurrentPosition(
+      p => { setGeo({ lat: p.coords.latitude, lng: p.coords.longitude, accuracy: p.coords.accuracy, at: Date.now() }); setGeoState('ok') },
+      () => setGeoState('denied'),
+      { enableHighAccuracy: true, timeout: 12000, maximumAge: 20000 },
+    )
+  }, [])
 
   useEffect(() => {
     (async () => {
       const { data: { session } } = await supabase.auth.getSession()
       if (!session) { router.replace('/'); return }
-      setMe(session.user)
-      setReady(true)
-      loadStats()
+      setMe(session.user); setReady(true); loadStats(); captureGeo()
     })()
-  }, [router])
+  }, [router, captureGeo])
 
   const loadStats = useCallback(async () => {
     const r = await authedFetch('/api/bus-audit/stats')
     if (r.ok) setStats(await r.json())
   }, [])
 
-  // ── add photos ──────────────────────────────────────────────────────────
   async function onFiles(fileList) {
     setResult(null)
+    if (geoState !== 'ok') captureGeo()   // refresh a fix as they shoot
     const files = Array.from(fileList || []).filter(f => f.type.startsWith('image/'))
-    if (!files.length) return
     for (const file of files) {
       if (photos.length >= MAX_PHOTOS) break
       const key = Math.random().toString(36).slice(2)
-      let proc
-      try { proc = await processImage(file) } catch { continue }
-      const photo = { key, previewUrl: proc.previewUrl, blob: proc.blob, blur: proc.blur, reading: { status: 'reading' }, isPlateShot: false }
-      setPhotos(p => [...p, photo].slice(0, MAX_PHOTOS))
+      let proc; try { proc = await processImage(file) } catch { continue }
+      setPhotos(p => [...p, { key, previewUrl: proc.previewUrl, blob: proc.blob, blur: proc.blur, reading: { status: 'reading' }, isPlateShot: false }].slice(0, MAX_PHOTOS))
       readPlate(key, proc.blob)
     }
   }
-
   async function readPlate(key, blob) {
     try {
-      const fd = new FormData()
-      fd.append('image', blob, 'p.jpg')
+      const fd = new FormData(); fd.append('image', blob, 'p.jpg')
       const r = await authedFetch('/api/bus-audit/read-plate', { method: 'POST', body: fd })
       const j = await r.json()
       setPhotos(prev => prev.map(p => p.key === key ? { ...p, reading: { status: 'done', ...j } } : p))
-    } catch {
-      setPhotos(prev => prev.map(p => p.key === key ? { ...p, reading: { status: 'error' } } : p))
-    }
+    } catch { setPhotos(prev => prev.map(p => p.key === key ? { ...p, reading: { status: 'error' } } : p)) }
   }
-
-  // auto-resolve the bus from the best matched read
   useEffect(() => {
     if (bus) return
-    const matched = photos
-      .filter(p => p.reading?.status === 'done' && p.reading.match)
-      .sort((a, b) => (b.reading.confidence || 0) - (a.reading.confidence || 0))
-    if (matched.length) {
-      const best = matched[0]
-      setBus({ ...best.reading.match, source: 'auto' })
-      setPhotos(prev => prev.map(p => ({ ...p, isPlateShot: p.key === best.key })))
-    }
+    const matched = photos.filter(p => p.reading?.status === 'done' && p.reading.match).sort((a, b) => (b.reading.confidence || 0) - (a.reading.confidence || 0))
+    if (matched.length) { const best = matched[0]; setBus({ ...best.reading.match, source: 'auto' }); setPhotos(prev => prev.map(p => ({ ...p, isPlateShot: p.key === best.key }))) }
   }, [photos, bus])
 
   function removePhoto(key) {
-    setPhotos(prev => {
-      const next = prev.filter(p => p.key !== key)
-      // if we removed the plate shot, unset bus so it re-resolves
-      const removed = prev.find(p => p.key === key)
-      if (removed?.isPlateShot) setBus(null)
-      return next
-    })
+    setPhotos(prev => { const removed = prev.find(p => p.key === key); if (removed?.isPlateShot) setBus(null); return prev.filter(p => p.key !== key) })
   }
-  function setPlateShot(key) {
-    setPhotos(prev => prev.map(p => ({ ...p, isPlateShot: p.key === key })))
-  }
-  function resetCapture() {
-    photos.forEach(p => URL.revokeObjectURL(p.previewUrl))
-    setPhotos([]); setBus(null); setManualQ(''); setManualHits([]); setResult(null)
-  }
+  const setPlateShot = (key) => setPhotos(prev => prev.map(p => ({ ...p, isPlateShot: p.key === key })))
+  function resetCapture() { photos.forEach(p => URL.revokeObjectURL(p.previewUrl)); setPhotos([]); setBus(null); setManualQ(''); setManualHits([]); setResult(null) }
 
-  // manual search fallback
   useEffect(() => {
     if (manualQ.replace(/[^a-z0-9]/gi, '').length < 3) { setManualHits([]); return }
     let live = true
-    const t = setTimeout(async () => {
-      const r = await authedFetch('/api/bus-audit/search?q=' + encodeURIComponent(manualQ))
-      if (live && r.ok) setManualHits((await r.json()).results || [])
-    }, 250)
+    const t = setTimeout(async () => { const r = await authedFetch('/api/bus-audit/search?q=' + encodeURIComponent(manualQ)); if (live && r.ok) setManualHits((await r.json()).results || []) }, 250)
     return () => { live = false; clearTimeout(t) }
   }, [manualQ])
 
   async function submit() {
-    if (!bus || photos.length < MIN_PHOTOS || submitting) return
+    if (!bus || photos.length < MIN_PHOTOS || submitting || geoState !== 'ok') return
     setSubmitting(true); setResult(null)
     try {
       const fd = new FormData()
       fd.append('reg_norm', bus.reg_norm)
-      const meta = photos.map(p => ({
-        is_plate_shot: p.isPlateShot,
-        blur_score: Math.round(p.blur),
-        detected_number: p.reading?.registration || null,
-        confidence: p.reading?.confidence ?? null,
-      }))
+      const meta = photos.map(p => ({ is_plate_shot: p.isPlateShot, blur_score: Math.round(p.blur), detected_number: p.reading?.registration || null, confidence: p.reading?.confidence ?? null, lat: geo?.lat ?? null, lng: geo?.lng ?? null, gps_accuracy: geo?.accuracy ?? null }))
       fd.append('meta', JSON.stringify(meta))
       photos.forEach((p, i) => fd.append('images', p.blob, `bus_${i}.jpg`))
       const r = await authedFetch('/api/bus-audit/submit', { method: 'POST', body: fd })
       const j = await r.json()
       if (!r.ok) { setResult({ ok: false, ...j }); setSubmitting(false); return }
       setResult({ ok: true, ...j })
-      photos.forEach(p => URL.revokeObjectURL(p.previewUrl))
-      setPhotos([]); setBus(null); setManualQ(''); setManualHits([])
-      loadStats()
-    } catch (e) {
-      setResult({ ok: false, error: e?.message || 'Submit failed' })
-    }
+      photos.forEach(p => URL.revokeObjectURL(p.previewUrl)); setPhotos([]); setBus(null); setManualQ(''); setManualHits([]); loadStats()
+    } catch (e) { setResult({ ok: false, error: e?.message || 'Submit failed' }) }
     setSubmitting(false)
   }
 
-  if (!ready) return <div style={{ ...s.app, alignItems: 'center', justifyContent: 'center' }}><div style={{ color: T.text3 }}>Loading…</div></div>
+  if (!ready) return <div style={{ ...s.app, alignItems: 'center', justifyContent: 'center' }}><span style={{ color: C.ink3 }}>Loading…</span></div>
 
   const plateShot = photos.find(p => p.isPlateShot)
   const anyReading = photos.some(p => p.reading?.status === 'reading')
   const readCandidate = photos.map(p => p.reading).find(r => r?.status === 'done' && r.registration && !r.match)
-  const canSubmit = bus && photos.length >= MIN_PHOTOS && plateShot && !submitting
+  const canSubmit = bus && photos.length >= MIN_PHOTOS && plateShot && geoState === 'ok' && !submitting
   const pct = stats && stats.total ? Math.round((stats.audited / stats.total) * 100) : 0
 
   return (
     <div style={s.app}>
       {/* header */}
       <div style={s.header}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
           <div style={s.logo}>W</div>
           <div>
-            <div style={{ fontWeight: 800, fontSize: 15, letterSpacing: '.02em' }}>Bus Audit</div>
-            <div style={{ fontSize: 11, color: T.text3 }}>{me?.email}</div>
+            <div style={{ fontWeight: 700, fontSize: 15.5, color: C.ink, letterSpacing: '-.01em' }}>Bus Audit</div>
+            <div style={{ fontSize: 11.5, color: C.ink3 }}>{me?.email}</div>
           </div>
         </div>
         <div style={{ textAlign: 'right' }}>
-          <div style={{ fontFamily: 'var(--font-dm-mono), monospace', fontSize: 18, fontWeight: 700, color: T.gold }}>{stats ? `${stats.audited}/${stats.total}` : '—'}</div>
-          <div style={{ fontSize: 10.5, color: T.text3 }}>audited</div>
+          <div style={{ fontFamily: MONO, fontSize: 17, fontWeight: 500, color: C.ink }}>{stats ? `${stats.audited}` : '—'}<span style={{ color: C.ink3 }}>/{stats?.total ?? '—'}</span></div>
+          <div style={{ fontSize: 10, color: C.ink3, textTransform: 'uppercase', letterSpacing: '.11em', fontWeight: 700 }}>audited</div>
         </div>
       </div>
-      <div style={s.progressTrack}><div style={{ ...s.progressFill, width: `${pct}%` }} /></div>
+      <div style={s.track}><div style={{ ...s.fill, width: `${pct}%` }} /></div>
 
-      {/* tabs */}
-      <div style={s.tabs}>
-        {['capture', 'progress'].map(k => (
-          <button key={k} onClick={() => { setTab(k); if (k === 'progress') loadStats() }}
-            style={{ ...s.tab, ...(tab === k ? s.tabOn : {}) }}>{k === 'capture' ? '📷 Capture' : '📊 Progress'}</button>
+      {/* segmented tabs */}
+      <div style={s.seg}>
+        {[['capture', 'Capture', Icon.cam], ['progress', 'Progress', Icon.chart]].map(([k, label, ic]) => (
+          <button key={k} onClick={() => { setTab(k); if (k === 'progress') loadStats() }} style={{ ...s.segBtn, ...(tab === k ? s.segOn : {}) }}>
+            <span style={{ color: tab === k ? C.navy : C.ink3 }}>{ic({ s: 16 })}</span>{label}
+          </button>
         ))}
       </div>
 
       {tab === 'capture' ? (
         <div style={s.body}>
           {result && (
-            <div style={{ ...s.banner, background: result.ok ? T.greenBg : T.redBg, borderColor: result.ok ? T.green : T.red }}>
+            <div style={{ ...s.banner, background: result.ok ? (result.audited ? C.greenSoft : C.amberSoft) : C.redSoft, borderColor: result.ok ? (result.audited ? C.green : C.amber) : C.red }}>
               {result.ok
                 ? (result.audited
-                  ? <><b style={{ color: T.green }}>✓ Audited — {result.bus?.reg_number}</b><div style={{ color: T.text2, fontSize: 12.5, marginTop: 2 }}>{result.bus?.photo_count} photos on file.</div></>
-                  : <><b style={{ color: T.amber }}>Saved {result.added} photo{result.added === 1 ? '' : 's'} — {result.bus?.reg_number}</b><div style={{ color: T.text2, fontSize: 12.5, marginTop: 2 }}>{result.needs_plate_shot ? 'Still needs a clear plate shot. ' : ''}{result.needs_more > 0 ? `Add ${result.needs_more} more to complete.` : ''}</div></>)
-                : <><b style={{ color: T.red }}>{result.error === 'AUDIT_ALREADY_DONE' ? 'Already audited' : "Couldn't save"}</b><div style={{ color: T.text2, fontSize: 12.5, marginTop: 2 }}>{result.message || result.error}</div></>}
+                  ? <><b style={{ color: C.green }}>Audited — {result.bus?.reg_number}</b><span style={{ color: C.ink2, fontSize: 12.5 }}> · {result.bus?.photo_count} photos on file</span></>
+                  : <><b style={{ color: C.amber }}>Saved {result.added} photo{result.added === 1 ? '' : 's'}</b><span style={{ color: C.ink2, fontSize: 12.5 }}> · {result.needs_plate_shot ? 'needs a clear plate shot. ' : ''}{result.needs_more > 0 ? `add ${result.needs_more} more.` : ''}</span></>)
+                : <><b style={{ color: C.red }}>{result.error === 'AUDIT_ALREADY_DONE' ? 'Already audited' : "Couldn't save"}</b><span style={{ color: C.ink2, fontSize: 12.5 }}> · {result.message || result.error}</span></>}
             </div>
           )}
 
+          {/* location status */}
+          <button onClick={geoState === 'ok' ? undefined : captureGeo} style={{ ...s.geo, cursor: geoState === 'ok' ? 'default' : 'pointer', borderColor: geoState === 'ok' ? C.green : geoState === 'locating' ? C.line : C.amber, background: geoState === 'ok' ? C.greenSoft : geoState === 'locating' ? C.card : C.amberSoft }}>
+            <span style={{ color: geoState === 'ok' ? C.green : geoState === 'locating' ? C.ink3 : C.amber, display: 'flex' }}>{Icon.pin({ s: 16 })}</span>
+            <span style={{ fontSize: 12.5, fontWeight: 600, color: C.ink2 }}>
+              {geoState === 'ok' ? <>Location tagged <span style={{ fontFamily: MONO, color: C.ink3 }}>{geo.lat.toFixed(4)}, {geo.lng.toFixed(4)} · ±{Math.round(geo.accuracy)}m</span></>
+                : geoState === 'locating' ? 'Getting location…'
+                : geoState === 'denied' ? 'Location blocked — tap to enable (required)'
+                : geoState === 'unsupported' ? 'Location not available on this device'
+                : 'Tap to tag location'}
+            </span>
+          </button>
+
           {photos.length === 0 ? (
-            <div style={s.hint}>
-              <div style={{ fontSize: 40, marginBottom: 8 }}>🚌</div>
-              <div style={{ fontWeight: 700, fontSize: 16 }}>Photograph the bus</div>
-              <div style={{ color: T.text3, fontSize: 13, marginTop: 6, lineHeight: 1.5, maxWidth: 280 }}>
-                Take <b style={{ color: T.text2 }}>{MIN_PHOTOS}–{MAX_PHOTOS}</b> photos — at least one clearly showing the <b style={{ color: T.text2 }}>number plate</b>, the rest showing the ad wrap. We'll read the plate and file it automatically.
+            <div style={s.empty}>
+              <div style={{ color: C.navy, display: 'flex' }}>{Icon.bus({ s: 34, w: 1.5 })}</div>
+              <div style={{ fontWeight: 700, fontSize: 16, color: C.ink, marginTop: 12 }}>Photograph the bus</div>
+              <div style={{ color: C.ink2, fontSize: 13, marginTop: 6, lineHeight: 1.5, maxWidth: 290 }}>
+                Take <b>{MIN_PHOTOS}–{MAX_PHOTOS}</b> photos — one clearly showing the <b>number plate</b>, the rest showing the ad wrap. The plate is read and filed automatically.
               </div>
             </div>
           ) : (
             <>
-              {/* resolved bus card */}
               {bus ? (
-                <div style={{ ...s.busCard, borderColor: bus.status === 'audited' ? T.amber : T.gold }}>
-                  <div>
-                    <div style={{ fontSize: 11, color: T.text3, textTransform: 'uppercase', letterSpacing: '.1em', fontWeight: 800 }}>{bus.source === 'auto' ? '✓ Plate matched' : 'Selected bus'}</div>
-                    <div style={{ fontSize: 22, fontWeight: 800, fontFamily: 'var(--font-dm-mono), monospace', color: T.gold, marginTop: 2 }}>{bus.reg_number}</div>
-                    <div style={{ fontSize: 12, color: T.text2, marginTop: 2 }}>{bus.region || 'Region —'} · {bus.status === 'audited' ? `already ${bus.photo_count}/5 photos` : `${bus.photo_count || 0}/5 on file`}</div>
+                <div style={s.busCard}>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={s.microLabel}><span style={{ color: C.green, display: 'inline-flex', verticalAlign: '-2px' }}>{Icon.check({ s: 13, w: 2.4 })}</span> {bus.source === 'auto' ? 'Plate matched' : 'Selected bus'}</div>
+                    <div style={{ fontFamily: MONO, fontSize: 24, fontWeight: 500, color: C.ink, letterSpacing: '.01em', margin: '3px 0 3px' }}>{bus.reg_number}</div>
+                    <div style={{ fontSize: 12.5, color: C.ink2 }}>{bus.region || 'Region —'}{bus.depot ? ` · ${bus.depot}` : ''} · {bus.status === 'audited' ? `already ${bus.photo_count}/5` : `${bus.photo_count || 0}/5 on file`}</div>
                   </div>
-                  <button onClick={() => setBus(null)} style={s.changeBtn}>Change</button>
+                  <button onClick={() => setBus(null)} style={s.change}>Change</button>
                 </div>
               ) : anyReading ? (
-                <div style={s.readingBar}>🔍 Reading plate…</div>
+                <div style={s.readingBar}><span className="ba-spin" style={{ width: 14, height: 14, borderRadius: '50%', border: `2px solid ${C.line}`, borderTopColor: C.navy, display: 'inline-block' }} /> Reading plate…</div>
               ) : (
-                <div style={{ ...s.busCard, borderColor: T.line, flexDirection: 'column', alignItems: 'stretch', gap: 8 }}>
-                  <div style={{ color: T.amber, fontWeight: 700, fontSize: 13 }}>
-                    {readCandidate ? `Read "${readCandidate.registration}" — not in the master list.` : "Couldn't read a plate."} Pick the bus:
+                <div style={{ ...s.busCard, flexDirection: 'column', alignItems: 'stretch', gap: 9 }}>
+                  <div style={{ color: C.amber, fontWeight: 600, fontSize: 13 }}>{readCandidate ? `Read "${readCandidate.registration}" — not in the list.` : "Couldn't read a plate."} Pick the bus:</div>
+                  <div style={{ position: 'relative' }}>
+                    <span style={{ position: 'absolute', left: 11, top: 11, color: C.ink3 }}>{Icon.search({ s: 16 })}</span>
+                    <input value={manualQ} onChange={e => setManualQ(e.target.value)} placeholder="Type the bus number" style={s.search} autoCapitalize="characters" />
                   </div>
-                  <input value={manualQ} onChange={e => setManualQ(e.target.value)} placeholder="Type the bus number…" style={s.search} autoCapitalize="characters" />
                   {manualHits.map(h => (
                     <button key={h.id} onClick={() => { setBus({ ...h, source: 'manual' }); setManualHits([]) }} style={s.hit}>
-                      <span style={{ fontFamily: 'var(--font-dm-mono), monospace', fontWeight: 700 }}>{h.reg_number}</span>
-                      <span style={{ color: T.text3, fontSize: 12 }}>{h.region || '—'} · {h.status}</span>
+                      <span style={{ fontFamily: MONO, fontWeight: 500, color: C.ink }}>{h.reg_number}</span>
+                      <span style={{ color: C.ink3, fontSize: 12 }}>{h.region || '—'} · {h.status}</span>
                     </button>
                   ))}
                 </div>
               )}
 
-              {/* photo grid */}
               <div style={s.grid}>
                 {photos.map(p => {
-                  const r = p.reading || {}
-                  const blurry = p.blur < BLUR_MIN
+                  const r = p.reading || {}; const blurry = p.blur < BLUR_MIN
                   return (
-                    <div key={p.key} style={{ ...s.thumb, borderColor: p.isPlateShot ? T.gold : T.line }}>
+                    <div key={p.key} style={{ ...s.thumb, borderColor: p.isPlateShot ? C.goldSolid : C.line }}>
                       <img src={p.previewUrl} alt="" style={s.thumbImg} />
-                      <button onClick={() => removePhoto(p.key)} style={s.rm}>✕</button>
+                      <button onClick={() => removePhoto(p.key)} style={s.rm}>{Icon.x({ s: 13, w: 2.2 })}</button>
                       {p.isPlateShot && <div style={s.plateTag}>PLATE</div>}
                       <div style={s.thumbFoot}>
-                        {r.status === 'reading' ? <span style={{ color: T.text3 }}>reading…</span>
-                          : blurry ? <span style={{ color: T.red }}>⚠ blurry</span>
-                          : r.match ? <span style={{ color: T.green }}>✓ {r.registration}</span>
-                          : r.registration ? <span style={{ color: T.amber }}>{r.registration}?</span>
-                          : <span style={{ color: T.text3 }}>no plate</span>}
+                        {r.status === 'reading' ? <span style={{ color: '#fff', opacity: .85 }}>reading…</span>
+                          : blurry ? <span style={{ color: '#ffb4a4' }}>blurry</span>
+                          : r.match ? <span style={{ color: '#8fe6b0', display: 'inline-flex', alignItems: 'center', gap: 3 }}>{Icon.check({ s: 12, w: 2.4 })}{r.registration}</span>
+                          : r.registration ? <span style={{ color: '#f2d38a' }}>{r.registration}?</span>
+                          : <span style={{ color: '#fff', opacity: .7 }}>no plate</span>}
                         {!p.isPlateShot && r.registration && <button onClick={() => setPlateShot(p.key)} style={s.setPlate}>set plate</button>}
                       </div>
                     </div>
                   )
                 })}
-                {photos.length < MAX_PHOTOS && (
-                  <button onClick={() => galRef.current?.click()} style={s.addTile}>＋</button>
-                )}
+                {photos.length < MAX_PHOTOS && <button onClick={() => galRef.current?.click()} style={s.addTile}>+</button>}
               </div>
             </>
           )}
 
-          {/* capture buttons */}
-          <div style={s.captureRow}>
+          <div style={s.capRow}>
             <input ref={camRef} type="file" accept="image/*" capture="environment" style={{ display: 'none' }} onChange={e => { onFiles(e.target.files); e.target.value = '' }} />
             <input ref={galRef} type="file" accept="image/*" multiple style={{ display: 'none' }} onChange={e => { onFiles(e.target.files); e.target.value = '' }} />
-            <button onClick={() => camRef.current?.click()} disabled={photos.length >= MAX_PHOTOS} style={{ ...s.capBtn, ...(photos.length >= MAX_PHOTOS ? s.disabled : {}) }}>📷 Take photo</button>
-            <button onClick={() => galRef.current?.click()} disabled={photos.length >= MAX_PHOTOS} style={{ ...s.capBtn, ...s.capBtnAlt, ...(photos.length >= MAX_PHOTOS ? s.disabled : {}) }}>🖼 Upload</button>
+            <button onClick={() => camRef.current?.click()} disabled={photos.length >= MAX_PHOTOS} style={{ ...s.cap, ...(photos.length >= MAX_PHOTOS ? s.disabled : {}) }}>{Icon.cam({ s: 18 })} Take photo</button>
+            <button onClick={() => galRef.current?.click()} disabled={photos.length >= MAX_PHOTOS} style={{ ...s.cap, ...s.capAlt, ...(photos.length >= MAX_PHOTOS ? s.disabled : {}) }}>{Icon.img({ s: 18 })} Upload</button>
           </div>
 
-          {/* submit */}
           {photos.length > 0 && (
-            <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
-              <button onClick={resetCapture} style={s.clearBtn}>Clear</button>
-              <button onClick={submit} disabled={!canSubmit} style={{ ...s.submitBtn, ...(canSubmit ? {} : s.disabled) }}>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button onClick={resetCapture} style={s.clear}>Clear</button>
+              <button onClick={submit} disabled={!canSubmit} style={{ ...s.submit, ...(canSubmit ? {} : s.disabled) }}>
                 {submitting ? 'Submitting…'
                   : photos.length < MIN_PHOTOS ? `Add ${MIN_PHOTOS - photos.length} more photo${MIN_PHOTOS - photos.length === 1 ? '' : 's'}`
                   : !bus ? 'Select the bus'
                   : !plateShot ? 'Mark the plate photo'
-                  : `Submit ${photos.length} photos ✓`}
+                  : geoState !== 'ok' ? 'Enable location to submit'
+                  : <>Submit {photos.length} photos {Icon.arrow({ s: 17 })}</>}
               </button>
             </div>
           )}
         </div>
       ) : (
         <div style={s.body}>
-          {!stats ? <div style={{ color: T.text3 }}>Loading…</div> : (
+          {!stats ? <span style={{ color: C.ink3 }}>Loading…</span> : (
             <>
-              <div style={s.statRow}>
-                <div style={s.statCard}><div style={s.statNum}>{stats.total}</div><div style={s.statLbl}>Total buses</div></div>
-                <div style={s.statCard}><div style={{ ...s.statNum, color: T.green }}>{stats.audited}</div><div style={s.statLbl}>Audited</div></div>
-                <div style={s.statCard}><div style={{ ...s.statNum, color: T.amber }}>{stats.pending}</div><div style={s.statLbl}>Pending</div></div>
+              <div style={{ display: 'flex', gap: 9 }}>
+                {[['Total', stats.total, C.ink], ['Audited', stats.audited, C.green], ['Pending', stats.pending, C.amber]].map(([l, v, col]) => (
+                  <div key={l} style={s.stat}><div style={{ fontFamily: MONO, fontSize: 24, fontWeight: 500, color: col }}>{v}</div><div style={s.statLbl}>{l}</div></div>
+                ))}
               </div>
-              <div style={{ fontSize: 12, color: T.text3, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '.1em', margin: '14px 2px 8px' }}>By region</div>
+              <div style={s.sectionLbl}>By region</div>
               {stats.by_region.map(r => (
                 <div key={r.region} style={s.regionRow}>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: 13.5, fontWeight: 700 }}>{r.region}</div>
-                    <div style={s.regionTrack}><div style={{ ...s.progressFill, width: `${r.total ? (r.audited / r.total) * 100 : 0}%` }} /></div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                      <span style={{ fontSize: 13.5, fontWeight: 600, color: C.ink, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.region}</span>
+                      <span style={{ fontFamily: MONO, fontSize: 12.5, color: C.ink2, flexShrink: 0 }}>{r.audited}/{r.total}</span>
+                    </div>
+                    <div style={s.regionTrack}><div style={{ ...s.fill, width: `${r.total ? (r.audited / r.total) * 100 : 0}%` }} /></div>
                   </div>
-                  <div style={{ fontFamily: 'var(--font-dm-mono), monospace', fontSize: 13, color: T.text2, minWidth: 62, textAlign: 'right' }}>{r.audited}/{r.total}</div>
                 </div>
               ))}
               {stats.recent.length > 0 && <>
-                <div style={{ fontSize: 12, color: T.text3, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '.1em', margin: '18px 2px 8px' }}>Recent audits</div>
+                <div style={s.sectionLbl}>Recent audits</div>
                 {stats.recent.map((r, i) => (
-                  <div key={i} style={s.recentRow}>
-                    <span style={{ fontFamily: 'var(--font-dm-mono), monospace', fontWeight: 700, color: T.gold }}>{r.reg_number}</span>
-                    <span style={{ color: T.text3, fontSize: 12 }}>{r.audited_by_name || '—'}</span>
+                  <div key={i} style={s.recent}>
+                    <span style={{ fontFamily: MONO, fontWeight: 500, color: C.ink }}>{r.reg_number}</span>
+                    <span style={{ color: C.ink3, fontSize: 12 }}>{r.region || '—'} · {r.audited_by_name || ''}</span>
                   </div>
                 ))}
               </>}
@@ -347,46 +334,48 @@ export default function BusAuditPage() {
           )}
         </div>
       )}
+      <style>{`@keyframes ba-spin{to{transform:rotate(360deg)}} .ba-spin{animation:ba-spin .7s linear infinite}`}</style>
     </div>
   )
 }
 
 const s = {
-  app: { minHeight: '100dvh', background: T.bgGrad, backgroundColor: T.bg, color: T.text, fontFamily: 'var(--font-jakarta), system-ui, sans-serif', display: 'flex', flexDirection: 'column', maxWidth: 560, margin: '0 auto' },
-  header: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 16px 10px' },
-  logo: { width: 34, height: 34, borderRadius: 9, background: `linear-gradient(135deg, ${T.gold}, ${T.goldSoft})`, color: '#0a1533', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 900, fontSize: 18 },
-  progressTrack: { height: 3, background: T.line2, margin: '0 16px', borderRadius: 3, overflow: 'hidden' },
-  progressFill: { height: '100%', background: `linear-gradient(90deg, ${T.gold}, ${T.green})`, borderRadius: 3, transition: 'width .4s' },
-  tabs: { display: 'flex', gap: 8, padding: '12px 16px 4px' },
-  tab: { flex: 1, padding: '9px 0', borderRadius: 10, border: `1px solid ${T.line}`, background: 'transparent', color: T.text3, fontWeight: 700, fontSize: 13, cursor: 'pointer' },
-  tabOn: { background: T.card, color: T.gold, borderColor: T.gold },
-  body: { padding: '12px 16px 28px', display: 'flex', flexDirection: 'column', gap: 12, flex: 1 },
-  banner: { border: '1px solid', borderRadius: 12, padding: '11px 14px' },
-  hint: { display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', padding: '38px 10px 30px' },
-  busCard: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, background: T.card, border: '1px solid', borderRadius: 14, padding: '13px 15px' },
-  changeBtn: { background: 'transparent', border: `1px solid ${T.line}`, color: T.text2, borderRadius: 8, padding: '7px 13px', fontSize: 12.5, fontWeight: 700, cursor: 'pointer', flexShrink: 0 },
-  readingBar: { background: T.card, border: `1px solid ${T.line}`, borderRadius: 12, padding: '13px 15px', color: T.text2, fontWeight: 700 },
-  search: { width: '100%', boxSizing: 'border-box', background: '#0a1533', border: `1px solid ${T.line}`, borderRadius: 9, padding: '10px 12px', color: T.text, fontSize: 15, outline: 'none', fontFamily: 'var(--font-dm-mono), monospace', letterSpacing: '.05em' },
-  hit: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#0a1533', border: `1px solid ${T.line}`, borderRadius: 9, padding: '10px 12px', cursor: 'pointer', color: T.text },
+  app: { minHeight: '100dvh', background: C.paper, color: C.ink, fontFamily: SANS, display: 'flex', flexDirection: 'column', maxWidth: 480, margin: '0 auto' },
+  header: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '15px 16px 11px' },
+  logo: { width: 34, height: 34, borderRadius: 8, background: C.navy, color: C.goldSolid, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: 18, fontFamily: 'Georgia, serif' },
+  track: { height: 3, background: C.paper2, margin: '0 16px', borderRadius: 3, overflow: 'hidden' },
+  fill: { height: '100%', background: C.green, borderRadius: 3, transition: 'width .4s' },
+  seg: { display: 'flex', gap: 4, margin: '12px 16px 0', padding: 4, background: C.paper2, borderRadius: 11 },
+  segBtn: { flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7, padding: '9px 0', borderRadius: 8, border: 'none', background: 'transparent', color: C.ink3, fontWeight: 700, fontSize: 13.5, cursor: 'pointer', fontFamily: SANS },
+  segOn: { background: C.card, color: C.navy, boxShadow: '0 1px 3px rgba(20,25,40,.09)' },
+  body: { padding: '14px 16px 30px', display: 'flex', flexDirection: 'column', gap: 12, flex: 1 },
+  banner: { border: '1px solid', borderRadius: 11, padding: '11px 13px', fontSize: 13.5 },
+  geo: { display: 'flex', alignItems: 'center', gap: 8, border: '1px solid', borderRadius: 10, padding: '9px 12px', width: '100%', textAlign: 'left', fontFamily: SANS },
+  empty: { display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', padding: '40px 10px 34px', background: C.card, border: `1px solid ${C.line}`, borderRadius: 14 },
+  busCard: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, background: C.card, border: `1px solid ${C.line}`, borderRadius: 13, padding: '13px 14px', boxShadow: '0 1px 2px rgba(20,25,40,.04)' },
+  microLabel: { fontSize: 10.5, color: C.ink3, textTransform: 'uppercase', letterSpacing: '.1em', fontWeight: 800 },
+  change: { background: 'transparent', border: `1px solid ${C.line}`, color: C.ink2, borderRadius: 8, padding: '8px 13px', fontSize: 12.5, fontWeight: 700, cursor: 'pointer', flexShrink: 0, fontFamily: SANS },
+  readingBar: { display: 'flex', alignItems: 'center', gap: 9, background: C.card, border: `1px solid ${C.line}`, borderRadius: 12, padding: '13px 14px', color: C.ink2, fontWeight: 600, fontSize: 13.5 },
+  search: { width: '100%', boxSizing: 'border-box', background: C.paper, border: `1px solid ${C.line}`, borderRadius: 9, padding: '10px 12px 10px 34px', color: C.ink, fontSize: 15, outline: 'none', fontFamily: MONO, letterSpacing: '.04em' },
+  hit: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: C.paper, border: `1px solid ${C.line}`, borderRadius: 9, padding: '10px 12px', cursor: 'pointer' },
   grid: { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 },
   thumb: { position: 'relative', aspectRatio: '3/4', borderRadius: 11, overflow: 'hidden', border: '2px solid', background: '#000' },
   thumbImg: { width: '100%', height: '100%', objectFit: 'cover', display: 'block' },
-  rm: { position: 'absolute', top: 4, right: 4, width: 22, height: 22, borderRadius: '50%', background: 'rgba(0,0,0,.6)', color: '#fff', border: 'none', fontSize: 12, cursor: 'pointer', lineHeight: 1 },
-  plateTag: { position: 'absolute', top: 4, left: 4, background: T.gold, color: '#0a1533', fontSize: 9, fontWeight: 900, padding: '2px 6px', borderRadius: 5, letterSpacing: '.05em' },
-  thumbFoot: { position: 'absolute', bottom: 0, left: 0, right: 0, background: 'linear-gradient(transparent, rgba(0,0,0,.85))', padding: '14px 6px 5px', fontSize: 11, fontWeight: 700, display: 'flex', flexDirection: 'column', gap: 2, alignItems: 'flex-start' },
-  setPlate: { background: 'rgba(232,181,61,.9)', color: '#0a1533', border: 'none', borderRadius: 5, padding: '2px 6px', fontSize: 9.5, fontWeight: 800, cursor: 'pointer' },
-  addTile: { aspectRatio: '3/4', borderRadius: 11, border: `2px dashed ${T.line}`, background: T.card, color: T.text3, fontSize: 30, cursor: 'pointer' },
-  captureRow: { display: 'flex', gap: 10, marginTop: 2 },
-  capBtn: { flex: 1, padding: '14px 0', borderRadius: 12, border: 'none', background: T.gold, color: '#0a1533', fontWeight: 800, fontSize: 14, cursor: 'pointer' },
-  capBtnAlt: { background: T.card, color: T.text, border: `1px solid ${T.line}` },
-  clearBtn: { padding: '14px 20px', borderRadius: 12, border: `1px solid ${T.line}`, background: 'transparent', color: T.text2, fontWeight: 700, fontSize: 14, cursor: 'pointer' },
-  submitBtn: { flex: 1, padding: '14px 0', borderRadius: 12, border: 'none', background: `linear-gradient(135deg, ${T.green}, #2f9d66)`, color: '#04120a', fontWeight: 900, fontSize: 14.5, cursor: 'pointer' },
-  disabled: { opacity: .4, cursor: 'not-allowed', filter: 'grayscale(.4)' },
-  statRow: { display: 'flex', gap: 8 },
-  statCard: { flex: 1, background: T.card, border: `1px solid ${T.line}`, borderRadius: 12, padding: '14px 10px', textAlign: 'center' },
-  statNum: { fontSize: 26, fontWeight: 800, fontFamily: 'var(--font-dm-mono), monospace', color: T.gold },
-  statLbl: { fontSize: 11, color: T.text3, marginTop: 2 },
-  regionRow: { display: 'flex', alignItems: 'center', gap: 12, padding: '9px 4px', borderBottom: `1px solid ${T.line2}` },
-  regionTrack: { height: 5, background: T.line2, borderRadius: 3, overflow: 'hidden', marginTop: 5 },
-  recentRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '9px 4px', borderBottom: `1px solid ${T.line2}` },
+  rm: { position: 'absolute', top: 5, right: 5, width: 23, height: 23, borderRadius: '50%', background: 'rgba(15,18,25,.62)', color: '#fff', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0 },
+  plateTag: { position: 'absolute', top: 5, left: 5, background: C.goldSolid, color: '#231800', fontSize: 9, fontWeight: 800, padding: '2px 6px', borderRadius: 5, letterSpacing: '.06em' },
+  thumbFoot: { position: 'absolute', bottom: 0, left: 0, right: 0, background: 'linear-gradient(transparent, rgba(0,0,0,.82))', padding: '15px 6px 5px', fontSize: 11, fontWeight: 700, display: 'flex', flexDirection: 'column', gap: 3, alignItems: 'flex-start' },
+  setPlate: { background: 'rgba(255,255,255,.92)', color: C.navyInk, border: 'none', borderRadius: 5, padding: '2px 6px', fontSize: 9.5, fontWeight: 800, cursor: 'pointer', fontFamily: SANS },
+  addTile: { aspectRatio: '3/4', borderRadius: 11, border: `2px dashed ${C.line}`, background: C.card, color: C.ink3, fontSize: 28, cursor: 'pointer', fontWeight: 300 },
+  capRow: { display: 'flex', gap: 10, marginTop: 2 },
+  cap: { flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '14px 0', borderRadius: 11, border: 'none', background: C.navy, color: '#fff', fontWeight: 700, fontSize: 14, cursor: 'pointer', fontFamily: SANS },
+  capAlt: { background: C.card, color: C.navy, border: `1px solid ${C.line}` },
+  clear: { padding: '14px 20px', borderRadius: 11, border: `1px solid ${C.line}`, background: C.card, color: C.ink2, fontWeight: 700, fontSize: 14, cursor: 'pointer', fontFamily: SANS },
+  submit: { flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7, padding: '14px 0', borderRadius: 11, border: 'none', background: C.goldSolid, color: '#231800', fontWeight: 800, fontSize: 14.5, cursor: 'pointer', fontFamily: SANS },
+  disabled: { opacity: .45, cursor: 'not-allowed', filter: 'grayscale(.3)' },
+  stat: { flex: 1, background: C.card, border: `1px solid ${C.line}`, borderRadius: 12, padding: '14px 10px', textAlign: 'center' },
+  statLbl: { fontSize: 11, color: C.ink3, marginTop: 2, textTransform: 'uppercase', letterSpacing: '.08em', fontWeight: 700 },
+  sectionLbl: { fontSize: 11, color: C.ink3, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '.11em', margin: '10px 2px 2px' },
+  regionRow: { display: 'flex', alignItems: 'center', gap: 12, padding: '8px 2px' },
+  regionTrack: { height: 5, background: C.paper2, borderRadius: 3, overflow: 'hidden', marginTop: 5 },
+  recent: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '9px 2px', borderBottom: `1px solid ${C.line2}` },
 }

@@ -86,6 +86,9 @@ export async function POST(req) {
       is_plate_shot: !!m.is_plate_shot,
       confidence: typeof m.confidence === 'number' ? m.confidence : null,
       blur_score: typeof m.blur_score === 'number' ? m.blur_score : null,
+      lat: typeof m.lat === 'number' ? m.lat : null,
+      lng: typeof m.lng === 'number' ? m.lng : null,
+      gps_accuracy: typeof m.gps_accuracy === 'number' ? m.gps_accuracy : null,
       uploaded_by: auth.user?.id || null,
       uploaded_by_name: uploader,
     }).select('id, is_plate_shot').single()
@@ -107,6 +110,9 @@ export async function POST(req) {
     patch.first_audited_at = new Date().toISOString()
     patch.audited_by = auth.user?.id || null
     patch.audited_by_name = uploader
+    // Stamp the audit location from the plate shot (falling back to any photo).
+    const geoMeta = meta.find(m => m.is_plate_shot && typeof m.lat === 'number') || meta.find(m => typeof m.lat === 'number')
+    if (geoMeta) { patch.audit_lat = geoMeta.lat; patch.audit_lng = geoMeta.lng }
   }
   const { data: updated } = await admin
     .from('bus_audit_buses')
