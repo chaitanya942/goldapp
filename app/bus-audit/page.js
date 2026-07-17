@@ -328,10 +328,18 @@ export default function BusAuditPage() {
 
           {photos.length === 0 ? (
             <div style={s.empty}>
-              <div style={{ color: C.navy, display: 'flex' }}>{Icon.bus({ s: 34, w: 1.5 })}</div>
-              <div style={{ fontWeight: 700, fontSize: 16, color: C.ink, marginTop: 12 }}>Photograph the bus</div>
-              <div style={{ color: C.ink2, fontSize: 13, marginTop: 6, lineHeight: 1.5, maxWidth: 290 }}>
-                Take <b>{MIN_PHOTOS}–{MAX_PHOTOS}</b> photos — one clearly showing the <b>number plate</b>, the rest showing the ad wrap. The plate is read and filed automatically.
+              <div style={s.emptyIcon}>{Icon.bus({ s: 30, w: 1.6 })}</div>
+              <div style={{ fontWeight: 800, fontSize: 18, color: C.ink, marginTop: 14, letterSpacing: '-.01em' }}>Photograph the bus</div>
+              <div style={{ color: C.ink2, fontSize: 13.5, marginTop: 6, lineHeight: 1.5, maxWidth: 300 }}>
+                One clear shot of the <b>number plate</b> is enough — add up to <b>{MAX_PHOTOS}</b> more showing the ad wrap.
+              </div>
+              <div style={s.steps}>
+                {['Snap the number plate', 'We read & match it automatically', 'Check the geotag, then submit'].map((t, i) => (
+                  <div key={i} style={s.step}>
+                    <span style={s.stepNo}>{i + 1}</span>
+                    <span style={{ color: C.ink, fontSize: 13, fontWeight: 600 }}>{t}</span>
+                  </div>
+                ))}
               </div>
             </div>
           ) : (
@@ -398,8 +406,8 @@ export default function BusAuditPage() {
           <div style={s.capRow}>
             <input ref={camRef} type="file" accept="image/*" capture="environment" style={{ display: 'none' }} onChange={e => { onFiles(e.target.files, 'camera'); e.target.value = '' }} />
             <input ref={galRef} type="file" accept="image/*" multiple style={{ display: 'none' }} onChange={e => { onFiles(e.target.files, 'upload'); e.target.value = '' }} />
-            <button onClick={() => camRef.current?.click()} disabled={photos.length >= MAX_PHOTOS} style={{ ...s.cap, ...(photos.length >= MAX_PHOTOS ? s.disabled : {}) }}>{Icon.cam({ s: 18 })} Take photo</button>
-            <button onClick={() => galRef.current?.click()} disabled={photos.length >= MAX_PHOTOS} style={{ ...s.cap, ...s.capAlt, ...(photos.length >= MAX_PHOTOS ? s.disabled : {}) }}>{Icon.img({ s: 18 })} Upload</button>
+            <button onClick={() => camRef.current?.click()} disabled={photos.length >= MAX_PHOTOS} style={{ ...s.cap, ...(photos.length >= MAX_PHOTOS ? s.disabled : {}) }}>{Icon.cam({ s: 19 })} Take photo</button>
+            <button onClick={() => galRef.current?.click()} disabled={photos.length >= MAX_PHOTOS} style={{ ...s.capGhost, ...(photos.length >= MAX_PHOTOS ? s.disabled : {}) }}>{Icon.img({ s: 16 })} Upload from gallery</button>
           </div>
 
           {photos.length > 0 && (
@@ -470,7 +478,11 @@ const s = {
   body: { padding: '14px 16px 30px', display: 'flex', flexDirection: 'column', gap: 12, flex: 1 },
   banner: { border: '1px solid', borderRadius: 11, padding: '11px 13px', fontSize: 13.5 },
   geo: { display: 'flex', alignItems: 'center', gap: 8, border: '1px solid', borderRadius: 10, padding: '9px 12px', width: '100%', textAlign: 'left', fontFamily: SANS },
-  empty: { display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', padding: '40px 10px 34px', background: C.card, border: `1px solid ${C.line}`, borderRadius: 14 },
+  empty: { display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', padding: '34px 18px 30px', background: C.card, border: `1px solid ${C.line}`, borderRadius: 16 },
+  emptyIcon: { width: 58, height: 58, borderRadius: 16, background: C.navySoft, color: C.navy, display: 'flex', alignItems: 'center', justifyContent: 'center' },
+  steps: { display: 'flex', flexDirection: 'column', gap: 11, marginTop: 20, alignItems: 'flex-start' },
+  step: { display: 'flex', alignItems: 'center', gap: 11 },
+  stepNo: { width: 22, height: 22, borderRadius: '50%', background: C.navy, color: '#fff', fontSize: 11.5, fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, fontVariantNumeric: 'tabular-nums' },
   busCard: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, background: C.card, border: `1px solid ${C.line}`, borderRadius: 13, padding: '13px 14px', boxShadow: '0 1px 2px rgba(20,25,40,.04)' },
   microLabel: { fontSize: 10.5, color: C.ink3, textTransform: 'uppercase', letterSpacing: '.1em', fontWeight: 800 },
   change: { background: 'transparent', border: `1px solid ${C.line}`, color: C.ink2, borderRadius: 8, padding: '8px 13px', fontSize: 12.5, fontWeight: 700, cursor: 'pointer', flexShrink: 0, fontFamily: SANS },
@@ -490,9 +502,9 @@ const s = {
   zoomWrap: { position: 'fixed', inset: 0, background: 'rgba(10,12,16,.94)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14, zIndex: 200, padding: 16, cursor: 'zoom-out' },
   zoomImg: { maxWidth: '100%', maxHeight: '82vh', objectFit: 'contain', borderRadius: 8 },
   zoomHint: { color: 'rgba(255,255,255,.8)', fontSize: 12.5, fontWeight: 600 },
-  capRow: { display: 'flex', gap: 10, marginTop: 2 },
-  cap: { flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '14px 0', borderRadius: 11, border: 'none', background: C.navy, color: '#fff', fontWeight: 700, fontSize: 14, cursor: 'pointer', fontFamily: SANS },
-  capAlt: { background: C.card, color: C.navy, border: `1px solid ${C.line}` },
+  capRow: { display: 'flex', flexDirection: 'column', gap: 9, marginTop: 2 },
+  cap: { display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 9, padding: '16px 0', borderRadius: 12, border: 'none', background: C.navy, color: '#fff', fontWeight: 700, fontSize: 15, cursor: 'pointer', fontFamily: SANS, boxShadow: '0 4px 14px rgba(27,58,107,.28)' },
+  capGhost: { display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '11px 0', borderRadius: 11, border: `1px solid ${C.line}`, background: 'transparent', color: C.ink2, fontWeight: 600, fontSize: 13, cursor: 'pointer', fontFamily: SANS },
   clear: { padding: '14px 20px', borderRadius: 11, border: `1px solid ${C.line}`, background: C.card, color: C.ink2, fontWeight: 700, fontSize: 14, cursor: 'pointer', fontFamily: SANS },
   submit: { flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7, padding: '14px 0', borderRadius: 11, border: 'none', background: C.goldSolid, color: '#231800', fontWeight: 800, fontSize: 14.5, cursor: 'pointer', fontFamily: SANS },
   disabled: { opacity: .45, cursor: 'not-allowed', filter: 'grayscale(.3)' },
