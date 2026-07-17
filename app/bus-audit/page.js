@@ -188,7 +188,7 @@ export default function BusAuditPage() {
 
   async function onFiles(fileList, source = 'camera') {
     setResult(null)
-    captureGeo()   // refresh a fix as they shoot
+    if (!geo || Date.now() - geo.at > 30000) captureGeo()   // refresh only a stale/absent fix
     const files = Array.from(fileList || []).filter(f => f.type.startsWith('image/'))
     for (const file of files) {
       if (photos.length >= MAX_PHOTOS) break
