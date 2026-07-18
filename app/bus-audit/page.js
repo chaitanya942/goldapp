@@ -317,40 +317,48 @@ export default function BusAuditPage() {
   if (!ready) return <div style={{ ...s.app, alignItems: 'center', justifyContent: 'center' }}><span style={{ color: C.ink3 }}>Loading…</span></div>
 
   if (!authed) return (
-    <div style={{ ...s.app, justifyContent: 'center', padding: '0 18px' }}>
-      <div style={s.loginWrap}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 11, marginBottom: 24 }}>
-          <div style={s.logo}>W</div>
-          <div>
-            <div style={{ fontWeight: 800, fontSize: 17, color: C.ink, letterSpacing: '-.01em' }}>Bus Audit</div>
-            <div style={{ fontSize: 12, color: C.ink3 }}>White Gold field app</div>
-          </div>
+    <div style={s.loginPage}>
+      <div style={s.loginBox}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 36 }}>
+          <div style={s.loginMark}>W</div>
+          <span style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: '.2em', color: C.ink3 }}>WHITE GOLD</span>
         </div>
+
         {loginStep === 'email' ? (
           <>
-            <div style={s.loginTitle}>Sign in</div>
-            <div style={s.loginSub}>Enter your White Gold email and we&apos;ll send a 6-digit code. No password needed.</div>
-            <input value={loginEmail} onChange={e => setLoginEmail(e.target.value)} onKeyDown={e => e.key === 'Enter' && sendOtp()}
-              placeholder="you@whitegold.money" type="email" autoComplete="email" autoCapitalize="none" style={s.loginInput} />
-            <button onClick={sendOtp} disabled={authBusy} style={{ ...s.loginBtn, ...(authBusy ? s.disabled : {}) }}>{authBusy ? 'Sending…' : 'Send code'}</button>
+            <h1 style={s.loginH1}>Bus Audit</h1>
+            <p style={s.loginLead}>Field verification for ad-wrapped buses across Karnataka.</p>
+            <div style={s.loginRule} />
+            <label style={s.loginLabel}>Work email</label>
+            <input className="ba-input" value={loginEmail} onChange={e => setLoginEmail(e.target.value)} onKeyDown={e => e.key === 'Enter' && sendOtp()}
+              placeholder={`you@${ALLOWED_DOMAIN}`} type="email" autoComplete="email" autoCapitalize="none" style={s.loginInput} />
+            <button onClick={sendOtp} disabled={authBusy} style={{ ...s.loginBtn, ...(authBusy ? s.disabled : {}) }}>
+              {authBusy ? 'Sending…' : <>Send code {Icon.arrow({ s: 17 })}</>}
+            </button>
+            <p style={s.loginHelp}>We&apos;ll email you a 6-digit code. No password to remember.</p>
           </>
         ) : (
           <>
-            <div style={s.loginTitle}>Enter the code</div>
-            <div style={s.loginSub}>{authNote || `Sent to ${loginEmail}`}</div>
-            <input value={otpCode} onChange={e => setOtpCode(e.target.value.replace(/\D/g, '').slice(0, 6))} onKeyDown={e => e.key === 'Enter' && verifyOtpCode()}
+            <h1 style={s.loginH1}>Check your email</h1>
+            <p style={s.loginLead}>We sent a 6-digit code to <b style={{ color: C.ink, fontWeight: 700 }}>{loginEmail}</b>.</p>
+            <div style={s.loginRule} />
+            <label style={s.loginLabel}>6-digit code</label>
+            <input className="ba-input" value={otpCode} onChange={e => setOtpCode(e.target.value.replace(/\D/g, '').slice(0, 6))} onKeyDown={e => e.key === 'Enter' && verifyOtpCode()}
               placeholder="000000" inputMode="numeric" autoComplete="one-time-code"
-              style={{ ...s.loginInput, ...NUM, letterSpacing: '.45em', textAlign: 'center', fontSize: 21, fontWeight: 800 }} />
-            <button onClick={verifyOtpCode} disabled={authBusy} style={{ ...s.loginBtn, ...(authBusy ? s.disabled : {}) }}>{authBusy ? 'Verifying…' : 'Verify & sign in'}</button>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 13 }}>
-              <button onClick={() => { setLoginStep('email'); setAuthErr(null); setAuthNote(null) }} style={s.loginLink}>Change email</button>
+              style={{ ...s.loginInput, ...NUM, letterSpacing: '.42em', textAlign: 'center', fontSize: 23, fontWeight: 800, paddingLeft: 0, paddingRight: 0 }} />
+            <button onClick={verifyOtpCode} disabled={authBusy} style={{ ...s.loginBtn, ...(authBusy ? s.disabled : {}) }}>
+              {authBusy ? 'Verifying…' : <>Verify &amp; sign in {Icon.arrow({ s: 17 })}</>}
+            </button>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 15 }}>
+              <button onClick={() => { setLoginStep('email'); setAuthErr(null); setAuthNote(null) }} style={s.loginLink}>← Change email</button>
               <button onClick={sendOtp} disabled={authBusy} style={s.loginLink}>Resend code</button>
             </div>
           </>
         )}
         {authErr && <div style={s.loginErr}>{authErr}</div>}
-        <div style={s.loginFoot}>You&apos;ll stay signed in on this device — this is a one-time step.</div>
+        <div style={s.loginFoot}>Sign in once — you&apos;ll stay signed in on this device.</div>
       </div>
+      <style>{`.ba-input:focus{border-color:${C.navy};box-shadow:0 0 0 3px rgba(27,58,107,.13)}`}</style>
     </div>
   )
   if (denied) return <div style={{ ...s.app, alignItems: 'center', justifyContent: 'center', textAlign: 'center', padding: 30 }}><div><div style={{ color: C.navy, display: 'flex', justifyContent: 'center' }}>{Icon.bus({ s: 32, w: 1.5 })}</div><div style={{ fontWeight: 800, fontSize: 17, marginTop: 12 }}>No access</div><div style={{ color: C.ink2, marginTop: 6, fontSize: 13.5, maxWidth: 280 }}>The Bus Audit is for the marketing team. Ask an admin to grant your account access.</div></div></div>
@@ -604,14 +612,19 @@ const s = {
   regionRow: { display: 'flex', alignItems: 'center', gap: 12, padding: '8px 2px' },
   regionTrack: { height: 5, background: C.paper2, borderRadius: 3, overflow: 'hidden', marginTop: 5 },
   recent: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '9px 2px', borderBottom: `1px solid ${C.line2}` },
-  loginWrap: { background: C.card, border: `1px solid ${C.line}`, borderRadius: 16, padding: '26px 22px 22px', boxShadow: '0 2px 10px rgba(20,25,40,.05)' },
-  loginTitle: { fontSize: 20, fontWeight: 800, color: C.ink, letterSpacing: '-.02em' },
-  loginSub: { fontSize: 13.5, color: C.ink2, marginTop: 6, lineHeight: 1.5 },
-  loginInput: { width: '100%', boxSizing: 'border-box', background: C.paper, border: `1px solid ${C.line}`, borderRadius: 10, padding: '13px 14px', color: C.ink, fontSize: 15.5, outline: 'none', fontFamily: SANS, marginTop: 16 },
-  loginBtn: { width: '100%', marginTop: 11, padding: '14px 0', borderRadius: 11, border: 'none', background: C.navy, color: '#fff', fontWeight: 700, fontSize: 15, cursor: 'pointer', fontFamily: SANS, boxShadow: '0 4px 14px rgba(27,58,107,.26)' },
+  loginPage: { minHeight: '100dvh', background: C.paper, color: C.ink, fontFamily: SANS, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '28px 22px' },
+  loginBox: { width: '100%', maxWidth: 372 },
+  loginMark: { width: 36, height: 36, borderRadius: 10, background: C.navy, color: C.goldSolid, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: 19, fontFamily: 'Georgia, serif' },
+  loginH1: { fontSize: 32, fontWeight: 800, color: C.ink, letterSpacing: '-.03em', margin: 0, lineHeight: 1.1 },
+  loginLead: { fontSize: 14.5, color: C.ink2, margin: '9px 0 0', lineHeight: 1.5 },
+  loginRule: { height: 1, background: C.line, margin: '26px 0 22px' },
+  loginLabel: { display: 'block', fontSize: 10.5, fontWeight: 800, letterSpacing: '.13em', textTransform: 'uppercase', color: C.ink3, marginBottom: 9 },
+  loginInput: { width: '100%', boxSizing: 'border-box', background: C.card, border: `1px solid ${C.line}`, borderRadius: 10, padding: '14px 15px', color: C.ink, fontSize: 15.5, outline: 'none', fontFamily: SANS, transition: 'border-color .15s, box-shadow .15s' },
+  loginBtn: { width: '100%', marginTop: 11, padding: '15px 0', borderRadius: 11, border: 'none', background: C.navy, color: '#fff', fontWeight: 700, fontSize: 15, cursor: 'pointer', fontFamily: SANS, boxShadow: '0 4px 14px rgba(27,58,107,.26)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 },
+  loginHelp: { fontSize: 12.5, color: C.ink3, margin: '13px 0 0', lineHeight: 1.45 },
   loginLink: { background: 'transparent', border: 'none', color: C.navy, fontWeight: 700, fontSize: 12.5, cursor: 'pointer', fontFamily: SANS, padding: 0 },
-  loginErr: { marginTop: 13, background: C.redSoft, border: `1px solid ${C.red}`, borderRadius: 9, padding: '9px 12px', color: C.red, fontSize: 12.5, fontWeight: 600 },
-  loginFoot: { marginTop: 16, fontSize: 11.5, color: C.ink3, textAlign: 'center' },
+  loginErr: { marginTop: 14, background: C.redSoft, border: `1px solid ${C.red}`, borderRadius: 9, padding: '10px 12px', color: C.red, fontSize: 12.5, fontWeight: 600 },
+  loginFoot: { marginTop: 34, fontSize: 11.5, color: C.ink3, textAlign: 'center' },
   subTab: { flex: 1, padding: '10px 0', borderRadius: 9, border: `1px solid ${C.line}`, background: C.card, color: C.ink3, fontWeight: 700, fontSize: 13, cursor: 'pointer', fontFamily: SANS },
   subTabOn: { background: C.navy, color: '#fff', borderColor: C.navy },
   busListRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, background: C.card, border: `1px solid ${C.line}`, borderRadius: 9, padding: '10px 12px' },
