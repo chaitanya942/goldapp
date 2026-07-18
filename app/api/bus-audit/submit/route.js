@@ -124,12 +124,18 @@ export async function POST(req) {
       patch.audit_city = cmp.actual || null
     }
   }
-  const { data: updated } = await admin
-    .from('bus_audit_buses')
-    .update(patch)
-    .eq('id', bus.id)
-    .select('id, reg_number, reg_norm, region, status, photo_count, first_audited_at, audited_by_name')
-    .single()
+  const SEL = 'id, reg_number, reg_norm, region, status, photo_count, first_audited_at, audited_by_name'
+  let { data: updated, error: updErr } = await admin
+    .from('bus_audit_buses').update(patch).eq('id', bus.id).select(SEL).single()
+  // The location-flag columns ship ahead of their migration; if they aren't
+  // there yet, save the audit anyway rather than failing the whole submit.
+  if (updErr && /location_status|audit_city/.test(updErr.message || '')) {
+    const { location_status, audit_city, ...safe } = patch
+    ;({ data: updated } = await admin
+      .from('bus_audit_buses').update(safe).eq('id', bus.id).select(SEL).single())
+  } else if (updErr) {
+    return Response.json({ error: 'Could not update the bus.', detail: updErr.message }, { status: 500 })
+  }
 
   return Response.json({
     ok: true,
