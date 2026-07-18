@@ -325,7 +325,7 @@ export async function GET(req) {
       // Trimming select('*') cut payload ~70% on branches with 200+ bills
       // (purchases has wide JSON columns like cleartax_response and full
       // address blocks the picker never touches).
-      const PICKER_COLS = 'id,branch_name,current_branch,customer_name,application_id,purchase_date,net_weight,total_amount,final_amount_crm,transaction_type,crm_source'
+      const PICKER_COLS = 'id,branch_name,current_branch,customer_name,application_id,purchase_date,transaction_time,net_weight,total_amount,final_amount_crm,transaction_type,crm_source'
 
       const baseFilter = (q) => {
         let r = q.eq('stock_status', 'at_branch').eq('is_deleted', false)
