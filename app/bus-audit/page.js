@@ -22,6 +22,7 @@ const C = {
   amber: '#A5711A', amberSoft: '#F6EDD5',
 }
 const MIN_PHOTOS = 1, MAX_PHOTOS = 5, BLUR_MIN = 55, ACC_MAX = 150   // reject GPS fixes rougher than 150 m
+const ALLOWED_DOMAIN = 'whitegold.money'   // mirrors BUS_AUDIT_ALLOWED_DOMAIN server-side
 const SANS = 'var(--font-jakarta), system-ui, sans-serif'
 // Plate numbers + stats: the UI sans with tabular figures reads like a clean
 // label, not the code-terminal look of a monospace face.
@@ -189,6 +190,8 @@ export default function BusAuditPage() {
   async function sendOtp() {
     const email = loginEmail.trim().toLowerCase()
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) { setAuthErr('Enter a valid email address.'); return }
+    // UX-only pre-check; the server (ensure-profile) is the real gate.
+    if (!email.endsWith(`@${ALLOWED_DOMAIN}`)) { setAuthErr(`Use your @${ALLOWED_DOMAIN} email address.`); return }
     setAuthBusy(true); setAuthErr(null); setAuthNote(null)
     const { error } = await supabase.auth.signInWithOtp({ email, options: { shouldCreateUser: true } })
     setAuthBusy(false)
