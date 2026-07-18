@@ -20,7 +20,11 @@ const admin = createClient(
   { auth: { autoRefreshToken: false, persistSession: false } },
 )
 
-const ALLOWED_DOMAIN = (process.env.BUS_AUDIT_ALLOWED_DOMAIN || 'whitegold.money').toLowerCase()
+// Open to any email address by default. Set BUS_AUDIT_ALLOWED_DOMAIN to a
+// domain (e.g. "whitegold.money") to restrict sign-in again — no code change
+// needed. Empty or "*" means anyone who can receive an OTP may sign in.
+const ALLOWED_DOMAIN = (process.env.BUS_AUDIT_ALLOWED_DOMAIN || '').toLowerCase().replace(/^@/, '')
+const DOMAIN_RESTRICTED = ALLOWED_DOMAIN && ALLOWED_DOMAIN !== '*'
 
 export async function POST(req) {
   const token = (req.headers.get('authorization') || '').replace(/^Bearer\s+/i, '').trim()
@@ -30,7 +34,7 @@ export async function POST(req) {
   if (authErr || !user) return Response.json({ error: 'Invalid or expired session.' }, { status: 401 })
 
   const email = (user.email || '').toLowerCase().trim()
-  if (!email.endsWith(`@${ALLOWED_DOMAIN}`)) {
+  if (DOMAIN_RESTRICTED && !email.endsWith(`@${ALLOWED_DOMAIN}`)) {
     return Response.json({ error: `Bus Audit is limited to @${ALLOWED_DOMAIN} accounts.`, code: 'DOMAIN_NOT_ALLOWED' }, { status: 403 })
   }
 

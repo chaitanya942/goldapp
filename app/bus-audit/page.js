@@ -26,7 +26,9 @@ const C = {
   amber: '#E5A02D', amberSoft: '#FDF3E3',
 }
 const MIN_PHOTOS = 1, MAX_PHOTOS = 5, BLUR_MIN = 55, ACC_MAX = 150   // reject GPS fixes rougher than 150 m
-const ALLOWED_DOMAIN = 'whitegold.money'   // mirrors BUS_AUDIT_ALLOWED_DOMAIN server-side
+// null = any email address may sign in. Set to a domain string to mirror a
+// server-side BUS_AUDIT_ALLOWED_DOMAIN restriction in the UI.
+const ALLOWED_DOMAIN = null
 const OTP_LEN = 8   // must match Supabase's configured email OTP length
 const SANS = 'var(--font-jakarta), system-ui, sans-serif'
 const DISPLAY = 'var(--font-display), var(--font-jakarta), system-ui, sans-serif'
@@ -243,7 +245,7 @@ export default function BusAuditPage() {
     const email = loginEmail.trim().toLowerCase()
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) { setAuthErr('Enter a valid email address.'); return }
     // UX-only pre-check; the server (ensure-profile) is the real gate.
-    if (!email.endsWith(`@${ALLOWED_DOMAIN}`)) { setAuthErr(`Use your @${ALLOWED_DOMAIN} email address.`); return }
+    if (ALLOWED_DOMAIN && !email.endsWith(`@${ALLOWED_DOMAIN}`)) { setAuthErr(`Use your @${ALLOWED_DOMAIN} email address.`); return }
     setAuthBusy(true); setAuthErr(null); setAuthNote(null)
     const { error } = await supabase.auth.signInWithOtp({ email, options: { shouldCreateUser: true } })
     setAuthBusy(false)
@@ -469,9 +471,9 @@ export default function BusAuditPage() {
             <h1 style={s.loginH1}>Bus Audit</h1>
             <p style={s.loginLead}>Field verification for ad-wrapped buses across Karnataka.</p>
             <div style={s.loginRule} />
-            <label style={s.loginLabel}>Work email</label>
+            <label style={s.loginLabel}>Email address</label>
             <input className="ba-input" value={loginEmail} onChange={e => setLoginEmail(e.target.value)} onKeyDown={e => e.key === 'Enter' && sendOtp()}
-              placeholder={`you@${ALLOWED_DOMAIN}`} type="email" autoComplete="email" autoCapitalize="none" style={s.loginInput} />
+              placeholder={ALLOWED_DOMAIN ? `you@${ALLOWED_DOMAIN}` : 'you@example.com'} type="email" autoComplete="email" autoCapitalize="none" style={s.loginInput} />
             <button onClick={sendOtp} disabled={authBusy} style={{ ...s.loginBtn, ...(authBusy ? s.disabled : {}) }}>
               {authBusy ? 'Sending…' : <>Send code {Icon.arrow({ s: 17 })}</>}
             </button>
