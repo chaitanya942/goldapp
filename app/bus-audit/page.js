@@ -116,6 +116,14 @@ export default function BusAuditPage() {
   const [ready, setReady] = useState(false)
   const [denied, setDenied] = useState(false)
   const [me, setMe] = useState(null)
+  // passwordless email-OTP sign-in
+  const [authed, setAuthed] = useState(false)
+  const [loginStep, setLoginStep] = useState('email')   // email | otp
+  const [loginEmail, setLoginEmail] = useState('')
+  const [otpCode, setOtpCode] = useState('')
+  const [authBusy, setAuthBusy] = useState(false)
+  const [authErr, setAuthErr] = useState(null)
+  const [authNote, setAuthNote] = useState(null)
   const [tab, setTab] = useState('capture')
   const [stats, setStats] = useState(null)
   const [statusTab, setStatusTab] = useState('pending')  // progress sub-tab
@@ -157,13 +165,49 @@ export default function BusAuditPage() {
     )
   }, [reverseGeocode])
 
+  // Confirms the signed-in email is allowed and provisions the marketing role
+  // on first sign-in. Server-side is the real gate (see ensure-profile route).
+  const ensureProfile = useCallback(async () => {
+    const r = await authedFetch('/api/bus-audit/ensure-profile', { method: 'POST' })
+    if (r.ok) return true
+    const j = await r.json().catch(() => ({}))
+    setAuthErr(j.error || 'Sign-in failed.')
+    await supabase.auth.signOut().catch(() => {})
+    return false
+  }, [])
+
   useEffect(() => {
     (async () => {
       const { data: { session } } = await supabase.auth.getSession()
-      if (!session) { router.replace('/'); return }
-      setMe(session.user); setReady(true); loadStats(); captureGeo()
+      if (!session) { setReady(true); return }          // no session → show sign-in
+      if (!(await ensureProfile())) { setReady(true); return }
+      setMe(session.user); setAuthed(true); setReady(true); loadStats(); captureGeo()
     })()
-  }, [router, captureGeo])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  async function sendOtp() {
+    const email = loginEmail.trim().toLowerCase()
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) { setAuthErr('Enter a valid email address.'); return }
+    setAuthBusy(true); setAuthErr(null); setAuthNote(null)
+    const { error } = await supabase.auth.signInWithOtp({ email, options: { shouldCreateUser: true } })
+    setAuthBusy(false)
+    if (error) { setAuthErr(error.message || "Couldn't send the code."); return }
+    setLoginStep('otp'); setOtpCode(''); setAuthNote(`6-digit code sent to ${email}`)
+  }
+
+  async function verifyOtpCode() {
+    const email = loginEmail.trim().toLowerCase()
+    const code = otpCode.replace(/\D/g, '')
+    if (code.length < 6) { setAuthErr('Enter the 6-digit code.'); return }
+    setAuthBusy(true); setAuthErr(null)
+    const { data, error } = await supabase.auth.verifyOtp({ email, token: code, type: 'email' })
+    if (error) { setAuthBusy(false); setAuthErr('That code is invalid or expired.'); return }
+    const ok = await ensureProfile()
+    setAuthBusy(false)
+    if (!ok) { setLoginStep('email'); return }
+    setMe(data.user); setAuthed(true); loadStats(); captureGeo()
+  }
 
   const loadStats = useCallback(async () => {
     const r = await authedFetch('/api/bus-audit/stats')
@@ -268,6 +312,44 @@ export default function BusAuditPage() {
   }
 
   if (!ready) return <div style={{ ...s.app, alignItems: 'center', justifyContent: 'center' }}><span style={{ color: C.ink3 }}>Loading…</span></div>
+
+  if (!authed) return (
+    <div style={{ ...s.app, justifyContent: 'center', padding: '0 18px' }}>
+      <div style={s.loginWrap}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 11, marginBottom: 24 }}>
+          <div style={s.logo}>W</div>
+          <div>
+            <div style={{ fontWeight: 800, fontSize: 17, color: C.ink, letterSpacing: '-.01em' }}>Bus Audit</div>
+            <div style={{ fontSize: 12, color: C.ink3 }}>White Gold field app</div>
+          </div>
+        </div>
+        {loginStep === 'email' ? (
+          <>
+            <div style={s.loginTitle}>Sign in</div>
+            <div style={s.loginSub}>Enter your White Gold email and we&apos;ll send a 6-digit code. No password needed.</div>
+            <input value={loginEmail} onChange={e => setLoginEmail(e.target.value)} onKeyDown={e => e.key === 'Enter' && sendOtp()}
+              placeholder="you@whitegold.money" type="email" autoComplete="email" autoCapitalize="none" style={s.loginInput} />
+            <button onClick={sendOtp} disabled={authBusy} style={{ ...s.loginBtn, ...(authBusy ? s.disabled : {}) }}>{authBusy ? 'Sending…' : 'Send code'}</button>
+          </>
+        ) : (
+          <>
+            <div style={s.loginTitle}>Enter the code</div>
+            <div style={s.loginSub}>{authNote || `Sent to ${loginEmail}`}</div>
+            <input value={otpCode} onChange={e => setOtpCode(e.target.value.replace(/\D/g, '').slice(0, 6))} onKeyDown={e => e.key === 'Enter' && verifyOtpCode()}
+              placeholder="000000" inputMode="numeric" autoComplete="one-time-code"
+              style={{ ...s.loginInput, ...NUM, letterSpacing: '.45em', textAlign: 'center', fontSize: 21, fontWeight: 800 }} />
+            <button onClick={verifyOtpCode} disabled={authBusy} style={{ ...s.loginBtn, ...(authBusy ? s.disabled : {}) }}>{authBusy ? 'Verifying…' : 'Verify & sign in'}</button>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 13 }}>
+              <button onClick={() => { setLoginStep('email'); setAuthErr(null); setAuthNote(null) }} style={s.loginLink}>Change email</button>
+              <button onClick={sendOtp} disabled={authBusy} style={s.loginLink}>Resend code</button>
+            </div>
+          </>
+        )}
+        {authErr && <div style={s.loginErr}>{authErr}</div>}
+        <div style={s.loginFoot}>You&apos;ll stay signed in on this device — this is a one-time step.</div>
+      </div>
+    </div>
+  )
   if (denied) return <div style={{ ...s.app, alignItems: 'center', justifyContent: 'center', textAlign: 'center', padding: 30 }}><div><div style={{ color: C.navy, display: 'flex', justifyContent: 'center' }}>{Icon.bus({ s: 32, w: 1.5 })}</div><div style={{ fontWeight: 800, fontSize: 17, marginTop: 12 }}>No access</div><div style={{ color: C.ink2, marginTop: 6, fontSize: 13.5, maxWidth: 280 }}>The Bus Audit is for the marketing team. Ask an admin to grant your account access.</div></div></div>
 
   const plateShot = photos.find(p => p.isPlateShot)
@@ -519,6 +601,14 @@ const s = {
   regionRow: { display: 'flex', alignItems: 'center', gap: 12, padding: '8px 2px' },
   regionTrack: { height: 5, background: C.paper2, borderRadius: 3, overflow: 'hidden', marginTop: 5 },
   recent: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '9px 2px', borderBottom: `1px solid ${C.line2}` },
+  loginWrap: { background: C.card, border: `1px solid ${C.line}`, borderRadius: 16, padding: '26px 22px 22px', boxShadow: '0 2px 10px rgba(20,25,40,.05)' },
+  loginTitle: { fontSize: 20, fontWeight: 800, color: C.ink, letterSpacing: '-.02em' },
+  loginSub: { fontSize: 13.5, color: C.ink2, marginTop: 6, lineHeight: 1.5 },
+  loginInput: { width: '100%', boxSizing: 'border-box', background: C.paper, border: `1px solid ${C.line}`, borderRadius: 10, padding: '13px 14px', color: C.ink, fontSize: 15.5, outline: 'none', fontFamily: SANS, marginTop: 16 },
+  loginBtn: { width: '100%', marginTop: 11, padding: '14px 0', borderRadius: 11, border: 'none', background: C.navy, color: '#fff', fontWeight: 700, fontSize: 15, cursor: 'pointer', fontFamily: SANS, boxShadow: '0 4px 14px rgba(27,58,107,.26)' },
+  loginLink: { background: 'transparent', border: 'none', color: C.navy, fontWeight: 700, fontSize: 12.5, cursor: 'pointer', fontFamily: SANS, padding: 0 },
+  loginErr: { marginTop: 13, background: C.redSoft, border: `1px solid ${C.red}`, borderRadius: 9, padding: '9px 12px', color: C.red, fontSize: 12.5, fontWeight: 600 },
+  loginFoot: { marginTop: 16, fontSize: 11.5, color: C.ink3, textAlign: 'center' },
   subTab: { flex: 1, padding: '10px 0', borderRadius: 9, border: `1px solid ${C.line}`, background: C.card, color: C.ink3, fontWeight: 700, fontSize: 13, cursor: 'pointer', fontFamily: SANS },
   subTabOn: { background: C.navy, color: '#fff', borderColor: C.navy },
   busListRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, background: C.card, border: `1px solid ${C.line}`, borderRadius: 9, padding: '10px 12px' },
