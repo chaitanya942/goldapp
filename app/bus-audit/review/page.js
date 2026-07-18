@@ -34,6 +34,13 @@ export default function ReviewPage() {
   const [loading, setLoading] = useState(false)
   const [detail, setDetail] = useState(null)
   const [detailLoading, setDetailLoading] = useState(false)
+  const [wide, setWide] = useState(false)
+  useEffect(() => {
+    const mq = window.matchMedia('(min-width: 900px)')
+    const on = () => setWide(mq.matches)
+    on(); mq.addEventListener('change', on)
+    return () => mq.removeEventListener('change', on)
+  }, [])
 
   useEffect(() => {
     (async () => {
@@ -70,7 +77,7 @@ export default function ReviewPage() {
   if (!authorized) return <div style={{ ...s.app, alignItems: 'center', justifyContent: 'center', textAlign: 'center', padding: 30 }}><div><div style={{ fontWeight: 700, fontSize: 17 }}>Admins only</div><div style={{ color: C.ink2, marginTop: 6 }}>This review view is limited to founders/admins.</div></div></div>
 
   return (
-    <div style={s.app}>
+    <div style={{ ...s.app, maxWidth: wide ? 1100 : 640 }}>
       <div style={s.header}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
           <div style={s.logo}>W</div>
@@ -111,8 +118,8 @@ export default function ReviewPage() {
       </div>
 
       {detail && (
-        <div style={s.overlay} onClick={() => setDetail(null)}>
-          <div style={s.sheet} onClick={e => e.stopPropagation()}>
+        <div style={{ ...s.overlay, alignItems: wide ? 'center' : 'flex-end' }} onClick={() => setDetail(null)}>
+          <div style={{ ...s.sheet, maxWidth: wide ? 900 : 640, borderRadius: wide ? 16 : '18px 18px 0 0', maxHeight: wide ? '88dvh' : '92dvh' }} onClick={e => e.stopPropagation()}>
             <div style={s.sheetHead}>
               <div style={{ fontFamily: MONO, fontWeight: 600, fontSize: 18 }}>{detail.bus?.reg_number || 'Bus'}</div>
               <button onClick={() => setDetail(null)} style={s.close}>✕</button>
@@ -130,7 +137,7 @@ export default function ReviewPage() {
                     {detail.bus.audit_lat != null && <a href={`https://www.google.com/maps?q=${detail.bus.audit_lat},${detail.bus.audit_lng}`} target="_blank" rel="noreferrer" style={{ ...s.chip, background: C.navySoft, color: C.navy, textDecoration: 'none', display: 'inline-flex', gap: 4, alignItems: 'center' }}>{pin(12)} {detail.bus.audit_address || 'Map'}</a>}
                   </div>
                   {(detail.photos || []).length === 0 ? <div style={{ color: C.ink3 }}>No photos yet.</div> : (
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: wide ? 'repeat(4, 1fr)' : '1fr 1fr', gap: 10 }}>
                       {detail.photos.map(ph => (
                         <a key={ph.id} href={ph.url || '#'} target="_blank" rel="noreferrer" style={s.photoCard}>
                           {ph.url ? <img src={ph.url} alt="" style={s.photo} /> : <div style={{ ...s.photo, display: 'flex', alignItems: 'center', justifyContent: 'center', color: C.ink3 }}>no image</div>}

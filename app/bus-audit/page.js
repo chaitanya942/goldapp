@@ -157,6 +157,14 @@ export default function BusAuditPage() {
   const [busTotal, setBusTotal] = useState(0)
   const [busLoading, setBusLoading] = useState(false)
   const [busDetail, setBusDetail] = useState(null)   // { loading } | { bus, photos } | { error }
+  // Responsive: set after mount so SSR and first client render agree.
+  const [wide, setWide] = useState(false)
+  useEffect(() => {
+    const mq = window.matchMedia('(min-width: 900px)')
+    const on = () => setWide(mq.matches)
+    on(); mq.addEventListener('change', on)
+    return () => mq.removeEventListener('change', on)
+  }, [])
 
   const [photos, setPhotos] = useState([])
   const [bus, setBus] = useState(null)
@@ -437,7 +445,7 @@ export default function BusAuditPage() {
   const pct = stats && stats.total ? Math.round((stats.audited / stats.total) * 100) : 0
 
   return (
-    <div className="ba-app" style={s.app}>
+    <div className="ba-app" style={{ ...s.app, maxWidth: wide ? 960 : 480 }}>
       {/* header */}
       <div style={s.header}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
@@ -540,7 +548,7 @@ export default function BusAuditPage() {
                   <span style={{ color: C.ink2 }}>The plate photo reads <b style={{ fontFamily: MONO, color: C.ink }}>{plateShot.reading.registration}</b>, but the selected bus is <b style={{ fontFamily: MONO, color: C.ink }}>{bus.reg_number}</b>. Double-check you've picked the right bus.</span>
                 </div>
               )}
-              <div style={s.grid}>
+              <div style={{ ...s.grid, gridTemplateColumns: wide ? 'repeat(4, 1fr)' : 'repeat(3, 1fr)' }}>
                 {photos.map(p => {
                   const r = p.reading || {}; const blurry = p.blur < BLUR_MIN
                   return (
@@ -607,16 +615,20 @@ export default function BusAuditPage() {
               <div style={{ fontSize: 11.5, color: C.ink3, fontWeight: 700, margin: '0 2px' }}>{busTotal.toLocaleString('en-IN')} {statusTab}</div>
               {busLoading && busRows.length === 0 ? <div style={{ color: C.ink3, padding: 16 }}>Loading…</div>
                 : busRows.length === 0 ? <div style={{ color: C.ink3, textAlign: 'center', padding: 24 }}>No buses.</div>
-                : busRows.map(b => (
-                  <button key={b.reg_norm} onClick={() => openBusDetail(b.reg_norm)} style={s.busListRow}>
-                    <span style={{ ...NUM, fontWeight: 700, color: C.ink, fontSize: 14.5, letterSpacing: '.01em' }}>{b.reg_number}</span>
-                    <span style={{ display: 'flex', alignItems: 'center', gap: 7, minWidth: 0 }}>
-                      <span style={{ fontSize: 12, color: C.ink3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', textAlign: 'right' }}>{b.region || '—'}{b.depot ? ` · ${b.depot}` : ''}</span>
-                      {b.photo_count > 0 && <span style={s.photoChip}>{b.photo_count}</span>}
-                      <span style={{ color: C.ink3, display: 'flex', flexShrink: 0 }}>{Icon.arrow({ s: 14 })}</span>
-                    </span>
-                  </button>
-                ))}
+                : (
+                  <div style={{ display: 'grid', gridTemplateColumns: wide ? '1fr 1fr' : '1fr', gap: 7 }}>
+                    {busRows.map(b => (
+                      <button key={b.reg_norm} onClick={() => openBusDetail(b.reg_norm)} style={s.busListRow}>
+                        <span style={{ ...NUM, fontWeight: 700, color: C.ink, fontSize: 14.5, letterSpacing: '.01em' }}>{b.reg_number}</span>
+                        <span style={{ display: 'flex', alignItems: 'center', gap: 7, minWidth: 0 }}>
+                          <span style={{ fontSize: 12, color: C.ink3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', textAlign: 'right' }}>{b.region || '—'}{b.depot ? ` · ${b.depot}` : ''}</span>
+                          {b.photo_count > 0 && <span style={s.photoChip}>{b.photo_count}</span>}
+                          <span style={{ color: C.ink3, display: 'flex', flexShrink: 0 }}>{Icon.arrow({ s: 14 })}</span>
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
               {busRows.length < busTotal && <button onClick={() => fetchBuses(false, busRows)} disabled={busLoading} style={s.more2}>{busLoading ? 'Loading…' : `Load more (${busTotal - busRows.length} left)`}</button>}
             </>
           )}
@@ -629,7 +641,7 @@ export default function BusAuditPage() {
               <span style={{ display: 'flex', transform: 'rotate(180deg)' }}>{Icon.arrow({ s: 17 })}</span> Back
             </button>
           </div>
-          <div className="ba-in" style={s.sheetBody}>
+          <div className="ba-in" style={{ ...s.sheetBody, maxWidth: wide ? 900 : 560 }}>
             {busDetail.loading ? <div style={{ color: C.ink3 }}>Loading…</div>
               : busDetail.error ? <div style={{ color: C.red }}>{busDetail.error}</div>
               : (<>
@@ -654,7 +666,7 @@ export default function BusAuditPage() {
                 </div>
                 <div style={s.sectionLbl}>Photos ({(busDetail.photos || []).length})</div>
                 {(busDetail.photos || []).length === 0 ? <div style={{ color: C.ink3, fontSize: 13 }}>No photos yet.</div> : (
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 9 }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: wide ? 'repeat(4, 1fr)' : '1fr 1fr', gap: 9 }}>
                     {busDetail.photos.map(ph => (
                       <button key={ph.id} onClick={() => ph.url && setZoom(ph.url)} style={s.detailPhoto}>
                         {ph.url ? <img src={ph.url} alt="" style={s.thumbImg} /> : <div style={{ ...s.thumbImg, display: 'flex', alignItems: 'center', justifyContent: 'center', color: C.ink3, fontSize: 12 }}>no image</div>}
