@@ -524,11 +524,14 @@ export default function BusAuditPage() {
   const locCheck = bus && (geoFull || geoPlace) ? compareLocation(bus.region, geoFull || geoPlace) : null
   const canSubmit = bus && photos.length >= MIN_PHOTOS && plateShot && geoAccurate && !submitting
   const pct = stats && stats.total ? Math.round((stats.audited / stats.total) * 100) : 0
+  // Once there are photos to look at, desktop splits: the linear controls stay
+  // in a narrow left rail, the photos get the rest of the screen.
+  const twoCol = wide && tab === 'capture' && photos.length > 0
 
   return (
-    // Capture is a linear task flow — keep it a comfortable column even on
-    // desktop. Progress is a browsable list, so it earns the extra width.
-    <div className="ba-app" style={{ ...s.app, maxWidth: wide ? (tab === 'progress' ? 960 : 600) : 480 }}>
+    // Empty capture stays a comfortable column — a full-width "Take photo"
+    // button looked absurd. Progress is a browsable list, so it earns the width.
+    <div className="ba-app" style={{ ...s.app, maxWidth: wide ? (tab === 'progress' ? 1120 : twoCol ? 1060 : 600) : 480 }}>
       {/* header */}
       <div style={s.header}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
@@ -558,7 +561,11 @@ export default function BusAuditPage() {
       </div>
 
       {tab === 'capture' ? (
-        <div className="ba-in" style={s.body}>
+        // The fragments below don't create DOM nodes, so the bus card, warnings,
+        // photo grid and buttons are all direct children here — which lets the
+        // grid place the photos in column 2 and everything else in column 1
+        // without reordering the markup.
+        <div className="ba-in" style={{ ...s.body, ...(twoCol ? { display: 'grid', gridTemplateColumns: 'minmax(300px, 350px) 1fr', columnGap: 24, rowGap: 12, alignItems: 'start' } : {}) }}>
           {result && (
             <div style={{ ...s.banner, background: result.ok ? (result.audited ? C.greenSoft : C.amberSoft) : C.redSoft, borderColor: result.ok ? (result.audited ? C.green : C.amber) : C.red }}>
               {result.ok && result.queuedOffline
@@ -601,7 +608,7 @@ export default function BusAuditPage() {
               <div style={{ color: C.ink2, fontSize: 13.5, marginTop: 6, lineHeight: 1.5, maxWidth: 300 }}>
                 One clear shot of the <b>number plate</b> is enough — add up to <b>{MAX_PHOTOS}</b> more showing the ad wrap.
               </div>
-              <div style={s.steps}>
+              <div style={{ ...s.steps, ...(wide ? { flexDirection: 'row', gap: 26, marginTop: 26, justifyContent: 'center', flexWrap: 'wrap' } : {}) }}>
                 {['Snap the number plate', 'We read & match it automatically', 'Check the geotag, then submit'].map((t, i) => (
                   <div key={i} style={s.step}>
                     <span style={s.stepNo}>{i + 1}</span>
@@ -654,7 +661,7 @@ export default function BusAuditPage() {
                   <span style={{ color: C.ink2 }}>The plate photo reads <b style={{ fontFamily: MONO, color: C.ink }}>{plateShot.reading.registration}</b>, but the selected bus is <b style={{ fontFamily: MONO, color: C.ink }}>{bus.reg_number}</b>. Double-check you've picked the right bus.</span>
                 </div>
               )}
-              <div style={s.grid}>
+              <div style={{ ...s.grid, ...(twoCol ? { gridColumn: 2, gridRow: '1 / span 20', gridTemplateColumns: 'repeat(3, 1fr)' } : {}) }}>
                 {photos.map(p => {
                   const r = p.reading || {}; const blurry = p.blur < BLUR_MIN
                   return (
@@ -726,7 +733,7 @@ export default function BusAuditPage() {
               {busLoading && busRows.length === 0 ? <div style={{ color: C.ink3, padding: 16 }}>Loading…</div>
                 : busRows.length === 0 ? <div style={{ color: C.ink3, textAlign: 'center', padding: 24 }}>No buses.</div>
                 : (
-                  <div style={{ display: 'grid', gridTemplateColumns: wide ? '1fr 1fr' : '1fr', gap: 7 }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: wide ? 'repeat(3, 1fr)' : '1fr', gap: 8 }}>
                     {busRows.map(b => (
                       <button key={b.reg_norm} onClick={() => openBusDetail(b.reg_norm)} style={s.busListRow}>
                         <span style={{ ...NUM, fontWeight: 700, color: C.ink, fontSize: 14.5, letterSpacing: '.01em' }}>{b.reg_number}</span>
@@ -751,11 +758,15 @@ export default function BusAuditPage() {
               <span style={{ display: 'flex', transform: 'rotate(180deg)' }}>{Icon.arrow({ s: 17 })}</span> Back
             </button>
           </div>
-          <div className="ba-in" style={{ ...s.sheetBody, maxWidth: wide ? 900 : 560 }}>
+          <div className="ba-in" style={{ ...s.sheetBody, maxWidth: wide ? 1120 : 560 }}>
             {busDetail.loading ? <div style={{ color: C.ink3 }}>Loading…</div>
               : busDetail.error ? <div style={{ color: C.red }}>{busDetail.error}</div>
-              : (<>
-                <div style={{ ...NUM, fontSize: 30, fontWeight: 800, color: C.ink, letterSpacing: '-.02em' }}>{busDetail.bus.reg_number}</div>
+              : (
+              // Desktop: info panel beside the photos so the proof images get
+              // real size instead of shrinking into a mostly-empty page.
+              <div style={{ display: wide ? 'grid' : 'block', gridTemplateColumns: wide ? '330px 1fr' : undefined, gap: 26, alignItems: 'start' }}>
+                <div style={wide ? { position: 'sticky', top: 12 } : undefined}>
+                <div style={{ ...NUM, fontSize: wide ? 34 : 30, fontWeight: 800, color: C.ink, letterSpacing: '-.02em' }}>{busDetail.bus.reg_number}</div>
                 <div style={{ fontSize: 13, color: C.ink2, marginTop: 4 }}>
                   {busDetail.bus.region || '—'}{busDetail.bus.depot ? ` · ${busDetail.bus.depot}` : ''}{busDetail.bus.route ? ` · ${busDetail.bus.route}` : ''}
                 </div>
@@ -772,17 +783,20 @@ export default function BusAuditPage() {
                     </span>
                   )}
                   {busDetail.bus.audited_by_name && <span style={{ fontSize: 12, color: C.ink2 }}>by {busDetail.bus.audited_by_name}</span>}
-                  {busDetail.bus.audit_lat != null && (
-                    <a href={`https://www.google.com/maps?q=${busDetail.bus.audit_lat},${busDetail.bus.audit_lng}`} target="_blank" rel="noreferrer"
-                      style={{ ...s.chip, background: C.navySoft, color: C.navy, textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                      {Icon.pin({ s: 12 })}
-                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: wide ? 420 : 190 }}>{busDetail.bus.audit_address || 'Map'}</span>
-                    </a>
-                  )}
                 </div>
-                <div style={s.sectionLbl}>Photos ({(busDetail.photos || []).length})</div>
+                {busDetail.bus.audit_lat != null && (
+                  <a href={`https://www.google.com/maps?q=${busDetail.bus.audit_lat},${busDetail.bus.audit_lng}`} target="_blank" rel="noreferrer"
+                    style={{ display: 'flex', gap: 6, alignItems: 'flex-start', marginTop: 10, background: C.navySoft, color: C.navy, borderRadius: 9, padding: '9px 11px', textDecoration: 'none', fontSize: 12, fontWeight: 600, lineHeight: 1.4 }}>
+                    <span style={{ display: 'flex', flexShrink: 0, marginTop: 1 }}>{Icon.pin({ s: 13 })}</span>
+                    <span>{busDetail.bus.audit_address || 'View on map'}</span>
+                  </a>
+                )}
+                </div>
+
+                <div>
+                <div style={{ ...s.sectionLbl, marginTop: wide ? 0 : 10 }}>Photos ({(busDetail.photos || []).length})</div>
                 {(busDetail.photos || []).length === 0 ? <div style={{ color: C.ink3, fontSize: 13 }}>No photos yet.</div> : (
-                  <div style={{ display: 'grid', gridTemplateColumns: wide ? 'repeat(4, 1fr)' : '1fr 1fr', gap: 9 }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: wide ? 'repeat(3, 1fr)' : '1fr 1fr', gap: 11 }}>
                     {busDetail.photos.map(ph => (
                       <button key={ph.id} onClick={() => ph.url && setZoom(ph.url)} style={s.detailPhoto}>
                         {ph.url ? <img src={ph.url} alt="" style={s.thumbImg} /> : <div style={{ ...s.thumbImg, display: 'flex', alignItems: 'center', justifyContent: 'center', color: C.ink3, fontSize: 12 }}>no image</div>}
@@ -800,8 +814,10 @@ export default function BusAuditPage() {
                     ))}
                   </div>
                 )}
-                <div style={{ fontSize: 11.5, color: C.ink3, marginTop: 16, textAlign: 'center' }}>Tap a photo to view it full-screen with its geotag.</div>
-              </>)}
+                <div style={{ fontSize: 11.5, color: C.ink3, marginTop: 14 }}>Tap a photo to view it full-screen with its geotag.</div>
+                </div>
+              </div>
+              )}
           </div>
         </div>
       )}
