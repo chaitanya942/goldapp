@@ -504,7 +504,7 @@ export default function BusAuditPage() {
             <div style={{ ...s.banner, background: result.ok ? (result.audited ? C.greenSoft : C.amberSoft) : C.redSoft, borderColor: result.ok ? (result.audited ? C.green : C.amber) : C.red }}>
               {result.ok
                 ? (result.audited
-                  ? <><b style={{ color: C.green }}>Audited — {result.bus?.reg_number}</b><span style={{ color: C.ink2, fontSize: 12.5 }}> · {result.bus?.photo_count} photos on file</span></>
+                  ? <><b style={{ color: C.green }}>Audited — {result.bus?.reg_number}</b><span style={{ color: C.ink2, fontSize: 12.5 }}> · {result.bus?.photo_count} photo{result.bus?.photo_count === 1 ? '' : 's'} on file</span></>
                   : <><b style={{ color: C.amber }}>Saved {result.added} photo{result.added === 1 ? '' : 's'}</b><span style={{ color: C.ink2, fontSize: 12.5 }}> · {result.needs_plate_shot ? 'needs a clear plate shot. ' : ''}{result.needs_more > 0 ? `add ${result.needs_more} more.` : ''}</span></>)
                 : <><b style={{ color: C.red }}>{result.error === 'AUDIT_ALREADY_DONE' ? 'Already audited' : "Couldn't save"}</b><span style={{ color: C.ink2, fontSize: 12.5 }}> · {result.message || result.error}</span></>}
             </div>
@@ -583,8 +583,12 @@ export default function BusAuditPage() {
                       <img src={p.previewUrl} alt="" style={{ ...s.thumbImg, cursor: 'zoom-in' }} onClick={() => setZoom(p.previewUrl)} />
                       {p.stamping && <div style={s.stamping}><span className="ba-spin" style={{ width: 14, height: 14, borderRadius: '50%', border: '2px solid rgba(255,255,255,.4)', borderTopColor: '#fff', display: 'inline-block' }} /></div>}
                       <button onClick={() => removePhoto(p.key)} style={s.rm}>{Icon.x({ s: 13, w: 2.2 })}</button>
-                      {p.isPlateShot && <div style={s.plateTag}>PLATE</div>}
-                      {p.source === 'upload' && <div style={{ ...s.uploadTag, top: p.isPlateShot ? 27 : 5 }}>GALLERY</div>}
+                      {(p.isPlateShot || p.source === 'upload') && (
+                        <div style={{ position: 'absolute', top: 5, left: 5, display: 'flex', gap: 4 }}>
+                          {p.isPlateShot && <span style={{ ...s.plateTag, position: 'static' }}>PLATE</span>}
+                          {p.source === 'upload' && <span style={{ ...s.uploadTag, position: 'static' }}>GALLERY</span>}
+                        </div>
+                      )}
                       <div style={s.thumbFoot}>
                         {r.status === 'reading' ? <span style={{ color: '#fff', opacity: .85 }}>reading…</span>
                           : blurry ? <span style={{ color: '#ffb4a4' }}>blurry</span>
@@ -687,7 +691,8 @@ export default function BusAuditPage() {
                   {busDetail.bus.audit_lat != null && (
                     <a href={`https://www.google.com/maps?q=${busDetail.bus.audit_lat},${busDetail.bus.audit_lng}`} target="_blank" rel="noreferrer"
                       style={{ ...s.chip, background: C.navySoft, color: C.navy, textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                      {Icon.pin({ s: 12 })} {busDetail.bus.audit_address || 'Map'}
+                      {Icon.pin({ s: 12 })}
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: wide ? 420 : 190 }}>{busDetail.bus.audit_address || 'Map'}</span>
                     </a>
                   )}
                 </div>
@@ -769,7 +774,7 @@ const s = {
   capGhost: { display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '11px 0', borderRadius: 11, border: `1px solid ${C.line}`, background: 'transparent', color: C.ink2, fontWeight: 600, fontSize: 13, cursor: 'pointer', fontFamily: SANS },
   clear: { padding: '14px 20px', borderRadius: 11, border: `1px solid ${C.line}`, background: C.card, color: C.ink2, fontWeight: 700, fontSize: 14, cursor: 'pointer', fontFamily: SANS },
   submit: { flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7, padding: '14px 0', borderRadius: 11, border: 'none', background: C.goldSolid, color: '#231800', fontWeight: 800, fontSize: 14.5, cursor: 'pointer', fontFamily: SANS },
-  disabled: { opacity: .45, cursor: 'not-allowed', filter: 'grayscale(.3)' },
+  disabled: { background: C.paper2, color: C.ink3, boxShadow: 'none', border: `1px solid ${C.line}`, cursor: 'not-allowed' },
   stat: { flex: 1, background: C.card, border: `1px solid ${C.line}`, borderRadius: 12, padding: '14px 10px', textAlign: 'center' },
   statLbl: { fontSize: 11, color: C.ink3, marginTop: 2, textTransform: 'uppercase', letterSpacing: '.08em', fontWeight: 700 },
   sectionLbl: { fontSize: 11, color: C.ink3, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '.11em', margin: '10px 2px 2px' },
