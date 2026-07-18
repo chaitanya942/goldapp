@@ -23,6 +23,7 @@ const C = {
 }
 const MIN_PHOTOS = 1, MAX_PHOTOS = 5, BLUR_MIN = 55, ACC_MAX = 150   // reject GPS fixes rougher than 150 m
 const ALLOWED_DOMAIN = 'whitegold.money'   // mirrors BUS_AUDIT_ALLOWED_DOMAIN server-side
+const OTP_LEN = 8   // must match Supabase's configured email OTP length
 const SANS = 'var(--font-jakarta), system-ui, sans-serif'
 // Plate numbers + stats: the UI sans with tabular figures reads like a clean
 // label, not the code-terminal look of a monospace face.
@@ -125,6 +126,8 @@ export default function BusAuditPage() {
   const [authBusy, setAuthBusy] = useState(false)
   const [authErr, setAuthErr] = useState(null)
   const [authNote, setAuthNote] = useState(null)
+  const [resendIn, setResendIn] = useState(0)     // Supabase enforces 60s between emails
+  const otpRef = useRef(null), emailRef = useRef(null)
   const [tab, setTab] = useState('capture')
   const [stats, setStats] = useState(null)
   const [statusTab, setStatusTab] = useState('pending')  // progress sub-tab
@@ -196,13 +199,13 @@ export default function BusAuditPage() {
     const { error } = await supabase.auth.signInWithOtp({ email, options: { shouldCreateUser: true } })
     setAuthBusy(false)
     if (error) { setAuthErr(error.message || "Couldn't send the code."); return }
-    setLoginStep('otp'); setOtpCode(''); setAuthNote(`6-digit code sent to ${email}`)
+    setLoginStep('otp'); setOtpCode(''); setResendIn(60); setAuthNote(`${OTP_LEN}-digit code sent to ${email}`)
   }
 
   async function verifyOtpCode() {
     const email = loginEmail.trim().toLowerCase()
     const code = otpCode.replace(/\D/g, '')
-    if (code.length < 6) { setAuthErr('Enter the 6-digit code.'); return }
+    if (code.length < OTP_LEN) { setAuthErr(`Enter the ${OTP_LEN}-digit code.`); return }
     setAuthBusy(true); setAuthErr(null)
     const { data, error } = await supabase.auth.verifyOtp({ email, token: code, type: 'email' })
     if (error) { setAuthBusy(false); setAuthErr('That code is invalid or expired.'); return }
@@ -211,6 +214,27 @@ export default function BusAuditPage() {
     if (!ok) { setLoginStep('email'); return }
     setMe(data.user); setAuthed(true); loadStats(); captureGeo()
   }
+
+  // resend cooldown tick
+  useEffect(() => {
+    if (resendIn <= 0) return
+    const t = setInterval(() => setResendIn(v => (v <= 1 ? 0 : v - 1)), 1000)
+    return () => clearInterval(t)
+  }, [resendIn])
+
+  // focus the right field for the step
+  useEffect(() => {
+    if (authed || !ready) return
+    const el = loginStep === 'otp' ? otpRef.current : emailRef.current
+    const t = setTimeout(() => el?.focus(), 60)
+    return () => clearTimeout(t)
+  }, [loginStep, authed, ready])
+
+  // auto-submit as soon as the 6th digit lands
+  useEffect(() => {
+    if (loginStep === 'otp' && otpCode.length === OTP_LEN && !authBusy) verifyOtpCode()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [otpCode])
 
   const loadStats = useCallback(async () => {
     const r = await authedFetch('/api/bus-audit/stats')
@@ -335,23 +359,33 @@ export default function BusAuditPage() {
             <button onClick={sendOtp} disabled={authBusy} style={{ ...s.loginBtn, ...(authBusy ? s.disabled : {}) }}>
               {authBusy ? 'Sending…' : <>Send code {Icon.arrow({ s: 17 })}</>}
             </button>
-            <p style={s.loginHelp}>We&apos;ll email you a 6-digit code. No password to remember.</p>
+            <p style={s.loginHelp}>We&apos;ll email you a {OTP_LEN}-digit code. No password to remember.</p>
           </>
         ) : (
           <>
             <h1 style={s.loginH1}>Check your email</h1>
-            <p style={s.loginLead}>We sent a 6-digit code to <b style={{ color: C.ink, fontWeight: 700 }}>{loginEmail}</b>.</p>
+            <p style={s.loginLead}>We sent a {OTP_LEN}-digit code to <b style={{ color: C.ink, fontWeight: 700 }}>{loginEmail}</b>.</p>
             <div style={s.loginRule} />
-            <label style={s.loginLabel}>6-digit code</label>
-            <input className="ba-input" value={otpCode} onChange={e => setOtpCode(e.target.value.replace(/\D/g, '').slice(0, 6))} onKeyDown={e => e.key === 'Enter' && verifyOtpCode()}
-              placeholder="000000" inputMode="numeric" autoComplete="one-time-code"
-              style={{ ...s.loginInput, ...NUM, letterSpacing: '.42em', textAlign: 'center', fontSize: 23, fontWeight: 800, paddingLeft: 0, paddingRight: 0 }} />
-            <button onClick={verifyOtpCode} disabled={authBusy} style={{ ...s.loginBtn, ...(authBusy ? s.disabled : {}) }}>
+            <label style={s.loginLabel}>{OTP_LEN}-digit code</label>
+            <div style={{ position: 'relative' }} onClick={() => otpRef.current?.focus()}>
+              <input ref={otpRef} value={otpCode} onChange={e => setOtpCode(e.target.value.replace(/\D/g, '').slice(0, OTP_LEN))}
+                inputMode="numeric" autoComplete="one-time-code" maxLength={OTP_LEN} aria-label={`${OTP_LEN}-digit code`} style={s.otpCapture} />
+              <div style={s.otpRow}>
+                {Array.from({ length: OTP_LEN }).map((_, i) => (
+                  <div key={i} style={{ ...s.otpCell, ...(otpCode[i] ? s.otpCellFilled : {}), ...(i === otpCode.length ? s.otpCellActive : {}) }}>
+                    {otpCode[i] || ''}
+                  </div>
+                ))}
+              </div>
+            </div>
+            <button onClick={verifyOtpCode} disabled={authBusy || otpCode.length < OTP_LEN} style={{ ...s.loginBtn, ...((authBusy || otpCode.length < OTP_LEN) ? s.disabled : {}) }}>
               {authBusy ? 'Verifying…' : <>Verify &amp; sign in {Icon.arrow({ s: 17 })}</>}
             </button>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 15 }}>
-              <button onClick={() => { setLoginStep('email'); setAuthErr(null); setAuthNote(null) }} style={s.loginLink}>← Change email</button>
-              <button onClick={sendOtp} disabled={authBusy} style={s.loginLink}>Resend code</button>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 15 }}>
+              <button onClick={() => { setLoginStep('email'); setAuthErr(null); setAuthNote(null); setOtpCode('') }} style={s.loginLink}>← Change email</button>
+              <button onClick={sendOtp} disabled={authBusy || resendIn > 0} style={{ ...s.loginLink, ...(resendIn > 0 ? { color: C.ink3, cursor: 'default' } : {}) }}>
+                {resendIn > 0 ? `Resend in ${resendIn}s` : 'Resend code'}
+              </button>
             </div>
           </>
         )}
@@ -622,6 +656,12 @@ const s = {
   loginInput: { width: '100%', boxSizing: 'border-box', background: C.card, border: `1px solid ${C.line}`, borderRadius: 10, padding: '14px 15px', color: C.ink, fontSize: 15.5, outline: 'none', fontFamily: SANS, transition: 'border-color .15s, box-shadow .15s' },
   loginBtn: { width: '100%', marginTop: 11, padding: '15px 0', borderRadius: 11, border: 'none', background: C.navy, color: '#fff', fontWeight: 700, fontSize: 15, cursor: 'pointer', fontFamily: SANS, boxShadow: '0 4px 14px rgba(27,58,107,.26)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 },
   loginHelp: { fontSize: 12.5, color: C.ink3, margin: '13px 0 0', lineHeight: 1.45 },
+  // segmented code entry: one invisible input captures keys/paste, the cells render it
+  otpCapture: { position: 'absolute', inset: 0, width: '100%', height: '100%', opacity: 0, border: 'none', background: 'transparent', fontSize: 16, zIndex: 2, cursor: 'text', caretColor: 'transparent' },
+  otpRow: { display: 'flex', gap: 7 },
+  otpCell: { flex: 1, minWidth: 0, height: 54, borderRadius: 9, border: `1px solid ${C.line}`, background: C.card, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, fontWeight: 800, color: C.ink, fontFamily: SANS, fontVariantNumeric: 'tabular-nums', transition: 'border-color .15s, box-shadow .15s' },
+  otpCellFilled: { borderColor: C.ink3 },
+  otpCellActive: { borderColor: C.navy, boxShadow: `0 0 0 3px rgba(27,58,107,.13)` },
   loginLink: { background: 'transparent', border: 'none', color: C.navy, fontWeight: 700, fontSize: 12.5, cursor: 'pointer', fontFamily: SANS, padding: 0 },
   loginErr: { marginTop: 14, background: C.redSoft, border: `1px solid ${C.red}`, borderRadius: 9, padding: '10px 12px', color: C.red, fontSize: 12.5, fontWeight: 600 },
   loginFoot: { marginTop: 34, fontSize: 11.5, color: C.ink3, textAlign: 'center' },
