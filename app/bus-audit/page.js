@@ -156,6 +156,7 @@ export default function BusAuditPage() {
   const [busRows, setBusRows] = useState([])
   const [busTotal, setBusTotal] = useState(0)
   const [busLoading, setBusLoading] = useState(false)
+  const [busDetail, setBusDetail] = useState(null)   // { loading } | { bus, photos } | { error }
 
   const [photos, setPhotos] = useState([])
   const [bus, setBus] = useState(null)
@@ -280,6 +281,15 @@ export default function BusAuditPage() {
     return () => clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, statusTab, busQ])
+
+  async function openBusDetail(regNorm) {
+    setBusDetail({ loading: true })
+    try {
+      const r = await authedFetch('/api/bus-audit/detail?reg_norm=' + encodeURIComponent(regNorm))
+      const j = await r.json()
+      setBusDetail(r.ok ? j : { error: j.error || 'Could not load this bus.' })
+    } catch (e) { setBusDetail({ error: e?.message || 'Could not load this bus.' }) }
+  }
 
   async function onFiles(fileList, source = 'camera') {
     setResult(null)
@@ -598,16 +608,76 @@ export default function BusAuditPage() {
               {busLoading && busRows.length === 0 ? <div style={{ color: C.ink3, padding: 16 }}>Loading…</div>
                 : busRows.length === 0 ? <div style={{ color: C.ink3, textAlign: 'center', padding: 24 }}>No buses.</div>
                 : busRows.map(b => (
-                  <div key={b.reg_norm} style={s.busListRow}>
+                  <button key={b.reg_norm} onClick={() => openBusDetail(b.reg_norm)} style={s.busListRow}>
                     <span style={{ ...NUM, fontWeight: 700, color: C.ink, fontSize: 14.5, letterSpacing: '.01em' }}>{b.reg_number}</span>
-                    <span style={{ fontSize: 12, color: C.ink3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', marginLeft: 10, textAlign: 'right' }}>{b.region || '—'}{b.depot ? ` · ${b.depot}` : ''}{statusTab === 'audited' && b.photo_count ? ` · ${b.photo_count} 📷` : ''}</span>
-                  </div>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 7, minWidth: 0 }}>
+                      <span style={{ fontSize: 12, color: C.ink3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', textAlign: 'right' }}>{b.region || '—'}{b.depot ? ` · ${b.depot}` : ''}</span>
+                      {b.photo_count > 0 && <span style={s.photoChip}>{b.photo_count}</span>}
+                      <span style={{ color: C.ink3, display: 'flex', flexShrink: 0 }}>{Icon.arrow({ s: 14 })}</span>
+                    </span>
+                  </button>
                 ))}
               {busRows.length < busTotal && <button onClick={() => fetchBuses(false, busRows)} disabled={busLoading} style={s.more2}>{busLoading ? 'Loading…' : `Load more (${busTotal - busRows.length} left)`}</button>}
             </>
           )}
         </div>
       )}
+      {busDetail && (
+        <div className="ba-app" style={s.sheetWrap}>
+          <div style={s.sheetHead}>
+            <button onClick={() => setBusDetail(null)} style={s.sheetBack}>
+              <span style={{ display: 'flex', transform: 'rotate(180deg)' }}>{Icon.arrow({ s: 17 })}</span> Back
+            </button>
+          </div>
+          <div className="ba-in" style={s.sheetBody}>
+            {busDetail.loading ? <div style={{ color: C.ink3 }}>Loading…</div>
+              : busDetail.error ? <div style={{ color: C.red }}>{busDetail.error}</div>
+              : (<>
+                <div style={{ ...NUM, fontSize: 30, fontWeight: 800, color: C.ink, letterSpacing: '-.02em' }}>{busDetail.bus.reg_number}</div>
+                <div style={{ fontSize: 13, color: C.ink2, marginTop: 4 }}>
+                  {busDetail.bus.region || '—'}{busDetail.bus.depot ? ` · ${busDetail.bus.depot}` : ''}{busDetail.bus.route ? ` · ${busDetail.bus.route}` : ''}
+                </div>
+                {busDetail.bus.ad_type && (
+                  <div style={{ fontSize: 12.5, color: C.navy, fontWeight: 600, marginTop: 5 }}>
+                    Should have: {busDetail.bus.ad_type}{busDetail.bus.mounting_date ? ` · mounted ${fmtDate(busDetail.bus.mounting_date)}` : ''}
+                  </div>
+                )}
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', margin: '15px 0 2px' }}>
+                  <span style={{ ...s.chip, background: busDetail.bus.status === 'audited' ? C.greenSoft : C.amberSoft, color: busDetail.bus.status === 'audited' ? C.green : C.amber }}>{busDetail.bus.status}</span>
+                  {busDetail.bus.audited_by_name && <span style={{ fontSize: 12, color: C.ink2 }}>by {busDetail.bus.audited_by_name}</span>}
+                  {busDetail.bus.audit_lat != null && (
+                    <a href={`https://www.google.com/maps?q=${busDetail.bus.audit_lat},${busDetail.bus.audit_lng}`} target="_blank" rel="noreferrer"
+                      style={{ ...s.chip, background: C.navySoft, color: C.navy, textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                      {Icon.pin({ s: 12 })} {busDetail.bus.audit_address || 'Map'}
+                    </a>
+                  )}
+                </div>
+                <div style={s.sectionLbl}>Photos ({(busDetail.photos || []).length})</div>
+                {(busDetail.photos || []).length === 0 ? <div style={{ color: C.ink3, fontSize: 13 }}>No photos yet.</div> : (
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 9 }}>
+                    {busDetail.photos.map(ph => (
+                      <button key={ph.id} onClick={() => ph.url && setZoom(ph.url)} style={s.detailPhoto}>
+                        {ph.url ? <img src={ph.url} alt="" style={s.thumbImg} /> : <div style={{ ...s.thumbImg, display: 'flex', alignItems: 'center', justifyContent: 'center', color: C.ink3, fontSize: 12 }}>no image</div>}
+                        <div style={{ display: 'flex', gap: 5, position: 'absolute', top: 6, left: 6 }}>
+                          {ph.is_plate_shot && <span style={s.plateTag}>PLATE</span>}
+                          {ph.source === 'upload' && <span style={{ ...s.uploadTag, position: 'static' }}>GALLERY</span>}
+                        </div>
+                        <div style={s.thumbFoot}>
+                          {ph.detected_number
+                            ? <span style={{ color: ph.matched ? '#8fe6b0' : '#f2d38a' }}>{ph.detected_number}{ph.matched ? ' ✓' : '?'}</span>
+                            : <span style={{ color: '#fff', opacity: .7 }}>no plate read</span>}
+                          {ph.gps_accuracy != null && <span style={{ color: '#fff', opacity: .75, fontWeight: 600 }}>±{Math.round(ph.gps_accuracy)}m</span>}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <div style={{ fontSize: 11.5, color: C.ink3, marginTop: 16, textAlign: 'center' }}>Tap a photo to view it full-screen with its geotag.</div>
+              </>)}
+          </div>
+        </div>
+      )}
+
       {zoom && (
         <div onClick={() => setZoom(null)} style={s.zoomWrap}>
           <img src={zoom} alt="" style={s.zoomImg} />
@@ -688,6 +758,14 @@ const s = {
   loginFoot: { marginTop: 34, fontSize: 11.5, color: C.ink3, textAlign: 'center' },
   subTab: { flex: 1, padding: '10px 0', borderRadius: 9, border: `1px solid ${C.line}`, background: C.card, color: C.ink3, fontWeight: 700, fontSize: 13, cursor: 'pointer', fontFamily: SANS },
   subTabOn: { background: C.navy, color: '#fff', borderColor: C.navy },
-  busListRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, background: C.card, border: `1px solid ${C.line}`, borderRadius: 9, padding: '10px 12px' },
+  busListRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, background: C.card, border: `1px solid ${C.line}`, borderRadius: 9, padding: '11px 12px', width: '100%', cursor: 'pointer', fontFamily: SANS, textAlign: 'left' },
+  photoChip: { ...NUM, fontSize: 10.5, fontWeight: 800, background: C.navySoft, color: C.navy, borderRadius: 100, padding: '2px 7px', flexShrink: 0 },
+  chip: { fontSize: 11, fontWeight: 800, padding: '4px 9px', borderRadius: 100, whiteSpace: 'nowrap' },
+  // full-screen bus detail sheet
+  sheetWrap: { position: 'fixed', inset: 0, background: C.paper, zIndex: 150, display: 'flex', flexDirection: 'column', overflowY: 'auto' },
+  sheetHead: { position: 'sticky', top: 0, background: C.paper, borderBottom: `1px solid ${C.line}`, padding: '12px 16px', zIndex: 2 },
+  sheetBack: { display: 'inline-flex', alignItems: 'center', gap: 7, background: 'transparent', border: 'none', color: C.navy, fontWeight: 700, fontSize: 14, cursor: 'pointer', fontFamily: SANS, padding: 0 },
+  sheetBody: { padding: '20px 16px 34px', maxWidth: 560, width: '100%', margin: '0 auto', boxSizing: 'border-box' },
+  detailPhoto: { position: 'relative', aspectRatio: '3/4', borderRadius: 11, overflow: 'hidden', border: `1px solid ${C.line}`, background: '#000', padding: 0, cursor: 'zoom-in', display: 'block', width: '100%' },
   more2: { marginTop: 4, padding: '11px 0', borderRadius: 10, border: `1px solid ${C.line}`, background: C.card, color: C.navy, fontWeight: 700, fontSize: 13, cursor: 'pointer', fontFamily: SANS },
 }

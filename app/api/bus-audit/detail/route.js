@@ -15,7 +15,9 @@ const admin = createClient(
 )
 
 export async function GET(req) {
-  const auth = await requireAuth(req, { requiredRoles: ROLE_GROUPS.ADMIN })
+  // Field team can view a bus's proof photos too (they shot them); the
+  // filterable /list stays admin-only.
+  const auth = await requireAuth(req, { requiredRoles: ROLE_GROUPS.BUS_AUDIT })
   if (!auth.ok) return auth.response
 
   const regNorm = normalizePlate(new URL(req.url).searchParams.get('reg_norm') || '')
