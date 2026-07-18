@@ -10,6 +10,7 @@ import { useRouter } from 'next/navigation'
 import { supabase } from '../../lib/supabase'
 import { authedFetch } from '../../lib/authedFetch'
 import { normalizePlate } from '../../lib/busPlate'
+import { compareLocation, cityLabel } from '../../lib/busGeo'
 
 // "Daylight" — crisp white base, near-black ink, vivid gold. Built to stay
 // legible in direct sun; colour carries state, gold carries emphasis.
@@ -463,6 +464,8 @@ export default function BusAuditPage() {
   const readCandidate = photos.map(p => p.reading).find(r => r?.status === 'done' && r.registration && !r.match)
   const geoAccurate = geoState === 'ok' && geo && geo.accuracy <= ACC_MAX
   const plateMismatch = plateShot?.reading?.status === 'done' && plateShot.reading.registration && bus && normalizePlate(plateShot.reading.registration) !== bus.reg_norm
+  // Is this bus being shot in the city it belongs to?
+  const locCheck = bus && (geoFull || geoPlace) ? compareLocation(bus.region, geoFull || geoPlace) : null
   const canSubmit = bus && photos.length >= MIN_PHOTOS && plateShot && geoAccurate && !submitting
   const pct = stats && stats.total ? Math.round((stats.audited / stats.total) * 100) : 0
 
@@ -569,6 +572,14 @@ export default function BusAuditPage() {
                 </div>
               )}
 
+              {locCheck?.status === 'mismatch' && (
+                <div style={{ ...s.banner, background: C.amberSoft, borderColor: C.amber, display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+                  <span style={{ color: C.amber, display: 'flex', flexShrink: 0, marginTop: 1 }}>{Icon.pin({ s: 15 })}</span>
+                  <span style={{ color: C.ink2 }}>
+                    This bus is registered in <b style={{ color: C.ink }}>{cityLabel(locCheck.expected)}</b>, but you&apos;re in <b style={{ color: C.ink }}>{cityLabel(locCheck.actual)}</b>. Check it&apos;s the right bus.
+                  </span>
+                </div>
+              )}
               {plateMismatch && (
                 <div style={{ ...s.banner, background: C.amberSoft, borderColor: C.amber, display: 'flex', gap: 8, alignItems: 'flex-start' }}>
                   <span style={{ color: C.amber, display: 'flex', flexShrink: 0, marginTop: 1 }}>{Icon.pin({ s: 15 })}</span>
@@ -687,6 +698,11 @@ export default function BusAuditPage() {
                 )}
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', margin: '15px 0 2px' }}>
                   <span style={{ ...s.chip, background: busDetail.bus.status === 'audited' ? C.greenSoft : C.amberSoft, color: busDetail.bus.status === 'audited' ? C.green : C.amber }}>{busDetail.bus.status}</span>
+                  {busDetail.bus.location_status === 'mismatch' && (
+                    <span style={{ ...s.chip, background: C.amberSoft, color: C.amber, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                      {Icon.pin({ s: 12 })} shot in {cityLabel(busDetail.bus.audit_city) || 'another city'}
+                    </span>
+                  )}
                   {busDetail.bus.audited_by_name && <span style={{ fontSize: 12, color: C.ink2 }}>by {busDetail.bus.audited_by_name}</span>}
                   {busDetail.bus.audit_lat != null && (
                     <a href={`https://www.google.com/maps?q=${busDetail.bus.audit_lat},${busDetail.bus.audit_lng}`} target="_blank" rel="noreferrer"

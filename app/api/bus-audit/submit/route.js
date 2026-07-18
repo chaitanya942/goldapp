@@ -14,6 +14,7 @@
 import { createClient } from '@supabase/supabase-js'
 import { requireAuth, ROLE_GROUPS } from '@/lib/apiAuth'
 import { normalizePlate } from '@/lib/busPlate'
+import { compareLocation } from '@/lib/busGeo'
 
 export const runtime = 'nodejs'
 export const maxDuration = 30
@@ -114,7 +115,14 @@ export async function POST(req) {
     patch.audited_by_name = uploader
     // Stamp the audit location from the plate shot (falling back to any photo).
     const geoMeta = meta.find(m => m.is_plate_shot && typeof m.lat === 'number') || meta.find(m => typeof m.lat === 'number')
-    if (geoMeta) { patch.audit_lat = geoMeta.lat; patch.audit_lng = geoMeta.lng; patch.audit_address = geoMeta.address || null }
+    if (geoMeta) {
+      patch.audit_lat = geoMeta.lat; patch.audit_lng = geoMeta.lng; patch.audit_address = geoMeta.address || null
+      // Was it shot in the city this bus is registered to? 'unknown' when either
+      // side can't be resolved — never treated as a mismatch.
+      const cmp = compareLocation(bus.region, geoMeta.address)
+      patch.location_status = cmp.status
+      patch.audit_city = cmp.actual || null
+    }
   }
   const { data: updated } = await admin
     .from('bus_audit_buses')
