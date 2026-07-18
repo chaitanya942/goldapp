@@ -452,8 +452,8 @@ export default function BusAuditPage() {
   const pct = stats && stats.total ? Math.round((stats.audited / stats.total) * 100) : 0
 
   return (
-    {/* Capture is a linear task flow — keep it a comfortable column even on
-        desktop. Progress is a browsable list, so it earns the extra width. */}
+    // Capture is a linear task flow — keep it a comfortable column even on
+    // desktop. Progress is a browsable list, so it earns the extra width.
     <div className="ba-app" style={{ ...s.app, maxWidth: wide ? (tab === 'progress' ? 960 : 600) : 480 }}>
       {/* header */}
       <div style={s.header}>
