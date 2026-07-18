@@ -202,20 +202,35 @@ export default function BusAuditPage() {
   // Confirms the signed-in email is allowed and provisions the marketing role
   // on first sign-in. Server-side is the real gate (see ensure-profile route).
   const ensureProfile = useCallback(async () => {
-    const r = await authedFetch('/api/bus-audit/ensure-profile', { method: 'POST' })
-    if (r.ok) return true
-    const j = await r.json().catch(() => ({}))
-    setAuthErr(j.error || 'Sign-in failed.')
-    await supabase.auth.signOut().catch(() => {})
-    return false
+    try {
+      const r = await authedFetch('/api/bus-audit/ensure-profile', { method: 'POST' })
+      if (r.ok) return true
+      const j = await r.json().catch(() => ({}))
+      setAuthErr(j.error || 'Sign-in failed.')
+      // Only drop the session when the account genuinely isn't allowed —
+      // a transient 5xx shouldn't sign someone out.
+      if (r.status === 403) await supabase.auth.signOut().catch(() => {})
+      return false
+    } catch {
+      setAuthErr("Couldn't reach the server. Check your connection and try again.")
+      return false
+    }
   }, [])
 
   useEffect(() => {
     (async () => {
-      const { data: { session } } = await supabase.auth.getSession()
-      if (!session) { setReady(true); return }          // no session → show sign-in
-      if (!(await ensureProfile())) { setReady(true); return }
-      setMe(session.user); setAuthed(true); setReady(true); loadStats(); captureGeo()
+      // finally{} is load-bearing: any throw in here used to leave `ready`
+      // false forever, which showed a permanent "Loading…" screen on refresh.
+      try {
+        const { data: { session } } = await supabase.auth.getSession()
+        if (!session) return                                  // no session → sign-in
+        if (!(await ensureProfile())) return
+        setMe(session.user); setAuthed(true); loadStats(); captureGeo()
+      } catch {
+        setAuthErr("Couldn't reach the server. Check your connection and try again.")
+      } finally {
+        setReady(true)
+      }
     })()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])

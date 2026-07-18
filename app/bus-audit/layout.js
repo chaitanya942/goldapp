@@ -12,5 +12,11 @@ const display = Bricolage_Grotesque({
 })
 
 export default function BusAuditLayout({ children }) {
-  return <div className={display.variable}>{children}</div>
+  // Full-bleed background lives here so it covers the whole viewport on desktop
+  // — the centred content column can't paint the area beside it.
+  return (
+    <div className={display.variable} style={{ minHeight: '100dvh', background: '#F6F7F9' }}>
+      {children}
+    </div>
+  )
 }
