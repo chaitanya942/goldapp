@@ -11,24 +11,27 @@ import { supabase } from '../../lib/supabase'
 import { authedFetch } from '../../lib/authedFetch'
 import { normalizePlate } from '../../lib/busPlate'
 
+// "Daylight" — crisp white base, near-black ink, vivid gold. Built to stay
+// legible in direct sun; colour carries state, gold carries emphasis.
 const C = {
-  paper: '#F2F0E9', paper2: '#E8E4D9', card: '#FFFFFF',
-  ink: '#181A1F', ink2: '#585B63', ink3: '#93949B',
-  line: '#E2DED3', line2: '#EDEAE1',
-  navy: '#1B3A6B', navyInk: '#12294D', navySoft: '#ECF1F8',
-  gold: '#9C7620', goldSolid: '#C89A33', goldSoft: '#F6EFD8',
-  green: '#1C824A', greenSoft: '#E4F2E9',
-  red: '#BC3A22', redSoft: '#F9E8E2',
-  amber: '#A5711A', amberSoft: '#F6EDD5',
+  paper: '#F6F7F9', paper2: '#EBEEF2', card: '#FFFFFF',
+  ink: '#0B0D12', ink2: '#4A4F5A', ink3: '#8A9099',
+  line: '#E4E7EC', line2: '#F0F2F5',
+  navy: '#16305F', navyInk: '#0F2247', navySoft: '#EDF1F8',
+  gold: '#C4820A', goldSolid: '#F0A81C', goldSoft: '#FEF6E7',
+  green: '#12A150', greenSoft: '#E7F6EE',
+  red: '#E5484D', redSoft: '#FDEDED',
+  amber: '#E5A02D', amberSoft: '#FDF3E3',
 }
 const MIN_PHOTOS = 1, MAX_PHOTOS = 5, BLUR_MIN = 55, ACC_MAX = 150   // reject GPS fixes rougher than 150 m
 const ALLOWED_DOMAIN = 'whitegold.money'   // mirrors BUS_AUDIT_ALLOWED_DOMAIN server-side
 const OTP_LEN = 8   // must match Supabase's configured email OTP length
 const SANS = 'var(--font-jakarta), system-ui, sans-serif'
+const DISPLAY = 'var(--font-display), var(--font-jakarta), system-ui, sans-serif'
 // Plate numbers + stats: the UI sans with tabular figures reads like a clean
 // label, not the code-terminal look of a monospace face.
 const MONO = SANS
-const NUM = { fontFamily: SANS, fontVariantNumeric: 'tabular-nums' }
+const NUM = { fontFamily: DISPLAY, fontVariantNumeric: 'tabular-nums' }
 const fmtDate = (d) => d ? new Date(d + 'T00:00:00').toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : ''
 
 // ── icons (stroke, currentColor) ──────────────────────────────────────────
@@ -44,6 +47,24 @@ const Icon = {
   arrow: (o) => svg(<path d="M5 12h14M13 6l6 6-6 6" />, o),
   search: (o) => svg(<><circle cx="11" cy="11" r="6.5" /><path d="M20 20l-4-4" /></>, o),
 }
+
+// ── motion + interaction layer ─────────────────────────────────────────────
+// Scoped to .ba-app so every button gets press feedback and every surface can
+// animate in, without touching each element. Honours reduced-motion.
+const CSS = `
+@keyframes ba-spin{to{transform:rotate(360deg)}}
+.ba-spin{animation:ba-spin .7s linear infinite}
+@keyframes ba-in{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
+@keyframes ba-pop{0%{transform:scale(.92);opacity:0}60%{transform:scale(1.02)}100%{transform:scale(1);opacity:1}}
+.ba-in{animation:ba-in .42s cubic-bezier(.2,.7,.3,1) both}
+.ba-pop{animation:ba-pop .34s cubic-bezier(.2,.7,.3,1) both}
+.ba-app button{transition:transform .12s cubic-bezier(.2,.7,.3,1),box-shadow .22s ease,background-color .2s ease,border-color .2s ease,opacity .2s ease}
+.ba-app button:active:not(:disabled){transform:scale(.97)}
+.ba-app input{transition:border-color .16s ease,box-shadow .16s ease}
+.ba-app input:focus{border-color:${C.navy};box-shadow:0 0 0 3px rgba(22,48,95,.13)}
+.ba-app a{transition:opacity .18s ease}
+@media (prefers-reduced-motion:reduce){.ba-in,.ba-pop{animation:none}.ba-app button:active{transform:none}}
+`
 
 // ── image processing (compress + sharpness) ────────────────────────────────
 function loadImage(file) {
@@ -341,8 +362,8 @@ export default function BusAuditPage() {
   if (!ready) return <div style={{ ...s.app, alignItems: 'center', justifyContent: 'center' }}><span style={{ color: C.ink3 }}>Loading…</span></div>
 
   if (!authed) return (
-    <div style={s.loginPage}>
-      <div style={s.loginBox}>
+    <div className="ba-app" style={s.loginPage}>
+      <div className="ba-in" style={s.loginBox}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 36 }}>
           <div style={s.loginMark}>W</div>
           <span style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: '.2em', color: C.ink3 }}>WHITE GOLD</span>
@@ -392,7 +413,7 @@ export default function BusAuditPage() {
         {authErr && <div style={s.loginErr}>{authErr}</div>}
         <div style={s.loginFoot}>Sign in once — you&apos;ll stay signed in on this device.</div>
       </div>
-      <style>{`.ba-input:focus{border-color:${C.navy};box-shadow:0 0 0 3px rgba(27,58,107,.13)}`}</style>
+      <style>{CSS}</style>
     </div>
   )
   if (denied) return <div style={{ ...s.app, alignItems: 'center', justifyContent: 'center', textAlign: 'center', padding: 30 }}><div><div style={{ color: C.navy, display: 'flex', justifyContent: 'center' }}>{Icon.bus({ s: 32, w: 1.5 })}</div><div style={{ fontWeight: 800, fontSize: 17, marginTop: 12 }}>No access</div><div style={{ color: C.ink2, marginTop: 6, fontSize: 13.5, maxWidth: 280 }}>The Bus Audit is for the marketing team. Ask an admin to grant your account access.</div></div></div>
@@ -406,13 +427,13 @@ export default function BusAuditPage() {
   const pct = stats && stats.total ? Math.round((stats.audited / stats.total) * 100) : 0
 
   return (
-    <div style={s.app}>
+    <div className="ba-app" style={s.app}>
       {/* header */}
       <div style={s.header}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
           <div style={s.logo}>W</div>
           <div>
-            <div style={{ fontWeight: 700, fontSize: 15.5, color: C.ink, letterSpacing: '-.01em' }}>Bus Audit</div>
+            <div style={{ fontFamily: DISPLAY, fontWeight: 800, fontSize: 17, color: C.ink, letterSpacing: '-.02em' }}>Bus Audit</div>
             <div style={{ fontSize: 11.5, color: C.ink3 }}>{me?.email}</div>
           </div>
         </div>
@@ -433,7 +454,7 @@ export default function BusAuditPage() {
       </div>
 
       {tab === 'capture' ? (
-        <div style={s.body}>
+        <div className="ba-in" style={s.body}>
           {result && (
             <div style={{ ...s.banner, background: result.ok ? (result.audited ? C.greenSoft : C.amberSoft) : C.redSoft, borderColor: result.ok ? (result.audited ? C.green : C.amber) : C.red }}>
               {result.ok
@@ -458,9 +479,9 @@ export default function BusAuditPage() {
           </button>
 
           {photos.length === 0 ? (
-            <div style={s.empty}>
+            <div className="ba-pop" style={s.empty}>
               <div style={s.emptyIcon}>{Icon.bus({ s: 30, w: 1.6 })}</div>
-              <div style={{ fontWeight: 800, fontSize: 18, color: C.ink, marginTop: 14, letterSpacing: '-.01em' }}>Photograph the bus</div>
+              <div style={{ fontFamily: DISPLAY, fontWeight: 800, fontSize: 21, color: C.ink, marginTop: 14, letterSpacing: '-.02em' }}>Photograph the bus</div>
               <div style={{ color: C.ink2, fontSize: 13.5, marginTop: 6, lineHeight: 1.5, maxWidth: 300 }}>
                 One clear shot of the <b>number plate</b> is enough — add up to <b>{MAX_PHOTOS}</b> more showing the ad wrap.
               </div>
@@ -557,12 +578,12 @@ export default function BusAuditPage() {
           )}
         </div>
       ) : (
-        <div style={s.body}>
+        <div className="ba-in" style={s.body}>
           {!stats ? <span style={{ color: C.ink3 }}>Loading…</span> : (
             <>
               <div style={{ display: 'flex', gap: 9 }}>
                 {[['Total', stats.total, C.ink], ['Audited', stats.audited, C.green], ['Pending', stats.pending, C.amber]].map(([l, v, col]) => (
-                  <div key={l} style={s.stat}><div style={{ ...NUM, fontSize: 26, fontWeight: 800, color: col, letterSpacing: '-.02em' }}>{v.toLocaleString('en-IN')}</div><div style={s.statLbl}>{l}</div></div>
+                  <div key={l} className="ba-pop" style={s.stat}><div style={{ ...NUM, fontSize: 26, fontWeight: 800, color: col, letterSpacing: '-.02em' }}>{v.toLocaleString('en-IN')}</div><div style={s.statLbl}>{l}</div></div>
                 ))}
               </div>
               <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
@@ -593,7 +614,7 @@ export default function BusAuditPage() {
           <div style={s.zoomHint}>Geotag is stamped on the photo · tap to close</div>
         </div>
       )}
-      <style>{`@keyframes ba-spin{to{transform:rotate(360deg)}} .ba-spin{animation:ba-spin .7s linear infinite}`}</style>
+      <style>{CSS}</style>
     </div>
   )
 }
@@ -649,7 +670,7 @@ const s = {
   loginPage: { minHeight: '100dvh', background: C.paper, color: C.ink, fontFamily: SANS, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '28px 22px' },
   loginBox: { width: '100%', maxWidth: 372 },
   loginMark: { width: 36, height: 36, borderRadius: 10, background: C.navy, color: C.goldSolid, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: 19, fontFamily: 'Georgia, serif' },
-  loginH1: { fontSize: 32, fontWeight: 800, color: C.ink, letterSpacing: '-.03em', margin: 0, lineHeight: 1.1 },
+  loginH1: { fontFamily: DISPLAY, fontSize: 34, fontWeight: 800, color: C.ink, letterSpacing: '-.03em', margin: 0, lineHeight: 1.1 },
   loginLead: { fontSize: 14.5, color: C.ink2, margin: '9px 0 0', lineHeight: 1.5 },
   loginRule: { height: 1, background: C.line, margin: '26px 0 22px' },
   loginLabel: { display: 'block', fontSize: 10.5, fontWeight: 800, letterSpacing: '.13em', textTransform: 'uppercase', color: C.ink3, marginBottom: 9 },
@@ -659,7 +680,7 @@ const s = {
   // segmented code entry: one invisible input captures keys/paste, the cells render it
   otpCapture: { position: 'absolute', inset: 0, width: '100%', height: '100%', opacity: 0, border: 'none', background: 'transparent', fontSize: 16, zIndex: 2, cursor: 'text', caretColor: 'transparent' },
   otpRow: { display: 'flex', gap: 7 },
-  otpCell: { flex: 1, minWidth: 0, height: 54, borderRadius: 9, border: `1px solid ${C.line}`, background: C.card, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, fontWeight: 800, color: C.ink, fontFamily: SANS, fontVariantNumeric: 'tabular-nums', transition: 'border-color .15s, box-shadow .15s' },
+  otpCell: { flex: 1, minWidth: 0, height: 54, borderRadius: 9, border: `1px solid ${C.line}`, background: C.card, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, fontWeight: 800, color: C.ink, fontFamily: DISPLAY, fontVariantNumeric: 'tabular-nums', transition: 'border-color .15s, box-shadow .15s' },
   otpCellFilled: { borderColor: C.ink3 },
   otpCellActive: { borderColor: C.navy, boxShadow: `0 0 0 3px rgba(27,58,107,.13)` },
   loginLink: { background: 'transparent', border: 'none', color: C.navy, fontWeight: 700, fontSize: 12.5, cursor: 'pointer', fontFamily: SANS, padding: 0 },

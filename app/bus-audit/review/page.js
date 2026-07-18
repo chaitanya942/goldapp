@@ -9,13 +9,15 @@ import { useRouter } from 'next/navigation'
 import { supabase } from '../../../lib/supabase'
 import { authedFetch } from '../../../lib/authedFetch'
 
+// "Daylight" — matches the field app.
 const C = {
-  paper: '#F2F0E9', paper2: '#E8E4D9', card: '#FFFFFF', ink: '#181A1F', ink2: '#585B63', ink3: '#93949B',
-  line: '#E2DED3', line2: '#EDEAE1', navy: '#1B3A6B', navySoft: '#ECF1F8',
-  green: '#1C824A', greenSoft: '#E4F2E9', amber: '#A5711A', amberSoft: '#F6EDD5', red: '#BC3A22',
+  paper: '#F6F7F9', paper2: '#EBEEF2', card: '#FFFFFF', ink: '#0B0D12', ink2: '#4A4F5A', ink3: '#8A9099',
+  line: '#E4E7EC', line2: '#F0F2F5', navy: '#16305F', navySoft: '#EDF1F8',
+  green: '#12A150', greenSoft: '#E7F6EE', amber: '#E5A02D', amberSoft: '#FDF3E3', red: '#E5484D',
 }
 const SANS = 'var(--font-jakarta), system-ui, sans-serif'
-const MONO = SANS   // plate numbers in the humanist sans, not a code-mono face
+const DISPLAY = 'var(--font-display), var(--font-jakarta), system-ui, sans-serif'
+const MONO = DISPLAY   // plate numbers carry the display face
 const pin = (s = 14) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M12 21s7-6.3 7-11a7 7 0 1 0-14 0c0 4.7 7 11 7 11z" /><circle cx="12" cy="10" r="2.4" /></svg>
 const fmtDate = (iso) => { if (!iso) return '' ; const d = new Date(iso); return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) + ' ' + d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) }
 
