@@ -65,6 +65,24 @@ export default function ReviewPage() {
 
   useEffect(() => { if (!ready) return; const t = setTimeout(() => fetchList(true), 250); return () => clearTimeout(t) /* eslint-disable-next-line */ }, [q, status, region, ready])
 
+  const [dl, setDl] = useState(false)
+  async function downloadCsv() {
+    setDl(true)
+    try {
+      // Can't use a plain <a href> — the endpoint needs the Bearer token.
+      const r = await authedFetch('/api/bus-audit/export' + (status ? `?status=${status}` : ''))
+      if (!r.ok) { setDl(false); return }
+      const blob = await r.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `bus-audit-${status || 'all'}-${new Date().toISOString().slice(0, 10)}.csv`
+      document.body.appendChild(a); a.click(); a.remove()
+      URL.revokeObjectURL(url)
+    } catch {}
+    setDl(false)
+  }
+
   async function openDetail(regNorm) {
     setDetailLoading(true); setDetail({ loading: true })
     const r = await authedFetch('/api/bus-audit/detail?reg_norm=' + encodeURIComponent(regNorm))
@@ -83,7 +101,10 @@ export default function ReviewPage() {
           <div style={s.logo}>W</div>
           <div><div style={{ fontWeight: 700, fontSize: 15.5 }}>Bus Audit · Review</div><div style={{ fontSize: 11.5, color: C.ink3 }}>{stats ? `${stats.audited} of ${stats.total} audited` : '—'}</div></div>
         </div>
-        <a href="/bus-audit" style={s.link}>Capture →</a>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+          <button onClick={downloadCsv} disabled={dl} style={s.csvBtn}>{dl ? 'Preparing…' : '↓ CSV'}</button>
+          <a href="/bus-audit" style={s.link}>Capture →</a>
+        </div>
       </div>
 
       <div style={s.controls}>
@@ -167,6 +188,7 @@ const s = {
   header: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '15px 16px 11px', borderBottom: `1px solid ${C.line}` },
   logo: { width: 34, height: 34, borderRadius: 8, background: C.navy, color: '#C89A33', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: 18, fontFamily: 'Georgia, serif' },
   link: { color: C.navy, fontWeight: 700, fontSize: 13, textDecoration: 'none' },
+  csvBtn: { background: C.card, border: `1px solid ${C.line}`, color: C.navy, borderRadius: 9, padding: '7px 13px', fontSize: 12.5, fontWeight: 700, cursor: 'pointer', fontFamily: SANS },
   controls: { padding: '12px 16px 6px', display: 'flex', flexDirection: 'column', gap: 9, position: 'sticky', top: 0, background: C.paper, zIndex: 5 },
   search: { width: '100%', boxSizing: 'border-box', background: C.card, border: `1px solid ${C.line}`, borderRadius: 10, padding: '11px 13px', color: C.ink, fontSize: 15, outline: 'none', fontFamily: MONO, letterSpacing: '.03em' },
   pill: { padding: '8px 13px', borderRadius: 9, border: `1px solid ${C.line}`, background: C.card, color: C.ink3, fontWeight: 700, fontSize: 12.5, cursor: 'pointer', fontFamily: SANS },

@@ -11,6 +11,7 @@ import { supabase } from '../../lib/supabase'
 import { authedFetch } from '../../lib/authedFetch'
 import { normalizePlate } from '../../lib/busPlate'
 import { compareLocation, cityLabel } from '../../lib/busGeo'
+import { enqueue, listQueued, removeQueued, bumpAttempts } from '../../lib/busQueue'
 
 // "Daylight" — crisp white base, near-black ink, vivid gold. Built to stay
 // legible in direct sun; colour carries state, gold carries emphasis.
@@ -149,6 +150,8 @@ export default function BusAuditPage() {
   const [authErr, setAuthErr] = useState(null)
   const [authNote, setAuthNote] = useState(null)
   const [resendIn, setResendIn] = useState(0)     // Supabase enforces 60s between emails
+  const [queued, setQueued] = useState(0)         // submissions parked offline
+  const [flushing, setFlushing] = useState(false)
   const otpRef = useRef(null), emailRef = useRef(null)
   const [tab, setTab] = useState('capture')
   const [stats, setStats] = useState(null)
@@ -306,6 +309,44 @@ export default function BusAuditPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, statusTab, busQ])
 
+  // ── offline queue ───────────────────────────────────────────────────────
+  // Posts one parked submission. Returns true when it's off the device.
+  const pushQueued = useCallback(async (item) => {
+    const fd = new FormData()
+    fd.append('reg_norm', item.reg_norm)
+    fd.append('meta', JSON.stringify(item.meta))
+    item.blobs.forEach((b, i) => fd.append('images', b, `bus_${i}.jpg`))
+    const r = await authedFetch('/api/bus-audit/submit', { method: 'POST', body: fd })
+    // A 409 (already audited) is terminal, not a retry — drop it so a stale
+    // item can't wedge the queue forever.
+    if (r.ok || r.status === 409) { await removeQueued(item.id); return true }
+    await bumpAttempts(item.id)
+    return false
+  }, [])
+
+  const flushQueue = useCallback(async () => {
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) return
+    const items = await listQueued()
+    if (!items.length) { setQueued(0); return }
+    setFlushing(true)
+    let left = items.length
+    for (const item of items) {
+      try { if (await pushQueued(item)) left-- } catch { /* still offline — keep it */ }
+    }
+    setQueued(left)
+    setFlushing(false)
+    if (left < items.length) loadStats()
+  }, [pushQueued, loadStats])
+
+  // Flush on load and whenever the device comes back online.
+  useEffect(() => {
+    if (!authed) return
+    flushQueue()
+    const on = () => flushQueue()
+    window.addEventListener('online', on)
+    return () => window.removeEventListener('online', on)
+  }, [authed, flushQueue])
+
   async function signOut() {
     await supabase.auth.signOut().catch(() => {})
     setAuthed(false); setMe(null); setStats(null)
@@ -380,23 +421,36 @@ export default function BusAuditPage() {
   async function submit() {
     if (!bus || photos.length < MIN_PHOTOS || submitting || !(geoState === 'ok' && geo && geo.accuracy <= ACC_MAX)) return
     setSubmitting(true); setResult(null)
+    // Declared out here so the catch can park them on the offline queue.
+    let meta = [], stamped = []
     try {
       const fd = new FormData()
       fd.append('reg_norm', bus.reg_norm)
       const address = geoFull || geoPlace || null
-      const meta = photos.map(p => ({ is_plate_shot: p.isPlateShot, blur_score: Math.round(p.blur), detected_number: p.reading?.registration || null, confidence: p.reading?.confidence ?? null, lat: geo?.lat ?? null, lng: geo?.lng ?? null, gps_accuracy: geo?.accuracy ?? null, address, source: p.source || 'camera' }))
+      meta = photos.map(p => ({ is_plate_shot: p.isPlateShot, blur_score: Math.round(p.blur), detected_number: p.reading?.registration || null, confidence: p.reading?.confidence ?? null, lat: geo?.lat ?? null, lng: geo?.lng ?? null, gps_accuracy: geo?.accuracy ?? null, address, source: p.source || 'camera' }))
       fd.append('meta', JSON.stringify(meta))
       // Burn the geotag banner (map + place + coords + time) into each photo.
       const info = { lat: geo.lat, lng: geo.lng, place: geoPlace || `${geo.lat.toFixed(5)}, ${geo.lng.toFixed(5)}`, address: geoFull || geoPlace || '', when: fmtStamp(new Date()), mapUrl: `/api/bus-audit/static-map?lat=${geo.lat}&lng=${geo.lng}` }
       // Photos are already stamped live; stamp any straggler as a fallback.
-      const stamped = await Promise.all(photos.map(p => p.stamped ? Promise.resolve(p.blob) : stampImage(p.blob, info).catch(() => p.blob)))
+      stamped = await Promise.all(photos.map(p => p.stamped ? Promise.resolve(p.blob) : stampImage(p.blob, info).catch(() => p.blob)))
       stamped.forEach((b, i) => fd.append('images', b, `bus_${i}.jpg`))
       const r = await authedFetch('/api/bus-audit/submit', { method: 'POST', body: fd })
       const j = await r.json()
       if (!r.ok) { setResult({ ok: false, ...j }); setSubmitting(false); return }
       setResult({ ok: true, ...j })
       photos.forEach(p => URL.revokeObjectURL(p.previewUrl)); setPhotos([]); setBus(null); setManualQ(''); setManualHits([]); loadStats()
-    } catch (e) { setResult({ ok: false, error: e?.message || 'Submit failed' }) }
+    } catch (e) {
+      // Couldn't reach the server — park it on the device rather than losing
+      // the shoot. It uploads itself when signal returns.
+      try {
+        await enqueue({ reg_norm: bus.reg_norm, reg_number: bus.reg_number, meta, blobs: stamped })
+        setQueued(q => q + 1)
+        setResult({ ok: true, queuedOffline: true, bus: { reg_number: bus.reg_number } })
+        photos.forEach(p => URL.revokeObjectURL(p.previewUrl)); setPhotos([]); setBus(null); setManualQ(''); setManualHits([])
+      } catch {
+        setResult({ ok: false, error: e?.message || 'Submit failed and could not be saved offline.' })
+      }
+    }
     setSubmitting(false)
   }
 
@@ -505,11 +559,23 @@ export default function BusAuditPage() {
         <div className="ba-in" style={s.body}>
           {result && (
             <div style={{ ...s.banner, background: result.ok ? (result.audited ? C.greenSoft : C.amberSoft) : C.redSoft, borderColor: result.ok ? (result.audited ? C.green : C.amber) : C.red }}>
-              {result.ok
+              {result.ok && result.queuedOffline
+                ? <><b style={{ color: C.amber }}>Saved on this phone — {result.bus?.reg_number}</b><span style={{ color: C.ink2, fontSize: 12.5 }}> · no signal. It uploads automatically when you&apos;re back online.</span></>
+                : result.ok
                 ? (result.audited
                   ? <><b style={{ color: C.green }}>Audited — {result.bus?.reg_number}</b><span style={{ color: C.ink2, fontSize: 12.5 }}> · {result.bus?.photo_count} photo{result.bus?.photo_count === 1 ? '' : 's'} on file</span></>
                   : <><b style={{ color: C.amber }}>Saved {result.added} photo{result.added === 1 ? '' : 's'}</b><span style={{ color: C.ink2, fontSize: 12.5 }}> · {result.needs_plate_shot ? 'needs a clear plate shot. ' : ''}{result.needs_more > 0 ? `add ${result.needs_more} more.` : ''}</span></>)
                 : <><b style={{ color: C.red }}>{result.error === 'AUDIT_ALREADY_DONE' ? 'Already audited' : "Couldn't save"}</b><span style={{ color: C.ink2, fontSize: 12.5 }}> · {result.message || result.error}</span></>}
+            </div>
+          )}
+
+          {queued > 0 && (
+            <div style={{ ...s.banner, background: C.amberSoft, borderColor: C.amber, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+              <span style={{ color: C.ink2 }}>
+                <b style={{ color: C.ink }}>{queued}</b> audit{queued === 1 ? '' : 's'} waiting to upload
+                {flushing ? ' — uploading…' : ''}
+              </span>
+              <button onClick={flushQueue} disabled={flushing} style={{ ...s.change, ...(flushing ? s.disabled : {}) }}>{flushing ? 'Uploading…' : 'Retry now'}</button>
             </div>
           )}
 
