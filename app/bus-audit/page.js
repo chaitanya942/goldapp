@@ -452,7 +452,9 @@ export default function BusAuditPage() {
   const pct = stats && stats.total ? Math.round((stats.audited / stats.total) * 100) : 0
 
   return (
-    <div className="ba-app" style={{ ...s.app, maxWidth: wide ? 960 : 480 }}>
+    {/* Capture is a linear task flow — keep it a comfortable column even on
+        desktop. Progress is a browsable list, so it earns the extra width. */}
+    <div className="ba-app" style={{ ...s.app, maxWidth: wide ? (tab === 'progress' ? 960 : 600) : 480 }}>
       {/* header */}
       <div style={s.header}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
@@ -558,7 +560,7 @@ export default function BusAuditPage() {
                   <span style={{ color: C.ink2 }}>The plate photo reads <b style={{ fontFamily: MONO, color: C.ink }}>{plateShot.reading.registration}</b>, but the selected bus is <b style={{ fontFamily: MONO, color: C.ink }}>{bus.reg_number}</b>. Double-check you've picked the right bus.</span>
                 </div>
               )}
-              <div style={{ ...s.grid, gridTemplateColumns: wide ? 'repeat(4, 1fr)' : 'repeat(3, 1fr)' }}>
+              <div style={s.grid}>
                 {photos.map(p => {
                   const r = p.reading || {}; const blurry = p.blur < BLUR_MIN
                   return (
