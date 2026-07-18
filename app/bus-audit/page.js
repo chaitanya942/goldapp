@@ -290,6 +290,13 @@ export default function BusAuditPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, statusTab, busQ])
 
+  async function signOut() {
+    await supabase.auth.signOut().catch(() => {})
+    setAuthed(false); setMe(null); setStats(null)
+    setLoginStep('email'); setOtpCode(''); setAuthErr(null); setAuthNote(null); setResendIn(0)
+    resetCapture()
+  }
+
   async function openBusDetail(regNorm) {
     setBusDetail({ loading: true })
     try {
@@ -452,7 +459,10 @@ export default function BusAuditPage() {
           <div style={s.logo}>W</div>
           <div>
             <div style={{ fontFamily: DISPLAY, fontWeight: 800, fontSize: 17, color: C.ink, letterSpacing: '-.02em' }}>Bus Audit</div>
-            <div style={{ fontSize: 11.5, color: C.ink3 }}>{me?.email}</div>
+            <div style={{ fontSize: 11.5, color: C.ink3, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 160 }}>{me?.email}</span>
+              <button onClick={signOut} style={s.signOut}>Sign out</button>
+            </div>
           </div>
         </div>
         <div style={{ textAlign: 'right' }}>
@@ -765,6 +775,7 @@ const s = {
   otpCell: { flex: 1, minWidth: 0, height: 54, borderRadius: 9, border: `1px solid ${C.line}`, background: C.card, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, fontWeight: 800, color: C.ink, fontFamily: DISPLAY, fontVariantNumeric: 'tabular-nums', transition: 'border-color .15s, box-shadow .15s' },
   otpCellFilled: { borderColor: C.ink3 },
   otpCellActive: { borderColor: C.navy, boxShadow: `0 0 0 3px rgba(27,58,107,.13)` },
+  signOut: { background: 'transparent', border: 'none', color: C.navy, fontWeight: 700, fontSize: 11, cursor: 'pointer', fontFamily: SANS, padding: 0, flexShrink: 0 },
   loginLink: { background: 'transparent', border: 'none', color: C.navy, fontWeight: 700, fontSize: 12.5, cursor: 'pointer', fontFamily: SANS, padding: 0 },
   loginErr: { marginTop: 14, background: C.redSoft, border: `1px solid ${C.red}`, borderRadius: 9, padding: '10px 12px', color: C.red, fontSize: 12.5, fontWeight: 600 },
   loginFoot: { marginTop: 34, fontSize: 11.5, color: C.ink3, textAlign: 'center' },
