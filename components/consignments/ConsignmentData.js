@@ -10,6 +10,7 @@ import Toast from '../ui/Toast'
 import { openConfirm } from '../ui/ConfirmDialog'
 import { authedFetch } from '../../lib/authedFetch'
 import { triggerSync } from '../../lib/triggerSync'
+import { isSelfCarryRegion, branchEmployeeTransporter } from '../../lib/selfCarryRegions'
 import { getCache, setCache } from '../../lib/moduleCache'
 import { CONSIGNMENT_THEMES as THEMES, REGION_COLORS, useMobile } from '../../lib/consignmentTheme'
 import { WorkflowStrip, canActOnStep } from './workflowParts'
@@ -141,6 +142,13 @@ export default function ConsignmentData() {
   const [branchContactPhone,  setBranchContactPhone] = useState('')
   const [transporterMode,     setTransporterMode]    = useState('bvc')   // 'bvc' | 'branch_employee' | 'other'
   const [transporterOther,    setTransporterOther]   = useState('')
+  // Self-carry (ROK / AP / TS): the branch employee who physically carries the
+  // parcel to the hub. Prints on the Issue Voucher. Suggestions come from the
+  // branch_employees directory, but the field stays free-text — 15 of 22 Rest
+  // of Karnataka branches have no employee records, so a strict dropdown would
+  // block consignment creation there.
+  const [carrierName,         setCarrierName]        = useState('')
+  const [branchEmps,          setBranchEmps]         = useState([])
   const [showModal,           setShowModal]          = useState(false)
   const [lastConsignment,     setLastConsignment]    = useState(null)
   // Re-render every 60s so the "approval pending · 5m" timer in the ALL
@@ -461,10 +469,20 @@ export default function ConsignmentData() {
       bvc:             { name: 'BVC LOGISTICS PVT. LTD.', mode: 'BY AIR & ROAD' },
       branch_employee: { name: 'BRANCH EMPLOYEE',         mode: 'BY ROAD' },
     }
-    const transporter_name = transporterMode === 'other'
-      ? (transporterOther.trim() || 'OTHER')
-      : TRANSPORTERS[transporterMode].name
-    const transport_mode   = transporterMode === 'other' ? 'BY ROAD' : TRANSPORTERS[transporterMode].mode
+    // INTERNAL movements out of a self-carry region are carried by a named
+    // branch employee, so the voucher can say who. Everything else keeps the
+    // existing transporter selector.
+    const srcRegionForCarry = branches.find(b => b.name === nav?.branch)?.region
+    const isSelfCarry = moveType === 'INTERNAL' && isSelfCarryRegion(srcRegionForCarry)
+
+    const transporter_name = isSelfCarry
+      ? branchEmployeeTransporter(carrierName)
+      : transporterMode === 'other'
+        ? (transporterOther.trim() || 'OTHER')
+        : TRANSPORTERS[transporterMode].name
+    const transport_mode   = isSelfCarry
+      ? 'BY ROAD'
+      : transporterMode === 'other' ? 'BY ROAD' : TRANSPORTERS[transporterMode].mode
 
     // Final confirmation gate — themed dialog so creation never fires from a
     // single click. Restates destination, bills, weight, value AND the
@@ -472,7 +490,7 @@ export default function ConsignmentData() {
     // line is the safety net: ops who never scrolled still see it here and can
     // cancel to fix it before the consignment is created.
     const dest = moveType === 'INTERNAL' ? destBranch : 'Head Office'
-    const transLine = moveType === 'INTERNAL' ? '' : `\n· Transporter: ${transporter_name}`
+    const transLine = (moveType === 'INTERNAL' && !isSelfCarry) ? '' : `\n· Transporter: ${transporter_name}`
     const ok = await openConfirm({
       title: 'Create this consignment?',
       message: `${nav.branch} → ${dest}\n\n· ${selected.size} bill${selected.size === 1 ? '' : 's'}\n· ${fmtWt(totalSelWt)} net weight\n· ₹${fmt(Math.round(totalSelAmt))} value\n· ${moveType === 'INTERNAL' ? 'Issue Voucher' : 'Delivery Challan'} will be issued${transLine}\n\nOnce created, the bills are locked to this consignment until accounts approves or the consignment is voided.`,
@@ -896,6 +914,18 @@ export default function ConsignmentData() {
                   setBranchContactName(br?.contact_person || '')
                   setBranchContactPhone(br?.contact_phone  || '')
                   setTransporterMode('bvc'); setTransporterOther('')   // default each dispatch to BVC
+                  setCarrierName('')
+                  // Suggestions for the self-carry carrier field. Fetched on
+                  // open rather than at mount so the directory isn't pulled for
+                  // operators who never create a consignment.
+                  if (isSelfCarryRegion(br?.region)) {
+                    authedFetch('/api/branch-employees')
+                      .then(r => r.json())
+                      .then(d => setBranchEmps(Array.isArray(d?.employees) ? d.employees : []))
+                      .catch(() => setBranchEmps([]))   // field stays free-text
+                  } else {
+                    setBranchEmps([])
+                  }
                   setShowModal(true)
                   fetchPreviewNumbers()
                 }} style={btnGold}>
@@ -2132,9 +2162,37 @@ export default function ConsignmentData() {
                     </div>
                   </div>
 
+                  {/* Self-carry (ROK / AP / TS) INTERNAL movements: name the
+                      branch employee carrying the parcel. Prints on the Issue
+                      Voucher as "Branch Employee - <name>", both in the header
+                      and pre-filled into Carrier Name. Free text with
+                      suggestions — see the carrierName state for why. */}
+                  {moveType === 'INTERNAL' && isSelfCarryRegion(branches.find(b => b.name === nav?.branch)?.region) && (
+                    <div style={{ marginBottom: '14px' }}>
+                      <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', marginBottom: '6px', fontWeight: 700 }}>
+                        Carried by <span style={{ textTransform: 'none', fontWeight: 400, color: t.text4 }}>(branch employee — prints on Issue Voucher)</span>
+                      </div>
+                      <input
+                        value={carrierName}
+                        onChange={e => setCarrierName(e.target.value.slice(0, 40))}
+                        placeholder="Employee name"
+                        list="ba-carrier-suggestions"
+                        style={{ width: '100%', background: t.card2, border: `1px solid ${t.border2}`, borderRadius: '9px', padding: '11px 14px', fontSize: '13px', color: t.text1, outline: 'none', boxSizing: 'border-box' }}
+                      />
+                      <datalist id="ba-carrier-suggestions">
+                        {branchEmps
+                          .filter(e => e.crm_branch_name === nav?.branch && e.name)
+                          .map(e => <option key={e.id} value={e.name}>{e.designation || ''}</option>)}
+                      </datalist>
+                      <div style={{ fontSize: '10px', color: t.text4, marginTop: '5px' }}>
+                        Leave blank to print just &ldquo;BRANCH EMPLOYEE&rdquo;.
+                      </div>
+                    </div>
+                  )}
+
                   {/* Transporter — who physically carries this consignment.
-                      Prints on the Delivery Challan (EXTERNAL only; the Issue
-                      Voucher has its own fillable Carrier field). Default BVC;
+                      Prints on the Delivery Challan (EXTERNAL only; INTERNAL
+                      self-carry uses the Carried by field above). Default BVC;
                       Branch Employee for self-carry; Other = free text. */}
                   {moveType !== 'INTERNAL' && (
                     <div style={{ marginBottom: '14px' }}>
