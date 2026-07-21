@@ -3181,6 +3181,36 @@ function ActionPill({ label, color, onClick, t, subtle = false }) {
 // section title + subtitle, total grams/bills floated right. A faint
 // gradient stripe traces the accent colour across the header. Branch rows
 // support checkboxes (when selectable), hover lift, and the Kerala-locking
+// Pickup-days strip — the weekdays a branch's stock is collected, shown next
+// to the delivery-TAT chip. Renders the full working week Mon–Sat so ops can
+// see at a glance which days are skipped (a Mon/Wed/Fri branch greys out
+// Tue/Thu/Sat) rather than only listing the active ones. Sunday is omitted —
+// no branch runs pickups then. Nothing renders when the branch has no
+// configured pickup_days.
+const PICKUP_WEEK = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+function PickupDaysChip({ t, days }) {
+  if (!Array.isArray(days) || days.length === 0) return null
+  const set = new Set(days)
+  return (
+    <span title={`Pickup days: ${PICKUP_WEEK.filter(d => set.has(d)).join(', ')}`}
+      style={{ display: 'inline-flex', gap: 2, alignItems: 'center', flexShrink: 0 }}>
+      {PICKUP_WEEK.map(d => {
+        const on = set.has(d)
+        return (
+          <span key={d} style={{
+            fontSize: 9.5, fontWeight: on ? 800 : 600,
+            color: on ? t.gold : t.text4,
+            background: on ? `${t.gold}18` : 'transparent',
+            border: `1px solid ${on ? `${t.gold}44` : t.border2}`,
+            borderRadius: 4, padding: '1px 4px', lineHeight: 1.35,
+            letterSpacing: '.02em', opacity: on ? 1 : 0.5,
+          }}>{d.slice(0, 2)}</span>
+        )
+      })}
+    </span>
+  )
+}
+
 // affordance via `branchLocked`. View-only sections (48h TAT) render rows
 // dimmed with no checkboxes — they're informational.
 function SourceSection({
@@ -4083,6 +4113,7 @@ function SourceSection({
                         {b.tat_hours != null && (
                           <span title={`Delivery TAT ${b.tat_hours}h`} style={{ fontSize: 10.5, color: t.text3, background: `${t.text4}1c`, border: `1px solid ${t.text4}2e`, borderRadius: 4, padding: '1px 8px', whiteSpace: 'nowrap', fontWeight: 700, letterSpacing: '.03em' }}>{b.tat_hours}h TAT</span>
                         )}
+                        <PickupDaysChip t={t} days={b.pickup_days} />
                         {(() => {
                           // Consignment-created date, derived from this branch's in-consignment
                           // bills. Shows a single date, or earliest→latest when they span days.

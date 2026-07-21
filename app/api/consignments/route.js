@@ -960,6 +960,7 @@ export async function GET(req) {
             region:        meta.region || 'Unknown',
             tat_hours:     meta.delivery_tat_hours || null,
             pickup_time:   meta.pickup_time || null,
+            pickup_days:   Array.isArray(meta.pickup_days) ? meta.pickup_days : null,
             partner:       meta.logistics_partner || null,
             bills:         [],
             total_bills:   0,
