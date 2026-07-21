@@ -3191,20 +3191,25 @@ const PICKUP_WEEK = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 function PickupDaysChip({ t, days }) {
   if (!Array.isArray(days) || days.length === 0) return null
   const set = new Set(days)
+  // One connected week-bar rather than six separate pills: active days are
+  // filled gold, skipped days sit hollow and faint, split by hairlines — the
+  // recurrence-picker pattern (S M T W T F S) reads as a single unit and the
+  // exceptions (a Mon/Wed/Fri branch) pop without the row looking busy.
   return (
-    <span title={`Pickup days: ${PICKUP_WEEK.filter(d => set.has(d)).join(', ')}`}
-      style={{ display: 'inline-flex', gap: 2, alignItems: 'center', flexShrink: 0 }}>
-      {PICKUP_WEEK.map(d => {
+    <span title={`Pickup days · ${PICKUP_WEEK.filter(d => set.has(d)).join(', ')}`}
+      style={{ display: 'inline-flex', alignItems: 'center', flexShrink: 0,
+        borderRadius: 5, overflow: 'hidden', border: `1px solid ${t.border2}` }}>
+      {PICKUP_WEEK.map((d, i) => {
         const on = set.has(d)
         return (
           <span key={d} style={{
             fontSize: 9.5, fontWeight: on ? 800 : 600,
-            color: on ? t.gold : t.text4,
-            background: on ? `${t.gold}18` : 'transparent',
-            border: `1px solid ${on ? `${t.gold}44` : t.border2}`,
-            borderRadius: 4, padding: '1px 4px', lineHeight: 1.35,
-            letterSpacing: '.02em', opacity: on ? 1 : 0.5,
-          }}>{d.slice(0, 2)}</span>
+            width: 15, textAlign: 'center', padding: '2px 0', lineHeight: 1.4,
+            color: on ? '#1a0a00' : t.text4,
+            background: on ? t.goldSolid || t.gold : 'transparent',
+            opacity: on ? 1 : 0.45,
+            borderLeft: i === 0 ? 'none' : `1px solid ${t.border2}`,
+          }}>{d[0]}</span>
         )
       })}
     </span>
