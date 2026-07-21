@@ -4260,7 +4260,13 @@ export async function POST(req) {
     // still lands on ~0.035 because gain_applied_g = net × 3.5 % by default.
     // Kerala = 0. Falls back to the 3.5 % standard when net is unknown.
     {
-      const netForRate  = Number(bills_net_weight_g) || 0
+      // Divide by SOURCED (net + pending), not net alone: the live gain model
+      // is gain = sourced × gain_rate, so dividing by sourced makes it reproduce
+      // exactly the grams the operator applied. Without the pending term, a
+      // booking with pending would show gain inflated by pending × rate while
+      // live (the row reading over its booked weight) and only reconcile once
+      // the arrival day settled it. With pending = 0 this is unchanged.
+      const netForRate  = (Number(bills_net_weight_g) || 0) + (Number(pending_g) || 0)
       const appliedGain = Number(gain_applied_g)
       breakdownPayload.gain_rate = is_kl ? 0
         : (netForRate > 0 && Number.isFinite(appliedGain) && appliedGain >= 0)
@@ -5249,7 +5255,7 @@ export async function POST(req) {
   // fill is recorded as an accounting allocation (booking_split_allocations),
   // so total sourced gold is conserved and the CRM re-sync never disturbs it.
   if (action === 'split_close_and_book') {
-    const { bill_ids, is_kl, bidding_date, party, rate, weight, purity, buyer_phone, notes, arrival_date, gain_rate } = body
+    const { bill_ids, is_kl, bidding_date, party, rate, weight, purity, buyer_phone, notes, arrival_date, gain_rate, pending_g, gain_applied_g } = body
     if (!Array.isArray(bill_ids) || bill_ids.length === 0) return Response.json({ error: 'bill_ids[] required' }, { status: 400 })
     if (!bidding_date) return Response.json({ error: 'bidding_date required' }, { status: 400 })
     if (!party || !String(party).trim()) return Response.json({ error: 'Buyer name required' }, { status: 400 })
@@ -5380,13 +5386,37 @@ export async function POST(req) {
     }
 
     // 8) Set the new booking's own pipeline + breakdown from the remainder.
-    const newSourced  = remainderNet
-    const newPipeline = Math.max(0, wNew - newSourced * (1 + newRate))
+    // Operator overrides (from the split modal):
+    //   · pending_g       — owed/delayed gold ops KNOWS is coming. Counts as
+    //                       sourced (attached + pending), so it shrinks pipeline
+    //                       instead of leaving it open to auto-attach. Mirrors
+    //                       the pending_g model in create_booking.
+    //   · gain_applied_g  — an absolute gain override (grams). gain_rate is
+    //                       derived from it exactly as create_booking does
+    //                       (appliedGain / net), so the live gain model honours
+    //                       the operator's figure instead of snapping to 3.5 %.
+    const pendingG = Math.max(0, Number(pending_g) || 0)
+    const gainOverride = Number(gain_applied_g)
+    const gainAppliedG = Number.isFinite(gainOverride) && gainOverride >= 0
+      ? gainOverride
+      : remainderNet * newRate
+    const newSourced  = remainderNet + pendingG                        // pending counts as sourced
+    // gain_rate is derived over SOURCED (net + pending), not net alone, so the
+    // live gain model (gain = sourced × rate) reproduces exactly the grams the
+    // operator entered — otherwise pending would earn phantom gain while the
+    // booking is live and the row would read over its own booked weight until
+    // the arrival day settled it. With pending = 0 this is identical to net-only.
+    const effGainRate = klFlag ? 0
+      : (newSourced > 0 && Number.isFinite(gainAppliedG) && gainAppliedG >= 0)
+        ? Number((gainAppliedG / newSourced).toFixed(6))
+        : newRate
+    const newPipeline = Math.max(0, wNew - newSourced * (1 + effGainRate))
     const pipelineRegion = klFlag ? 'Kerala' : 'Bangalore'
     await supabase.from('cal_quotas').update({
-      gain_rate:             newRate,
-      bills_net_weight_g:    Number(newSourced.toFixed(3)),
-      gain_applied_g:        Number((newSourced * newRate).toFixed(3)),
+      gain_rate:             effGainRate,
+      bills_net_weight_g:    Number(remainderNet.toFixed(3)),
+      gain_applied_g:        Number(gainAppliedG.toFixed(3)),
+      pending_g:             Number(pendingG.toFixed(3)),
       pipeline_original_g:   Number(newPipeline.toFixed(3)),
       pipeline_remaining_g:  newPipeline > 0.001 ? Number(newPipeline.toFixed(3)) : 0,
       pipeline_region:       newPipeline > 0.001 ? pipelineRegion : null,

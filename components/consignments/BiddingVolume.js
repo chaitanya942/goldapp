@@ -4723,6 +4723,14 @@ function SplitBookingModal({ t, regionPipe, selectedTotal, selGainRate, bidders,
   const [price, setPrice]   = useState('')
   const [weight, setWeight] = useState(() => remainderCommitted > 0 ? remainderCommitted.toFixed(2) : '')
   const [weightDirty, setWeightDirty] = useState(false)
+  // Operator-editable gain + pending for the NEW booking (the remainder).
+  // Gain defaults to the rate-implied grams; Pending defaults to 0. Pending is
+  // owed gold that counts as sourced, so it shrinks the new booking's pipeline
+  // — this is the control that was missing (ops could only let the shortfall
+  // fall into pipeline, never mark it pending).
+  const [gainEntry, setGainEntry]       = useState(() => remainderNet > 0 ? (remainderNet * rate).toFixed(2) : '')
+  const [gainDirty, setGainDirty]       = useState(false)
+  const [pendingEntry, setPendingEntry] = useState('')
   const [busy, setBusy]     = useState(false)
   const [localBidders, setLocalBidders] = useState(() => {
     if (typeof window === 'undefined') return []
@@ -4757,8 +4765,19 @@ function SplitBookingModal({ t, regionPipe, selectedTotal, selGainRate, bidders,
   const w = Number(weight), pr = Number(price)
   const wValid = Number.isFinite(w) && w > 0
   const prValid = Number.isFinite(pr) && pr > 0
-  const newPipeline = wValid ? Math.max(0, w - remainderNet * (1 + rate)) : 0
+  const gainG    = (() => { const n = Number(gainEntry);    return Number.isFinite(n) && n >= 0 ? n : 0 })()
+  const pendingG = (() => { const n = Number(pendingEntry); return Number.isFinite(n) && n >= 0 ? n : 0 })()
+  // The server derives gain_rate over sourced (net + pending), which makes the
+  // model additive: Net + Gain + Pending + Pipeline = Booked. Mirror that here
+  // so the preview matches the row that lands. Kerala has no gain.
+  const gainForPipe = isKerala ? 0 : gainG
+  const newPipeline = wValid ? Math.max(0, w - remainderNet - gainForPipe - pendingG) : 0
   const canSubmit = party.trim().length > 0 && wValid && prValid && !busy
+  // Keep the gain field synced to the rate-implied default until edited.
+  useEffect(() => {
+    if (gainDirty) return
+    setGainEntry(remainderNet > 0 ? (remainderNet * rate).toFixed(2) : '')
+  }, [remainderNet, rate, gainDirty])
 
   const allBidders = useMemo(() => {
     const seen = new Set(); const out = []
@@ -4769,7 +4788,7 @@ function SplitBookingModal({ t, regionPipe, selectedTotal, selGainRate, bidders,
   const submit = async () => {
     if (!canSubmit) return
     setBusy(true)
-    const ok = await onSubmit?.({ party: party.trim(), rate: pr, weight: w, gain_rate: rate })
+    const ok = await onSubmit?.({ party: party.trim(), rate: pr, weight: w, gain_rate: rate, gain_applied_g: gainG, pending_g: pendingG })
     if (!ok) setBusy(false)
   }
 
@@ -4816,14 +4835,51 @@ function SplitBookingModal({ t, regionPipe, selectedTotal, selGainRate, bidders,
             </div>
           </div>
 
+          {/* Gain + Pending — editable for the new booking. Gain defaults to the
+              rate-implied grams; Pending is owed gold that counts as sourced and
+              shrinks the pipeline shown below. */}
+          <div style={{ display: 'flex', gap: 12, marginBottom: 14 }}>
+            {!isKerala && (
+              <div style={{ flex: 1 }}>
+                <label style={lbl}>Gain (g)</label>
+                <input value={gainEntry} onChange={e => { setGainEntry(e.target.value.replace(/[^\d.]/g, '')); setGainDirty(true) }} inputMode="decimal" style={inp} />
+              </div>
+            )}
+            <div style={{ flex: 1 }}>
+              <label style={{ ...lbl, display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                <span>Pending (g)</span>
+                {newPipeline > 0.001 && (
+                  <button type="button"
+                    onClick={() => { setPendingEntry((pendingG + newPipeline).toFixed(2)) }}
+                    title="Set pending so the new booking carries no pipeline"
+                    style={{ background: 'transparent', border: 'none', color: t.gold, fontSize: 10.5, fontWeight: 700, cursor: 'pointer', padding: 0 }}>
+                    cover pipeline →
+                  </button>
+                )}
+              </label>
+              <input value={pendingEntry} onChange={e => setPendingEntry(e.target.value.replace(/[^\d.]/g, ''))} inputMode="decimal" placeholder="0" style={inp} />
+            </div>
+          </div>
+
           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: t.text3, marginBottom: 4 }}>
             <span>New booking value</span>
             <strong style={{ color: t.text }}>{wValid && prValid ? fmtINR(w * pr) : '—'}</strong>
           </div>
-          {newPipeline > 0.001 && (
+          {pendingG > 0.001 && (
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: t.text3 }}>
+              <span>New booking pending</span>
+              <strong style={{ color: t.green || '#3aaa6a' }}>{fmt(pendingG, 2)} g</strong>
+            </div>
+          )}
+          {newPipeline > 0.001 ? (
             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: t.text3 }}>
               <span>New booking carries pipeline</span>
               <strong style={{ color: t.orange || '#d98a3a' }}>{fmt(newPipeline, 2)} g</strong>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: t.text3 }}>
+              <span>New booking pipeline</span>
+              <strong style={{ color: t.green || '#3aaa6a' }}>fully covered</strong>
             </div>
           )}
         </div>
@@ -4988,6 +5044,12 @@ function BookingModal({ t, arrivalDate, availablePool, remainingQty, incomingNet
   const overBy = wValid && totalBiddingW > 0 ? Math.max(0, w - totalBiddingW) : 0
   const [attrGain,     setAttrGain]     = useState(false)
   const [attrPipeline, setAttrPipeline] = useState(false)
+  // Third destination for an over-booking: Pending — gold ops KNOWS is coming
+  // (owed/delayed), booked now against it. Unlike Pipeline it counts as
+  // sourced, so the booking shows fully covered (pipeline 0) with the excess
+  // in the Pending column. Contradicts Pipeline (sourced vs not) and Gain, so
+  // it's exclusive — ticking it clears the other two and vice-versa.
+  const [attrPending,  setAttrPending]  = useState(false)
   // Opt-in: when ticked, the pipeline auto-attacher will also draw from
   // outstation 24h-transit bills (non-Kerala) arriving on the booking's
   // arrival date — not just tomorrow's Bangalore purchases. Hidden until
@@ -5003,6 +5065,7 @@ function BookingModal({ t, arrivalDate, availablePool, remainingQty, incomingNet
     if (overBy <= 0) {
       if (attrGain)     setAttrGain(false)
       if (attrPipeline) setAttrPipeline(false)
+      if (attrPending)  setAttrPending(false)
     }
   }, [overBy]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -5076,9 +5139,9 @@ function BookingModal({ t, arrivalDate, availablePool, remainingQty, incomingNet
         : `Bid is ${excessBy.toFixed(2)} g under the selected weight — reduce gain or detach Bangalore bills first.`)
       return
     }
-    if (overBy > 0 && !attrGain && !attrPipeline) {
+    if (overBy > 0 && !attrGain && !attrPipeline && !attrPending) {
       console.warn('[BookingModal] guard: overBy attribution required', overBy)
-      if (onSubmitGuardFail) onSubmitGuardFail(`Booking is ${overBy.toFixed(2)} g over total — tick ${isKerala ? 'Pipeline' : 'Additional gain or Pipeline'} first.`)
+      if (onSubmitGuardFail) onSubmitGuardFail(`Booking is ${overBy.toFixed(2)} g over total — tick ${isKerala ? 'Pending or Pipeline' : 'Additional gain, Pending or Pipeline'} first.`)
       return
     }
     setBusy(true)
@@ -5088,11 +5151,15 @@ function BookingModal({ t, arrivalDate, availablePool, remainingQty, incomingNet
       if (isNewBidder) saveNewBidder()
       const attrBits = []
       if (attrGain)     attrBits.push('additional_gain')
+      if (attrPending)  attrBits.push('pending')
       if (attrPipeline) attrBits.push('pipeline')
       const compositeNotes = [
         selectedBranchNames.length ? `Sources: ${selectedBranchNames.join(', ')}` : null,
         overBy > 0 && attrBits.length ? `Excess ${overBy.toFixed(2)} g · from ${attrBits.join(' + ')}` : null,
       ].filter(Boolean).join(' · ') || null
+      // Excess → Pending: the over-booked grams are owed gold that counts as
+      // sourced. Added on top of any shared carry-over already folded in.
+      const excessPendingG = attrPending && overBy > 0 ? overBy : 0
       // Pipeline payload — when ops ticks "Pipeline" attribution the
       // backend stores the gap (in grams) and the bidder's region so the
       // sync-purchases hook can auto-attach incoming bills until fulfilled.
@@ -5120,7 +5187,7 @@ function BookingModal({ t, arrivalDate, availablePool, remainingQty, incomingNet
         // Breakdown — each component of the operator-built total.
         bills_net_weight_g:   Number(netFromSelection.toFixed(3)),
         gain_applied_g:       Number(addedGainsW.toFixed(3)),
-        pending_g:            Number(addedPendingW.toFixed(3)),
+        pending_g:            Number((addedPendingW + excessPendingG).toFixed(3)),
         additional_gain_g:    attrGain && overBy > 0 && !attrPipeline ? Number(overBy.toFixed(3)) : 0,
         pipeline_original_g:  attrPipeline && overBy > 0 ? Number(overBy.toFixed(3)) : 0,
       })
@@ -5134,7 +5201,7 @@ function BookingModal({ t, arrivalDate, availablePool, remainingQty, incomingNet
     }
   }
 
-  const valid = party.trim() && Number.isFinite(w) && w > 0 && Number.isFinite(r) && r > 0 && (overBy === 0 || attrGain || attrPipeline) && (excessBy <= 0.05 || acceptExcess)
+  const valid = party.trim() && Number.isFinite(w) && w > 0 && Number.isFinite(r) && r > 0 && (overBy === 0 || attrGain || attrPipeline || attrPending) && (excessBy <= 0.05 || acceptExcess)
 
   // Portal to document.body — the dashboard <main> uses overflow: clip on
   // its x-axis, which (with overflow-y: auto) creates a clipping/paint
@@ -5405,7 +5472,7 @@ function BookingModal({ t, arrivalDate, availablePool, remainingQty, incomingNet
                   </span>
                 </button>
               )
-              const needsAttr = !attrGain && !attrPipeline
+              const needsAttr = !attrGain && !attrPipeline && !attrPending
               return (
                 <div style={{
                   background: `linear-gradient(150deg, ${amberTone}0e, ${amberTone}04 60%, transparent)`,
@@ -5421,13 +5488,18 @@ function BookingModal({ t, arrivalDate, availablePool, remainingQty, incomingNet
                     </span>
                   </div>
                   <div style={{ fontSize: 11, color: t.text3, marginBottom: 8, fontWeight: 600 }}>
-                    Booking weight is {fmt(overBy, 2)} g over the total bidding weight ({fmt(totalBiddingW, 2)} g). {isKerala ? 'Booked against tomorrow’s incoming (hub stock + branch → hub) — tick Pipeline:' : 'Pick where this comes from — tick one or both:'}
+                    Booking weight is {fmt(overBy, 2)} g over the total bidding weight ({fmt(totalBiddingW, 2)} g). {isKerala ? 'Where does it come from?' : 'Pick where this comes from:'}
                   </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: isKerala ? '1fr' : '1fr 1fr', gap: 10 }}>
+                  {/* Pending is exclusive vs Gain/Pipeline: it counts the excess
+                      as sourced (owed gold), the others don't. Ticking it clears
+                      them; ticking either of them clears it. Gain+Pipeline may
+                      still be ticked together, as before. */}
+                  <div style={{ display: 'grid', gridTemplateColumns: isKerala ? '1fr 1fr' : '1fr 1fr 1fr', gap: 10 }}>
                     {!isKerala && (
-                      <Box checked={attrGain} onClick={() => setAttrGain(v => !v)} accent={t.orange || '#e58a3b'} label="Additional gain" hint={`Realize more than the ${(liveGainRate * 100).toFixed(2)} % default`} />
+                      <Box checked={attrGain} onClick={() => { setAttrGain(v => !v); setAttrPending(false) }} accent={t.orange || '#e58a3b'} label="Additional gain" hint={`Realize more than the ${(liveGainRate * 100).toFixed(2)} % default`} />
                     )}
-                    <Box checked={attrPipeline} onClick={() => setAttrPipeline(v => !v)} accent={t.purple || '#8c5ac8'} label="Pipeline" hint={isKerala ? 'Back-fill from hub stock + branch → hub' : "Book against tomorrow's incoming"} />
+                    <Box checked={attrPending} onClick={() => { setAttrPending(v => { const nv = !v; if (nv) { setAttrGain(false); setAttrPipeline(false) } return nv }) }} accent={t.green || '#3aaa6a'} label="Pending" hint="Owed gold that's coming — counts as sourced now" />
+                    <Box checked={attrPipeline} onClick={() => { setAttrPipeline(v => !v); setAttrPending(false) }} accent={t.purple || '#8c5ac8'} label="Pipeline" hint={isKerala ? 'Back-fill from hub stock + branch → hub' : "Book against tomorrow's incoming"} />
                   </div>
                   {/* Sub-option: when pipeline is ticked AND it's not a Kerala
                       booking, allow the auto-attacher to also pull from
