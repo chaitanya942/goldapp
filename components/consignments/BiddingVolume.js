@@ -3190,29 +3190,21 @@ function ActionPill({ label, color, onClick, t, subtle = false }) {
 const PICKUP_WEEK = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 function PickupDaysChip({ t, days }) {
   if (!Array.isArray(days) || days.length === 0) return null
-  const set = new Set(days)
-  // One connected week-bar rather than six separate pills: active days are
-  // filled gold, skipped days sit hollow and faint, split by hairlines — the
-  // recurrence-picker pattern (S M T W T F S) reads as a single unit and the
-  // exceptions (a Mon/Wed/Fri branch) pop without the row looking busy.
+  // Show ONLY the days pickup actually runs — ops don't want the skipped days
+  // shown at all (an earlier full-week bar that greyed the off-days read as
+  // "all 6 days"). A genuine Mon–Sat branch compacts to a range; anything else
+  // lists its days, so a Tue/Thu/Sat branch pops as exactly that.
+  const active = PICKUP_WEEK.filter(d => days.includes(d))
+  if (!active.length) return null
+  const label = active.length === PICKUP_WEEK.length ? 'Mon–Sat' : active.join(' · ')
   return (
-    <span title={`Pickup days · ${PICKUP_WEEK.filter(d => set.has(d)).join(', ')}`}
-      style={{ display: 'inline-flex', alignItems: 'center', flexShrink: 0,
-        borderRadius: 5, overflow: 'hidden', border: `1px solid ${t.border2}` }}>
-      {PICKUP_WEEK.map((d, i) => {
-        const on = set.has(d)
-        return (
-          <span key={d} style={{
-            fontSize: 9.5, fontWeight: on ? 800 : 600,
-            width: 15, textAlign: 'center', padding: '2px 0', lineHeight: 1.4,
-            color: on ? '#1a0a00' : t.text4,
-            background: on ? t.goldSolid || t.gold : 'transparent',
-            opacity: on ? 1 : 0.45,
-            borderLeft: i === 0 ? 'none' : `1px solid ${t.border2}`,
-          }}>{d[0]}</span>
-        )
-      })}
-    </span>
+    <span title={`Pickup days · ${active.join(', ')}`}
+      style={{
+        display: 'inline-flex', alignItems: 'center', flexShrink: 0,
+        fontSize: 10, fontWeight: 800, letterSpacing: '.02em', whiteSpace: 'nowrap',
+        color: t.gold, background: `${t.gold}14`,
+        border: `1px solid ${t.gold}3a`, borderRadius: 5, padding: '2px 8px',
+      }}>{label}</span>
   )
 }
 
