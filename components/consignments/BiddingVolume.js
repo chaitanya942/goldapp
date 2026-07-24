@@ -3196,15 +3196,22 @@ function PickupDaysChip({ t, days }) {
   // lists its days, so a Tue/Thu/Sat branch pops as exactly that.
   const active = PICKUP_WEEK.filter(d => days.includes(d))
   if (!active.length) return null
-  const label = active.length === PICKUP_WEEK.length ? 'Mon–Sat' : active.join(' · ')
+  const full = active.length === PICKUP_WEEK.length
   return (
     <span title={`Pickup days · ${active.join(', ')}`}
       style={{
-        display: 'inline-flex', alignItems: 'center', flexShrink: 0,
-        fontSize: 10, fontWeight: 800, letterSpacing: '.02em', whiteSpace: 'nowrap',
-        color: t.gold, background: `${t.gold}14`,
-        border: `1px solid ${t.gold}3a`, borderRadius: 5, padding: '2px 8px',
-      }}>{label}</span>
+        display: 'inline-flex', alignItems: 'center', gap: 5, flexShrink: 0,
+        fontSize: 12, fontWeight: 800, letterSpacing: '.01em', whiteSpace: 'nowrap',
+        color: t.gold, background: `${t.gold}22`,
+        border: `1px solid ${t.gold}5c`, borderRadius: 6, padding: '3px 11px', lineHeight: 1.25,
+      }}>
+      {full ? 'Mon–Sat' : active.map((d, i) => (
+        <React.Fragment key={d}>
+          {i > 0 && <span style={{ color: `${t.gold}7a`, fontWeight: 700 }}>·</span>}
+          <span>{d}</span>
+        </React.Fragment>
+      ))}
+    </span>
   )
 }
 
