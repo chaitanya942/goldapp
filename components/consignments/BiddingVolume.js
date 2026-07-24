@@ -3200,16 +3200,16 @@ function PickupDaysChip({ t, days }) {
   return (
     <span title={`Pickup days · ${active.join(', ')}`}
       style={{
-        display: 'inline-flex', alignItems: 'center', gap: 5, flexShrink: 0,
+        display: 'inline-flex', alignItems: 'center', flexShrink: 0,
         fontSize: 12, fontWeight: 800, letterSpacing: '.01em', whiteSpace: 'nowrap',
         color: t.gold, background: `${t.gold}22`,
         border: `1px solid ${t.gold}5c`, borderRadius: 6, padding: '3px 11px', lineHeight: 1.25,
       }}>
       {full ? 'Mon–Sat' : active.map((d, i) => (
-        <React.Fragment key={d}>
-          {i > 0 && <span style={{ color: `${t.gold}7a`, fontWeight: 700 }}>·</span>}
-          <span>{d}</span>
-        </React.Fragment>
+        <span key={d} style={{ display: 'inline-flex', alignItems: 'center' }}>
+          {i > 0 && <span style={{ margin: '0 5px', color: `${t.gold}7a`, fontWeight: 700 }}>·</span>}
+          {d}
+        </span>
       ))}
     </span>
   )
