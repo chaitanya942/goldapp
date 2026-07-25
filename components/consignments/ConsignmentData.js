@@ -13,7 +13,7 @@ import { triggerSync } from '../../lib/triggerSync'
 import { isSelfCarryRegion, branchEmployeeTransporter } from '../../lib/selfCarryRegions'
 import { getCache, setCache } from '../../lib/moduleCache'
 import { CONSIGNMENT_THEMES as THEMES, REGION_COLORS, useMobile } from '../../lib/consignmentTheme'
-import { WorkflowStrip, canActOnStep } from './workflowParts'
+import { canActOnStep } from './workflowParts'
 import PreviewModal from './PreviewModal'
 import { istToday, istDaysAgo, istStartOfDayIso, istEndOfDayIso } from '../../lib/dateIst'
 import { docFilename } from '../../lib/docFilename'
@@ -1188,9 +1188,8 @@ export default function ConsignmentData() {
                     { key: 'total_bills',  label: 'Bills',           align: 'right', sortable: true  },
                     { key: 'total_net_wt', label: 'Net Wt',          align: 'right', sortable: true  },
                     { key: 'total_amount', label: 'Value',           align: 'right', sortable: true  },
-                    { key: 'document',     label: 'Document',        align: 'left',  sortable: false },
-                    { key: 'gst_doc',      label: 'EWB / E-Invoice', align: 'left',  sortable: false },
-                    { key: 'cancel',       label: 'Cancel',          align: 'left',  sortable: false },
+                    { key: 'documents',    label: 'Documents',       align: 'left',  sortable: false },
+                    { key: 'cancel',       label: 'Actions',         align: 'left',  sortable: false },
                   ]
                   return cols.map(col => {
                     const isActive = col.sortable && sortKey === col.key
@@ -1253,7 +1252,7 @@ export default function ConsignmentData() {
                   </tr>
                 ))
               ) : filteredCons.length === 0 ? (
-                <tr><td colSpan={11} style={{ padding: '64px', textAlign: 'center', color: t.text4, fontSize: '13px' }}>
+                <tr><td colSpan={10} style={{ padding: '64px', textAlign: 'center', color: t.text4, fontSize: '13px' }}>
                   {consignments.length === 0
                     ? 'No active consignments. Use Branch Stock → Move to create one.'
                     : 'No consignments match the filters'}
@@ -1398,161 +1397,108 @@ export default function ConsignmentData() {
                     <td className="cdata-num" style={{ padding: '11px 14px', fontSize: '12px', color: t.text2, textAlign: 'right' }}>{c.total_bills}</td>
                     <td className="cdata-num" style={{ padding: '11px 14px', fontSize: '12px', color: t.gold, textAlign: 'right', fontFamily: 'monospace', fontWeight: 600, whiteSpace: 'nowrap' }}>{fmtWt(c.total_net_wt)}</td>
                     <td className="cdata-num" style={{ padding: '11px 14px', fontSize: '12px', color: t.blue, textAlign: 'right', fontFamily: 'monospace', whiteSpace: 'nowrap' }}>₹{fmt(Math.round(c.total_amount))}</td>
-                    {/* Document column — View is the primary action (opens the
-                        doc inline; download is the small ⤓ secondary). Report
-                        first (always available); Voucher/Challan unlocks only
-                        after the Report has been opened. Viewing stamps the
-                        workflow step server-side, mirroring the gate. */}
+                    {/* Documents pipeline — Report → Voucher/Challan → EWB/E-Invoice
+                        as one connected control (replaces the old Document + EWB
+                        columns and the workflow strip). Each step: View primary,
+                        ⤓ download secondary; the last step generates the GST doc.
+                        Connectors turn green as each step completes. The unlock
+                        chain is unchanged and still enforced server-side. */}
                     {(() => {
-                      const docKind  = isType ? 'voucher' : 'challan'
-                      const docLabel = isType ? 'Voucher' : 'Challan'
-                      const docGate  = canActOnStep(c, docKind)
+                      const docKind    = isType ? 'voucher' : 'challan'
+                      const docLabel   = isType ? 'Voucher' : 'Challan'
                       const reportDone = !!c.consignee_report_generated_at
+                      const docGate    = canActOnStep(c, docKind)
                       const docDone    = !!(c.issue_voucher_generated_at || c.delivery_challan_generated_at)
-                      // Small download-only affordance next to each View button.
-                      const dl = (kind, enabled) => (
-                        <button onClick={() => enabled && downloadDoc(c, kind)} disabled={!!downloadingId || !enabled}
-                          title={enabled ? 'Download instead' : 'Locked'}
-                          style={{
-                            background: 'transparent', border: `1px solid ${t.border2}`,
-                            color: enabled ? t.text3 : t.text4, borderRadius: '5px',
-                            padding: '4px 7px', fontSize: '11px', lineHeight: 1,
-                            cursor: enabled ? 'pointer' : 'not-allowed', opacity: enabled ? 1 : 0.4,
-                          }}>
-                          {downloadingId === c.id + ':' + kind + ':dl' ? '…' : '⤓'}
+                      const isApproved = c.approval_status === 'approved'
+                      const dead       = c.approval_status === 'rejected' || c.status === 'cancelled' || !!c.cancellation_requested_at
+                      const err        = msg => setToast({ msg, type: 'error' })
+
+                      const TONE = {
+                        done:   { background: 'transparent', color: t.green, border: `1px solid ${t.green}55` },
+                        gold:   { background: t.gold,   color: (t.goldText || '#1a0a00'), border: 'none' },
+                        purple: { background: t.purple, color: '#fff', border: 'none' },
+                        locked: { background: t.border, color: t.text4, border: `1px solid ${t.border}` },
+                      }
+                      const step = ({ label, tone, onClick, disabled, busy, title }) => (
+                        <button onClick={onClick} disabled={disabled} title={title}
+                          style={{ ...tone, display: 'inline-flex', alignItems: 'center', gap: 5,
+                            borderRadius: '7px', padding: '5px 11px', fontSize: '10.5px', fontWeight: 700,
+                            cursor: disabled ? 'not-allowed' : 'pointer', opacity: busy ? 0.6 : 1,
+                            whiteSpace: 'nowrap', lineHeight: 1.1 }}>
+                          {busy ? '…' : label}
                         </button>
                       )
+                      const conn = (filled) => <span style={{ width: 14, height: 2, borderRadius: 2, background: filled ? t.green : t.border2, flexShrink: 0 }} />
+                      const dlMini = (onClick, busy, show) => show ? (
+                        <button onClick={onClick} disabled={!!downloadingId} title="Download instead"
+                          style={{ background: 'transparent', border: 'none', color: t.text3,
+                            cursor: downloadingId ? 'default' : 'pointer', fontSize: '13px', padding: '0 3px',
+                            opacity: busy ? 0.5 : 0.6, lineHeight: 1 }}>
+                          {busy ? '·' : '⤓'}
+                        </button>
+                      ) : null
+
+                      const dlEinv = async () => {
+                        setDownloadingId(c.id + ':einv:dl')
+                        await triggerDownload(`/api/e-invoice/pdf?id=${c.id}`,
+                          docFilename({ consignment: c, branch: sourceBranchInfo, docType: 'einvoice', ext: 'pdf' }), err)
+                        setDownloadingId(null)
+                      }
+                      const gst = (() => {
+                        if (showEwb) {
+                          if (c.eway_bill_no) return { kind: 'done', short: 'EWB', tip: `E-Way Bill ${c.eway_bill_no}`,
+                            view: () => triggerView(`/api/eway-bill/pdf?id=${c.id}`, err), dl: () => downloadEwbPdf(c), dlBusy: c.id + ':ewb' }
+                          if (dead) return { kind: 'dash' }
+                          return { kind: 'gen', short: 'EWB', label: 'Generate EWB', tone: TONE.gold, act: () => openEwbPreview(c) }
+                        }
+                        if (showEinvoice) {
+                          if (c.irn) return { kind: isApproved ? 'done' : 'lockedpdf', short: 'E-Inv', tip: `IRN ${c.irn}`,
+                            view: () => triggerView(`/api/e-invoice/pdf?id=${c.id}`, err), dl: dlEinv, dlBusy: c.id + ':einv:dl' }
+                          if (dead) return { kind: 'dash' }
+                          return { kind: 'gen', short: 'E-Inv', label: 'Generate E-Invoice', tone: TONE.purple, act: () => openEinvoicePreview(c) }
+                        }
+                        return { kind: 'na' }
+                      })()
+
                       return (
                         <td style={{ padding: '11px 14px' }}>
-                          <div style={{ display: 'flex', gap: '4px', flexWrap: 'nowrap', whiteSpace: 'nowrap', alignItems: 'center' }}>
-                            <button onClick={() => viewDoc(c, 'report')} disabled={!!downloadingId}
-                              title={reportDone ? 'View Consignee Report (re-open)' : 'Step 1 — View the Consignee Report to unlock the next document'}
-                              style={{
-                                background: reportDone ? 'transparent' : t.gold,
-                                color: reportDone ? t.green : (t.goldText || '#1a0a00'),
-                                border: reportDone ? `1px solid ${t.green}55` : 'none',
-                                borderRadius: '5px', padding: '4px 10px', fontSize: '10px',
-                                fontWeight: 600, cursor: 'pointer',
-                                opacity: downloadingId === c.id + ':report' ? 0.6 : 1,
-                              }}>
-                              {downloadingId === c.id + ':report' ? '…' : (reportDone ? '✓ Report' : 'View Report')}
-                            </button>
-                            {dl('report', true)}
-                            <span style={{ width: 1, height: 16, background: t.border2, margin: '0 3px' }} />
-                            <button onClick={() => docGate.allowed && viewDoc(c, docKind)} disabled={!!downloadingId || !docGate.allowed}
-                              title={docGate.allowed ? `View ${docLabel}` : `Locked — view the Consignee Report first`}
-                              style={{
-                                ...btnGold,
-                                padding: '4px 10px', fontSize: '10px',
-                                background: docGate.allowed ? (docDone ? 'transparent' : t.gold) : t.border,
-                                color: docGate.allowed ? (docDone ? t.green : (t.goldText || '#1a0a00')) : t.text4,
-                                border: docGate.allowed && docDone ? `1px solid ${t.green}55` : (docGate.allowed ? 'none' : `1px solid ${t.border}`),
-                                cursor: docGate.allowed ? 'pointer' : 'not-allowed',
-                                opacity: !docGate.allowed ? 0.5 : 1,
-                              }}>
-                              {downloadingId === c.id + ':' + docKind ? '…' : (docGate.allowed ? (docDone ? `✓ ${docLabel}` : `View ${docLabel}`) : `🔒 ${docLabel}`)}
-                            </button>
-                            {dl(docKind, docGate.allowed)}
+                          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
+                            {/* 1 · Report */}
+                            {step({ label: reportDone ? '✓ Report' : 'Report', tone: reportDone ? TONE.done : TONE.gold,
+                              onClick: () => viewDoc(c, 'report'), disabled: !!downloadingId,
+                              busy: downloadingId === c.id + ':report',
+                              title: reportDone ? 'View Consignee Report' : 'View the Consignee Report to unlock the next step' })}
+                            {dlMini(() => downloadDoc(c, 'report'), downloadingId === c.id + ':report:dl', true)}
+                            {conn(reportDone)}
+                            {/* 2 · Voucher / Challan */}
+                            {step({ label: docDone ? `✓ ${docLabel}` : (docGate.allowed ? docLabel : `🔒 ${docLabel}`),
+                              tone: docDone ? TONE.done : (docGate.allowed ? TONE.gold : TONE.locked),
+                              onClick: docGate.allowed ? () => viewDoc(c, docKind) : undefined,
+                              disabled: !!downloadingId || !docGate.allowed, busy: downloadingId === c.id + ':' + docKind,
+                              title: docGate.allowed ? `View ${docLabel}` : 'View the Consignee Report first' })}
+                            {dlMini(() => downloadDoc(c, docKind), downloadingId === c.id + ':' + docKind + ':dl', docGate.allowed)}
+                            {conn(docDone)}
+                            {/* 3 · EWB / E-Invoice */}
+                            {gst.kind === 'na' ? (
+                              <span title="No GST document required for this movement" style={{ fontSize: '10px', color: t.text4, padding: '0 6px' }}>n/a</span>
+                            ) : gst.kind === 'dash' ? (
+                              <span title="Unavailable — consignment is rejected or cancelled" style={{ fontSize: '10px', color: t.text4, fontStyle: 'italic', padding: '0 6px' }}>—</span>
+                            ) : gst.kind === 'gen' ? (
+                              step({ label: docDone ? gst.label : `🔒 ${gst.short}`, tone: docDone ? gst.tone : TONE.locked,
+                                onClick: docDone ? gst.act : undefined, disabled: !!downloadingId || !docDone,
+                                title: docDone ? 'Preview & generate on the portal' : 'Finish the Voucher / Challan first' })
+                            ) : gst.kind === 'lockedpdf' ? (
+                              step({ label: `✓ ${gst.short}`, tone: TONE.done, disabled: true, title: 'PDF finalising — refresh in a moment' })
+                            ) : (
+                              <>
+                                {step({ label: `✓ ${gst.short}`, tone: TONE.done, onClick: gst.view, disabled: !!downloadingId, title: gst.tip })}
+                                {dlMini(gst.dl, downloadingId === gst.dlBusy, true)}
+                              </>
+                            )}
                           </div>
                         </td>
                       )
                     })()}
-                    {/* Merged GST doc cell. EWB and E-Invoice are mutually
-                        exclusive per consignment (intrastate KA → EWB, interstate
-                        Hub→HO → E-Invoice, INTERNAL → EWB). Render whichever
-                        applies as a single labelled pill + PDF. Cancel lives in
-                        the dedicated Cancel column — no inline cancel here. */}
-                    <td style={{ padding: '11px 14px', whiteSpace: 'nowrap' }}>
-                      {(() => {
-                        const isApproved = c.approval_status === 'approved'
-                        if (showEwb) {
-                          if (c.eway_bill_no) {
-                            // EWB auto-approves on generation, so the signed PDF
-                            // is available immediately — no accounts gate.
-                            return (
-                              <div style={{ display: 'inline-flex', gap: '6px', alignItems: 'center' }} title={`E-Way Bill ${c.eway_bill_no}${c.ewb_valid_until ? ` · valid till ${new Date(c.ewb_valid_until).toLocaleString()}` : ''}`}>
-                                <button onClick={() => downloadEwbPdf(c)} disabled={!!downloadingId}
-                                  title="Download signed E-Way Bill PDF"
-                                  style={{ background: t.blue, color: '#fff', border: 'none', borderRadius: '5px', padding: '3px 10px', fontSize: '10px', fontWeight: 600, cursor: 'pointer', opacity: downloadingId === c.id + ':ewb' ? 0.6 : 1 }}>
-                                  {downloadingId === c.id + ':ewb' ? '…' : 'PDF'}
-                                </button>
-                                <span style={{ fontSize: '10px', color: t.green, background: `${t.green}22`, border: `1px solid ${t.green}55`, borderRadius: '4px', padding: '1px 8px', fontWeight: 700, letterSpacing: '.06em' }}>EWB</span>
-                              </div>
-                            )
-                          }
-                          // Not yet generated. EWB is ops self-service — show
-                          // the Preview/Generate action unless the consignment
-                          // is dead (rejected / cancelled / cancel requested).
-                          const blocked = c.approval_status === 'rejected'
-                            || c.status === 'cancelled'
-                            || !!c.cancellation_requested_at
-                          if (blocked) {
-                            return (
-                              <span title="EWB unavailable — consignment is rejected or cancelled."
-                                style={{ fontSize: '10px', color: t.text4, fontStyle: 'italic' }}>
-                                —
-                              </span>
-                            )
-                          }
-                          return (
-                            <button onClick={() => openEwbPreview(c)} disabled={!!downloadingId}
-                              title="Preview the E-Way Bill payload, then generate it on NIC. Generating dispatches the consignment."
-                              style={{ ...btnGold, padding: '4px 12px', fontSize: '10px', display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-                              Preview &amp; Generate EWB
-                            </button>
-                          )
-                        }
-                        if (showEinvoice) {
-                          if (c.irn) {
-                            return (
-                              <div style={{ display: 'inline-flex', gap: '6px', alignItems: 'center' }} title={`IRN: ${c.irn}`}>
-                                {isApproved ? (
-                                  <button onClick={async () => {
-                                    setDownloadingId(c.id + ':einv')
-                                    await triggerDownload(`/api/e-invoice/pdf?id=${c.id}`,
-                                      docFilename({ consignment: c, branch: sourceBranchInfo, docType: 'einvoice', ext: 'pdf' }),
-                                      msg => setToast({ msg, type: 'error' }))
-                                    setDownloadingId(null)
-                                  }} disabled={!!downloadingId}
-                                    title="Download signed E-Invoice PDF with QR code"
-                                    style={{ background: t.purple, color: '#fff', border: 'none', borderRadius: '5px', padding: '3px 10px', fontSize: '10px', fontWeight: 600, cursor: 'pointer', opacity: downloadingId === c.id + ':einv' ? 0.6 : 1 }}>
-                                    {downloadingId === c.id + ':einv' ? '…' : 'PDF'}
-                                  </button>
-                                ) : (
-                                  <span title="PDF locked — auto-approval is finalising. Refresh in a moment." style={{ fontSize: '10px', color: t.text4, fontStyle: 'italic' }}>locked</span>
-                                )}
-                                <span style={{ fontSize: '10px', color: t.purple, background: `${t.purple}22`, border: `1px solid ${t.purple}55`, borderRadius: '4px', padding: '1px 8px', fontWeight: 700, letterSpacing: '.06em' }}>E-Invoice</span>
-                              </div>
-                            )
-                          }
-                          // E-Invoice is ops self-service now (same pattern as EWB)
-                          // — show the Preview/Generate action unless the row is
-                          // already dead (rejected / cancelled / cancel requested).
-                          const blocked = c.approval_status === 'rejected'
-                            || c.status === 'cancelled'
-                            || !!c.cancellation_requested_at
-                          if (blocked) {
-                            return (
-                              <span title="E-Invoice unavailable — consignment is rejected or cancelled."
-                                style={{ fontSize: '10px', color: t.text4, fontStyle: 'italic' }}>
-                                —
-                              </span>
-                            )
-                          }
-                          return (
-                            <button onClick={() => openEinvoicePreview(c)} disabled={!!downloadingId}
-                              title="Preview the E-Invoice payload, then generate it on IRP. Generating dispatches the consignment."
-                              style={{ background: t.purple, color: '#fff', border: 'none', borderRadius: '6px', padding: '4px 12px', fontSize: '10px', fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-                              Preview &amp; Generate E-Invoice
-                            </button>
-                          )
-                        }
-                        // Neither applies (e.g. INTERNAL Branch→Hub uses Issue Voucher only)
-                        return (
-                          <span title="No GST document required for this movement." style={{ fontSize: '10px', color: t.text4 }}>n/a</span>
-                        )
-                      })()}
-                    </td>
                     <td style={{ padding: '11px 14px', whiteSpace: 'nowrap' }}>
                      <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
                       {/* Email to Branch — sits before Cancel. Enabled only once
@@ -1668,13 +1614,7 @@ export default function ConsignmentData() {
                         </div>
                       </td>
                     </tr>
-                  ) : c.approval_status !== 'approved' && (
-                    <tr style={{ background: isNew ? `${t.green}06` : 'transparent' }}>
-                      <td colSpan={10} style={{ padding: '4px 14px 12px', borderBottom: `1px solid ${t.border}15` }}>
-                        <WorkflowStrip t={t} c={c} isType={isType} />
-                      </td>
-                    </tr>
-                  )}
+                  ) : null}
                   </React.Fragment>
                 )
               })}
@@ -2538,8 +2478,13 @@ function EmailDocsModal({ t, c, branchEmail, onClose, onSent, onError }) {
             )}
             {info?.branch_email && <div style={{ height: '10px' }} />}
 
-            <label style={{ fontSize: '10px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 700, display: 'block', marginBottom: '5px' }}>Cc <span style={{ textTransform: 'none', fontWeight: 400 }}>(optional)</span></label>
-            <input value={cc} onChange={e => setCc(e.target.value)} placeholder="—" style={{ ...inp, borderColor: cc && !ccValid ? t.red : t.border2, marginBottom: '18px' }} />
+            <label style={{ fontSize: '10px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 700, display: 'block', marginBottom: '5px' }}>Cc <span style={{ textTransform: 'none', fontWeight: 400 }}>(optional — added to the standing Cc)</span></label>
+            <input value={cc} onChange={e => setCc(e.target.value)} placeholder="—" style={{ ...inp, borderColor: cc && !ccValid ? t.red : t.border2, marginBottom: (info?.standing_cc || []).length ? '6px' : '18px' }} />
+            {(info?.standing_cc || []).length > 0 && (
+              <div style={{ fontSize: '10.5px', color: t.text4, marginBottom: '18px' }}>
+                Always Cc&apos;d: <span style={{ color: t.text3, fontFamily: 'monospace' }}>{info.standing_cc.join(', ')}</span>
+              </div>
+            )}
 
             <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
               <button onClick={() => { if (!sending) onClose?.() }} disabled={sending}

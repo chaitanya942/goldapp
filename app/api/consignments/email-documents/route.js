@@ -65,8 +65,21 @@ async function loadContext(id) {
   const { data: c, error } = await admin.from('consignments').select(CONS_COLS).eq('id', id).maybeSingle()
   if (error || !c) return { error: 'Consignment not found', status: 404 }
   const { data: branch } = await admin
-    .from('branches').select('name, branch_code, contact_email').eq('name', c.branch_name).maybeSingle()
+    .from('branches').select('name, branch_code, contact_email, region').eq('name', c.branch_name).maybeSingle()
   return { c, branch: branch || { name: c.branch_name } }
+}
+
+// Standing Cc list: ops lead always, plus the GM-ops inbox for Kerala. Merged
+// with any Cc the operator typed, de-duplicated, and never duplicating the To.
+const ALWAYS_CC = ['nagendra@whitegold.money']
+const KERALA_CC = 'gmops@whitegold.money'
+function buildCc(branch, extraCc, to) {
+  const set = new Set(ALWAYS_CC)
+  if ((branch?.region || '') === 'Kerala') set.add(KERALA_CC)
+  for (const e of String(extraCc || '').split(',').map(s => s.trim()).filter(Boolean)) set.add(e)
+  set.delete((to || '').trim().toLowerCase())
+  // Also drop any cc that case-insensitively equals the To.
+  return [...set].filter(e => e.toLowerCase() !== (to || '').trim().toLowerCase())
 }
 
 function plannedAttachments(c, branch, a) {
@@ -98,6 +111,7 @@ export async function GET(req) {
     attachments:   plannedAttachments(c, branch, a),
     tmp_prf_no:    c.tmp_prf_no,
     dest:          a.isInternal ? (c.dest_branch || 'Hub') : 'Head Office',
+    standing_cc:   buildCc(branch, '', branch.contact_email || ''),   // auto-Cc'd (shown in the modal)
   })
 }
 
@@ -127,8 +141,12 @@ export async function POST(req) {
   const to = (body.to || branch.contact_email || '').trim()
   if (!to) return Response.json({ error: 'No recipient — this branch has no email on file. Enter one to send.', code: 'NO_RECIPIENT' }, { status: 400 })
   if (!EMAIL_RE.test(to)) return Response.json({ error: `"${to}" is not a valid email address.` }, { status: 400 })
-  const cc = (body.cc || '').trim()
-  if (cc && !EMAIL_RE.test(cc)) return Response.json({ error: `Cc "${cc}" is not a valid email address.` }, { status: 400 })
+  // Operator-typed Cc (may be comma-separated), validated per-address, then
+  // merged with the standing Cc (ops lead always + GM-ops for Kerala).
+  for (const e of String(body.cc || '').split(',').map(s => s.trim()).filter(Boolean)) {
+    if (!EMAIL_RE.test(e)) return Response.json({ error: `Cc "${e}" is not a valid email address.` }, { status: 400 })
+  }
+  const ccList = buildCc(branch, body.cc, to)
 
   // Regenerate the three docs via the existing routes (auth forwarded).
   // Prefer the canonical public URL (Railway's proxy can make req.url's origin
@@ -195,8 +213,8 @@ export async function POST(req) {
     </div>`
 
   try {
-    const info = await sendMail({ to, cc: cc || undefined, subject, html, attachments, fromName: senderName, replyTo: senderEmail })
-    return Response.json({ ok: true, sent_to: to, cc: cc || null, from_name: senderName, reply_to: senderEmail || null, attachments: attachments.map(x => x.filename), messageId: info.messageId })
+    const info = await sendMail({ to, cc: ccList.length ? ccList : undefined, subject, html, attachments, fromName: senderName, replyTo: senderEmail })
+    return Response.json({ ok: true, sent_to: to, cc: ccList, from_name: senderName, reply_to: senderEmail || null, attachments: attachments.map(x => x.filename), messageId: info.messageId })
   } catch (e) {
     return Response.json({ error: `Send failed: ${e.message}` }, { status: 502 })
   }
