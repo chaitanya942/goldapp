@@ -1188,7 +1188,7 @@ export default function ConsignmentData() {
                     { key: 'total_bills',  label: 'Bills',           align: 'right', sortable: true  },
                     { key: 'total_net_wt', label: 'Net Wt',          align: 'right', sortable: true  },
                     { key: 'total_amount', label: 'Value',           align: 'right', sortable: true  },
-                    { key: 'documents',    label: 'Documents',       align: 'left',  sortable: false },
+                    { key: 'documents',    label: 'Documents',       align: 'center', sortable: false },
                     { key: 'cancel',       label: 'Actions',         align: 'left',  sortable: false },
                   ]
                   return cols.map(col => {
@@ -1414,10 +1414,11 @@ export default function ConsignmentData() {
                       const err        = msg => setToast({ msg, type: 'error' })
 
                       const TONE = {
-                        done:   { background: 'transparent', color: t.green, border: `1px solid ${t.green}55` },
-                        gold:   { background: t.gold,   color: (t.goldText || '#1a0a00'), border: 'none' },
-                        purple: { background: t.purple, color: '#fff', border: 'none' },
-                        locked: { background: t.border, color: t.text4, border: `1px solid ${t.border}` },
+                        done:       { background: 'transparent', color: t.green,  border: `1px solid ${t.green}55` },
+                        donePurple: { background: 'transparent', color: t.purple, border: `1px solid ${t.purple}55` },
+                        gold:       { background: t.gold,   color: (t.goldText || '#1a0a00'), border: 'none' },
+                        purple:     { background: t.purple, color: '#fff', border: 'none' },
+                        locked:     { background: t.border, color: t.text4, border: `1px solid ${t.border}` },
                       }
                       const step = ({ label, tone, onClick, disabled, busy, title }) => (
                         <button onClick={onClick} disabled={disabled} title={title}
@@ -1465,7 +1466,7 @@ export default function ConsignmentData() {
                       })()
 
                       return (
-                        <td style={{ padding: '11px 14px' }}>
+                        <td style={{ padding: '11px 14px', textAlign: 'center' }}>
                           <div style={{ display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
                             {/* 1 · Report */}
                             {step({ label: reportDone ? '✓ Report' : 'Report', tone: reportDone ? TONE.done : TONE.gold,
@@ -1492,10 +1493,10 @@ export default function ConsignmentData() {
                                 onClick: docDone ? gst.act : undefined, disabled: !!downloadingId || !docDone,
                                 title: docDone ? 'Preview & generate on the portal' : 'Finish the Voucher / Challan first' })
                             ) : gst.kind === 'lockedpdf' ? (
-                              step({ label: `✓ ${gst.short}`, tone: TONE.done, disabled: true, title: 'PDF finalising — refresh in a moment' })
+                              step({ label: `✓ ${gst.short}`, tone: TONE.donePurple, disabled: true, title: 'PDF finalising — refresh in a moment' })
                             ) : (
                               <>
-                                {step({ label: `✓ ${gst.short}`, tone: TONE.done, onClick: gst.view, disabled: !!downloadingId, title: gst.tip })}
+                                {step({ label: `✓ ${gst.short}`, tone: gst.short === 'E-Inv' ? TONE.donePurple : TONE.done, onClick: gst.view, disabled: !!downloadingId, title: gst.tip })}
                                 {dlMini(gst.dl, downloadingId === gst.dlBusy, true)}
                               </>
                             )}
