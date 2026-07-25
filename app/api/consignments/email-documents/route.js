@@ -165,11 +165,20 @@ export async function POST(req) {
 
   const dest = a.isInternal ? (c.dest_branch || 'Hub') : 'Head Office'
   const wt   = c.total_net_wt != null ? `${Number(c.total_net_wt).toFixed(3)} g` : '—'
+  // Dispatch (consignment) date in IST, e.g. "25 Jul 2026".
+  const dateStr = c.created_at
+    ? new Date(c.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' })
+    : ''
+  // Sender identity — the ops person who clicked Send. The From address stays
+  // GMAIL_USER (Gmail limitation); their name shows and replies route to them.
+  const senderName  = (auth.profile?.full_name || '').trim() || (auth.profile?.email || '').split('@')[0] || 'White Gold'
+  const senderEmail = (auth.profile?.email || '').trim() || undefined
+
   const subject = `White Gold · ${c.branch_name} → ${dest} · ${c.tmp_prf_no} documents`
   const html = `
     <div style="font-family:Arial,sans-serif;font-size:14px;color:#222;line-height:1.55">
       <p>Hello ${c.branch_name} team,</p>
-      <p>Please find attached the documents for this consignment:</p>
+      <p>Please find attached the documents for today's consignment dated: <b>${dateStr || '—'}</b></p>
       <table style="border-collapse:collapse;font-size:13px;margin:8px 0">
         <tr><td style="padding:2px 14px 2px 0;color:#666">Reference</td><td><b>${c.tmp_prf_no}</b></td></tr>
         <tr><td style="padding:2px 14px 2px 0;color:#666">Route</td><td>${c.branch_name} → ${dest}</td></tr>
@@ -182,12 +191,12 @@ export async function POST(req) {
         <li>${a.docLabel}</li>
         <li>${a.gstLabel}</li>
       </ol>
-      <p style="color:#888;font-size:12px">Sent from the White Gold consignment system.</p>
+      <p style="color:#888;font-size:12px">Sent by ${senderName} · White Gold consignment system.</p>
     </div>`
 
   try {
-    const info = await sendMail({ to, cc: cc || undefined, subject, html, attachments })
-    return Response.json({ ok: true, sent_to: to, cc: cc || null, attachments: attachments.map(x => x.filename), messageId: info.messageId })
+    const info = await sendMail({ to, cc: cc || undefined, subject, html, attachments, fromName: senderName, replyTo: senderEmail })
+    return Response.json({ ok: true, sent_to: to, cc: cc || null, from_name: senderName, reply_to: senderEmail || null, attachments: attachments.map(x => x.filename), messageId: info.messageId })
   } catch (e) {
     return Response.json({ error: `Send failed: ${e.message}` }, { status: 502 })
   }
