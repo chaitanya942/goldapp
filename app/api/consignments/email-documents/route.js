@@ -33,7 +33,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
 const CONS_COLS =
   'id, tmp_prf_no, challan_no, branch_name, dest_branch, movement_type, created_at, ' +
-  'eway_bill_no, einvoice_doc_no, irn, total_bills, total_net_wt, status, approval_status, ' +
+  'eway_bill_no, einvoice_doc_no, irn, total_bills, total_net_wt, total_gross_wt, status, approval_status, ' +
   'consignee_report_generated_at, issue_voucher_generated_at, delivery_challan_generated_at'
 
 // Work out which documents this consignment has, and whether all three are
@@ -186,7 +186,7 @@ export async function POST(req) {
   }
 
   const dest = a.isInternal ? (c.dest_branch || 'Hub') : 'Head Office'
-  const wt   = c.total_net_wt != null ? `${Number(c.total_net_wt).toFixed(3)} g` : '—'
+  const wt   = c.total_gross_wt != null ? `${Number(c.total_gross_wt).toFixed(3)} g` : '—'
   // Dispatch (consignment) date in IST, e.g. "25 Jul 2026".
   const dateStr = c.created_at
     ? new Date(c.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' })
@@ -205,7 +205,7 @@ export async function POST(req) {
         <tr><td style="padding:2px 14px 2px 0;color:#666">Reference</td><td><b>${c.tmp_prf_no}</b></td></tr>
         <tr><td style="padding:2px 14px 2px 0;color:#666">Route</td><td>${c.branch_name} → ${dest}</td></tr>
         <tr><td style="padding:2px 14px 2px 0;color:#666">Bills</td><td>${c.total_bills ?? '—'}</td></tr>
-        <tr><td style="padding:2px 14px 2px 0;color:#666">Net weight</td><td>${wt}</td></tr>
+        <tr><td style="padding:2px 14px 2px 0;color:#666">Gross weight</td><td>${wt}</td></tr>
       </table>
       <p style="margin:8px 0">Attachments:</p>
       <ol style="margin:4px 0 12px 18px;padding:0">

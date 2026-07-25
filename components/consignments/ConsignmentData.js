@@ -1429,12 +1429,16 @@ export default function ConsignmentData() {
                         </button>
                       )
                       const conn = (filled) => <span style={{ width: 14, height: 2, borderRadius: 2, background: filled ? t.green : t.border2, flexShrink: 0 }} />
+                      // Download is a plainly-labelled button (not a bare icon) so
+                      // the field team reads it as clickable at a glance.
                       const dlMini = (onClick, busy, show) => show ? (
-                        <button onClick={onClick} disabled={!!downloadingId} title="Download instead"
-                          style={{ background: 'transparent', border: 'none', color: t.text3,
-                            cursor: downloadingId ? 'default' : 'pointer', fontSize: '13px', padding: '0 3px',
-                            opacity: busy ? 0.5 : 0.6, lineHeight: 1 }}>
-                          {busy ? '·' : '⤓'}
+                        <button onClick={onClick} disabled={!!downloadingId} title="Download / save a copy"
+                          style={{ display: 'inline-flex', alignItems: 'center', gap: 3,
+                            background: t.card2 || '#fff', border: `1px solid ${t.border2 || t.border}`, color: t.text2,
+                            cursor: downloadingId ? 'default' : 'pointer', fontSize: '9.5px', fontWeight: 700,
+                            borderRadius: '5px', padding: '4px 8px', lineHeight: 1, opacity: busy ? 0.5 : 1,
+                            whiteSpace: 'nowrap' }}>
+                          {busy ? '·' : '↓ Save'}
                         </button>
                       ) : null
 
