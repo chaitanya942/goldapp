@@ -34,6 +34,27 @@ async function triggerDownload(url, filename, onError) {
   URL.revokeObjectURL(a.href)
 }
 
+// View a generated doc INLINE in a new tab (the primary action now — download
+// is secondary). authedFetch carries the Bearer token to the gated route, then
+// a blob URL lets the browser render the JPEG/PDF instead of downloading it.
+// Hitting the route still stamps the workflow step, so viewing unlocks the next
+// document exactly as downloading used to. The tab is opened synchronously
+// before the await so it isn't treated as a blocked popup.
+async function triggerView(url, onError) {
+  const tab = typeof window !== 'undefined' ? window.open('', '_blank') : null
+  const res = await authedFetch(url)
+  if (!res.ok) {
+    let msg = `Couldn't open: ${res.status}`
+    try { const j = await res.json(); if (j.error) msg = j.error } catch {}
+    if (tab) tab.close()
+    onError?.(msg); return false
+  }
+  const obj = URL.createObjectURL(await res.blob())
+  if (tab) tab.location = obj; else window.open(obj, '_blank')
+  setTimeout(() => URL.revokeObjectURL(obj), 60000)
+  return true
+}
+
 const fmt     = (n) => n != null ? Number(n).toLocaleString('en-IN') : '—'
 const fmtWt   = (n) => n != null ? `${Number(n).toFixed(3)}g` : '—'
 const fmtDate = (d) => d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: '2-digit' }) : '—'
@@ -192,6 +213,7 @@ export default function ConsignmentData() {
   // Cancellation request modal state. cancelTarget holds the consignment row
   // whose Cancel button was clicked; null means modal is closed.
   const [cancelTarget,    setCancelTarget]    = useState(null)
+  const [emailTarget,     setEmailTarget]     = useState(null)   // consignment whose docs are being emailed
   const [cancelReason,    setCancelReason]    = useState('')
   const [cancelSubmitting,setCancelSubmitting]= useState(false)
 
@@ -657,19 +679,30 @@ export default function ConsignmentData() {
   // (the user already confirmed twice during the create flow). Removed the
   // explicit handler; the workflow strip is purely a status indicator now.
 
+  const docUrl = (c, kind) => kind === 'report'  ? `/api/generate-consignee-report?id=${c.id}`
+                            : kind === 'voucher' ? `/api/generate-issue-voucher-pdf?id=${c.id}`
+                            :                       `/api/generate-challan-pdf?id=${c.id}`
+
   async function downloadDoc(c, kind) {
-    setDownloadingId(c.id + ':' + kind)
+    setDownloadingId(c.id + ':' + kind + ':dl')
     const branch   = branches.find(b => b.name === c.branch_name)
-    const url      = kind === 'report'  ? `/api/generate-consignee-report?id=${c.id}`
-                   : kind === 'voucher' ? `/api/generate-issue-voucher-pdf?id=${c.id}`
-                   :                       `/api/generate-challan-pdf?id=${c.id}`
     const filename = docFilename({
       consignment: c, branch,
       docType: kind,                          // 'report' | 'voucher' | 'challan'
       ext:     kind === 'report' ? 'jpg' : 'pdf',
     })
-    await triggerDownload(url, filename, msg => setToast({ msg, type: 'error' }))
+    await triggerDownload(docUrl(c, kind), filename, msg => setToast({ msg, type: 'error' }))
     setDownloadingId(null)
+  }
+
+  // Primary action: open the doc inline. Also stamps the workflow step, so
+  // viewing the Report unlocks the Voucher/Challan, and viewing that unlocks
+  // EWB / E-Invoice — the same chain download used to drive.
+  async function viewDoc(c, kind) {
+    setDownloadingId(c.id + ':' + kind)
+    const ok = await triggerView(docUrl(c, kind), msg => setToast({ msg, type: 'error' }))
+    setDownloadingId(null)
+    if (ok) fetchAll(true)          // refresh so the unlock state updates immediately
   }
 
 
@@ -1365,42 +1398,61 @@ export default function ConsignmentData() {
                     <td className="cdata-num" style={{ padding: '11px 14px', fontSize: '12px', color: t.text2, textAlign: 'right' }}>{c.total_bills}</td>
                     <td className="cdata-num" style={{ padding: '11px 14px', fontSize: '12px', color: t.gold, textAlign: 'right', fontFamily: 'monospace', fontWeight: 600, whiteSpace: 'nowrap' }}>{fmtWt(c.total_net_wt)}</td>
                     <td className="cdata-num" style={{ padding: '11px 14px', fontSize: '12px', color: t.blue, textAlign: 'right', fontFamily: 'monospace', whiteSpace: 'nowrap' }}>₹{fmt(Math.round(c.total_amount))}</td>
-                    {/* Document column — Report comes first (always available),
-                        Voucher/Challan unlocks only after Report. The button
-                        disable + tooltip mirrors the backend workflow gate so
-                        ops sees the lock state instead of getting a 409 toast. */}
+                    {/* Document column — View is the primary action (opens the
+                        doc inline; download is the small ⤓ secondary). Report
+                        first (always available); Voucher/Challan unlocks only
+                        after the Report has been opened. Viewing stamps the
+                        workflow step server-side, mirroring the gate. */}
                     {(() => {
                       const docKind  = isType ? 'voucher' : 'challan'
                       const docLabel = isType ? 'Voucher' : 'Challan'
                       const docGate  = canActOnStep(c, docKind)
                       const reportDone = !!c.consignee_report_generated_at
+                      const docDone    = !!(c.issue_voucher_generated_at || c.delivery_challan_generated_at)
+                      // Small download-only affordance next to each View button.
+                      const dl = (kind, enabled) => (
+                        <button onClick={() => enabled && downloadDoc(c, kind)} disabled={!!downloadingId || !enabled}
+                          title={enabled ? 'Download instead' : 'Locked'}
+                          style={{
+                            background: 'transparent', border: `1px solid ${t.border2}`,
+                            color: enabled ? t.text3 : t.text4, borderRadius: '5px',
+                            padding: '4px 7px', fontSize: '11px', lineHeight: 1,
+                            cursor: enabled ? 'pointer' : 'not-allowed', opacity: enabled ? 1 : 0.4,
+                          }}>
+                          {downloadingId === c.id + ':' + kind + ':dl' ? '…' : '⤓'}
+                        </button>
+                      )
                       return (
                         <td style={{ padding: '11px 14px' }}>
-                          <div style={{ display: 'flex', gap: '4px', flexWrap: 'nowrap', whiteSpace: 'nowrap' }}>
-                            <button onClick={() => downloadDoc(c, 'report')} disabled={!!downloadingId}
-                              title={reportDone ? 'Re-download Consignee Report' : 'Step 1 — Consignee Report (item-wise summary)'}
+                          <div style={{ display: 'flex', gap: '4px', flexWrap: 'nowrap', whiteSpace: 'nowrap', alignItems: 'center' }}>
+                            <button onClick={() => viewDoc(c, 'report')} disabled={!!downloadingId}
+                              title={reportDone ? 'View Consignee Report (re-open)' : 'Step 1 — View the Consignee Report to unlock the next document'}
                               style={{
                                 background: reportDone ? 'transparent' : t.gold,
                                 color: reportDone ? t.green : (t.goldText || '#1a0a00'),
                                 border: reportDone ? `1px solid ${t.green}55` : 'none',
-                                borderRadius: '5px', padding: '4px 12px', fontSize: '10px',
+                                borderRadius: '5px', padding: '4px 10px', fontSize: '10px',
                                 fontWeight: 600, cursor: 'pointer',
                                 opacity: downloadingId === c.id + ':report' ? 0.6 : 1,
                               }}>
-                              {downloadingId === c.id + ':report' ? '…' : (reportDone ? '✓ Report' : 'Report')}
+                              {downloadingId === c.id + ':report' ? '…' : (reportDone ? '✓ Report' : 'View Report')}
                             </button>
-                            <button onClick={() => docGate.allowed && downloadDoc(c, docKind)} disabled={!!downloadingId || !docGate.allowed}
-                              title={docGate.allowed ? docLabel : `Locked — ${docGate.reason}`}
+                            {dl('report', true)}
+                            <span style={{ width: 1, height: 16, background: t.border2, margin: '0 3px' }} />
+                            <button onClick={() => docGate.allowed && viewDoc(c, docKind)} disabled={!!downloadingId || !docGate.allowed}
+                              title={docGate.allowed ? `View ${docLabel}` : `Locked — view the Consignee Report first`}
                               style={{
                                 ...btnGold,
-                                padding: '4px 12px', fontSize: '10px',
-                                background: docGate.allowed ? t.gold : t.border,
-                                color: docGate.allowed ? (t.goldText || '#1a0a00') : t.text4,
+                                padding: '4px 10px', fontSize: '10px',
+                                background: docGate.allowed ? (docDone ? 'transparent' : t.gold) : t.border,
+                                color: docGate.allowed ? (docDone ? t.green : (t.goldText || '#1a0a00')) : t.text4,
+                                border: docGate.allowed && docDone ? `1px solid ${t.green}55` : (docGate.allowed ? 'none' : `1px solid ${t.border}`),
                                 cursor: docGate.allowed ? 'pointer' : 'not-allowed',
                                 opacity: !docGate.allowed ? 0.5 : 1,
                               }}>
-                              {downloadingId === c.id + ':' + docKind ? '…' : (docGate.allowed ? docLabel : `🔒 ${docLabel}`)}
+                              {downloadingId === c.id + ':' + docKind ? '…' : (docGate.allowed ? (docDone ? `✓ ${docLabel}` : `View ${docLabel}`) : `🔒 ${docLabel}`)}
                             </button>
+                            {dl(docKind, docGate.allowed)}
                           </div>
                         </td>
                       )
@@ -1502,6 +1554,34 @@ export default function ConsignmentData() {
                       })()}
                     </td>
                     <td style={{ padding: '11px 14px', whiteSpace: 'nowrap' }}>
+                     <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                      {/* Email to Branch — sits before Cancel. Enabled only once
+                          all three docs exist (the GST doc is the last step and
+                          implies the others). Opens the confirm modal. */}
+                      {(() => {
+                        const gstReady = c.eway_bill_no ? true : (c.irn ? c.approval_status === 'approved' : false)
+                        const allReady = !!c.consignee_report_generated_at
+                          && !!(c.issue_voucher_generated_at || c.delivery_challan_generated_at)
+                          && gstReady
+                        const dead = c.status === 'cancelled' || c.approval_status === 'rejected' || !!c.cancellation_requested_at
+                        if (dead) return null
+                        return (
+                          <button onClick={() => allReady && setEmailTarget(c)} disabled={!allReady}
+                            title={allReady
+                              ? 'Email all 3 documents to the branch'
+                              : 'Available once the Consignee Report, Voucher/Challan and E-Way Bill / E-Invoice are all done'}
+                            style={{
+                              display: 'inline-flex', alignItems: 'center', gap: '5px',
+                              background: allReady ? t.green : 'transparent',
+                              border: allReady ? 'none' : `1px solid ${t.border}`,
+                              borderRadius: '6px', padding: '5px 11px', fontSize: '10px', fontWeight: 700,
+                              color: allReady ? '#fff' : t.text4,
+                              cursor: allReady ? 'pointer' : 'not-allowed', opacity: allReady ? 1 : 0.55,
+                            }}>
+                            {allReady ? '✉ Email' : '✉ Email'}
+                          </button>
+                        )
+                      })()}
                       {(() => {
                         // Cancellation already requested → show pill, no button.
                         if (c.cancellation_requested_at) {
@@ -1540,6 +1620,7 @@ export default function ConsignmentData() {
                           </button>
                         )
                       })()}
+                     </div>
                     </td>
                   </tr>
 
@@ -1782,6 +1863,18 @@ export default function ConsignmentData() {
           t={t}
           onClose={() => { if (!einvoiceModal.generating) setEinvoiceModal(null) }}
           onConfirm={confirmGenerateEinvoice}
+        />
+      )}
+
+      {/* Email documents modal — confirm recipient + send the 3 docs. */}
+      {emailTarget && (
+        <EmailDocsModal
+          t={t}
+          c={emailTarget}
+          branchEmail={branches.find(b => b.name === emailTarget.branch_name)?.contact_email || ''}
+          onClose={() => setEmailTarget(null)}
+          onSent={(to) => { setEmailTarget(null); setToast({ msg: `Documents sent to ${to}`, type: 'success' }) }}
+          onError={(msg) => setToast({ msg, type: 'error' })}
         />
       )}
 
@@ -2355,6 +2448,112 @@ function ActivityDrawer({ consignment, rows, loading, onClose, t }) {
             )
           })}
         </div>
+      </div>
+    </div>
+  ), document.body)
+}
+
+// ── Email documents modal ────────────────────────────────────────────────────
+// Confirms the recipient (prefilled from the branch mailbox, editable — this is
+// the "ops enters the mail id" path when the branch has none) and sends the 3
+// consignment documents as attachments. Fetches readiness + the exact filenames
+// from the endpoint on open so the operator sees precisely what will go out.
+function EmailDocsModal({ t, c, branchEmail, onClose, onSent, onError }) {
+  const [info,    setInfo]    = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [to,      setTo]      = useState(branchEmail || '')
+  const [cc,      setCc]      = useState('')
+  const [sending, setSending] = useState(false)
+
+  useEffect(() => {
+    let live = true
+    ;(async () => {
+      try {
+        const r = await authedFetch(`/api/consignments/email-documents?id=${c.id}`)
+        const j = await r.json()
+        if (!live) return
+        if (!r.ok) { onError?.(j.error || 'Could not load document info'); onClose?.(); return }
+        setInfo(j)
+        setTo(prev => prev || j.branch_email || '')
+      } catch (e) {
+        if (live) { onError?.('Network error loading document info'); onClose?.() }
+      } finally {
+        if (live) setLoading(false)
+      }
+    })()
+    return () => { live = false }
+  }, [c.id]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+  const toValid  = EMAIL_RE.test(to.trim())
+  const ccValid  = !cc.trim() || EMAIL_RE.test(cc.trim())
+  const canSend  = !loading && !sending && info?.ready && toValid && ccValid
+
+  const send = async () => {
+    if (!canSend) return
+    setSending(true)
+    try {
+      const r = await authedFetch('/api/consignments/email-documents', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: c.id, to: to.trim(), cc: cc.trim() || undefined }),
+      })
+      const j = await r.json()
+      if (!r.ok || j.error) { onError?.(j.error || `Send failed (${r.status})`); setSending(false); return }
+      onSent?.(j.sent_to || to.trim())
+    } catch (e) {
+      onError?.('Network error — the email may not have been sent.'); setSending(false)
+    }
+  }
+
+  if (typeof document === 'undefined') return null
+  const inp = { width: '100%', background: t.card2, border: `1px solid ${t.border2}`, borderRadius: '9px', padding: '10px 13px', fontSize: '13px', color: t.text1, outline: 'none', boxSizing: 'border-box', fontFamily: 'monospace' }
+  return createPortal((
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.78)', zIndex: 120, display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(6px)', padding: '20px' }}
+      onClick={() => { if (!sending) onClose?.() }}>
+      <div onClick={e => e.stopPropagation()}
+        style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: '14px', padding: '22px 24px', width: '100%', maxWidth: '460px', boxShadow: '0 20px 60px rgba(0,0,0,.5)' }}>
+        <div style={{ fontSize: '15px', fontWeight: 800, color: t.text1, marginBottom: '2px' }}>Email documents to branch</div>
+        <div style={{ fontSize: '12px', color: t.text3, marginBottom: '16px' }}>
+          {c.tmp_prf_no} · {c.branch_name}{info?.dest ? ` → ${info.dest}` : ''}
+        </div>
+
+        {loading ? (
+          <div style={{ fontSize: '13px', color: t.text3, padding: '12px 0' }}>Loading…</div>
+        ) : (
+          <>
+            <div style={{ fontSize: '10px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 700, marginBottom: '6px' }}>Attachments</div>
+            <ol style={{ margin: '0 0 16px 0', padding: '0 0 0 18px', fontSize: '12px', color: t.text2, lineHeight: 1.7 }}>
+              {(info?.attachments || []).map((f, i) => <li key={i} style={{ fontFamily: 'monospace', wordBreak: 'break-all' }}>{f}</li>)}
+            </ol>
+            {!info?.ready && (
+              <div style={{ fontSize: '11.5px', color: t.orange, background: `${t.orange}12`, border: `1px solid ${t.orange}40`, borderRadius: '8px', padding: '9px 11px', marginBottom: '14px' }}>
+                Not ready to send — missing: {(info?.missing || []).join(', ')}.
+              </div>
+            )}
+
+            <label style={{ fontSize: '10px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 700, display: 'block', marginBottom: '5px' }}>To</label>
+            <input value={to} onChange={e => setTo(e.target.value)} placeholder="branch@whitegold.money" style={{ ...inp, borderColor: to && !toValid ? t.red : t.border2, marginBottom: '4px' }} />
+            {!info?.branch_email && (
+              <div style={{ fontSize: '10.5px', color: t.text4, marginBottom: '10px' }}>This branch has no email on file — enter one to send.</div>
+            )}
+            {info?.branch_email && <div style={{ height: '10px' }} />}
+
+            <label style={{ fontSize: '10px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 700, display: 'block', marginBottom: '5px' }}>Cc <span style={{ textTransform: 'none', fontWeight: 400 }}>(optional)</span></label>
+            <input value={cc} onChange={e => setCc(e.target.value)} placeholder="—" style={{ ...inp, borderColor: cc && !ccValid ? t.red : t.border2, marginBottom: '18px' }} />
+
+            <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+              <button onClick={() => { if (!sending) onClose?.() }} disabled={sending}
+                style={{ background: 'transparent', border: `1px solid ${t.border2}`, borderRadius: '8px', padding: '9px 18px', fontSize: '13px', fontWeight: 700, color: t.text2, cursor: sending ? 'not-allowed' : 'pointer' }}>
+                Cancel
+              </button>
+              <button onClick={send} disabled={!canSend}
+                title={!info?.ready ? 'All 3 documents must be ready' : !toValid ? 'Enter a valid recipient email' : ''}
+                style={{ background: canSend ? t.green : t.border2, color: canSend ? '#fff' : t.text4, border: 'none', borderRadius: '8px', padding: '9px 22px', fontSize: '13px', fontWeight: 800, cursor: canSend ? 'pointer' : 'not-allowed' }}>
+                {sending ? 'Sending…' : '✉ Send'}
+              </button>
+            </div>
+          </>
+        )}
       </div>
     </div>
   ), document.body)

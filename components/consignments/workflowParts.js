@@ -52,13 +52,13 @@ export function WorkflowStrip({ t, c, isType }) {
   const activeIdx = !reported ? 0 : !docMade ? 1 : !ewbDone ? 2 : -1
 
   const steps = [
-    { key: 'report',  label: 'Consignee report',  done: reported,  ts: c.consignee_report_generated_at, hint: 'Download the report — operations does this first' },
+    { key: 'report',  label: 'Consignee report',  done: reported,  ts: c.consignee_report_generated_at, hint: 'Open the report — operations does this first' },
     {
       key:   'doc',
       label: isType ? 'Issue voucher' : 'Delivery challan',
       done:  docMade,
       ts:    c.issue_voucher_generated_at || c.delivery_challan_generated_at,
-      hint:  isType ? 'Download the voucher (unlocks after the report)' : 'Download the challan (unlocks after the report)',
+      hint:  isType ? 'Open the voucher (unlocks after the report)' : 'Open the challan (unlocks after the report)',
     },
     { key: 'ewb', label: 'EWB / E-Invoice', done: ewbDone, ts: c.ewb_generated_at || c.einvoice_generated_at, hint: 'Accounts: Preview → Confirm → Generate on NIC / IRP' },
   ]
@@ -109,12 +109,12 @@ export function canActOnStep(c, step) {
     case 'challan':
       return c.consignee_report_generated_at
         ? { allowed: true, reason: null }
-        : { allowed: false, reason: 'Download the Consignee Report first' }
+        : { allowed: false, reason: 'Open the Consignee Report first' }
     case 'preview_ewb':
     case 'preview_einvoice':
       return (c.issue_voucher_generated_at || c.delivery_challan_generated_at)
         ? { allowed: true, reason: null }
-        : { allowed: false, reason: 'Download the Voucher / Challan first' }
+        : { allowed: false, reason: 'Open the Voucher / Challan first' }
     default:
       return { allowed: true, reason: null }
   }
