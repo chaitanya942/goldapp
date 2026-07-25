@@ -165,18 +165,22 @@ export async function POST(req) {
 
   let attachments
   try {
-    // Order matters — report first (unlocks the rest through the shared gate).
-    const report = await fetchDoc(`/api/generate-consignee-report?id=${id}`, 'image/jpeg',
-      docFilename({ consignment: c, branch, docType: 'report', ext: 'jpg' }))
-    const doc = await fetchDoc(
-      a.isInternal ? `/api/generate-issue-voucher-pdf?id=${id}` : `/api/generate-challan-pdf?id=${id}`,
-      'application/pdf',
-      docFilename({ consignment: c, branch, docType: a.isInternal ? 'voucher' : 'challan', ext: 'pdf' }))
-    const gst = await fetchDoc(
-      a.gstKind === 'ewb' ? `/api/eway-bill/pdf?id=${id}` : `/api/e-invoice/pdf?id=${id}`,
-      'application/pdf',
-      docFilename({ consignment: c, branch, docType: a.gstKind === 'ewb' ? 'ewb' : 'einvoice', ext: 'pdf' }))
-    attachments = [report, doc, gst]
+    // All three in PARALLEL — the button only enables once every step is already
+    // generated, so the workflow gate is satisfied and ordering no longer
+    // matters. This is the main latency win: build time drops from the sum of
+    // the three round-trips to the slowest single one.
+    attachments = await Promise.all([
+      fetchDoc(`/api/generate-consignee-report?id=${id}`, 'image/jpeg',
+        docFilename({ consignment: c, branch, docType: 'report', ext: 'jpg' })),
+      fetchDoc(
+        a.isInternal ? `/api/generate-issue-voucher-pdf?id=${id}` : `/api/generate-challan-pdf?id=${id}`,
+        'application/pdf',
+        docFilename({ consignment: c, branch, docType: a.isInternal ? 'voucher' : 'challan', ext: 'pdf' })),
+      fetchDoc(
+        a.gstKind === 'ewb' ? `/api/eway-bill/pdf?id=${id}` : `/api/e-invoice/pdf?id=${id}`,
+        'application/pdf',
+        docFilename({ consignment: c, branch, docType: a.gstKind === 'ewb' ? 'ewb' : 'einvoice', ext: 'pdf' })),
+    ])
   } catch (e) {
     return Response.json({ error: `Could not build the documents — ${e.message}` }, { status: 502 })
   }
