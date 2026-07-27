@@ -732,32 +732,20 @@ export default function ConsignmentData() {
 
     setDownloadingId(c.id + ':all')
     try {
-      // Fetch every doc first (parallel) — so a folder-picker prompt only shows
-      // after we know all the documents actually built.
+      // Fetch every doc first (parallel), then save straight to the browser's
+      // download folder — NO folder-picker prompt. Each filename is prefixed with
+      // "Branch consignment-date" so all three files for a consignment sort and
+      // group together in Downloads.
       const blobs = await Promise.all(list.map(async d => {
         const res = await authedFetch(d.url)
         if (!res.ok) { let m = `HTTP ${res.status}`; try { const j = await res.json(); if (j.error) m = j.error } catch {} throw new Error(`${d.name}: ${m}`) }
-        return { name: d.name, blob: await res.blob() }
+        return { name: `${folder} - ${d.name}`, blob: await res.blob() }
       }))
-
-      if (typeof window !== 'undefined' && window.showDirectoryPicker) {
-        let dir
-        try { dir = await window.showDirectoryPicker({ mode: 'readwrite' }) }
-        catch { setDownloadingId(null); return }   // user dismissed the picker
-        const sub = await dir.getDirectoryHandle(folder, { create: true })
-        for (const b of blobs) {
-          const fh = await sub.getFileHandle(b.name, { create: true })
-          const w  = await fh.createWritable(); await w.write(b.blob); await w.close()
-        }
-        setToast({ msg: `Saved ${blobs.length} documents to “${folder}”.`, type: 'success' })
-      } else {
-        // Fallback: separate downloads into the browser's download folder.
-        for (const b of blobs) {
-          const a = document.createElement('a'); a.href = URL.createObjectURL(b.blob); a.download = b.name; a.click(); URL.revokeObjectURL(a.href)
-          await new Promise(r => setTimeout(r, 350))
-        }
-        setToast({ msg: `Downloaded ${blobs.length} documents.`, type: 'success' })
+      for (const b of blobs) {
+        const a = document.createElement('a'); a.href = URL.createObjectURL(b.blob); a.download = b.name; a.click(); URL.revokeObjectURL(a.href)
+        await new Promise(r => setTimeout(r, 350))   // let each download register before the next
       }
+      setToast({ msg: `Downloaded ${blobs.length} documents for ${folder}.`, type: 'success' })
     } catch (e) {
       setToast({ msg: `Save failed: ${e.message}`, type: 'error' })
     }
@@ -1549,7 +1537,7 @@ export default function ConsignmentData() {
                               <>
                                 <span style={{ width: 1, height: 18, background: t.border2, margin: '0 4px', flexShrink: 0 }} />
                                 <button onClick={() => saveAllDocs(c)} disabled={!!downloadingId}
-                                  title="Save all documents together — into a folder you choose (or as separate files)"
+                                  title="Download all documents — Report, Voucher/Challan and EWB/E-Invoice together"
                                   style={{ display: 'inline-flex', alignItems: 'center', gap: 4,
                                     background: t.card2 || '#fff', border: `1px solid ${t.border2 || t.border}`, color: t.text2,
                                     cursor: downloadingId ? 'default' : 'pointer', fontSize: '10px', fontWeight: 700,
