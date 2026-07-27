@@ -1893,8 +1893,25 @@ export default function ConsignmentData() {
       ), document.body)}
 
       {showModal && typeof document !== 'undefined' && createPortal((
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.78)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(6px)', padding: '20px' }}>
-          <div style={{
+        <div className="ccm-overlay" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.78)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(6px)', padding: '20px' }}>
+          {/* Scoped polish — entrance, input focus ring, action hover feel.
+              These need real CSS pseudo-states/keyframes that inline styles
+              can't express. */}
+          <style>{`
+            @keyframes ccmFade { from { opacity: 0 } to { opacity: 1 } }
+            @keyframes ccmIn { from { opacity: 0; transform: translateY(12px) scale(.985) } to { opacity: 1; transform: none } }
+            .ccm-overlay { animation: ccmFade .18s ease }
+            .ccm-card { animation: ccmIn .28s cubic-bezier(.22,1,.36,1) }
+            .ccm-card input { transition: border-color .14s ease, box-shadow .14s ease }
+            .ccm-card input:focus { border-color: ${t.gold} !important; box-shadow: 0 0 0 3px ${t.gold}26 }
+            .ccm-confirm { transition: transform .12s ease, box-shadow .14s ease, filter .12s ease }
+            .ccm-confirm:hover { transform: translateY(-1px); filter: brightness(1.04); box-shadow: 0 10px 24px ${t.gold}4a }
+            .ccm-confirm:active { transform: translateY(0); box-shadow: 0 4px 10px ${t.gold}3a }
+            .ccm-cancel { transition: background .12s ease, border-color .12s ease, color .12s ease }
+            .ccm-cancel:hover { background: ${t.card2}; color: ${t.text1} }
+            @media (prefers-reduced-motion: reduce) { .ccm-overlay, .ccm-card { animation: none } }
+          `}</style>
+          <div className="ccm-card" style={{
             background: t.card,
             border: `1px solid ${t.border2}`,
             borderRadius: '20px',
@@ -2214,7 +2231,7 @@ export default function ConsignmentData() {
                   {/* Shipment summary — one cohesive panel (route · metrics ·
                       document) divided by hairlines. Reads as the "ticket" being
                       created rather than three loose cards. */}
-                  <div style={{ border: `1px solid ${t.border2}`, borderRadius: '14px', background: t.card2, overflow: 'hidden' }}>
+                  <div style={{ border: `1px solid ${t.border2}`, borderRadius: '14px', background: t.card2, overflow: 'hidden', boxShadow: '0 1px 3px rgba(0,0,0,.05), 0 8px 24px rgba(0,0,0,.03)' }}>
                     {/* Route */}
                     <div style={{ padding: '18px 22px', display: 'grid', gridTemplateColumns: '1fr auto 1fr', gap: '12px', alignItems: 'center' }}>
                       <div style={{ minWidth: 0 }}>
@@ -2319,7 +2336,7 @@ export default function ConsignmentData() {
 
                   {/* Reference numbers — full-width band beneath both columns. */}
                   {(loadingPreview || previewNumbers) && (
-                    <div style={{ marginTop: '18px', border: `1px solid ${t.border2}`, borderRadius: '12px', background: t.card2, padding: '15px 20px' }}>
+                    <div style={{ marginTop: '18px', border: `1px solid ${t.border2}`, borderRadius: '12px', background: t.card2, padding: '15px 20px', boxShadow: '0 1px 3px rgba(0,0,0,.04)' }}>
                       {loadingPreview ? (
                         <div style={{ fontSize: '11px', color: t.text4 }}>Generating reference numbers…</div>
                       ) : (
@@ -2370,8 +2387,8 @@ export default function ConsignmentData() {
                   </div>
                 )
               })()}
-              <button onClick={() => setShowModal(false)} style={btnOut}>Cancel</button>
-              <button onClick={handleCreate} disabled={creating}
+              <button className="ccm-cancel" onClick={() => setShowModal(false)} style={btnOut}>Cancel</button>
+              <button className="ccm-confirm" onClick={handleCreate} disabled={creating}
                 style={{ ...btnGold, padding: '11px 24px', fontSize: '13px', fontWeight: 700, opacity: creating ? .7 : 1 }}>
                 {creating ? 'Creating…' : 'Confirm & Create →'}
               </button>
