@@ -2207,6 +2207,9 @@ export default function ConsignmentData() {
                   )}
                     </div>{/* end left column */}
                     <div style={{ minWidth: 0 }}>
+                  {/* Section label mirrors DESTINATION on the left so the two
+                      columns share the same top baseline. */}
+                  <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', marginBottom: '8px', fontWeight: 700 }}>Summary</div>
                   {/* Shipment summary — one cohesive panel (route · metrics ·
                       document) divided by hairlines. Reads as the "ticket" being
                       created rather than three loose cards. */}
