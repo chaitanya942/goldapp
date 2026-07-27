@@ -2174,11 +2174,11 @@ export default function ConsignmentData() {
                       return (
                         <div style={{ padding: '13px 16px' }}>
                           <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 700, marginBottom: '9px' }}>Documents</div>
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '9px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap' }}>
                             {docs.map(d => (
-                              <div key={d.label} style={{ display: 'flex', alignItems: 'center', gap: '11px' }}>
-                                <span style={{ fontSize: '10px', fontWeight: 800, letterSpacing: '.04em', color: d.accent, background: `${d.accent}18`, border: `1px solid ${d.accent}40`, borderRadius: '6px', padding: '5px 0', flexShrink: 0, width: '46px', textAlign: 'center' }}>{d.badge}</span>
-                                <div style={{ fontSize: '13px', color: t.text1, fontWeight: 700 }}>{d.label}</div>
+                              <div key={d.label} style={{ display: 'flex', alignItems: 'center', gap: '7px' }}>
+                                <span style={{ fontSize: '9.5px', fontWeight: 800, letterSpacing: '.03em', color: d.accent, background: `${d.accent}18`, border: `1px solid ${d.accent}40`, borderRadius: '5px', padding: '4px 7px', flexShrink: 0 }}>{d.badge}</span>
+                                <div style={{ fontSize: '12.5px', color: t.text1, fontWeight: 700, whiteSpace: 'nowrap' }}>{d.label}</div>
                               </div>
                             ))}
                           </div>
