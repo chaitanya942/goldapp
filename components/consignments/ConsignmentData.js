@@ -2164,7 +2164,7 @@ export default function ConsignmentData() {
                         E-Invoice. */}
                     {(() => {
                       const isKaSrc = srcState === 'Karnataka'
-                      const gst = (isType || isKaSrc)
+                      const gst = (moveType === 'INTERNAL' || isKaSrc)
                         ? { badge: 'EWB',   label: 'E-Way Bill', accent: t.blue }
                         : { badge: 'E-Inv', label: 'E-Invoice',  accent: t.purple }
                       const docs = [
