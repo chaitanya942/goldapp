@@ -2206,6 +2206,15 @@ export default function ConsignmentData() {
                       )}
                     </div>
                   )}
+
+                  {/* Plain-language heads-up. Also fills the left column so it
+                      balances against the taller summary panel on the right. */}
+                  <div style={{ marginTop: '4px', background: `${t.gold}0a`, border: `1px solid ${t.border2}`, borderLeft: `3px solid ${t.gold}`, borderRadius: '10px', padding: '13px 15px' }}>
+                    <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 700, marginBottom: '7px' }}>Good to know</div>
+                    <div style={{ fontSize: '12px', color: t.text2, lineHeight: 1.7 }}>
+                      Creating locks these <strong style={{ color: t.text1 }}>{selected.size}</strong> bill{selected.size === 1 ? '' : 's'} to this consignment and generates the <strong style={{ color: t.text1 }}>{isExternal ? 'Delivery Challan' : 'Issue Voucher'}</strong>. Open the documents anytime from the Consignment Data list. Bills release only if accounts voids it.
+                    </div>
+                  </div>
                     </div>{/* end left column */}
                     <div style={{ minWidth: 0 }}>
                   {/* Section label mirrors DESTINATION on the left so the two
