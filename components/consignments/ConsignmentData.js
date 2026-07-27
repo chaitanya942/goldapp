@@ -1896,9 +1896,9 @@ export default function ConsignmentData() {
           <div style={{
             background: t.card,
             border: `1px solid ${t.border2}`,
-            borderRadius: '18px',
-            width: '780px', maxWidth: '100%',
-            boxShadow: '0 28px 80px rgba(0,0,0,.55)',
+            borderRadius: '20px',
+            width: '960px', maxWidth: '100%',
+            boxShadow: '0 30px 90px rgba(0,0,0,.55)',
             maxHeight: 'calc(100vh - 40px)',
             display: 'flex', flexDirection: 'column',
             overflow: 'hidden',
@@ -1906,7 +1906,7 @@ export default function ConsignmentData() {
 
             {/* ── Hero header ──────────────────────────────────────────── */}
             <div style={{
-              padding: '22px 28px 20px',
+              padding: '26px 34px 22px',
               borderBottom: `1px solid ${t.border}`,
               background: `linear-gradient(150deg, ${t.gold}16 0%, transparent 62%)`,
               flexShrink: 0,
@@ -1922,7 +1922,7 @@ export default function ConsignmentData() {
             </div>
 
             {/* ── Body (scrollable) ────────────────────────────────────── */}
-            <div style={{ padding: '20px 26px', overflowY: 'auto', flex: 1, minHeight: 0 }}>
+            <div style={{ padding: '26px 34px', overflowY: 'auto', flex: 1, minHeight: 0 }}>
 
             {(() => {
               // Hub must be in the same state as the source branch — interstate
@@ -1984,8 +1984,8 @@ export default function ConsignmentData() {
                   {/* Top band: Destination picker (left) beside the route +
                       summary (right). Broadens the modal and halves its height
                       vs the old single column. Stacks on narrow widths. */}
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '18px', alignItems: 'start', marginBottom: '4px' }}>
-                    <div style={{ minWidth: 0 }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '32px', alignItems: 'start', marginBottom: '4px' }}>
+                    <div style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: '24px' }}>
                   {/* Destination — unified two-zone picker.
                       Hub combobox up top, an explicit 'send to Head Office'
                       button below. The previous segmented toggle defaulted
@@ -2021,7 +2021,7 @@ export default function ConsignmentData() {
                           width: '100%',
                           background: t.card2,
                           border: `1px solid ${isHubPicked ? `${t.purple}80` : t.border2}`,
-                          borderRadius: '9px', padding: '11px 14px',
+                          borderRadius: '10px', padding: '13px 15px',
                           fontSize: '13px', color: t.text1, outline: 'none', boxSizing: 'border-box',
                           cursor: candidateHubs.length === 0 ? 'not-allowed' : 'text',
                           transition: 'border-color .15s',
@@ -2126,7 +2126,7 @@ export default function ConsignmentData() {
                       handling THIS shipment is on the paperwork (not just the
                       branch manager). Empty → fall back to branch defaults at
                       PDF-generation time. */}
-                  <div style={{ marginBottom: '14px', marginTop: '14px' }}>
+                  <div>
                     <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', marginBottom: '6px', fontWeight: 700 }}>
                       Branch Contact <span style={{ textTransform: 'none', fontWeight: 400, color: t.text4 }}>(prints on {moveType === 'INTERNAL' ? 'Issue Voucher' : 'Delivery Challan'})</span>
                     </div>
@@ -2135,14 +2135,14 @@ export default function ConsignmentData() {
                         value={branchContactName}
                         onChange={e => setBranchContactName(e.target.value)}
                         placeholder="Name"
-                        style={{ flex: 1.4, minWidth: 0, background: t.card2, border: `1px solid ${t.border2}`, borderRadius: '9px', padding: '11px 14px', fontSize: '13px', color: t.text1, outline: 'none', boxSizing: 'border-box' }}
+                        style={{ flex: 1.4, minWidth: 0, background: t.card2, border: `1px solid ${t.border2}`, borderRadius: '10px', padding: '13px 15px', fontSize: '13px', color: t.text1, outline: 'none', boxSizing: 'border-box' }}
                       />
                       <input
                         value={branchContactPhone}
                         onChange={e => setBranchContactPhone(e.target.value.replace(/[^\d+ ]/g, '').slice(0, 18))}
                         placeholder="Phone"
                         inputMode="tel"
-                        style={{ flex: 1, minWidth: 0, background: t.card2, border: `1px solid ${t.border2}`, borderRadius: '9px', padding: '11px 14px', fontSize: '13px', color: t.text1, outline: 'none', boxSizing: 'border-box', fontFamily: 'monospace' }}
+                        style={{ flex: 1, minWidth: 0, background: t.card2, border: `1px solid ${t.border2}`, borderRadius: '10px', padding: '13px 15px', fontSize: '13px', color: t.text1, outline: 'none', boxSizing: 'border-box', fontFamily: 'monospace' }}
                       />
                     </div>
                   </div>
@@ -2153,7 +2153,7 @@ export default function ConsignmentData() {
                       and pre-filled into Carrier Name. Free text with
                       suggestions — see the carrierName state for why. */}
                   {moveType === 'INTERNAL' && isSelfCarryRegion(branches.find(b => b.name === nav?.branch)?.region) && (
-                    <div style={{ marginBottom: '14px' }}>
+                    <div>
                       <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', marginBottom: '6px', fontWeight: 700 }}>
                         Carried by <span style={{ textTransform: 'none', fontWeight: 400, color: t.text4 }}>(branch employee — prints on Issue Voucher)</span>
                       </div>
@@ -2162,7 +2162,7 @@ export default function ConsignmentData() {
                         onChange={e => setCarrierName(e.target.value.slice(0, 40))}
                         placeholder="Employee name"
                         list="ba-carrier-suggestions"
-                        style={{ width: '100%', background: t.card2, border: `1px solid ${t.border2}`, borderRadius: '9px', padding: '11px 14px', fontSize: '13px', color: t.text1, outline: 'none', boxSizing: 'border-box' }}
+                        style={{ width: '100%', background: t.card2, border: `1px solid ${t.border2}`, borderRadius: '10px', padding: '13px 15px', fontSize: '13px', color: t.text1, outline: 'none', boxSizing: 'border-box' }}
                       />
                       <datalist id="ba-carrier-suggestions">
                         {branchEmps
@@ -2180,7 +2180,7 @@ export default function ConsignmentData() {
                       self-carry uses the Carried by field above). Default BVC;
                       Branch Employee for self-carry; Other = free text. */}
                   {moveType !== 'INTERNAL' && (
-                    <div style={{ marginBottom: '14px' }}>
+                    <div>
                       <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', marginBottom: '6px', fontWeight: 700 }}>
                         Transporter <span style={{ textTransform: 'none', fontWeight: 400, color: t.text4 }}>(prints on Delivery Challan)</span>
                       </div>
@@ -2189,7 +2189,7 @@ export default function ConsignmentData() {
                           const on = transporterMode === val
                           return (
                             <button key={val} type="button" onClick={() => setTransporterMode(val)}
-                              style={{ flex: 1, padding: '10px 8px', borderRadius: '9px', border: `1px solid ${on ? t.gold : t.border2}`, background: on ? `${t.gold}18` : t.card2, color: on ? t.gold : t.text2, fontSize: '12px', fontWeight: on ? 700 : 500, cursor: 'pointer', transition: 'all .12s' }}>
+                              style={{ flex: 1, padding: '13px 8px', borderRadius: '10px', border: `1px solid ${on ? t.gold : t.border2}`, background: on ? `${t.gold}18` : t.card2, color: on ? t.gold : t.text2, fontSize: '12.5px', fontWeight: on ? 700 : 500, cursor: 'pointer', transition: 'all .12s', whiteSpace: 'nowrap' }}>
                               {label}
                             </button>
                           )
@@ -2200,7 +2200,7 @@ export default function ConsignmentData() {
                           value={transporterOther}
                           onChange={e => setTransporterOther(e.target.value.slice(0, 50))}
                           placeholder="Courier / transporter name"
-                          style={{ width: '100%', marginTop: '8px', background: t.card2, border: `1px solid ${t.border2}`, borderRadius: '9px', padding: '11px 14px', fontSize: '13px', color: t.text1, outline: 'none', boxSizing: 'border-box' }}
+                          style={{ width: '100%', marginTop: '8px', background: t.card2, border: `1px solid ${t.border2}`, borderRadius: '10px', padding: '13px 15px', fontSize: '13px', color: t.text1, outline: 'none', boxSizing: 'border-box' }}
                         />
                       )}
                     </div>
@@ -2212,32 +2212,32 @@ export default function ConsignmentData() {
                       created rather than three loose cards. */}
                   <div style={{ border: `1px solid ${t.border2}`, borderRadius: '14px', background: t.card2, overflow: 'hidden' }}>
                     {/* Route */}
-                    <div style={{ padding: '15px 18px', display: 'grid', gridTemplateColumns: '1fr auto 1fr', gap: '10px', alignItems: 'center' }}>
+                    <div style={{ padding: '18px 22px', display: 'grid', gridTemplateColumns: '1fr auto 1fr', gap: '12px', alignItems: 'center' }}>
                       <div style={{ minWidth: 0 }}>
-                        <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.14em', textTransform: 'uppercase', fontWeight: 700, marginBottom: '5px' }}>From</div>
-                        <div style={{ fontSize: '14px', fontWeight: 800, color: t.gold, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', letterSpacing: '-.01em' }}>{nav?.branch || '—'}</div>
-                        {srcRegionLabel && <div style={{ fontSize: '10px', color: t.text3, marginTop: '3px' }}>{srcRegionLabel}</div>}
+                        <div style={{ fontSize: '9.5px', color: t.text4, letterSpacing: '.14em', textTransform: 'uppercase', fontWeight: 700, marginBottom: '6px' }}>From</div>
+                        <div style={{ fontSize: '16px', fontWeight: 800, color: t.gold, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', letterSpacing: '-.015em' }}>{nav?.branch || '—'}</div>
+                        {srcRegionLabel && <div style={{ fontSize: '10.5px', color: t.text3, marginTop: '4px' }}>{srcRegionLabel}</div>}
                       </div>
                       <div style={{ display: 'flex', alignItems: 'center', color: destColor }}>
-                        <span style={{ width: '16px', height: '2px', borderRadius: '2px', background: `repeating-linear-gradient(90deg, ${destColor} 0 3px, transparent 3px 6px)` }} />
-                        <span style={{ fontSize: '15px', lineHeight: 1, marginLeft: '1px' }}>→</span>
+                        <span style={{ width: '18px', height: '2px', borderRadius: '2px', background: `repeating-linear-gradient(90deg, ${destColor} 0 3px, transparent 3px 6px)` }} />
+                        <span style={{ fontSize: '16px', lineHeight: 1, marginLeft: '1px' }}>→</span>
                       </div>
                       <div style={{ minWidth: 0, textAlign: 'right' }}>
-                        <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.14em', textTransform: 'uppercase', fontWeight: 700, marginBottom: '5px' }}>To</div>
-                        <div style={{ fontSize: '14px', fontWeight: 800, color: destColor, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', letterSpacing: '-.01em' }}>{dest}</div>
-                        {destRegion && <div style={{ fontSize: '10px', color: t.text3, marginTop: '3px' }}>{destRegion}</div>}
+                        <div style={{ fontSize: '9.5px', color: t.text4, letterSpacing: '.14em', textTransform: 'uppercase', fontWeight: 700, marginBottom: '6px' }}>To</div>
+                        <div style={{ fontSize: '16px', fontWeight: 800, color: destColor, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', letterSpacing: '-.015em' }}>{dest}</div>
+                        {destRegion && <div style={{ fontSize: '10.5px', color: t.text3, marginTop: '4px' }}>{destRegion}</div>}
                       </div>
                     </div>
                     <div style={{ height: '1px', background: t.border }} />
                     {/* Metrics */}
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)' }}>
                       {[
-                        { label: 'Bills',      value: String(selected.size),               color: t.text1, size: '20px' },
-                        { label: 'Net Weight', value: fmtWt(totalSelWt),                   color: t.gold,  size: '15px' },
-                        { label: 'Value',      value: `₹${fmt(Math.round(totalSelAmt))}`,  color: t.blue,  size: '15px' },
+                        { label: 'Bills',      value: String(selected.size),               color: t.text1, size: '24px' },
+                        { label: 'Net Weight', value: fmtWt(totalSelWt),                   color: t.gold,  size: '17px' },
+                        { label: 'Value',      value: `₹${fmt(Math.round(totalSelAmt))}`,  color: t.blue,  size: '17px' },
                       ].map((m, i) => (
-                        <div key={m.label} style={{ padding: '13px 15px', borderLeft: i === 0 ? 'none' : `1px solid ${t.border}` }}>
-                          <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 700, marginBottom: '6px' }}>{m.label}</div>
+                        <div key={m.label} style={{ padding: '16px 16px', borderLeft: i === 0 ? 'none' : `1px solid ${t.border}` }}>
+                          <div style={{ fontSize: '9.5px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 700, marginBottom: '8px' }}>{m.label}</div>
                           <div style={{ fontSize: m.size, color: m.color, fontFamily: 'monospace', fontWeight: 700, lineHeight: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{m.value}</div>
                         </div>
                       ))}
@@ -2257,7 +2257,7 @@ export default function ConsignmentData() {
                         gst,
                       ]
                       return (
-                        <div style={{ padding: '13px 16px' }}>
+                        <div style={{ padding: '16px 20px' }}>
                           <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 700, marginBottom: '9px' }}>Documents</div>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap' }}>
                             {docs.map(d => (
@@ -2273,7 +2273,7 @@ export default function ConsignmentData() {
                     {(loadingPreview || previewNumbers) && (
                       <>
                         <div style={{ height: '1px', background: t.border }} />
-                        <div style={{ padding: '13px 16px' }}>
+                        <div style={{ padding: '16px 20px' }}>
                           {loadingPreview ? (
                             <div style={{ fontSize: '11px', color: t.text4 }}>Generating numbers…</div>
                           ) : (
@@ -2303,7 +2303,7 @@ export default function ConsignmentData() {
 
             {/* ── Footer (sticky to modal bottom) ──────────────────────── */}
             <div style={{
-              padding: '14px 26px',
+              padding: '18px 34px',
               borderTop: `1px solid ${t.border}`,
               background: t.card,
               display: 'flex', gap: '10px', justifyContent: 'flex-end', alignItems: 'center',
