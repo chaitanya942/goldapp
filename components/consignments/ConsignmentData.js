@@ -716,6 +716,12 @@ export default function ConsignmentData() {
     const branch  = branches.find(b => b.name === c.branch_name)
     const isType  = c.movement_type === 'INTERNAL'
     const docKind = isType ? 'voucher' : 'challan'
+    // Folder name the operator sees: "Branch consignment-date", e.g.
+    // "KL-EDAPPALLY 27 Jul 2026". Sanitised of characters Windows/macOS forbid.
+    const dateStr = c.created_at
+      ? new Date(c.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' })
+      : ''
+    const folder = `${c.branch_name}${dateStr ? ' ' + dateStr : ''}`.replace(/[\\/:*?"<>|]+/g, '-').trim() || c.tmp_prf_no || 'consignment'
     const list = [{ url: docUrl(c, 'report'), name: docFilename({ consignment: c, branch, docType: 'report', ext: 'jpg' }) }]
     if (c.issue_voucher_generated_at || c.delivery_challan_generated_at)
       list.push({ url: docUrl(c, docKind), name: docFilename({ consignment: c, branch, docType: docKind, ext: 'pdf' }) })
@@ -738,8 +744,7 @@ export default function ConsignmentData() {
         let dir
         try { dir = await window.showDirectoryPicker({ mode: 'readwrite' }) }
         catch { setDownloadingId(null); return }   // user dismissed the picker
-        const folder = (docFilename({ consignment: c, branch, docType: 'report', ext: 'jpg' }).replace(/\.jpg$/i, '')) || c.tmp_prf_no || 'consignment'
-        const sub = await dir.getDirectoryHandle(folder.replace(/[\\/:*?"<>|]+/g, '-'), { create: true })
+        const sub = await dir.getDirectoryHandle(folder, { create: true })
         for (const b of blobs) {
           const fh = await sub.getFileHandle(b.name, { create: true })
           const w  = await fh.createWritable(); await w.write(b.blob); await w.close()
