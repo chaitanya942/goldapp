@@ -1958,25 +1958,23 @@ export default function ConsignmentData() {
                       from so an unexpected pre-fill doesn't read as a bug. */}
                   {destSuggestion && (
                     <div style={{
-                      marginBottom: '12px',
-                      padding: '8px 12px',
-                      background: `${t.purple}10`,
-                      border: `1px solid ${t.purple}35`,
-                      borderRadius: '7px',
-                      fontSize: '11px',
+                      marginBottom: '16px',
+                      padding: '10px 14px',
+                      background: t.card2,
+                      border: `1px solid ${t.border2}`,
+                      borderLeft: `3px solid ${t.gold}`,
+                      borderRadius: '8px',
+                      fontSize: '11.5px',
                       color: t.text2,
-                      display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap',
+                      lineHeight: 1.5,
                     }}>
-                      <span style={{ fontSize: '12px', color: t.purple }}>💡</span>
-                      <span>
-                        Suggested from your last consignment:{' '}
-                        <strong style={{ color: t.text1 }}>
-                          {destSuggestion.movement_type === 'INTERNAL'
-                            ? `Branch → ${destSuggestion.dest_branch}`
-                            : 'Branch → HO'}
-                        </strong>
-                        {' '}— change anything below to override.
-                      </span>
+                      Suggested from your last consignment:{' '}
+                      <strong style={{ color: t.text1 }}>
+                        {destSuggestion.movement_type === 'INTERNAL'
+                          ? `Branch → ${destSuggestion.dest_branch}`
+                          : 'Branch → HO'}
+                      </strong>
+                      {' '}— change anything below to override.
                     </div>
                   )}
 
@@ -2096,9 +2094,8 @@ export default function ConsignmentData() {
                       }}
                       onMouseEnter={e => { if (!isExternal && !isHubPicked) e.currentTarget.style.background = `${t.gold}10` }}
                       onMouseLeave={e => { if (!isExternal && !isHubPicked) e.currentTarget.style.background = t.card2 }}>
-                      <span style={{ fontSize: '15px' }}>📤</span>
                       Send directly to Head Office
-                      {isExternal && <span style={{ fontSize: '15px', fontWeight: 900 }}>✓</span>}
+                      {isExternal && <span style={{ fontSize: '14px', fontWeight: 900 }}>✓</span>}
                     </button>
 
                     {/* Tiny hint at the bottom — only visible while ops
@@ -2112,70 +2109,51 @@ export default function ConsignmentData() {
                   </div>
 
                     </div>{/* end left column */}
-                    <div style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                  {/* Source ──→ Destination flow card */}
-                  <div style={{
-                    background: t.card2,
-                    border: `1px solid ${t.border}`,
-                    borderRadius: '12px',
-                    padding: '14px 16px',
-                    marginBottom: '0',
-                    display: 'grid',
-                    gridTemplateColumns: '1fr auto 1fr',
-                    gap: '12px',
-                    alignItems: 'center',
-                  }}>
                     <div style={{ minWidth: 0 }}>
-                      <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 700, marginBottom: '4px' }}>From</div>
-                      <div style={{ fontSize: '13px', fontWeight: 700, color: t.gold, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{nav?.branch || '—'}</div>
-                      {srcRegionLabel && <div style={{ fontSize: '10px', color: t.text3, marginTop: '2px' }}>{srcRegionLabel}</div>}
+                  {/* Shipment summary — one cohesive panel (route · metrics ·
+                      document) divided by hairlines. Reads as the "ticket" being
+                      created rather than three loose cards. */}
+                  <div style={{ border: `1px solid ${t.border2}`, borderRadius: '14px', background: t.card2, overflow: 'hidden' }}>
+                    {/* Route */}
+                    <div style={{ padding: '15px 18px', display: 'grid', gridTemplateColumns: '1fr auto 1fr', gap: '10px', alignItems: 'center' }}>
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.14em', textTransform: 'uppercase', fontWeight: 700, marginBottom: '5px' }}>From</div>
+                        <div style={{ fontSize: '14px', fontWeight: 800, color: t.gold, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', letterSpacing: '-.01em' }}>{nav?.branch || '—'}</div>
+                        {srcRegionLabel && <div style={{ fontSize: '10px', color: t.text3, marginTop: '3px' }}>{srcRegionLabel}</div>}
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', color: destColor }}>
+                        <span style={{ width: '16px', height: '2px', borderRadius: '2px', background: `repeating-linear-gradient(90deg, ${destColor} 0 3px, transparent 3px 6px)` }} />
+                        <span style={{ fontSize: '15px', lineHeight: 1, marginLeft: '1px' }}>→</span>
+                      </div>
+                      <div style={{ minWidth: 0, textAlign: 'right' }}>
+                        <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.14em', textTransform: 'uppercase', fontWeight: 700, marginBottom: '5px' }}>To</div>
+                        <div style={{ fontSize: '14px', fontWeight: 800, color: destColor, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', letterSpacing: '-.01em' }}>{dest}</div>
+                        {destRegion && <div style={{ fontSize: '10px', color: t.text3, marginTop: '3px' }}>{destRegion}</div>}
+                      </div>
                     </div>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column' }}>
-                      <div style={{ fontSize: '20px', color: destColor, lineHeight: 1 }}>→</div>
+                    <div style={{ height: '1px', background: t.border }} />
+                    {/* Metrics */}
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)' }}>
+                      {[
+                        { label: 'Bills',      value: String(selected.size),               color: t.text1, size: '20px' },
+                        { label: 'Net Weight', value: fmtWt(totalSelWt),                   color: t.gold,  size: '15px' },
+                        { label: 'Value',      value: `₹${fmt(Math.round(totalSelAmt))}`,  color: t.blue,  size: '15px' },
+                      ].map((m, i) => (
+                        <div key={m.label} style={{ padding: '13px 15px', borderLeft: i === 0 ? 'none' : `1px solid ${t.border}` }}>
+                          <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 700, marginBottom: '6px' }}>{m.label}</div>
+                          <div style={{ fontSize: m.size, color: m.color, fontFamily: 'monospace', fontWeight: 700, lineHeight: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{m.value}</div>
+                        </div>
+                      ))}
                     </div>
-                    <div style={{ minWidth: 0, textAlign: 'right' }}>
-                      <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 700, marginBottom: '4px' }}>To</div>
-                      <div style={{ fontSize: '13px', fontWeight: 700, color: destColor, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{dest}</div>
-                      {destRegion && <div style={{ fontSize: '10px', color: t.text3, marginTop: '2px' }}>{destRegion}</div>}
-                    </div>
-                  </div>
-
-                  {/* Stats row — bills · net weight · total value */}
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px', marginBottom: '0' }}>
-                    <div style={{ background: t.card2, border: `1px solid ${t.border}`, borderRadius: '10px', padding: '12px 14px' }}>
-                      <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 700, marginBottom: '4px' }}>Bills</div>
-                      <div style={{ fontSize: '20px', color: t.text1, fontFamily: 'monospace', fontWeight: 600, lineHeight: 1 }}>{selected.size}</div>
-                    </div>
-                    <div style={{ background: t.card2, border: `1px solid ${t.border}`, borderRadius: '10px', padding: '12px 14px' }}>
-                      <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 700, marginBottom: '4px' }}>Net Weight</div>
-                      <div style={{ fontSize: '15px', color: t.gold, fontFamily: 'monospace', fontWeight: 700, lineHeight: 1.1 }}>{fmtWt(totalSelWt)}</div>
-                    </div>
-                    <div style={{ background: t.card2, border: `1px solid ${t.border}`, borderRadius: '10px', padding: '12px 14px' }}>
-                      <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 700, marginBottom: '4px' }}>Value</div>
-                      <div style={{ fontSize: '15px', color: t.blue, fontFamily: 'monospace', fontWeight: 700, lineHeight: 1.1 }}>₹{fmt(Math.round(totalSelAmt))}</div>
-                    </div>
-                  </div>
-
-                  {/* Document chip */}
-                  <div style={{
-                    background: t.card2,
-                    border: `1px solid ${t.border}`,
-                    borderRadius: '10px',
-                    padding: '12px 14px',
-                    marginBottom: '0',
-                    display: 'flex', alignItems: 'center', gap: '12px',
-                  }}>
-                    <div style={{
-                      width: '34px', height: '34px', borderRadius: '8px',
-                      background: isExternal ? `${t.gold}18` : `${t.purple}18`,
-                      color: isExternal ? t.gold : t.purple,
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      fontSize: '16px', flexShrink: 0,
-                    }}>📄</div>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 700 }}>Document</div>
-                      <div style={{ fontSize: '13px', color: t.text1, fontWeight: 600, marginTop: '2px' }}>
-                        {isExternal ? 'Delivery Challan' : 'Issue Voucher'}
+                    <div style={{ height: '1px', background: t.border }} />
+                    {/* Document */}
+                    <div style={{ padding: '13px 16px', display: 'flex', alignItems: 'center', gap: '12px' }}>
+                      <span style={{ fontSize: '10px', fontWeight: 800, letterSpacing: '.06em', color: isExternal ? t.gold : t.purple, background: isExternal ? `${t.gold}18` : `${t.purple}18`, border: `1px solid ${isExternal ? `${t.gold}40` : `${t.purple}40`}`, borderRadius: '6px', padding: '5px 9px', flexShrink: 0 }}>
+                        {isExternal ? 'DC' : 'IV'}
+                      </span>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 700 }}>Document</div>
+                        <div style={{ fontSize: '13px', color: t.text1, fontWeight: 700, marginTop: '2px' }}>{isExternal ? 'Delivery Challan' : 'Issue Voucher'}</div>
                       </div>
                     </div>
                   </div>
