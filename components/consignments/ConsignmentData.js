@@ -706,6 +706,59 @@ export default function ConsignmentData() {
     if (ok) fetchAll(true)          // refresh so the unlock state updates immediately
   }
 
+  // Save ALL of a consignment's available documents in one click. On Chromium
+  // (File System Access API) it drops them into a folder the user picks — a
+  // real folder named after the consignment, NOT a zip. Elsewhere it falls back
+  // to separate downloads. Includes whichever docs already exist: Report,
+  // Voucher/Challan (once the report's generated), and EWB / E-Invoice (once
+  // generated).
+  async function saveAllDocs(c) {
+    const branch  = branches.find(b => b.name === c.branch_name)
+    const isType  = c.movement_type === 'INTERNAL'
+    const docKind = isType ? 'voucher' : 'challan'
+    const list = [{ url: docUrl(c, 'report'), name: docFilename({ consignment: c, branch, docType: 'report', ext: 'jpg' }) }]
+    if (c.issue_voucher_generated_at || c.delivery_challan_generated_at)
+      list.push({ url: docUrl(c, docKind), name: docFilename({ consignment: c, branch, docType: docKind, ext: 'pdf' }) })
+    if (c.eway_bill_no)
+      list.push({ url: `/api/eway-bill/pdf?id=${c.id}`, name: docFilename({ consignment: c, branch, docType: 'ewb', ext: 'pdf' }) })
+    else if (c.irn && c.approval_status === 'approved')
+      list.push({ url: `/api/e-invoice/pdf?id=${c.id}`, name: docFilename({ consignment: c, branch, docType: 'einvoice', ext: 'pdf' }) })
+
+    setDownloadingId(c.id + ':all')
+    try {
+      // Fetch every doc first (parallel) — so a folder-picker prompt only shows
+      // after we know all the documents actually built.
+      const blobs = await Promise.all(list.map(async d => {
+        const res = await authedFetch(d.url)
+        if (!res.ok) { let m = `HTTP ${res.status}`; try { const j = await res.json(); if (j.error) m = j.error } catch {} throw new Error(`${d.name}: ${m}`) }
+        return { name: d.name, blob: await res.blob() }
+      }))
+
+      if (typeof window !== 'undefined' && window.showDirectoryPicker) {
+        let dir
+        try { dir = await window.showDirectoryPicker({ mode: 'readwrite' }) }
+        catch { setDownloadingId(null); return }   // user dismissed the picker
+        const folder = (docFilename({ consignment: c, branch, docType: 'report', ext: 'jpg' }).replace(/\.jpg$/i, '')) || c.tmp_prf_no || 'consignment'
+        const sub = await dir.getDirectoryHandle(folder.replace(/[\\/:*?"<>|]+/g, '-'), { create: true })
+        for (const b of blobs) {
+          const fh = await sub.getFileHandle(b.name, { create: true })
+          const w  = await fh.createWritable(); await w.write(b.blob); await w.close()
+        }
+        setToast({ msg: `Saved ${blobs.length} documents to “${folder}”.`, type: 'success' })
+      } else {
+        // Fallback: separate downloads into the browser's download folder.
+        for (const b of blobs) {
+          const a = document.createElement('a'); a.href = URL.createObjectURL(b.blob); a.download = b.name; a.click(); URL.revokeObjectURL(a.href)
+          await new Promise(r => setTimeout(r, 350))
+        }
+        setToast({ msg: `Downloaded ${blobs.length} documents.`, type: 'success' })
+      }
+    } catch (e) {
+      setToast({ msg: `Save failed: ${e.message}`, type: 'error' })
+    }
+    setDownloadingId(null)
+  }
+
 
   // ── Active consignments filtering ─────────────────────────────────────────
   const filteredCons = consignments.filter(c => {
@@ -1433,17 +1486,6 @@ export default function ConsignmentData() {
                       const conn = (filled) => <span style={{ width: 14, height: 2, borderRadius: 2, background: filled ? t.green : t.border2, flexShrink: 0 }} />
                       // Download is a plainly-labelled button (not a bare icon) so
                       // the field team reads it as clickable at a glance.
-                      const dlMini = (onClick, busy, show) => show ? (
-                        <button onClick={onClick} disabled={!!downloadingId} title="Download / save a copy"
-                          style={{ display: 'inline-flex', alignItems: 'center', gap: 3,
-                            background: t.card2 || '#fff', border: `1px solid ${t.border2 || t.border}`, color: t.text2,
-                            cursor: downloadingId ? 'default' : 'pointer', fontSize: '9.5px', fontWeight: 700,
-                            borderRadius: '5px', padding: '4px 8px', lineHeight: 1, opacity: busy ? 0.5 : 1,
-                            whiteSpace: 'nowrap' }}>
-                          {busy ? '·' : '↓ Save'}
-                        </button>
-                      ) : null
-
                       const dlEinv = async () => {
                         setDownloadingId(c.id + ':einv:dl')
                         await triggerDownload(`/api/e-invoice/pdf?id=${c.id}`,
@@ -1474,7 +1516,6 @@ export default function ConsignmentData() {
                               onClick: () => viewDoc(c, 'report'), disabled: !!downloadingId,
                               busy: downloadingId === c.id + ':report',
                               title: reportDone ? 'View Consignee Report' : 'View the Consignee Report to unlock the next step' })}
-                            {dlMini(() => downloadDoc(c, 'report'), downloadingId === c.id + ':report:dl', true)}
                             {conn(reportDone)}
                             {/* 2 · Voucher / Challan */}
                             {step({ label: docDone ? `✓ ${docLabel}` : (docGate.allowed ? docLabel : `🔒 ${docLabel}`),
@@ -1482,7 +1523,6 @@ export default function ConsignmentData() {
                               onClick: docGate.allowed ? () => viewDoc(c, docKind) : undefined,
                               disabled: !!downloadingId || !docGate.allowed, busy: downloadingId === c.id + ':' + docKind,
                               title: docGate.allowed ? `View ${docLabel}` : 'View the Consignee Report first' })}
-                            {dlMini(() => downloadDoc(c, docKind), downloadingId === c.id + ':' + docKind + ':dl', docGate.allowed)}
                             {conn(docDone)}
                             {/* 3 · EWB / E-Invoice */}
                             {gst.kind === 'na' ? (
@@ -1496,9 +1536,22 @@ export default function ConsignmentData() {
                             ) : gst.kind === 'lockedpdf' ? (
                               step({ label: `✓ ${gst.short}`, tone: TONE.donePurple, disabled: true, title: 'PDF finalising — refresh in a moment' })
                             ) : (
+                              step({ label: `✓ ${gst.short}`, tone: gst.short === 'E-Inv' ? TONE.donePurple : TONE.done, onClick: gst.view, disabled: !!downloadingId, title: gst.tip })
+                            )}
+                            {/* One Save button — downloads every ready document (Report, Voucher/Challan,
+                                EWB/E-Invoice) into a folder you pick (Chromium), else as separate files. */}
+                            {reportDone && (
                               <>
-                                {step({ label: `✓ ${gst.short}`, tone: gst.short === 'E-Inv' ? TONE.donePurple : TONE.done, onClick: gst.view, disabled: !!downloadingId, title: gst.tip })}
-                                {dlMini(gst.dl, downloadingId === gst.dlBusy, true)}
+                                <span style={{ width: 1, height: 18, background: t.border2, margin: '0 4px', flexShrink: 0 }} />
+                                <button onClick={() => saveAllDocs(c)} disabled={!!downloadingId}
+                                  title="Save all documents together — into a folder you choose (or as separate files)"
+                                  style={{ display: 'inline-flex', alignItems: 'center', gap: 4,
+                                    background: t.card2 || '#fff', border: `1px solid ${t.border2 || t.border}`, color: t.text2,
+                                    cursor: downloadingId ? 'default' : 'pointer', fontSize: '10px', fontWeight: 700,
+                                    borderRadius: '6px', padding: '5px 11px', lineHeight: 1,
+                                    opacity: downloadingId === c.id + ':all' ? 0.6 : 1, whiteSpace: 'nowrap' }}>
+                                  {downloadingId === c.id + ':all' ? '· saving' : '↓ Save'}
+                                </button>
                               </>
                             )}
                           </div>
