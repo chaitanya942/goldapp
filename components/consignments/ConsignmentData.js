@@ -9,6 +9,7 @@ import Badge from '../ui/Badge'
 import Toast from '../ui/Toast'
 import { openConfirm } from '../ui/ConfirmDialog'
 import { authedFetch } from '../../lib/authedFetch'
+import { computeConsignmentTotals } from '../../lib/consignmentTotals'
 import { triggerSync } from '../../lib/triggerSync'
 import { isSelfCarryRegion, branchEmployeeTransporter } from '../../lib/selfCarryRegions'
 import { getCache, setCache } from '../../lib/moduleCache'
@@ -2245,6 +2246,34 @@ export default function ConsignmentData() {
                         </div>
                       ))}
                     </div>
+                    <div style={{ height: '1px', background: t.border }} />
+                    {/* Value breakdown — goods value + (interstate only) markup &
+                        IGST → grand total, computed by the SAME single source of
+                        truth the E-Invoice/Voucher use. For INTERNAL / intrastate
+                        markup & IGST are n/a and Total = goods value. */}
+                    {(() => {
+                      const T = computeConsignmentTotals({
+                        consignment: { movement_type: moveType, source_region: srcRegion },
+                        items: selectedRows,
+                        companySettings: {},
+                      })
+                      const rs = n => `₹${fmt(Math.round(n))}`
+                      const line = (label, value, opts = {}) => (
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '12px' }}>
+                          <span style={{ fontSize: opts.strong ? '12px' : '11.5px', color: opts.strong ? t.text1 : t.text3, fontWeight: opts.strong ? 800 : 500, letterSpacing: opts.strong ? '.02em' : 0, textTransform: opts.strong ? 'uppercase' : 'none' }}>{label}</span>
+                          <span style={{ fontSize: opts.strong ? '15px' : '12.5px', color: opts.strong ? t.gold : (opts.muted ? t.text4 : t.text2), fontFamily: 'monospace', fontWeight: opts.strong ? 800 : 600, whiteSpace: 'nowrap' }}>{value}</span>
+                        </div>
+                      )
+                      const inter = T.isExternalInterstate
+                      return (
+                        <div style={{ padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                          {line(`Markup @ ${T.upliftPct}%`, inter ? rs(T.markupAmt) : '—', { muted: !inter })}
+                          {line(`IGST @ ${T.gstRate}%`,     inter ? rs(T.igstAmt)   : '—', { muted: !inter })}
+                          <div style={{ height: '1px', background: t.border, margin: '2px 0' }} />
+                          {line('Total value', rs(T.grandTotal), { strong: true })}
+                        </div>
+                      )
+                    })()}
                     <div style={{ height: '1px', background: t.border }} />
                     {/* Documents — the movement doc PLUS the GST doc that will be
                         generated. GST kind: intrastate (INTERNAL, or KA source →
