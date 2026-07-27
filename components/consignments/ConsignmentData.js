@@ -2120,76 +2120,6 @@ export default function ConsignmentData() {
                     )}
                   </div>
 
-                    </div>{/* end left column */}
-                    <div style={{ minWidth: 0 }}>
-                  {/* Shipment summary — one cohesive panel (route · metrics ·
-                      document) divided by hairlines. Reads as the "ticket" being
-                      created rather than three loose cards. */}
-                  <div style={{ border: `1px solid ${t.border2}`, borderRadius: '14px', background: t.card2, overflow: 'hidden' }}>
-                    {/* Route */}
-                    <div style={{ padding: '15px 18px', display: 'grid', gridTemplateColumns: '1fr auto 1fr', gap: '10px', alignItems: 'center' }}>
-                      <div style={{ minWidth: 0 }}>
-                        <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.14em', textTransform: 'uppercase', fontWeight: 700, marginBottom: '5px' }}>From</div>
-                        <div style={{ fontSize: '14px', fontWeight: 800, color: t.gold, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', letterSpacing: '-.01em' }}>{nav?.branch || '—'}</div>
-                        {srcRegionLabel && <div style={{ fontSize: '10px', color: t.text3, marginTop: '3px' }}>{srcRegionLabel}</div>}
-                      </div>
-                      <div style={{ display: 'flex', alignItems: 'center', color: destColor }}>
-                        <span style={{ width: '16px', height: '2px', borderRadius: '2px', background: `repeating-linear-gradient(90deg, ${destColor} 0 3px, transparent 3px 6px)` }} />
-                        <span style={{ fontSize: '15px', lineHeight: 1, marginLeft: '1px' }}>→</span>
-                      </div>
-                      <div style={{ minWidth: 0, textAlign: 'right' }}>
-                        <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.14em', textTransform: 'uppercase', fontWeight: 700, marginBottom: '5px' }}>To</div>
-                        <div style={{ fontSize: '14px', fontWeight: 800, color: destColor, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', letterSpacing: '-.01em' }}>{dest}</div>
-                        {destRegion && <div style={{ fontSize: '10px', color: t.text3, marginTop: '3px' }}>{destRegion}</div>}
-                      </div>
-                    </div>
-                    <div style={{ height: '1px', background: t.border }} />
-                    {/* Metrics */}
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)' }}>
-                      {[
-                        { label: 'Bills',      value: String(selected.size),               color: t.text1, size: '20px' },
-                        { label: 'Net Weight', value: fmtWt(totalSelWt),                   color: t.gold,  size: '15px' },
-                        { label: 'Value',      value: `₹${fmt(Math.round(totalSelAmt))}`,  color: t.blue,  size: '15px' },
-                      ].map((m, i) => (
-                        <div key={m.label} style={{ padding: '13px 15px', borderLeft: i === 0 ? 'none' : `1px solid ${t.border}` }}>
-                          <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 700, marginBottom: '6px' }}>{m.label}</div>
-                          <div style={{ fontSize: m.size, color: m.color, fontFamily: 'monospace', fontWeight: 700, lineHeight: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{m.value}</div>
-                        </div>
-                      ))}
-                    </div>
-                    <div style={{ height: '1px', background: t.border }} />
-                    {/* Documents — the movement doc PLUS the GST doc that will be
-                        generated. GST kind: intrastate (INTERNAL, or KA source →
-                        KA head office) = E-Way Bill; interstate (non-KA → HO) =
-                        E-Invoice. */}
-                    {(() => {
-                      const isKaSrc = srcState === 'Karnataka'
-                      const gst = (moveType === 'INTERNAL' || isKaSrc)
-                        ? { badge: 'EWB',   label: 'E-Way Bill', accent: t.blue }
-                        : { badge: 'E-Inv', label: 'E-Invoice',  accent: t.purple }
-                      const docs = [
-                        { badge: isExternal ? 'DC' : 'IV', label: isExternal ? 'Delivery Challan' : 'Issue Voucher', accent: isExternal ? t.gold : t.purple },
-                        gst,
-                      ]
-                      return (
-                        <div style={{ padding: '13px 16px' }}>
-                          <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 700, marginBottom: '9px' }}>Documents</div>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap' }}>
-                            {docs.map(d => (
-                              <div key={d.label} style={{ display: 'flex', alignItems: 'center', gap: '7px' }}>
-                                <span style={{ fontSize: '9.5px', fontWeight: 800, letterSpacing: '.03em', color: d.accent, background: `${d.accent}18`, border: `1px solid ${d.accent}40`, borderRadius: '5px', padding: '4px 7px', flexShrink: 0 }}>{d.badge}</span>
-                                <div style={{ fontSize: '12.5px', color: t.text1, fontWeight: 700, whiteSpace: 'nowrap' }}>{d.label}</div>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )
-                    })()}
-                  </div>
-
-                    </div>{/* end right column */}
-                  </div>{/* end top band grid */}
-
                   {/* Branch Contact override — prints on Delivery Challan +
                       Issue Voucher. Pre-seeded from the branch's configured
                       contact, but operations can edit so the person actually
@@ -2275,24 +2205,100 @@ export default function ConsignmentData() {
                       )}
                     </div>
                   )}
+                    </div>{/* end left column */}
+                    <div style={{ minWidth: 0 }}>
+                  {/* Shipment summary — one cohesive panel (route · metrics ·
+                      document) divided by hairlines. Reads as the "ticket" being
+                      created rather than three loose cards. */}
+                  <div style={{ border: `1px solid ${t.border2}`, borderRadius: '14px', background: t.card2, overflow: 'hidden' }}>
+                    {/* Route */}
+                    <div style={{ padding: '15px 18px', display: 'grid', gridTemplateColumns: '1fr auto 1fr', gap: '10px', alignItems: 'center' }}>
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.14em', textTransform: 'uppercase', fontWeight: 700, marginBottom: '5px' }}>From</div>
+                        <div style={{ fontSize: '14px', fontWeight: 800, color: t.gold, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', letterSpacing: '-.01em' }}>{nav?.branch || '—'}</div>
+                        {srcRegionLabel && <div style={{ fontSize: '10px', color: t.text3, marginTop: '3px' }}>{srcRegionLabel}</div>}
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', color: destColor }}>
+                        <span style={{ width: '16px', height: '2px', borderRadius: '2px', background: `repeating-linear-gradient(90deg, ${destColor} 0 3px, transparent 3px 6px)` }} />
+                        <span style={{ fontSize: '15px', lineHeight: 1, marginLeft: '1px' }}>→</span>
+                      </div>
+                      <div style={{ minWidth: 0, textAlign: 'right' }}>
+                        <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.14em', textTransform: 'uppercase', fontWeight: 700, marginBottom: '5px' }}>To</div>
+                        <div style={{ fontSize: '14px', fontWeight: 800, color: destColor, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', letterSpacing: '-.01em' }}>{dest}</div>
+                        {destRegion && <div style={{ fontSize: '10px', color: t.text3, marginTop: '3px' }}>{destRegion}</div>}
+                      </div>
+                    </div>
+                    <div style={{ height: '1px', background: t.border }} />
+                    {/* Metrics */}
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)' }}>
+                      {[
+                        { label: 'Bills',      value: String(selected.size),               color: t.text1, size: '20px' },
+                        { label: 'Net Weight', value: fmtWt(totalSelWt),                   color: t.gold,  size: '15px' },
+                        { label: 'Value',      value: `₹${fmt(Math.round(totalSelAmt))}`,  color: t.blue,  size: '15px' },
+                      ].map((m, i) => (
+                        <div key={m.label} style={{ padding: '13px 15px', borderLeft: i === 0 ? 'none' : `1px solid ${t.border}` }}>
+                          <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 700, marginBottom: '6px' }}>{m.label}</div>
+                          <div style={{ fontSize: m.size, color: m.color, fontFamily: 'monospace', fontWeight: 700, lineHeight: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{m.value}</div>
+                        </div>
+                      ))}
+                    </div>
+                    <div style={{ height: '1px', background: t.border }} />
+                    {/* Documents — the movement doc PLUS the GST doc that will be
+                        generated. GST kind: intrastate (INTERNAL, or KA source →
+                        KA head office) = E-Way Bill; interstate (non-KA → HO) =
+                        E-Invoice. */}
+                    {(() => {
+                      const isKaSrc = srcState === 'Karnataka'
+                      const gst = (moveType === 'INTERNAL' || isKaSrc)
+                        ? { badge: 'EWB',   label: 'E-Way Bill', accent: t.blue }
+                        : { badge: 'E-Inv', label: 'E-Invoice',  accent: t.purple }
+                      const docs = [
+                        { badge: isExternal ? 'DC' : 'IV', label: isExternal ? 'Delivery Challan' : 'Issue Voucher', accent: isExternal ? t.gold : t.purple },
+                        gst,
+                      ]
+                      return (
+                        <div style={{ padding: '13px 16px' }}>
+                          <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 700, marginBottom: '9px' }}>Documents</div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap' }}>
+                            {docs.map(d => (
+                              <div key={d.label} style={{ display: 'flex', alignItems: 'center', gap: '7px' }}>
+                                <span style={{ fontSize: '9.5px', fontWeight: 800, letterSpacing: '.03em', color: d.accent, background: `${d.accent}18`, border: `1px solid ${d.accent}40`, borderRadius: '5px', padding: '4px 7px', flexShrink: 0 }}>{d.badge}</span>
+                                <div style={{ fontSize: '12.5px', color: t.text1, fontWeight: 700, whiteSpace: 'nowrap' }}>{d.label}</div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )
+                    })()}
+                    {(loadingPreview || previewNumbers) && (
+                      <>
+                        <div style={{ height: '1px', background: t.border }} />
+                        <div style={{ padding: '13px 16px' }}>
+                          {loadingPreview ? (
+                            <div style={{ fontSize: '11px', color: t.text4 }}>Generating numbers…</div>
+                          ) : (
+                            <div style={{ display: 'flex', gap: '22px', flexWrap: 'wrap' }}>
+                              <div style={{ minWidth: 0 }}>
+                                <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 700, marginBottom: '5px' }}>TMP PRF No</div>
+                                <div style={{ fontSize: '14px', color: t.gold, fontWeight: 700, fontFamily: 'monospace' }}>{previewNumbers.tmp_prf_no}</div>
+                              </div>
+                              <div style={{ minWidth: 0, flex: 1 }}>
+                                <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 700, marginBottom: '5px' }}>{moveType === 'INTERNAL' ? 'Voucher No' : 'Challan No'}</div>
+                                <div style={{ fontSize: '11px', color: t.blue, fontWeight: 600, fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{previewNumbers.challan_no}</div>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </>
+                    )}
+                  </div>
+
+                    </div>{/* end right column */}
+                  </div>{/* end top band grid */}
                 </>
               )
             })()}
 
-            {loadingPreview ? (
-              <div style={{ fontSize: '11px', color: t.text4, marginBottom: '4px', padding: '11px 14px', background: `${t.gold}08`, borderRadius: '9px', border: `1px solid ${t.gold}20`, textAlign: 'center' }}>Generating preview numbers…</div>
-            ) : previewNumbers && (
-              <div style={{ display: 'flex', gap: '8px' }}>
-                <div style={{ flex: 1, padding: '11px 14px', background: `${t.gold}10`, borderRadius: '9px', border: `1px solid ${t.gold}30` }}>
-                  <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', marginBottom: '3px', fontWeight: 700 }}>TMP PRF No</div>
-                  <div style={{ fontSize: '14px', color: t.gold, fontWeight: 700, fontFamily: 'monospace' }}>{previewNumbers.tmp_prf_no}</div>
-                </div>
-                <div style={{ flex: 1, padding: '11px 14px', background: `${t.blue}10`, borderRadius: '9px', border: `1px solid ${t.blue}30`, minWidth: 0 }}>
-                  <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', marginBottom: '3px', fontWeight: 700 }}>{moveType === 'INTERNAL' ? 'Voucher No' : 'Challan No'}</div>
-                  <div style={{ fontSize: '11px', color: t.blue, fontWeight: 600, fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{previewNumbers.challan_no}</div>
-                </div>
-              </div>
-            )}
             </div>
 
             {/* ── Footer (sticky to modal bottom) ──────────────────────── */}
