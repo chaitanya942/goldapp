@@ -2588,6 +2588,23 @@ export async function GET(req) {
     if (allowedBranches) query = query.in('branch_name', allowedBranches)
 
     const { data, error } = await query
+    // Annotate each row with the latest "documents emailed" timestamp so the UI
+    // can flag which consignments have already had their docs mailed to the
+    // branch (ops can still resend). One batch query; best-effort.
+    if (data?.length) {
+      try {
+        const ids = data.map(r => r.id)
+        const { data: sent } = await supabase
+          .from('consignment_activity_log')
+          .select('consignment_id, created_at')
+          .eq('event_type', 'documents_emailed')
+          .in('consignment_id', ids)
+          .order('created_at', { ascending: false })
+        const latest = {}
+        for (const row of (sent || [])) if (!latest[row.consignment_id]) latest[row.consignment_id] = row.created_at
+        for (const r of data) r.documents_emailed_at = latest[r.id] || null
+      } catch { /* leave rows un-annotated on log hiccup */ }
+    }
     return Response.json({ data, error: error?.message })
   }
 

@@ -1563,20 +1563,26 @@ export default function ConsignmentData() {
                           && gstReady
                         const dead = c.status === 'cancelled' || c.approval_status === 'rejected' || !!c.cancellation_requested_at
                         if (dead) return null
+                        const emailed = !!c.documents_emailed_at
+                        const sentOn = emailed
+                          ? (() => { try { return new Date(c.documents_emailed_at).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'Asia/Kolkata' }) } catch { return '' } })()
+                          : ''
                         return (
                           <button onClick={() => allReady && setEmailTarget(c)} disabled={!allReady}
-                            title={allReady
-                              ? 'Email all 3 documents to the branch'
-                              : 'Available once the Consignee Report, Voucher/Challan and E-Way Bill / E-Invoice are all done'}
+                            title={!allReady
+                              ? 'Available once the Consignee Report, Voucher/Challan and E-Way Bill / E-Invoice are all done'
+                              : emailed
+                                ? `Already emailed${sentOn ? ' on ' + sentOn : ''} — click to resend`
+                                : 'Email all 3 documents to the branch'}
                             style={{
                               display: 'inline-flex', alignItems: 'center', gap: '5px',
-                              background: allReady ? t.green : 'transparent',
-                              border: allReady ? 'none' : `1px solid ${t.border}`,
+                              background: !allReady ? 'transparent' : emailed ? `${t.green}18` : t.green,
+                              border: !allReady ? `1px solid ${t.border}` : emailed ? `1px solid ${t.green}` : 'none',
                               borderRadius: '6px', padding: '5px 11px', fontSize: '10px', fontWeight: 700,
-                              color: allReady ? '#fff' : t.text4,
+                              color: !allReady ? t.text4 : emailed ? t.green : '#fff',
                               cursor: allReady ? 'pointer' : 'not-allowed', opacity: allReady ? 1 : 0.55,
                             }}>
-                            {allReady ? '✉ Email' : '✉ Email'}
+                            {emailed ? '✓ Emailed' : '✉ Email'}
                           </button>
                         )
                       })()}
@@ -1865,7 +1871,7 @@ export default function ConsignmentData() {
           c={emailTarget}
           branchEmail={branches.find(b => b.name === emailTarget.branch_name)?.contact_email || ''}
           onClose={() => setEmailTarget(null)}
-          onSent={(to) => { setEmailTarget(null); setToast({ msg: `Documents sent to ${to}`, type: 'success' }) }}
+          onSent={(to) => { setEmailTarget(null); setToast({ msg: `Documents sent to ${to}`, type: 'success' }); fetchAll(true) }}
           onError={(msg) => setToast({ msg, type: 'error' })}
         />
       )}
@@ -2577,6 +2583,11 @@ function EmailDocsModal({ t, c, branchEmail, onClose, onSent, onError }) {
   const toValid  = EMAIL_RE.test(to.trim())
   const ccValid  = !cc.trim() || EMAIL_RE.test(cc.trim())
   const canSend  = !loading && !sending && info?.ready && toValid && ccValid
+  const alreadySent = !!info?.last_sent
+  const fmtSent = (iso) => {
+    try { return 'on ' + new Date(iso).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'Asia/Kolkata' }) }
+    catch { return 'earlier' }
+  }
 
   const send = async () => {
     if (!canSend) return
@@ -2610,6 +2621,11 @@ function EmailDocsModal({ t, c, branchEmail, onClose, onSent, onError }) {
           <div style={{ fontSize: '13px', color: t.text3, padding: '12px 0' }}>Loading…</div>
         ) : (
           <>
+            {alreadySent && (
+              <div style={{ fontSize: '11.5px', color: t.green, background: `${t.green}12`, border: `1px solid ${t.green}40`, borderRadius: '8px', padding: '9px 11px', marginBottom: '14px', lineHeight: 1.5 }}>
+                ✓ Already emailed {fmtSent(info.last_sent.at)}{info.last_sent.by ? ` by ${info.last_sent.by}` : ''}{info.last_sent.to ? ` to ${info.last_sent.to}` : ''}. You can resend if required.
+              </div>
+            )}
             <div style={{ fontSize: '10px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 700, marginBottom: '6px' }}>Attachments</div>
             <ol style={{ margin: '0 0 16px 0', padding: '0 0 0 18px', fontSize: '12px', color: t.text2, lineHeight: 1.7 }}>
               {(info?.attachments || []).map((f, i) => <li key={i} style={{ fontFamily: 'monospace', wordBreak: 'break-all' }}>{f}</li>)}
@@ -2643,7 +2659,7 @@ function EmailDocsModal({ t, c, branchEmail, onClose, onSent, onError }) {
               <button onClick={send} disabled={!canSend}
                 title={!info?.ready ? 'All 3 documents must be ready' : !toValid ? 'Enter a valid recipient email' : ''}
                 style={{ background: canSend ? t.green : t.border2, color: canSend ? '#fff' : t.text4, border: 'none', borderRadius: '8px', padding: '9px 22px', fontSize: '13px', fontWeight: 800, cursor: canSend ? 'pointer' : 'not-allowed' }}>
-                {sending ? 'Sending…' : '✉ Send'}
+                {sending ? 'Sending…' : (alreadySent ? '✉ Resend' : '✉ Send')}
               </button>
             </div>
           </>

@@ -19,6 +19,7 @@ import { createClient } from '@supabase/supabase-js'
 import { requireAuth } from '../../../../lib/apiAuth'
 import { sendMail, mailConfigured } from '../../../../lib/sendMail'
 import { docFilename } from '../../../../lib/docFilename'
+import { logConsignmentEvent } from '../../../../lib/consignmentLog'
 
 export const runtime = 'nodejs'
 export const maxDuration = 60
@@ -101,6 +102,20 @@ export async function GET(req) {
   if (ctx.error) return Response.json({ error: ctx.error }, { status: ctx.status })
   const { c, branch } = ctx
   const a = assess(c)
+
+  // Most recent send (if any) — so the modal can say "already emailed" and let
+  // ops resend. Best-effort; a log-table hiccup just hides the banner.
+  let last_sent = null
+  try {
+    const { data: rows } = await admin
+      .from('consignment_activity_log')
+      .select('actor_email, details, created_at')
+      .eq('consignment_id', id).eq('event_type', 'documents_emailed')
+      .order('created_at', { ascending: false }).limit(1)
+    const r = rows?.[0]
+    if (r) last_sent = { at: r.created_at, by: r.details?.from_name || r.actor_email || null, to: r.details?.to || null }
+  } catch {}
+
   return Response.json({
     branch_name:   c.branch_name,
     branch_email:  branch.contact_email || null,
@@ -112,6 +127,7 @@ export async function GET(req) {
     tmp_prf_no:    c.tmp_prf_no,
     dest:          a.isInternal ? (c.dest_branch || 'Hub') : 'Head Office',
     standing_cc:   buildCc(branch, '', branch.contact_email || ''),   // auto-Cc'd (shown in the modal)
+    last_sent,
   })
 }
 
@@ -218,6 +234,15 @@ export async function POST(req) {
 
   try {
     const info = await sendMail({ to, cc: ccList.length ? ccList : undefined, subject, html, attachments, fromName: senderName, replyTo: senderEmail })
+    // Record the send so the modal can tell ops it was already emailed (and by
+    // whom / when) — while still allowing a resend. Best-effort; never blocks.
+    await logConsignmentEvent(admin, {
+      consignment_id: id,
+      event_type:     'documents_emailed',
+      actor_email:    senderEmail || null,
+      actor_role:     auth.profile?.role || null,
+      details:        { to, cc: ccList, from_name: senderName, attachments: attachments.map(x => x.filename) },
+    })
     return Response.json({ ok: true, sent_to: to, cc: ccList, from_name: senderName, reply_to: senderEmail || null, attachments: attachments.map(x => x.filename), messageId: info.messageId })
   } catch (e) {
     return Response.json({ error: `Send failed: ${e.message}` }, { status: 502 })
