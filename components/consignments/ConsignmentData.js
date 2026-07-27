@@ -2073,7 +2073,8 @@ export default function ConsignmentData() {
                       <div style={{ flex: 1, height: 1, background: t.border }} />
                     </div>
 
-                    {/* Zone 2: Head Office button — explicit click required. */}
+                    {/* Zone 2: Head Office — an explicit destination choice card
+                        (HO badge · title · sub-line) paralleling the hub search. */}
                     <button type="button"
                       onClick={() => {
                         setMoveType('EXTERNAL')
@@ -2083,22 +2084,30 @@ export default function ConsignmentData() {
                       }}
                       style={{
                         width: '100%',
-                        padding: '13px 14px',
-                        borderRadius: '9px',
+                        padding: '12px 14px',
+                        borderRadius: '11px',
                         border: isExternal ? `1.5px solid ${t.gold}` : `1px solid ${t.border2}`,
                         background: isExternal ? `${t.gold}1c` : t.card2,
-                        color: isExternal ? t.gold : t.text2,
-                        fontSize: '13px', fontWeight: 700, letterSpacing: '.02em',
                         cursor: 'pointer',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px',
+                        display: 'flex', alignItems: 'center', gap: '12px', textAlign: 'left',
                         opacity: isHubPicked ? 0.45 : 1,
                         transition: 'all .15s',
                         boxSizing: 'border-box',
                       }}
                       onMouseEnter={e => { if (!isExternal && !isHubPicked) e.currentTarget.style.background = `${t.gold}10` }}
                       onMouseLeave={e => { if (!isExternal && !isHubPicked) e.currentTarget.style.background = t.card2 }}>
-                      Send directly to Head Office
-                      {isExternal && <span style={{ fontSize: '14px', fontWeight: 900 }}>✓</span>}
+                      <span style={{
+                        width: '38px', height: '38px', borderRadius: '10px', flexShrink: 0,
+                        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                        background: isExternal ? t.gold : `${t.gold}18`,
+                        color: isExternal ? (t.goldText || '#1a0a00') : t.gold,
+                        fontSize: '13px', fontWeight: 900, letterSpacing: '.03em',
+                      }}>HO</span>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: '13px', fontWeight: 800, color: isExternal ? t.gold : t.text1 }}>Send directly to Head Office</div>
+                        <div style={{ fontSize: '10.5px', color: t.text3, marginTop: '2px' }}>Bangalore (KA) · no hub stop</div>
+                      </div>
+                      {isExternal && <span style={{ fontSize: '16px', fontWeight: 900, color: t.gold, flexShrink: 0 }}>✓</span>}
                     </button>
 
                     {/* Tiny hint at the bottom — only visible while ops
@@ -2149,16 +2158,33 @@ export default function ConsignmentData() {
                       ))}
                     </div>
                     <div style={{ height: '1px', background: t.border }} />
-                    {/* Document */}
-                    <div style={{ padding: '13px 16px', display: 'flex', alignItems: 'center', gap: '12px' }}>
-                      <span style={{ fontSize: '10px', fontWeight: 800, letterSpacing: '.06em', color: isExternal ? t.gold : t.purple, background: isExternal ? `${t.gold}18` : `${t.purple}18`, border: `1px solid ${isExternal ? `${t.gold}40` : `${t.purple}40`}`, borderRadius: '6px', padding: '5px 9px', flexShrink: 0 }}>
-                        {isExternal ? 'DC' : 'IV'}
-                      </span>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 700 }}>Document</div>
-                        <div style={{ fontSize: '13px', color: t.text1, fontWeight: 700, marginTop: '2px' }}>{isExternal ? 'Delivery Challan' : 'Issue Voucher'}</div>
-                      </div>
-                    </div>
+                    {/* Documents — the movement doc PLUS the GST doc that will be
+                        generated. GST kind: intrastate (INTERNAL, or KA source →
+                        KA head office) = E-Way Bill; interstate (non-KA → HO) =
+                        E-Invoice. */}
+                    {(() => {
+                      const isKaSrc = srcState === 'Karnataka'
+                      const gst = (isType || isKaSrc)
+                        ? { badge: 'EWB',   label: 'E-Way Bill', accent: t.blue }
+                        : { badge: 'E-Inv', label: 'E-Invoice',  accent: t.purple }
+                      const docs = [
+                        { badge: isExternal ? 'DC' : 'IV', label: isExternal ? 'Delivery Challan' : 'Issue Voucher', accent: isExternal ? t.gold : t.purple },
+                        gst,
+                      ]
+                      return (
+                        <div style={{ padding: '13px 16px' }}>
+                          <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 700, marginBottom: '9px' }}>Documents</div>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '9px' }}>
+                            {docs.map(d => (
+                              <div key={d.label} style={{ display: 'flex', alignItems: 'center', gap: '11px' }}>
+                                <span style={{ fontSize: '10px', fontWeight: 800, letterSpacing: '.04em', color: d.accent, background: `${d.accent}18`, border: `1px solid ${d.accent}40`, borderRadius: '6px', padding: '5px 0', flexShrink: 0, width: '46px', textAlign: 'center' }}>{d.badge}</span>
+                                <div style={{ fontSize: '13px', color: t.text1, fontWeight: 700 }}>{d.label}</div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )
+                    })()}
                   </div>
 
                     </div>{/* end right column */}
