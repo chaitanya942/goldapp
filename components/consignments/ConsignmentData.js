@@ -1906,14 +1906,17 @@ export default function ConsignmentData() {
 
             {/* ── Hero header ──────────────────────────────────────────── */}
             <div style={{
-              padding: '20px 26px 18px',
+              padding: '22px 28px 20px',
               borderBottom: `1px solid ${t.border}`,
-              background: `linear-gradient(160deg, ${t.gold}12 0%, transparent 100%)`,
+              background: `linear-gradient(150deg, ${t.gold}16 0%, transparent 62%)`,
               flexShrink: 0,
             }}>
-              <div style={{ fontSize: '9px', color: t.gold, letterSpacing: '.18em', textTransform: 'uppercase', fontWeight: 700 }}>Create Consignment</div>
-              <div style={{ fontSize: '20px', fontWeight: 600, color: t.text1, marginTop: '4px', letterSpacing: '-.01em' }}>Confirm before dispatch</div>
-              <div style={{ fontSize: '12px', color: t.text3, marginTop: '4px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '9px' }}>
+                <span style={{ width: '18px', height: '2px', borderRadius: '2px', background: t.gold, display: 'inline-block' }} />
+                <span style={{ fontSize: '9.5px', color: t.gold, letterSpacing: '.22em', textTransform: 'uppercase', fontWeight: 800 }}>Create Consignment</span>
+              </div>
+              <div style={{ fontSize: '23px', fontWeight: 800, color: t.text1, marginTop: '7px', letterSpacing: '-.025em' }}>Confirm before dispatch</div>
+              <div style={{ fontSize: '12px', color: t.text3, marginTop: '5px', lineHeight: 1.5 }}>
                 Once you create, bills are locked to this consignment until accounts approves or it's voided.
               </div>
             </div>
@@ -2274,12 +2277,29 @@ export default function ConsignmentData() {
               display: 'flex', gap: '10px', justifyContent: 'flex-end', alignItems: 'center',
               flexShrink: 0,
             }}>
-              <span style={{ fontSize: '10px', color: t.text4, marginRight: 'auto' }}>
-                You'll be asked to confirm once more before creation.
-              </span>
+              {(() => {
+                const footDest = moveType === 'EXTERNAL' ? 'Head Office' : moveType === 'INTERNAL' ? destBranch : null
+                return (
+                  <div style={{ marginRight: 'auto', minWidth: 0 }}>
+                    {footDest ? (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '7px', fontSize: '12px', color: t.text2, flexWrap: 'wrap' }}>
+                        <strong style={{ color: t.text1, fontFamily: 'monospace' }}>{selected.size}</strong>
+                        <span style={{ color: t.text3 }}>bill{selected.size === 1 ? '' : 's'}</span>
+                        <span style={{ color: t.text4 }}>·</span>
+                        <strong style={{ color: t.gold, fontFamily: 'monospace' }}>{fmtWt(totalSelWt)}</strong>
+                        <span style={{ color: t.text4 }}>→</span>
+                        <strong style={{ color: moveType === 'EXTERNAL' ? t.gold : t.purple, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '220px' }}>{footDest}</strong>
+                      </div>
+                    ) : (
+                      <span style={{ fontSize: '11.5px', color: t.text4 }}>Pick a destination to continue.</span>
+                    )}
+                    <div style={{ fontSize: '10px', color: t.text4, marginTop: '3px' }}>You'll confirm once more before it's created.</div>
+                  </div>
+                )
+              })()}
               <button onClick={() => setShowModal(false)} style={btnOut}>Cancel</button>
               <button onClick={handleCreate} disabled={creating}
-                style={{ ...btnGold, padding: '10px 22px', fontSize: '13px', opacity: creating ? .7 : 1 }}>
+                style={{ ...btnGold, padding: '11px 24px', fontSize: '13px', fontWeight: 700, opacity: creating ? .7 : 1 }}>
                 {creating ? 'Creating…' : 'Confirm & Create →'}
               </button>
             </div>
