@@ -1897,7 +1897,7 @@ export default function ConsignmentData() {
             background: t.card,
             border: `1px solid ${t.border2}`,
             borderRadius: '18px',
-            width: '560px', maxWidth: '100%',
+            width: '780px', maxWidth: '100%',
             boxShadow: '0 28px 80px rgba(0,0,0,.55)',
             maxHeight: 'calc(100vh - 40px)',
             display: 'flex', flexDirection: 'column',
@@ -1980,13 +1980,18 @@ export default function ConsignmentData() {
                     </div>
                   )}
 
+                  {/* Top band: Destination picker (left) beside the route +
+                      summary (right). Broadens the modal and halves its height
+                      vs the old single column. Stacks on narrow widths. */}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '18px', alignItems: 'start', marginBottom: '4px' }}>
+                    <div style={{ minWidth: 0 }}>
                   {/* Destination — unified two-zone picker.
                       Hub combobox up top, an explicit 'send to Head Office'
                       button below. The previous segmented toggle defaulted
                       to EXTERNAL which let ops accidentally ship to HO when
                       they meant a hub — this layout forces an explicit
                       click on either side before Create unlocks. */}
-                  <div style={{ marginBottom: '18px' }}>
+                  <div style={{ marginBottom: '0' }}>
                     <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', marginBottom: '8px', fontWeight: 700, display: 'flex', alignItems: 'baseline', gap: '6px' }}>
                       Destination
                       <span style={{ color: t.red, fontSize: '9px' }}>(required)</span>
@@ -2106,13 +2111,15 @@ export default function ConsignmentData() {
                     )}
                   </div>
 
+                    </div>{/* end left column */}
+                    <div style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: '12px' }}>
                   {/* Source ──→ Destination flow card */}
                   <div style={{
                     background: t.card2,
                     border: `1px solid ${t.border}`,
                     borderRadius: '12px',
                     padding: '14px 16px',
-                    marginBottom: '14px',
+                    marginBottom: '0',
                     display: 'grid',
                     gridTemplateColumns: '1fr auto 1fr',
                     gap: '12px',
@@ -2134,7 +2141,7 @@ export default function ConsignmentData() {
                   </div>
 
                   {/* Stats row — bills · net weight · total value */}
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px', marginBottom: '14px' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px', marginBottom: '0' }}>
                     <div style={{ background: t.card2, border: `1px solid ${t.border}`, borderRadius: '10px', padding: '12px 14px' }}>
                       <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 700, marginBottom: '4px' }}>Bills</div>
                       <div style={{ fontSize: '20px', color: t.text1, fontFamily: 'monospace', fontWeight: 600, lineHeight: 1 }}>{selected.size}</div>
@@ -2155,7 +2162,7 @@ export default function ConsignmentData() {
                     border: `1px solid ${t.border}`,
                     borderRadius: '10px',
                     padding: '12px 14px',
-                    marginBottom: '14px',
+                    marginBottom: '0',
                     display: 'flex', alignItems: 'center', gap: '12px',
                   }}>
                     <div style={{
@@ -2173,13 +2180,16 @@ export default function ConsignmentData() {
                     </div>
                   </div>
 
+                    </div>{/* end right column */}
+                  </div>{/* end top band grid */}
+
                   {/* Branch Contact override — prints on Delivery Challan +
                       Issue Voucher. Pre-seeded from the branch's configured
                       contact, but operations can edit so the person actually
                       handling THIS shipment is on the paperwork (not just the
                       branch manager). Empty → fall back to branch defaults at
                       PDF-generation time. */}
-                  <div style={{ marginBottom: '14px' }}>
+                  <div style={{ marginBottom: '14px', marginTop: '14px' }}>
                     <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', marginBottom: '6px', fontWeight: 700 }}>
                       Branch Contact <span style={{ textTransform: 'none', fontWeight: 400, color: t.text4 }}>(prints on {moveType === 'INTERNAL' ? 'Issue Voucher' : 'Delivery Challan'})</span>
                     </div>
