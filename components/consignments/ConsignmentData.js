@@ -2206,15 +2206,6 @@ export default function ConsignmentData() {
                       )}
                     </div>
                   )}
-
-                  {/* Plain-language heads-up. Also fills the left column so it
-                      balances against the taller summary panel on the right. */}
-                  <div style={{ marginTop: '4px', background: `${t.gold}0a`, border: `1px solid ${t.border2}`, borderLeft: `3px solid ${t.gold}`, borderRadius: '10px', padding: '13px 15px' }}>
-                    <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 700, marginBottom: '7px' }}>Good to know</div>
-                    <div style={{ fontSize: '12px', color: t.text2, lineHeight: 1.7 }}>
-                      Creating locks these <strong style={{ color: t.text1 }}>{selected.size}</strong> bill{selected.size === 1 ? '' : 's'} to this consignment and generates the <strong style={{ color: t.text1 }}>{isExternal ? 'Delivery Challan' : 'Issue Voucher'}</strong>. Open the documents anytime from the Consignment Data list. Bills release only if accounts voids it.
-                    </div>
-                  </div>
                     </div>{/* end left column */}
                     <div style={{ minWidth: 0 }}>
                   {/* Section label mirrors DESTINATION on the left so the two
@@ -2275,9 +2266,19 @@ export default function ConsignmentData() {
                       )
                       const inter = T.isExternalInterstate
                       return (
-                        <div style={{ padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                          {line(`Markup @ ${T.upliftPct}%`, inter ? rs(T.markupAmt) : '—', { muted: !inter })}
-                          {line(`IGST @ ${T.gstRate}%`,     inter ? rs(T.igstAmt)   : '—', { muted: !inter })}
+                        <div style={{ padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                          {/* Markup + IGST side by side */}
+                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
+                            {[
+                              { label: `Markup @ ${T.upliftPct}%`, value: inter ? rs(T.markupAmt) : '—' },
+                              { label: `IGST @ ${T.gstRate}%`,     value: inter ? rs(T.igstAmt)   : '—' },
+                            ].map(x => (
+                              <div key={x.label} style={{ minWidth: 0 }}>
+                                <div style={{ fontSize: '9.5px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 700, marginBottom: '5px' }}>{x.label}</div>
+                                <div style={{ fontSize: '14px', color: inter ? t.text2 : t.text4, fontFamily: 'monospace', fontWeight: 700 }}>{x.value}</div>
+                              </div>
+                            ))}
+                          </div>
                           <div style={{ height: '1px', background: t.border, margin: '2px 0' }} />
                           {line('Total value', rs(T.grandTotal), { strong: true })}
                         </div>
@@ -2311,31 +2312,30 @@ export default function ConsignmentData() {
                         </div>
                       )
                     })()}
-                    {(loadingPreview || previewNumbers) && (
-                      <>
-                        <div style={{ height: '1px', background: t.border }} />
-                        <div style={{ padding: '16px 20px' }}>
-                          {loadingPreview ? (
-                            <div style={{ fontSize: '11px', color: t.text4 }}>Generating numbers…</div>
-                          ) : (
-                            <div style={{ display: 'flex', gap: '22px', flexWrap: 'wrap' }}>
-                              <div style={{ minWidth: 0 }}>
-                                <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 700, marginBottom: '5px' }}>TMP PRF No</div>
-                                <div style={{ fontSize: '14px', color: t.gold, fontWeight: 700, fontFamily: 'monospace' }}>{previewNumbers.tmp_prf_no}</div>
-                              </div>
-                              <div style={{ minWidth: 0, flex: 1 }}>
-                                <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 700, marginBottom: '5px' }}>{moveType === 'INTERNAL' ? 'Voucher No' : 'Challan No'}</div>
-                                <div style={{ fontSize: '11px', color: t.blue, fontWeight: 600, fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{previewNumbers.challan_no}</div>
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      </>
-                    )}
                   </div>
 
                     </div>{/* end right column */}
                   </div>{/* end top band grid */}
+
+                  {/* Reference numbers — full-width band beneath both columns. */}
+                  {(loadingPreview || previewNumbers) && (
+                    <div style={{ marginTop: '18px', border: `1px solid ${t.border2}`, borderRadius: '12px', background: t.card2, padding: '15px 20px' }}>
+                      {loadingPreview ? (
+                        <div style={{ fontSize: '11px', color: t.text4 }}>Generating reference numbers…</div>
+                      ) : (
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '20px' }}>
+                          <div style={{ minWidth: 0 }}>
+                            <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 700, marginBottom: '6px' }}>TMP PRF No</div>
+                            <div style={{ fontSize: '15px', color: t.gold, fontWeight: 700, fontFamily: 'monospace' }}>{previewNumbers.tmp_prf_no}</div>
+                          </div>
+                          <div style={{ minWidth: 0 }}>
+                            <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 700, marginBottom: '6px' }}>{moveType === 'INTERNAL' ? 'Voucher No' : 'Challan No'}</div>
+                            <div style={{ fontSize: '13px', color: t.blue, fontWeight: 600, fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{previewNumbers.challan_no}</div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </>
               )
             })()}
