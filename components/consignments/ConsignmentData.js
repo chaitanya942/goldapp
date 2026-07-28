@@ -2613,14 +2613,27 @@ function EmailDocsModal({ t, c, branchEmail, onClose, onSent, onError }) {
   }
 
   if (typeof document === 'undefined') return null
-  const inp = { width: '100%', background: t.card2, border: `1px solid ${t.border2}`, borderRadius: '10px', padding: '11px 13px', fontSize: '13.5px', color: t.text1, outline: 'none', boxSizing: 'border-box', transition: 'border-color .15s, box-shadow .15s' }
+  const inp = { width: '100%', background: t.card2, border: `1px solid ${t.border2}`, borderRadius: '10px', padding: '11px 13px', fontSize: '13.5px', color: t.text1, outline: 'none', boxSizing: 'border-box', transition: 'border-color .15s, box-shadow .15s', boxShadow: 'inset 0 1px 2px rgba(0,0,0,.05)' }
   // Friendly document names for the three attachments (order fixed by the API:
   // report, voucher/challan, EWB/E-Invoice) — the raw filenames are cryptic to
   // the branch ops team, so lead with a plain-English label + a file-type badge.
   const docLabels = ['Consignee Report', info?.doc_label || 'Voucher / Challan', info?.gst_label || 'EWB / E-Invoice']
   const docRows = (info?.attachments || []).map((f, i) => ({ name: docLabels[i] || 'Document', file: f, ext: (String(f).split('.').pop() || '').toUpperCase() }))
+  // Colour each document by what it IS (mirrors the pipeline): Report = gold,
+  // Voucher/Challan = blue, then green for an E-Way Bill or purple for an
+  // E-Invoice. Gives the three rows a distinct, on-brand identity.
+  const docAccent = (i) => i === 0 ? t.gold : i === 1 ? t.blue : (info?.gst_label === 'E-Invoice' ? t.purple : t.green)
   const bills = c.total_bills
   const wt = c.total_gross_wt != null ? Number(c.total_gross_wt).toFixed(3) : (c.total_net_wt != null ? Number(c.total_net_wt).toFixed(3) : null)
+  // A proper folded-corner document glyph, tinted to the doc's accent, with the
+  // file type lettered inside — reads as a real file, not a coloured box.
+  const FileGlyph = ({ ext, color }) => (
+    <svg width="28" height="34" viewBox="0 0 28 34" style={{ flexShrink: 0 }} aria-hidden="true">
+      <path d="M3 1.5 h14 l8.5 8.5 V31 a1.5 1.5 0 0 1-1.5 1.5 H3 a1.5 1.5 0 0 1-1.5-1.5 V3 A1.5 1.5 0 0 1 3 1.5 Z" fill={`${color}14`} stroke={color} strokeWidth="1.4" />
+      <path d="M17 1.5 V10 h8.5" fill="none" stroke={color} strokeWidth="1.4" strokeLinejoin="round" />
+      <text x="13.5" y="26" fontSize="6.5" fontWeight="800" fill={color} textAnchor="middle" style={{ fontFamily: 'system-ui, sans-serif', letterSpacing: '.03em' }}>{ext}</text>
+    </svg>
+  )
   return createPortal((
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.78)', zIndex: 120, display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(6px)', padding: '20px' }}
       onClick={() => { if (!sending) onClose?.() }}>
@@ -2628,9 +2641,11 @@ function EmailDocsModal({ t, c, branchEmail, onClose, onSent, onError }) {
         @keyframes edmIn { from { opacity: 0; transform: translateY(8px) scale(.985) } to { opacity: 1; transform: none } }
         .edm-card { animation: edmIn .2s cubic-bezier(.2,.7,.3,1) }
         .edm-card input:focus { border-color: ${t.green} !important; box-shadow: 0 0 0 3px ${t.green}22 }
-        .edm-send:hover:not(:disabled) { filter: brightness(1.07) }
+        .edm-send:hover:not(:disabled) { filter: brightness(1.07); transform: translateY(-1px) }
         .edm-cancel:hover { background: ${t.card2} }
-        @media (prefers-reduced-motion: reduce) { .edm-card { animation: none } }
+        .edm-doc { transition: transform .13s ease, box-shadow .13s ease }
+        .edm-doc:hover { transform: translateY(-1px) }
+        @media (prefers-reduced-motion: reduce) { .edm-card, .edm-send, .edm-doc { animation: none; transition: none } }
       `}</style>
       <div className="edm-card" onClick={e => e.stopPropagation()}
         style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: '16px', width: '100%', maxWidth: '480px', boxShadow: '0 24px 70px rgba(0,0,0,.55)', overflow: 'hidden' }}>
@@ -2672,15 +2687,14 @@ function EmailDocsModal({ t, c, branchEmail, onClose, onSent, onError }) {
                 </span>
               )}
             </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '7px', marginBottom: '18px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '20px' }}>
               {docRows.map((d, i) => {
-                const isPdf = d.ext === 'PDF'
-                const badge = isPdf ? t.red : t.gold
+                const accent = docAccent(i)
                 return (
-                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '11px', background: t.card2, border: `1px solid ${t.border2}`, borderRadius: '10px', padding: '9px 11px' }}>
-                    <div style={{ flexShrink: 0, width: '30px', height: '34px', borderRadius: '6px', background: `${badge}18`, color: badge, border: `1px solid ${badge}40`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '8px', fontWeight: 800, letterSpacing: '.03em' }}>{d.ext}</div>
+                  <div className="edm-doc" key={i} style={{ display: 'flex', alignItems: 'center', gap: '12px', background: t.card, border: `1px solid ${t.border}`, borderLeft: `3px solid ${accent}`, borderRadius: '11px', padding: '10px 13px', boxShadow: t.shadow }}>
+                    <FileGlyph ext={d.ext} color={accent} />
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: '12.5px', fontWeight: 700, color: t.text1 }}>{d.name}</div>
+                      <div style={{ fontSize: '13px', fontWeight: 700, color: t.text1, marginBottom: '1px' }}>{d.name}</div>
                       <div style={{ fontSize: '10px', color: t.text4, fontFamily: 'monospace', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{d.file}</div>
                     </div>
                   </div>
@@ -2712,14 +2726,14 @@ function EmailDocsModal({ t, c, branchEmail, onClose, onSent, onError }) {
               </div>
             )}
 
-            <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+            <div style={{ margin: '22px -24px -20px', padding: '15px 24px', borderTop: `1px solid ${t.border2}`, background: t.card3, display: 'flex', gap: '10px', justifyContent: 'flex-end', alignItems: 'center' }}>
               <button className="edm-cancel" onClick={() => { if (!sending) onClose?.() }} disabled={sending}
                 style={{ background: 'transparent', border: `1px solid ${t.border2}`, borderRadius: '9px', padding: '10px 18px', fontSize: '13px', fontWeight: 700, color: t.text2, cursor: sending ? 'not-allowed' : 'pointer', transition: 'background .15s' }}>
                 Cancel
               </button>
               <button className="edm-send" onClick={send} disabled={!canSend}
                 title={!info?.ready ? 'All 3 documents must be ready' : !toValid ? 'Enter a valid recipient email' : ''}
-                style={{ background: canSend ? t.green : t.border2, color: canSend ? '#fff' : t.text4, border: 'none', borderRadius: '9px', padding: '10px 22px', fontSize: '13px', fontWeight: 800, cursor: canSend ? 'pointer' : 'not-allowed', transition: 'filter .15s', display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                style={{ background: canSend ? t.green : t.border2, color: canSend ? '#fff' : t.text4, border: 'none', borderRadius: '9px', padding: '10px 24px', fontSize: '13px', fontWeight: 800, cursor: canSend ? 'pointer' : 'not-allowed', transition: 'filter .15s, transform .15s', display: 'inline-flex', alignItems: 'center', gap: '6px', boxShadow: canSend ? `0 3px 12px ${t.green}44` : 'none' }}>
                 {sending ? 'Sending…' : (alreadySent ? '✉ Resend' : '✉ Send')}
               </button>
             </div>
