@@ -1777,6 +1777,7 @@ export default function BiddingVolume() {
         total={sumBranches(preEodBranches)}
         metrics={sectionMetrics(sumBranches(preEodBranches).net_wt, sumBranches(preEodBooked).net_wt, 7)}
         bookedBranches={preEodBooked}
+        dispatchedTodayBranches={dropKL(supply?.branch_pre_eod?.dispatched_today)}
         onRateChange={(p) => handleSectionRate(7, p)}
         onSetGainGrams={(g) => handleSectionGainGrams(7, g)}
         onAutoSelect={(dates, alt, tats) => selectSectionBills(['branch_pre_eod'], dates, null, tats)}
@@ -3269,6 +3270,11 @@ function SourceSection({
   // as a read-only "Already booked" band so booked stock stays visible (it
   // doesn't vanish from the section just because it left the picker list).
   bookedBranches,
+  // Section 7 only: at_branch stock whose branch already dispatched a
+  // consignment today (excluded from the bookable pool). Rendered as a
+  // read-only band at the very bottom — but ONLY when the pickup filter is
+  // 'all', so the default 'today' view stays focused on what's bookable.
+  dispatchedTodayBranches,
   // When provided, the Gain card becomes inline-editable. onRateChange(pct)
   // sets the shared company % rate; onSetGainGrams(g) sets a per-section
   // absolute gain override (grams). onAutoSelect() is fired when ops clicks
@@ -3319,6 +3325,7 @@ function SourceSection({
   const [exporting, setExporting] = useState(null)   // 'xlsx' | 'png' | null
   // Already-booked band — collapsed by default (just the summary row).
   const [bookedOpen, setBookedOpen] = useState(false)
+  const [dispatchedOpen, setDispatchedOpen] = useState(false)
   // Per-branch expand state for the bill drill-down. Keyed by branch_name
   // within this section — collapses on rerender if the branch disappears.
   const [openBranches, setOpenBranches] = useState(() => new Set())
@@ -3526,6 +3533,10 @@ function SourceSection({
   const bookedRows  = bookedBranches || []
   const bookedBills = bookedRows.reduce((s, b) => s + (b.total_bills || 0), 0)
   const bookedNet   = bookedRows.reduce((s, b) => s + (b.total_net_wt || 0), 0)
+  // Dispatched-today band (read-only, Section 7 only, 'all' view only).
+  const dispRows  = (selectedPickup === 'all' ? (dispatchedTodayBranches || []) : [])
+  const dispBills = dispRows.reduce((s, b) => s + (b.total_bills || 0), 0)
+  const dispNet   = dispRows.reduce((s, b) => s + (b.total_net_wt || 0), 0)
   const isEmpty   = branches.length === 0 && subBranches.length === 0 && bookedRows.length === 0
   const unbookedBills = total?.bills  || 0
   const totalBills = unbookedBills + bookedBills   // header count = booked + unbooked
@@ -4462,6 +4473,74 @@ function SourceSection({
                             </span>
                             <span style={{ color: t.text2, textAlign: 'right', fontWeight: 600 }}>{fmt(bill.gross_weight, 2)}<span style={{ fontSize: 10, color: t.text4, marginLeft: 2 }}>g</span></span>
                             <span style={{ color: bk, textAlign: 'right', fontWeight: 800 }}>{fmt(bill.net_weight, 2)}<span style={{ fontSize: 10, color: t.text3, marginLeft: 2 }}>g</span></span>
+                            <span style={{ color: t.blue, textAlign: 'right', fontWeight: 700 }}>{bill.total_amount != null ? `₹${Math.round(Number(bill.total_amount)).toLocaleString('en-IN')}` : '—'}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    </Fragment>
+                  )
+                })}
+              </div>
+            )
+          })()}
+
+          {/* Dispatched-today band (read-only). These branches already fired a
+              consignment today, so their leftover at_branch stock isn't bookable
+              (it's tomorrow's cycle) — shown only in the 'All' pickup view so ops
+              can still SEE the stock. Unselectable. */}
+          {dispRows.length > 0 && (() => {
+            const dk = t.gold
+            return (
+              <div style={{ margin: '10px 14px 4px', paddingTop: 12, borderTop: `1px dashed ${dk}44` }}>
+                <div onClick={() => setDispatchedOpen(o => !o)}
+                  style={{ display: 'flex', alignItems: 'center', gap: 9, flexWrap: 'wrap', marginBottom: dispatchedOpen ? 6 : 0, cursor: 'pointer', userSelect: 'none' }}>
+                  <span style={{ color: dispatchedOpen ? dk : t.text4, fontSize: 11, fontWeight: 800, width: 12, textAlign: 'center' }}>{dispatchedOpen ? '▾' : '▸'}</span>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11, color: dk, fontWeight: 800, letterSpacing: '.04em', textTransform: 'uppercase' }}>
+                    <span style={{ width: 16, height: 16, borderRadius: 5, background: `${dk}22`, color: dk, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 900 }}>↗</span>
+                    Consignment dispatched today · stock still at branch
+                  </span>
+                  <span style={{ fontSize: 11, color: t.text3, fontFamily: 'monospace', fontWeight: 700 }}>
+                    {fmt(dispNet, 2)} g · {dispBills} bill{dispBills === 1 ? '' : 's'}
+                  </span>
+                  <span style={{ fontSize: 10, color: t.text4, fontStyle: 'italic' }}>not bookable — next cycle</span>
+                </div>
+                {dispatchedOpen && dispRows.map(b => {
+                  const bexp   = openBranches.has('dt:' + b.branch_name)
+                  const bbills = Array.isArray(b.bills) ? b.bills : []
+                  const dtCols = '78px 130px minmax(0, 1fr) 100px 100px 130px'
+                  return (
+                    <Fragment key={`dt-${b.branch_name}`}>
+                    <div style={{ display: 'grid', gridTemplateColumns: rowGrid, alignItems: 'center', columnGap: 14, padding: '8px 11px', borderRadius: 8, opacity: 0.8 }}>
+                      <span style={{ width: 16, height: 16, borderRadius: 4, background: `${dk}22`, color: dk, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 900 }}>↗</span>
+                      <span style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                        <span style={{ fontSize: 13, color: t.text2, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{b.branch_name}</span>
+                        <span title="This branch already dispatched a consignment today" style={{ fontSize: 10.5, color: dk, background: `${dk}14`, border: `1px solid ${dk}33`, borderRadius: 4, padding: '1px 8px', whiteSpace: 'nowrap', fontWeight: 700, letterSpacing: '.03em', flexShrink: 0 }}>dispatched today</span>
+                      </span>
+                      <span style={{ textAlign: 'right', color: t.text3, fontWeight: 600 }}>{fmt(b.total_gross_wt, 2)}<span style={{ fontSize: 10, color: t.text4, marginLeft: 2 }}>g</span></span>
+                      <span style={{ textAlign: 'right', color: dk, fontWeight: 800 }}>{fmt(b.total_net_wt, 2)}<span style={{ fontSize: 10, color: t.text4, marginLeft: 2 }}>g</span></span>
+                      <span style={{ textAlign: 'right', color: t.text3, fontWeight: 700 }}>{b.total_bills} bill{b.total_bills === 1 ? '' : 's'}</span>
+                      <span onClick={() => toggleBranchExpand('dt:' + b.branch_name)} title={bexp ? 'Hide bills' : 'Show bills'}
+                        style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 24, height: 24, borderRadius: 6, cursor: 'pointer', color: bexp ? dk : t.text3, fontSize: 13, fontWeight: 800, background: bexp ? `${dk}18` : 'transparent', border: `1px solid ${bexp ? `${dk}66` : 'transparent'}`, opacity: bbills.length === 0 ? 0.25 : 1, pointerEvents: bbills.length === 0 ? 'none' : 'auto' }}>
+                        {bexp ? '▾' : '▸'}
+                      </span>
+                    </div>
+                    {bexp && bbills.length > 0 && (
+                      <div style={{ marginLeft: 30, marginTop: 2, marginBottom: 8, paddingLeft: 12, paddingTop: 5, paddingBottom: 5, borderLeft: `2px solid ${dk}40` }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: dtCols, columnGap: 14, padding: '4px 8px', fontSize: 10, color: t.text3, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 800 }}>
+                          <span>Date</span><span>App ID</span><span>Customer</span>
+                          <span style={{ textAlign: 'right' }}>Gross</span><span style={{ textAlign: 'right' }}>Net</span><span style={{ textAlign: 'right' }}>Amount</span>
+                        </div>
+                        {bbills.map((bill, idx) => (
+                          <div key={bill.id ?? idx} style={{ display: 'grid', gridTemplateColumns: dtCols, alignItems: 'center', columnGap: 14, padding: '5px 8px', borderRadius: 5, background: idx % 2 === 1 ? `${t.card2}40` : 'transparent', fontFamily: 'monospace', fontSize: 12 }}>
+                            <span style={{ color: t.text3, fontWeight: 600, whiteSpace: 'nowrap' }}>{bill.purchase_date ? fmtDateShort(bill.purchase_date) : '—'}</span>
+                            <span style={{ color: t.gold, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{bill.application_id || '—'}</span>
+                            <span style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                              <span style={{ color: t.text1, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{bill.customer_name || '—'}</span>
+                              <OriginChip t={t} bill={bill} />
+                            </span>
+                            <span style={{ color: t.text2, textAlign: 'right', fontWeight: 600 }}>{fmt(bill.gross_weight, 2)}<span style={{ fontSize: 10, color: t.text4, marginLeft: 2 }}>g</span></span>
+                            <span style={{ color: dk, textAlign: 'right', fontWeight: 800 }}>{fmt(bill.net_weight, 2)}<span style={{ fontSize: 10, color: t.text3, marginLeft: 2 }}>g</span></span>
                             <span style={{ color: t.blue, textAlign: 'right', fontWeight: 700 }}>{bill.total_amount != null ? `₹${Math.round(Number(bill.total_amount)).toLocaleString('en-IN')}` : '—'}</span>
                           </div>
                         ))}

@@ -865,6 +865,32 @@ export async function GET(req) {
         .filter(b => !postDispatchedBranches.has(b.branch_name))
     }
 
+    // 4b) Already-dispatched-today stock — the at_branch bills we just excluded
+    //     because their branch already fired a consignment today. Not bookable
+    //     (they belong to tomorrow's cycle), but ops wants them VISIBLE as a
+    //     read-only band at the bottom of Section 7 so the branch's leftover
+    //     stock isn't invisible. Same query as preEodBills, but for the
+    //     post-dispatched branches only.
+    let dispatchedTodayBills = []
+    if (postDispatchedBranches.size) {
+      const dlist = [...postDispatchedBranches].map(n => `"${n}"`).join(',')
+      const { data: db } = await supabase
+        .from('purchases')
+        .select('id, application_id, branch_name, current_branch, customer_name, gross_weight, net_weight, total_amount, purchase_date, stock_status, dispatched_at, crm_status')
+        .or(`current_branch.in.(${dlist}),and(current_branch.is.null,branch_name.in.(${dlist}))`)
+        .eq('stock_status', 'at_branch')
+        .eq('crm_status',   'approved')
+        .eq('is_deleted',   false)
+        .is('booking_id',   null)
+      dispatchedTodayBills = (db || [])
+        .map(b => {
+          const owner = b.current_branch || b.branch_name
+          const tat   = branchMeta[owner]?.delivery_tat_hours ?? branchMeta[b.branch_name]?.delivery_tat_hours ?? null
+          return { ...b, _origin_branch: b.branch_name, branch_name: owner, _tat_hours: tat }
+        })
+        .filter(b => postDispatchedBranches.has(b.branch_name))
+    }
+
     // 5) Booked Pending Dispatch — at_branch bills that are already attached
     //    to a booking (booking_id IS NOT NULL). These are "promises without
     //    delivery in motion" — a booking row commits this weight to a buyer,
@@ -1043,6 +1069,7 @@ export async function GET(req) {
     const bangPendingBookingByBranch = annotateConsignmentMeta(groupByBranch(bangalorePendingBooking))
     const bangGainRebookableByBranch = groupByBranch(bangaloreGainRebookable)
     const preEodByBranch     = groupByBranch(preEodBills)
+    const dispatchedTodayByBranch = groupByBranch(dispatchedTodayBills)
     // Flag whether each branch's pickup is today (Today/All client filter).
     for (const b of preEodByBranch) b.pickup_today = pickupTodaySet.has(b.branch_name)
 
@@ -1461,7 +1488,7 @@ export async function GET(req) {
         // sub-group inside Section 1 (Bangalore's own section).
         bangalore_pending_booking:   { branches: bangPendingBookingByBranch, total: bangPendingBookingTotal },
         bangalore_gain_rebookable:   { branches: bangGainRebookableByBranch, total: bangGainRebookableTotal },
-        branch_pre_eod: { branches: preEodByBranch,     total: preEodTotalToday, total_all: preEodTotal, booked: bookedSection(bookedPreEod, true), _debug: debugSection4 },
+        branch_pre_eod: { branches: preEodByBranch,     total: preEodTotalToday, total_all: preEodTotal, booked: bookedSection(bookedPreEod, true), dispatched_today: dispatchedTodayByBranch, _debug: debugSection4 },
         // Section 5 — booked but consignment not yet created (at_branch +
         // booking_id IS NOT NULL). View-only; intentionally excluded from
         // bookable totals (the booking row already counts this weight).
