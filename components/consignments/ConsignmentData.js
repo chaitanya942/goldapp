@@ -250,7 +250,14 @@ export default function ConsignmentData() {
     //     reason. They stay visible until ops re-creates or 7d passes.
     const filteredConsignments = (c.data || []).filter(x => {
       if (x.status === 'seed') return false
-      const isRejected = x.approval_status === 'rejected'
+      // A cancelled EWB / E-Invoice records approval_status='rejected' with a
+      // "Rejected because of cancellation of…" reason — but that's a
+      // CANCELLATION, not an accounts rejection. Don't treat it as rejected here
+      // (no REJECTED pill, no "accounts rejected" banner); it's hidden like any
+      // other cancelled row and lives on the Approvals → Cancellations tab.
+      const isCancelReject = x.approval_status === 'rejected'
+        && /^Rejected because of cancellation of/i.test(x.rejection_reason || '')
+      const isRejected = x.approval_status === 'rejected' && !isCancelReject
       if (x.status === 'cancelled' && !isRejected) return false
       // Anything still awaiting a decision must surface here — otherwise it
       // can appear in the accounts Pending Approvals queue but be invisible
