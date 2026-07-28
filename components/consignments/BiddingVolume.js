@@ -4118,6 +4118,15 @@ function SourceSection({
                           <span title={`Delivery TAT ${b.tat_hours}h`} style={{ fontSize: 10.5, color: t.text3, background: `${t.text4}1c`, border: `1px solid ${t.text4}2e`, borderRadius: 4, padding: '1px 8px', whiteSpace: 'nowrap', fontWeight: 700, letterSpacing: '.03em' }}>{b.tat_hours}h TAT</span>
                         )}
                         <PickupDaysChip t={t} days={b.pickup_days} />
+                        {b.pickup_time && (
+                          <span title={`Scheduled pickup time · ${b.pickup_time} (informational — pickups can run late)`}
+                            style={{ display: 'inline-flex', alignItems: 'center', gap: 4, flexShrink: 0,
+                              fontSize: 11, fontWeight: 700, letterSpacing: '.02em', whiteSpace: 'nowrap',
+                              color: t.gold, background: `${t.gold}12`, border: `1px solid ${t.gold}3a`,
+                              borderRadius: 6, padding: '3px 9px', lineHeight: 1.25 }}>
+                            <span aria-hidden="true" style={{ fontSize: 10 }}>⏱</span>{b.pickup_time}
+                          </span>
+                        )}
                         {(() => {
                           // Consignment-created date, derived from this branch's in-consignment
                           // bills. Shows a single date, or earliest→latest when they span days.
@@ -4129,12 +4138,11 @@ function SourceSection({
                             <span title={`Consignment created on ${label}`} style={{ fontSize: 10.5, color: t.blue, background: `${t.blue}14`, border: `1px solid ${t.blue}33`, borderRadius: 4, padding: '1px 8px', whiteSpace: 'nowrap', fontWeight: 700, letterSpacing: '.03em', flexShrink: 0 }}>Consignment created on {label}</span>
                           )
                         })()}
-                        {/* Pickup time intentionally suppressed — pickups
-                            can run late and we don't want ops to think a
-                            branch is "done" just because the scheduled
-                            time has passed. Eligibility is gated by
-                            pickup_days (today is a pickup day), not by
-                            the clock. */}
+                        {/* Pickup time is shown (chip above) as INFORMATIONAL
+                            only — ops asked to see the scheduled time next to the
+                            pickup days. Eligibility is still gated by pickup_days
+                            (today is a pickup day), never by the clock, since
+                            pickups can run late. */}
                         {(b._booking_earliest || (b._booking_users && b._booking_users.length > 0)) && (
                           <span style={{ fontSize: 11, color: t.text2, fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0 }}>
                             {b._booking_earliest && (
