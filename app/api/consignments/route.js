@@ -2617,18 +2617,26 @@ export async function GET(req) {
     const { data, error } = await query
     // Annotate each row with the latest "documents emailed" timestamp so the UI
     // can flag which consignments have already had their docs mailed to the
-    // branch (ops can still resend). One batch query; best-effort.
+    // branch (ops can still resend). Best-effort.
+    //
+    // NOTE: chunk the id list. A single `.in(all-ids)` with hundreds of
+    // consignments builds a ~17 KB URL that PostgREST rejects (URI too long) —
+    // the query then errored and the catch silently left EVERY row un-flagged,
+    // so the "Mail Sent" state never showed. Batch of 100 keeps each URL small.
     if (data?.length) {
       try {
         const ids = data.map(r => r.id)
-        const { data: sent } = await supabase
-          .from('consignment_activity_log')
-          .select('consignment_id, created_at')
-          .eq('event_type', 'documents_emailed')
-          .in('consignment_id', ids)
-          .order('created_at', { ascending: false })
         const latest = {}
-        for (const row of (sent || [])) if (!latest[row.consignment_id]) latest[row.consignment_id] = row.created_at
+        const CH = 100
+        for (let i = 0; i < ids.length; i += CH) {
+          const { data: sent } = await supabase
+            .from('consignment_activity_log')
+            .select('consignment_id, created_at')
+            .eq('event_type', 'documents_emailed')
+            .in('consignment_id', ids.slice(i, i + CH))
+            .order('created_at', { ascending: false })
+          for (const row of (sent || [])) if (!latest[row.consignment_id]) latest[row.consignment_id] = row.created_at
+        }
         for (const r of data) r.documents_emailed_at = latest[r.id] || null
       } catch { /* leave rows un-annotated on log hiccup */ }
     }

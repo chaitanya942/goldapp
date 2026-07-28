@@ -1579,7 +1579,7 @@ export default function ConsignmentData() {
                             title={!allReady
                               ? 'Available once the Consignee Report, Voucher/Challan and E-Way Bill / E-Invoice are all done'
                               : emailed
-                                ? `Already emailed${sentOn ? ' on ' + sentOn : ''} — click to resend`
+                                ? `Mail sent${sentOn ? ' on ' + sentOn : ''} — click to resend`
                                 : 'Email all 3 documents to the branch'}
                             style={{
                               display: 'inline-flex', alignItems: 'center', gap: '5px',
@@ -1589,7 +1589,7 @@ export default function ConsignmentData() {
                               color: !allReady ? t.text4 : emailed ? t.green : '#fff',
                               cursor: allReady ? 'pointer' : 'not-allowed', opacity: allReady ? 1 : 0.55,
                             }}>
-                            {emailed ? '✓ Emailed' : '✉ Email'}
+                            {emailed ? '✓ Mail Sent' : '✉ Email'}
                           </button>
                         )
                       })()}
