@@ -3188,6 +3188,17 @@ function ActionPill({ label, color, onClick, t, subtle = false }) {
 // no branch runs pickups then. Nothing renders when the branch has no
 // configured pickup_days.
 const PICKUP_WEEK = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+// Branch pickup_time is stored 24h ("16:00"); ops want it read as 12h with
+// AM/PM. Anything that isn't HH:MM (free-form notes) is shown verbatim.
+function fmtPickupTime(s) {
+  if (!s) return ''
+  const m = /^(\d{1,2}):(\d{2})/.exec(String(s).trim())
+  if (!m) return String(s)
+  let h = Number(m[1]); const min = m[2]
+  const ap = h < 12 ? 'AM' : 'PM'
+  h = h % 12 || 12
+  return `${h}:${min} ${ap}`
+}
 function PickupDaysChip({ t, days }) {
   if (!Array.isArray(days) || days.length === 0) return null
   // Show ONLY the days pickup actually runs — ops don't want the skipped days
@@ -4106,7 +4117,7 @@ function SourceSection({
                           rows). Inline placement uses the empty space after
                           the 24h TAT chip instead of stacking a new line. */}
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-                        <span style={{ fontSize: 13.5, color: t.text1, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{b.branch_name}</span>
+                        <span title={b.branch_name} style={{ fontSize: 13.5, color: t.text1, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: '0 0 178px' }}>{b.branch_name}</span>
                         {(() => {
                           const lk = isDateLocked ? (b.bills || []).filter(bl => isDateLocked(bl.purchase_date)).length : 0
                           return lk > 0 ? (
@@ -4117,14 +4128,19 @@ function SourceSection({
                         {b.tat_hours != null && (
                           <span title={`Delivery TAT ${b.tat_hours}h`} style={{ fontSize: 10.5, color: t.text3, background: `${t.text4}1c`, border: `1px solid ${t.text4}2e`, borderRadius: 4, padding: '1px 8px', whiteSpace: 'nowrap', fontWeight: 700, letterSpacing: '.03em' }}>{b.tat_hours}h TAT</span>
                         )}
-                        <PickupDaysChip t={t} days={b.pickup_days} />
+                        {/* Fixed-width slot so the pickup-time chip that follows
+                            lines up in its own column across every row, whatever
+                            the pickup-days content (or its absence). */}
+                        <span style={{ display: 'inline-flex', width: 140, flexShrink: 0 }}>
+                          <PickupDaysChip t={t} days={b.pickup_days} />
+                        </span>
                         {b.pickup_time && (
-                          <span title={`Scheduled pickup time · ${b.pickup_time} (informational — pickups can run late)`}
+                          <span title={`Scheduled pickup time · ${fmtPickupTime(b.pickup_time)} (informational — pickups can run late)`}
                             style={{ display: 'inline-flex', alignItems: 'center', gap: 4, flexShrink: 0,
                               fontSize: 11, fontWeight: 700, letterSpacing: '.02em', whiteSpace: 'nowrap',
                               color: t.gold, background: `${t.gold}12`, border: `1px solid ${t.gold}3a`,
                               borderRadius: 6, padding: '3px 9px', lineHeight: 1.25 }}>
-                            <span aria-hidden="true" style={{ fontSize: 10 }}>⏱</span>{b.pickup_time}
+                            <span aria-hidden="true" style={{ fontSize: 10 }}>⏱</span>{fmtPickupTime(b.pickup_time)}
                           </span>
                         )}
                         {(() => {
