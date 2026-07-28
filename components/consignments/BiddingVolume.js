@@ -4128,20 +4128,26 @@ function SourceSection({
                         {b.tat_hours != null && (
                           <span title={`Delivery TAT ${b.tat_hours}h`} style={{ fontSize: 10.5, color: t.text3, background: `${t.text4}1c`, border: `1px solid ${t.text4}2e`, borderRadius: 4, padding: '1px 8px', whiteSpace: 'nowrap', fontWeight: 700, letterSpacing: '.03em' }}>{b.tat_hours}h TAT</span>
                         )}
-                        {/* Fixed-width slot so the pickup-time chip that follows
-                            lines up in its own column across every row, whatever
-                            the pickup-days content (or its absence). */}
-                        <span style={{ display: 'inline-flex', width: 140, flexShrink: 0 }}>
-                          <PickupDaysChip t={t} days={b.pickup_days} />
-                        </span>
-                        {b.pickup_time && (
-                          <span title={`Scheduled pickup time · ${fmtPickupTime(b.pickup_time)} (informational — pickups can run late)`}
-                            style={{ display: 'inline-flex', alignItems: 'center', gap: 4, flexShrink: 0,
-                              fontSize: 11, fontWeight: 700, letterSpacing: '.02em', whiteSpace: 'nowrap',
-                              color: t.gold, background: `${t.gold}12`, border: `1px solid ${t.gold}3a`,
-                              borderRadius: 6, padding: '3px 9px', lineHeight: 1.25 }}>
-                            <span aria-hidden="true" style={{ fontSize: 10 }}>⏱</span>{fmtPickupTime(b.pickup_time)}
-                          </span>
+                        {/* Pickup schedule (days + time) is only meaningful for
+                            OUTSTATION branches — the local Bangalore pool is
+                            same-day with no fixed pickup, so the chips are noise
+                            there. Values still live in Branch Management. The
+                            fixed-width slot keeps the time chip column-aligned. */}
+                        {b.region !== 'Bangalore' && b.model_type !== 'bangalore' && (
+                          <>
+                            <span style={{ display: 'inline-flex', width: 140, flexShrink: 0 }}>
+                              <PickupDaysChip t={t} days={b.pickup_days} />
+                            </span>
+                            {b.pickup_time && (
+                              <span title={`Scheduled pickup time · ${fmtPickupTime(b.pickup_time)} (informational — pickups can run late)`}
+                                style={{ display: 'inline-flex', alignItems: 'center', gap: 4, flexShrink: 0,
+                                  fontSize: 11, fontWeight: 700, letterSpacing: '.02em', whiteSpace: 'nowrap',
+                                  color: t.gold, background: `${t.gold}12`, border: `1px solid ${t.gold}3a`,
+                                  borderRadius: 6, padding: '3px 9px', lineHeight: 1.25 }}>
+                                <span aria-hidden="true" style={{ fontSize: 10 }}>⏱</span>{fmtPickupTime(b.pickup_time)}
+                              </span>
+                            )}
+                          </>
                         )}
                         {(() => {
                           // Consignment-created date, derived from this branch's in-consignment
