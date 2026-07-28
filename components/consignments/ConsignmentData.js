@@ -2613,64 +2613,119 @@ function EmailDocsModal({ t, c, branchEmail, onClose, onSent, onError }) {
   }
 
   if (typeof document === 'undefined') return null
-  const inp = { width: '100%', background: t.card2, border: `1px solid ${t.border2}`, borderRadius: '9px', padding: '10px 13px', fontSize: '13px', color: t.text1, outline: 'none', boxSizing: 'border-box', fontFamily: 'monospace' }
+  const inp = { width: '100%', background: t.card2, border: `1px solid ${t.border2}`, borderRadius: '10px', padding: '11px 13px', fontSize: '13.5px', color: t.text1, outline: 'none', boxSizing: 'border-box', transition: 'border-color .15s, box-shadow .15s' }
+  // Friendly document names for the three attachments (order fixed by the API:
+  // report, voucher/challan, EWB/E-Invoice) — the raw filenames are cryptic to
+  // the branch ops team, so lead with a plain-English label + a file-type badge.
+  const docLabels = ['Consignee Report', info?.doc_label || 'Voucher / Challan', info?.gst_label || 'EWB / E-Invoice']
+  const docRows = (info?.attachments || []).map((f, i) => ({ name: docLabels[i] || 'Document', file: f, ext: (String(f).split('.').pop() || '').toUpperCase() }))
+  const bills = c.total_bills
+  const wt = c.total_gross_wt != null ? Number(c.total_gross_wt).toFixed(3) : (c.total_net_wt != null ? Number(c.total_net_wt).toFixed(3) : null)
   return createPortal((
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.78)', zIndex: 120, display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(6px)', padding: '20px' }}
       onClick={() => { if (!sending) onClose?.() }}>
-      <div onClick={e => e.stopPropagation()}
-        style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: '14px', padding: '22px 24px', width: '100%', maxWidth: '460px', boxShadow: '0 20px 60px rgba(0,0,0,.5)' }}>
-        <div style={{ fontSize: '15px', fontWeight: 800, color: t.text1, marginBottom: '2px' }}>Email documents to branch</div>
-        <div style={{ fontSize: '12px', color: t.text3, marginBottom: '16px' }}>
-          {c.tmp_prf_no} · {c.branch_name}{info?.dest ? ` → ${info.dest}` : ''}
+      <style>{`
+        @keyframes edmIn { from { opacity: 0; transform: translateY(8px) scale(.985) } to { opacity: 1; transform: none } }
+        .edm-card { animation: edmIn .2s cubic-bezier(.2,.7,.3,1) }
+        .edm-card input:focus { border-color: ${t.green} !important; box-shadow: 0 0 0 3px ${t.green}22 }
+        .edm-send:hover:not(:disabled) { filter: brightness(1.07) }
+        .edm-cancel:hover { background: ${t.card2} }
+        @media (prefers-reduced-motion: reduce) { .edm-card { animation: none } }
+      `}</style>
+      <div className="edm-card" onClick={e => e.stopPropagation()}
+        style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: '16px', width: '100%', maxWidth: '480px', boxShadow: '0 24px 70px rgba(0,0,0,.55)', overflow: 'hidden' }}>
+
+        {/* Header */}
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: '13px', padding: '20px 24px 16px', borderBottom: `1px solid ${t.border2}` }}>
+          <div style={{ flexShrink: 0, width: '38px', height: '38px', borderRadius: '11px', background: `${t.green}18`, color: t.green, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '18px' }}>✉</div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: '15.5px', fontWeight: 800, color: t.text1, lineHeight: 1.2 }}>Email documents to branch</div>
+            <div style={{ fontSize: '12px', color: t.text3, marginTop: '4px', display: 'flex', alignItems: 'center', gap: '7px', flexWrap: 'wrap' }}>
+              <span style={{ fontFamily: 'monospace', color: t.text2, fontWeight: 700 }}>{c.tmp_prf_no}</span>
+              <span style={{ color: t.text4 }}>·</span>
+              <span>{c.branch_name}</span>
+              <span style={{ color: t.gold }}>→</span>
+              <span>{info?.dest || 'Head Office'}</span>
+            </div>
+          </div>
         </div>
 
+        {/* Body */}
+        <div style={{ padding: '16px 24px 20px' }}>
         {loading ? (
-          <div style={{ fontSize: '13px', color: t.text3, padding: '12px 0' }}>Loading…</div>
+          <div style={{ fontSize: '13px', color: t.text3, padding: '22px 0', textAlign: 'center' }}>Loading…</div>
         ) : (
           <>
             {alreadySent && (
-              <div style={{ fontSize: '11.5px', color: t.green, background: `${t.green}12`, border: `1px solid ${t.green}40`, borderRadius: '8px', padding: '9px 11px', marginBottom: '14px', lineHeight: 1.5 }}>
-                ✓ Already emailed {fmtSent(info.last_sent.at)}{info.last_sent.by ? ` by ${info.last_sent.by}` : ''}{info.last_sent.to ? ` to ${info.last_sent.to}` : ''}. You can resend if required.
+              <div style={{ display: 'flex', gap: '8px', fontSize: '11.5px', color: t.green, background: `${t.green}12`, border: `1px solid ${t.green}40`, borderRadius: '9px', padding: '10px 12px', marginBottom: '16px', lineHeight: 1.5 }}>
+                <span style={{ flexShrink: 0, fontWeight: 800 }}>✓</span>
+                <span>Already emailed {fmtSent(info.last_sent.at)}{info.last_sent.by ? ` by ${info.last_sent.by}` : ''}{info.last_sent.to ? ` to ${info.last_sent.to}` : ''}. You can resend if required.</span>
               </div>
             )}
-            <div style={{ fontSize: '10px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 700, marginBottom: '6px' }}>Attachments</div>
-            <ol style={{ margin: '0 0 16px 0', padding: '0 0 0 18px', fontSize: '12px', color: t.text2, lineHeight: 1.7 }}>
-              {(info?.attachments || []).map((f, i) => <li key={i} style={{ fontFamily: 'monospace', wordBreak: 'break-all' }}>{f}</li>)}
-            </ol>
+
+            {/* Attachments — plain-English document names, not raw filenames */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+              <span style={{ fontSize: '10px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 700 }}>Attachments</span>
+              {(bills != null || wt) && (
+                <span style={{ fontSize: '10.5px', color: t.text3 }}>
+                  {bills != null ? `${bills} bill${bills === 1 ? '' : 's'}` : ''}{bills != null && wt ? ' · ' : ''}{wt ? `${wt} g` : ''}
+                </span>
+              )}
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '7px', marginBottom: '18px' }}>
+              {docRows.map((d, i) => {
+                const isPdf = d.ext === 'PDF'
+                const badge = isPdf ? t.red : t.gold
+                return (
+                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '11px', background: t.card2, border: `1px solid ${t.border2}`, borderRadius: '10px', padding: '9px 11px' }}>
+                    <div style={{ flexShrink: 0, width: '30px', height: '34px', borderRadius: '6px', background: `${badge}18`, color: badge, border: `1px solid ${badge}40`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '8px', fontWeight: 800, letterSpacing: '.03em' }}>{d.ext}</div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: '12.5px', fontWeight: 700, color: t.text1 }}>{d.name}</div>
+                      <div style={{ fontSize: '10px', color: t.text4, fontFamily: 'monospace', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{d.file}</div>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+
             {!info?.ready && (
-              <div style={{ fontSize: '11.5px', color: t.orange, background: `${t.orange}12`, border: `1px solid ${t.orange}40`, borderRadius: '8px', padding: '9px 11px', marginBottom: '14px' }}>
+              <div style={{ fontSize: '11.5px', color: t.orange, background: `${t.orange}12`, border: `1px solid ${t.orange}40`, borderRadius: '9px', padding: '10px 12px', marginBottom: '16px' }}>
                 Not ready to send — missing: {(info?.missing || []).join(', ')}.
               </div>
             )}
 
-            <label style={{ fontSize: '10px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 700, display: 'block', marginBottom: '5px' }}>To</label>
-            <input value={to} onChange={e => setTo(e.target.value)} placeholder="branch@whitegold.money" style={{ ...inp, borderColor: to && !toValid ? t.red : t.border2, marginBottom: '4px' }} />
+            <label style={{ fontSize: '10px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 700, display: 'block', marginBottom: '6px' }}>To</label>
+            <input value={to} onChange={e => setTo(e.target.value)} placeholder="branch@whitegold.money" style={{ ...inp, borderColor: to && !toValid ? t.red : t.border2, marginBottom: '5px' }} />
             {!info?.branch_email && (
-              <div style={{ fontSize: '10.5px', color: t.text4, marginBottom: '10px' }}>This branch has no email on file — enter one to send.</div>
+              <div style={{ fontSize: '10.5px', color: t.text4, marginBottom: '12px' }}>This branch has no email on file — enter one to send.</div>
             )}
-            {info?.branch_email && <div style={{ height: '10px' }} />}
+            {info?.branch_email && <div style={{ height: '12px' }} />}
 
-            <label style={{ fontSize: '10px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 700, display: 'block', marginBottom: '5px' }}>Cc <span style={{ textTransform: 'none', fontWeight: 400 }}>(optional — added to the standing Cc)</span></label>
-            <input value={cc} onChange={e => setCc(e.target.value)} placeholder="—" style={{ ...inp, borderColor: cc && !ccValid ? t.red : t.border2, marginBottom: (info?.standing_cc || []).length ? '6px' : '18px' }} />
+            <label style={{ fontSize: '10px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 700, display: 'block', marginBottom: '6px' }}>Cc <span style={{ textTransform: 'none', fontWeight: 400 }}>(optional)</span></label>
+            <input value={cc} onChange={e => setCc(e.target.value)} placeholder="add another recipient…" style={{ ...inp, borderColor: cc && !ccValid ? t.red : t.border2, marginBottom: (info?.standing_cc || []).length ? '8px' : '20px' }} />
             {(info?.standing_cc || []).length > 0 && (
-              <div style={{ fontSize: '10.5px', color: t.text4, marginBottom: '18px' }}>
-                Always Cc&apos;d: <span style={{ color: t.text3, fontFamily: 'monospace' }}>{info.standing_cc.join(', ')}</span>
+              <div style={{ fontSize: '10.5px', color: t.text4, marginBottom: '20px', display: 'flex', gap: '5px', flexWrap: 'wrap', alignItems: 'center' }}>
+                <span>Always Cc&apos;d:</span>
+                {info.standing_cc.map((e, i) => (
+                  <span key={i} style={{ color: t.text3, fontFamily: 'monospace', background: t.card2, border: `1px solid ${t.border2}`, borderRadius: '5px', padding: '1px 6px' }}>{e}</span>
+                ))}
               </div>
             )}
 
             <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
-              <button onClick={() => { if (!sending) onClose?.() }} disabled={sending}
-                style={{ background: 'transparent', border: `1px solid ${t.border2}`, borderRadius: '8px', padding: '9px 18px', fontSize: '13px', fontWeight: 700, color: t.text2, cursor: sending ? 'not-allowed' : 'pointer' }}>
+              <button className="edm-cancel" onClick={() => { if (!sending) onClose?.() }} disabled={sending}
+                style={{ background: 'transparent', border: `1px solid ${t.border2}`, borderRadius: '9px', padding: '10px 18px', fontSize: '13px', fontWeight: 700, color: t.text2, cursor: sending ? 'not-allowed' : 'pointer', transition: 'background .15s' }}>
                 Cancel
               </button>
-              <button onClick={send} disabled={!canSend}
+              <button className="edm-send" onClick={send} disabled={!canSend}
                 title={!info?.ready ? 'All 3 documents must be ready' : !toValid ? 'Enter a valid recipient email' : ''}
-                style={{ background: canSend ? t.green : t.border2, color: canSend ? '#fff' : t.text4, border: 'none', borderRadius: '8px', padding: '9px 22px', fontSize: '13px', fontWeight: 800, cursor: canSend ? 'pointer' : 'not-allowed' }}>
+                style={{ background: canSend ? t.green : t.border2, color: canSend ? '#fff' : t.text4, border: 'none', borderRadius: '9px', padding: '10px 22px', fontSize: '13px', fontWeight: 800, cursor: canSend ? 'pointer' : 'not-allowed', transition: 'filter .15s', display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
                 {sending ? 'Sending…' : (alreadySent ? '✉ Resend' : '✉ Send')}
               </button>
             </div>
           </>
         )}
+        </div>
       </div>
     </div>
   ), document.body)
