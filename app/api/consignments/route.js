@@ -3886,6 +3886,25 @@ export async function POST(req) {
       }
     }
 
+    // Flip approval_status to 'rejected' — the RPC only sets status='cancelled',
+    // it never touches approval_status. Without this the row keeps
+    // approval_status='approved' and leaks into the Approved tab even though it's
+    // cancelled (worse on force-local, where the IRN/EWB is deliberately kept, so
+    // the "has a doc" filter also still matches). The standard
+    // "Rejected because of cancellation of…" reason additionally keeps it OFF the
+    // Rejected tab (that query excludes this prefix), so it surfaces only on the
+    // Cancellations tab — same convention as the eway-bill/cancel + e-invoice/cancel
+    // routes.
+    const cancelledDoc = c.irn ? 'E-Invoice' : c.eway_bill_no ? 'E-Way Bill' : 'consignment'
+    await supabase.from('consignments')
+      .update({
+        approval_status:  'rejected',
+        rejection_reason: `Rejected because of cancellation of ${cancelledDoc}`,
+        approved_at:      new Date().toISOString(),
+        approved_by:      actorEmail,
+      })
+      .eq('id', id)
+
     // What is still live on the portal after this cancel? Force-local always leaves
     // the doc standing; the normal path leaves nothing.
     const stillLiveOnPortal = force_local
