@@ -70,17 +70,14 @@ async function loadContext(id) {
   return { c, branch: branch || { name: c.branch_name } }
 }
 
-// Standing Cc list: ops lead always, plus the GM-ops inbox for Kerala. Merged
-// with any Cc the operator typed, de-duplicated, and never duplicating the To.
-const ALWAYS_CC = ['nagendra@whitegold.money']
-const KERALA_CC = 'gmops@whitegold.money'
-function buildCc(branch, extraCc, to) {
-  const set = new Set(ALWAYS_CC)
-  if ((branch?.region || '') === 'Kerala') set.add(KERALA_CC)
+// Cc is now operator-driven only — no standing/always-Cc. Ops adds recipients
+// manually when needed. We just de-duplicate what they typed and never Cc the
+// same address that's already in To.
+function buildCc(extraCc, to) {
+  const set = new Set()
   for (const e of String(extraCc || '').split(',').map(s => s.trim()).filter(Boolean)) set.add(e)
-  set.delete((to || '').trim().toLowerCase())
-  // Also drop any cc that case-insensitively equals the To.
-  return [...set].filter(e => e.toLowerCase() !== (to || '').trim().toLowerCase())
+  const toLc = (to || '').trim().toLowerCase()
+  return [...set].filter(e => e.toLowerCase() !== toLc)
 }
 
 function plannedAttachments(c, branch, a) {
@@ -126,7 +123,6 @@ export async function GET(req) {
     attachments:   plannedAttachments(c, branch, a),
     tmp_prf_no:    c.tmp_prf_no,
     dest:          a.isInternal ? (c.dest_branch || 'Hub') : 'Head Office',
-    standing_cc:   buildCc(branch, '', branch.contact_email || ''),   // auto-Cc'd (shown in the modal)
     last_sent,
   })
 }
@@ -162,7 +158,7 @@ export async function POST(req) {
   for (const e of String(body.cc || '').split(',').map(s => s.trim()).filter(Boolean)) {
     if (!EMAIL_RE.test(e)) return Response.json({ error: `Cc "${e}" is not a valid email address.` }, { status: 400 })
   }
-  const ccList = buildCc(branch, body.cc, to)
+  const ccList = buildCc(body.cc, to)
 
   // Regenerate the three docs via the existing routes (auth forwarded).
   // Prefer the canonical public URL (Railway's proxy can make req.url's origin

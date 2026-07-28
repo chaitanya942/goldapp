@@ -1878,7 +1878,7 @@ export default function ConsignmentData() {
           c={emailTarget}
           branchEmail={branches.find(b => b.name === emailTarget.branch_name)?.contact_email || ''}
           onClose={() => setEmailTarget(null)}
-          onSent={(to) => { setEmailTarget(null); setToast({ msg: `Documents sent to ${to}`, type: 'success' }); fetchAll(true) }}
+          onSent={(to) => { setToast({ msg: `Documents sent to ${to}`, type: 'success' }); fetchAll(true) }}
           onError={(msg) => setToast({ msg, type: 'error' })}
         />
       )}
@@ -2566,6 +2566,7 @@ function EmailDocsModal({ t, c, branchEmail, onClose, onSent, onError }) {
   const [to,      setTo]      = useState(branchEmail || '')
   const [cc,      setCc]      = useState('')
   const [sending, setSending] = useState(false)
+  const [sent,    setSent]    = useState(null)   // success confirmation shown in-modal
 
   useEffect(() => {
     let live = true
@@ -2606,6 +2607,11 @@ function EmailDocsModal({ t, c, branchEmail, onClose, onSent, onError }) {
       })
       const j = await r.json()
       if (!r.ok || j.error) { onError?.(j.error || `Send failed (${r.status})`); setSending(false); return }
+      // Show an explicit in-modal confirmation (ops asked for a clear "sent"
+      // acknowledgement) rather than closing straight away. onSent still fires
+      // so the row refreshes to its "✓ Emailed" state in the background.
+      setSent({ to: j.sent_to || to.trim(), cc: j.cc || [], attachments: j.attachments || [] })
+      setSending(false)
       onSent?.(j.sent_to || to.trim())
     } catch (e) {
       onError?.('Network error — the email may not have been sent.'); setSending(false)
@@ -2667,7 +2673,24 @@ function EmailDocsModal({ t, c, branchEmail, onClose, onSent, onError }) {
 
         {/* Body */}
         <div style={{ padding: '16px 24px 20px' }}>
-        {loading ? (
+        {sent ? (
+          <div style={{ padding: '14px 0 4px', textAlign: 'center' }}>
+            <div style={{ width: '58px', height: '58px', borderRadius: '50%', background: `${t.green}18`, border: `1px solid ${t.green}44`, color: t.green, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '30px', fontWeight: 800, marginBottom: '14px' }}>✓</div>
+            <div style={{ fontSize: '16px', fontWeight: 800, color: t.text1, marginBottom: '6px' }}>Email sent</div>
+            <div style={{ fontSize: '13px', color: t.text2, lineHeight: 1.6 }}>
+              {sent.attachments.length || 3} document{(sent.attachments.length || 3) === 1 ? '' : 's'} sent to <b style={{ color: t.text1 }}>{sent.to}</b>
+              {sent.cc && sent.cc.length > 0 && (
+                <><br /><span style={{ fontSize: '11.5px', color: t.text3 }}>Cc: {sent.cc.join(', ')}</span></>
+              )}
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'center', marginTop: '20px' }}>
+              <button className="edm-send" onClick={() => onClose?.()}
+                style={{ background: t.green, color: '#fff', border: 'none', borderRadius: '9px', padding: '10px 30px', fontSize: '13px', fontWeight: 800, cursor: 'pointer', boxShadow: `0 3px 12px ${t.green}44` }}>
+                Done
+              </button>
+            </div>
+          </div>
+        ) : loading ? (
           <div style={{ fontSize: '13px', color: t.text3, padding: '22px 0', textAlign: 'center' }}>Loading…</div>
         ) : (
           <>
@@ -2716,15 +2739,7 @@ function EmailDocsModal({ t, c, branchEmail, onClose, onSent, onError }) {
             {info?.branch_email && <div style={{ height: '12px' }} />}
 
             <label style={{ fontSize: '10px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 700, display: 'block', marginBottom: '6px' }}>Cc <span style={{ textTransform: 'none', fontWeight: 400 }}>(optional)</span></label>
-            <input value={cc} onChange={e => setCc(e.target.value)} placeholder="add another recipient…" style={{ ...inp, borderColor: cc && !ccValid ? t.red : t.border2, marginBottom: (info?.standing_cc || []).length ? '8px' : '20px' }} />
-            {(info?.standing_cc || []).length > 0 && (
-              <div style={{ fontSize: '10.5px', color: t.text4, marginBottom: '20px', display: 'flex', gap: '5px', flexWrap: 'wrap', alignItems: 'center' }}>
-                <span>Always Cc&apos;d:</span>
-                {info.standing_cc.map((e, i) => (
-                  <span key={i} style={{ color: t.text3, fontFamily: 'monospace', background: t.card2, border: `1px solid ${t.border2}`, borderRadius: '5px', padding: '1px 6px' }}>{e}</span>
-                ))}
-              </div>
-            )}
+            <input value={cc} onChange={e => setCc(e.target.value)} placeholder="add another recipient…" style={{ ...inp, borderColor: cc && !ccValid ? t.red : t.border2, marginBottom: '20px' }} />
 
             <div style={{ margin: '22px -24px -20px', padding: '15px 24px', borderTop: `1px solid ${t.border2}`, background: t.card3, display: 'flex', gap: '10px', justifyContent: 'flex-end', alignItems: 'center' }}>
               <button className="edm-cancel" onClick={() => { if (!sending) onClose?.() }} disabled={sending}
