@@ -215,6 +215,7 @@ export default function ConsignmentData() {
   // whose Cancel button was clicked; null means modal is closed.
   const [cancelTarget,    setCancelTarget]    = useState(null)
   const [emailTarget,     setEmailTarget]     = useState(null)   // consignment whose docs are being emailed
+  const [saveBlockedFor,  setSaveBlockedFor]  = useState(null)   // Save clicked before the branch mail was sent
   const [cancelReason,    setCancelReason]    = useState('')
   const [cancelSubmitting,setCancelSubmitting]= useState(false)
 
@@ -720,6 +721,11 @@ export default function ConsignmentData() {
   // Voucher/Challan (once the report's generated), and EWB / E-Invoice (once
   // generated).
   async function saveAllDocs(c) {
+    // Gate: the documents can't be downloaded until the branch email has gone
+    // out. This makes the official mail the mandatory step before ops keeps a
+    // local copy. Not sent yet → prompt (with a Send-mail action) instead of
+    // downloading.
+    if (!c.documents_emailed_at) { setSaveBlockedFor(c); return }
     const branch  = branches.find(b => b.name === c.branch_name)
     const isType  = c.movement_type === 'INTERNAL'
     const docKind = isType ? 'voucher' : 'challan'
@@ -1882,6 +1888,33 @@ export default function ConsignmentData() {
           onError={(msg) => setToast({ msg, type: 'error' })}
         />
       )}
+
+      {/* Save-gate prompt — ops clicked Save before the branch mail went out.
+          The documents can't be downloaded until the mail is sent; offer to
+          send it right here. */}
+      {saveBlockedFor && typeof document !== 'undefined' && createPortal((
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.78)', zIndex: 130, display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(6px)', padding: '20px' }}
+          onClick={() => setSaveBlockedFor(null)}>
+          <div onClick={e => e.stopPropagation()}
+            style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: '16px', padding: '24px', width: '100%', maxWidth: '420px', boxShadow: '0 24px 70px rgba(0,0,0,.55)', textAlign: 'center' }}>
+            <div style={{ width: '52px', height: '52px', borderRadius: '50%', background: `${t.orange}18`, border: `1px solid ${t.orange}44`, color: t.orange, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '26px', marginBottom: '14px' }}>✉</div>
+            <div style={{ fontSize: '16px', fontWeight: 800, color: t.text1, marginBottom: '6px' }}>Send the mail first</div>
+            <div style={{ fontSize: '13px', color: t.text2, lineHeight: 1.6, marginBottom: '20px' }}>
+              The documents for <b style={{ color: t.text1, fontFamily: 'monospace' }}>{saveBlockedFor.tmp_prf_no}</b> ({saveBlockedFor.branch_name}) haven&apos;t been emailed to the branch yet. Email them before saving a copy.
+            </div>
+            <div style={{ display: 'flex', gap: '10px', justifyContent: 'center' }}>
+              <button onClick={() => setSaveBlockedFor(null)}
+                style={{ background: 'transparent', border: `1px solid ${t.border2}`, borderRadius: '9px', padding: '10px 18px', fontSize: '13px', fontWeight: 700, color: t.text2, cursor: 'pointer' }}>
+                Cancel
+              </button>
+              <button onClick={() => { const c = saveBlockedFor; setSaveBlockedFor(null); setEmailTarget(c) }}
+                style={{ background: t.green, color: '#fff', border: 'none', borderRadius: '9px', padding: '10px 22px', fontSize: '13px', fontWeight: 800, cursor: 'pointer', boxShadow: `0 3px 12px ${t.green}44`, display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                ✉ Send mail
+              </button>
+            </div>
+          </div>
+        </div>
+      ), document.body)}
 
       {/* Cancellation request modal — operations fills in a reason and confirms;
           server records the request and accounts processes it later. */}
