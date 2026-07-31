@@ -70,6 +70,25 @@ const fmtDateShort = (d) => {
   const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
   return `${day} ${months[+m - 1]}`
 }
+// Weekday of a YYYY-MM-DD (matches addWorkingDaysSkipSunday: UTC parse, 0=Sun).
+const DOW3 = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+const parseYmdUtc = (s) => { const [y, m, d] = String(s).split('-').map(Number); return new Date(Date.UTC(y, m - 1, d)) }
+const dowName = (ymd) => DOW3[parseYmdUtc(ymd).getUTCDay()]
+const addDaysYmd = (ymd, n) => { const dt = parseYmdUtc(ymd); dt.setUTCDate(dt.getUTCDate() + n); return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, '0')}-${String(dt.getUTCDate()).padStart(2, '0')}` }
+// Earliest expected delivery at HO for a pickup-pending branch: the next pickup
+// day (today if today is a pickup day, else the next configured day) plus the
+// branch's TAT in working days (Sundays skipped). Needs pickup_days + tat_hours.
+function earliestDeliveryFor(pickupDays, tatHours) {
+  if (!Array.isArray(pickupDays) || !pickupDays.length || !tatHours) return null
+  const set = new Set(pickupDays)
+  let pick = istToday()
+  let found = false
+  for (let i = 0; i < 7; i++) { if (set.has(dowName(pick))) { found = true; break } pick = addDaysYmd(pick, 1) }
+  if (!found) return null
+  const tatDays = Math.max(1, Math.round(Number(tatHours) / 24))
+  const date = addWorkingDaysSkipSunday(pick, tatDays)
+  return { date, day: dowName(date), pickupDay: dowName(pick), pickIsToday: pick === istToday() }
+}
 // Lazy-load a CDN script once (SheetJS / html2canvas for the case exports).
 function loadScript(src) {
   return new Promise((resolve, reject) => {
@@ -4192,6 +4211,20 @@ function SourceSection({
                                 <span aria-hidden="true" style={{ fontSize: 10 }}>⏱</span>{fmtPickupTime(b.pickup_time)}
                               </span>
                             )}
+                            {/* Earliest expected delivery at HO = next pickup day + TAT. */}
+                            {(() => {
+                              const del = earliestDeliveryFor(b.pickup_days, b.tat_hours)
+                              if (!del) return null
+                              return (
+                                <span title={`Earliest expected delivery at HO — ${del.pickIsToday ? 'today’s' : del.pickupDay} pickup + ${b.tat_hours}h TAT (Sundays skipped)`}
+                                  style={{ display: 'inline-flex', alignItems: 'center', gap: 4, flexShrink: 0,
+                                    fontSize: 11, fontWeight: 800, letterSpacing: '.02em', whiteSpace: 'nowrap',
+                                    color: t.green, background: `${t.green}12`, border: `1px solid ${t.green}3a`,
+                                    borderRadius: 6, padding: '3px 9px', lineHeight: 1.25 }}>
+                                  <span aria-hidden="true" style={{ fontSize: 10 }}>→</span>{del.day} {fmtDateShort(del.date)}
+                                </span>
+                              )
+                            })()}
                           </>
                         )}
                         {(() => {
