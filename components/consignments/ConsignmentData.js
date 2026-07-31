@@ -1790,37 +1790,6 @@ export default function ConsignmentData() {
         </button>
       </div>
 
-      {/* Delivery-failed notification — bounced document emails. The branch
-          never received them; ops must fix the address and resend. */}
-      {!nav?.branch && (() => {
-        const failed = consignments.filter(c => {
-          if (c.status === 'cancelled' || c.approval_status === 'rejected') return false
-          const b = c.documents_email_bounced_at ? new Date(c.documents_email_bounced_at).getTime() : 0
-          const e = c.documents_emailed_at ? new Date(c.documents_emailed_at).getTime() : 0
-          return b > 0 && b >= e
-        })
-        if (!failed.length) return null
-        return (
-          <div role="alert" style={{ margin: '0 0 14px', background: `${t.red}0e`, border: `1px solid ${t.red}45`, borderLeft: `4px solid ${t.red}`, borderRadius: '10px', padding: '12px 16px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '9px', flexWrap: 'wrap' }}>
-              <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 22, height: 22, borderRadius: '50%', background: `${t.red}20`, color: t.red, fontSize: '13px', fontWeight: 800 }}>⚠</span>
-              <span style={{ fontSize: '13px', fontWeight: 800, color: t.text1 }}>
-                {failed.length} document email{failed.length === 1 ? '' : 's'} didn&apos;t reach the branch
-              </span>
-              <span style={{ fontSize: '11.5px', color: t.text3 }}>— the address bounced. Fix it and resend:</span>
-            </div>
-            <div style={{ display: 'flex', gap: '7px', flexWrap: 'wrap', marginTop: '9px' }}>
-              {failed.map(c => (
-                <button key={c.id} onClick={() => setEmailTarget(c)}
-                  title={`${c.tmp_prf_no} · ${c.branch_name} — the last email bounced. Click to fix the address and resend.`}
-                  style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', background: t.card, border: `1px solid ${t.red}55`, color: t.red, borderRadius: '7px', padding: '5px 10px', fontSize: '11px', fontWeight: 700, cursor: 'pointer', fontFamily: 'monospace' }}>
-                  {c.tmp_prf_no} · {c.branch_name} <span aria-hidden="true" style={{ fontFamily: 'inherit' }}>↻</span>
-                </button>
-              ))}
-            </div>
-          </div>
-        )
-      })()}
 
       {/* Content. Bill picker still uses the spinner overlay (it builds its
           own complex layout); the active-consignments list renders its own
