@@ -4023,11 +4023,11 @@ function SourceSection({
             const consolidateKey = isSub ? `sub:${region}` : region
             const regionExpanded = openConsolidated.has(consolidateKey)
             const showBranches   = !consolidated || regionExpanded
-            // Region totals — only need them when rendering the
-            // consolidated roll-up row.
-            const regBills = consolidated ? rows.reduce((s, r) => s + (r.total_bills    || 0), 0) : 0
-            const regGross = consolidated ? rows.reduce((s, r) => s + (r.total_gross_wt || 0), 0) : 0
-            const regNet   = consolidated ? rows.reduce((s, r) => s + (r.total_net_wt   || 0), 0) : 0
+            // Region totals — shown on the consolidated roll-up row AND as a
+            // per-region subtotal in the normal region header.
+            const regBills = rows.reduce((s, r) => s + (r.total_bills    || 0), 0)
+            const regGross = rows.reduce((s, r) => s + (r.total_gross_wt || 0), 0)
+            const regNet   = rows.reduce((s, r) => s + (r.total_net_wt   || 0), 0)
             return (
               <div key={consolidateKey} style={{ padding: '11px 20px', borderTop: `1px solid ${t.border}25` }}>
                 {consolidated ? (
@@ -4090,17 +4090,31 @@ function SourceSection({
                     </span>
                   </div>
                 ) : (
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 7 }}>
-                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, fontSize: 11, color: rColor, fontWeight: 800, letterSpacing: '.1em', textTransform: 'uppercase' }}>
-                      <span style={{ width: 6, height: 6, borderRadius: '50%', background: rColor, display: 'inline-block' }} />
-                      {region}
+                  // Region header = a subtotal row aligned to the branch columns
+                  // (gross · net · bills), with the region name + Select-all in
+                  // the name column.
+                  <div style={{ display: 'grid', gridTemplateColumns: rowGrid, alignItems: 'center', columnGap: 14, padding: '1px 11px 8px' }}>
+                    <span style={{ width: 6, height: 6, borderRadius: '50%', background: rColor, display: 'inline-block', justifySelf: 'start', marginLeft: 5 }} />
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+                      <span style={{ fontSize: 11, color: rColor, fontWeight: 800, letterSpacing: '.1em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>{region}</span>
+                      <span style={{ fontSize: 10.5, color: t.text4, fontWeight: 600, whiteSpace: 'nowrap' }}>{rows.length} branch{rows.length === 1 ? '' : 'es'}</span>
+                      {selectable && rows.length >= 1 && (
+                        <button onClick={() => onToggleRegionAll?.(rows)}
+                          style={{ background: regionState === 'none' ? 'transparent' : `${rColor}14`, border: `1px solid ${regionState === 'none' ? t.border2 : `${rColor}55`}`, borderRadius: 6, color: regionState === 'none' ? t.text3 : rColor, fontSize: 10.5, fontWeight: 700, cursor: 'pointer', letterSpacing: '.02em', padding: '3px 10px', whiteSpace: 'nowrap' }}>
+                          {regionState === 'all' ? 'Clear region' : regionState === 'partial' ? 'Select rest' : 'Select all'}
+                        </button>
+                      )}
+                    </div>
+                    <span title={`${region} total gross weight`} style={{ fontSize: 11.5, color: t.text3, fontFamily: 'monospace', textAlign: 'right', fontWeight: 600, whiteSpace: 'nowrap' }}>
+                      {fmt(regGross, 2)}<span style={{ fontSize: 9.5, color: t.text4, marginLeft: 2, fontWeight: 600 }}>g gross</span>
                     </span>
-                    {selectable && rows.length >= 1 && (
-                      <button onClick={() => onToggleRegionAll?.(rows)}
-                        style={{ background: regionState === 'none' ? 'transparent' : `${rColor}14`, border: `1px solid ${regionState === 'none' ? t.border2 : `${rColor}55`}`, borderRadius: 6, color: regionState === 'none' ? t.text3 : rColor, fontSize: 11, fontWeight: 700, cursor: 'pointer', letterSpacing: '.02em', padding: '3px 10px' }}>
-                        {regionState === 'all' ? 'Clear region' : regionState === 'partial' ? 'Select rest' : 'Select all'}
-                      </button>
-                    )}
+                    <span title={`${region} total net weight`} style={{ fontSize: 13.5, color: rColor, fontFamily: 'monospace', textAlign: 'right', fontWeight: 800, whiteSpace: 'nowrap', letterSpacing: '-.01em' }}>
+                      {fmt(regNet, 2)}<span style={{ fontSize: 10, color: t.text3, marginLeft: 2, fontWeight: 600 }}>g</span>
+                    </span>
+                    <span style={{ fontSize: 11.5, color: t.text3, textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, whiteSpace: 'nowrap' }}>
+                      {regBills} bill{regBills === 1 ? '' : 's'}
+                    </span>
+                    <span />
                   </div>
                 )}
                 {showBranches && (
