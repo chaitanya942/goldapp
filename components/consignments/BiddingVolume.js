@@ -2761,7 +2761,7 @@ function BookingsList({ t, card, bookings, biddingDate, onUpdateStatus, onReques
               <th style={{ ...th, textAlign: 'right' }} title="Total weight committed to the bidder">= Booked Wt</th>
               <th style={{ ...th, textAlign: 'right', color: t.text4 }}>× Rate</th>
               <th style={{ ...th, textAlign: 'right' }}>= Value</th>
-              <th style={{ ...th, textAlign: 'center', width: 50 }}>KL</th>
+              <th style={{ ...th, textAlign: 'center', width: 50 }} title="Clear a booking — cancels it and unbooks the attached bills"></th>
             </tr>
           </thead>
           <tbody>
@@ -3006,9 +3006,29 @@ function BookingsList({ t, card, bookings, biddingDate, onUpdateStatus, onReques
                     {fmtINR(total)}
                   </td>
                   <td style={{ ...td, textAlign: 'center' }}>
-                    {b.is_kl
-                      ? <span style={{ background: `${t.purple}1f`, color: t.purple, borderRadius: 4, padding: '2px 9px', fontSize: 10, fontWeight: 800, letterSpacing: '.04em' }}>KL</span>
-                      : <span style={{ color: t.text4 }}>—</span>}
+                    {isCancelled ? (
+                      <span style={{ color: t.text4 }}>—</span>
+                    ) : (
+                      <button type="button" disabled={actionBusy === b.id}
+                        onClick={async () => {
+                          if (actionBusy) return
+                          const n = b.attached_bills_count
+                          const billTxt = n != null ? ` and unbooks its ${n} attached bill${n === 1 ? '' : 's'}` : ' and unbooks its attached bills'
+                          if (!window.confirm(`Clear the booking for "${b.party}"?\n\nThis cancels the booking${billTxt}, releasing them back to the picker. This can't be undone.`)) return
+                          setActionBusy(b.id)
+                          try { await unbookBooking(b.id) } finally { setActionBusy(null) }
+                        }}
+                        title="Clear this booking — cancels it and unbooks the attached bills"
+                        style={{
+                          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                          width: 24, height: 24, borderRadius: 6, background: 'transparent',
+                          border: `1px solid ${t.red}55`, color: t.red, lineHeight: 1,
+                          fontSize: 13, fontWeight: 800, cursor: actionBusy === b.id ? 'wait' : 'pointer',
+                          opacity: actionBusy === b.id ? 0.5 : 1,
+                        }}>
+                        {actionBusy === b.id ? '·' : '✕'}
+                      </button>
+                    )}
                   </td>
                 </tr>
                 {bdOpen && (
