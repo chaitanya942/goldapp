@@ -19,6 +19,7 @@ import PreviewModal from './PreviewModal'
 import { istToday, istDaysAgo, istStartOfDayIso, istEndOfDayIso } from '../../lib/dateIst'
 import { docFilename } from '../../lib/docFilename'
 import { appIdMatches } from '../../lib/appIdSearch'
+import { isCompanyEmail, COMPANY_MAIL_DOMAIN } from '../../lib/companyMail'
 
 async function triggerDownload(url, filename, onError) {
   const res  = await authedFetch(url)
@@ -2670,8 +2671,9 @@ function EmailDocsModal({ t, c, branchEmail, onClose, onSent, onError }) {
 
   const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
   const toValid  = EMAIL_RE.test(to.trim())
+  const toCompany = isCompanyEmail(to.trim())   // branch mail must be @company domain
   const ccValid  = !cc.trim() || EMAIL_RE.test(cc.trim())
-  const canSend  = !loading && !sending && info?.ready && toValid && ccValid
+  const canSend  = !loading && !sending && info?.ready && toValid && toCompany && ccValid
   const alreadySent = !!info?.last_sent
   const fmtSent = (iso) => {
     try { return 'on ' + new Date(iso).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'Asia/Kolkata' }) }
@@ -2813,11 +2815,14 @@ function EmailDocsModal({ t, c, branchEmail, onClose, onSent, onError }) {
             )}
 
             <label style={{ fontSize: '10px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 700, display: 'block', marginBottom: '6px' }}>To</label>
-            <input value={to} onChange={e => setTo(e.target.value)} placeholder="branch@whitegold.money" style={{ ...inp, borderColor: to && !toValid ? t.red : t.border2, marginBottom: '5px' }} />
-            {!info?.branch_email && (
+            <input value={to} onChange={e => setTo(e.target.value)} placeholder={`branch@${COMPANY_MAIL_DOMAIN}`} style={{ ...inp, borderColor: to && (!toValid || !toCompany) ? t.red : t.border2, marginBottom: '5px' }} />
+            {to && toValid && !toCompany ? (
+              <div style={{ fontSize: '10.5px', color: t.red, marginBottom: '12px' }}>Must be a @{COMPANY_MAIL_DOMAIN} address — check the domain for a typo.</div>
+            ) : !info?.branch_email ? (
               <div style={{ fontSize: '10.5px', color: t.text4, marginBottom: '12px' }}>This branch has no email on file — enter one to send.</div>
+            ) : (
+              <div style={{ height: '12px' }} />
             )}
-            {info?.branch_email && <div style={{ height: '12px' }} />}
 
             <label style={{ fontSize: '10px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 700, display: 'block', marginBottom: '6px' }}>Cc <span style={{ textTransform: 'none', fontWeight: 400 }}>(optional)</span></label>
             <input value={cc} onChange={e => setCc(e.target.value)} placeholder="add another recipient…" style={{ ...inp, borderColor: cc && !ccValid ? t.red : t.border2, marginBottom: '20px' }} />
@@ -2828,7 +2833,7 @@ function EmailDocsModal({ t, c, branchEmail, onClose, onSent, onError }) {
                 Cancel
               </button>
               <button className="edm-send" onClick={send} disabled={!canSend}
-                title={!info?.ready ? 'All 3 documents must be ready' : !toValid ? 'Enter a valid recipient email' : ''}
+                title={!info?.ready ? 'All 3 documents must be ready' : !toValid ? 'Enter a valid recipient email' : !toCompany ? `Branch email must be @${COMPANY_MAIL_DOMAIN}` : ''}
                 style={{ background: canSend ? t.green : t.border2, color: canSend ? '#fff' : t.text4, border: 'none', borderRadius: '9px', padding: '10px 24px', fontSize: '13px', fontWeight: 800, cursor: canSend ? 'pointer' : 'not-allowed', transition: 'filter .15s, transform .15s', display: 'inline-flex', alignItems: 'center', gap: '6px', boxShadow: canSend ? `0 3px 12px ${t.green}44` : 'none' }}>
                 {sending ? 'Sending…' : (alreadySent ? '✉ Resend' : '✉ Send')}
               </button>

@@ -20,6 +20,8 @@ import { requireAuth } from '../../../../lib/apiAuth'
 import { sendMail, mailConfigured } from '../../../../lib/sendMail'
 import { docFilename } from '../../../../lib/docFilename'
 import { logConsignmentEvent } from '../../../../lib/consignmentLog'
+import { isCompanyEmail, COMPANY_MAIL_DOMAIN } from '../../../../lib/companyMail'
+import { checkRecipientDomain } from '../../../../lib/emailDomain'
 
 export const runtime = 'nodejs'
 export const maxDuration = 60
@@ -159,6 +161,22 @@ export async function POST(req) {
     if (!EMAIL_RE.test(e)) return Response.json({ error: `Cc "${e}" is not a valid email address.` }, { status: 400 })
   }
   const ccList = buildCc(body.cc, to)
+
+  // Domain guards — SMTP accepts almost anything and only bounces a bad address
+  // asynchronously, so a typo'd domain (e.g. whitegold1.money) would otherwise
+  // be recorded as "sent" while never reaching the branch. Verify BEFORE we
+  // send so nothing is falsely marked delivered.
+  //   (B) the branch address must be on the company domain — catches domain typos.
+  if (!isCompanyEmail(to)) {
+    return Response.json({ error: `"${to}" is not a ${COMPANY_MAIL_DOMAIN} address — check the branch email for a typo (e.g. "${COMPANY_MAIL_DOMAIN}" vs a look-alike).`, code: 'BAD_DOMAIN' }, { status: 400 })
+  }
+  //   (A) the recipient + every Cc domain must actually exist / accept mail.
+  const toDom = await checkRecipientDomain(to)
+  if (!toDom.ok) return Response.json({ error: `Can't send — ${toDom.reason}. Fix the branch email and try again.`, code: 'BAD_DOMAIN' }, { status: 400 })
+  for (const e of ccList) {
+    const cd = await checkRecipientDomain(e)
+    if (!cd.ok) return Response.json({ error: `Cc "${e}" — ${cd.reason}.`, code: 'BAD_DOMAIN' }, { status: 400 })
+  }
 
   // Regenerate the three docs via the existing routes (auth forwarded).
   // Prefer the canonical public URL (Railway's proxy can make req.url's origin

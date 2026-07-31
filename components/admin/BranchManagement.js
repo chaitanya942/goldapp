@@ -7,6 +7,7 @@ import { useApp } from '../../lib/context'
 import { authedFetch } from '../../lib/authedFetch'
 
 import { CONSIGNMENT_THEMES as THEMES } from '../../lib/consignmentTheme'
+import { isCompanyEmail, COMPANY_MAIL_DOMAIN } from '../../lib/companyMail'
 
 const EMPTY_FORM = { name: '', opening_date: '', state: '', region: '', cluster: '', model_type: 'outside_bangalore', branch_code: '', address: '', city: '', pin_code: '', branch_gstin: '', crm_branch_id: '', pickup_time: '', delivery_tat_hours: 24, pickup_days: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'], tamper_next: '', contact_person: '', contact_phone: '', contact_email: '' }
 
@@ -240,6 +241,14 @@ export default function BranchManagement({ embedded = false } = {}) {
       // Manual save = human-verified. Locks the row from future auto-resolution overrides.
       address_verified: true,
       address_source:   'manual',
+    }
+    // Guard the branch email domain — every branch mailbox is on the company
+    // domain, and a wrong domain silently bounces later (the app would still
+    // show "Mail Sent"). Catch the typo here, at data entry.
+    if (payload.contact_email && !isCompanyEmail(payload.contact_email)) {
+      setMsg(`Branch email must be a @${COMPANY_MAIL_DOMAIN} address — "${payload.contact_email}" looks wrong. Fix the domain and save again.`)
+      setSaving(false)
+      return
     }
     const { error } = editId
       ? await supabase.from('branches').update(payload).eq('id', editId)
