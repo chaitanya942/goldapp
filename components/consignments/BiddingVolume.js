@@ -4113,10 +4113,10 @@ function SourceSection({
                   // (gross · net · bills), with the region name + Select-all in
                   // the name column.
                   <div style={{ display: 'grid', gridTemplateColumns: rowGrid, alignItems: 'center', columnGap: 14, padding: '1px 11px 8px' }}>
-                    <span style={{ width: 6, height: 6, borderRadius: '50%', background: rColor, display: 'inline-block', justifySelf: 'start', marginLeft: 5 }} />
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
-                      <span style={{ fontSize: 11, color: rColor, fontWeight: 800, letterSpacing: '.1em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>{region}</span>
-                      <span style={{ fontSize: 10.5, color: t.text4, fontWeight: 600, whiteSpace: 'nowrap' }}>{rows.length} branch{rows.length === 1 ? '' : 'es'}</span>
+                    <span style={{ width: 8, height: 8, borderRadius: '50%', background: rColor, display: 'inline-block', justifySelf: 'start', marginLeft: 4 }} />
+                    <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, minWidth: 0 }}>
+                      <span style={{ fontSize: 14, color: t.text1, fontWeight: 900, letterSpacing: '.06em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>{region}</span>
+                      <span style={{ fontSize: 11, color: t.text3, fontWeight: 600, whiteSpace: 'nowrap' }}>{rows.length} branch{rows.length === 1 ? '' : 'es'}</span>
                       {selectable && rows.length >= 1 && (
                         <button onClick={() => onToggleRegionAll?.(rows)}
                           style={{ background: regionState === 'none' ? 'transparent' : `${rColor}14`, border: `1px solid ${regionState === 'none' ? t.border2 : `${rColor}55`}`, borderRadius: 6, color: regionState === 'none' ? t.text3 : rColor, fontSize: 10.5, fontWeight: 700, cursor: 'pointer', letterSpacing: '.02em', padding: '3px 10px', whiteSpace: 'nowrap' }}>
