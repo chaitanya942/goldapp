@@ -4105,13 +4105,13 @@ function SourceSection({
                         </button>
                       )}
                     </div>
-                    <span title={`${region} total gross weight`} style={{ fontSize: 11.5, color: t.text3, fontFamily: 'monospace', textAlign: 'right', fontWeight: 600, whiteSpace: 'nowrap' }}>
-                      {fmt(regGross, 2)}<span style={{ fontSize: 9.5, color: t.text4, marginLeft: 2, fontWeight: 600 }}>g gross</span>
+                    <span title={`${region} total gross weight`} style={{ fontSize: 13.5, color: t.text2, fontFamily: 'monospace', textAlign: 'right', fontWeight: 800, whiteSpace: 'nowrap' }}>
+                      {fmt(regGross, 2)}<span style={{ fontSize: 11, color: t.text4, marginLeft: 2, fontWeight: 700 }}>g gross</span>
                     </span>
-                    <span title={`${region} total net weight`} style={{ fontSize: 13.5, color: rColor, fontFamily: 'monospace', textAlign: 'right', fontWeight: 800, whiteSpace: 'nowrap', letterSpacing: '-.01em' }}>
-                      {fmt(regNet, 2)}<span style={{ fontSize: 10, color: t.text3, marginLeft: 2, fontWeight: 600 }}>g</span>
+                    <span title={`${region} total net weight`} style={{ fontSize: 16.5, color: rColor, fontFamily: 'monospace', textAlign: 'right', fontWeight: 800, whiteSpace: 'nowrap', letterSpacing: '-.01em' }}>
+                      {fmt(regNet, 2)}<span style={{ fontSize: 11.5, color: t.text3, marginLeft: 2, fontWeight: 700 }}>g</span>
                     </span>
-                    <span style={{ fontSize: 11.5, color: t.text3, textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, whiteSpace: 'nowrap' }}>
+                    <span style={{ fontSize: 13.5, color: t.text2, textAlign: 'right', fontFamily: 'monospace', fontWeight: 800, whiteSpace: 'nowrap' }}>
                       {regBills} bill{regBills === 1 ? '' : 's'}
                     </span>
                     <span />
