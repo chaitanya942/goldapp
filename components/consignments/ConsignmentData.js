@@ -1577,26 +1577,34 @@ export default function ConsignmentData() {
                           && gstReady
                         const dead = c.status === 'cancelled' || c.approval_status === 'rejected'
                         if (dead) return null
-                        const emailed = !!c.documents_emailed_at
-                        const sentOn = emailed
+                        const emailedAt = c.documents_emailed_at ? new Date(c.documents_emailed_at).getTime() : 0
+                        const bouncedAt = c.documents_email_bounced_at ? new Date(c.documents_email_bounced_at).getTime() : 0
+                        const emailed = !!emailedAt
+                        // The latest known state is a bounce → the send failed to deliver.
+                        const failed  = bouncedAt > 0 && bouncedAt >= emailedAt
+                        const sentOn = emailedAt
                           ? (() => { try { return new Date(c.documents_emailed_at).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'Asia/Kolkata' }) } catch { return '' } })()
                           : ''
+                        const bg     = !allReady ? 'transparent' : failed ? `${t.red}18` : emailed ? `${t.green}18` : t.green
+                        const brd    = !allReady ? `1px solid ${t.border}` : failed ? `1px solid ${t.red}` : emailed ? `1px solid ${t.green}` : 'none'
+                        const col    = !allReady ? t.text4 : failed ? t.red : emailed ? t.green : '#fff'
                         return (
                           <button onClick={() => allReady && setEmailTarget(c)} disabled={!allReady}
                             title={!allReady
                               ? 'Available once the Consignee Report, Voucher/Challan and E-Way Bill / E-Invoice are all done'
-                              : emailed
-                                ? `Mail sent${sentOn ? ' on ' + sentOn : ''} — click to resend`
-                                : 'Email all 3 documents to the branch'}
+                              : failed
+                                ? 'The last email bounced — the branch never received it. Check the address and resend.'
+                                : emailed
+                                  ? `Mail sent${sentOn ? ' on ' + sentOn : ''} — click to resend`
+                                  : 'Email all 3 documents to the branch'}
                             style={{
                               display: 'inline-flex', alignItems: 'center', gap: '5px',
-                              background: !allReady ? 'transparent' : emailed ? `${t.green}18` : t.green,
-                              border: !allReady ? `1px solid ${t.border}` : emailed ? `1px solid ${t.green}` : 'none',
+                              background: bg, border: brd,
                               borderRadius: '6px', padding: '5px 11px', fontSize: '10px', fontWeight: 700,
-                              color: !allReady ? t.text4 : emailed ? t.green : '#fff',
+                              color: col,
                               cursor: allReady ? 'pointer' : 'not-allowed', opacity: allReady ? 1 : 0.55,
                             }}>
-                            {emailed ? '✓ Mail Sent' : '✉ Email'}
+                            {failed ? '⚠ Delivery Failed' : emailed ? '✓ Mail Sent' : '✉ Email'}
                           </button>
                         )
                       })()}
@@ -1781,6 +1789,38 @@ export default function ConsignmentData() {
           {loading ? 'Refreshing…' : 'Refresh'}
         </button>
       </div>
+
+      {/* Delivery-failed notification — bounced document emails. The branch
+          never received them; ops must fix the address and resend. */}
+      {!nav?.branch && (() => {
+        const failed = consignments.filter(c => {
+          if (c.status === 'cancelled' || c.approval_status === 'rejected') return false
+          const b = c.documents_email_bounced_at ? new Date(c.documents_email_bounced_at).getTime() : 0
+          const e = c.documents_emailed_at ? new Date(c.documents_emailed_at).getTime() : 0
+          return b > 0 && b >= e
+        })
+        if (!failed.length) return null
+        return (
+          <div role="alert" style={{ margin: '0 0 14px', background: `${t.red}0e`, border: `1px solid ${t.red}45`, borderLeft: `4px solid ${t.red}`, borderRadius: '10px', padding: '12px 16px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '9px', flexWrap: 'wrap' }}>
+              <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 22, height: 22, borderRadius: '50%', background: `${t.red}20`, color: t.red, fontSize: '13px', fontWeight: 800 }}>⚠</span>
+              <span style={{ fontSize: '13px', fontWeight: 800, color: t.text1 }}>
+                {failed.length} document email{failed.length === 1 ? '' : 's'} didn&apos;t reach the branch
+              </span>
+              <span style={{ fontSize: '11.5px', color: t.text3 }}>— the address bounced. Fix it and resend:</span>
+            </div>
+            <div style={{ display: 'flex', gap: '7px', flexWrap: 'wrap', marginTop: '9px' }}>
+              {failed.map(c => (
+                <button key={c.id} onClick={() => setEmailTarget(c)}
+                  title={`${c.tmp_prf_no} · ${c.branch_name} — the last email bounced. Click to fix the address and resend.`}
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', background: t.card, border: `1px solid ${t.red}55`, color: t.red, borderRadius: '7px', padding: '5px 10px', fontSize: '11px', fontWeight: 700, cursor: 'pointer', fontFamily: 'monospace' }}>
+                  {c.tmp_prf_no} · {c.branch_name} <span aria-hidden="true" style={{ fontFamily: 'inherit' }}>↻</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )
+      })()}
 
       {/* Content. Bill picker still uses the spinner overlay (it builds its
           own complex layout); the active-consignments list renders its own
@@ -2675,6 +2715,10 @@ function EmailDocsModal({ t, c, branchEmail, onClose, onSent, onError }) {
   const ccValid  = !cc.trim() || EMAIL_RE.test(cc.trim())
   const canSend  = !loading && !sending && info?.ready && toValid && toCompany && ccValid
   const alreadySent = !!info?.last_sent
+  // Did the last email bounce? (latest known state is a bounce, not a send.)
+  const bouncedAt = c.documents_email_bounced_at ? new Date(c.documents_email_bounced_at).getTime() : 0
+  const emailedAt = c.documents_emailed_at ? new Date(c.documents_emailed_at).getTime() : 0
+  const deliveryFailed = bouncedAt > 0 && bouncedAt >= emailedAt
   const fmtSent = (iso) => {
     try { return 'on ' + new Date(iso).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'Asia/Kolkata' }) }
     catch { return 'earlier' }
@@ -2777,7 +2821,12 @@ function EmailDocsModal({ t, c, branchEmail, onClose, onSent, onError }) {
           <div style={{ fontSize: '13px', color: t.text3, padding: '22px 0', textAlign: 'center' }}>Loading…</div>
         ) : (
           <>
-            {alreadySent && (
+            {deliveryFailed ? (
+              <div style={{ display: 'flex', gap: '8px', fontSize: '11.5px', color: t.red, background: `${t.red}12`, border: `1px solid ${t.red}40`, borderRadius: '9px', padding: '10px 12px', marginBottom: '16px', lineHeight: 1.5 }}>
+                <span style={{ flexShrink: 0, fontWeight: 800 }}>⚠</span>
+                <span>The last email <b>bounced</b>{info?.last_sent?.to ? ` — ${info.last_sent.to} didn't receive it` : ' — the branch didn\'t receive it'}. Check the address for a typo and resend.</span>
+              </div>
+            ) : alreadySent && (
               <div style={{ display: 'flex', gap: '8px', fontSize: '11.5px', color: t.green, background: `${t.green}12`, border: `1px solid ${t.green}40`, borderRadius: '9px', padding: '10px 12px', marginBottom: '16px', lineHeight: 1.5 }}>
                 <span style={{ flexShrink: 0, fontWeight: 800 }}>✓</span>
                 <span>Already emailed {fmtSent(info.last_sent.at)}{info.last_sent.by ? ` by ${info.last_sent.by}` : ''}{info.last_sent.to ? ` to ${info.last_sent.to}` : ''}. You can resend if required.</span>

@@ -2632,18 +2632,21 @@ export async function GET(req) {
     if (data?.length) {
       try {
         const ids = data.map(r => r.id)
-        const latest = {}
+        const latest = {}, bounced = {}
         const CH = 100
         for (let i = 0; i < ids.length; i += CH) {
-          const { data: sent } = await supabase
+          const { data: rows } = await supabase
             .from('consignment_activity_log')
-            .select('consignment_id, created_at')
-            .eq('event_type', 'documents_emailed')
+            .select('consignment_id, created_at, event_type')
+            .in('event_type', ['documents_emailed', 'documents_email_bounced'])
             .in('consignment_id', ids.slice(i, i + CH))
             .order('created_at', { ascending: false })
-          for (const row of (sent || [])) if (!latest[row.consignment_id]) latest[row.consignment_id] = row.created_at
+          for (const row of (rows || [])) {
+            if (row.event_type === 'documents_emailed'        && !latest[row.consignment_id])  latest[row.consignment_id]  = row.created_at
+            if (row.event_type === 'documents_email_bounced'  && !bounced[row.consignment_id]) bounced[row.consignment_id] = row.created_at
+          }
         }
-        for (const r of data) r.documents_emailed_at = latest[r.id] || null
+        for (const r of data) { r.documents_emailed_at = latest[r.id] || null; r.documents_email_bounced_at = bounced[r.id] || null }
       } catch { /* leave rows un-annotated on log hiccup */ }
     }
     return Response.json({ data, error: error?.message })

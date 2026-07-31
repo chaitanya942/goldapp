@@ -41,6 +41,7 @@ const SECTION1_AUDIT_URL   = `${APP_URL}/api/bidding/section1-audit`
 const EMPLOYEE_SYNC_URL    = `${APP_URL}/api/sync-branch-employees`
 const BRANCH_SYNC_URL      = `${APP_URL}/api/sync-branches-auto`
 const REPORT_DISPATCH_URL  = `${APP_URL}/api/reports/dispatch`
+const BOUNCE_SCAN_URL      = `${APP_URL}/api/consignments/scan-bounces`
 const HEADERS              = { Authorization: `Bearer ${CRON_SECRET}` }
 // /api/eod-inventory-snapshot POST + /api/bidding/section1-audit POST both
 // gate on x-cron-token (not Bearer).
@@ -304,6 +305,27 @@ async function syncOnce() {
   // idempotent and only mails when a schedule is actually due (send_time
   // reached, not yet sent today).
   maybeSendScheduledReports().catch(() => null)
+
+  // Piggy-back the bounce scanner — reads the sending mailbox for undelivered
+  // consignment-document emails and flips those rows to "Delivery Failed".
+  // Every ~5 min (bounces trickle in, no need to hammer IMAP each tick).
+  maybeScanBounces().catch(() => null)
+}
+
+let lastBounceScanMs = 0
+const BOUNCE_SCAN_EVERY_MS = 5 * 60 * 1000
+async function maybeScanBounces() {
+  const now = Date.now()
+  if (now - lastBounceScanMs < BOUNCE_SCAN_EVERY_MS) return
+  lastBounceScanMs = now
+  try {
+    const res = await fetch(BOUNCE_SCAN_URL, { headers: HEADERS })
+    const j = await res.json().catch(() => ({}))
+    if (!res.ok) { console.warn('[cron-sync] bounce scan failed:', j.error || res.status); return }
+    if (j.flagged) console.log(`[cron-sync] bounce scan — flagged ${j.flagged} delivery failure(s)`)
+  } catch (e) {
+    console.warn('[cron-sync] bounce scan error:', e.message)
+  }
 }
 
 console.log(`[cron-sync] starting — ${ENDPOINT} every ${INTERVAL_MS}ms`)
