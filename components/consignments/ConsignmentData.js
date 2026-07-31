@@ -1890,31 +1890,87 @@ export default function ConsignmentData() {
       )}
 
       {/* Save-gate prompt — ops clicked Save before the branch mail went out.
-          The documents can't be downloaded until the mail is sent; offer to
-          send it right here. */}
-      {saveBlockedFor && typeof document !== 'undefined' && createPortal((
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.78)', zIndex: 130, display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(6px)', padding: '20px' }}
-          onClick={() => setSaveBlockedFor(null)}>
-          <div onClick={e => e.stopPropagation()}
-            style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: '16px', padding: '24px', width: '100%', maxWidth: '420px', boxShadow: '0 24px 70px rgba(0,0,0,.55)', textAlign: 'center' }}>
-            <div style={{ width: '52px', height: '52px', borderRadius: '50%', background: `${t.orange}18`, border: `1px solid ${t.orange}44`, color: t.orange, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '26px', marginBottom: '14px' }}>✉</div>
-            <div style={{ fontSize: '16px', fontWeight: 800, color: t.text1, marginBottom: '6px' }}>Send the mail first</div>
-            <div style={{ fontSize: '13px', color: t.text2, lineHeight: 1.6, marginBottom: '20px' }}>
-              The documents for <b style={{ color: t.text1, fontFamily: 'monospace' }}>{saveBlockedFor.tmp_prf_no}</b> ({saveBlockedFor.branch_name}) haven&apos;t been emailed to the branch yet. Email them before saving a copy.
-            </div>
-            <div style={{ display: 'flex', gap: '10px', justifyContent: 'center' }}>
-              <button onClick={() => setSaveBlockedFor(null)}
-                style={{ background: 'transparent', border: `1px solid ${t.border2}`, borderRadius: '9px', padding: '10px 18px', fontSize: '13px', fontWeight: 700, color: t.text2, cursor: 'pointer' }}>
-                Cancel
-              </button>
-              <button onClick={() => { const c = saveBlockedFor; setSaveBlockedFor(null); setEmailTarget(c) }}
-                style={{ background: t.green, color: '#fff', border: 'none', borderRadius: '9px', padding: '10px 22px', fontSize: '13px', fontWeight: 800, cursor: 'pointer', boxShadow: `0 3px 12px ${t.green}44`, display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
-                ✉ Send mail
-              </button>
+          Shows the flow so it's clear WHY Save is locked (Email is the pending
+          step before Save) and offers to send the mail right here. */}
+      {saveBlockedFor && typeof document !== 'undefined' && createPortal((() => {
+        const c = saveBlockedFor
+        const isInternal = c.movement_type === 'INTERNAL'
+        const reportDone = !!c.consignee_report_generated_at
+        const docDone    = !!(c.issue_voucher_generated_at || c.delivery_challan_generated_at)
+        const gstDone    = !!(c.eway_bill_no || (c.irn && c.approval_status === 'approved'))
+        const gstLabel   = c.eway_bill_no ? 'EWB' : c.irn ? 'E-Inv' : 'EWB'
+        const allReady   = reportDone && docDone && gstDone
+        const steps = [
+          { label: 'Report', done: reportDone },
+          { label: isInternal ? 'Voucher' : 'Challan', done: docDone },
+          { label: gstLabel, done: gstDone },
+          { label: 'Email', current: true },
+          { label: 'Save', locked: true },
+        ]
+        return (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.78)', zIndex: 130, display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(6px)', padding: '20px' }}
+            onClick={() => setSaveBlockedFor(null)}>
+            <style>{`
+              @keyframes sgIn { from { opacity: 0; transform: translateY(8px) scale(.985) } to { opacity: 1; transform: none } }
+              @keyframes sgPulse { 0%,100% { box-shadow: 0 0 0 0 ${t.orange}55 } 50% { box-shadow: 0 0 0 5px ${t.orange}00 } }
+              .sg-card { animation: sgIn .2s cubic-bezier(.2,.7,.3,1) }
+              .sg-now  { animation: sgPulse 1.8s ease-in-out infinite }
+              .sg-send:hover { filter: brightness(1.07); transform: translateY(-1px) }
+              .sg-cancel:hover { background: ${t.card2} }
+              @media (prefers-reduced-motion: reduce) { .sg-card,.sg-now,.sg-send { animation: none } }
+            `}</style>
+            <div className="sg-card" onClick={e => e.stopPropagation()}
+              style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: '16px', width: '100%', maxWidth: '470px', boxShadow: '0 24px 70px rgba(0,0,0,.55)', overflow: 'hidden' }}>
+
+              <div style={{ padding: '22px 24px 6px', textAlign: 'center' }}>
+                <div style={{ width: '46px', height: '46px', borderRadius: '13px', background: `${t.orange}18`, border: `1px solid ${t.orange}40`, color: t.orange, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '22px', marginBottom: '12px' }}>✉</div>
+                <div style={{ fontSize: '16.5px', fontWeight: 800, color: t.text1, marginBottom: '4px' }}>Email the branch before saving</div>
+                <div style={{ fontSize: '12px', color: t.text3, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                  <span style={{ fontFamily: 'monospace', color: t.text2, fontWeight: 700 }}>{c.tmp_prf_no}</span>
+                  <span style={{ color: t.text4 }}>·</span>
+                  <span>{c.branch_name}</span>
+                  <span style={{ color: t.gold }}>→</span>
+                  <span>{isInternal ? (c.dest_branch || 'Hub') : 'Head Office'}</span>
+                </div>
+              </div>
+
+              {/* Flow strip — the three docs are done; Email is the pending step
+                  that unlocks Save. */}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flexWrap: 'wrap', gap: '3px', padding: '16px 20px 6px' }}>
+                {steps.map((s, i) => (
+                  <span key={s.label} style={{ display: 'inline-flex', alignItems: 'center' }}>
+                    {i > 0 && <span style={{ width: 14, height: 2, borderRadius: 2, background: s.done ? t.green : (steps[i - 1].done && !s.locked ? t.orange : t.border2), flexShrink: 0 }} />}
+                    <span className={s.current ? 'sg-now' : ''}
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap', fontSize: 11, fontWeight: 800, borderRadius: 8, padding: '5px 10px', letterSpacing: '.01em',
+                        ...(s.done ? { background: `${t.green}16`, color: t.green, border: `1px solid ${t.green}40` }
+                          : s.current ? { background: t.orange, color: '#fff', border: 'none' }
+                          : { background: t.card2, color: t.text4, border: `1px solid ${t.border2}` }) }}>
+                      <span aria-hidden="true">{s.done ? '✓' : s.current ? '✉' : '🔒'}</span>{s.label}
+                    </span>
+                  </span>
+                ))}
+              </div>
+
+              <div style={{ fontSize: '12.5px', color: t.text2, lineHeight: 1.55, textAlign: 'center', padding: '4px 28px 0' }}>
+                {allReady
+                  ? <>All three documents are ready. Send them to the branch, then you can save a copy.</>
+                  : <>Saving is locked until the branch has been emailed the documents.</>}
+              </div>
+
+              <div style={{ margin: '20px 0 0', padding: '15px 24px', borderTop: `1px solid ${t.border2}`, background: t.card3, display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+                <button className="sg-cancel" onClick={() => setSaveBlockedFor(null)}
+                  style={{ background: 'transparent', border: `1px solid ${t.border2}`, borderRadius: '9px', padding: '10px 18px', fontSize: '13px', fontWeight: 700, color: t.text2, cursor: 'pointer', transition: 'background .15s' }}>
+                  Cancel
+                </button>
+                <button className="sg-send" onClick={() => { setSaveBlockedFor(null); setEmailTarget(c) }}
+                  style={{ background: t.green, color: '#fff', border: 'none', borderRadius: '9px', padding: '10px 24px', fontSize: '13px', fontWeight: 800, cursor: 'pointer', boxShadow: `0 3px 12px ${t.green}44`, transition: 'filter .15s, transform .15s', display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                  ✉ Send mail
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      ), document.body)}
+        )
+      })(), document.body)}
 
       {/* Cancellation request modal — operations fills in a reason and confirms;
           server records the request and accounts processes it later. */}
