@@ -4112,7 +4112,7 @@ function SourceSection({
                   // Region header = a subtotal row aligned to the branch columns
                   // (gross · net · bills), with the region name + Select-all in
                   // the name column.
-                  <div style={{ display: 'grid', gridTemplateColumns: rowGrid, alignItems: 'center', columnGap: 14, padding: '1px 11px 8px' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: rowGrid, alignItems: 'center', columnGap: 14, padding: '9px 11px', background: `${rColor}14`, border: `1px solid ${rColor}30`, borderRadius: 8, marginBottom: 5 }}>
                     <span style={{ width: 8, height: 8, borderRadius: '50%', background: rColor, display: 'inline-block', justifySelf: 'start', marginLeft: 4 }} />
                     <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, minWidth: 0 }}>
                       <span style={{ fontSize: 14, color: t.text1, fontWeight: 900, letterSpacing: '.06em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>{region}</span>
