@@ -1470,7 +1470,7 @@ export default function ConsignmentData() {
                       const docGate    = canActOnStep(c, docKind)
                       const docDone    = !!(c.issue_voucher_generated_at || c.delivery_challan_generated_at)
                       const isApproved = c.approval_status === 'approved'
-                      const dead       = c.approval_status === 'rejected' || c.status === 'cancelled' || !!c.cancellation_requested_at
+                      const dead       = c.approval_status === 'rejected' || c.status === 'cancelled'
                       const err        = msg => setToast({ msg, type: 'error' })
 
                       const TONE = {
@@ -1574,7 +1574,7 @@ export default function ConsignmentData() {
                         const allReady = !!c.consignee_report_generated_at
                           && !!(c.issue_voucher_generated_at || c.delivery_challan_generated_at)
                           && gstReady
-                        const dead = c.status === 'cancelled' || c.approval_status === 'rejected' || !!c.cancellation_requested_at
+                        const dead = c.status === 'cancelled' || c.approval_status === 'rejected'
                         if (dead) return null
                         const emailed = !!c.documents_emailed_at
                         const sentOn = emailed
@@ -1599,44 +1599,14 @@ export default function ConsignmentData() {
                           </button>
                         )
                       })()}
-                      {(() => {
-                        // Cancellation already requested → show pill, no button.
-                        if (c.cancellation_requested_at) {
-                          return (
-                            <span title={`Reason: ${c.cancellation_reason || '—'}\nRequested by: ${c.cancellation_requested_by || '—'}\nWaiting for accounts to approve / reject.`}
-                              style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', background: `${t.orange}12`, border: `1px solid ${t.orange}40`, borderRadius: '6px', padding: '5px 11px', fontSize: '10px', color: t.orange, fontWeight: 600 }}>
-                              <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: t.orange, display: 'inline-block' }} />
-                              Cancellation requested
-                            </span>
-                          )
-                        }
-                        // Cancellable check — same logic as the API gate so the
-                        // user doesn't click into a doomed flow.
-                        const HOUR_MS = 3600 * 1000
-                        const WINDOW  = 24 * HOUR_MS
-                        const now     = Date.now()
-                        let blockReason = null
-                        if (c.eway_bill_no && c.ewb_generated_at) {
-                          const elapsed = now - new Date(c.ewb_generated_at).getTime()
-                          if (elapsed >= WINDOW) blockReason = 'E-Way Bill cancel window has closed (>24h since generation).'
-                        }
-                        if (!blockReason && c.irn && c.einvoice_generated_at) {
-                          const elapsed = now - new Date(c.einvoice_generated_at).getTime()
-                          if (elapsed >= WINDOW) blockReason = 'E-Invoice cancel window has closed (>24h since generation).'
-                        }
-                        if (blockReason) {
-                          // Window closed → don't shout about it on every row.
-                          // Tooltip still explains why if the user hovers.
-                          return <span title={blockReason} style={{ fontSize: '12px', color: t.text4 }}>—</span>
-                        }
-                        return (
-                          <button onClick={() => setCancelTarget(c)}
-                            title="Send a cancellation request to accounts. Bills will return to the source branch once accounts approves."
-                            style={{ background: 'transparent', border: `1px solid ${t.red}50`, borderRadius: '6px', padding: '5px 12px', fontSize: '10px', color: t.red, cursor: 'pointer', fontWeight: 600 }}>
-                            Cancel
-                          </button>
-                        )
-                      })()}
+                      {/* Ops self-cancel — direct, no accounts request. Bills return
+                          to the branch; if an EWB/E-Invoice exists it's cancelled on
+                          the portal and accounts is notified. */}
+                      <button onClick={() => setCancelTarget(c)}
+                        title="Cancel this consignment — bills return to the branch. Any EWB/E-Invoice is cancelled on the portal and accounts is notified."
+                        style={{ background: 'transparent', border: `1px solid ${t.red}50`, borderRadius: '6px', padding: '5px 12px', fontSize: '10px', color: t.red, cursor: 'pointer', fontWeight: 600 }}>
+                        Cancel
+                      </button>
                      </div>
                     </td>
                   </tr>
@@ -1979,63 +1949,85 @@ export default function ConsignmentData() {
           onClick={() => { if (!cancelSubmitting) { setCancelTarget(null); setCancelReason('') } }}>
           <div onClick={e => e.stopPropagation()}
             style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: '14px', padding: '24px 26px', width: '100%', maxWidth: '480px', boxShadow: '0 20px 60px rgba(0,0,0,.5)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '6px' }}>
-              <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 28, height: 28, borderRadius: '50%', background: `${t.red}18`, color: t.red, fontSize: '15px', fontWeight: 700 }}>!</span>
-              <div style={{ fontSize: '15px', fontWeight: 600, color: t.text1 }}>Request cancellation</div>
-            </div>
-            <div style={{ fontSize: '11px', color: t.text3, marginBottom: '14px' }}>
-              Consignment <strong style={{ color: t.gold, fontFamily: 'monospace' }}>{cancelTarget.tmp_prf_no}</strong> ·{' '}
-              {cancelTarget.branch_name} → {cancelTarget.movement_type === 'INTERNAL' ? (cancelTarget.dest_branch || '?') : 'Head Office'}
-            </div>
-            <div style={{ background: `${t.orange}10`, border: `1px solid ${t.orange}35`, borderRadius: '8px', padding: '10px 12px', fontSize: '11px', color: t.orange, marginBottom: '14px', lineHeight: 1.5 }}>
-              Accounts will review the request and decide whether to cancel the consignment, the E-Way Bill, and the E-Invoice (if any). Bills will return to {cancelTarget.branch_name} only after accounts approves.
-            </div>
-            <label style={{ display: 'block', fontSize: '10px', color: t.text4, letterSpacing: '.08em', textTransform: 'uppercase', fontWeight: 600, marginBottom: '6px' }}>
-              Reason <span style={{ color: t.red }}>*</span>
-            </label>
-            <textarea
-              value={cancelReason}
-              onChange={e => setCancelReason(e.target.value)}
-              placeholder="Why does this consignment need to be cancelled? Accounts sees this verbatim."
-              autoFocus
-              rows={4}
-              style={{ width: '100%', background: t.card2, border: `1px solid ${t.border2}`, borderRadius: '8px', padding: '10px 12px', fontSize: '12px', color: t.text1, outline: 'none', resize: 'vertical', boxSizing: 'border-box', fontFamily: 'inherit' }}
-            />
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '16px' }}>
-              <button onClick={() => { setCancelTarget(null); setCancelReason('') }} disabled={cancelSubmitting}
-                style={{ background: 'transparent', border: `1px solid ${t.border2}`, borderRadius: '8px', padding: '8px 16px', fontSize: '12px', color: t.text2, cursor: cancelSubmitting ? 'not-allowed' : 'pointer' }}>
-                Back
-              </button>
-              <button onClick={async () => {
-                const reason = cancelReason.trim()
-                if (!reason) return
-                setCancelSubmitting(true)
-                try {
-                  const res  = await authedFetch('/api/consignments', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ action: 'request_cancellation', id: cancelTarget.id, reason }),
-                  })
-                  const json = await res.json()
-                  if (!res.ok) throw new Error(json.error || 'Failed to send request')
-                  setToast({ msg: json.message || 'Cancellation request sent to accounts.', type: 'success' })
-                  setCancelTarget(null)
-                  setCancelReason('')
-                  fetchAll()
-                } catch (err) {
-                  setToast({ msg: err.message || 'Failed to send request', type: 'error' })
-                } finally { setCancelSubmitting(false) }
-              }}
-                disabled={cancelSubmitting || !cancelReason.trim()}
-                style={{
-                  background: cancelReason.trim() && !cancelSubmitting ? t.red : `${t.red}40`,
-                  color: '#fff', border: 'none', borderRadius: '8px',
-                  padding: '8px 18px', fontSize: '12px', fontWeight: 700,
-                  cursor: cancelSubmitting || !cancelReason.trim() ? 'not-allowed' : 'pointer',
-                }}>
-                {cancelSubmitting ? 'Sending…' : 'Confirm cancellation'}
-              </button>
-            </div>
+            {(() => {
+              const ct = cancelTarget
+              const isInternal = ct.movement_type === 'INTERNAL'
+              const gstKind  = ct.eway_bill_no ? 'ewb' : ct.irn ? 'einvoice' : null
+              const gstLabel = gstKind === 'ewb' ? 'E-Way Bill' : gstKind === 'einvoice' ? 'E-Invoice' : null
+              const mailed   = !!ct.documents_emailed_at
+              const effects = [
+                <>Bills return to <b style={{ color: t.text1 }}>{ct.branch_name}</b> stock.</>,
+                gstLabel ? <>The <b style={{ color: t.text1 }}>{gstLabel}</b> is cancelled on the government portal, and accounts are emailed to remove it manually (with the document attached).</> : null,
+                mailed ? <>The branch is emailed that this consignment&apos;s documents are <b style={{ color: t.text1 }}>no longer valid</b>.</> : null,
+              ].filter(Boolean)
+              return (
+                <>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '6px' }}>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 28, height: 28, borderRadius: '50%', background: `${t.red}18`, color: t.red, fontSize: '15px', fontWeight: 700 }}>!</span>
+                    <div style={{ fontSize: '15px', fontWeight: 700, color: t.text1 }}>Cancel consignment</div>
+                  </div>
+                  <div style={{ fontSize: '11px', color: t.text3, marginBottom: '14px' }}>
+                    <strong style={{ color: t.gold, fontFamily: 'monospace' }}>{ct.tmp_prf_no}</strong> ·{' '}
+                    {ct.branch_name} → {isInternal ? (ct.dest_branch || '?') : 'Head Office'}
+                  </div>
+                  <div style={{ background: `${t.red}0d`, border: `1px solid ${t.red}30`, borderRadius: '8px', padding: '11px 13px', marginBottom: '14px' }}>
+                    <div style={{ fontSize: '10px', color: t.text4, letterSpacing: '.08em', textTransform: 'uppercase', fontWeight: 700, marginBottom: '7px' }}>This will</div>
+                    <ul style={{ margin: 0, padding: '0 0 0 16px', fontSize: '11.5px', color: t.text2, lineHeight: 1.6 }}>
+                      {effects.map((e, i) => <li key={i} style={{ marginBottom: i < effects.length - 1 ? '4px' : 0 }}>{e}</li>)}
+                    </ul>
+                  </div>
+                  <label style={{ display: 'block', fontSize: '10px', color: t.text4, letterSpacing: '.08em', textTransform: 'uppercase', fontWeight: 600, marginBottom: '6px' }}>
+                    Reason <span style={{ color: t.red }}>*</span>
+                  </label>
+                  <textarea
+                    value={cancelReason}
+                    onChange={e => setCancelReason(e.target.value)}
+                    placeholder="Why is this consignment being cancelled?"
+                    autoFocus
+                    rows={3}
+                    style={{ width: '100%', background: t.card2, border: `1px solid ${t.border2}`, borderRadius: '8px', padding: '10px 12px', fontSize: '12px', color: t.text1, outline: 'none', resize: 'vertical', boxSizing: 'border-box', fontFamily: 'inherit' }}
+                  />
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '16px' }}>
+                    <button onClick={() => { setCancelTarget(null); setCancelReason('') }} disabled={cancelSubmitting}
+                      style={{ background: 'transparent', border: `1px solid ${t.border2}`, borderRadius: '8px', padding: '8px 16px', fontSize: '12px', color: t.text2, cursor: cancelSubmitting ? 'not-allowed' : 'pointer' }}>
+                      Back
+                    </button>
+                    <button onClick={async () => {
+                      const reason = cancelReason.trim()
+                      if (!reason) return
+                      setCancelSubmitting(true)
+                      try {
+                        const res  = await authedFetch('/api/consignments', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ action: 'ops_cancel_consignment', id: ct.id, reason }),
+                        })
+                        const json = await res.json()
+                        if (!res.ok) throw new Error(json.error || 'Failed to cancel')
+                        const notes = []
+                        if (json.gst_kind) notes.push(json.portal_cancelled ? 'portal doc cancelled' : 'accounts notified to remove portal doc')
+                        if (json.emails_sent?.length) notes.push('emailed ' + json.emails_sent.join(' + '))
+                        setToast({ msg: 'Consignment cancelled · bills back at branch' + (notes.length ? ' · ' + notes.join(' · ') : ''), type: 'success' })
+                        setCancelTarget(null)
+                        setCancelReason('')
+                        fetchAll()
+                      } catch (err) {
+                        setToast({ msg: err.message || 'Failed to cancel', type: 'error' })
+                      } finally { setCancelSubmitting(false) }
+                    }}
+                      disabled={cancelSubmitting || !cancelReason.trim()}
+                      style={{
+                        background: cancelReason.trim() && !cancelSubmitting ? t.red : `${t.red}40`,
+                        color: '#fff', border: 'none', borderRadius: '8px',
+                        padding: '8px 18px', fontSize: '12px', fontWeight: 700,
+                        cursor: cancelSubmitting || !cancelReason.trim() ? 'not-allowed' : 'pointer',
+                      }}>
+                      {cancelSubmitting ? 'Cancelling…' : 'Cancel consignment'}
+                    </button>
+                  </div>
+                </>
+              )
+            })()}
           </div>
         </div>
       ), document.body)}

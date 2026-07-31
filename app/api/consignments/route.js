@@ -16,6 +16,12 @@ import { requireAuth, requireAuthForPage, ROLE_GROUPS, getRegionFilter, resolveA
 import { istToday, istStartOfDayIso, istEndOfDayIso, addWorkingDaysSkipSunday } from '../../../lib/dateIst'
 import { cancelEWayBill, cancelEInvoice } from '../../../lib/clearTaxClient'
 import { REGION_TO_STATE_CODE } from '../../../lib/stateMap'
+import { sendMail, mailConfigured } from '../../../lib/sendMail'
+import { docFilename } from '../../../lib/docFilename'
+
+// Accounts inbox that must manually verify/remove a cancelled EWB / E-Invoice
+// from the government portal when ops cancels a fully-documented consignment.
+const ACCOUNTS_CANCEL_CC = ['Rudresh.kedia@whitegold.money', 'sunay.kumar@whitegold.money']
 
 // Purchase-date lock helper — returns the subset of `dates` (YYYY-MM-DD) that
 // fall inside any active lock range (bidding_purchase_date_locks). Used to block
@@ -3602,6 +3608,172 @@ export async function POST(req) {
     })
 
     return Response.json({ data: updated, message: 'Cancellation request sent to accounts.' })
+  }
+
+  // ── Ops self-service cancellation ────────────────────────────────────────
+  // Ops cancels a consignment directly (no accounts approval step). Behaviour
+  // scales with how far the consignment got:
+  //   • no gov doc (EWB/E-Invoice not generated) → just void, bills return.
+  //   • gov doc generated → best-effort cancel it on NIC/IRP, AND email accounts
+  //     (Rudresh/Sunay) the doc as a precaution so they remove it on the portal
+  //     manually. Portal failure NEVER blocks the void — the accounts mail is the
+  //     safety net.
+  //   • branch was already emailed the docs → also email the branch that the
+  //     consignment is cancelled and its documents are no longer valid.
+  if (action === 'ops_cancel_consignment') {
+    const { id, reason } = body
+    if (!id || !reason || !String(reason).trim()) return Response.json({ error: 'Reason is required' }, { status: 400 })
+
+    const { data: c, error: fErr } = await supabase.from('consignments').select('*').eq('id', id).single()
+    if (fErr || !c)               return Response.json({ error: 'Consignment not found' }, { status: 404 })
+    if (c.status === 'cancelled') return Response.json({ error: 'Already cancelled' }, { status: 400 })
+
+    const cleanReason = String(reason).trim()
+    const isInternal  = c.movement_type === 'INTERNAL'
+    const gstKind     = c.eway_bill_no ? 'ewb' : c.irn ? 'einvoice' : null
+    const gstLabel    = gstKind === 'ewb' ? 'E-Way Bill' : gstKind === 'einvoice' ? 'E-Invoice' : null
+    const dest        = isInternal ? (c.dest_branch || 'Hub') : 'Head Office'
+    const dateStr     = c.created_at
+      ? new Date(c.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' })
+      : ''
+
+    const { data: branch } = await supabase
+      .from('branches').select('name, region, branch_gstin, contact_email').eq('name', c.branch_name).maybeSingle()
+
+    // Was the branch already emailed the documents? (documents_emailed is a log
+    // event, not a column.)
+    let mailSent = false
+    try {
+      const { data: em } = await supabase.from('consignment_activity_log')
+        .select('id').eq('consignment_id', id).eq('event_type', 'documents_emailed').limit(1)
+      mailSent = !!(em && em.length)
+    } catch {}
+
+    const origin  = (process.env.NEXT_PUBLIC_SITE_URL || new URL(req.url).origin).replace(/\/+$/, '')
+    const authHdr = req.headers.get('authorization') || ''
+
+    // 1) Government doc: grab the PDF (while the numbers are still on the row) for
+    //    the accounts email, then attempt the portal cancel (best-effort).
+    let gstPdf = null, portalCancelled = false, portalError = null
+    if (gstKind) {
+      try {
+        const path = gstKind === 'ewb' ? `/api/eway-bill/pdf?id=${id}` : `/api/e-invoice/pdf?id=${id}`
+        const pres = await fetch(`${origin}${path}`, { headers: { authorization: authHdr } })
+        if (pres.ok) gstPdf = {
+          filename:    docFilename({ consignment: c, branch: branch || { name: c.branch_name }, docType: gstKind === 'ewb' ? 'ewb' : 'einvoice', ext: 'pdf' }),
+          content:     Buffer.from(await pres.arrayBuffer()),
+          contentType: 'application/pdf',
+        }
+      } catch (e) { console.error('[ops_cancel] gst pdf fetch failed:', e?.message) }
+
+      const { data: cs } = await supabase.from('company_settings').select('*').single()
+      const stateCode  = REGION_TO_STATE_CODE[branch?.region]
+      const stateGstin = stateCode ? cs?.[`gstin_${stateCode.toLowerCase()}`] : null
+      const gstinFor   = c.source_gstin || stateGstin || branch?.branch_gstin || process.env.WG_GSTIN
+      try {
+        if (gstKind === 'ewb') await cancelEWayBill({ ewbNumber: c.eway_bill_no, reasonCode: '2', remark: cleanReason.slice(0, 100), gstinOverride: gstinFor })
+        else                   await cancelEInvoice({ irn: c.irn,            reasonCode: '2', remark: cleanReason.slice(0, 100), gstinOverride: gstinFor })
+        portalCancelled = true
+      } catch (e) { portalError = e?.message || 'portal cancel failed' }
+    }
+
+    // 2) Void the consignment — bills return to the source branch.
+    const composedReason = `Cancelled by operations (${actorEmail}). Reason: ${cleanReason}`
+    const { error: rpcErr } = await supabase.rpc('cancel_consignment_atomic', { p_consignment_id: id, p_reason: composedReason, p_cancelled_by: actorEmail })
+    if (rpcErr && rpcErr.code !== 'PGRST202') return Response.json({ error: rpcErr.message }, { status: 400 })
+    if (rpcErr) {
+      const { data: links } = await supabase.from('consignment_items').select('purchase_id').eq('consignment_id', id)
+      const pids = (links || []).map(l => l.purchase_id)
+      if (pids.length) await supabase.from('purchases').update({ stock_status: 'at_branch', current_branch: c.branch_name }).in('id', pids)
+      await supabase.from('consignments').update({ status: 'cancelled', cancelled_at: new Date().toISOString(), cancelled_by: actorEmail, cancellation_reason_final: composedReason }).eq('id', id)
+    }
+
+    // 3) Flip approval to rejected (keeps it off the Approved tab + reads as a
+    //    cancellation, not an accounts rejection). Clear any stale request flags.
+    //    Clear the portal-doc numbers only if the portal cancel actually
+    //    succeeded; otherwise keep them so accounts can find the doc to remove.
+    const cancelledDoc = c.irn ? 'E-Invoice' : c.eway_bill_no ? 'E-Way Bill' : 'consignment'
+    const upd = {
+      approval_status:  'rejected',
+      rejection_reason: `Rejected because of cancellation of ${cancelledDoc}`,
+      approved_at:      new Date().toISOString(),
+      approved_by:      actorEmail,
+      cancellation_requested_at: null,
+      cancellation_reason:       null,
+      cancellation_requested_by: null,
+    }
+    if (portalCancelled) {
+      if (c.eway_bill_no) { upd.eway_bill_no = null; upd.ewb_valid_until = null; upd.ewb_generated_at = null; upd.ewb_generation_started_at = null }
+      if (c.irn)          { upd.irn = null; upd.ack_no = null; upd.ack_dt = null; upd.signed_qr_code = null; upd.einvoice_generated_at = null }
+    }
+    await supabase.from('consignments').update(upd).eq('id', id)
+
+    // 4) Emails (best-effort — never block the cancel).
+    const senderName  = (auth.profile?.full_name || '').trim() || (auth.profile?.email || '').split('@')[0] || 'White Gold'
+    const senderEmail = (auth.profile?.email || '').trim() || undefined
+    const emailsSent  = []
+    if (mailConfigured()) {
+      // 4a) Accounts precautionary email — only when a gov doc existed.
+      if (gstKind) {
+        const docNo = gstKind === 'ewb' ? c.eway_bill_no : (c.einvoice_doc_no || c.irn)
+        const actionLine = portalCancelled
+          ? `The system reported the ${gstLabel} was cancelled on the portal. Please VERIFY on the government portal and remove it manually if it still shows active.`
+          : `The system could NOT auto-cancel the ${gstLabel} on the portal (${portalError || 'reason unknown'}). Please cancel / delete it on the government portal MANUALLY.`
+        const html = `<div style="font-family:Arial,sans-serif;font-size:14px;color:#222;line-height:1.55">
+          <p>Team,</p>
+          <p>Consignment <b>${c.tmp_prf_no}</b> (${c.branch_name} &rarr; ${dest}${dateStr ? `, ${dateStr}` : ''}) has been <b>cancelled</b> by operations.</p>
+          <table style="border-collapse:collapse;font-size:13px;margin:8px 0">
+            <tr><td style="padding:2px 14px 2px 0;color:#666">${gstLabel}</td><td><b>${docNo || '—'}</b></td></tr>
+            <tr><td style="padding:2px 14px 2px 0;color:#666">Reason</td><td>${cleanReason}</td></tr>
+            <tr><td style="padding:2px 14px 2px 0;color:#666">Cancelled by</td><td>${senderName}</td></tr>
+          </table>
+          <p><b>Action needed:</b> ${actionLine}</p>
+          <p>The ${gstLabel} is attached for reference.</p>
+        </div>`
+        try {
+          await sendMail({ to: ACCOUNTS_CANCEL_CC, subject: `White Gold · ${c.tmp_prf_no} cancelled · ${gstLabel} to be removed from portal`, html, attachments: gstPdf ? [gstPdf] : undefined, fromName: senderName, replyTo: senderEmail })
+          emailsSent.push('accounts')
+        } catch (e) { console.error('[ops_cancel] accounts email failed:', e?.message) }
+      }
+      // 4b) Branch notice — only if the branch was already emailed the docs.
+      if (mailSent && branch?.contact_email) {
+        const docList = `Consignee Report, ${isInternal ? 'Issue Voucher' : 'Delivery Challan'}${gstLabel ? `, ${gstLabel}` : ''}`
+        const html = `<div style="font-family:Arial,sans-serif;font-size:14px;color:#222;line-height:1.55">
+          <p>Hello ${c.branch_name} team,</p>
+          <p>The consignment <b>${c.tmp_prf_no}</b>${dateStr ? ` dated ${dateStr}` : ''} that we emailed you earlier has been <b>CANCELLED</b>.</p>
+          <p>The documents sent for it (${docList}) are <b>no longer valid</b> — please do not act on them or hand over any stock against them. A fresh consignment and a new set of documents will follow in a separate email.</p>
+          <p style="color:#888;font-size:12px">Sent by ${senderName} · White Gold consignment system.</p>
+        </div>`
+        try {
+          await sendMail({ to: branch.contact_email, subject: `White Gold · ${c.tmp_prf_no} CANCELLED — documents no longer valid`, html, fromName: senderName, replyTo: senderEmail })
+          emailsSent.push('branch')
+        } catch (e) { console.error('[ops_cancel] branch email failed:', e?.message) }
+      }
+    }
+
+    // 5) Audit. When the portal doc was actually cancelled, also log the
+    //    standard ewb_cancelled / einvoice_cancelled event so it shows on the
+    //    accounts Cancellations tab (same as the old accounts-driven flow). If
+    //    the portal cancel failed, we DON'T log it — the doc is still live and
+    //    surfaces on the portal-cleanup banner + the accounts email instead.
+    if (gstKind && portalCancelled) {
+      await logConsignmentEvent(supabase, {
+        consignment_id: id,
+        event_type:  gstKind === 'ewb' ? 'ewb_cancelled' : 'einvoice_cancelled',
+        actor_email: actorEmail,
+        actor_role:  auth.role,
+        details:     { [gstKind === 'ewb' ? 'ewb_no' : 'irn']: gstKind === 'ewb' ? c.eway_bill_no : c.irn, via: 'ops_cancel', reason: cleanReason },
+      })
+    }
+    await logConsignmentEvent(supabase, {
+      consignment_id: id,
+      event_type:     'cancelled_by_ops',
+      actor_email:    actorEmail,
+      actor_role:     auth.role,
+      details:        { reason: cleanReason, gst_kind: gstKind, portal_cancelled: portalCancelled, portal_error: portalError, mail_sent_to_branch: mailSent, emails_sent: emailsSent, eway_bill_no: c.eway_bill_no || null, irn: c.irn || null },
+    })
+
+    return Response.json({ ok: true, message: 'Consignment cancelled. Bills returned to branch.', portal_cancelled: portalCancelled, portal_error: portalError, emails_sent: emailsSent, gst_kind: gstKind })
   }
 
   // ── Approve a pending cancellation request (accounts side) ───────────────
