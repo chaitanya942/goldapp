@@ -149,6 +149,7 @@ export default function BiddingVolume() {
   // bookings show up. ← / → step through past bidding days; the hero +
   // Bidding tab stay locked to tomorrow's arrival.
   const [bookingsDate, setBookingsDate] = useState(today)
+  const [manualBookingOpen, setManualBookingOpen] = useState(false)   // bill-less manual booking modal
   const [supply,       setSupply]       = useState(null)
   const [bookingsResp, setBookingsResp] = useState(null)
   const [loading,      setLoading]      = useState(true)
@@ -968,6 +969,24 @@ export default function BiddingVolume() {
   }
 
   // ── Mutations ──────────────────────────────────────────────────────────────
+  // Manual, bill-less booking (leftover / old inventory). Ops enters net + gain
+  // + rate + bidder; booked weight = net + gain.
+  const createManualBooking = async ({ net, gain, rate, bidder }) => {
+    try {
+      const r = await authedFetch('/api/consignments?action=create_manual_booking', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ net_weight: net, gain, rate, party: bidder, is_kl: regionTab === 'kl', date: arrivalDate }),
+      })
+      const j = await r.json().catch(() => null)
+      if (!r.ok || j?.error) { showToast(j?.error || `Booking failed (HTTP ${r.status})`, 'error'); return false }
+      showToast(j.message || 'Booking created.', 'success')
+      setManualBookingOpen(false)
+      setActiveTab('bookings')
+      await fetchAll(true)
+      return true
+    } catch (e) { showToast(`Booking failed: ${String(e?.message || e)}`, 'error'); return false }
+  }
+
   const createBooking = async (payload) => {
     // Bill-level claim: send the exact purchase ids ops selected. The server
     // honours bill_ids verbatim (no branch-wide widening) so partial
@@ -1296,6 +1315,7 @@ export default function BiddingVolume() {
           )
         })()}
 
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 8 }}>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', position: 'relative' }}>
           {/* Purchase-date lock — ops lock date ranges out of booking. */}
           <button onClick={() => setLockPanelOpen(o => !o)}
@@ -1335,7 +1355,18 @@ export default function BiddingVolume() {
             Refresh
           </button>
         </div>
+        {/* Manual, bill-less booking — for leftover / old inventory. */}
+        <button onClick={() => setManualBookingOpen(true)}
+          title="Create a booking manually (no bills) — for leftover / old inventory"
+          style={{ background: t.gold, color: t.goldText || '#1a0a00', border: 'none', borderRadius: '8px', padding: '8px 16px', fontSize: '12px', fontWeight: 800, letterSpacing: '.02em', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, boxShadow: `0 2px 8px ${t.gold}44` }}>
+          + Create New Booking
+        </button>
+        </div>
       </div>
+
+      {manualBookingOpen && (
+        <ManualBookingModal t={t} isKl={regionTab === 'kl'} onClose={() => setManualBookingOpen(false)} onCreate={createManualBooking} />
+      )}
 
       {/* ── Region tab strip — switches between the KA·AP·TS pool (Bangalore
           + outstation) and the KL pool (Kerala-only, with its own S1/S2/S3
@@ -3239,6 +3270,84 @@ function fmtPickupTime(s) {
   h = h % 12 || 12
   return `${h}:${min} ${ap}`
 }
+
+// Manual, bill-less booking modal — commit leftover / old inventory that has no
+// bills in the picker. Ops enters bidder + net + optional gain + rate; booked
+// weight = net + gain.
+function ManualBookingModal({ t, isKl, onClose, onCreate }) {
+  const [bidder, setBidder] = useState('')
+  const [net,    setNet]    = useState('')
+  const [gain,   setGain]   = useState('')
+  const [rate,   setRate]   = useState('')
+  const [busy,   setBusy]   = useState(false)
+  const nNet  = parseFloat(net)  || 0
+  const nGain = parseFloat(gain) || 0
+  const nRate = parseFloat(rate) || 0
+  const book  = nNet + nGain
+  const value = book * nRate
+  const canSubmit = bidder.trim() && nNet > 0 && nRate > 0 && nGain >= 0 && !busy
+  const submit = async () => {
+    if (!canSubmit) return
+    setBusy(true)
+    const ok = await onCreate({ net: nNet, gain: nGain, rate: nRate, bidder: bidder.trim() })
+    if (!ok) setBusy(false)   // on success the modal is closed by the parent
+  }
+  if (typeof document === 'undefined') return null
+  const inp = { width: '100%', background: t.card2, border: `1px solid ${t.border2}`, borderRadius: 9, padding: '10px 12px', fontSize: 14, color: t.text1, outline: 'none', boxSizing: 'border-box', fontFamily: 'monospace' }
+  const lbl = { fontSize: 10, color: t.text4, letterSpacing: '.08em', textTransform: 'uppercase', fontWeight: 700, display: 'block', marginBottom: 5 }
+  const inr = (n) => `₹${Math.round(n).toLocaleString('en-IN')}`
+  return createPortal((
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.78)', zIndex: 120, display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(6px)', padding: 20 }}
+      onClick={() => { if (!busy) onClose?.() }}>
+      <div onClick={e => e.stopPropagation()}
+        style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: 16, width: '100%', maxWidth: 460, boxShadow: '0 24px 70px rgba(0,0,0,.55)', overflow: 'hidden' }}>
+        <div style={{ padding: '20px 24px 14px', borderBottom: `1px solid ${t.border2}` }}>
+          <div style={{ fontSize: 16, fontWeight: 800, color: t.text1 }}>Create New Booking</div>
+          <div style={{ fontSize: 12, color: t.text3, marginTop: 3 }}>Manual, bill-less booking — for leftover / old inventory{isKl ? ' · Kerala' : ''}.</div>
+        </div>
+        <div style={{ padding: '16px 24px 20px' }}>
+          <label style={lbl}>Bidder <span style={{ color: t.red }}>*</span></label>
+          <input value={bidder} onChange={e => setBidder(e.target.value)} placeholder="Buyer / party name" autoFocus
+            style={{ ...inp, fontFamily: 'inherit', marginBottom: 14 }} />
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 14 }}>
+            <div>
+              <label style={lbl}>Net weight (g) <span style={{ color: t.red }}>*</span></label>
+              <input value={net} onChange={e => setNet(e.target.value)} inputMode="decimal" placeholder="0.00" style={inp} />
+            </div>
+            <div>
+              <label style={lbl}>Gain (g) <span style={{ color: t.text4, textTransform: 'none', letterSpacing: 0 }}>· optional</span></label>
+              <input value={gain} onChange={e => setGain(e.target.value)} inputMode="decimal" placeholder="0.00" style={inp} />
+            </div>
+          </div>
+          <label style={lbl}>Rate (₹ / g) <span style={{ color: t.red }}>*</span></label>
+          <input value={rate} onChange={e => setRate(e.target.value)} inputMode="decimal" placeholder="0" style={{ ...inp, marginBottom: 16 }} />
+
+          {/* Live summary — booked weight = net + gain. */}
+          <div style={{ background: t.card2, border: `1px solid ${t.border2}`, borderRadius: 10, padding: '12px 14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+            <div>
+              <div style={{ fontSize: 10, color: t.text4, letterSpacing: '.08em', textTransform: 'uppercase', fontWeight: 700, marginBottom: 3 }}>Booked weight</div>
+              <div style={{ fontSize: 12, color: t.text3, fontFamily: 'monospace' }}>{nNet.toFixed(2)} net + {nGain.toFixed(2)} gain</div>
+            </div>
+            <div style={{ textAlign: 'right' }}>
+              <div style={{ fontSize: 20, fontWeight: 800, color: t.gold, fontFamily: 'monospace', letterSpacing: '-.01em' }}>{book.toFixed(2)}<span style={{ fontSize: 12, color: t.text3, marginLeft: 3, fontWeight: 600 }}>g</span></div>
+              <div style={{ fontSize: 11, color: t.blue, fontFamily: 'monospace', fontWeight: 700 }}>{value > 0 ? inr(value) : '—'}</div>
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 20 }}>
+            <button onClick={() => { if (!busy) onClose?.() }} disabled={busy}
+              style={{ background: 'transparent', border: `1px solid ${t.border2}`, borderRadius: 9, padding: '10px 18px', fontSize: 13, fontWeight: 700, color: t.text2, cursor: busy ? 'not-allowed' : 'pointer' }}>Cancel</button>
+            <button onClick={submit} disabled={!canSubmit}
+              style={{ background: canSubmit ? t.gold : t.border2, color: canSubmit ? (t.goldText || '#1a0a00') : t.text4, border: 'none', borderRadius: 9, padding: '10px 22px', fontSize: 13, fontWeight: 800, cursor: canSubmit ? 'pointer' : 'not-allowed' }}>
+              {busy ? 'Creating…' : 'Create booking'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  ), document.body)
+}
+
 function PickupDaysChip({ t, days }) {
   if (!Array.isArray(days) || days.length === 0) return null
   // Show ONLY the days pickup actually runs — ops don't want the skipped days

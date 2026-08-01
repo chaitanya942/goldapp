@@ -1931,7 +1931,11 @@ export async function GET(req) {
         const rate    = r.gain_rate != null ? Number(r.gain_rate) : (r.is_kl ? 0 : 0.035)
         const pending = Number(r.pending_g || 0)
         const attached = Number(r.attached_net_weight_g || 0)
-        const sourced  = attached + pending
+        // Manual bookings (ops-entered net/gain, no bills) and any booking with
+        // no live-attached bills fall back to the net snapshot captured at
+        // creation, so their gain/pipeline derive from a real base instead of 0.
+        const baseNet  = attached > 0 ? attached : Number(r.bills_net_weight_g || 0)
+        const sourced  = baseNet + pending
         // Settled = arrival day passed OR ops manually closed a small
         // residual pipeline. Either way the leftover folds into gain.
         // Settle by the pipeline's ARRIVAL date, not the booking date — a
@@ -2915,7 +2919,7 @@ export async function POST(req) {
   // can see the Bidding Volume page (page.consignment-bidding) rather than
   // a hardcoded role group — so the gate can never lock out whichever role
   // ops actually grant the page to (the KT §VII trap-2 lesson).
-  const BIDDING_WRITES = new Set(['set_bidding_pending', 'create_booking', 'reconcile_booking', 'update_booking_status', 'close_booking_pipeline', 'toggle_bill_hold', 'unbook_bills', 'attach_selected_to_pipeline', 'lock_dates', 'unlock_dates'])
+  const BIDDING_WRITES = new Set(['set_bidding_pending', 'create_booking', 'create_manual_booking', 'reconcile_booking', 'update_booking_status', 'close_booking_pipeline', 'toggle_bill_hold', 'unbook_bills', 'attach_selected_to_pipeline', 'lock_dates', 'unlock_dates'])
   let auth
   if (BIDDING_WRITES.has(action)) {
     auth = await requireAuthForPage(req, 'consignment-bidding')
@@ -4364,6 +4368,49 @@ export async function POST(req) {
       .single()
     if (error) return Response.json({ error: error.message }, { status: 500 })
     return Response.json({ data })
+  }
+
+  // Manual, bill-less booking — for committing leftover/old inventory that has
+  // no bills in the picker. Ops enters net weight + optional gain + rate +
+  // bidder; booked weight = net + gain. Stored as a cal_quota with the net as
+  // its creation snapshot and the flat gain encoded as a per-net gain_rate, so
+  // the Bookings table derives NET=net, GAIN=gain, PENDING/PIPELINE=0.
+  if (action === 'create_manual_booking') {
+    const { party, rate, net_weight, gain, is_kl, date } = body
+    if (!party || !String(party).trim()) return Response.json({ error: 'Bidder name required' }, { status: 400 })
+    const net = Number(net_weight), g = Number(gain) || 0, rt = Number(rate)
+    if (!Number.isFinite(net) || net <= 0) return Response.json({ error: 'Net weight must be a positive number' }, { status: 400 })
+    if (!Number.isFinite(g)   || g < 0)    return Response.json({ error: 'Gain must be 0 or more' }, { status: 400 })
+    if (!Number.isFinite(rt)  || rt <= 0)  return Response.json({ error: 'Rate must be a positive number' }, { status: 400 })
+    const bookWeight = net + g
+    const bdate = (date && /^\d{4}-\d{2}-\d{2}$/.test(date)) ? date : istToday()
+    const actorUuid = auth.user?.id || null
+    const baseRow = {
+      date: bdate, party: String(party).trim(), weight: bookWeight, rate: rt,
+      is_kl: !!is_kl, status: 'booked', created_by: actorUuid || actorEmail,
+      notes: 'Manual booking · bill-less (old inventory)',
+    }
+    const insert = (row) => supabase.from('cal_quotas').insert(row).select().single()
+    let { data, error: insErr } = await insert(baseRow)
+    if (insErr && /invalid input syntax for type uuid/i.test(insErr.message || '') && actorUuid) {
+      const retry = await insert({ ...baseRow, created_by: actorEmail }); data = retry.data; insErr = retry.error
+    } else if (insErr && /invalid input syntax for type uuid/i.test(insErr.message || '') && !actorUuid) {
+      const retry = await insert({ ...baseRow, created_by: null }); data = retry.data; insErr = retry.error
+    }
+    if (insErr) return Response.json({ error: insErr.message }, { status: 500 })
+    // Best-effort: encode net/gain into the breakdown + gain_rate columns so the
+    // Bookings table shows them split correctly (columns present in prod).
+    try {
+      const { error: bdErr } = await supabase.from('cal_quotas').update({
+        gain_rate:          net > 0 ? g / net : 0,
+        bills_net_weight_g: net,
+        gain_applied_g:     g,
+        pending_g:          0,
+        additional_gain_g:  0,
+      }).eq('id', data.id)
+      if (bdErr) console.warn('[create_manual_booking] breakdown update failed (migration may be missing):', bdErr.message)
+    } catch (e) { console.warn('[create_manual_booking] breakdown update threw:', e?.message) }
+    return Response.json({ data, message: `Booking created for ${baseRow.party} — ${bookWeight.toFixed(2)} g (net ${net.toFixed(2)} + gain ${g.toFixed(2)}).` })
   }
 
   if (action === 'create_booking') {
