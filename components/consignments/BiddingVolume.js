@@ -4644,6 +4644,11 @@ function SourceSection({
                   const bkCols = '78px 130px minmax(0, 1fr) 100px 100px 130px'
                   const bcds   = [...new Set(bbills.map(bl => bl._consignment_created_at ? istDayOf(bl._consignment_created_at) : null).filter(Boolean))].sort()
                   const bclabel = bcds.length ? (bcds.length === 1 ? fmtDateShort(bcds[0]) : `${fmtDateShort(bcds[0])} → ${fmtDateShort(bcds[bcds.length - 1])}`) : null
+                  // When the bills were BOOKED (not the same as the consignment date) —
+                  // ops needs both so they aren't confused about which day is which.
+                  const bkds    = [...new Set(bbills.map(bl => bl.booked_at ? istDayOf(bl.booked_at) : null).filter(Boolean))].sort()
+                  const bkdlabel = bkds.length ? (bkds.length === 1 ? fmtDateShort(bkds[0]) : `${fmtDateShort(bkds[0])} → ${fmtDateShort(bkds[bkds.length - 1])}`) : null
+                  const bkGreen = t.green || '#3fa66a'
                   return (
                     <Fragment key={`bk-${b.branch_name}`}>
                     <div style={{ display: 'grid', gridTemplateColumns: rowGrid, alignItems: 'center', columnGap: 14, padding: '8px 11px', borderRadius: 8, opacity: 0.85 }}>
@@ -4651,6 +4656,7 @@ function SourceSection({
                       <span style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
                         <span style={{ fontSize: 13, color: t.text2, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{b.branch_name}</span>
                         {bclabel && <span title={`Consignment created on ${bclabel}`} style={{ fontSize: 10.5, color: t.blue, background: `${t.blue}14`, border: `1px solid ${t.blue}33`, borderRadius: 4, padding: '1px 8px', whiteSpace: 'nowrap', fontWeight: 700, letterSpacing: '.03em', flexShrink: 0 }}>Consignment created on {bclabel}</span>}
+                        {bkdlabel && <span title={`Booked on ${bkdlabel}`} style={{ fontSize: 10.5, color: bkGreen, background: `${bkGreen}14`, border: `1px solid ${bkGreen}33`, borderRadius: 4, padding: '1px 8px', whiteSpace: 'nowrap', fontWeight: 700, letterSpacing: '.03em', flexShrink: 0 }}>Booked on {bkdlabel}</span>}
                       </span>
                       <span style={{ textAlign: 'right', color: t.text3, fontWeight: 600 }}>{fmt(b.total_gross_wt, 2)}<span style={{ fontSize: 10, color: t.text4, marginLeft: 2 }}>g</span></span>
                       <span style={{ textAlign: 'right', color: bk, fontWeight: 800 }}>{fmt(b.total_net_wt, 2)}<span style={{ fontSize: 10, color: t.text4, marginLeft: 2 }}>g</span></span>
