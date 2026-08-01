@@ -1365,7 +1365,7 @@ export default function BiddingVolume() {
       </div>
 
       {manualBookingOpen && (
-        <ManualBookingModal t={t} isKl={regionTab === 'kl'} onClose={() => setManualBookingOpen(false)} onCreate={createManualBooking} />
+        <ManualBookingModal t={t} isKl={regionTab === 'kl'} bidders={bidders} onClose={() => setManualBookingOpen(false)} onCreate={createManualBooking} />
       )}
 
       {/* ── Region tab strip — switches between the KA·AP·TS pool (Bangalore
@@ -3274,7 +3274,7 @@ function fmtPickupTime(s) {
 // Manual, bill-less booking modal — commit leftover / old inventory that has no
 // bills in the picker. Ops enters bidder + net + optional gain + rate; booked
 // weight = net + gain.
-function ManualBookingModal({ t, isKl, onClose, onCreate }) {
+function ManualBookingModal({ t, isKl, bidders = [], onClose, onCreate }) {
   const [bidder, setBidder] = useState('')
   const [net,    setNet]    = useState('')
   const [gain,   setGain]   = useState('')
@@ -3292,30 +3292,47 @@ function ManualBookingModal({ t, isKl, onClose, onCreate }) {
     const ok = await onCreate({ net: nNet, gain: nGain, rate: nRate, bidder: bidder.trim() })
     if (!ok) setBusy(false)   // on success the modal is closed by the parent
   }
+  // Known bidder names (from cal_quotas.party) for the autocomplete.
+  const bidderNames = [...new Set((bidders || []).map(b => (typeof b === 'string' ? b : (b?.party || b?.name || ''))).filter(Boolean))].sort()
   if (typeof document === 'undefined') return null
-  const inp = { width: '100%', background: t.card2, border: `1px solid ${t.border2}`, borderRadius: 9, padding: '10px 12px', fontSize: 14, color: t.text1, outline: 'none', boxSizing: 'border-box', fontFamily: 'monospace' }
-  const lbl = { fontSize: 10, color: t.text4, letterSpacing: '.08em', textTransform: 'uppercase', fontWeight: 700, display: 'block', marginBottom: 5 }
+  const inp = { width: '100%', background: t.card2, border: `1px solid ${t.border2}`, borderRadius: 10, padding: '11px 13px', fontSize: 14, color: t.text1, outline: 'none', boxSizing: 'border-box', fontFamily: 'monospace', transition: 'border-color .15s, box-shadow .15s' }
+  const lbl = { fontSize: 10, color: t.text4, letterSpacing: '.08em', textTransform: 'uppercase', fontWeight: 700, display: 'block', marginBottom: 6 }
   const inr = (n) => `₹${Math.round(n).toLocaleString('en-IN')}`
   return createPortal((
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.78)', zIndex: 120, display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(6px)', padding: 20 }}
       onClick={() => { if (!busy) onClose?.() }}>
-      <div onClick={e => e.stopPropagation()}
-        style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: 16, width: '100%', maxWidth: 460, boxShadow: '0 24px 70px rgba(0,0,0,.55)', overflow: 'hidden' }}>
-        <div style={{ padding: '20px 24px 14px', borderBottom: `1px solid ${t.border2}` }}>
-          <div style={{ fontSize: 16, fontWeight: 800, color: t.text1 }}>Create New Booking</div>
-          <div style={{ fontSize: 12, color: t.text3, marginTop: 3 }}>Manual, bill-less booking — for leftover / old inventory{isKl ? ' · Kerala' : ''}.</div>
+      <style>{`
+        @keyframes mbkIn { from { opacity: 0; transform: translateY(8px) scale(.985) } to { opacity: 1; transform: none } }
+        .mbk-card { animation: mbkIn .2s cubic-bezier(.2,.7,.3,1) }
+        .mbk-card input:focus { border-color: ${t.gold} !important; box-shadow: 0 0 0 3px ${t.gold}26 }
+        .mbk-go:hover:not(:disabled) { filter: brightness(1.06); transform: translateY(-1px) }
+        .mbk-cancel:hover { background: ${t.card2} }
+        @media (prefers-reduced-motion: reduce) { .mbk-card,.mbk-go { animation: none } }
+      `}</style>
+      <div className="mbk-card" onClick={e => e.stopPropagation()}
+        style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: 16, width: '100%', maxWidth: 470, boxShadow: '0 24px 70px rgba(0,0,0,.55)', overflow: 'hidden' }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 13, padding: '20px 24px 16px', borderBottom: `1px solid ${t.border2}` }}>
+          <div style={{ flexShrink: 0, width: 38, height: 38, borderRadius: 11, background: `${t.gold}1e`, color: t.gold, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 19, fontWeight: 800 }}>✓</div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 15.5, fontWeight: 800, color: t.text1, lineHeight: 1.2 }}>Create New Booking</div>
+            <div style={{ fontSize: 12, color: t.text3, marginTop: 4 }}>Manual, bill-less — for leftover / old inventory{isKl ? ' · Kerala' : ''}.</div>
+          </div>
         </div>
-        <div style={{ padding: '16px 24px 20px' }}>
+        <div style={{ padding: '16px 24px 4px' }}>
           <label style={lbl}>Bidder <span style={{ color: t.red }}>*</span></label>
-          <input value={bidder} onChange={e => setBidder(e.target.value)} placeholder="Buyer / party name" autoFocus
-            style={{ ...inp, fontFamily: 'inherit', marginBottom: 14 }} />
+          <input value={bidder} onChange={e => setBidder(e.target.value)} placeholder="Start typing or pick a bidder…" autoFocus
+            list="mbk-bidders" autoComplete="off" style={{ ...inp, fontFamily: 'inherit', marginBottom: 4 }} />
+          <datalist id="mbk-bidders">{bidderNames.map(n => <option key={n} value={n} />)}</datalist>
+          <div style={{ fontSize: 10.5, color: t.text4, marginBottom: 14 }}>
+            {bidderNames.length ? `${bidderNames.length} known bidder${bidderNames.length === 1 ? '' : 's'} — pick one or type a new name.` : 'Type the bidder name.'}
+          </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 14 }}>
             <div>
               <label style={lbl}>Net weight (g) <span style={{ color: t.red }}>*</span></label>
               <input value={net} onChange={e => setNet(e.target.value)} inputMode="decimal" placeholder="0.00" style={inp} />
             </div>
             <div>
-              <label style={lbl}>Gain (g) <span style={{ color: t.text4, textTransform: 'none', letterSpacing: 0 }}>· optional</span></label>
+              <label style={lbl}>Gain (g) <span style={{ color: t.text4, textTransform: 'none', letterSpacing: 0, fontWeight: 400 }}>· optional</span></label>
               <input value={gain} onChange={e => setGain(e.target.value)} inputMode="decimal" placeholder="0.00" style={inp} />
             </div>
           </div>
@@ -3323,25 +3340,25 @@ function ManualBookingModal({ t, isKl, onClose, onCreate }) {
           <input value={rate} onChange={e => setRate(e.target.value)} inputMode="decimal" placeholder="0" style={{ ...inp, marginBottom: 16 }} />
 
           {/* Live summary — booked weight = net + gain. */}
-          <div style={{ background: t.card2, border: `1px solid ${t.border2}`, borderRadius: 10, padding: '12px 14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+          <div style={{ background: `${t.gold}0e`, border: `1px solid ${t.gold}33`, borderRadius: 11, padding: '12px 15px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
             <div>
               <div style={{ fontSize: 10, color: t.text4, letterSpacing: '.08em', textTransform: 'uppercase', fontWeight: 700, marginBottom: 3 }}>Booked weight</div>
-              <div style={{ fontSize: 12, color: t.text3, fontFamily: 'monospace' }}>{nNet.toFixed(2)} net + {nGain.toFixed(2)} gain</div>
+              <div style={{ fontSize: 12, color: t.text3, fontFamily: 'monospace' }}>{nNet.toFixed(2)} net {nGain > 0 ? `+ ${nGain.toFixed(2)} gain` : ''}</div>
             </div>
             <div style={{ textAlign: 'right' }}>
-              <div style={{ fontSize: 20, fontWeight: 800, color: t.gold, fontFamily: 'monospace', letterSpacing: '-.01em' }}>{book.toFixed(2)}<span style={{ fontSize: 12, color: t.text3, marginLeft: 3, fontWeight: 600 }}>g</span></div>
-              <div style={{ fontSize: 11, color: t.blue, fontFamily: 'monospace', fontWeight: 700 }}>{value > 0 ? inr(value) : '—'}</div>
+              <div style={{ fontSize: 22, fontWeight: 800, color: t.gold, fontFamily: 'monospace', letterSpacing: '-.01em' }}>{book.toFixed(2)}<span style={{ fontSize: 12, color: t.text3, marginLeft: 3, fontWeight: 600 }}>g</span></div>
+              <div style={{ fontSize: 11.5, color: t.blue, fontFamily: 'monospace', fontWeight: 700 }}>{value > 0 ? inr(value) : '—'}</div>
             </div>
           </div>
+        </div>
 
-          <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 20 }}>
-            <button onClick={() => { if (!busy) onClose?.() }} disabled={busy}
-              style={{ background: 'transparent', border: `1px solid ${t.border2}`, borderRadius: 9, padding: '10px 18px', fontSize: 13, fontWeight: 700, color: t.text2, cursor: busy ? 'not-allowed' : 'pointer' }}>Cancel</button>
-            <button onClick={submit} disabled={!canSubmit}
-              style={{ background: canSubmit ? t.gold : t.border2, color: canSubmit ? (t.goldText || '#1a0a00') : t.text4, border: 'none', borderRadius: 9, padding: '10px 22px', fontSize: 13, fontWeight: 800, cursor: canSubmit ? 'pointer' : 'not-allowed' }}>
-              {busy ? 'Creating…' : 'Create booking'}
-            </button>
-          </div>
+        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', padding: '15px 24px', marginTop: 16, borderTop: `1px solid ${t.border2}`, background: t.card3 }}>
+          <button className="mbk-cancel" onClick={() => { if (!busy) onClose?.() }} disabled={busy}
+            style={{ background: 'transparent', border: `1px solid ${t.border2}`, borderRadius: 9, padding: '10px 18px', fontSize: 13, fontWeight: 700, color: t.text2, cursor: busy ? 'not-allowed' : 'pointer', transition: 'background .15s' }}>Cancel</button>
+          <button className="mbk-go" onClick={submit} disabled={!canSubmit}
+            style={{ background: canSubmit ? t.gold : t.border2, color: canSubmit ? (t.goldText || '#1a0a00') : t.text4, border: 'none', borderRadius: 9, padding: '10px 24px', fontSize: 13, fontWeight: 800, cursor: canSubmit ? 'pointer' : 'not-allowed', transition: 'filter .15s, transform .15s', boxShadow: canSubmit ? `0 3px 12px ${t.gold}44` : 'none' }}>
+            {busy ? 'Creating…' : 'Create booking'}
+          </button>
         </div>
       </div>
     </div>
