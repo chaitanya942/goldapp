@@ -4389,11 +4389,11 @@ function SourceSection({
                           // sibling chips (green) — nothing renders for unbooked bills.
                           const kds = [...new Set((b.bills || []).map(bl => bl.booked_at ? istDayOf(bl.booked_at) : null).filter(Boolean))].sort()
                           if (!kds.length) return null
-                          const klabel = kds.length === 1 ? fmtDateShort(kds[0]) : `${fmtDateShort(kds[0])} → ${fmtDateShort(kds[kds.length - 1])}`
                           const g = t.green || '#3fa66a'
-                          return (
-                            <span title={`Booked on ${klabel}`} style={{ fontSize: 10.5, color: g, background: `${g}14`, border: `1px solid ${g}33`, borderRadius: 4, padding: '1px 8px', whiteSpace: 'nowrap', fontWeight: 700, letterSpacing: '.03em', flexShrink: 0 }}>Booked on {klabel}</span>
-                          )
+                          // One chip per distinct booked day (not a → range).
+                          return kds.map((d, i) => (
+                            <span key={`bk-${d}`} title={`Booked on ${fmtDateShort(d)}`} style={{ fontSize: 10.5, color: g, background: `${g}14`, border: `1px solid ${g}33`, borderRadius: 4, padding: '1px 8px', whiteSpace: 'nowrap', fontWeight: 700, letterSpacing: '.03em', flexShrink: 0 }}>{i === 0 ? 'Booked on ' : ''}{fmtDateShort(d)}</span>
+                          ))
                         })()}
                         {/* Pickup time is shown (chip above) as INFORMATIONAL
                             only — ops asked to see the scheduled time next to the
@@ -4658,17 +4658,27 @@ function SourceSection({
                   const bclabel = bcds.length ? (bcds.length === 1 ? fmtDateShort(bcds[0]) : `${fmtDateShort(bcds[0])} → ${fmtDateShort(bcds[bcds.length - 1])}`) : null
                   // When the bills were BOOKED (not the same as the consignment date) —
                   // ops needs both so they aren't confused about which day is which.
+                  // Each distinct booked day gets its own chip (not a → range) so
+                  // ops can see exactly which days a branch's bills were booked on.
                   const bkds    = [...new Set(bbills.map(bl => bl.booked_at ? istDayOf(bl.booked_at) : null).filter(Boolean))].sort()
-                  const bkdlabel = bkds.length ? (bkds.length === 1 ? fmtDateShort(bkds[0]) : `${fmtDateShort(bkds[0])} → ${fmtDateShort(bkds[bkds.length - 1])}`) : null
                   const bkGreen = t.green || '#3fa66a'
+                  const chipSt  = (color, extra) => ({ fontSize: 10.5, color, background: `${color}14`, border: `1px solid ${color}33`, borderRadius: 4, padding: '1px 8px', whiteSpace: 'nowrap', fontWeight: 700, letterSpacing: '.03em', ...extra })
                   return (
                     <Fragment key={`bk-${b.branch_name}`}>
                     <div style={{ display: 'grid', gridTemplateColumns: rowGrid, alignItems: 'center', columnGap: 14, padding: '8px 11px', borderRadius: 8, opacity: 0.85 }}>
                       <span style={{ width: 16, height: 16, borderRadius: 4, background: `${bk}22`, color: bk, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 900 }}>✓</span>
-                      <span style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                      {/* name | consignment chip | booked chips — fixed slots so the
+                          chips line up column-wise across every row. */}
+                      <span style={{ display: 'grid', gridTemplateColumns: '150px 220px 1fr', alignItems: 'center', columnGap: 10, minWidth: 0 }}>
                         <span style={{ fontSize: 13, color: t.text2, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{b.branch_name}</span>
-                        {bclabel && <span title={`Consignment created on ${bclabel}`} style={{ fontSize: 10.5, color: t.blue, background: `${t.blue}14`, border: `1px solid ${t.blue}33`, borderRadius: 4, padding: '1px 8px', whiteSpace: 'nowrap', fontWeight: 700, letterSpacing: '.03em', flexShrink: 0 }}>Consignment created on {bclabel}</span>}
-                        {bkdlabel && <span title={`Booked on ${bkdlabel}`} style={{ fontSize: 10.5, color: bkGreen, background: `${bkGreen}14`, border: `1px solid ${bkGreen}33`, borderRadius: 4, padding: '1px 8px', whiteSpace: 'nowrap', fontWeight: 700, letterSpacing: '.03em', flexShrink: 0 }}>Booked on {bkdlabel}</span>}
+                        <span style={{ minWidth: 0, display: 'flex' }}>
+                          {bclabel && <span title={`Consignment created on ${bclabel}`} style={chipSt(t.blue, { overflow: 'hidden', textOverflow: 'ellipsis' })}>Consignment created on {bclabel}</span>}
+                        </span>
+                        <span style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', minWidth: 0 }}>
+                          {bkds.map((d, i) => (
+                            <span key={d} title={`Booked on ${fmtDateShort(d)}`} style={chipSt(bkGreen, { flexShrink: 0 })}>{i === 0 ? 'Booked on ' : ''}{fmtDateShort(d)}</span>
+                          ))}
+                        </span>
                       </span>
                       <span style={{ textAlign: 'right', color: t.text3, fontWeight: 600 }}>{fmt(b.total_gross_wt, 2)}<span style={{ fontSize: 10, color: t.text4, marginLeft: 2 }}>g</span></span>
                       <span style={{ textAlign: 'right', color: bk, fontWeight: 800 }}>{fmt(b.total_net_wt, 2)}<span style={{ fontSize: 10, color: t.text4, marginLeft: 2 }}>g</span></span>
