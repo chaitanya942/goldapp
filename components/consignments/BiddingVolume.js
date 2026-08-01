@@ -3066,7 +3066,7 @@ function BookingsList({ t, card, bookings, biddingDate, onUpdateStatus, onReques
                           const billTxt = n != null ? ` and unbooks its ${n} attached bill${n === 1 ? '' : 's'}` : ' and unbooks its attached bills'
                           if (!window.confirm(`Clear the booking for "${b.party}"?\n\nThis cancels the booking${billTxt}, releasing them back to the picker. This can't be undone.`)) return
                           setActionBusy(b.id)
-                          try { await unbookBooking(b.id) } finally { setActionBusy(null) }
+                          try { await onUnbook?.(b.id) } finally { setActionBusy(null) }
                         }}
                         title="Clear this booking — cancels it and unbooks the attached bills"
                         style={{
