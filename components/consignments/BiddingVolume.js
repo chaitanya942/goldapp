@@ -1290,33 +1290,7 @@ export default function BiddingVolume() {
           </div>
         </div>
 
-        {/* ── Today's purchases · region-wise (ops summary) ── */}
-        {(() => {
-          const SHORT = { 'Bangalore': 'Bangalore', 'Rest of Karnataka': 'Rest of KA', 'Andhra Pradesh': 'Andhra', 'Telangana': 'Telangana', 'Kerala': 'Kerala' }
-          const rows  = supply?.todays_purchases_by_region || []
-          const want  = regionTab === 'kl' ? rows.filter(r => r.region === 'Kerala') : rows.filter(r => r.region !== 'Kerala')
-          if (!want.length) return <div style={{ flex: 1 }} />
-          const accent = regionTab === 'kl' ? (t.purple || '#8c5ac8') : t.gold
-          return (
-            <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
-              <div style={{ fontSize: 9.5, color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 700 }}>
-                Today's purchases{supply?.todays_purchase_date ? ` · ${fmtDateShort(supply.todays_purchase_date)}` : ''}
-              </div>
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
-                {want.map(r => (
-                  <div key={r.region} style={{ display: 'inline-flex', alignItems: 'center', gap: 9, background: t.card2, border: `1px solid ${t.border}`, borderRadius: 99, padding: '5px 13px' }}>
-                    <span style={{ fontSize: 10, color: accent, fontWeight: 800, letterSpacing: '.03em', textTransform: 'uppercase' }}>{SHORT[r.region] || r.region}</span>
-                    <span style={{ fontSize: 12.5, color: t.text1, fontWeight: 700, fontFamily: 'monospace' }}>{Number(r.net_wt || 0).toFixed(2)}<span style={{ fontSize: 9, color: t.text4 }}>g</span></span>
-                    <span style={{ fontSize: 9.5, color: t.text4 }}>{r.bills} bill{r.bills === 1 ? '' : 's'}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )
-        })()}
-
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 8 }}>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center', position: 'relative' }}>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', position: 'relative', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
           {/* Purchase-date lock — ops lock date ranges out of booking. */}
           <button onClick={() => setLockPanelOpen(o => !o)}
             title="Lock purchase dates so their bills can't be selected or booked"
@@ -1354,19 +1328,52 @@ export default function BiddingVolume() {
             <span style={{ display: 'inline-block', animation: loading ? 'spin 1s linear infinite' : 'none', fontSize: '13px' }}>⟳</span>
             Refresh
           </button>
-        </div>
-        {/* Manual, bill-less booking — for leftover / old inventory. */}
-        <button onClick={() => setManualBookingOpen(true)}
-          title="Create a booking manually (no bills) — for leftover / old inventory"
-          style={{ background: t.gold, color: t.goldText || '#1a0a00', border: 'none', borderRadius: '8px', padding: '8px 16px', fontSize: '12px', fontWeight: 800, letterSpacing: '.02em', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, boxShadow: `0 2px 8px ${t.gold}44` }}>
-          + Create New Booking
-        </button>
+          {/* Manual, bill-less booking — for leftover / old inventory. */}
+          <button onClick={() => setManualBookingOpen(true)}
+            title="Create a booking manually (no bills) — for leftover / old inventory"
+            style={{ background: t.gold, color: t.goldText || '#1a0a00', border: 'none', borderRadius: '8px', padding: '8px 16px', fontSize: '12px', fontWeight: 800, letterSpacing: '.02em', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, boxShadow: `0 2px 8px ${t.gold}44` }}>
+            + Create New Booking
+          </button>
         </div>
       </div>
 
       {manualBookingOpen && (
         <ManualBookingModal t={t} isKl={regionTab === 'kl'} bidders={bidders} onClose={() => setManualBookingOpen(false)} onCreate={createManualBooking} />
       )}
+
+      {/* ── Today's purchases · region-wise band (ops summary) ── */}
+      {(() => {
+        const SHORT = { 'Bangalore': 'Bangalore', 'Rest of Karnataka': 'Rest of KA', 'Andhra Pradesh': 'Andhra', 'Telangana': 'Telangana', 'Kerala': 'Kerala' }
+        const rows  = supply?.todays_purchases_by_region || []
+        const want  = regionTab === 'kl' ? rows.filter(r => r.region === 'Kerala') : rows.filter(r => r.region !== 'Kerala')
+        if (!want.length) return null
+        const accent   = regionTab === 'kl' ? (t.purple || '#8c5ac8') : t.gold
+        const totBills = want.reduce((s, r) => s + Number(r.bills || 0), 0)
+        const totNet   = want.reduce((s, r) => s + Number(r.net_wt || 0), 0)
+        return (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap', background: t.card2, border: `1px solid ${t.border}`, borderRadius: 12, padding: '9px 14px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 2, paddingRight: 14, borderRight: `1px solid ${t.border}` }}>
+              <span style={{ fontSize: 9.5, color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 700 }}>
+                Today's purchases{supply?.todays_purchase_date ? ` · ${fmtDateShort(supply.todays_purchase_date)}` : ''}
+              </span>
+              <span style={{ fontSize: 13, color: t.text1, fontWeight: 800, fontFamily: 'monospace' }}>
+                {totNet.toFixed(2)}<span style={{ fontSize: 9, color: t.text4 }}>g</span>
+                <span style={{ color: t.text4, fontWeight: 600 }}> · {totBills} bill{totBills === 1 ? '' : 's'}</span>
+              </span>
+            </div>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              {want.map(r => (
+                <div key={r.region} style={{ display: 'inline-flex', alignItems: 'center', gap: 9, background: t.card, border: `1px solid ${t.border}`, borderRadius: 99, padding: '5px 13px' }}>
+                  <span style={{ width: 7, height: 7, borderRadius: '50%', background: accent, display: 'inline-block' }} />
+                  <span style={{ fontSize: 10, color: accent, fontWeight: 800, letterSpacing: '.03em', textTransform: 'uppercase' }}>{SHORT[r.region] || r.region}</span>
+                  <span style={{ fontSize: 12.5, color: t.text1, fontWeight: 700, fontFamily: 'monospace' }}>{Number(r.net_wt || 0).toFixed(2)}<span style={{ fontSize: 9, color: t.text4 }}>g</span></span>
+                  <span style={{ fontSize: 9.5, color: t.text4 }}>{r.bills} bill{r.bills === 1 ? '' : 's'}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )
+      })()}
 
       {/* ── Region tab strip — switches between the KA·AP·TS pool (Bangalore
           + outstation) and the KL pool (Kerala-only, with its own S1/S2/S3
