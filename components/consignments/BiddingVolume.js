@@ -3320,12 +3320,23 @@ function ManualBookingModal({ t, isKl, bidders = [], onClose, onCreate }) {
         </div>
         <div style={{ padding: '16px 24px 4px' }}>
           <label style={lbl}>Bidder <span style={{ color: t.red }}>*</span></label>
-          <input value={bidder} onChange={e => setBidder(e.target.value)} placeholder="Start typing or pick a bidder…" autoFocus
-            list="mbk-bidders" autoComplete="off" style={{ ...inp, fontFamily: 'inherit', marginBottom: 4 }} />
-          <datalist id="mbk-bidders">{bidderNames.map(n => <option key={n} value={n} />)}</datalist>
-          <div style={{ fontSize: 10.5, color: t.text4, marginBottom: 14 }}>
-            {bidderNames.length ? `${bidderNames.length} known bidder${bidderNames.length === 1 ? '' : 's'} — pick one or type a new name.` : 'Type the bidder name.'}
-          </div>
+          <BidderCombobox t={t} value={bidder} onChange={setBidder} options={bidderNames} onAddNew={(name) => setBidder(name)} />
+          {bidderNames.length > 0 && (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8, marginBottom: 14 }}>
+              {bidderNames.map(b => {
+                const picked = b.toLowerCase() === bidder.trim().toLowerCase()
+                return (
+                  <button key={b} type="button" onClick={() => setBidder(picked ? '' : b)}
+                    title={picked ? `${b} — click to clear` : `Pick ${b}`}
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: picked ? `${t.gold}1f` : (t.card2 || t.card), border: `1px solid ${picked ? `${t.gold}66` : t.border}`, borderRadius: 99, padding: '4px 10px 4px 5px', cursor: 'pointer', transition: 'all .12s ease' }}>
+                    <span style={{ width: 18, height: 18, borderRadius: '50%', background: hashAvatarBg(b, t), color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 9.5, fontWeight: 800, flexShrink: 0 }}>{b[0].toUpperCase()}</span>
+                    <span style={{ fontSize: 12, fontWeight: picked ? 800 : 600, color: picked ? t.gold : t.text2, whiteSpace: 'nowrap' }}>{b}</span>
+                    {picked && <span style={{ fontSize: 10, color: t.gold }}>✓</span>}
+                  </button>
+                )
+              })}
+            </div>
+          )}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 14 }}>
             <div>
               <label style={lbl}>Net weight (g) <span style={{ color: t.red }}>*</span></label>
