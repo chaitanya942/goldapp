@@ -4682,7 +4682,10 @@ function SourceSection({
                       {/* name | consignment chip | booked chip — fixed slots so the
                           chips line up column-wise across every row. */}
                       <span style={{ display: 'grid', gridTemplateColumns: '150px 220px 1fr', alignItems: 'center', columnGap: 10, minWidth: 0 }}>
-                        <span style={{ fontSize: 13, color: isFirst ? t.text2 : t.text4, fontWeight: isFirst ? 700 : 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{isFirst ? b.branch_name : `↳ ${b.branch_name}`}</span>
+                        <span style={{ display: 'flex', alignItems: 'center', gap: 7, minWidth: 0, paddingLeft: isFirst ? 0 : 10 }}>
+                          {!isFirst && <span aria-hidden="true" style={{ width: 7, height: 7, borderLeft: `1.5px solid ${bk}80`, borderBottom: `1.5px solid ${bk}80`, borderBottomLeftRadius: 2, marginTop: -6, flexShrink: 0 }} />}
+                          <span style={{ fontSize: 13, color: isFirst ? t.text2 : t.text4, fontWeight: isFirst ? 700 : 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{b.branch_name}</span>
+                        </span>
                         <span style={{ minWidth: 0, display: 'flex' }}>
                           {gclabel && <span title={`Consignment created on ${gclabel}`} style={chipSt(t.blue, { overflow: 'hidden', textOverflow: 'ellipsis' })}>Consignment created on {gclabel}</span>}
                         </span>
