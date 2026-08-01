@@ -1117,7 +1117,7 @@ export async function GET(req) {
       while (true) {
         const { data: bw, error: bwErr } = await supabase
           .from('purchases')
-          .select('id, application_id, customer_name, branch_name, current_branch, gross_weight, net_weight, total_amount, purchase_date, stock_status, dispatched_at, crm_status')
+          .select('id, application_id, customer_name, branch_name, current_branch, gross_weight, net_weight, total_amount, purchase_date, stock_status, dispatched_at, crm_status, booked_at')
           .in('branch_name', allBookableBranchNames)
           .eq('crm_status', 'approved')
           .eq('is_deleted', false)
@@ -1147,7 +1147,7 @@ export async function GET(req) {
     if (bangaloreBranchNames.length) {
       const { data: bbk } = await supabase
         .from('purchases')
-        .select('id, application_id, customer_name, branch_name, current_branch, gross_weight, net_weight, total_amount, purchase_date, stock_status')
+        .select('id, application_id, customer_name, branch_name, current_branch, gross_weight, net_weight, total_amount, purchase_date, stock_status, booked_at')
         .in('branch_name', bangaloreBranchNames)
         .gte('purchase_date', bangalorePurchaseDate)
         .lt('purchase_date',  addDays(bangalorePurchaseDate, 1))
