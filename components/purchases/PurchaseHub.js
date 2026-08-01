@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { useApp } from '../../lib/context'
 import LiveFeed              from './LiveFeed'
+import LiveRates             from './LiveRates'
 import PurchaseData          from './PurchaseData'
 import WalkinPipeline        from './WalkinPipeline'
 import PendingBills          from './PendingBills'
@@ -16,6 +17,7 @@ import { CONSIGNMENT_THEMES as THEMES } from '../../lib/consignmentTheme'
 const TABS = [
   { id: 'live',        label: 'Live Feed',    icon: '●', accentFn: t => t.green  },
   { id: 'approved',    label: 'Purchase Data',icon: '✓', accentFn: t => t.gold   },
+  { id: 'rates',       label: 'Live Rates',   icon: '₹', accentFn: t => t.gold   },
   // { id: 'walkin',      label: 'Walk-in',      icon: '→', accentFn: t => t.blue   },
   // { id: 'pending',     label: 'Pending',      icon: '⏳',accentFn: t => t.orange },
   // { id: 'rejected',    label: 'Rejected',     icon: '✕', accentFn: t => t.red    },
@@ -73,6 +75,7 @@ export default function PurchaseHub() {
       <div className="hub-content" style={{ padding: '24px 24px' }}>
         {active === 'live'        && <LiveFeed />}
         {active === 'approved'    && <PurchaseData />}
+        {active === 'rates'       && <LiveRates />}
         {active === 'walkin'      && <WalkinPipeline />}
         {active === 'pending'     && <PendingBills />}
         {active === 'rejected'    && <RejectedBills />}
