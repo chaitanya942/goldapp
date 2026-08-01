@@ -2650,7 +2650,13 @@ export async function GET(req) {
             if (row.event_type === 'documents_email_bounced'  && !bounced[row.consignment_id]) bounced[row.consignment_id] = row.created_at
           }
         }
-        for (const r of data) { r.documents_emailed_at = latest[r.id] || null; r.documents_email_bounced_at = bounced[r.id] || null }
+        // Prefer the event-log timestamp (authoritative history) but fall back to
+        // the real column so a row is never un-flagged — covers rows stamped on
+        // the column before this log query, and keeps working pre-migration.
+        for (const r of data) {
+          r.documents_emailed_at       = latest[r.id]  || r.documents_emailed_at       || null
+          r.documents_email_bounced_at = bounced[r.id] || r.documents_email_bounced_at || null
+        }
       } catch { /* leave rows un-annotated on log hiccup */ }
     }
     return Response.json({ data, error: error?.message })

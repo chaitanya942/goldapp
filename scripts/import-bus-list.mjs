@@ -20,7 +20,7 @@ const file = process.argv[2]
 const dryRun = process.argv.includes('--dry')
 if (!file) { console.error('Usage: node scripts/import-bus-list.mjs <file.xlsx|csv> [--dry]'); process.exit(1) }
 
-const wb = XLSX.readFile(file)
+const wb = XLSX.read(readFileSync(file), { type: 'buffer' })
 const sheetArg = process.argv.includes('--sheet') ? process.argv[process.argv.indexOf('--sheet') + 1] : null
 const sheetName = sheetArg || wb.SheetNames[0]
 const rows = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { defval: '' })

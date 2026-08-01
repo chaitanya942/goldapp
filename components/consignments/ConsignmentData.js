@@ -308,8 +308,14 @@ export default function ConsignmentData() {
     triggerSync({ minIntervalMs: 0 }).then(res => { if (res) fetchAll(true) })
   }, [fetchAll])
 
-  // Realtime: when accounts approves/rejects a consignment, the badge and
-  // download buttons in this view update without the user refreshing.
+  // Mirror the latest consignments into a ref so the realtime handler can read
+  // the PREVIOUS row without re-subscribing on every list change.
+  const consignmentsRef = useRef(consignments)
+  useEffect(() => { consignmentsRef.current = consignments }, [consignments])
+
+  // Realtime: when accounts approves/rejects a consignment — or when anyone
+  // emails / bounces its documents — the badge, download buttons and Mail-Sent
+  // state in this view update without the user refreshing.
   useEffect(() => {
     // Coalesce INSERT bursts (e.g. an external sync landing many at once)
     // into one debounced silent refetch instead of N round-trips.
@@ -321,11 +327,15 @@ export default function ConsignmentData() {
         (payload) => {
           const row = payload.new
           if (!row?.id) return
+          // Read the prior approval_status BEFORE patching so we can tell a real
+          // status transition from an unrelated update (e.g. a documents_emailed
+          // stamp) — otherwise every doc-email would fire a false "approved" toast.
+          const prevStatus = consignmentsRef.current.find(c => c.id === row.id)?.approval_status ?? null
           setConsignments(prev => prev.map(c => c.id === row.id ? { ...c, ...row } : c))
-          // Notify ops when accounts changes status.
-          if (row.approval_status === 'approved') {
+          // Notify ops only when accounts actually CHANGES status.
+          if (row.approval_status === 'approved' && prevStatus !== 'approved') {
             setToast({ msg: `${row.tmp_prf_no} approved. Documents are now available.`, type: 'success' })
-          } else if (row.approval_status === 'rejected') {
+          } else if (row.approval_status === 'rejected' && prevStatus !== 'rejected') {
             setToast({ msg: `${row.tmp_prf_no} rejected: ${row.rejection_reason || 'no reason given'}`, type: 'error' })
           }
         })

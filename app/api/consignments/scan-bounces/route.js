@@ -102,6 +102,9 @@ async function handle(req) {
           actor_email:    'system',
           details:        { to: rcpt, tmp_prf_no: wg || null, reason: 'Bounced — address could not be delivered' },
         })
+        // Stamp the real column so open screens flip to "Delivery Failed" via the
+        // realtime consignments UPDATE. Best-effort (column may not exist yet).
+        try { await admin.from('consignments').update({ documents_email_bounced_at: new Date().toISOString() }).eq('id', consignmentId) } catch {}
         flagged++
         details.push({ consignment_id: consignmentId, to: rcpt, wg: wg || null })
       }

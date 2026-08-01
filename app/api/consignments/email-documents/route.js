@@ -257,6 +257,16 @@ export async function POST(req) {
       actor_role:     auth.profile?.role || null,
       details:        { to, cc: ccList, from_name: senderName, attachments: attachments.map(x => x.filename) },
     })
+    // Stamp the real column too. This is what makes OTHER users' open screens
+    // flip to "Mail Sent" without a refresh: the consignments-row UPDATE fires
+    // the realtime subscription. Clearing the bounce marker means a resend to a
+    // corrected address drops the old "Delivery Failed". Best-effort — a missing
+    // column (migration not yet applied) must never fail the send.
+    try {
+      await admin.from('consignments')
+        .update({ documents_emailed_at: new Date().toISOString(), documents_email_bounced_at: null })
+        .eq('id', id)
+    } catch (e) { console.warn('[email-documents] column stamp failed:', e?.message) }
     return Response.json({ ok: true, sent_to: to, cc: ccList, from_name: senderName, reply_to: senderEmail || null, attachments: attachments.map(x => x.filename), messageId: info.messageId })
   } catch (e) {
     return Response.json({ error: `Send failed: ${e.message}` }, { status: 502 })
