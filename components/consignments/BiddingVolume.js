@@ -4651,50 +4651,60 @@ function SourceSection({
                   </span>
                 </div>
                 {bookedOpen && bookedRows.map(b => {
-                  const bexp   = openBranches.has('bk:' + b.branch_name)
                   const bbills = Array.isArray(b.bills) ? b.bills : []
                   const bkCols = '78px 130px minmax(0, 1fr) 100px 100px 130px'
-                  const bcds   = [...new Set(bbills.map(bl => bl._consignment_created_at ? istDayOf(bl._consignment_created_at) : null).filter(Boolean))].sort()
-                  const bclabel = bcds.length ? (bcds.length === 1 ? fmtDateShort(bcds[0]) : `${fmtDateShort(bcds[0])} → ${fmtDateShort(bcds[bcds.length - 1])}`) : null
-                  // When the bills were BOOKED (not the same as the consignment date) —
-                  // ops needs both so they aren't confused about which day is which.
-                  // Each distinct booked day gets its own chip (not a → range) so
-                  // ops can see exactly which days a branch's bills were booked on.
-                  const bkds    = [...new Set(bbills.map(bl => bl.booked_at ? istDayOf(bl.booked_at) : null).filter(Boolean))].sort()
                   const bkGreen = t.green || '#3fa66a'
                   const chipSt  = (color, extra) => ({ fontSize: 10.5, color, background: `${color}14`, border: `1px solid ${color}33`, borderRadius: 4, padding: '1px 8px', whiteSpace: 'nowrap', fontWeight: 700, letterSpacing: '.03em', ...extra })
+                  // One row per distinct booked day: split this branch's booked bills
+                  // by the day they were booked, so the weight + bill count are shown
+                  // per booking date instead of lumped together.
+                  const groupsMap = {}
+                  for (const bl of bbills) {
+                    const d = bl.booked_at ? istDayOf(bl.booked_at) : '—'
+                    ;(groupsMap[d] = groupsMap[d] || []).push(bl)
+                  }
+                  const groupKeys = Object.keys(groupsMap).sort((a, x) => (a === '—' ? 1 : x === '—' ? -1 : a.localeCompare(x)))
                   return (
                     <Fragment key={`bk-${b.branch_name}`}>
+                    {groupKeys.map((d, gi) => {
+                      const gbills = groupsMap[d]
+                      const gGross = gbills.reduce((s, x) => s + Number(x.gross_weight || 0), 0)
+                      const gNet   = gbills.reduce((s, x) => s + Number(x.net_weight   || 0), 0)
+                      const gcds   = [...new Set(gbills.map(bl => bl._consignment_created_at ? istDayOf(bl._consignment_created_at) : null).filter(Boolean))].sort()
+                      const gclabel = gcds.length ? (gcds.length === 1 ? fmtDateShort(gcds[0]) : `${fmtDateShort(gcds[0])} → ${fmtDateShort(gcds[gcds.length - 1])}`) : null
+                      const gkey   = `bk:${b.branch_name}:${d}`
+                      const gexp   = openBranches.has(gkey)
+                      const isFirst = gi === 0
+                      return (
+                    <Fragment key={gkey}>
                     <div style={{ display: 'grid', gridTemplateColumns: rowGrid, alignItems: 'center', columnGap: 14, padding: '8px 11px', borderRadius: 8, opacity: 0.85 }}>
-                      <span style={{ width: 16, height: 16, borderRadius: 4, background: `${bk}22`, color: bk, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 900 }}>✓</span>
-                      {/* name | consignment chip | booked chips — fixed slots so the
+                      <span style={{ width: 16, height: 16, borderRadius: 4, background: isFirst ? `${bk}22` : 'transparent', color: bk, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 900 }}>{isFirst ? '✓' : ''}</span>
+                      {/* name | consignment chip | booked chip — fixed slots so the
                           chips line up column-wise across every row. */}
                       <span style={{ display: 'grid', gridTemplateColumns: '150px 220px 1fr', alignItems: 'center', columnGap: 10, minWidth: 0 }}>
-                        <span style={{ fontSize: 13, color: t.text2, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{b.branch_name}</span>
+                        <span style={{ fontSize: 13, color: isFirst ? t.text2 : t.text4, fontWeight: isFirst ? 700 : 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{isFirst ? b.branch_name : `↳ ${b.branch_name}`}</span>
                         <span style={{ minWidth: 0, display: 'flex' }}>
-                          {bclabel && <span title={`Consignment created on ${bclabel}`} style={chipSt(t.blue, { overflow: 'hidden', textOverflow: 'ellipsis' })}>Consignment created on {bclabel}</span>}
+                          {gclabel && <span title={`Consignment created on ${gclabel}`} style={chipSt(t.blue, { overflow: 'hidden', textOverflow: 'ellipsis' })}>Consignment created on {gclabel}</span>}
                         </span>
-                        <span style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', minWidth: 0 }}>
-                          {bkds.map((d, i) => (
-                            <span key={d} title={`Booked on ${fmtDateShort(d)}`} style={chipSt(bkGreen, { flexShrink: 0 })}>{i === 0 ? 'Booked on ' : ''}{fmtDateShort(d)}</span>
-                          ))}
+                        <span style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                          {d !== '—' && <span title={`Booked on ${fmtDateShort(d)}`} style={chipSt(bkGreen, { flexShrink: 0 })}>Booked on {fmtDateShort(d)}</span>}
                         </span>
                       </span>
-                      <span style={{ textAlign: 'right', color: t.text3, fontWeight: 600 }}>{fmt(b.total_gross_wt, 2)}<span style={{ fontSize: 10, color: t.text4, marginLeft: 2 }}>g</span></span>
-                      <span style={{ textAlign: 'right', color: bk, fontWeight: 800 }}>{fmt(b.total_net_wt, 2)}<span style={{ fontSize: 10, color: t.text4, marginLeft: 2 }}>g</span></span>
-                      <span style={{ textAlign: 'right', color: t.text3, fontWeight: 700 }}>{b.total_bills} bill{b.total_bills === 1 ? '' : 's'}</span>
-                      <span onClick={() => toggleBranchExpand('bk:' + b.branch_name)} title={bexp ? 'Hide bills' : 'Show bills'}
-                        style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 24, height: 24, borderRadius: 6, cursor: 'pointer', color: bexp ? bk : t.text3, fontSize: 13, fontWeight: 800, background: bexp ? `${bk}18` : 'transparent', border: `1px solid ${bexp ? `${bk}66` : 'transparent'}`, opacity: bbills.length === 0 ? 0.25 : 1, pointerEvents: bbills.length === 0 ? 'none' : 'auto' }}>
-                        {bexp ? '▾' : '▸'}
+                      <span style={{ textAlign: 'right', color: t.text3, fontWeight: 600 }}>{fmt(gGross, 2)}<span style={{ fontSize: 10, color: t.text4, marginLeft: 2 }}>g</span></span>
+                      <span style={{ textAlign: 'right', color: bk, fontWeight: 800 }}>{fmt(gNet, 2)}<span style={{ fontSize: 10, color: t.text4, marginLeft: 2 }}>g</span></span>
+                      <span style={{ textAlign: 'right', color: t.text3, fontWeight: 700 }}>{gbills.length} bill{gbills.length === 1 ? '' : 's'}</span>
+                      <span onClick={() => toggleBranchExpand(gkey)} title={gexp ? 'Hide bills' : 'Show bills'}
+                        style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 24, height: 24, borderRadius: 6, cursor: 'pointer', color: gexp ? bk : t.text3, fontSize: 13, fontWeight: 800, background: gexp ? `${bk}18` : 'transparent', border: `1px solid ${gexp ? `${bk}66` : 'transparent'}`, opacity: gbills.length === 0 ? 0.25 : 1, pointerEvents: gbills.length === 0 ? 'none' : 'auto' }}>
+                        {gexp ? '▾' : '▸'}
                       </span>
                     </div>
-                    {bexp && bbills.length > 0 && (
+                    {gexp && gbills.length > 0 && (
                       <div style={{ marginLeft: 30, marginTop: 2, marginBottom: 8, paddingLeft: 12, paddingTop: 5, paddingBottom: 5, borderLeft: `2px solid ${bk}40` }}>
                         <div style={{ display: 'grid', gridTemplateColumns: bkCols, columnGap: 14, padding: '4px 8px', fontSize: 10, color: t.text3, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 800 }}>
                           <span>Date</span><span>App ID</span><span>Customer</span>
                           <span style={{ textAlign: 'right' }}>Gross</span><span style={{ textAlign: 'right' }}>Net</span><span style={{ textAlign: 'right' }}>Amount</span>
                         </div>
-                        {bbills.map((bill, idx) => (
+                        {gbills.map((bill, idx) => (
                           <div key={bill.id ?? idx} style={{ display: 'grid', gridTemplateColumns: bkCols, alignItems: 'center', columnGap: 14, padding: '5px 8px', borderRadius: 5, background: idx % 2 === 1 ? `${t.card2}40` : 'transparent', fontFamily: 'monospace', fontSize: 12 }}>
                             <span style={{ color: t.text3, fontWeight: 600, whiteSpace: 'nowrap' }}>{bill.purchase_date ? fmtDateShort(bill.purchase_date) : '—'}</span>
                             <span style={{ color: t.gold, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{bill.application_id || '—'}</span>
@@ -4718,6 +4728,9 @@ function SourceSection({
                         ))}
                       </div>
                     )}
+                    </Fragment>
+                      )
+                    })}
                     </Fragment>
                   )
                 })}
