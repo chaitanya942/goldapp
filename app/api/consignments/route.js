@@ -4520,9 +4520,15 @@ export async function POST(req) {
       .is('booking_id', null)
     if (updErr) return Response.json({ error: updErr.message }, { status: 500 })
 
-    // Fold any resulting over-attachment into pipeline (shared with create_booking).
+    // Guard against GROSS over-attachment only. A residual is meant to fill the
+    // booking's gain gap, so attaching net up to the booked weight is valid — we
+    // must NOT let the shared reconcile (which compares net×(1+gain_rate) to the
+    // booked weight) rip the residual back off just because the gain multiplier
+    // pushes it over. Raising the threshold by the same multiplier makes it
+    // detach only when the actual NET exceeds the booked weight (true over-source).
+    const grMult = 1 + (booking.is_kl ? 0 : 0.035)
     const recon = await reconcileBookingOverAttachment({
-      supabase, bookingId: booking.id, bookedWeight: Number(booking.weight || 0), isKl: !!booking.is_kl,
+      supabase, bookingId: booking.id, bookedWeight: Number(booking.weight || 0) * grMult, isKl: !!booking.is_kl,
     })
     if (recon.error) console.warn('[attach_bills_to_booking] reconcile non-fatal:', recon.error)
 
