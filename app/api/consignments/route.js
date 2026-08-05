@@ -1768,6 +1768,57 @@ export async function GET(req) {
     return Response.json({ status, branches, total, days: status === 'at_ho' ? days : null, cutoff: status === 'at_ho' ? cutoff : null })
   }
 
+  if (action === 'attachable_bookings') {
+    // The last 3 bidding days (created_at IST) that placed a booking in this
+    // pool — each with its bookings — so ops can attach a small prior-day
+    // residual bill onto an existing booking instead of forcing a brand-new one
+    // (a 7 g leftover never justifies its own booking). Read-only.
+    const isKl = searchParams.get('is_kl') === 'true'
+    const todayStartIso = istStartOfDayIso(istToday())
+    const { data: rows, error } = await supabase
+      .from('cal_quotas')
+      .select('id, date, party, buyer_phone, weight, rate, is_kl, status, created_at, created_by')
+      .eq('is_kl', isKl)
+      .neq('status', 'cancelled')
+      .lt('created_at', todayStartIso)        // prior bidding days only
+      .order('created_at', { ascending: false })
+      .limit(300)
+    if (error) return Response.json({ error: error.message }, { status: 500 })
+
+    const istDay = (utcIso) => {
+      const d = new Date(new Date(utcIso).getTime() + 5.5 * 3600_000)
+      return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`
+    }
+    // Group newest-first, keeping only the 3 most recent distinct bidding days.
+    const byDay = new Map()
+    for (const r of rows || []) {
+      const day = istDay(r.created_at)
+      if (!byDay.has(day)) { if (byDay.size >= 3) continue; byDay.set(day, []) }
+      byDay.get(day).push(r)
+    }
+    // Live attached net per booking, so ops sees remaining capacity.
+    const ids = [...byDay.values()].flat().map(r => r.id)
+    const attachedBy = {}
+    if (ids.length) {
+      const { data: agg } = await supabase.from('purchases').select('booking_id, net_weight').in('booking_id', ids)
+      for (const a of agg || []) attachedBy[a.booking_id] = (attachedBy[a.booking_id] || 0) + Number(a.net_weight || 0)
+    }
+    const days = [...byDay.entries()].map(([day, bks]) => ({
+      bidding_date: day,
+      bookings: bks.map(r => {
+        const attached = attachedBy[r.id] || 0
+        const weight   = Number(r.weight || 0)
+        return {
+          id: r.id, party: r.party, weight, rate: Number(r.rate || 0),
+          arrival_date: r.date, status: r.status, created_at: r.created_at,
+          attached_net_g: Number(attached.toFixed(3)),
+          remaining_g:    Number((weight - attached).toFixed(3)),
+        }
+      }),
+    }))
+    return Response.json({ days })
+  }
+
   if (action === 'bidding_bookings') {
     // Accept either `bidding_date` (NEW: filter by created_at IST date —
     // the day the booking was placed) or `date` (LEGACY: filter by
@@ -2925,7 +2976,7 @@ export async function POST(req) {
   // can see the Bidding Volume page (page.consignment-bidding) rather than
   // a hardcoded role group — so the gate can never lock out whichever role
   // ops actually grant the page to (the KT §VII trap-2 lesson).
-  const BIDDING_WRITES = new Set(['set_bidding_pending', 'create_booking', 'create_manual_booking', 'reconcile_booking', 'update_booking_status', 'close_booking_pipeline', 'toggle_bill_hold', 'unbook_bills', 'attach_selected_to_pipeline', 'lock_dates', 'unlock_dates'])
+  const BIDDING_WRITES = new Set(['set_bidding_pending', 'create_booking', 'create_manual_booking', 'attach_bills_to_booking', 'reconcile_booking', 'update_booking_status', 'close_booking_pipeline', 'toggle_bill_hold', 'unbook_bills', 'attach_selected_to_pipeline', 'lock_dates', 'unlock_dates'])
   let auth
   if (BIDDING_WRITES.has(action)) {
     auth = await requireAuthForPage(req, 'consignment-bidding')
@@ -4417,6 +4468,48 @@ export async function POST(req) {
       if (bdErr) console.warn('[create_manual_booking] breakdown update failed (migration may be missing):', bdErr.message)
     } catch (e) { console.warn('[create_manual_booking] breakdown update threw:', e?.message) }
     return Response.json({ data, message: `Booking created for ${baseRow.party} — ${bookWeight.toFixed(2)} g (net ${net.toFixed(2)} + gain ${g.toFixed(2)}).` })
+  }
+
+  if (action === 'attach_bills_to_booking') {
+    // Attach small prior-day residual bills onto an EXISTING booking (chosen by
+    // ops from the last few bidding days) instead of creating a new booking.
+    // Same claim the create_booking bill-path does: set booking_id + booked_at
+    // and reverse any "consumed as gain" attribution, then reconcile so an
+    // over-attachment folds into pipeline.
+    const { booking_id, bill_ids } = body
+    if (!booking_id) return Response.json({ error: 'booking_id required' }, { status: 400 })
+    if (!Array.isArray(bill_ids) || bill_ids.length === 0) return Response.json({ error: 'bill_ids required' }, { status: 400 })
+
+    const { data: booking, error: bErr } = await supabase
+      .from('cal_quotas').select('id, weight, is_kl, status, party, date').eq('id', booking_id).single()
+    if (bErr || !booking)               return Response.json({ error: 'Booking not found' }, { status: 404 })
+    if (booking.status === 'cancelled') return Response.json({ error: 'That booking is cancelled — pick another.' }, { status: 400 })
+
+    // Refuse locked purchase dates (same guard as create_booking).
+    const { data: billRows } = await supabase.from('purchases').select('id, purchase_date, booking_id').in('id', bill_ids)
+    const locked = await lockedPurchaseDates(supabase, (billRows || []).map(b => b.purchase_date))
+    if (locked.length) {
+      return Response.json({ error: `Can't attach — purchase date${locked.length > 1 ? 's' : ''} locked: ${locked.join(', ')}. Unlock first.` }, { status: 409 })
+    }
+    // Only claim bills that aren't already booked.
+    const claimable = (billRows || []).filter(b => !b.booking_id).map(b => b.id)
+    if (!claimable.length) return Response.json({ error: 'Those bills are already booked.' }, { status: 409 })
+
+    const bookedAt = new Date().toISOString()
+    const { error: updErr } = await supabase
+      .from('purchases')
+      .update({ booking_id: booking.id, booked_at: bookedAt, audit_consumed_at: null, audit_attributed_to: null })
+      .in('id', claimable)
+      .is('booking_id', null)
+    if (updErr) return Response.json({ error: updErr.message }, { status: 500 })
+
+    // Fold any resulting over-attachment into pipeline (shared with create_booking).
+    const recon = await reconcileBookingOverAttachment({
+      supabase, bookingId: booking.id, bookedWeight: Number(booking.weight || 0), isKl: !!booking.is_kl,
+    })
+    if (recon.error) console.warn('[attach_bills_to_booking] reconcile non-fatal:', recon.error)
+
+    return Response.json({ ok: true, attached: claimable.length, booking: { id: booking.id, party: booking.party } })
   }
 
   if (action === 'create_booking') {
