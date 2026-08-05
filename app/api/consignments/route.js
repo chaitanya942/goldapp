@@ -4476,12 +4476,29 @@ export async function POST(req) {
     // Same claim the create_booking bill-path does: set booking_id + booked_at
     // and reverse any "consumed as gain" attribution, then reconcile so an
     // over-attachment folds into pipeline.
-    const { booking_id, bill_ids } = body
-    if (!booking_id) return Response.json({ error: 'booking_id required' }, { status: 400 })
+    const { booking_id, bidding_date, is_kl, bill_ids } = body
     if (!Array.isArray(bill_ids) || bill_ids.length === 0) return Response.json({ error: 'bill_ids required' }, { status: 400 })
 
+    // Target booking: an explicit id, or — the common path — the LAST booking
+    // placed on the chosen bidding day (the residual tops up that day's final
+    // booking).
+    let targetId = booking_id || null
+    if (!targetId && bidding_date) {
+      const { data: last } = await supabase
+        .from('cal_quotas')
+        .select('id')
+        .eq('is_kl', !!is_kl)
+        .neq('status', 'cancelled')
+        .gte('created_at', istStartOfDayIso(bidding_date))
+        .lt('created_at',  istEndOfDayIso(bidding_date))
+        .order('created_at', { ascending: false })
+        .limit(1)
+      targetId = last?.[0]?.id || null
+    }
+    if (!targetId) return Response.json({ error: 'No booking found for that date.' }, { status: 404 })
+
     const { data: booking, error: bErr } = await supabase
-      .from('cal_quotas').select('id, weight, is_kl, status, party, date').eq('id', booking_id).single()
+      .from('cal_quotas').select('id, weight, is_kl, status, party, date').eq('id', targetId).single()
     if (bErr || !booking)               return Response.json({ error: 'Booking not found' }, { status: 404 })
     if (booking.status === 'cancelled') return Response.json({ error: 'That booking is cancelled — pick another.' }, { status: 400 })
 

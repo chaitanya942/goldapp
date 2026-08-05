@@ -3318,16 +3318,16 @@ function AttachToBookingModal({ t, bill, isKl, onClose, onDone, onError }) {
   }, [isKl])
 
   const submit = async () => {
-    if (!pick || busy) return
+    if (!pick || busy) return   // pick = chosen bidding_date
     setBusy(true)
     try {
       const r = await authedFetch('/api/consignments?action=attach_bills_to_booking', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ booking_id: pick, bill_ids: [bill.id] }),
+        body: JSON.stringify({ bidding_date: pick, is_kl: !!isKl, bill_ids: [bill.id] }),
       })
       const j = await r.json()
       if (!r.ok) throw new Error(j.error || 'Attach failed')
-      onDone?.(`Attached ${bill.application_id || 'bill'} → ${j.booking?.party || 'booking'}`)
+      onDone?.(`Attached ${bill.application_id || 'bill'} → ${j.booking?.party || 'booking'} (${fmtDateShort(pick)})`)
     } catch (e) { setBusy(false); onError?.(e.message || String(e)) }
   }
 
@@ -3340,7 +3340,7 @@ function AttachToBookingModal({ t, bill, isKl, onClose, onDone, onError }) {
         {/* Header */}
         <div style={{ padding: '18px 22px 14px', borderBottom: `1px solid ${t.border}` }}>
           <div style={{ fontSize: 16, fontWeight: 800, color: t.text1, letterSpacing: '.01em' }}>Attach bill to a previous booking</div>
-          <div style={{ fontSize: 11.5, color: t.text3, marginTop: 4 }}>Books this residual onto an earlier bidding day instead of a new booking.</div>
+          <div style={{ fontSize: 11.5, color: t.text3, marginTop: 4 }}>Pick a day — the bill attaches to that day's final booking, instead of opening a new one.</div>
           {/* The bill being attached */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginTop: 12, background: t.card2, border: `1px solid ${t.border}`, borderRadius: 10, padding: '9px 12px' }}>
             <span style={{ fontSize: 12.5, fontWeight: 800, color: t.gold, fontFamily: 'monospace' }}>{bill?.application_id || '—'}</span>
@@ -3358,36 +3358,29 @@ function AttachToBookingModal({ t, bill, isKl, onClose, onDone, onError }) {
           ) : days.length === 0 ? (
             <div style={{ padding: 30, textAlign: 'center', color: t.text3, fontSize: 13 }}>No bookings in the last 3 bidding days for this pool.</div>
           ) : (
-            days.map(day => (
-              <div key={day.bidding_date} style={{ marginBottom: 14 }}>
-                <div style={{ fontSize: 10, color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 800, marginBottom: 7 }}>
-                  Booked on {fmtDateShort(day.bidding_date)}
-                </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  {day.bookings.map(bk => {
-                    const active = pick === bk.id
-                    return (
-                      <button key={bk.id} type="button" onClick={() => setPick(bk.id)}
-                        style={{ display: 'grid', gridTemplateColumns: 'auto 1fr auto', alignItems: 'center', gap: 10, textAlign: 'left',
-                          background: active ? `${t.gold}12` : t.card2, border: `1px solid ${active ? `${t.gold}80` : t.border}`,
-                          borderRadius: 10, padding: '10px 13px', cursor: 'pointer', width: '100%', fontFamily: 'inherit' }}>
-                        <span style={{ width: 16, height: 16, borderRadius: '50%', border: `2px solid ${active ? t.gold : t.border2}`, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
-                          {active && <span style={{ width: 8, height: 8, borderRadius: '50%', background: t.gold }} />}
-                        </span>
-                        <span style={{ minWidth: 0 }}>
-                          <span style={{ fontSize: 13, fontWeight: 800, color: t.text1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'block' }}>{bk.party || '—'}</span>
-                          <span style={{ fontSize: 10.5, color: t.text4 }}>arrives {fmtDateShort(bk.arrival_date)}{bk.status !== 'booked' ? ` · ${bk.status}` : ''}</span>
-                        </span>
-                        <span style={{ textAlign: 'right' }}>
-                          <span style={{ fontSize: 13, fontWeight: 800, color: t.gold, fontFamily: 'monospace', display: 'block' }}>{fmt(bk.weight, 0)}<span style={{ fontSize: 9.5, color: t.text4 }}>g</span></span>
-                          <span style={{ fontSize: 10, color: t.text4, fontFamily: 'monospace' }}>{fmt(bk.attached_net_g, 1)}g in</span>
-                        </span>
-                      </button>
-                    )
-                  })}
-                </div>
-              </div>
-            ))
+            days.map(day => {
+              const last   = day.bookings[0]   // API returns newest-first → [0] is the day's final booking
+              const active = pick === day.bidding_date
+              return (
+                <button key={day.bidding_date} type="button" onClick={() => setPick(day.bidding_date)}
+                  style={{ display: 'grid', gridTemplateColumns: 'auto 1fr auto', alignItems: 'center', gap: 12, textAlign: 'left',
+                    background: active ? `${t.gold}12` : t.card2, border: `1px solid ${active ? `${t.gold}80` : t.border}`,
+                    borderRadius: 12, padding: '13px 15px', cursor: 'pointer', width: '100%', fontFamily: 'inherit', marginBottom: 8 }}>
+                  <span style={{ width: 17, height: 17, borderRadius: '50%', border: `2px solid ${active ? t.gold : t.border2}`, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                    {active && <span style={{ width: 9, height: 9, borderRadius: '50%', background: t.gold }} />}
+                  </span>
+                  <span style={{ minWidth: 0 }}>
+                    <span style={{ fontSize: 14, fontWeight: 800, color: t.text1, display: 'block' }}>Booked on {fmtDateShort(day.bidding_date)}</span>
+                    {last && (
+                      <span style={{ fontSize: 11, color: t.text3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'block' }}>
+                        attaches to last booking · <b style={{ color: t.text2 }}>{last.party || '—'}</b> · {fmt(last.weight, 0)}g
+                      </span>
+                    )}
+                  </span>
+                  <span style={{ textAlign: 'right', fontSize: 10.5, color: t.text4, whiteSpace: 'nowrap', flexShrink: 0 }}>{day.bookings.length} booking{day.bookings.length === 1 ? '' : 's'}</span>
+                </button>
+              )
+            })
           )}
         </div>
 
