@@ -249,6 +249,7 @@ PLEDGE_ESTIMATION_PENDING → (sales/pledge approvals) → RELEASE_AGREEMENT_PEN
 **Cross-cutting:**
 - [Data provenance & external integrations](data-provenance-integrations.md) — where every table's data originates (lead webhooks, telephony/Gnani, spectrometer, RazorpayX, S3/OCR, GST, Qandle HRMS, GoldRate) + a live/dormant breakdown.
 - [DB objects beyond the base tables](db-objects-views-functions.md) — the `latest_gold_transaction_report` **view** (the CRM's ready-made per-deal purchase report), the ID-minting **functions**, and sequences.
+- [GoldApp ↔ CRM integration layer](goldapp-crm-integration.md) — **the seam**: every place GoldApp reads a CRM — the two purchase syncs, the `goldapp-cron` heartbeat, branch/employee sync, live gold rates, the direct-read dashboards, the `purchases` mirror schema, auth, and sync health.
 
 ---
 
