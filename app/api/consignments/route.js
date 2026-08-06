@@ -2957,6 +2957,35 @@ async function reopenBookingPipeline(supabase, bookingId) {
   return true
 }
 
+// Like reopenBookingPipeline, but LOCKS the freed weight open so the
+// auto-attacher NEVER back-fills it (case-wise manual unbook). The shortfall
+// still SHOWS as pipeline because the UI derives it live (W − net×(1+rate));
+// we only zero the cached `pipeline_remaining_g` counter, which the v3
+// auto-attach RPC treats as its "skip this booking" lock. The booking is kept
+// UNSETTLED (pipeline_closed_at=null, arrival not-past) so the shortfall reads
+// as an open pipeline (not folded into gain), and ops can still close it
+// manually via attach_selected_to_pipeline (which recomputes the residual live,
+// independent of this counter).
+async function lockBookingPipeline(supabase, bookingId) {
+  if (!bookingId) return false
+  const { data: bk } = await supabase
+    .from('cal_quotas')
+    .select('id, is_kl, status, date, pipeline_arrival_date, pipeline_region')
+    .eq('id', bookingId)
+    .maybeSingle()
+  if (!bk || bk.status === 'cancelled') return false
+  const todayIst = istToday()
+  const patch = {
+    pipeline_remaining_g: 0,     // ← auto-attacher lock (RPC filters WHERE pipeline_remaining_g > 0)
+    pipeline_closed_at:   null,  // keep OPEN so manual close still targets it
+    pipeline_region:      bk.pipeline_region || (bk.is_kl ? 'Kerala' : 'Bangalore'),
+  }
+  const settleDate = bk.pipeline_arrival_date || bk.date
+  if (!settleDate || String(settleDate) < todayIst) patch.pipeline_arrival_date = todayIst
+  await supabase.from('cal_quotas').update(patch).eq('id', bookingId)
+  return true
+}
+
 // ── POST handler ──────────────────────────────────────────────────────────────
 export async function POST(req) {
   const body   = await req.json()
@@ -5618,7 +5647,7 @@ export async function POST(req) {
   // the Bangalore lifecycle and the manual at_ho SQL moves leave booked-but-
   // unconsigned bills at_ho, and ops still needs to release them.
   if (action === 'unbook_bills') {
-    const { application_ids } = body
+    const { application_ids, lock_pipeline } = body
     if (!Array.isArray(application_ids) || application_ids.length === 0) {
       return Response.json({ error: 'application_ids[] required' }, { status: 400 })
     }
@@ -5666,12 +5695,19 @@ export async function POST(req) {
     // buyer is still owed, so it must show as PIPELINE, not fold into gain. A
     // booking whose pipeline was previously closed (pipeline_closed_at set)
     // would otherwise stay "settled" and report the shortfall as gain.
+    //
+    // lock_pipeline (case-wise ops unbook): additionally hold the pipeline open
+    // against the auto-attacher — the freed weight must NOT be silently
+    // back-filled; ops will pick a bill and close it manually.
     let reopened = 0
     for (const bid of affectedBookingIds) {
-      try { if (await reopenBookingPipeline(supabase, bid)) reopened++ } catch (e) { console.warn('[unbook_bills] reopen pipeline failed', bid, e?.message) }
+      try {
+        const ok = lock_pipeline ? await lockBookingPipeline(supabase, bid) : await reopenBookingPipeline(supabase, bid)
+        if (ok) reopened++
+      } catch (e) { console.warn('[unbook_bills] reopen/lock pipeline failed', bid, e?.message) }
     }
 
-    return Response.json({ data: { unbooked: toUnbook.length, skipped, pipeline_reopened: reopened } })
+    return Response.json({ data: { unbooked: toUnbook.length, skipped, pipeline_reopened: reopened, locked: !!lock_pipeline } })
   }
 
   // ── Split a big bill: close open pipeline(s) + book the remainder ──────────

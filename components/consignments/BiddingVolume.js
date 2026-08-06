@@ -1256,6 +1256,33 @@ export default function BiddingVolume() {
     return true
   }
 
+  // ── Case-wise unbook (from a booking's breakup) ───────────────────────────
+  // Unbooks a single bill from a booking: the bill returns to the pool for
+  // rebooking, the booking's net drops, and the freed weight shows as pipeline —
+  // but LOCKED (lock_pipeline), so the auto-attacher never back-fills it. Ops
+  // closes that pipeline manually by selecting a bill.
+  const unbookBillCaseWise = async (bill) => {
+    const appId = bill?.application_id
+    if (!appId) return false
+    if (!window.confirm(
+      `Unbook ${appId} (${fmt(bill.net_weight, 2)} g)?\n\n` +
+      `• The bill returns to the pool and can be re-booked.\n` +
+      `• This booking's net drops by ${fmt(bill.net_weight, 2)} g and that weight opens as pipeline.\n` +
+      `• The pipeline is HELD — it won't auto-attach; close it manually when ready.`
+    )) return false
+    const r = await authedFetch('/api/consignments?action=unbook_bills', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ application_ids: [appId], lock_pipeline: true }),
+    })
+    const j = await r.json().catch(() => ({}))
+    if (!r.ok || j.error) { showToast(j.error || 'Unbook failed', 'error'); return false }
+    const n = j.data?.unbooked || 0
+    if (n === 0) { showToast(j.data?.skipped?.[0]?.reason || 'Could not unbook this bill (already dispatched?)', 'error'); return false }
+    showToast(`Unbooked ${appId} — ${fmt(bill.net_weight, 2)} g opened as held pipeline.`, 'success')
+    fetchAll(true)
+    return true
+  }
+
   // ── Loading / error ────────────────────────────────────────────────────────
   if (loading && !supply) return <div style={{ padding: 80, display: 'flex', justifyContent: 'center' }}><GoldSpinner size={32} /></div>
 
@@ -2157,6 +2184,7 @@ export default function BiddingVolume() {
             onClosePipeline={closeBookingPipeline}
             onReconcile={reconcileBooking}
             onUnbook={unbookBooking}
+            onUnbookBill={unbookBillCaseWise}
             onCreateConsignment={createConsignmentForBooking}
             onCreate={() => { setActiveTab('bidding') }}
           />
@@ -2641,7 +2669,7 @@ const DISPATCH_META = {
   at_risk: { label: '⚠ at risk',           tone: 'red'    },
 }
 
-function BookingsList({ t, card, bookings, biddingDate, onUpdateStatus, onRequestCancel, onClosePipeline, onReconcile, onUnbook, onCreateConsignment, onCreate }) {
+function BookingsList({ t, card, bookings, biddingDate, onUpdateStatus, onRequestCancel, onClosePipeline, onReconcile, onUnbook, onUnbookBill, onCreateConsignment, onCreate }) {
   const [actionBusy, setActionBusy] = useState(null)  // booking id currently mid-action
   const [hideCancelled, setHideCancelled] = useState(true)
   const [exporting, setExporting] = useState(null)    // 'xlsx' | 'png' | null
@@ -3163,10 +3191,13 @@ function BookingsList({ t, card, bookings, biddingDate, onUpdateStatus, onReques
                                                     <th style={bth('right')}>Net Wt</th>
                                                     <th style={bth('left')}>Expected Arrival</th>
                                                     <th style={bth('left')}>Section</th>
+                                                    {onUnbookBill && <th style={bth('center')}>Action</th>}
                                                   </tr>
                                                 </thead>
                                                 <tbody>
-                                                  {br.bills.map((bill, j) => (
+                                                  {br.bills.map((bill, j) => {
+                                                    const canUnbook = ['at_branch', 'at_ho'].includes(bill.stock_status)
+                                                    return (
                                                     <tr key={bill.application_id || j} style={{ borderTop: `1px solid ${t.border}18` }}>
                                                       <td style={btd('left', t.text2, 600)}>{bill.consignment_date ? fmtDate(bill.consignment_date) : (bill.stock_status === 'at_branch' ? 'pending' : '—')}</td>
                                                       <td style={btd('left', t.text2, 600)}>{bill.purchase_date ? fmtDate(bill.purchase_date) : '—'}</td>
@@ -3174,8 +3205,22 @@ function BookingsList({ t, card, bookings, biddingDate, onUpdateStatus, onReques
                                                       <td style={{ ...btd('right', t.text1, 600), fontFamily: 'monospace' }}>{fmt(bill.net_weight, 2)} g</td>
                                                       <td style={btd('left', t.text3, 500)}>{bill.expected_arrival ? fmtDate(bill.expected_arrival) : (bill.stock_status === 'at_branch' ? 'pickup pending' : '—')}</td>
                                                       <td style={btd('left', t.text3, 600)}>{bill.section || '—'}</td>
+                                                      {onUnbookBill && (
+                                                        <td style={btd('center')}>
+                                                          {canUnbook ? (
+                                                            <button type="button" onClick={(e) => { e.stopPropagation(); onUnbookBill(bill) }}
+                                                              title="Unbook this bill — returns it to the pool for rebooking; opens a held pipeline the auto-attacher won't fill"
+                                                              style={{ background: `${t.red}12`, color: t.red, border: `1px solid ${t.red}55`, borderRadius: 5, padding: '2px 9px', fontSize: 10, fontWeight: 800, letterSpacing: '.03em', textTransform: 'uppercase', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                                                              Unbook
+                                                            </button>
+                                                          ) : (
+                                                            <span title="Already dispatched — can't unbook" style={{ color: t.text4, fontSize: 10 }}>—</span>
+                                                          )}
+                                                        </td>
+                                                      )}
                                                     </tr>
-                                                  ))}
+                                                    )
+                                                  })}
                                                 </tbody>
                                               </table>
                                             </div>
