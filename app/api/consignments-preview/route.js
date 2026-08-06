@@ -4,7 +4,7 @@ import { createClient } from '@supabase/supabase-js'
 import {
   regionToStateCode,
   autoBranchCode,
-  generateTmpPrfNo,
+  peekTmpPrfNo,
   generateExternalNo,
   generateIssueVoucherNo,
 } from '../../../lib/consignmentUtils'
@@ -42,7 +42,8 @@ export async function GET(req) {
     const branchCode = autoBranchCode(branchName)
 
     // Mirror create_consignment logic exactly so preview == actual generated value.
-    const tmpPrfNo = await generateTmpPrfNo(supabase, branchName)
+    // PEEK (not generate) so a preview never consumes the branch's next-seal override.
+    const tmpPrfNo = await peekTmpPrfNo(supabase, branchName)
 
     let extNo = null, internalNo = null, challan = null
     if (movementType === 'INTERNAL') {

@@ -9,7 +9,7 @@ import { authedFetch } from '../../lib/authedFetch'
 import { CONSIGNMENT_THEMES as THEMES } from '../../lib/consignmentTheme'
 import { isCompanyEmail, COMPANY_MAIL_DOMAIN } from '../../lib/companyMail'
 
-const EMPTY_FORM = { name: '', opening_date: '', state: '', region: '', cluster: '', model_type: 'outside_bangalore', branch_code: '', address: '', city: '', pin_code: '', branch_gstin: '', crm_branch_id: '', pickup_time: '', delivery_tat_hours: 24, pickup_days: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'], tamper_next: '', contact_person: '', contact_phone: '', contact_email: '' }
+const EMPTY_FORM = { name: '', opening_date: '', state: '', region: '', cluster: '', model_type: 'outside_bangalore', branch_code: '', address: '', city: '', pin_code: '', branch_gstin: '', crm_branch_id: '', pickup_time: '', delivery_tat_hours: 24, pickup_days: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'], tamper_last: '', tamper_next: '', contact_person: '', contact_phone: '', contact_email: '' }
 
 // Logistics is RULE-BASED in these regions — no per-branch pickup time/days are
 // stored and the TAT is stamped from the region rule (Bangalore = same-day HO = 0h,
@@ -70,6 +70,7 @@ export default function BranchManagement({ embedded = false } = {}) {
   const [sortDir,      setSortDir]      = useState(1)
   const [activity,     setActivity]     = useState(null)   // { branch_name: last_bill_date } — absent = upcoming
   const [tamper,       setTamper]       = useState({})     // { branch_name: last_used_tmp_no (numeric) }
+  const [tamperOv,     setTamperOv]     = useState({})     // { branch_name: pending next-seal override (numeric) }
 
   // Google address auto-resolution state
   const [resolveOpen,    setResolveOpen]    = useState(false)
@@ -85,12 +86,14 @@ export default function BranchManagement({ embedded = false } = {}) {
       const res = await authedFetch('/api/branch-tamper')
       const data = await res.json()
       setTamper(data.lastTmp || {})
-    } catch { setTamper({}) }
+      setTamperOv(data.overrides || {})
+    } catch { setTamper({}); setTamperOv({}) }
   }
   // Format a numeric tamper-proof to WG######; helpers for last/next.
   const fmtTmp = (n) => (n && n > 0) ? `WG${String(n).padStart(6, '0')}` : '—'
   const lastTmpOf = (name) => tamper[name] || 0
-  const nextTmpOf = (name) => fmtTmp((tamper[name] || 0) + 1)
+  // Next = the pending one-shot override if set, else last + 1.
+  const nextTmpOf = (name) => fmtTmp(tamperOv[name] || ((tamper[name] || 0) + 1))
 
   const load = async () => {
     setLoading(true)
@@ -255,21 +258,39 @@ export default function BranchManagement({ embedded = false } = {}) {
       : await supabase.from('branches').insert(payload)
     if (error) { setMsg(error.message); setSaving(false); return }
 
-    // Tamper-proof: if the operator set a Next number different from the current
-    // one, seed a consignment row at (next − 1) so the generator issues exactly
-    // that number next (same mechanism as the Bangalore seal seeding).
+    // Tamper-proof seal: push Last used and/or Next through the validated
+    // endpoint. It blocks setting Next to an already-used seal (and Last used
+    // below the branch's real dispatched max), and points the branch's one-shot
+    // next-seal override — which can move backward, unlike the raw max+1 counter.
+    const wantLast = parseInt(String(form.tamper_last || '').replace(/\D/g, '')) || 0
     const wantNext = parseInt(String(form.tamper_next || '').replace(/\D/g, '')) || 0
-    const curNext  = (tamper[payload.name] || 0) + 1
-    if (wantNext > 0 && wantNext !== curNext) {
-      const seedNo = `WG${String(wantNext - 1).padStart(6, '0')}`
-      const sc = (payload.name.match(/^([A-Z]{2})-/) || [])[1] || 'KA'
-      await supabase.from('consignments').insert({
-        consignment_no: `SEED-${payload.name}-${seedNo}`, tmp_prf_no: seedNo,
-        external_no: `SEED-${payload.name}-${seedNo}`, challan_no: `SEED-${payload.name}-${seedNo}`,
-        branch_name: payload.name, branch_code: payload.branch_code || payload.name.substring(0, 3).toUpperCase(),
-        state_code: sc, movement_type: 'EXTERNAL', status: 'seed', total_bills: 0, total_net_wt: 0, total_amount: 0, created_by: 'SYSTEM_SEED',
-      })
-      loadTamper()
+    const curLast  = tamper[payload.name] || 0
+    const curNext  = tamperOv[payload.name] || ((tamper[payload.name] || 0) + 1)
+    if ((wantLast > 0 && wantLast !== curLast) || (wantNext > 0 && wantNext !== curNext)) {
+      try {
+        const res = await authedFetch('/api/branch-tamper', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            branch_name: payload.name,
+            last_used:   wantLast > 0 ? `WG${String(wantLast).padStart(6, '0')}` : undefined,
+            next:        wantNext > 0 ? `WG${String(wantNext).padStart(6, '0')}` : undefined,
+          }),
+        })
+        const body = await res.json().catch(() => ({}))
+        if (!res.ok) {
+          // Branch data already saved above; only the seal update was rejected.
+          setMsg(`Branch saved, but the seal number wasn't changed — ${body.error || 'update failed'}`)
+          setSaving(false)
+          await loadTamper()
+          return
+        }
+      } catch (e) {
+        setMsg(`Branch saved, but the seal update failed — ${e.message}`)
+        setSaving(false)
+        return
+      }
+      await loadTamper()
     }
     setMsg(editId ? 'Branch updated successfully' : 'Branch added successfully')
     setForm(EMPTY_FORM); setFormOpen(false); setEditId(null)
@@ -294,6 +315,7 @@ export default function BranchManagement({ embedded = false } = {}) {
       // single Save. (?? not ||, so a real 0h Bangalore TAT isn't clobbered.)
       delivery_tat_hours: b.delivery_tat_hours ?? '',
       pickup_days: b.pickup_days ?? [],
+      tamper_last: fmtTmp(lastTmpOf(b.name)) === '—' ? '' : fmtTmp(lastTmpOf(b.name)),
       tamper_next: nextTmpOf(b.name) === '—' ? '' : nextTmpOf(b.name),
       contact_person: b.contact_person || '',
       contact_phone:  b.contact_phone  || '',
@@ -782,20 +804,22 @@ export default function BranchManagement({ embedded = false } = {}) {
             )}
           </div>
 
-          {/* Tamper-proof seal — last used (derived) + next (editable → seeds). */}
+          {/* Tamper-proof seal — both Last used and Next are editable. */}
           <div style={s.section}>
             <SectionHead icon="seal" title="Tamper-proof seal" desc="The tamper-proof number sequence used on this branch's consignments." />
             <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '16px' }}>
               <div>
-                <label style={s.label}>Last used <span style={{ color: t.text4, fontWeight: 400 }}>(from consignments)</span></label>
-                <input style={{ ...s.input, color: t.text3, background: `${t.border}22`, cursor: 'not-allowed' }} value={editId ? fmtTmp(lastTmpOf(form.name)) : '—'} readOnly />
+                <label style={s.label}>Last used <span style={{ color: t.text4, fontWeight: 400 }}>(editable)</span></label>
+                <input style={s.input} placeholder="WG000112" value={form.tamper_last || ''} onChange={e => setField('tamper_last', e.target.value.toUpperCase())} disabled={!editId} />
               </div>
               <div>
                 <label style={s.label}>Next number <span style={{ color: t.text4, fontWeight: 400 }}>(editable)</span></label>
-                <input style={s.input} placeholder="WG000123" value={form.tamper_next} onChange={e => setField('tamper_next', e.target.value.toUpperCase())} />
+                <input style={s.input} placeholder="WG000113" value={form.tamper_next} onChange={e => setField('tamper_next', e.target.value.toUpperCase())} disabled={!editId} />
               </div>
             </div>
-            <div style={{ fontSize: '.6rem', color: t.text4, marginTop: '6px' }}>Setting Next writes a seed so the branch's next consignment uses exactly that seal number.</div>
+            <div style={{ fontSize: '.6rem', color: t.text4, marginTop: '6px' }}>
+              Next can be pointed to any <b>unused</b> seal — forward or backward. A number a live consignment already used is rejected. Last used can't go below the branch's highest dispatched seal.
+            </div>
           </div>
 
           </div>
