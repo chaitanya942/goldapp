@@ -3196,7 +3196,6 @@ function BookingsList({ t, card, bookings, biddingDate, onUpdateStatus, onReques
                                                 </thead>
                                                 <tbody>
                                                   {br.bills.map((bill, j) => {
-                                                    const canUnbook = ['at_branch', 'at_ho'].includes(bill.stock_status)
                                                     return (
                                                     <tr key={bill.application_id || j} style={{ borderTop: `1px solid ${t.border}18` }}>
                                                       <td style={btd('left', t.text2, 600)}>{bill.consignment_date ? fmtDate(bill.consignment_date) : (bill.stock_status === 'at_branch' ? 'pending' : '—')}</td>
@@ -3207,15 +3206,11 @@ function BookingsList({ t, card, bookings, biddingDate, onUpdateStatus, onReques
                                                       <td style={btd('left', t.text3, 600)}>{bill.section || '—'}</td>
                                                       {onUnbookBill && (
                                                         <td style={btd('center')}>
-                                                          {canUnbook ? (
-                                                            <button type="button" onClick={(e) => { e.stopPropagation(); onUnbookBill(bill) }}
-                                                              title="Unbook this bill — returns it to the pool for rebooking; opens a held pipeline the auto-attacher won't fill"
-                                                              style={{ background: `${t.red}12`, color: t.red, border: `1px solid ${t.red}55`, borderRadius: 5, padding: '2px 9px', fontSize: 10, fontWeight: 800, letterSpacing: '.03em', textTransform: 'uppercase', cursor: 'pointer', whiteSpace: 'nowrap' }}>
-                                                              Unbook
-                                                            </button>
-                                                          ) : (
-                                                            <span title="Already dispatched — can't unbook" style={{ color: t.text4, fontSize: 10 }}>—</span>
-                                                          )}
+                                                          <button type="button" onClick={(e) => { e.stopPropagation(); onUnbookBill(bill) }}
+                                                            title="Unbook this bill — returns it to the pool for rebooking; opens a held pipeline the auto-attacher won't fill"
+                                                            style={{ background: `${t.red}12`, color: t.red, border: `1px solid ${t.red}55`, borderRadius: 5, padding: '2px 9px', fontSize: 10, fontWeight: 800, letterSpacing: '.03em', textTransform: 'uppercase', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                                                            Unbook
+                                                          </button>
                                                         </td>
                                                       )}
                                                     </tr>

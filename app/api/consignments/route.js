@@ -5653,6 +5653,12 @@ export async function POST(req) {
     }
 
     const UNBOOKABLE_STATUS = new Set(['at_branch', 'at_ho'])
+    // Case-wise ops unbook (lock_pipeline) may release ANY booked bill — incl.
+    // in-transit (in_consignment) ones. Unbooking clears only the bidding claim
+    // (booking_id); the physical consignment is untouched, so the gold still
+    // arrives at HO and can be re-booked to another party. The bulk/stuck
+    // callers (no lock_pipeline) keep the at_branch/at_ho-only restriction.
+    const anyStatus = !!lock_pipeline
     const { data: rows, error: fErr } = await supabase
       .from('purchases')
       .select('id, application_id, stock_status, booking_id, is_deleted, audit_consumed_at')
@@ -5662,7 +5668,7 @@ export async function POST(req) {
     // A WGKA number can exist in BOTH crm_sources; only one is the booked row.
     // So evaluate every fetched row and unbook each that qualifies, rather than
     // keying one row per application_id (which could pick the unbooked twin).
-    const qualifies = (r) => !r.is_deleted && !r.audit_consumed_at && r.booking_id && UNBOOKABLE_STATUS.has(r.stock_status)
+    const qualifies = (r) => !r.is_deleted && !r.audit_consumed_at && r.booking_id && (anyStatus || UNBOOKABLE_STATUS.has(r.stock_status))
     const toUnbook = (rows || []).filter(qualifies).map(r => r.id)
     const skipped  = []
     for (const appId of application_ids) {
