@@ -1283,6 +1283,31 @@ export default function BiddingVolume() {
     return true
   }
 
+  // Unbook EVERY bill of one branch in a booking's breakup — one call, same
+  // held-pipeline behaviour as the per-bill unbook.
+  const unbookBranchCaseWise = async (branch) => {
+    const bills  = Array.isArray(branch?.bills) ? branch.bills : []
+    const appIds = [...new Set(bills.map(b => b.application_id).filter(Boolean))]
+    if (!appIds.length) return false
+    const totalNet = bills.reduce((s, b) => s + Number(b.net_weight || 0), 0)
+    if (!window.confirm(
+      `Unbook ALL ${appIds.length} bill${appIds.length === 1 ? '' : 's'} at ${branch.branch_name} (${fmt(totalNet, 2)} g)?\n\n` +
+      `• Every bill returns to the pool and can be re-booked.\n` +
+      `• This booking's net drops by ${fmt(totalNet, 2)} g and that weight opens as pipeline.\n` +
+      `• The pipeline is HELD — it won't auto-attach; close it manually when ready.`
+    )) return false
+    const r = await authedFetch('/api/consignments?action=unbook_bills', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ application_ids: appIds, lock_pipeline: true }),
+    })
+    const j = await r.json().catch(() => ({}))
+    if (!r.ok || j.error) { showToast(j.error || 'Unbook failed', 'error'); return false }
+    const n = j.data?.unbooked || 0
+    showToast(`Unbooked ${n} bill${n === 1 ? '' : 's'} at ${branch.branch_name} — opened as held pipeline.`, n > 0 ? 'success' : 'info')
+    fetchAll(true)
+    return true
+  }
+
   // ── Loading / error ────────────────────────────────────────────────────────
   if (loading && !supply) return <div style={{ padding: 80, display: 'flex', justifyContent: 'center' }}><GoldSpinner size={32} /></div>
 
@@ -2185,6 +2210,7 @@ export default function BiddingVolume() {
             onReconcile={reconcileBooking}
             onUnbook={unbookBooking}
             onUnbookBill={unbookBillCaseWise}
+            onUnbookBranch={unbookBranchCaseWise}
             onCreateConsignment={createConsignmentForBooking}
             onCreate={() => { setActiveTab('bidding') }}
           />
@@ -2669,7 +2695,7 @@ const DISPATCH_META = {
   at_risk: { label: '⚠ at risk',           tone: 'red'    },
 }
 
-function BookingsList({ t, card, bookings, biddingDate, onUpdateStatus, onRequestCancel, onClosePipeline, onReconcile, onUnbook, onUnbookBill, onCreateConsignment, onCreate }) {
+function BookingsList({ t, card, bookings, biddingDate, onUpdateStatus, onRequestCancel, onClosePipeline, onReconcile, onUnbook, onUnbookBill, onUnbookBranch, onCreateConsignment, onCreate }) {
   const [actionBusy, setActionBusy] = useState(null)  // booking id currently mid-action
   const [hideCancelled, setHideCancelled] = useState(true)
   const [exporting, setExporting] = useState(null)    // 'xlsx' | 'png' | null
@@ -3182,6 +3208,15 @@ function BookingsList({ t, card, bookings, biddingDate, onUpdateStatus, onReques
                                         <tr>
                                           <td colSpan={6} style={{ padding: 0, background: `${t.card2 || t.card}80` }}>
                                             <div style={{ padding: '4px 10px 10px 38px' }}>
+                                              {onUnbookBranch && br.bills.length > 0 && (
+                                                <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 4 }}>
+                                                  <button type="button" onClick={(e) => { e.stopPropagation(); onUnbookBranch(br) }}
+                                                    title={`Unbook every bill at ${br.branch_name} — returns them to the pool; opens a held pipeline`}
+                                                    style={{ background: `${t.red}18`, color: t.red, border: `1px solid ${t.red}66`, borderRadius: 5, padding: '3px 11px', fontSize: 10, fontWeight: 800, letterSpacing: '.03em', textTransform: 'uppercase', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                                                    Unbook all {br.bills.length}
+                                                  </button>
+                                                </div>
+                                              )}
                                               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                                                 <thead>
                                                   <tr>
