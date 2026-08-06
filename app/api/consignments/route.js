@@ -4498,12 +4498,12 @@ export async function POST(req) {
     if (!targetId) return Response.json({ error: 'No booking found for that date.' }, { status: 404 })
 
     const { data: booking, error: bErr } = await supabase
-      .from('cal_quotas').select('id, weight, is_kl, status, party, date').eq('id', targetId).single()
+      .from('cal_quotas').select('id, weight, is_kl, status, party, date, additional_gain_g').eq('id', targetId).single()
     if (bErr || !booking)               return Response.json({ error: 'Booking not found' }, { status: 404 })
     if (booking.status === 'cancelled') return Response.json({ error: 'That booking is cancelled — pick another.' }, { status: 400 })
 
     // Refuse locked purchase dates (same guard as create_booking).
-    const { data: billRows } = await supabase.from('purchases').select('id, purchase_date, booking_id').in('id', bill_ids)
+    const { data: billRows } = await supabase.from('purchases').select('id, purchase_date, booking_id, net_weight').in('id', bill_ids)
     const locked = await lockedPurchaseDates(supabase, (billRows || []).map(b => b.purchase_date))
     if (locked.length) {
       return Response.json({ error: `Can't attach — purchase date${locked.length > 1 ? 's' : ''} locked: ${locked.join(', ')}. Unlock first.` }, { status: 409 })
@@ -4531,6 +4531,19 @@ export async function POST(req) {
       supabase, bookingId: booking.id, bookedWeight: Number(booking.weight || 0) * grMult, isKl: !!booking.is_kl,
     })
     if (recon.error) console.warn('[attach_bills_to_booking] reconcile non-fatal:', recon.error)
+
+    // Un-fold: if this booking had a CLOSED pipeline gap folded into gain
+    // (additional_gain_g), shrink that folded gain by the net just attached —
+    // the gap is now filled by real gold, so counting it as gain too would
+    // double-count (settled gain = (W − net) already reflects the smaller gap).
+    // Best-effort; never blocks the attach.
+    const attachedNet = (billRows || []).filter(b => claimable.includes(b.id)).reduce((s, b) => s + Number(b.net_weight || 0), 0)
+    const priorAdd    = Number(booking.additional_gain_g || 0)
+    if (priorAdd > 0.01 && attachedNet > 0.01) {
+      const newAdd = Math.max(0, priorAdd - attachedNet)
+      try { await supabase.from('cal_quotas').update({ additional_gain_g: Number(newAdd.toFixed(3)) }).eq('id', booking.id) }
+      catch (e) { console.warn('[attach_bills_to_booking] additional_gain_g adjust failed:', e?.message) }
+    }
 
     return Response.json({ ok: true, attached: claimable.length, booking: { id: booking.id, party: booking.party } })
   }
