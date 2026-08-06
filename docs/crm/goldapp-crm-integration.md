@@ -259,17 +259,19 @@ covers: the **Karnataka `KA-` prefix migration** (`'adugodi' → 'KA-ADUGODI'`, 
 `'mangaluru' → 'KA-MANGALORE'`, `'mattikere' → 'KA-MATHIKERE'`, …), and HO folding
 (`'ho'`/`'head office' → 'KA-KORAMANGALA'`).
 
-> **⚠ Latent bug — flagged, not fixed.** Both the key-builder and the fallback use
-> `.replace(/s+/g, ' ')` — a regex that matches the **literal letter "s"**, not
-> whitespace (it was almost certainly meant to be `/\s+/g`). Any name containing "s"
-> (Mysuru, Hassan, Hosa Road, Hospete, Basaweshwaranagar…) is mangled *before* the
-> dictionary lookup, so those aliases silently fail and the fallback returns a
-> corrupted uppercase name. It has been survivable only because **both** the incoming
-> bill and the auto-added branch row pass through the *same* mangling, so they still
-> match each other — the stored names are just wrong/ugly rather than mis-joined. Worth
-> fixing to `/\s+/g`, but that will re-map many branch names and needs a coordinated
-> `branches`/`purchases` rename, so it's a decision, not a silent patch.
-> ([crmBranchAlias.js:90](../../lib/crmBranchAlias.js#L90), [:94](../../lib/crmBranchAlias.js#L94))
+> **Bug — found and fixed (2026-08-06).** Both the key-builder and the fallback used
+> `.replace(/s+/g, ' ')` — a regex matching the **literal letter "s"**, not whitespace
+> (meant to be `/\s+/g`). Any name containing a lowercase "s" was mangled *before* the
+> dictionary lookup, so its alias silently failed. Verified impact: **16 CRM branches
+> linked to completed transactions** (MYSURU 315, HOSA ROAD 234, BASAWESHWARANAGAR 219,
+> MALLESHWARAM 172, SHIVAMOGGA, SARJAPURA, HASSAN, THANISANDRA, HOSPETE, SUNKADAKATTE,
+> HOSAKOTE, SADASHIVA NAGAR, Flagship Store, …) resolved to names **absent from the
+> `branches` master** (`MYSURU`, `FLAG HIP STORE`, `BA AVE HWARNAGAR`…), so a bill from
+> one of them synced with an orphaned `branch_name` — dropping it from region roll-ups,
+> consignment routing and bidding. Fixed to `/\s+/g`; a read-only proof confirmed all
+> 129 transaction-linked branches then resolve to a valid master name (0 orphans, 0
+> new breakage) and that no current `purchases` row held an orphaned value (no backfill
+> needed). ([crmBranchAlias.js:90](../../lib/crmBranchAlias.js#L90), [:94](../../lib/crmBranchAlias.js#L94))
 
 ### 7c. Legacy / retired branch tooling
 
