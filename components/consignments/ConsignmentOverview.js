@@ -541,6 +541,7 @@ export default function ConsignmentOverview() {
   // so the alert lands even when the tab is in the background.
   const pickupLogRef = useRef({})
   const [pickupNotifs, setPickupNotifs] = useState([])
+  const autoDismissRef = useRef(new Set())  // 30-min heads-ups already scheduled to auto-dismiss
   useEffect(() => {
     try { pickupLogRef.current = JSON.parse(window.localStorage.getItem(`pickup-notif-${istToday()}`) || '{}') } catch {}
     // Ask for browser-notification permission once, up front.
@@ -648,6 +649,18 @@ export default function ConsignmentOverview() {
   }, [tick, data])  // eslint-disable-line react-hooks/exhaustive-deps
 
   const dismissNotif = (id) => setPickupNotifs(prev => prev.filter(n => n.id !== id))
+
+  // Auto-dismiss the informational 30-min heads-ups after 12 s so they don't
+  // pile up. The urgent 15-min reminders stay sticky until ops acts or dismisses
+  // them. Each is scheduled once (guarded by autoDismissRef).
+  useEffect(() => {
+    for (const n of pickupNotifs) {
+      if (n.kind === '30min' && !autoDismissRef.current.has(n.id)) {
+        autoDismissRef.current.add(n.id)
+        setTimeout(() => dismissNotif(n.id), 12000)
+      }
+    }
+  }, [pickupNotifs])
 
   // ── Column sort toggle ────────────────────────────────────────────────────
   function handleSort(key) {
@@ -1100,7 +1113,7 @@ export default function ConsignmentOverview() {
            Each card shows branch · net weight · pickup time. */}
       {typeof document !== 'undefined' && pickupNotifs.length > 0 && createPortal((
         <div style={{
-          position: 'fixed', top: 18, right: 18, zIndex: 3000,
+          position: 'fixed', top: 72, right: 18, zIndex: 3000,
           display: 'flex', flexDirection: 'column', gap: 10,
           maxWidth: 340, pointerEvents: 'none',
         }}>
@@ -1117,6 +1130,7 @@ export default function ConsignmentOverview() {
             }
             return (
               <div key={n.id}
+                data-cnspu
                 onClick={goMove}
                 title={`Move ${n.branch} stock — create consignment`}
                 style={{
@@ -1133,7 +1147,7 @@ export default function ConsignmentOverview() {
                 {/* accent rail */}
                 <span aria-hidden style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 3, background: accent }} />
                 {/* leading icon chip — gives it a notification feel, not a form card */}
-                <div style={{
+                <div data-cnspu style={{
                   flexShrink: 0, width: 34, height: 34, borderRadius: '50%',
                   background: `${accent}1f`, color: accent,
                   display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16,
@@ -1197,6 +1211,9 @@ export default function ConsignmentOverview() {
           94% { transform: rotate(-7deg); }
           96% { transform: rotate(5deg); }
           98% { transform: rotate(-2deg); }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          [data-cnspu] { animation: none !important; }
         }
       `}</style>
 
