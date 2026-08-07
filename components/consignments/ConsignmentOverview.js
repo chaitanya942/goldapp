@@ -1121,56 +1121,64 @@ export default function ConsignmentOverview() {
                 title={`Move ${n.branch} stock — create consignment`}
                 style={{
                   pointerEvents: 'auto', cursor: 'pointer',
+                  position: 'relative', overflow: 'hidden',
+                  display: 'flex', gap: 11,
                   background: t.card,
-                  border: `1px solid ${accent}66`,
-                  borderLeft: `4px solid ${accent}`,
-                  borderRadius: 12,
-                  boxShadow: '0 14px 40px rgba(0,0,0,.4)',
-                  padding: '13px 15px',
-                  animation: 'cnsPickupPopIn .3s cubic-bezier(.34,1.2,.64,1)',
+                  border: `1px solid ${accent}33`,
+                  borderRadius: 13,
+                  boxShadow: '0 6px 22px rgba(0,0,0,.26), 0 1px 4px rgba(0,0,0,.18)',
+                  padding: '12px 13px 12px 14px',
+                  animation: 'cnsPickupPopIn .34s cubic-bezier(.34,1.2,.64,1)',
                 }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 8 }}>
-                  <span style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 10.5, fontWeight: 800, letterSpacing: '.07em', textTransform: 'uppercase', color: accent }}>
-                    <span style={{ fontSize: 14, animation: urgent ? 'pulse 1.1s infinite' : 'none' }}>{urgent ? '⚠' : '⏰'}</span>
-                    {urgent ? 'Pickup reminder · 15 min' : 'Pickup approaching · 30 min'}
-                  </span>
-                  <button onClick={(e) => { e.stopPropagation(); dismissNotif(n.id) }}
-                    title="Dismiss"
-                    style={{ background: 'none', border: 'none', color: t.text4, cursor: 'pointer', fontSize: 17, lineHeight: 1, padding: 0 }}>
-                    ×
-                  </button>
-                </div>
-                <div style={{ fontSize: 15, fontWeight: 800, color: t.text1, letterSpacing: '-.01em' }}>{n.branch}</div>
-                {n.region && <div style={{ fontSize: 10.5, color: t.text4, marginTop: 1, fontWeight: 600 }}>{n.region}</div>}
-                <div style={{ display: 'flex', alignItems: 'baseline', gap: 14, marginTop: 9 }}>
-                  <div>
-                    <div style={{ fontSize: 9, color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 700 }}>Net weight</div>
-                    <div style={{ fontSize: 16, fontWeight: 800, color: t.gold, fontFamily: 'monospace' }}>
-                      {n.netWt.toFixed(2)}<span style={{ fontSize: 10, color: t.text3, marginLeft: 2 }}>g</span>
+                {/* accent rail */}
+                <span aria-hidden style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 3, background: accent }} />
+                {/* leading icon chip — gives it a notification feel, not a form card */}
+                <div style={{
+                  flexShrink: 0, width: 34, height: 34, borderRadius: '50%',
+                  background: `${accent}1f`, color: accent,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16,
+                  animation: urgent ? 'cnsBellShake 1.8s ease-in-out infinite' : 'none',
+                }}>{urgent ? '⚠' : '⏰'}</div>
+                {/* content */}
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                    <span style={{ flex: 1, minWidth: 0, fontSize: 9.5, fontWeight: 800, letterSpacing: '.08em', textTransform: 'uppercase', color: t.text4, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      {urgent ? 'Pickup reminder' : 'Pickup approaching'}
+                    </span>
+                    <span style={{ flexShrink: 0, fontSize: 10, fontWeight: 800, color: accent, background: `${accent}1a`, borderRadius: 100, padding: '2px 8px', fontVariantNumeric: 'tabular-nums' }}>
+                      {urgent ? '15 min' : '30 min'}
+                    </span>
+                    <button onClick={(e) => { e.stopPropagation(); dismissNotif(n.id) }}
+                      title="Dismiss"
+                      style={{ flexShrink: 0, background: 'none', border: 'none', color: t.text4, cursor: 'pointer', fontSize: 16, lineHeight: 1, padding: '0 0 0 2px' }}>
+                      ×
+                    </button>
+                  </div>
+                  <div style={{ fontSize: 14.5, fontWeight: 800, color: t.text1, letterSpacing: '-.01em', marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{n.branch}</div>
+                  <div style={{ fontSize: 11, color: t.text3, marginTop: 3, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                    {n.region && <><span>{n.region}</span><span style={{ color: t.text4 }}>·</span></>}
+                    <span style={{ color: t.gold, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{n.netWt.toFixed(2)} g</span>
+                    <span style={{ color: t.text4 }}>·</span>
+                    <span style={{ fontVariantNumeric: 'tabular-nums' }}>pickup {n.pickup_time}</span>
+                  </div>
+                  {urgent && (
+                    <div style={{ fontSize: 10.5, color: accent, marginTop: 6, fontWeight: 600, lineHeight: 1.35 }}>
+                      No consignment yet — move the stock before pickup.
                     </div>
-                  </div>
-                  <div>
-                    <div style={{ fontSize: 9, color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 700 }}>Pickup time</div>
-                    <div style={{ fontSize: 16, fontWeight: 800, color: accent, fontFamily: 'monospace' }}>{n.pickup_time}</div>
+                  )}
+                  {/* subtle right-aligned action — same deep-link as the branch-row CTA */}
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 9 }}>
+                    <span onClick={(e) => { e.stopPropagation(); goMove() }}
+                      style={{
+                        display: 'inline-flex', alignItems: 'center', gap: 5,
+                        background: accent, color: '#fff', borderRadius: 8,
+                        padding: '6px 12px', fontSize: 11.5, fontWeight: 800, letterSpacing: '.02em',
+                        cursor: 'pointer', whiteSpace: 'nowrap',
+                      }}>
+                      Move stock <span style={{ fontSize: 13, lineHeight: 1 }}>→</span>
+                    </span>
                   </div>
                 </div>
-                {urgent && (
-                  <div style={{ fontSize: 10.5, color: accent, marginTop: 9, fontWeight: 700, lineHeight: 1.4 }}>
-                    No consignment created yet — move the stock before pickup.
-                  </div>
-                )}
-                {/* Move button — same deep-link as the branch-row CTA. */}
-                <button onClick={(e) => { e.stopPropagation(); goMove() }}
-                  style={{
-                    marginTop: 11, width: '100%',
-                    background: accent, color: '#fff',
-                    border: 'none', borderRadius: 8,
-                    padding: '9px 14px', fontSize: 12.5, fontWeight: 800,
-                    letterSpacing: '.03em', cursor: 'pointer',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-                  }}>
-                  Move stock → create consignment
-                </button>
               </div>
             )
           })}
@@ -1179,8 +1187,16 @@ export default function ConsignmentOverview() {
 
       <style>{`
         @keyframes cnsPickupPopIn {
-          from { opacity: 0; transform: translateX(24px); }
-          to   { opacity: 1; transform: translateX(0); }
+          from { opacity: 0; transform: translateX(24px) scale(.98); }
+          to   { opacity: 1; transform: translateX(0) scale(1); }
+        }
+        @keyframes cnsBellShake {
+          0%, 88%, 100% { transform: rotate(0deg); }
+          90% { transform: rotate(-12deg); }
+          92% { transform: rotate(10deg); }
+          94% { transform: rotate(-7deg); }
+          96% { transform: rotate(5deg); }
+          98% { transform: rotate(-2deg); }
         }
       `}</style>
 
