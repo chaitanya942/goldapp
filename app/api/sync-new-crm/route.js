@@ -144,7 +144,16 @@ async function runSync(request) {
         COALESCE(orn.total_amount, 0) AS total_amount,
         -- Final-payment timestamp = the day the purchase actually happened (== the
         -- invoice date). This is the purchase_date we store, NOT created_at.
-        fpay.fp AS final_payment_at
+        fpay.fp AS final_payment_at,
+        -- IST-normalised purchase day + clock time, computed in SQL so the value
+        -- NEVER depends on the Node process timezone. The CRM stores these in
+        -- timestamp-without-time-zone columns as UTC and renders them +5:30 (IST);
+        -- interpret-as-UTC then convert-to-IST reproduces its display exactly.
+        -- (node-postgres parses timestamp-without-tz using the process TZ, which is
+        -- Asia/Kolkata in prod: that shifted -5:30, and the old JS fmtTime added
+        -- +5:30 back, netting the raw UTC clock instead of IST. This avoids both.)
+        to_char(COALESCE(fpay.fp, t.created_at) AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM-DD') AS ist_date,
+        to_char(COALESCE(fpay.fp, t.created_at) AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata', 'HH24:MI:SS') AS ist_time
       FROM "Transaction" t
       LEFT JOIN "Customer" c ON c.id = t.customer_id
       LEFT JOIN "Branch"   b ON b.id = t.branch_id
@@ -215,8 +224,10 @@ async function runSync(request) {
         // Purchase date/time = when the final payment was made (== invoice date).
         // Falls back to created_at only if a completed bill somehow lacks a
         // final-payment row (shouldn't happen for FINAL_PAYMENT_COMPLETED).
-        purchase_date:              fmtDate(r.final_payment_at || r.created_at),
-        transaction_time:           fmtTime(r.final_payment_at || r.created_at),
+        // IST date + clock time, computed in Postgres (see ist_date/ist_time in
+        // the query) so they don't depend on the Node process timezone.
+        purchase_date:              r.ist_date,
+        transaction_time:           r.ist_time,
         customer_name:              customerName,
         phone_number:               r.mobile?.trim() || null,
         branch_name:                aliasBranchName(r.branch_name?.trim()) || null,
