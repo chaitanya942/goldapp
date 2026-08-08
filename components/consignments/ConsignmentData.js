@@ -2771,7 +2771,14 @@ function EmailDocsModal({ t, c, branchEmail, onClose, onSent, onError }) {
     })
     return m.slice(0, 7)
   })()
-  const showDrop = ccFocus && suggestions.length > 0
+  const showDrop = ccFocus && q !== ''
+  const hl = (text) => {
+    const str = String(text || '')
+    if (!q) return str
+    const i = str.toLowerCase().indexOf(q)
+    if (i < 0) return str
+    return <>{str.slice(0, i)}<b style={{ color: t.green, fontWeight: 800 }}>{str.slice(i, i + q.length)}</b>{str.slice(i + q.length)}</>
+  }
   const addCc = (email) => {
     const e = String(email).trim()
     if (!EMAIL_RE.test(e)) return
@@ -2895,7 +2902,7 @@ function EmailDocsModal({ t, c, branchEmail, onClose, onSent, onError }) {
             )}
 
             <label style={{ fontSize: '10px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 700, display: 'block', marginBottom: '6px' }}>Cc <span style={{ textTransform: 'none', fontWeight: 400 }}>(optional)</span></label>
-            <div className="edm-cc" style={{ position: 'relative', marginBottom: ccInput && !ccValid ? '6px' : '20px' }}>
+            <div className="edm-cc" style={{ position: 'relative', marginBottom: ccInput && !ccValid && !ccFocus ? '6px' : '20px' }}>
               <div onClick={() => ccInputRef.current?.focus()}
                 style={{ ...inp, display: 'flex', flexWrap: 'wrap', gap: '6px', alignItems: 'center', minHeight: '44px', padding: '7px 9px', cursor: 'text',
                   borderColor: ccFocus ? t.green : (ccInput && !ccValid ? t.red : t.border2),
@@ -2932,22 +2939,37 @@ function EmailDocsModal({ t, c, branchEmail, onClose, onSent, onError }) {
                   style={{ flex: 1, minWidth: '130px', border: 'none', outline: 'none', background: 'transparent', color: t.text1, fontSize: '13.5px', padding: '4px 2px' }} />
               </div>
               {showDrop && (
-                <div style={{ position: 'absolute', bottom: 'calc(100% + 5px)', left: 0, right: 0, zIndex: 6, background: t.card, border: `1px solid ${t.border}`, borderRadius: '11px', boxShadow: '0 14px 34px rgba(0,0,0,.4)', overflow: 'hidden', maxHeight: '250px', overflowY: 'auto' }}>
-                  {suggestions.map((r, i) => (
-                    <div key={r.email} onMouseDown={e => { e.preventDefault(); addCc(r.email) }} onMouseEnter={() => setCcIdx(i)}
-                      style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 11px', cursor: 'pointer', background: i === ccIdx ? `${t.green}12` : 'transparent', borderBottom: i < suggestions.length - 1 ? `1px solid ${t.border2}` : 'none' }}>
-                      {avatar(r.name || r.email, 26)}
-                      <div style={{ minWidth: 0, flex: 1 }}>
-                        <div style={{ fontSize: '12.5px', fontWeight: 700, color: t.text1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.name || r.email}</div>
-                        <div style={{ fontSize: '11px', color: t.text3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.email}{r.region ? ` · ${r.region}` : ''}</div>
+                <div style={{ position: 'absolute', bottom: 'calc(100% + 5px)', left: 0, right: 0, zIndex: 6, background: t.card, border: `1px solid ${t.border}`, borderRadius: '12px', boxShadow: '0 16px 42px rgba(0,0,0,.48)', overflow: 'hidden' }}>
+                  <div style={{ maxHeight: '236px', overflowY: 'auto' }}>
+                    {suggestions.length ? suggestions.map((r, i) => (
+                      <div key={r.email} onMouseDown={e => { e.preventDefault(); addCc(r.email) }} onMouseEnter={() => setCcIdx(i)}
+                        style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 11px', cursor: 'pointer', background: i === ccIdx ? `${t.green}12` : 'transparent', borderBottom: i < suggestions.length - 1 ? `1px solid ${t.border2}` : 'none' }}>
+                        {avatar(r.name || r.email, 26)}
+                        <div style={{ minWidth: 0, flex: 1 }}>
+                          <div style={{ fontSize: '12.5px', fontWeight: 700, color: t.text1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{hl(r.name || r.email)}</div>
+                          <div style={{ fontSize: '11px', color: t.text3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{hl(r.email)}{r.region ? <span style={{ color: t.text4 }}> · {r.region}</span> : null}</div>
+                        </div>
+                        {i === ccIdx
+                          ? <span style={{ flexShrink: 0, fontSize: '10px', color: t.green, fontWeight: 700, border: `1px solid ${t.green}55`, borderRadius: '5px', padding: '1px 5px' }}>↵ add</span>
+                          : <span style={{ flexShrink: 0, fontSize: '17px', color: t.text4, lineHeight: 1 }}>＋</span>}
                       </div>
-                      <span style={{ fontSize: '17px', color: t.green, lineHeight: 1 }}>＋</span>
+                    )) : (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '9px', padding: '11px 13px', fontSize: '12px', color: t.text3, lineHeight: 1.5 }}>
+                        <span style={{ fontSize: '15px' }}>🔍</span>
+                        <span>No branch matches “<b style={{ color: t.text2 }}>{ccInput.trim()}</b>”.{EMAIL_RE.test(ccInput.trim()) ? <> Press <b style={{ color: t.green }}>Enter</b> to add it as an email.</> : <> Type a full email address to add it directly.</>}</span>
+                      </div>
+                    )}
+                  </div>
+                  {suggestions.length > 0 && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 11px', borderTop: `1px solid ${t.border2}`, background: t.card3, fontSize: '10px', color: t.text4 }}>
+                      <span>{suggestions.length} match{suggestions.length === 1 ? '' : 'es'}</span>
+                      <span>↑↓ navigate · ↵ add · esc close</span>
                     </div>
-                  ))}
+                  )}
                 </div>
               )}
             </div>
-            {ccInput && !ccValid && <div style={{ fontSize: '10.5px', color: t.red, marginBottom: '16px' }}>Enter a valid email address, or pick one from the list.</div>}
+            {ccInput && !ccValid && !ccFocus && <div style={{ fontSize: '10.5px', color: t.red, marginBottom: '16px' }}>“{ccInput.trim()}” isn’t a valid email — fix it or clear it to send.</div>}
 
             <div style={{ margin: '22px -24px -20px', padding: '15px 24px', borderTop: `1px solid ${t.border2}`, background: t.card3, display: 'flex', gap: '10px', justifyContent: 'flex-end', alignItems: 'center' }}>
               <button className="edm-cancel" onClick={() => { if (!sending) onClose?.() }} disabled={sending}
