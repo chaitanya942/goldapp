@@ -640,7 +640,15 @@ export default function BranchManagement({ embedded = false } = {}) {
           {/* Scrollable middle — between the header and the footer action bar */}
           <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
           {/* Centered content column — wide so the form fills the screen */}
-          <div style={{ width: '100%', maxWidth: '1440px', margin: '0 auto', padding: '28px 32px 32px' }}>
+          <div className="bm-editor" style={{ width: '100%', maxWidth: '1440px', margin: '0 auto', padding: '28px 32px 32px' }}>
+          <style>{`
+            .bm-editor input:focus, .bm-editor select:focus, .bm-editor textarea:focus{
+              outline:none; border-color:${t.gold}; box-shadow:0 0 0 3px ${t.gold}22;
+            }
+            .bm-editor input:hover:not(:focus), .bm-editor select:hover:not(:focus), .bm-editor textarea:hover:not(:focus){ border-color:${t.gold}66; }
+            .bm-editor input::placeholder, .bm-editor textarea::placeholder{ color:${t.text4}; }
+            .bm-editor input:disabled{ opacity:.55; cursor:not-allowed; }
+          `}</style>
           <div style={s.section}>
           <SectionHead icon="identity" title="Identity & classification" desc="What the branch is called, and where it sits in the state → region → cluster hierarchy." />
           {/* Row 1 — name / code / opening date */}
@@ -672,7 +680,9 @@ export default function BranchManagement({ embedded = false } = {}) {
                   const regs = Object.keys(tmap[v] || {})
                   const region = regs.length === 1 ? regs[0] : ''
                   const cls = region ? (tmap[v][region] || []) : []
-                  return { ...f, state: v, region, cluster: cls.length === 1 ? cls[0] : '' }
+                  // Model type follows the region: Bangalore = same-day HO, else consignment.
+                  const model_type = region === 'Bangalore' ? 'bangalore' : region ? 'outside_bangalore' : f.model_type
+                  return { ...f, state: v, region, cluster: cls.length === 1 ? cls[0] : '', model_type }
                 })}
                 options={Object.keys(tmap)}
                 placeholder="State"
@@ -683,7 +693,7 @@ export default function BranchManagement({ embedded = false } = {}) {
                 value={form.region}
                 onChange={v => setForm(f => {
                   const cls = tmap[f.state]?.[v] || []
-                  return { ...f, region: v, cluster: cls.length === 1 ? cls[0] : '' }
+                  return { ...f, region: v, cluster: cls.length === 1 ? cls[0] : '', model_type: v === 'Bangalore' ? 'bangalore' : 'outside_bangalore' }
                 })}
                 options={form.state ? Object.keys(tmap[form.state] || {}) : []}
                 placeholder={form.state ? 'Region' : 'Pick state first'}
@@ -703,13 +713,15 @@ export default function BranchManagement({ embedded = false } = {}) {
             </div>
           </div>
 
-          {/* Model type — how stock leaves the branch */}
+          {/* Model type — how stock leaves the branch. Set automatically from the
+              region above; kept editable for the rare override. */}
           <div style={{ marginTop: '18px', maxWidth: isMobile ? '100%' : '360px' }}>
             <label style={s.label}>Model Type</label>
             <select style={s.input} value={form.model_type} onChange={e => setField('model_type', e.target.value)}>
               <option value="bangalore" style={{ background: t.card }}>Bangalore (Same-day HO)</option>
               <option value="outside_bangalore" style={{ background: t.card }}>Outside Bangalore (Consignment)</option>
             </select>
+            <div style={{ fontSize: '.6rem', color: t.text4, marginTop: '6px' }}>Auto-set from the region — Bangalore is same-day HO, everywhere else ships by consignment.</div>
           </div>
           </div>
 
@@ -722,15 +734,16 @@ export default function BranchManagement({ embedded = false } = {}) {
                 <textarea style={{ ...s.input, minHeight: '64px', fontFamily: 'inherit', resize: 'vertical' }}
                   placeholder="Street, Area, District..."
                   value={form.address}
-                  onChange={e => setField('address', e.target.value)} />
+                  onChange={e => { const v = e.target.value; setForm(f => ({ ...f, address: v, pin_code: f.pin_code || (v.match(/\b(\d{6})\b/) || [])[1] || '' })) }} />
               </div>
               <div>
-                <label style={s.label}>City</label>
+                <label style={s.label}>City <span style={{ color: t.text4, fontWeight: 400 }}>(optional)</span></label>
                 <input style={s.input} value={form.city} onChange={e => setField('city', e.target.value)} />
               </div>
               <div>
                 <label style={s.label}>PIN Code</label>
-                <input style={s.input} value={form.pin_code} onChange={e => setField('pin_code', e.target.value)} />
+                <input style={s.input} inputMode="numeric" value={form.pin_code} onChange={e => setField('pin_code', e.target.value.replace(/\D/g, '').slice(0, 6))} />
+                <div style={{ fontSize: '.58rem', color: t.text4, marginTop: '4px' }}>Auto-detected from the address if left blank</div>
               </div>
               <div>
                 <label style={s.label}>Branch GSTIN</label>
