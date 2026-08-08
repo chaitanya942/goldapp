@@ -115,6 +115,20 @@ export async function GET(req) {
     if (r) last_sent = { at: r.created_at, by: r.details?.from_name || r.actor_email || null, to: r.details?.to || null }
   } catch {}
 
+  // Autocomplete pool for the Cc field — every active branch with an email on
+  // file, so ops can add recipients by branch name or address without knowing
+  // the exact mailbox. Best-effort; a failure just yields no suggestions.
+  let recipients = []
+  try {
+    const { data: brs } = await admin
+      .from('branches').select('name, contact_email, region')
+      .not('contact_email', 'is', null).eq('is_active', true).order('name')
+    const seen = new Set()
+    recipients = (brs || [])
+      .map(b => ({ name: b.name, email: String(b.contact_email || '').trim(), region: b.region }))
+      .filter(r => EMAIL_RE.test(r.email) && !seen.has(r.email.toLowerCase()) && seen.add(r.email.toLowerCase()))
+  } catch {}
+
   return Response.json({
     branch_name:   c.branch_name,
     branch_email:  branch.contact_email || null,
@@ -125,6 +139,7 @@ export async function GET(req) {
     attachments:   plannedAttachments(c, branch, a),
     tmp_prf_no:    c.tmp_prf_no,
     dest:          a.isInternal ? (c.dest_branch || 'Hub') : 'Head Office',
+    recipients,
     last_sent,
   })
 }

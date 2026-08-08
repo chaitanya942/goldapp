@@ -2665,7 +2665,11 @@ function EmailDocsModal({ t, c, branchEmail, onClose, onSent, onError }) {
   const [info,    setInfo]    = useState(null)
   const [loading, setLoading] = useState(true)
   const [to,      setTo]      = useState(branchEmail || '')
-  const [cc,      setCc]      = useState('')
+  const [ccList,  setCcList]  = useState([])     // Cc recipients as chips
+  const [ccInput, setCcInput] = useState('')     // text currently being typed
+  const [ccIdx,   setCcIdx]   = useState(0)      // highlighted suggestion
+  const [ccFocus, setCcFocus] = useState(false)
+  const ccInputRef = useRef(null)
   const [sending, setSending] = useState(false)
   const [sent,    setSent]    = useState(null)   // success confirmation shown in-modal
 
@@ -2691,7 +2695,7 @@ function EmailDocsModal({ t, c, branchEmail, onClose, onSent, onError }) {
   const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
   const toValid  = EMAIL_RE.test(to.trim())
   const toCompany = isCompanyEmail(to.trim())   // branch mail must be @company domain
-  const ccValid  = !cc.trim() || EMAIL_RE.test(cc.trim())
+  const ccValid  = !ccInput.trim() || EMAIL_RE.test(ccInput.trim())
   const canSend  = !loading && !sending && info?.ready && toValid && toCompany && ccValid
   const alreadySent = !!info?.last_sent
   // Did the last email bounce? (latest known state is a bounce, not a send.)
@@ -2707,9 +2711,12 @@ function EmailDocsModal({ t, c, branchEmail, onClose, onSent, onError }) {
     if (!canSend) return
     setSending(true)
     try {
+      // Include a still-typed-but-valid address so ops don't lose it.
+      const pending = EMAIL_RE.test(ccInput.trim()) ? [ccInput.trim()] : []
+      const ccAll = [...ccList, ...pending].filter(e => e.toLowerCase() !== to.trim().toLowerCase())
       const r = await authedFetch('/api/consignments/email-documents', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: c.id, to: to.trim(), cc: cc.trim() || undefined }),
+        body: JSON.stringify({ id: c.id, to: to.trim(), cc: ccAll.join(',') || undefined }),
       })
       const j = await r.json()
       if (!r.ok || j.error) { onError?.(j.error || `Send failed (${r.status})`); setSending(false); return }
@@ -2746,6 +2753,40 @@ function EmailDocsModal({ t, c, branchEmail, onClose, onSent, onError }) {
       <text x="13.5" y="26" fontSize="6.5" fontWeight="800" fill={color} textAnchor="middle" style={{ fontFamily: 'system-ui, sans-serif', letterSpacing: '.03em' }}>{ext}</text>
     </svg>
   )
+
+  // ── Cc autosuggest — chips + branch-aware suggestions ──────────────────────
+  const recipients = info?.recipients || []
+  const recByEmail = {}
+  for (const r of recipients) recByEmail[r.email.toLowerCase()] = r.name
+  const chosen = new Set([to.trim().toLowerCase(), ...ccList.map(e => e.toLowerCase())])
+  const q = ccInput.trim().toLowerCase()
+  const suggestions = (() => {
+    if (!q) return []
+    const m = recipients.filter(r => !chosen.has(r.email.toLowerCase()) &&
+      (r.email.toLowerCase().includes(q) || (r.name || '').toLowerCase().includes(q)))
+    m.sort((a, b) => {
+      const as = a.email.toLowerCase().startsWith(q) || (a.name || '').toLowerCase().startsWith(q)
+      const bs = b.email.toLowerCase().startsWith(q) || (b.name || '').toLowerCase().startsWith(q)
+      return (bs ? 1 : 0) - (as ? 1 : 0)
+    })
+    return m.slice(0, 7)
+  })()
+  const showDrop = ccFocus && suggestions.length > 0
+  const addCc = (email) => {
+    const e = String(email).trim()
+    if (!EMAIL_RE.test(e)) return
+    const lc = e.toLowerCase()
+    setCcInput(''); setCcIdx(0)
+    if (lc === to.trim().toLowerCase()) return
+    setCcList(l => l.some(x => x.toLowerCase() === lc) ? l : [...l, e])
+  }
+  const removeCc = (email) => setCcList(l => l.filter(x => x !== email))
+  const initialsOf = (name) => (String(name || '?').replace(/@.*/, '').split(/[\s._-]+/).filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase() || '?')
+  const hueOf = (str) => [...String(str || '')].reduce((h, ch) => (h * 31 + ch.charCodeAt(0)) >>> 0, 7) % 360
+  const avatar = (name, size = 22) => (
+    <span style={{ flexShrink: 0, width: size, height: size, borderRadius: '50%', background: `hsl(${hueOf(name)} 42% 42%)`, color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: (size * 0.4) + 'px', fontWeight: 700 }}>{initialsOf(name)}</span>
+  )
+
   return createPortal((
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.78)', zIndex: 120, display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(6px)', padding: '20px' }}
       onClick={() => { if (!sending) onClose?.() }}>
@@ -2753,6 +2794,7 @@ function EmailDocsModal({ t, c, branchEmail, onClose, onSent, onError }) {
         @keyframes edmIn { from { opacity: 0; transform: translateY(8px) scale(.985) } to { opacity: 1; transform: none } }
         .edm-card { animation: edmIn .2s cubic-bezier(.2,.7,.3,1) }
         .edm-card input:focus { border-color: ${t.green} !important; box-shadow: 0 0 0 3px ${t.green}22 }
+        .edm-cc input:focus { border: none !important; box-shadow: none !important }
         .edm-send:hover:not(:disabled) { filter: brightness(1.07); transform: translateY(-1px) }
         .edm-cancel:hover { background: ${t.card2} }
         .edm-doc { transition: transform .13s ease, box-shadow .13s ease }
@@ -2853,7 +2895,59 @@ function EmailDocsModal({ t, c, branchEmail, onClose, onSent, onError }) {
             )}
 
             <label style={{ fontSize: '10px', color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 700, display: 'block', marginBottom: '6px' }}>Cc <span style={{ textTransform: 'none', fontWeight: 400 }}>(optional)</span></label>
-            <input value={cc} onChange={e => setCc(e.target.value)} placeholder="add another recipient…" style={{ ...inp, borderColor: cc && !ccValid ? t.red : t.border2, marginBottom: '20px' }} />
+            <div className="edm-cc" style={{ position: 'relative', marginBottom: ccInput && !ccValid ? '6px' : '20px' }}>
+              <div onClick={() => ccInputRef.current?.focus()}
+                style={{ ...inp, display: 'flex', flexWrap: 'wrap', gap: '6px', alignItems: 'center', minHeight: '44px', padding: '7px 9px', cursor: 'text',
+                  borderColor: ccFocus ? t.green : (ccInput && !ccValid ? t.red : t.border2),
+                  boxShadow: ccFocus ? `0 0 0 3px ${t.green}22` : 'inset 0 1px 2px rgba(0,0,0,.05)' }}>
+                {ccList.map(email => {
+                  const nm = recByEmail[email.toLowerCase()]
+                  return (
+                    <span key={email} title={email}
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', background: `${t.green}12`, border: `1px solid ${t.green}3a`, borderRadius: '100px', padding: '3px 5px 3px 3px', maxWidth: '100%' }}>
+                      {avatar(nm || email, 20)}
+                      <span style={{ fontSize: '12px', fontWeight: 600, color: t.text1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '170px' }}>{nm || email}</span>
+                      <button type="button" onClick={e => { e.stopPropagation(); removeCc(email) }} title="Remove"
+                        style={{ background: 'none', border: 'none', color: t.text3, cursor: 'pointer', fontSize: '15px', lineHeight: 1, padding: '0 3px' }}>×</button>
+                    </span>
+                  )
+                })}
+                <input ref={ccInputRef} value={ccInput}
+                  onFocus={() => setCcFocus(true)}
+                  onBlur={() => setTimeout(() => { if (EMAIL_RE.test(ccInput.trim())) addCc(ccInput.trim()); setCcFocus(false) }, 120)}
+                  onChange={e => { setCcInput(e.target.value); setCcIdx(0) }}
+                  onPaste={e => { const txt = e.clipboardData.getData('text'); if (/[,;\s]/.test(txt)) { e.preventDefault(); txt.split(/[,;\s]+/).map(s => s.trim()).filter(Boolean).forEach(addCc) } }}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter' || e.key === ',' || (e.key === 'Tab' && ccInput.trim())) {
+                      const pick = showDrop ? suggestions[ccIdx] : null
+                      if (pick) { e.preventDefault(); addCc(pick.email) }
+                      else if (EMAIL_RE.test(ccInput.trim())) { e.preventDefault(); addCc(ccInput.trim()) }
+                      else if (e.key === ',') e.preventDefault()
+                    } else if (e.key === 'ArrowDown') { e.preventDefault(); setCcIdx(i => Math.min(i + 1, suggestions.length - 1)) }
+                    else if (e.key === 'ArrowUp') { e.preventDefault(); setCcIdx(i => Math.max(i - 1, 0)) }
+                    else if (e.key === 'Backspace' && !ccInput && ccList.length) { setCcList(l => l.slice(0, -1)) }
+                    else if (e.key === 'Escape') { setCcFocus(false) }
+                  }}
+                  placeholder={ccList.length ? 'add more…' : 'type a branch name or email…'}
+                  style={{ flex: 1, minWidth: '130px', border: 'none', outline: 'none', background: 'transparent', color: t.text1, fontSize: '13.5px', padding: '4px 2px' }} />
+              </div>
+              {showDrop && (
+                <div style={{ position: 'absolute', bottom: 'calc(100% + 5px)', left: 0, right: 0, zIndex: 6, background: t.card, border: `1px solid ${t.border}`, borderRadius: '11px', boxShadow: '0 14px 34px rgba(0,0,0,.4)', overflow: 'hidden', maxHeight: '250px', overflowY: 'auto' }}>
+                  {suggestions.map((r, i) => (
+                    <div key={r.email} onMouseDown={e => { e.preventDefault(); addCc(r.email) }} onMouseEnter={() => setCcIdx(i)}
+                      style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 11px', cursor: 'pointer', background: i === ccIdx ? `${t.green}12` : 'transparent', borderBottom: i < suggestions.length - 1 ? `1px solid ${t.border2}` : 'none' }}>
+                      {avatar(r.name || r.email, 26)}
+                      <div style={{ minWidth: 0, flex: 1 }}>
+                        <div style={{ fontSize: '12.5px', fontWeight: 700, color: t.text1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.name || r.email}</div>
+                        <div style={{ fontSize: '11px', color: t.text3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.email}{r.region ? ` · ${r.region}` : ''}</div>
+                      </div>
+                      <span style={{ fontSize: '17px', color: t.green, lineHeight: 1 }}>＋</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            {ccInput && !ccValid && <div style={{ fontSize: '10.5px', color: t.red, marginBottom: '16px' }}>Enter a valid email address, or pick one from the list.</div>}
 
             <div style={{ margin: '22px -24px -20px', padding: '15px 24px', borderTop: `1px solid ${t.border2}`, background: t.card3, display: 'flex', gap: '10px', justifyContent: 'flex-end', alignItems: 'center' }}>
               <button className="edm-cancel" onClick={() => { if (!sending) onClose?.() }} disabled={sending}
