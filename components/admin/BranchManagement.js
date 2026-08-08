@@ -643,76 +643,74 @@ export default function BranchManagement({ embedded = false } = {}) {
           <div style={{ width: '100%', maxWidth: '1440px', margin: '0 auto', padding: '28px 32px 32px' }}>
           <div style={s.section}>
           <SectionHead icon="identity" title="Identity & classification" desc="What the branch is called, and where it sits in the state → region → cluster hierarchy." />
-          <div style={s.grid4}>
+          {/* Row 1 — name / code / opening date */}
+          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '2fr 1fr 1fr', gap: isMobile ? '12px' : '16px' }}>
             <div>
               <label style={s.label}>Branch Name *</label>
               <input style={s.input} placeholder="e.g. KORAMANGALA" value={form.name} onChange={e => setField('name', e.target.value)} />
             </div>
             <div>
               <label style={s.label}>Branch Code</label>
-              <input style={s.input} placeholder="e.g. KOR (auto-generated if blank)" value={form.branch_code} onChange={e => setField('branch_code', e.target.value)} />
+              <input style={s.input} placeholder="e.g. KOR (auto if blank)" value={form.branch_code} onChange={e => setField('branch_code', e.target.value)} />
             </div>
             <div>
               <label style={s.label}>Opening Date</label>
               <input style={s.input} type="date" value={form.opening_date} onChange={e => setField('opening_date', e.target.value)} />
             </div>
-            <div>
-              <label style={s.label}>State *</label>
+          </div>
+
+          {/* Location hierarchy — one grouped control. Region & cluster auto-fill
+              from the state (they only diverge in Karnataka: Bangalore vs Rest of
+              Karnataka), so ops rarely touches them. The chevrons signal a single
+              state → region → cluster path, not three separate questions. */}
+          <div style={{ marginTop: '20px' }}>
+            <label style={s.label}>Location hierarchy *</label>
+            <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 16px 1fr 16px 1fr', gap: isMobile ? '10px' : '6px', alignItems: 'start' }}>
               <SmartSelect
                 value={form.state}
-                onChange={v => setForm(f => ({ ...f, state: v, region: '', cluster: '' }))}
+                onChange={v => setForm(f => {
+                  const regs = Object.keys(tmap[v] || {})
+                  const region = regs.length === 1 ? regs[0] : ''
+                  const cls = region ? (tmap[v][region] || []) : []
+                  return { ...f, state: v, region, cluster: cls.length === 1 ? cls[0] : '' }
+                })}
                 options={Object.keys(tmap)}
-                placeholder="Select state"
-                onAdd={addState}
-                adding={addingState} setAdding={setAddingState}
-                newVal={newState} setNewVal={setNewState}
+                placeholder="State"
+                onAdd={addState} adding={addingState} setAdding={setAddingState} newVal={newState} setNewVal={setNewState}
               />
-            </div>
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, 1fr)', gap: isMobile ? '12px' : '16px', marginTop: '16px' }}>
-            <div>
-              <label style={s.label}>Region *</label>
+              {!isMobile && <div style={{ textAlign: 'center', color: t.text4, fontSize: '1.15rem', lineHeight: '40px' }}>›</div>}
               <SmartSelect
                 value={form.region}
-                onChange={v => setForm(f => ({ ...f, region: v, cluster: '' }))}
+                onChange={v => setForm(f => {
+                  const cls = tmap[f.state]?.[v] || []
+                  return { ...f, region: v, cluster: cls.length === 1 ? cls[0] : '' }
+                })}
                 options={form.state ? Object.keys(tmap[form.state] || {}) : []}
-                placeholder={form.state ? 'Select region' : 'Select state first'}
-                onAdd={addRegion}
-                adding={addingRegion} setAdding={setAddingRegion}
-                newVal={newRegion} setNewVal={setNewRegion}
+                placeholder={form.state ? 'Region' : 'Pick state first'}
+                onAdd={addRegion} adding={addingRegion} setAdding={setAddingRegion} newVal={newRegion} setNewVal={setNewRegion}
               />
-            </div>
-            <div>
-              <label style={s.label}>Cluster *</label>
+              {!isMobile && <div style={{ textAlign: 'center', color: t.text4, fontSize: '1.15rem', lineHeight: '40px' }}>›</div>}
               <SmartSelect
                 value={form.cluster}
                 onChange={v => setField('cluster', v)}
                 options={form.state && form.region ? (tmap[form.state]?.[form.region] || []) : []}
-                placeholder={form.region ? 'Select cluster' : 'Select region first'}
-                onAdd={addCluster}
-                adding={addingCluster} setAdding={setAddingCluster}
-                newVal={newCluster} setNewVal={setNewCluster}
+                placeholder={form.region ? 'Cluster' : 'Pick region first'}
+                onAdd={addCluster} adding={addingCluster} setAdding={setAddingCluster} newVal={newCluster} setNewVal={setNewCluster}
               />
             </div>
-            <div>
-              <label style={s.label}>Model Type</label>
-              <select style={s.input} value={form.model_type} onChange={e => setField('model_type', e.target.value)}>
-                <option value="bangalore" style={{ background: t.card }}>Bangalore (Same-day HO)</option>
-                <option value="outside_bangalore" style={{ background: t.card }}>Outside Bangalore (Consignment)</option>
-              </select>
+            <div style={{ fontSize: '.62rem', color: t.text4, marginTop: '6px' }}>
+              Region &amp; cluster fill in automatically from the state — you only choose them for Karnataka (Bangalore vs Rest of Karnataka).
             </div>
           </div>
 
-          {form.model_type === 'outside_bangalore' && (
-            <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, 1fr)', gap: isMobile ? '12px' : '16px', marginTop: '16px' }}>
-              <div>
-                <label style={s.label}>Logistics Pickup Time</label>
-                <input style={s.input} placeholder="e.g. Mon/Wed/Fri 4 PM"
-                  value={form.pickup_time} onChange={e => setField('pickup_time', e.target.value)} />
-                <div style={{ fontSize: '.6rem', color: t.text4, marginTop: '4px' }}>Shown in Branch Stock Overview · free-form text</div>
-              </div>
-            </div>
-          )}
+          {/* Model type — how stock leaves the branch */}
+          <div style={{ marginTop: '18px', maxWidth: isMobile ? '100%' : '360px' }}>
+            <label style={s.label}>Model Type</label>
+            <select style={s.input} value={form.model_type} onChange={e => setField('model_type', e.target.value)}>
+              <option value="bangalore" style={{ background: t.card }}>Bangalore (Same-day HO)</option>
+              <option value="outside_bangalore" style={{ background: t.card }}>Outside Bangalore (Consignment)</option>
+            </select>
+          </div>
           </div>
 
           {/* Address */}
