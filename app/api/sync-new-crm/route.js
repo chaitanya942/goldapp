@@ -317,14 +317,66 @@ async function runSync(request) {
       }
     } catch (paErr) { console.warn('[sync-new-crm] pipeline auto-attach threw (non-fatal):', paErr?.message) }
 
+    // ── Ghost reconcile ──────────────────────────────────────────────────────
+    // The upsert above never notices when a previously-synced bill is later
+    // DELETED from the CRM (a branch re-does the deal under a new code). Such a
+    // row lingers as an 'approved' dispatchable bill forever (e.g. WGKA-68645).
+    // Mirror the old-CRM ghost pass: within the sync window, mark as 'deleted'
+    // any approved new_crm row whose CRM transaction is TRULY GONE — and only
+    // when it's still at_branch/unbooked, so we never auto-touch a bill that ops
+    // has already booked or dispatched (those need a human look if they vanish).
+    // Conservative on purpose: we ghost only on ABSENCE from the CRM, not on a
+    // status flip, so a transient state can't wrongly delete a live bill.
+    // Non-fatal — a failure here never fails the sync.
+    let ghostsMarked = 0
+    try {
+      const candidates = []
+      for (let i = 0; ; i += 1000) {
+        const { data, error } = await supabaseAdmin
+          .from('purchases')
+          .select('application_id')
+          .eq('crm_source', 'new_crm').eq('crm_status', 'approved').eq('stock_status', 'at_branch')
+          .is('booking_id', null)
+          .gte('purchase_date', cutoffDate)
+          .range(i, i + 999)
+        if (error || !data || !data.length) break
+        candidates.push(...data.map(r => r.application_id))
+        if (data.length < 1000) break
+      }
+      if (candidates.length) {
+        // Which of these codes still exist in the CRM (any status)? Chunk the ANY().
+        const present = new Set()
+        for (let i = 0; i < candidates.length; i += 500) {
+          const chunk = candidates.slice(i, i + 500)
+          const { rows: ex } = await client.query('SELECT code FROM "Transaction" WHERE code = ANY($1)', [chunk])
+          for (const r of ex) present.add(r.code)
+        }
+        const ghosts = candidates.filter(code => !present.has(code))
+        for (let i = 0; i < ghosts.length; i += 100) {
+          const chunk = ghosts.slice(i, i + 100)
+          // Re-assert the at_branch/unbooked guard on the UPDATE itself so a row
+          // booked between the read and the write is never clobbered.
+          const { count } = await supabaseAdmin
+            .from('purchases')
+            .update({ crm_status: 'deleted' }, { count: 'exact' })
+            .in('application_id', chunk)
+            .eq('crm_source', 'new_crm').eq('crm_status', 'approved')
+            .eq('stock_status', 'at_branch').is('booking_id', null)
+          ghostsMarked += (count || 0)
+        }
+        if (ghosts.length) console.log(`[sync-new-crm] ghost reconcile: ${ghostsMarked} deleted-in-CRM bill(s) marked — ${ghosts.slice(0, 20).join(', ')}${ghosts.length > 20 ? '…' : ''}`)
+      }
+    } catch (gErr) { console.warn('[sync-new-crm] ghost reconcile threw (non-fatal):', gErr?.message) }
+
     return Response.json({
       success:   errors === 0,
       total:     rows.length,
       synced,
       errors,
+      ghostsMarked,
       failedIds,
       lastError: lastError ? lastError.message : null,
-      message:   `New CRM upsert ${minDate}→${maxDate}: ${allRecords.length} completed bills (${errors} errors${failedIds.length ? `: ${failedIds.join(', ')}` : ''})`,
+      message:   `New CRM upsert ${minDate}→${maxDate}: ${allRecords.length} completed bills (${errors} errors${failedIds.length ? `: ${failedIds.join(', ')}` : ''})${ghostsMarked ? `, ${ghostsMarked} ghost(s) cleared` : ''}`,
     })
 
   } catch (err) {
