@@ -1397,10 +1397,10 @@ export default function BiddingVolume() {
       {attachTarget && (
         <AttachToBookingModal
           t={t}
-          bill={attachTarget.bill}
+          bills={attachTarget.bills}
           isKl={regionTab === 'kl'}
           onClose={() => setAttachTarget(null)}
-          onDone={(msg) => { setAttachTarget(null); showToast(msg || 'Bill attached to booking', 'success'); fetchAll(true) }}
+          onDone={(msg) => { setAttachTarget(null); setSelected(new Set()); showToast(msg || 'Bills attached to booking', 'success'); fetchAll(true) }}
           onError={(msg) => showToast(msg, 'error')}
         />
       )}
@@ -1718,7 +1718,7 @@ export default function BiddingVolume() {
         onToggleRegionAll={toggleRegionAll}
         branchSelectionState={branchSelectionState}
         onToggleHold={toggleBillHold}
-        onAttachBill={(bill) => setAttachTarget({ bill })}
+        onAttachBill={(bill) => setAttachTarget({ bills: [bill] })}
         emptyMsg=""
       />)}
 
@@ -2189,6 +2189,14 @@ export default function BiddingVolume() {
                 </span>
               )
             })()}
+            {/* Attach the selected bills onto a PRIOR day's final booking (the
+                "book back to date" flow) — bulk version of the per-bill button,
+                so ops can attach several residuals in one go. */}
+            <button onClick={() => setAttachTarget({ bills: [...selected].map(id => billsById[id]).filter(Boolean) })}
+              title="Attach the selected bills onto a previous day's final booking, instead of opening a new one"
+              style={{ background: 'transparent', color: t.text2, border: `1px solid ${t.border2}`, borderRadius: 8, padding: '9px 16px', fontSize: 12.5, fontWeight: 800, cursor: 'pointer', whiteSpace: 'nowrap', flexShrink: 0 }}>
+              ↩ Attach to prior booking
+            </button>
             <button onClick={() => setShowBookModal(true)}
               style={{ background: t.gold, color: '#1a0a00', border: 'none', borderRadius: 8, padding: '10px 24px', fontSize: 13, fontWeight: 900, cursor: 'pointer', letterSpacing: '.02em', boxShadow: `0 3px 12px ${t.gold}66`, whiteSpace: 'nowrap', flexShrink: 0 }}>
               Book Selected →
@@ -3372,7 +3380,7 @@ function fmtPickupTime(s) {
 // Attach a small prior-day residual bill onto an EXISTING booking from one of
 // the last few bidding days, instead of opening a fresh booking for a few grams.
 // Ops picks the exact booking (bidder) so the gold is attributed correctly.
-function AttachToBookingModal({ t, bill, isKl, onClose, onDone, onError }) {
+function AttachToBookingModal({ t, bills, isKl, onClose, onDone, onError }) {
   const [days,    setDays]    = useState(null)   // null = loading
   const [error,   setError]   = useState(null)
   const [pick,    setPick]    = useState(null)   // chosen booking id
@@ -3392,36 +3400,50 @@ function AttachToBookingModal({ t, bill, isKl, onClose, onDone, onError }) {
     return () => { live = false }
   }, [isKl])
 
+  const list = Array.isArray(bills) ? bills.filter(Boolean) : []
+  const n = list.length
+  const totalNet = list.reduce((s, b) => s + Number(b?.net_weight || 0), 0)
+
   const submit = async () => {
-    if (!pick || busy) return   // pick = chosen bidding_date
+    if (!pick || busy || !n) return   // pick = chosen bidding_date
     setBusy(true)
     try {
       const r = await authedFetch('/api/consignments?action=attach_bills_to_booking', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ bidding_date: pick, is_kl: !!isKl, bill_ids: [bill.id] }),
+        body: JSON.stringify({ bidding_date: pick, is_kl: !!isKl, bill_ids: list.map(b => b.id) }),
       })
       const j = await r.json()
       if (!r.ok) throw new Error(j.error || 'Attach failed')
-      onDone?.(`Attached ${bill.application_id || 'bill'} → ${j.booking?.party || 'booking'} (${fmtDateShort(pick)})`)
+      const attached = j.attached ?? n
+      onDone?.(`Attached ${attached} bill${attached === 1 ? '' : 's'} → ${j.booking?.party || 'booking'} (${fmtDateShort(pick)})`)
     } catch (e) { setBusy(false); onError?.(e.message || String(e)) }
   }
 
   if (typeof document === 'undefined') return null
-  const net = Number(bill?.net_weight || 0)
   return createPortal((
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.78)', zIndex: 120, display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(6px)', padding: 20 }}
       onClick={() => { if (!busy) onClose?.() }}>
       <div onClick={(e) => e.stopPropagation()} style={{ width: 'min(560px, 96vw)', maxHeight: '88vh', overflow: 'auto', background: t.card, border: `1px solid ${t.border}`, borderRadius: 16, boxShadow: '0 24px 70px rgba(0,0,0,.5)' }}>
         {/* Header */}
         <div style={{ padding: '18px 22px 14px', borderBottom: `1px solid ${t.border}` }}>
-          <div style={{ fontSize: 16, fontWeight: 800, color: t.text1, letterSpacing: '.01em' }}>Attach bill to a previous booking</div>
-          <div style={{ fontSize: 11.5, color: t.text3, marginTop: 4 }}>Pick a day — the bill attaches to that day's final booking, instead of opening a new one.</div>
-          {/* The bill being attached */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginTop: 12, background: t.card2, border: `1px solid ${t.border}`, borderRadius: 10, padding: '9px 12px' }}>
-            <span style={{ fontSize: 12.5, fontWeight: 800, color: t.gold, fontFamily: 'monospace' }}>{bill?.application_id || '—'}</span>
-            <span style={{ fontSize: 11.5, color: t.text2, fontWeight: 600 }}>{bill?.branch_name || bill?.current_branch || ''}</span>
-            <span style={{ marginLeft: 'auto', fontSize: 13, fontWeight: 800, color: t.text1, fontFamily: 'monospace' }}>{fmt(net, 2)}<span style={{ fontSize: 10, color: t.text4 }}>g net</span></span>
+          <div style={{ fontSize: 16, fontWeight: 800, color: t.text1, letterSpacing: '.01em' }}>Attach {n} bill{n === 1 ? '' : 's'} to a previous booking</div>
+          <div style={{ fontSize: 11.5, color: t.text3, marginTop: 4 }}>Pick a day — {n === 1 ? 'the bill attaches' : 'all these bills attach'} to that day's final booking, instead of opening a new one.</div>
+          {/* The bill(s) being attached */}
+          <div style={{ marginTop: 12, maxHeight: 148, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {list.map(b => (
+              <div key={b.id} style={{ display: 'flex', alignItems: 'center', gap: 10, background: t.card2, border: `1px solid ${t.border}`, borderRadius: 10, padding: '8px 12px' }}>
+                <span style={{ fontSize: 12.5, fontWeight: 800, color: t.gold, fontFamily: 'monospace', flexShrink: 0 }}>{b?.application_id || '—'}</span>
+                <span style={{ fontSize: 11.5, color: t.text2, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{b?.branch_name || b?.current_branch || ''}</span>
+                <span style={{ marginLeft: 'auto', fontSize: 13, fontWeight: 800, color: t.text1, fontFamily: 'monospace', flexShrink: 0 }}>{fmt(Number(b?.net_weight || 0), 2)}<span style={{ fontSize: 10, color: t.text4 }}>g</span></span>
+              </div>
+            ))}
           </div>
+          {n > 1 && (
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 9, fontSize: 12, color: t.text3, fontWeight: 700 }}>
+              <span>{n} bills selected</span>
+              <span style={{ color: t.text1, fontFamily: 'monospace', fontWeight: 800 }}>{fmt(totalNet, 2)} g net total</span>
+            </div>
+          )}
         </div>
 
         {/* Body — pick a booking */}
@@ -3464,7 +3486,7 @@ function AttachToBookingModal({ t, bill, isKl, onClose, onDone, onError }) {
           <button type="button" onClick={() => { if (!busy) onClose?.() }} style={{ background: 'transparent', border: `1px solid ${t.border}`, borderRadius: 9, padding: '9px 16px', fontSize: 12.5, color: t.text2, cursor: busy ? 'default' : 'pointer', fontWeight: 600 }}>Cancel</button>
           <button type="button" onClick={submit} disabled={!pick || busy}
             style={{ background: (!pick || busy) ? t.card2 : t.gold, color: (!pick || busy) ? t.text4 : (t.goldText || '#1a0a00'), border: 'none', borderRadius: 9, padding: '9px 18px', fontSize: 12.5, fontWeight: 800, cursor: (!pick || busy) ? 'not-allowed' : 'pointer', letterSpacing: '.02em' }}>
-            {busy ? 'Attaching…' : 'Attach to booking'}
+            {busy ? 'Attaching…' : (n > 1 ? `Attach ${n} bills →` : 'Attach to booking')}
           </button>
         </div>
       </div>
