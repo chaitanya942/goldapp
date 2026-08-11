@@ -1451,7 +1451,7 @@ export default function BiddingVolume() {
               {pills.map(r => (
                 <div key={r.region}
                   title={r._synthetic ? 'Karnataka total · Bangalore + Rest of Karnataka combined' : undefined}
-                  style={{ display: 'inline-flex', alignItems: 'center', gap: 9, background: r._synthetic ? `${accent}12` : t.card, border: `1px solid ${r._synthetic ? `${accent}66` : t.border}`, borderRadius: 99, padding: '5px 13px' }}>
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: 9, background: t.card, border: `1px solid ${t.border}`, borderRadius: 99, padding: '5px 13px' }}>
                   <span style={{ width: 7, height: 7, borderRadius: '50%', background: accent, display: 'inline-block' }} />
                   <span style={{ fontSize: 10, color: accent, fontWeight: 800, letterSpacing: '.03em', textTransform: 'uppercase' }}>{SHORT[r.region] || r.region}</span>
                   <span style={{ fontSize: 12.5, color: t.text1, fontWeight: 700, fontFamily: 'monospace' }}>{Number(r.net_wt || 0).toFixed(2)}<span style={{ fontSize: 9, color: t.text4 }}>g</span></span>
