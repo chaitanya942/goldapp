@@ -1407,13 +1407,35 @@ export default function BiddingVolume() {
 
       {/* ── Today's purchases · region-wise band (ops summary) ── */}
       {(() => {
-        const SHORT = { 'Bangalore': 'Bangalore', 'Rest of Karnataka': 'Rest of KA', 'Andhra Pradesh': 'Andhra', 'Telangana': 'Telangana', 'Kerala': 'Kerala' }
+        const SHORT = { 'Bangalore': 'Bangalore', 'Rest of Karnataka': 'Rest of KA', 'KA': 'KA', 'Andhra Pradesh': 'Andhra', 'Telangana': 'Telangana', 'Kerala': 'Kerala' }
         const rows  = supply?.todays_purchases_by_region || []
-        const want  = regionTab === 'kl' ? rows.filter(r => r.region === 'Kerala') : rows.filter(r => r.region !== 'Kerala')
-        if (!want.length) return null
-        const accent   = regionTab === 'kl' ? (t.purple || '#8c5ac8') : t.gold
-        const totBills = want.reduce((s, r) => s + Number(r.bills || 0), 0)
-        const totNet   = want.reduce((s, r) => s + Number(r.net_wt || 0), 0)
+        const isKl  = regionTab === 'kl'
+        const base  = isKl ? rows.filter(r => r.region === 'Kerala') : rows.filter(r => r.region !== 'Kerala')
+        if (!base.length) return null
+        const accent   = isKl ? (t.purple || '#8c5ac8') : t.gold
+        // Totals come from the REAL regions only — the synthetic KA roll-up must
+        // not double-count into the header total.
+        const totBills = base.reduce((s, r) => s + Number(r.bills || 0), 0)
+        const totNet   = base.reduce((s, r) => s + Number(r.net_wt || 0), 0)
+        // KA·AP·TS pool gets an extra 'KA' pill that clubs Bangalore + Rest of
+        // Karnataka into one Karnataka total, shown alongside the two, in order:
+        // Bangalore · Rest of KA · KA · Andhra · Telangana.
+        let pills = base
+        if (!isKl) {
+          const byRegion = Object.fromEntries(base.map(r => [r.region, r]))
+          const kaParts  = base.filter(r => r.region === 'Bangalore' || r.region === 'Rest of Karnataka')
+          const ordered  = []
+          const push = (reg) => { if (byRegion[reg]) ordered.push(byRegion[reg]) }
+          push('Bangalore'); push('Rest of Karnataka')
+          if (kaParts.length) ordered.push({
+            region: 'KA', _synthetic: true,
+            net_wt: kaParts.reduce((s, r) => s + Number(r.net_wt || 0), 0),
+            bills:  kaParts.reduce((s, r) => s + Number(r.bills || 0), 0),
+          })
+          push('Andhra Pradesh'); push('Telangana')
+          for (const r of base) if (!['Bangalore', 'Rest of Karnataka', 'Andhra Pradesh', 'Telangana'].includes(r.region)) ordered.push(r)
+          pills = ordered
+        }
         return (
           <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap', background: t.card2, border: `1px solid ${t.border}`, borderRadius: 12, padding: '9px 14px' }}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 2, paddingRight: 14, borderRight: `1px solid ${t.border}` }}>
@@ -1426,8 +1448,10 @@ export default function BiddingVolume() {
               </span>
             </div>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              {want.map(r => (
-                <div key={r.region} style={{ display: 'inline-flex', alignItems: 'center', gap: 9, background: t.card, border: `1px solid ${t.border}`, borderRadius: 99, padding: '5px 13px' }}>
+              {pills.map(r => (
+                <div key={r.region}
+                  title={r._synthetic ? 'Karnataka total · Bangalore + Rest of Karnataka combined' : undefined}
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: 9, background: r._synthetic ? `${accent}12` : t.card, border: `1px solid ${r._synthetic ? `${accent}66` : t.border}`, borderRadius: 99, padding: '5px 13px' }}>
                   <span style={{ width: 7, height: 7, borderRadius: '50%', background: accent, display: 'inline-block' }} />
                   <span style={{ fontSize: 10, color: accent, fontWeight: 800, letterSpacing: '.03em', textTransform: 'uppercase' }}>{SHORT[r.region] || r.region}</span>
                   <span style={{ fontSize: 12.5, color: t.text1, fontWeight: 700, fontFamily: 'monospace' }}>{Number(r.net_wt || 0).toFixed(2)}<span style={{ fontSize: 9, color: t.text4 }}>g</span></span>
