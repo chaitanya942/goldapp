@@ -2678,20 +2678,33 @@ export async function GET(req) {
     const dateFrom = searchParams.get('date_from')
     const dateTo   = searchParams.get('date_to')
 
-    let query = supabase
-      .from('consignments')
-      .select('*')
-      .neq('status', 'seed')          // never show seed records in reports
-      .order('created_at', { ascending: false })
-
-    if (status)   query = query.eq('status', status)
-    if (branch)   query = query.eq('branch_name', branch)
-    if (dateFrom) query = query.gte('created_at', dateFrom)
-    if (dateTo)   query = query.lte('created_at', dateTo)
-    // Region scoping: a regional user only sees consignments dispatched FROM their region's branches.
-    if (allowedBranches) query = query.in('branch_name', allowedBranches)
-
-    const { data, error } = await query
+    const buildQuery = () => {
+      let q = supabase
+        .from('consignments')
+        .select('*')
+        .neq('status', 'seed')          // never show seed records in reports
+        .order('created_at', { ascending: false })
+      if (status)   q = q.eq('status', status)
+      if (branch)   q = q.eq('branch_name', branch)
+      if (dateFrom) q = q.gte('created_at', dateFrom)
+      if (dateTo)   q = q.lte('created_at', dateTo)
+      // Region scoping: a regional user only sees consignments dispatched FROM their region's branches.
+      if (allowedBranches) q = q.in('branch_name', allowedBranches)
+      return q
+    }
+    // Paginate — a single call caps at Supabase's 1000-row max_rows. With
+    // thousands of consignments that silently dropped the oldest in-flight rows
+    // (the page showed 448 of 1,192 active). Fetch in 1000-row chunks so the
+    // whole in-flight set is returned regardless of total volume.
+    let data = [], error = null
+    const CHUNK = 1000
+    for (let from = 0; ; from += CHUNK) {
+      const { data: page, error: pErr } = await buildQuery().range(from, from + CHUNK - 1)
+      if (pErr) { error = pErr; break }
+      if (!page || !page.length) break
+      data.push(...page)
+      if (page.length < CHUNK) break
+    }
     // Annotate each row with the latest "documents emailed" timestamp so the UI
     // can flag which consignments have already had their docs mailed to the
     // branch (ops can still resend). Best-effort.
