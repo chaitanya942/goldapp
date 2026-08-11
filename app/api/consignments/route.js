@@ -4636,17 +4636,16 @@ export async function POST(req) {
       .is('booking_id', null)
     if (updErr) return Response.json({ error: updErr.message }, { status: 500 })
 
-    // Guard against GROSS over-attachment only. A residual is meant to fill the
-    // booking's gain gap, so attaching net up to the booked weight is valid — we
-    // must NOT let the shared reconcile (which compares net×(1+gain_rate) to the
-    // booked weight) rip the residual back off just because the gain multiplier
-    // pushes it over. Raising the threshold by the same multiplier makes it
-    // detach only when the actual NET exceeds the booked weight (true over-source).
-    const grMult = 1 + (booking.is_kl ? 0 : 0.035)
-    const recon = await reconcileBookingOverAttachment({
-      supabase, bookingId: booking.id, bookedWeight: Number(booking.weight || 0) * grMult, isKl: !!booking.is_kl,
-    })
-    if (recon.error) console.warn('[attach_bills_to_booking] reconcile non-fatal:', recon.error)
+    // DELIBERATELY over-attach — do NOT reconcile here. When ops manually
+    // attaches residual bills to an existing booking, the intent is "add these
+    // on top", not "swap them in". Running the over-attachment reconcile would
+    // evict the booking's own detachable (Bangalore-local at_branch/at_ho)
+    // bills to make room for the newly-attached in-transit residuals — which is
+    // never what ops wants and silently strips good supply off the booking.
+    // (See 11-Aug-2026 incident: 6 in-transit stragglers attached to an 8-Aug
+    // 400 g booking auto-evicted its entire ~398 g of Bangalore originals.)
+    // The booking is simply allowed to go over-attached; it's the operator's
+    // call to trim it if they ever want to, not ours to silently do here.
 
     // Un-fold: if this booking had a CLOSED pipeline gap folded into gain
     // (additional_gain_g), shrink that folded gain by the net just attached —
