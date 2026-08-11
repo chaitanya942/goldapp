@@ -40,13 +40,24 @@ async function buildSnapshot(actor) {
   // Pull every bill currently sitting at_branch or in_consignment. Excludes
   // soft-deleted and CRM-deleted so the totals match what Master Purchase Data
   // shows as "active stock".
-  const { data: bills, error: billsErr } = await supabase
-    .from('purchases')
-    .select('branch_name, current_branch, gross_weight, net_weight, total_amount, stock_status')
-    .in('stock_status', ['at_branch', 'in_consignment'])
-    .eq('is_deleted', false)
-    .neq('crm_status', 'deleted')
-  if (billsErr) throw new Error(`purchases select failed: ${billsErr.message}`)
+  // PAGINATE: active stock (at_branch + in_consignment) exceeds 1000 rows, so a
+  // single call would cap at Supabase's 1000-row max_rows and undercount every
+  // snapshot total (not-moved, in-transit, per-region/branch sums).
+  const bills = []
+  const CHUNK = 1000
+  for (let i = 0; ; i += CHUNK) {
+    const { data, error: billsErr } = await supabase
+      .from('purchases')
+      .select('branch_name, current_branch, gross_weight, net_weight, total_amount, stock_status')
+      .in('stock_status', ['at_branch', 'in_consignment'])
+      .eq('is_deleted', false)
+      .neq('crm_status', 'deleted')
+      .range(i, i + CHUNK - 1)
+    if (billsErr) throw new Error(`purchases select failed: ${billsErr.message}`)
+    if (!data || !data.length) break
+    bills.push(...data)
+    if (data.length < CHUNK) break
+  }
 
   const { data: branches, error: brErr } = await supabase
     .from('branches')

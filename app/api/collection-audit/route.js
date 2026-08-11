@@ -168,16 +168,27 @@ async function handleGet(req) {
       dt.setUTCDate(dt.getUTCDate() + 1)
       return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, '0')}-${String(dt.getUTCDate()).padStart(2, '0')}`
     }
-    let q = supabase
-      .from('purchases')
-      .select(COLS)
-      .not('audited_at', 'is', null)
-      .order('audited_at', { ascending: false })
-      .limit(2000)
-    if (from) q = q.gte('audited_at', `${from}T19:30:00+05:30`)
-    if (to)   q = q.lt ('audited_at', `${addDay(to)}T19:30:00+05:30`)
-    const { data: audited, error } = await q
-    if (error) return Response.json({ error: error.message }, { status: 500 })
+    // Paginate up to the 2000 soft-cap — a bare .limit(2000) is silently capped
+    // at PostgREST's 1000 max_rows, so the history list dropped the oldest half.
+    const buildAuditedQ = () => {
+      let q = supabase
+        .from('purchases')
+        .select(COLS)
+        .not('audited_at', 'is', null)
+        .order('audited_at', { ascending: false })
+      if (from) q = q.gte('audited_at', `${from}T19:30:00+05:30`)
+      if (to)   q = q.lt ('audited_at', `${addDay(to)}T19:30:00+05:30`)
+      return q
+    }
+    const audited = []
+    const HCH = 1000, HMAX = 2000
+    for (let i = 0; i < HMAX; i += HCH) {
+      const { data, error } = await buildAuditedQ().range(i, i + HCH - 1)
+      if (error) return Response.json({ error: error.message }, { status: 500 })
+      if (!data || !data.length) break
+      audited.push(...data)
+      if (data.length < HCH) break
+    }
 
     // ── Re-audit history per bill ────────────────────────────────────────
     // Pull every audit event for the bills in this window so the UI can
@@ -188,7 +199,7 @@ async function handleGet(req) {
     const eventsByBill = new Map()
     if (billIds.length) {
       // Chunk to dodge any large-IN limits on the Supabase REST layer.
-      const EVT_CHUNK = 1000
+      const EVT_CHUNK = 100   // ~100 keeps the .in() URL under PostgREST's limit
       for (let i = 0; i < billIds.length; i += EVT_CHUNK) {
         const slice = billIds.slice(i, i + EVT_CHUNK)
         const { data: evts } = await supabase
@@ -232,7 +243,7 @@ async function handleGet(req) {
     // belongs to.
     const consCreatedByBill = new Map()  // purchase_id → ISO ts
     if (billIds.length) {
-      const LINK_CHUNK = 1000
+      const LINK_CHUNK = 100   // ~100 keeps the .in() URL under PostgREST's limit
       for (let i = 0; i < billIds.length; i += LINK_CHUNK) {
         const slice = billIds.slice(i, i + LINK_CHUNK)
         const { data: links } = await supabase

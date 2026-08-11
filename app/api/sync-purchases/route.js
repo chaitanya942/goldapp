@@ -384,11 +384,16 @@ async function runSync(request) {
         .filter(id => !crmIds.has(id))
 
       if (deletedIds.length > 0) {
-        await supabaseAdmin
-          .from('purchases')
-          .update({ crm_status: 'deleted' })
-          .in('application_id', deletedIds)
-          .eq('crm_source', 'old_crm')
+        // Chunk the .in() to ~100 — a large delete batch would build an
+        // over-long URL that silently fails, marking nothing.
+        const DCH = 100
+        for (let i = 0; i < deletedIds.length; i += DCH) {
+          await supabaseAdmin
+            .from('purchases')
+            .update({ crm_status: 'deleted' })
+            .in('application_id', deletedIds.slice(i, i + DCH))
+            .eq('crm_source', 'old_crm')
+        }
         ghostsMarked = deletedIds.length
         console.log(`Reconcile: marked ${deletedIds.length} CRM-deleted bills`, deletedIds)
       }

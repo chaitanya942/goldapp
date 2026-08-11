@@ -360,16 +360,25 @@ export async function GET(req) {
       // 'at_branch' and would otherwise show up here as pickable — even
       // though the duplicate-link guard would reject them at create time.
       // Exclude them from the picker to avoid the false-affordance.
-      const committedQ = supabase
-        .from('consignment_items')
-        .select('purchase_id, consignments!inner(status)')
-        .not('consignments.status', 'in', '("cancelled","received")')
-
-      const [own1, own2, tr, committed] = await Promise.all([ownCurrentQ, ownNullCurrentQ, transferredQ, committedQ])
-      const firstErr = own1.error || own2.error || tr.error || committed.error
+      const [own1, own2, tr] = await Promise.all([ownCurrentQ, ownNullCurrentQ, transferredQ])
+      const firstErr = own1.error || own2.error || tr.error
       if (firstErr) return Response.json({ data: [], error: firstErr.message })
 
-      const committedIds = new Set((committed.data || []).map(r => r.purchase_id))
+      // Paginate — active consignment_items exceed 1000 globally; a truncated
+      // committed-set would let already-committed bills look pickable.
+      const committedIds = new Set()
+      const CMCH = 1000
+      for (let i = 0; ; i += CMCH) {
+        const { data, error } = await supabase
+          .from('consignment_items')
+          .select('purchase_id, consignments!inner(status)')
+          .not('consignments.status', 'in', '("cancelled","received")')
+          .range(i, i + CMCH - 1)
+        if (error) return Response.json({ data: [], error: error.message })
+        if (!data || !data.length) break
+        for (const r of data) committedIds.add(r.purchase_id)
+        if (data.length < CMCH) break
+      }
 
       // De-dup defensively (a row should only fall in one bucket) and drop
       // any bill already committed to an active consignment.
@@ -386,18 +395,30 @@ export async function GET(req) {
     }
 
     // Branch-overview path (no specific branch) — keep original strict filter.
-    let query = supabase
-      .from('purchases')
-      .select('*')
-      .eq('stock_status', 'at_branch')
-      .eq('crm_status', 'approved')
-      .eq('is_deleted', false)
-      .order('purchase_date', { ascending: false })
-      .or(`current_branch.in.(${outsideNames.map(n => `"${n}"`).join(',')}),and(current_branch.is.null,branch_name.in.(${outsideNames.map(n => `"${n}"`).join(',')}))`)
-    if (dateFrom) query = query.gte('purchase_date', dateFrom)
-    if (dateTo)   query = query.lte('purchase_date', dateTo)
-
-    const { data, error } = await query
+    // Paginate: at_branch outside-Bangalore stock can exceed 1000 rows.
+    const orClause = `current_branch.in.(${outsideNames.map(n => `"${n}"`).join(',')}),and(current_branch.is.null,branch_name.in.(${outsideNames.map(n => `"${n}"`).join(',')}))`
+    const buildBillsQ = () => {
+      let q = supabase
+        .from('purchases')
+        .select('*')
+        .eq('stock_status', 'at_branch')
+        .eq('crm_status', 'approved')
+        .eq('is_deleted', false)
+        .order('purchase_date', { ascending: false })
+        .or(orClause)
+      if (dateFrom) q = q.gte('purchase_date', dateFrom)
+      if (dateTo)   q = q.lte('purchase_date', dateTo)
+      return q
+    }
+    const data = []; let error = null
+    const GBCH = 1000
+    for (let i = 0; ; i += GBCH) {
+      const { data: page, error: e } = await buildBillsQ().range(i, i + GBCH - 1)
+      if (e) { error = e; break }
+      if (!page || !page.length) break
+      data.push(...page)
+      if (page.length < GBCH) break
+    }
     return Response.json({ data, error: error?.message })
   }
 
@@ -1899,10 +1920,23 @@ export async function GET(req) {
       // Also pull stock_status + source branch so we can compute the
       // per-booking dispatch_state (ready / partial / pending / at_risk)
       // — surfaces "booked but not shipped" risk to the bid desk.
-      const { data: agg } = await supabase
-        .from('purchases')
-        .select('booking_id, net_weight, stock_status, branch_name, current_branch')
-        .in('booking_id', ids)
+      // Chunk booking ids (~100, URL-safe) and paginate each chunk — a heavy
+      // day's attached bills can exceed the 1000-row cap and undercount.
+      const agg = []
+      const AGCH = 100
+      for (let j = 0; j < ids.length; j += AGCH) {
+        const slice = ids.slice(j, j + AGCH)
+        for (let from = 0; ; from += 1000) {
+          const { data: pg } = await supabase
+            .from('purchases')
+            .select('booking_id, net_weight, stock_status, branch_name, current_branch')
+            .in('booking_id', slice)
+            .range(from, from + 999)
+          if (!pg || !pg.length) break
+          agg.push(...pg)
+          if (pg.length < 1000) break
+        }
+      }
       const sumByBooking      = {}
       const countByBooking    = {}
       const billsByBooking    = {}
@@ -2096,16 +2130,27 @@ export async function GET(req) {
     // Audit-critical: as long as any one of these exists the cancellation
     // surfaces, so a silent RPC failure or a missed per-doc event can't
     // make a cancelled consignment vanish from the audit log.
-    const { data: events, error: evErr } = await supabase
-      .from('consignment_activity_log')
-      .select('id, consignment_id, event_type, actor_email, actor_role, details, created_at')
-      .in('event_type', [
-        'ewb_cancelled', 'einvoice_cancelled', 'cancelled',
-        'ewb_cancel_skipped', 'einvoice_cancel_skipped',
-        'cancellation_approved', 'cancellation_forced_local',
-      ])
-      .order('created_at', { ascending: false })
-    if (evErr) return Response.json({ error: evErr.message }, { status: 500 })
+    // Paginate — cancellation events accumulate permanently (~3-4 per cancelled
+    // consignment) and exceed 1000 over time; truncation would silently drop
+    // older cancellations from the audit tab.
+    const events = []
+    const ECHUNK = 1000
+    for (let i = 0; ; i += ECHUNK) {
+      const { data, error: evErr } = await supabase
+        .from('consignment_activity_log')
+        .select('id, consignment_id, event_type, actor_email, actor_role, details, created_at')
+        .in('event_type', [
+          'ewb_cancelled', 'einvoice_cancelled', 'cancelled',
+          'ewb_cancel_skipped', 'einvoice_cancel_skipped',
+          'cancellation_approved', 'cancellation_forced_local',
+        ])
+        .order('created_at', { ascending: false })
+        .range(i, i + ECHUNK - 1)
+      if (evErr) return Response.json({ error: evErr.message }, { status: 500 })
+      if (!data || !data.length) break
+      events.push(...data)
+      if (data.length < ECHUNK) break
+    }
 
     // Normalise legacy skipped events back to the canonical type so the rest
     // of this handler + the UI's badge logic don't need a special case.
@@ -2151,12 +2196,15 @@ export async function GET(req) {
       // shapes use total_gross_value as the alias, so we re-expose both so
       // either consumer (Cancellations card UI, docs report, etc.) finds
       // what it expects without another round trip.
-      const { data: cs, error: cErr } = await supabase
-        .from('consignments')
-        .select('id, tmp_prf_no, branch_name, dest_branch, movement_type, state_code, total_bills, total_amount, total_net_wt, approval_status, status, rejection_reason, created_at, eway_bill_no, irn')
-        .in('id', ids)
-      if (cErr) return Response.json({ error: cErr.message }, { status: 500 })
-      consignmentsAll = (cs || []).map(c => ({ ...c, total_gross_value: c.total_amount }))
+      const CCH = 100   // chunk the .in() — ids can reach ~1000, over-long URL fails silently
+      for (let i = 0; i < ids.length; i += CCH) {
+        const { data: cs, error: cErr } = await supabase
+          .from('consignments')
+          .select('id, tmp_prf_no, branch_name, dest_branch, movement_type, state_code, total_bills, total_amount, total_net_wt, approval_status, status, rejection_reason, created_at, eway_bill_no, irn')
+          .in('id', ids.slice(i, i + CCH))
+        if (cErr) return Response.json({ error: cErr.message }, { status: 500 })
+        consignmentsAll.push(...(cs || []).map(c => ({ ...c, total_gross_value: c.total_amount })))
+      }
     }
     const byId = new Map(consignmentsAll.map(c => [c.id, c]))
     const inScope = (c) => !allowedBranches || (c && allowedBranches.includes(c.branch_name))
@@ -2580,14 +2628,24 @@ export async function GET(req) {
       }
     }
 
-    const { data: purchases } = await supabase
-      .from('purchases')
-      .select('branch_name, current_branch, stock_status, net_weight, total_amount')
-      .eq('is_deleted', false)
-      .in('stock_status', ['at_branch', 'in_consignment'])
+    // Paginate — company-wide at_branch + in_consignment exceeds 1000 rows, so a
+    // single call would cap at max_rows and undercount the per-branch summary.
+    const purchases = []
+    const SCHUNK = 1000
+    for (let i = 0; ; i += SCHUNK) {
+      const { data } = await supabase
+        .from('purchases')
+        .select('branch_name, current_branch, stock_status, net_weight, total_amount')
+        .eq('is_deleted', false)
+        .in('stock_status', ['at_branch', 'in_consignment'])
+        .range(i, i + SCHUNK - 1)
+      if (!data || !data.length) break
+      purchases.push(...data)
+      if (data.length < SCHUNK) break
+    }
 
     const summary = {}
-    for (const row of purchases || []) {
+    for (const row of purchases) {
       const key  = row.current_branch || row.branch_name
       const meta = branchMeta[key]
       if (!meta) continue

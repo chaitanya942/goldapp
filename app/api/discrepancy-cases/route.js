@@ -54,12 +54,21 @@ export async function GET(req) {
   const purchaseIds = [...new Set(cases.map(c => c.purchase_id).filter(Boolean))]
   const userIds     = [...new Set(cases.flatMap(c => [c.sent_by, c.resolved_by]).filter(Boolean))]
 
+  // Chunk the purchases .in() to ~100 ids — a big case list otherwise builds an
+  // over-long URL that PostgREST rejects (silently leaving cases un-enriched).
+  const fetchPurchasesChunked = async () => {
+    const out = []
+    const CH = 100
+    for (let i = 0; i < purchaseIds.length; i += CH) {
+      const { data } = await supabase.from('purchases')
+        .select('id, application_id, customer_name, branch_name, gross_weight, audit_gross_weight, audit_discrepancy_g, audited_at, stock_status')
+        .in('id', purchaseIds.slice(i, i + CH))
+      if (data) out.push(...data)
+    }
+    return { data: out }
+  }
   const [{ data: purchases }, { data: profiles }] = await Promise.all([
-    purchaseIds.length
-      ? supabase.from('purchases')
-          .select('id, application_id, customer_name, branch_name, gross_weight, audit_gross_weight, audit_discrepancy_g, audited_at, stock_status')
-          .in('id', purchaseIds)
-      : Promise.resolve({ data: [] }),
+    purchaseIds.length ? fetchPurchasesChunked() : Promise.resolve({ data: [] }),
     userIds.length
       ? supabase.from('user_profiles')
           .select('id, full_name, email')

@@ -25,11 +25,16 @@ function createConn() {
 
 async function markDeleted(ids) {
   if (!ids.length) return
-  await supabaseAdmin
-    .from('purchases')
-    .update({ crm_status: 'deleted' })
-    .in('application_id', ids)
-    .eq('crm_source', 'old_crm')
+  // Chunk the .in() — hundreds of ids over a 90-day window build an over-long
+  // URL that PostgREST rejects (silently marking nothing). ~100 keeps it safe.
+  const CH = 100
+  for (let i = 0; i < ids.length; i += CH) {
+    await supabaseAdmin
+      .from('purchases')
+      .update({ crm_status: 'deleted' })
+      .in('application_id', ids.slice(i, i + CH))
+      .eq('crm_source', 'old_crm')
+  }
 }
 
 export async function GET(request) { return POST(request) }
@@ -61,14 +66,24 @@ export async function POST(request) {
       )
       const crmIds = new Set(rows.map(r => normalizeAppId(r.bill_no)))
 
-      const { data: supaRows } = await supabaseAdmin
-        .from('purchases')
-        .select('application_id')
-        .eq('crm_source', 'old_crm')
-        .eq('crm_status', 'approved')
-        .eq('purchase_date', reconcileDate)
+      // Paginate — a single peak day can approach/exceed 1000 approved bills;
+      // truncation would under-detect ghosts (some bills never compared).
+      const supaRows = []
+      const PCH = 1000
+      for (let i = 0; ; i += PCH) {
+        const { data } = await supabaseAdmin
+          .from('purchases')
+          .select('application_id')
+          .eq('crm_source', 'old_crm')
+          .eq('crm_status', 'approved')
+          .eq('purchase_date', reconcileDate)
+          .range(i, i + PCH - 1)
+        if (!data || !data.length) break
+        supaRows.push(...data)
+        if (data.length < PCH) break
+      }
 
-      const missing = (supaRows || []).map(b => b.application_id).filter(id => !crmIds.has(id))
+      const missing = supaRows.map(b => b.application_id).filter(id => !crmIds.has(id))
 
       if (!dryRun) await markDeleted(missing)
 

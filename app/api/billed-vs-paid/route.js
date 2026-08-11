@@ -152,13 +152,23 @@ async function razorpayPayouts(from, to) {
   // Bound the read to the case window (±3 days) on the payout date.
   const lo = new Date(`${addDays(from, -3)}T00:00:00+05:30`).toISOString()
   const hi = new Date(`${addDays(to,    3)}T23:59:59+05:30`).toISOString()
-  const { data, error } = await supabase
-    .from('razorpay_payouts')
-    .select('payout_id, utr, amount, status, reference_id, benef_account, benef_ifsc, notes, payout_created_at')
-    .gte('payout_created_at', lo).lte('payout_created_at', hi)
-    .limit(20000)
-  if (error)               return { linked: false, list: [], byUtr: {}, byRef: {}, error: error.message }
-  if (!data || !data.length) return { linked: false, list: [], byUtr: {}, byRef: {} }   // no payouts captured yet
+  // PAGINATE: PostgREST caps at 1000 rows regardless of .limit(20000), and the
+  // payout window can exceed that (one final payment can be several split
+  // payouts) — truncation dropped payouts from byUtr/byRef and mis-reconciled.
+  const data = []
+  const CHUNK = 1000
+  for (let i = 0; ; i += CHUNK) {
+    const { data: page, error } = await supabase
+      .from('razorpay_payouts')
+      .select('payout_id, utr, amount, status, reference_id, benef_account, benef_ifsc, notes, payout_created_at')
+      .gte('payout_created_at', lo).lte('payout_created_at', hi)
+      .range(i, i + CHUNK - 1)
+    if (error) return { linked: false, list: [], byUtr: {}, byRef: {}, error: error.message }
+    if (!page || !page.length) break
+    data.push(...page)
+    if (page.length < CHUNK) break
+  }
+  if (!data.length) return { linked: false, list: [], byUtr: {}, byRef: {} }   // no payouts captured yet
 
   const list = [], byUtr = {}, byRef = {}
   for (const p of data) {

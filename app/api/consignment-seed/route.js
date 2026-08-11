@@ -15,8 +15,8 @@ export async function GET(req) {
   const auth = await requireAuthForPage(req, 'consignment-seeds')
   if (!auth.ok) return auth.response
   try {
-    // Run all 3 fetches in parallel
-    const [branchesRes, consignmentsRes, lastExtRes] = await Promise.all([
+    // Branches + last external_no in parallel.
+    const [branchesRes, lastExtRes] = await Promise.all([
       // 1. All outside-Bangalore branches
       supabase
         .from('branches')
@@ -26,17 +26,6 @@ export async function GET(req) {
         .order('region')
         .order('name'),
 
-      // 2. All consignments — just the columns we need to derive per-branch
-      // max tmp_prf_no. Exclude cancelled rows so the "last used" shown on
-      // the seeds page matches what the next-number generator will see: a
-      // cancellation gives the number back to the pool.
-      supabase
-        .from('consignments')
-        .select('branch_name, tmp_prf_no, challan_no, branch_code, status')
-        .not('tmp_prf_no', 'is', null)
-        .neq('status', 'cancelled')
-        .order('tmp_prf_no', { ascending: false }),
-
       // 3. Last issued external_no via the sequence-backed RPC. Atomic and
       // immune to the dirty-data issue that broke the old SELECT MAX
       // approach (SEED-* + WG-prefixed garbage in external_no column sorted
@@ -44,8 +33,28 @@ export async function GET(req) {
       supabase.rpc('get_last_external_no'),
     ])
 
-    const branches     = branchesRes.data   || []
-    const consignments = consignmentsRes.data || []
+    // 2. All consignments — columns needed to derive per-branch max tmp_prf_no.
+    // Exclude cancelled rows so "last used" matches the next-number generator.
+    // PAGINATE: a single call caps at Supabase's 1000-row max_rows, which
+    // silently dropped whole branches once consignments exceed 1000 (their
+    // "last used" then showed as —). Ordered tmp_prf_no DESC across pages, so
+    // the first hit per branch is still the global max.
+    const consignments = []
+    const CHUNK = 1000
+    for (let i = 0; ; i += CHUNK) {
+      const { data, error } = await supabase
+        .from('consignments')
+        .select('branch_name, tmp_prf_no, challan_no, branch_code, status')
+        .not('tmp_prf_no', 'is', null)
+        .neq('status', 'cancelled')
+        .order('tmp_prf_no', { ascending: false })
+        .range(i, i + CHUNK - 1)
+      if (error || !data || !data.length) break
+      consignments.push(...data)
+      if (data.length < CHUNK) break
+    }
+
+    const branches = branchesRes.data || []
 
     // Build per-branch maps in a single pass (already sorted DESC so first hit = max)
     const tmpPrfMap  = {}   // branch_name → last tmp_prf_no
