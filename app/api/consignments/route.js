@@ -682,18 +682,34 @@ export async function GET(req) {
     //    whose expected arrival (dispatched_at + branch.delivery_tat_hours)
     //    lands on the target arrivalDate in IST. Done client-side since the
     //    join+date-math is cleaner in JS than embedded in PostgREST filters.
+    // NON-KERALA only. Kerala has its own S1/S2/S3 movement sections and is
+    // filtered out of Sections 2/3/4 downstream anyway — but excluding it HERE is
+    // essential: Kerala's hub model keeps THOUSANDS of bills in_consignment, and
+    // this query (previously un-paginated, capped at Supabase's 1000-row max_rows)
+    // was filled entirely by Kerala rows — starving the KA/AP/TS bills so Sections
+    // 2/3/4 rendered empty even with bills genuinely in transit. We also paginate,
+    // so the non-Kerala set can never be truncated either.
+    const inflightBranchNames = (branchRows || [])
+      .filter(b => b.model_type !== 'bangalore' && b.region !== 'Kerala')
+      .map(b => b.name)
     let inflightBills = []
-    if (outsideBranchNames.length) {
-      const { data: ib, error: ibErr } = await supabase
-        .from('purchases')
-        .select('id, application_id, branch_name, customer_name, gross_weight, net_weight, total_amount, purchase_date, dispatched_at, stock_status, crm_status')
-        .in('branch_name', outsideBranchNames)
-        .eq('stock_status', 'in_consignment')
-        .eq('is_deleted', false)
-        .not('dispatched_at', 'is', null)
-        .is('booking_id', null)
-      if (ibErr) return Response.json({ error: ibErr.message }, { status: 500 })
-      inflightBills = ib || []
+    if (inflightBranchNames.length) {
+      const CHUNK = 1000
+      for (let from = 0; ; from += CHUNK) {
+        const { data: ib, error: ibErr } = await supabase
+          .from('purchases')
+          .select('id, application_id, branch_name, customer_name, gross_weight, net_weight, total_amount, purchase_date, dispatched_at, stock_status, crm_status')
+          .in('branch_name', inflightBranchNames)
+          .eq('stock_status', 'in_consignment')
+          .eq('is_deleted', false)
+          .not('dispatched_at', 'is', null)
+          .is('booking_id', null)
+          .range(from, from + CHUNK - 1)
+        if (ibErr) return Response.json({ error: ibErr.message }, { status: 500 })
+        if (!ib || !ib.length) break
+        inflightBills.push(...ib)
+        if (ib.length < CHUNK) break
+      }
     }
 
     // Compute arrival_date for each in-flight bill using working-day math
