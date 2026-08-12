@@ -686,7 +686,7 @@ export async function GET(req) {
     if (bangaloreBranchNames.length) {
       const { data: bb, error: bbErr } = await supabase
         .from('purchases')
-        .select('id, application_id, branch_name, customer_name, gross_weight, net_weight, total_amount, purchase_date, stock_status, dispatched_at, crm_status, audit_hold, audit_consumed_at')
+        .select('id, application_id, branch_name, customer_name, gross_weight, net_weight, total_amount, purchase_date, transaction_time, stock_status, dispatched_at, crm_status, audit_hold, audit_consumed_at')
         .in('branch_name', bangaloreBranchNames)
         .gte('purchase_date', bangalorePurchaseDate)
         .lt('purchase_date',  addDays(bangalorePurchaseDate, 1))
@@ -719,7 +719,7 @@ export async function GET(req) {
       for (let from = 0; ; from += CHUNK) {
         const { data: ib, error: ibErr } = await supabase
           .from('purchases')
-          .select('id, application_id, branch_name, customer_name, gross_weight, net_weight, total_amount, purchase_date, dispatched_at, stock_status, crm_status')
+          .select('id, application_id, branch_name, customer_name, gross_weight, net_weight, total_amount, purchase_date, transaction_time, dispatched_at, stock_status, crm_status')
           .in('branch_name', inflightBranchNames)
           .eq('stock_status', 'in_consignment')
           .eq('is_deleted', false)
@@ -763,7 +763,7 @@ export async function GET(req) {
     if (outsideBranchNames.length) {
       const { data: fp, error: fpErr } = await supabase
         .from('purchases')
-        .select('id, application_id, branch_name, customer_name, gross_weight, net_weight, total_amount, purchase_date, dispatched_at, stock_status, crm_status')
+        .select('id, application_id, branch_name, customer_name, gross_weight, net_weight, total_amount, purchase_date, transaction_time, dispatched_at, stock_status, crm_status')
         .in('branch_name', outsideBranchNames)
         .eq('stock_status', 'at_ho')
         .eq('force_pending_booking', true)
@@ -807,7 +807,7 @@ export async function GET(req) {
       const section1Ids = new Set(bangBills.map(b => b.id))
       const { data: bpb } = await supabase
         .from('purchases')
-        .select('id, application_id, branch_name, current_branch, customer_name, gross_weight, net_weight, total_amount, purchase_date, dispatched_at, stock_status, crm_status, audit_consumed_at')
+        .select('id, application_id, branch_name, current_branch, customer_name, gross_weight, net_weight, total_amount, purchase_date, transaction_time, dispatched_at, stock_status, crm_status, audit_consumed_at')
         .in('branch_name', bangaloreBranchNames)
         .eq('stock_status', 'in_consignment')
         .eq('crm_status', 'approved')
@@ -831,7 +831,7 @@ export async function GET(req) {
     if (bangaloreBranchNames.length) {
       const { data: gbr } = await supabase
         .from('purchases')
-        .select('id, application_id, branch_name, current_branch, customer_name, gross_weight, net_weight, total_amount, purchase_date, stock_status, crm_status, audit_attributed_to')
+        .select('id, application_id, branch_name, current_branch, customer_name, gross_weight, net_weight, total_amount, purchase_date, transaction_time, stock_status, crm_status, audit_attributed_to')
         .in('branch_name', bangaloreBranchNames)
         .eq('crm_status', 'approved')
         .eq('is_deleted', false)
@@ -884,7 +884,7 @@ export async function GET(req) {
       const list = preEodEligibleAfterDispatch.map(n => `"${n}"`).join(',')
       const { data: pb, error: pbErr } = await supabase
         .from('purchases')
-        .select('id, application_id, branch_name, current_branch, customer_name, gross_weight, net_weight, total_amount, purchase_date, stock_status, dispatched_at, crm_status')
+        .select('id, application_id, branch_name, current_branch, customer_name, gross_weight, net_weight, total_amount, purchase_date, transaction_time, stock_status, dispatched_at, crm_status')
         .or(`current_branch.in.(${list}),and(current_branch.is.null,branch_name.in.(${list}))`)
         .eq('stock_status', 'at_branch')
         .eq('crm_status',   'approved')
@@ -919,7 +919,7 @@ export async function GET(req) {
       const dlist = [...postDispatchedBranches].map(n => `"${n}"`).join(',')
       const { data: db } = await supabase
         .from('purchases')
-        .select('id, application_id, branch_name, current_branch, customer_name, gross_weight, net_weight, total_amount, purchase_date, stock_status, dispatched_at, crm_status')
+        .select('id, application_id, branch_name, current_branch, customer_name, gross_weight, net_weight, total_amount, purchase_date, transaction_time, stock_status, dispatched_at, crm_status')
         .or(`current_branch.in.(${dlist}),and(current_branch.is.null,branch_name.in.(${dlist}))`)
         .eq('stock_status', 'at_branch')
         .eq('crm_status',   'approved')
@@ -953,7 +953,7 @@ export async function GET(req) {
     if (allBookableBranchNames.length) {
       const { data: bp, error: bpErr } = await supabase
         .from('purchases')
-        .select('id, application_id, branch_name, current_branch, customer_name, gross_weight, net_weight, total_amount, purchase_date, stock_status, dispatched_at, crm_status, booking_id, booked_at')
+        .select('id, application_id, branch_name, current_branch, customer_name, gross_weight, net_weight, total_amount, purchase_date, transaction_time, stock_status, dispatched_at, crm_status, booking_id, booked_at')
         .in('branch_name', allBookableBranchNames)
         .eq('stock_status', 'at_branch')
         .eq('crm_status',   'approved')
@@ -1154,7 +1154,7 @@ export async function GET(req) {
       while (true) {
         const { data: bw, error: bwErr } = await supabase
           .from('purchases')
-          .select('id, application_id, customer_name, branch_name, current_branch, gross_weight, net_weight, total_amount, purchase_date, stock_status, dispatched_at, crm_status, booked_at')
+          .select('id, application_id, customer_name, branch_name, current_branch, gross_weight, net_weight, total_amount, purchase_date, transaction_time, stock_status, dispatched_at, crm_status, booked_at')
           .in('branch_name', allBookableBranchNames)
           .eq('crm_status', 'approved')
           .eq('is_deleted', false)
@@ -1184,7 +1184,7 @@ export async function GET(req) {
     if (bangaloreBranchNames.length) {
       const { data: bbk } = await supabase
         .from('purchases')
-        .select('id, application_id, customer_name, branch_name, current_branch, gross_weight, net_weight, total_amount, purchase_date, stock_status, booked_at')
+        .select('id, application_id, customer_name, branch_name, current_branch, gross_weight, net_weight, total_amount, purchase_date, transaction_time, stock_status, booked_at')
         .in('branch_name', bangaloreBranchNames)
         .gte('purchase_date', bangalorePurchaseDate)
         .lt('purchase_date',  addDays(bangalorePurchaseDate, 1))
@@ -1308,7 +1308,7 @@ export async function GET(req) {
       const list = klHubNames.map(n => `"${n}"`).join(',')
       const { data: s1, error: s1Err } = await supabase
         .from('purchases')
-        .select('id, application_id, branch_name, current_branch, customer_name, gross_weight, net_weight, total_amount, purchase_date, stock_status, dispatched_at, crm_status')
+        .select('id, application_id, branch_name, current_branch, customer_name, gross_weight, net_weight, total_amount, purchase_date, transaction_time, stock_status, dispatched_at, crm_status')
         .or(`current_branch.in.(${list}),and(current_branch.is.null,branch_name.in.(${list}))`)
         .eq('stock_status', 'at_branch')
         .eq('crm_status',   'approved')
@@ -1359,7 +1359,7 @@ export async function GET(req) {
         if (pIds.length) {
           const { data: s2, error: s2Err } = await supabase
             .from('purchases')
-            .select('id, application_id, branch_name, current_branch, customer_name, gross_weight, net_weight, total_amount, purchase_date, stock_status, dispatched_at, crm_status')
+            .select('id, application_id, branch_name, current_branch, customer_name, gross_weight, net_weight, total_amount, purchase_date, transaction_time, stock_status, dispatched_at, crm_status')
             .in('id', pIds)
             .eq('crm_status', 'approved')
             .eq('is_deleted', false)
@@ -1387,7 +1387,7 @@ export async function GET(req) {
       const list = klLeafNames.map(n => `"${n}"`).join(',')
       const { data: s5, error: s5Err } = await supabase
         .from('purchases')
-        .select('id, application_id, branch_name, current_branch, customer_name, gross_weight, net_weight, total_amount, purchase_date, stock_status, dispatched_at, crm_status')
+        .select('id, application_id, branch_name, current_branch, customer_name, gross_weight, net_weight, total_amount, purchase_date, transaction_time, stock_status, dispatched_at, crm_status')
         .or(`current_branch.in.(${list}),and(current_branch.is.null,branch_name.in.(${list}))`)
         .eq('stock_status', 'at_branch')
         .eq('crm_status',   'approved')
@@ -1406,7 +1406,7 @@ export async function GET(req) {
       const list = allKlNames.map(n => `"${n}"`).join(',')
       const { data: s3, error: s3Err } = await supabase
         .from('purchases')
-        .select('id, application_id, branch_name, current_branch, customer_name, gross_weight, net_weight, total_amount, purchase_date, stock_status, dispatched_at, crm_status')
+        .select('id, application_id, branch_name, current_branch, customer_name, gross_weight, net_weight, total_amount, purchase_date, transaction_time, stock_status, dispatched_at, crm_status')
         .or(`branch_name.in.(${list}),current_branch.in.(${list})`)
         .eq('stock_status', 'in_consignment')
         .eq('crm_status',   'approved')

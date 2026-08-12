@@ -70,6 +70,17 @@ const fmtDateShort = (d) => {
   const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
   return `${day} ${months[+m - 1]}`
 }
+// Bill purchase time — stored as an IST "HH:MM:SS" string; shown 12-hour under
+// the date in the section bill tables. Returns null when absent (old bills with
+// no captured time) so the row simply omits the time line.
+const fmtBillTime = (s) => {
+  if (!s) return null
+  const [h, m] = String(s).split(':').map(Number)
+  if (!Number.isFinite(h) || !Number.isFinite(m)) return null
+  const ampm = h < 12 ? 'AM' : 'PM'
+  const h12  = h % 12 === 0 ? 12 : h % 12
+  return `${h12}:${String(m).padStart(2, '0')} ${ampm}`
+}
 // Weekday of a YYYY-MM-DD (matches addWorkingDaysSkipSunday: UTC parse, 0=Sun).
 const DOW3 = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 const parseYmdUtc = (s) => { const [y, m, d] = String(s).split('-').map(Number); return new Date(Date.UTC(y, m - 1, d)) }
@@ -4811,9 +4822,15 @@ function SourceSection({
                                         transition: 'all .12s ease',
                                       }}>{billChecked ? '✓' : ''}</span>
                                     )}
-                                    {/* Purchase date — compact "10 Jun" form; 🔒 when its date is locked. */}
-                                    <span style={{ color: dateLocked ? t.red : t.text3, fontWeight: 600, whiteSpace: 'nowrap' }}>
-                                      {dateLocked && '🔒 '}{bill.purchase_date ? fmtDateShort(bill.purchase_date) : '—'}
+                                    {/* Purchase date + time — compact "10 Jun" over "2:34 PM";
+                                        🔒 when its date is locked. */}
+                                    <span style={{ display: 'flex', flexDirection: 'column', whiteSpace: 'nowrap', lineHeight: 1.25 }}>
+                                      <span style={{ color: dateLocked ? t.red : t.text3, fontWeight: 600 }}>
+                                        {dateLocked && '🔒 '}{bill.purchase_date ? fmtDateShort(bill.purchase_date) : '—'}
+                                      </span>
+                                      {fmtBillTime(bill.transaction_time) && (
+                                        <span style={{ color: t.text4, fontSize: 10, fontWeight: 600 }}>{fmtBillTime(bill.transaction_time)}</span>
+                                      )}
                                     </span>
                                     <span style={{ color: t.gold, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{bill.application_id || '—'}</span>
                                     {/* Customer cell — stacked with optional booking caption (only
@@ -4970,7 +4987,12 @@ function SourceSection({
                         </div>
                         {gbills.map((bill, idx) => (
                           <div key={bill.id ?? idx} style={{ display: 'grid', gridTemplateColumns: bkCols, alignItems: 'center', columnGap: 14, padding: '5px 8px', borderRadius: 5, background: idx % 2 === 1 ? `${t.card2}40` : 'transparent', fontFamily: 'monospace', fontSize: 12 }}>
-                            <span style={{ color: t.text3, fontWeight: 600, whiteSpace: 'nowrap' }}>{bill.purchase_date ? fmtDateShort(bill.purchase_date) : '—'}</span>
+                            <span style={{ display: 'flex', flexDirection: 'column', whiteSpace: 'nowrap', lineHeight: 1.25 }}>
+                              <span style={{ color: t.text3, fontWeight: 600 }}>{bill.purchase_date ? fmtDateShort(bill.purchase_date) : '—'}</span>
+                              {fmtBillTime(bill.transaction_time) && (
+                                <span style={{ color: t.text4, fontSize: 10, fontWeight: 600 }}>{fmtBillTime(bill.transaction_time)}</span>
+                              )}
+                            </span>
                             <span style={{ color: t.gold, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{bill.application_id || '—'}</span>
                             <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0, overflow: 'hidden' }}>
                               <span style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
@@ -5050,7 +5072,12 @@ function SourceSection({
                         </div>
                         {bbills.map((bill, idx) => (
                           <div key={bill.id ?? idx} style={{ display: 'grid', gridTemplateColumns: dtCols, alignItems: 'center', columnGap: 14, padding: '5px 8px', borderRadius: 5, background: idx % 2 === 1 ? `${t.card2}40` : 'transparent', fontFamily: 'monospace', fontSize: 12 }}>
-                            <span style={{ color: t.text3, fontWeight: 600, whiteSpace: 'nowrap' }}>{bill.purchase_date ? fmtDateShort(bill.purchase_date) : '—'}</span>
+                            <span style={{ display: 'flex', flexDirection: 'column', whiteSpace: 'nowrap', lineHeight: 1.25 }}>
+                              <span style={{ color: t.text3, fontWeight: 600 }}>{bill.purchase_date ? fmtDateShort(bill.purchase_date) : '—'}</span>
+                              {fmtBillTime(bill.transaction_time) && (
+                                <span style={{ color: t.text4, fontSize: 10, fontWeight: 600 }}>{fmtBillTime(bill.transaction_time)}</span>
+                              )}
+                            </span>
                             <span style={{ color: t.gold, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{bill.application_id || '—'}</span>
                             <span style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
                               <span style={{ color: t.text1, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{bill.customer_name || '—'}</span>
