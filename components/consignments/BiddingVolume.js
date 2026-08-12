@@ -1437,25 +1437,25 @@ export default function BiddingVolume() {
           pills = ordered
         }
         return (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap', background: t.card2, border: `1px solid ${t.border}`, borderRadius: 12, padding: '9px 14px' }}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 2, paddingRight: 14, borderRight: `1px solid ${t.border}` }}>
-              <span style={{ fontSize: 9.5, color: t.text4, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 700 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap', background: `${accent}12`, border: `1px solid ${accent}3a`, borderRadius: 14, padding: '12px 18px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 3, paddingRight: 16, borderRight: `1px solid ${accent}33` }}>
+              <span style={{ fontSize: 10.5, color: t.text3, letterSpacing: '.1em', textTransform: 'uppercase', fontWeight: 800 }}>
                 Today's purchases{supply?.todays_purchase_date ? ` · ${fmtDateShort(supply.todays_purchase_date)}` : ''}
               </span>
-              <span style={{ fontSize: 13, color: t.text1, fontWeight: 800, fontFamily: 'monospace' }}>
-                {totNet.toFixed(2)}<span style={{ fontSize: 9, color: t.text4 }}>g</span>
+              <span style={{ fontSize: 16, color: t.text1, fontWeight: 800, fontFamily: 'monospace' }}>
+                {totNet.toFixed(2)}<span style={{ fontSize: 10.5, color: t.text4 }}>g</span>
                 <span style={{ color: t.text4, fontWeight: 600 }}> · {totBills} bill{totBills === 1 ? '' : 's'}</span>
               </span>
             </div>
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', gap: 9, flexWrap: 'wrap' }}>
               {pills.map(r => (
                 <div key={r.region}
                   title={r._synthetic ? 'Karnataka total · Bangalore + Rest of Karnataka combined' : undefined}
-                  style={{ display: 'inline-flex', alignItems: 'center', gap: 9, background: t.card, border: `1px solid ${t.border}`, borderRadius: 99, padding: '5px 13px' }}>
-                  <span style={{ width: 7, height: 7, borderRadius: '50%', background: accent, display: 'inline-block' }} />
-                  <span style={{ fontSize: 10, color: accent, fontWeight: 800, letterSpacing: '.03em', textTransform: 'uppercase' }}>{SHORT[r.region] || r.region}</span>
-                  <span style={{ fontSize: 12.5, color: t.text1, fontWeight: 700, fontFamily: 'monospace' }}>{Number(r.net_wt || 0).toFixed(2)}<span style={{ fontSize: 9, color: t.text4 }}>g</span></span>
-                  <span style={{ fontSize: 9.5, color: t.text4 }}>{r.bills} bill{r.bills === 1 ? '' : 's'}</span>
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: 10, background: t.card, border: `1px solid ${accent}4d`, borderRadius: 99, padding: '7px 15px', boxShadow: `0 1px 4px ${accent}1a` }}>
+                  <span style={{ width: 8, height: 8, borderRadius: '50%', background: accent, display: 'inline-block', boxShadow: `0 0 0 3px ${accent}26` }} />
+                  <span style={{ fontSize: 11.5, color: accent, fontWeight: 800, letterSpacing: '.03em', textTransform: 'uppercase' }}>{SHORT[r.region] || r.region}</span>
+                  <span style={{ fontSize: 15, color: t.text1, fontWeight: 800, fontFamily: 'monospace' }}>{Number(r.net_wt || 0).toFixed(2)}<span style={{ fontSize: 10.5, color: t.text4 }}>g</span></span>
+                  <span style={{ fontSize: 11, color: t.text4 }}>{r.bills} bill{r.bills === 1 ? '' : 's'}</span>
                 </div>
               ))}
             </div>
