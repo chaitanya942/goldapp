@@ -199,7 +199,16 @@ export async function POST(req) {
   const origin  = (process.env.NEXT_PUBLIC_SITE_URL || new URL(req.url).origin).replace(/\/+$/, '')
   const authHdr = req.headers.get('authorization') || ''
   const fetchDoc = async (path, contentType, filename) => {
-    const res = await fetch(`${origin}${path}`, { headers: { authorization: authHdr } })
+    // Bound the self-fetch so a hung generator surfaces as a real error rather
+    // than hanging the whole send on "Sending…" forever (maxDuration is 60s).
+    const ac = new AbortController()
+    const timer = setTimeout(() => ac.abort(), 45000)
+    let res
+    try {
+      res = await fetch(`${origin}${path}`, { headers: { authorization: authHdr }, signal: ac.signal })
+    } catch (e) {
+      throw new Error(`${filename}: ${e?.name === 'AbortError' ? 'document generation timed out' : (e?.message || 'fetch failed')}`)
+    } finally { clearTimeout(timer) }
     if (!res.ok) {
       let msg = `${res.status}`
       try { msg = (await res.json())?.error || msg } catch {}
