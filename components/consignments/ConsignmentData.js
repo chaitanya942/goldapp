@@ -1872,6 +1872,7 @@ export default function ConsignmentData() {
           onClose={() => setEmailTarget(null)}
           onSent={(to) => { setToast({ msg: `Documents sent to ${to}`, type: 'success' }); fetchAll(true) }}
           onError={(msg) => setToast({ msg, type: 'error' })}
+          onSaveDocs={saveAllDocs}
         />
       )}
 
@@ -2577,7 +2578,7 @@ function ActivityDrawer({ consignment, rows, loading, onClose, t }) {
 // the "ops enters the mail id" path when the branch has none) and sends the 3
 // consignment documents as attachments. Fetches readiness + the exact filenames
 // from the endpoint on open so the operator sees precisely what will go out.
-function EmailDocsModal({ t, c, branchEmail, onClose, onSent, onError }) {
+function EmailDocsModal({ t, c, branchEmail, onClose, onSent, onError, onSaveDocs }) {
   const [info,    setInfo]    = useState(null)
   const [loading, setLoading] = useState(true)
   const [to,      setTo]      = useState(branchEmail || '')
@@ -2588,6 +2589,7 @@ function EmailDocsModal({ t, c, branchEmail, onClose, onSent, onError }) {
   const ccInputRef = useRef(null)
   const [sending, setSending] = useState(false)
   const [sent,    setSent]    = useState(null)   // success confirmation shown in-modal
+  const [failed,  setFailed]  = useState(null)   // { error } — send failed; offer manual download
 
   useEffect(() => {
     let live = true
@@ -2635,7 +2637,9 @@ function EmailDocsModal({ t, c, branchEmail, onClose, onSent, onError }) {
         body: JSON.stringify({ id: c.id, to: to.trim(), cc: ccAll.join(',') || undefined }),
       })
       const j = await r.json()
-      if (!r.ok || j.error) { onError?.(j.error || `Send failed (${r.status})`); setSending(false); return }
+      // On any failure, don't just toast — show an in-modal fallback telling ops
+      // to download the documents and send them to the branch manually.
+      if (!r.ok || j.error) { setFailed({ error: j.error || `Send failed (${r.status})` }); setSending(false); return }
       // Show an explicit in-modal confirmation (ops asked for a clear "sent"
       // acknowledgement) rather than closing straight away. onSent still fires
       // so the row refreshes to its "✓ Emailed" state in the background.
@@ -2643,7 +2647,7 @@ function EmailDocsModal({ t, c, branchEmail, onClose, onSent, onError }) {
       setSending(false)
       onSent?.(j.sent_to || to.trim())
     } catch (e) {
-      onError?.('Network error — the email may not have been sent.'); setSending(false)
+      setFailed({ error: 'Network error — the email could not be sent.' }); setSending(false)
     }
   }
 
@@ -2744,7 +2748,34 @@ function EmailDocsModal({ t, c, branchEmail, onClose, onSent, onError }) {
 
         {/* Body */}
         <div style={{ padding: '16px 24px 20px' }}>
-        {sent ? (
+        {failed ? (
+          <div style={{ padding: '14px 0 4px', textAlign: 'center' }}>
+            <div style={{ width: '58px', height: '58px', borderRadius: '50%', background: `${t.red}16`, border: `1px solid ${t.red}44`, color: t.red, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '28px', fontWeight: 800, marginBottom: '14px' }}>⚠</div>
+            <div style={{ fontSize: '16px', fontWeight: 800, color: t.text1, marginBottom: '6px' }}>Mail not sent</div>
+            <div style={{ fontSize: '13px', color: t.text2, lineHeight: 1.6 }}>
+              The email couldn't be sent. Please <b style={{ color: t.text1 }}>download the documents and send them to the branch manually.</b>
+            </div>
+            {failed.error && (
+              <div style={{ fontSize: '11px', color: t.text4, background: t.card2, border: `1px solid ${t.border2}`, borderRadius: '8px', padding: '8px 10px', marginTop: '12px', lineHeight: 1.5, wordBreak: 'break-word', textAlign: 'left' }}>
+                {failed.error}
+              </div>
+            )}
+            <div style={{ display: 'flex', gap: '10px', justifyContent: 'center', marginTop: '20px', flexWrap: 'wrap' }}>
+              <button onClick={() => onClose?.()}
+                style={{ background: 'transparent', border: `1px solid ${t.border2}`, borderRadius: '9px', padding: '10px 18px', fontSize: '13px', fontWeight: 700, color: t.text2, cursor: 'pointer' }}>
+                Close
+              </button>
+              <button onClick={() => setFailed(null)}
+                style={{ background: 'transparent', border: `1px solid ${t.border2}`, borderRadius: '9px', padding: '10px 18px', fontSize: '13px', fontWeight: 700, color: t.text2, cursor: 'pointer' }}>
+                Retry
+              </button>
+              <button onClick={() => { onSaveDocs?.(c); onClose?.() }}
+                style={{ background: t.gold, color: '#1a0a00', border: 'none', borderRadius: '9px', padding: '10px 22px', fontSize: '13px', fontWeight: 800, cursor: 'pointer', boxShadow: `0 3px 12px ${t.gold}44`, display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                ↓ Download documents
+              </button>
+            </div>
+          </div>
+        ) : sent ? (
           <div style={{ padding: '14px 0 4px', textAlign: 'center' }}>
             <div style={{ width: '58px', height: '58px', borderRadius: '50%', background: `${t.green}18`, border: `1px solid ${t.green}44`, color: t.green, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '30px', fontWeight: 800, marginBottom: '14px' }}>✓</div>
             <div style={{ fontSize: '16px', fontWeight: 800, color: t.text1, marginBottom: '6px' }}>Email sent</div>

@@ -236,7 +236,15 @@ export async function POST(req) {
         docFilename({ consignment: c, branch, docType: a.gstKind === 'ewb' ? 'ewb' : 'einvoice', ext: 'pdf' })),
     ])
   } catch (e) {
-    return Response.json({ error: `Could not build the documents — ${e.message}` }, { status: 502 })
+    // Persist the reason so it can be diagnosed without server logs.
+    try {
+      await logConsignmentEvent(admin, {
+        consignment_id: id, event_type: 'documents_email_failed',
+        actor_email: auth.profile?.email || null, actor_role: auth.profile?.role || null,
+        details: { stage: 'build_docs', error: String(e?.message || e).slice(0, 800) },
+      })
+    } catch {}
+    return Response.json({ error: `Could not build the documents — ${e.message}`, code: 'BUILD_FAILED' }, { status: 502 })
   }
 
   const dest = a.isInternal ? (c.dest_branch || 'Hub') : 'Head Office'
@@ -293,6 +301,15 @@ export async function POST(req) {
     } catch (e) { console.warn('[email-documents] column stamp failed:', e?.message) }
     return Response.json({ ok: true, sent_to: to, cc: ccList, from_name: senderName, reply_to: senderEmail || null, attachments: attachments.map(x => x.filename), messageId: info.messageId })
   } catch (e) {
-    return Response.json({ error: `Send failed: ${e.message}` }, { status: 502 })
+    // Persist the exact SMTP error (code + message) so the failure can be
+    // diagnosed from the activity log without needing server logs.
+    try {
+      await logConsignmentEvent(admin, {
+        consignment_id: id, event_type: 'documents_email_failed',
+        actor_email: senderEmail || null, actor_role: auth.profile?.role || null,
+        details: { stage: 'smtp', to, cc: ccList, code: e?.code || null, command: e?.command || null, response: (e?.response || '').toString().slice(0, 400), error: String(e?.message || e).slice(0, 800) },
+      })
+    } catch {}
+    return Response.json({ error: `Send failed: ${e.message}`, code: 'SEND_FAILED' }, { status: 502 })
   }
 }
