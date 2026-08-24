@@ -638,9 +638,9 @@ export default function PurchaseReports() {
         scrollSnapType: isMobile ? 'x mandatory' : 'none',
         WebkitOverflowScrolling: 'touch',
         boxShadow: '0 1px 3px rgba(0,0,0,.3)',
-        position: isMobile ? 'sticky' : 'static',
-        top: isMobile ? '64px' : 'auto',
-        zIndex: isMobile ? 29 : 'auto',
+        // Not sticky on mobile — the (taller) filter bar already sticks at
+        // top:0, and a second sticky here overlapped it. Scrolls normally.
+        position: 'static',
       }}>
         <button
           onClick={() => setActiveSection(null)}

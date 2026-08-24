@@ -170,6 +170,13 @@ svg.recharts-surface { pointer-events: none !important; }
     padding: 14px !important;
   }
 
+  /* Compact report KPI cards on mobile (shared reportUtils KpiCard) so the
+     KPI block isn't a tall wall before the charts. */
+  .kpi-card { padding: 12px 12px !important; }
+  .kpi-card .kpi-lbl { margin-bottom: 5px !important; letter-spacing: .08em !important; }
+  .kpi-card .kpi-val { font-size: 1.1rem !important; }
+  .kpi-card .kpi-ico { width: 26px !important; height: 26px !important; font-size: .82rem !important; }
+
   /* ── Utility classes ── */
   .kpi-grid  { grid-template-columns: repeat(2, 1fr) !important; }
   .chart-grid { grid-template-columns: 1fr !important; }

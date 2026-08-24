@@ -315,7 +315,7 @@ export function GrowthBadge({ value, t }) {
 export function KpiCard({ label, value, sub, color, icon, t, trend }) {
   const s = getStyles(t)
   return (
-    <div style={{ ...s.kpiCard }}>
+    <div className="kpi-card" style={{ ...s.kpiCard }}>
       <div style={{
         position: 'absolute', top: 0, left: 0, right: 0, height: '2px',
         background: `linear-gradient(90deg, transparent, ${color || t.gold}60, transparent)`,
@@ -323,12 +323,12 @@ export function KpiCard({ label, value, sub, color, icon, t, trend }) {
       }} />
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
         <div>
-          <div style={{ fontSize: '.58rem', color: t.text3, letterSpacing: '.16em', textTransform: 'uppercase', marginBottom: '10px', fontWeight: 500 }}>{label}</div>
-          <div style={{ fontSize: '1.4rem', color: color || t.gold, fontWeight: 200, letterSpacing: '-.01em', lineHeight: 1 }}>{value}</div>
+          <div className="kpi-lbl" style={{ fontSize: '.58rem', color: t.text3, letterSpacing: '.16em', textTransform: 'uppercase', marginBottom: '10px', fontWeight: 500 }}>{label}</div>
+          <div className="kpi-val" style={{ fontSize: '1.4rem', color: color || t.gold, fontWeight: 200, letterSpacing: '-.01em', lineHeight: 1 }}>{value}</div>
           {sub && <div style={{ fontSize: '.65rem', color: t.text3, marginTop: '6px' }}>{sub}</div>}
         </div>
         {icon && (
-          <div style={{
+          <div className="kpi-ico" style={{
             width: '34px', height: '34px', borderRadius: '9px',
             background: `${color || t.gold}15`,
             display: 'flex', alignItems: 'center', justifyContent: 'center',
